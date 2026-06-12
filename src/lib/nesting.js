@@ -23,10 +23,10 @@ export function runNesting({ details, sheetL, sheetW, marginT, marginR, marginB,
       pieces.push({
         id: `${di}_${q}`,
         detailIndex: di,
-        pw: d.length + kerf,  // X = length (первое число, горизонталь)
-        ph: d.width + kerf,   // Y = width  (второе число, вертикаль)
-        origX: d.length,      // оригинальный X-размер (для бирки)
-        origY: d.width,       // оригинальный Y-размер (для бирки)
+        pw: d.width + kerf,   // X = width  (ширина, горизонталь)
+        ph: d.length + kerf,  // Y = length (длина, вертикаль)
+        origX: d.width,       // оригинальный X-размер
+        origY: d.length,      // оригинальный Y-размер
         rotatable: d.rotatable,
         label: d.display_name || d.name,
         prefix: d.prefix,

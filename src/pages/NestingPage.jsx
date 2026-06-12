@@ -438,7 +438,7 @@ export default function NestingPage() {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', borderBottom: '0.5px solid var(--border)' }}>
                 <div style={{ width: 12, height: 12, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{p.label}</span>
-                <span style={{ color: 'var(--text-hint)' }}>{p.origY}×{p.origX}</span>
+                <span style={{ color: 'var(--text-hint)' }}>{p.origY ?? p.originalH}×{p.origX ?? p.originalW}</span>
                 {p.rotated && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻</span>}
               </div>
             ))}
