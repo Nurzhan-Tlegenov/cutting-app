@@ -1,11 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
 
-/**
- * Позиционирование выреза/паза — от выбранных сторон:
- * sides: массив активных сторон ['top','left'] и для каждой — offsets[side] = мм
- * Если сторона не выбрана — позиция свободная (задаётся вручную)
- */
-
 function NumField({ label, value, onChange, unit = 'мм' }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
@@ -21,28 +15,21 @@ function NumField({ label, value, onChange, unit = 'мм' }) {
 }
 
 const SIDE_BTNS = [
-  { id: 'top',    label: '↑ Верх' },
+  { id: 'top', label: '↑ Верх' },
   { id: 'bottom', label: '↓ Низ' },
-  { id: 'left',   label: '← Лево' },
-  { id: 'right',  label: '→ Право' },
+  { id: 'left', label: '← Лево' },
+  { id: 'right', label: '→ Право' },
 ]
 
-// Выбор сторон + отступы
 function SideOffsetPicker({ activeSides = [], offsets = {}, onChange }) {
   const toggle = (id) => {
-    const next = activeSides.includes(id)
-      ? activeSides.filter(s => s !== id)
-      : [...activeSides, id]
+    const next = activeSides.includes(id) ? activeSides.filter(s => s !== id) : [...activeSides, id]
     onChange({ sides: next, offsets })
   }
-  const setOffset = (id, val) => {
-    onChange({ sides: activeSides, offsets: { ...offsets, [id]: val } })
-  }
+  const setOffset = (id, val) => onChange({ sides: activeSides, offsets: { ...offsets, [id]: val } })
   return (
     <div>
-      <label style={{ fontSize: 11, color: 'var(--text-hint)', display: 'block', marginBottom: 6 }}>
-        Отступ от сторон
-      </label>
+      <label style={{ fontSize: 11, color: 'var(--text-hint)', display: 'block', marginBottom: 6 }}>Привязка к сторонам</label>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
         {SIDE_BTNS.map(s => (
           <button key={s.id} type="button" onClick={() => toggle(s.id)}
@@ -57,35 +44,41 @@ function SideOffsetPicker({ activeSides = [], offsets = {}, onChange }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
           {activeSides.map(id => (
             <NumField key={id}
-              label={`Отступ ${SIDE_BTNS.find(s=>s.id===id)?.label}`}
+              label={`Отступ ${SIDE_BTNS.find(s => s.id === id)?.label}`}
               value={offsets[id] ?? 0}
               onChange={v => setOffset(id, v)} />
           ))}
         </div>
       )}
-      {activeSides.length === 0 && (
-        <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center' }}>
-          Выберите стороны для привязки
-        </p>
-      )}
     </div>
   )
 }
 
-// Вычисляем позицию выреза/паза по сторонам и отступам
-function resolvePosition(sides, offsets, w, h, itemW, itemH) {
-  let x = (w - itemW) / 2  // по умолчанию по центру
-  let y = (h - itemH) / 2
-  if (sides.includes('left'))   x = offsets.left ?? 0
-  if (sides.includes('right'))  x = w - itemW - (offsets.right ?? 0)
-  if (sides.includes('top'))    y = offsets.top ?? 0
-  if (sides.includes('bottom')) y = h - itemH - (offsets.bottom ?? 0)
-  // Если обе горизонтальные — берём размер между ними
-  if (sides.includes('left') && sides.includes('right'))
-    itemW = w - (offsets.left ?? 0) - (offsets.right ?? 0)
-  if (sides.includes('top') && sides.includes('bottom'))
-    itemH = h - (offsets.top ?? 0) - (offsets.bottom ?? 0)
-  return { x, y, w: itemW, h: itemH }
+// Вычисляем позицию элемента по привязкам
+function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
+  let x = (panelW - itemW) / 2
+  let y = (panelH - itemH) / 2
+  let w = itemW, h = itemH
+
+  if (sides.includes('left') && sides.includes('right')) {
+    x = offsets.left ?? 0
+    w = panelW - (offsets.left ?? 0) - (offsets.right ?? 0)
+  } else if (sides.includes('left')) {
+    x = offsets.left ?? 0
+  } else if (sides.includes('right')) {
+    x = panelW - itemW - (offsets.right ?? 0)
+  }
+
+  if (sides.includes('top') && sides.includes('bottom')) {
+    y = offsets.top ?? 0
+    h = panelH - (offsets.top ?? 0) - (offsets.bottom ?? 0)
+  } else if (sides.includes('top')) {
+    y = offsets.top ?? 0
+  } else if (sides.includes('bottom')) {
+    y = panelH - itemH - (offsets.bottom ?? 0)
+  }
+
+  return { x, y, w, h }
 }
 
 // ─── Превью ───────────────────────────────────────────────────────────────────
@@ -100,6 +93,7 @@ function ContourPreview({ w, h, contour }) {
     const sc = Math.min(PW / w, PH / h)
     const dw = w * sc, dh = h * sc
     const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2
+    const toC = v => (v || 0) * sc
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -107,8 +101,6 @@ function ContourPreview({ w, h, contour }) {
     const corners = c.corners || {}
     const tl = corners.tl || {}, tr = corners.tr || {}
     const br = corners.br || {}, bl = corners.bl || {}
-
-    const toC = v => (v || 0) * sc
 
     function offs(corner) {
       if (!corner?.type || corner.type === 'none') return { x: 0, y: 0 }
@@ -145,13 +137,12 @@ function ContourPreview({ w, h, contour }) {
     ;(c.cutouts || []).forEach(cut => {
       ctx.fillStyle = '#fff'; ctx.strokeStyle = '#E24B4A'; ctx.lineWidth = 1
       if (cut.type === 'circle') {
-        const pos = resolvePosition(cut.sides||[], cut.offsets||{}, w, h, 0, 0)
-        const cx = ox + pos.x * sc
-        const cy = oy + pos.y * sc
-        const r = toC(cut.r || 0)
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill(); ctx.stroke()
+        const pos = resolvePos(cut.sides||[], cut.offsets||{}, w, h, 0, 0)
+        ctx.beginPath()
+        ctx.arc(ox + pos.x*sc, oy + pos.y*sc, toC(cut.r||0), 0, Math.PI*2)
+        ctx.fill(); ctx.stroke()
       } else {
-        const pos = resolvePosition(cut.sides||[], cut.offsets||{}, w, h, cut.w||100, cut.h||100)
+        const pos = resolvePos(cut.sides||[], cut.offsets||{}, w, h, cut.w||100, cut.h||100)
         ctx.fillRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
         ctx.strokeRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
       }
@@ -160,7 +151,11 @@ function ContourPreview({ w, h, contour }) {
     // Пазы
     ;(c.grooves || []).forEach(g => {
       ctx.fillStyle = 'rgba(250,199,117,0.8)'; ctx.strokeStyle = '#BA7517'; ctx.lineWidth = 1
-      const pos = resolvePosition(g.sides||[], g.offsets||{}, w, h, g.length||100, g.width||8)
+      // Определяем размеры паза по направлению
+      const isH = g.dir === 'horizontal'
+      const gW = isH ? (g.length||100) : (g.width||8)
+      const gH = isH ? (g.width||8) : (g.length||100)
+      const pos = resolvePos(g.sides||[], g.offsets||{}, w, h, gW, gH)
       ctx.fillRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
       ctx.strokeRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
     })
@@ -197,6 +192,23 @@ function CornerEditor({ label, value = {}, onChange }) {
   )
 }
 
+// ─── Свёртываемый блок ────────────────────────────────────────────────────────
+function CollapsibleItem({ title, onRemove, children }) {
+  const [open, setOpen] = useState(true)
+  return (
+    <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', marginBottom:8, overflow:'hidden' }}>
+      <div style={{ display:'flex', alignItems:'center', padding:'8px 10px', cursor:'pointer' }}
+        onClick={() => setOpen(v => !v)}>
+        <span style={{ fontSize:13, fontWeight:500, flex:1 }}>{title}</span>
+        <span style={{ fontSize:12, color:'var(--text-hint)', marginRight:8 }}>{open ? '▲' : '▼'}</span>
+        <button type="button" onClick={e=>{e.stopPropagation();onRemove()}}
+          style={{ background:'none', border:'none', color:'var(--text-hint)', cursor:'pointer', fontSize:16, padding:0 }}>✕</button>
+      </div>
+      {open && <div style={{ padding:'0 10px 10px' }}>{children}</div>}
+    </div>
+  )
+}
+
 // ─── Главный компонент ────────────────────────────────────────────────────────
 export default function ContourEditor({ detail, onUpdate }) {
   const contour = detail.contour || { corners:{}, cutouts:[], grooves:[] }
@@ -213,7 +225,6 @@ export default function ContourEditor({ detail, onUpdate }) {
       : { type:'rect', w:200, h:100, sides:[], offsets:{} }
     upd({ cutouts: [...(contour.cutouts||[]), cut] })
   }
-
   const updCutout = (i, patch) => {
     const cuts = [...(contour.cutouts||[])]
     cuts[i] = { ...cuts[i], ...patch }
@@ -221,9 +232,8 @@ export default function ContourEditor({ detail, onUpdate }) {
   }
 
   const addGroove = () => {
-    upd({ grooves: [...(contour.grooves||[]), { length:100, width:8, depth:10, sides:[], offsets:{} }] })
+    upd({ grooves: [...(contour.grooves||[]), { dir:'horizontal', length:100, width:8, depth:10, sides:[], offsets:{} }] })
   }
-
   const updGroove = (i, patch) => {
     const gs = [...(contour.grooves||[])]
     gs[i] = { ...gs[i], ...patch }
@@ -258,7 +268,8 @@ export default function ContourEditor({ detail, onUpdate }) {
             <CornerEditor label="↙ Низ-лево"   value={contour.corners?.bl} onChange={v=>setCorner('bl',v)} />
             <CornerEditor label="↘ Низ-право"  value={contour.corners?.br} onChange={v=>setCorner('br',v)} />
           </div>
-          <button type="button" onClick={()=>upd({corners:{tl:{type:'radius',r:50},tr:{type:'radius',r:50},br:{type:'radius',r:50},bl:{type:'radius',r:50}}})}
+          <button type="button"
+            onClick={()=>upd({corners:{tl:{type:'radius',r:50},tr:{type:'radius',r:50},br:{type:'radius',r:50},bl:{type:'radius',r:50}}})}
             style={{ width:'100%', padding:'8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
               background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
             ⌒ Скруглить все углы R50
@@ -281,35 +292,25 @@ export default function ContourEditor({ detail, onUpdate }) {
               + Круглый
             </button>
           </div>
-
           {!(contour.cutouts||[]).length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет вырезов</p>}
-
           {(contour.cutouts||[]).map((cut,i)=>(
-            <div key={i} style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:10, marginBottom:8 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-                <span style={{ fontSize:13, fontWeight:500 }}>{cut.type==='circle'?'○ Круглый':'□ Прямоугольный'} #{i+1}</span>
-                <button type="button" onClick={()=>upd({cutouts:(contour.cutouts||[]).filter((_,j)=>j!==i)})}
-                  style={{ background:'none', border:'none', color:'var(--text-hint)', cursor:'pointer', fontSize:16 }}>✕</button>
+            <CollapsibleItem key={i}
+              title={`${cut.type==='circle'?'○ Круглый':'□ Прямоугольный'} #${i+1}`}
+              onRemove={()=>upd({cutouts:(contour.cutouts||[]).filter((_,j)=>j!==i)})}>
+              <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                {cut.type==='circle'
+                  ? <NumField label="Радиус R" value={cut.r??50} onChange={v=>updCutout(i,{r:v})} />
+                  : <>
+                      <NumField label="Длина выреза" value={cut.w??200} onChange={v=>updCutout(i,{w:v})} />
+                      <NumField label="Ширина выреза" value={cut.h??100} onChange={v=>updCutout(i,{h:v})} />
+                    </>
+                }
               </div>
-
-              {/* Размеры */}
-              <div style={{ display:'flex', gap:8, marginBottom:12 }}>
-                {cut.type==='circle' ? (
-                  <NumField label="Радиус R" value={cut.r??50} onChange={v=>updCutout(i,{r:v})} />
-                ) : (
-                  <>
-                    <NumField label="Длина выреза" value={cut.w??200} onChange={v=>updCutout(i,{w:v})} />
-                    <NumField label="Ширина выреза" value={cut.h??100} onChange={v=>updCutout(i,{h:v})} />
-                  </>
-                )}
-              </div>
-
-              {/* Позиционирование */}
               <SideOffsetPicker
                 activeSides={cut.sides||[]}
                 offsets={cut.offsets||{}}
                 onChange={({sides,offsets})=>updCutout(i,{sides,offsets})} />
-            </div>
+            </CollapsibleItem>
           ))}
         </div>
       )}
@@ -322,19 +323,26 @@ export default function ContourEditor({ detail, onUpdate }) {
               background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer', marginBottom:12 }}>
             + Добавить паз
           </button>
-
           {!(contour.grooves||[]).length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет пазов</p>}
-
           {(contour.grooves||[]).map((g,i)=>(
-            <div key={i} style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:10, marginBottom:8 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-                <span style={{ fontSize:13, fontWeight:500 }}>Паз #{i+1}</span>
-                <button type="button" onClick={()=>upd({grooves:(contour.grooves||[]).filter((_,j)=>j!==i)})}
-                  style={{ background:'none', border:'none', color:'var(--text-hint)', cursor:'pointer', fontSize:16 }}>✕</button>
+            <CollapsibleItem key={i} title={`Паз #${i+1}`}
+              onRemove={()=>upd({grooves:(contour.grooves||[]).filter((_,j)=>j!==i)})}>
+
+              {/* Направление паза */}
+              <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>Направление паза</label>
+              <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+                {[['horizontal','↔ Горизонтальный'],['vertical','↕ Вертикальный']].map(([id,label])=>(
+                  <button key={id} type="button" onClick={()=>updGroove(i,{dir:id})}
+                    style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                      background: (g.dir||'horizontal')===id?'var(--blue)':'var(--bg3)',
+                      color: (g.dir||'horizontal')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                    {label}
+                  </button>
+                ))}
               </div>
 
               {/* Размеры */}
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:12 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6, marginBottom:10 }}>
                 <NumField label="Длина" value={g.length??100} onChange={v=>updGroove(i,{length:v})} />
                 <NumField label="Ширина" value={g.width??8} onChange={v=>updGroove(i,{width:v})} />
                 <NumField label="Глубина" value={g.depth??10} onChange={v=>updGroove(i,{depth:v})} />
@@ -345,7 +353,7 @@ export default function ContourEditor({ detail, onUpdate }) {
                 activeSides={g.sides||[]}
                 offsets={g.offsets||{}}
                 onChange={({sides,offsets})=>updGroove(i,{sides,offsets})} />
-            </div>
+            </CollapsibleItem>
           ))}
         </div>
       )}
