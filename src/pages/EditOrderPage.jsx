@@ -337,6 +337,14 @@ export default function EditOrderPage() {
             {showEdge ? 'Скрыть кромку' : 'Показать кромку'}
           </button>
         </div>
+        {/* Вращение для всех */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 10 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-hint)" strokeWidth="1.5"><path d="M21 2v6h-6M3 12a9 9 0 0115-6.7L21 8M3 22v-6h6M21 12a9 9 0 01-15 6.7L3 16"/></svg>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>Вращение для всех</span>
+          <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: true })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Вкл</button>
+          <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: false })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Выкл</button>
+        </div>
+
         <div style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Длина</div>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>

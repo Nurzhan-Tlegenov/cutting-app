@@ -360,6 +360,22 @@ export default function NewOrderPage() {
         </div>
       </div>
 
+      {/* Импорт */}
+      <div style={{ marginBottom: 14 }}>
+        <p className="section-title">Импорт деталей</p>
+        <div className="card" style={{ background: 'var(--bg2)' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" disabled style={{ flex: 1, padding: '10px 6px', border: '0.5px dashed var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--text-hint)', fontSize: 13, cursor: 'not-allowed', textAlign: 'center' }}>
+              📊 Excel / CSV
+            </button>
+            <button type="button" disabled style={{ flex: 1, padding: '10px 6px', border: '0.5px dashed var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--text-hint)', fontSize: 13, cursor: 'not-allowed', textAlign: 'center' }}>
+              📐 OBJ / DXF
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 8, textAlign: 'center' }}>Импорт будет доступен в следующем обновлении</p>
+        </div>
+      </div>
+
       {/* Детали */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -367,10 +383,17 @@ export default function NewOrderPage() {
             Детали ({details.length}) {validCount > 0 && `· ${validCount} заполнено`}
           </p>
           <button type="button" onClick={() => setShowEdge(v => !v)}
-            style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)',
-              borderRadius: 20, padding: '3px 10px', cursor: 'pointer' }}>
+            style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px', cursor: 'pointer' }}>
             {showEdge ? 'Скрыть кромку' : 'Показать кромку'}
           </button>
+        </div>
+
+        {/* Вращение для всех */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 10 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-hint)" strokeWidth="1.5"><path d="M21 2v6h-6M3 12a9 9 0 0115-6.7L21 8M3 22v-6h6M21 12a9 9 0 01-15 6.7L3 16"/></svg>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>Вращение для всех</span>
+          <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: true })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Вкл</button>
+          <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: false })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Выкл</button>
         </div>
 
         {/* Заголовок колонок */}
