@@ -14,7 +14,7 @@ function rectsOverlap(a, b) {
          a.y < b.y + b.h - 1 && a.y + a.h - 1 > b.y
 }
 
-function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT, kerf, colorMap, onMove, interactive, showOffcuts }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, onMove, interactive, showOffcuts }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   const placedRef = useRef(sheet.placed)
@@ -27,8 +27,9 @@ function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT
 
   const PADDING = 8
   const canvasW = typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360
-  const canvasH = Math.round((canvasW - PADDING * 2) * (sheetW / sheetL)) + PADDING * 2
-  const sc = (canvasW - PADDING * 2) / sheetL
+  const sc = (canvasW - PADDING * 2) / sheetW
+  const canvasH = Math.round(sc * sheetL) + PADDING * 2
+  
 
   const toC = v => v * sc
   const fromC = v => v / sc
@@ -43,15 +44,15 @@ function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT
     ctx.fillStyle = '#F1EFE8'
     ctx.fillRect(0, 0, canvasW, canvasH)
 
-    // Рабочая зона: X=usableW (горизонталь), Y=usableH (вертикаль)
+    // Рабочая зона: X=usableX (горизонталь), Y=usableY (вертикаль)
     const rx = PADDING + toC(marginL), ry = PADDING + toC(marginT)
-    const rw = toC(usableW), rh = toC(usableH)
+    const rw = toC(usableX), rh = toC(usableY)
     ctx.fillStyle = '#fff'
     ctx.fillRect(rx, ry, rw, rh)
 
     // Обрезки
     if (showOffcuts && sheet.freeRects) {
-      const offcuts = computeOffcuts(sheet, usableW, usableH)
+      const offcuts = computeOffcuts(sheet, usableX, usableY)
       offcuts.forEach(o => {
         const ox = rx + toC(o.x), oy = ry + toC(o.y)
         const ow = toC(o.w), oh = toC(o.h)
@@ -75,6 +76,7 @@ function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT
 
     // Детали
     items.forEach((p, i) => {
+      // p.x,p.w = X-координаты; p.y,p.h = Y-координаты
       const x = rx + toC(p.x), y = ry + toC(p.y)
       const w = toC(p.w) - toC(kerf), h = toC(p.h) - toC(kerf)
       const isDragging = i === dragIdx
@@ -104,13 +106,13 @@ function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT
       ctx.font = `${Math.max(7, Math.min(10, w / 7))}px sans-serif`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lbl = (p.prefix ? p.prefix.slice(0,3) + ' ' : '') + p.label.replace(/Деталь\s*/, 'Д')
-      if (h > 16) ctx.fillText(lbl, x + w / 2, y + h / 2 - 5)
+      if (h > 14) ctx.fillText(lbl, x + w / 2, y + h / 2 - 5)
       ctx.fillStyle = 'rgba(0,0,0,0.4)'
       ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
       if (h > 26) ctx.fillText(`${p.originalW}×${p.originalH}`, x + w / 2, y + h / 2 + 6)
     })
 
-    // Рамка листа: ширина=sheetW(X), высота=sheetL(Y)
+    // Рамка: X=sheetW(горизонталь), Y=sheetL(вертикаль)
     ctx.strokeStyle = '#888780'
     ctx.lineWidth = 1
     ctx.setLineDash([])
@@ -129,10 +131,10 @@ function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT
 
   function findPiece(cx, cy) {
     const items = placedRef.current
-    const rx = PADDING + toC(marginL), ry = PADDING + toC(marginT)
+    const rx2 = PADDING + toC(marginL), ry2 = PADDING + toC(marginT)
     for (let i = items.length - 1; i >= 0; i--) {
       const p = items[i]
-      const px = rx + toC(p.x), py = ry + toC(p.y)
+      const px = rx2 + toC(p.x), py = ry2 + toC(p.y)
       const pw = toC(p.w - kerf), ph = toC(p.h - kerf)
       if (cx >= px && cx <= px + pw && cy >= py && cy <= py + ph) return i
     }
@@ -154,8 +156,8 @@ function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT
     }
     if (Math.abs(sx) < SNAP) sx = 0
     if (Math.abs(sy) < SNAP) sy = 0
-    if (Math.abs(sx + pw - usableW) < SNAP) sx = usableW - pw
-    if (Math.abs(sy + ph - usableH) < SNAP) sy = usableH - ph
+    if (Math.abs(sx + pw - usableX) < SNAP) sx = usableX - pw
+    if (Math.abs(sy + ph - usableY) < SNAP) sy = usableY - ph
     return { x: sx, y: sy }
   }
 
@@ -176,11 +178,11 @@ function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT
     const { idx, startX, startY, origX, origY } = draggingRef.current
     const p = placedRef.current[idx]
     const dx = fromC(x - startX), dy = fromC(y - startY)
-    let nx = Math.max(0, Math.min(usableW - p.w, origX + dx))
-    let ny = Math.max(0, Math.min(usableH - p.h, origY + dy))
+    let nx = Math.max(0, Math.min(usableX - p.w, origX + dx))
+    let ny = Math.max(0, Math.min(usableY - p.h, origY + dy))
     const snapped = applyMagnet(nx, ny, p.w, p.h, idx, placedRef.current)
-    nx = Math.max(0, Math.min(usableW - p.w, snapped.x))
-    ny = Math.max(0, Math.min(usableH - p.h, snapped.y))
+    nx = Math.max(0, Math.min(usableX - p.w, snapped.x))
+    ny = Math.max(0, Math.min(usableY - p.h, snapped.y))
     const updated = placedRef.current.map((item, i) => i === idx ? { ...item, x: nx, y: ny } : item)
     placedRef.current = updated
     redraw(updated, idx)
@@ -204,7 +206,7 @@ function SheetCanvas({ sheet, usableW, usableH, sheetL, sheetW, marginL, marginT
           edgeTop: p.edgeLeft, edgeRight: p.edgeTop,
           edgeBottom: p.edgeRight, edgeLeft: p.edgeBottom,
         }
-        if (rotated.x + rotated.w <= usableW && rotated.y + rotated.h <= usableH) {
+        if (rotated.x + rotated.w <= usableX && rotated.y + rotated.h <= usableY) {
           const updated = placedRef.current.map((item, i) => i === drag.idx ? rotated : item)
           placedRef.current = updated
           redraw(updated)
@@ -290,7 +292,7 @@ export default function NestingPage() {
           kerf: order.kerf_width,
         })
         setResult(res)
-        setSheetsData(res.sheets.map(s => ({ ...s })))
+        setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
         setActiveSheet(0)
       } finally { setRunning(false) }
     }, 100)
@@ -418,7 +420,7 @@ export default function NestingPage() {
             </div>
             <SheetCanvas
               sheet={sheetsData[activeSheet]}
-              usableW={result.usableW} usableH={result.usableH}
+              usableX={result.usableX} usableY={result.usableY}
               sheetL={order.sheet_length} sheetW={order.sheet_width}
               marginL={order.margin_left} marginT={order.margin_top}
               kerf={order.kerf_width} colorMap={colorMap}
@@ -436,7 +438,7 @@ export default function NestingPage() {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', borderBottom: '0.5px solid var(--border)' }}>
                 <div style={{ width: 12, height: 12, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{p.label}</span>
-                <span style={{ color: 'var(--text-hint)' }}>{p.originalW}×{p.originalH}</span>
+                <span style={{ color: 'var(--text-hint)' }}>{p.origY}×{p.origX}</span>
                 {p.rotated && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻</span>}
               </div>
             ))}
