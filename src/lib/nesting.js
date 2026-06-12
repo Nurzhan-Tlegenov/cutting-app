@@ -87,10 +87,20 @@ function bssf(freeRects, piece, direction) {
       if (o.pw > rect.w || o.ph > rect.h) continue
       const short = Math.min(rect.w - o.pw, rect.h - o.ph)
       const long_ = Math.max(rect.w - o.pw, rect.h - o.ph)
-      let bonus = 0
-      if (direction === 'along_y' && o.ph >= o.pw) bonus = -300
-      if (direction === 'along_x' && o.pw >= o.ph) bonus = -300
-      const score = short * 1000 + long_ + bonus
+      let score
+      if (direction === 'along_y') {
+        // Вдоль Y: сначала заполняем по X (левее = лучше), потом по Y (выше = лучше)
+        score = rect.x * 100000 + rect.y * 100 + short
+      } else if (direction === 'along_x') {
+        // Вдоль X: сначала заполняем по Y (выше = лучше), потом по X
+        score = rect.y * 100000 + rect.x * 100 + short
+      } else {
+        // Авто: Best Short Side Fit
+        score = short * 1000 + long_
+      }
+      // Бонус за предпочтительную ориентацию
+      if (direction === 'along_y' && o.ph >= o.pw) score -= 50
+      if (direction === 'along_x' && o.pw >= o.ph) score -= 50
       if (score < bestScore) {
         bestScore = score
         const rot = o.rotated
