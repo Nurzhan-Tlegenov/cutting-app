@@ -62,8 +62,18 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
   return (
     <div className="card" style={{ marginBottom: 8, padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {/* Номер */}
-        <div style={{ fontSize: 12, color: 'var(--text-hint)', minWidth: 22 }}>#{index + 1}</div>
+        {/* Номер + кнопка контура */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>#{index + 1}</div>
+          <button type="button" onClick={() => setShowContour(v => !v)}
+            title="Редактор контура"
+            style={{ background: hasContour ? 'var(--teal-light)' : 'var(--bg2)',
+              border: `0.5px solid ${hasContour ? 'var(--teal)' : 'var(--border-md)'}`,
+              borderRadius: 4, cursor: 'pointer', fontSize: 11, padding: '1px 3px',
+              color: hasContour ? 'var(--teal)' : 'var(--text-hint)', marginTop: 2, lineHeight: 1.2 }}>
+            {hasContour ? '✦' : '◇'}
+          </button>
+        </div>
 
         {/* Размеры */}
         <div style={{ display: 'flex', gap: 4, flex: 1 }}>
@@ -124,13 +134,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
         </div>
       )}
 
-      {/* Кнопка редактора контура */}
-      <button type="button" onClick={() => setShowContour(v => !v)}
-        style={{ width: '100%', marginTop: 8, padding: '6px', border: `0.5px solid ${hasContour ? 'var(--teal)' : 'var(--border-md)'}`,
-          borderRadius: 'var(--radius)', background: hasContour ? 'var(--teal-light)' : 'transparent',
-          fontSize: 12, color: hasContour ? 'var(--teal)' : 'var(--text-hint)', cursor: 'pointer' }}>
-        {showContour ? '▲ Скрыть редактор контура' : hasContour ? '✓ Контур задан — изменить' : '◇ Задать контур детали'}
-      </button>
+
 
       {/* Редактор контура */}
       {showContour && (

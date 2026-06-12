@@ -137,9 +137,15 @@ function ContourPreview({ w, h, contour }) {
     ;(c.cutouts || []).forEach(cut => {
       ctx.fillStyle = '#fff'; ctx.strokeStyle = '#E24B4A'; ctx.lineWidth = 1
       if (cut.type === 'circle') {
-        const pos = resolvePos(cut.sides||[], cut.offsets||{}, w, h, 0, 0)
+        const d = cut.d || 100
+        const r = toC(d / 2)
+        // Позиционируем от края круга (как прямоугольник d×d)
+        const pos = resolvePos(cut.sides||[], cut.offsets||{}, w, h, d, d)
+        // Центр = левый верхний угол прямоугольника + радиус
+        const cx = ox + (pos.x + d/2) * sc
+        const cy = oy + (pos.y + d/2) * sc
         ctx.beginPath()
-        ctx.arc(ox + pos.x*sc, oy + pos.y*sc, toC(cut.r||0), 0, Math.PI*2)
+        ctx.arc(cx, cy, r, 0, Math.PI*2)
         ctx.fill(); ctx.stroke()
       } else {
         const pos = resolvePos(cut.sides||[], cut.offsets||{}, w, h, cut.w||100, cut.h||100)
@@ -174,7 +180,11 @@ function CornerEditor({ label, value = {}, onChange }) {
       <div style={{ fontSize:11, color:'var(--text-hint)', marginBottom:6, textAlign:'center' }}>{label}</div>
       <div style={{ display:'flex', gap:4, justifyContent:'center', marginBottom:8 }}>
         {[['none','—'],['radius','⌒'],['chamfer','◣']].map(([id,icon])=>(
-          <button key={id} type="button" onClick={()=>onChange({...value,type:id})}
+          <button key={id} type="button" onClick={()=>onChange({
+            ...value, type:id,
+            ...(id==='radius' ? {r: value.r || 50} : {}),
+            ...(id==='chamfer' ? {dx: value.dx || 50, dy: value.dy || 50} : {})
+          })}
             style={{ width:32, height:32, border: type===id?'1.5px solid var(--blue)':'0.5px solid var(--border-md)',
               borderRadius:6, background: type===id?'var(--blue-light)':'transparent', fontSize:16, cursor:'pointer' }}>
             {icon}
@@ -221,7 +231,7 @@ export default function ContourEditor({ detail, onUpdate }) {
 
   const addCutout = (type) => {
     const cut = type === 'circle'
-      ? { type:'circle', r:50, sides:[], offsets:{} }
+      ? { type:'circle', d:100, sides:[], offsets:{} }
       : { type:'rect', w:200, h:100, sides:[], offsets:{} }
     upd({ cutouts: [...(contour.cutouts||[]), cut] })
   }
@@ -299,7 +309,7 @@ export default function ContourEditor({ detail, onUpdate }) {
               onRemove={()=>upd({cutouts:(contour.cutouts||[]).filter((_,j)=>j!==i)})}>
               <div style={{ display:'flex', gap:8, marginBottom:10 }}>
                 {cut.type==='circle'
-                  ? <NumField label="Радиус R" value={cut.r??50} onChange={v=>updCutout(i,{r:v})} />
+                  ? <NumField label="Диаметр D" value={cut.d??100} onChange={v=>updCutout(i,{d:v})} />
                   : <>
                       <NumField label="Длина выреза" value={cut.w??200} onChange={v=>updCutout(i,{w:v})} />
                       <NumField label="Ширина выреза" value={cut.h??100} onChange={v=>updCutout(i,{h:v})} />
