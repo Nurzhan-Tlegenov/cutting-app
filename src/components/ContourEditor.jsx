@@ -89,13 +89,52 @@ function ContourPreview({ w, h, contour }) {
     const canvas = ref.current
     if (!canvas || !w || !h) return
     const ctx = canvas.getContext('2d')
-    const PW = canvas.width - 20, PH = canvas.height - 20
+    const PW = canvas.width - 50, PH = canvas.height - 50
     const sc = Math.min(PW / w, PH / h)
     const dw = w * sc, dh = h * sc
     const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2
     const toC = v => (v || 0) * sc
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    // Размеры детали по сторонам (как на чертеже)
+    const dimColor = '#888780'
+    const dimFont = '10px sans-serif'
+    ctx.fillStyle = dimColor
+    ctx.font = dimFont
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    // Верхний размер (длина = w)
+    ctx.fillText(`${w} мм`, ox + dw/2, oy - 8)
+    // Нижний размер
+    ctx.fillText(`${w} мм`, ox + dw/2, oy + dh + 8)
+    // Левый размер (ширина = h) — вертикально
+    ctx.save()
+    ctx.translate(ox - 10, oy + dh/2)
+    ctx.rotate(-Math.PI/2)
+    ctx.fillText(`${h} мм`, 0, 0)
+    ctx.restore()
+    // Правый размер
+    ctx.save()
+    ctx.translate(ox + dw + 10, oy + dh/2)
+    ctx.rotate(Math.PI/2)
+    ctx.fillText(`${h} мм`, 0, 0)
+    ctx.restore()
+
+    // Линии размеров
+    ctx.strokeStyle = dimColor
+    ctx.lineWidth = 0.5
+    ctx.setLineDash([2,2])
+    // Верх
+    ctx.beginPath(); ctx.moveTo(ox, oy-4); ctx.lineTo(ox+dw, oy-4); ctx.stroke()
+    // Низ
+    ctx.beginPath(); ctx.moveTo(ox, oy+dh+4); ctx.lineTo(ox+dw, oy+dh+4); ctx.stroke()
+    // Лево
+    ctx.beginPath(); ctx.moveTo(ox-4, oy); ctx.lineTo(ox-4, oy+dh); ctx.stroke()
+    // Право
+    ctx.beginPath(); ctx.moveTo(ox+dw+4, oy); ctx.lineTo(ox+dw+4, oy+dh); ctx.stroke()
+    ctx.setLineDash([])
 
     const c = contour || {}
     const corners = c.corners || {}
@@ -168,7 +207,7 @@ function ContourPreview({ w, h, contour }) {
 
   }, [w, h, contour])
 
-  return <canvas ref={ref} width={240} height={160}
+  return <canvas ref={ref} width={260} height={180}
     style={{ width:'100%', maxWidth:240, borderRadius:8, display:'block', margin:'0 auto' }} />
 }
 
