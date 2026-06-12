@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import ContourEditor from '../components/ContourEditor'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -30,6 +31,14 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
   const SIDES = ['Д1','Д2','Ш1','Ш2']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
+  const [showContour, setShowContour] = useState(false)
+
+  const hasContour = detail.contour && (
+    Object.values(detail.contour.corners || {}).some(c => c?.type && c.type !== 'none') ||
+    (detail.contour.cutouts || []).length > 0 ||
+    (detail.contour.grooves || []).length > 0
+  )
+
   useEffect(() => {
     if (autoFocus && lengthRef.current) {
       setTimeout(() => {
@@ -113,6 +122,19 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
             .map(([k,s]) => `${s}:${detail.edges[k] === 'default' ? '✓' : detail.edges[k]}`)
             .join('  ')}
         </div>
+      )}
+
+      {/* Кнопка редактора контура */}
+      <button type="button" onClick={() => setShowContour(v => !v)}
+        style={{ width: '100%', marginTop: 8, padding: '6px', border: `0.5px solid ${hasContour ? 'var(--teal)' : 'var(--border-md)'}`,
+          borderRadius: 'var(--radius)', background: hasContour ? 'var(--teal-light)' : 'transparent',
+          fontSize: 12, color: hasContour ? 'var(--teal)' : 'var(--text-hint)', cursor: 'pointer' }}>
+        {showContour ? '▲ Скрыть редактор контура' : hasContour ? '✓ Контур задан — изменить' : '◇ Задать контур детали'}
+      </button>
+
+      {/* Редактор контура */}
+      {showContour && (
+        <ContourEditor detail={detail} onUpdate={onUpdate} />
       )}
     </div>
   )

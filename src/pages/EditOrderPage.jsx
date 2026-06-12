@@ -172,7 +172,8 @@ function makeDetail(d) {
     w: d?.length || '', h: d?.width || '', qty: d?.qty || '',
     prefix: d?.prefix || null,
     edges: { top: d?.edge_top || null, right: d?.edge_right || null, bottom: d?.edge_bottom || null, left: d?.edge_left || null },
-    rotatable: d?.rotatable || false
+    rotatable: d?.rotatable || false,
+    contour: d?.contour ? JSON.parse(d.contour) : null
   }
 }
 
@@ -266,7 +267,8 @@ export default function EditOrderPage() {
           length: Number(d.w), width: Number(d.h), qty: Number(d.qty) || 1,
           edge_top: d.edges.top || null, edge_right: d.edges.right || null,
           edge_bottom: d.edges.bottom || null, edge_left: d.edges.left || null,
-          rotatable: d.rotatable, sort_order: sortIdx - 1
+          rotatable: d.rotatable, sort_order: sortIdx - 1,
+          contour: d.contour ? JSON.stringify(d.contour) : null
         }
       })
 
