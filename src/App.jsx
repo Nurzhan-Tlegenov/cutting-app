@@ -1,4 +1,19 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Component } from 'react'
+
+class ErrorBoundary extends Component {
+  state = { error: null }
+  static getDerivedStateFromError(e) { return { error: e } }
+  render() {
+    if (this.state.error) return (
+      <div style={{ padding: 20, color: 'red', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>
+        <b>Ошибка:</b>{String(this.state.error)}
+        {this.state.error?.stack}
+      </div>
+    )
+    return this.props.children
+  }
+}
 import { AuthProvider, useAuth } from './context/AuthContext'
 import './index.css'
 
@@ -38,7 +53,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <ErrorBoundary>
+          <AppRoutes />
+        </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
   )
