@@ -12,30 +12,32 @@ const SHEET_DEFAULTS = {
   kerf: 4
 }
 
-const NumInput = ({ value, onChange, placeholder, inputRef, onEnter }) => {
+const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => {
   return (
     <input
       ref={inputRef}
       type="text" inputMode="numeric" pattern="[0-9]*"
       value={value} placeholder={placeholder}
+      enterKeyHint={hint || (onEnter ? 'next' : 'done')}
       style={{ fontSize: 14, padding: '5px 6px' }}
       onChange={e => {
         const v = e.target.value.replace(/[^0-9]/g, '')
         onChange(v === '' ? '' : Number(v))
       }}
       onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === 'Next') {
+        if (e.key === 'Enter') {
           e.preventDefault()
           onEnter?.()
         }
       }}
-      enterKeyHint={onEnter ? 'next' : 'done'}
     />
   )
 }
 
 // Компактная карточка детали
 function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter }) {
+  const widthRef = useRef(null)
+  const qtyRef = useRef(null)
   const SIDES = ['Д1','Д2','Ш1','Ш2']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
@@ -85,12 +87,13 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
 
         {/* Размеры */}
         <div style={{ display: 'flex', gap: 3, flex: 1 }}>
-          <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} />
-          <NumInput value={detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: v })} />
+          <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} onEnter={() => widthRef.current?.focus()} hint="next" />
+          <NumInput value={detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: v })} inputRef={widthRef} onEnter={() => qtyRef.current?.focus()} hint="next" />
           <div style={{ width: 56, flexShrink: 0 }}>
             <NumInput value={detail.qty} placeholder="Кол"
               onChange={v => onUpdate({ ...detail, qty: v })}
-              onEnter={onQtyEnter} />
+              inputRef={qtyRef}
+              onEnter={onQtyEnter} hint="next" />
           </div>
         </div>
 
