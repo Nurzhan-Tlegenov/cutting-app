@@ -359,7 +359,7 @@ export default function NewOrderPage() {
   }, {})
 
   return (
-    <div className="page" style={{ paddingBottom: inputFocused ? 16 : 100 }}>
+    <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
         <button type="button" onClick={() => navigate('/orders')}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
