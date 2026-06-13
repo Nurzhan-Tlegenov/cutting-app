@@ -51,12 +51,10 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
 
   useEffect(() => {
     if (autoFocus && lengthRef.current) {
-      // Используем requestAnimationFrame чтобы не гасить клавиатуру
-      const raf = requestAnimationFrame(() => {
-        lengthRef.current?.focus({ preventScroll: true })
+      setTimeout(() => {
+        lengthRef.current?.focus()
         lengthRef.current?.select()
-      })
-      return () => cancelAnimationFrame(raf)
+      }, 30)
     }
   }, [autoFocus])
 
@@ -280,21 +278,16 @@ export default function NewOrderPage() {
   const detailRefs = useRef({})
   const newDetailFocusRef = useRef(null) // будет установлен новой деталью
 
-  const addDetail = (fromEnter = false) => {
+  const addDetail = () => {
     const d = { ...newDetail(), prefix: activePrefix }
     setLastAddedUid(d.uid)
-    if (fromEnter) {
-      // Помечаем что нужен автофокус И клавиатура не должна гаснуть
-      d._focusOnMount = true
-    }
     setDetails(prev => [...prev, d])
     setTimeout(() => {
       detailRefs.current[d.uid]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 60)
-    return d.uid
   }
 
-  const onQtyEnter = () => { addDetail(true) }
+  const onQtyEnter = () => addDetail()
   const removeDetail = (u) => setDetails(d => d.filter(x => x.uid !== u))
   const updateDetail = (u, updated) => setDetails(d => d.map(x => x.uid === u ? updated : x))
 
