@@ -254,17 +254,6 @@ function EdgeManager({ edgeNames, activeEdge, onChange, onSetActive }) {
 
 export default function NewOrderPage() {
   const navigate = useNavigate()
-
-  useEffect(() => {
-    const handler = () => {
-      if (window.visualViewport) {
-        const ratio = window.visualViewport.height / window.innerHeight
-        setKeyboardOpen(ratio < 0.75)
-      }
-    }
-    window.visualViewport?.addEventListener('resize', handler)
-    return () => window.visualViewport?.removeEventListener('resize', handler)
-  }, [])
   const { user } = useAuth()
   const [orderName, setOrderName] = useState('')
   const [materialName, setMaterialName] = useState('')
@@ -285,6 +274,16 @@ export default function NewOrderPage() {
   const [sheetWidth, setSheetWidth] = useState(1830)
   const [saving, setSaving] = useState(false)
   const [keyboardOpen, setKeyboardOpen] = useState(false)
+
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const handler = () => {
+      setKeyboardOpen(vv.height / window.innerHeight < 0.75)
+    }
+    vv.addEventListener('resize', handler)
+    return () => vv.removeEventListener('resize', handler)
+  }, [])
 
   useEffect(() => {
     const onFocus = (e) => { if (e.target.tagName === 'INPUT') setInputFocused(true) }
