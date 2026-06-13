@@ -12,22 +12,30 @@ const SHEET_DEFAULTS = {
   kerf: 4
 }
 
-const NumInput = ({ value, onChange, placeholder, inputRef }) => {
+const NumInput = ({ value, onChange, placeholder, inputRef, onEnter }) => {
   return (
     <input
       ref={inputRef}
       type="text" inputMode="numeric" pattern="[0-9]*"
       value={value} placeholder={placeholder}
+      style={{ fontSize: 14, padding: '5px 6px' }}
       onChange={e => {
         const v = e.target.value.replace(/[^0-9]/g, '')
         onChange(v === '' ? '' : Number(v))
       }}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === 'Next') {
+          e.preventDefault()
+          onEnter?.()
+        }
+      }}
+      enterKeyHint={onEnter ? 'next' : 'done'}
     />
   )
 }
 
 // Компактная карточка детали
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter }) {
   const SIDES = ['Д1','Д2','Ш1','Ш2']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
@@ -60,7 +68,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
   }
 
   return (
-    <div className="card" style={{ marginBottom: 8, padding: '10px 12px' }}>
+    <div className="card" style={{ marginBottom: 4, padding: '6px 10px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* Номер + кнопка контура */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
@@ -76,11 +84,13 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
         </div>
 
         {/* Размеры */}
-        <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+        <div style={{ display: 'flex', gap: 3, flex: 1 }}>
           <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} />
           <NumInput value={detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: v })} />
-          <div style={{ width: 60, flexShrink: 0 }}>
-            <NumInput value={detail.qty} placeholder="Кол" onChange={v => onUpdate({ ...detail, qty: v })} />
+          <div style={{ width: 56, flexShrink: 0 }}>
+            <NumInput value={detail.qty} placeholder="Кол"
+              onChange={v => onUpdate({ ...detail, qty: v })}
+              onEnter={onQtyEnter} />
           </div>
         </div>
 
@@ -93,7 +103,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
 
       {/* Кромка — галочки */}
       {showEdge && (
-        <div style={{ display: 'flex', gap: 4, marginTop: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-hint)', minWidth: 44 }}>Кромка:</span>
           {SIDES.map((side, i) => {
             const key = KEYS[i]
@@ -256,15 +266,27 @@ export default function NewOrderPage() {
   const [details, setDetails] = useState([newDetail()])
   const [showEdge, setShowEdge] = useState(true)
 
+  const [sheetLength, setSheetLength] = useState(2750)
+  const [sheetWidth, setSheetWidth] = useState(1830)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   const [lastAddedUid, setLastAddedUid] = useState(null)
-  const addDetail = () => {
+  const detailRefs = useRef({})
+
+  const addDetail = (scrollToNew = true) => {
     const d = { ...newDetail(), prefix: activePrefix }
     setLastAddedUid(d.uid)
     setDetails(prev => [...prev, d])
+    if (scrollToNew) {
+      setTimeout(() => {
+        detailRefs.current[d.uid]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 80)
+    }
+    return d.uid
   }
+
+  const onQtyEnter = () => { addDetail(true) }
   const removeDetail = (u) => setDetails(d => d.filter(x => x.uid !== u))
   const updateDetail = (u, updated) => setDetails(d => d.map(x => x.uid === u ? updated : x))
 
@@ -279,8 +301,8 @@ export default function NewOrderPage() {
         order_number: orderNumber,
         order_name: orderName || null,
         material_name: materialName || 'Без названия',
-        sheet_length: SHEET_DEFAULTS.length,
-        sheet_width: SHEET_DEFAULTS.width,
+        sheet_length: Number(sheetLength) || SHEET_DEFAULTS.length,
+        sheet_width: Number(sheetWidth) || SHEET_DEFAULTS.width,
         margin_top: SHEET_DEFAULTS.margin_top,
         margin_right: SHEET_DEFAULTS.margin_right,
         margin_bottom: SHEET_DEFAULTS.margin_bottom,
@@ -353,18 +375,26 @@ export default function NewOrderPage() {
       {/* Параметры листа */}
       <div style={{ marginBottom: 14 }}>
         <p className="section-title">Параметры листа</p>
-        <div className="card" style={{ background: 'var(--bg2)' }}>
-          <div className="row2" style={{ marginBottom: 6 }}>
-            <div><label className="label">Длина</label><div style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{SHEET_DEFAULTS.length} мм</div></div>
-            <div><label className="label">Ширина</label><div style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{SHEET_DEFAULTS.width} мм</div></div>
+        <div className="card" style={{ padding: '8px 12px' }}>
+          {/* Формат листа — редактируемый */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+            <label className="label" style={{ marginBottom: 0, minWidth: 70 }}>Формат листа</label>
+            <input type="text" inputMode="numeric" value={sheetLength}
+              onChange={e => { const v = e.target.value.replace(/[^0-9]/g,''); setSheetLength(v===''?'':Number(v)) }}
+              style={{ width: 70, padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
+            <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>×</span>
+            <input type="text" inputMode="numeric" value={sheetWidth}
+              onChange={e => { const v = e.target.value.replace(/[^0-9]/g,''); setSheetWidth(v===''?'':Number(v)) }}
+              style={{ width: 70, padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
+            <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>мм</span>
           </div>
-          <div className="row4" style={{ marginBottom: 6 }}>
-            {[['↑',SHEET_DEFAULTS.margin_top],['→',SHEET_DEFAULTS.margin_right],['↓',SHEET_DEFAULTS.margin_bottom],['←',SHEET_DEFAULTS.margin_left]].map(([a,v]) => (
-              <div key={a}><label className="label">{a}</label><div style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 14 }}>{v} мм</div></div>
-            ))}
+          {/* Отступы — только просмотр */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-hint)', minWidth: 70 }}>Отступы/рез</span>
+            <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>
+              ↑{SHEET_DEFAULTS.margin_top} →{SHEET_DEFAULTS.margin_right} ↓{SHEET_DEFAULTS.margin_bottom} ←{SHEET_DEFAULTS.margin_left} · рез {SHEET_DEFAULTS.kerf} мм
+            </span>
           </div>
-          <div><label className="label">Рез</label><div style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 14 }}>{SHEET_DEFAULTS.kerf} мм</div></div>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6 }}>Устанавливает производство</p>
         </div>
       </div>
 

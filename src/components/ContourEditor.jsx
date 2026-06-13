@@ -106,34 +106,20 @@ function ContourPreview({ w, h, contour }) {
     ctx.textBaseline = 'middle'
 
     // Верхний размер (длина = w)
-    ctx.fillText(`${w} мм`, ox + dw/2, oy - 8)
-    // Нижний размер
-    ctx.fillText(`${w} мм`, ox + dw/2, oy + dh + 8)
+    ctx.fillText(`${w}`, ox + dw/2, oy - 8)
     // Левый размер (ширина = h) — вертикально
     ctx.save()
     ctx.translate(ox - 10, oy + dh/2)
     ctx.rotate(-Math.PI/2)
-    ctx.fillText(`${h} мм`, 0, 0)
-    ctx.restore()
-    // Правый размер
-    ctx.save()
-    ctx.translate(ox + dw + 10, oy + dh/2)
-    ctx.rotate(Math.PI/2)
-    ctx.fillText(`${h} мм`, 0, 0)
+    ctx.fillText(`${h}`, 0, 0)
     ctx.restore()
 
     // Линии размеров
     ctx.strokeStyle = dimColor
     ctx.lineWidth = 0.5
     ctx.setLineDash([2,2])
-    // Верх
     ctx.beginPath(); ctx.moveTo(ox, oy-4); ctx.lineTo(ox+dw, oy-4); ctx.stroke()
-    // Низ
-    ctx.beginPath(); ctx.moveTo(ox, oy+dh+4); ctx.lineTo(ox+dw, oy+dh+4); ctx.stroke()
-    // Лево
     ctx.beginPath(); ctx.moveTo(ox-4, oy); ctx.lineTo(ox-4, oy+dh); ctx.stroke()
-    // Право
-    ctx.beginPath(); ctx.moveTo(ox+dw+4, oy); ctx.lineTo(ox+dw+4, oy+dh); ctx.stroke()
     ctx.setLineDash([])
 
     const c = contour || {}
