@@ -480,7 +480,7 @@ export default function NewOrderPage() {
                   showEdge={showEdge}
                   autoFocus={d.uid === lastAddedUid}
                   externalLengthRef={d.uid === lastAddedUid ? newDetailLengthRef : null}
-                  onQtyEnter={() => onQtyEnter(globalIndex)} />
+                  onQtyEnter={onQtyEnter} />
               )
             })}
           </div>
