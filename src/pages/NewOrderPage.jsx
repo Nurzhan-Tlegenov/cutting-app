@@ -276,16 +276,12 @@ export default function NewOrderPage() {
   const [error, setError] = useState('')
 
   const [lastAddedUid, setLastAddedUid] = useState(null)
-  const detailRefs = useRef({})
-  const newDetailFocusRef = useRef(null) // будет установлен новой деталью
+  const newDetailLengthRef = useRef(null)
 
   const addDetail = () => {
     const d = { ...newDetail(), prefix: activePrefix }
     setLastAddedUid(d.uid)
     setDetails(prev => [...prev, d])
-    setTimeout(() => {
-      detailRefs.current[d.uid]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 60)
   }
 
   const onQtyEnter = () => addDetail()
@@ -479,7 +475,6 @@ export default function NewOrderPage() {
                   activeEdgeName={activeEdge}
                   showEdge={showEdge}
                   autoFocus={d.uid === lastAddedUid}
-                  externalLengthRef={d.uid === lastAddedUid ? newDetailLengthRef : null}
                   onQtyEnter={onQtyEnter} />
               )
             })}
