@@ -1,12 +1,39 @@
 import { useState, useRef, useEffect } from 'react'
 
-function NumField({ label, value, onChange, unit = 'мм' }) {
+function NumField({ label, value, onChange, unit = 'мм', allowNegative = false }) {
+  const [raw, setRaw] = useState(String(value ?? 0))
+
+  // Синхронизируем если value изменился снаружи
+  useEffect(() => {
+    const external = String(value ?? 0)
+    if (Number(raw) !== Number(external)) setRaw(external)
+  }, [value])
+
+  const handleChange = (e) => {
+    let v = e.target.value
+    // Разрешаем: цифры, точку, запятую (→ точка), минус в начале если allowNegative
+    if (allowNegative) {
+      v = v.replace(/[^0-9.,-]/g, '').replace(',', '.')
+      // Минус только в начале
+      if (v.startsWith('-')) v = '-' + v.slice(1).replace(/-/g, '')
+    } else {
+      v = v.replace(/[^0-9.,]/g, '').replace(',', '.')
+    }
+    // Не больше одной точки
+    const parts = v.split('.')
+    if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('')
+    setRaw(v)
+    const num = parseFloat(v)
+    if (!isNaN(num)) onChange(num)
+  }
+
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       {label && <label style={{ fontSize: 10, color: 'var(--text-hint)', display: 'block', marginBottom: 2 }}>{label}</label>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-        <input type="text" inputMode="numeric" value={value ?? 0}
-          onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); onChange(v === '' ? 0 : Number(v)) }}
+        <input type="text" inputMode="decimal" value={raw}
+          onChange={handleChange}
+          onBlur={() => setRaw(String(value ?? 0))}
           style={{ padding: '6px 6px', fontSize: 13, width: '100%' }} />
         <span style={{ fontSize: 10, color: 'var(--text-hint)', flexShrink: 0 }}>{unit}</span>
       </div>
@@ -129,7 +156,7 @@ function ContourPreview({ w, h, contour }) {
 
     function offs(corner) {
       if (!corner?.type || corner.type === 'none') return { x: 0, y: 0 }
-      if (corner.type === 'radius') return { x: toC(corner.r), y: toC(corner.r) }
+      if (corner.type === 'radius') return { x: toC(Math.abs(corner.r || 0)), y: toC(Math.abs(corner.r || 0)) }
       if (corner.type === 'chamfer') return { x: toC(corner.dx || 0), y: toC(corner.dy || 0) }
       return { x: 0, y: 0 }
     }
@@ -139,21 +166,41 @@ function ContourPreview({ w, h, contour }) {
     ctx.beginPath()
     ctx.moveTo(ox + TL.x, oy)
     ctx.lineTo(ox + dw - TR.x, oy)
-    if (tr.type === 'radius' && TR.x > 0) ctx.arcTo(ox+dw, oy, ox+dw, oy+TR.y, TR.x)
-    else if (tr.type === 'chamfer') ctx.lineTo(ox+dw, oy+TR.y)
-    else ctx.lineTo(ox+dw, oy)
+
+    // TR — верхний правый
+    if (tr.type === 'radius' && TR.x > 0) {
+      if ((tr.r||0) > 0) { ctx.arcTo(ox+dw, oy, ox+dw, oy+TR.y, TR.x) }
+      else { ctx.lineTo(ox+dw, oy); ctx.arc(ox+dw, oy, TR.x, Math.PI, Math.PI*1.5, true) }
+    } else if (tr.type === 'chamfer') { ctx.lineTo(ox+dw, oy+TR.y) }
+    else { ctx.lineTo(ox+dw, oy) }
+
     ctx.lineTo(ox+dw, oy+dh-BR.y)
-    if (br.type === 'radius' && BR.x > 0) ctx.arcTo(ox+dw, oy+dh, ox+dw-BR.x, oy+dh, BR.y)
-    else if (br.type === 'chamfer') ctx.lineTo(ox+dw-BR.x, oy+dh)
-    else ctx.lineTo(ox+dw, oy+dh)
+
+    // BR — нижний правый
+    if (br.type === 'radius' && BR.x > 0) {
+      if ((br.r||0) > 0) { ctx.arcTo(ox+dw, oy+dh, ox+dw-BR.x, oy+dh, BR.y) }
+      else { ctx.lineTo(ox+dw, oy+dh); ctx.arc(ox+dw, oy+dh, BR.x, Math.PI*1.5, 0, true) }
+    } else if (br.type === 'chamfer') { ctx.lineTo(ox+dw-BR.x, oy+dh) }
+    else { ctx.lineTo(ox+dw, oy+dh) }
+
     ctx.lineTo(ox+BL.x, oy+dh)
-    if (bl.type === 'radius' && BL.x > 0) ctx.arcTo(ox, oy+dh, ox, oy+dh-BL.y, BL.x)
-    else if (bl.type === 'chamfer') ctx.lineTo(ox, oy+dh-BL.y)
-    else ctx.lineTo(ox, oy+dh)
+
+    // BL — нижний левый
+    if (bl.type === 'radius' && BL.x > 0) {
+      if ((bl.r||0) > 0) { ctx.arcTo(ox, oy+dh, ox, oy+dh-BL.y, BL.x) }
+      else { ctx.lineTo(ox, oy+dh); ctx.arc(ox, oy+dh, BL.x, 0, Math.PI*0.5, true) }
+    } else if (bl.type === 'chamfer') { ctx.lineTo(ox, oy+dh-BL.y) }
+    else { ctx.lineTo(ox, oy+dh) }
+
     ctx.lineTo(ox, oy+TL.y)
-    if (tl.type === 'radius' && TL.x > 0) ctx.arcTo(ox, oy, ox+TL.x, oy, TL.y)
-    else if (tl.type === 'chamfer') ctx.lineTo(ox+TL.x, oy)
-    else ctx.lineTo(ox, oy)
+
+    // TL — верхний левый
+    if (tl.type === 'radius' && TL.x > 0) {
+      if ((tl.r||0) > 0) { ctx.arcTo(ox, oy, ox+TL.x, oy, TL.y) }
+      else { ctx.lineTo(ox, oy); ctx.arc(ox, oy, TL.x, Math.PI*0.5, Math.PI, true) }
+    } else if (tl.type === 'chamfer') { ctx.lineTo(ox+TL.x, oy) }
+    else { ctx.lineTo(ox, oy) }
+
     ctx.closePath()
     ctx.fillStyle = '#E6F1FB'; ctx.fill()
     ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.5; ctx.stroke()
@@ -216,7 +263,14 @@ function CornerEditor({ label, value = {}, onChange }) {
           </button>
         ))}
       </div>
-      {type==='radius' && <NumField label="Радиус R" value={value.r??50} onChange={v=>onChange({...value,r:v})} />}
+      {type==='radius' && (
+        <div>
+          <NumField label="Радиус R" value={value.r??50} onChange={v=>onChange({...value,r:v})} allowNegative={true} />
+          <div style={{ fontSize:9, color:'var(--text-hint)', marginTop:3, textAlign:'center' }}>
+            положительный — выпуклый, отрицательный — вогнутый
+          </div>
+        </div>
+      )}
       {type==='chamfer' && (
         <div style={{ display:'flex', gap:6 }}>
           <NumField label="По X →" value={value.dx??50} onChange={v=>onChange({...value,dx:v})} />
