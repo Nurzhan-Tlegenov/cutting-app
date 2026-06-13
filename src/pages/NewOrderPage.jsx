@@ -273,6 +273,7 @@ export default function NewOrderPage() {
   const [sheetLength, setSheetLength] = useState(2750)
   const [sheetWidth, setSheetWidth] = useState(1830)
   const [saving, setSaving] = useState(false)
+  const [inputFocused, setInputFocused] = useState(false)
   const [error, setError] = useState('')
 
   const [lastAddedUid, setLastAddedUid] = useState(null)
@@ -350,7 +351,9 @@ export default function NewOrderPage() {
   }, {})
 
   return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+    <div className="page" style={{ paddingBottom: 100 }}
+      onFocus={e => { if (e.target.tagName === 'INPUT') setInputFocused(true) }}
+      onBlur={e => { if (e.target.tagName === 'INPUT') setTimeout(() => setInputFocused(false), 100) }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
         <button type="button" onClick={() => navigate('/orders')}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
@@ -523,7 +526,7 @@ export default function NewOrderPage() {
           {saving ? 'Сохранение...' : `Сохранить заказ (${validCount} дет.)`}
         </button>
       </div>
-      <BottomNav />
+      {!inputFocused && <BottomNav />}
     </div>
   )
 }
