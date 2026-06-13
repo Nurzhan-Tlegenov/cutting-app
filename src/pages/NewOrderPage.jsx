@@ -254,6 +254,17 @@ function EdgeManager({ edgeNames, activeEdge, onChange, onSetActive }) {
 
 export default function NewOrderPage() {
   const navigate = useNavigate()
+
+  useEffect(() => {
+    const handler = () => {
+      if (window.visualViewport) {
+        const ratio = window.visualViewport.height / window.innerHeight
+        setKeyboardOpen(ratio < 0.75)
+      }
+    }
+    window.visualViewport?.addEventListener('resize', handler)
+    return () => window.visualViewport?.removeEventListener('resize', handler)
+  }, [])
   const { user } = useAuth()
   const [orderName, setOrderName] = useState('')
   const [materialName, setMaterialName] = useState('')
@@ -273,7 +284,15 @@ export default function NewOrderPage() {
   const [sheetLength, setSheetLength] = useState(2750)
   const [sheetWidth, setSheetWidth] = useState(1830)
   const [saving, setSaving] = useState(false)
-  const [inputFocused, setInputFocused] = useState(false)
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
+
+  useEffect(() => {
+    const onFocus = (e) => { if (e.target.tagName === 'INPUT') setInputFocused(true) }
+    const onBlur = (e) => { if (e.target.tagName === 'INPUT') setTimeout(() => setInputFocused(false), 200) }
+    window.addEventListener('focusin', onFocus)
+    window.addEventListener('focusout', onBlur)
+    return () => { window.removeEventListener('focusin', onFocus); window.removeEventListener('focusout', onBlur) }
+  }, [])
   const [error, setError] = useState('')
 
   const [lastAddedUid, setLastAddedUid] = useState(null)
@@ -351,9 +370,7 @@ export default function NewOrderPage() {
   }, {})
 
   return (
-    <div className="page" style={{ paddingBottom: 100 }}
-      onFocus={e => { if (e.target.tagName === 'INPUT') setInputFocused(true) }}
-      onBlur={e => { if (e.target.tagName === 'INPUT') setTimeout(() => setInputFocused(false), 100) }}>
+    <div className="page" style={{ paddingBottom: inputFocused ? 16 : 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
         <button type="button" onClick={() => navigate('/orders')}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
@@ -526,7 +543,7 @@ export default function NewOrderPage() {
           {saving ? 'Сохранение...' : `Сохранить заказ (${validCount} дет.)`}
         </button>
       </div>
-      {!inputFocused && <BottomNav />}
+      {!keyboardOpen && <BottomNav />}
     </div>
   )
 }
