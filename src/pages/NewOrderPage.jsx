@@ -274,28 +274,18 @@ export default function NewOrderPage() {
   const [sheetWidth, setSheetWidth] = useState(1830)
   const [saving, setSaving] = useState(false)
   const [keyboardOpen, setKeyboardOpen] = useState(false)
+  const [error, setError] = useState('')
+  const [lastAddedUid, setLastAddedUid] = useState(null)
+  const newDetailLengthRef = useRef(null)
 
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
-    const handler = () => {
-      setKeyboardOpen(vv.height / window.innerHeight < 0.75)
-    }
+    const handler = () => setKeyboardOpen(vv.height / window.innerHeight < 0.75)
     vv.addEventListener('resize', handler)
     return () => vv.removeEventListener('resize', handler)
   }, [])
 
-  useEffect(() => {
-    const onFocus = (e) => { if (e.target.tagName === 'INPUT') setInputFocused(true) }
-    const onBlur = (e) => { if (e.target.tagName === 'INPUT') setTimeout(() => setInputFocused(false), 200) }
-    window.addEventListener('focusin', onFocus)
-    window.addEventListener('focusout', onBlur)
-    return () => { window.removeEventListener('focusin', onFocus); window.removeEventListener('focusout', onBlur) }
-  }, [])
-  const [error, setError] = useState('')
-
-  const [lastAddedUid, setLastAddedUid] = useState(null)
-  const newDetailLengthRef = useRef(null)
 
   const addDetail = () => {
     const d = { ...newDetail(), prefix: activePrefix }
