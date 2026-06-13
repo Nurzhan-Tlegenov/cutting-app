@@ -50,11 +50,12 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
   )
 
   useEffect(() => {
-    if (autoFocus && lengthRef.current) {
+    if (autoFocus) {
       setTimeout(() => {
         lengthRef.current?.focus()
         lengthRef.current?.select()
-      }, 30)
+        lengthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
     }
   }, [autoFocus])
 
@@ -477,7 +478,9 @@ export default function NewOrderPage() {
                   onRemove={() => removeDetail(d.uid)}
                   activeEdgeName={activeEdge}
                   showEdge={showEdge}
-                  autoFocus={d.uid === lastAddedUid} />
+                  autoFocus={d.uid === lastAddedUid}
+                  externalLengthRef={d.uid === lastAddedUid ? newDetailLengthRef : null}
+                  onQtyEnter={() => onQtyEnter(globalIndex)} />
               )
             })}
           </div>
