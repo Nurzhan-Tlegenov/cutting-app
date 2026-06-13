@@ -45,7 +45,7 @@ function Toggle({ on }) {
 }
 
 function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus }) {
-  const SIDES = ['Д1','Д2','Ш1','Ш2']
+  const SIDES = ['Дв','Дн','Шл','Шп']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
 

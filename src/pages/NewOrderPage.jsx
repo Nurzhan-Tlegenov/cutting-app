@@ -38,7 +38,7 @@ const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => 
 function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter }) {
   const widthRef = useRef(null)
   const qtyRef = useRef(null)
-  const SIDES = ['Д1','Д2','Ш1','Ш2']
+  const SIDES = ['Дв','Дн','Шл','Шп']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
   const [showContour, setShowContour] = useState(false)
@@ -357,16 +357,21 @@ export default function NewOrderPage() {
         <h1 style={{ fontSize: 18, fontWeight: 500 }}>Новый заказ</h1>
       </div>
 
-      {/* Материал */}
-      <div style={{ marginBottom: 14 }}>
-        <p className="section-title">Материал</p>
-        <div className="card">
-          <label className="label">Название заказа</label>
-          <input type="text" placeholder="Кухня Ивановых / Шкаф-купе" value={orderName}
-            onChange={e => setOrderName(e.target.value)} style={{ marginBottom: 10 }} />
-          <label className="label">Материал</label>
-          <input type="text" placeholder="ЛДСП Белый 16мм" value={materialName}
-            onChange={e => setMaterialName(e.target.value)} />
+      {/* Название + материал компактно */}
+      <div style={{ marginBottom: 10 }}>
+        <div className="card" style={{ padding: '8px 12px' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <label className="label">Название заказа</label>
+              <input type="text" placeholder="Кухня Ивановых" value={orderName}
+                onChange={e => setOrderName(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="label">Материал</label>
+              <input type="text" placeholder="ЛДСП Белый 16мм" value={materialName}
+                onChange={e => setMaterialName(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -396,21 +401,44 @@ export default function NewOrderPage() {
         </div>
       </div>
 
-      {/* Префиксы */}
-      <div style={{ marginBottom: 14 }}>
-        <p className="section-title">Префиксы групп</p>
-        <div className="card">
-          <PrefixManager prefixes={prefixes} active={activePrefix}
-            onChange={setPrefixes} onSetActive={setActivePrefix} />
+      {/* Префиксы + Кромки компактно */}
+      <div style={{ marginBottom: 10 }}>
+        <div className="card" style={{ padding: '8px 12px' }}>
+          <details>
+            <summary style={{ fontSize: 12, color: 'var(--text-hint)', cursor: 'pointer', userSelect: 'none', marginBottom: 0, listStyle: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>
+                <span style={{ fontWeight: 500, color: prefixes.length ? 'var(--blue)' : 'var(--text-hint)' }}>
+                  Префиксы {prefixes.length ? `(${prefixes.length})` : ''}
+                </span>
+                {activePrefix && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--blue)' }}>· активный: {activePrefix}</span>}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>▼</span>
+            </summary>
+            <div style={{ marginTop: 8 }}>
+              <PrefixManager prefixes={prefixes} active={activePrefix}
+                onChange={setPrefixes} onSetActive={setActivePrefix} />
+            </div>
+          </details>
         </div>
       </div>
 
-      {/* Кромки */}
-      <div style={{ marginBottom: 14 }}>
-        <p className="section-title">Виды кромки</p>
-        <div className="card">
-          <EdgeManager edgeNames={edgeNames} activeEdge={activeEdge}
-            onChange={setEdgeNames} onSetActive={setActiveEdge} />
+      <div style={{ marginBottom: 10 }}>
+        <div className="card" style={{ padding: '8px 12px' }}>
+          <details>
+            <summary style={{ fontSize: 12, color: 'var(--text-hint)', cursor: 'pointer', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>
+                <span style={{ fontWeight: 500, color: edgeNames.length ? 'var(--blue)' : 'var(--text-hint)' }}>
+                  Виды кромки {edgeNames.length ? `(${edgeNames.length})` : ''}
+                </span>
+                {activeEdge && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--blue)' }}>· активная: {activeEdge}</span>}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>▼</span>
+            </summary>
+            <div style={{ marginTop: 8 }}>
+              <EdgeManager edgeNames={edgeNames} activeEdge={activeEdge}
+                onChange={setEdgeNames} onSetActive={setActiveEdge} />
+            </div>
+          </details>
         </div>
       </div>
 
