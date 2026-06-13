@@ -527,7 +527,7 @@ export default function NewOrderPage() {
 
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: keyboardOpen ? 'none' : 'flex', flexDirection: 'column', gap: 8 }}>
         <button type="button" className="btn-primary" onClick={handleSave} disabled={saving || !validCount}>
           {saving ? 'Сохранение...' : `Сохранить заказ (${validCount} дет.)`}
         </button>
