@@ -171,7 +171,7 @@ function getCornerMarkers(contour, ox, oy, dw, dh, toC) {
 // ─── Интерактивный Canvas ─────────────────────────────────────────────────────
 function InteractiveContour({ w, h, contour, activeCorner, onCornerTap }) {
   const ref = useRef(null)
-  const MARKER_R = 6
+  const MARKER_R = 3
 
   useEffect(() => {
     const canvas = ref.current
