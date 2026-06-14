@@ -292,11 +292,20 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       markers.forEach(m => {
         const isActive = m.idx === activeIdx
         const isArcSel = arcPoints.includes(m.idx)
+        const r = arcMode ? 10 : (isActive ? 5 : 3.5)
         ctx.beginPath()
-        ctx.arc(m.x, m.y, isActive || isArcSel ? 5 : 3.5, 0, Math.PI * 2)
-        ctx.fillStyle = isArcSel ? '#F5A623' : isActive ? '#E24B4A' : '#185FA5'
+        ctx.arc(m.x, m.y, r, 0, Math.PI * 2)
+        ctx.fillStyle = isArcSel ? '#F5A623' : isActive ? '#E24B4A' : arcMode ? '#185FA5' : '#185FA5'
         ctx.fill()
         ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5; ctx.stroke()
+        // Номер точки в режиме дуги
+        if (arcMode) {
+          ctx.fillStyle = 'white'
+          ctx.font = 'bold 9px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(m.idx + 1, m.x, m.y)
+        }
       })
     }
 
@@ -312,14 +321,14 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const cx = (e.clientX - rect.left)
     const cy = (e.clientY - rect.top)
 
-    const PAD = 36
+    const PAD = 16
     const sc = Math.min((CSS_W - PAD*2) / w, (CSS_H - PAD*2) / h)
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
     const verts = contour.vertices || makeRect(w, h)
     const markers = getMarkers(verts, sc, ox, oy, dh)
-    const TAP_R = 20
+    const TAP_R = arcMode ? 30 : 20
     for (const m of markers) {
       if (Math.hypot(cx - m.x, cy - m.y) <= TAP_R) {
         onTap(m.idx)
@@ -649,13 +658,11 @@ export default function ContourEditor({ detail, onUpdate }) {
       if (!arcMode) { setActiveIdx(null); setMenuSelType(null); setPreviewVerts(null) }
       return
     }
-    if (arcMode) {
-      handleArcTap(idx)
-      return
-    }
     setActiveIdx(idx)
     setMenuSelType(null)
     setPreviewVerts(null)
+    setArcMode(false)
+    setArcPoints([])
     setTab('contour')
   }
 
@@ -802,15 +809,6 @@ export default function ContourEditor({ detail, onUpdate }) {
 
           {/* Canvas */}
           <div style={{ flex:1, minWidth:0 }}>
-            {arcMode && (
-              <div style={{ background:'#FFF3CD', borderRadius:'var(--radius)', padding:'6px 8px',
-                marginBottom:4, fontSize:11, color:'#856404', textAlign:'center' }}>
-                {arcPoints.length === 1 ? '〜 Выбери контрольную точку (середину дуги)' :
-                 arcPoints.length === 2 ? '〜 Выбери конечную точку дуги' : ''}
-                <button type="button" onClick={() => { setArcMode(false); setArcPoints([]); setMenuSelType(null) }}
-                  style={{ marginLeft:8, background:'none', border:'none', color:'#856404', cursor:'pointer', fontSize:12 }}>✕</button>
-              </div>
-            )}
             {!arcMode && (
               <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
                 Нажми на точку
@@ -870,8 +868,45 @@ export default function ContourEditor({ detail, onUpdate }) {
               style={{ background:'none', border:'none', fontSize:16, color:'var(--text-hint)', cursor:'pointer', padding:0 }}>✕</button>
           </div>
 
-          {/* Радиус */}
-          {menuSelType === 'radius' && (
+          {/* Дуга — выбор точек кнопками */}
+          {menuSelType === 'arc' && (
+            <div style={{ marginBottom:10 }}>
+              <div style={{ fontSize:11, color:'var(--text-hint)', marginBottom:6 }}>
+                {arcPoints.length === 1 ? 'Выбери контрольную точку (середину дуги):' :
+                 arcPoints.length === 2 ? 'Выбери конечную точку дуги:' :
+                 'Нажми на начальную точку:'}
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
+                {contour.vertices.map((v, i) => {
+                  const isSelected = arcPoints.includes(i)
+                  const isStart = arcPoints[0] === i
+                  const isCp = arcPoints[1] === i
+                  return (
+                    <button key={i} type="button"
+                      onClick={() => {
+                        if (isSelected) return
+                        const pts = [...arcPoints, i]
+                        setArcPoints(pts)
+                        if (pts.length === 3) applyArc(pts)
+                      }}
+                      style={{ padding:'5px 8px', borderRadius:'var(--radius)', fontSize:11, border:'none',
+                        background: isStart ? 'var(--blue)' : isCp ? '#F5A623' : isSelected ? '#ccc' : 'var(--bg3)',
+                        color: isSelected ? 'white' : 'var(--text-muted)', cursor: isSelected ? 'default' : 'pointer',
+                        fontWeight: isSelected ? 600 : 400 }}>
+                      #{i+1} ({Math.round(v.x)}, {Math.round(v.y)})
+                    </button>
+                  )
+                })}
+              </div>
+              <button type="button"
+                onClick={() => { setArcMode(false); setArcPoints([]); setMenuSelType(null) }}
+                style={{ width:'100%', padding:'6px', border:'0.5px solid var(--border-md)',
+                  borderRadius:'var(--radius)', background:'transparent', fontSize:11,
+                  color:'var(--text-muted)', cursor:'pointer' }}>
+                Отмена
+              </button>
+            </div>
+          )}
             <NumField label="Радиус R" value={menuR}
               onChange={v => { setMenuR(v); applyCornerType(activeIdx, 'radius', { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
           )}
