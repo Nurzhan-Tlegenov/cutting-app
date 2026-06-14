@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 
 // ─── NumField ─────────────────────────────────────────────────────────────────
-function NumField({ label, value, onChange, onCommit, unit = 'мм' }) {
+function NumField({ label, value, onChange, unit = 'мм' }) {
   const [raw, setRaw] = useState(String(value ?? 0))
   useEffect(() => {
     const ext = String(value ?? 0)
@@ -15,21 +15,13 @@ function NumField({ label, value, onChange, onCommit, unit = 'мм' }) {
     const num = parseFloat(v)
     if (!isNaN(num)) onChange(num)
   }
-  const handleCommit = () => {
-    const num = parseFloat(raw)
-    if (!isNaN(num) && num > 0) {
-      onChange(num)
-      if (onCommit) onCommit(num)
-    }
-    setRaw(String(value ?? 0))
-  }
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       {label && <label style={{ fontSize: 10, color: 'var(--text-hint)', display: 'block', marginBottom: 2 }}>{label}</label>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
         <input type="text" inputMode="decimal" value={raw}
           onChange={handleChange}
-          onBlur={handleCommit}
+          onBlur={() => setRaw(String(value ?? 0))}
           style={{ padding: '6px 6px', fontSize: 13, width: '100%' }} />
         <span style={{ fontSize: 10, color: 'var(--text-hint)', flexShrink: 0 }}>{unit}</span>
       </div>
@@ -113,7 +105,7 @@ function getMarkers(verts, sc, ox, oy) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, onTap }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
   const ref = useRef(null)
   const w = Number(detail.w) || 0
   const h = Number(detail.h) || 0
@@ -141,8 +133,8 @@ function ContourCanvas({ detail, contour, activeIdx, onTap }) {
     ctx.beginPath(); ctx.moveTo(ox-5, oy); ctx.lineTo(ox-5, oy+dh); ctx.stroke()
     ctx.setLineDash([])
 
-    // Внешний контур
-    const verts = contour.vertices || makeRect(w, h)
+    // Внешний контур — используем превью если есть
+    const verts = previewVerts || contour.vertices || makeRect(w, h)
     buildPath(ctx, verts, sc, ox, oy)
     ctx.fillStyle = '#E6F1FB'; ctx.fill()
     ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.5; ctx.stroke()
@@ -190,7 +182,7 @@ function ContourCanvas({ detail, contour, activeIdx, onTap }) {
       ctx.strokeStyle = 'white'; ctx.lineWidth = 1; ctx.stroke()
     })
 
-  }, [w, h, contour, activeIdx])
+  }, [w, h, contour, activeIdx, previewVerts])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -227,7 +219,7 @@ function ContourCanvas({ detail, contour, activeIdx, onTap }) {
 }
 
 // ─── Меню вершины ─────────────────────────────────────────────────────────────
-function VertexMenu({ idx, vertex, total, onChange, onApplyType, onInsertBefore, onInsertAfter, onDelete, onClose }) {
+function VertexMenu({ idx, vertex, total, onChange, onApplyType, onPreview, onInsertBefore, onInsertAfter, onDelete, onClose }) {
   const canDelete = total > 3
   const [dx, setDx] = useState(50)
   const [dy, setDy] = useState(50)
@@ -283,23 +275,33 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onInsertBefore,
         </div>
       )}
 
-      {/* Параметры фаски */}
+      {/* Фаска — превью сразу, применить по кнопке */}
       {selType === 'chamfer' && (
         <div style={{ marginBottom:10 }}>
-          <div style={{ display:'flex', gap:8 }}>
-            <NumField label="По X →" value={dx} onChange={setDx} onCommit={v => onApplyType(idx, 'chamfer', { r, dx: v, dy })} />
-            <NumField label="По Y ↓" value={dy} onChange={setDy} onCommit={v => onApplyType(idx, 'chamfer', { r, dx, dy: v })} />
+          <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+            <NumField label="По X →" value={dx} onChange={v => { setDx(v); onPreview(idx, 'chamfer', { dx: v, dy }) }} />
+            <NumField label="По Y ↓" value={dy} onChange={v => { setDy(v); onPreview(idx, 'chamfer', { dx, dy: v }) }} />
           </div>
+          <button type="button" onClick={() => onApplyType(idx, 'chamfer', { r, dx, dy })}
+            style={{ width:'100%', padding:'8px', background:'var(--blue)', color:'white', border:'none',
+              borderRadius:'var(--radius)', fontSize:13, cursor:'pointer', fontWeight:500 }}>
+            ✓ Применить фаску
+          </button>
         </div>
       )}
 
-      {/* Параметры выреза */}
+      {/* Вырез — превью сразу, применить по кнопке */}
       {selType === 'notch' && (
         <div style={{ marginBottom:10 }}>
-          <div style={{ display:'flex', gap:8 }}>
-            <NumField label="По X →" value={dx} onChange={setDx} onCommit={v => onApplyType(idx, 'notch', { r, dx: v, dy })} />
-            <NumField label="По Y ↓" value={dy} onChange={setDy} onCommit={v => onApplyType(idx, 'notch', { r, dx, dy: v })} />
+          <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+            <NumField label="По X →" value={dx} onChange={v => { setDx(v); onPreview(idx, 'notch', { dx: v, dy }) }} />
+            <NumField label="По Y ↓" value={dy} onChange={v => { setDy(v); onPreview(idx, 'notch', { dx, dy: v }) }} />
           </div>
+          <button type="button" onClick={() => onApplyType(idx, 'notch', { r, dx, dy })}
+            style={{ width:'100%', padding:'8px', background:'var(--blue)', color:'white', border:'none',
+              borderRadius:'var(--radius)', fontSize:13, cursor:'pointer', fontWeight:500 }}>
+            ✓ Применить вырез
+          </button>
         </div>
       )}
 
@@ -404,6 +406,47 @@ export default function ContourEditor({ detail, onUpdate }) {
 
   const [tab, setTab] = useState('contour')
   const [activeIdx, setActiveIdx] = useState(null)
+  const [previewVerts, setPreviewVerts] = useState(null)
+
+  // Рассчитать превью без сохранения в контур
+  const calcPreview = (idx, type, params) => {
+    const verts = [...contour.vertices]
+    const n = verts.length
+    const curr = verts[idx]
+    const prev = verts[(idx - 1 + n) % n]
+    const next = verts[(idx + 1) % n]
+    const { dx = 50, dy = 50 } = params
+
+    const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
+    const dx1 = next.x - curr.x, dy1 = next.y - curr.y
+    const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
+    const nx0 = d0 > 0 ? dx0/d0 : 0, ny0 = d0 > 0 ? dy0/d0 : 0
+    const nx1 = d1 > 0 ? dx1/d1 : 0, ny1 = d1 > 0 ? dy1/d1 : 0
+
+    let hx, hy, vx, vy
+    if (Math.abs(nx0) >= Math.abs(ny0)) {
+      hx = nx0; hy = ny0; vx = nx1; vy = ny1
+    } else {
+      hx = nx1; hy = ny1; vx = nx0; vy = ny0
+    }
+
+    if (type === 'chamfer') {
+      const p1 = { x: curr.x + hx*dx, y: curr.y + hy*dx, r: 0 }
+      const p2 = { x: curr.x + vx*dy, y: curr.y + vy*dy, r: 0 }
+      const newV = [...verts]
+      if (Math.abs(nx0) >= Math.abs(ny0)) newV.splice(idx, 1, p1, p2)
+      else newV.splice(idx, 1, p2, p1)
+      setPreviewVerts(newV)
+    } else if (type === 'notch') {
+      const p1 = { x: curr.x + hx*dx, y: curr.y + hy*dx, r: 0 }
+      const p2 = { x: curr.x + hx*dx + vx*dy, y: curr.y + hy*dx + vy*dy, r: 0 }
+      const p3 = { x: curr.x + vx*dy, y: curr.y + vy*dy, r: 0 }
+      const newV = [...verts]
+      if (Math.abs(nx0) >= Math.abs(ny0)) newV.splice(idx, 1, p1, p2, p3)
+      else newV.splice(idx, 1, p3, p2, p1)
+      setPreviewVerts(newV)
+    }
+  }
 
   const upd = (patch) => onUpdate({ ...detail, contour: { ...contour, ...patch } })
 
@@ -540,7 +583,7 @@ export default function ContourEditor({ detail, onUpdate }) {
           <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
             Нажми на точку чтобы изменить
           </p>
-          <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx} onTap={handleTap} />
+          <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx} previewVerts={previewVerts} onTap={handleTap} />
         </div>
       )}
 
@@ -551,11 +594,12 @@ export default function ContourEditor({ detail, onUpdate }) {
           vertex={activeVertex}
           total={contour.vertices.length}
           onChange={v => updateVertex(activeIdx, v)}
-          onApplyType={applyCornerType}
+          onApplyType={(idx, type, params) => { applyCornerType(idx, type, params); setPreviewVerts(null) }}
+          onPreview={calcPreview}
           onInsertBefore={() => insertVertex(activeIdx, false)}
           onInsertAfter={() => insertVertex(activeIdx, true)}
           onDelete={() => deleteVertex(activeIdx)}
-          onClose={() => setActiveIdx(null)} />
+          onClose={() => { setActiveIdx(null); setPreviewVerts(null) }} />
       )}
 
       {/* Вкладки */}
