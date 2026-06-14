@@ -201,28 +201,76 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
       ctx.strokeRect(cx2, cy2, pos.w*sc, pos.h*sc)
     })
 
-    // Размеры отрезков контура
+    // Размеры отрезков + углы в вершинах
     const n = verts.length
-    ctx.font = `${Math.max(8, 10)}px sans-serif`
-    ctx.fillStyle = '#185FA5'
-    ctx.strokeStyle = 'white'; ctx.lineWidth = 3
+    const cv = verts.map(v => ({
+      x: ox + v.x * sc,
+      y: oy + dh - v.y * sc,
+    }))
+
+    ctx.font = '9px sans-serif'
+
+    // Размеры отрезков
     for (let i = 0; i < n; i++) {
-      const a = verts[i], b = verts[(i+1) % n]
-      const len = Math.round(Math.hypot(b.x - a.x, b.y - a.y))
-      if (len < 10) continue
-      // Середина отрезка на canvas
-      const mx = ox + (a.x + b.x)/2 * sc
-      const my = oy + dh - (a.y + b.y)/2 * sc
-      // Угол отрезка
-      const angle = Math.atan2(-(b.y - a.y), b.x - a.x) // минус Y из-за инверсии
+      const a = cv[i], b = cv[(i+1) % n]
+      const len = Math.round(Math.hypot(verts[(i+1)%n].x - verts[i].x, verts[(i+1)%n].y - verts[i].y))
+      if (len < 5) continue
+
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
+      // Нормаль наружу (влево от направления обхода)
+      const dx = b.x - a.x, dy = b.y - a.y
+      const d = Math.hypot(dx, dy)
+      const nx = -dy/d, ny = dx/d  // нормаль
+      // Сдвигаем подпись наружу на 10px
+      const lx = mx + nx * 11, ly = my + ny * 11
+
+      const angle = Math.atan2(dy, dx)
       ctx.save()
-      ctx.translate(mx, my)
-      ctx.rotate(angle)
-      // Белая подложка под текст
-      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
-      ctx.strokeText(`${len}`, 0, -3)
-      ctx.fillText(`${len}`, 0, -3)
+      ctx.translate(lx, ly)
+      // Держим текст читаемым (не переворачиваем)
+      const a2 = angle > Math.PI/2 || angle < -Math.PI/2 ? angle + Math.PI : angle
+      ctx.rotate(a2)
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.strokeStyle = 'white'; ctx.lineWidth = 2.5
+      ctx.strokeText(`${len}`, 0, 0)
+      ctx.fillStyle = '#185FA5'
+      ctx.fillText(`${len}`, 0, 0)
       ctx.restore()
+    }
+
+    // Углы в вершинах
+    ctx.font = '8px sans-serif'
+    for (let i = 0; i < n; i++) {
+      const prev = verts[(i - 1 + n) % n]
+      const curr = verts[i]
+      const next = verts[(i + 1) % n]
+
+      // Векторы к соседям
+      const ax = prev.x - curr.x, ay = prev.y - curr.y
+      const bx = next.x - curr.x, by = next.y - curr.y
+      const da = Math.hypot(ax, ay), db = Math.hypot(bx, by)
+      if (da < 1 || db < 1) continue
+
+      // Угол между отрезками
+      const dot = (ax*bx + ay*by) / (da * db)
+      const angleDeg = Math.round(Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI)
+      if (angleDeg === 180) continue // прямая линия — не показываем
+
+      // Позиция подписи — сдвиг к центру детали
+      const cx2 = ox + curr.x * sc
+      const cy2 = oy + dh - curr.y * sc
+      // Направление к центру детали
+      const cxD = ox + dw/2, cyD = oy + dh/2
+      const toDx = cxD - cx2, toDy = cyD - cy2
+      const toD = Math.hypot(toDx, toDy) || 1
+      const lx = cx2 + (toDx/toD) * 14
+      const ly = cy2 + (toDy/toD) * 14
+
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.strokeStyle = 'white'; ctx.lineWidth = 2.5
+      ctx.strokeText(`${angleDeg}°`, lx, ly)
+      ctx.fillStyle = '#E24B4A'
+      ctx.fillText(`${angleDeg}°`, lx, ly)
     }
 
     // Маркеры
@@ -761,10 +809,16 @@ export default function ContourEditor({ detail, onUpdate }) {
               {/* Шаг перемещения */}
               <div style={{ marginTop:10, marginBottom:6, display:'flex', alignItems:'center', gap:8 }}>
                 <label style={{ fontSize:10, color:'var(--text-hint)', flexShrink:0 }}>Шаг мм</label>
-                <input type="text" inputMode="decimal" value={moveStep}
-                  onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) setMoveStep(v) }}
-                  style={{ width:60, padding:'4px 6px', fontSize:13, borderRadius:'var(--radius)',
+                <input type="text" inputMode="decimal"
+                  defaultValue={moveStep}
+                  onChange={e => {
+                    let v = e.target.value.replace(/[^0-9.,]/g, '').replace(',', '.')
+                    const num = parseFloat(v)
+                    if (!isNaN(num)) setMoveStep(num)
+                  }}
+                  style={{ width:70, padding:'4px 6px', fontSize:13, borderRadius:'var(--radius)',
                     border:'0.5px solid var(--border-md)' }} />
+                <span style={{ fontSize:10, color:'var(--text-hint)' }}>мм</span>
               </div>
 
               {/* Стрелки XY */}
