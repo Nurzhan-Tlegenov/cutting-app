@@ -29,21 +29,27 @@ function NumField({ label, value, onChange, unit = 'мм' }) {
   )
 }
 
-// ─── Начальные вершины прямоугольника ─────────────────────────────────────────
+// ─── Начальные вершины прямоугольника (0,0 = нижний левый, Y вверх) ──────────
 function makeRect(w, h) {
   return [
-    { x: 0, y: 0, r: 0 },
-    { x: w, y: 0, r: 0 },
-    { x: w, y: h, r: 0 },
-    { x: 0, y: h, r: 0 },
+    { x: 0, y: 0, r: 0 },   // нижний левый
+    { x: w, y: 0, r: 0 },   // нижний правый
+    { x: w, y: h, r: 0 },   // верхний правый
+    { x: 0, y: h, r: 0 },   // верхний левый
   ]
 }
 
 // ─── Рисование пути по вершинам с радиусами ───────────────────────────────────
-function buildPath(ctx, verts, sc, ox, oy) {
+// ox,oy — левый верхний угол детали на canvas; dh — высота детали в пикселях
+// Вершины в мировых координатах (Y вверх), canvas Y вниз: canvasY = oy + dh - v.y*sc
+function buildPath(ctx, verts, sc, ox, oy, dh) {
   if (!verts || verts.length < 2) return
   const n = verts.length
-  const cv = verts.map(v => ({ x: ox + v.x * sc, y: oy + v.y * sc, r: (v.r || 0) * sc }))
+  const cv = verts.map(v => ({
+    x: ox + v.x * sc,
+    y: oy + dh - v.y * sc,  // инверсия Y
+    r: (v.r || 0) * sc
+  }))
 
   ctx.beginPath()
   for (let i = 0; i < n; i++) {
@@ -56,7 +62,6 @@ function buildPath(ctx, verts, sc, ox, oy) {
       if (i === 0) ctx.moveTo(curr.x, curr.y)
       else ctx.lineTo(curr.x, curr.y)
     } else {
-      // Вектора от curr к prev и от curr к next
       const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
       const dx1 = next.x - curr.x, dy1 = next.y - curr.y
       const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
@@ -65,13 +70,11 @@ function buildPath(ctx, verts, sc, ox, oy) {
         else ctx.lineTo(curr.x, curr.y)
         continue
       }
-      // Точки касания
-      const t = Math.min(r, d0 / 2, d1 / 2)
+      const t = Math.min(r, d0, d1)
       const tx0 = curr.x + (dx0 / d0) * t
       const ty0 = curr.y + (dy0 / d0) * t
       const tx1 = curr.x + (dx1 / d1) * t
       const ty1 = curr.y + (dy1 / d1) * t
-
       if (i === 0) ctx.moveTo(tx0, ty0)
       else ctx.lineTo(tx0, ty0)
       ctx.arcTo(curr.x, curr.y, tx1, ty1, t)
@@ -94,11 +97,11 @@ function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
 }
 
 // ─── Получить позиции маркеров по вершинам ────────────────────────────────────
-function getMarkers(verts, sc, ox, oy) {
+function getMarkers(verts, sc, ox, oy, dh) {
   return (verts || []).map((v, i) => ({
     idx: i,
     x: ox + v.x * sc,
-    y: oy + v.y * sc,
+    y: oy + dh - v.y * sc,  // инверсия Y
     r: v.r || 0,
     vertex: v,
   }))
@@ -121,7 +124,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Размеры
+    // Размеры — подпись ширины сверху, высоты слева
     const dimColor = '#888780'
     ctx.fillStyle = dimColor; ctx.font = '10px sans-serif'
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
@@ -135,11 +138,11 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
 
     // Внешний контур — используем превью если есть
     const verts = previewVerts || contour.vertices || makeRect(w, h)
-    buildPath(ctx, verts, sc, ox, oy)
+    buildPath(ctx, verts, sc, ox, oy, dh)
     ctx.fillStyle = '#E6F1FB'; ctx.fill()
     ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.5; ctx.stroke()
 
-    // Holes (вырезы/выборки)
+    // Holes (вырезы/выборки) — Y инвертирован
     ;(contour.holes || []).forEach(hole => {
       const isCircle = hole.type === 'circle'
       const isPocket = hole.type === 'pocket'
@@ -149,30 +152,37 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
       if (isCircle) {
         const d = hole.d || 100
         const pos = resolvePos(hole.sides||[], hole.offsets||{}, w, h, d, d)
-        const cx2 = ox + (pos.x + d/2) * sc, cy2 = oy + (pos.y + d/2) * sc
+        // Y инверсия: низ дырки в мировых = верх на canvas
+        const cx2 = ox + (pos.x + d/2) * sc
+        const cy2 = oy + dh - (pos.y + d/2) * sc
         ctx.beginPath(); ctx.arc(cx2, cy2, d/2*sc, 0, Math.PI*2)
         ctx.fill(); ctx.stroke()
       } else {
         const hw = hole.hw || 200, hh = hole.hh || 100
         const pos = resolvePos(hole.sides||[], hole.offsets||{}, w, h, hw, hh)
-        ctx.fillRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
-        ctx.strokeRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
+        // pos.y — мировая Y (от низа), на canvas верх = oy + dh - (pos.y + hh)*sc
+        const cx2 = ox + pos.x * sc
+        const cy2 = oy + dh - (pos.y + pos.h) * sc
+        ctx.fillRect(cx2, cy2, pos.w*sc, pos.h*sc)
+        ctx.strokeRect(cx2, cy2, pos.w*sc, pos.h*sc)
       }
     })
 
-    // Пазы
+    // Пазы — Y инвертирован
     ;(contour.grooves || []).forEach(g => {
       ctx.fillStyle = 'rgba(250,199,117,0.8)'; ctx.strokeStyle = '#BA7517'; ctx.lineWidth = 1
       const isH = g.dir === 'horizontal'
       const gW = isH ? (g.length||100) : (g.width||8)
       const gH = isH ? (g.width||8) : (g.length||100)
       const pos = resolvePos(g.sides||[], g.offsets||{}, w, h, gW, gH)
-      ctx.fillRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
-      ctx.strokeRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
+      const cx2 = ox + pos.x * sc
+      const cy2 = oy + dh - (pos.y + pos.h) * sc
+      ctx.fillRect(cx2, cy2, pos.w*sc, pos.h*sc)
+      ctx.strokeRect(cx2, cy2, pos.w*sc, pos.h*sc)
     })
 
     // Маркеры внешнего контура
-    const markers = getMarkers(verts, sc, ox, oy)
+    const markers = getMarkers(verts, sc, ox, oy, dh)
     markers.forEach(m => {
       const isActive = m.idx === activeIdx
       ctx.beginPath()
@@ -199,7 +209,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
     const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2
 
     const verts = contour.vertices || makeRect(w, h)
-    const markers = getMarkers(verts, sc, ox, oy)
+    const markers = getMarkers(verts, sc, ox, oy, dh)
     const TAP_R = 18
     for (const m of markers) {
       if (Math.hypot(cx - m.x, cy - m.y) <= TAP_R) {
