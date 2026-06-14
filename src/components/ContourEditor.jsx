@@ -58,34 +58,54 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     const next = cv[(i + 1) % n]
 
     // Если ТЕКУЩАЯ точка — контрольная точка дуги (type='arc')
-    // Собираем все подряд идущие arc-точки и строим сплайн
     if (curr.type === 'arc') {
-      // Находим начало и конец группы arc-точек
-      const p0 = cv[(i - 1 + n) % n] // начало (обычная точка)
+      // Собираем всю группу arc-точек
+      const p0 = cv[(i - 1 + n) % n]
       const arcGroup = [p0]
       let j = i
       while (j < n && cv[j % n].type === 'arc') {
         arcGroup.push(cv[j % n])
         j++
       }
-      const pEnd = cv[j % n] // конец (обычная точка)
-      arcGroup.push(pEnd)
+      arcGroup.push(cv[j % n])
 
-      // Рисуем плавный сплайн через все точки группы
-      // Используем quadraticCurveTo для каждой пары
-      for (let k = 1; k < arcGroup.length - 1; k++) {
-        const cp = arcGroup[k]
-        // Конечная точка — середина между cp и следующей
-        const nx2 = k < arcGroup.length - 2
-          ? (cp.x + arcGroup[k+1].x) / 2
-          : arcGroup[k+1].x
-        const ny2 = k < arcGroup.length - 2
-          ? (cp.y + arcGroup[k+1].y) / 2
-          : arcGroup[k+1].y
-        ctx.quadraticCurveTo(cp.x, cp.y, nx2, ny2)
+      // Для каждой тройки соседних точек строим дугу окружности
+      // Точки: arcGroup[0], arcGroup[1], ..., arcGroup[last]
+      // Рисуем дуги: (0,1,2), (2,3,4), ... строго через точки
+      const drawArcThrough3 = (a, b, c) => {
+        const D = 2*(a.x*(b.y-c.y) + b.x*(c.y-a.y) + c.x*(a.y-b.y))
+        if (Math.abs(D) < 0.001) {
+          ctx.lineTo(c.x, c.y)
+          return
+        }
+        const ux = ((a.x*a.x+a.y*a.y)*(b.y-c.y) + (b.x*b.x+b.y*b.y)*(c.y-a.y) + (c.x*c.x+c.y*c.y)*(a.y-b.y)) / D
+        const uy = ((a.x*a.x+a.y*a.y)*(c.x-b.x) + (b.x*b.x+b.y*b.y)*(a.x-c.x) + (c.x*c.x+c.y*c.y)*(b.x-a.x)) / D
+        const r2 = Math.hypot(a.x-ux, a.y-uy)
+        const sa = Math.atan2(a.y-uy, a.x-ux)
+        const ma = Math.atan2(b.y-uy, b.x-ux)
+        const ea = Math.atan2(c.y-uy, c.x-ux)
+        const norm = (a) => { let d = a - sa; while(d < 0) d += Math.PI*2; return d }
+        const ccw = norm(ma) > norm(ea)
+        ctx.arc(ux, uy, r2, sa, ea, ccw)
       }
 
-      i = j - 1 // пропускаем все arc-точки
+      if (arcGroup.length === 3) {
+        // Ровно 3 точки — одна дуга
+        drawArcThrough3(arcGroup[0], arcGroup[1], arcGroup[2])
+      } else {
+        // 4+ точек — строим дуги через каждые 3 соседних
+        // arcGroup[0]-[1]-[2], потом [2]-[3]-[4] и т.д.
+        for (let k = 0; k+2 < arcGroup.length; k += 2) {
+          const a = arcGroup[k], b = arcGroup[k+1], c = arcGroup[k+2]
+          drawArcThrough3(a, b, c)
+        }
+        // Если нечётное число промежуточных — добиваем последний отрезок
+        if (arcGroup.length % 2 === 1) {
+          ctx.lineTo(arcGroup[arcGroup.length-1].x, arcGroup[arcGroup.length-1].y)
+        }
+      }
+
+      i = j - 1
       continue
     }
 
