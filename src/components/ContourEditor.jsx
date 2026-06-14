@@ -158,6 +158,7 @@ function ContourPreview({ w, h, contour }) {
       if (!corner?.type || corner.type === 'none') return { x: 0, y: 0 }
       if (corner.type === 'radius') return { x: toC(Math.abs(corner.r || 0)), y: toC(Math.abs(corner.r || 0)) }
       if (corner.type === 'chamfer') return { x: toC(corner.dx || 0), y: toC(corner.dy || 0) }
+      if (corner.type === 'notch')   return { x: toC(corner.dx || 0), y: toC(corner.dy || 0) }
       return { x: 0, y: 0 }
     }
 
@@ -172,6 +173,7 @@ function ContourPreview({ w, h, contour }) {
       if ((tr.r||0) > 0) { ctx.arcTo(ox+dw, oy, ox+dw, oy+TR.y, TR.x) }
       else { ctx.lineTo(ox+dw, oy); ctx.arc(ox+dw, oy, TR.x, Math.PI, Math.PI*1.5, true) }
     } else if (tr.type === 'chamfer') { ctx.lineTo(ox+dw, oy+TR.y) }
+    else if (tr.type === 'notch') { ctx.lineTo(ox+dw-TR.x, oy); ctx.lineTo(ox+dw-TR.x, oy+TR.y); ctx.lineTo(ox+dw, oy+TR.y) }
     else { ctx.lineTo(ox+dw, oy) }
 
     ctx.lineTo(ox+dw, oy+dh-BR.y)
@@ -181,6 +183,7 @@ function ContourPreview({ w, h, contour }) {
       if ((br.r||0) > 0) { ctx.arcTo(ox+dw, oy+dh, ox+dw-BR.x, oy+dh, BR.y) }
       else { ctx.lineTo(ox+dw, oy+dh); ctx.arc(ox+dw, oy+dh, BR.x, Math.PI*1.5, 0, true) }
     } else if (br.type === 'chamfer') { ctx.lineTo(ox+dw-BR.x, oy+dh) }
+    else if (br.type === 'notch') { ctx.lineTo(ox+dw, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh) }
     else { ctx.lineTo(ox+dw, oy+dh) }
 
     ctx.lineTo(ox+BL.x, oy+dh)
@@ -190,6 +193,7 @@ function ContourPreview({ w, h, contour }) {
       if ((bl.r||0) > 0) { ctx.arcTo(ox, oy+dh, ox, oy+dh-BL.y, BL.x) }
       else { ctx.lineTo(ox, oy+dh); ctx.arc(ox, oy+dh, BL.x, 0, Math.PI*0.5, true) }
     } else if (bl.type === 'chamfer') { ctx.lineTo(ox, oy+dh-BL.y) }
+    else if (bl.type === 'notch') { ctx.lineTo(ox+BL.x, oy+dh); ctx.lineTo(ox+BL.x, oy+dh-BL.y); ctx.lineTo(ox, oy+dh-BL.y) }
     else { ctx.lineTo(ox, oy+dh) }
 
     ctx.lineTo(ox, oy+TL.y)
@@ -199,6 +203,7 @@ function ContourPreview({ w, h, contour }) {
       if ((tl.r||0) > 0) { ctx.arcTo(ox, oy, ox+TL.x, oy, TL.y) }
       else { ctx.lineTo(ox, oy); ctx.arc(ox, oy, TL.x, Math.PI*0.5, Math.PI, true) }
     } else if (tl.type === 'chamfer') { ctx.lineTo(ox+TL.x, oy) }
+    else if (tl.type === 'notch') { ctx.lineTo(ox, oy+TL.y); ctx.lineTo(ox+TL.x, oy+TL.y); ctx.lineTo(ox+TL.x, oy) }
     else { ctx.lineTo(ox, oy) }
 
     ctx.closePath()
@@ -247,31 +252,64 @@ function ContourPreview({ w, h, contour }) {
 // ─── Редактор угла ────────────────────────────────────────────────────────────
 function CornerEditor({ label, value = {}, onChange }) {
   const type = value.type || 'none'
+
+  // Кнопки: [тип, иконка, подсказка, что установить при выборе]
+  const BTNS = [
+    { id: 'none',    icon: '—',  hint: 'Нет' },
+    { id: 'radius',  icon: '⌒',  hint: 'Выпуклый радиус' },
+    { id: 'concave', icon: '⌣',  hint: 'Вогнутый радиус' },
+    { id: 'chamfer', icon: '◣',  hint: 'Фаска' },
+    { id: 'notch',   icon: '⌐',  hint: 'Вырез угла' },
+  ]
+
+  const handleType = (id) => {
+    // вогнутый хранится как radius с r<0
+    const storeType = id === 'concave' ? 'radius' : id
+    const base = { ...value, type: storeType }
+    if (id === 'radius')   onChange({ ...base, r:  Math.abs(value.r  || 50) })
+    else if (id === 'concave') onChange({ ...base, r: -(Math.abs(value.r || 50)) })
+    else if (id === 'chamfer') onChange({ ...base, dx: value.dx || 50, dy: value.dy || 50 })
+    else if (id === 'notch')   onChange({ ...base, dx: value.dx || 50, dy: value.dy || 50 })
+    else onChange({ ...base })
+  }
+
+  // Для отображения — вогнутый тоже хранится как radius с r<0, но тип кнопки разный
+  const activeBtn = type === 'radius' && (value.r || 0) < 0 ? 'concave' : type
+
   return (
     <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:8 }}>
       <div style={{ fontSize:11, color:'var(--text-hint)', marginBottom:6, textAlign:'center' }}>{label}</div>
-      <div style={{ display:'flex', gap:4, justifyContent:'center', marginBottom:8 }}>
-        {[['none','—'],['radius','⌒'],['chamfer','◣']].map(([id,icon])=>(
-          <button key={id} type="button" onClick={()=>onChange({
-            ...value, type:id,
-            ...(id==='radius' ? {r: value.r || 50} : {}),
-            ...(id==='chamfer' ? {dx: value.dx || 50, dy: value.dy || 50} : {})
-          })}
-            style={{ width:32, height:32, border: type===id?'1.5px solid var(--blue)':'0.5px solid var(--border-md)',
-              borderRadius:6, background: type===id?'var(--blue-light)':'transparent', fontSize:16, cursor:'pointer' }}>
+      <div style={{ display:'flex', gap:3, justifyContent:'center', marginBottom:8 }}>
+        {BTNS.map(({id, icon, hint}) => (
+          <button key={id} type="button" title={hint} onClick={() => handleType(id)}
+            style={{ width:30, height:30, border: activeBtn===id?'1.5px solid var(--blue)':'0.5px solid var(--border-md)',
+              borderRadius:6, background: activeBtn===id?'var(--blue-light)':'transparent',
+              fontSize:15, cursor:'pointer', padding:0 }}>
             {icon}
           </button>
         ))}
       </div>
-      {type==='radius' && (
-        <div>
-          <NumField label="Радиус R" value={value.r??50} onChange={v=>onChange({...value,r:v})} allowNegative={true} />
-          <div style={{ fontSize:9, color:'var(--text-hint)', marginTop:3, textAlign:'center' }}>
-            положительный — выпуклый, отрицательный — вогнутый
-          </div>
+
+      {/* Выпуклый радиус */}
+      {type==='radius' && (value.r||0) >= 0 && (
+        <NumField label="Радиус R" value={Math.abs(value.r??50)} onChange={v=>onChange({...value,r:Math.abs(v)})} />
+      )}
+
+      {/* Вогнутый радиус */}
+      {type==='radius' && (value.r||0) < 0 && (
+        <NumField label="Радиус R" value={Math.abs(value.r??50)} onChange={v=>onChange({...value,r:-Math.abs(v)})} />
+      )}
+
+      {/* Фаска */}
+      {type==='chamfer' && (
+        <div style={{ display:'flex', gap:6 }}>
+          <NumField label="По X →" value={value.dx??50} onChange={v=>onChange({...value,dx:v})} />
+          <NumField label="По Y ↓" value={value.dy??50} onChange={v=>onChange({...value,dy:v})} />
         </div>
       )}
-      {type==='chamfer' && (
+
+      {/* Вырез угла */}
+      {type==='notch' && (
         <div style={{ display:'flex', gap:6 }}>
           <NumField label="По X →" value={value.dx??50} onChange={v=>onChange({...value,dx:v})} />
           <NumField label="По Y ↓" value={value.dy??50} onChange={v=>onChange({...value,dy:v})} />
@@ -357,12 +395,20 @@ export default function ContourEditor({ detail, onUpdate }) {
             <CornerEditor label="↙ Низ-лево"   value={contour.corners?.bl} onChange={v=>setCorner('bl',v)} />
             <CornerEditor label="↘ Низ-право"  value={contour.corners?.br} onChange={v=>setCorner('br',v)} />
           </div>
-          <button type="button"
-            onClick={()=>upd({corners:{tl:{type:'radius',r:50},tr:{type:'radius',r:50},br:{type:'radius',r:50},bl:{type:'radius',r:50}}})}
-            style={{ width:'100%', padding:'8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
-              background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
-            ⌒ Скруглить все углы R50
-          </button>
+          <div style={{ display:'flex', gap:6 }}>
+            <button type="button"
+              onClick={()=>upd({corners:{tl:{type:'radius',r:50},tr:{type:'radius',r:50},br:{type:'radius',r:50},bl:{type:'radius',r:50}}})}
+              style={{ flex:1, padding:'8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+              ⌒ Скруглить все R50
+            </button>
+            <button type="button"
+              onClick={()=>upd({corners:{tl:{type:'notch',dx:50,dy:50},tr:{type:'notch',dx:50,dy:50},br:{type:'notch',dx:50,dy:50},bl:{type:'notch',dx:50,dy:50}}})}
+              style={{ flex:1, padding:'8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+              ⌐ Вырез все 50×50
+            </button>
+          </div>
         </div>
       )}
 
