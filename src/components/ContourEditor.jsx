@@ -40,43 +40,50 @@ function makeRect(w, h) {
 }
 
 // ─── Рисование пути по вершинам с радиусами ───────────────────────────────────
-// ox,oy — левый верхний угол детали на canvas; dh — высота детали в пикселях
-// Вершины в мировых координатах (Y вверх), canvas Y вниз: canvasY = oy + dh - v.y*sc
 function buildPath(ctx, verts, sc, ox, oy, dh) {
   if (!verts || verts.length < 2) return
   const n = verts.length
   const cv = verts.map(v => ({
     x: ox + v.x * sc,
-    y: oy + dh - v.y * sc,  // инверсия Y
-    r: (v.r || 0) * sc
+    y: oy + dh - v.y * sc,
+    r: (v.r || 0) * sc,
+    type: v.type || 'point',
+    cpx: v.cp ? ox + v.cp.x * sc : null,
+    cpy: v.cp ? oy + dh - v.cp.y * sc : null,
   }))
 
   ctx.beginPath()
   for (let i = 0; i < n; i++) {
-    const prev = cv[(i - 1 + n) % n]
     const curr = cv[i]
+    if (i === 0) ctx.moveTo(curr.x, curr.y)
+
     const next = cv[(i + 1) % n]
+
+    // Если следующая точка — контрольная точка дуги
+    if (next.type === 'arc' && next.cpx !== null) {
+      // quadraticCurveTo: cp → endpoint
+      const endIdx = (i + 2) % n
+      const end = cv[endIdx]
+      ctx.quadraticCurveTo(next.cpx, next.cpy, end.x, end.y)
+      i++ // пропускаем контрольную точку
+      continue
+    }
+
+    // Обычный отрезок с радиусом скругления
+    const prev = cv[(i - 1 + n) % n]
     const r = curr.r
 
-    if (r <= 0) {
-      if (i === 0) ctx.moveTo(curr.x, curr.y)
-      else ctx.lineTo(curr.x, curr.y)
+    if (r <= 0 || i === 0) {
+      if (i > 0) ctx.lineTo(curr.x, curr.y)
     } else {
       const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
       const dx1 = next.x - curr.x, dy1 = next.y - curr.y
       const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
-      if (d0 === 0 || d1 === 0) {
-        if (i === 0) ctx.moveTo(curr.x, curr.y)
-        else ctx.lineTo(curr.x, curr.y)
-        continue
-      }
+      if (d0 === 0 || d1 === 0) { ctx.lineTo(curr.x, curr.y); continue }
       const t = Math.min(r, d0, d1)
-      const tx0 = curr.x + (dx0 / d0) * t
-      const ty0 = curr.y + (dy0 / d0) * t
-      const tx1 = curr.x + (dx1 / d1) * t
-      const ty1 = curr.y + (dy1 / d1) * t
-      if (i === 0) ctx.moveTo(tx0, ty0)
-      else ctx.lineTo(tx0, ty0)
+      const tx0 = curr.x + (dx0/d0)*t, ty0 = curr.y + (dy0/d0)*t
+      const tx1 = curr.x + (dx1/d1)*t, ty1 = curr.y + (dy1/d1)*t
+      ctx.lineTo(tx0, ty0)
       ctx.arcTo(curr.x, curr.y, tx1, ty1, t)
     }
   }
@@ -108,7 +115,7 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[] }) {
   const ref = useRef(null)
   const w = Number(detail.w) || 0
   const h = Number(detail.h) || 0
@@ -127,7 +134,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     canvas.style.height = CSS_H + 'px'
     ctx.scale(DPR, DPR)
 
-    const PAD = 36
+    const PAD = 16
     const sc = Math.min((CSS_W - PAD*2) / w, (CSS_H - PAD*2) / h)
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
@@ -143,20 +150,6 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     for (let y = oy; y <= oy+dh; y += gridStep) {
       ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox+dw, y); ctx.stroke()
     }
-
-    // Размерные линии
-    const dimColor = '#999'
-    ctx.fillStyle = dimColor; ctx.font = `${Math.max(9, 11/DPR)}px sans-serif`
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.strokeStyle = dimColor; ctx.lineWidth = 0.5; ctx.setLineDash([3,3])
-    // Ширина сверху
-    ctx.beginPath(); ctx.moveTo(ox, oy-8); ctx.lineTo(ox+dw, oy-8); ctx.stroke()
-    ctx.fillText(`${w}`, ox+dw/2, oy-18)
-    // Высота слева
-    ctx.save(); ctx.translate(ox-18, oy+dh/2); ctx.rotate(-Math.PI/2)
-    ctx.fillText(`${h}`, 0, 0); ctx.restore()
-    ctx.beginPath(); ctx.moveTo(ox-8, oy); ctx.lineTo(ox-8, oy+dh); ctx.stroke()
-    ctx.setLineDash([])
 
     // Внешний контур
     const verts = previewVerts || contour.vertices || makeRect(w, h)
@@ -294,19 +287,20 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     }
 
     // Маркеры
-    if (showMarkers) {
+    if (showMarkers || arcMode) {
       const markers = getMarkers(verts, sc, ox, oy, dh)
       markers.forEach(m => {
         const isActive = m.idx === activeIdx
+        const isArcSel = arcPoints.includes(m.idx)
         ctx.beginPath()
-        ctx.arc(m.x, m.y, isActive ? 5 : 3.5, 0, Math.PI * 2)
-        ctx.fillStyle = isActive ? '#E24B4A' : '#185FA5'
+        ctx.arc(m.x, m.y, isActive || isArcSel ? 5 : 3.5, 0, Math.PI * 2)
+        ctx.fillStyle = isArcSel ? '#F5A623' : isActive ? '#E24B4A' : '#185FA5'
         ctx.fill()
         ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5; ctx.stroke()
       })
     }
 
-  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles])
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -539,6 +533,44 @@ export default function ContourEditor({ detail, onUpdate }) {
   const [showMarkers, setShowMarkers] = useState(true)
   const [showLengths, setShowLengths] = useState(true)
   const [showAngles, setShowAngles] = useState(true)
+  const [arcMode, setArcMode] = useState(false)
+  const [arcPoints, setArcPoints] = useState([]) // индексы выбранных точек
+
+  // Применить дугу: точки [i, cp, j] — cp становится контрольной точкой
+  const applyArc = (pts) => {
+    if (pts.length < 3) return
+    const [i, cpIdx, j] = pts
+    const verts = [...contour.vertices]
+    // Помечаем среднюю точку как контрольную точку дуги
+    // Дуга: от verts[i] через verts[cpIdx] (control) до verts[j]
+    // Вставляем контрольную точку с type='arc'
+    const cp = verts[cpIdx]
+    const newVerts = []
+    for (let k = 0; k < verts.length; k++) {
+      if (k === i) {
+        newVerts.push({ ...verts[k] })
+        // Вставляем контрольную точку сразу после точки i
+        if ((i + 1) % verts.length === cpIdx) {
+          newVerts.push({ ...cp, type: 'arc' })
+        }
+      } else if (k === cpIdx) {
+        // Пропускаем — уже вставили как arc
+      } else {
+        newVerts.push({ ...verts[k] })
+      }
+    }
+    setVertices(newVerts)
+    setArcMode(false)
+    setArcPoints([])
+  }
+
+  const handleArcTap = (idx) => {
+    const pts = [...arcPoints, idx]
+    setArcPoints(pts)
+    if (pts.length === 3) {
+      applyArc(pts)
+    }
+  }
 
   // Стиль кнопки-стрелки
   const arrowBtn = {
@@ -613,6 +645,14 @@ export default function ContourEditor({ detail, onUpdate }) {
   const setVertices = (verts) => upd({ vertices: verts })
 
   const handleTap = (idx) => {
+    if (idx === null) {
+      if (!arcMode) { setActiveIdx(null); setMenuSelType(null); setPreviewVerts(null) }
+      return
+    }
+    if (arcMode) {
+      handleArcTap(idx)
+      return
+    }
     setActiveIdx(idx)
     setMenuSelType(null)
     setPreviewVerts(null)
@@ -762,10 +802,22 @@ export default function ContourEditor({ detail, onUpdate }) {
 
           {/* Canvas */}
           <div style={{ flex:1, minWidth:0 }}>
-            <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
-              Нажми на точку
-            </p>
+            {arcMode && (
+              <div style={{ background:'#FFF3CD', borderRadius:'var(--radius)', padding:'6px 8px',
+                marginBottom:4, fontSize:11, color:'#856404', textAlign:'center' }}>
+                {arcPoints.length === 1 ? '〜 Выбери контрольную точку (середину дуги)' :
+                 arcPoints.length === 2 ? '〜 Выбери конечную точку дуги' : ''}
+                <button type="button" onClick={() => { setArcMode(false); setArcPoints([]); setMenuSelType(null) }}
+                  style={{ marginLeft:8, background:'none', border:'none', color:'#856404', cursor:'pointer', fontSize:12 }}>✕</button>
+              </div>
+            )}
+            {!arcMode && (
+              <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
+                Нажми на точку
+              </p>
+            )}
             <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx}
+              arcMode={arcMode} arcPoints={arcPoints}
               previewVerts={previewVerts} onTap={handleTap}
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
           </div>
@@ -778,9 +830,16 @@ export default function ContourEditor({ detail, onUpdate }) {
                 { id:'radius',  icon:'⌒',  label:'Радиус' },
                 { id:'chamfer', icon:'◣',  label:'Фаска' },
                 { id:'notch',   icon:'⌐',  label:'Вырез' },
+                { id:'arc',     icon:'〜', label:'Дуга' },
               ].map(({id, icon, label}) => (
                 <button key={id} type="button"
                   onClick={() => {
+                    if (id === 'arc') {
+                      setArcMode(true)
+                      setArcPoints([activeIdx])
+                      setMenuSelType('arc')
+                      return
+                    }
                     setMenuSelType(id)
                     if (id === 'none' || id === 'radius') {
                       applyCornerType(activeIdx, id, { r: menuR, dx: menuDx, dy: menuDy })
