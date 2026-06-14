@@ -251,7 +251,7 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onPreview, onIn
       border:'1.5px solid var(--blue)' }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
         <span style={{ fontSize:13, fontWeight:500, color:'var(--blue)' }}>Точка #{idx + 1}</span>
-        <button type="button" onClick={onClose}
+        <button type="button" onClick={() => onClose(selType, dx, dy, r)}
           style={{ background:'none', border:'none', fontSize:18, color:'var(--text-hint)', cursor:'pointer', padding:0, lineHeight:1 }}>✕</button>
       </div>
 
@@ -407,6 +407,10 @@ export default function ContourEditor({ detail, onUpdate }) {
   const [tab, setTab] = useState('contour')
   const [activeIdx, setActiveIdx] = useState(null)
   const [previewVerts, setPreviewVerts] = useState(null)
+  const [menuSelType, setMenuSelType] = useState(null)
+  const [menuDx, setMenuDx] = useState(50)
+  const [menuDy, setMenuDy] = useState(50)
+  const [menuR, setMenuR] = useState(50)
 
   // Рассчитать превью без сохранения в контур
   const calcPreview = (idx, type, params) => {
@@ -454,6 +458,8 @@ export default function ContourEditor({ detail, onUpdate }) {
 
   const handleTap = (idx) => {
     setActiveIdx(idx)
+    setMenuSelType(null)
+    setPreviewVerts(null)
     setTab('contour')
   }
 
@@ -577,29 +583,114 @@ export default function ContourEditor({ detail, onUpdate }) {
   return (
     <div style={{ marginTop:10, borderTop:'0.5px solid var(--border)', paddingTop:10 }}>
 
-      {/* Canvas */}
+      {/* Canvas + кнопки типа рядом */}
       {w > 0 && h > 0 && (
-        <div style={{ marginBottom:8 }}>
-          <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
-            Нажми на точку чтобы изменить
-          </p>
-          <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx} previewVerts={previewVerts} onTap={handleTap} />
+        <div style={{ display:'flex', gap:8, marginBottom:8, alignItems:'flex-start' }}>
+          {/* Canvas */}
+          <div style={{ flex:1, minWidth:0 }}>
+            <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
+              Нажми на точку
+            </p>
+            <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx} previewVerts={previewVerts} onTap={handleTap} />
+          </div>
+
+          {/* Кнопки типа — только когда точка выбрана */}
+          {activeVertex && tab === 'contour' && (
+            <div style={{ display:'flex', flexDirection:'column', gap:5, paddingTop:22 }}>
+              {[
+                { id:'none',    icon:'—',  label:'Нет' },
+                { id:'radius',  icon:'⌒',  label:'Выпукл' },
+                { id:'concave', icon:'⌣',  label:'Вогнут' },
+                { id:'chamfer', icon:'◣',  label:'Фаска' },
+                { id:'notch',   icon:'⌐',  label:'Вырез' },
+              ].map(({id, icon, label}) => (
+                <button key={id} type="button"
+                  onClick={() => {
+                    setMenuSelType(id)
+                    if (id === 'none' || id === 'radius' || id === 'concave') {
+                      applyCornerType(activeIdx, id, { r: menuR, dx: menuDx, dy: menuDy })
+                      setPreviewVerts(null)
+                    } else {
+                      calcPreview(activeIdx, id, { dx: menuDx, dy: menuDy })
+                    }
+                  }}
+                  style={{ width:44, padding:'6px 2px', border: menuSelType===id ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                    borderRadius:'var(--radius)', background: menuSelType===id ? 'var(--blue-light)' : 'transparent',
+                    fontSize:14, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1 }}>
+                  <span>{icon}</span>
+                  <span style={{ fontSize:8, color: menuSelType===id ? 'var(--blue)' : 'var(--text-hint)' }}>{label}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Меню активной вершины */}
+      {/* Параметры под превью */}
       {activeVertex && tab === 'contour' && (
-        <VertexMenu
-          idx={activeIdx}
-          vertex={activeVertex}
-          total={contour.vertices.length}
-          onChange={v => updateVertex(activeIdx, v)}
-          onApplyType={(idx, type, params) => { applyCornerType(idx, type, params); setPreviewVerts(null) }}
-          onPreview={calcPreview}
-          onInsertBefore={() => insertVertex(activeIdx, false)}
-          onInsertAfter={() => insertVertex(activeIdx, true)}
-          onDelete={() => deleteVertex(activeIdx)}
-          onClose={() => { setActiveIdx(null); setPreviewVerts(null) }} />
+        <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:10, marginBottom:8 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+            <span style={{ fontSize:12, color:'var(--text-hint)' }}>Точка #{activeIdx + 1}</span>
+            <button type="button"
+              onClick={() => { setActiveIdx(null); setMenuSelType(null); setPreviewVerts(null) }}
+              style={{ background:'none', border:'none', fontSize:16, color:'var(--text-hint)', cursor:'pointer', padding:0 }}>✕</button>
+          </div>
+
+          {/* Радиус */}
+          {(menuSelType === 'radius' || menuSelType === 'concave') && (
+            <NumField label="Радиус R" value={menuR}
+              onChange={v => { setMenuR(v); applyCornerType(activeIdx, menuSelType, { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
+          )}
+
+          {/* Фаска */}
+          {menuSelType === 'chamfer' && (
+            <div>
+              <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+                <NumField label="По X →" value={menuDx} onChange={v => { setMenuDx(v); calcPreview(activeIdx, 'chamfer', { dx: v, dy: menuDy }) }} />
+                <NumField label="По Y ↓" value={menuDy} onChange={v => { setMenuDy(v); calcPreview(activeIdx, 'chamfer', { dx: menuDx, dy: v }) }} />
+              </div>
+              <button type="button" onClick={() => { applyCornerType(activeIdx, 'chamfer', { r: menuR, dx: menuDx, dy: menuDy }); setPreviewVerts(null); setActiveIdx(null); setMenuSelType(null) }}
+                style={{ width:'100%', padding:'7px', background:'var(--blue)', color:'white', border:'none', borderRadius:'var(--radius)', fontSize:12, cursor:'pointer' }}>
+                ✓ Применить фаску
+              </button>
+            </div>
+          )}
+
+          {/* Вырез */}
+          {menuSelType === 'notch' && (
+            <div>
+              <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+                <NumField label="По X →" value={menuDx} onChange={v => { setMenuDx(v); calcPreview(activeIdx, 'notch', { dx: v, dy: menuDy }) }} />
+                <NumField label="По Y ↓" value={menuDy} onChange={v => { setMenuDy(v); calcPreview(activeIdx, 'notch', { dx: menuDx, dy: v }) }} />
+              </div>
+              <button type="button" onClick={() => { applyCornerType(activeIdx, 'notch', { r: menuR, dx: menuDx, dy: menuDy }); setPreviewVerts(null); setActiveIdx(null); setMenuSelType(null) }}
+                style={{ width:'100%', padding:'7px', background:'var(--blue)', color:'white', border:'none', borderRadius:'var(--radius)', fontSize:12, cursor:'pointer' }}>
+                ✓ Применить вырез
+              </button>
+            </div>
+          )}
+
+          {/* Просто радиус точки если тип не выбран */}
+          {!menuSelType && (
+            <NumField label="Радиус скругления R" value={activeVertex.r || 0}
+              onChange={v => updateVertex(activeIdx, { ...activeVertex, r: v })} />
+          )}
+
+          {/* Действия с точкой */}
+          <div style={{ display:'flex', gap:6, marginTop:8 }}>
+            <button type="button" onClick={() => insertVertex(activeIdx, false)}
+              style={{ flex:1, padding:'6px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:11, color:'var(--text-muted)', cursor:'pointer' }}>+ До</button>
+            <button type="button" onClick={() => insertVertex(activeIdx, true)}
+              style={{ flex:1, padding:'6px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:11, color:'var(--text-muted)', cursor:'pointer' }}>+ После</button>
+            {contour.vertices.length > 3 && (
+              <button type="button" onClick={() => deleteVertex(activeIdx)}
+                style={{ flex:1, padding:'6px', border:'0.5px solid var(--danger)', borderRadius:'var(--radius)',
+                  background:'transparent', fontSize:11, color:'var(--danger)', cursor:'pointer' }}>Удалить</button>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Вкладки */}

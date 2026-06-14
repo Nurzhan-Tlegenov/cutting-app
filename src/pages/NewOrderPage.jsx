@@ -44,6 +44,13 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
   const [showContour, setShowContour] = useState(false)
 
   const hasContour = detail.contour && (
+    // Новый формат — вершины
+    (detail.contour.vertices && (
+      detail.contour.vertices.length > 4 ||
+      detail.contour.vertices.some(v => v.r && v.r !== 0)
+    )) ||
+    (detail.contour.holes || []).length > 0 ||
+    // Старый формат — для обратной совместимости
     Object.values(detail.contour.corners || {}).some(c => c?.type && c.type !== 'none') ||
     (detail.contour.cutouts || []).length > 0 ||
     (detail.contour.grooves || []).length > 0
