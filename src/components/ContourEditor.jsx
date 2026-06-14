@@ -48,8 +48,6 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     y: oy + dh - v.y * sc,
     r: (v.r || 0) * sc,
     type: v.type || 'point',
-    cpx: v.cp ? ox + v.cp.x * sc : null,
-    cpy: v.cp ? oy + dh - v.cp.y * sc : null,
   }))
 
   ctx.beginPath()
@@ -59,13 +57,12 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
 
     const next = cv[(i + 1) % n]
 
-    // Если следующая точка — контрольная точка дуги
-    if (next.type === 'arc' && next.cpx !== null) {
-      // quadraticCurveTo: cp → endpoint
-      const endIdx = (i + 2) % n
-      const end = cv[endIdx]
-      ctx.quadraticCurveTo(next.cpx, next.cpy, end.x, end.y)
-      i++ // пропускаем контрольную точку
+    // Если ТЕКУЩАЯ точка — контрольная точка дуги (type='arc')
+    // Значит предыдущая точка = начало дуги, следующая = конец дуги
+    if (curr.type === 'arc') {
+      const end = cv[(i + 1) % n]
+      ctx.quadraticCurveTo(curr.x, curr.y, end.x, end.y)
+      i++ // пропускаем конечную точку — она уже нарисована
       continue
     }
 
@@ -548,29 +545,16 @@ export default function ContourEditor({ detail, onUpdate }) {
   // Применить дугу: точки [i, cp, j] — cp становится контрольной точкой
   const applyArc = (pts) => {
     if (pts.length < 3) return
-    const [i, cpIdx, j] = pts
+    const [startIdx, cpIdx, endIdx] = pts
     const verts = [...contour.vertices]
-    // Помечаем среднюю точку как контрольную точку дуги
-    // Дуга: от verts[i] через verts[cpIdx] (control) до verts[j]
-    // Вставляем контрольную точку с type='arc'
-    const cp = verts[cpIdx]
-    const newVerts = []
-    for (let k = 0; k < verts.length; k++) {
-      if (k === i) {
-        newVerts.push({ ...verts[k] })
-        // Вставляем контрольную точку сразу после точки i
-        if ((i + 1) % verts.length === cpIdx) {
-          newVerts.push({ ...cp, type: 'arc' })
-        }
-      } else if (k === cpIdx) {
-        // Пропускаем — уже вставили как arc
-      } else {
-        newVerts.push({ ...verts[k] })
-      }
-    }
-    setVertices(newVerts)
+    // Просто помечаем контрольную точку как arc
+    // buildPath умеет обрабатывать точки с type='arc' как quadratic bezier control point
+    verts[cpIdx] = { ...verts[cpIdx], type: 'arc' }
+    setVertices(verts)
     setArcMode(false)
     setArcPoints([])
+    setMenuSelType(null)
+    setActiveIdx(null)
   }
 
   const handleArcTap = (idx) => {
@@ -790,36 +774,7 @@ export default function ContourEditor({ detail, onUpdate }) {
       {w > 0 && h > 0 && (
         <div style={{ display:'flex', gap:4, marginBottom:8, alignItems:'flex-start' }}>
 
-          {/* Переключатели слева — компактные */}
-          <div style={{ display:'flex', flexDirection:'column', gap:3, paddingTop:0 }}>
-            {[
-              { key:'markers', icon:'●', val:showMarkers, set:setShowMarkers },
-              { key:'lengths', icon:'↔', val:showLengths, set:setShowLengths },
-              { key:'angles',  icon:'∠', val:showAngles,  set:setShowAngles },
-            ].map(({key, icon, val, set}) => (
-              <button key={key} type="button" onClick={() => set(v => !v)}
-                style={{ width:26, height:26, border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
-                  borderRadius:'var(--radius)', background: val ? 'var(--blue-light)' : 'transparent',
-                  fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                {icon}
-              </button>
-            ))}
-          </div>
-
-          {/* Canvas */}
-          <div style={{ flex:1, minWidth:0 }}>
-            {!arcMode && !activeVertex && (
-              <p style={{ fontSize:10, color:'var(--text-hint)', textAlign:'center', marginBottom:2 }}>
-                Нажми на точку
-              </p>
-            )}
-            <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx}
-              arcMode={arcMode} arcPoints={arcPoints}
-              previewVerts={previewVerts} onTap={handleTap}
-              showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
-          </div>
-
-          {/* Список точек справа — всегда виден */}
+          {/* Список точек слева */}
           <div style={{ display:'flex', flexDirection:'column', gap:3, maxHeight:280, overflowY:'auto' }}>
             <span style={{ fontSize:8, color:'var(--text-hint)', textAlign:'center', marginBottom:1 }}>№</span>
             {contour.vertices.map((v, i) => {
@@ -852,16 +807,29 @@ export default function ContourEditor({ detail, onUpdate }) {
             })}
           </div>
 
-          {/* Кнопки типа — только когда точка выбрана и не режим дуги */}
+          {/* Canvas */}
+          <div style={{ flex:1, minWidth:0 }}>
+            {!arcMode && !activeVertex && (
+              <p style={{ fontSize:10, color:'var(--text-hint)', textAlign:'center', marginBottom:2 }}>
+                Нажми на точку
+              </p>
+            )}
+            <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx}
+              arcMode={arcMode} arcPoints={arcPoints}
+              previewVerts={previewVerts} onTap={handleTap}
+              showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
+          </div>
+
+          {/* Кнопки типа справа — только когда точка выбрана */}
           {activeVertex && tab === 'contour' && !arcMode && (
             <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
               {[
-                { id:'none',    icon:'—',  label:'Нет' },
-                { id:'radius',  icon:'⌒',  label:'R' },
-                { id:'chamfer', icon:'◣',  label:'/' },
-                { id:'notch',   icon:'⌐',  label:'⌐' },
-                { id:'arc',     icon:'〜', label:'~' },
-              ].map(({id, icon, label}) => (
+                { id:'none',    icon:'—' },
+                { id:'radius',  icon:'⌒' },
+                { id:'chamfer', icon:'◣' },
+                { id:'notch',   icon:'⌐' },
+                { id:'arc',     icon:'〜' },
+              ].map(({id, icon}) => (
                 <button key={id} type="button"
                   onClick={() => {
                     if (id === 'arc') {
@@ -881,6 +849,24 @@ export default function ContourEditor({ detail, onUpdate }) {
                   style={{ width:28, height:28, border: menuSelType===id ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
                     borderRadius:'var(--radius)', background: menuSelType===id ? 'var(--blue-light)' : 'transparent',
                     fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  {icon}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Toggles справа — когда точка не выбрана */}
+          {!activeVertex && (
+            <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+              {[
+                { key:'markers', icon:'●', val:showMarkers, set:setShowMarkers },
+                { key:'lengths', icon:'↔', val:showLengths, set:setShowLengths },
+                { key:'angles',  icon:'∠', val:showAngles,  set:setShowAngles },
+              ].map(({key, icon, val, set}) => (
+                <button key={key} type="button" onClick={() => set(v => !v)}
+                  style={{ width:28, height:28, border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                    borderRadius:'var(--radius)', background: val ? 'var(--blue-light)' : 'transparent',
+                    fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   {icon}
                 </button>
               ))}
