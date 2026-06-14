@@ -170,8 +170,8 @@ function ContourPreview({ w, h, contour }) {
     const blConcave = bl.type === 'radius' && (bl.r||0) < 0
 
     ctx.beginPath()
-    ctx.moveTo(ox + (tlConcave ? 0 : TL.x), oy)
-    ctx.lineTo(ox + dw - (trConcave ? 0 : TR.x), oy)
+    ctx.moveTo(ox + (tlConcave ? TL.x : TL.x), oy)
+    ctx.lineTo(ox + dw - TR.x, oy)
 
     // TR — верхний правый
     if (tr.type === 'radius' && TR.x > 0) {
@@ -181,7 +181,7 @@ function ContourPreview({ w, h, contour }) {
     else if (tr.type === 'notch') { ctx.lineTo(ox+dw-TR.x, oy); ctx.lineTo(ox+dw-TR.x, oy+TR.y); ctx.lineTo(ox+dw, oy+TR.y) }
     else { ctx.lineTo(ox+dw, oy) }
 
-    ctx.lineTo(ox+dw, oy+dh-(brConcave ? 0 : BR.y))
+    ctx.lineTo(ox+dw, oy+dh-BR.y)
 
     // BR — нижний правый
     if (br.type === 'radius' && BR.x > 0) {
@@ -191,7 +191,7 @@ function ContourPreview({ w, h, contour }) {
     else if (br.type === 'notch') { ctx.lineTo(ox+dw, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh) }
     else { ctx.lineTo(ox+dw, oy+dh) }
 
-    ctx.lineTo(ox+(blConcave ? 0 : BL.x), oy+dh)
+    ctx.lineTo(ox+BL.x, oy+dh)
 
     // BL — нижний левый
     if (bl.type === 'radius' && BL.x > 0) {
@@ -201,7 +201,7 @@ function ContourPreview({ w, h, contour }) {
     else if (bl.type === 'notch') { ctx.lineTo(ox+BL.x, oy+dh); ctx.lineTo(ox+BL.x, oy+dh-BL.y); ctx.lineTo(ox, oy+dh-BL.y) }
     else { ctx.lineTo(ox, oy+dh) }
 
-    ctx.lineTo(ox, oy+(tlConcave ? 0 : TL.y))
+    ctx.lineTo(ox, oy+TL.y)
 
     // TL — верхний левый
     if (tl.type === 'radius' && TL.x > 0) {
