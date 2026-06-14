@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 
 // ─── NumField ─────────────────────────────────────────────────────────────────
-function NumField({ label, value, onChange, unit = 'мм' }) {
+function NumField({ label, value, onChange, onCommit, unit = 'мм' }) {
   const [raw, setRaw] = useState(String(value ?? 0))
   useEffect(() => {
     const ext = String(value ?? 0)
@@ -15,13 +15,21 @@ function NumField({ label, value, onChange, unit = 'мм' }) {
     const num = parseFloat(v)
     if (!isNaN(num)) onChange(num)
   }
+  const handleCommit = () => {
+    const num = parseFloat(raw)
+    if (!isNaN(num) && num > 0) {
+      onChange(num)
+      if (onCommit) onCommit(num)
+    }
+    setRaw(String(value ?? 0))
+  }
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       {label && <label style={{ fontSize: 10, color: 'var(--text-hint)', display: 'block', marginBottom: 2 }}>{label}</label>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
         <input type="text" inputMode="decimal" value={raw}
           onChange={handleChange}
-          onBlur={() => setRaw(String(value ?? 0))}
+          onBlur={handleCommit}
           style={{ padding: '6px 6px', fontSize: 13, width: '100%' }} />
         <span style={{ fontSize: 10, color: 'var(--text-hint)', flexShrink: 0 }}>{unit}</span>
       </div>
@@ -279,8 +287,8 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onInsertBefore,
       {selType === 'chamfer' && (
         <div style={{ marginBottom:10 }}>
           <div style={{ display:'flex', gap:8 }}>
-            <NumField label="По X →" value={dx} onChange={v => { setDx(v); onApplyType(idx, 'chamfer', { r, dx: v, dy }) }} />
-            <NumField label="По Y ↓" value={dy} onChange={v => { setDy(v); onApplyType(idx, 'chamfer', { r, dx, dy: v }) }} />
+            <NumField label="По X →" value={dx} onChange={setDx} onCommit={v => onApplyType(idx, 'chamfer', { r, dx: v, dy })} />
+            <NumField label="По Y ↓" value={dy} onChange={setDy} onCommit={v => onApplyType(idx, 'chamfer', { r, dx, dy: v })} />
           </div>
         </div>
       )}
@@ -289,8 +297,8 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onInsertBefore,
       {selType === 'notch' && (
         <div style={{ marginBottom:10 }}>
           <div style={{ display:'flex', gap:8 }}>
-            <NumField label="По X →" value={dx} onChange={v => { setDx(v); onApplyType(idx, 'notch', { r, dx: v, dy }) }} />
-            <NumField label="По Y ↓" value={dy} onChange={v => { setDy(v); onApplyType(idx, 'notch', { r, dx, dy: v }) }} />
+            <NumField label="По X →" value={dx} onChange={setDx} onCommit={v => onApplyType(idx, 'notch', { r, dx: v, dy })} />
+            <NumField label="По Y ↓" value={dy} onChange={setDy} onCommit={v => onApplyType(idx, 'notch', { r, dx, dy: v })} />
           </div>
         </div>
       )}
