@@ -173,9 +173,8 @@ function ContourPreview({ w, h, contour }) {
       if ((tr.r||0) > 0) {
         ctx.arcTo(ox+dw, oy, ox+dw, oy+TR.y, TR.x)
       } else {
-        // вогнутый: идём до угла, центр дуги (ox+dw-R, oy+R), от 270° до 0° ccw
         ctx.lineTo(ox+dw, oy)
-        ctx.arc(ox+dw-TR.x, oy+TR.y, TR.x, -Math.PI/2, 0, true)
+        ctx.arc(ox+dw-TR.x, oy+TR.y, TR.x, -Math.PI/2, 0, false)
       }
     } else if (tr.type === 'chamfer') { ctx.lineTo(ox+dw, oy+TR.y) }
     else if (tr.type === 'notch') { ctx.lineTo(ox+dw-TR.x, oy); ctx.lineTo(ox+dw-TR.x, oy+TR.y); ctx.lineTo(ox+dw, oy+TR.y) }
@@ -188,9 +187,8 @@ function ContourPreview({ w, h, contour }) {
       if ((br.r||0) > 0) {
         ctx.arcTo(ox+dw, oy+dh, ox+dw-BR.x, oy+dh, BR.y)
       } else {
-        // вогнутый: центр (ox+dw-R, oy+dh-R), от 0° до 90° ccw
         ctx.lineTo(ox+dw, oy+dh)
-        ctx.arc(ox+dw-BR.x, oy+dh-BR.y, BR.x, 0, Math.PI/2, true)
+        ctx.arc(ox+dw-BR.x, oy+dh-BR.y, BR.x, 0, Math.PI/2, false)
       }
     } else if (br.type === 'chamfer') { ctx.lineTo(ox+dw-BR.x, oy+dh) }
     else if (br.type === 'notch') { ctx.lineTo(ox+dw, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh) }
@@ -203,9 +201,8 @@ function ContourPreview({ w, h, contour }) {
       if ((bl.r||0) > 0) {
         ctx.arcTo(ox, oy+dh, ox, oy+dh-BL.y, BL.x)
       } else {
-        // вогнутый: центр (ox+R, oy+dh-R), от 90° до 180° ccw
         ctx.lineTo(ox, oy+dh)
-        ctx.arc(ox+BL.x, oy+dh-BL.y, BL.x, Math.PI/2, Math.PI, true)
+        ctx.arc(ox+BL.x, oy+dh-BL.y, BL.x, Math.PI/2, Math.PI, false)
       }
     } else if (bl.type === 'chamfer') { ctx.lineTo(ox, oy+dh-BL.y) }
     else if (bl.type === 'notch') { ctx.lineTo(ox+BL.x, oy+dh); ctx.lineTo(ox+BL.x, oy+dh-BL.y); ctx.lineTo(ox, oy+dh-BL.y) }
@@ -218,9 +215,8 @@ function ContourPreview({ w, h, contour }) {
       if ((tl.r||0) > 0) {
         ctx.arcTo(ox, oy, ox+TL.x, oy, TL.y)
       } else {
-        // вогнутый: центр (ox+R, oy+R), от 180° до 270° ccw
         ctx.lineTo(ox, oy)
-        ctx.arc(ox+TL.x, oy+TL.y, TL.x, Math.PI, Math.PI*3/2, true)
+        ctx.arc(ox+TL.x, oy+TL.y, TL.x, Math.PI, Math.PI*3/2, false)
       }
     } else if (tl.type === 'chamfer') { ctx.lineTo(ox+TL.x, oy) }
     else if (tl.type === 'notch') { ctx.lineTo(ox, oy+TL.y); ctx.lineTo(ox+TL.x, oy+TL.y); ctx.lineTo(ox+TL.x, oy) }
