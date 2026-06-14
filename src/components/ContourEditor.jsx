@@ -421,6 +421,35 @@ export default function ContourEditor({ detail, onUpdate }) {
   const [menuDx, setMenuDx] = useState(50)
   const [menuDy, setMenuDy] = useState(50)
   const [menuR, setMenuR] = useState(50)
+  const [moveStep, setMoveStep] = useState(10)
+
+  // Стиль кнопки-стрелки
+  const arrowBtn = {
+    width: 32, height: 32, border: '0.5px solid var(--border-md)',
+    borderRadius: 'var(--radius)', background: 'var(--bg3)',
+    fontSize: 14, cursor: 'pointer', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', padding: 0,
+  }
+
+  // Переместить точку по X/Y
+  const moveVertex = (idx, dx, dy) => {
+    const verts = [...contour.vertices]
+    verts[idx] = { ...verts[idx], x: verts[idx].x + dx, y: verts[idx].y + dy }
+    setVertices(verts)
+  }
+
+  // Переместить точку вдоль соседнего отрезка
+  const moveAlongEdge = (idx, edge, step) => {
+    const verts = contour.vertices
+    const n = verts.length
+    const curr = verts[idx]
+    const neighbor = edge === 'prev' ? verts[(idx - 1 + n) % n] : verts[(idx + 1) % n]
+    const dx = neighbor.x - curr.x, dy = neighbor.y - curr.y
+    const d = Math.hypot(dx, dy)
+    if (d === 0) return
+    const nx = dx / d, ny = dy / d
+    moveVertex(idx, nx * step, ny * step)
+  }
 
   // Рассчитать превью без сохранения в контур
   const calcPreview = (idx, type, params) => {
@@ -609,15 +638,14 @@ export default function ContourEditor({ detail, onUpdate }) {
             <div style={{ display:'flex', flexDirection:'column', gap:5, paddingTop:22 }}>
               {[
                 { id:'none',    icon:'—',  label:'Нет' },
-                { id:'radius',  icon:'⌒',  label:'Выпукл' },
-                { id:'concave', icon:'⌣',  label:'Вогнут' },
+                { id:'radius',  icon:'⌒',  label:'Радиус' },
                 { id:'chamfer', icon:'◣',  label:'Фаска' },
                 { id:'notch',   icon:'⌐',  label:'Вырез' },
               ].map(({id, icon, label}) => (
                 <button key={id} type="button"
                   onClick={() => {
                     setMenuSelType(id)
-                    if (id === 'none' || id === 'radius' || id === 'concave') {
+                    if (id === 'none' || id === 'radius') {
                       applyCornerType(activeIdx, id, { r: menuR, dx: menuDx, dy: menuDy })
                       setPreviewVerts(null)
                     } else {
@@ -647,9 +675,9 @@ export default function ContourEditor({ detail, onUpdate }) {
           </div>
 
           {/* Радиус */}
-          {(menuSelType === 'radius' || menuSelType === 'concave') && (
+          {menuSelType === 'radius' && (
             <NumField label="Радиус R" value={menuR}
-              onChange={v => { setMenuR(v); applyCornerType(activeIdx, menuSelType, { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
+              onChange={v => { setMenuR(v); applyCornerType(activeIdx, 'radius', { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
           )}
 
           {/* Фаска */}
@@ -657,7 +685,7 @@ export default function ContourEditor({ detail, onUpdate }) {
             <div>
               <div style={{ display:'flex', gap:8, marginBottom:8 }}>
                 <NumField label="По X →" value={menuDx} onChange={v => { setMenuDx(v); calcPreview(activeIdx, 'chamfer', { dx: v, dy: menuDy }) }} />
-                <NumField label="По Y ↓" value={menuDy} onChange={v => { setMenuDy(v); calcPreview(activeIdx, 'chamfer', { dx: menuDx, dy: v }) }} />
+                <NumField label="По Y ↑" value={menuDy} onChange={v => { setMenuDy(v); calcPreview(activeIdx, 'chamfer', { dx: menuDx, dy: v }) }} />
               </div>
               <button type="button" onClick={() => { applyCornerType(activeIdx, 'chamfer', { r: menuR, dx: menuDx, dy: menuDy }); setPreviewVerts(null); setActiveIdx(null); setMenuSelType(null) }}
                 style={{ width:'100%', padding:'7px', background:'var(--blue)', color:'white', border:'none', borderRadius:'var(--radius)', fontSize:12, cursor:'pointer' }}>
@@ -671,7 +699,7 @@ export default function ContourEditor({ detail, onUpdate }) {
             <div>
               <div style={{ display:'flex', gap:8, marginBottom:8 }}>
                 <NumField label="По X →" value={menuDx} onChange={v => { setMenuDx(v); calcPreview(activeIdx, 'notch', { dx: v, dy: menuDy }) }} />
-                <NumField label="По Y ↓" value={menuDy} onChange={v => { setMenuDy(v); calcPreview(activeIdx, 'notch', { dx: menuDx, dy: v }) }} />
+                <NumField label="По Y ↑" value={menuDy} onChange={v => { setMenuDy(v); calcPreview(activeIdx, 'notch', { dx: menuDx, dy: v }) }} />
               </div>
               <button type="button" onClick={() => { applyCornerType(activeIdx, 'notch', { r: menuR, dx: menuDx, dy: menuDy }); setPreviewVerts(null); setActiveIdx(null); setMenuSelType(null) }}
                 style={{ width:'100%', padding:'7px', background:'var(--blue)', color:'white', border:'none', borderRadius:'var(--radius)', fontSize:12, cursor:'pointer' }}>
@@ -680,10 +708,55 @@ export default function ContourEditor({ detail, onUpdate }) {
             </div>
           )}
 
-          {/* Просто радиус точки если тип не выбран */}
+          {/* Перемещение точки — если тип не выбран */}
           {!menuSelType && (
-            <NumField label="Радиус скругления R" value={activeVertex.r || 0}
-              onChange={v => updateVertex(activeIdx, { ...activeVertex, r: v })} />
+            <div>
+              <NumField label="Радиус скругления R" value={activeVertex.r || 0}
+                onChange={v => updateVertex(activeIdx, { ...activeVertex, r: v })} />
+
+              {/* Шаг перемещения */}
+              <div style={{ marginTop:10, marginBottom:6 }}>
+                <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Шаг перемещения</label>
+                <div style={{ display:'flex', gap:4 }}>
+                  {[1, 5, 10, 50].map(s => (
+                    <button key={s} type="button" onClick={() => setMoveStep(s)}
+                      style={{ flex:1, padding:'5px 2px', fontSize:11, border: moveStep===s ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                        borderRadius:'var(--radius)', background: moveStep===s ? 'var(--blue-light)' : 'transparent',
+                        color: moveStep===s ? 'var(--blue)' : 'var(--text-muted)', cursor:'pointer' }}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Стрелки XY */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:6 }}>
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
+                  <label style={{ fontSize:10, color:'var(--text-hint)' }}>X / Y</label>
+                  <button type="button" onClick={() => moveVertex(activeIdx, 0, moveStep)}
+                    style={arrowBtn}>↑</button>
+                  <div style={{ display:'flex', gap:3 }}>
+                    <button type="button" onClick={() => moveVertex(activeIdx, -moveStep, 0)} style={arrowBtn}>←</button>
+                    <button type="button" onClick={() => moveVertex(activeIdx, moveStep, 0)}  style={arrowBtn}>→</button>
+                  </div>
+                  <button type="button" onClick={() => moveVertex(activeIdx, 0, -moveStep)}
+                    style={arrowBtn}>↓</button>
+                </div>
+
+                {/* Движение по линии отрезка */}
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
+                  <label style={{ fontSize:10, color:'var(--text-hint)' }}>По отрезку</label>
+                  <button type="button" onClick={() => moveAlongEdge(activeIdx, 'prev', moveStep)}
+                    style={arrowBtn}>◀</button>
+                  <div style={{ display:'flex', gap:3 }}>
+                    <span style={{ fontSize:9, color:'var(--text-hint)', alignSelf:'center' }}>пред</span>
+                    <span style={{ fontSize:9, color:'var(--text-hint)', alignSelf:'center' }}>след</span>
+                  </div>
+                  <button type="button" onClick={() => moveAlongEdge(activeIdx, 'next', moveStep)}
+                    style={arrowBtn}>▶</button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Действия с точкой */}
