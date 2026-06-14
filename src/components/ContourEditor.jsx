@@ -278,30 +278,20 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onInsertBefore,
       {/* Параметры фаски */}
       {selType === 'chamfer' && (
         <div style={{ marginBottom:10 }}>
-          <div style={{ display:'flex', gap:8, marginBottom:8 }}>
-            <NumField label="По X →" value={dx} onChange={setDx} />
-            <NumField label="По Y ↓" value={dy} onChange={setDy} />
+          <div style={{ display:'flex', gap:8 }}>
+            <NumField label="По X →" value={dx} onChange={v => { setDx(v); onApplyType(idx, 'chamfer', { r, dx: v, dy }) }} />
+            <NumField label="По Y ↓" value={dy} onChange={v => { setDy(v); onApplyType(idx, 'chamfer', { r, dx, dy: v }) }} />
           </div>
-          <button type="button" onClick={handleApply}
-            style={{ width:'100%', padding:'8px', background:'var(--blue)', color:'white', border:'none',
-              borderRadius:'var(--radius)', fontSize:12, cursor:'pointer' }}>
-            Применить фаску
-          </button>
         </div>
       )}
 
       {/* Параметры выреза */}
       {selType === 'notch' && (
         <div style={{ marginBottom:10 }}>
-          <div style={{ display:'flex', gap:8, marginBottom:8 }}>
-            <NumField label="По X →" value={dx} onChange={setDx} />
-            <NumField label="По Y ↓" value={dy} onChange={setDy} />
+          <div style={{ display:'flex', gap:8 }}>
+            <NumField label="По X →" value={dx} onChange={v => { setDx(v); onApplyType(idx, 'notch', { r, dx: v, dy }) }} />
+            <NumField label="По Y ↓" value={dy} onChange={v => { setDy(v); onApplyType(idx, 'notch', { r, dx, dy: v }) }} />
           </div>
-          <button type="button" onClick={handleApply}
-            style={{ width:'100%', padding:'8px', background:'var(--blue)', color:'white', border:'none',
-              borderRadius:'var(--radius)', fontSize:12, cursor:'pointer' }}>
-            Применить вырез
-          </button>
         </div>
       )}
 
@@ -423,7 +413,7 @@ export default function ContourEditor({ detail, onUpdate }) {
     setVertices(verts)
   }
 
-  // Применить тип угла к базовой точке (добавляет/убирает вершины)
+  // Применить тип угла к точке
   const applyCornerType = (idx, type, params = {}) => {
     const verts = [...contour.vertices]
     const n = verts.length
@@ -431,44 +421,57 @@ export default function ContourEditor({ detail, onUpdate }) {
     const prev = verts[(idx - 1 + n) % n]
     const next = verts[(idx + 1) % n]
 
-    // Убираем старые точки этого угла если они были добавлены ранее
-    // Определяем направления от угла к соседям
+    const dx = params.dx || 50, dy = params.dy || 50
+
+    // Направления от curr к prev и next
     const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
     const dx1 = next.x - curr.x, dy1 = next.y - curr.y
     const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
-    const dx = params.dx || 50, dy = params.dy || 50
-
-    // Нормализованные направления
     const nx0 = d0 > 0 ? dx0/d0 : 0, ny0 = d0 > 0 ? dy0/d0 : 0
     const nx1 = d1 > 0 ? dx1/d1 : 0, ny1 = d1 > 0 ? dy1/d1 : 0
 
+    // Определяем какой из двух направлений горизонтальный, какой вертикальный
+    // Горизонтальный — тот у которого |nx| > |ny|
+    let hx, hy, vx, vy
+    if (Math.abs(nx0) >= Math.abs(ny0)) {
+      // prev — горизонталь, next — вертикаль
+      hx = nx0; hy = ny0; vx = nx1; vy = ny1
+    } else {
+      // prev — вертикаль, next — горизонталь
+      hx = nx1; hy = ny1; vx = nx0; vy = ny0
+    }
+
     if (type === 'none') {
-      verts[idx] = { ...curr, r: 0, _corner: 'none' }
-      setVertices(verts)
-      setActiveIdx(idx)
+      verts[idx] = { ...curr, r: 0 }
+      setVertices(verts); setActiveIdx(idx)
     } else if (type === 'radius') {
-      verts[idx] = { ...curr, r: params.r || 50, _corner: 'radius' }
-      setVertices(verts)
-      setActiveIdx(idx)
+      verts[idx] = { ...curr, r: params.r || 50 }
+      setVertices(verts); setActiveIdx(idx)
     } else if (type === 'concave') {
-      verts[idx] = { ...curr, r: -(params.r || 50), _corner: 'concave' }
-      setVertices(verts)
-      setActiveIdx(idx)
+      verts[idx] = { ...curr, r: -(params.r || 50) }
+      setVertices(verts); setActiveIdx(idx)
     } else if (type === 'chamfer') {
-      // Заменяем точку на 2 точки среза
-      const p1 = { x: curr.x + nx0*dx, y: curr.y + ny0*dx, r: 0, _corner: 'chamfer_a' }
-      const p2 = { x: curr.x + nx1*dy, y: curr.y + ny1*dy, r: 0, _corner: 'chamfer_b' }
-      verts.splice(idx, 1, p1, p2)
-      setVertices(verts)
-      setActiveIdx(null)
+      // 2 точки: одна по горизонтали, одна по вертикали
+      const p1 = { x: curr.x + hx*dx, y: curr.y + hy*dx, r: 0 }
+      const p2 = { x: curr.x + vx*dy, y: curr.y + vy*dy, r: 0 }
+      // Порядок: сначала та что по горизонтали от prev
+      if (Math.abs(nx0) >= Math.abs(ny0)) {
+        verts.splice(idx, 1, p1, p2)
+      } else {
+        verts.splice(idx, 1, p2, p1)
+      }
+      setVertices(verts); setActiveIdx(null)
     } else if (type === 'notch') {
-      // Заменяем точку на 3 точки выреза
-      const p1 = { x: curr.x + nx0*dx, y: curr.y + ny0*dx, r: 0, _corner: 'notch_a' }
-      const p2 = { x: curr.x + nx0*dx + nx1*dy, y: curr.y + ny0*dx + ny1*dy, r: 0, _corner: 'notch_in' }
-      const p3 = { x: curr.x + nx1*dy, y: curr.y + ny1*dy, r: 0, _corner: 'notch_b' }
-      verts.splice(idx, 1, p1, p2, p3)
-      setVertices(verts)
-      setActiveIdx(null)
+      // 3 точки: p1 по горизонтали, p2 внутренний угол, p3 по вертикали
+      const p1 = { x: curr.x + hx*dx, y: curr.y + hy*dx, r: 0 }
+      const p2 = { x: curr.x + hx*dx + vx*dy, y: curr.y + hy*dx + vy*dy, r: 0 }
+      const p3 = { x: curr.x + vx*dy, y: curr.y + vy*dy, r: 0 }
+      if (Math.abs(nx0) >= Math.abs(ny0)) {
+        verts.splice(idx, 1, p1, p2, p3)
+      } else {
+        verts.splice(idx, 1, p3, p2, p1)
+      }
+      setVertices(verts); setActiveIdx(null)
     }
   }
   const insertVertex = (idx, after = false) => {
