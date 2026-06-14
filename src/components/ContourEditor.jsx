@@ -58,11 +58,34 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     const next = cv[(i + 1) % n]
 
     // Если ТЕКУЩАЯ точка — контрольная точка дуги (type='arc')
-    // Значит предыдущая точка = начало дуги, следующая = конец дуги
+    // Собираем все подряд идущие arc-точки и строим сплайн
     if (curr.type === 'arc') {
-      const end = cv[(i + 1) % n]
-      ctx.quadraticCurveTo(curr.x, curr.y, end.x, end.y)
-      i++ // пропускаем конечную точку — она уже нарисована
+      // Находим начало и конец группы arc-точек
+      const p0 = cv[(i - 1 + n) % n] // начало (обычная точка)
+      const arcGroup = [p0]
+      let j = i
+      while (j < n && cv[j % n].type === 'arc') {
+        arcGroup.push(cv[j % n])
+        j++
+      }
+      const pEnd = cv[j % n] // конец (обычная точка)
+      arcGroup.push(pEnd)
+
+      // Рисуем плавный сплайн через все точки группы
+      // Используем quadraticCurveTo для каждой пары
+      for (let k = 1; k < arcGroup.length - 1; k++) {
+        const cp = arcGroup[k]
+        // Конечная точка — середина между cp и следующей
+        const nx2 = k < arcGroup.length - 2
+          ? (cp.x + arcGroup[k+1].x) / 2
+          : arcGroup[k+1].x
+        const ny2 = k < arcGroup.length - 2
+          ? (cp.y + arcGroup[k+1].y) / 2
+          : arcGroup[k+1].y
+        ctx.quadraticCurveTo(cp.x, cp.y, nx2, ny2)
+      }
+
+      i = j - 1 // пропускаем все arc-точки
       continue
     }
 
@@ -70,11 +93,15 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     const prev = cv[(i - 1 + n) % n]
     const r = curr.r
 
+    // Пропускаем arc-точки при расчёте радиуса предыдущей
+    const prevReal = prev.type === 'arc' ? cv[(i - 2 + n) % n] : prev
+    const nextReal = next.type === 'arc' ? cv[(i + 2) % n] : next
+
     if (r <= 0 || i === 0) {
       if (i > 0) ctx.lineTo(curr.x, curr.y)
     } else {
-      const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
-      const dx1 = next.x - curr.x, dy1 = next.y - curr.y
+      const dx0 = prevReal.x - curr.x, dy0 = prevReal.y - curr.y
+      const dx1 = nextReal.x - curr.x, dy1 = nextReal.y - curr.y
       const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
       if (d0 === 0 || d1 === 0) { ctx.lineTo(curr.x, curr.y); continue }
       const t = Math.min(r, d0, d1)
@@ -545,11 +572,11 @@ export default function ContourEditor({ detail, onUpdate }) {
   // Применить дугу: точки [i, cp, j] — cp становится контрольной точкой
   const applyArc = (pts) => {
     if (pts.length < 3) return
-    const [startIdx, cpIdx, endIdx] = pts
     const verts = [...contour.vertices]
-    // Просто помечаем контрольную точку как arc
-    // buildPath умеет обрабатывать точки с type='arc' как quadratic bezier control point
-    verts[cpIdx] = { ...verts[cpIdx], type: 'arc' }
+    // Все средние точки (не первая и не последняя) помечаем как arc
+    for (let k = 1; k < pts.length - 1; k++) {
+      verts[pts[k]] = { ...verts[pts[k]], type: 'arc' }
+    }
     setVertices(verts)
     setArcMode(false)
     setArcPoints([])
@@ -775,7 +802,7 @@ export default function ContourEditor({ detail, onUpdate }) {
         <div style={{ display:'flex', gap:4, marginBottom:8, alignItems:'flex-start' }}>
 
           {/* Список точек слева */}
-          <div style={{ display:'flex', flexDirection:'column', gap:3, maxHeight:280, overflowY:'auto' }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:2, maxHeight:280, overflowY:'auto' }}>
             <span style={{ fontSize:8, color:'var(--text-hint)', textAlign:'center', marginBottom:1 }}>№</span>
             {contour.vertices.map((v, i) => {
               const isActive = i === activeIdx
@@ -787,7 +814,6 @@ export default function ContourEditor({ detail, onUpdate }) {
                       if (arcPoints.includes(i)) return
                       const pts = [...arcPoints, i]
                       setArcPoints(pts)
-                      if (pts.length === 3) applyArc(pts)
                     } else {
                       setActiveIdx(i)
                       setMenuSelType(null)
@@ -795,12 +821,12 @@ export default function ContourEditor({ detail, onUpdate }) {
                       setTab('contour')
                     }
                   }}
-                  style={{ width:28, height:28, border: isActive ? '1.5px solid var(--blue)' : isArcSel ? '1.5px solid #F5A623' : '0.5px solid var(--border-md)',
-                    borderRadius:'var(--radius)',
+                  style={{ width:22, height:22, border: isActive ? '1.5px solid var(--blue)' : isArcSel ? '1.5px solid #F5A623' : '0.5px solid var(--border-md)',
+                    borderRadius:4,
                     background: isActive ? 'var(--blue)' : isArcSel ? '#F5A623' : 'var(--bg3)',
                     color: isActive || isArcSel ? 'white' : 'var(--text-muted)',
-                    fontSize:10, fontWeight:600, cursor:'pointer',
-                    display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    fontSize:9, fontWeight:600, cursor:'pointer',
+                    display:'flex', alignItems:'center', justifyContent:'center', padding:0 }}>
                   {i+1}
                 </button>
               )
@@ -820,71 +846,85 @@ export default function ContourEditor({ detail, onUpdate }) {
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
           </div>
 
-          {/* Кнопки типа справа — только когда точка выбрана */}
-          {activeVertex && tab === 'contour' && !arcMode && (
-            <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-              {[
-                { id:'none',    icon:'—' },
-                { id:'radius',  icon:'⌒' },
-                { id:'chamfer', icon:'◣' },
-                { id:'notch',   icon:'⌐' },
-                { id:'arc',     icon:'〜' },
-              ].map(({id, icon}) => (
-                <button key={id} type="button"
-                  onClick={() => {
-                    if (id === 'arc') {
-                      setArcMode(true)
-                      setArcPoints([activeIdx])
-                      setMenuSelType('arc')
-                      return
-                    }
-                    setMenuSelType(id)
-                    if (id === 'none' || id === 'radius') {
-                      applyCornerType(activeIdx, id, { r: menuR, dx: menuDx, dy: menuDy })
-                      setPreviewVerts(null)
-                    } else {
-                      calcPreview(activeIdx, id, { dx: menuDx, dy: menuDy })
-                    }
-                  }}
-                  style={{ width:28, height:28, border: menuSelType===id ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
-                    borderRadius:'var(--radius)', background: menuSelType===id ? 'var(--blue-light)' : 'transparent',
-                    fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  {icon}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Правая колонка — всегда toggles + кнопки типа если точка выбрана */}
+          <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+            {/* Toggles — всегда */}
+            {[
+              { key:'markers', icon:'●', val:showMarkers, set:setShowMarkers },
+              { key:'lengths', icon:'↔', val:showLengths, set:setShowLengths },
+              { key:'angles',  icon:'∠', val:showAngles,  set:setShowAngles },
+            ].map(({key, icon, val, set}) => (
+              <button key={key} type="button" onClick={() => set(v => !v)}
+                style={{ width:26, height:26, border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                  borderRadius:4, background: val ? 'var(--blue-light)' : 'transparent',
+                  fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                {icon}
+              </button>
+            ))}
 
-          {/* Toggles справа — когда точка не выбрана */}
-          {!activeVertex && (
-            <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-              {[
-                { key:'markers', icon:'●', val:showMarkers, set:setShowMarkers },
-                { key:'lengths', icon:'↔', val:showLengths, set:setShowLengths },
-                { key:'angles',  icon:'∠', val:showAngles,  set:setShowAngles },
-              ].map(({key, icon, val, set}) => (
-                <button key={key} type="button" onClick={() => set(v => !v)}
-                  style={{ width:28, height:28, border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
-                    borderRadius:'var(--radius)', background: val ? 'var(--blue-light)' : 'transparent',
-                    fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  {icon}
-                </button>
-              ))}
-            </div>
-          )}
+            {/* Разделитель */}
+            {activeVertex && tab === 'contour' && !arcMode && (
+              <div style={{ height:1, background:'var(--border)', margin:'2px 0' }} />
+            )}
+
+            {/* Кнопки типа — только когда точка выбрана */}
+            {activeVertex && tab === 'contour' && !arcMode && (
+              <>
+                {[
+                  { id:'none',    icon:'—' },
+                  { id:'radius',  icon:'⌒' },
+                  { id:'chamfer', icon:'◣' },
+                  { id:'notch',   icon:'⌐' },
+                  { id:'arc',     icon:'〜' },
+                ].map(({id, icon}) => (
+                  <button key={id} type="button"
+                    onClick={() => {
+                      if (id === 'arc') {
+                        setArcMode(true)
+                        setArcPoints([activeIdx])
+                        setMenuSelType('arc')
+                        return
+                      }
+                      setMenuSelType(id)
+                      if (id === 'none' || id === 'radius') {
+                        applyCornerType(activeIdx, id, { r: menuR, dx: menuDx, dy: menuDy })
+                        setPreviewVerts(null)
+                      } else {
+                        calcPreview(activeIdx, id, { dx: menuDx, dy: menuDy })
+                      }
+                    }}
+                    style={{ width:26, height:26, border: menuSelType===id ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                      borderRadius:4, background: menuSelType===id ? 'var(--blue-light)' : 'transparent',
+                      fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    {icon}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
         </div>
       )}
 
       {/* Подсказка в режиме дуги */}
       {arcMode && (
         <div style={{ background:'#FFF3CD', borderRadius:'var(--radius)', padding:'6px 8px',
-          marginBottom:8, fontSize:11, color:'#856404', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <span>
-            {arcPoints.length === 1 ? '〜 Выбери контрольную точку' :
-             arcPoints.length === 2 ? '〜 Выбери конечную точку' : ''}
-          </span>
-          <button type="button" onClick={() => { setArcMode(false); setArcPoints([]); setMenuSelType(null) }}
-            style={{ background:'none', border:'none', color:'#856404', cursor:'pointer', fontSize:14 }}>✕</button>
+          marginBottom:8, fontSize:11, color:'#856404' }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: arcPoints.length >= 3 ? 6 : 0 }}>
+            <span>
+              {arcPoints.length === 1 ? '〜 Выбери промежуточные точки' :
+               arcPoints.length === 2 ? '〜 Выбери ещё точки или нажми Применить' :
+               `〜 Выбрано ${arcPoints.length} точек`}
+            </span>
+            <button type="button" onClick={() => { setArcMode(false); setArcPoints([]); setMenuSelType(null) }}
+              style={{ background:'none', border:'none', color:'#856404', cursor:'pointer', fontSize:14, marginLeft:8 }}>✕</button>
+          </div>
+          {arcPoints.length >= 3 && (
+            <button type="button" onClick={() => applyArc(arcPoints)}
+              style={{ width:'100%', padding:'6px', background:'#856404', color:'white', border:'none',
+                borderRadius:'var(--radius)', fontSize:12, cursor:'pointer', fontWeight:500 }}>
+              ✓ Применить дугу ({arcPoints.length} точек)
+            </button>
+          )}
         </div>
       )}
 
