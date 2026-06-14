@@ -166,6 +166,7 @@ function ContourPreview({ w, h, contour }) {
 
     ctx.beginPath()
     ctx.moveTo(ox + TL.x, oy)
+    // До начала TR дуги: если вогнутый — до (ox+dw-R, oy), иначе до (ox+dw-R, oy)
     ctx.lineTo(ox + dw - TR.x, oy)
 
     // TR — верхний правый
@@ -173,7 +174,7 @@ function ContourPreview({ w, h, contour }) {
       if ((tr.r||0) > 0) {
         ctx.arcTo(ox+dw, oy, ox+dw, oy+TR.y, TR.x)
       } else {
-        ctx.lineTo(ox+dw, oy)
+        // вогнутый: центр (ox+dw-R, oy+R), дуга от -π/2 до 0
         ctx.arc(ox+dw-TR.x, oy+TR.y, TR.x, -Math.PI/2, 0, false)
       }
     } else if (tr.type === 'chamfer') { ctx.lineTo(ox+dw, oy+TR.y) }
@@ -187,7 +188,7 @@ function ContourPreview({ w, h, contour }) {
       if ((br.r||0) > 0) {
         ctx.arcTo(ox+dw, oy+dh, ox+dw-BR.x, oy+dh, BR.y)
       } else {
-        ctx.lineTo(ox+dw, oy+dh)
+        // вогнутый: центр (ox+dw-R, oy+dh-R), дуга от 0 до π/2
         ctx.arc(ox+dw-BR.x, oy+dh-BR.y, BR.x, 0, Math.PI/2, false)
       }
     } else if (br.type === 'chamfer') { ctx.lineTo(ox+dw-BR.x, oy+dh) }
@@ -201,7 +202,7 @@ function ContourPreview({ w, h, contour }) {
       if ((bl.r||0) > 0) {
         ctx.arcTo(ox, oy+dh, ox, oy+dh-BL.y, BL.x)
       } else {
-        ctx.lineTo(ox, oy+dh)
+        // вогнутый: центр (ox+R, oy+dh-R), дуга от π/2 до π
         ctx.arc(ox+BL.x, oy+dh-BL.y, BL.x, Math.PI/2, Math.PI, false)
       }
     } else if (bl.type === 'chamfer') { ctx.lineTo(ox, oy+dh-BL.y) }
@@ -215,7 +216,7 @@ function ContourPreview({ w, h, contour }) {
       if ((tl.r||0) > 0) {
         ctx.arcTo(ox, oy, ox+TL.x, oy, TL.y)
       } else {
-        ctx.lineTo(ox, oy)
+        // вогнутый: центр (ox+R, oy+R), дуга от π до 3π/2
         ctx.arc(ox+TL.x, oy+TL.y, TL.x, Math.PI, Math.PI*3/2, false)
       }
     } else if (tl.type === 'chamfer') { ctx.lineTo(ox+TL.x, oy) }
