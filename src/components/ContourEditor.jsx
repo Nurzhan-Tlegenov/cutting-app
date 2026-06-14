@@ -165,43 +165,48 @@ function ContourPreview({ w, h, contour }) {
     const TL = offs(tl), TR = offs(tr), BR = offs(br), BL = offs(bl)
 
     ctx.beginPath()
-    ctx.moveTo(ox + TL.x, oy)
-    ctx.lineTo(ox + dw - TR.x, oy)
+    // moveTo: если TL вогнутый — начинаем прямо от угла
+    ctx.moveTo(tl.type === 'radius' && (tl.r||0) < 0 ? ox : ox + TL.x, oy)
+    ctx.lineTo(tr.type === 'radius' && (tr.r||0) < 0 ? ox+dw : ox + dw - TR.x, oy)
 
-    // TR — верхний правый: вогнутый — центр (ox+dw-TR.x, oy+TR.y), дуга от -π/2 до 0
+    // TR — верхний правый
     if (tr.type === 'radius' && TR.x > 0) {
       if ((tr.r||0) > 0) { ctx.arcTo(ox+dw, oy, ox+dw, oy+TR.y, TR.x) }
-      else { ctx.lineTo(ox+dw-TR.x, oy); ctx.arc(ox+dw-TR.x, oy+TR.y, TR.x, -Math.PI/2, 0, false) }
+      // вогнутый: центр в углу (ox+dw, oy), дуга от π до π/2 (по часовой = false→cw в canvas y-down)
+      else { ctx.arc(ox+dw, oy, TR.x, Math.PI, Math.PI/2, true) }
     } else if (tr.type === 'chamfer') { ctx.lineTo(ox+dw, oy+TR.y) }
     else if (tr.type === 'notch') { ctx.lineTo(ox+dw-TR.x, oy); ctx.lineTo(ox+dw-TR.x, oy+TR.y); ctx.lineTo(ox+dw, oy+TR.y) }
     else { ctx.lineTo(ox+dw, oy) }
 
-    ctx.lineTo(ox+dw, oy+dh-BR.y)
+    ctx.lineTo(ox+dw, br.type === 'radius' && (br.r||0) < 0 ? oy+dh : oy+dh-BR.y)
 
-    // BR — нижний правый: вогнутый — центр (ox+dw-BR.x, oy+dh-BR.y), дуга от 0 до π/2
+    // BR — нижний правый
     if (br.type === 'radius' && BR.x > 0) {
       if ((br.r||0) > 0) { ctx.arcTo(ox+dw, oy+dh, ox+dw-BR.x, oy+dh, BR.y) }
-      else { ctx.lineTo(ox+dw, oy+dh-BR.y); ctx.arc(ox+dw-BR.x, oy+dh-BR.y, BR.x, 0, Math.PI/2, false) }
+      // вогнутый: центр (ox+dw, oy+dh), дуга от -π/2 до π (= от 3π/2 до π)
+      else { ctx.arc(ox+dw, oy+dh, BR.x, -Math.PI/2, Math.PI, true) }
     } else if (br.type === 'chamfer') { ctx.lineTo(ox+dw-BR.x, oy+dh) }
     else if (br.type === 'notch') { ctx.lineTo(ox+dw, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh) }
     else { ctx.lineTo(ox+dw, oy+dh) }
 
-    ctx.lineTo(ox+BL.x, oy+dh)
+    ctx.lineTo(bl.type === 'radius' && (bl.r||0) < 0 ? ox : ox+BL.x, oy+dh)
 
-    // BL — нижний левый: вогнутый — центр (ox+BL.x, oy+dh-BL.y), дуга от π/2 до π
+    // BL — нижний левый
     if (bl.type === 'radius' && BL.x > 0) {
       if ((bl.r||0) > 0) { ctx.arcTo(ox, oy+dh, ox, oy+dh-BL.y, BL.x) }
-      else { ctx.lineTo(ox+BL.x, oy+dh); ctx.arc(ox+BL.x, oy+dh-BL.y, BL.x, Math.PI/2, Math.PI, false) }
+      // вогнутый: центр (ox, oy+dh), дуга от 0 до -π/2
+      else { ctx.arc(ox, oy+dh, BL.x, 0, -Math.PI/2, true) }
     } else if (bl.type === 'chamfer') { ctx.lineTo(ox, oy+dh-BL.y) }
     else if (bl.type === 'notch') { ctx.lineTo(ox+BL.x, oy+dh); ctx.lineTo(ox+BL.x, oy+dh-BL.y); ctx.lineTo(ox, oy+dh-BL.y) }
     else { ctx.lineTo(ox, oy+dh) }
 
-    ctx.lineTo(ox, oy+TL.y)
+    ctx.lineTo(ox, tl.type === 'radius' && (tl.r||0) < 0 ? oy : oy+TL.y)
 
-    // TL — верхний левый: вогнутый — центр (ox+TL.x, oy+TL.y), дуга от π до 3π/2
+    // TL — верхний левый
     if (tl.type === 'radius' && TL.x > 0) {
       if ((tl.r||0) > 0) { ctx.arcTo(ox, oy, ox+TL.x, oy, TL.y) }
-      else { ctx.lineTo(ox, oy+TL.y); ctx.arc(ox+TL.x, oy+TL.y, TL.x, Math.PI, -Math.PI/2, false) }
+      // вогнутый: центр (ox, oy), дуга от π/2 до 0
+      else { ctx.arc(ox, oy, TL.x, Math.PI/2, 0, true) }
     } else if (tl.type === 'chamfer') { ctx.lineTo(ox+TL.x, oy) }
     else if (tl.type === 'notch') { ctx.lineTo(ox, oy+TL.y); ctx.lineTo(ox+TL.x, oy+TL.y); ctx.lineTo(ox+TL.x, oy) }
     else { ctx.lineTo(ox, oy) }
