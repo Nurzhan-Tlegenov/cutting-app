@@ -108,7 +108,7 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true }) {
   const ref = useRef(null)
   const w = Number(detail.w) || 0
   const h = Number(detail.h) || 0
@@ -201,90 +201,112 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
       ctx.strokeRect(cx2, cy2, pos.w*sc, pos.h*sc)
     })
 
-    // Размеры отрезков + углы в вершинах
+    // Размеры отрезков + углы — умное позиционирование
     const n = verts.length
     const cv = verts.map(v => ({
       x: ox + v.x * sc,
       y: oy + dh - v.y * sc,
     }))
 
-    ctx.font = '9px sans-serif'
+    // Центр детали на canvas
+    const cxD = ox + dw/2, cyD = oy + dh/2
 
-    // Размеры отрезков
-    for (let i = 0; i < n; i++) {
-      const a = cv[i], b = cv[(i+1) % n]
-      const len = Math.round(Math.hypot(verts[(i+1)%n].x - verts[i].x, verts[(i+1)%n].y - verts[i].y))
-      if (len < 5) continue
+    // Собираем все подписи с их позициями
+    const labels = []
 
-      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
-      // Нормаль наружу (влево от направления обхода)
-      const dx = b.x - a.x, dy = b.y - a.y
-      const d = Math.hypot(dx, dy)
-      const nx = -dy/d, ny = dx/d  // нормаль
-      // Сдвигаем подпись наружу на 10px
-      const lx = mx + nx * 11, ly = my + ny * 11
-
-      const angle = Math.atan2(dy, dx)
-      ctx.save()
-      ctx.translate(lx, ly)
-      // Держим текст читаемым (не переворачиваем)
-      const a2 = angle > Math.PI/2 || angle < -Math.PI/2 ? angle + Math.PI : angle
-      ctx.rotate(a2)
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.strokeStyle = 'white'; ctx.lineWidth = 2.5
-      ctx.strokeText(`${len}`, 0, 0)
-      ctx.fillStyle = '#185FA5'
-      ctx.fillText(`${len}`, 0, 0)
-      ctx.restore()
+    // Длины отрезков
+    if (showLengths) {
+      for (let i = 0; i < n; i++) {
+        const a = cv[i], b = cv[(i+1) % n]
+        const len = Math.round(Math.hypot(verts[(i+1)%n].x - verts[i].x, verts[(i+1)%n].y - verts[i].y))
+        if (len < 5) continue
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
+        const dx = b.x - a.x, dy = b.y - a.y
+        const d = Math.hypot(dx, dy)
+        // Нормаль наружу (от центра детали)
+        let nx = -dy/d, ny = dx/d
+        // Проверяем направление нормали — она должна смотреть от центра
+        const toCx = mx - cxD, toCy = my - cyD
+        if (nx*toCx + ny*toCy < 0) { nx = -nx; ny = -ny }
+        labels.push({ x: mx + nx*13, y: my + ny*13, text: `${len}`, color:'#185FA5',
+          angle: Math.atan2(dy, dx), rotate: true })
+      }
     }
 
     // Углы в вершинах
-    ctx.font = '8px sans-serif'
-    for (let i = 0; i < n; i++) {
-      const prev = verts[(i - 1 + n) % n]
-      const curr = verts[i]
-      const next = verts[(i + 1) % n]
+    if (showAngles) {
+      for (let i = 0; i < n; i++) {
+        const prev = verts[(i-1+n)%n], curr = verts[i], next = verts[(i+1)%n]
+        const ax = prev.x-curr.x, ay = prev.y-curr.y
+        const bx = next.x-curr.x, by = next.y-curr.y
+        const da = Math.hypot(ax,ay), db = Math.hypot(bx,by)
+        if (da < 1 || db < 1) continue
+        const dot = (ax*bx+ay*by)/(da*db)
+        const angleDeg = Math.round(Math.acos(Math.max(-1,Math.min(1,dot)))*180/Math.PI)
+        if (angleDeg === 180) continue
 
-      // Векторы к соседям
-      const ax = prev.x - curr.x, ay = prev.y - curr.y
-      const bx = next.x - curr.x, by = next.y - curr.y
-      const da = Math.hypot(ax, ay), db = Math.hypot(bx, by)
-      if (da < 1 || db < 1) continue
+        const px = ox + curr.x*sc, py = oy + dh - curr.y*sc
+        // Биссектриса угла — направление к центру детали
+        const toCx = cxD - px, toCy = cyD - py
+        const toD = Math.hypot(toCx, toCy) || 1
+        // Смещаем дальше для больших углов (больше текста)
+        const dist = angleDeg === 90 ? 16 : 20
+        labels.push({ x: px + (toCx/toD)*dist, y: py + (toCy/toD)*dist,
+          text: `${angleDeg}°`, color:'#E24B4A', rotate: false })
+      }
+    }
 
-      // Угол между отрезками
-      const dot = (ax*bx + ay*by) / (da * db)
-      const angleDeg = Math.round(Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI)
-      if (angleDeg === 180) continue // прямая линия — не показываем
+    // Разрешаем пересечения — сдвигаем метки друг от друга
+    const FONT_H = 9, FONT_W = 6
+    for (let iter = 0; iter < 3; iter++) {
+      for (let i = 0; i < labels.length; i++) {
+        for (let j = i+1; j < labels.length; j++) {
+          const a = labels[i], b = labels[j]
+          const dx = b.x - a.x, dy = b.y - a.y
+          const dist = Math.hypot(dx, dy)
+          if (dist < FONT_H * 1.5 && dist > 0) {
+            const push = (FONT_H * 1.5 - dist) / 2
+            labels[i].x -= (dx/dist)*push
+            labels[i].y -= (dy/dist)*push
+            labels[j].x += (dx/dist)*push
+            labels[j].y += (dy/dist)*push
+          }
+        }
+      }
+    }
 
-      // Позиция подписи — сдвиг к центру детали
-      const cx2 = ox + curr.x * sc
-      const cy2 = oy + dh - curr.y * sc
-      // Направление к центру детали
-      const cxD = ox + dw/2, cyD = oy + dh/2
-      const toDx = cxD - cx2, toDy = cyD - cy2
-      const toD = Math.hypot(toDx, toDy) || 1
-      const lx = cx2 + (toDx/toD) * 14
-      const ly = cy2 + (toDy/toD) * 14
-
+    // Рисуем подписи
+    for (const lb of labels) {
+      ctx.save()
+      ctx.translate(lb.x, lb.y)
+      if (lb.rotate) {
+        let a = lb.angle
+        if (a > Math.PI/2 || a < -Math.PI/2) a += Math.PI
+        ctx.rotate(a)
+      }
+      ctx.font = '9px sans-serif'
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.strokeStyle = 'white'; ctx.lineWidth = 2.5
-      ctx.strokeText(`${angleDeg}°`, lx, ly)
-      ctx.fillStyle = '#E24B4A'
-      ctx.fillText(`${angleDeg}°`, lx, ly)
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3
+      ctx.strokeText(lb.text, 0, 0)
+      ctx.fillStyle = lb.color
+      ctx.fillText(lb.text, 0, 0)
+      ctx.restore()
     }
 
     // Маркеры
-    const markers = getMarkers(verts, sc, ox, oy, dh)
-    markers.forEach(m => {
-      const isActive = m.idx === activeIdx
-      ctx.beginPath()
-      ctx.arc(m.x, m.y, isActive ? 5 : 3.5, 0, Math.PI * 2)
-      ctx.fillStyle = isActive ? '#E24B4A' : '#185FA5'
-      ctx.fill()
-      ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5; ctx.stroke()
-    })
+    if (showMarkers) {
+      const markers = getMarkers(verts, sc, ox, oy, dh)
+      markers.forEach(m => {
+        const isActive = m.idx === activeIdx
+        ctx.beginPath()
+        ctx.arc(m.x, m.y, isActive ? 5 : 3.5, 0, Math.PI * 2)
+        ctx.fillStyle = isActive ? '#E24B4A' : '#185FA5'
+        ctx.fill()
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5; ctx.stroke()
+      })
+    }
 
-  }, [w, h, contour, activeIdx, previewVerts])
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -514,6 +536,9 @@ export default function ContourEditor({ detail, onUpdate }) {
   const [menuDy, setMenuDy] = useState(50)
   const [menuR, setMenuR] = useState(50)
   const [moveStep, setMoveStep] = useState(10)
+  const [showMarkers, setShowMarkers] = useState(true)
+  const [showLengths, setShowLengths] = useState(true)
+  const [showAngles, setShowAngles] = useState(true)
 
   // Стиль кнопки-стрелки
   const arrowBtn = {
@@ -716,13 +741,33 @@ export default function ContourEditor({ detail, onUpdate }) {
 
       {/* Canvas + кнопки типа рядом */}
       {w > 0 && h > 0 && (
-        <div style={{ display:'flex', gap:8, marginBottom:8, alignItems:'flex-start' }}>
+        <div style={{ display:'flex', gap:6, marginBottom:8, alignItems:'flex-start' }}>
+
+          {/* Переключатели слева */}
+          <div style={{ display:'flex', flexDirection:'column', gap:4, paddingTop:22 }}>
+            {[
+              { key:'markers', icon:'●', label:'Точки', val:showMarkers, set:setShowMarkers },
+              { key:'lengths', icon:'↔', label:'Размер', val:showLengths, set:setShowLengths },
+              { key:'angles',  icon:'∠', label:'Углы',   val:showAngles,  set:setShowAngles },
+            ].map(({key, icon, label, val, set}) => (
+              <button key={key} type="button" onClick={() => set(v => !v)}
+                style={{ width:36, padding:'5px 2px', border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                  borderRadius:'var(--radius)', background: val ? 'var(--blue-light)' : 'transparent',
+                  fontSize:13, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1 }}>
+                <span>{icon}</span>
+                <span style={{ fontSize:7, color: val ? 'var(--blue)' : 'var(--text-hint)', lineHeight:1 }}>{label}</span>
+              </button>
+            ))}
+          </div>
+
           {/* Canvas */}
           <div style={{ flex:1, minWidth:0 }}>
             <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
               Нажми на точку
             </p>
-            <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx} previewVerts={previewVerts} onTap={handleTap} />
+            <ContourCanvas detail={detail} contour={contour} activeIdx={activeIdx}
+              previewVerts={previewVerts} onTap={handleTap}
+              showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
           </div>
 
           {/* Кнопки типа — только когда точка выбрана */}
