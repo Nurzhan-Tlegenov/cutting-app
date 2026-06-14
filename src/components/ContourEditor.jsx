@@ -169,9 +169,9 @@ function getCornerMarkers(contour, ox, oy, dw, dh, toC) {
 }
 
 // ─── Интерактивный Canvas ─────────────────────────────────────────────────────
-function InteractiveContour({ w, h, contour, onCornerTap }) {
+function InteractiveContour({ w, h, contour, activeCorner, onCornerTap }) {
   const ref = useRef(null)
-  const MARKER_R = 10
+  const MARKER_R = 6
 
   useEffect(() => {
     const canvas = ref.current
@@ -227,31 +227,20 @@ function InteractiveContour({ w, h, contour, onCornerTap }) {
       ctx.strokeRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
     })
 
-    // Маркерные точки углов
+    // Маркерные точки — маленькие, синие / активная красная
     const markers = getCornerMarkers(contour, ox, oy, dw, dh, toC)
     markers.forEach(m => {
-      const hasType = m.corner?.type && m.corner.type !== 'none'
+      const isActive = m.key === activeCorner
       ctx.beginPath()
       ctx.arc(m.x, m.y, MARKER_R, 0, Math.PI*2)
-      ctx.fillStyle = hasType ? '#185FA5' : 'white'
+      ctx.fillStyle = isActive ? '#E24B4A' : '#185FA5'
       ctx.fill()
-      ctx.strokeStyle = '#185FA5'
-      ctx.lineWidth = 2
+      ctx.strokeStyle = 'white'
+      ctx.lineWidth = 1.5
       ctx.stroke()
-      // Иконка типа
-      ctx.fillStyle = hasType ? 'white' : '#185FA5'
-      ctx.font = 'bold 9px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      const icon = !hasType ? '+'
-        : m.corner.type === 'radius' && (m.corner.r||0) > 0 ? '⌒'
-        : m.corner.type === 'radius' && (m.corner.r||0) < 0 ? '⌣'
-        : m.corner.type === 'chamfer' ? '◣'
-        : m.corner.type === 'notch' ? '⌐' : '+'
-      ctx.fillText(icon, m.x, m.y)
     })
 
-  }, [w, h, contour])
+  }, [w, h, contour, activeCorner])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -269,10 +258,10 @@ function InteractiveContour({ w, h, contour, onCornerTap }) {
     const toC = v => (v || 0) * sc
 
     const markers = getCornerMarkers(contour, ox, oy, dw, dh, toC)
-    const MARKER_R = 14 // чуть больше для тапа
+    const TAP_R = 18
     for (const m of markers) {
       const dist = Math.sqrt((cx - m.x)**2 + (cy - m.y)**2)
-      if (dist <= MARKER_R) {
+      if (dist <= TAP_R) {
         onCornerTap(m.key)
         return
       }
@@ -385,7 +374,7 @@ export default function ContourEditor({ detail, onUpdate }) {
   const setCorner = (key, val) => upd({ corners: { ...contour.corners, [key]: val } })
 
   const handleCornerTap = (key) => {
-    setActiveCorner(prev => prev === key ? null : key)
+    setActiveCorner(key)
     setTab('corners')
   }
 
@@ -421,7 +410,7 @@ export default function ContourEditor({ detail, onUpdate }) {
           <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
             Нажми на угол чтобы изменить
           </p>
-          <InteractiveContour w={w} h={h} contour={contour} onCornerTap={handleCornerTap} />
+          <InteractiveContour w={w} h={h} contour={contour} activeCorner={activeCorner} onCornerTap={handleCornerTap} />
         </div>
       )}
 
