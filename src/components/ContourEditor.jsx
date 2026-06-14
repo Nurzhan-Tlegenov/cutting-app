@@ -117,32 +117,54 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
     const canvas = ref.current
     if (!canvas || !w || !h) return
     const ctx = canvas.getContext('2d')
-    const PW = canvas.width - 50, PH = canvas.height - 50
-    const sc = Math.min(PW / w, PH / h)
+    const DPR = window.devicePixelRatio || 1
+
+    // Высокое разрешение
+    const CSS_W = canvas.offsetWidth || 280
+    const CSS_H = Math.round(CSS_W * (h / w) * 0.75 + 60)
+    canvas.width = CSS_W * DPR
+    canvas.height = CSS_H * DPR
+    canvas.style.height = CSS_H + 'px'
+    ctx.scale(DPR, DPR)
+
+    const PAD = 36
+    const sc = Math.min((CSS_W - PAD*2) / w, (CSS_H - PAD*2) / h)
     const dw = w * sc, dh = h * sc
-    const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2
+    const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.clearRect(0, 0, CSS_W, CSS_H)
 
-    // Размеры — подпись ширины сверху, высоты слева
-    const dimColor = '#888780'
-    ctx.fillStyle = dimColor; ctx.font = '10px sans-serif'
+    // Сетка фона
+    ctx.strokeStyle = '#f0f0f0'; ctx.lineWidth = 0.5
+    const gridStep = sc * (w > 500 ? 100 : 50)
+    for (let x = ox; x <= ox+dw; x += gridStep) {
+      ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy+dh); ctx.stroke()
+    }
+    for (let y = oy; y <= oy+dh; y += gridStep) {
+      ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox+dw, y); ctx.stroke()
+    }
+
+    // Размерные линии
+    const dimColor = '#999'
+    ctx.fillStyle = dimColor; ctx.font = `${Math.max(9, 11/DPR)}px sans-serif`
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.fillText(`${w}`, ox + dw/2, oy - 10)
-    ctx.save(); ctx.translate(ox - 12, oy + dh/2); ctx.rotate(-Math.PI/2)
+    ctx.strokeStyle = dimColor; ctx.lineWidth = 0.5; ctx.setLineDash([3,3])
+    // Ширина сверху
+    ctx.beginPath(); ctx.moveTo(ox, oy-8); ctx.lineTo(ox+dw, oy-8); ctx.stroke()
+    ctx.fillText(`${w}`, ox+dw/2, oy-18)
+    // Высота слева
+    ctx.save(); ctx.translate(ox-18, oy+dh/2); ctx.rotate(-Math.PI/2)
     ctx.fillText(`${h}`, 0, 0); ctx.restore()
-    ctx.strokeStyle = dimColor; ctx.lineWidth = 0.5; ctx.setLineDash([2,2])
-    ctx.beginPath(); ctx.moveTo(ox, oy-5); ctx.lineTo(ox+dw, oy-5); ctx.stroke()
-    ctx.beginPath(); ctx.moveTo(ox-5, oy); ctx.lineTo(ox-5, oy+dh); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(ox-8, oy); ctx.lineTo(ox-8, oy+dh); ctx.stroke()
     ctx.setLineDash([])
 
-    // Внешний контур — используем превью если есть
+    // Внешний контур
     const verts = previewVerts || contour.vertices || makeRect(w, h)
     buildPath(ctx, verts, sc, ox, oy, dh)
     ctx.fillStyle = '#E6F1FB'; ctx.fill()
     ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.5; ctx.stroke()
 
-    // Holes (вырезы/выборки) — Y инвертирован
+    // Holes
     ;(contour.holes || []).forEach(hole => {
       const isCircle = hole.type === 'circle'
       const isPocket = hole.type === 'pocket'
@@ -152,7 +174,6 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
       if (isCircle) {
         const d = hole.d || 100
         const pos = resolvePos(hole.sides||[], hole.offsets||{}, w, h, d, d)
-        // Y инверсия: низ дырки в мировых = верх на canvas
         const cx2 = ox + (pos.x + d/2) * sc
         const cy2 = oy + dh - (pos.y + d/2) * sc
         ctx.beginPath(); ctx.arc(cx2, cy2, d/2*sc, 0, Math.PI*2)
@@ -160,7 +181,6 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
       } else {
         const hw = hole.hw || 200, hh = hole.hh || 100
         const pos = resolvePos(hole.sides||[], hole.offsets||{}, w, h, hw, hh)
-        // pos.y — мировая Y (от низа), на canvas верх = oy + dh - (pos.y + hh)*sc
         const cx2 = ox + pos.x * sc
         const cy2 = oy + dh - (pos.y + pos.h) * sc
         ctx.fillRect(cx2, cy2, pos.w*sc, pos.h*sc)
@@ -168,7 +188,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
       }
     })
 
-    // Пазы — Y инвертирован
+    // Пазы
     ;(contour.grooves || []).forEach(g => {
       ctx.fillStyle = 'rgba(250,199,117,0.8)'; ctx.strokeStyle = '#BA7517'; ctx.lineWidth = 1
       const isH = g.dir === 'horizontal'
@@ -181,15 +201,39 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
       ctx.strokeRect(cx2, cy2, pos.w*sc, pos.h*sc)
     })
 
-    // Маркеры внешнего контура
+    // Размеры отрезков контура
+    const n = verts.length
+    ctx.font = `${Math.max(8, 10)}px sans-serif`
+    ctx.fillStyle = '#185FA5'
+    ctx.strokeStyle = 'white'; ctx.lineWidth = 3
+    for (let i = 0; i < n; i++) {
+      const a = verts[i], b = verts[(i+1) % n]
+      const len = Math.round(Math.hypot(b.x - a.x, b.y - a.y))
+      if (len < 10) continue
+      // Середина отрезка на canvas
+      const mx = ox + (a.x + b.x)/2 * sc
+      const my = oy + dh - (a.y + b.y)/2 * sc
+      // Угол отрезка
+      const angle = Math.atan2(-(b.y - a.y), b.x - a.x) // минус Y из-за инверсии
+      ctx.save()
+      ctx.translate(mx, my)
+      ctx.rotate(angle)
+      // Белая подложка под текст
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
+      ctx.strokeText(`${len}`, 0, -3)
+      ctx.fillText(`${len}`, 0, -3)
+      ctx.restore()
+    }
+
+    // Маркеры
     const markers = getMarkers(verts, sc, ox, oy, dh)
     markers.forEach(m => {
       const isActive = m.idx === activeIdx
       ctx.beginPath()
-      ctx.arc(m.x, m.y, 3, 0, Math.PI * 2)
+      ctx.arc(m.x, m.y, isActive ? 5 : 3.5, 0, Math.PI * 2)
       ctx.fillStyle = isActive ? '#E24B4A' : '#185FA5'
       ctx.fill()
-      ctx.strokeStyle = 'white'; ctx.lineWidth = 1; ctx.stroke()
+      ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5; ctx.stroke()
     })
 
   }, [w, h, contour, activeIdx, previewVerts])
@@ -198,33 +242,33 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap }) {
     const canvas = ref.current
     if (!canvas || !w || !h) return
     const rect = canvas.getBoundingClientRect()
-    const scaleX = canvas.width / rect.width
-    const scaleY = canvas.height / rect.height
-    const cx = (e.clientX - rect.left) * scaleX
-    const cy = (e.clientY - rect.top) * scaleY
+    const DPR = window.devicePixelRatio || 1
+    const CSS_W = rect.width
+    const CSS_H = rect.height
+    const cx = (e.clientX - rect.left)
+    const cy = (e.clientY - rect.top)
 
-    const PW = canvas.width - 50, PH = canvas.height - 50
-    const sc = Math.min(PW / w, PH / h)
+    const PAD = 36
+    const sc = Math.min((CSS_W - PAD*2) / w, (CSS_H - PAD*2) / h)
     const dw = w * sc, dh = h * sc
-    const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2
+    const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
     const verts = contour.vertices || makeRect(w, h)
     const markers = getMarkers(verts, sc, ox, oy, dh)
-    const TAP_R = 18
+    const TAP_R = 20
     for (const m of markers) {
       if (Math.hypot(cx - m.x, cy - m.y) <= TAP_R) {
         onTap(m.idx)
         return
       }
     }
-    // Тап мимо — снимаем выбор
     onTap(null)
   }
 
   return (
-    <canvas ref={ref} width={280} height={200}
+    <canvas ref={ref}
       onClick={handleTap}
-      style={{ width:'100%', maxWidth:280, borderRadius:8, display:'block', margin:'0 auto', cursor:'pointer', touchAction:'manipulation' }} />
+      style={{ width:'100%', borderRadius:8, display:'block', cursor:'pointer', touchAction:'manipulation' }} />
   )
 }
 
@@ -715,18 +759,12 @@ export default function ContourEditor({ detail, onUpdate }) {
                 onChange={v => updateVertex(activeIdx, { ...activeVertex, r: v })} />
 
               {/* Шаг перемещения */}
-              <div style={{ marginTop:10, marginBottom:6 }}>
-                <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Шаг перемещения</label>
-                <div style={{ display:'flex', gap:4 }}>
-                  {[1, 5, 10, 50].map(s => (
-                    <button key={s} type="button" onClick={() => setMoveStep(s)}
-                      style={{ flex:1, padding:'5px 2px', fontSize:11, border: moveStep===s ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
-                        borderRadius:'var(--radius)', background: moveStep===s ? 'var(--blue-light)' : 'transparent',
-                        color: moveStep===s ? 'var(--blue)' : 'var(--text-muted)', cursor:'pointer' }}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
+              <div style={{ marginTop:10, marginBottom:6, display:'flex', alignItems:'center', gap:8 }}>
+                <label style={{ fontSize:10, color:'var(--text-hint)', flexShrink:0 }}>Шаг мм</label>
+                <input type="text" inputMode="decimal" value={moveStep}
+                  onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) setMoveStep(v) }}
+                  style={{ width:60, padding:'4px 6px', fontSize:13, borderRadius:'var(--radius)',
+                    border:'0.5px solid var(--border-md)' }} />
               </div>
 
               {/* Стрелки XY */}
