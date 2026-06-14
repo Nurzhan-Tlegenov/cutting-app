@@ -209,27 +209,72 @@ function ContourCanvas({ detail, contour, activeIdx, onTap }) {
 }
 
 // ─── Меню вершины ─────────────────────────────────────────────────────────────
-function VertexMenu({ idx, vertex, total, onChange, onInsertBefore, onInsertAfter, onDelete, onClose }) {
+function VertexMenu({ idx, vertex, total, onChange, onApplyType, onInsertBefore, onInsertAfter, onDelete, onClose }) {
   const canDelete = total > 3
+  const [dx, setDx] = useState(50)
+  const [dy, setDy] = useState(50)
+  const [r, setR] = useState(Math.abs(vertex.r) || 50)
+  const [selType, setSelType] = useState(null)
+
+  const BTNS = [
+    { id: 'none',    icon: '—',  label: 'Нет' },
+    { id: 'radius',  icon: '⌒',  label: 'Выпуклый' },
+    { id: 'concave', icon: '⌣',  label: 'Вогнутый' },
+    { id: 'chamfer', icon: '◣',  label: 'Фаска' },
+    { id: 'notch',   icon: '⌐',  label: 'Вырез' },
+  ]
+
+  const handleApply = (type) => {
+    onApplyType(idx, type, { r, dx, dy })
+    setSelType(type)
+  }
 
   return (
     <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:12, marginTop:8,
       border:'1.5px solid var(--blue)' }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
         <span style={{ fontSize:13, fontWeight:500, color:'var(--blue)' }}>
-          Точка #{idx + 1} · ({Math.round(vertex.x)}, {Math.round(vertex.y)})
+          Точка #{idx + 1}
         </span>
         <button type="button" onClick={onClose}
           style={{ background:'none', border:'none', fontSize:18, color:'var(--text-hint)', cursor:'pointer', padding:0, lineHeight:1 }}>✕</button>
       </div>
 
-      {/* Радиус */}
-      <div style={{ marginBottom:12 }}>
-        <NumField label="Радиус скругления R"
-          value={vertex.r || 0}
-          onChange={v => onChange({ ...vertex, r: v })} />
-        <p style={{ fontSize:10, color:'var(--text-hint)', marginTop:3 }}>0 = острый угол</p>
+      {/* Кнопки типа угла */}
+      <div style={{ display:'flex', gap:5, marginBottom:10 }}>
+        {BTNS.map(({id, icon, label}) => (
+          <button key={id} type="button" onClick={() => handleApply(id)}
+            style={{ flex:1, padding:'7px 2px', border: selType===id ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+              borderRadius:'var(--radius)', background: selType===id ? 'var(--blue-light)' : 'transparent',
+              fontSize:14, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1 }}>
+            <span>{icon}</span>
+            <span style={{ fontSize:8, color: selType===id ? 'var(--blue)' : 'var(--text-hint)' }}>{label}</span>
+          </button>
+        ))}
       </div>
+
+      {/* Параметры в зависимости от типа */}
+      {(selType === 'radius' || selType === 'concave') && (
+        <div style={{ marginBottom:10 }}>
+          <NumField label="Радиус R" value={r} onChange={setR} />
+        </div>
+      )}
+      {(selType === 'chamfer' || selType === 'notch') && (
+        <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+          <NumField label="По X" value={dx} onChange={setDx} />
+          <NumField label="По Y" value={dy} onChange={setDy} />
+        </div>
+      )}
+
+      {/* Радиус текущей точки (если не выбран тип) */}
+      {!selType && (
+        <div style={{ marginBottom:10 }}>
+          <NumField label="Радиус скругления R"
+            value={vertex.r || 0}
+            onChange={v => onChange({ ...vertex, r: v })} />
+          <p style={{ fontSize:10, color:'var(--text-hint)', marginTop:3 }}>0 = острый угол</p>
+        </div>
+      )}
 
       {/* Действия */}
       <div style={{ display:'flex', gap:6 }}>
@@ -339,7 +384,54 @@ export default function ContourEditor({ detail, onUpdate }) {
     setVertices(verts)
   }
 
-  // Вставить точку до или после
+  // Применить тип угла к базовой точке (добавляет/убирает вершины)
+  const applyCornerType = (idx, type, params = {}) => {
+    const verts = [...contour.vertices]
+    const n = verts.length
+    const curr = verts[idx]
+    const prev = verts[(idx - 1 + n) % n]
+    const next = verts[(idx + 1) % n]
+
+    // Убираем старые точки этого угла если они были добавлены ранее
+    // Определяем направления от угла к соседям
+    const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
+    const dx1 = next.x - curr.x, dy1 = next.y - curr.y
+    const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
+    const dx = params.dx || 50, dy = params.dy || 50
+
+    // Нормализованные направления
+    const nx0 = d0 > 0 ? dx0/d0 : 0, ny0 = d0 > 0 ? dy0/d0 : 0
+    const nx1 = d1 > 0 ? dx1/d1 : 0, ny1 = d1 > 0 ? dy1/d1 : 0
+
+    if (type === 'none') {
+      verts[idx] = { ...curr, r: 0, _corner: 'none' }
+      setVertices(verts)
+      setActiveIdx(idx)
+    } else if (type === 'radius') {
+      verts[idx] = { ...curr, r: params.r || 50, _corner: 'radius' }
+      setVertices(verts)
+      setActiveIdx(idx)
+    } else if (type === 'concave') {
+      verts[idx] = { ...curr, r: -(params.r || 50), _corner: 'concave' }
+      setVertices(verts)
+      setActiveIdx(idx)
+    } else if (type === 'chamfer') {
+      // Заменяем точку на 2 точки среза
+      const p1 = { x: curr.x + nx0*dx, y: curr.y + ny0*dx, r: 0, _corner: 'chamfer_a' }
+      const p2 = { x: curr.x + nx1*dy, y: curr.y + ny1*dy, r: 0, _corner: 'chamfer_b' }
+      verts.splice(idx, 1, p1, p2)
+      setVertices(verts)
+      setActiveIdx(null)
+    } else if (type === 'notch') {
+      // Заменяем точку на 3 точки выреза
+      const p1 = { x: curr.x + nx0*dx, y: curr.y + ny0*dx, r: 0, _corner: 'notch_a' }
+      const p2 = { x: curr.x + nx0*dx + nx1*dy, y: curr.y + ny0*dx + ny1*dy, r: 0, _corner: 'notch_in' }
+      const p3 = { x: curr.x + nx1*dy, y: curr.y + ny1*dy, r: 0, _corner: 'notch_b' }
+      verts.splice(idx, 1, p1, p2, p3)
+      setVertices(verts)
+      setActiveIdx(null)
+    }
+  }
   const insertVertex = (idx, after = false) => {
     const verts = contour.vertices
     const n = verts.length
@@ -412,6 +504,7 @@ export default function ContourEditor({ detail, onUpdate }) {
           vertex={activeVertex}
           total={contour.vertices.length}
           onChange={v => updateVertex(activeIdx, v)}
+          onApplyType={applyCornerType}
           onInsertBefore={() => insertVertex(activeIdx, false)}
           onInsertAfter={() => insertVertex(activeIdx, true)}
           onDelete={() => deleteVertex(activeIdx)}
