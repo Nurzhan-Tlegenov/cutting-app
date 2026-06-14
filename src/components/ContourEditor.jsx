@@ -788,29 +788,28 @@ export default function ContourEditor({ detail, onUpdate }) {
 
       {/* Canvas + кнопки типа рядом */}
       {w > 0 && h > 0 && (
-        <div style={{ display:'flex', gap:6, marginBottom:8, alignItems:'flex-start' }}>
+        <div style={{ display:'flex', gap:4, marginBottom:8, alignItems:'flex-start' }}>
 
-          {/* Переключатели слева */}
-          <div style={{ display:'flex', flexDirection:'column', gap:4, paddingTop:22 }}>
+          {/* Переключатели слева — компактные */}
+          <div style={{ display:'flex', flexDirection:'column', gap:3, paddingTop:0 }}>
             {[
-              { key:'markers', icon:'●', label:'Точки', val:showMarkers, set:setShowMarkers },
-              { key:'lengths', icon:'↔', label:'Размер', val:showLengths, set:setShowLengths },
-              { key:'angles',  icon:'∠', label:'Углы',   val:showAngles,  set:setShowAngles },
-            ].map(({key, icon, label, val, set}) => (
+              { key:'markers', icon:'●', val:showMarkers, set:setShowMarkers },
+              { key:'lengths', icon:'↔', val:showLengths, set:setShowLengths },
+              { key:'angles',  icon:'∠', val:showAngles,  set:setShowAngles },
+            ].map(({key, icon, val, set}) => (
               <button key={key} type="button" onClick={() => set(v => !v)}
-                style={{ width:36, padding:'5px 2px', border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                style={{ width:26, height:26, border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
                   borderRadius:'var(--radius)', background: val ? 'var(--blue-light)' : 'transparent',
-                  fontSize:13, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1 }}>
-                <span>{icon}</span>
-                <span style={{ fontSize:7, color: val ? 'var(--blue)' : 'var(--text-hint)', lineHeight:1 }}>{label}</span>
+                  fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                {icon}
               </button>
             ))}
           </div>
 
           {/* Canvas */}
           <div style={{ flex:1, minWidth:0 }}>
-            {!arcMode && (
-              <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
+            {!arcMode && !activeVertex && (
+              <p style={{ fontSize:10, color:'var(--text-hint)', textAlign:'center', marginBottom:2 }}>
                 Нажми на точку
               </p>
             )}
@@ -820,15 +819,48 @@ export default function ContourEditor({ detail, onUpdate }) {
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
           </div>
 
-          {/* Кнопки типа — только когда точка выбрана */}
-          {activeVertex && tab === 'contour' && (
-            <div style={{ display:'flex', flexDirection:'column', gap:5, paddingTop:22 }}>
+          {/* Список точек справа — всегда виден */}
+          <div style={{ display:'flex', flexDirection:'column', gap:3, maxHeight:280, overflowY:'auto' }}>
+            <span style={{ fontSize:8, color:'var(--text-hint)', textAlign:'center', marginBottom:1 }}>№</span>
+            {contour.vertices.map((v, i) => {
+              const isActive = i === activeIdx
+              const isArcSel = arcPoints.includes(i)
+              return (
+                <button key={i} type="button"
+                  onClick={() => {
+                    if (arcMode) {
+                      if (arcPoints.includes(i)) return
+                      const pts = [...arcPoints, i]
+                      setArcPoints(pts)
+                      if (pts.length === 3) applyArc(pts)
+                    } else {
+                      setActiveIdx(i)
+                      setMenuSelType(null)
+                      setPreviewVerts(null)
+                      setTab('contour')
+                    }
+                  }}
+                  style={{ width:28, height:28, border: isActive ? '1.5px solid var(--blue)' : isArcSel ? '1.5px solid #F5A623' : '0.5px solid var(--border-md)',
+                    borderRadius:'var(--radius)',
+                    background: isActive ? 'var(--blue)' : isArcSel ? '#F5A623' : 'var(--bg3)',
+                    color: isActive || isArcSel ? 'white' : 'var(--text-muted)',
+                    fontSize:10, fontWeight:600, cursor:'pointer',
+                    display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  {i+1}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Кнопки типа — только когда точка выбрана и не режим дуги */}
+          {activeVertex && tab === 'contour' && !arcMode && (
+            <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
               {[
                 { id:'none',    icon:'—',  label:'Нет' },
-                { id:'radius',  icon:'⌒',  label:'Радиус' },
-                { id:'chamfer', icon:'◣',  label:'Фаска' },
-                { id:'notch',   icon:'⌐',  label:'Вырез' },
-                { id:'arc',     icon:'〜', label:'Дуга' },
+                { id:'radius',  icon:'⌒',  label:'R' },
+                { id:'chamfer', icon:'◣',  label:'/' },
+                { id:'notch',   icon:'⌐',  label:'⌐' },
+                { id:'arc',     icon:'〜', label:'~' },
               ].map(({id, icon, label}) => (
                 <button key={id} type="button"
                   onClick={() => {
@@ -846,15 +878,27 @@ export default function ContourEditor({ detail, onUpdate }) {
                       calcPreview(activeIdx, id, { dx: menuDx, dy: menuDy })
                     }
                   }}
-                  style={{ width:44, padding:'6px 2px', border: menuSelType===id ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                  style={{ width:28, height:28, border: menuSelType===id ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
                     borderRadius:'var(--radius)', background: menuSelType===id ? 'var(--blue-light)' : 'transparent',
-                    fontSize:14, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1 }}>
-                  <span>{icon}</span>
-                  <span style={{ fontSize:8, color: menuSelType===id ? 'var(--blue)' : 'var(--text-hint)' }}>{label}</span>
+                    fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  {icon}
                 </button>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Подсказка в режиме дуги */}
+      {arcMode && (
+        <div style={{ background:'#FFF3CD', borderRadius:'var(--radius)', padding:'6px 8px',
+          marginBottom:8, fontSize:11, color:'#856404', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span>
+            {arcPoints.length === 1 ? '〜 Выбери контрольную точку' :
+             arcPoints.length === 2 ? '〜 Выбери конечную точку' : ''}
+          </span>
+          <button type="button" onClick={() => { setArcMode(false); setArcPoints([]); setMenuSelType(null) }}
+            style={{ background:'none', border:'none', color:'#856404', cursor:'pointer', fontSize:14 }}>✕</button>
         </div>
       )}
 
@@ -868,45 +912,8 @@ export default function ContourEditor({ detail, onUpdate }) {
               style={{ background:'none', border:'none', fontSize:16, color:'var(--text-hint)', cursor:'pointer', padding:0 }}>✕</button>
           </div>
 
-          {/* Дуга — выбор точек кнопками */}
-          {menuSelType === 'arc' && (
-            <div style={{ marginBottom:10 }}>
-              <div style={{ fontSize:11, color:'var(--text-hint)', marginBottom:6 }}>
-                {arcPoints.length === 1 ? 'Выбери контрольную точку (середину дуги):' :
-                 arcPoints.length === 2 ? 'Выбери конечную точку дуги:' :
-                 'Нажми на начальную точку:'}
-              </div>
-              <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginBottom:8 }}>
-                {contour.vertices.map((v, i) => {
-                  const isSelected = arcPoints.includes(i)
-                  const isStart = arcPoints[0] === i
-                  const isCp = arcPoints[1] === i
-                  return (
-                    <button key={i} type="button"
-                      onClick={() => {
-                        if (isSelected) return
-                        const pts = [...arcPoints, i]
-                        setArcPoints(pts)
-                        if (pts.length === 3) applyArc(pts)
-                      }}
-                      style={{ padding:'5px 8px', borderRadius:'var(--radius)', fontSize:11, border:'none',
-                        background: isStart ? 'var(--blue)' : isCp ? '#F5A623' : isSelected ? '#ccc' : 'var(--bg3)',
-                        color: isSelected ? 'white' : 'var(--text-muted)', cursor: isSelected ? 'default' : 'pointer',
-                        fontWeight: isSelected ? 600 : 400 }}>
-                      #{i+1} ({Math.round(v.x)}, {Math.round(v.y)})
-                    </button>
-                  )
-                })}
-              </div>
-              <button type="button"
-                onClick={() => { setArcMode(false); setArcPoints([]); setMenuSelType(null) }}
-                style={{ width:'100%', padding:'6px', border:'0.5px solid var(--border-md)',
-                  borderRadius:'var(--radius)', background:'transparent', fontSize:11,
-                  color:'var(--text-muted)', cursor:'pointer' }}>
-                Отмена
-              </button>
-            </div>
-          )}
+          {/* Радиус */}
+          {menuSelType === 'radius' && (
             <NumField label="Радиус R" value={menuR}
               onChange={v => { setMenuR(v); applyCornerType(activeIdx, 'radius', { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
           )}
