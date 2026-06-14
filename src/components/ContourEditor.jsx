@@ -107,7 +107,17 @@ function drawContourPath(ctx, contour, ox, oy, dw, dh, toC) {
     if ((tr.r||0) > 0) ctx.arcTo(ox+dw, oy, ox+dw, oy+TR.y, TR.x)
     else ctx.arc(ox+dw, oy, TR.x, Math.PI, Math.PI/2, true)
   } else if (tr.type === 'chamfer') { ctx.lineTo(ox+dw, oy+TR.y) }
-  else if (tr.type === 'notch') { ctx.lineTo(ox+dw-TR.x, oy); ctx.lineTo(ox+dw-TR.x, oy+TR.y); ctx.lineTo(ox+dw, oy+TR.y) }
+  else if (tr.type === 'notch') {
+    const ir = toC(tr.innerR || 0)
+    if (ir > 0) {
+      ctx.lineTo(ox+dw-TR.x, oy)
+      ctx.lineTo(ox+dw-TR.x, oy+TR.y-ir)
+      ctx.arcTo(ox+dw-TR.x, oy+TR.y, ox+dw-TR.x+ir, oy+TR.y, ir)
+      ctx.lineTo(ox+dw, oy+TR.y)
+    } else {
+      ctx.lineTo(ox+dw-TR.x, oy); ctx.lineTo(ox+dw-TR.x, oy+TR.y); ctx.lineTo(ox+dw, oy+TR.y)
+    }
+  }
   else ctx.lineTo(ox+dw, oy)
 
   ctx.lineTo(ox+dw, oy+dh-BR.y)
@@ -117,7 +127,17 @@ function drawContourPath(ctx, contour, ox, oy, dw, dh, toC) {
     if ((br.r||0) > 0) ctx.arcTo(ox+dw, oy+dh, ox+dw-BR.x, oy+dh, BR.y)
     else ctx.arc(ox+dw, oy+dh, BR.x, -Math.PI/2, Math.PI, true)
   } else if (br.type === 'chamfer') { ctx.lineTo(ox+dw-BR.x, oy+dh) }
-  else if (br.type === 'notch') { ctx.lineTo(ox+dw, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh) }
+  else if (br.type === 'notch') {
+    const ir = toC(br.innerR || 0)
+    if (ir > 0) {
+      ctx.lineTo(ox+dw, oy+dh-BR.y)
+      ctx.lineTo(ox+dw-BR.x+ir, oy+dh-BR.y)
+      ctx.arcTo(ox+dw-BR.x, oy+dh-BR.y, ox+dw-BR.x, oy+dh-BR.y+ir, ir)
+      ctx.lineTo(ox+dw-BR.x, oy+dh)
+    } else {
+      ctx.lineTo(ox+dw, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh-BR.y); ctx.lineTo(ox+dw-BR.x, oy+dh)
+    }
+  }
   else ctx.lineTo(ox+dw, oy+dh)
 
   ctx.lineTo(ox+BL.x, oy+dh)
@@ -127,7 +147,17 @@ function drawContourPath(ctx, contour, ox, oy, dw, dh, toC) {
     if ((bl.r||0) > 0) ctx.arcTo(ox, oy+dh, ox, oy+dh-BL.y, BL.x)
     else ctx.arc(ox, oy+dh, BL.x, 0, -Math.PI/2, true)
   } else if (bl.type === 'chamfer') { ctx.lineTo(ox, oy+dh-BL.y) }
-  else if (bl.type === 'notch') { ctx.lineTo(ox+BL.x, oy+dh); ctx.lineTo(ox+BL.x, oy+dh-BL.y); ctx.lineTo(ox, oy+dh-BL.y) }
+  else if (bl.type === 'notch') {
+    const ir = toC(bl.innerR || 0)
+    if (ir > 0) {
+      ctx.lineTo(ox+BL.x, oy+dh)
+      ctx.lineTo(ox+BL.x, oy+dh-BL.y+ir)
+      ctx.arcTo(ox+BL.x, oy+dh-BL.y, ox+BL.x-ir, oy+dh-BL.y, ir)
+      ctx.lineTo(ox, oy+dh-BL.y)
+    } else {
+      ctx.lineTo(ox+BL.x, oy+dh); ctx.lineTo(ox+BL.x, oy+dh-BL.y); ctx.lineTo(ox, oy+dh-BL.y)
+    }
+  }
   else ctx.lineTo(ox, oy+dh)
 
   ctx.lineTo(ox, oy+TL.y)
@@ -137,41 +167,107 @@ function drawContourPath(ctx, contour, ox, oy, dw, dh, toC) {
     if ((tl.r||0) > 0) ctx.arcTo(ox, oy, ox+TL.x, oy, TL.y)
     else ctx.arc(ox, oy, TL.x, Math.PI/2, 0, true)
   } else if (tl.type === 'chamfer') { ctx.lineTo(ox+TL.x, oy) }
-  else if (tl.type === 'notch') { ctx.lineTo(ox, oy+TL.y); ctx.lineTo(ox+TL.x, oy+TL.y); ctx.lineTo(ox+TL.x, oy) }
+  else if (tl.type === 'notch') {
+    const ir = toC(tl.innerR || 0)
+    if (ir > 0) {
+      ctx.lineTo(ox, oy+TL.y)
+      ctx.lineTo(ox+TL.x-ir, oy+TL.y)
+      ctx.arcTo(ox+TL.x, oy+TL.y, ox+TL.x, oy+TL.y-ir, ir)
+      ctx.lineTo(ox+TL.x, oy)
+    } else {
+      ctx.lineTo(ox, oy+TL.y); ctx.lineTo(ox+TL.x, oy+TL.y); ctx.lineTo(ox+TL.x, oy)
+    }
+  }
   else ctx.lineTo(ox, oy)
 
   ctx.closePath()
 }
 
-// Вычисляем позиции маркерных точек для углов
-function getCornerMarkers(contour, ox, oy, dw, dh, toC) {
+// Генерирует все маркерные точки контура
+// Каждая точка: { key, x, y, corner, cornerKey, isInner }
+// key — уникальный идентификатор точки
+// cornerKey — к какому углу относится ('tl'|'tr'|'br'|'bl')
+// isInner — внутренний угол (у notch)
+function getMarkers(contour, ox, oy, dw, dh, toC) {
   const c = contour || {}
   const corners = c.corners || {}
-  const tl = corners.tl || {}, tr = corners.tr || {}
-  const br = corners.br || {}, bl = corners.bl || {}
+  const markers = []
 
-  function offs(corner) {
-    if (!corner?.type || corner.type === 'none') return { x: 0, y: 0 }
-    if (corner.type === 'radius') return { x: toC(Math.abs(corner.r || 0)), y: toC(Math.abs(corner.r || 0)) }
-    if (corner.type === 'chamfer' || corner.type === 'notch') return { x: toC(corner.dx || 0), y: toC(corner.dy || 0) }
-    return { x: 0, y: 0 }
-  }
-
-  const TL = offs(tl), TR = offs(tr), BR = offs(br), BL = offs(bl)
-
-  // Маркер всегда в угловой точке детали
-  return [
-    { key: 'tl', x: ox,      y: oy,      corner: tl },
-    { key: 'tr', x: ox+dw,   y: oy,      corner: tr },
-    { key: 'br', x: ox+dw,   y: oy+dh,   corner: br },
-    { key: 'bl', x: ox,      y: oy+dh,   corner: bl },
+  const CORNERS = [
+    { key: 'tl', cx: ox,    cy: oy },
+    { key: 'tr', cx: ox+dw, cy: oy },
+    { key: 'br', cx: ox+dw, cy: oy+dh },
+    { key: 'bl', cx: ox,    cy: oy+dh },
   ]
+
+  CORNERS.forEach(({ key, cx, cy }) => {
+    const corner = corners[key] || {}
+    const type = corner.type || 'none'
+    const R  = toC(Math.abs(corner.r  || 0))
+    const dx = toC(corner.dx || 0)
+    const dy = toC(corner.dy || 0)
+
+    if (type === 'none') {
+      // 1 точка — сам угол
+      markers.push({ key, cornerKey: key, x: cx, y: cy, corner, isInner: false })
+    } else if (type === 'radius') {
+      // 2 точки — начало и конец дуги
+      if (key === 'tl') {
+        markers.push({ key: key+'_a', cornerKey: key, x: cx+R,  y: cy,   corner, isInner: false })
+        markers.push({ key: key+'_b', cornerKey: key, x: cx,    y: cy+R, corner, isInner: false })
+      } else if (key === 'tr') {
+        markers.push({ key: key+'_a', cornerKey: key, x: cx-R,  y: cy,   corner, isInner: false })
+        markers.push({ key: key+'_b', cornerKey: key, x: cx,    y: cy+R, corner, isInner: false })
+      } else if (key === 'br') {
+        markers.push({ key: key+'_a', cornerKey: key, x: cx,    y: cy-R, corner, isInner: false })
+        markers.push({ key: key+'_b', cornerKey: key, x: cx-R,  y: cy,   corner, isInner: false })
+      } else if (key === 'bl') {
+        markers.push({ key: key+'_a', cornerKey: key, x: cx,    y: cy-R, corner, isInner: false })
+        markers.push({ key: key+'_b', cornerKey: key, x: cx+R,  y: cy,   corner, isInner: false })
+      }
+    } else if (type === 'chamfer') {
+      // 2 точки — начало и конец среза
+      if (key === 'tl') {
+        markers.push({ key: key+'_a', cornerKey: key, x: cx+dx, y: cy,   corner, isInner: false })
+        markers.push({ key: key+'_b', cornerKey: key, x: cx,    y: cy+dy, corner, isInner: false })
+      } else if (key === 'tr') {
+        markers.push({ key: key+'_a', cornerKey: key, x: cx-dx, y: cy,   corner, isInner: false })
+        markers.push({ key: key+'_b', cornerKey: key, x: cx,    y: cy+dy, corner, isInner: false })
+      } else if (key === 'br') {
+        markers.push({ key: key+'_a', cornerKey: key, x: cx,    y: cy-dy, corner, isInner: false })
+        markers.push({ key: key+'_b', cornerKey: key, x: cx-dx, y: cy,   corner, isInner: false })
+      } else if (key === 'bl') {
+        markers.push({ key: key+'_a', cornerKey: key, x: cx,    y: cy-dy, corner, isInner: false })
+        markers.push({ key: key+'_b', cornerKey: key, x: cx+dx, y: cy,   corner, isInner: false })
+      }
+    } else if (type === 'notch') {
+      // 3 точки: 2 внешних + 1 внутренний угол
+      if (key === 'tl') {
+        markers.push({ key: key+'_a',   cornerKey: key, x: cx+dx, y: cy,    corner, isInner: false })
+        markers.push({ key: key+'_in',  cornerKey: key, x: cx+dx, y: cy+dy, corner, isInner: true  })
+        markers.push({ key: key+'_b',   cornerKey: key, x: cx,    y: cy+dy, corner, isInner: false })
+      } else if (key === 'tr') {
+        markers.push({ key: key+'_a',   cornerKey: key, x: cx-dx, y: cy,    corner, isInner: false })
+        markers.push({ key: key+'_in',  cornerKey: key, x: cx-dx, y: cy+dy, corner, isInner: true  })
+        markers.push({ key: key+'_b',   cornerKey: key, x: cx,    y: cy+dy, corner, isInner: false })
+      } else if (key === 'br') {
+        markers.push({ key: key+'_a',   cornerKey: key, x: cx,    y: cy-dy, corner, isInner: false })
+        markers.push({ key: key+'_in',  cornerKey: key, x: cx-dx, y: cy-dy, corner, isInner: true  })
+        markers.push({ key: key+'_b',   cornerKey: key, x: cx-dx, y: cy,    corner, isInner: false })
+      } else if (key === 'bl') {
+        markers.push({ key: key+'_a',   cornerKey: key, x: cx,    y: cy-dy, corner, isInner: false })
+        markers.push({ key: key+'_in',  cornerKey: key, x: cx+dx, y: cy-dy, corner, isInner: true  })
+        markers.push({ key: key+'_b',   cornerKey: key, x: cx+dx, y: cy,    corner, isInner: false })
+      }
+    }
+  })
+
+  return markers
 }
 
 // ─── Интерактивный Canvas ─────────────────────────────────────────────────────
 function InteractiveContour({ w, h, contour, activeCorner, onCornerTap }) {
   const ref = useRef(null)
-  const MARKER_R = 3
 
   useEffect(() => {
     const canvas = ref.current
@@ -227,16 +323,22 @@ function InteractiveContour({ w, h, contour, activeCorner, onCornerTap }) {
       ctx.strokeRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
     })
 
-    // Маркерные точки — маленькие, синие / активная красная
-    const markers = getCornerMarkers(contour, ox, oy, dw, dh, toC)
+    // Маркерные точки
+    const markers = getMarkers(contour, ox, oy, dw, dh, toC)
     markers.forEach(m => {
       const isActive = m.key === activeCorner
       ctx.beginPath()
-      ctx.arc(m.x, m.y, MARKER_R, 0, Math.PI*2)
+      if (m.isInner) {
+        // Внутренний угол — квадратик
+        const s = 4
+        ctx.rect(m.x - s/2, m.y - s/2, s, s)
+      } else {
+        ctx.arc(m.x, m.y, 3, 0, Math.PI*2)
+      }
       ctx.fillStyle = isActive ? '#E24B4A' : '#185FA5'
       ctx.fill()
       ctx.strokeStyle = 'white'
-      ctx.lineWidth = 1.5
+      ctx.lineWidth = 1
       ctx.stroke()
     })
 
@@ -257,12 +359,12 @@ function InteractiveContour({ w, h, contour, activeCorner, onCornerTap }) {
     const ox = (canvas.width - dw) / 2, oy = (canvas.height - dh) / 2
     const toC = v => (v || 0) * sc
 
-    const markers = getCornerMarkers(contour, ox, oy, dw, dh, toC)
+    const markers = getMarkers(contour, ox, oy, dw, dh, toC)
     const TAP_R = 18
     for (const m of markers) {
       const dist = Math.sqrt((cx - m.x)**2 + (cy - m.y)**2)
       if (dist <= TAP_R) {
-        onCornerTap(m.key)
+        onCornerTap(m.key, m.cornerKey, m.isInner)
         return
       }
     }
@@ -276,9 +378,10 @@ function InteractiveContour({ w, h, contour, activeCorner, onCornerTap }) {
 }
 
 // ─── Меню выбора типа угла ────────────────────────────────────────────────────
-function CornerMenu({ cornerKey, value = {}, onChange, onClose }) {
+function CornerMenu({ cornerKey, isInner, value = {}, onChange, onClose }) {
   const type = value.type || 'none'
   const isConcave = type === 'radius' && (value.r||0) < 0
+  const innerR = value.innerR || 0
 
   const BTNS = [
     { id: 'none',    icon: '—',  label: 'Нет' },
@@ -292,13 +395,33 @@ function CornerMenu({ cornerKey, value = {}, onChange, onClose }) {
 
   const handleType = (id) => {
     if (id === 'none') { onChange({ type: 'none' }); return }
-    if (id === 'radius')  onChange({ type: 'radius', r:  Math.abs(value.r  || 50) })
-    else if (id === 'concave') onChange({ type: 'radius', r: -(Math.abs(value.r || 50)) })
+    if (id === 'radius')   onChange({ type: 'radius',  r:  Math.abs(value.r  || 50) })
+    else if (id === 'concave') onChange({ type: 'radius',  r: -(Math.abs(value.r || 50)) })
     else if (id === 'chamfer') onChange({ type: 'chamfer', dx: value.dx || 50, dy: value.dy || 50 })
     else if (id === 'notch')   onChange({ type: 'notch',   dx: value.dx || 50, dy: value.dy || 50 })
   }
 
   const CORNER_LABELS = { tl:'↖ Верх-лево', tr:'↗ Верх-право', br:'↘ Низ-право', bl:'↙ Низ-лево' }
+
+  // Внутренний угол выреза — только радиус скругления
+  if (isInner) {
+    return (
+      <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:12, marginTop:8,
+        border:'1.5px solid var(--blue)' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+          <span style={{ fontSize:13, fontWeight:500, color:'var(--blue)' }}>
+            {CORNER_LABELS[cornerKey]} · внутренний угол
+          </span>
+          <button type="button" onClick={onClose}
+            style={{ background:'none', border:'none', fontSize:18, color:'var(--text-hint)', cursor:'pointer', padding:0, lineHeight:1 }}>✕</button>
+        </div>
+        <NumField label="Радиус скругления R"
+          value={innerR}
+          onChange={v => onChange({ ...value, innerR: v })} />
+        <p style={{ fontSize:10, color:'var(--text-hint)', marginTop:4 }}>0 = острый угол</p>
+      </div>
+    )
+  }
 
   return (
     <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:12, marginTop:8,
@@ -309,7 +432,6 @@ function CornerMenu({ cornerKey, value = {}, onChange, onClose }) {
           style={{ background:'none', border:'none', fontSize:18, color:'var(--text-hint)', cursor:'pointer', padding:0, lineHeight:1 }}>✕</button>
       </div>
 
-      {/* Кнопки типа */}
       <div style={{ display:'flex', gap:6, marginBottom:12 }}>
         {BTNS.map(({id, icon, label}) => (
           <button key={id} type="button" onClick={() => handleType(id)}
@@ -323,7 +445,6 @@ function CornerMenu({ cornerKey, value = {}, onChange, onClose }) {
         ))}
       </div>
 
-      {/* Параметры */}
       {type === 'radius' && (
         <NumField label="Радиус R" value={Math.abs(value.r ?? 50)}
           onChange={v => onChange({ ...value, r: isConcave ? -Math.abs(v) : Math.abs(v) })} />
@@ -365,16 +486,15 @@ function CollapsibleItem({ title, onRemove, children }) {
 export default function ContourEditor({ detail, onUpdate }) {
   const contour = detail.contour || { corners:{}, cutouts:[], grooves:[] }
   const [tab, setTab] = useState('corners')
-  const [activeCorner, setActiveCorner] = useState(null) // 'tl'|'tr'|'br'|'bl'|null
+  const [activeMarker, setActiveMarker] = useState(null) // { key, cornerKey, isInner }
   const w = Number(detail.w) || 0
   const h = Number(detail.h) || 0
 
   const upd = (patch) => onUpdate({ ...detail, contour: { ...contour, ...patch } })
-
   const setCorner = (key, val) => upd({ corners: { ...contour.corners, [key]: val } })
 
-  const handleCornerTap = (key) => {
-    setActiveCorner(key)
+  const handleCornerTap = (key, cornerKey, isInner) => {
+    setActiveMarker({ key, cornerKey, isInner })
     setTab('corners')
   }
 
@@ -410,23 +530,24 @@ export default function ContourEditor({ detail, onUpdate }) {
           <p style={{ fontSize:11, color:'var(--text-hint)', textAlign:'center', marginBottom:4 }}>
             Нажми на угол чтобы изменить
           </p>
-          <InteractiveContour w={w} h={h} contour={contour} activeCorner={activeCorner} onCornerTap={handleCornerTap} />
+          <InteractiveContour w={w} h={h} contour={contour} activeCorner={activeMarker?.key} onCornerTap={handleCornerTap} />
         </div>
       )}
 
-      {/* Меню угла — показывается под canvas при выборе */}
-      {activeCorner && tab === 'corners' && (
+      {/* Меню угла */}
+      {activeMarker && tab === 'corners' && (
         <CornerMenu
-          cornerKey={activeCorner}
-          value={contour.corners?.[activeCorner] || {}}
-          onChange={v => setCorner(activeCorner, v)}
-          onClose={() => setActiveCorner(null)} />
+          cornerKey={activeMarker.cornerKey}
+          isInner={activeMarker.isInner}
+          value={contour.corners?.[activeMarker.cornerKey] || {}}
+          onChange={v => setCorner(activeMarker.cornerKey, v)}
+          onClose={() => setActiveMarker(null)} />
       )}
 
       {/* Вкладки */}
       <div style={{ display:'flex', gap:4, margin:'10px 0 10px', background:'var(--bg2)', borderRadius:'var(--radius)', padding:3 }}>
         {[['corners','Углы'],['cutouts','Вырезы'],['grooves','Пазы']].map(([id,label])=>(
-          <button key={id} type="button" onClick={()=>{ setTab(id); if(id!=='corners') setActiveCorner(null) }}
+          <button key={id} type="button" onClick={()=>{ setTab(id); if(id!=='corners') setActiveMarker(null) }}
             style={{ flex:1, padding:'6px 4px', border:'none', borderRadius:6, fontSize:12,
               background: tab===id?'var(--bg)':'transparent',
               color: tab===id?'var(--blue)':'var(--text-hint)',
@@ -436,8 +557,8 @@ export default function ContourEditor({ detail, onUpdate }) {
         ))}
       </div>
 
-      {/* УГЛЫ — быстрые кнопки (когда нет активного угла) */}
-      {tab==='corners' && !activeCorner && (
+      {/* УГЛЫ — быстрые кнопки */}
+      {tab==='corners' && !activeMarker && (
         <div style={{ display:'flex', gap:6 }}>
           <button type="button"
             onClick={()=>upd({corners:{tl:{type:'radius',r:50},tr:{type:'radius',r:50},br:{type:'radius',r:50},bl:{type:'radius',r:50}}})}
@@ -526,7 +647,7 @@ export default function ContourEditor({ detail, onUpdate }) {
       )}
 
       {hasContour && (
-        <button type="button" onClick={()=>{ upd({corners:{},cutouts:[],grooves:[]}); setActiveCorner(null) }}
+        <button type="button" onClick={()=>{ upd({corners:{},cutouts:[],grooves:[]}); setActiveMarker(null) }}
           style={{ width:'100%', marginTop:8, padding:'6px', border:'0.5px solid var(--danger)',
             borderRadius:'var(--radius)', background:'transparent', fontSize:11, color:'var(--danger)', cursor:'pointer' }}>
           Сбросить контур
