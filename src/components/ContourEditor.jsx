@@ -141,12 +141,22 @@ function ContourCanvas({ detail, contour, activeIdx, onTap }) {
 
     // Holes (вырезы/выборки)
     ;(contour.holes || []).forEach(hole => {
-      if (hole.vertices && hole.vertices.length >= 3) {
-        buildPath(ctx, hole.vertices, sc, ox, oy)
-        ctx.fillStyle = hole.type === 'pocket' ? 'rgba(250,199,117,0.4)' : '#fff'
-        ctx.fill()
-        ctx.strokeStyle = hole.type === 'pocket' ? '#BA7517' : '#E24B4A'
-        ctx.lineWidth = 1; ctx.stroke()
+      const isCircle = hole.type === 'circle'
+      const isPocket = hole.type === 'pocket'
+      ctx.fillStyle = isPocket ? 'rgba(250,199,117,0.4)' : 'white'
+      ctx.strokeStyle = isPocket ? '#BA7517' : '#E24B4A'
+      ctx.lineWidth = 1
+      if (isCircle) {
+        const d = hole.d || 100
+        const pos = resolvePos(hole.sides||[], hole.offsets||{}, w, h, d, d)
+        const cx2 = ox + (pos.x + d/2) * sc, cy2 = oy + (pos.y + d/2) * sc
+        ctx.beginPath(); ctx.arc(cx2, cy2, d/2*sc, 0, Math.PI*2)
+        ctx.fill(); ctx.stroke()
+      } else {
+        const hw = hole.hw || 200, hh = hole.hh || 100
+        const pos = resolvePos(hole.sides||[], hole.offsets||{}, w, h, hw, hh)
+        ctx.fillRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
+        ctx.strokeRect(ox+pos.x*sc, oy+pos.y*sc, pos.w*sc, pos.h*sc)
       }
     })
 
@@ -224,26 +234,31 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onInsertBefore,
     { id: 'notch',   icon: '⌐',  label: 'Вырез' },
   ]
 
-  const handleApply = (type) => {
-    onApplyType(idx, type, { r, dx, dy })
+  const handleSelectType = (type) => {
     setSelType(type)
+    // Для none/radius/concave — применяем сразу
+    if (type === 'none' || type === 'radius' || type === 'concave') {
+      onApplyType(idx, type, { r, dx, dy })
+    }
+  }
+
+  const handleApply = () => {
+    onApplyType(idx, selType, { r, dx, dy })
   }
 
   return (
     <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:12, marginTop:8,
       border:'1.5px solid var(--blue)' }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
-        <span style={{ fontSize:13, fontWeight:500, color:'var(--blue)' }}>
-          Точка #{idx + 1}
-        </span>
+        <span style={{ fontSize:13, fontWeight:500, color:'var(--blue)' }}>Точка #{idx + 1}</span>
         <button type="button" onClick={onClose}
           style={{ background:'none', border:'none', fontSize:18, color:'var(--text-hint)', cursor:'pointer', padding:0, lineHeight:1 }}>✕</button>
       </div>
 
-      {/* Кнопки типа угла */}
+      {/* Кнопки типа */}
       <div style={{ display:'flex', gap:5, marginBottom:10 }}>
         {BTNS.map(({id, icon, label}) => (
-          <button key={id} type="button" onClick={() => handleApply(id)}
+          <button key={id} type="button" onClick={() => handleSelectType(id)}
             style={{ flex:1, padding:'7px 2px', border: selType===id ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
               borderRadius:'var(--radius)', background: selType===id ? 'var(--blue-light)' : 'transparent',
               fontSize:14, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1 }}>
@@ -253,20 +268,44 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onInsertBefore,
         ))}
       </div>
 
-      {/* Параметры в зависимости от типа */}
+      {/* Параметры радиуса */}
       {(selType === 'radius' || selType === 'concave') && (
         <div style={{ marginBottom:10 }}>
-          <NumField label="Радиус R" value={r} onChange={setR} />
-        </div>
-      )}
-      {(selType === 'chamfer' || selType === 'notch') && (
-        <div style={{ display:'flex', gap:8, marginBottom:10 }}>
-          <NumField label="По X" value={dx} onChange={setDx} />
-          <NumField label="По Y" value={dy} onChange={setDy} />
+          <NumField label="Радиус R" value={r} onChange={v => { setR(v); onApplyType(idx, selType, { r: v, dx, dy }) }} />
         </div>
       )}
 
-      {/* Радиус текущей точки (если не выбран тип) */}
+      {/* Параметры фаски */}
+      {selType === 'chamfer' && (
+        <div style={{ marginBottom:10 }}>
+          <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+            <NumField label="По X →" value={dx} onChange={setDx} />
+            <NumField label="По Y ↓" value={dy} onChange={setDy} />
+          </div>
+          <button type="button" onClick={handleApply}
+            style={{ width:'100%', padding:'8px', background:'var(--blue)', color:'white', border:'none',
+              borderRadius:'var(--radius)', fontSize:12, cursor:'pointer' }}>
+            Применить фаску
+          </button>
+        </div>
+      )}
+
+      {/* Параметры выреза */}
+      {selType === 'notch' && (
+        <div style={{ marginBottom:10 }}>
+          <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+            <NumField label="По X →" value={dx} onChange={setDx} />
+            <NumField label="По Y ↓" value={dy} onChange={setDy} />
+          </div>
+          <button type="button" onClick={handleApply}
+            style={{ width:'100%', padding:'8px', background:'var(--blue)', color:'white', border:'none',
+              borderRadius:'var(--radius)', fontSize:12, cursor:'pointer' }}>
+            Применить вырез
+          </button>
+        </div>
+      )}
+
+      {/* Радиус текущей точки (если тип не выбран) */}
       {!selType && (
         <div style={{ marginBottom:10 }}>
           <NumField label="Радиус скругления R"
@@ -454,13 +493,10 @@ export default function ContourEditor({ detail, onUpdate }) {
 
   // Holes
   const addHole = (type) => {
-    const size = Math.min(w, h) * 0.3
-    const cx = w / 2, cy = h / 2, s = size / 2
-    const verts = [
-      { x: cx-s, y: cy-s, r: 0 }, { x: cx+s, y: cy-s, r: 0 },
-      { x: cx+s, y: cy+s, r: 0 }, { x: cx-s, y: cy+s, r: 0 },
-    ]
-    upd({ holes: [...contour.holes, { type, vertices: verts, depth: type === 'pocket' ? 10 : 0 }] })
+    const base = { type, sides: [], offsets: {} }
+    if (type === 'circle') upd({ holes: [...contour.holes, { ...base, d: 100 }] })
+    else if (type === 'pocket') upd({ holes: [...contour.holes, { ...base, hw: 200, hh: 100, depth: 10 }] })
+    else upd({ holes: [...contour.holes, { ...base, hw: 200, hh: 100 }] })
   }
   const updHole = (i, patch) => {
     const holes = [...contour.holes]
@@ -545,11 +581,16 @@ export default function ContourEditor({ detail, onUpdate }) {
       {/* ВЫРЕЗЫ */}
       {tab==='holes' && (
         <div>
-          <div style={{ display:'flex', gap:8, marginBottom:12 }}>
-            <button type="button" onClick={() => addHole('cutout')}
+          <div style={{ display:'flex', gap:6, marginBottom:12, flexWrap:'wrap' }}>
+            <button type="button" onClick={() => addHole('rect')}
               style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
                 background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
-              + Сквозной вырез
+              + Прямоугольный
+            </button>
+            <button type="button" onClick={() => addHole('circle')}
+              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+              + Круглый
             </button>
             <button type="button" onClick={() => addHole('pocket')}
               style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
@@ -560,16 +601,34 @@ export default function ContourEditor({ detail, onUpdate }) {
           {!contour.holes.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет вырезов</p>}
           {contour.holes.map((hole, i) => (
             <CollapsibleItem key={i}
-              title={`${hole.type === 'pocket' ? '▣ Выборка' : '□ Сквозной'} #${i+1}`}
+              title={`${hole.type==='pocket'?'▣ Выборка':hole.type==='circle'?'○ Круглый':'□ Прямоугольный'} #${i+1}`}
               onRemove={() => upd({ holes: contour.holes.filter((_,j)=>j!==i) })}>
-              {hole.type === 'pocket' && (
-                <div style={{ marginBottom:8 }}>
-                  <NumField label="Глубина" value={hole.depth ?? 10} onChange={v => updHole(i, { depth: v })} />
+
+              {/* Круглый */}
+              {hole.type === 'circle' && (
+                <div style={{ marginBottom:10 }}>
+                  <NumField label="Диаметр D" value={hole.d??100} onChange={v=>updHole(i,{d:v})} />
                 </div>
               )}
-              <p style={{ fontSize:11, color:'var(--text-hint)', marginBottom:6 }}>
-                {hole.vertices?.length || 0} точек · редактирование формы в контуре
-              </p>
+
+              {/* Прямоугольный / Выборка */}
+              {(hole.type === 'rect' || hole.type === 'pocket') && (
+                <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                  <NumField label="Длина" value={hole.hw??200} onChange={v=>updHole(i,{hw:v})} />
+                  <NumField label="Ширина" value={hole.hh??100} onChange={v=>updHole(i,{hh:v})} />
+                </div>
+              )}
+
+              {/* Глубина для выборки */}
+              {hole.type === 'pocket' && (
+                <div style={{ marginBottom:10 }}>
+                  <NumField label="Глубина" value={hole.depth??10} onChange={v=>updHole(i,{depth:v})} />
+                </div>
+              )}
+
+              {/* Позиция */}
+              <SideOffsetPicker activeSides={hole.sides||[]} offsets={hole.offsets||{}}
+                onChange={({sides,offsets})=>updHole(i,{sides,offsets})} />
             </CollapsibleItem>
           ))}
         </div>
