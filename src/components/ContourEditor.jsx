@@ -113,20 +113,58 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     const prev = cv[(i - 1 + n) % n]
     const r = curr.r
 
-    // Для соседства с дугой: берём касательную в точке соединения
-    // Если предыдущая — arc, то направление от предпредыдущей через arc к curr
+    // Вычисляем касательную к дуге в точке соединения с curr
+    // Для этого находим центр описанной окружности дуги и берём перпендикуляр
+    const arcTangentAt = (arcPtIdx, atPt) => {
+      // Собираем группу arc-точек
+      let start = arcPtIdx
+      while (cv[(start - 1 + n) % n].type === 'arc') start = (start - 1 + n) % n
+      let end = arcPtIdx
+      while (cv[(end + 1) % n].type === 'arc') end = (end + 1) % n
+
+      const p1 = cv[(start - 1 + n) % n]            // начало дуги
+      const pm = cv[start]                            // первая arc-точка
+      const p3 = cv[(end + 1) % n]                   // конец дуги
+
+      // Центр окружности через p1, pm, p3
+      const ax = p1.x, ay = p1.y
+      const bx = pm.x, by = pm.y
+      const cx2 = p3.x, cy2 = p3.y
+      const D = 2*(ax*(by-cy2)+bx*(cy2-ay)+cx2*(ay-by))
+      if (Math.abs(D) < 0.001) return null
+
+      const ux = ((ax*ax+ay*ay)*(by-cy2)+(bx*bx+by*by)*(cy2-ay)+(cx2*cx2+cy2*cy2)*(ay-by))/D
+      const uy = ((ax*ax+ay*ay)*(cx2-bx)+(bx*bx+by*by)*(ax-cx2)+(cx2*cx2+cy2*cy2)*(bx-ax))/D
+
+      // Касательная в точке atPt = перпендикуляр к вектору (center→atPt)
+      const rx = atPt.x - ux, ry = atPt.y - uy
+      // Два перпендикуляра: (-ry, rx) и (ry, -rx)
+      // Выбираем тот что смотрит от curr наружу (в сторону противоположной точки)
+      return { t1: { x: atPt.x - ry, y: atPt.y + rx }, t2: { x: atPt.x + ry, y: atPt.y - rx } }
+    }
+
     let prevDir = prev
     if (prev.type === 'arc') {
-      const pp = cv[(i - 2 + n) % n]
-      // Касательная в конце дуги — направление от pp через prev к curr
-      prevDir = { x: curr.x - (prev.x - pp.x)*0.01, y: curr.y - (prev.y - pp.y)*0.01 }
-      // Просто берём точку чуть раньше по дуге — используем pp как направление
-      prevDir = pp
+      const tg = arcTangentAt((i - 1 + n) % n, curr)
+      if (tg) {
+        // Берём точку на касательной в сторону "от дуги"
+        const pp = cv[(i - 2 + n) % n]
+        // Выбираем направление касательной совпадающее с направлением обхода
+        const d1 = Math.hypot(tg.t1.x - pp.x, tg.t1.y - pp.y)
+        const d2 = Math.hypot(tg.t2.x - pp.x, tg.t2.y - pp.y)
+        prevDir = d1 < d2 ? tg.t1 : tg.t2
+      }
     }
+
     let nextDir = next
     if (next.type === 'arc') {
-      const nn = cv[(i + 2) % n]
-      nextDir = nn
+      const tg = arcTangentAt((i + 1) % n, curr)
+      if (tg) {
+        const nn = cv[(i + 2) % n]
+        const d1 = Math.hypot(tg.t1.x - nn.x, tg.t1.y - nn.y)
+        const d2 = Math.hypot(tg.t2.x - nn.x, tg.t2.y - nn.y)
+        nextDir = d1 < d2 ? tg.t1 : tg.t2
+      }
     }
 
     const dx0 = prevDir.x - curr.x, dy0 = prevDir.y - curr.y
@@ -134,7 +172,6 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
 
     if (r <= 0) {
-      // Нет радиуса — просто линия к точке
       if (i === 0) ctx.moveTo(curr.x, curr.y)
       else ctx.lineTo(curr.x, curr.y)
     } else if (d0 === 0 || d1 === 0) {
