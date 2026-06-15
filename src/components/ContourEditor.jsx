@@ -113,37 +113,59 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     const prev = cv[(i - 1 + n) % n]
     const r = curr.r
 
-    // Пропускаем arc-точки при расчёте радиуса предыдущей
-    const prevReal = prev.type === 'arc' ? cv[(i - 2 + n) % n] : prev
-    const nextReal = next.type === 'arc' ? cv[(i + 2) % n] : next
+    // Для соседства с дугой: берём касательную в точке соединения
+    // Если предыдущая — arc, то направление от предпредыдущей через arc к curr
+    let prevDir = prev
+    if (prev.type === 'arc') {
+      const pp = cv[(i - 2 + n) % n]
+      // Касательная в конце дуги — направление от pp через prev к curr
+      prevDir = { x: curr.x - (prev.x - pp.x)*0.01, y: curr.y - (prev.y - pp.y)*0.01 }
+      // Просто берём точку чуть раньше по дуге — используем pp как направление
+      prevDir = pp
+    }
+    let nextDir = next
+    if (next.type === 'arc') {
+      const nn = cv[(i + 2) % n]
+      nextDir = nn
+    }
 
-    if (r <= 0 || i === 0) {
-      if (i > 0) ctx.lineTo(curr.x, curr.y)
+    const dx0 = prevDir.x - curr.x, dy0 = prevDir.y - curr.y
+    const dx1 = nextDir.x - curr.x, dy1 = nextDir.y - curr.y
+    const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
+
+    if (r <= 0) {
+      // Нет радиуса — просто линия к точке
+      if (i === 0) ctx.moveTo(curr.x, curr.y)
+      else ctx.lineTo(curr.x, curr.y)
+    } else if (d0 === 0 || d1 === 0) {
+      ctx.lineTo(curr.x, curr.y)
     } else {
-      const dx0 = prevReal.x - curr.x, dy0 = prevReal.y - curr.y
-      const dx1 = nextReal.x - curr.x, dy1 = nextReal.y - curr.y
-      const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
-      if (d0 === 0 || d1 === 0) { ctx.lineTo(curr.x, curr.y); continue }
       const t = Math.min(r, d0, d1)
       const tx0 = curr.x + (dx0/d0)*t, ty0 = curr.y + (dy0/d0)*t
       const tx1 = curr.x + (dx1/d1)*t, ty1 = curr.y + (dy1/d1)*t
-      ctx.lineTo(tx0, ty0)
+      if (i === 0) ctx.moveTo(tx0, ty0)
+      else ctx.lineTo(tx0, ty0)
       ctx.arcTo(curr.x, curr.y, tx1, ty1, t)
     }
   }
   ctx.closePath()
 }
 
-// ─── resolvePos для вырезов ───────────────────────────────────────────────────
+// ─── resolvePos для вырезов (Y вверх — 0,0 нижний левый) ────────────────────
 function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
   let x = (panelW - itemW) / 2, y = (panelH - itemH) / 2
   let w = itemW, h = itemH
-  if (sides.includes('left') && sides.includes('right')) { x = offsets.left ?? 0; w = panelW - (offsets.left ?? 0) - (offsets.right ?? 0) }
-  else if (sides.includes('left')) x = offsets.left ?? 0
-  else if (sides.includes('right')) x = panelW - itemW - (offsets.right ?? 0)
-  if (sides.includes('top') && sides.includes('bottom')) { y = offsets.top ?? 0; h = panelH - (offsets.top ?? 0) - (offsets.bottom ?? 0) }
-  else if (sides.includes('top')) y = offsets.top ?? 0
-  else if (sides.includes('bottom')) y = panelH - itemH - (offsets.bottom ?? 0)
+  if (sides.includes('left') && sides.includes('right')) {
+    x = offsets.left ?? 0
+    w = panelW - (offsets.left ?? 0) - (offsets.right ?? 0)
+  } else if (sides.includes('left'))  x = offsets.left ?? 0
+  else if (sides.includes('right'))   x = panelW - itemW - (offsets.right ?? 0)
+  // Y вверх: 'bottom' = отступ от низа = малый Y, 'top' = отступ от верха = большой Y
+  if (sides.includes('top') && sides.includes('bottom')) {
+    y = offsets.bottom ?? 0
+    h = panelH - (offsets.bottom ?? 0) - (offsets.top ?? 0)
+  } else if (sides.includes('bottom')) y = offsets.bottom ?? 0
+  else if (sides.includes('top'))      y = panelH - itemH - (offsets.top ?? 0)
   return { x, y, w, h }
 }
 
