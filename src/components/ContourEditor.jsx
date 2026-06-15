@@ -113,85 +113,67 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     const prev = cv[(i - 1 + n) % n]
     const r = curr.r
 
-    // Вычисляем касательную к дуге в точке соединения с curr
-    // Для этого находим центр описанной окружности дуги и берём перпендикуляр
-    const arcTangentAt = (arcPtIdx, atPt) => {
-      // Собираем группу arc-точек
-      let start = arcPtIdx
-      while (cv[(start - 1 + n) % n].type === 'arc') start = (start - 1 + n) % n
-      let end = arcPtIdx
-      while (cv[(end + 1) % n].type === 'arc') end = (end + 1) % n
+    // Вычисляем касательный вектор прихода t0 и ухода t1
+    // Для обычной точки — направление вдоль отрезка
+    // Для arc-соседа — перпендикуляр к (центр_окружности → curr)
 
-      const p1 = cv[(start - 1 + n) % n]            // начало дуги
-      const pm = cv[start]                            // первая arc-точка
-      const p3 = cv[(end + 1) % n]                   // конец дуги
-
-      // Центр окружности через p1, pm, p3
-      const ax = p1.x, ay = p1.y
-      const bx = pm.x, by = pm.y
-      const cx2 = p3.x, cy2 = p3.y
-      const D = 2*(ax*(by-cy2)+bx*(cy2-ay)+cx2*(ay-by))
+    const getArcCC = (ni) => {
+      let si = ni; while (cv[(si-1+n)%n].type === 'arc') si = (si-1+n)%n
+      let ei = ni; while (cv[(ei+1)%n].type === 'arc') ei = (ei+1)%n
+      const p1 = cv[(si-1+n)%n], pm = cv[si], p3 = cv[(ei+1)%n]
+      const D = 2*(p1.x*(pm.y-p3.y)+pm.x*(p3.y-p1.y)+p3.x*(p1.y-pm.y))
       if (Math.abs(D) < 0.001) return null
-
-      const ux = ((ax*ax+ay*ay)*(by-cy2)+(bx*bx+by*by)*(cy2-ay)+(cx2*cx2+cy2*cy2)*(ay-by))/D
-      const uy = ((ax*ax+ay*ay)*(cx2-bx)+(bx*bx+by*by)*(ax-cx2)+(cx2*cx2+cy2*cy2)*(bx-ax))/D
-
-      // Касательная в точке atPt = перпендикуляр к вектору (center→atPt)
-      const rx = atPt.x - ux, ry = atPt.y - uy
-      // Два перпендикуляра: (-ry, rx) и (ry, -rx)
-      // Выбираем тот что смотрит от curr наружу (в сторону противоположной точки)
-      return { t1: { x: atPt.x - ry, y: atPt.y + rx }, t2: { x: atPt.x + ry, y: atPt.y - rx } }
+      const ux = ((p1.x*p1.x+p1.y*p1.y)*(pm.y-p3.y)+(pm.x*pm.x+pm.y*pm.y)*(p3.y-p1.y)+(p3.x*p3.x+p3.y*p3.y)*(p1.y-pm.y))/D
+      const uy = ((p1.x*p1.x+p1.y*p1.y)*(p3.x-pm.x)+(pm.x*pm.x+pm.y*pm.y)*(p1.x-p3.x)+(p3.x*p3.x+p3.y*p3.y)*(pm.x-p1.x))/D
+      return { cx: ux, cy: uy, p1, p3 }
     }
 
-    let prevDir = prev
-    if (prev.type === 'arc') {
-      const tg = arcTangentAt((i - 1 + n) % n, curr)
-      if (tg) {
-        // Направление "входа" в curr со стороны дуги:
-        // берём точку начала дуги и смотрим в каком направлении двигалась дуга к curr
-        let arcStart = (i - 1 + n) % n
-        while (cv[(arcStart - 1 + n) % n].type === 'arc') arcStart = (arcStart - 1 + n) % n
-        const pStart = cv[(arcStart - 1 + n) % n]
-        // Вектор от начала дуги к curr — общее направление движения
-        const moveX = curr.x - pStart.x, moveY = curr.y - pStart.y
-        // Выбираем касательную совпадающую с этим направлением (dot > 0)
-        const dot1 = (tg.t1.x - curr.x)*moveX + (tg.t1.y - curr.y)*moveY
-        const dot2 = (tg.t2.x - curr.x)*moveX + (tg.t2.y - curr.y)*moveY
-        prevDir = dot1 > dot2 ? tg.t1 : tg.t2
-      }
+    const getTangent = (neighborIdx) => {
+      const nb = cv[neighborIdx]
+      if (nb.type !== 'arc') return null // обычная точка — используем координаты
+      const info = getArcCC(neighborIdx)
+      if (!info) return null
+      const { cx, cy, p1, p3 } = info
+      const rx = curr.x - cx, ry = curr.y - cy
+      const R = Math.hypot(rx, ry)
+      if (R === 0) return null
+      // Два варианта касательной
+      const ta1 = { x: -ry/R, y: rx/R }
+      const ta2 = { x:  ry/R, y: -rx/R }
+      // Выбираем совпадающий с направлением дуги (p1→p3)
+      const mx = p3.x - p1.x, my = p3.y - p1.y
+      return (ta1.x*mx + ta1.y*my > 0) ? ta1 : ta2
     }
 
-    let nextDir = next
-    if (next.type === 'arc') {
-      const tg = arcTangentAt((i + 1) % n, curr)
-      if (tg) {
-        // Направление "выхода" из curr в сторону дуги
-        let arcEnd = (i + 1) % n
-        while (cv[(arcEnd + 1) % n].type === 'arc') arcEnd = (arcEnd + 1) % n
-        const pEnd = cv[(arcEnd + 1) % n]
-        const moveX = pEnd.x - curr.x, moveY = pEnd.y - curr.y
-        const dot1 = (tg.t1.x - curr.x)*moveX + (tg.t1.y - curr.y)*moveY
-        const dot2 = (tg.t2.x - curr.x)*moveX + (tg.t2.y - curr.y)*moveY
-        nextDir = dot1 > dot2 ? tg.t1 : tg.t2
-      }
+    // t0: откуда пришли
+    const t0 = getTangent((i-1+n)%n)
+    let t0x, t0y
+    if (t0) { t0x = t0.x; t0y = t0.y }
+    else {
+      const d = Math.hypot(curr.x-prev.x, curr.y-prev.y)
+      t0x = d > 0 ? (curr.x-prev.x)/d : 0
+      t0y = d > 0 ? (curr.y-prev.y)/d : 0
     }
 
-    const dx0 = prevDir.x - curr.x, dy0 = prevDir.y - curr.y
-    const dx1 = nextDir.x - curr.x, dy1 = nextDir.y - curr.y
-    const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
+    // t1: куда идём
+    const t1 = getTangent((i+1)%n)
+    let t1x, t1y
+    const nextPt = cv[(i+1)%n]
+    if (t1) { t1x = t1.x; t1y = t1.y }
+    else {
+      const d = Math.hypot(nextPt.x-curr.x, nextPt.y-curr.y)
+      t1x = d > 0 ? (nextPt.x-curr.x)/d : 0
+      t1y = d > 0 ? (nextPt.y-curr.y)/d : 0
+    }
 
     if (r <= 0) {
       if (i === 0) ctx.moveTo(curr.x, curr.y)
       else ctx.lineTo(curr.x, curr.y)
-    } else if (d0 === 0 || d1 === 0) {
-      ctx.lineTo(curr.x, curr.y)
     } else {
-      const t = Math.min(r, d0, d1)
-      const tx0 = curr.x + (dx0/d0)*t, ty0 = curr.y + (dy0/d0)*t
-      const tx1 = curr.x + (dx1/d1)*t, ty1 = curr.y + (dy1/d1)*t
-      if (i === 0) ctx.moveTo(tx0, ty0)
-      else ctx.lineTo(tx0, ty0)
-      ctx.arcTo(curr.x, curr.y, tx1, ty1, t)
+      const t = r
+      if (i === 0) ctx.moveTo(curr.x - t0x*t, curr.y - t0y*t)
+      else ctx.lineTo(curr.x - t0x*t, curr.y - t0y*t)
+      ctx.arcTo(curr.x, curr.y, curr.x + t1x*t, curr.y + t1y*t, r)
     }
   }
   ctx.closePath()
