@@ -147,12 +147,17 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     if (prev.type === 'arc') {
       const tg = arcTangentAt((i - 1 + n) % n, curr)
       if (tg) {
-        // Берём точку на касательной в сторону "от дуги"
-        const pp = cv[(i - 2 + n) % n]
-        // Выбираем направление касательной совпадающее с направлением обхода
-        const d1 = Math.hypot(tg.t1.x - pp.x, tg.t1.y - pp.y)
-        const d2 = Math.hypot(tg.t2.x - pp.x, tg.t2.y - pp.y)
-        prevDir = d1 < d2 ? tg.t1 : tg.t2
+        // Направление "входа" в curr со стороны дуги:
+        // берём точку начала дуги и смотрим в каком направлении двигалась дуга к curr
+        let arcStart = (i - 1 + n) % n
+        while (cv[(arcStart - 1 + n) % n].type === 'arc') arcStart = (arcStart - 1 + n) % n
+        const pStart = cv[(arcStart - 1 + n) % n]
+        // Вектор от начала дуги к curr — общее направление движения
+        const moveX = curr.x - pStart.x, moveY = curr.y - pStart.y
+        // Выбираем касательную совпадающую с этим направлением (dot > 0)
+        const dot1 = (tg.t1.x - curr.x)*moveX + (tg.t1.y - curr.y)*moveY
+        const dot2 = (tg.t2.x - curr.x)*moveX + (tg.t2.y - curr.y)*moveY
+        prevDir = dot1 > dot2 ? tg.t1 : tg.t2
       }
     }
 
@@ -160,10 +165,14 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     if (next.type === 'arc') {
       const tg = arcTangentAt((i + 1) % n, curr)
       if (tg) {
-        const nn = cv[(i + 2) % n]
-        const d1 = Math.hypot(tg.t1.x - nn.x, tg.t1.y - nn.y)
-        const d2 = Math.hypot(tg.t2.x - nn.x, tg.t2.y - nn.y)
-        nextDir = d1 < d2 ? tg.t1 : tg.t2
+        // Направление "выхода" из curr в сторону дуги
+        let arcEnd = (i + 1) % n
+        while (cv[(arcEnd + 1) % n].type === 'arc') arcEnd = (arcEnd + 1) % n
+        const pEnd = cv[(arcEnd + 1) % n]
+        const moveX = pEnd.x - curr.x, moveY = pEnd.y - curr.y
+        const dot1 = (tg.t1.x - curr.x)*moveX + (tg.t1.y - curr.y)*moveY
+        const dot2 = (tg.t2.x - curr.x)*moveX + (tg.t2.y - curr.y)*moveY
+        nextDir = dot1 > dot2 ? tg.t1 : tg.t2
       }
     }
 
@@ -739,13 +748,35 @@ export default function ContourEditor({ detail, onUpdate }) {
     }
   }
 
-  const upd = (patch) => onUpdate({ ...detail, contour: { ...contour, ...patch } })
+  const [history, setHistory] = useState([])
+
+  const upd = (patch) => {
+    // Сохраняем текущее состояние в историю
+    setHistory(h => [...h.slice(-19), contour])
+    onUpdate({ ...detail, contour: { ...contour, ...patch } })
+  }
+
+  const undo = () => {
+    if (history.length === 0) return
+    const prev = history[history.length - 1]
+    setHistory(h => h.slice(0, -1))
+    onUpdate({ ...detail, contour: prev })
+    setActiveIdx(null)
+    setMenuSelType(null)
+    setPreviewVerts(null)
+  }
 
   const setVertices = (verts) => upd({ vertices: verts })
 
   const handleTap = (idx) => {
     if (idx === null) {
       if (!arcMode) { setActiveIdx(null); setMenuSelType(null); setPreviewVerts(null) }
+      return
+    }
+    // В режиме дуги тап по canvas тоже добавляет точку
+    if (arcMode) {
+      if (arcPoints.includes(idx)) return
+      setArcPoints(pts => [...pts, idx])
       return
     }
     setActiveIdx(idx)
@@ -875,6 +906,15 @@ export default function ContourEditor({ detail, onUpdate }) {
 
   return (
     <div style={{ marginTop:10, borderTop:'0.5px solid var(--border)', paddingTop:10 }}>
+
+      {/* Кнопка отката */}
+      {history.length > 0 && (
+        <button type="button" onClick={undo}
+          style={{ marginBottom:6, padding:'4px 10px', fontSize:11, border:'0.5px solid var(--border-md)',
+            borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', cursor:'pointer' }}>
+          ↩ Отменить
+        </button>
+      )}
 
       {/* Canvas + кнопки типа рядом */}
       {w > 0 && h > 0 && (
