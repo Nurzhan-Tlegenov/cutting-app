@@ -118,30 +118,45 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     // Для arc-соседа — перпендикуляр к (центр_окружности → curr)
 
     const getArcCC = (ni) => {
+      // ni — индекс arc-точки (соседа)
+      // Находим начало и конец группы arc-точек
       let si = ni; while (cv[(si-1+n)%n].type === 'arc') si = (si-1+n)%n
       let ei = ni; while (cv[(ei+1)%n].type === 'arc') ei = (ei+1)%n
-      const p1 = cv[(si-1+n)%n], pm = cv[si], p3 = cv[(ei+1)%n]
+      // p1 = точка ДО arc-группы, p3 = точка ПОСЛЕ arc-группы
+      const p1 = cv[(si-1+n)%n]
+      const pm = cv[si]  // первая arc-точка (контрольная)
+      const p3 = cv[(ei+1)%n]
       const D = 2*(p1.x*(pm.y-p3.y)+pm.x*(p3.y-p1.y)+p3.x*(p1.y-pm.y))
       if (Math.abs(D) < 0.001) return null
       const ux = ((p1.x*p1.x+p1.y*p1.y)*(pm.y-p3.y)+(pm.x*pm.x+pm.y*pm.y)*(p3.y-p1.y)+(p3.x*p3.x+p3.y*p3.y)*(p1.y-pm.y))/D
       const uy = ((p1.x*p1.x+p1.y*p1.y)*(p3.x-pm.x)+(pm.x*pm.x+pm.y*pm.y)*(p1.x-p3.x)+(p3.x*p3.x+p3.y*p3.y)*(pm.x-p1.x))/D
+      // Направление обхода дуги: от p1 к p3
       return { cx: ux, cy: uy, p1, p3 }
     }
 
     const getTangent = (neighborIdx) => {
       const nb = cv[neighborIdx]
-      if (nb.type !== 'arc') return null // обычная точка — используем координаты
+      if (nb.type !== 'arc') return null
       const info = getArcCC(neighborIdx)
       if (!info) return null
       const { cx, cy, p1, p3 } = info
       const rx = curr.x - cx, ry = curr.y - cy
       const R = Math.hypot(rx, ry)
       if (R === 0) return null
-      // Два варианта касательной
-      const ta1 = { x: -ry/R, y: rx/R }
+      // Два варианта касательной (перпендикуляры к радиусу)
+      const ta1 = { x: -ry/R, y:  rx/R }
       const ta2 = { x:  ry/R, y: -rx/R }
-      // Выбираем совпадающий с направлением дуги (p1→p3)
-      const mx = p3.x - p1.x, my = p3.y - p1.y
+      // Направление вдоль дуги: от p1 к p3, но если p1==curr используем pm
+      let mx, my
+      if (Math.hypot(p1.x-curr.x, p1.y-curr.y) < 1) {
+        // p1 совпадает с curr — берём направление от curr к p3
+        mx = p3.x - curr.x; my = p3.y - curr.y
+      } else if (Math.hypot(p3.x-curr.x, p3.y-curr.y) < 1) {
+        // p3 совпадает с curr — берём направление от p1 к curr
+        mx = curr.x - p1.x; my = curr.y - p1.y
+      } else {
+        mx = p3.x - p1.x; my = p3.y - p1.y
+      }
       return (ta1.x*mx + ta1.y*my > 0) ? ta1 : ta2
     }
 
