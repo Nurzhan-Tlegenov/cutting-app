@@ -105,7 +105,6 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
       }
     }
     if(!candidates.length)return null
-    // tp_t < 0: центр F находится "за" curr в сторону прямой — правильная сторона
     const valid=candidates.filter(c=>{
       const tp_t=(c.fcx-curr.x)*ldx+(c.fcy-curr.y)*ldy
       return tp_t<0
@@ -116,9 +115,7 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
       const tb=(b.fcx-curr.x)*ldx+(b.fcy-curr.y)*ldy
       return Math.abs(ta)-Math.abs(tb)
     })
-    // arcFlip позволяет выбрать второй вариант
-    const flip = curr.arcFlip || false
-    return flip && pool.length>1 ? pool[1] : pool[0]
+    return pool[0]  // всегда первый — flip влияет только на ccw при рисовании
   }
 
   // Предвычисляем fillets для всех стыков прямая↔дуга
@@ -1100,7 +1097,7 @@ export default function ContourEditor({ detail, onUpdate }) {
                   setVertices(verts)
                 }} style={{marginTop:8,width:'100%',padding:'7px',border:'0.5px solid var(--border-md)',
                   borderRadius:'var(--radius)',background:'transparent',fontSize:12,cursor:'pointer'}}>
-                  ⇄ Переключить вариант радиуса
+                  ⇄ Выбрать другой отрезок
                 </button>
               )}
             </div>
