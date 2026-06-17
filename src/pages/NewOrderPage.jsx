@@ -370,7 +370,12 @@ export default function NewOrderPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
         <button type="button" onClick={() => navigate('/orders')}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
-        <h1 style={{ fontSize: 18, fontWeight: 500 }}>Новый заказ</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 500, flex:1 }}>Новый заказ</h1>
+        <button type="button" className="btn-primary" onClick={handleSave}
+          disabled={saving || !validCount}
+          style={{ padding:'7px 16px', fontSize:13, whiteSpace:'nowrap' }}>
+          {saving ? 'Сохранение...' : `Сохранить заказ (${validCount} дет.)`}
+        </button>
       </div>
 
       {/* Название + материал компактно */}
@@ -393,14 +398,7 @@ export default function NewOrderPage() {
 
       {/* Параметры листа */}
       <div style={{ marginBottom: 14 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-          <span className="section-title" style={{margin:0}}>Параметры листа</span>
-          <button type="button" className="btn-primary" onClick={handleSave}
-            disabled={saving || !validCount}
-            style={{ padding:'6px 14px', fontSize:13 }}>
-            {saving ? '...' : `Сохранить (${validCount})`}
-          </button>
-        </div>
+        <span className="section-title">Параметры листа</span>
         <div className="card" style={{ padding: '8px 12px' }}>
           {/* Формат листа — редактируемый */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
@@ -541,11 +539,6 @@ export default function NewOrderPage() {
 
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 
-      <div style={{ display: keyboardOpen ? 'none' : 'flex', flexDirection: 'column', gap: 8 }}>
-        <button type="button" className="btn-primary" onClick={handleSave} disabled={saving || !validCount}>
-          {saving ? 'Сохранение...' : `Сохранить заказ (${validCount} дет.)`}
-        </button>
-      </div>
       {!keyboardOpen && <BottomNav />}
     </div>
   )
