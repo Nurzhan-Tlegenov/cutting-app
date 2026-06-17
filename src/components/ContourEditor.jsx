@@ -104,9 +104,9 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
       }
     }
     if(!candidates.length)return null
-    // Выбираем центр скругления ближайший к центру детали
+    // Выбираем центр скругления ДАЛЬНИЙ от центра детали (снаружи угла)
     candidates.sort((a,b)=>
-      Math.hypot(a.fcx-cxD,a.fcy-cyD)-Math.hypot(b.fcx-cxD,b.fcy-cyD)
+      Math.hypot(b.fcx-cxD,b.fcy-cyD)-Math.hypot(a.fcx-cxD,a.fcy-cyD)
     )
     return candidates[0]
   }
@@ -177,7 +177,6 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
       if(f){
         ctx.lineTo(f.ta.x,f.ta.y)
         ctx.arc(f.fcx,f.fcy,r,Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),false)
-        ctx.lineTo(next.x,next.y)
         continue
       }
     }
