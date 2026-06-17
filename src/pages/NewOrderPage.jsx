@@ -393,7 +393,14 @@ export default function NewOrderPage() {
 
       {/* Параметры листа */}
       <div style={{ marginBottom: 14 }}>
-        <p className="section-title">Параметры листа</p>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+          <span className="section-title" style={{margin:0}}>Параметры листа</span>
+          <button type="button" className="btn-primary" onClick={handleSave}
+            disabled={saving || !validCount}
+            style={{ padding:'6px 14px', fontSize:13 }}>
+            {saving ? '...' : `Сохранить (${validCount})`}
+          </button>
+        </div>
         <div className="card" style={{ padding: '8px 12px' }}>
           {/* Формат листа — редактируемый */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>

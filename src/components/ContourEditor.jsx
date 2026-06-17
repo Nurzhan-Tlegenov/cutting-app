@@ -177,28 +177,41 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     // Если пред. точка имела isAN fillet — нам уже нарисован ta, начинаем с него
     // Если текущая точка isAP — начинаем после ta (уже нарисовано дугой)
 
-    // Конечная точка прямой: если isAN — обрезаем до tp
+    // Стык прямая→дуга
     if(r>0 && isAN && !isAP){
       const f=fillets[i+'_next']
       if(f){
-        const flip=curr.arcFlip||false
+        // Определяем правильный ccw автоматически
+        // Cross product lineDir × (F→curr) > 0 → ccw=false
+        const ldx2=curr.x-prev.x, ldy2=curr.y-prev.y
+        const ld2=Math.hypot(ldx2,ldy2)
+        const nx=ldx2/ld2, ny=ldy2/ld2
+        const fx2curr_x=curr.x-f.fcx, fx2curr_y=curr.y-f.fcy
+        const cross=nx*fx2curr_y - ny*fx2curr_x
+        const autoCcw = curr.arcFlip ? cross>0 : cross<=0
         if(ii===0) ctx.moveTo(f.tp.x,f.tp.y)
         else ctx.lineTo(f.tp.x,f.tp.y)
         ctx.arc(f.fcx,f.fcy,r,
           Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),
-          Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),flip)
+          Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),autoCcw)
         continue
       }
     }
 
+    // Стык дуга→прямая
     if(r>0 && isAP && !isAN){
       const f=fillets[i+'_prev']
       if(f){
-        const flip=curr.arcFlip||false
+        const ldx2=next.x-curr.x, ldy2=next.y-curr.y
+        const ld2=Math.hypot(ldx2,ldy2)
+        const nx=ldx2/ld2, ny=ldy2/ld2
+        const fx2curr_x=curr.x-f.fcx, fx2curr_y=curr.y-f.fcy
+        const cross=nx*fx2curr_y - ny*fx2curr_x
+        const autoCcw = curr.arcFlip ? cross<=0 : cross>0
         ctx.lineTo(f.ta.x,f.ta.y)
         ctx.arc(f.fcx,f.fcy,r,
           Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),
-          Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),!flip)
+          Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),autoCcw)
         continue
       }
     }
