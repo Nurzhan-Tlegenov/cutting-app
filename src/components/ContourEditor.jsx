@@ -104,11 +104,19 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
       }
     }
     if(!candidates.length)return null
-    // Выбираем центр скругления ДАЛЬНИЙ от центра детали (снаружи угла)
-    candidates.sort((a,b)=>
-      Math.hypot(b.fcx-cxD,b.fcy-cyD)-Math.hypot(a.fcx-cxD,a.fcy-cyD)
-    )
-    return candidates[0]
+    // tp_t < 0: центр F находится "за" curr в сторону прямой — правильная сторона
+    // Из таких берём с минимальным |tp_t| (ближайший к curr)
+    const valid=candidates.filter(c=>{
+      const tp_t=(c.fcx-curr.x)*ldx+(c.fcy-curr.y)*ldy
+      return tp_t<0
+    })
+    const pool=valid.length?valid:candidates
+    pool.sort((a,b)=>{
+      const ta=(a.fcx-curr.x)*ldx+(a.fcy-curr.y)*ldy
+      const tb=(b.fcx-curr.x)*ldx+(b.fcy-curr.y)*ldy
+      return Math.abs(ta)-Math.abs(tb)
+    })
+    return pool[0]
   }
 
   // Предвычисляем fillets для всех стыков прямая↔дуга
