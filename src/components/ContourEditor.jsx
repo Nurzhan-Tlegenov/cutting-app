@@ -105,7 +105,6 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     }
     if(!candidates.length)return null
     // tp_t < 0: центр F находится "за" curr в сторону прямой — правильная сторона
-    // Из таких берём с минимальным |tp_t| (ближайший к curr)
     const valid=candidates.filter(c=>{
       const tp_t=(c.fcx-curr.x)*ldx+(c.fcy-curr.y)*ldy
       return tp_t<0
@@ -116,7 +115,9 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
       const tb=(b.fcx-curr.x)*ldx+(b.fcy-curr.y)*ldy
       return Math.abs(ta)-Math.abs(tb)
     })
-    return pool[0]
+    // arcFlip позволяет выбрать второй вариант
+    const flip = curr.arcFlip || false
+    return flip && pool.length>1 ? pool[1] : pool[0]
   }
 
   // Предвычисляем fillets для всех стыков прямая↔дуга
@@ -1084,8 +1085,24 @@ export default function ContourEditor({ detail, onUpdate }) {
 
           {/* Радиус */}
           {menuSelType === 'radius' && (
-            <NumField label="Радиус R" value={menuR}
-              onChange={v => { setMenuR(v); applyCornerType(activeIdx, 'radius', { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
+            <div>
+              <NumField label="Радиус R" value={menuR}
+                onChange={v => { setMenuR(v); applyCornerType(activeIdx, 'radius', { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
+              {/* Кнопка Flip если соседняя точка — дуга */}
+              {(activeVertex && (
+                (contour.vertices[(activeIdx+1)%contour.vertices.length]?.type==='arc') ||
+                (contour.vertices[(activeIdx-1+contour.vertices.length)%contour.vertices.length]?.type==='arc')
+              )) && (
+                <button type="button" onClick={() => {
+                  const verts=[...contour.vertices]
+                  verts[activeIdx]={...verts[activeIdx], arcFlip:!verts[activeIdx].arcFlip}
+                  setVertices(verts)
+                }} style={{marginTop:8,width:'100%',padding:'7px',border:'0.5px solid var(--border-md)',
+                  borderRadius:'var(--radius)',background:'transparent',fontSize:12,cursor:'pointer'}}>
+                  ⇄ Переключить вариант радиуса
+                </button>
+              )}
+            </div>
           )}
 
           {/* Фаска */}
