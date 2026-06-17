@@ -128,9 +128,15 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
   }
 
   ctx.beginPath()
+  // Находим стартовую точку — первая не-arc точка без isAP
+  let startI=0
   for(let i=0;i<n;i++){
+    if(cv[i].type!=='arc' && cv[(i-1+n)%n].type!=='arc'){startI=i;break}
+  }
+
+  for(let ii=0;ii<n;ii++){
+    const i=(startI+ii)%n
     const curr=cv[i], next=cv[(i+1)%n], prev=cv[(i-1+n)%n]
-    if(i===0) ctx.moveTo(curr.x,curr.y)
 
     // Дуга через 3+ точек — с обрезкой по ta
     if(curr.type==='arc'){
@@ -140,7 +146,6 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
       const startPt=fPrev?fPrev.ta:prev
       const endPt=fNext?fNext.ta:next
 
-      // Собираем arc-группу
       const arcGroup=[prev]
       let j=i
       while(j<n && cv[j%n].type==='arc'){arcGroup.push(cv[j%n]);j++}
@@ -155,44 +160,54 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
           drawArc3(arcGroup[k],arcGroup[k+1],arcGroup[k+2],sp,ep)
         }
       }
-      i=j-1; continue
+      ii+=(j-i-1); continue
     }
 
     const r=curr.r
     const isAN=next.type==='arc', isAP=prev.type==='arc'
 
-    // Стык прямая→дуга
+    // Определяем реальную начальную точку этого отрезка
+    // Если пред. точка имела isAN fillet — нам уже нарисован ta, начинаем с него
+    // Если текущая точка isAP — начинаем после ta (уже нарисовано дугой)
+
+    // Конечная точка прямой: если isAN — обрезаем до tp
     if(r>0 && isAN && !isAP){
       const f=fillets[i+'_next']
       if(f){
-        if(i===0) ctx.moveTo(f.tp.x,f.tp.y); else ctx.lineTo(f.tp.x,f.tp.y)
-        ctx.arc(f.fcx,f.fcy,r,Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),false)
+        if(ii===0) ctx.moveTo(f.tp.x,f.tp.y)
+        else ctx.lineTo(f.tp.x,f.tp.y)
+        ctx.arc(f.fcx,f.fcy,r,
+          Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),
+          Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),false)
         continue
       }
     }
 
-    // Стык дуга→прямая
     if(r>0 && isAP && !isAN){
       const f=fillets[i+'_prev']
       if(f){
+        // Пришли из ta (конец дуги обрезан). Рисуем скругление ta→tp
         ctx.lineTo(f.ta.x,f.ta.y)
-        ctx.arc(f.fcx,f.fcy,r,Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),false)
+        ctx.arc(f.fcx,f.fcy,r,
+          Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),
+          Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),false)
+        // Теперь в tp — прямая продолжится к следующей точке в след. итерации
         continue
       }
     }
 
-    // Обычный радиус между двумя прямыми
+    // Обычный отрезок или радиус между двумя прямыми
     const dx0=prev.x-curr.x, dy0=prev.y-curr.y
     const dx1=next.x-curr.x, dy1=next.y-curr.y
     const d0=Math.hypot(dx0,dy0), d1=Math.hypot(dx1,dy1)
     if(r<=0){
-      if(i===0) ctx.moveTo(curr.x,curr.y); else ctx.lineTo(curr.x,curr.y)
+      if(ii===0) ctx.moveTo(curr.x,curr.y); else ctx.lineTo(curr.x,curr.y)
     } else if(d0===0||d1===0){
-      ctx.lineTo(curr.x,curr.y)
+      if(ii===0) ctx.moveTo(curr.x,curr.y); else ctx.lineTo(curr.x,curr.y)
     } else {
       const t=Math.min(r,d0,d1)
-      if(i===0) ctx.moveTo(curr.x+dx0/d0*t,curr.y+dy0/d0*t)
-      else ctx.lineTo(curr.x+dx0/d0*t,curr.y+dy0/d0*t)
+      const sx=curr.x+dx0/d0*t, sy=curr.y+dy0/d0*t
+      if(ii===0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy)
       ctx.arcTo(curr.x,curr.y,curr.x+dx1/d1*t,curr.y+dy1/d1*t,r)
     }
   }
