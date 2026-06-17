@@ -48,6 +48,7 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     y: oy + dh - v.y * sc,
     r: (v.r || 0) * sc,
     type: v.type || 'point',
+    arcFlip: v.arcFlip || false,
   }))
 
   // Центр детали для выбора правильного центра скругления (ближайший к центру)
