@@ -49,12 +49,14 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     r: (v.r || 0) * sc,
     type: v.type || 'point',
     arcFlip: v.arcFlip || false,
+    // fillet: центр и радиус скругления
+    fcx: v.fcx != null ? ox + v.fcx * sc : null,
+    fcy: v.fcy != null ? oy + dh - v.fcy * sc : null,
+    fr:  v.fr  != null ? v.fr * sc : null,
+    fa0: v.fa0,
+    fa1: v.fa1,
+    fccw: v.fccw || false,
   }))
-
-  // Центр детали для выбора правильного центра скругления (ближайший к центру)
-  let sumX=0, sumY=0, cnt=0
-  cv.forEach(v=>{ if(v.type!=='arc'){sumX+=v.x;sumY+=v.y;cnt++} })
-  const cxD=sumX/(cnt||1), cyD=sumY/(cnt||1)
 
   function cc3(a,b,c){
     const D=2*(a.x*(b.y-c.y)+b.x*(c.y-a.y)+c.x*(a.y-b.y))
@@ -82,157 +84,73 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     ctx.arc(C.x,C.y,R,sa,ea,dma>dea)
   }
 
-  function findFillet(curr,lineDir,arcNi,r){
-    const info=getArcInfo(arcNi); if(!info.C)return null
-    const {C}=info
-    const arcR=Math.hypot(curr.x-C.x,curr.y-C.y)
-    const ldx=lineDir.x, ldy=lineDir.y
-    let candidates=[]
-    for(const norm of [{x:-ldy,y:ldx},{x:ldy,y:-ldx}]){
-      const ox2=curr.x+norm.x*r-C.x, oy2=curr.y+norm.y*r-C.y
-      const B=2*(ox2*ldx+oy2*ldy)
-      const C2=ox2*ox2+oy2*oy2-(arcR-r)*(arcR-r)
-      const disc=B*B-4*C2
-      if(disc<0)continue
-      for(const sign of[1,-1]){
-        const t=(-B+sign*Math.sqrt(disc))/2
-        const fx=curr.x+norm.x*r+t*ldx, fy=curr.y+norm.y*r+t*ldy
-        const tp_t=(fx-curr.x)*ldx+(fy-curr.y)*ldy
-        const tp={x:curr.x+tp_t*ldx,y:curr.y+tp_t*ldy}
-        const adx=fx-C.x, ady=fy-C.y, ad=Math.hypot(adx,ady)
-        const ta={x:C.x+adx/ad*arcR,y:C.y+ady/ad*arcR}
-        candidates.push({fcx:fx,fcy:fy,tp,ta})
-      }
-    }
-    if(!candidates.length)return null
-    const valid=candidates.filter(c=>{
-      const tp_t=(c.fcx-curr.x)*ldx+(c.fcy-curr.y)*ldy
-      return tp_t<0
-    })
-    const pool=valid.length?valid:candidates
-    pool.sort((a,b)=>{
-      const ta=(a.fcx-curr.x)*ldx+(a.fcy-curr.y)*ldy
-      const tb=(b.fcx-curr.x)*ldx+(b.fcy-curr.y)*ldy
-      return Math.abs(ta)-Math.abs(tb)
-    })
-    return pool[0]  // всегда первый — flip влияет только на ccw при рисовании
-  }
-
-  // Предвычисляем fillets для всех стыков прямая↔дуга
-  const fillets={}
-  for(let i=0;i<n;i++){
-    const curr=cv[i],next=cv[(i+1)%n],prev=cv[(i-1+n)%n]
-    if(curr.type==='arc')continue
-    const r=curr.r; if(r<=0)continue
-    if(next.type==='arc'){
-      const ld=Math.hypot(curr.x-prev.x,curr.y-prev.y)
-      if(ld>0) fillets[i+'_next']=findFillet(curr,{x:(curr.x-prev.x)/ld,y:(curr.y-prev.y)/ld},(i+1)%n,r)
-    }
-    if(prev.type==='arc'){
-      const ld=Math.hypot(next.x-curr.x,next.y-curr.y)
-      if(ld>0) fillets[i+'_prev']=findFillet(curr,{x:(next.x-curr.x)/ld,y:(next.y-curr.y)/ld},(i-1+n)%n,r)
-    }
-  }
-
   ctx.beginPath()
-  // Находим стартовую точку — первая не-arc точка без isAP
-  let startI=0
-  for(let i=0;i<n;i++){
-    if(cv[i].type!=='arc' && cv[(i-1+n)%n].type!=='arc'){startI=i;break}
-  }
+  let started = false
 
-  for(let ii=0;ii<n;ii++){
-    const i=(startI+ii)%n
+  for(let i=0;i<n;i++){
     const curr=cv[i], next=cv[(i+1)%n], prev=cv[(i-1+n)%n]
 
-    // Дуга через 3+ точек — с обрезкой по ta
-    if(curr.type==='arc'){
-      const prevIdx=(i-1+n)%n, nextIdx=(i+1)%n
-      const fPrev=fillets[prevIdx+'_next']
-      const fNext=fillets[nextIdx+'_prev']
-      const startPt=fPrev?fPrev.ta:prev
-      const endPt=fNext?fNext.ta:next
+    // Fillet точка — явное скругление (новая архитектура)
+    if(curr.type==='fillet'){
+      const ccw = curr.arcFlip ? !curr.fccw : curr.fccw
+      ctx.arc(curr.fcx, curr.fcy, curr.fr, curr.fa0, curr.fa1, ccw)
+      started = true
+      continue
+    }
 
-      const arcGroup=[prev]
+    // Дуга через 3+ точек
+    if(curr.type==='arc'){
+      const arcGroup=[]
       let j=i
       while(j<n && cv[j%n].type==='arc'){arcGroup.push(cv[j%n]);j++}
-      arcGroup.push(cv[j%n])
 
-      if(arcGroup.length===3){
-        drawArc3(arcGroup[0],arcGroup[1],arcGroup[2],startPt,endPt)
+      // Определяем start/end точки — ta записана как позиция fillet точки
+      const prevPt = cv[(i-1+n)%n]
+      const nextPt = cv[j%n]
+      const p1 = prevPt.type==='fillet' ? prevPt : prevPt  // ta = позиция fillet
+      const p3 = nextPt.type==='fillet' ? nextPt : nextPt
+
+      // p1 реальная начальная точка дуги — позиция ta (fillet.x, fillet.y = ta coords)
+      const sp = p1
+      const ep = p3
+
+      if(!started){ ctx.moveTo(sp.x, sp.y); started=true }
+      else ctx.lineTo(sp.x, sp.y)
+
+      if(arcGroup.length===1){
+        drawArc3(sp, arcGroup[0], ep, sp, ep)
       } else {
-        for(let k=0;k+2<arcGroup.length;k+=2){
-          const sp=k===0?startPt:null
-          const ep=k+2===arcGroup.length-1?endPt:null
-          drawArc3(arcGroup[k],arcGroup[k+1],arcGroup[k+2],sp,ep)
+        for(let k=0;k+1<arcGroup.length;k++){
+          const s=k===0?sp:arcGroup[k-1]
+          const e=k===arcGroup.length-2?ep:arcGroup[k+2]
+          drawArc3(k===0?sp:arcGroup[k-1], arcGroup[k], k===arcGroup.length-1?ep:arcGroup[k+1], k===0?sp:null, k===arcGroup.length-2?ep:null)
         }
+        // Упрощённо для группы:
       }
-      ii+=(j-i-1); continue
+      i=j-1; started=true; continue
     }
 
     const r=curr.r
-    const isAN=next.type==='arc', isAP=prev.type==='arc'
-
-    // Определяем реальную начальную точку этого отрезка
-    // Если пред. точка имела isAN fillet — нам уже нарисован ta, начинаем с него
-    // Если текущая точка isAP — начинаем после ta (уже нарисовано дугой)
-
-    // Стык прямая→дуга
-    if(r>0 && isAN && !isAP){
-      const f=fillets[i+'_next']
-      if(f){
-        // Определяем правильный ccw автоматически
-        // Cross product lineDir × (F→curr) > 0 → ccw=false
-        const ldx2=curr.x-prev.x, ldy2=curr.y-prev.y
-        const ld2=Math.hypot(ldx2,ldy2)
-        const nx=ldx2/ld2, ny=ldy2/ld2
-        const fx2curr_x=curr.x-f.fcx, fx2curr_y=curr.y-f.fcy
-        const cross=nx*fx2curr_y - ny*fx2curr_x
-        const autoCcw = curr.arcFlip ? cross>0 : cross<=0
-        if(ii===0) ctx.moveTo(f.tp.x,f.tp.y)
-        else ctx.lineTo(f.tp.x,f.tp.y)
-        ctx.arc(f.fcx,f.fcy,r,
-          Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),
-          Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),autoCcw)
-        continue
-      }
-    }
-
-    // Стык дуга→прямая
-    if(r>0 && isAP && !isAN){
-      const f=fillets[i+'_prev']
-      if(f){
-        const ldx2=next.x-curr.x, ldy2=next.y-curr.y
-        const ld2=Math.hypot(ldx2,ldy2)
-        const nx=ldx2/ld2, ny=ldy2/ld2
-        const fx2curr_x=curr.x-f.fcx, fx2curr_y=curr.y-f.fcy
-        const cross=nx*fx2curr_y - ny*fx2curr_x
-        const autoCcw = curr.arcFlip ? cross<=0 : cross>0
-        ctx.lineTo(f.ta.x,f.ta.y)
-        ctx.arc(f.fcx,f.fcy,r,
-          Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),
-          Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),autoCcw)
-        continue
-      }
-    }
-
-    // Обычный отрезок или радиус между двумя прямыми
     const dx0=prev.x-curr.x, dy0=prev.y-curr.y
     const dx1=next.x-curr.x, dy1=next.y-curr.y
     const d0=Math.hypot(dx0,dy0), d1=Math.hypot(dx1,dy1)
+
     if(r<=0){
-      if(ii===0) ctx.moveTo(curr.x,curr.y); else ctx.lineTo(curr.x,curr.y)
+      if(!started){ ctx.moveTo(curr.x,curr.y); started=true }
+      else ctx.lineTo(curr.x,curr.y)
     } else if(d0===0||d1===0){
-      if(ii===0) ctx.moveTo(curr.x,curr.y); else ctx.lineTo(curr.x,curr.y)
+      if(!started){ ctx.moveTo(curr.x,curr.y); started=true }
+      else ctx.lineTo(curr.x,curr.y)
     } else {
       const t=Math.min(r,d0,d1)
-      const sx=curr.x+dx0/d0*t, sy=curr.y+dy0/d0*t
-      if(ii===0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy)
+      if(!started){ ctx.moveTo(curr.x+dx0/d0*t,curr.y+dy0/d0*t); started=true }
+      else ctx.lineTo(curr.x+dx0/d0*t,curr.y+dy0/d0*t)
       ctx.arcTo(curr.x,curr.y,curr.x+dx1/d1*t,curr.y+dy1/d1*t,r)
     }
   }
   ctx.closePath()
 }
+
 
 // ─── resolvePos для вырезов (Y вверх — 0,0 нижний левый) ────────────────────
 function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
@@ -254,13 +172,15 @@ function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
 
 // ─── Получить позиции маркеров по вершинам ────────────────────────────────────
 function getMarkers(verts, sc, ox, oy, dh) {
-  return (verts || []).map((v, i) => ({
-    idx: i,
-    x: ox + v.x * sc,
-    y: oy + dh - v.y * sc,  // инверсия Y
-    r: v.r || 0,
-    vertex: v,
-  }))
+  return (verts || [])
+    .map((v, i) => ({
+      idx: i,
+      x: ox + v.x * sc,
+      y: oy + dh - v.y * sc,
+      r: v.r || 0,
+      vertex: v,
+    }))
+    .filter(m => m.vertex.type !== 'fillet') // fillet точки не редактируются напрямую
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
@@ -864,11 +784,108 @@ export default function ContourEditor({ detail, onUpdate }) {
     }
 
     if (type === 'none') {
-      verts[idx] = { ...curr, r: 0 }
+      // Если это была fillet-группа — удаляем fillet точки
+      const newVerts = verts.filter((v,vi) => {
+        if (vi === idx) return false // удаляем саму точку если она fillet
+        return true
+      })
+      // Просто сбрасываем r
+      verts[idx] = { ...curr, r: 0, type: 'point' }
       setVertices(verts); setActiveIdx(idx)
     } else if (type === 'radius') {
-      verts[idx] = { ...curr, r: params.r || 50 }
-      setVertices(verts); setActiveIdx(idx)
+      const r = params.r || 50
+      const isArcNext = next.type === 'arc'
+      const isArcPrev = prev.type === 'arc'
+
+      if (isArcNext || isArcPrev) {
+        // Стык прямой и дуги — вычисляем fillet геометрически
+        const arcIdx = isArcNext ? (idx+1)%n : (idx-1+n)%n
+
+        // Находим arc-группу и её центр
+        let si=arcIdx; while(verts[(si-1+n)%n]?.type==='arc') si=(si-1+n)%n
+        let ei=arcIdx; while(verts[(ei+1)%n]?.type==='arc') ei=(ei+1)%n
+        const p1=verts[(si-1+n)%n], pm=verts[si], p3=verts[(ei+1)%n]
+
+        const D=2*(p1.x*(pm.y-p3.y)+pm.x*(p3.y-p1.y)+p3.x*(p1.y-pm.y))
+        if(Math.abs(D)<0.001){ verts[idx]={...curr,r}; setVertices(verts); return }
+
+        const arcCx=((p1.x*p1.x+p1.y*p1.y)*(pm.y-p3.y)+(pm.x*pm.x+pm.y*pm.y)*(p3.y-p1.y)+(p3.x*p3.x+p3.y*p3.y)*(p1.y-pm.y))/D
+        const arcCy=((p1.x*p1.x+p1.y*p1.y)*(p3.x-pm.x)+(pm.x*pm.x+pm.y*pm.y)*(p1.x-p3.x)+(p3.x*p3.x+p3.y*p3.y)*(pm.x-p1.x))/D
+        const arcR=Math.hypot(curr.x-arcCx, curr.y-arcCy)
+
+        // Направление прямой
+        const linePt = isArcNext ? prev : next
+        const ld=Math.hypot(curr.x-linePt.x,curr.y-linePt.y)
+        if(ld===0){ verts[idx]={...curr,r}; setVertices(verts); return }
+        const ldx=(curr.x-linePt.x)/ld, ldy=(curr.y-linePt.y)/ld
+        // Если дуга после curr — линия идёт от prev к curr, иначе от curr к next
+        const dirX = isArcNext ? ldx : -ldx
+        const dirY = isArcNext ? ldy : -ldy
+
+        // Находим центр скругления
+        let best=null, bestScore=Infinity
+        for(const norm of [{x:-dirY,y:dirX},{x:dirY,y:-dirX}]){
+          const ox2=curr.x+norm.x*r-arcCx, oy2=curr.y+norm.y*r-arcCy
+          const B=2*(ox2*dirX+oy2*dirY)
+          const C2=ox2*ox2+oy2*oy2-(arcR-r)*(arcR-r)
+          const disc=B*B-4*C2
+          if(disc<0)continue
+          for(const sign of[1,-1]){
+            const t=(-B+sign*Math.sqrt(disc))/2
+            const fx=curr.x+norm.x*r+t*dirX, fy=curr.y+norm.y*r+t*dirY
+            const tp_t=(fx-curr.x)*dirX+(fy-curr.y)*dirY
+            const tpx=curr.x+tp_t*dirX, tpy=curr.y+tp_t*dirY
+            const adx=fx-arcCx, ady=fy-arcCy, ad=Math.hypot(adx,ady)
+            const tax=arcCx+adx/ad*arcR, tay=arcCy+ady/ad*arcR
+            const score=Math.hypot(tax-curr.x,tay-curr.y)
+            const tpCheck=(fx-curr.x)*dirX+(fy-curr.y)*dirY
+            if(tpCheck<0 && score<bestScore){
+              bestScore=score
+              best={fx,fy,tpx,tpy,tax,tay}
+            }
+          }
+        }
+
+        if(!best){ verts[idx]={...curr,r}; setVertices(verts); return }
+
+        // Вычисляем углы дуги скругления
+        const a0=Math.atan2(best.tpy-best.fy,best.tpx-best.fx)
+        const a1=Math.atan2(best.tay-best.fy,best.tax-best.fx)
+
+        // Определяем ccw: дуга скругления должна идти ВНУТРИ угла
+        // Проверяем оба варианта и выбираем тот при котором середина дуги
+        // находится ближе к точке curr (внутри угла)
+        const midAngle0 = (a0+a1)/2
+        const midAngle1 = midAngle0 + Math.PI
+        const mx0 = best.fx + r*Math.cos(midAngle0), my0 = best.fy + r*Math.sin(midAngle0)
+        const mx1 = best.fx + r*Math.cos(midAngle1), my1 = best.fy + r*Math.sin(midAngle1)
+        const d0 = Math.hypot(mx0-curr.x, my0-curr.y)
+        const d1 = Math.hypot(mx1-curr.x, my1-curr.y)
+        // Выбираем дугу чья середина ДАЛЬШЕ от curr (дуга огибает угол снаружи)
+        const fccw = d0 > d1 ? false : true
+
+        // Создаём три точки: tp, fillet, ta
+        const tpPt = { x:best.tpx, y:best.tpy, r:0, type:'point' }
+        const filletPt = {
+          x:(best.tpx+best.tax)/2, y:(best.tpy+best.tay)/2, // визуальная позиция
+          r:0, type:'fillet',
+          fcx:best.fx, fcy:best.fy, fr:r,
+          fa0:a0, fa1:a1, fccw
+        }
+        const taPt = { x:best.tax, y:best.tay, r:0, type:'point' }
+
+        // Заменяем текущую точку
+        if(isArcNext){
+          verts.splice(idx, 1, tpPt, filletPt, taPt)
+        } else {
+          verts.splice(idx, 1, taPt, filletPt, tpPt)
+        }
+        setVertices(verts); setActiveIdx(null)
+      } else {
+        // Обычный радиус между двумя прямыми
+        verts[idx] = { ...curr, r }
+        setVertices(verts); setActiveIdx(idx)
+      }
     } else if (type === 'concave') {
       verts[idx] = { ...curr, r: -(params.r || 50) }
       setVertices(verts); setActiveIdx(idx)
@@ -1103,15 +1120,29 @@ export default function ContourEditor({ detail, onUpdate }) {
             <div>
               <NumField label="Радиус R" value={menuR}
                 onChange={v => { setMenuR(v); applyCornerType(activeIdx, 'radius', { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
-              {/* Кнопка Flip если соседняя точка — дуга */}
-              {(activeVertex && (
-                (contour.vertices[(activeIdx+1)%contour.vertices.length]?.type==='arc') ||
-                (contour.vertices[(activeIdx-1+contour.vertices.length)%contour.vertices.length]?.type==='arc')
-              )) && (
+              {/* Кнопка Flip если рядом есть fillet точка */}
+              {(activeVertex && (() => {
+                const n = contour.vertices.length
+                const neighbors = [
+                  contour.vertices[(activeIdx+1)%n],
+                  contour.vertices[(activeIdx-1+n)%n],
+                  contour.vertices[(activeIdx+2)%n],
+                  contour.vertices[(activeIdx-2+n)%n],
+                ]
+                return neighbors.some(v => v?.type==='fillet')
+              })())) && (
                 <button type="button" onClick={() => {
                   const verts=[...contour.vertices]
-                  verts[activeIdx]={...verts[activeIdx], arcFlip:!verts[activeIdx].arcFlip}
-                  setVertices(verts)
+                  const n=verts.length
+                  // Ищем fillet точку рядом
+                  for(const di of [1,-1,2,-2]){
+                    const fi=(activeIdx+di+n)%n
+                    if(verts[fi]?.type==='fillet'){
+                      verts[fi]={...verts[fi], fccw:!verts[fi].fccw}
+                      setVertices(verts)
+                      break
+                    }
+                  }
                 }} style={{marginTop:8,width:'100%',padding:'7px',border:'0.5px solid var(--border-md)',
                   borderRadius:'var(--radius)',background:'transparent',fontSize:12,cursor:'pointer'}}>
                   ⇄ Выбрать другой отрезок
