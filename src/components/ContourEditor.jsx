@@ -184,11 +184,12 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     if(r>0 && isAN && !isAP){
       const f=fillets[i+'_next']
       if(f){
+        const flip=curr.arcFlip||false
         if(ii===0) ctx.moveTo(f.tp.x,f.tp.y)
         else ctx.lineTo(f.tp.x,f.tp.y)
         ctx.arc(f.fcx,f.fcy,r,
           Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),
-          Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),false)
+          Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),flip)
         continue
       }
     }
@@ -196,12 +197,11 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     if(r>0 && isAP && !isAN){
       const f=fillets[i+'_prev']
       if(f){
-        // Пришли из ta (конец дуги обрезан). Рисуем скругление ta→tp
+        const flip=curr.arcFlip||false
         ctx.lineTo(f.ta.x,f.ta.y)
         ctx.arc(f.fcx,f.fcy,r,
           Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),
-          Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),false)
-        // Теперь в tp — прямая продолжится к следующей точке в след. итерации
+          Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),!flip)
         continue
       }
     }
