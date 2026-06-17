@@ -712,10 +712,14 @@ export default function ContourEditor({ detail, onUpdate }) {
     alignItems: 'center', justifyContent: 'center', padding: 0,
   }
 
-  // Переместить точку по X/Y
+  // Переместить точку по X/Y с ограничением внутри детали
   const moveVertex = (idx, dx, dy) => {
     const verts = [...contour.vertices]
-    verts[idx] = { ...verts[idx], x: verts[idx].x + dx, y: verts[idx].y + dy }
+    const w = Number(detail.w) || 0
+    const h = Number(detail.h) || 0
+    const newX = Math.max(0, Math.min(w, verts[idx].x + dx))
+    const newY = Math.max(0, Math.min(h, verts[idx].y + dy))
+    verts[idx] = { ...verts[idx], x: newX, y: newY }
     setVertices(verts)
   }
 
@@ -1015,7 +1019,7 @@ export default function ContourEditor({ detail, onUpdate }) {
               <>
                 {[
                   { id:'none',    icon:'—' },
-                  { id:'radius',  icon:'⌒' },
+                  { id:'radius',  icon:<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2 L2 9 Q2 12 5 12 L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M5 9.5 L4.5 12 L7 11.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg> },
                   { id:'chamfer', icon:'◣' },
                   { id:'notch',   icon:'⌐' },
                   { id:'arc',     icon:'〜' },
@@ -1134,8 +1138,6 @@ export default function ContourEditor({ detail, onUpdate }) {
           {/* Перемещение точки — если тип не выбран */}
           {!menuSelType && (
             <div>
-              <NumField label="Радиус скругления R" value={activeVertex.r || 0}
-                onChange={v => updateVertex(activeIdx, { ...activeVertex, r: v })} />
 
               {/* Шаг перемещения */}
               <div style={{ marginTop:10, marginBottom:6, display:'flex', alignItems:'center', gap:8 }}>
