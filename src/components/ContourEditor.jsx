@@ -813,16 +813,13 @@ export default function ContourEditor({ detail, onUpdate }) {
         const arcCy=((p1.x*p1.x+p1.y*p1.y)*(p3.x-pm.x)+(pm.x*pm.x+pm.y*pm.y)*(p1.x-p3.x)+(p3.x*p3.x+p3.y*p3.y)*(pm.x-p1.x))/D
         const arcR=Math.hypot(curr.x-arcCx, curr.y-arcCy)
 
-        // Направление прямой
         const linePt = isArcNext ? prev : next
         const ld=Math.hypot(curr.x-linePt.x,curr.y-linePt.y)
         if(ld===0){ verts[idx]={...curr,r}; setVertices(verts); return }
         const ldx=(curr.x-linePt.x)/ld, ldy=(curr.y-linePt.y)/ld
-        // Если дуга после curr — линия идёт от prev к curr, иначе от curr к next
         const dirX = isArcNext ? ldx : -ldx
         const dirY = isArcNext ? ldy : -ldy
 
-        // Находим центр скругления
         let best=null, bestScore=Infinity
         for(const norm of [{x:-dirY,y:dirX},{x:dirY,y:-dirX}]){
           const ox2=curr.x+norm.x*r-arcCx, oy2=curr.y+norm.y*r-arcCy
@@ -848,43 +845,74 @@ export default function ContourEditor({ detail, onUpdate }) {
 
         if(!best){ verts[idx]={...curr,r}; setVertices(verts); return }
 
-        // Вычисляем углы дуги скругления
         const a0=Math.atan2(best.tpy-best.fy,best.tpx-best.fx)
         const a1=Math.atan2(best.tay-best.fy,best.tax-best.fx)
-
-        // Определяем ccw: дуга скругления должна идти ВНУТРИ угла
-        // Проверяем оба варианта и выбираем тот при котором середина дуги
-        // находится ближе к точке curr (внутри угла)
         const midAngle0 = (a0+a1)/2
-        const midAngle1 = midAngle0 + Math.PI
         const mx0 = best.fx + r*Math.cos(midAngle0), my0 = best.fy + r*Math.sin(midAngle0)
-        const mx1 = best.fx + r*Math.cos(midAngle1), my1 = best.fy + r*Math.sin(midAngle1)
-        const d0 = Math.hypot(mx0-curr.x, my0-curr.y)
-        const d1 = Math.hypot(mx1-curr.x, my1-curr.y)
-        // Выбираем дугу чья середина ДАЛЬШЕ от curr (дуга огибает угол снаружи)
-        const fccw = d0 > d1 ? false : true
+        const mx1 = best.fx + r*Math.cos(midAngle0+Math.PI), my1 = best.fy + r*Math.sin(midAngle0+Math.PI)
+        const fccw = Math.hypot(mx0-curr.x,my0-curr.y) > Math.hypot(mx1-curr.x,my1-curr.y) ? false : true
 
-        // Создаём три точки: tp, fillet, ta
         const tpPt = { x:best.tpx, y:best.tpy, r:0, type:'point' }
         const filletPt = {
-          x:(best.tpx+best.tax)/2, y:(best.tpy+best.tay)/2, // визуальная позиция
+          x:(best.tpx+best.tax)/2, y:(best.tpy+best.tay)/2,
           r:0, type:'fillet',
           fcx:best.fx, fcy:best.fy, fr:r,
           fa0:a0, fa1:a1, fccw
         }
         const taPt = { x:best.tax, y:best.tay, r:0, type:'point' }
 
-        // Заменяем текущую точку
         if(isArcNext){
           verts.splice(idx, 1, tpPt, filletPt, taPt)
         } else {
           verts.splice(idx, 1, taPt, filletPt, tpPt)
         }
         setVertices(verts); setActiveIdx(null)
+
       } else {
-        // Обычный радиус между двумя прямыми
-        verts[idx] = { ...curr, r }
-        setVertices(verts); setActiveIdx(idx)
+        // Две прямые — тоже создаём реальные точки tp, fillet, ta
+        const d0=Math.hypot(dx0,dy0), d1=Math.hypot(dx1,dy1)
+        if(d0===0||d1===0){ verts[idx]={...curr,r}; setVertices(verts); return }
+
+        const t=Math.min(r,d0,d1)
+        // Точки касания на прямых
+        const tpx=curr.x+dx0/d0*t, tpy=curr.y+dy0/d0*t  // на отрезке к prev
+        const tax=curr.x+dx1/d1*t, tay=curr.y+dy1/d1*t  // на отрезке к next
+
+        // Центр скругления — через arcTo геометрию
+        // Центр = curr + нормаль * r
+        // Нормаль к биссектрисе угла
+        const nx=(dx0/d0+dx1/d1), ny=(dy0/d0+dy1/d1)
+        const nl=Math.hypot(nx,ny)
+        if(nl<0.001){ verts[idx]={...curr,r}; setVertices(verts); return }
+        // Расстояние от curr до центра
+        const sin_half = Math.abs((dx0/d0)*(dy1/d1)-(dy0/d0)*(dx1/d1)) / 2
+        const dist = sin_half > 0.001 ? r / sin_half : r
+        const fcx = curr.x + nx/nl*dist/Math.sqrt(2) * Math.sqrt(2)
+        const fcy = curr.y + ny/nl*dist/Math.sqrt(2) * Math.sqrt(2)
+
+        // Точнее: центр = точка равноудалённая на r от обоих отрезков
+        // Используем arcTo точку: centre лежит на биссектрисе
+        const cross2 = (dx0/d0)*(dy1/d1)-(dy0/d0)*(dx1/d1)
+        const bisLen = cross2 !== 0 ? r/Math.abs(cross2)*Math.sqrt(2) : r*Math.sqrt(2)
+        const bx=curr.x+(nx/nl)*bisLen, by=curr.y+(ny/nl)*bisLen
+
+        const fa0=Math.atan2(tpy-by,tpx-bx)
+        const fa1=Math.atan2(tay-by,tax-bx)
+
+        // ccw: смотрим на знак cross product
+        const fccw = cross2 > 0
+
+        const tpPt   = { x:tpx, y:tpy, r:0, type:'point' }
+        const filletPt = {
+          x:(tpx+tax)/2, y:(tpy+tay)/2,
+          r:0, type:'fillet',
+          fcx:bx, fcy:by, fr:r,
+          fa0, fa1, fccw
+        }
+        const taPt   = { x:tax, y:tay, r:0, type:'point' }
+
+        verts.splice(idx, 1, tpPt, filletPt, taPt)
+        setVertices(verts); setActiveIdx(null)
       }
     } else if (type === 'concave') {
       verts[idx] = { ...curr, r: -(params.r || 50) }
