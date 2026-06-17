@@ -50,145 +50,151 @@ function buildPath(ctx, verts, sc, ox, oy, dh) {
     type: v.type || 'point',
   }))
 
+  // Центр детали для выбора правильного центра скругления (ближайший к центру)
+  let sumX=0, sumY=0, cnt=0
+  cv.forEach(v=>{ if(v.type!=='arc'){sumX+=v.x;sumY+=v.y;cnt++} })
+  const cxD=sumX/(cnt||1), cyD=sumY/(cnt||1)
+
+  function cc3(a,b,c){
+    const D=2*(a.x*(b.y-c.y)+b.x*(c.y-a.y)+c.x*(a.y-b.y))
+    if(Math.abs(D)<0.001)return null
+    const ux=((a.x*a.x+a.y*a.y)*(b.y-c.y)+(b.x*b.x+b.y*b.y)*(c.y-a.y)+(c.x*c.x+c.y*c.y)*(a.y-b.y))/D
+    const uy=((a.x*a.x+a.y*a.y)*(c.x-b.x)+(b.x*b.x+b.y*b.y)*(a.x-c.x)+(c.x*c.x+c.y*c.y)*(b.x-a.x))/D
+    return{x:ux,y:uy}
+  }
+
+  function getArcInfo(ni){
+    let si=ni; while(cv[(si-1+n)%n].type==='arc') si=(si-1+n)%n
+    let ei=ni; while(cv[(ei+1)%n].type==='arc') ei=(ei+1)%n
+    return{p1:cv[(si-1+n)%n], pm:cv[si], p3:cv[(ei+1)%n], C:cc3(cv[(si-1+n)%n],cv[si],cv[(ei+1)%n])}
+  }
+
+  function drawArc3(a,b,c,startPt,endPt){
+    const C=cc3(a,b,c); if(!C){ctx.lineTo((endPt||c).x,(endPt||c).y);return}
+    const R=Math.hypot(a.x-C.x,a.y-C.y)
+    const sp=startPt||a, ep=endPt||c
+    const sa=Math.atan2(sp.y-C.y,sp.x-C.x)
+    const ma=Math.atan2(b.y-C.y,b.x-C.x)
+    const ea=Math.atan2(ep.y-C.y,ep.x-C.x)
+    let dma=ma-sa; while(dma<0)dma+=Math.PI*2
+    let dea=ea-sa; while(dea<0)dea+=Math.PI*2
+    ctx.arc(C.x,C.y,R,sa,ea,dma>dea)
+  }
+
+  function findFillet(curr,lineDir,arcNi,r){
+    const info=getArcInfo(arcNi); if(!info.C)return null
+    const {C}=info
+    const arcR=Math.hypot(curr.x-C.x,curr.y-C.y)
+    const ldx=lineDir.x, ldy=lineDir.y
+    let candidates=[]
+    for(const norm of [{x:-ldy,y:ldx},{x:ldy,y:-ldx}]){
+      const ox2=curr.x+norm.x*r-C.x, oy2=curr.y+norm.y*r-C.y
+      const B=2*(ox2*ldx+oy2*ldy)
+      const C2=ox2*ox2+oy2*oy2-(arcR-r)*(arcR-r)
+      const disc=B*B-4*C2
+      if(disc<0)continue
+      for(const sign of[1,-1]){
+        const t=(-B+sign*Math.sqrt(disc))/2
+        const fx=curr.x+norm.x*r+t*ldx, fy=curr.y+norm.y*r+t*ldy
+        const tp_t=(fx-curr.x)*ldx+(fy-curr.y)*ldy
+        const tp={x:curr.x+tp_t*ldx,y:curr.y+tp_t*ldy}
+        const adx=fx-C.x, ady=fy-C.y, ad=Math.hypot(adx,ady)
+        const ta={x:C.x+adx/ad*arcR,y:C.y+ady/ad*arcR}
+        candidates.push({fcx:fx,fcy:fy,tp,ta})
+      }
+    }
+    if(!candidates.length)return null
+    // Выбираем центр скругления ближайший к центру детали
+    candidates.sort((a,b)=>
+      Math.hypot(a.fcx-cxD,a.fcy-cyD)-Math.hypot(b.fcx-cxD,b.fcy-cyD)
+    )
+    return candidates[0]
+  }
+
+  // Предвычисляем fillets для всех стыков прямая↔дуга
+  const fillets={}
+  for(let i=0;i<n;i++){
+    const curr=cv[i],next=cv[(i+1)%n],prev=cv[(i-1+n)%n]
+    if(curr.type==='arc')continue
+    const r=curr.r; if(r<=0)continue
+    if(next.type==='arc'){
+      const ld=Math.hypot(curr.x-prev.x,curr.y-prev.y)
+      if(ld>0) fillets[i+'_next']=findFillet(curr,{x:(curr.x-prev.x)/ld,y:(curr.y-prev.y)/ld},(i+1)%n,r)
+    }
+    if(prev.type==='arc'){
+      const ld=Math.hypot(next.x-curr.x,next.y-curr.y)
+      if(ld>0) fillets[i+'_prev']=findFillet(curr,{x:(next.x-curr.x)/ld,y:(next.y-curr.y)/ld},(i-1+n)%n,r)
+    }
+  }
+
   ctx.beginPath()
-  for (let i = 0; i < n; i++) {
-    const curr = cv[i]
-    if (i === 0) ctx.moveTo(curr.x, curr.y)
+  for(let i=0;i<n;i++){
+    const curr=cv[i], next=cv[(i+1)%n], prev=cv[(i-1+n)%n]
+    if(i===0) ctx.moveTo(curr.x,curr.y)
 
-    const next = cv[(i + 1) % n]
+    // Дуга через 3+ точек — с обрезкой по ta
+    if(curr.type==='arc'){
+      const prevIdx=(i-1+n)%n, nextIdx=(i+1)%n
+      const fPrev=fillets[prevIdx+'_next']
+      const fNext=fillets[nextIdx+'_prev']
+      const startPt=fPrev?fPrev.ta:prev
+      const endPt=fNext?fNext.ta:next
 
-    // Если ТЕКУЩАЯ точка — контрольная точка дуги (type='arc')
-    if (curr.type === 'arc') {
-      // Собираем всю группу arc-точек
-      const p0 = cv[(i - 1 + n) % n]
-      const arcGroup = [p0]
-      let j = i
-      while (j < n && cv[j % n].type === 'arc') {
-        arcGroup.push(cv[j % n])
-        j++
-      }
-      arcGroup.push(cv[j % n])
+      // Собираем arc-группу
+      const arcGroup=[prev]
+      let j=i
+      while(j<n && cv[j%n].type==='arc'){arcGroup.push(cv[j%n]);j++}
+      arcGroup.push(cv[j%n])
 
-      // Для каждой тройки соседних точек строим дугу окружности
-      // Точки: arcGroup[0], arcGroup[1], ..., arcGroup[last]
-      // Рисуем дуги: (0,1,2), (2,3,4), ... строго через точки
-      const drawArcThrough3 = (a, b, c) => {
-        const D = 2*(a.x*(b.y-c.y) + b.x*(c.y-a.y) + c.x*(a.y-b.y))
-        if (Math.abs(D) < 0.001) {
-          ctx.lineTo(c.x, c.y)
-          return
-        }
-        const ux = ((a.x*a.x+a.y*a.y)*(b.y-c.y) + (b.x*b.x+b.y*b.y)*(c.y-a.y) + (c.x*c.x+c.y*c.y)*(a.y-b.y)) / D
-        const uy = ((a.x*a.x+a.y*a.y)*(c.x-b.x) + (b.x*b.x+b.y*b.y)*(a.x-c.x) + (c.x*c.x+c.y*c.y)*(b.x-a.x)) / D
-        const r2 = Math.hypot(a.x-ux, a.y-uy)
-        const sa = Math.atan2(a.y-uy, a.x-ux)
-        const ma = Math.atan2(b.y-uy, b.x-ux)
-        const ea = Math.atan2(c.y-uy, c.x-ux)
-        const norm = (a) => { let d = a - sa; while(d < 0) d += Math.PI*2; return d }
-        const ccw = norm(ma) > norm(ea)
-        ctx.arc(ux, uy, r2, sa, ea, ccw)
-      }
-
-      if (arcGroup.length === 3) {
-        // Ровно 3 точки — одна дуга
-        drawArcThrough3(arcGroup[0], arcGroup[1], arcGroup[2])
+      if(arcGroup.length===3){
+        drawArc3(arcGroup[0],arcGroup[1],arcGroup[2],startPt,endPt)
       } else {
-        // 4+ точек — строим дуги через каждые 3 соседних
-        // arcGroup[0]-[1]-[2], потом [2]-[3]-[4] и т.д.
-        for (let k = 0; k+2 < arcGroup.length; k += 2) {
-          const a = arcGroup[k], b = arcGroup[k+1], c = arcGroup[k+2]
-          drawArcThrough3(a, b, c)
-        }
-        // Если нечётное число промежуточных — добиваем последний отрезок
-        if (arcGroup.length % 2 === 1) {
-          ctx.lineTo(arcGroup[arcGroup.length-1].x, arcGroup[arcGroup.length-1].y)
+        for(let k=0;k+2<arcGroup.length;k+=2){
+          const sp=k===0?startPt:null
+          const ep=k+2===arcGroup.length-1?endPt:null
+          drawArc3(arcGroup[k],arcGroup[k+1],arcGroup[k+2],sp,ep)
         }
       }
-
-      i = j - 1
-      continue
+      i=j-1; continue
     }
 
-    // Обычный отрезок с радиусом скругления
-    const prev = cv[(i - 1 + n) % n]
-    const r = curr.r
+    const r=curr.r
+    const isAN=next.type==='arc', isAP=prev.type==='arc'
 
-    // Вычисляем касательный вектор прихода t0 и ухода t1
-    // Для обычной точки — направление вдоль отрезка
-    // Для arc-соседа — перпендикуляр к (центр_окружности → curr)
-
-    const getArcCC = (ni) => {
-      // ni — индекс arc-точки (соседа)
-      // Находим начало и конец группы arc-точек
-      let si = ni; while (cv[(si-1+n)%n].type === 'arc') si = (si-1+n)%n
-      let ei = ni; while (cv[(ei+1)%n].type === 'arc') ei = (ei+1)%n
-      // p1 = точка ДО arc-группы, p3 = точка ПОСЛЕ arc-группы
-      const p1 = cv[(si-1+n)%n]
-      const pm = cv[si]  // первая arc-точка (контрольная)
-      const p3 = cv[(ei+1)%n]
-      const D = 2*(p1.x*(pm.y-p3.y)+pm.x*(p3.y-p1.y)+p3.x*(p1.y-pm.y))
-      if (Math.abs(D) < 0.001) return null
-      const ux = ((p1.x*p1.x+p1.y*p1.y)*(pm.y-p3.y)+(pm.x*pm.x+pm.y*pm.y)*(p3.y-p1.y)+(p3.x*p3.x+p3.y*p3.y)*(p1.y-pm.y))/D
-      const uy = ((p1.x*p1.x+p1.y*p1.y)*(p3.x-pm.x)+(pm.x*pm.x+pm.y*pm.y)*(p1.x-p3.x)+(p3.x*p3.x+p3.y*p3.y)*(pm.x-p1.x))/D
-      // Направление обхода дуги: от p1 к p3
-      return { cx: ux, cy: uy, p1, p3 }
-    }
-
-    const getTangent = (neighborIdx) => {
-      const nb = cv[neighborIdx]
-      if (nb.type !== 'arc') return null
-      const info = getArcCC(neighborIdx)
-      if (!info) return null
-      const { cx, cy, p1, p3 } = info
-      const rx = curr.x - cx, ry = curr.y - cy
-      const R = Math.hypot(rx, ry)
-      if (R === 0) return null
-      // Два варианта касательной (перпендикуляры к радиусу)
-      const ta1 = { x: -ry/R, y:  rx/R }
-      const ta2 = { x:  ry/R, y: -rx/R }
-      // Направление вдоль дуги: от p1 к p3, но если p1==curr используем pm
-      let mx, my
-      if (Math.hypot(p1.x-curr.x, p1.y-curr.y) < 1) {
-        // p1 совпадает с curr — берём направление от curr к p3
-        mx = p3.x - curr.x; my = p3.y - curr.y
-      } else if (Math.hypot(p3.x-curr.x, p3.y-curr.y) < 1) {
-        // p3 совпадает с curr — берём направление от p1 к curr
-        mx = curr.x - p1.x; my = curr.y - p1.y
-      } else {
-        mx = p3.x - p1.x; my = p3.y - p1.y
+    // Стык прямая→дуга
+    if(r>0 && isAN && !isAP){
+      const f=fillets[i+'_next']
+      if(f){
+        if(i===0) ctx.moveTo(f.tp.x,f.tp.y); else ctx.lineTo(f.tp.x,f.tp.y)
+        ctx.arc(f.fcx,f.fcy,r,Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),false)
+        continue
       }
-      return (ta1.x*mx + ta1.y*my > 0) ? ta1 : ta2
     }
 
-    // t0: откуда пришли
-    const t0 = getTangent((i-1+n)%n)
-    let t0x, t0y
-    if (t0) { t0x = t0.x; t0y = t0.y }
-    else {
-      const d = Math.hypot(curr.x-prev.x, curr.y-prev.y)
-      t0x = d > 0 ? (curr.x-prev.x)/d : 0
-      t0y = d > 0 ? (curr.y-prev.y)/d : 0
+    // Стык дуга→прямая
+    if(r>0 && isAP && !isAN){
+      const f=fillets[i+'_prev']
+      if(f){
+        ctx.lineTo(f.ta.x,f.ta.y)
+        ctx.arc(f.fcx,f.fcy,r,Math.atan2(f.ta.y-f.fcy,f.ta.x-f.fcx),Math.atan2(f.tp.y-f.fcy,f.tp.x-f.fcx),false)
+        ctx.lineTo(next.x,next.y)
+        continue
+      }
     }
 
-    // t1: куда идём
-    const t1 = getTangent((i+1)%n)
-    let t1x, t1y
-    const nextPt = cv[(i+1)%n]
-    if (t1) { t1x = t1.x; t1y = t1.y }
-    else {
-      const d = Math.hypot(nextPt.x-curr.x, nextPt.y-curr.y)
-      t1x = d > 0 ? (nextPt.x-curr.x)/d : 0
-      t1y = d > 0 ? (nextPt.y-curr.y)/d : 0
-    }
-
-    if (r <= 0) {
-      if (i === 0) ctx.moveTo(curr.x, curr.y)
-      else ctx.lineTo(curr.x, curr.y)
+    // Обычный радиус между двумя прямыми
+    const dx0=prev.x-curr.x, dy0=prev.y-curr.y
+    const dx1=next.x-curr.x, dy1=next.y-curr.y
+    const d0=Math.hypot(dx0,dy0), d1=Math.hypot(dx1,dy1)
+    if(r<=0){
+      if(i===0) ctx.moveTo(curr.x,curr.y); else ctx.lineTo(curr.x,curr.y)
+    } else if(d0===0||d1===0){
+      ctx.lineTo(curr.x,curr.y)
     } else {
-      const t = r
-      if (i === 0) ctx.moveTo(curr.x - t0x*t, curr.y - t0y*t)
-      else ctx.lineTo(curr.x - t0x*t, curr.y - t0y*t)
-      ctx.arcTo(curr.x, curr.y, curr.x + t1x*t, curr.y + t1y*t, r)
+      const t=Math.min(r,d0,d1)
+      if(i===0) ctx.moveTo(curr.x+dx0/d0*t,curr.y+dy0/d0*t)
+      else ctx.lineTo(curr.x+dx0/d0*t,curr.y+dy0/d0*t)
+      ctx.arcTo(curr.x,curr.y,curr.x+dx1/d1*t,curr.y+dy1/d1*t,r)
     }
   }
   ctx.closePath()
