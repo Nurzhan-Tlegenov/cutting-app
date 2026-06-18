@@ -1170,33 +1170,31 @@ export default function ContourEditor({ detail, onUpdate }) {
                 ✓ Применить радиус R{menuR}
               </button>
               {/* Кнопка Flip если рядом есть fillet точка */}
-              {(activeVertex && (() => {
+              {(() => {
+                if (!activeVertex) return null
                 const n = contour.vertices.length
-                const neighbors = [
-                  contour.vertices[(activeIdx+1)%n],
-                  contour.vertices[(activeIdx-1+n)%n],
-                  contour.vertices[(activeIdx+2)%n],
-                  contour.vertices[(activeIdx-2+n)%n],
-                ]
-                return neighbors.some(v => v?.type==='fillet')
-              })())) && (
-                <button type="button" onClick={() => {
-                  const verts=[...contour.vertices]
-                  const n=verts.length
-                  // Ищем fillet точку рядом
-                  for(const di of [1,-1,2,-2]){
-                    const fi=(activeIdx+di+n)%n
-                    if(verts[fi]?.type==='fillet'){
-                      verts[fi]={...verts[fi], fccw:!verts[fi].fccw}
-                      setVertices(verts)
-                      break
+                const hasFilletNear = [1,-1,2,-2].some(di => 
+                  contour.vertices[(activeIdx+di+n)%n]?.type==='fillet'
+                )
+                if (!hasFilletNear) return null
+                return (
+                  <button type="button" onClick={() => {
+                    const verts=[...contour.vertices]
+                    const n=verts.length
+                    for(const di of [1,-1,2,-2]){
+                      const fi=(activeIdx+di+n)%n
+                      if(verts[fi]?.type==='fillet'){
+                        verts[fi]={...verts[fi], fccw:!verts[fi].fccw}
+                        setVertices(verts)
+                        break
+                      }
                     }
-                  }
-                }} style={{marginTop:8,width:'100%',padding:'7px',border:'0.5px solid var(--border-md)',
-                  borderRadius:'var(--radius)',background:'transparent',fontSize:12,cursor:'pointer'}}>
-                  ⇄ Выбрать другой отрезок
-                </button>
-              )}
+                  }} style={{marginTop:8,width:'100%',padding:'7px',border:'0.5px solid var(--border-md)',
+                    borderRadius:'var(--radius)',background:'transparent',fontSize:12,cursor:'pointer'}}>
+                    ⇄ Выбрать другой отрезок
+                  </button>
+                )
+              })()}
             </div>
           )}
 
