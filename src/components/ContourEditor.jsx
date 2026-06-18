@@ -760,6 +760,7 @@ export default function ContourEditor({ detail, onUpdate }) {
     const verts = [...contour.vertices]
     const n = verts.length
     const curr = verts[idx]
+    console.log('applyCornerType', idx, type, params, 'curr:', curr, 'n:', n)
     const prev = verts[(idx - 1 + n) % n]
     const next = verts[(idx + 1) % n]
 
@@ -1091,8 +1092,11 @@ export default function ContourEditor({ detail, onUpdate }) {
                         return
                       }
                       setMenuSelType(id)
-                      if (id === 'none' || id === 'radius') {
+                      if (id === 'none') {
                         applyCornerType(activeIdx, id, { r: menuR, dx: menuDx, dy: menuDy })
+                        setPreviewVerts(null)
+                      } else if (id === 'radius') {
+                        // Не применяем сразу — ждём подтверждения из NumField
                         setPreviewVerts(null)
                       } else {
                         calcPreview(activeIdx, id, { dx: menuDx, dy: menuDy })
@@ -1146,8 +1150,18 @@ export default function ContourEditor({ detail, onUpdate }) {
           {/* Радиус */}
           {menuSelType === 'radius' && (
             <div>
-              <NumField label="Радиус R" value={menuR}
-                onChange={v => { setMenuR(v); applyCornerType(activeIdx, 'radius', { r: v, dx: menuDx, dy: menuDy }); setPreviewVerts(null) }} />
+              <NumField label="Радиус R" value={menuR} onChange={v => setMenuR(v)} />
+              <button type="button"
+                onClick={() => {
+                  applyCornerType(activeIdx, 'radius', { r: menuR })
+                  setPreviewVerts(null)
+                  setMenuSelType(null)
+                  setActiveIdx(null)
+                }}
+                style={{ marginTop:8, width:'100%', padding:'7px', background:'var(--blue)', color:'white',
+                  border:'none', borderRadius:'var(--radius)', fontSize:13, cursor:'pointer', fontWeight:500 }}>
+                ✓ Применить радиус R{menuR}
+              </button>
               {/* Кнопка Flip если рядом есть fillet точка */}
               {(activeVertex && (() => {
                 const n = contour.vertices.length
