@@ -432,8 +432,8 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onPreview, onIn
 
   const handleSelectType = (type) => {
     setSelType(type)
-    // Для none/radius/concave — применяем сразу
-    if (type === 'none' || type === 'radius' || type === 'concave') {
+    // Для none — применяем сразу. Для radius — ждём подтверждения
+    if (type === 'none') {
       onApplyType(idx, type, { r, dx, dy })
     }
   }
@@ -465,9 +465,14 @@ function VertexMenu({ idx, vertex, total, onChange, onApplyType, onPreview, onIn
       </div>
 
       {/* Параметры радиуса */}
-      {(selType === 'radius' || selType === 'concave') && (
+      {(selType === 'radius') && (
         <div style={{ marginBottom:10 }}>
-          <NumField label="Радиус R" value={r} onChange={v => { setR(v); onApplyType(idx, selType, { r: v, dx, dy }) }} />
+          <NumField label="Радиус R" value={r} onChange={v => setR(v)} />
+          <button type="button" onClick={() => onApplyType(idx, 'radius', { r, dx, dy })}
+            style={{ marginTop:8, width:'100%', padding:'8px', background:'var(--blue)', color:'white', border:'none',
+              borderRadius:'var(--radius)', fontSize:13, cursor:'pointer', fontWeight:500 }}>
+            ✓ Применить радиус R{r}
+          </button>
         </div>
       )}
 
