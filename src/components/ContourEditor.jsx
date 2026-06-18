@@ -1158,13 +1158,15 @@ export default function ContourEditor({ detail, onUpdate }) {
               <NumField label="Радиус R" value={menuR} onChange={v => setMenuR(v)} />
               <button type="button"
                 onClick={() => {
+                  console.log('Применить радиус', activeIdx, menuR)
                   applyCornerType(activeIdx, 'radius', { r: menuR })
                   setPreviewVerts(null)
                   setMenuSelType(null)
                   setActiveIdx(null)
                 }}
-                style={{ marginTop:8, width:'100%', padding:'7px', background:'var(--blue)', color:'white',
-                  border:'none', borderRadius:'var(--radius)', fontSize:13, cursor:'pointer', fontWeight:500 }}>
+                style={{ marginTop:8, width:'100%', padding:'10px', background:'var(--blue)', color:'white',
+                  border:'2px solid var(--blue)', borderRadius:'var(--radius)', fontSize:14, cursor:'pointer', fontWeight:700,
+                  display:'block' }}>
                 ✓ Применить радиус R{menuR}
               </button>
               {/* Кнопка Flip если рядом есть fillet точка */}
