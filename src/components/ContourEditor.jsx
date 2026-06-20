@@ -1119,13 +1119,11 @@ export default function ContourEditor({ detail, onUpdate }) {
                 applyCornerType(activeIdx, 'radius', { r: v })
                 setPreviewVerts(null)
               }} />
-            </div>
-          )}
               {/* Кнопка Flip если рядом есть fillet точка */}
               {(() => {
                 if (!activeVertex) return null
                 const n = contour.vertices.length
-                const hasFilletNear = [1,-1,2,-2].some(di => 
+                const hasFilletNear = [1,-1,2,-2].some(di =>
                   contour.vertices[(activeIdx+di+n)%n]?.type==='fillet'
                 )
                 if (!hasFilletNear) return null
