@@ -875,56 +875,9 @@ export default function ContourEditor({ detail, onUpdate }) {
         setVertices(verts); setActiveIdx(null)
 
       } else {
-        // Две прямые — тоже создаём реальные точки tp, fillet, ta
-        const d0=Math.hypot(dx0,dy0), d1=Math.hypot(dx1,dy1)
-        if(d0===0||d1===0){ verts[idx]={...curr,r}; setVertices(verts); return }
-
-        const t=Math.min(r,d0,d1)
-        // Точки касания на прямых
-        const tpx=curr.x+dx0/d0*t, tpy=curr.y+dy0/d0*t  // на отрезке к prev
-        const tax=curr.x+dx1/d1*t, tay=curr.y+dy1/d1*t  // на отрезке к next
-
-        // Центр скругления — через arcTo геометрию
-        // Центр = curr + нормаль * r
-        // Нормаль к биссектрисе угла
-        const nx=(dx0/d0+dx1/d1), ny=(dy0/d0+dy1/d1)
-        const nl=Math.hypot(nx,ny)
-        if(nl<0.001){ verts[idx]={...curr,r}; setVertices(verts); return }
-        // Расстояние от curr до центра
-        const sin_half = Math.abs((dx0/d0)*(dy1/d1)-(dy0/d0)*(dx1/d1)) / 2
-        const dist = sin_half > 0.001 ? r / sin_half : r
-        const fcx = curr.x + nx/nl*dist/Math.sqrt(2) * Math.sqrt(2)
-        const fcy = curr.y + ny/nl*dist/Math.sqrt(2) * Math.sqrt(2)
-
-        // Точнее: центр = точка равноудалённая на r от обоих отрезков
-        // Используем arcTo точку: centre лежит на биссектрисе
-        const cross2 = (dx0/d0)*(dy1/d1)-(dy0/d0)*(dx1/d1)
-        const bisLen = cross2 !== 0 ? r/Math.abs(cross2)*Math.sqrt(2) : r*Math.sqrt(2)
-        const bx=curr.x+(nx/nl)*bisLen, by=curr.y+(ny/nl)*bisLen
-
-        const fa0=Math.atan2(tpy-by,tpx-bx)
-        const fa1=Math.atan2(tay-by,tax-bx)
-
-        // Определяем ccw: дуга должна огибать угол СНАРУЖИ (сглаживать)
-        // Проверяем оба варианта — берём тот чья середина дальше от curr
-        const midA0 = (fa0+fa1)/2
-        const midA1 = midA0 + Math.PI
-        const mx0 = bx + r*Math.cos(midA0), my0 = by + r*Math.sin(midA0)
-        const mx1 = bx + r*Math.cos(midA1), my1 = by + r*Math.sin(midA1)
-        // Середина "правильной" дуги должна быть дальше от curr (дуга снаружи угла)
-        const fccw = Math.hypot(mx0-curr.x, my0-curr.y) < Math.hypot(mx1-curr.x, my1-curr.y)
-
-        const tpPt   = { x:tpx, y:tpy, r:0, type:'point' }
-        const filletPt = {
-          x:(tpx+tax)/2, y:(tpy+tay)/2,
-          r:0, type:'fillet',
-          fcx:bx, fcy:by, fr:r,
-          fa0, fa1, fccw
-        }
-        const taPt   = { x:tax, y:tay, r:0, type:'point' }
-
-        verts.splice(idx, 1, tpPt, filletPt, taPt)
-        setVertices(verts); setActiveIdx(null)
+        // Две прямые — просто ставим r на вершину (buildPath использует arcTo)
+        verts[idx] = { ...curr, r }
+        setVertices(verts); setActiveIdx(idx)
       }
     } else if (type === 'concave') {
       verts[idx] = { ...curr, r: -(params.r || 50) }
