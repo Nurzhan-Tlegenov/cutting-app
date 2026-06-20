@@ -905,8 +905,14 @@ export default function ContourEditor({ detail, onUpdate }) {
         const fa0=Math.atan2(tpy-by,tpx-bx)
         const fa1=Math.atan2(tay-by,tax-bx)
 
-        // ccw: смотрим на знак cross product
-        const fccw = cross2 > 0
+        // Определяем ccw: дуга должна огибать угол СНАРУЖИ (сглаживать)
+        // Проверяем оба варианта — берём тот чья середина дальше от curr
+        const midA0 = (fa0+fa1)/2
+        const midA1 = midA0 + Math.PI
+        const mx0 = bx + r*Math.cos(midA0), my0 = by + r*Math.sin(midA0)
+        const mx1 = bx + r*Math.cos(midA1), my1 = by + r*Math.sin(midA1)
+        // Середина "правильной" дуги должна быть дальше от curr (дуга снаружи угла)
+        const fccw = Math.hypot(mx0-curr.x, my0-curr.y) < Math.hypot(mx1-curr.x, my1-curr.y)
 
         const tpPt   = { x:tpx, y:tpy, r:0, type:'point' }
         const filletPt = {
@@ -1155,7 +1161,14 @@ export default function ContourEditor({ detail, onUpdate }) {
           {/* Радиус */}
           {menuSelType === 'radius' && (
             <div>
-              <NumField label="Радиус R" value={menuR} onChange={v => setMenuR(v)} />
+              <NumField label="Радиус R" value={menuR} onChange={v => {
+                setMenuR(v)
+                // Превью — показываем радиус временно на вершине
+                const verts = contour.vertices.map((vert, i) =>
+                  i === activeIdx ? { ...vert, r: v } : vert
+                )
+                setPreviewVerts(verts)
+              }} />
               <button type="button"
                 onClick={() => {
                   console.log('Применить радиус', activeIdx, menuR)
