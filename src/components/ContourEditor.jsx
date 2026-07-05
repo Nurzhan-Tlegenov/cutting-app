@@ -815,9 +815,12 @@ export default function ContourEditor({ detail, onUpdate }) {
   }
 
   // Получить/установить активные вершины (контур или вырез)
-  const getActiveVerts = () => activeHoleIdx !== null && contour.holes[activeHoleIdx]?.vertices
-    ? contour.holes[activeHoleIdx].vertices
-    : contour.vertices
+  const getActiveVerts = () => {
+    if (activeHoleIdx !== null && contour.holes?.[activeHoleIdx]?.vertices) {
+      return contour.holes[activeHoleIdx].vertices
+    }
+    return contour.vertices || []
+  }
   const setActiveVerts = (verts) => activeHoleIdx !== null
     ? setHoleVertices(activeHoleIdx, verts)
     : setVertices(verts)
