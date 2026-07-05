@@ -366,30 +366,50 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       ctx.restore()
     }
 
-    // Маркеры — внешнего контура или выреза (если редактируется)
+    // Маркеры внешнего контура (всегда видны)
     if (showMarkers || arcMode) {
-      const editVerts = activeHoleIdx !== null && contour.holes?.[activeHoleIdx]?.vertices
-        ? contour.holes[activeHoleIdx].vertices
-        : verts
-      const markers = getMarkers(editVerts, sc, ox, oy, dh)
+      const markers = getMarkers(verts, sc, ox, oy, dh)
       markers.forEach(m => {
         if (m.vertex.type === 'fillet') return
-        const isActive = m.idx === activeIdx
-        const isArcSel = arcPoints.includes(m.idx)
-        const r = arcMode ? 10 : (isActive ? 5 : 3.5)
+        const isActive = activeHoleIdx === null && m.idx === activeIdx
+        const isArcSel = activeHoleIdx === null && arcPoints.includes(m.idx)
+        const r = arcMode && activeHoleIdx === null ? 10 : (isActive ? 5 : 3.5)
         ctx.beginPath()
         ctx.arc(m.x, m.y, r, 0, Math.PI * 2)
-        ctx.fillStyle = isArcSel ? '#F5A623' : isActive ? '#E24B4A' :
-          activeHoleIdx !== null ? '#E24B4A' : '#185FA5'
+        ctx.fillStyle = isArcSel ? '#F5A623' : isActive ? '#E24B4A' : '#185FA5'
         ctx.fill()
         ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5; ctx.stroke()
-        if (arcMode) {
+        if (arcMode && activeHoleIdx === null) {
           ctx.fillStyle = 'white'; ctx.font = 'bold 9px sans-serif'
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
           ctx.fillText(m.idx + 1, m.x, m.y)
         }
       })
     }
+
+    // Маркеры всех вырезов
+    ;(contour.holes || []).forEach((hole, hi) => {
+      if (!hole.vertices) return
+      const hMarkers = getMarkers(hole.vertices, sc, ox, oy, dh)
+      hMarkers.forEach(m => {
+        if (m.vertex.type === 'fillet') return
+        const isActiveHole = activeHoleIdx === hi
+        const isActive = isActiveHole && m.idx === activeIdx
+        const isArcSel = isActiveHole && arcPoints.includes(m.idx)
+        const r = arcMode && isActiveHole ? 10 : (isActive ? 5 : 3.5)
+        ctx.beginPath()
+        ctx.arc(m.x, m.y, r, 0, Math.PI * 2)
+        ctx.fillStyle = isArcSel ? '#F5A623' : isActive ? '#E24B4A' :
+          isActiveHole ? '#E24B4A' : 'rgba(226,75,74,0.4)'
+        ctx.fill()
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 1.5; ctx.stroke()
+        if (arcMode && isActiveHole) {
+          ctx.fillStyle = 'white'; ctx.font = 'bold 9px sans-serif'
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+          ctx.fillText(m.idx + 1, m.x, m.y)
+        }
+      })
+    })
 
   }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx])
 
@@ -409,11 +429,23 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
     const verts = contour.vertices || makeRect(w, h)
-    const editVerts = activeHoleIdx !== null && contour.holes?.[activeHoleIdx]?.vertices
-      ? contour.holes[activeHoleIdx].vertices
-      : verts
-    const markers = getMarkers(editVerts, sc, ox, oy, dh)
     const TAP_R = arcMode ? 30 : 20
+
+    // Сначала проверяем точки вырезов
+    for (let hi = 0; hi < (contour.holes||[]).length; hi++) {
+      const hole = contour.holes[hi]
+      if (!hole.vertices) continue
+      const hMarkers = getMarkers(hole.vertices, sc, ox, oy, dh)
+      for (const m of hMarkers) {
+        if (Math.hypot(cx - m.x, cy - m.y) <= TAP_R) {
+          onTap(m.idx, hi) // передаём holeIdx
+          return
+        }
+      }
+    }
+
+    // Потом точки внешнего контура
+    const markers = getMarkers(verts, sc, ox, oy, dh)
     for (const m of markers) {
       if (Math.hypot(cx - m.x, cy - m.y) <= TAP_R) {
         onTap(m.idx)
@@ -758,9 +790,12 @@ export default function ContourEditor({ detail, onUpdate }) {
     upd({ holes })
   }
 
-  const handleTap = (idx) => {
+  const handleTap = (idx, holeIdx = null) => {
     if (idx === null) {
-      if (!arcMode) { setActiveIdx(null); setMenuSelType(null); setPreviewVerts(null) }
+      if (!arcMode) {
+        setActiveIdx(null); setMenuSelType(null); setPreviewVerts(null)
+        // Не сбрасываем activeHoleIdx — пользователь остаётся в режиме выреза
+      }
       return
     }
     if (arcMode) {
@@ -768,12 +803,15 @@ export default function ContourEditor({ detail, onUpdate }) {
       setArcPoints(pts => [...pts, idx])
       return
     }
+    // Если тапнули по точке выреза — переключаемся на этот вырез
+    if (holeIdx !== null) setActiveHoleIdx(holeIdx)
+    else setActiveHoleIdx(null)
     setActiveIdx(idx)
     setMenuSelType(null)
     setPreviewVerts(null)
     setArcMode(false)
     setArcPoints([])
-    if (activeHoleIdx === null) setTab('contour')
+    if (holeIdx === null) setTab('contour')
   }
 
   // Получить/установить активные вершины (контур или вырез)
@@ -938,7 +976,7 @@ export default function ContourEditor({ detail, onUpdate }) {
     }
   }
   const insertVertex = (idx, after = false) => {
-    const verts = contour.vertices
+    const verts = getActiveVerts()
     const n = verts.length
     const i = after ? idx : (idx - 1 + n) % n
     const j = (i + 1) % n
@@ -952,7 +990,7 @@ export default function ContourEditor({ detail, onUpdate }) {
 
   // Удалить точку
   const deleteVertex = (idx) => {
-    const verts = contour.vertices.filter((_, i) => i !== idx)
+    const verts = getActiveVerts().filter((_, i) => i !== idx)
     setActiveVerts(verts)
     setActiveIdx(null)
   }
@@ -1114,7 +1152,7 @@ export default function ContourEditor({ detail, onUpdate }) {
                         applyCornerType(activeIdx, id, { r: menuR, dx: menuDx, dy: menuDy })
                         setPreviewVerts(null)
                       } else if (id === 'radius') {
-                        // Не применяем сразу — ждём подтверждения из NumField
+                        applyCornerType(activeIdx, 'radius', { r: menuR })
                         setPreviewVerts(null)
                       } else {
                         calcPreview(activeIdx, id, { dx: menuDx, dy: menuDy })
@@ -1299,7 +1337,11 @@ export default function ContourEditor({ detail, onUpdate }) {
       {/* Вкладки */}
       <div style={{ display:'flex', gap:4, margin:'10px 0 10px', background:'var(--bg2)', borderRadius:'var(--radius)', padding:3 }}>
         {[['contour','Контур'],['holes','Вырезы'],['grooves','Пазы']].map(([id,label])=>(
-          <button key={id} type="button" onClick={()=>{ setTab(id); if(id!=='contour') setActiveIdx(null) }}
+          <button key={id} type="button" onClick={()=>{
+            setTab(id)
+            if(id!=='contour') { setActiveIdx(null) }
+            if(id!=='holes') setActiveHoleIdx(null)
+          }}
             style={{ flex:1, padding:'6px 4px', border:'none', borderRadius:6, fontSize:12,
               background: tab===id?'var(--bg)':'transparent',
               color: tab===id?'var(--blue)':'var(--text-hint)',
@@ -1378,22 +1420,6 @@ export default function ContourEditor({ detail, onUpdate }) {
               {/* Позиция */}
               <SideOffsetPicker activeSides={hole.sides||[]} offsets={hole.offsets||{}}
                 onChange={({sides,offsets})=>updHole(i,{sides,offsets})} />
-
-              {/* Кнопка редактирования точек */}
-              {hole.type !== 'circle' && hole.vertices && (
-                <button type="button"
-                  onClick={() => {
-                    setActiveHoleIdx(i)
-                    setActiveIdx(null)
-                    setMenuSelType(null)
-                    setTab('holes')
-                  }}
-                  style={{ width:'100%', marginTop:8, padding:'7px', border:'1.5px solid var(--blue)',
-                    borderRadius:'var(--radius)', background: activeHoleIdx===i?'var(--blue-light)':'transparent',
-                    fontSize:12, color:'var(--blue)', cursor:'pointer' }}>
-                  {activeHoleIdx===i ? '✏️ Редактируется...' : '✏️ Редактировать точки выреза'}
-                </button>
-              )}
             </CollapsibleItem>
           ))}
         </div>
