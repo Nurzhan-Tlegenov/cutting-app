@@ -233,7 +233,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     }
 
     // Внешний контур
-    const verts = previewVerts || contour.vertices || makeRect(w, h)
+    const verts = (activeHoleIdx === null ? previewVerts : null) || contour.vertices || makeRect(w, h)
     buildPath(ctx, verts, sc, ox, oy, dh)
     ctx.fillStyle = '#E6F1FB'; ctx.fill()
     ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.5; ctx.stroke()
@@ -252,10 +252,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         ctx.beginPath(); ctx.arc(cx2, cy2, d/2*sc, 0, Math.PI*2)
         ctx.fill(); ctx.stroke()
       } else {
-        // Используем vertices если есть, иначе вычисляем из resolvePos
-        const verts = hole.vertices || holeToVertices(hole, w, h)
-        if (verts) {
-          buildPath(ctx, verts, sc, ox, oy, dh)
+        // Используем previewVerts если это активный редактируемый вырез
+        const holeVerts = (activeHoleIdx === hi && previewVerts)
+          || hole.vertices
+          || holeToVertices(hole, w, h)
+        if (holeVerts) {
+          buildPath(ctx, holeVerts, sc, ox, oy, dh)
           ctx.fill(); ctx.stroke()
         }
       }
@@ -725,7 +727,7 @@ export default function ContourEditor({ detail, onUpdate }) {
 
   // Рассчитать превью без сохранения в контур
   const calcPreview = (idx, type, params) => {
-    const verts = [...contour.vertices]
+    const verts = [...getActiveVerts()]
     const n = verts.length
     const curr = verts[idx]
     const prev = verts[(idx - 1 + n) % n]
