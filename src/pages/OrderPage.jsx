@@ -4,37 +4,30 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
-
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
-
 export default function OrderPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { profile } = useAuth()
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
-
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
-
   useEffect(() => { fetchOrder() }, [id])
-
   async function fetchOrder() {
-    const { data: o } = await supabase.from('orders').select(`*, profiles(full_name, phone, whatsapp)`).eq('id', id).single()
+    const { data: o, error: oErr } = await supabase.from('orders').select('*').eq('id', id).single()
+    console.log('order:', o, 'error:', oErr)
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
     setOrder(o)
     setDetails(d || [])
     setLoading(false)
   }
-
 async function setStatus(status) {
     await supabase.from('orders').update({ status }).eq('id', id)
     setOrder(o => ({ ...o, status }))
   }
-
   if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40 }}>Загрузка...</p></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
-
   const validDetails = details.filter(d => d.length > 0 && d.width > 0)
   const kerf = order.kerf_width || 4
   const usableL = order.sheet_length - (order.margin_left || 0) - (order.margin_right || 0)
@@ -50,12 +43,8 @@ async function setStatus(status) {
     if (d.edge_right) totalEdge += (d.width / 1000) * d.qty
   })
   const sheetsNeeded = usableArea > 0 ? Math.ceil(totalPartArea / (usableArea * 0.85)) : 0
-
   const isDraft = order.status === 'draft'
-  const canSubmit = isDraft && validDetails.length > 0
-
   const edgeNames = { edge_top:'В', edge_right:'П', edge_bottom:'Н', edge_left:'Л' }
-
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
@@ -68,16 +57,6 @@ async function setStatus(status) {
           {STATUS_LABELS[order.status] || order.status}
         </span>
       </div>
-
-      {isOperator && order.profiles && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <p className="section-title">Клиент</p>
-          <p style={{ fontWeight: 500 }}>{order.profiles.full_name}</p>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Тел: {order.profiles.phone}</p>
-          {order.profiles.whatsapp && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>WhatsApp: {order.profiles.whatsapp}</p>}
-        </div>
-      )}
-
       {isOperator && (
         <div className="card" style={{ marginBottom: 12 }}>
           <p className="section-title">Изменить статус</p>
@@ -93,7 +72,6 @@ async function setStatus(status) {
           </div>
         </div>
       )}
-
       <div style={{ marginBottom: 12 }}>
         <p className="section-title">Статистика</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -110,7 +88,6 @@ async function setStatus(status) {
           ))}
         </div>
       </div>
-
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
@@ -121,7 +98,6 @@ async function setStatus(status) {
             </button>
           )}
         </div>
-
         <div style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -133,7 +109,7 @@ async function setStatus(status) {
               </tr>
             </thead>
             <tbody>
-              {details.map((d, i) => (
+              {details.map((d) => (
                 <tr key={d.id} style={{ borderTop: '0.5px solid var(--border)' }}>
                   <td style={{ padding: '8px 10px' }}>
                     {d.prefix && <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 500 }}>{d.prefix}</div>}
@@ -150,7 +126,6 @@ async function setStatus(status) {
           </table>
         </div>
       </div>
-
       {isDraft && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button onClick={() => navigate(`/orders/${id}/nesting`)}
@@ -158,12 +133,8 @@ async function setStatus(status) {
               border: 'none', borderRadius: 'var(--radius)', fontSize: 15, fontWeight: 500, cursor: 'pointer' }}>
             ▶ Выполнить раскрой
           </button>
-          <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center' }}>
-            После раскроя вы сможете оформить заказ
-          </p>
         </div>
       )}
-
       <BottomNav />
     </div>
   )
