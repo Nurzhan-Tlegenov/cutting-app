@@ -239,7 +239,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.5; ctx.stroke()
 
     // Holes
-    ;(contour.holes || []).forEach(hole => {
+    ;(contour.holes || []).forEach((hole, hi) => {
       const isCircle = hole.type === 'circle'
       ctx.fillStyle = 'white'
       ctx.strokeStyle = '#E24B4A'
