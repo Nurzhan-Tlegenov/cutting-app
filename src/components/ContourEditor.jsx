@@ -703,7 +703,7 @@ export default function ContourEditor({ detail, onUpdate }) {
 
   // Переместить точку по X/Y с ограничением внутри детали
   const moveVertex = (idx, dx, dy) => {
-    const verts = [...contour.vertices]
+    const verts = [...getActiveVerts()]
     const w = Number(detail.w) || 0
     const h = Number(detail.h) || 0
     const newX = Math.max(0, Math.min(w, verts[idx].x + dx))
