@@ -22,7 +22,12 @@ export default function OrderPage() {
     setDetails(d || [])
     setLoading(false)
   }
-async function setStatus(status) {
+  async function deleteOrder() {
+    if (!window.confirm('Удалить заказ? Это действие нельзя отменить.')) return
+    await supabase.from('order_details').delete().eq('order_id', id)
+    await supabase.from('orders').delete().eq('id', id)
+    navigate('/orders')
+  }
     await supabase.from('orders').update({ status }).eq('id', id)
     setOrder(o => ({ ...o, status }))
   }
@@ -132,6 +137,11 @@ async function setStatus(status) {
             style={{ width: '100%', padding: 12, background: 'var(--blue)', color: 'white',
               border: 'none', borderRadius: 'var(--radius)', fontSize: 15, fontWeight: 500, cursor: 'pointer' }}>
             ▶ Выполнить раскрой
+          </button>
+          <button onClick={deleteOrder}
+            style={{ width: '100%', padding: 10, background: 'transparent', color: 'var(--danger)',
+              border: '1px solid var(--danger)', borderRadius: 'var(--radius)', fontSize: 14, cursor: 'pointer' }}>
+            🗑 Удалить заказ
           </button>
         </div>
       )}
