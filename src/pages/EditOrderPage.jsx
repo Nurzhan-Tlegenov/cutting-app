@@ -2,14 +2,13 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import ContourEditor from '../components/ContourEditor'
 import BottomNav from '../components/BottomNav'
-
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
   kerf: 4
 }
-
 function NumInput({ value, onChange, placeholder, inputRef }) {
   return (
     <input ref={inputRef} type="text" inputMode="numeric" pattern="[0-9]*"
@@ -20,7 +19,6 @@ function NumInput({ value, onChange, placeholder, inputRef }) {
       }} />
   )
 }
-
 function EdgeBtn({ active, label, onClick, vertical, flipText }) {
   return (
     <button type="button" onClick={onClick} style={{
@@ -35,7 +33,6 @@ function EdgeBtn({ active, label, onClick, vertical, flipText }) {
     </button>
   )
 }
-
 function Toggle({ on }) {
   return (
     <div style={{ width: 36, height: 20, borderRadius: 10, background: on ? 'var(--blue)' : 'var(--border-md)', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}>
@@ -43,18 +40,15 @@ function Toggle({ on }) {
     </div>
   )
 }
-
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onEditContour }) {
   const SIDES = ['Дв','Дн','Шл','Шп']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
-
   useEffect(() => {
     if (autoFocus && lengthRef.current) {
       setTimeout(() => { lengthRef.current?.focus(); lengthRef.current?.select() }, 50)
     }
   }, [autoFocus])
-
   const toggleEdge = (key) => {
     const newEdges = { ...detail.edges }
     if (activeEdgeName) {
@@ -64,11 +58,20 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
     }
     onUpdate({ ...detail, edges: newEdges })
   }
-
+  const hasContour = detail.contour && (
+    (detail.contour.vertices && (
+      detail.contour.vertices.length > 4 ||
+      detail.contour.vertices.some(v => v.r && v.r !== 0)
+    )) ||
+    (detail.contour.holes || []).length > 0
+  )
   return (
     <div className="card" style={{ marginBottom: 8, padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ fontSize: 12, color: 'var(--text-hint)', minWidth: 22 }}>#{index + 1}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 28 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>#{index + 1}</div>
+          {hasContour && <span style={{ fontSize: 9, color: 'var(--blue)', background: 'var(--blue-light)', borderRadius: 4, padding: '1px 3px' }}>✦</span>}
+        </div>
         <div style={{ display: 'flex', gap: 4, flex: 1 }}>
           <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} />
           <NumInput value={detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: v })} />
@@ -101,15 +104,18 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
               fontSize: 10, color: detail.rotatable ? 'var(--teal)' : 'var(--text-hint)', cursor: 'pointer', flexShrink: 0 }}>↻</button>
         </div>
       )}
-      {!showEdge && Object.entries(detail.edges).some(([,v]) => v) && (
-        <div style={{ marginTop: 4, fontSize: 10, color: 'var(--blue)' }}>
-          {[['top','Д1'],['bottom','Д2'],['left','Ш1'],['right','Ш2']].filter(([k]) => detail.edges[k]).map(([k,s]) => `${s}:${detail.edges[k] === 'default' ? '✓' : detail.edges[k]}`).join('  ')}
-        </div>
+      {/* Кнопка редактирования контура */}
+      {Number(detail.w) > 0 && Number(detail.h) > 0 && (
+        <button type="button" onClick={onEditContour}
+          style={{ marginTop: 8, width: '100%', padding: '6px', border: hasContour ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+            borderRadius: 'var(--radius)', background: hasContour ? 'var(--blue-light)' : 'transparent',
+            fontSize: 12, color: hasContour ? 'var(--blue)' : 'var(--text-hint)', cursor: 'pointer' }}>
+          {hasContour ? '✦ Редактировать контур' : '◇ Редактировать контур'}
+        </button>
       )}
     </div>
   )
 }
-
 function PrefixManager({ prefixes, active, onChange, onSetActive }) {
   const [input, setInput] = useState('')
   const add = () => {
@@ -137,7 +143,6 @@ function PrefixManager({ prefixes, active, onChange, onSetActive }) {
     </div>
   )
 }
-
 function EdgeManager({ edgeNames, activeEdge, onChange, onSetActive }) {
   const [input, setInput] = useState('')
   const add = () => {
@@ -163,7 +168,6 @@ function EdgeManager({ edgeNames, activeEdge, onChange, onSetActive }) {
     </div>
   )
 }
-
 let uid = 0
 function makeDetail(d) {
   uid++
@@ -176,16 +180,13 @@ function makeDetail(d) {
     contour: d?.contour ? JSON.parse(d.contour) : null
   }
 }
-
 export default function EditOrderPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
-
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-
   const [orderName, setOrderName] = useState('')
   const [materialName, setMaterialName] = useState('')
   const [prefixes, setPrefixes] = useState([])
@@ -195,22 +196,16 @@ export default function EditOrderPage() {
   const [details, setDetails] = useState([])
   const [showEdge, setShowEdge] = useState(true)
   const [lastAddedUid, setLastAddedUid] = useState(null)
-
+  const [editingContourUid, setEditingContourUid] = useState(null)
   useEffect(() => { fetchOrder() }, [id])
-
   async function fetchOrder() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
-    if (o) {
-      setOrderName(o.order_name || '')
-      setMaterialName(o.material_name || '')
-    }
+    if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || '') }
     if (d && d.length > 0) {
-      // Восстанавливаем префиксы
       const pfxSet = [...new Set(d.filter(x => x.prefix).map(x => x.prefix))]
       setPrefixes(pfxSet)
       setDetails(d.map(makeDetail))
-      // Восстанавливаем кромки
       const edgeSet = new Set()
       d.forEach(x => {
         if (x.edge_top && x.edge_top !== 'default') edgeSet.add(x.edge_top)
@@ -222,7 +217,6 @@ export default function EditOrderPage() {
     }
     setLoading(false)
   }
-
   const addDetail = () => {
     const d = { ...makeDetail(null), prefix: activePrefix }
     setLastAddedUid(d.uid)
@@ -230,32 +224,36 @@ export default function EditOrderPage() {
   }
   const removeDetail = (u) => setDetails(d => d.filter(x => x.uid !== u))
   const updateDetail = (u, updated) => setDetails(d => d.map(x => x.uid === u ? updated : x))
-
   const grouped = details.reduce((acc, d) => {
     const key = d.prefix || ''
     if (!acc[key]) acc[key] = []
     acc[key].push(d)
     return acc
   }, {})
-
+  // Редактирование контура
+  const editingDetail = editingContourUid ? details.find(d => d.uid === editingContourUid) : null
+  if (editingDetail) {
+    return (
+      <ContourEditor
+        detail={{ w: editingDetail.w, h: editingDetail.h, contour: editingDetail.contour }}
+        onUpdate={(updated) => updateDetail(editingContourUid, { ...editingDetail, contour: updated.contour })}
+        onClose={() => setEditingContourUid(null)}
+      />
+    )
+  }
   async function handleSave() {
     const valid = details.filter(d => Number(d.w) > 0 && Number(d.h) > 0)
     if (!valid.length) { setError('Добавьте хотя бы одну деталь с размерами'); return }
     setSaving(true); setError('')
     try {
-      // Обновляем заказ
       const { error: oErr } = await supabase.from('orders').update({
         order_name: orderName || null,
         material_name: materialName || 'Без названия',
         nesting_result: null
       }).eq('id', id)
       if (oErr) throw new Error('Ошибка обновления заказа: ' + oErr.message)
-
-      // Удаляем старые детали
       const { error: dErr } = await supabase.from('order_details').delete().eq('order_id', id)
       if (dErr) throw new Error('Ошибка удаления деталей: ' + dErr.message)
-
-      // Вставляем только заполненные детали
       let sortIdx = 0
       const rows = valid.map((d) => {
         const pfx = d.prefix || null
@@ -271,10 +269,8 @@ export default function EditOrderPage() {
           contour: d.contour ? JSON.stringify(d.contour) : null
         }
       })
-
       const { error: iErr } = await supabase.from('order_details').insert(rows)
       if (iErr) throw new Error('Ошибка сохранения деталей: ' + iErr.message)
-
       navigate(`/orders/${id}`)
     } catch (err) {
       setError(err.message)
@@ -282,11 +278,8 @@ export default function EditOrderPage() {
       setSaving(false)
     }
   }
-
   const validCount = details.filter(d => d.w > 0 && d.h > 0).length
-
   if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
-
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingTop: 8 }}>
@@ -294,7 +287,6 @@ export default function EditOrderPage() {
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
         <h1 style={{ fontSize: 18, fontWeight: 500 }}>Редактирование заказа</h1>
       </div>
-
       <div style={{ marginBottom: 14 }}>
         <p className="section-title">Название заказа</p>
         <div className="card">
@@ -305,32 +297,18 @@ export default function EditOrderPage() {
             onChange={e => setMaterialName(e.target.value)} />
         </div>
       </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <p className="section-title">Параметры листа</p>
-        <div className="card" style={{ background: 'var(--bg2)' }}>
-          <div className="row2" style={{ marginBottom: 6 }}>
-            <div><label className="label">Длина</label><div style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{SHEET_DEFAULTS.length} мм</div></div>
-            <div><label className="label">Ширина</label><div style={{ fontWeight: 500, color: 'var(--text-muted)' }}>{SHEET_DEFAULTS.width} мм</div></div>
-          </div>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Устанавливает производство</p>
-        </div>
-      </div>
-
       <div style={{ marginBottom: 14 }}>
         <p className="section-title">Префиксы групп</p>
         <div className="card">
           <PrefixManager prefixes={prefixes} active={activePrefix} onChange={setPrefixes} onSetActive={setActivePrefix} />
         </div>
       </div>
-
       <div style={{ marginBottom: 14 }}>
         <p className="section-title">Виды кромки</p>
         <div className="card">
           <EdgeManager edgeNames={edgeNames} activeEdge={activeEdge} onChange={setEdgeNames} onSetActive={setActiveEdge} />
         </div>
       </div>
-
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
@@ -339,20 +317,17 @@ export default function EditOrderPage() {
             {showEdge ? 'Скрыть кромку' : 'Показать кромку'}
           </button>
         </div>
-        {/* Вращение для всех */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 10 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-hint)" strokeWidth="1.5"><path d="M21 2v6h-6M3 12a9 9 0 0115-6.7L21 8M3 22v-6h6M21 12a9 9 0 01-15 6.7L3 16"/></svg>
           <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>Вращение для всех</span>
           <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: true })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Вкл</button>
           <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: false })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Выкл</button>
         </div>
-
         <div style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Длина</div>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>
           <div style={{ width: 60, fontSize: 11, color: 'var(--text-hint)' }}>Кол-во</div>
         </div>
-
         {Object.entries(grouped).map(([pfx, dets]) => (
           <div key={pfx}>
             {pfx && <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--blue)', marginBottom: 4, marginTop: 8, padding: '4px 8px', background: 'var(--blue-light)', borderRadius: 'var(--radius)', display: 'inline-block' }}>{pfx}</div>}
@@ -363,24 +338,21 @@ export default function EditOrderPage() {
                   onUpdate={u => updateDetail(d.uid, u)}
                   onRemove={() => removeDetail(d.uid)}
                   activeEdgeName={activeEdge} showEdge={showEdge}
-                  autoFocus={d.uid === lastAddedUid} />
+                  autoFocus={d.uid === lastAddedUid}
+                  onEditContour={() => setEditingContourUid(d.uid)} />
               )
             })}
           </div>
         ))}
-
         <button type="button" onClick={addDetail}
           style={{ width: '100%', padding: 10, border: '0.5px dashed var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--text-hint)', fontSize: 14, cursor: 'pointer', marginTop: 4 }}>
           + Добавить деталь {activePrefix ? `(${activePrefix})` : ''}
         </button>
       </div>
-
       <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '10px 12px', marginBottom: 12, fontSize: 13, color: 'var(--amber)' }}>
         ⚠ После сохранения раскрой будет сброшен — нужно выполнить заново
       </div>
-
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
-
       <button type="button" className="btn-primary" onClick={handleSave} disabled={saving || !validCount}>
         {saving ? 'Сохранение...' : `Сохранить изменения (${validCount} дет.)`}
       </button>
