@@ -9,7 +9,12 @@ import BottomNav from '../components/BottomNav'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
-  kerf: 4
+  kerf: 4,
+  // Мелкие детали — в середину листа (защита от сдвига при резке фрезером).
+  // Правь эти значения при необходимости — они применяются ко всем новым заказам.
+  smallPartsToCenter: true,
+  smallPartsMaxAreaCm2: 1500, // площадь, см²; 0 — критерий выключен
+  smallPartsMaxSideMm: 350,   // меньшая сторона, мм; 0 — критерий выключен
 }
 
 const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => {
@@ -322,6 +327,9 @@ export default function NewOrderPage() {
         margin_bottom: SHEET_DEFAULTS.margin_bottom,
         margin_left: SHEET_DEFAULTS.margin_left,
         kerf_width: SHEET_DEFAULTS.kerf,
+        small_parts_to_center: SHEET_DEFAULTS.smallPartsToCenter,
+        small_parts_max_area: SHEET_DEFAULTS.smallPartsMaxAreaCm2 * 100, // см² → мм², в БД храним в мм² как везде
+        small_parts_max_side: SHEET_DEFAULTS.smallPartsMaxSideMm,
         status: 'draft'
       }).select().single()
       if (oErr) throw oErr

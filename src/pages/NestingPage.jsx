@@ -263,6 +263,9 @@ export default function NestingPage() {
   const [sheetsData, setSheetsData] = useState([])
   const [nestDir, setNestDir] = useState('auto')
   const [showOffcuts, setShowOffcuts] = useState(false)
+  const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
+  const [smallPartsMaxAreaCm2, setSmallPartsMaxAreaCm2] = useState('') // см², заполнится глобальным дефолтом заказа
+  const [smallPartsMaxSideMm, setSmallPartsMaxSideMm] = useState('')   // мм, заполнится глобальным дефолтом заказа
 
   const colorMap = {}
   details.forEach((d, i) => { colorMap[i] = COLORS[i % COLORS.length] })
@@ -273,6 +276,11 @@ export default function NestingPage() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
     setOrder(o); setDetails(d || [])
+    if (o) {
+      setSmallPartsToCenter(!!o.small_parts_to_center)
+      setSmallPartsMaxAreaCm2(o.small_parts_max_area ? String(o.small_parts_max_area / 100) : '') // мм² → см²
+      setSmallPartsMaxSideMm(o.small_parts_max_side ? String(o.small_parts_max_side) : '')
+    }
     if (o?.nesting_result) {
       const saved = JSON.parse(o.nesting_result)
       setResult(saved); setSheetsData(saved.sheets)
@@ -290,12 +298,19 @@ export default function NestingPage() {
           marginT: order.margin_top, marginR: order.margin_right,
           marginB: order.margin_bottom, marginL: order.margin_left,
           kerf: order.kerf_width,
+          smallPartsToCenter,
+          smallPartsMaxArea: smallPartsMaxAreaCm2 === '' ? 0 : Number(smallPartsMaxAreaCm2) * 100, // см² → мм²
+          smallPartsMaxSide: smallPartsMaxSideMm === '' ? 0 : Number(smallPartsMaxSideMm),
         })
         setResult(res)
         setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
         setActiveSheet(0)
       } finally { setRunning(false) }
     }, 100)
+  }
+
+  async function saveSmallPartsSettings(patch) {
+    await supabase.from('orders').update(patch).eq('id', id)
   }
 
   async function saveNesting() {
@@ -381,6 +396,47 @@ export default function NestingPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Мелкие детали */}
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: smallPartsToCenter ? 8 : 0 }}>
+          <input type="checkbox" checked={smallPartsToCenter}
+            onChange={e => {
+              const v = e.target.checked
+              setSmallPartsToCenter(v)
+              saveSmallPartsSettings({ small_parts_to_center: v })
+            }}
+            style={{ width: 18, height: 18 }} />
+          <span className="section-title" style={{ margin: 0 }}>Мелкие детали — в середину листа</span>
+        </label>
+        {smallPartsToCenter && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Площадь до, см²</span>
+              <input
+                type="text" inputMode="numeric" pattern="[0-9]*"
+                value={smallPartsMaxAreaCm2} placeholder="напр. 1500"
+                onChange={e => setSmallPartsMaxAreaCm2(e.target.value.replace(/[^0-9]/g, ''))}
+                onBlur={e => saveSmallPartsSettings({ small_parts_max_area: e.target.value === '' ? 0 : Number(e.target.value) * 100 })}
+                style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Сторона до, мм</span>
+              <input
+                type="text" inputMode="numeric" pattern="[0-9]*"
+                value={smallPartsMaxSideMm} placeholder="напр. 350"
+                onChange={e => setSmallPartsMaxSideMm(e.target.value.replace(/[^0-9]/g, ''))}
+                onBlur={e => saveSmallPartsSettings({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
+                style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
+            </div>
+          </div>
+        )}
+        {smallPartsToCenter && smallPartsMaxAreaCm2 === '' && smallPartsMaxSideMm === '' && (
+          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+            Задайте хотя бы один порог — иначе ни одна деталь не будет считаться мелкой.
+          </p>
+        )}
       </div>
 
       {/* Кнопка раскроя */}
