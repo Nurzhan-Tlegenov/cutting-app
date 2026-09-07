@@ -59,11 +59,16 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
     onUpdate({ ...detail, edges: newEdges })
   }
   const hasContour = detail.contour && (
+    // Новый формат — вершины
     (detail.contour.vertices && (
       detail.contour.vertices.length > 4 ||
       detail.contour.vertices.some(v => v.r && v.r !== 0)
     )) ||
-    (detail.contour.holes || []).length > 0
+    (detail.contour.holes || []).length > 0 ||
+    // Старый формат — для обратной совместимости
+    Object.values(detail.contour.corners || {}).some(c => c?.type && c.type !== 'none') ||
+    (detail.contour.cutouts || []).length > 0 ||
+    (detail.contour.grooves || []).length > 0
   )
   return (
     <div className="card" style={{ marginBottom: 8, padding: '10px 12px' }}>
@@ -105,14 +110,12 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
         </div>
       )}
       {/* Кнопка редактирования контура */}
-      {Number(detail.w) > 0 && Number(detail.h) > 0 && (
-        <button type="button" onClick={onEditContour}
-          style={{ marginTop: 8, width: '100%', padding: '6px', border: hasContour ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
-            borderRadius: 'var(--radius)', background: hasContour ? 'var(--blue-light)' : 'transparent',
-            fontSize: 12, color: hasContour ? 'var(--blue)' : 'var(--text-hint)', cursor: 'pointer' }}>
-          {hasContour ? '✦ Редактировать контур' : '◇ Редактировать контур'}
-        </button>
-      )}
+      <button type="button" onClick={onEditContour}
+        style={{ marginTop: 8, width: '100%', padding: '6px', border: hasContour ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+          borderRadius: 'var(--radius)', background: hasContour ? 'var(--blue-light)' : 'transparent',
+          fontSize: 12, color: hasContour ? 'var(--blue)' : 'var(--text-hint)', cursor: 'pointer' }}>
+        {hasContour ? '✦ Редактировать контур' : '◇ Редактировать контур'}
+      </button>
     </div>
   )
 }
