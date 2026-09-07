@@ -673,12 +673,12 @@ export default function ContourEditor({ detail, onUpdate }) {
   // Применить дугу: точки [i, cp, j] — cp становится контрольной точкой
   const applyArc = (pts) => {
     if (pts.length < 3) return
-    const verts = [...contour.vertices]
+    const verts = [...getActiveVerts()]
     // Все средние точки (не первая и не последняя) помечаем как arc
     for (let k = 1; k < pts.length - 1; k++) {
       verts[pts[k]] = { ...verts[pts[k]], type: 'arc' }
     }
-    setVertices(verts)
+    setActiveVerts(verts)
     setArcMode(false)
     setArcPoints([])
     setMenuSelType(null)
@@ -801,6 +801,13 @@ export default function ContourEditor({ detail, onUpdate }) {
       return
     }
     if (arcMode) {
+      // Фиксируем контекст (контур или конкретный вырез) по первой выбранной точке —
+      // нельзя мешать точки из разных наборов вершин в одну дугу
+      if (arcPoints.length === 0) {
+        setActiveHoleIdx(holeIdx)
+      } else if (holeIdx !== activeHoleIdx) {
+        return // точка из другого контекста — игнорируем
+      }
       if (arcPoints.includes(idx)) return
       setArcPoints(pts => [...pts, idx])
       return
