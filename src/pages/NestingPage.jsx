@@ -264,7 +264,7 @@ export default function NestingPage() {
   const [nestDir, setNestDir] = useState('auto')
   const [showOffcuts, setShowOffcuts] = useState(false)
   const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
-  const [smallPartsMaxAreaCm2, setSmallPartsMaxAreaCm2] = useState('') // см², заполнится глобальным дефолтом заказа
+  const [smallPartsMaxSquareSideMm, setSmallPartsMaxSquareSideMm] = useState('') // мм, заполнится глобальным дефолтом заказа
   const [smallPartsMaxSideMm, setSmallPartsMaxSideMm] = useState('')   // мм, заполнится глобальным дефолтом заказа
 
   const colorMap = {}
@@ -278,7 +278,7 @@ export default function NestingPage() {
     setOrder(o); setDetails(d || [])
     if (o) {
       setSmallPartsToCenter(!!o.small_parts_to_center)
-      setSmallPartsMaxAreaCm2(o.small_parts_max_area ? String(o.small_parts_max_area / 100) : '') // мм² → см²
+      setSmallPartsMaxSquareSideMm(o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '')
       setSmallPartsMaxSideMm(o.small_parts_max_side ? String(o.small_parts_max_side) : '')
     }
     if (o?.nesting_result) {
@@ -299,7 +299,7 @@ export default function NestingPage() {
           marginB: order.margin_bottom, marginL: order.margin_left,
           kerf: order.kerf_width,
           smallPartsToCenter,
-          smallPartsMaxArea: smallPartsMaxAreaCm2 === '' ? 0 : Number(smallPartsMaxAreaCm2) * 100, // см² → мм²
+          smallPartsMaxSquareSide: smallPartsMaxSquareSideMm === '' ? 0 : Number(smallPartsMaxSquareSideMm),
           smallPartsMaxSide: smallPartsMaxSideMm === '' ? 0 : Number(smallPartsMaxSideMm),
         })
         setResult(res)
@@ -413,12 +413,12 @@ export default function NestingPage() {
         {smallPartsToCenter && (
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Площадь до, см²</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Площадь до (квадрат), мм</span>
               <input
                 type="text" inputMode="numeric" pattern="[0-9]*"
-                value={smallPartsMaxAreaCm2} placeholder="напр. 1500"
-                onChange={e => setSmallPartsMaxAreaCm2(e.target.value.replace(/[^0-9]/g, ''))}
-                onBlur={e => saveSmallPartsSettings({ small_parts_max_area: e.target.value === '' ? 0 : Number(e.target.value) * 100 })}
+                value={smallPartsMaxSquareSideMm} placeholder="напр. 400"
+                onChange={e => setSmallPartsMaxSquareSideMm(e.target.value.replace(/[^0-9]/g, ''))}
+                onBlur={e => saveSmallPartsSettings({ small_parts_max_square_side: e.target.value === '' ? 0 : Number(e.target.value) })}
                 style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
             </div>
             <div style={{ flex: 1 }}>
@@ -432,7 +432,12 @@ export default function NestingPage() {
             </div>
           </div>
         )}
-        {smallPartsToCenter && smallPartsMaxAreaCm2 === '' && smallPartsMaxSideMm === '' && (
+        {smallPartsToCenter && smallPartsMaxSquareSideMm !== '' && (
+          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+            Мелкая — это деталь, которая уместилась бы в квадрат {smallPartsMaxSquareSideMm}×{smallPartsMaxSquareSideMm} мм (по площади).
+          </p>
+        )}
+        {smallPartsToCenter && smallPartsMaxSquareSideMm === '' && smallPartsMaxSideMm === '' && (
           <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
             Задайте хотя бы один порог — иначе ни одна деталь не будет считаться мелкой.
           </p>

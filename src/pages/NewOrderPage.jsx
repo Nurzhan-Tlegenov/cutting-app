@@ -13,8 +13,8 @@ const SHEET_DEFAULTS = {
   // Мелкие детали — в середину листа (защита от сдвига при резке фрезером).
   // Правь эти значения при необходимости — они применяются ко всем новым заказам.
   smallPartsToCenter: true,
-  smallPartsMaxAreaCm2: 1500, // площадь, см²; 0 — критерий выключен
-  smallPartsMaxSideMm: 350,   // меньшая сторона, мм; 0 — критерий выключен
+  smallPartsMaxSquareSideMm: 400, // сторона квадрата, мм; деталь мелкая, если её площадь помещается в такой квадрат. 0 — критерий выключен
+  smallPartsMaxSideMm: 350,       // меньшая сторона детали, мм; 0 — критерий выключен
 }
 
 const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => {
@@ -328,7 +328,7 @@ export default function NewOrderPage() {
         margin_left: SHEET_DEFAULTS.margin_left,
         kerf_width: SHEET_DEFAULTS.kerf,
         small_parts_to_center: SHEET_DEFAULTS.smallPartsToCenter,
-        small_parts_max_area: SHEET_DEFAULTS.smallPartsMaxAreaCm2 * 100, // см² → мм², в БД храним в мм² как везде
+        small_parts_max_square_side: SHEET_DEFAULTS.smallPartsMaxSquareSideMm,
         small_parts_max_side: SHEET_DEFAULTS.smallPartsMaxSideMm,
         status: 'draft'
       }).select().single()
