@@ -258,6 +258,8 @@ export default function NestingPage() {
   const [details, setDetails] = useState([])
   const [result, setResult] = useState(null)
   const [running, setRunning] = useState(false)
+  const [nestError, setNestError] = useState('')
+  const [elapsedSec, setElapsedSec] = useState(0)
   const [activeSheet, setActiveSheet] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [sheetsData, setSheetsData] = useState([])
@@ -289,12 +291,15 @@ export default function NestingPage() {
     }
   }
 
-  function doNesting() {
+  async function doNesting() {
     if (!details.length || !order) return
     setRunning(true)
-    setTimeout(() => {
+    setNestError('')
+    setElapsedSec(0)
+    const timerId = setInterval(() => setElapsedSec(s => s + 1), 1000)
+    setTimeout(async () => {
       try {
-        const res = runNesting({
+        const res = await runNesting({
           details, direction: nestDir,
           sheetL: order.sheet_length, sheetW: order.sheet_width,
           marginT: order.margin_top, marginR: order.margin_right,
@@ -308,7 +313,13 @@ export default function NestingPage() {
         setResult(res)
         setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
         setActiveSheet(0)
-      } finally { setRunning(false) }
+      } catch (err) {
+        console.error('Ошибка раскроя:', err)
+        setNestError('Не удалось выполнить раскрой: ' + (err?.message || 'неизвестная ошибка') + '. Попробуйте ещё раз или уменьшите время оптимизации.')
+      } finally {
+        setRunning(false)
+        clearInterval(timerId)
+      }
     }, 100)
   }
 
@@ -465,9 +476,28 @@ export default function NestingPage() {
       <button onClick={doNesting} disabled={running}
         style={{ width: '100%', padding: 12, background: running ? 'var(--bg2)' : 'var(--blue)',
           color: running ? 'var(--text-hint)' : 'white', border: 'none', borderRadius: 'var(--radius)',
-          fontSize: 15, fontWeight: 500, cursor: running ? 'default' : 'pointer', marginBottom: 16 }}>
-        {running ? '⏳ Выполняется...' : result ? '🔄 Пересчитать раскрой' : '▶ Выполнить раскрой'}
+          fontSize: 15, fontWeight: 500, cursor: running ? 'default' : 'pointer', marginBottom: running ? 8 : 16,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        {running && (
+          <span style={{
+            display: 'inline-block', width: 14, height: 14, borderRadius: '50%',
+            border: '2px solid var(--text-hint)', borderTopColor: 'transparent',
+            animation: 'nesting-spin 0.8s linear infinite',
+          }} />
+        )}
+        {running ? `Считаю раскрой... ${elapsedSec} сек` : result ? '🔄 Пересчитать раскрой' : '▶ Выполнить раскрой'}
       </button>
+      <style>{`@keyframes nesting-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
+      {running && (
+        <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', marginTop: -4, marginBottom: 16 }}>
+          Идёт поиск более плотной укладки, страница остаётся отзывчивой — можно подождать.
+        </p>
+      )}
+      {nestError && (
+        <div style={{ padding: 10, marginBottom: 16, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.1)', color: '#dc3545', fontSize: 13 }}>
+          {nestError}
+        </div>
+      )}
 
       {/* Карты */}
       {sheetsData.length > 0 && (
