@@ -16,20 +16,20 @@ export default function OrderPage() {
   useEffect(() => { fetchOrder() }, [id])
   async function fetchOrder() {
     const { data: o, error: oErr } = await supabase.from('orders').select('*').eq('id', id).single()
-    console.log('order:', o, 'error:', oErr)
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
     setOrder(o)
     setDetails(d || [])
     setLoading(false)
+  }
+  async function setStatus(status) {
+    await supabase.from('orders').update({ status }).eq('id', id)
+    setOrder(o => ({ ...o, status }))
   }
   async function deleteOrder() {
     if (!window.confirm('Удалить заказ? Это действие нельзя отменить.')) return
     await supabase.from('order_details').delete().eq('order_id', id)
     await supabase.from('orders').delete().eq('id', id)
     navigate('/orders')
-  }
-    await supabase.from('orders').update({ status }).eq('id', id)
-    setOrder(o => ({ ...o, status }))
   }
   if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40 }}>Загрузка...</p></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
@@ -71,7 +71,6 @@ export default function OrderPage() {
                 padding: '6px 12px', borderRadius: 20, fontSize: 12, border: 'none',
                 background: order.status === s ? 'var(--blue)' : 'var(--bg2)',
                 color: order.status === s ? 'white' : 'var(--text-muted)',
-                fontWeight: order.status === s ? 500 : 400
               }}>{STATUS_LABELS[s]}</button>
             ))}
           </div>
@@ -80,11 +79,8 @@ export default function OrderPage() {
       <div style={{ marginBottom: 12 }}>
         <p className="section-title">Статистика</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {[
-            ['Листов нужно', sheetsNeeded],
-            ['Деталей всего', totalQty],
-            ['Кромка (п.м.)', totalEdge.toFixed(1)],
-            ['Площадь листов (м²)', (sheetsNeeded * usableArea).toFixed(2)]
+          {[['Листов нужно', sheetsNeeded],['Деталей всего', totalQty],
+            ['Кромка (п.м.)', totalEdge.toFixed(1)],['Площадь листов (м²)', (sheetsNeeded * usableArea).toFixed(2)]
           ].map(([label, val]) => (
             <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '12px' }}>
               <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{label}</div>
@@ -132,19 +128,19 @@ export default function OrderPage() {
         </div>
       </div>
       {isDraft && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
           <button onClick={() => navigate(`/orders/${id}/nesting`)}
             style={{ width: '100%', padding: 12, background: 'var(--blue)', color: 'white',
               border: 'none', borderRadius: 'var(--radius)', fontSize: 15, fontWeight: 500, cursor: 'pointer' }}>
             ▶ Выполнить раскрой
           </button>
-          <button onClick={deleteOrder}
-            style={{ width: '100%', padding: 10, background: 'transparent', color: 'var(--danger)',
-              border: '1px solid var(--danger)', borderRadius: 'var(--radius)', fontSize: 14, cursor: 'pointer' }}>
-            🗑 Удалить заказ
-          </button>
         </div>
       )}
+      <button onClick={deleteOrder}
+        style={{ width: '100%', padding: 10, background: 'transparent', color: 'var(--danger)',
+          border: '1px solid var(--danger)', borderRadius: 'var(--radius)', fontSize: 14, cursor: 'pointer', marginBottom: 16 }}>
+        🗑 Удалить заказ
+      </button>
       <BottomNav />
     </div>
   )
