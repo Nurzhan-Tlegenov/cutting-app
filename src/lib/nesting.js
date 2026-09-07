@@ -57,12 +57,13 @@ const EPS = 0.5 // мм, допуск на сравнение с границе�
 // повторить несколько раз, но не бесконечно.
 const MAX_COMPACT_PASSES = 3
 
-export function runNesting({
+export async function runNesting({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
   direction = 'auto',
   smallPartsToCenter = false,     // галочка "мелкие детали в середину" из настроек раскроя
   smallPartsMaxSquareSide = 0,    // сторона квадрата (мм); деталь мелкая, если её площадь <= side*side. 0 = критерий выключен
   smallPartsMaxSide = 0,          // порог меньшей стороны детали (мм). 0 = критерий выключен
+  optimizeSeconds = 12,           // сколько секунд гонять поиск плотной укладки — из настроек раскроя
 }) {
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
@@ -111,21 +112,44 @@ export function runNesting({
   for (let i = 0; i < RANDOM_ATTEMPTS; i++) {
     const shuffled = shuffle(basePieces.slice())
     for (const mode of scoringModes) tryAttempt(shuffled, mode)
+    if (i % 20 === 0) await new Promise(r => setTimeout(r, 0))
   }
 
   // Направленный локальный поиск (hill climbing) поверх лучшего найденного порядка.
   // Случайные перезапуски "с нуля" быстро выходят на плато и дальше не улучшаются —
   // небольшие направленные пертурбации уже хорошего решения находят улучшения там,
-  // где чистая случайность не справляется. Раз время не критично — гоняем долго.
-  const HILL_CLIMB_ITERS = 8000 // баланс времени/качества; можно поднять, если готов подождать дольше ради ещё большей плотности
+  // где чистая случайность не справляется.
+  //
+  // Бюджет по ВРЕМЕНИ, а не по фиксированному числу итераций: на маленьком заказе
+  // (мало деталей) каждая попытка укладки дешёвая — успеет отработать намного
+  // больше итераций за то же время. На большом заказе — меньше итераций, но зато
+  // они не растянутся на неадекватное время. Плюс "рестарт при застревании":
+  // если долго нет улучшений, пробуем более сильную (не точечную) пертурбацию,
+  // чтобы выпрыгнуть из локального плато, а не топтаться на месте до конца бюджета.
+  const HILL_CLIMB_BUDGET_MS = Math.max(0, Number(optimizeSeconds) || 0) * 1000 // из настроек раскроя, 0 = без hill climbing
+  const STUCK_THRESHOLD = 400 // итераций без улучшения — сигнал, что пора тряхнуть сильнее
+  const YIELD_EVERY = 20 // раз в столько итераций отдаём управление браузеру — иначе вкладка "подвиснет" на весь расчёт
+
   let cur = { order: bestOrder.order.slice(), mode: bestOrder.mode, ...packAndEval(bestOrder.order, bestOrder.mode) }
-  for (let it = 0; it < HILL_CLIMB_ITERS; it++) {
-    const candOrder = perturbOrder(cur.order)
+  let sinceImprovement = 0
+  const startTime = Date.now()
+  let iterations = 0
+  while (Date.now() - startTime < HILL_CLIMB_BUDGET_MS) {
+    iterations++
+    const strong = sinceImprovement >= STUCK_THRESHOLD
+    const candOrder = perturbOrder(cur.order, strong)
     const cand = packAndEval(candOrder, cur.mode)
     if (better(cand.stat, cur.stat)) {
       cur = { order: candOrder, mode: cur.mode, ...cand }
+      sinceImprovement = 0
       if (better(cur.stat, best.stat)) best = cur
+    } else {
+      sinceImprovement++
+      if (strong) sinceImprovement = 0 // после сильной встряски отсчёт заново, не застреваем в бесконечных сильных прыжках подряд
     }
+    // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт —
+    // без этого долгий синхронный цикл может показать "Страница не отвечает".
+    if (iterations % YIELD_EVERY === 0) await new Promise(r => setTimeout(r, 0))
   }
 
   return { sheets: best.sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
@@ -139,12 +163,17 @@ function shuffle(arr) {
   return arr
 }
 
-// Небольшая направленная пертурбация порядка — меняет местами 1-5 случайных пар,
-// а не тасует всё заново. Так локальный поиск исследует окрестность уже хорошего
-// решения, а не начинает каждый раз с чистого листа.
-function perturbOrder(order) {
+// Направленная пертурбация порядка — меняет местами несколько случайных пар,
+// а не тасует всё заново. Так локальный поиск исследует окрестность уже
+// хорошего решения, а не начинает каждый раз с чистого листа.
+// strong=true — более резкая встряска (больше перестановок), когда обычная
+// точечная пертурбация долго не даёт улучшений — сигнал, что мы застряли
+// в локальном плато и нужен более крупный скачок, чтобы из него выбраться.
+function perturbOrder(order, strong = false) {
   const arr = order.slice()
-  const swaps = 1 + Math.floor(Math.random() * 5)
+  const swaps = strong
+    ? 8 + Math.floor(Math.random() * 15)   // сильная встряска: 8-22 перестановки
+    : 1 + Math.floor(Math.random() * 5)    // обычная: 1-5 перестановок
   for (let s = 0; s < swaps; s++) {
     const i = Math.floor(Math.random() * arr.length)
     const j = Math.floor(Math.random() * arr.length)

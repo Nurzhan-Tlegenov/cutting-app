@@ -266,6 +266,7 @@ export default function NestingPage() {
   const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
   const [smallPartsMaxSquareSideMm, setSmallPartsMaxSquareSideMm] = useState('') // мм, заполнится глобальным дефолтом заказа
   const [smallPartsMaxSideMm, setSmallPartsMaxSideMm] = useState('')   // мм, заполнится глобальным дефолтом заказа
+  const [optimizeSeconds, setOptimizeSeconds] = useState('')          // сек, заполнится глобальным дефолтом заказа
 
   const colorMap = {}
   details.forEach((d, i) => { colorMap[i] = COLORS[i % COLORS.length] })
@@ -280,6 +281,7 @@ export default function NestingPage() {
       setSmallPartsToCenter(!!o.small_parts_to_center)
       setSmallPartsMaxSquareSideMm(o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '')
       setSmallPartsMaxSideMm(o.small_parts_max_side ? String(o.small_parts_max_side) : '')
+      setOptimizeSeconds(o.optimize_seconds != null ? String(o.optimize_seconds) : '12')
     }
     if (o?.nesting_result) {
       const saved = JSON.parse(o.nesting_result)
@@ -301,6 +303,7 @@ export default function NestingPage() {
           smallPartsToCenter,
           smallPartsMaxSquareSide: smallPartsMaxSquareSideMm === '' ? 0 : Number(smallPartsMaxSquareSideMm),
           smallPartsMaxSide: smallPartsMaxSideMm === '' ? 0 : Number(smallPartsMaxSideMm),
+          optimizeSeconds: optimizeSeconds === '' ? 12 : Number(optimizeSeconds),
         })
         setResult(res)
         setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
@@ -442,6 +445,20 @@ export default function NestingPage() {
             Задайте хотя бы один порог — иначе ни одна деталь не будет считаться мелкой.
           </p>
         )}
+      </div>
+
+      {/* Время оптимизации плотности */}
+      <div style={{ marginBottom: 12 }}>
+        <p className="section-title">Время оптимизации, сек</p>
+        <input
+          type="text" inputMode="numeric" pattern="[0-9]*"
+          value={optimizeSeconds} placeholder="напр. 12"
+          onChange={e => setOptimizeSeconds(e.target.value.replace(/[^0-9]/g, ''))}
+          onBlur={e => saveSmallPartsSettings({ optimize_seconds: e.target.value === '' ? 12 : Number(e.target.value) })}
+          style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
+        <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+          Больше времени — плотнее укладка на первых листах и меньше остаётся на последнем. 0 — без доп. оптимизации (быстрый расчёт).
+        </p>
       </div>
 
       {/* Кнопка раскроя */}
