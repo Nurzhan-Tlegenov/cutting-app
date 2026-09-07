@@ -73,9 +73,16 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
   return (
     <div className="card" style={{ marginBottom: 8, padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>#{index + 1}</div>
-          {hasContour && <span style={{ fontSize: 9, color: 'var(--blue)', background: 'var(--blue-light)', borderRadius: 4, padding: '1px 3px' }}>✦</span>}
+          <button type="button" onClick={onEditContour}
+            title="Редактор контура"
+            style={{ background: hasContour ? 'var(--teal-light)' : 'var(--bg2)',
+              border: `0.5px solid ${hasContour ? 'var(--teal)' : 'var(--border-md)'}`,
+              borderRadius: 4, cursor: 'pointer', fontSize: 11, padding: '1px 3px',
+              color: hasContour ? 'var(--teal)' : 'var(--text-hint)', marginTop: 2, lineHeight: 1.2 }}>
+            {hasContour ? '✦' : '◇'}
+          </button>
         </div>
         <div style={{ display: 'flex', gap: 4, flex: 1 }}>
           <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} />
@@ -109,13 +116,6 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
               fontSize: 10, color: detail.rotatable ? 'var(--teal)' : 'var(--text-hint)', cursor: 'pointer', flexShrink: 0 }}>↻</button>
         </div>
       )}
-      {/* Кнопка редактирования контура */}
-      <button type="button" onClick={onEditContour}
-        style={{ marginTop: 8, width: '100%', padding: '6px', border: hasContour ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
-          borderRadius: 'var(--radius)', background: hasContour ? 'var(--blue-light)' : 'transparent',
-          fontSize: 12, color: hasContour ? 'var(--blue)' : 'var(--text-hint)', cursor: 'pointer' }}>
-        {hasContour ? '✦ Редактировать контур' : '◇ Редактировать контур'}
-      </button>
     </div>
   )
 }
