@@ -1,5 +1,5 @@
 /**
- * Нестинг — Maximal Rectangles BSSF
+ * Нестинг — Maximal Rectangles, multi-strategy поиск
  *
  * МЕБЕЛЬНЫЙ СТАНДАРТ:
  *   Лист 2750×1830: 2750=Y (вертикаль), 1830=X (горизонталь)
@@ -11,6 +11,17 @@
  *     sheetL=2750=Y → usableY = sheetL - marginT - marginB
  *     sheetW=1830=X → usableX = sheetW - marginL - marginR
  *
+ * ПОЧЕМУ MULTI-STRATEGY:
+ *   Один порядок деталей + одна эвристика выбора места — это самый
+ *   слабый вариант MaxRects, результат сильно зависит от того, в каком
+ *   порядке детали подавались на укладку. Здесь прогоняется несколько
+ *   вариантов порядка (по площади/периметру/стороне) и обеих эвристик
+ *   размещения (BSSF — Best Short Side Fit, BAF — Best Area Fit),
+ *   и выбирается результат с наименьшим числом листов, при равенстве —
+ *   с наибольшим % использования материала. Это по-прежнему не полный
+ *   перебор (для реального заказа это заняло бы часы), но заметно ближе
+ *   к тому, что делают взрослые раскрой-программы, чем один жадный проход.
+ *
  * ЗАЩИТА МЕЛКИХ ДЕТАЛЕЙ ОТ КРАЯ ЛИСТА (для фрезера):
  *   Мелкие/узкие детали держатся на столе хуже крупных — при резке фрезером
  *   риск сдвига у детали, расположенной у самого края используемой зоны
@@ -18,7 +29,9 @@
  *   Поэтому такие детали при прочих равных предпочтительно укладываются
  *   ближе к центру, окружённые другими деталями/обрезками со всех сторон.
  *   Это не жёсткий запрет — если другого места физически нет, деталь всё
- *   равно встанет к краю, но при наличии выбора алгоритм предпочтёт центр.
+ *   равно встанет к краю; но среди вынужденных вариантов у края алгоритм
+ *   предпочитает тот, что ближе к началу координат (0,0) — так проще
+ *   ориентироваться оператору и предсказуемее для дальнейшей резки.
  *
  *   Порог(и) и включение/выключение этой логики задаёт ПОЛЬЗОВАТЕЛЬ
  *   в настройках раскроя (параметры листа), а не алгоритм — сюда всегда
@@ -28,9 +41,13 @@
  */
 
 // Насколько сильно "давить" мелкие детали внутрь листа.
-// Должен доминировать над обычным BSSF-скором (тот обычно в пределах
+// Должен доминировать над обычным скором размещения (тот обычно в пределах
 // сотен тысяч при координатах листа ~2700x1800), но не быть абсолютным.
 const BORDER_PENALTY = 2000000
+// Среди вариантов у края — небольшой тай-брейк в пользу того, что ближе к (0,0).
+// Должен быть заметно меньше BORDER_PENALTY, чтобы не перебивать сравнение
+// по числу касаний границы, а только выбирать между равными по этому счёту.
+const ORIGIN_TIEBREAK = 5
 const EPS = 0.5 // мм, допуск на сравнение с границей (из-за kerf/округлений)
 
 export function runNesting({
@@ -44,6 +61,42 @@ export function runNesting({
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
 
+  const basePieces = buildPieces(details, kerf, direction)
+
+  // Классификация "мелкая деталь" — по исходным размерам без kerf (чтобы
+  // граница не гуляла в зависимости от толщины пропила). Работает только
+  // если пользователь включил галочку; деталь мелкая, если сработал хотя
+  // бы один из двух порогов (0 у порога = этот критерий не участвует).
+  basePieces.forEach(p => {
+    const area = p.origX * p.origY
+    const minSide = Math.min(p.origX, p.origY)
+    p.isSmall = smallPartsToCenter && (
+      (smallPartsMaxArea > 0 && area <= smallPartsMaxArea) ||
+      (smallPartsMaxSide > 0 && minSide <= smallPartsMaxSide)
+    )
+  })
+
+  const sortStrategies = [
+    (a, b) => (b.pw * b.ph) - (a.pw * a.ph),                 // по убыванию площади
+    (a, b) => (b.pw + b.ph) - (a.pw + a.ph),                 // по убыванию периметра
+    (a, b) => Math.max(b.pw, b.ph) - Math.max(a.pw, a.ph),   // по убыванию максимальной стороны
+    (a, b) => Math.min(a.pw, a.ph) - Math.min(b.pw, b.ph),   // по возрастанию минимальной стороны
+  ]
+  const scoringModes = ['bssf', 'baf']
+
+  let best = null
+  for (const sortFn of sortStrategies) {
+    for (const mode of scoringModes) {
+      const sheets = packAttempt(basePieces, sortFn, mode, direction, usableX, usableY)
+      const stat = evaluate(sheets, usableX, usableY)
+      if (!best || better(stat, best.stat)) best = { sheets, stat }
+    }
+  }
+
+  return { sheets: best.sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+}
+
+function buildPieces(details, kerf, direction) {
   const pieces = []
   details.forEach((d, di) => {
     for (let q = 0; q < d.qty; q++) {
@@ -69,45 +122,13 @@ export function runNesting({
   pieces.forEach(p => {
     if (!p.rotatable) return
     if (direction === 'along_y') {
-      // Длинная сторона вдоль Y → ph >= pw
       if (p.pw > p.ph) rotatePiece(p)
     } else if (direction === 'along_x') {
-      // Длинная сторона вдоль X → pw >= ph
       if (p.ph > p.pw) rotatePiece(p)
     }
   })
 
-  // Классификация "мелкая деталь" — по исходным размерам без kerf (чтобы
-  // граница не гуляла в зависимости от толщины пропила). Работает только
-  // если пользователь включил галочку; деталь мелкая, если сработал хотя
-  // бы один из двух порогов (0 у порога = этот критерий не участвует).
-  pieces.forEach(p => {
-    const area = p.origX * p.origY
-    const minSide = Math.min(p.origX, p.origY)
-    p.isSmall = smallPartsToCenter && (
-      (smallPartsMaxArea > 0 && area <= smallPartsMaxArea) ||
-      (smallPartsMaxSide > 0 && minSide <= smallPartsMaxSide)
-    )
-  })
-
-  pieces.sort((a, b) => (b.pw * b.ph) - (a.pw * a.ph))
-
-  const sheets = []
-  for (const piece of pieces) {
-    let placed = false
-    for (const sheet of sheets) {
-      const result = bssf(sheet.freeRects, piece, direction, usableX, usableY)
-      if (result) { sheet.placed.push(result); split(sheet, result); prune(sheet); placed = true; break }
-    }
-    if (!placed) {
-      const sheet = { index: sheets.length, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
-      const result = bssf(sheet.freeRects, piece, direction, usableX, usableY)
-      if (result) { sheet.placed.push(result); split(sheet, result); prune(sheet) }
-      sheets.push(sheet)
-    }
-  }
-
-  return { sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+  return pieces
 }
 
 function rotatePiece(p) {
@@ -116,7 +137,39 @@ function rotatePiece(p) {
   ;[p.edgeTop, p.edgeRight, p.edgeBottom, p.edgeLeft] = [p.edgeLeft, p.edgeTop, p.edgeRight, p.edgeBottom]
 }
 
-function bssf(freeRects, piece, direction, usableX, usableY) {
+// Один полный проход укладки: заданный порядок деталей + заданная эвристика выбора места.
+function packAttempt(basePieces, sortFn, mode, direction, usableX, usableY) {
+  const pieces = basePieces.slice().sort(sortFn)
+  const sheets = []
+  for (const piece of pieces) {
+    let placed = false
+    for (const sheet of sheets) {
+      const result = chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, mode)
+      if (result) { sheet.placed.push(result); split(sheet, result); prune(sheet); placed = true; break }
+    }
+    if (!placed) {
+      const sheet = { index: sheets.length, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+      const result = chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, mode)
+      if (result) { sheet.placed.push(result); split(sheet, result); prune(sheet) }
+      sheets.push(sheet)
+    }
+  }
+  return sheets
+}
+
+function evaluate(sheets, usableX, usableY) {
+  const used = sheets.reduce((s, sh) => s + sh.placed.reduce((a, p) => a + p.w * p.h, 0), 0)
+  const total = sheets.length * usableX * usableY
+  return { sheetCount: sheets.length, utilization: total ? used / total : 0 }
+}
+
+// Меньше листов — всегда лучше. При равном числе листов — выше % использования материала.
+function better(a, b) {
+  if (a.sheetCount !== b.sheetCount) return a.sheetCount < b.sheetCount
+  return a.utilization > b.utilization
+}
+
+function chooseSpot(freeRects, piece, direction, usableX, usableY, mode) {
   let best = null, bestScore = Infinity
   const oris = [{ pw: piece.pw, ph: piece.ph, rotated: false }]
   if (piece.rotatable && piece.pw !== piece.ph)
@@ -127,6 +180,7 @@ function bssf(freeRects, piece, direction, usableX, usableY) {
       if (o.pw > rect.w || o.ph > rect.h) continue
       const short = Math.min(rect.w - o.pw, rect.h - o.ph)
       const long_ = Math.max(rect.w - o.pw, rect.h - o.ph)
+      const leftoverArea = rect.w * rect.h - o.pw * o.ph
       let score
       if (direction === 'along_y') {
         // Вдоль Y: сначала заполняем по X (левее = лучше), потом по Y (выше = лучше)
@@ -134,16 +188,18 @@ function bssf(freeRects, piece, direction, usableX, usableY) {
       } else if (direction === 'along_x') {
         // Вдоль X: сначала заполняем по Y (выше = лучше), потом по X
         score = rect.y * 100000 + rect.x * 100 + short
+      } else if (mode === 'baf') {
+        // Best Area Fit: минимизировать оставшуюся пустую площадь в прямоугольнике
+        score = leftoverArea
       } else {
-        // Авто: Best Short Side Fit
+        // Best Short Side Fit (по умолчанию)
         score = short * 1000 + long_
       }
       // Бонус за предпочтительную ориентацию
       if (direction === 'along_y' && o.ph >= o.pw) score -= 50
       if (direction === 'along_x' && o.pw >= o.ph) score -= 50
 
-      // Штраф за касание внешней границы используемой зоны — только для мелких деталей.
-      // Считаем отдельно по каждой из 4 сторон, чтобы угол (2 касания) штрафовался сильнее ребра (1 касание).
+      // Мелкие детали — приоритет размещению подальше от края используемой зоны.
       if (piece.isSmall) {
         let borderTouch = 0
         if (rect.x <= EPS) borderTouch++
@@ -151,6 +207,9 @@ function bssf(freeRects, piece, direction, usableX, usableY) {
         if (Math.abs(rect.x + o.pw - usableX) <= EPS) borderTouch++
         if (Math.abs(rect.y + o.ph - usableY) <= EPS) borderTouch++
         score += borderTouch * BORDER_PENALTY
+        // Если варианта без касания края нет — среди вынужденных вариантов
+        // предпочесть тот, что ближе к началу координат (0,0).
+        if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
       }
 
       if (score < bestScore) {
@@ -188,9 +247,39 @@ function split(sheet, p) {
 }
 
 function prune(sheet) {
-  const r = sheet.freeRects.filter(r => r.w > 5 && r.h > 5)
-  sheet.freeRects = r.filter((a, i) =>
+  let r = sheet.freeRects.filter(r => r.w > 5 && r.h > 5)
+  // Убираем прямоугольники, полностью вложенные в другие
+  r = r.filter((a, i) =>
     !r.some((b, j) => j !== i && b.x <= a.x && b.y <= a.y && b.x + b.w >= a.x + a.w && b.y + b.h >= a.y + a.h))
+  // Объединяем соседние прямоугольники, стоящие впритык и образующие один большой —
+  // без этого список свободных мест быстро фрагментируется на мелкие обрезки,
+  // и туда физически не влезает то, что влезло бы в объединённую полосу.
+  sheet.freeRects = mergeAdjacent(r)
+}
+
+function mergeAdjacent(rects) {
+  let list = rects.slice()
+  let merged = true
+  while (merged) {
+    merged = false
+    outer:
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j]
+        // Горизонтальное слияние: одинаковые y и h, смежные по x
+        if (Math.abs(a.y - b.y) < 0.01 && Math.abs(a.h - b.h) < 0.01) {
+          if (Math.abs(a.x + a.w - b.x) < 0.01) { list[i] = { x: a.x, y: a.y, w: a.w + b.w, h: a.h }; list.splice(j, 1); merged = true; break outer }
+          if (Math.abs(b.x + b.w - a.x) < 0.01) { list[i] = { x: b.x, y: a.y, w: a.w + b.w, h: a.h }; list.splice(j, 1); merged = true; break outer }
+        }
+        // Вертикальное слияние: одинаковые x и w, смежные по y
+        if (Math.abs(a.x - b.x) < 0.01 && Math.abs(a.w - b.w) < 0.01) {
+          if (Math.abs(a.y + a.h - b.y) < 0.01) { list[i] = { x: a.x, y: a.y, w: a.w, h: a.h + b.h }; list.splice(j, 1); merged = true; break outer }
+          if (Math.abs(b.y + b.h - a.y) < 0.01) { list[i] = { x: a.x, y: b.y, w: a.w, h: a.h + b.h }; list.splice(j, 1); merged = true; break outer }
+        }
+      }
+    }
+  }
+  return list
 }
 
 function hits(a, b) {
