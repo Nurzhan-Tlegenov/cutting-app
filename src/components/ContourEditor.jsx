@@ -175,12 +175,13 @@ function findLayoutGuide(layout, id) {
   return (layout || []).find(g => g.id === id) || null
 }
 
-// ─── Целевая координата от привязки к линии разметки (центр толщины + зазор) ──
+// ─── Целевая координата от привязки к линии разметки (центр толщины ± зазор) ─
 function attachedTarget(dr, layout) {
   const guide = findLayoutGuide(layout, dr.attachTo)
   if (!guide) return null
   const gap = dr.gap ?? 0
-  const center = (guide.pos || 0) + (guide.thickness || 18) / 2 + gap
+  const dirMul = dr.gapDir === 'neg' ? -1 : 1
+  const center = (guide.pos || 0) + (guide.thickness || 18) / 2 + dirMul * gap
   return { axis: guide.kind === 'upright' ? 'x' : 'y', value: center }
 }
 
@@ -362,12 +363,53 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1 }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null }) {
   const ref = useRef(null)
   const wrapRef = useRef(null)
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
   const w = Number(detail.h) || 0
   const h = Number(detail.w) || 0
+
+  // Pinch-to-zoom двумя пальцами прямо в окне превью
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
+  const onZoomChangeRef = useRef(onZoomChange)
+  onZoomChangeRef.current = onZoomChange
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const state = { active: false, dist: 0, zoom: 1 }
+    const getDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const onStart = (e) => {
+      if (e.touches.length === 2) {
+        state.active = true
+        state.dist = getDist(e.touches)
+        state.zoom = zoomRef.current
+      }
+    }
+    const onMove = (e) => {
+      if (state.active && e.touches.length === 2) {
+        e.preventDefault()
+        const d = getDist(e.touches)
+        if (state.dist > 0) {
+          const ratio = d / state.dist
+          const nz = Math.max(0.3, Math.min(2.5, state.zoom * ratio))
+          onZoomChangeRef.current && onZoomChangeRef.current(nz)
+        }
+      }
+    }
+    const onEnd = (e) => { if (e.touches.length < 2) state.active = false }
+    el.addEventListener('touchstart', onStart, { passive: true })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd, { passive: true })
+    el.addEventListener('touchcancel', onEnd, { passive: true })
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
+    }
+  }, [])
 
   useEffect(() => {
     const canvas = ref.current
@@ -448,19 +490,24 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     })
 
     // Разметка — полки/стойки/царги (вспомогательные линии для позиционирования присадки)
-    ;(contour.layout || []).forEach(g => {
+    ;(contour.layout || []).forEach((g, gi) => {
       const thick = g.thickness || 18
       const colors = g.kind === 'upright'
         ? { fill: 'rgba(42,94,139,0.16)', stroke: '#2A5E8B', label: 'Стойка' }
         : g.kind === 'rail'
         ? { fill: 'rgba(94,42,139,0.14)', stroke: '#5E2A8B', label: 'Царга' }
         : { fill: 'rgba(139,94,42,0.16)', stroke: '#8B5E2A', label: 'Полка' }
-      ctx.fillStyle = colors.fill; ctx.strokeStyle = colors.stroke; ctx.lineWidth = 1
+      const isHi = highlightLayoutIdx === gi
+      ctx.fillStyle = isHi ? colors.fill.replace(/[\d.]+\)$/, '0.4)') : colors.fill
+      ctx.strokeStyle = colors.stroke; ctx.lineWidth = isHi ? 2.2 : 1
       let bx, by, bw, bh
       if (g.kind === 'upright') {
-        bx = ox + (g.pos||0) * sc; by = oy; bw = thick * sc; bh = dh
+        const insetB = g.insetBottom || 0, insetT = g.insetTop || 0
+        bx = ox + (g.pos||0) * sc; bw = thick * sc
+        by = oy + insetT * sc; bh = dh - (insetB + insetT) * sc
       } else {
-        bx = ox; bw = dw
+        const insetL = g.insetLeft || 0, insetR = g.insetRight || 0
+        bx = ox + insetL * sc; bw = dw - (insetL + insetR) * sc
         by = oy + dh - ((g.pos||0) + thick) * sc; bh = thick * sc
       }
       ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh)
@@ -471,11 +518,61 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         ctx.beginPath(); ctx.moveTo(ox, oy+dh); ctx.lineTo(ox, by+bh); ctx.stroke()
       }
       ctx.setLineDash([])
-      ctx.font = '9px sans-serif'; ctx.fillStyle = colors.stroke
+      ctx.font = isHi ? 'bold 9px sans-serif' : '9px sans-serif'; ctx.fillStyle = colors.stroke
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
       ctx.fillText(`${colors.label} ${Math.round(g.pos||0)}/${Math.round(thick)}`,
-        g.kind==='upright' ? bx+3 : ox+3, g.kind==='upright' ? oy+12 : by+bh/2)
+        g.kind==='upright' ? bx+3 : bx+3, g.kind==='upright' ? oy+12 : by+bh/2)
     })
+
+    // Размерная цепочка между полками/царгами (по Y) и стойками (по X) — расстояния до соседей/краёв
+    if (showLengths) {
+      const shelves = (contour.layout||[]).filter(g => g.kind !== 'upright').sort((a,b)=>(a.pos||0)-(b.pos||0))
+      if (shelves.length) {
+        let prevEdge = 0
+        const chainX = ox - 6
+        ctx.font = '9px sans-serif'; ctx.fillStyle = '#8B5E2A'; ctx.strokeStyle = 'rgba(139,94,42,0.5)'; ctx.lineWidth = 1
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.setLineDash([2,2])
+        for (const g of shelves) {
+          const gap = (g.pos||0) - prevEdge
+          const y1 = oy + dh - prevEdge*sc, y2 = oy + dh - (g.pos||0)*sc
+          if (gap > 1) {
+            ctx.beginPath(); ctx.moveTo(chainX, y1); ctx.lineTo(chainX, y2); ctx.stroke()
+            ctx.fillText(Math.round(gap), chainX-3, (y1+y2)/2)
+          }
+          prevEdge = (g.pos||0) + (g.thickness||18)
+        }
+        const lastGap = h - prevEdge
+        if (lastGap > 1) {
+          const y1 = oy + dh - prevEdge*sc, y2 = oy
+          ctx.beginPath(); ctx.moveTo(chainX, y1); ctx.lineTo(chainX, y2); ctx.stroke()
+          ctx.fillText(Math.round(lastGap), chainX-3, (y1+y2)/2)
+        }
+        ctx.setLineDash([])
+      }
+      const uprights = (contour.layout||[]).filter(g => g.kind === 'upright').sort((a,b)=>(a.pos||0)-(b.pos||0))
+      if (uprights.length) {
+        let prevEdge = 0
+        const chainY = oy + dh + 14
+        ctx.font = '9px sans-serif'; ctx.fillStyle = '#2A5E8B'; ctx.strokeStyle = 'rgba(42,94,139,0.5)'; ctx.lineWidth = 1
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.setLineDash([2,2])
+        for (const g of uprights) {
+          const gap = (g.pos||0) - prevEdge
+          const x1 = ox + prevEdge*sc, x2 = ox + (g.pos||0)*sc
+          if (gap > 1) {
+            ctx.beginPath(); ctx.moveTo(x1, chainY); ctx.lineTo(x2, chainY); ctx.stroke()
+            ctx.fillText(Math.round(gap), (x1+x2)/2, chainY+2)
+          }
+          prevEdge = (g.pos||0) + (g.thickness||18)
+        }
+        const lastGap = w - prevEdge
+        if (lastGap > 1) {
+          const x1 = ox + prevEdge*sc, x2 = ox + dw
+          ctx.beginPath(); ctx.moveTo(x1, chainY); ctx.lineTo(x2, chainY); ctx.stroke()
+          ctx.fillText(Math.round(lastGap), (x1+x2)/2, chainY+2)
+        }
+        ctx.setLineDash([])
+      }
+    }
 
     // Присадка — реальная геометрия отверстий + выноски размеров
     ;(contour.drillings || []).forEach(dr => {
@@ -669,7 +766,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       })
     })
 
-  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom])
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -718,11 +815,32 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         return
       }
     }
+
+    // Полосы разметки (полки/стойки/царги) — тап переключает на их редактирование
+    if (!arcMode && onLayoutTap && contour.layout && contour.layout.length) {
+      const dataX = (cx - ox) / sc
+      const dataY = (dh - (cy - oy)) / sc
+      for (let li = contour.layout.length - 1; li >= 0; li--) {
+        const g = contour.layout[li]
+        const thick = g.thickness || 18
+        if (g.kind === 'upright') {
+          const bottom = g.insetBottom || 0, top = h - (g.insetTop || 0)
+          if (dataX >= (g.pos||0) && dataX <= (g.pos||0)+thick && dataY >= bottom && dataY <= top) {
+            onLayoutTap(li); return
+          }
+        } else {
+          const left = g.insetLeft || 0, right = w - (g.insetRight || 0)
+          if (dataY >= (g.pos||0) && dataY <= (g.pos||0)+thick && dataX >= left && dataX <= right) {
+            onLayoutTap(li); return
+          }
+        }
+      }
+    }
     onTap(null)
   }
 
   return (
-    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)' }}>
+    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y' }}>
       <canvas ref={ref}
         onClick={handleTap}
         style={{ display:'block', cursor:'pointer', touchAction:'manipulation',
@@ -895,10 +1013,11 @@ function SideOffsetPicker({ activeSides = [], offsets = {}, onChange, allowedSid
 }
 
 // ─── Свёртываемый блок ────────────────────────────────────────────────────────
-function CollapsibleItem({ title, onRemove, children }) {
+function CollapsibleItem({ title, onRemove, children, innerRef, highlighted }) {
   const [open, setOpen] = useState(true)
   return (
-    <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', marginBottom:8, overflow:'hidden' }}>
+    <div ref={innerRef} style={{ background:'var(--bg2)', borderRadius:'var(--radius)', marginBottom:8, overflow:'hidden',
+      border: highlighted ? '1.5px solid #8B5E2A' : '1.5px solid transparent', transition:'border-color 0.3s' }}>
       <div style={{ display:'flex', alignItems:'center', padding:'8px 10px', cursor:'pointer' }} onClick={() => setOpen(v => !v)}>
         <span style={{ fontSize:13, fontWeight:500, flex:1 }}>{title}</span>
         <span style={{ fontSize:12, color:'var(--text-hint)', marginRight:8 }}>{open ? '▲' : '▼'}</span>
@@ -943,6 +1062,17 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
   const [placeDrillIdx, setPlaceDrillIdx] = useState(null) // индекс присадки в режиме "указать нажатием"
   const [placeLayoutIdx, setPlaceLayoutIdx] = useState(null) // индекс линии разметки в режиме "указать нажатием"
   const [zoom, setZoom] = useState(1) // масштаб превью детали (кнопки/списки не масштабируются)
+  const [highlightLayoutIdx, setHighlightLayoutIdx] = useState(null) // подсветка линии разметки при тапе по превью
+  const [shelfCount, setShelfCount] = useState(3)
+  const layoutItemRefs = useRef({})
+
+  useEffect(() => {
+    if (highlightLayoutIdx === null) return
+    const el = layoutItemRefs.current[highlightLayoutIdx]
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = setTimeout(() => setHighlightLayoutIdx(null), 2200)
+    return () => clearTimeout(t)
+  }, [highlightLayoutIdx])
 
   // Применить дугу: точки [i, cp, j] — cp становится контрольной точкой
   const applyArc = (pts) => {
@@ -1328,17 +1458,17 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
   // Присадка (сверление)
   const addDrilling = (kind) => {
     if (kind === 'face') {
-      upd({ drillings: [...contour.drillings, {
+      upd({ drillings: [{
         kind: 'face', face: 'both', d: 8, depth: 13,
         sides: [], offsets: {},
         row: false, rowDir: 'x', rowStep: 32, rowCount: 2,
-      }] })
+      }, ...contour.drillings] })
     } else {
-      upd({ drillings: [...contour.drillings, {
+      upd({ drillings: [{
         kind: 'edge', edgeSide: 'left', alongFrom: 'start',
         offsetAlong: 50, offsetFace: 9, d: 8, depth: 15,
         row: false, rowStep: 32, rowCount: 2,
-      }] })
+      }, ...contour.drillings] })
     }
   }
   const updDrilling = (i, patch) => {
@@ -1379,7 +1509,21 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
     const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2,5)
     const thickness = defaultThickness
     const pos = kind === 'upright' ? Math.round(w/2 - thickness/2) : Math.round(h/2 - thickness/2)
-    upd({ layout: [...contour.layout, { id, kind, pos, thickness }] })
+    const base = { id, kind, pos, thickness }
+    const withInsets = kind === 'upright' ? { ...base, insetBottom: 0, insetTop: 0 } : { ...base, insetLeft: 0, insetRight: 0 }
+    upd({ layout: [withInsets, ...contour.layout] })
+  }
+  // Добавить сразу N полок, равномерно поделив высоту детали на секции
+  const addShelvesEven = (count) => {
+    const n = Math.max(1, Math.round(count) || 1)
+    const thickness = defaultThickness
+    const step = h / (n + 1)
+    const newGuides = []
+    for (let k = 1; k <= n; k++) {
+      const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2,5) + k
+      newGuides.push({ id, kind: 'shelf', pos: Math.round(step * k - thickness / 2), thickness, insetLeft: 0, insetRight: 0 })
+    }
+    upd({ layout: [...newGuides, ...contour.layout] })
   }
   const updLayout = (i, patch) => {
     const ls = [...contour.layout]
@@ -1404,6 +1548,14 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
     setPlaceLayoutIdx(null)
   }
 
+  // Нажатие на саму полосу разметки в превью — переходим к её редактированию
+  const handleLayoutBandTap = (i) => {
+    setTab('layout')
+    setActiveIdx(null)
+    setActiveHoleIdx(null)
+    setHighlightLayoutIdx(i)
+  }
+
   const hasContour = contour.vertices.length > 4 ||
     contour.vertices.some(v => v.r > 0) ||
     contour.holes.length > 0 || contour.grooves.length > 0 || contour.drillings.length > 0
@@ -1425,18 +1577,14 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
       {/* Canvas + кнопки типа рядом */}
       {w > 0 && h > 0 && (
         <>
-          {/* Слайдер масштаба — масштабируется только сама деталь в превью */}
-          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
-            <span style={{ fontSize:12 }}>🔍</span>
-            <input type="range" min={0.3} max={2.5} step={0.05} value={zoom}
-              onChange={e => setZoom(Number(e.target.value))}
-              style={{ flex:1 }} />
-            <span style={{ fontSize:10, color:'var(--text-hint)', width:36, textAlign:'right' }}>{Math.round(zoom*100)}%</span>
-            {Math.abs(zoom-1) > 0.001 && (
+          {/* Подсказка pinch-zoom — масштабируется только сама деталь в превью, щипком двух пальцев */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+            <span style={{ fontSize:10, color:'var(--text-hint)' }}>🤏 Щипком двух пальцев — масштаб детали</span>
+            {Math.abs(zoom-1) > 0.02 && (
               <button type="button" onClick={() => setZoom(1)}
                 style={{ fontSize:10, padding:'3px 7px', border:'0.5px solid var(--border-md)', borderRadius:6,
                   background:'transparent', color:'var(--text-muted)', cursor:'pointer' }}>
-                100%
+                {Math.round(zoom*100)}% · сброс
               </button>
             )}
           </div>
@@ -1502,7 +1650,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
               placeMode={placeDrillIdx !== null || placeLayoutIdx !== null}
               onPlaceTap={placeLayoutIdx !== null ? handlePlaceLayoutTap : handlePlaceDrillTap}
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles}
-              zoom={zoom} />
+              zoom={zoom} onZoomChange={setZoom} onLayoutTap={handleLayoutBandTap} highlightLayoutIdx={highlightLayoutIdx} />
           </div>
 
           {/* Правая колонка — всегда toggles + кнопки типа если точка выбрана */}
@@ -1866,7 +2014,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
           <p style={{ fontSize:11, color:'var(--text-hint)', margin:'0 0 10px' }}>
             Отметь, где будут полки, стойки и царги — потом присадку по плоскости можно привязать прямо к этим линиям.
           </p>
-          <div style={{ display:'flex', gap:6, marginBottom:12, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:6, marginBottom:8, flexWrap:'wrap' }}>
             <button type="button" onClick={() => addLayout('shelf')}
               style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
                 background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
@@ -1883,9 +2031,26 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
               + Царга
             </button>
           </div>
+
+          {/* Быстрое равномерное размещение нескольких полок */}
+          <div style={{ display:'flex', gap:6, alignItems:'flex-end', marginBottom:14, padding:8,
+            background:'var(--bg2)', borderRadius:'var(--radius)' }}>
+            <div style={{ flex:1 }}>
+              <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Быстро: N полок поровну (секциями)</label>
+              <NumField value={shelfCount} onChange={v=>setShelfCount(Math.max(1,Math.round(v)))} />
+            </div>
+            <button type="button" onClick={() => addShelvesEven(shelfCount)}
+              style={{ padding:'8px 12px', border:'none', borderRadius:'var(--radius)',
+                background:'var(--blue)', color:'white', fontSize:12, cursor:'pointer' }}>
+              Разместить
+            </button>
+          </div>
+
           {!contour.layout.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет линий разметки</p>}
           {contour.layout.map((g, i) => (
             <CollapsibleItem key={g.id}
+              innerRef={el => { layoutItemRefs.current[i] = el }}
+              highlighted={highlightLayoutIdx === i}
               title={`${g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #${i+1} · ${Math.round(g.pos||0)}мм`}
               onRemove={() => removeLayout(i)}>
 
@@ -1898,11 +2063,26 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
                 {placeLayoutIdx === i ? '👆 Жду нажатия на детали…' : '📍 Указать нажатием на детали'}
               </button>
 
-              <div style={{ display:'flex', gap:8 }}>
+              <div style={{ display:'flex', gap:8, marginBottom:10 }}>
                 <NumField label={g.kind==='upright' ? 'От левого края' : 'От низа'}
                   value={g.pos??0} onChange={v=>updLayout(i,{pos:v})} />
                 <NumField label="Толщина материала" value={g.thickness??defaultThickness} onChange={v=>updLayout(i,{thickness:v})} />
               </div>
+
+              <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>
+                Отступ от края контура (если не на всю {g.kind==='upright' ? 'высоту' : 'ширину'})
+              </label>
+              {g.kind === 'upright' ? (
+                <div style={{ display:'flex', gap:8 }}>
+                  <NumField label="Снизу" value={g.insetBottom??0} onChange={v=>updLayout(i,{insetBottom:v})} />
+                  <NumField label="Сверху" value={g.insetTop??0} onChange={v=>updLayout(i,{insetTop:v})} />
+                </div>
+              ) : (
+                <div style={{ display:'flex', gap:8 }}>
+                  <NumField label="Слева" value={g.insetLeft??0} onChange={v=>updLayout(i,{insetLeft:v})} />
+                  <NumField label="Справа" value={g.insetRight??0} onChange={v=>updLayout(i,{insetRight:v})} />
+                </div>
+              )}
             </CollapsibleItem>
           ))}
         </div>
@@ -1981,7 +2161,22 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
                         ))}
                       </div>
                       {dr.attachTo && (
-                        <NumField label="Зазор от линии" value={dr.gap??0} onChange={v=>updDrilling(i,{gap:v})} />
+                        <div style={{ display:'flex', gap:6, alignItems:'flex-end' }}>
+                          <NumField label="Зазор от линии" value={dr.gap??0} onChange={v=>updDrilling(i,{gap:v})} />
+                          <div style={{ display:'flex', gap:4 }}>
+                            {(attachedGuide?.kind === 'upright'
+                              ? [['pos','Вправо'],['neg','Влево']]
+                              : [['pos','Вверх'],['neg','Вниз']]
+                            ).map(([id,label])=>(
+                              <button key={id} type="button" onClick={() => updDrilling(i,{gapDir:id})}
+                                style={{ padding:'6px 8px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                                  background: (dr.gapDir||'pos')===id?'var(--blue)':'var(--bg3)',
+                                  color: (dr.gapDir||'pos')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </>
                   )}
