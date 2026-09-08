@@ -16,6 +16,7 @@ const SHEET_DEFAULTS = {
   smallPartsMaxSquareSideMm: 400, // сторона квадрата, мм; деталь мелкая, если её площадь помещается в такой квадрат. 0 — критерий выключен
   smallPartsMaxSideMm: 350,       // меньшая сторона детали, мм; 0 — критерий выключен
   optimizeSeconds: 12,            // время доп. оптимизации плотности раскроя, сек; 0 — без неё
+  cuttingMethod: 'nesting',       // 'nesting' (фрезер) | 'guillotine' (форматно-раскроечный станок)
 }
 
 const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => {
@@ -332,6 +333,7 @@ export default function NewOrderPage() {
         small_parts_max_square_side: SHEET_DEFAULTS.smallPartsMaxSquareSideMm,
         small_parts_max_side: SHEET_DEFAULTS.smallPartsMaxSideMm,
         optimize_seconds: SHEET_DEFAULTS.optimizeSeconds,
+        cutting_method: SHEET_DEFAULTS.cuttingMethod,
         status: 'draft'
       }).select().single()
       if (oErr) throw oErr

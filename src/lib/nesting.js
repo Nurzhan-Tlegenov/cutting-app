@@ -92,6 +92,7 @@ export async function runNesting({
   smallPartsMaxSquareSide = 0,    // сторона квадрата (мм); деталь мелкая, если её площадь <= side*side. 0 = критерий выключен
   smallPartsMaxSide = 0,          // порог меньшей стороны детали (мм). 0 = критерий выключен
   optimizeSeconds = 12,           // сколько секунд гонять поиск плотной укладки — из настроек раскроя
+  cuttingMethod = 'nesting',      // 'nesting' (фрезер, ЧПУ — свободная укладка) | 'guillotine' (форматно-раскроечный станок — только сквозные резы)
 }) {
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
@@ -115,7 +116,16 @@ export async function runNesting({
     (a, b) => Math.max(b.pw, b.ph) - Math.max(a.pw, a.ph),   // по убыванию максимальной стороны
     (a, b) => Math.min(a.pw, a.ph) - Math.min(b.pw, b.ph),   // по возрастанию минимальной стороны
   ]
-  const scoringModes = ['bssf', 'baf', 'g-bssf', 'g-baf'] // MaxRects×{BSSF,BAF} и Guillotine×{BSSF,BAF}
+  // ВЫБОР СТАНКА — это не просто предпочтение по скорости/плотности, а вопрос
+  // физической реализуемости. На форматно-раскроечном станке (пиле) каждый рез
+  // обязан идти НАСКВОЗЬ через весь лист/полосу — MaxRects-раскладка этого не
+  // гарантирует и может быть физически нерезаемой на таком станке. Поэтому для
+  // 'guillotine' семья MaxRects жёстко исключается из конкурса, а не просто
+  // проигрывает по плотности. Для 'nesting' (ЧПУ-фрезер) такого ограничения нет —
+  // фреза режет по любому контуру, обе семьи конкурируют на равных.
+  const scoringModes = cuttingMethod === 'guillotine'
+    ? ['g-bssf', 'g-baf']
+    : ['bssf', 'baf', 'g-bssf', 'g-baf']
   const RANDOM_ATTEMPTS = 150 // случайные перестановки порядка — время не критично, важна плотность
 
   let best = null
@@ -172,9 +182,9 @@ export async function runNesting({
   const YIELD_EVERY_GEN = 2 // раз в столько поколений отдаём управление браузеру
   const BUDGET_PER_MODE_MS = HILL_CLIMB_BUDGET_MS / scoringModes.length
 
-  const POP_SIZE = 16
-  const ELITE_COUNT = 2
-  const TOURNAMENT_SIZE = 3
+  const POP_SIZE = 40
+  const ELITE_COUNT = 4
+  const TOURNAMENT_SIZE = 4
   const MUTATION_RATE = 0.35
 
   for (const mode of scoringModes) {

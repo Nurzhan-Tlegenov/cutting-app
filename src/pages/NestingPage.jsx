@@ -264,6 +264,7 @@ export default function NestingPage() {
   const [submitting, setSubmitting] = useState(false)
   const [sheetsData, setSheetsData] = useState([])
   const [nestDir, setNestDir] = useState('auto')
+  const [cuttingMethod, setCuttingMethod] = useState('nesting')
   const [showOffcuts, setShowOffcuts] = useState(false)
   const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
   const [smallPartsMaxSquareSideMm, setSmallPartsMaxSquareSideMm] = useState('') // мм, заполнится глобальным дефолтом заказа
@@ -284,6 +285,7 @@ export default function NestingPage() {
       setSmallPartsMaxSquareSideMm(o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '')
       setSmallPartsMaxSideMm(o.small_parts_max_side ? String(o.small_parts_max_side) : '')
       setOptimizeSeconds(o.optimize_seconds != null ? String(o.optimize_seconds) : '12')
+      setCuttingMethod(o.cutting_method || 'nesting')
     }
     if (o?.nesting_result) {
       const saved = JSON.parse(o.nesting_result)
@@ -309,6 +311,7 @@ export default function NestingPage() {
           smallPartsMaxSquareSide: smallPartsMaxSquareSideMm === '' ? 0 : Number(smallPartsMaxSquareSideMm),
           smallPartsMaxSide: smallPartsMaxSideMm === '' ? 0 : Number(smallPartsMaxSideMm),
           optimizeSeconds: optimizeSeconds === '' ? 12 : Number(optimizeSeconds),
+          cuttingMethod,
         })
         setResult(res)
         setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
@@ -396,6 +399,27 @@ export default function NestingPage() {
           ))}
         </div>
       )}
+
+      {/* Тип станка */}
+      <div style={{ marginBottom: 12 }}>
+        <p className="section-title">Станок</p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Форматно-раскроечный (пила)']].map(([val, label]) => (
+            <div key={val} onClick={() => { setCuttingMethod(val); saveSmallPartsSettings({ cutting_method: val }) }}
+              style={{ flex: 1, padding: '8px 6px', borderRadius: 'var(--radius)', textAlign: 'center',
+                fontSize: 13, cursor: 'pointer',
+                background: cuttingMethod === val ? 'var(--blue)' : 'var(--bg2)',
+                color: cuttingMethod === val ? 'white' : 'var(--text-muted)', fontWeight: cuttingMethod === val ? 500 : 400 }}>
+              {label}
+            </div>
+          ))}
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+          {cuttingMethod === 'guillotine'
+            ? 'Только сквозные резы через весь лист/полосу — раскладка гарантированно режется на пиле.'
+            : 'Свободная укладка без ограничения на сквозной рез — для резки фрезой по любому контуру.'}
+        </p>
+      </div>
 
       {/* Направление укладки */}
       <div style={{ marginBottom: 12 }}>
