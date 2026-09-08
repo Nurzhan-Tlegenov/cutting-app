@@ -221,11 +221,13 @@ function faceDrillPointsForGuide(dr, panelW, panelH, guide) {
   }
   const count = dr.row ? Math.max(1, Math.round(dr.rowCount || 1)) : 1
   const step = dr.rowStep || 32
+  const offsetStart = -(count - 1) / 2 // симметрично относительно исходной точки
   const pts = []
   for (let k = 0; k < count; k++) {
+    const off = (offsetStart + k) * step
     pts.push(dr.rowDir === 'y'
-      ? { x: baseX, y: baseY + k * step }
-      : { x: baseX + k * step, y: baseY })
+      ? { x: baseX, y: baseY + off }
+      : { x: baseX + off, y: baseY })
   }
   return pts
 }
@@ -275,12 +277,13 @@ function baseEdgeDrillPoints(dr, panelW, panelH) {
   const along = dr.offsetAlong ?? 50
   const count = dr.row ? Math.max(1, Math.round(dr.rowCount || 1)) : 1
   const step = dr.rowStep || 32
+  const offsetStart = -(count - 1) / 2 // симметрично относительно исходной точки
   const fromEnd = dr.alongFrom === 'end'
   const dir = edge === 'left' ? { dx: 1, dy: 0 } : edge === 'right' ? { dx: -1, dy: 0 }
     : edge === 'top' ? { dx: 0, dy: -1 } : { dx: 0, dy: 1 } // bottom
   const pts = []
   for (let k = 0; k < count; k++) {
-    const a = along + k * step // расстояние до центра k-го отверстия
+    const a = along + (offsetStart + k) * step // расстояние до центра k-го отверстия
     const total = (edge === 'left' || edge === 'right') ? panelH : panelW
     const center = fromEnd ? (total - a) : a
     let x, y
@@ -577,6 +580,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     })
 
     // Разметка — полки/стойки/царги (вспомогательные линии для позиционирования присадки)
+    // Подписи собираем отдельно и разводим, если несколько линий расположены близко —
+    // иначе текст соседних полок/стоек накладывается друг на друга и становится нечитаемым
+    const shelfLabels = [], uprightLabels = []
     ;(contour.layout || []).forEach((g, gi) => {
       const thick = g.thickness || 18
       const colors = g.kind === 'upright'
@@ -605,10 +611,34 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         ctx.beginPath(); ctx.moveTo(ox, oy+dh); ctx.lineTo(ox, by+bh); ctx.stroke()
       }
       ctx.setLineDash([])
-      ctx.font = isHi ? 'bold 9px sans-serif' : '9px sans-serif'; ctx.fillStyle = colors.stroke
+      const text = `${colors.label} ${Math.round(g.pos||0)}/${Math.round(thick)}`
+      if (g.kind === 'upright') uprightLabels.push({ x: bx+3, y: oy+12, text, color: colors.stroke, bold: isHi })
+      else shelfLabels.push({ x: bx+3, y: by+bh/2, text, color: colors.stroke, bold: isHi })
+    })
+
+    // Разводим подписи полок/царг по вертикали (если ближе минимального шага — раздвигаем)
+    const LABEL_GAP_Y = 11
+    shelfLabels.sort((a,b) => a.y - b.y)
+    for (let k = 1; k < shelfLabels.length; k++) {
+      if (shelfLabels[k].y - shelfLabels[k-1].y < LABEL_GAP_Y) {
+        shelfLabels[k].y = shelfLabels[k-1].y + LABEL_GAP_Y
+      }
+    }
+    // Разводим подписи стоек по горизонтали (по ширине текста)
+    uprightLabels.sort((a,b) => a.x - b.x)
+    for (let k = 1; k < uprightLabels.length; k++) {
+      const needW = uprightLabels[k-1].text.length * 5.2 + 8
+      if (uprightLabels[k].x - uprightLabels[k-1].x < needW) {
+        uprightLabels[k].x = uprightLabels[k-1].x + needW
+      }
+    }
+    ;[...shelfLabels, ...uprightLabels].forEach(lb => {
+      ctx.font = lb.bold ? 'bold 9px sans-serif' : '9px sans-serif'
+      ctx.fillStyle = lb.color
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      ctx.fillText(`${colors.label} ${Math.round(g.pos||0)}/${Math.round(thick)}`,
-        g.kind==='upright' ? bx+3 : bx+3, g.kind==='upright' ? oy+12 : by+bh/2)
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3
+      ctx.strokeText(lb.text, lb.x, lb.y)
+      ctx.fillText(lb.text, lb.x, lb.y)
     })
 
     // Размерная цепочка между полками/царгами (по Y) и стойками (по X) — можно скрыть тем же переключателем размеров
