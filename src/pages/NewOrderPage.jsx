@@ -57,6 +57,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
       detail.contour.vertices.some(v => v.r && v.r !== 0)
     )) ||
     (detail.contour.holes || []).length > 0 ||
+    (detail.contour.drillings || []).length > 0 ||
     // Старый формат — для обратной совместимости
     Object.values(detail.contour.corners || {}).some(c => c?.type && c.type !== 'none') ||
     (detail.contour.cutouts || []).length > 0 ||

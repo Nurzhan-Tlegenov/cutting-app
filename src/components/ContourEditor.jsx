@@ -170,6 +170,41 @@ function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
   return { x, y, w, h }
 }
 
+// ─── Точки присадки по плоскости (с рядом) ───────────────────────────────────
+function resolveFaceDrillPoints(dr, panelW, panelH) {
+  const d = dr.d || 8
+  const pos = resolvePos(dr.sides || [], dr.offsets || {}, panelW, panelH, d, d)
+  const baseX = pos.x + d / 2, baseY = pos.y + d / 2
+  const count = dr.row ? Math.max(1, Math.round(dr.rowCount || 1)) : 1
+  const step = dr.rowStep || 32
+  const pts = []
+  for (let k = 0; k < count; k++) {
+    pts.push(dr.rowDir === 'y'
+      ? { x: baseX, y: baseY + k * step }
+      : { x: baseX + k * step, y: baseY })
+  }
+  return pts
+}
+
+// ─── Точки присадки по торцу (с рядом) ───────────────────────────────────────
+function resolveEdgeDrillPoints(dr, panelW, panelH) {
+  const edge = dr.edgeSide || 'left'
+  const along = dr.offsetAlong ?? 50
+  const count = dr.row ? Math.max(1, Math.round(dr.rowCount || 1)) : 1
+  const step = dr.rowStep || 32
+  const pts = []
+  for (let k = 0; k < count; k++) {
+    const a = along + k * step
+    let x, y
+    if (edge === 'bottom') { y = 0; x = dr.alongFrom === 'end' ? (panelW - a) : a }
+    else if (edge === 'top') { y = panelH; x = dr.alongFrom === 'end' ? (panelW - a) : a }
+    else if (edge === 'left') { x = 0; y = dr.alongFrom === 'end' ? (panelH - a) : a }
+    else { x = panelW; y = dr.alongFrom === 'end' ? (panelH - a) : a } // right
+    pts.push({ x, y })
+  }
+  return pts
+}
+
 // ─── Конвертировать прямоугольный вырез в вершины ────────────────────────────
 function holeToVertices(hole, panelW, panelH) {
   if (hole.type === 'circle') return null // круг — не конвертируем
@@ -274,6 +309,32 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       const cy2 = oy + dh - (pos.y + pos.h) * sc
       ctx.fillRect(cx2, cy2, pos.w*sc, pos.h*sc)
       ctx.strokeRect(cx2, cy2, pos.w*sc, pos.h*sc)
+    })
+
+    // Присадка — по плоскости (кружок с крестом) и по торцу (квадратик на кромке)
+    ;(contour.drillings || []).forEach(dr => {
+      const d = dr.d || 8
+      if (dr.kind === 'edge') {
+        const pts = resolveEdgeDrillPoints(dr, w, h)
+        pts.forEach(p => {
+          const px = ox + p.x * sc, py = oy + dh - p.y * sc
+          ctx.fillStyle = '#7B4FC9'
+          ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI*2); ctx.fill()
+          ctx.strokeStyle = 'white'; ctx.lineWidth = 1.2; ctx.stroke()
+        })
+      } else {
+        const pts = resolveFaceDrillPoints(dr, w, h)
+        pts.forEach(p => {
+          const px = ox + p.x * sc, py = oy + dh - p.y * sc
+          const rr = Math.max(3, d/2*sc)
+          ctx.strokeStyle = '#0E8A6D'; ctx.lineWidth = 1.3
+          ctx.beginPath(); ctx.arc(px, py, rr, 0, Math.PI*2); ctx.stroke()
+          ctx.beginPath()
+          ctx.moveTo(px-rr*0.6, py); ctx.lineTo(px+rr*0.6, py)
+          ctx.moveTo(px, py-rr*0.6); ctx.lineTo(px, py+rr*0.6)
+          ctx.stroke()
+        })
+      }
     })
 
     // Размеры отрезков + углы — умное позиционирование
@@ -650,9 +711,10 @@ export default function ContourEditor({ detail, onUpdate }) {
   // Нормализуем контур в новый формат
   const rawContour = detail.contour || {}
   const contour = {
-    vertices: rawContour.vertices || makeRect(w, h),
-    holes:    rawContour.holes    || [],
-    grooves:  rawContour.grooves  || [],
+    vertices:  rawContour.vertices  || makeRect(w, h),
+    holes:     rawContour.holes     || [],
+    grooves:   rawContour.grooves   || [],
+    drillings: rawContour.drillings || [],
   }
 
   const [tab, setTab] = useState('contour')
@@ -1048,9 +1110,31 @@ export default function ContourEditor({ detail, onUpdate }) {
     upd({ grooves: gs })
   }
 
+  // Присадка (сверление)
+  const addDrilling = (kind) => {
+    if (kind === 'face') {
+      upd({ drillings: [...contour.drillings, {
+        kind: 'face', face: 'both', d: 8, depth: 13,
+        sides: [], offsets: {},
+        row: false, rowDir: 'x', rowStep: 32, rowCount: 2,
+      }] })
+    } else {
+      upd({ drillings: [...contour.drillings, {
+        kind: 'edge', edgeSide: 'left', alongFrom: 'start',
+        offsetAlong: 50, offsetFace: 9, d: 8, depth: 15,
+        row: false, rowStep: 32, rowCount: 2,
+      }] })
+    }
+  }
+  const updDrilling = (i, patch) => {
+    const ds = [...contour.drillings]
+    ds[i] = { ...ds[i], ...patch }
+    upd({ drillings: ds })
+  }
+
   const hasContour = contour.vertices.length > 4 ||
     contour.vertices.some(v => v.r > 0) ||
-    contour.holes.length > 0 || contour.grooves.length > 0
+    contour.holes.length > 0 || contour.grooves.length > 0 || contour.drillings.length > 0
 
   const activeVertex = activeIdx !== null ? getActiveVerts()[activeIdx] : null
 
@@ -1348,7 +1432,7 @@ export default function ContourEditor({ detail, onUpdate }) {
 
       {/* Вкладки */}
       <div style={{ display:'flex', gap:4, margin:'10px 0 10px', background:'var(--bg2)', borderRadius:'var(--radius)', padding:3 }}>
-        {[['contour','Контур'],['holes','Вырезы'],['grooves','Пазы']].map(([id,label])=>(
+        {[['contour','Контур'],['holes','Вырезы'],['grooves','Пазы'],['drilling','Присадка']].map(([id,label])=>(
           <button key={id} type="button" onClick={()=>{
             setTab(id)
             if(id!=='contour') { setActiveIdx(null) }
@@ -1472,10 +1556,131 @@ export default function ContourEditor({ detail, onUpdate }) {
         </div>
       )}
 
+      {/* ПРИСАДКА */}
+      {tab==='drilling' && (
+        <div>
+          <div style={{ display:'flex', gap:6, marginBottom:12 }}>
+            <button type="button" onClick={() => addDrilling('face')}
+              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+              + По плоскости
+            </button>
+            <button type="button" onClick={() => addDrilling('edge')}
+              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+              + По торцу
+            </button>
+          </div>
+          {!contour.drillings.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет присадки</p>}
+          {contour.drillings.map((dr, i) => (
+            <CollapsibleItem key={i}
+              title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}`}
+              onRemove={() => upd({ drillings: contour.drillings.filter((_,j)=>j!==i) })}>
+
+              {/* По плоскости */}
+              {dr.kind === 'face' && (
+                <>
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>Сторона</label>
+                  <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+                    {[['front','Лицо'],['back','Изнанка'],['both','С двух сторон']].map(([id,label])=>(
+                      <button key={id} type="button" onClick={() => updDrilling(i, { face: id })}
+                        style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                          background: (dr.face||'both')===id?'var(--blue)':'var(--bg3)',
+                          color: (dr.face||'both')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                    <NumField label="Диаметр D" value={dr.d??8} onChange={v=>updDrilling(i,{d:v})} />
+                    <NumField label="Глубина" value={dr.depth??13} onChange={v=>updDrilling(i,{depth:v})} />
+                  </div>
+                  <SideOffsetPicker activeSides={dr.sides||[]} offsets={dr.offsets||{}}
+                    onChange={({sides,offsets})=>updDrilling(i,{sides,offsets})} />
+
+                  <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', margin:'10px 0 6px', cursor:'pointer' }}>
+                    <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
+                    Ряд отверстий
+                  </label>
+                  {dr.row && (
+                    <div style={{ display:'flex', gap:6 }}>
+                      <div style={{ flex:1 }}>
+                        <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Направление</label>
+                        <div style={{ display:'flex', gap:4 }}>
+                          {[['x','↔'],['y','↕']].map(([id,label])=>(
+                            <button key={id} type="button" onClick={() => updDrilling(i,{rowDir:id})}
+                              style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:12,
+                                background: (dr.rowDir||'x')===id?'var(--blue)':'var(--bg3)',
+                                color: (dr.rowDir||'x')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <NumField label="Шаг" value={dr.rowStep??32} onChange={v=>updDrilling(i,{rowStep:v})} />
+                      <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* По торцу */}
+              {dr.kind === 'edge' && (
+                <>
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>Торец</label>
+                  <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:10 }}>
+                    {SIDE_BTNS.map(s => (
+                      <button key={s.id} type="button" onClick={() => updDrilling(i,{edgeSide:s.id})}
+                        style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                          background: (dr.edgeSide||'left')===s.id?'var(--blue)':'var(--bg3)',
+                          color: (dr.edgeSide||'left')===s.id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ marginBottom:10 }}>
+                    <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Отступ вдоль торца от</label>
+                    <div style={{ display:'flex', gap:4 }}>
+                      {[['start','начала'],['end','конца']].map(([id,label])=>(
+                        <button key={id} type="button" onClick={() => updDrilling(i,{alongFrom:id})}
+                          style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                            background: (dr.alongFrom||'start')===id?'var(--blue)':'var(--bg3)',
+                            color: (dr.alongFrom||'start')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:10 }}>
+                    <NumField label="Вдоль торца" value={dr.offsetAlong??50} onChange={v=>updDrilling(i,{offsetAlong:v})} />
+                    <NumField label="От пласти" value={dr.offsetFace??9} onChange={v=>updDrilling(i,{offsetFace:v})} />
+                  </div>
+                  <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                    <NumField label="Диаметр D" value={dr.d??8} onChange={v=>updDrilling(i,{d:v})} />
+                    <NumField label="Глубина" value={dr.depth??15} onChange={v=>updDrilling(i,{depth:v})} />
+                  </div>
+
+                  <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', margin:'0 0 6px', cursor:'pointer' }}>
+                    <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
+                    Ряд отверстий вдоль торца
+                  </label>
+                  {dr.row && (
+                    <div style={{ display:'flex', gap:6 }}>
+                      <NumField label="Шаг" value={dr.rowStep??32} onChange={v=>updDrilling(i,{rowStep:v})} />
+                      <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
+                    </div>
+                  )}
+                </>
+              )}
+            </CollapsibleItem>
+          ))}
+        </div>
+      )}
+
       {/* Сброс */}
       {hasContour && (
         <button type="button"
-          onClick={() => { upd({ vertices: makeRect(w, h), holes: [], grooves: [] }); setActiveIdx(null) }}
+          onClick={() => { upd({ vertices: makeRect(w, h), holes: [], grooves: [], drillings: [] }); setActiveIdx(null) }}
           style={{ width:'100%', marginTop:8, padding:'6px', border:'0.5px solid var(--danger)',
             borderRadius:'var(--radius)', background:'transparent', fontSize:11, color:'var(--danger)', cursor:'pointer' }}>
           Сбросить контур
