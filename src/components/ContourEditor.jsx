@@ -230,15 +230,41 @@ function faceDrillPointsForGuide(dr, panelW, panelH, guide) {
   return pts
 }
 
+// ─── Зеркалирование присадки по плоскости в пределах ширины САМОЙ линии разметки
+// (а не всей детали) — чтобы «зеркалить» давало симметрию по границам линии
+function mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide) {
+  let xLo = 0, xHi = panelW, yLo = 0, yHi = panelH
+  if (guide) {
+    if (guide.kind === 'upright') {
+      yLo = guide.insetBottom || 0
+      yHi = panelH - (guide.insetTop || 0)
+    } else {
+      xLo = guide.insetLeft || 0
+      xHi = panelW - (guide.insetRight || 0)
+    }
+  }
+  let result = pts.map(p => ({ ...p }))
+  if (dr.mirrorX) result = result.concat(pts.map(p => ({ ...p, x: xLo + xHi - p.x })))
+  if (dr.mirrorY) {
+    const cur = result
+    result = cur.concat(cur.map(p => ({ ...p, y: yLo + yHi - p.y })))
+  }
+  return result
+}
+
 // ─── Точки присадки по плоскости — по всем выбранным привязкам сразу ─────────
 function baseFaceDrillPoints(dr, panelW, panelH, layout) {
   const guides = findLayoutGuides(layout, dr.attachTo)
-  if (!guides.length) return faceDrillPointsForGuide(dr, panelW, panelH, null)
-  let pts = []
-  for (const guide of guides) {
-    pts = pts.concat(faceDrillPointsForGuide(dr, panelW, panelH, guide))
+  if (!guides.length) {
+    const pts = faceDrillPointsForGuide(dr, panelW, panelH, null)
+    return mirrorFacePointsForGuide(pts, dr, panelW, panelH, null)
   }
-  return pts
+  let all = []
+  for (const guide of guides) {
+    const pts = faceDrillPointsForGuide(dr, panelW, panelH, guide)
+    all = all.concat(mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide))
+  }
+  return all
 }
 
 // ─── Точки присадки по торцу (базовые, с рядом) ──────────────────────────────
@@ -282,9 +308,13 @@ function mirrorDrillPoints(pts, dr, panelW, panelH, isEdge) {
 
 // ─── Итоговые точки присадки (ряд + зеркало) — единая точка входа для рендера и экспорта
 function getDrillPoints(dr, panelW, panelH, layout) {
-  const isEdge = dr.kind === 'edge'
-  const base = isEdge ? baseEdgeDrillPoints(dr, panelW, panelH) : baseFaceDrillPoints(dr, panelW, panelH, layout)
-  return mirrorDrillPoints(base, dr, panelW, panelH, isEdge)
+  if (dr.kind === 'edge') {
+    const base = baseEdgeDrillPoints(dr, panelW, panelH)
+    return mirrorDrillPoints(base, dr, panelW, panelH, true)
+  }
+  // Присадка по плоскости зеркалится внутри baseFaceDrillPoints — по ширине
+  // конкретной линии разметки (если есть привязка), а не всей детали
+  return baseFaceDrillPoints(dr, panelW, panelH, layout)
 }
 
 // ─── Выноска размера для присадки по плоскости ───────────────────────────────
@@ -555,9 +585,8 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         g.kind==='upright' ? bx+3 : bx+3, g.kind==='upright' ? oy+12 : by+bh/2)
     })
 
-    // Размерная цепочка между полками/царгами (по Y) и стойками (по X) — расстояния РАВНЫЕ ПРОЁМАМ
-    // (расстояние между соседними линиями разметки, а не связано с присадкой) — видна всегда
-    {
+    // Размерная цепочка между полками/царгами (по Y) и стойками (по X) — можно скрыть тем же переключателем размеров
+    if (showLengths) {
       const shelves = (contour.layout||[]).filter(g => g.kind !== 'upright').sort((a,b)=>(a.pos||0)-(b.pos||0))
       if (shelves.length) {
         let prevEdge = 0
@@ -1604,9 +1633,18 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
       pos = Math.max(op.start, Math.min(op.end - thickness, pos))
       newGuides.push(mkBase(pos))
     } else {
+      // Проёмы (не позиции) должны быть равны: из общего проёма вычитаем суммарную
+      // толщину всех N линий, оставшееся делим на N+1 равных проёмов, и расставляем
+      // линии впритык к этим проёмам одна за другой.
       const span = op.end - op.start
-      const step = span / (n + 1)
-      for (let k = 1; k <= n; k++) newGuides.push(mkBase(op.start + step*k - thickness/2))
+      const openSpan = Math.max(0, span - thickness * n)
+      const step = openSpan / (n + 1)
+      let cursor = op.start
+      for (let k = 1; k <= n; k++) {
+        const pos = cursor + step
+        newGuides.push(mkBase(pos))
+        cursor = pos + thickness
+      }
     }
     upd({ layout: [...newGuides, ...contour.layout] })
     setGenType(null)
@@ -2150,7 +2188,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
                           style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
                             background: genOpeningIdx===oi ? 'var(--blue)' : 'var(--bg3)',
                             color: genOpeningIdx===oi ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
-                          {Math.round(o.start)}–{Math.round(o.end)}мм
+                          {Math.round(o.end - o.start)}мм
                         </button>
                       ))}
                     </div>
