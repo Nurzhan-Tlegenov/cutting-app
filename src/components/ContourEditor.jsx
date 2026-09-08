@@ -184,11 +184,24 @@ function attachedTarget(dr, layout) {
   return { axis: guide.kind === 'upright' ? 'x' : 'y', value: center }
 }
 
+// ─── Центр присадки по плоскости от сторон (offsets — расстояние до ЦЕНТРА) ──
+function faceDrillCenterFromSides(sides, offsets, panelW, panelH) {
+  let x = panelW / 2, y = panelH / 2
+  if (sides.includes('left') && sides.includes('right')) {
+    x = ((offsets.left ?? 0) + (panelW - (offsets.right ?? 0))) / 2
+  } else if (sides.includes('left')) x = offsets.left ?? 0
+  else if (sides.includes('right')) x = panelW - (offsets.right ?? 0)
+  if (sides.includes('top') && sides.includes('bottom')) {
+    y = ((offsets.bottom ?? 0) + (panelH - (offsets.top ?? 0))) / 2
+  } else if (sides.includes('bottom')) y = offsets.bottom ?? 0
+  else if (sides.includes('top')) y = panelH - (offsets.top ?? 0)
+  return { x, y }
+}
+
 // ─── Точки присадки по плоскости (базовые, с рядом) ──────────────────────────
 function baseFaceDrillPoints(dr, panelW, panelH, layout) {
-  const d = dr.d || 8
-  const pos = resolvePos(dr.sides || [], dr.offsets || {}, panelW, panelH, d, d)
-  let baseX = pos.x + d / 2, baseY = pos.y + d / 2
+  const center = faceDrillCenterFromSides(dr.sides || [], dr.offsets || {}, panelW, panelH)
+  let baseX = center.x, baseY = center.y
   const att = attachedTarget(dr, layout)
   if (att) {
     if (att.axis === 'y') baseY = Math.max(0, Math.min(panelH, att.value))
@@ -254,12 +267,13 @@ function getDrillPoints(dr, panelW, panelH, layout) {
 // ─── Выноска размера для присадки по плоскости ───────────────────────────────
 // Считаем расстояния ЖИВЬЁМ из текущей позиции точки — выноска всегда точна и всегда
 // отображается, независимо от того, как отверстие было установлено (пальцем или цифрами).
-function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY, halfD) {
+// Расстояние — до ЦЕНТРА отверстия (как и хранится в offsets).
+function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY) {
   const sides = dr.sides || []
   const xSide = sides.includes('left') ? 'left' : sides.includes('right') ? 'right' : (dataX <= w/2 ? 'left' : 'right')
   const ySide = sides.includes('bottom') ? 'bottom' : sides.includes('top') ? 'top' : (dataY <= h/2 ? 'bottom' : 'top')
-  const distX = xSide === 'left' ? (dataX - halfD) : (w - dataX - halfD)
-  const distY = ySide === 'bottom' ? (dataY - halfD) : (h - dataY - halfD)
+  const distX = xSide === 'left' ? dataX : (w - dataX)
+  const distY = ySide === 'bottom' ? dataY : (h - dataY)
 
   ctx.save()
   ctx.strokeStyle = 'rgba(24,95,165,0.6)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
@@ -348,8 +362,9 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1 }) {
   const ref = useRef(null)
+  const wrapRef = useRef(null)
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
   const w = Number(detail.h) || 0
   const h = Number(detail.w) || 0
@@ -360,11 +375,14 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const ctx = canvas.getContext('2d')
     const DPR = window.devicePixelRatio || 1
 
-    // Высокое разрешение
-    const CSS_W = canvas.offsetWidth || 280
+    // Высокое разрешение — базовая ширина берётся от контейнера (не масштабируется зумом),
+    // сам масштаб детали внутри регулируется зумом отдельно
+    const baseW = wrapRef.current?.clientWidth || canvas.offsetWidth || 280
+    const CSS_W = Math.round(baseW * zoom)
     const CSS_H = Math.round(CSS_W * (h / w) * 0.75 + 60)
     canvas.width = CSS_W * DPR
     canvas.height = CSS_H * DPR
+    canvas.style.width = CSS_W + 'px'
     canvas.style.height = CSS_H + 'px'
     ctx.scale(DPR, DPR)
 
@@ -492,7 +510,6 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         })
       } else {
         const isThrough = (dr.face || 'both') === 'both'
-        const halfD = d / 2
         pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
           const r = Math.max(3, dPx/2)
@@ -509,7 +526,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
             ctx.fillText(dr.face === 'front' ? 'Л' : 'И', px, py)
           }
           if (pi === 0 && showLengths) {
-            drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, halfD)
+            drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y)
           }
         })
       }
@@ -652,7 +669,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       })
     })
 
-  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx])
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -705,10 +722,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   }
 
   return (
-    <canvas ref={ref}
-      onClick={handleTap}
-      style={{ width:'100%', borderRadius:8, display:'block', cursor:'pointer', touchAction:'manipulation',
-        outline: placeMode ? '2px solid #0E8A6D' : 'none' }} />
+    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)' }}>
+      <canvas ref={ref}
+        onClick={handleTap}
+        style={{ display:'block', cursor:'pointer', touchAction:'manipulation',
+          outline: placeMode ? '2px solid #0E8A6D' : 'none' }} />
+    </div>
   )
 }
 
@@ -923,6 +942,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
   const [arcPoints, setArcPoints] = useState([]) // индексы выбранных точек
   const [placeDrillIdx, setPlaceDrillIdx] = useState(null) // индекс присадки в режиме "указать нажатием"
   const [placeLayoutIdx, setPlaceLayoutIdx] = useState(null) // индекс линии разметки в режиме "указать нажатием"
+  const [zoom, setZoom] = useState(1) // масштаб превью детали (кнопки/списки не масштабируются)
 
   // Применить дугу: точки [i, cp, j] — cp становится контрольной точкой
   const applyArc = (pts) => {
@@ -1332,7 +1352,6 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
     if (placeDrillIdx === null) return
     const dr = contour.drillings[placeDrillIdx]
     if (!dr) { setPlaceDrillIdx(null); return }
-    const d = dr.d || 8
     if (dr.kind === 'edge') {
       const distLeft = x, distRight = w - x, distBottom = y, distTop = h - y
       const minD = Math.min(distLeft, distRight, distBottom, distTop)
@@ -1344,10 +1363,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
       // offsetAlong хранится как расстояние до ЦЕНТРА отверстия (от начала)
       updDrilling(placeDrillIdx, { edgeSide, alongFrom: 'start', offsetAlong: Math.max(0, Math.round(alongCenter)) })
     } else {
+      // offsets хранится как расстояние до ЦЕНТРА отверстия
       const sideX = x <= w / 2 ? 'left' : 'right'
       const sideY = y <= h / 2 ? 'bottom' : 'top'
-      const offX = sideX === 'left' ? Math.max(0, x - d/2) : Math.max(0, w - d/2 - x)
-      const offY = sideY === 'bottom' ? Math.max(0, y - d/2) : Math.max(0, h - d/2 - y)
+      const offX = sideX === 'left' ? Math.max(0, x) : Math.max(0, w - x)
+      const offY = sideY === 'bottom' ? Math.max(0, y) : Math.max(0, h - y)
       updDrilling(placeDrillIdx, { sides: [sideX, sideY], offsets: { [sideX]: Math.round(offX), [sideY]: Math.round(offY) } })
     }
     setPlaceDrillIdx(null)
@@ -1404,6 +1424,22 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
 
       {/* Canvas + кнопки типа рядом */}
       {w > 0 && h > 0 && (
+        <>
+          {/* Слайдер масштаба — масштабируется только сама деталь в превью */}
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+            <span style={{ fontSize:12 }}>🔍</span>
+            <input type="range" min={0.3} max={2.5} step={0.05} value={zoom}
+              onChange={e => setZoom(Number(e.target.value))}
+              style={{ flex:1 }} />
+            <span style={{ fontSize:10, color:'var(--text-hint)', width:36, textAlign:'right' }}>{Math.round(zoom*100)}%</span>
+            {Math.abs(zoom-1) > 0.001 && (
+              <button type="button" onClick={() => setZoom(1)}
+                style={{ fontSize:10, padding:'3px 7px', border:'0.5px solid var(--border-md)', borderRadius:6,
+                  background:'transparent', color:'var(--text-muted)', cursor:'pointer' }}>
+                100%
+              </button>
+            )}
+          </div>
         <div style={{ display:'flex', gap:4, marginBottom:8, alignItems:'flex-start' }}>
 
           {/* Список точек слева */}
@@ -1465,7 +1501,8 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
               onTap={handleTap}
               placeMode={placeDrillIdx !== null || placeLayoutIdx !== null}
               onPlaceTap={placeLayoutIdx !== null ? handlePlaceLayoutTap : handlePlaceDrillTap}
-              showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
+              showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles}
+              zoom={zoom} />
           </div>
 
           {/* Правая колонка — всегда toggles + кнопки типа если точка выбрана */}
@@ -1528,6 +1565,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
             )}
           </div>
         </div>
+        </>
       )}
 
       {/* Подсказка в режиме дуги */}
