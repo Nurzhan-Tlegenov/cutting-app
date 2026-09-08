@@ -179,7 +179,7 @@ function findLayoutGuide(layout, id) {
 function attachedTarget(dr, layout) {
   const guide = findLayoutGuide(layout, dr.attachTo)
   if (!guide) return null
-  const gap = dr.gap ?? 37
+  const gap = dr.gap ?? 0
   const center = (guide.pos || 0) + (guide.thickness || 18) / 2 + gap
   return { axis: guide.kind === 'upright' ? 'x' : 'y', value: center }
 }
@@ -350,8 +350,9 @@ function getMarkers(verts, sc, ox, oy, dh) {
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null }) {
   const ref = useRef(null)
-  const w = Number(detail.w) || 0
-  const h = Number(detail.h) || 0
+  // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
+  const w = Number(detail.h) || 0
+  const h = Number(detail.w) || 0
 
   useEffect(() => {
     const canvas = ref.current
@@ -891,9 +892,10 @@ function CollapsibleItem({ title, onRemove, children }) {
 }
 
 // ─── Главный компонент ────────────────────────────────────────────────────────
-export default function ContourEditor({ detail, onUpdate }) {
-  const w = Number(detail.w) || 0
-  const h = Number(detail.h) || 0
+export default function ContourEditor({ detail, onUpdate, materialThickness }) {
+  // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
+  const w = Number(detail.h) || 0
+  const h = Number(detail.w) || 0
 
   // Нормализуем контур в новый формат
   const rawContour = detail.contour || {}
@@ -956,8 +958,9 @@ export default function ContourEditor({ detail, onUpdate }) {
   // Переместить точку по X/Y с ограничением внутри детали
   const moveVertex = (idx, dx, dy) => {
     const verts = [...getActiveVerts()]
-    const w = Number(detail.w) || 0
-    const h = Number(detail.h) || 0
+    // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
+    const w = Number(detail.h) || 0
+    const h = Number(detail.w) || 0
     const newX = Math.max(0, Math.min(w, verts[idx].x + dx))
     const newY = Math.max(0, Math.min(h, verts[idx].y + dy))
     verts[idx] = { ...verts[idx], x: newX, y: newY }
@@ -1262,8 +1265,9 @@ export default function ContourEditor({ detail, onUpdate }) {
   // Holes
   const addHole = (type) => {
     const base = { type, sides: [], offsets: {} }
-    const w = Number(detail.w) || 0
-    const h = Number(detail.h) || 0
+    // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
+    const w = Number(detail.h) || 0
+    const h = Number(detail.w) || 0
     if (type === 'circle') {
       upd({ holes: [...contour.holes, { ...base, d: 100 }] })
     } else {
@@ -1279,8 +1283,9 @@ export default function ContourEditor({ detail, onUpdate }) {
     const updated = { ...holes[i], ...patch }
     // Пересчитываем vertices для прямоугольного выреза
     if (updated.type !== 'circle') {
-      const w = Number(detail.w) || 0
-      const h = Number(detail.h) || 0
+      // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
+      const w = Number(detail.h) || 0
+      const h = Number(detail.w) || 0
       // Сохраняем пользовательские точки если они были отредактированы вручную
       if (!updated._verticesEdited) {
         updated.vertices = holeToVertices(updated, w, h)
@@ -1349,10 +1354,11 @@ export default function ContourEditor({ detail, onUpdate }) {
   }
 
   // Разметка (полки/стойки/царги)
+  const defaultThickness = Number(materialThickness) || 16
   const addLayout = (kind) => {
     const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2,5)
-    const thickness = kind === 'rail' ? 100 : 18
-    const pos = kind === 'upright' ? Math.round(w/2 - 9) : Math.round(h/2 - thickness/2)
+    const thickness = defaultThickness
+    const pos = kind === 'upright' ? Math.round(w/2 - thickness/2) : Math.round(h/2 - thickness/2)
     upd({ layout: [...contour.layout, { id, kind, pos, thickness }] })
   }
   const updLayout = (i, patch) => {
@@ -1857,7 +1863,7 @@ export default function ContourEditor({ detail, onUpdate }) {
               <div style={{ display:'flex', gap:8 }}>
                 <NumField label={g.kind==='upright' ? 'От левого края' : 'От низа'}
                   value={g.pos??0} onChange={v=>updLayout(i,{pos:v})} />
-                <NumField label="Толщина материала" value={g.thickness??18} onChange={v=>updLayout(i,{thickness:v})} />
+                <NumField label="Толщина материала" value={g.thickness??defaultThickness} onChange={v=>updLayout(i,{thickness:v})} />
               </div>
             </CollapsibleItem>
           ))}
@@ -1937,7 +1943,7 @@ export default function ContourEditor({ detail, onUpdate }) {
                         ))}
                       </div>
                       {dr.attachTo && (
-                        <NumField label="Зазор от линии" value={dr.gap??37} onChange={v=>updDrilling(i,{gap:v})} />
+                        <NumField label="Зазор от линии" value={dr.gap??0} onChange={v=>updDrilling(i,{gap:v})} />
                       )}
                     </>
                   )}

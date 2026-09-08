@@ -193,6 +193,7 @@ export default function EditOrderPage() {
   const [error, setError] = useState('')
   const [orderName, setOrderName] = useState('')
   const [materialName, setMaterialName] = useState('')
+  const [materialThickness, setMaterialThickness] = useState(16)
   const [prefixes, setPrefixes] = useState([])
   const [activePrefix, setActivePrefix] = useState(null)
   const [edgeNames, setEdgeNames] = useState([])
@@ -205,7 +206,7 @@ export default function EditOrderPage() {
   async function fetchOrder() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
-    if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || '') }
+    if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16) }
     if (d && d.length > 0) {
       const pfxSet = [...new Set(d.filter(x => x.prefix).map(x => x.prefix))]
       setPrefixes(pfxSet)
@@ -242,6 +243,7 @@ export default function EditOrderPage() {
         detail={{ w: editingDetail.w, h: editingDetail.h, contour: editingDetail.contour }}
         onUpdate={(updated) => updateDetail(editingContourUid, { ...editingDetail, contour: updated.contour })}
         onClose={() => setEditingContourUid(null)}
+        materialThickness={materialThickness}
       />
     )
   }
@@ -253,6 +255,7 @@ export default function EditOrderPage() {
       const { error: oErr } = await supabase.from('orders').update({
         order_name: orderName || null,
         material_name: materialName || 'Без названия',
+        material_thickness: Number(materialThickness) || 16,
         nesting_result: null
       }).eq('id', id)
       if (oErr) throw new Error('Ошибка обновления заказа: ' + oErr.message)
@@ -297,8 +300,12 @@ export default function EditOrderPage() {
           <input type="text" placeholder="Например: Кухня Ивановых" value={orderName}
             onChange={e => setOrderName(e.target.value)} style={{ marginBottom: 10 }} />
           <label className="label">Материал</label>
-          <input type="text" placeholder="ЛДСП Белый 16мм" value={materialName}
-            onChange={e => setMaterialName(e.target.value)} />
+          <div style={{ display:'flex', gap:8 }}>
+            <input type="text" placeholder="ЛДСП Белый 16мм" value={materialName}
+              onChange={e => setMaterialName(e.target.value)} style={{ flex:1 }} />
+            <input type="number" placeholder="16" value={materialThickness}
+              onChange={e => setMaterialThickness(e.target.value)} style={{ width:70 }} />
+          </div>
         </div>
       </div>
       <div style={{ marginBottom: 14 }}>

@@ -42,7 +42,7 @@ const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => 
 }
 
 // Компактная карточка детали
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter, materialThickness }) {
   const widthRef = useRef(null)
   const qtyRef = useRef(null)
   const SIDES = ['Дв','Дн','Шл','Шп']
@@ -167,7 +167,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
 
       {/* Редактор контура */}
       {showContour && (
-        <ContourEditor detail={detail} onUpdate={onUpdate} />
+        <ContourEditor detail={detail} onUpdate={onUpdate} materialThickness={materialThickness} />
       )}
     </div>
   )
@@ -272,6 +272,7 @@ export default function NewOrderPage() {
   const { user } = useAuth()
   const [orderName, setOrderName] = useState('')
   const [materialName, setMaterialName] = useState('')
+  const [materialThickness, setMaterialThickness] = useState(16)
 
   // Префиксы
   const [prefixes, setPrefixes] = useState([])
@@ -323,6 +324,7 @@ export default function NewOrderPage() {
         order_number: orderNumber,
         order_name: orderName || null,
         material_name: materialName || 'Без названия',
+        material_thickness: Number(materialThickness) || 16,
         sheet_length: Number(sheetLength) || SHEET_DEFAULTS.length,
         sheet_width: Number(sheetWidth) || SHEET_DEFAULTS.width,
         margin_top: SHEET_DEFAULTS.margin_top,
@@ -404,6 +406,11 @@ export default function NewOrderPage() {
               <label className="label">Материал</label>
               <input type="text" placeholder="ЛДСП Белый 16мм" value={materialName}
                 onChange={e => setMaterialName(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
+            </div>
+            <div style={{ width: 70 }}>
+              <label className="label">Толщ.</label>
+              <input type="number" placeholder="16" value={materialThickness}
+                onChange={e => setMaterialThickness(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
             </div>
           </div>
         </div>
@@ -537,7 +544,8 @@ export default function NewOrderPage() {
                   activeEdgeName={activeEdge}
                   showEdge={showEdge}
                   autoFocus={d.uid === lastAddedUid}
-                  onQtyEnter={onQtyEnter} />
+                  onQtyEnter={onQtyEnter}
+                  materialThickness={materialThickness} />
               )
             })}
           </div>
