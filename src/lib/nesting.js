@@ -159,67 +159,93 @@ export async function runNesting({
     if (i % 20 === 0) await new Promise(r => setTimeout(r, 0))
   }
 
-  // Генетический алгоритм поверх популяции вариантов порядка деталей.
-  // В отличие от одиночного hill climbing (одна "цепочка" с точечными
-  // мутациями), здесь целая популяция решений эволюционирует поколение
-  // за поколением: турнирный отбор выбирает более удачных "родителей",
-  // order crossover комбинирует их порядок деталей в потомка (наследуя
-  // фрагменты структуры от обоих родителей, а не просто перемешивая),
-  // и небольшая мутация поддерживает разнообразие популяции. Такой подход
-  // обычно исследует пространство решений эффективнее одной случайно
-  // блуждающей цепочки и меньше подвержен застреванию в локальном плато.
-  //
-  // ВАЖНО: бюджет времени делится ПОРОВНУ между всеми 4 режимами (MaxRects/Guillotine
-  // × BSSF/BAF), а не достаётся целиком тому, кто случайно выиграл короткую
-  // начальную фазу. Guillotine на короткой дистанции не обязательно лучше MaxRects —
-  // его реальное преимущество (на порядок дешевле каждая попытка → на порядок больше
-  // поколений за то же время) проявляется только на ДЛИННОЙ дистанции.
-  //
-  // Бюджет по ВРЕМЕНИ, а не по фиксированному числу поколений: на маленьком заказе
-  // (мало деталей) каждая особь дешевле оценить — успеет отработать намного
-  // больше поколений за то же время.
+  // Генетический алгоритм поверх ЕДИНОЙ популяции особей "порядок + режим".
+  // Раньше время бюджета делилось ПОРОВНУ между 4 режимами (MaxRects/Guillotine
+  // × BSSF/BAF), даже если для конкретного заказа один из них явно проигрывал —
+  // ¾ бюджета уходило впустую на заведомо более слабые ветки. Теперь режим —
+  // это тоже "ген" каждой особи: наследуется от одного из родителей при
+  // скрещивании, изредка мутирует (шанс сменить семью целиком). Турнирный
+  // отбор естественным образом вытесняет из популяции слабую семью и отдаёт
+  // ей всё меньше "места" — эволюция сама перераспределяет вычислительный
+  // бюджет в пользу того, что реально выигрывает для ЭТОГО набора деталей,
+  // а не тратит его поровну вслепую.
   const HILL_CLIMB_BUDGET_MS = Math.max(0, Number(optimizeSeconds) || 0) * 1000 // из настроек раскроя, 0 = без доп. оптимизации
   const YIELD_EVERY_GEN = 2 // раз в столько поколений отдаём управление браузеру
-  const BUDGET_PER_MODE_MS = HILL_CLIMB_BUDGET_MS / scoringModes.length
 
   const POP_SIZE = 40
   const ELITE_COUNT = 4
   const TOURNAMENT_SIZE = 4
   const MUTATION_RATE = 0.35
+  const MODE_MUTATION_RATE = 0.1 // шанс сменить семью целиком при мутации — поддерживает разнообразие семей в популяции
 
-  for (const mode of scoringModes) {
-    // Начальная популяция: лучший порядок, уже найденный для ЭТОГО режима на
-    // структурной/случайной фазе, плюс случайные перестановки для разнообразия.
-    const seedOrder = bestPerMode[mode] || shuffle(basePieces.slice())
-    let population = [seedOrder.slice()]
-    while (population.length < POP_SIZE) population.push(shuffle(basePieces.slice()))
-
-    let evaluated = population.map(order => ({ order, ...packAndEval(order, mode) }))
-    evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
-    if (better(evaluated[0].stat, best.stat)) best = evaluated[0]
-
-    const startTime = Date.now()
-    let gen = 0
-    while (Date.now() - startTime < BUDGET_PER_MODE_MS) {
-      gen++
-      // Элитизм: лучшие особи переходят в следующее поколение без изменений.
-      const nextOrders = evaluated.slice(0, ELITE_COUNT).map(e => e.order)
-      while (nextOrders.length < POP_SIZE) {
-        const parentA = tournamentSelect(evaluated, TOURNAMENT_SIZE)
-        const parentB = tournamentSelect(evaluated, TOURNAMENT_SIZE)
-        let child = orderCrossover(parentA.order, parentB.order)
-        if (Math.random() < MUTATION_RATE) child = perturbOrder(child, false)
-        nextOrders.push(child)
-      }
-      evaluated = nextOrders.map(order => ({ order, ...packAndEval(order, mode) }))
-      evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
-      if (better(evaluated[0].stat, best.stat)) best = evaluated[0]
-      // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт.
-      if (gen % YIELD_EVERY_GEN === 0) await new Promise(r => setTimeout(r, 0))
-    }
+  // Начальная популяция: лучший порядок для КАЖДОГО режима (из структурной/
+  // случайной фазы) плюс случайные особи со случайным режимом — сразу
+  // представлены все семьи, дальше отбор решает, кому остаться.
+  let population = scoringModes.map(mode => ({ order: (bestPerMode[mode] || shuffle(basePieces.slice())).slice(), mode }))
+  while (population.length < POP_SIZE) {
+    population.push({ order: shuffle(basePieces.slice()), mode: scoringModes[Math.floor(Math.random() * scoringModes.length)] })
   }
 
+  let evaluated = population.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
+  evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
+  if (better(evaluated[0].stat, best.stat)) best = evaluated[0]
+
+  const startTime = Date.now()
+  let gen = 0
+  while (Date.now() - startTime < HILL_CLIMB_BUDGET_MS) {
+    gen++
+    // Элитизм: лучшие особи переходят в следующее поколение без изменений (вместе со своим режимом).
+    const nextGen = evaluated.slice(0, ELITE_COUNT).map(e => ({ order: e.order, mode: e.mode }))
+    while (nextGen.length < POP_SIZE) {
+      const parentA = tournamentSelect(evaluated, TOURNAMENT_SIZE)
+      const parentB = tournamentSelect(evaluated, TOURNAMENT_SIZE)
+      let childOrder = orderCrossover(parentA.order, parentB.order)
+      if (Math.random() < MUTATION_RATE) childOrder = perturbOrder(childOrder, false)
+      // Режим наследуется от одного из родителей — от более удачного чуть чаще, чем 50/50.
+      let childMode = better(parentA.stat, parentB.stat)
+        ? (Math.random() < 0.7 ? parentA.mode : parentB.mode)
+        : (Math.random() < 0.7 ? parentB.mode : parentA.mode)
+      if (Math.random() < MODE_MUTATION_RATE) childMode = scoringModes[Math.floor(Math.random() * scoringModes.length)]
+      nextGen.push({ order: childOrder, mode: childMode })
+    }
+    evaluated = nextGen.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
+    evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
+    if (better(evaluated[0].stat, best.stat)) best = evaluated[0]
+    // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт.
+    if (gen % YIELD_EVERY_GEN === 0) await new Promise(r => setTimeout(r, 0))
+  }
+
+  // Финальная "интенсификация": компакция выше по коду всегда обходит детали
+  // листа в одном и том же порядке (как они туда легли), из-за чего может
+  // упускать перестановки, которые нашлись бы при другом порядке обхода.
+  // Здесь пробуем много раз со случайным порядком обхода поверх УЖЕ лучшего
+  // найденного решения — дёшево (компакция сама по себе быстрая операция),
+  // но может дожать последний лист чуть плотнее.
+  best.sheets = await intensifyCompaction(best.sheets, direction, usableX, usableY)
+
   return { sheets: best.sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+}
+
+function cloneSheets(sheets) {
+  return sheets.map(s => ({
+    index: s.index, family: s.family,
+    placed: s.placed.map(p => ({ ...p })),
+    freeRects: s.freeRects.map(r => ({ ...r })),
+  }))
+}
+
+async function intensifyCompaction(sheets, direction, usableX, usableY, attempts = 300) {
+  let best = sheets
+  let bestStat = evaluate(best, usableX, usableY)
+  for (let i = 0; i < attempts; i++) {
+    let candidate = cloneSheets(best)
+    candidate.forEach(s => shuffle(s.placed))
+    candidate = compactUntilStable(candidate, direction, usableX, usableY)
+    const stat = evaluate(candidate, usableX, usableY)
+    if (better(stat, bestStat)) { best = candidate; bestStat = stat }
+    if (i % 30 === 0) await new Promise(r => setTimeout(r, 0))
+  }
+  return best
 }
 
 // Турнирный отбор: берём k случайных особей из популяции, побеждает лучшая
