@@ -170,8 +170,8 @@ function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
   return { x, y, w, h }
 }
 
-// ─── Точки присадки по плоскости (с рядом) ───────────────────────────────────
-function resolveFaceDrillPoints(dr, panelW, panelH) {
+// ─── Точки присадки по плоскости (базовые, с рядом) ──────────────────────────
+function baseFaceDrillPoints(dr, panelW, panelH) {
   const d = dr.d || 8
   const pos = resolvePos(dr.sides || [], dr.offsets || {}, panelW, panelH, d, d)
   const baseX = pos.x + d / 2, baseY = pos.y + d / 2
@@ -186,12 +186,15 @@ function resolveFaceDrillPoints(dr, panelW, panelH) {
   return pts
 }
 
-// ─── Точки присадки по торцу (с рядом) ───────────────────────────────────────
-function resolveEdgeDrillPoints(dr, panelW, panelH) {
+// ─── Точки присадки по торцу (базовые, с рядом) ──────────────────────────────
+// dx/dy — единичный вектор направления сверления ВНУТРЬ детали (в координатах данных)
+function baseEdgeDrillPoints(dr, panelW, panelH) {
   const edge = dr.edgeSide || 'left'
   const along = dr.offsetAlong ?? 50
   const count = dr.row ? Math.max(1, Math.round(dr.rowCount || 1)) : 1
   const step = dr.rowStep || 32
+  const dir = edge === 'left' ? { dx: 1, dy: 0 } : edge === 'right' ? { dx: -1, dy: 0 }
+    : edge === 'top' ? { dx: 0, dy: -1 } : { dx: 0, dy: 1 } // bottom
   const pts = []
   for (let k = 0; k < count; k++) {
     const a = along + k * step
@@ -200,9 +203,84 @@ function resolveEdgeDrillPoints(dr, panelW, panelH) {
     else if (edge === 'top') { y = panelH; x = dr.alongFrom === 'end' ? (panelW - a) : a }
     else if (edge === 'left') { x = 0; y = dr.alongFrom === 'end' ? (panelH - a) : a }
     else { x = panelW; y = dr.alongFrom === 'end' ? (panelH - a) : a } // right
-    pts.push({ x, y })
+    pts.push({ x, y, dx: dir.dx, dy: dir.dy })
   }
   return pts
+}
+
+// ─── Зеркалирование точек присадки (множит комплект) ─────────────────────────
+function mirrorDrillPoints(pts, dr, panelW, panelH, isEdge) {
+  let result = pts.map(p => ({ ...p }))
+  if (dr.mirrorX) {
+    result = result.concat(pts.map(p => ({ ...p, x: panelW - p.x, dx: isEdge ? -p.dx : p.dx })))
+  }
+  if (dr.mirrorY) {
+    const cur = result
+    result = cur.concat(cur.map(p => ({ ...p, y: panelH - p.y, dy: isEdge ? -p.dy : p.dy })))
+  }
+  return result
+}
+
+// ─── Итоговые точки присадки (ряд + зеркало) — единая точка входа для рендера и экспорта
+function getDrillPoints(dr, panelW, panelH) {
+  const isEdge = dr.kind === 'edge'
+  const base = isEdge ? baseEdgeDrillPoints(dr, panelW, panelH) : baseFaceDrillPoints(dr, panelW, panelH)
+  return mirrorDrillPoints(base, dr, panelW, panelH, isEdge)
+}
+
+// ─── Выноска размера для присадки по плоскости ───────────────────────────────
+function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh) {
+  const sides = dr.sides || []
+  const offsets = dr.offsets || {}
+  ctx.save()
+  ctx.strokeStyle = 'rgba(24,95,165,0.55)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
+  ctx.font = '9px sans-serif'; ctx.fillStyle = '#185FA5'
+  if (sides.includes('left')) {
+    const ex = ox
+    ctx.beginPath(); ctx.moveTo(ex, py); ctx.lineTo(px, py); ctx.stroke()
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
+    ctx.fillText(Math.round(offsets.left ?? 0), (ex + px) / 2, py - 3)
+  }
+  if (sides.includes('right')) {
+    const ex = ox + w * sc
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, py); ctx.stroke()
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
+    ctx.fillText(Math.round(offsets.right ?? 0), (ex + px) / 2, py - 3)
+  }
+  if (sides.includes('bottom')) {
+    const ey = oy + dh
+    ctx.beginPath(); ctx.moveTo(px, ey); ctx.lineTo(px, py); ctx.stroke()
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+    ctx.fillText(Math.round(offsets.bottom ?? 0), px + 4, (ey + py) / 2)
+  }
+  if (sides.includes('top')) {
+    const ey = oy
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, ey); ctx.stroke()
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+    ctx.fillText(Math.round(offsets.top ?? 0), px + 4, (ey + py) / 2)
+  }
+  ctx.restore()
+}
+
+// ─── Выноска размера для присадки по торцу (вдоль торца + глубина) ───────────
+function drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh) {
+  const edge = dr.edgeSide || 'left'
+  ctx.save()
+  ctx.strokeStyle = 'rgba(123,79,201,0.55)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
+  ctx.font = '9px sans-serif'; ctx.fillStyle = '#7B4FC9'
+  if (edge === 'bottom' || edge === 'top') {
+    const cornerX = dr.alongFrom === 'end' ? ox + w * sc : ox
+    ctx.beginPath(); ctx.moveTo(cornerX, py); ctx.lineTo(px, py); ctx.stroke()
+    ctx.textAlign = 'center'; ctx.textBaseline = edge === 'bottom' ? 'top' : 'bottom'
+    ctx.fillText(Math.round(dr.offsetAlong ?? 0), (cornerX + px) / 2, py + (edge === 'bottom' ? 6 : -6))
+  } else {
+    const cornerY = dr.alongFrom === 'end' ? oy : oy + dh
+    ctx.beginPath(); ctx.moveTo(px, cornerY); ctx.lineTo(px, py); ctx.stroke()
+    ctx.textAlign = edge === 'left' ? 'left' : 'right'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(Math.round(dr.offsetAlong ?? 0), px + (edge === 'left' ? 6 : -6), (cornerY + py) / 2)
+  }
+  ctx.restore()
 }
 
 // ─── Конвертировать прямоугольный вырез в вершины ────────────────────────────
@@ -231,7 +309,7 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null }) {
   const ref = useRef(null)
   const w = Number(detail.w) || 0
   const h = Number(detail.h) || 0
@@ -311,28 +389,52 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       ctx.strokeRect(cx2, cy2, pos.w*sc, pos.h*sc)
     })
 
-    // Присадка — по плоскости (кружок с крестом) и по торцу (квадратик на кромке)
+    // Присадка — реальная геометрия отверстий + выноски размеров
     ;(contour.drillings || []).forEach(dr => {
       const d = dr.d || 8
+      const dPx = d * sc
+      const pts = getDrillPoints(dr, w, h)
+
       if (dr.kind === 'edge') {
-        const pts = resolveEdgeDrillPoints(dr, w, h)
-        pts.forEach(p => {
+        const depthPx = (dr.depth || 15) * sc
+        pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
-          ctx.fillStyle = '#7B4FC9'
-          ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI*2); ctx.fill()
-          ctx.strokeStyle = 'white'; ctx.lineWidth = 1.2; ctx.stroke()
+          const ix = px + p.dx * depthPx   // внутренний конец по X (canvas)
+          const iy = py - p.dy * depthPx   // внутренний конец по Y (canvas, инверсия)
+          ctx.fillStyle = 'rgba(123,79,201,0.28)'
+          ctx.strokeStyle = '#7B4FC9'; ctx.lineWidth = 1.2
+          ctx.beginPath()
+          if (p.dx !== 0) {
+            const rx = Math.min(px, ix), rw = Math.abs(ix - px)
+            ctx.rect(rx, py - dPx/2, rw, dPx)
+          } else {
+            const ry = Math.min(py, iy), rh = Math.abs(iy - py)
+            ctx.rect(px - dPx/2, ry, dPx, rh)
+          }
+          ctx.fill(); ctx.stroke()
+          // точка входа сверла на торце
+          ctx.beginPath(); ctx.arc(px, py, Math.max(2, dPx*0.18), 0, Math.PI*2)
+          ctx.fillStyle = '#7B4FC9'; ctx.fill()
+          if (pi === 0) drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh)
         })
       } else {
-        const pts = resolveFaceDrillPoints(dr, w, h)
-        pts.forEach(p => {
+        const isThrough = (dr.face || 'both') === 'both'
+        pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
-          const rr = Math.max(3, d/2*sc)
-          ctx.strokeStyle = '#0E8A6D'; ctx.lineWidth = 1.3
-          ctx.beginPath(); ctx.arc(px, py, rr, 0, Math.PI*2); ctx.stroke()
-          ctx.beginPath()
-          ctx.moveTo(px-rr*0.6, py); ctx.lineTo(px+rr*0.6, py)
-          ctx.moveTo(px, py-rr*0.6); ctx.lineTo(px, py+rr*0.6)
-          ctx.stroke()
+          const r = Math.max(3, dPx/2)
+          if (isThrough) {
+            // Сквозное — как настоящий вырез, цвет контура детали
+            ctx.fillStyle = '#E6F1FB'; ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.4
+            ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill(); ctx.stroke()
+          } else {
+            // Глухое (лицо/изнанка) — полупрозрачное, другим цветом, с меткой стороны
+            ctx.fillStyle = 'rgba(245,166,35,0.35)'; ctx.strokeStyle = '#C77D0E'; ctx.lineWidth = 1.4
+            ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill(); ctx.stroke()
+            ctx.fillStyle = '#8A5300'; ctx.font = `bold ${Math.max(7, Math.round(r))}px sans-serif`
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+            ctx.fillText(dr.face === 'front' ? 'Л' : 'И', px, py)
+          }
+          if (pi === 0) drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh)
         })
       }
     })
@@ -491,6 +593,14 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
+    // Режим размещения присадки нажатием — координаты точки на детали
+    if (placeMode && onPlaceTap) {
+      const dataX = Math.max(0, Math.min(w, (cx - ox) / sc))
+      const dataY = Math.max(0, Math.min(h, (dh - (cy - oy)) / sc))
+      onPlaceTap(dataX, dataY)
+      return
+    }
+
     const verts = contour.vertices || makeRect(w, h)
     const TAP_R = arcMode ? 30 : 20
 
@@ -521,7 +631,8 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   return (
     <canvas ref={ref}
       onClick={handleTap}
-      style={{ width:'100%', borderRadius:8, display:'block', cursor:'pointer', touchAction:'manipulation' }} />
+      style={{ width:'100%', borderRadius:8, display:'block', cursor:'pointer', touchAction:'manipulation',
+        outline: placeMode ? '2px solid #0E8A6D' : 'none' }} />
   )
 }
 
@@ -731,6 +842,7 @@ export default function ContourEditor({ detail, onUpdate }) {
   const [showAngles, setShowAngles] = useState(true)
   const [arcMode, setArcMode] = useState(false)
   const [arcPoints, setArcPoints] = useState([]) // индексы выбранных точек
+  const [placeDrillIdx, setPlaceDrillIdx] = useState(null) // индекс присадки в режиме "указать нажатием"
 
   // Применить дугу: точки [i, cp, j] — cp становится контрольной точкой
   const applyArc = (pts) => {
@@ -1132,6 +1244,31 @@ export default function ContourEditor({ detail, onUpdate }) {
     upd({ drillings: ds })
   }
 
+  // Разместить присадку нажатием на детали (визуально, без ввода цифр)
+  const handlePlaceDrillTap = (x, y) => {
+    if (placeDrillIdx === null) return
+    const dr = contour.drillings[placeDrillIdx]
+    if (!dr) { setPlaceDrillIdx(null); return }
+    if (dr.kind === 'edge') {
+      const distLeft = x, distRight = w - x, distBottom = y, distTop = h - y
+      const minD = Math.min(distLeft, distRight, distBottom, distTop)
+      let edgeSide, along
+      if (minD === distLeft) { edgeSide = 'left'; along = y }
+      else if (minD === distRight) { edgeSide = 'right'; along = y }
+      else if (minD === distBottom) { edgeSide = 'bottom'; along = x }
+      else { edgeSide = 'top'; along = x }
+      updDrilling(placeDrillIdx, { edgeSide, alongFrom: 'start', offsetAlong: Math.round(along) })
+    } else {
+      const d = dr.d || 8
+      const sideX = x <= w / 2 ? 'left' : 'right'
+      const sideY = y <= h / 2 ? 'bottom' : 'top'
+      const offX = sideX === 'left' ? Math.max(0, x - d/2) : Math.max(0, w - d/2 - x)
+      const offY = sideY === 'bottom' ? Math.max(0, y - d/2) : Math.max(0, h - d/2 - y)
+      updDrilling(placeDrillIdx, { sides: [sideX, sideY], offsets: { [sideX]: Math.round(offX), [sideY]: Math.round(offY) } })
+    }
+    setPlaceDrillIdx(null)
+  }
+
   const hasContour = contour.vertices.length > 4 ||
     contour.vertices.some(v => v.r > 0) ||
     contour.holes.length > 0 || contour.grooves.length > 0 || contour.drillings.length > 0
@@ -1191,9 +1328,14 @@ export default function ContourEditor({ detail, onUpdate }) {
 
           {/* Canvas */}
           <div style={{ flex:1, minWidth:0 }}>
-            {!arcMode && !activeVertex && (
+            {!arcMode && !activeVertex && placeDrillIdx === null && (
               <p style={{ fontSize:10, color:'var(--text-hint)', textAlign:'center', marginBottom:2 }}>
                 Нажми на точку
+              </p>
+            )}
+            {placeDrillIdx !== null && (
+              <p style={{ fontSize:11, color:'#0E8A6D', fontWeight:500, textAlign:'center', marginBottom:2 }}>
+                👆 Нажми на детали, куда поставить отверстие
               </p>
             )}
             <ContourCanvas detail={detail} contour={contour} activeIdx={activeHoleIdx!==null ? activeIdx : activeIdx}
@@ -1201,6 +1343,8 @@ export default function ContourEditor({ detail, onUpdate }) {
               previewVerts={previewVerts}
               activeHoleIdx={activeHoleIdx}
               onTap={handleTap}
+              placeMode={placeDrillIdx !== null}
+              onPlaceTap={handlePlaceDrillTap}
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
           </div>
 
@@ -1437,6 +1581,7 @@ export default function ContourEditor({ detail, onUpdate }) {
             setTab(id)
             if(id!=='contour') { setActiveIdx(null) }
             if(id!=='holes') setActiveHoleIdx(null)
+            if(id!=='drilling') setPlaceDrillIdx(null)
           }}
             style={{ flex:1, padding:'6px 4px', border:'none', borderRadius:6, fontSize:12,
               background: tab===id?'var(--bg)':'transparent',
@@ -1574,8 +1719,18 @@ export default function ContourEditor({ detail, onUpdate }) {
           {!contour.drillings.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет присадки</p>}
           {contour.drillings.map((dr, i) => (
             <CollapsibleItem key={i}
-              title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}`}
+              title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}${dr.mirrorX||dr.mirrorY ? ' ⇄' : ''}`}
               onRemove={() => upd({ drillings: contour.drillings.filter((_,j)=>j!==i) })}>
+
+              {/* Указать нажатием на детали */}
+              <button type="button"
+                onClick={() => setPlaceDrillIdx(placeDrillIdx === i ? null : i)}
+                style={{ width:'100%', padding:'8px', marginBottom:10, borderRadius:'var(--radius)',
+                  border: placeDrillIdx === i ? '1px solid #0E8A6D' : '0.5px dashed var(--border-md)',
+                  background: placeDrillIdx === i ? 'rgba(14,138,109,0.1)' : 'transparent',
+                  fontSize:12, color: placeDrillIdx === i ? '#0E8A6D' : 'var(--text-muted)', cursor:'pointer' }}>
+                {placeDrillIdx === i ? '👆 Жду нажатия на детали…' : '📍 Указать нажатием на детали'}
+              </button>
 
               {/* По плоскости */}
               {dr.kind === 'face' && (
@@ -1603,7 +1758,7 @@ export default function ContourEditor({ detail, onUpdate }) {
                     Ряд отверстий
                   </label>
                   {dr.row && (
-                    <div style={{ display:'flex', gap:6 }}>
+                    <div style={{ display:'flex', gap:6, marginBottom:10 }}>
                       <div style={{ flex:1 }}>
                         <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Направление</label>
                         <div style={{ display:'flex', gap:4 }}>
@@ -1621,6 +1776,20 @@ export default function ContourEditor({ detail, onUpdate }) {
                       <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
                     </div>
                   )}
+
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'4px 0 6px' }}>Размножить (зеркало)</label>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                      padding:'6px 8px', borderRadius:'var(--radius)', background: dr.mirrorX?'var(--blue-light)':'var(--bg3)' }}>
+                      <input type="checkbox" checked={!!dr.mirrorX} onChange={e=>updDrilling(i,{mirrorX:e.target.checked})} />
+                      ↔ По X
+                    </label>
+                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                      padding:'6px 8px', borderRadius:'var(--radius)', background: dr.mirrorY?'var(--blue-light)':'var(--bg3)' }}>
+                      <input type="checkbox" checked={!!dr.mirrorY} onChange={e=>updDrilling(i,{mirrorY:e.target.checked})} />
+                      ↕ По Y
+                    </label>
+                  </div>
                 </>
               )}
 
@@ -1665,11 +1834,25 @@ export default function ContourEditor({ detail, onUpdate }) {
                     Ряд отверстий вдоль торца
                   </label>
                   {dr.row && (
-                    <div style={{ display:'flex', gap:6 }}>
+                    <div style={{ display:'flex', gap:6, marginBottom:10 }}>
                       <NumField label="Шаг" value={dr.rowStep??32} onChange={v=>updDrilling(i,{rowStep:v})} />
                       <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
                     </div>
                   )}
+
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'4px 0 6px' }}>Размножить (зеркало)</label>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                      padding:'6px 8px', borderRadius:'var(--radius)', background: dr.mirrorX?'var(--blue-light)':'var(--bg3)' }}>
+                      <input type="checkbox" checked={!!dr.mirrorX} onChange={e=>updDrilling(i,{mirrorX:e.target.checked})} />
+                      ↔ Лево/право
+                    </label>
+                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                      padding:'6px 8px', borderRadius:'var(--radius)', background: dr.mirrorY?'var(--blue-light)':'var(--bg3)' }}>
+                      <input type="checkbox" checked={!!dr.mirrorY} onChange={e=>updDrilling(i,{mirrorY:e.target.checked})} />
+                      ↕ Верх/низ
+                    </label>
+                  </div>
                 </>
               )}
             </CollapsibleItem>
