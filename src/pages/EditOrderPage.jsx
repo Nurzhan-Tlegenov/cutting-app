@@ -43,7 +43,7 @@ function Toggle({ on }) {
   )
 }
 function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onEditContour }) {
-  const SIDES = ['Дв','Дн','Шл','Шп']
+  const SIDES = ['Шв','Шн','Дл','Дп']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
   useEffect(() => {
@@ -256,7 +256,7 @@ export default function EditOrderPage() {
     return (
       <>
         <ContourEditor
-          detail={{ w: editingDetail.w, h: editingDetail.h, contour: editingDetail.contour }}
+          detail={{ w: editingDetail.w, h: editingDetail.h, contour: editingDetail.contour, edges: editingDetail.edges }}
           onUpdate={(updated) => updateDetail(editingContourUid, { ...editingDetail, contour: updated.contour })}
           onClose={() => setEditingContourUid(null)}
           materialThickness={materialThickness}

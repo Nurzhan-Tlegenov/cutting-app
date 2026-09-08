@@ -48,13 +48,15 @@ const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => 
 function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter, materialThickness, siblings, onCopyFrom }) {
   const widthRef = useRef(null)
   const qtyRef = useRef(null)
-  const SIDES = ['Дв','Дн','Шл','Шп']
+  const SIDES = ['Шв','Шн','Дл','Дп']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
   const [showContour, setShowContour] = useState(false)
   const [showCopyPicker, setShowCopyPicker] = useState(false)
   const [copySourceUid, setCopySourceUid] = useState(null)
   const [copyMirror, setCopyMirror] = useState(false)
+  const [copySize, setCopySize] = useState(false)
+  const [copyEdgesFlag, setCopyEdgesFlag] = useState(false)
 
   const hasContour = detail.contour && (
     // Новый формат — вершины
@@ -171,7 +173,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
       {/* Показываем какие кромки назначены если кромка скрыта */}
       {!showEdge && Object.entries(detail.edges).some(([,v]) => v) && (
         <div style={{ marginTop: 4, fontSize: 10, color: 'var(--blue)' }}>
-          {[['top','Д1'],['bottom','Д2'],['left','Ш1'],['right','Ш2']]
+          {[['top','Шв'],['bottom','Шн'],['left','Дл'],['right','Дп']]
             .filter(([k]) => detail.edges[k])
             .map(([k,s]) => `${s}:${detail.edges[k] === 'default' ? '✓' : detail.edges[k]}`)
             .join('  ')}
@@ -184,7 +186,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
       {showCopyPicker && (
         <div style={{ marginTop: 8, padding: 10, background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
           <label style={{ fontSize: 11, color: 'var(--text-hint)', display: 'block', marginBottom: 6 }}>
-            Скопировать контур, присадку и кромки из детали:
+            Скопировать присадку и разметку из детали:
           </label>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
             {siblings.map(s => (
@@ -196,13 +198,26 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
               </button>
             ))}
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, cursor: 'pointer' }}>
             <input type="checkbox" checked={copyMirror} onChange={e => setCopyMirror(e.target.checked)} />
             Отзеркалить (лево ↔ право) — для симметричной детали
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={copySize} onChange={e => setCopySize(e.target.checked)} />
+            Копировать размеры (Длина/Ширина) и форму контура
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={copyEdgesFlag} onChange={e => setCopyEdgesFlag(e.target.checked)} />
+            Копировать кромки
+          </label>
+          {!copySize && (
+            <p style={{ fontSize:10, color:'var(--text-hint)', margin:'-4px 0 10px' }}>
+              Без копирования размеров переносится только присадка и разметка (полки/стойки) — форма и вырезы детали не трогаются.
+            </p>
+          )}
           <div style={{ display: 'flex', gap: 6 }}>
             <button type="button" disabled={!copySourceUid}
-              onClick={() => { onCopyFrom(copySourceUid, copyMirror); setShowCopyPicker(false); setCopySourceUid(null); setCopyMirror(false) }}
+              onClick={() => { onCopyFrom(copySourceUid, { mirror: copyMirror, copySize, copyEdges: copyEdgesFlag }); setShowCopyPicker(false); setCopySourceUid(null); setCopyMirror(false); setCopySize(false); setCopyEdgesFlag(false) }}
               style={{ flex: 1, padding: '8px', border: 'none', borderRadius: 'var(--radius)',
                 background: copySourceUid ? 'var(--blue)' : 'var(--bg3)', color: copySourceUid ? 'white' : 'var(--text-hint)',
                 fontSize: 12, cursor: copySourceUid ? 'pointer' : 'default' }}>
@@ -365,16 +380,33 @@ export default function NewOrderPage() {
   const removeDetail = (u) => setDetails(d => d.filter(x => x.uid !== u))
   const updateDetail = (u, updated) => setDetails(d => d.map(x => x.uid === u ? updated : x))
 
-  // Скопировать контур/присадку/кромки из другой детали в целевую (targetUid),
-  // опционально зеркально (лево↔право). Размер и количество целевой детали не трогаем.
-  const copyDetailConfig = (targetUid, sourceUid, mirror) => {
+  // Скопировать присадку/разметку (и опционально размеры+форму+кромки) из другой детали.
+  // Если размеры НЕ копируются — переносим только присадку и разметку (полки/стойки),
+  // форму (вершины/вырезы/пазы) целевой детали не трогаем, т.к. она рассчитана под другой размер.
+  const copyDetailConfig = (targetUid, sourceUid, { mirror, copySize, copyEdges }) => {
     const source = details.find(x => x.uid === sourceUid)
     const target = details.find(x => x.uid === targetUid)
     if (!source || !target) return
     const panelWidthX = Number(source.h) || 0 // горизонталь (Ширина) — именно её мы зеркалим
-    const newContour = mirror ? mirrorContour(source.contour, panelWidthX) : source.contour
-    const newEdges = mirror ? mirrorEdges(source.edges) : source.edges
-    updateDetail(targetUid, { ...target, contour: newContour, edges: { ...newEdges } })
+    const mirroredContour = mirror ? mirrorContour(source.contour, panelWidthX) : source.contour
+    const mirroredEdges = mirror ? mirrorEdges(source.edges) : source.edges
+
+    const patch = { ...target }
+    if (copySize) {
+      // Размеры совпадают — можно перенести форму целиком (вершины/вырезы/пазы тоже)
+      patch.w = source.w
+      patch.h = source.h
+      patch.contour = mirroredContour
+    } else {
+      // Размеры разные — форму не трогаем, переносим только присадку и разметку
+      patch.contour = {
+        ...target.contour,
+        drillings: mirroredContour?.drillings || [],
+        layout: mirroredContour?.layout || [],
+      }
+    }
+    if (copyEdges) patch.edges = { ...mirroredEdges }
+    updateDetail(targetUid, patch)
   }
 
   async function handleSave() {
@@ -622,7 +654,7 @@ export default function NewOrderPage() {
                     uid: x.uid,
                     label: `#${details.findIndex(y=>y.uid===x.uid)+1} (${x.w||'?'}×${x.h||'?'})`
                   }))}
-                  onCopyFrom={(sourceUid, mirror) => copyDetailConfig(d.uid, sourceUid, mirror)} />
+                  onCopyFrom={(sourceUid, opts) => copyDetailConfig(d.uid, sourceUid, opts)} />
               )
             })}
           </div>

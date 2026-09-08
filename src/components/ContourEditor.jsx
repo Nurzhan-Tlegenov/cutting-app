@@ -510,6 +510,34 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     ctx.fillStyle = '#E6F1FB'; ctx.fill()
     ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.5; ctx.stroke()
 
+    // Кромка — показываем, на каких сторонах она назначена в карточке детали
+    const edges = detail.edges || {}
+    if (edges.top || edges.bottom || edges.left || edges.right) {
+      ctx.save()
+      ctx.strokeStyle = '#2FA84F'; ctx.lineWidth = 4; ctx.lineCap = 'round'
+      ctx.font = 'bold 9px sans-serif'; ctx.fillStyle = '#1F7A38'
+      const mk = (val) => val && val !== 'default' ? val : 'кромка'
+      if (edges.bottom) {
+        ctx.beginPath(); ctx.moveTo(ox+2, oy+dh); ctx.lineTo(ox+dw-2, oy+dh); ctx.stroke()
+        ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(mk(edges.bottom), ox+dw/2, oy+dh+4)
+      }
+      if (edges.top) {
+        ctx.beginPath(); ctx.moveTo(ox+2, oy); ctx.lineTo(ox+dw-2, oy); ctx.stroke()
+        ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(mk(edges.top), ox+dw/2, oy-4)
+      }
+      if (edges.left) {
+        ctx.beginPath(); ctx.moveTo(ox, oy+2); ctx.lineTo(ox, oy+dh-2); ctx.stroke()
+        ctx.save(); ctx.translate(ox-6, oy+dh/2); ctx.rotate(-Math.PI/2)
+        ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(mk(edges.left), 0, 0); ctx.restore()
+      }
+      if (edges.right) {
+        ctx.beginPath(); ctx.moveTo(ox+dw, oy+2); ctx.lineTo(ox+dw, oy+dh-2); ctx.stroke()
+        ctx.save(); ctx.translate(ox+dw+6, oy+dh/2); ctx.rotate(-Math.PI/2)
+        ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(mk(edges.right), 0, 0); ctx.restore()
+      }
+      ctx.restore()
+    }
+
     // Holes
     ;(contour.holes || []).forEach((hole, hi) => {
       const isCircle = hole.type === 'circle'
@@ -825,7 +853,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       })
     })
 
-  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx])
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -1093,6 +1121,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
   const w = Number(detail.h) || 0
   const h = Number(detail.w) || 0
+  const defaultThickness = Number(materialThickness) || 16
 
   // Нормализуем контур в новый формат
   const rawContour = detail.contour || {}
@@ -1533,7 +1562,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
     } else {
       upd({ drillings: [{
         kind: 'edge', edgeSide: 'left', alongFrom: 'start',
-        offsetAlong: 50, offsetFace: 9, d: 8, depth: 15,
+        offsetAlong: 50, offsetFace: defaultThickness / 2, d: 8, depth: 35,
         row: false, rowStep: 32, rowCount: 2,
       }, ...contour.drillings] })
     }
@@ -1574,7 +1603,6 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
   }
 
   // Разметка (полки/стойки/царги)
-  const defaultThickness = Number(materialThickness) || 16
 
   // Найти свободные проёмы вдоль оси данного типа разметки
   const computeOpenings = (kind) => {
@@ -2475,11 +2503,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
                   </div>
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:10 }}>
                     <NumField label="Вдоль торца" value={dr.offsetAlong??50} onChange={v=>updDrilling(i,{offsetAlong:v})} />
-                    <NumField label="От пласти" value={dr.offsetFace??9} onChange={v=>updDrilling(i,{offsetFace:v})} />
+                    <NumField label="От пласти" value={dr.offsetFace??(defaultThickness/2)} onChange={v=>updDrilling(i,{offsetFace:v})} />
                   </div>
                   <div style={{ display:'flex', gap:8, marginBottom:10 }}>
                     <NumField label="Диаметр D" value={dr.d??8} onChange={v=>updDrilling(i,{d:v})} />
-                    <NumField label="Глубина" value={dr.depth??15} onChange={v=>updDrilling(i,{depth:v})} />
+                    <NumField label="Глубина" value={dr.depth??35} onChange={v=>updDrilling(i,{depth:v})} />
                   </div>
 
                   <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', margin:'0 0 6px', cursor:'pointer' }}>
