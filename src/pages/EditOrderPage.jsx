@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import ContourEditor from '../components/ContourEditor'
 import BottomNav from '../components/BottomNav'
+import { useLeaveGuard } from '../hooks/useLeaveGuard'
+import LeaveConfirmModal from '../components/LeaveConfirmModal'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -202,15 +204,18 @@ export default function EditOrderPage() {
   const [showEdge, setShowEdge] = useState(true)
   const [lastAddedUid, setLastAddedUid] = useState(null)
   const [editingContourUid, setEditingContourUid] = useState(null)
+  const initialSnapshotRef = useRef(null)
   useEffect(() => { fetchOrder() }, [id])
   async function fetchOrder() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
     if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16) }
+    let loadedDetails = []
     if (d && d.length > 0) {
       const pfxSet = [...new Set(d.filter(x => x.prefix).map(x => x.prefix))]
       setPrefixes(pfxSet)
-      setDetails(d.map(makeDetail))
+      loadedDetails = d.map(makeDetail)
+      setDetails(loadedDetails)
       const edgeSet = new Set()
       d.forEach(x => {
         if (x.edge_top && x.edge_top !== 'default') edgeSet.add(x.edge_top)
@@ -220,6 +225,10 @@ export default function EditOrderPage() {
       })
       setEdgeNames([...edgeSet])
     }
+    initialSnapshotRef.current = JSON.stringify({
+      orderName: o?.order_name || '', materialName: o?.material_name || '',
+      materialThickness: o?.material_thickness || 16, details: loadedDetails,
+    })
     setLoading(false)
   }
   const addDetail = () => {
@@ -235,16 +244,27 @@ export default function EditOrderPage() {
     acc[key].push(d)
     return acc
   }, {})
+
+  // Есть ли несохранённые изменения относительно исходно загруженных данных
+  const currentSnapshot = JSON.stringify({ orderName, materialName, materialThickness: Number(materialThickness)||16, details })
+  const isDirty = !loading && initialSnapshotRef.current !== null && currentSnapshot !== initialSnapshotRef.current
+  const { showLeaveConfirm, stayOnPage, leavePage } = useLeaveGuard(isDirty && !saving)
+
   // Редактирование контура
   const editingDetail = editingContourUid ? details.find(d => d.uid === editingContourUid) : null
   if (editingDetail) {
     return (
-      <ContourEditor
-        detail={{ w: editingDetail.w, h: editingDetail.h, contour: editingDetail.contour }}
-        onUpdate={(updated) => updateDetail(editingContourUid, { ...editingDetail, contour: updated.contour })}
-        onClose={() => setEditingContourUid(null)}
-        materialThickness={materialThickness}
-      />
+      <>
+        <ContourEditor
+          detail={{ w: editingDetail.w, h: editingDetail.h, contour: editingDetail.contour }}
+          onUpdate={(updated) => updateDetail(editingContourUid, { ...editingDetail, contour: updated.contour })}
+          onClose={() => setEditingContourUid(null)}
+          materialThickness={materialThickness}
+        />
+        {showLeaveConfirm && (
+          <LeaveConfirmModal saving={saving} onSave={handleSave} onDiscard={leavePage} onStay={stayOnPage} />
+        )}
+      </>
     )
   }
   async function handleSave() {
@@ -368,6 +388,9 @@ export default function EditOrderPage() {
         {saving ? 'Сохранение...' : `Сохранить изменения (${validCount} дет.)`}
       </button>
       <BottomNav />
+      {showLeaveConfirm && (
+        <LeaveConfirmModal saving={saving} onSave={handleSave} onDiscard={leavePage} onStay={stayOnPage} />
+      )}
     </div>
   )
 }

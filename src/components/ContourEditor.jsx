@@ -425,7 +425,6 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   // Pinch-to-zoom двумя пальцами прямо в окне превью
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
-  const prevZoomRef = useRef(zoom)
   const onZoomChangeRef = useRef(onZoomChange)
   onZoomChangeRef.current = onZoomChange
   useEffect(() => {
@@ -481,12 +480,11 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     canvas.style.height = CSS_H + 'px'
     ctx.scale(DPR, DPR)
 
-    // При изменении зума держим деталь по центру видимой области (иначе съезжает вправо/вниз)
-    if (wrapRef.current && prevZoomRef.current !== zoom) {
+    // Деталь всегда должна оставаться по центру видимой области превью
+    if (wrapRef.current) {
       const wrap = wrapRef.current
       wrap.scrollLeft = Math.max(0, (CSS_W - wrap.clientWidth) / 2)
       wrap.scrollTop = Math.max(0, (CSS_H - wrap.clientHeight) / 2)
-      prevZoomRef.current = zoom
     }
 
     const PAD = 26

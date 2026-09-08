@@ -5,6 +5,9 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { getNextOrderNumber } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
+import { useLeaveGuard } from '../hooks/useLeaveGuard'
+import LeaveConfirmModal from '../components/LeaveConfirmModal'
+import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
 
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
@@ -42,13 +45,16 @@ const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => 
 }
 
 // Компактная карточка детали
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter, materialThickness }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter, materialThickness, siblings, onCopyFrom }) {
   const widthRef = useRef(null)
   const qtyRef = useRef(null)
   const SIDES = ['Дв','Дн','Шл','Шп']
   const KEYS = ['top','bottom','left','right']
   const lengthRef = useRef(null)
   const [showContour, setShowContour] = useState(false)
+  const [showCopyPicker, setShowCopyPicker] = useState(false)
+  const [copySourceUid, setCopySourceUid] = useState(null)
+  const [copyMirror, setCopyMirror] = useState(false)
 
   const hasContour = detail.contour && (
     // Новый формат — вершины
@@ -99,6 +105,15 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
               color: hasContour ? 'var(--teal)' : 'var(--text-hint)', marginTop: 2, lineHeight: 1.2 }}>
             {hasContour ? '✦' : '◇'}
           </button>
+          {siblings && siblings.length > 0 && (
+            <button type="button" onClick={() => setShowCopyPicker(v => !v)}
+              title="Копировать контур/присадку из другой детали"
+              style={{ background: 'var(--bg2)', border: '0.5px solid var(--border-md)',
+                borderRadius: 4, cursor: 'pointer', fontSize: 10, padding: '1px 3px',
+                color: 'var(--text-hint)', marginTop: 2, lineHeight: 1.2 }}>
+              📋
+            </button>
+          )}
         </div>
 
         {/* Размеры */}
@@ -164,6 +179,43 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
       )}
 
 
+
+      {/* Копирование контура/присадки/кромок из другой детали (с зеркалированием) */}
+      {showCopyPicker && (
+        <div style={{ marginTop: 8, padding: 10, background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
+          <label style={{ fontSize: 11, color: 'var(--text-hint)', display: 'block', marginBottom: 6 }}>
+            Скопировать контур, присадку и кромки из детали:
+          </label>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+            {siblings.map(s => (
+              <button key={s.uid} type="button" onClick={() => setCopySourceUid(s.uid)}
+                style={{ padding: '5px 10px', borderRadius: 20, fontSize: 11, border: 'none',
+                  background: copySourceUid === s.uid ? 'var(--blue)' : 'var(--bg3)',
+                  color: copySourceUid === s.uid ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={copyMirror} onChange={e => setCopyMirror(e.target.checked)} />
+            Отзеркалить (лево ↔ право) — для симметричной детали
+          </label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button type="button" disabled={!copySourceUid}
+              onClick={() => { onCopyFrom(copySourceUid, copyMirror); setShowCopyPicker(false); setCopySourceUid(null); setCopyMirror(false) }}
+              style={{ flex: 1, padding: '8px', border: 'none', borderRadius: 'var(--radius)',
+                background: copySourceUid ? 'var(--blue)' : 'var(--bg3)', color: copySourceUid ? 'white' : 'var(--text-hint)',
+                fontSize: 12, cursor: copySourceUid ? 'pointer' : 'default' }}>
+              Скопировать
+            </button>
+            <button type="button" onClick={() => { setShowCopyPicker(false); setCopySourceUid(null) }}
+              style={{ flex: 1, padding: '8px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)',
+                background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Редактор контура */}
       {showContour && (
@@ -313,6 +365,18 @@ export default function NewOrderPage() {
   const removeDetail = (u) => setDetails(d => d.filter(x => x.uid !== u))
   const updateDetail = (u, updated) => setDetails(d => d.map(x => x.uid === u ? updated : x))
 
+  // Скопировать контур/присадку/кромки из другой детали в целевую (targetUid),
+  // опционально зеркально (лево↔право). Размер и количество целевой детали не трогаем.
+  const copyDetailConfig = (targetUid, sourceUid, mirror) => {
+    const source = details.find(x => x.uid === sourceUid)
+    const target = details.find(x => x.uid === targetUid)
+    if (!source || !target) return
+    const panelWidthX = Number(source.h) || 0 // горизонталь (Ширина) — именно её мы зеркалим
+    const newContour = mirror ? mirrorContour(source.contour, panelWidthX) : source.contour
+    const newEdges = mirror ? mirrorEdges(source.edges) : source.edges
+    updateDetail(targetUid, { ...target, contour: newContour, edges: { ...newEdges } })
+  }
+
   async function handleSave() {
     const valid = details.filter(d => d.w > 0 && d.h > 0)
     if (!valid.length) { setError('Добавьте хотя бы одну деталь с размерами'); return }
@@ -357,7 +421,8 @@ export default function NewOrderPage() {
           edge_bottom: d.edges.bottom || null,
           edge_left: d.edges.left || null,
           rotatable: d.rotatable,
-          sort_order: i
+          sort_order: i,
+          contour: d.contour ? JSON.stringify(d.contour) : null
         }
       })
       const { error: dErr } = await supabase.from('order_details').insert(rows)
@@ -371,6 +436,13 @@ export default function NewOrderPage() {
   }
 
   const validCount = details.filter(d => d.w > 0 && d.h > 0).length
+
+  // Есть ли несохранённые данные — защита от случайного ухода (кнопка "назад")
+  const hasUnsavedContent = Boolean(
+    orderName.trim() || materialName.trim() ||
+    details.some(d => Number(d.w) > 0 || Number(d.h) > 0)
+  )
+  const { showLeaveConfirm, stayOnPage, leavePage } = useLeaveGuard(hasUnsavedContent && !saving)
 
   // Группируем детали по префиксу для отображения
   const grouped = details.reduce((acc, d) => {
@@ -545,7 +617,12 @@ export default function NewOrderPage() {
                   showEdge={showEdge}
                   autoFocus={d.uid === lastAddedUid}
                   onQtyEnter={onQtyEnter}
-                  materialThickness={materialThickness} />
+                  materialThickness={materialThickness}
+                  siblings={details.filter(x => x.uid !== d.uid).map(x => ({
+                    uid: x.uid,
+                    label: `#${details.findIndex(y=>y.uid===x.uid)+1} (${x.w||'?'}×${x.h||'?'})`
+                  }))}
+                  onCopyFrom={(sourceUid, mirror) => copyDetailConfig(d.uid, sourceUid, mirror)} />
               )
             })}
           </div>
@@ -561,6 +638,10 @@ export default function NewOrderPage() {
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 
       {!keyboardOpen && <BottomNav />}
+
+      {showLeaveConfirm && (
+        <LeaveConfirmModal saving={saving} onSave={handleSave} onDiscard={leavePage} onStay={stayOnPage} />
+      )}
     </div>
   )
 }
