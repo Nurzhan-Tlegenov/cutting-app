@@ -6,6 +6,7 @@ import ContourEditor from '../components/ContourEditor'
 import BottomNav from '../components/BottomNav'
 import { useLeaveGuard } from '../hooks/useLeaveGuard'
 import LeaveConfirmModal from '../components/LeaveConfirmModal'
+import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -42,10 +43,15 @@ function Toggle({ on }) {
     </div>
   )
 }
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onEditContour }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onEditContour, siblings, onCopyFrom }) {
   const SIDES = ['Дл','Дп','Шв','Шн']
   const KEYS = ['left','right','top','bottom']
   const lengthRef = useRef(null)
+  const [showCopyPicker, setShowCopyPicker] = useState(false)
+  const [copySourceUid, setCopySourceUid] = useState(null)
+  const [copyMirror, setCopyMirror] = useState(false)
+  const [copySize, setCopySize] = useState(false)
+  const [copyEdgesFlag, setCopyEdgesFlag] = useState(false)
   useEffect(() => {
     if (autoFocus && lengthRef.current) {
       setTimeout(() => { lengthRef.current?.focus(); lengthRef.current?.select() }, 50)
@@ -86,6 +92,15 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
               color: hasContour ? 'var(--teal)' : 'var(--text-hint)', marginTop: 2, lineHeight: 1.2 }}>
             {hasContour ? '✦' : '◇'}
           </button>
+          {siblings && siblings.length > 0 && (
+            <button type="button" onClick={() => setShowCopyPicker(v => !v)}
+              title="Копировать контур/присадку из другой детали"
+              style={{ background: 'var(--bg2)', border: '0.5px solid var(--border-md)',
+                borderRadius: 4, cursor: 'pointer', fontSize: 10, padding: '1px 3px',
+                color: 'var(--text-hint)', marginTop: 2, lineHeight: 1.2 }}>
+              📋
+            </button>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 4, flex: 1 }}>
           <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} />
@@ -117,6 +132,56 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
             style={{ padding: '5px 6px', border: detail.rotatable ? '1.5px solid var(--teal)' : '0.5px solid var(--border-md)',
               borderRadius: 'var(--radius)', background: detail.rotatable ? 'var(--teal-light)' : 'transparent',
               fontSize: 10, color: detail.rotatable ? 'var(--teal)' : 'var(--text-hint)', cursor: 'pointer', flexShrink: 0 }}>↻</button>
+        </div>
+      )}
+
+      {/* Копирование контура/присадки/кромок из другой детали (с зеркалированием) */}
+      {showCopyPicker && (
+        <div style={{ marginTop: 8, padding: 10, background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
+          <label style={{ fontSize: 11, color: 'var(--text-hint)', display: 'block', marginBottom: 6 }}>
+            Скопировать присадку и разметку из детали:
+          </label>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+            {siblings.map(s => (
+              <button key={s.uid} type="button" onClick={() => setCopySourceUid(s.uid)}
+                style={{ padding: '5px 10px', borderRadius: 20, fontSize: 11, border: 'none',
+                  background: copySourceUid === s.uid ? 'var(--blue)' : 'var(--bg3)',
+                  color: copySourceUid === s.uid ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={copyMirror} onChange={e => setCopyMirror(e.target.checked)} />
+            Отзеркалить (лево ↔ право) — для симметричной детали
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={copySize} onChange={e => setCopySize(e.target.checked)} />
+            Копировать размеры (Длина/Ширина) и форму контура
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={copyEdgesFlag} onChange={e => setCopyEdgesFlag(e.target.checked)} />
+            Копировать кромки
+          </label>
+          {!copySize && (
+            <p style={{ fontSize:10, color:'var(--text-hint)', margin:'-4px 0 10px' }}>
+              Без копирования размеров переносится только присадка и разметка (полки/стойки) — форма и вырезы детали не трогаются.
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button type="button" disabled={!copySourceUid}
+              onClick={() => { onCopyFrom(copySourceUid, { mirror: copyMirror, copySize, copyEdges: copyEdgesFlag }); setShowCopyPicker(false); setCopySourceUid(null); setCopyMirror(false); setCopySize(false); setCopyEdgesFlag(false) }}
+              style={{ flex: 1, padding: '8px', border: 'none', borderRadius: 'var(--radius)',
+                background: copySourceUid ? 'var(--blue)' : 'var(--bg3)', color: copySourceUid ? 'white' : 'var(--text-hint)',
+                fontSize: 12, cursor: copySourceUid ? 'pointer' : 'default' }}>
+              Скопировать
+            </button>
+            <button type="button" onClick={() => { setShowCopyPicker(false); setCopySourceUid(null) }}
+              style={{ flex: 1, padding: '8px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)',
+                background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+              Отмена
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -238,6 +303,33 @@ export default function EditOrderPage() {
   }
   const removeDetail = (u) => setDetails(d => d.filter(x => x.uid !== u))
   const updateDetail = (u, updated) => setDetails(d => d.map(x => x.uid === u ? updated : x))
+
+  // Скопировать присадку/разметку (и опционально размеры+форму+кромки) из другой детали.
+  // Если размеры НЕ копируются — переносим только присадку и разметку (полки/стойки),
+  // форму (вершины/вырезы/пазы) целевой детали не трогаем, т.к. она рассчитана под другой размер.
+  const copyDetailConfig = (targetUid, sourceUid, { mirror, copySize, copyEdges }) => {
+    const source = details.find(x => x.uid === sourceUid)
+    const target = details.find(x => x.uid === targetUid)
+    if (!source || !target) return
+    const panelWidthX = Number(source.h) || 0 // горизонталь (Ширина) — именно её мы зеркалим
+    const mirroredContour = mirror ? mirrorContour(source.contour, panelWidthX) : source.contour
+    const mirroredEdges = mirror ? mirrorEdges(source.edges) : source.edges
+
+    const patch = { ...target }
+    if (copySize) {
+      patch.w = source.w
+      patch.h = source.h
+      patch.contour = mirroredContour
+    } else {
+      patch.contour = {
+        ...target.contour,
+        drillings: mirroredContour?.drillings || [],
+        layout: mirroredContour?.layout || [],
+      }
+    }
+    if (copyEdges) patch.edges = { ...mirroredEdges }
+    updateDetail(targetUid, patch)
+  }
   const grouped = details.reduce((acc, d) => {
     const key = d.prefix || ''
     if (!acc[key]) acc[key] = []
@@ -370,7 +462,12 @@ export default function EditOrderPage() {
                   onRemove={() => removeDetail(d.uid)}
                   activeEdgeName={activeEdge} showEdge={showEdge}
                   autoFocus={d.uid === lastAddedUid}
-                  onEditContour={() => setEditingContourUid(d.uid)} />
+                  onEditContour={() => setEditingContourUid(d.uid)}
+                  siblings={details.filter(x => x.uid !== d.uid).map(x => ({
+                    uid: x.uid,
+                    label: `#${details.findIndex(y=>y.uid===x.uid)+1} (${x.w||'?'}×${x.h||'?'})`
+                  }))}
+                  onCopyFrom={(sourceUid, opts) => copyDetailConfig(d.uid, sourceUid, opts)} />
               )
             })}
           </div>

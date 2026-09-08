@@ -1116,15 +1116,15 @@ function SideOffsetPicker({ activeSides = [], offsets = {}, onChange, allowedSid
 function CollapsibleItem({ title, onRemove, children, innerRef, highlighted }) {
   const [open, setOpen] = useState(true)
   return (
-    <div ref={innerRef} style={{ background:'var(--bg2)', borderRadius:'var(--radius)', marginBottom:8, overflow:'hidden',
+    <div ref={innerRef} style={{ background:'var(--bg2)', borderRadius:'var(--radius)', marginBottom:5, overflow:'hidden',
       border: highlighted ? '1.5px solid #8B5E2A' : '1.5px solid transparent', transition:'border-color 0.3s' }}>
-      <div style={{ display:'flex', alignItems:'center', padding:'8px 10px', cursor:'pointer' }} onClick={() => setOpen(v => !v)}>
-        <span style={{ fontSize:13, fontWeight:500, flex:1 }}>{title}</span>
-        <span style={{ fontSize:12, color:'var(--text-hint)', marginRight:8 }}>{open ? '▲' : '▼'}</span>
+      <div style={{ display:'flex', alignItems:'center', padding:'6px 8px', cursor:'pointer' }} onClick={() => setOpen(v => !v)}>
+        <span style={{ fontSize:12.5, fontWeight:500, flex:1 }}>{title}</span>
+        <span style={{ fontSize:11, color:'var(--text-hint)', marginRight:6 }}>{open ? '▲' : '▼'}</span>
         <button type="button" onClick={e=>{e.stopPropagation();onRemove()}}
-          style={{ background:'none', border:'none', color:'var(--text-hint)', cursor:'pointer', fontSize:16, padding:0 }}>✕</button>
+          style={{ background:'none', border:'none', color:'var(--text-hint)', cursor:'pointer', fontSize:15, padding:0 }}>✕</button>
       </div>
-      {open && <div style={{ padding:'0 10px 10px' }}>{children}</div>}
+      {open && <div style={{ padding:'0 8px 8px' }}>{children}</div>}
     </div>
   )
 }
@@ -2191,24 +2191,24 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
       {/* РАЗМЕТКА — полки, стойки, царги как визуальные ориентиры */}
       {tab==='layout' && (
         <div>
-          <p style={{ fontSize:11, color:'var(--text-hint)', margin:'0 0 10px' }}>
+          <p style={{ fontSize:10.5, color:'var(--text-hint)', margin:'0 0 6px' }}>
             Отметь, где будут полки, стойки и царги — потом присадку по плоскости можно привязать прямо к этим линиям.
           </p>
-          <div style={{ display:'flex', gap:6, marginBottom:8, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:4, marginBottom:5, flexWrap:'wrap' }}>
             <button type="button" onClick={() => openLayoutGenerator('shelf')}
-              style={{ flex:1, padding:'8px', border: genType==='shelf' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
+              style={{ flex:1, padding:'6px', border: genType==='shelf' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
                 borderRadius:'var(--radius)', background: genType==='shelf' ? 'var(--blue-light)' : 'transparent',
                 fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
               + Полка
             </button>
             <button type="button" onClick={() => openLayoutGenerator('upright')}
-              style={{ flex:1, padding:'8px', border: genType==='upright' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
+              style={{ flex:1, padding:'6px', border: genType==='upright' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
                 borderRadius:'var(--radius)', background: genType==='upright' ? 'var(--blue-light)' : 'transparent',
                 fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
               + Стойка
             </button>
             <button type="button" onClick={() => openLayoutGenerator('rail')}
-              style={{ flex:1, padding:'8px', border: genType==='rail' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
+              style={{ flex:1, padding:'6px', border: genType==='rail' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
                 borderRadius:'var(--radius)', background: genType==='rail' ? 'var(--blue-light)' : 'transparent',
                 fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
               + Царга
@@ -2222,26 +2222,26 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
             const op = openings[genOpeningIdx] || openings[0]
             const label = genType==='upright' ? 'стойки' : genType==='rail' ? 'царги' : 'полки'
             return (
-              <div style={{ padding:10, marginBottom:14, background:'var(--bg2)', borderRadius:'var(--radius)',
+              <div style={{ padding:7, marginBottom:6, background:'var(--bg2)', borderRadius:'var(--radius)',
                 border:'1px solid var(--blue)' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                  <strong style={{ fontSize:13 }}>Добавить {label}</strong>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                  <strong style={{ fontSize:12.5 }}>Добавить {label}</strong>
                   <button type="button" onClick={() => setGenType(null)}
-                    style={{ background:'none', border:'none', color:'var(--text-hint)', fontSize:16, cursor:'pointer', padding:0 }}>✕</button>
+                    style={{ background:'none', border:'none', color:'var(--text-hint)', fontSize:15, cursor:'pointer', padding:0 }}>✕</button>
                 </div>
 
-                <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                <div style={{ display:'flex', gap:5, marginBottom:5 }}>
                   <NumField label="Количество" value={genCount} onChange={v=>setGenCount(Math.max(1,Math.round(v)))} />
                   <NumField label="Толщина материала" value={genThickness} onChange={setGenThickness} />
                 </div>
 
                 {openings.length > 1 && (
                   <>
-                    <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:4 }}>В каком проёме размещаем</label>
-                    <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:10 }}>
+                    <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:3 }}>В каком проёме размещаем</label>
+                    <div style={{ display:'flex', gap:3, flexWrap:'wrap', marginBottom:5 }}>
                       {openings.map((o, oi) => (
                         <button key={oi} type="button" onClick={() => setGenOpeningIdx(oi)}
-                          style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                          style={{ padding:'4px 9px', borderRadius:20, fontSize:11, border:'none',
                             background: genOpeningIdx===oi ? 'var(--blue)' : 'var(--bg3)',
                             color: genOpeningIdx===oi ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
                           {Math.round(o.end - o.start)}мм
@@ -2253,11 +2253,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
 
                 {genCount === 1 ? (
                   <>
-                    <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Отступ внутри проёма от</label>
-                    <div style={{ display:'flex', gap:4, marginBottom:8 }}>
+                    <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:3 }}>Отступ внутри проёма от</label>
+                    <div style={{ display:'flex', gap:3, marginBottom:5 }}>
                       {(isUpright ? [['left','Левого края'],['right','Правого края']] : [['bottom','Низа'],['top','Верха']]).map(([id,lb])=>(
                         <button key={id} type="button" onClick={() => setGenPosRef(id)}
-                          style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                          style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
                             background: genPosRef===id?'var(--blue)':'var(--bg3)',
                             color: genPosRef===id?'white':'var(--text-muted)', cursor:'pointer' }}>
                             {lb}
@@ -2267,22 +2267,22 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     <NumField label="Расстояние" value={genPos} onChange={setGenPos} />
                   </>
                 ) : (
-                  <p style={{ fontSize:11, color:'var(--text-hint)', margin:'0 0 8px' }}>
+                  <p style={{ fontSize:11, color:'var(--text-hint)', margin:'0 0 5px' }}>
                     {genCount} шт. разместятся равномерно внутри выбранного проёма.
                   </p>
                 )}
 
-                <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', margin:'8px 0 4px' }}>
+                <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', margin:'5px 0 3px' }}>
                   Отступ от края контура (если не на всю {isUpright ? 'высоту' : 'ширину'})
                 </label>
-                <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+                <div style={{ display:'flex', gap:5, marginBottom:7 }}>
                   <NumField label={isUpright?'Снизу':'Слева'} value={genInsetA} onChange={setGenInsetA} />
                   <NumField label={isUpright?'Сверху':'Справа'} value={genInsetB} onChange={setGenInsetB} />
                 </div>
 
                 <button type="button" onClick={commitLayoutGenerator}
-                  style={{ width:'100%', padding:'9px', border:'none', borderRadius:'var(--radius)',
-                    background:'var(--blue)', color:'white', fontSize:13, fontWeight:500, cursor:'pointer' }}>
+                  style={{ width:'100%', padding:'7px', border:'none', borderRadius:'var(--radius)',
+                    background:'var(--blue)', color:'white', fontSize:12.5, fontWeight:500, cursor:'pointer' }}>
                   Добавить
                 </button>
               </div>
@@ -2313,18 +2313,18 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
 
               <button type="button"
                 onClick={() => setPlaceLayoutIdx(placeLayoutIdx === i ? null : i)}
-                style={{ width:'100%', padding:'8px', marginBottom:10, borderRadius:'var(--radius)',
+                style={{ width:'100%', padding:'6px', marginBottom:6, borderRadius:'var(--radius)',
                   border: placeLayoutIdx === i ? '1px solid #8B5E2A' : '0.5px dashed var(--border-md)',
                   background: placeLayoutIdx === i ? 'rgba(139,94,42,0.1)' : 'transparent',
-                  fontSize:12, color: placeLayoutIdx === i ? '#8B5E2A' : 'var(--text-muted)', cursor:'pointer' }}>
+                  fontSize:11.5, color: placeLayoutIdx === i ? '#8B5E2A' : 'var(--text-muted)', cursor:'pointer' }}>
                 {placeLayoutIdx === i ? '👆 Жду нажатия на детали…' : '📍 Указать нажатием на детали'}
               </button>
 
-              <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Отсчитывать позицию от</label>
-              <div style={{ display:'flex', gap:4, marginBottom:8 }}>
+              <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:3 }}>Отсчитывать позицию от</label>
+              <div style={{ display:'flex', gap:3, marginBottom:5 }}>
                 {(isUpright ? [['left','Левого края'],['right','Правого края']] : [['bottom','Низа'],['top','Верха']]).map(([id,lb])=>(
                   <button key={id} type="button" onClick={() => updLayout(i,{posFrom:id})}
-                    style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                    style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
                       background: posFrom===id?'var(--blue)':'var(--bg3)',
                       color: posFrom===id?'white':'var(--text-muted)', cursor:'pointer' }}>
                       {lb}
@@ -2332,21 +2332,21 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                 ))}
               </div>
 
-              <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+              <div style={{ display:'flex', gap:5, marginBottom:6 }}>
                 <NumField label="Позиция" value={displayPos} onChange={setDisplayPos} />
                 <NumField label="Толщина материала" value={g.thickness??defaultThickness} onChange={v=>updLayout(i,{thickness:v})} />
               </div>
 
-              <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>
+              <label style={{ fontSize:10.5, color:'var(--text-hint)', display:'block', marginBottom:3 }}>
                 Отступ от края контура (если не на всю {g.kind==='upright' ? 'высоту' : 'ширину'})
               </label>
               {g.kind === 'upright' ? (
-                <div style={{ display:'flex', gap:8 }}>
+                <div style={{ display:'flex', gap:5 }}>
                   <NumField label="Снизу" value={g.insetBottom??0} onChange={v=>updLayout(i,{insetBottom:v})} />
                   <NumField label="Сверху" value={g.insetTop??0} onChange={v=>updLayout(i,{insetTop:v})} />
                 </div>
               ) : (
-                <div style={{ display:'flex', gap:8 }}>
+                <div style={{ display:'flex', gap:5 }}>
                   <NumField label="Слева" value={g.insetLeft??0} onChange={v=>updLayout(i,{insetLeft:v})} />
                   <NumField label="Справа" value={g.insetRight??0} onChange={v=>updLayout(i,{insetRight:v})} />
                 </div>
@@ -2360,14 +2360,14 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
       {/* ПРИСАДКА */}
       {tab==='drilling' && (
         <div>
-          <div style={{ display:'flex', gap:6, marginBottom:12 }}>
+          <div style={{ display:'flex', gap:4, marginBottom:4 }}>
             <button type="button" onClick={() => addDrilling('face')}
-              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
+              style={{ flex:1, padding:'6px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
                 background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
               + По плоскости
             </button>
             <button type="button" onClick={() => addDrilling('edge')}
-              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
+              style={{ flex:1, padding:'6px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
                 background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
               + По торцу
             </button>
@@ -2384,15 +2384,15 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               onRemove={() => upd({ drillings: contour.drillings.filter((_,j)=>j!==i) })}>
 
               {/* Копировать + Указать нажатием */}
-              <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+              <div style={{ display:'flex', gap:4, marginBottom:5 }}>
                 <button type="button" onClick={() => duplicateDrilling(i)}
-                  style={{ flex:1, padding:'8px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)',
+                  style={{ flex:1, padding:'6px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)',
                     background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
                   ⧉ Копировать
                 </button>
                 <button type="button"
                   onClick={() => setPlaceDrillIdx(placeDrillIdx === i ? null : i)}
-                  style={{ flex:2, padding:'8px', borderRadius:'var(--radius)',
+                  style={{ flex:2, padding:'6px', borderRadius:'var(--radius)',
                     border: placeDrillIdx === i ? '1px solid #0E8A6D' : '0.5px dashed var(--border-md)',
                     background: placeDrillIdx === i ? 'rgba(14,138,109,0.1)' : 'transparent',
                     fontSize:12, color: placeDrillIdx === i ? '#0E8A6D' : 'var(--text-muted)', cursor:'pointer' }}>
@@ -2403,30 +2403,30 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               {/* По плоскости */}
               {dr.kind === 'face' && (
                 <>
-                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>Сторона</label>
-                  <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Сторона</label>
+                  <div style={{ display:'flex', gap:4, marginBottom:5 }}>
                     {[['front','Лицо'],['back','Изнанка'],['both','С двух сторон']].map(([id,label])=>(
                       <button key={id} type="button" onClick={() => updDrilling(i, { face: id })}
-                        style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                        style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
                           background: (dr.face||'both')===id?'var(--blue)':'var(--bg3)',
                           color: (dr.face||'both')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
                         {label}
                       </button>
                     ))}
                   </div>
-                  <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                  <div style={{ display:'flex', gap:5, marginBottom:5 }}>
                     <NumField label="Диаметр D" value={dr.d??8} onChange={v=>updDrilling(i,{d:v})} />
                     <NumField label="Глубина" value={dr.depth??13} onChange={v=>updDrilling(i,{depth:v})} />
                   </div>
 
                   {contour.layout.length > 0 && (
                     <>
-                      <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>
+                      <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:4 }}>
                         Привязать к линиям разметки (можно несколько)
                       </label>
-                      <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:10 }}>
+                      <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:5 }}>
                         <button type="button" onClick={() => updDrilling(i,{attachTo:[]})}
-                          style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                          style={{ padding:'4px 9px', borderRadius:20, fontSize:11, border:'none',
                             background: !attachedIds.length ? 'var(--blue)' : 'var(--bg3)',
                             color: !attachedIds.length ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
                           Не привязывать
@@ -2438,7 +2438,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                           return (
                             <button key={g.id} type="button"
                               onClick={() => updDrilling(i,{attachTo: on ? attachedIds.filter(id=>id!==g.id) : [...attachedIds, g.id]})}
-                              style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                              style={{ padding:'4px 9px', borderRadius:20, fontSize:11, border:'none',
                                 background: on ? 'var(--blue)' : 'var(--bg3)',
                                 color: on ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
                               {g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #{gOrderNum}
@@ -2447,7 +2447,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         })}
                       </div>
                       {attachedIds.length > 0 && (
-                        <div style={{ display:'flex', gap:6, alignItems:'flex-end' }}>
+                        <div style={{ display:'flex', gap:4, alignItems:'flex-end' }}>
                           <NumField label="Зазор от линии" value={dr.gap??0} onChange={v=>updDrilling(i,{gap:v})} />
                           <div style={{ display:'flex', gap:4 }}>
                             {(primaryGuide?.kind === 'upright'
@@ -2455,7 +2455,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                               : [['pos','Вверх'],['neg','Вниз']]
                             ).map(([id,label])=>(
                               <button key={id} type="button" onClick={() => updDrilling(i,{gapDir:id})}
-                                style={{ padding:'6px 8px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                                style={{ padding:'5px 6px', borderRadius:'var(--radius)', border:'none', fontSize:11,
                                   background: (dr.gapDir||'pos')===id?'var(--blue)':'var(--bg3)',
                                   color: (dr.gapDir||'pos')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
                                 {label}
@@ -2470,18 +2470,18 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   <SideOffsetPicker activeSides={dr.sides||[]} offsets={dr.offsets||{}} allowedSides={allowedSides}
                     onChange={({sides,offsets})=>updDrilling(i,{sides,offsets})} />
 
-                  <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', margin:'10px 0 6px', cursor:'pointer' }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', margin:'6px 0 4px', cursor:'pointer' }}>
                     <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
                     Ряд отверстий
                   </label>
                   {dr.row && (
-                    <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
                       <div style={{ flex:1 }}>
                         <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Направление</label>
                         <div style={{ display:'flex', gap:4 }}>
                           {[['x','↔'],['y','↕']].map(([id,label])=>(
                             <button key={id} type="button" onClick={() => updDrilling(i,{rowDir:id})}
-                              style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:12,
+                              style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:12,
                                 background: (dr.rowDir||'x')===id?'var(--blue)':'var(--bg3)',
                                 color: (dr.rowDir||'x')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
                               {label}
@@ -2494,15 +2494,15 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     </div>
                   )}
 
-                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'4px 0 6px' }}>Размножить (зеркало)</label>
-                  <div style={{ display:'flex', gap:6 }}>
-                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
-                      padding:'6px 8px', borderRadius:'var(--radius)', background: dr.mirrorX?'var(--blue-light)':'var(--bg3)' }}>
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'3px 0 4px' }}>Размножить (зеркало)</label>
+                  <div style={{ display:'flex', gap:4 }}>
+                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                      padding:'5px 6px', borderRadius:'var(--radius)', background: dr.mirrorX?'var(--blue-light)':'var(--bg3)' }}>
                       <input type="checkbox" checked={!!dr.mirrorX} onChange={e=>updDrilling(i,{mirrorX:e.target.checked})} />
                       ↔ По X
                     </label>
-                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
-                      padding:'6px 8px', borderRadius:'var(--radius)', background: dr.mirrorY?'var(--blue-light)':'var(--bg3)' }}>
+                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                      padding:'5px 6px', borderRadius:'var(--radius)', background: dr.mirrorY?'var(--blue-light)':'var(--bg3)' }}>
                       <input type="checkbox" checked={!!dr.mirrorY} onChange={e=>updDrilling(i,{mirrorY:e.target.checked})} />
                       ↕ По Y
                     </label>
@@ -2513,23 +2513,23 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               {/* По торцу */}
               {dr.kind === 'edge' && (
                 <>
-                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>Торец</label>
-                  <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:10 }}>
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Торец</label>
+                  <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:5 }}>
                     {SIDE_BTNS.map(s => (
                       <button key={s.id} type="button" onClick={() => updDrilling(i,{edgeSide:s.id})}
-                        style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                        style={{ padding:'4px 9px', borderRadius:20, fontSize:11, border:'none',
                           background: (dr.edgeSide||'left')===s.id?'var(--blue)':'var(--bg3)',
                           color: (dr.edgeSide||'left')===s.id?'white':'var(--text-muted)', cursor:'pointer' }}>
                         {s.label}
                       </button>
                     ))}
                   </div>
-                  <div style={{ marginBottom:10 }}>
+                  <div style={{ marginBottom:5 }}>
                     <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Отступ вдоль торца от</label>
                     <div style={{ display:'flex', gap:4 }}>
                       {[['start','начала'],['end','конца']].map(([id,label])=>(
                         <button key={id} type="button" onClick={() => updDrilling(i,{alongFrom:id})}
-                          style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                          style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
                             background: (dr.alongFrom||'start')===id?'var(--blue)':'var(--bg3)',
                             color: (dr.alongFrom||'start')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
                           {label}
@@ -2537,35 +2537,35 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                       ))}
                     </div>
                   </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:10 }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:4, marginBottom:5 }}>
                     <NumField label="Вдоль торца" value={dr.offsetAlong??50} onChange={v=>updDrilling(i,{offsetAlong:v})} />
                     <NumField label="От пласти" value={dr.offsetFace??(defaultThickness/2)} onChange={v=>updDrilling(i,{offsetFace:v})} />
                   </div>
-                  <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                  <div style={{ display:'flex', gap:5, marginBottom:5 }}>
                     <NumField label="Диаметр D" value={dr.d??5} onChange={v=>updDrilling(i,{d:v})} />
                     <NumField label="Глубина" value={dr.depth??35} onChange={v=>updDrilling(i,{depth:v})} />
                   </div>
 
-                  <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', margin:'0 0 6px', cursor:'pointer' }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', margin:'0 0 4px', cursor:'pointer' }}>
                     <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
                     Ряд отверстий вдоль торца
                   </label>
                   {dr.row && (
-                    <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
                       <NumField label="Шаг" value={dr.rowStep??32} onChange={v=>updDrilling(i,{rowStep:v})} />
                       <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
                     </div>
                   )}
 
-                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'4px 0 6px' }}>Размножить (зеркало)</label>
-                  <div style={{ display:'flex', gap:6 }}>
-                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
-                      padding:'6px 8px', borderRadius:'var(--radius)', background: dr.mirrorX?'var(--blue-light)':'var(--bg3)' }}>
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'3px 0 4px' }}>Размножить (зеркало)</label>
+                  <div style={{ display:'flex', gap:4 }}>
+                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                      padding:'5px 6px', borderRadius:'var(--radius)', background: dr.mirrorX?'var(--blue-light)':'var(--bg3)' }}>
                       <input type="checkbox" checked={!!dr.mirrorX} onChange={e=>updDrilling(i,{mirrorX:e.target.checked})} />
                       ↔ Лево/право
                     </label>
-                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
-                      padding:'6px 8px', borderRadius:'var(--radius)', background: dr.mirrorY?'var(--blue-light)':'var(--bg3)' }}>
+                    <label style={{ flex:1, display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                      padding:'5px 6px', borderRadius:'var(--radius)', background: dr.mirrorY?'var(--blue-light)':'var(--bg3)' }}>
                       <input type="checkbox" checked={!!dr.mirrorY} onChange={e=>updDrilling(i,{mirrorY:e.target.checked})} />
                       ↕ Верх/низ
                     </label>
