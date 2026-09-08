@@ -170,11 +170,30 @@ function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
   return { x, y, w, h }
 }
 
+// ─── Найти линию разметки (полка/стойка/царга) по id ─────────────────────────
+function findLayoutGuide(layout, id) {
+  return (layout || []).find(g => g.id === id) || null
+}
+
+// ─── Целевая координата от привязки к линии разметки (центр толщины + зазор) ──
+function attachedTarget(dr, layout) {
+  const guide = findLayoutGuide(layout, dr.attachTo)
+  if (!guide) return null
+  const gap = dr.gap ?? 37
+  const center = (guide.pos || 0) + (guide.thickness || 18) / 2 + gap
+  return { axis: guide.kind === 'upright' ? 'x' : 'y', value: center }
+}
+
 // ─── Точки присадки по плоскости (базовые, с рядом) ──────────────────────────
-function baseFaceDrillPoints(dr, panelW, panelH) {
+function baseFaceDrillPoints(dr, panelW, panelH, layout) {
   const d = dr.d || 8
   const pos = resolvePos(dr.sides || [], dr.offsets || {}, panelW, panelH, d, d)
-  const baseX = pos.x + d / 2, baseY = pos.y + d / 2
+  let baseX = pos.x + d / 2, baseY = pos.y + d / 2
+  const att = attachedTarget(dr, layout)
+  if (att) {
+    if (att.axis === 'y') baseY = Math.max(0, Math.min(panelH, att.value))
+    else baseX = Math.max(0, Math.min(panelW, att.value))
+  }
   const count = dr.row ? Math.max(1, Math.round(dr.rowCount || 1)) : 1
   const step = dr.rowStep || 32
   const pts = []
@@ -187,22 +206,26 @@ function baseFaceDrillPoints(dr, panelW, panelH) {
 }
 
 // ─── Точки присадки по торцу (базовые, с рядом) ──────────────────────────────
-// dx/dy — единичный вектор направления сверления ВНУТРЬ детали (в координатах данных)
+// offsetAlong — расстояние от угла до ЦЕНТРА отверстия.
+// dx/dy — единичный вектор направления сверления ВНУТРЬ детали.
 function baseEdgeDrillPoints(dr, panelW, panelH) {
   const edge = dr.edgeSide || 'left'
   const along = dr.offsetAlong ?? 50
   const count = dr.row ? Math.max(1, Math.round(dr.rowCount || 1)) : 1
   const step = dr.rowStep || 32
+  const fromEnd = dr.alongFrom === 'end'
   const dir = edge === 'left' ? { dx: 1, dy: 0 } : edge === 'right' ? { dx: -1, dy: 0 }
     : edge === 'top' ? { dx: 0, dy: -1 } : { dx: 0, dy: 1 } // bottom
   const pts = []
   for (let k = 0; k < count; k++) {
-    const a = along + k * step
+    const a = along + k * step // расстояние до центра k-го отверстия
+    const total = (edge === 'left' || edge === 'right') ? panelH : panelW
+    const center = fromEnd ? (total - a) : a
     let x, y
-    if (edge === 'bottom') { y = 0; x = dr.alongFrom === 'end' ? (panelW - a) : a }
-    else if (edge === 'top') { y = panelH; x = dr.alongFrom === 'end' ? (panelW - a) : a }
-    else if (edge === 'left') { x = 0; y = dr.alongFrom === 'end' ? (panelH - a) : a }
-    else { x = panelW; y = dr.alongFrom === 'end' ? (panelH - a) : a } // right
+    if (edge === 'bottom') { y = 0; x = center }
+    else if (edge === 'top') { y = panelH; x = center }
+    else if (edge === 'left') { x = 0; y = center }
+    else { x = panelW; y = center } // right
     pts.push({ x, y, dx: dir.dx, dy: dir.dy })
   }
   return pts
@@ -222,64 +245,80 @@ function mirrorDrillPoints(pts, dr, panelW, panelH, isEdge) {
 }
 
 // ─── Итоговые точки присадки (ряд + зеркало) — единая точка входа для рендера и экспорта
-function getDrillPoints(dr, panelW, panelH) {
+function getDrillPoints(dr, panelW, panelH, layout) {
   const isEdge = dr.kind === 'edge'
-  const base = isEdge ? baseEdgeDrillPoints(dr, panelW, panelH) : baseFaceDrillPoints(dr, panelW, panelH)
+  const base = isEdge ? baseEdgeDrillPoints(dr, panelW, panelH) : baseFaceDrillPoints(dr, panelW, panelH, layout)
   return mirrorDrillPoints(base, dr, panelW, panelH, isEdge)
 }
 
 // ─── Выноска размера для присадки по плоскости ───────────────────────────────
-function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh) {
+// Считаем расстояния ЖИВЬЁМ из текущей позиции точки — выноска всегда точна и всегда
+// отображается, независимо от того, как отверстие было установлено (пальцем или цифрами).
+function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY, halfD) {
   const sides = dr.sides || []
-  const offsets = dr.offsets || {}
+  const xSide = sides.includes('left') ? 'left' : sides.includes('right') ? 'right' : (dataX <= w/2 ? 'left' : 'right')
+  const ySide = sides.includes('bottom') ? 'bottom' : sides.includes('top') ? 'top' : (dataY <= h/2 ? 'bottom' : 'top')
+  const distX = xSide === 'left' ? (dataX - halfD) : (w - dataX - halfD)
+  const distY = ySide === 'bottom' ? (dataY - halfD) : (h - dataY - halfD)
+
   ctx.save()
-  ctx.strokeStyle = 'rgba(24,95,165,0.55)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(24,95,165,0.6)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
   ctx.font = '9px sans-serif'; ctx.fillStyle = '#185FA5'
-  if (sides.includes('left')) {
-    const ex = ox
-    ctx.beginPath(); ctx.moveTo(ex, py); ctx.lineTo(px, py); ctx.stroke()
-    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
-    ctx.fillText(Math.round(offsets.left ?? 0), (ex + px) / 2, py - 3)
-  }
-  if (sides.includes('right')) {
-    const ex = ox + w * sc
-    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, py); ctx.stroke()
-    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
-    ctx.fillText(Math.round(offsets.right ?? 0), (ex + px) / 2, py - 3)
-  }
-  if (sides.includes('bottom')) {
-    const ey = oy + dh
-    ctx.beginPath(); ctx.moveTo(px, ey); ctx.lineTo(px, py); ctx.stroke()
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-    ctx.fillText(Math.round(offsets.bottom ?? 0), px + 4, (ey + py) / 2)
-  }
-  if (sides.includes('top')) {
-    const ey = oy
-    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, ey); ctx.stroke()
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-    ctx.fillText(Math.round(offsets.top ?? 0), px + 4, (ey + py) / 2)
-  }
+
+  const exX = xSide === 'left' ? ox : ox + w * sc
+  ctx.beginPath(); ctx.moveTo(exX, py); ctx.lineTo(px, py); ctx.stroke()
+  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
+  ctx.fillText(Math.round(distX), (exX + px) / 2, py - 3)
+
+  const exY = ySide === 'bottom' ? oy + dh : oy
+  ctx.beginPath(); ctx.moveTo(px, exY); ctx.lineTo(px, py); ctx.stroke()
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+  ctx.fillText(Math.round(distY), px + 4, (exY + py) / 2)
   ctx.restore()
 }
 
 // ─── Выноска размера для присадки по торцу (вдоль торца + глубина) ───────────
-function drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh) {
-  const edge = dr.edgeSide || 'left'
+// Также считается живьём от фактического положения точки — не зависит от способа установки.
+function drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY, dxDir, dyDir, halfD, depthPx) {
   ctx.save()
-  ctx.strokeStyle = 'rgba(123,79,201,0.55)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
+  ctx.strokeStyle = 'rgba(123,79,201,0.6)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
   ctx.font = '9px sans-serif'; ctx.fillStyle = '#7B4FC9'
-  if (edge === 'bottom' || edge === 'top') {
-    const cornerX = dr.alongFrom === 'end' ? ox + w * sc : ox
-    ctx.beginPath(); ctx.moveTo(cornerX, py); ctx.lineTo(px, py); ctx.stroke()
-    ctx.textAlign = 'center'; ctx.textBaseline = edge === 'bottom' ? 'top' : 'bottom'
-    ctx.fillText(Math.round(dr.offsetAlong ?? 0), (cornerX + px) / 2, py + (edge === 'bottom' ? 6 : -6))
-  } else {
-    const cornerY = dr.alongFrom === 'end' ? oy : oy + dh
+
+  if (dxDir !== 0) {
+    // Левый/правый торец — размер "вдоль торца" измеряется по Y, от ближнего угла, до ЦЕНТРА отверстия
+    const distBottom = dataY, distTop = h - dataY
+    const fromBottom = distBottom <= distTop
+    const cornerY = fromBottom ? oy + dh : oy
     ctx.beginPath(); ctx.moveTo(px, cornerY); ctx.lineTo(px, py); ctx.stroke()
-    ctx.textAlign = edge === 'left' ? 'left' : 'right'
+    ctx.textAlign = dxDir > 0 ? 'left' : 'right'
     ctx.textBaseline = 'middle'
-    ctx.fillText(Math.round(dr.offsetAlong ?? 0), px + (edge === 'left' ? 6 : -6), (cornerY + py) / 2)
+    ctx.fillText(Math.round(fromBottom ? distBottom : distTop), px + (dxDir > 0 ? 6 : -6), (cornerY + py) / 2)
+  } else {
+    // Верхний/нижний торец — размер "вдоль торца" измеряется по X, от ближнего угла, до ЦЕНТРА отверстия
+    const distLeft = dataX, distRight = w - dataX
+    const fromLeft = distLeft <= distRight
+    const cornerX = fromLeft ? ox : ox + w * sc
+    ctx.beginPath(); ctx.moveTo(cornerX, py); ctx.lineTo(px, py); ctx.stroke()
+    ctx.textAlign = 'center'
+    ctx.textBaseline = dyDir < 0 ? 'top' : 'bottom'
+    ctx.fillText(Math.round(fromLeft ? distLeft : distRight), (cornerX + px) / 2, py + (dyDir < 0 ? 6 : -6))
   }
+
+  // Выноска глубины — вдоль направления сверления, до внутреннего конца
+  const ix = px + dxDir * depthPx, iy = py - dyDir * depthPx
+  ctx.strokeStyle = 'rgba(123,79,201,0.6)'
+  ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ix, iy); ctx.stroke()
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+  ctx.save()
+  ctx.translate((px + ix) / 2, (py + iy) / 2)
+  if (dxDir === 0) ctx.rotate(Math.PI / 2)
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'
+  const depthLabel = String(Math.round((dr.depth || 15)))
+  const tw = ctx.measureText(depthLabel).width
+  ctx.fillRect(-tw/2-2, -6, tw+4, 12)
+  ctx.fillStyle = '#7B4FC9'
+  ctx.fillText(depthLabel, 0, 0)
+  ctx.restore()
   ctx.restore()
 }
 
@@ -389,14 +428,45 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       ctx.strokeRect(cx2, cy2, pos.w*sc, pos.h*sc)
     })
 
+    // Разметка — полки/стойки/царги (вспомогательные линии для позиционирования присадки)
+    ;(contour.layout || []).forEach(g => {
+      const thick = g.thickness || 18
+      const colors = g.kind === 'upright'
+        ? { fill: 'rgba(42,94,139,0.16)', stroke: '#2A5E8B', label: 'Стойка' }
+        : g.kind === 'rail'
+        ? { fill: 'rgba(94,42,139,0.14)', stroke: '#5E2A8B', label: 'Царга' }
+        : { fill: 'rgba(139,94,42,0.16)', stroke: '#8B5E2A', label: 'Полка' }
+      ctx.fillStyle = colors.fill; ctx.strokeStyle = colors.stroke; ctx.lineWidth = 1
+      let bx, by, bw, bh
+      if (g.kind === 'upright') {
+        bx = ox + (g.pos||0) * sc; by = oy; bw = thick * sc; bh = dh
+      } else {
+        bx = ox; bw = dw
+        by = oy + dh - ((g.pos||0) + thick) * sc; bh = thick * sc
+      }
+      ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh)
+      ctx.setLineDash([3,3])
+      if (g.kind === 'upright') {
+        ctx.beginPath(); ctx.moveTo(ox, oy+dh); ctx.lineTo(bx, oy+dh); ctx.stroke()
+      } else {
+        ctx.beginPath(); ctx.moveTo(ox, oy+dh); ctx.lineTo(ox, by+bh); ctx.stroke()
+      }
+      ctx.setLineDash([])
+      ctx.font = '9px sans-serif'; ctx.fillStyle = colors.stroke
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillText(`${colors.label} ${Math.round(g.pos||0)}/${Math.round(thick)}`,
+        g.kind==='upright' ? bx+3 : ox+3, g.kind==='upright' ? oy+12 : by+bh/2)
+    })
+
     // Присадка — реальная геометрия отверстий + выноски размеров
     ;(contour.drillings || []).forEach(dr => {
       const d = dr.d || 8
       const dPx = d * sc
-      const pts = getDrillPoints(dr, w, h)
+      const pts = getDrillPoints(dr, w, h, contour.layout)
 
       if (dr.kind === 'edge') {
         const depthPx = (dr.depth || 15) * sc
+        const halfD = d / 2
         pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
           const ix = px + p.dx * depthPx   // внутренний конец по X (canvas)
@@ -415,10 +485,13 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           // точка входа сверла на торце
           ctx.beginPath(); ctx.arc(px, py, Math.max(2, dPx*0.18), 0, Math.PI*2)
           ctx.fillStyle = '#7B4FC9'; ctx.fill()
-          if (pi === 0) drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh)
+          if (pi === 0 && showLengths) {
+            drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, depthPx)
+          }
         })
       } else {
         const isThrough = (dr.face || 'both') === 'both'
+        const halfD = d / 2
         pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
           const r = Math.max(3, dPx/2)
@@ -434,7 +507,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
             ctx.fillText(dr.face === 'front' ? 'Л' : 'И', px, py)
           }
-          if (pi === 0) drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh)
+          if (pi === 0 && showLengths) {
+            drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, halfD)
+          }
         })
       }
     })
@@ -767,17 +842,18 @@ const SIDE_BTNS = [
   { id: 'top', label: '↑ Верх' }, { id: 'bottom', label: '↓ Низ' },
   { id: 'left', label: '← Лево' }, { id: 'right', label: '→ Право' },
 ]
-function SideOffsetPicker({ activeSides = [], offsets = {}, onChange }) {
+function SideOffsetPicker({ activeSides = [], offsets = {}, onChange, allowedSides = null }) {
   const toggle = (id) => {
     const next = activeSides.includes(id) ? activeSides.filter(s => s !== id) : [...activeSides, id]
     onChange({ sides: next, offsets })
   }
   const setOffset = (id, val) => onChange({ sides: activeSides, offsets: { ...offsets, [id]: val } })
+  const btns = allowedSides ? SIDE_BTNS.filter(s => allowedSides.includes(s.id)) : SIDE_BTNS
   return (
     <div>
       <label style={{ fontSize: 11, color: 'var(--text-hint)', display: 'block', marginBottom: 6 }}>Привязка к сторонам</label>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-        {SIDE_BTNS.map(s => (
+        {btns.map(s => (
           <button key={s.id} type="button" onClick={() => toggle(s.id)}
             style={{ padding: '5px 10px', borderRadius: 20, fontSize: 11, border: 'none',
               background: activeSides.includes(s.id) ? 'var(--blue)' : 'var(--bg3)',
@@ -788,7 +864,7 @@ function SideOffsetPicker({ activeSides = [], offsets = {}, onChange }) {
       </div>
       {activeSides.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-          {activeSides.map(id => (
+          {activeSides.filter(id => !allowedSides || allowedSides.includes(id)).map(id => (
             <NumField key={id} label={`Отступ ${SIDE_BTNS.find(s => s.id === id)?.label}`}
               value={offsets[id] ?? 0} onChange={v => setOffset(id, v)} />
           ))}
@@ -826,6 +902,7 @@ export default function ContourEditor({ detail, onUpdate }) {
     holes:     rawContour.holes     || [],
     grooves:   rawContour.grooves   || [],
     drillings: rawContour.drillings || [],
+    layout:    rawContour.layout    || [],
   }
 
   const [tab, setTab] = useState('contour')
@@ -843,6 +920,7 @@ export default function ContourEditor({ detail, onUpdate }) {
   const [arcMode, setArcMode] = useState(false)
   const [arcPoints, setArcPoints] = useState([]) // индексы выбранных точек
   const [placeDrillIdx, setPlaceDrillIdx] = useState(null) // индекс присадки в режиме "указать нажатием"
+  const [placeLayoutIdx, setPlaceLayoutIdx] = useState(null) // индекс линии разметки в режиме "указать нажатием"
 
   // Применить дугу: точки [i, cp, j] — cp становится контрольной точкой
   const applyArc = (pts) => {
@@ -1249,17 +1327,18 @@ export default function ContourEditor({ detail, onUpdate }) {
     if (placeDrillIdx === null) return
     const dr = contour.drillings[placeDrillIdx]
     if (!dr) { setPlaceDrillIdx(null); return }
+    const d = dr.d || 8
     if (dr.kind === 'edge') {
       const distLeft = x, distRight = w - x, distBottom = y, distTop = h - y
       const minD = Math.min(distLeft, distRight, distBottom, distTop)
-      let edgeSide, along
-      if (minD === distLeft) { edgeSide = 'left'; along = y }
-      else if (minD === distRight) { edgeSide = 'right'; along = y }
-      else if (minD === distBottom) { edgeSide = 'bottom'; along = x }
-      else { edgeSide = 'top'; along = x }
-      updDrilling(placeDrillIdx, { edgeSide, alongFrom: 'start', offsetAlong: Math.round(along) })
+      let edgeSide, alongCenter
+      if (minD === distLeft) { edgeSide = 'left'; alongCenter = y }
+      else if (minD === distRight) { edgeSide = 'right'; alongCenter = y }
+      else if (minD === distBottom) { edgeSide = 'bottom'; alongCenter = x }
+      else { edgeSide = 'top'; alongCenter = x }
+      // offsetAlong хранится как расстояние до ЦЕНТРА отверстия (от начала)
+      updDrilling(placeDrillIdx, { edgeSide, alongFrom: 'start', offsetAlong: Math.max(0, Math.round(alongCenter)) })
     } else {
-      const d = dr.d || 8
       const sideX = x <= w / 2 ? 'left' : 'right'
       const sideY = y <= h / 2 ? 'bottom' : 'top'
       const offX = sideX === 'left' ? Math.max(0, x - d/2) : Math.max(0, w - d/2 - x)
@@ -1267,6 +1346,36 @@ export default function ContourEditor({ detail, onUpdate }) {
       updDrilling(placeDrillIdx, { sides: [sideX, sideY], offsets: { [sideX]: Math.round(offX), [sideY]: Math.round(offY) } })
     }
     setPlaceDrillIdx(null)
+  }
+
+  // Разметка (полки/стойки/царги)
+  const addLayout = (kind) => {
+    const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2,5)
+    const thickness = kind === 'rail' ? 100 : 18
+    const pos = kind === 'upright' ? Math.round(w/2 - 9) : Math.round(h/2 - thickness/2)
+    upd({ layout: [...contour.layout, { id, kind, pos, thickness }] })
+  }
+  const updLayout = (i, patch) => {
+    const ls = [...contour.layout]
+    ls[i] = { ...ls[i], ...patch }
+    upd({ layout: ls })
+  }
+  const removeLayout = (i) => {
+    upd({ layout: contour.layout.filter((_,j) => j !== i) })
+  }
+
+  // Разместить линию разметки нажатием на детали
+  const handlePlaceLayoutTap = (x, y) => {
+    if (placeLayoutIdx === null) return
+    const g = contour.layout[placeLayoutIdx]
+    if (!g) { setPlaceLayoutIdx(null); return }
+    const thickness = g.thickness || 18
+    if (g.kind === 'upright') {
+      updLayout(placeLayoutIdx, { pos: Math.max(0, Math.round(x - thickness/2)) })
+    } else {
+      updLayout(placeLayoutIdx, { pos: Math.max(0, Math.round(y - thickness/2)) })
+    }
+    setPlaceLayoutIdx(null)
   }
 
   const hasContour = contour.vertices.length > 4 ||
@@ -1328,7 +1437,7 @@ export default function ContourEditor({ detail, onUpdate }) {
 
           {/* Canvas */}
           <div style={{ flex:1, minWidth:0 }}>
-            {!arcMode && !activeVertex && placeDrillIdx === null && (
+            {!arcMode && !activeVertex && placeDrillIdx === null && placeLayoutIdx === null && (
               <p style={{ fontSize:10, color:'var(--text-hint)', textAlign:'center', marginBottom:2 }}>
                 Нажми на точку
               </p>
@@ -1338,13 +1447,18 @@ export default function ContourEditor({ detail, onUpdate }) {
                 👆 Нажми на детали, куда поставить отверстие
               </p>
             )}
+            {placeLayoutIdx !== null && (
+              <p style={{ fontSize:11, color:'#8B5E2A', fontWeight:500, textAlign:'center', marginBottom:2 }}>
+                👆 Нажми на детали, где будет линия
+              </p>
+            )}
             <ContourCanvas detail={detail} contour={contour} activeIdx={activeHoleIdx!==null ? activeIdx : activeIdx}
               arcMode={arcMode} arcPoints={arcPoints}
               previewVerts={previewVerts}
               activeHoleIdx={activeHoleIdx}
               onTap={handleTap}
-              placeMode={placeDrillIdx !== null}
-              onPlaceTap={handlePlaceDrillTap}
+              placeMode={placeDrillIdx !== null || placeLayoutIdx !== null}
+              onPlaceTap={placeLayoutIdx !== null ? handlePlaceLayoutTap : handlePlaceDrillTap}
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} />
           </div>
 
@@ -1576,14 +1690,15 @@ export default function ContourEditor({ detail, onUpdate }) {
 
       {/* Вкладки */}
       <div style={{ display:'flex', gap:4, margin:'10px 0 10px', background:'var(--bg2)', borderRadius:'var(--radius)', padding:3 }}>
-        {[['contour','Контур'],['holes','Вырезы'],['grooves','Пазы'],['drilling','Присадка']].map(([id,label])=>(
+        {[['contour','Контур'],['holes','Вырезы'],['grooves','Пазы'],['layout','Разметка'],['drilling','Присадка']].map(([id,label])=>(
           <button key={id} type="button" onClick={()=>{
             setTab(id)
             if(id!=='contour') { setActiveIdx(null) }
             if(id!=='holes') setActiveHoleIdx(null)
             if(id!=='drilling') setPlaceDrillIdx(null)
+            if(id!=='layout') setPlaceLayoutIdx(null)
           }}
-            style={{ flex:1, padding:'6px 4px', border:'none', borderRadius:6, fontSize:12,
+            style={{ flex:1, padding:'6px 2px', border:'none', borderRadius:6, fontSize:10.5,
               background: tab===id?'var(--bg)':'transparent',
               color: tab===id?'var(--blue)':'var(--text-hint)',
               fontWeight: tab===id?500:400, cursor:'pointer' }}>
@@ -1701,6 +1816,54 @@ export default function ContourEditor({ detail, onUpdate }) {
         </div>
       )}
 
+      {/* РАЗМЕТКА — полки, стойки, царги как визуальные ориентиры */}
+      {tab==='layout' && (
+        <div>
+          <p style={{ fontSize:11, color:'var(--text-hint)', margin:'0 0 10px' }}>
+            Отметь, где будут полки, стойки и царги — потом присадку по плоскости можно привязать прямо к этим линиям.
+          </p>
+          <div style={{ display:'flex', gap:6, marginBottom:12, flexWrap:'wrap' }}>
+            <button type="button" onClick={() => addLayout('shelf')}
+              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+              + Полка
+            </button>
+            <button type="button" onClick={() => addLayout('upright')}
+              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+              + Стойка
+            </button>
+            <button type="button" onClick={() => addLayout('rail')}
+              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
+                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+              + Царга
+            </button>
+          </div>
+          {!contour.layout.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет линий разметки</p>}
+          {contour.layout.map((g, i) => (
+            <CollapsibleItem key={g.id}
+              title={`${g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #${i+1} · ${Math.round(g.pos||0)}мм`}
+              onRemove={() => removeLayout(i)}>
+
+              <button type="button"
+                onClick={() => setPlaceLayoutIdx(placeLayoutIdx === i ? null : i)}
+                style={{ width:'100%', padding:'8px', marginBottom:10, borderRadius:'var(--radius)',
+                  border: placeLayoutIdx === i ? '1px solid #8B5E2A' : '0.5px dashed var(--border-md)',
+                  background: placeLayoutIdx === i ? 'rgba(139,94,42,0.1)' : 'transparent',
+                  fontSize:12, color: placeLayoutIdx === i ? '#8B5E2A' : 'var(--text-muted)', cursor:'pointer' }}>
+                {placeLayoutIdx === i ? '👆 Жду нажатия на детали…' : '📍 Указать нажатием на детали'}
+              </button>
+
+              <div style={{ display:'flex', gap:8 }}>
+                <NumField label={g.kind==='upright' ? 'От левого края' : 'От низа'}
+                  value={g.pos??0} onChange={v=>updLayout(i,{pos:v})} />
+                <NumField label="Толщина материала" value={g.thickness??18} onChange={v=>updLayout(i,{thickness:v})} />
+              </div>
+            </CollapsibleItem>
+          ))}
+        </div>
+      )}
+
       {/* ПРИСАДКА */}
       {tab==='drilling' && (
         <div>
@@ -1717,7 +1880,10 @@ export default function ContourEditor({ detail, onUpdate }) {
             </button>
           </div>
           {!contour.drillings.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет присадки</p>}
-          {contour.drillings.map((dr, i) => (
+          {contour.drillings.map((dr, i) => {
+            const attachedGuide = dr.attachTo ? contour.layout.find(g => g.id === dr.attachTo) : null
+            const allowedSides = attachedGuide ? (attachedGuide.kind === 'upright' ? ['top','bottom'] : ['left','right']) : null
+            return (
             <CollapsibleItem key={i}
               title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}${dr.mirrorX||dr.mirrorY ? ' ⇄' : ''}`}
               onRemove={() => upd({ drillings: contour.drillings.filter((_,j)=>j!==i) })}>
@@ -1750,7 +1916,33 @@ export default function ContourEditor({ detail, onUpdate }) {
                     <NumField label="Диаметр D" value={dr.d??8} onChange={v=>updDrilling(i,{d:v})} />
                     <NumField label="Глубина" value={dr.depth??13} onChange={v=>updDrilling(i,{depth:v})} />
                   </div>
-                  <SideOffsetPicker activeSides={dr.sides||[]} offsets={dr.offsets||{}}
+
+                  {contour.layout.length > 0 && (
+                    <>
+                      <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>Привязать к линии разметки</label>
+                      <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:10 }}>
+                        <button type="button" onClick={() => updDrilling(i,{attachTo:null})}
+                          style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                            background: !dr.attachTo ? 'var(--blue)' : 'var(--bg3)',
+                            color: !dr.attachTo ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
+                          Не привязывать
+                        </button>
+                        {contour.layout.map((g, gi) => (
+                          <button key={g.id} type="button" onClick={() => updDrilling(i,{attachTo:g.id})}
+                            style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                              background: dr.attachTo===g.id ? 'var(--blue)' : 'var(--bg3)',
+                              color: dr.attachTo===g.id ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
+                            {g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #{gi+1}
+                          </button>
+                        ))}
+                      </div>
+                      {dr.attachTo && (
+                        <NumField label="Зазор от линии" value={dr.gap??37} onChange={v=>updDrilling(i,{gap:v})} />
+                      )}
+                    </>
+                  )}
+
+                  <SideOffsetPicker activeSides={dr.sides||[]} offsets={dr.offsets||{}} allowedSides={allowedSides}
                     onChange={({sides,offsets})=>updDrilling(i,{sides,offsets})} />
 
                   <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', margin:'10px 0 6px', cursor:'pointer' }}>
@@ -1856,14 +2048,14 @@ export default function ContourEditor({ detail, onUpdate }) {
                 </>
               )}
             </CollapsibleItem>
-          ))}
+          )})}
         </div>
       )}
 
       {/* Сброс */}
       {hasContour && (
         <button type="button"
-          onClick={() => { upd({ vertices: makeRect(w, h), holes: [], grooves: [], drillings: [] }); setActiveIdx(null) }}
+          onClick={() => { upd({ vertices: makeRect(w, h), holes: [], grooves: [], drillings: [], layout: [] }); setActiveIdx(null) }}
           style={{ width:'100%', marginTop:8, padding:'6px', border:'0.5px solid var(--danger)',
             borderRadius:'var(--radius)', background:'transparent', fontSize:11, color:'var(--danger)', cursor:'pointer' }}>
           Сбросить контур
