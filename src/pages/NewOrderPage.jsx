@@ -48,8 +48,8 @@ const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => 
 function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onQtyEnter, materialThickness, siblings, onCopyFrom }) {
   const widthRef = useRef(null)
   const qtyRef = useRef(null)
-  const SIDES = ['Шв','Шн','Дл','Дп']
-  const KEYS = ['top','bottom','left','right']
+  const SIDES = ['Дл','Дп','Шв','Шн']
+  const KEYS = ['left','right','top','bottom']
   const lengthRef = useRef(null)
   const [showContour, setShowContour] = useState(false)
   const [showCopyPicker, setShowCopyPicker] = useState(false)
@@ -173,7 +173,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
       {/* Показываем какие кромки назначены если кромка скрыта */}
       {!showEdge && Object.entries(detail.edges).some(([,v]) => v) && (
         <div style={{ marginTop: 4, fontSize: 10, color: 'var(--blue)' }}>
-          {[['top','Шв'],['bottom','Шн'],['left','Дл'],['right','Дп']]
+          {[['left','Дл'],['right','Дп'],['top','Шв'],['bottom','Шн']]
             .filter(([k]) => detail.edges[k])
             .map(([k,s]) => `${s}:${detail.edges[k] === 'default' ? '✓' : detail.edges[k]}`)
             .join('  ')}

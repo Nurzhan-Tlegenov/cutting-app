@@ -43,8 +43,8 @@ function Toggle({ on }) {
   )
 }
 function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onEditContour }) {
-  const SIDES = ['Шв','Шн','Дл','Дп']
-  const KEYS = ['top','bottom','left','right']
+  const SIDES = ['Дл','Дп','Шв','Шн']
+  const KEYS = ['left','right','top','bottom']
   const lengthRef = useRef(null)
   useEffect(() => {
     if (autoFocus && lengthRef.current) {
