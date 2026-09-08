@@ -1117,7 +1117,7 @@ function CollapsibleItem({ title, onRemove, children, innerRef, highlighted }) {
 }
 
 // ─── Главный компонент ────────────────────────────────────────────────────────
-export default function ContourEditor({ detail, onUpdate, materialThickness }) {
+export default function ContourEditor({ detail, onUpdate, materialThickness, onClose }) {
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
   const w = Number(detail.h) || 0
   const h = Number(detail.w) || 0
@@ -1716,7 +1716,21 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
   const activeVertex = activeIdx !== null ? getActiveVerts()[activeIdx] : null
 
   return (
-    <div style={{ marginTop:10, borderTop:'0.5px solid var(--border)', paddingTop:10 }}>
+    <div className={onClose ? 'page' : undefined} style={onClose ? { paddingBottom: 40 } : { marginTop:10, borderTop:'0.5px solid var(--border)', paddingTop:10 }}>
+
+      {/* Шапка с кнопкой "Готово" — только когда редактор открыт на весь экран (из EditOrderPage) */}
+      {onClose && (
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, paddingTop:8 }}>
+          <button type="button" onClick={onClose}
+            style={{ background:'none', border:'none', color:'var(--blue)', fontSize:22, padding:0, lineHeight:1, cursor:'pointer' }}>←</button>
+          <h1 style={{ fontSize:16, fontWeight:500, flex:1 }}>Контур детали</h1>
+          <button type="button" onClick={onClose}
+            style={{ padding:'7px 16px', fontSize:13, border:'none', borderRadius:'var(--radius)',
+              background:'var(--blue)', color:'white', cursor:'pointer', whiteSpace:'nowrap' }}>
+            Готово
+          </button>
+        </div>
+      )}
 
       {/* Кнопка отката */}
       {history.length > 0 && (
