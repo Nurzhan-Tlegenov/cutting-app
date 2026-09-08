@@ -170,15 +170,14 @@ function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
   return { x, y, w, h }
 }
 
-// ─── Найти линию разметки (полка/стойка/царга) по id ─────────────────────────
-function findLayoutGuide(layout, id) {
-  return (layout || []).find(g => g.id === id) || null
+// ─── Найти линии разметки (полка/стойка/царга) по массиву id ─────────────────
+function findLayoutGuides(layout, ids) {
+  if (!ids || !ids.length) return []
+  return (layout || []).filter(g => ids.includes(g.id))
 }
 
-// ─── Целевая координата от привязки к линии разметки (центр толщины ± зазор) ─
-function attachedTarget(dr, layout) {
-  const guide = findLayoutGuide(layout, dr.attachTo)
-  if (!guide) return null
+// ─── Целевая координата вдоль оси привязки (центр толщины ± зазор) ───────────
+function attachedTargetForGuide(dr, guide) {
   const gap = dr.gap ?? 0
   const dirMul = dr.gapDir === 'neg' ? -1 : 1
   const center = (guide.pos || 0) + (guide.thickness || 18) / 2 + dirMul * gap
@@ -199,12 +198,24 @@ function faceDrillCenterFromSides(sides, offsets, panelW, panelH) {
   return { x, y }
 }
 
-// ─── Точки присадки по плоскости (базовые, с рядом) ──────────────────────────
-function baseFaceDrillPoints(dr, panelW, panelH, layout) {
-  const center = faceDrillCenterFromSides(dr.sides || [], dr.offsets || {}, panelW, panelH)
-  let baseX = center.x, baseY = center.y
-  const att = attachedTarget(dr, layout)
-  if (att) {
+// ─── Точки присадки по плоскости (базовые, с рядом, для одной привязки/без неё) ─
+// Свободная ось (не управляемая привязкой) считается от ГРАНИЦ САМОЙ ЛИНИИ
+// разметки (с учётом её отступов слева/справа или снизу/сверху), а не от краёв детали.
+function faceDrillPointsForGuide(dr, panelW, panelH, guide) {
+  let effW = panelW, effH = panelH, offX0 = 0, offY0 = 0
+  if (guide) {
+    if (guide.kind === 'upright') {
+      offY0 = guide.insetBottom || 0
+      effH = Math.max(1, panelH - (guide.insetBottom || 0) - (guide.insetTop || 0))
+    } else {
+      offX0 = guide.insetLeft || 0
+      effW = Math.max(1, panelW - (guide.insetLeft || 0) - (guide.insetRight || 0))
+    }
+  }
+  const center = faceDrillCenterFromSides(dr.sides || [], dr.offsets || {}, effW, effH)
+  let baseX = center.x + offX0, baseY = center.y + offY0
+  if (guide) {
+    const att = attachedTargetForGuide(dr, guide)
     if (att.axis === 'y') baseY = Math.max(0, Math.min(panelH, att.value))
     else baseX = Math.max(0, Math.min(panelW, att.value))
   }
@@ -215,6 +226,17 @@ function baseFaceDrillPoints(dr, panelW, panelH, layout) {
     pts.push(dr.rowDir === 'y'
       ? { x: baseX, y: baseY + k * step }
       : { x: baseX + k * step, y: baseY })
+  }
+  return pts
+}
+
+// ─── Точки присадки по плоскости — по всем выбранным привязкам сразу ─────────
+function baseFaceDrillPoints(dr, panelW, panelH, layout) {
+  const guides = findLayoutGuides(layout, dr.attachTo)
+  if (!guides.length) return faceDrillPointsForGuide(dr, panelW, panelH, null)
+  let pts = []
+  for (const guide of guides) {
+    pts = pts.concat(faceDrillPointsForGuide(dr, panelW, panelH, guide))
   }
   return pts
 }
@@ -373,6 +395,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   // Pinch-to-zoom двумя пальцами прямо в окне превью
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
+  const prevZoomRef = useRef(zoom)
   const onZoomChangeRef = useRef(onZoomChange)
   onZoomChangeRef.current = onZoomChange
   useEffect(() => {
@@ -428,7 +451,15 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     canvas.style.height = CSS_H + 'px'
     ctx.scale(DPR, DPR)
 
-    const PAD = 16
+    // При изменении зума держим деталь по центру видимой области (иначе съезжает вправо/вниз)
+    if (wrapRef.current && prevZoomRef.current !== zoom) {
+      const wrap = wrapRef.current
+      wrap.scrollLeft = Math.max(0, (CSS_W - wrap.clientWidth) / 2)
+      wrap.scrollTop = Math.max(0, (CSS_H - wrap.clientHeight) / 2)
+      prevZoomRef.current = zoom
+    }
+
+    const PAD = 26
     const sc = Math.min((CSS_W - PAD*2) / w, (CSS_H - PAD*2) / h)
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
@@ -524,8 +555,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         g.kind==='upright' ? bx+3 : bx+3, g.kind==='upright' ? oy+12 : by+bh/2)
     })
 
-    // Размерная цепочка между полками/царгами (по Y) и стойками (по X) — расстояния до соседей/краёв
-    if (showLengths) {
+    // Размерная цепочка между полками/царгами (по Y) и стойками (по X) — расстояния РАВНЫЕ ПРОЁМАМ
+    // (расстояние между соседними линиями разметки, а не связано с присадкой) — видна всегда
+    {
       const shelves = (contour.layout||[]).filter(g => g.kind !== 'upright').sort((a,b)=>(a.pos||0)-(b.pos||0))
       if (shelves.length) {
         let prevEdge = 0
@@ -1063,7 +1095,15 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
   const [placeLayoutIdx, setPlaceLayoutIdx] = useState(null) // индекс линии разметки в режиме "указать нажатием"
   const [zoom, setZoom] = useState(1) // масштаб превью детали (кнопки/списки не масштабируются)
   const [highlightLayoutIdx, setHighlightLayoutIdx] = useState(null) // подсветка линии разметки при тапе по превью
-  const [shelfCount, setShelfCount] = useState(3)
+  // Генератор добавления линий разметки (кол-во, проём, отступы — общий для полки/стойки/царги)
+  const [genType, setGenType] = useState(null)
+  const [genCount, setGenCount] = useState(1)
+  const [genOpeningIdx, setGenOpeningIdx] = useState(0)
+  const [genThickness, setGenThickness] = useState(16)
+  const [genInsetA, setGenInsetA] = useState(0)
+  const [genInsetB, setGenInsetB] = useState(0)
+  const [genPosRef, setGenPosRef] = useState('bottom')
+  const [genPos, setGenPos] = useState(0)
   const layoutItemRefs = useRef({})
 
   useEffect(() => {
@@ -1460,7 +1500,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
     if (kind === 'face') {
       upd({ drillings: [{
         kind: 'face', face: 'both', d: 8, depth: 13,
-        sides: [], offsets: {},
+        sides: [], offsets: {}, attachTo: [],
         row: false, rowDir: 'x', rowStep: 32, rowCount: 2,
       }, ...contour.drillings] })
     } else {
@@ -1475,6 +1515,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
     const ds = [...contour.drillings]
     ds[i] = { ...ds[i], ...patch }
     upd({ drillings: ds })
+  }
+  const duplicateDrilling = (i) => {
+    upd({ drillings: [{ ...contour.drillings[i] }, ...contour.drillings] })
   }
 
   // Разместить присадку нажатием на детали (визуально, без ввода цифр)
@@ -1505,25 +1548,68 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
 
   // Разметка (полки/стойки/царги)
   const defaultThickness = Number(materialThickness) || 16
-  const addLayout = (kind) => {
-    const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2,5)
-    const thickness = defaultThickness
-    const pos = kind === 'upright' ? Math.round(w/2 - thickness/2) : Math.round(h/2 - thickness/2)
-    const base = { id, kind, pos, thickness }
-    const withInsets = kind === 'upright' ? { ...base, insetBottom: 0, insetTop: 0 } : { ...base, insetLeft: 0, insetRight: 0 }
-    upd({ layout: [withInsets, ...contour.layout] })
+
+  // Найти свободные проёмы вдоль оси данного типа разметки
+  const computeOpenings = (kind) => {
+    const isUpright = kind === 'upright'
+    const total = isUpright ? w : h
+    const same = contour.layout.filter(g => (g.kind==='upright') === isUpright).sort((a,b)=>(a.pos||0)-(b.pos||0))
+    const openings = []
+    let prevEdge = 0
+    for (const g of same) {
+      if ((g.pos||0) - prevEdge > 1) openings.push({ start: prevEdge, end: g.pos||0 })
+      prevEdge = (g.pos||0) + (g.thickness||18)
+    }
+    if (total - prevEdge > 1) openings.push({ start: prevEdge, end: total })
+    return openings.length ? openings : [{ start: 0, end: total }]
   }
-  // Добавить сразу N полок, равномерно поделив высоту детали на секции
-  const addShelvesEven = (count) => {
-    const n = Math.max(1, Math.round(count) || 1)
-    const thickness = defaultThickness
-    const step = h / (n + 1)
+
+  // Открыть генератор для конкретного типа (полка/стойка/царга)
+  const openLayoutGenerator = (kind) => {
+    const openings = computeOpenings(kind)
+    const opIdx = openings.length - 1
+    const op = openings[opIdx]
+    const th = defaultThickness
+    setGenType(kind)
+    setGenCount(1)
+    setGenOpeningIdx(opIdx)
+    setGenThickness(th)
+    setGenInsetA(0); setGenInsetB(0)
+    setGenPosRef(kind === 'upright' ? 'left' : 'bottom')
+    setGenPos(Math.max(0, Math.round((op.end - op.start) / 2 - th / 2)))
+  }
+
+  // Подтвердить генератор — создать одну или несколько линий в выбранном проёме
+  const commitLayoutGenerator = () => {
+    const kind = genType
+    if (!kind) return
+    const isUpright = kind === 'upright'
+    const total = isUpright ? w : h
+    const openings = computeOpenings(kind)
+    const op = openings[genOpeningIdx] || openings[0]
+    const thickness = Number(genThickness) || defaultThickness
+    const n = Math.max(1, Math.round(genCount) || 1)
     const newGuides = []
-    for (let k = 1; k <= n; k++) {
-      const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2,5) + k
-      newGuides.push({ id, kind: 'shelf', pos: Math.round(step * k - thickness / 2), thickness, insetLeft: 0, insetRight: 0 })
+    const mkBase = (pos) => {
+      const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2,5) + Math.round(Math.random()*999)
+      const base = { id, kind, pos: Math.round(pos), thickness }
+      return isUpright
+        ? { ...base, insetBottom: Number(genInsetA)||0, insetTop: Number(genInsetB)||0 }
+        : { ...base, insetLeft: Number(genInsetA)||0, insetRight: Number(genInsetB)||0 }
+    }
+    if (n === 1) {
+      let pos = (genPosRef === 'top' || genPosRef === 'right')
+        ? op.end - (Number(genPos)||0) - thickness
+        : op.start + (Number(genPos)||0)
+      pos = Math.max(op.start, Math.min(op.end - thickness, pos))
+      newGuides.push(mkBase(pos))
+    } else {
+      const span = op.end - op.start
+      const step = span / (n + 1)
+      for (let k = 1; k <= n; k++) newGuides.push(mkBase(op.start + step*k - thickness/2))
     }
     upd({ layout: [...newGuides, ...contour.layout] })
+    setGenType(null)
   }
   const updLayout = (i, patch) => {
     const ls = [...contour.layout]
@@ -2015,39 +2101,112 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
             Отметь, где будут полки, стойки и царги — потом присадку по плоскости можно привязать прямо к этим линиям.
           </p>
           <div style={{ display:'flex', gap:6, marginBottom:8, flexWrap:'wrap' }}>
-            <button type="button" onClick={() => addLayout('shelf')}
-              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
-                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+            <button type="button" onClick={() => openLayoutGenerator('shelf')}
+              style={{ flex:1, padding:'8px', border: genType==='shelf' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
+                borderRadius:'var(--radius)', background: genType==='shelf' ? 'var(--blue-light)' : 'transparent',
+                fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
               + Полка
             </button>
-            <button type="button" onClick={() => addLayout('upright')}
-              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
-                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+            <button type="button" onClick={() => openLayoutGenerator('upright')}
+              style={{ flex:1, padding:'8px', border: genType==='upright' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
+                borderRadius:'var(--radius)', background: genType==='upright' ? 'var(--blue-light)' : 'transparent',
+                fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
               + Стойка
             </button>
-            <button type="button" onClick={() => addLayout('rail')}
-              style={{ flex:1, padding:'8px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
-                background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+            <button type="button" onClick={() => openLayoutGenerator('rail')}
+              style={{ flex:1, padding:'8px', border: genType==='rail' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',
+                borderRadius:'var(--radius)', background: genType==='rail' ? 'var(--blue-light)' : 'transparent',
+                fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
               + Царга
             </button>
           </div>
 
-          {/* Быстрое равномерное размещение нескольких полок */}
-          <div style={{ display:'flex', gap:6, alignItems:'flex-end', marginBottom:14, padding:8,
-            background:'var(--bg2)', borderRadius:'var(--radius)' }}>
-            <div style={{ flex:1 }}>
-              <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Быстро: N полок поровну (секциями)</label>
-              <NumField value={shelfCount} onChange={v=>setShelfCount(Math.max(1,Math.round(v)))} />
-            </div>
-            <button type="button" onClick={() => addShelvesEven(shelfCount)}
-              style={{ padding:'8px 12px', border:'none', borderRadius:'var(--radius)',
-                background:'var(--blue)', color:'white', fontSize:12, cursor:'pointer' }}>
-              Разместить
-            </button>
-          </div>
+          {/* Генератор — общий для полки/стойки/царги: количество, проём, отступы */}
+          {genType && (() => {
+            const isUpright = genType === 'upright'
+            const openings = computeOpenings(genType)
+            const op = openings[genOpeningIdx] || openings[0]
+            const label = genType==='upright' ? 'стойки' : genType==='rail' ? 'царги' : 'полки'
+            return (
+              <div style={{ padding:10, marginBottom:14, background:'var(--bg2)', borderRadius:'var(--radius)',
+                border:'1px solid var(--blue)' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                  <strong style={{ fontSize:13 }}>Добавить {label}</strong>
+                  <button type="button" onClick={() => setGenType(null)}
+                    style={{ background:'none', border:'none', color:'var(--text-hint)', fontSize:16, cursor:'pointer', padding:0 }}>✕</button>
+                </div>
+
+                <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+                  <NumField label="Количество" value={genCount} onChange={v=>setGenCount(Math.max(1,Math.round(v)))} />
+                  <NumField label="Толщина материала" value={genThickness} onChange={setGenThickness} />
+                </div>
+
+                {openings.length > 1 && (
+                  <>
+                    <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:4 }}>В каком проёме размещаем</label>
+                    <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:10 }}>
+                      {openings.map((o, oi) => (
+                        <button key={oi} type="button" onClick={() => setGenOpeningIdx(oi)}
+                          style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                            background: genOpeningIdx===oi ? 'var(--blue)' : 'var(--bg3)',
+                            color: genOpeningIdx===oi ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
+                          {Math.round(o.start)}–{Math.round(o.end)}мм
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {genCount === 1 ? (
+                  <>
+                    <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Отступ внутри проёма от</label>
+                    <div style={{ display:'flex', gap:4, marginBottom:8 }}>
+                      {(isUpright ? [['left','Левого края'],['right','Правого края']] : [['bottom','Низа'],['top','Верха']]).map(([id,lb])=>(
+                        <button key={id} type="button" onClick={() => setGenPosRef(id)}
+                          style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                            background: genPosRef===id?'var(--blue)':'var(--bg3)',
+                            color: genPosRef===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                            {lb}
+                          </button>
+                      ))}
+                    </div>
+                    <NumField label="Расстояние" value={genPos} onChange={setGenPos} />
+                  </>
+                ) : (
+                  <p style={{ fontSize:11, color:'var(--text-hint)', margin:'0 0 8px' }}>
+                    {genCount} шт. разместятся равномерно внутри выбранного проёма.
+                  </p>
+                )}
+
+                <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', margin:'8px 0 4px' }}>
+                  Отступ от края контура (если не на всю {isUpright ? 'высоту' : 'ширину'})
+                </label>
+                <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+                  <NumField label={isUpright?'Снизу':'Слева'} value={genInsetA} onChange={setGenInsetA} />
+                  <NumField label={isUpright?'Сверху':'Справа'} value={genInsetB} onChange={setGenInsetB} />
+                </div>
+
+                <button type="button" onClick={commitLayoutGenerator}
+                  style={{ width:'100%', padding:'9px', border:'none', borderRadius:'var(--radius)',
+                    background:'var(--blue)', color:'white', fontSize:13, fontWeight:500, cursor:'pointer' }}>
+                  Добавить
+                </button>
+              </div>
+            )
+          })()}
 
           {!contour.layout.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет линий разметки</p>}
-          {contour.layout.map((g, i) => (
+          {contour.layout.map((g, i) => {
+            const isUpright = g.kind === 'upright'
+            const total = isUpright ? w : h
+            const posFrom = g.posFrom || (isUpright ? 'left' : 'bottom')
+            const isFar = posFrom === 'top' || posFrom === 'right'
+            const displayPos = isFar ? Math.round(total - (g.pos||0) - (g.thickness||18)) : Math.round(g.pos||0)
+            const setDisplayPos = (v) => {
+              const newPos = isFar ? (total - v - (g.thickness||18)) : v
+              updLayout(i, { pos: Math.max(0, Math.round(newPos)) })
+            }
+            return (
             <CollapsibleItem key={g.id}
               innerRef={el => { layoutItemRefs.current[i] = el }}
               highlighted={highlightLayoutIdx === i}
@@ -2063,9 +2222,20 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
                 {placeLayoutIdx === i ? '👆 Жду нажатия на детали…' : '📍 Указать нажатием на детали'}
               </button>
 
+              <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Отсчитывать позицию от</label>
+              <div style={{ display:'flex', gap:4, marginBottom:8 }}>
+                {(isUpright ? [['left','Левого края'],['right','Правого края']] : [['bottom','Низа'],['top','Верха']]).map(([id,lb])=>(
+                  <button key={id} type="button" onClick={() => updLayout(i,{posFrom:id})}
+                    style={{ flex:1, padding:'6px 4px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                      background: posFrom===id?'var(--blue)':'var(--bg3)',
+                      color: posFrom===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                      {lb}
+                    </button>
+                ))}
+              </div>
+
               <div style={{ display:'flex', gap:8, marginBottom:10 }}>
-                <NumField label={g.kind==='upright' ? 'От левого края' : 'От низа'}
-                  value={g.pos??0} onChange={v=>updLayout(i,{pos:v})} />
+                <NumField label="Позиция" value={displayPos} onChange={setDisplayPos} />
                 <NumField label="Толщина материала" value={g.thickness??defaultThickness} onChange={v=>updLayout(i,{thickness:v})} />
               </div>
 
@@ -2084,7 +2254,8 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
                 </div>
               )}
             </CollapsibleItem>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -2105,22 +2276,31 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
           </div>
           {!contour.drillings.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет присадки</p>}
           {contour.drillings.map((dr, i) => {
-            const attachedGuide = dr.attachTo ? contour.layout.find(g => g.id === dr.attachTo) : null
-            const allowedSides = attachedGuide ? (attachedGuide.kind === 'upright' ? ['top','bottom'] : ['left','right']) : null
+            const attachedIds = Array.isArray(dr.attachTo) ? dr.attachTo : (dr.attachTo ? [dr.attachTo] : [])
+            const attachedGuides = attachedIds.map(id => contour.layout.find(g => g.id === id)).filter(Boolean)
+            const primaryGuide = attachedGuides[0] || null
+            const allowedSides = primaryGuide ? (primaryGuide.kind === 'upright' ? ['top','bottom'] : ['left','right']) : null
             return (
             <CollapsibleItem key={i}
-              title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}${dr.mirrorX||dr.mirrorY ? ' ⇄' : ''}`}
+              title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}${dr.mirrorX||dr.mirrorY ? ' ⇄' : ''}${attachedGuides.length>1 ? ` ×${attachedGuides.length}линии` : ''}`}
               onRemove={() => upd({ drillings: contour.drillings.filter((_,j)=>j!==i) })}>
 
-              {/* Указать нажатием на детали */}
-              <button type="button"
-                onClick={() => setPlaceDrillIdx(placeDrillIdx === i ? null : i)}
-                style={{ width:'100%', padding:'8px', marginBottom:10, borderRadius:'var(--radius)',
-                  border: placeDrillIdx === i ? '1px solid #0E8A6D' : '0.5px dashed var(--border-md)',
-                  background: placeDrillIdx === i ? 'rgba(14,138,109,0.1)' : 'transparent',
-                  fontSize:12, color: placeDrillIdx === i ? '#0E8A6D' : 'var(--text-muted)', cursor:'pointer' }}>
-                {placeDrillIdx === i ? '👆 Жду нажатия на детали…' : '📍 Указать нажатием на детали'}
-              </button>
+              {/* Копировать + Указать нажатием */}
+              <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+                <button type="button" onClick={() => duplicateDrilling(i)}
+                  style={{ flex:1, padding:'8px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)',
+                    background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+                  ⧉ Копировать
+                </button>
+                <button type="button"
+                  onClick={() => setPlaceDrillIdx(placeDrillIdx === i ? null : i)}
+                  style={{ flex:2, padding:'8px', borderRadius:'var(--radius)',
+                    border: placeDrillIdx === i ? '1px solid #0E8A6D' : '0.5px dashed var(--border-md)',
+                    background: placeDrillIdx === i ? 'rgba(14,138,109,0.1)' : 'transparent',
+                    fontSize:12, color: placeDrillIdx === i ? '#0E8A6D' : 'var(--text-muted)', cursor:'pointer' }}>
+                  {placeDrillIdx === i ? '👆 Жду нажатия…' : '📍 Указать нажатием'}
+                </button>
+              </div>
 
               {/* По плоскости */}
               {dr.kind === 'face' && (
@@ -2143,28 +2323,34 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
 
                   {contour.layout.length > 0 && (
                     <>
-                      <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>Привязать к линии разметки</label>
+                      <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:6 }}>
+                        Привязать к линиям разметки (можно несколько)
+                      </label>
                       <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:10 }}>
-                        <button type="button" onClick={() => updDrilling(i,{attachTo:null})}
+                        <button type="button" onClick={() => updDrilling(i,{attachTo:[]})}
                           style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
-                            background: !dr.attachTo ? 'var(--blue)' : 'var(--bg3)',
-                            color: !dr.attachTo ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
+                            background: !attachedIds.length ? 'var(--blue)' : 'var(--bg3)',
+                            color: !attachedIds.length ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
                           Не привязывать
                         </button>
-                        {contour.layout.map((g, gi) => (
-                          <button key={g.id} type="button" onClick={() => updDrilling(i,{attachTo:g.id})}
-                            style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
-                              background: dr.attachTo===g.id ? 'var(--blue)' : 'var(--bg3)',
-                              color: dr.attachTo===g.id ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
-                            {g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #{gi+1}
-                          </button>
-                        ))}
+                        {contour.layout.map((g, gi) => {
+                          const on = attachedIds.includes(g.id)
+                          return (
+                            <button key={g.id} type="button"
+                              onClick={() => updDrilling(i,{attachTo: on ? attachedIds.filter(id=>id!==g.id) : [...attachedIds, g.id]})}
+                              style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
+                                background: on ? 'var(--blue)' : 'var(--bg3)',
+                                color: on ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
+                              {g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #{gi+1}
+                            </button>
+                          )
+                        })}
                       </div>
-                      {dr.attachTo && (
+                      {attachedIds.length > 0 && (
                         <div style={{ display:'flex', gap:6, alignItems:'flex-end' }}>
                           <NumField label="Зазор от линии" value={dr.gap??0} onChange={v=>updDrilling(i,{gap:v})} />
                           <div style={{ display:'flex', gap:4 }}>
-                            {(attachedGuide?.kind === 'upright'
+                            {(primaryGuide?.kind === 'upright'
                               ? [['pos','Вправо'],['neg','Влево']]
                               : [['pos','Вверх'],['neg','Вниз']]
                             ).map(([id,label])=>(
