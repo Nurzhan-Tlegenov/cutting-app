@@ -1552,17 +1552,20 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
   }
 
   // Присадка (сверление)
+  const makeDrillId = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2,6)
   const addDrilling = (kind) => {
     if (kind === 'face') {
       upd({ drillings: [{
+        id: makeDrillId(),
         kind: 'face', face: 'both', d: 8, depth: 13,
         sides: [], offsets: {}, attachTo: [],
         row: false, rowDir: 'x', rowStep: 32, rowCount: 2,
       }, ...contour.drillings] })
     } else {
       upd({ drillings: [{
+        id: makeDrillId(),
         kind: 'edge', edgeSide: 'left', alongFrom: 'start',
-        offsetAlong: 50, offsetFace: defaultThickness / 2, d: 8, depth: 35,
+        offsetAlong: 50, offsetFace: defaultThickness / 2, d: 5, depth: 35,
         row: false, rowStep: 32, rowCount: 2,
       }, ...contour.drillings] })
     }
@@ -1573,7 +1576,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
     upd({ drillings: ds })
   }
   const duplicateDrilling = (i) => {
-    upd({ drillings: [{ ...contour.drillings[i] }, ...contour.drillings] })
+    upd({ drillings: [{ ...contour.drillings[i], id: makeDrillId() }, ...contour.drillings] })
   }
 
   // Разместить присадку нажатием на детали (визуально, без ввода цифр)
@@ -2270,11 +2273,15 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
               const newPos = isFar ? (total - v - (g.thickness||18)) : v
               updLayout(i, { pos: Math.max(0, Math.round(newPos)) })
             }
+            // Номер по физическому порядку от начала детали (0,0 — левый нижний угол),
+            // а не по порядку создания — иначе номера скачут при добавлении новых линий
+            const sameKind = contour.layout.filter(x => x.kind === g.kind).sort((a,b)=>(a.pos||0)-(b.pos||0))
+            const orderNum = sameKind.findIndex(x => x.id === g.id) + 1
             return (
             <CollapsibleItem key={g.id}
               innerRef={el => { layoutItemRefs.current[i] = el }}
               highlighted={highlightLayoutIdx === i}
-              title={`${g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #${i+1} · ${Math.round(g.pos||0)}мм`}
+              title={`${g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #${orderNum} · ${Math.round(g.pos||0)}мм`}
               onRemove={() => removeLayout(i)}>
 
               <button type="button"
@@ -2345,7 +2352,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
             const primaryGuide = attachedGuides[0] || null
             const allowedSides = primaryGuide ? (primaryGuide.kind === 'upright' ? ['top','bottom'] : ['left','right']) : null
             return (
-            <CollapsibleItem key={i}
+            <CollapsibleItem key={dr.id || i}
               title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}${dr.mirrorX||dr.mirrorY ? ' ⇄' : ''}${attachedGuides.length>1 ? ` ×${attachedGuides.length}линии` : ''}`}
               onRemove={() => upd({ drillings: contour.drillings.filter((_,j)=>j!==i) })}>
 
@@ -2399,13 +2406,15 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
                         </button>
                         {contour.layout.map((g, gi) => {
                           const on = attachedIds.includes(g.id)
+                          const sameKindG = contour.layout.filter(x => x.kind === g.kind).sort((a,b)=>(a.pos||0)-(b.pos||0))
+                          const gOrderNum = sameKindG.findIndex(x => x.id === g.id) + 1
                           return (
                             <button key={g.id} type="button"
                               onClick={() => updDrilling(i,{attachTo: on ? attachedIds.filter(id=>id!==g.id) : [...attachedIds, g.id]})}
                               style={{ padding:'5px 10px', borderRadius:20, fontSize:11, border:'none',
                                 background: on ? 'var(--blue)' : 'var(--bg3)',
                                 color: on ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
-                              {g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #{gi+1}
+                              {g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #{gOrderNum}
                             </button>
                           )
                         })}
@@ -2506,7 +2515,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness }) {
                     <NumField label="От пласти" value={dr.offsetFace??(defaultThickness/2)} onChange={v=>updDrilling(i,{offsetFace:v})} />
                   </div>
                   <div style={{ display:'flex', gap:8, marginBottom:10 }}>
-                    <NumField label="Диаметр D" value={dr.d??8} onChange={v=>updDrilling(i,{d:v})} />
+                    <NumField label="Диаметр D" value={dr.d??5} onChange={v=>updDrilling(i,{d:v})} />
                     <NumField label="Глубина" value={dr.depth??35} onChange={v=>updDrilling(i,{depth:v})} />
                   </div>
 
