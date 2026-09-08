@@ -1,5 +1,5 @@
 /**
- * Нестинг — Maximal Rectangles, multi-strategy поиск + компакция
+ * Нестинг — две конкурирующие "семьи" алгоритмов + multi-strategy поиск + компакция
  *
  * МЕБЕЛЬНЫЙ СТАНДАРТ:
  *   Лист 2750×1830: 2750=Y (вертикаль), 1830=X (горизонталь)
@@ -10,6 +10,33 @@
  *   Лист: usableX = sheetL(2750) - отступы по X? НЕТ:
  *     sheetL=2750=Y → usableY = sheetL - marginT - marginB
  *     sheetW=1830=X → usableX = sheetW - marginL - marginR
+ *
+ * ДВЕ СЕМЬИ АЛГОРИТМОВ РАЗМЕЩЕНИЯ:
+ *   Все детали в проекте — прямоугольники (это не нестинг произвольных фигур,
+ *   а классическая rectangle bin packing задача). Для неё существуют два
+ *   классических подхода — они конкурируют между собой на равных условиях
+ *   (тот же multi-strategy поиск + генетический алгоритм), и на выходе выбирается тот,
+ *   что дал лучший результат именно для конкретного набора деталей:
+ *
+ *   1. MaxRects ('bssf'/'baf') — список свободных прямоугольников может
+ *      перекрываться, после каждой вставки разбивается на 4 максимальных
+ *      прямоугольника-остатка. Гибче геометрически, но сильнее фрагментирует
+ *      свободное место на узкие бесполезные полосы (отсюда prune+merge).
+ *
+ *   2. Guillotine ('g-bssf'/'g-baf') — после вставки остаток режется РОВНО
+ *      ОДНИМ разрезом на 2 прямоугольника (Split Shorter Leftover Axis,
+ *      как в Jukka Jylänki, "A Thousand Ways to Pack the Bin", 2010 —
+ *      открытая, свободно доступная работа по именно этой задаче, есть
+ *      референсная реализация на GitHub, MIT-лицензия). Меньше фрагментации,
+ *      значительно дешевле по вычислениям на одну попытку — при том же
+ *      бюджете времени успевает исследовать на порядок больше вариантов
+ *      порядка деталей через генетический алгоритм, что на практике часто даёт
+ *      более чистый и предсказуемый остаток на последнем листе.
+ *
+ *   (Для сравнения: SVGnest/Deepnest решают более общую задачу — нестинг
+ *   ПРОИЗВОЛЬНЫХ фигур через No-Fit-Polygon + генетический алгоритм. Для
+ *   чисто прямоугольных деталей это избыточно сложно, плюс лицензия AGPL
+ *   плохо совместима с коммерческим SaaS без раскрытия исходников.)
  *
  * ЦЕЛЬ ОПТИМИЗАЦИИ — ФРОНТ-ЗАГРУЗКА:
  *   Важно не среднее % использования по всем листам, а чтобы ПЕРВЫЕ листы
@@ -23,13 +50,14 @@
  *
  * ПОЧЕМУ MULTI-STRATEGY (и почему это не мгновенно):
  *   Один порядок деталей + одна эвристика выбора места — самый слабый
- *   вариант MaxRects, результат сильно зависит от порядка подачи деталей.
- *   Здесь прогоняется несколько структурных порядков (по площади/периметру/
- *   стороне) и обеих эвристик размещения (BSSF, BAF), а также набор случайных
- *   перестановок порядка — и для каждой попытки выполняется компакция.
- *   Выбирается результат с наименьшим числом листов, при равенстве —
- *   с наибольшим % использования материала. Время расчёта сознательно
- *   принесено в жертву плотности — это не "мгновенный" алгоритм.
+ *   вариант packing-алгоритма, результат сильно зависит от порядка подачи
+ *   деталей. Здесь прогоняется несколько структурных порядков (по площади/
+ *   периметру/стороне) и все 4 комбинации семья×эвристика (MaxRects/Guillotine
+ *   × BSSF/BAF), а также набор случайных перестановок порядка — и для каждой
+ *   попытки выполняется компакция. Выбирается результат с наименьшим числом
+ *   листов, при равенстве — с наименьшим остатком на последнем листе. Время
+ *   расчёта сознательно принесено в жертву плотности — это не "мгновенный"
+ *   алгоритм.
  *
  * ЗАЩИТА МЕЛКИХ ДЕТАЛЕЙ ОТ КРАЯ ЛИСТА (для фрезера):
  *   Мелкие/узкие детали держатся на столе хуже крупных — риск сдвига при
@@ -87,11 +115,13 @@ export async function runNesting({
     (a, b) => Math.max(b.pw, b.ph) - Math.max(a.pw, a.ph),   // по убыванию максимальной стороны
     (a, b) => Math.min(a.pw, a.ph) - Math.min(b.pw, b.ph),   // по возрастанию минимальной стороны
   ]
-  const scoringModes = ['bssf', 'baf']
+  const scoringModes = ['bssf', 'baf', 'g-bssf', 'g-baf'] // MaxRects×{BSSF,BAF} и Guillotine×{BSSF,BAF}
   const RANDOM_ATTEMPTS = 150 // случайные перестановки порядка — время не критично, важна плотность
 
   let best = null
   let bestOrder = null
+  const bestPerMode = {}     // лучший порядок ОТДЕЛЬНО по каждому режиму — не только глобальный лидер
+  const bestStatPerMode = {}
 
   const packAndEval = (order, mode) => {
     let sheets = packAttempt(order, mode, direction, usableX, usableY)
@@ -103,6 +133,10 @@ export async function runNesting({
   const tryAttempt = (order, mode) => {
     const result = packAndEval(order, mode)
     if (!best || better(result.stat, best.stat)) { best = result; bestOrder = { order, mode } }
+    if (!bestStatPerMode[mode] || better(result.stat, bestStatPerMode[mode])) {
+      bestStatPerMode[mode] = result.stat
+      bestPerMode[mode] = order
+    }
   }
 
   for (const sortFn of sortStrategies) {
@@ -115,44 +149,110 @@ export async function runNesting({
     if (i % 20 === 0) await new Promise(r => setTimeout(r, 0))
   }
 
-  // Направленный локальный поиск (hill climbing) поверх лучшего найденного порядка.
-  // Случайные перезапуски "с нуля" быстро выходят на плато и дальше не улучшаются —
-  // небольшие направленные пертурбации уже хорошего решения находят улучшения там,
-  // где чистая случайность не справляется.
+  // Генетический алгоритм поверх популяции вариантов порядка деталей.
+  // В отличие от одиночного hill climbing (одна "цепочка" с точечными
+  // мутациями), здесь целая популяция решений эволюционирует поколение
+  // за поколением: турнирный отбор выбирает более удачных "родителей",
+  // order crossover комбинирует их порядок деталей в потомка (наследуя
+  // фрагменты структуры от обоих родителей, а не просто перемешивая),
+  // и небольшая мутация поддерживает разнообразие популяции. Такой подход
+  // обычно исследует пространство решений эффективнее одной случайно
+  // блуждающей цепочки и меньше подвержен застреванию в локальном плато.
   //
-  // Бюджет по ВРЕМЕНИ, а не по фиксированному числу итераций: на маленьком заказе
-  // (мало деталей) каждая попытка укладки дешёвая — успеет отработать намного
-  // больше итераций за то же время. На большом заказе — меньше итераций, но зато
-  // они не растянутся на неадекватное время. Плюс "рестарт при застревании":
-  // если долго нет улучшений, пробуем более сильную (не точечную) пертурбацию,
-  // чтобы выпрыгнуть из локального плато, а не топтаться на месте до конца бюджета.
-  const HILL_CLIMB_BUDGET_MS = Math.max(0, Number(optimizeSeconds) || 0) * 1000 // из настроек раскроя, 0 = без hill climbing
-  const STUCK_THRESHOLD = 400 // итераций без улучшения — сигнал, что пора тряхнуть сильнее
-  const YIELD_EVERY = 20 // раз в столько итераций отдаём управление браузеру — иначе вкладка "подвиснет" на весь расчёт
+  // ВАЖНО: бюджет времени делится ПОРОВНУ между всеми 4 режимами (MaxRects/Guillotine
+  // × BSSF/BAF), а не достаётся целиком тому, кто случайно выиграл короткую
+  // начальную фазу. Guillotine на короткой дистанции не обязательно лучше MaxRects —
+  // его реальное преимущество (на порядок дешевле каждая попытка → на порядок больше
+  // поколений за то же время) проявляется только на ДЛИННОЙ дистанции.
+  //
+  // Бюджет по ВРЕМЕНИ, а не по фиксированному числу поколений: на маленьком заказе
+  // (мало деталей) каждая особь дешевле оценить — успеет отработать намного
+  // больше поколений за то же время.
+  const HILL_CLIMB_BUDGET_MS = Math.max(0, Number(optimizeSeconds) || 0) * 1000 // из настроек раскроя, 0 = без доп. оптимизации
+  const YIELD_EVERY_GEN = 2 // раз в столько поколений отдаём управление браузеру
+  const BUDGET_PER_MODE_MS = HILL_CLIMB_BUDGET_MS / scoringModes.length
 
-  let cur = { order: bestOrder.order.slice(), mode: bestOrder.mode, ...packAndEval(bestOrder.order, bestOrder.mode) }
-  let sinceImprovement = 0
-  const startTime = Date.now()
-  let iterations = 0
-  while (Date.now() - startTime < HILL_CLIMB_BUDGET_MS) {
-    iterations++
-    const strong = sinceImprovement >= STUCK_THRESHOLD
-    const candOrder = perturbOrder(cur.order, strong)
-    const cand = packAndEval(candOrder, cur.mode)
-    if (better(cand.stat, cur.stat)) {
-      cur = { order: candOrder, mode: cur.mode, ...cand }
-      sinceImprovement = 0
-      if (better(cur.stat, best.stat)) best = cur
-    } else {
-      sinceImprovement++
-      if (strong) sinceImprovement = 0 // после сильной встряски отсчёт заново, не застреваем в бесконечных сильных прыжках подряд
+  const POP_SIZE = 16
+  const ELITE_COUNT = 2
+  const TOURNAMENT_SIZE = 3
+  const MUTATION_RATE = 0.35
+
+  for (const mode of scoringModes) {
+    // Начальная популяция: лучший порядок, уже найденный для ЭТОГО режима на
+    // структурной/случайной фазе, плюс случайные перестановки для разнообразия.
+    const seedOrder = bestPerMode[mode] || shuffle(basePieces.slice())
+    let population = [seedOrder.slice()]
+    while (population.length < POP_SIZE) population.push(shuffle(basePieces.slice()))
+
+    let evaluated = population.map(order => ({ order, ...packAndEval(order, mode) }))
+    evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
+    if (better(evaluated[0].stat, best.stat)) best = evaluated[0]
+
+    const startTime = Date.now()
+    let gen = 0
+    while (Date.now() - startTime < BUDGET_PER_MODE_MS) {
+      gen++
+      // Элитизм: лучшие особи переходят в следующее поколение без изменений.
+      const nextOrders = evaluated.slice(0, ELITE_COUNT).map(e => e.order)
+      while (nextOrders.length < POP_SIZE) {
+        const parentA = tournamentSelect(evaluated, TOURNAMENT_SIZE)
+        const parentB = tournamentSelect(evaluated, TOURNAMENT_SIZE)
+        let child = orderCrossover(parentA.order, parentB.order)
+        if (Math.random() < MUTATION_RATE) child = perturbOrder(child, false)
+        nextOrders.push(child)
+      }
+      evaluated = nextOrders.map(order => ({ order, ...packAndEval(order, mode) }))
+      evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
+      if (better(evaluated[0].stat, best.stat)) best = evaluated[0]
+      // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт.
+      if (gen % YIELD_EVERY_GEN === 0) await new Promise(r => setTimeout(r, 0))
     }
-    // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт —
-    // без этого долгий синхронный цикл может показать "Страница не отвечает".
-    if (iterations % YIELD_EVERY === 0) await new Promise(r => setTimeout(r, 0))
   }
 
   return { sheets: best.sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+}
+
+// Турнирный отбор: берём k случайных особей из популяции, побеждает лучшая
+// по тому же критерию better(), что использует и весь остальной алгоритм.
+function tournamentSelect(evaluated, k) {
+  let winner = null
+  for (let i = 0; i < k; i++) {
+    const cand = evaluated[Math.floor(Math.random() * evaluated.length)]
+    if (!winner || better(cand.stat, winner.stat)) winner = cand
+  }
+  return winner
+}
+
+// Order Crossover (OX) — стандартный метод скрещивания для представлений-перестановок
+// (задачи типа TSP, cutting-stock). Берём случайный отрезок у родителя A как есть,
+// остальные позиции заполняем генами родителя B по порядку, пропуская уже занятые id.
+// Так ребёнок наследует и относительный порядок из A, и из B, а не просто их смесь.
+function orderCrossover(parentA, parentB) {
+  const n = parentA.length
+  let i = Math.floor(Math.random() * n)
+  let j = Math.floor(Math.random() * n)
+  if (i > j) [i, j] = [j, i]
+
+  const child = new Array(n).fill(null)
+  const usedIds = new Set()
+  for (let k = i; k <= j; k++) { child[k] = parentA[k]; usedIds.add(parentA[k].id) }
+
+  const emptyPositions = []
+  for (let k = 0; k < n; k++) {
+    const pos = (j + 1 + k) % n
+    if (pos < i || pos > j) emptyPositions.push(pos)
+  }
+
+  let ptr = 0
+  for (let k = 0; k < n; k++) {
+    const gene = parentB[(j + 1 + k) % n]
+    if (!usedIds.has(gene.id)) {
+      child[emptyPositions[ptr]] = gene
+      usedIds.add(gene.id)
+      ptr++
+    }
+  }
+  return child
 }
 
 function shuffle(arr) {
@@ -223,18 +323,29 @@ function rotatePiece(p) {
 }
 
 // Один полный проход укладки: заданный порядок деталей + заданная эвристика выбора места.
+// mode: 'bssf'/'baf' → семья MaxRects; 'g-bssf'/'g-baf' → семья Guillotine.
 function packAttempt(sortedPieces, mode, direction, usableX, usableY) {
+  const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
+  const scoreMode = mode.includes('baf') ? 'baf' : 'bssf'
+
+  const place = (sheet, piece) => {
+    const result = family === 'guillotine'
+      ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode)
+      : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode)
+    if (!result) return false
+    sheet.placed.push(result)
+    if (family === 'guillotine') { splitGuillotine(sheet, result); delete result._freeRectIdx }
+    else { split(sheet, result); prune(sheet) }
+    return true
+  }
+
   const sheets = []
   for (const piece of sortedPieces) {
     let placed = false
-    for (const sheet of sheets) {
-      const result = chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, mode)
-      if (result) { sheet.placed.push(result); split(sheet, result); prune(sheet); placed = true; break }
-    }
+    for (const sheet of sheets) { if (place(sheet, piece)) { placed = true; break } }
     if (!placed) {
-      const sheet = { index: sheets.length, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
-      const result = chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, mode)
-      if (result) { sheet.placed.push(result); split(sheet, result); prune(sheet) }
+      const sheet = { index: sheets.length, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }], family }
+      place(sheet, piece)
       sheets.push(sheet)
     }
   }
@@ -242,9 +353,9 @@ function packAttempt(sortedPieces, mode, direction, usableX, usableY) {
 }
 
 // Компакция: пытаемся перенести детали с последних листов на более ранние,
-// если там реально есть место в уже посчитанных freeRects. Без повторной
-// ротации (переиспользуем уже выбранную ориентацию w×h) — это упрощение,
-// но покрывает основную часть выигрыша при минимуме сложности.
+// если там реально есть место в уже посчитанных freeRects. Учитывает семью
+// алгоритма целевого листа (у Guillotine и MaxRects разная структура
+// freeRects и разный способ разбиения остатка после вставки).
 function compactPass(sheets, direction, usableX, usableY) {
   for (let i = sheets.length - 1; i >= 1; i--) {
     const sheet = sheets[i]
@@ -258,15 +369,25 @@ function compactPass(sheets, direction, usableX, usableY) {
       for (let j = 0; j < i; j++) {
         const target = sheets[j]
         for (const o of orientations) {
-          const spot = fitFixed(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall)
-          if (spot) {
-            const placed = o.flip
-              ? { ...piece, x: spot.x, y: spot.y, w: o.w, h: o.h, rotated: !piece.rotated,
-                  edgeTop: piece.edgeLeft, edgeRight: piece.edgeTop, edgeBottom: piece.edgeRight, edgeLeft: piece.edgeBottom }
-              : { ...piece, x: spot.x, y: spot.y }
-            target.placed.push(placed); split(target, placed); prune(target)
-            moved = true
-            break outer
+          const makePlaced = () => o.flip
+            ? { ...piece, x: 0, y: 0, w: o.w, h: o.h, rotated: !piece.rotated,
+                edgeTop: piece.edgeLeft, edgeRight: piece.edgeTop, edgeBottom: piece.edgeRight, edgeLeft: piece.edgeBottom }
+            : { ...piece, x: 0, y: 0 }
+
+          if (target.family === 'guillotine') {
+            const spot = fitFixedGuillotine(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall)
+            if (spot) {
+              const placed = { ...makePlaced(), x: spot.x, y: spot.y, _freeRectIdx: spot.idx }
+              target.placed.push(placed); splitGuillotine(target, placed); delete placed._freeRectIdx
+              moved = true; break outer
+            }
+          } else {
+            const spot = fitFixed(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall)
+            if (spot) {
+              const placed = { ...makePlaced(), x: spot.x, y: spot.y }
+              target.placed.push(placed); split(target, placed); prune(target)
+              moved = true; break outer
+            }
           }
         }
       }
@@ -403,6 +524,112 @@ function split(sheet, p) {
     if (p.y + p.h < r.y + r.h) out.push({ x: r.x, y: p.y + p.h, w: r.w, h: r.y + r.h - (p.y + p.h) })
   }
   sheet.freeRects = out
+}
+
+// === Guillotine-семья (Jylänki, "A Thousand Ways to Pack the Bin", 2010) ===
+// В отличие от MaxRects, свободные прямоугольники никогда не перекрываются —
+// после вставки остаток режется РОВНО ОДНИМ разрезом на 2 части. Дешевле
+// считать (нет merge/prune), меньше фрагментация на узкие полосы.
+
+function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mode) {
+  let best = null, bestScore = Infinity
+  const oris = [{ pw: piece.pw, ph: piece.ph, rotated: false }]
+  if (piece.rotatable && piece.pw !== piece.ph)
+    oris.push({ pw: piece.ph, ph: piece.pw, rotated: true })
+
+  freeRects.forEach((rect, idx) => {
+    for (const o of oris) {
+      if (o.pw > rect.w || o.ph > rect.h) continue
+      const short = Math.min(rect.w - o.pw, rect.h - o.ph)
+      const long_ = Math.max(rect.w - o.pw, rect.h - o.ph)
+      const leftoverArea = rect.w * rect.h - o.pw * o.ph
+      let score
+      if (direction === 'along_y') {
+        score = rect.x * 100000 + rect.y * 100 + short
+      } else if (direction === 'along_x') {
+        score = rect.y * 100000 + rect.x * 100 + short
+      } else if (mode === 'baf') {
+        score = leftoverArea
+      } else {
+        score = short * 1000 + long_
+      }
+      if (direction === 'along_y' && o.ph >= o.pw) score -= 50
+      if (direction === 'along_x' && o.pw >= o.ph) score -= 50
+
+      if (piece.isSmall) {
+        let borderTouch = 0
+        if (rect.x <= EPS) borderTouch++
+        if (rect.y <= EPS) borderTouch++
+        if (Math.abs(rect.x + o.pw - usableX) <= EPS) borderTouch++
+        if (Math.abs(rect.y + o.ph - usableY) <= EPS) borderTouch++
+        score += borderTouch * BORDER_PENALTY
+        if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
+      }
+
+      if (score < bestScore) {
+        bestScore = score
+        const rot = o.rotated
+        best = {
+          id: piece.id, detailIndex: piece.detailIndex,
+          label: piece.label, prefix: piece.prefix,
+          x: rect.x, y: rect.y,
+          w: o.pw, h: o.ph,
+          origX: rot ? piece.origY : piece.origX,
+          origY: rot ? piece.origX : piece.origY,
+          rotated: rot,
+          isSmall: piece.isSmall,
+          rotatable: piece.rotatable,
+          edgeTop:    rot ? piece.edgeLeft   : piece.edgeTop,
+          edgeRight:  rot ? piece.edgeTop    : piece.edgeRight,
+          edgeBottom: rot ? piece.edgeRight  : piece.edgeBottom,
+          edgeLeft:   rot ? piece.edgeBottom : piece.edgeLeft,
+          _freeRectIdx: idx,
+        }
+      }
+    }
+  })
+  return best
+}
+
+// Split Shorter Leftover Axis (SLAS): режем остаток вдоль оси с МЕНЬШИМ
+// запасом — так обе части остатка получаются пропорциональнее и реже
+// вырождаются в бесполезные узкие полоски.
+function splitGuillotine(sheet, p) {
+  const idx = p._freeRectIdx
+  const r = sheet.freeRects[idx]
+  sheet.freeRects.splice(idx, 1)
+  const rightW = r.w - p.w, bottomH = r.h - p.h
+  if (rightW < bottomH) {
+    if (rightW > 0.01) sheet.freeRects.push({ x: r.x + p.w, y: r.y, w: rightW, h: p.h })
+    if (bottomH > 0.01) sheet.freeRects.push({ x: r.x, y: r.y + p.h, w: r.w, h: bottomH })
+  } else {
+    if (rightW > 0.01) sheet.freeRects.push({ x: r.x + p.w, y: r.y, w: rightW, h: r.h })
+    if (bottomH > 0.01) sheet.freeRects.push({ x: r.x, y: r.y + p.h, w: p.w, h: bottomH })
+  }
+}
+
+// Guillotine-аналог fitFixed (для компакции) — тоже возвращает индекс
+// свободного прямоугольника, чтобы компакция могла вызвать splitGuillotine.
+function fitFixedGuillotine(freeRects, w, h, usableX, usableY, isSmall) {
+  let best = null, bestScore = Infinity, bestIdx = -1
+  freeRects.forEach((rect, idx) => {
+    if (w > rect.w || h > rect.h) return
+    const short = Math.min(rect.w - w, rect.h - h)
+    const long_ = Math.max(rect.w - w, rect.h - h)
+    let score = short * 1000 + long_
+    if (isSmall) {
+      let borderTouch = 0
+      if (rect.x <= EPS) borderTouch++
+      if (rect.y <= EPS) borderTouch++
+      if (Math.abs(rect.x + w - usableX) <= EPS) borderTouch++
+      if (Math.abs(rect.y + h - usableY) <= EPS) borderTouch++
+      score += borderTouch * BORDER_PENALTY
+      if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
+    }
+    if (score < bestScore) { bestScore = score; best = { x: rect.x, y: rect.y }; bestIdx = idx }
+  })
+  if (!best) return null
+  return { x: best.x, y: best.y, idx: bestIdx }
 }
 
 function prune(sheet) {
