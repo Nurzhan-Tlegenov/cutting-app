@@ -324,6 +324,8 @@ function getDrillPoints(dr, panelW, panelH, layout) {
 // Считаем расстояния ЖИВЬЁМ из текущей позиции точки — выноска всегда точна и всегда
 // отображается, независимо от того, как отверстие было установлено (пальцем или цифрами).
 // Расстояние — до ЦЕНТРА отверстия (как и хранится в offsets).
+// Рисует только линии-выноски, подписи возвращает — чтобы их развести с остальными
+// подписями/маркерами на канвасе в единой системе.
 function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY) {
   const sides = dr.sides || []
   const xSide = sides.includes('left') ? 'left' : sides.includes('right') ? 'right' : (dataX <= w/2 ? 'left' : 'right')
@@ -333,18 +335,18 @@ function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY) {
 
   ctx.save()
   ctx.strokeStyle = 'rgba(24,95,165,0.6)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
-  ctx.font = '9px sans-serif'; ctx.fillStyle = '#185FA5'
 
   const exX = xSide === 'left' ? ox : ox + w * sc
   ctx.beginPath(); ctx.moveTo(exX, py); ctx.lineTo(px, py); ctx.stroke()
-  ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
-  ctx.fillText(Math.round(distX), (exX + px) / 2, py - 3)
 
   const exY = ySide === 'bottom' ? oy + dh : oy
   ctx.beginPath(); ctx.moveTo(px, exY); ctx.lineTo(px, py); ctx.stroke()
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-  ctx.fillText(Math.round(distY), px + 4, (exY + py) / 2)
   ctx.restore()
+
+  return [
+    { x: (exX + px) / 2, y: py - 6, text: String(Math.round(distX)), color: '#185FA5' },
+    { x: px + 8, y: (exY + py) / 2, text: String(Math.round(distY)), color: '#185FA5' },
+  ]
 }
 
 // ─── Выноска размера для присадки по торцу (вдоль торца + глубина) ───────────
@@ -352,7 +354,7 @@ function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY) {
 function drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY, dxDir, dyDir, halfD, depthPx) {
   ctx.save()
   ctx.strokeStyle = 'rgba(123,79,201,0.6)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
-  ctx.font = '9px sans-serif'; ctx.fillStyle = '#7B4FC9'
+  const labels = []
 
   if (dxDir !== 0) {
     // Левый/правый торец — размер "вдоль торца" измеряется по Y, от ближнего угла, до ЦЕНТРА отверстия
@@ -360,36 +362,27 @@ function drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY, dxD
     const fromBottom = distBottom <= distTop
     const cornerY = fromBottom ? oy + dh : oy
     ctx.beginPath(); ctx.moveTo(px, cornerY); ctx.lineTo(px, py); ctx.stroke()
-    ctx.textAlign = dxDir > 0 ? 'left' : 'right'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(Math.round(fromBottom ? distBottom : distTop), px + (dxDir > 0 ? 6 : -6), (cornerY + py) / 2)
+    labels.push({ x: px + (dxDir > 0 ? 9 : -9), y: (cornerY + py) / 2, text: String(Math.round(fromBottom ? distBottom : distTop)), color: '#7B4FC9' })
   } else {
     // Верхний/нижний торец — размер "вдоль торца" измеряется по X, от ближнего угла, до ЦЕНТРА отверстия
     const distLeft = dataX, distRight = w - dataX
     const fromLeft = distLeft <= distRight
     const cornerX = fromLeft ? ox : ox + w * sc
     ctx.beginPath(); ctx.moveTo(cornerX, py); ctx.lineTo(px, py); ctx.stroke()
-    ctx.textAlign = 'center'
-    ctx.textBaseline = dyDir < 0 ? 'top' : 'bottom'
-    ctx.fillText(Math.round(fromLeft ? distLeft : distRight), (cornerX + px) / 2, py + (dyDir < 0 ? 6 : -6))
+    labels.push({ x: (cornerX + px) / 2, y: py + (dyDir < 0 ? 9 : -9), text: String(Math.round(fromLeft ? distLeft : distRight)), color: '#7B4FC9' })
   }
 
   // Выноска глубины — вдоль направления сверления, до внутреннего конца
   const ix = px + dxDir * depthPx, iy = py - dyDir * depthPx
-  ctx.strokeStyle = 'rgba(123,79,201,0.6)'
   ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ix, iy); ctx.stroke()
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  ctx.save()
-  ctx.translate((px + ix) / 2, (py + iy) / 2)
-  if (dxDir === 0) ctx.rotate(Math.PI / 2)
-  ctx.fillStyle = 'rgba(255,255,255,0.85)'
+  ctx.restore()
+
   const depthLabel = String(Math.round((dr.depth || 15)))
-  const tw = ctx.measureText(depthLabel).width
-  ctx.fillRect(-tw/2-2, -6, tw+4, 12)
-  ctx.fillStyle = '#7B4FC9'
-  ctx.fillText(depthLabel, 0, 0)
-  ctx.restore()
-  ctx.restore()
+  labels.push({
+    x: (px + ix) / 2, y: (py + iy) / 2, text: depthLabel, color: '#7B4FC9',
+    angle: dxDir === 0 ? Math.PI / 2 : 0,
+  })
+  return labels
 }
 
 // ─── Конвертировать прямоугольный вырез в вершины ────────────────────────────
@@ -495,6 +488,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
+    // Единая система размещения подписей: все текстовые размеры/названия собираются
+    // сюда и в конце разводятся между собой И от маркеров/точек — чтобы ничего
+    // не перекрывалось и не читалось поверх друг друга.
+    const allLabels = []   // { x, y, text, color, bold?, angle? }
+    const obstacles = []   // { x, y, r } — маркеры/точки, от которых подписи отталкиваются
+
     ctx.clearRect(0, 0, CSS_W, CSS_H)
 
     // Сетка фона
@@ -518,25 +517,22 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     if (edges.top || edges.bottom || edges.left || edges.right) {
       ctx.save()
       ctx.strokeStyle = '#2FA84F'; ctx.lineWidth = 4; ctx.lineCap = 'round'
-      ctx.font = 'bold 9px sans-serif'; ctx.fillStyle = '#1F7A38'
       const mk = (val) => val && val !== 'default' ? val : 'кромка'
       if (edges.bottom) {
         ctx.beginPath(); ctx.moveTo(ox+2, oy+dh); ctx.lineTo(ox+dw-2, oy+dh); ctx.stroke()
-        ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(mk(edges.bottom), ox+dw/2, oy+dh+4)
+        allLabels.push({ x: ox+dw/2, y: oy+dh+10, text: mk(edges.bottom), color: '#1F7A38', bold: true })
       }
       if (edges.top) {
         ctx.beginPath(); ctx.moveTo(ox+2, oy); ctx.lineTo(ox+dw-2, oy); ctx.stroke()
-        ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(mk(edges.top), ox+dw/2, oy-4)
+        allLabels.push({ x: ox+dw/2, y: oy-10, text: mk(edges.top), color: '#1F7A38', bold: true })
       }
       if (edges.left) {
         ctx.beginPath(); ctx.moveTo(ox, oy+2); ctx.lineTo(ox, oy+dh-2); ctx.stroke()
-        ctx.save(); ctx.translate(ox-6, oy+dh/2); ctx.rotate(-Math.PI/2)
-        ctx.textAlign='center'; ctx.textBaseline='bottom'; ctx.fillText(mk(edges.left), 0, 0); ctx.restore()
+        allLabels.push({ x: ox-10, y: oy+dh/2, text: mk(edges.left), color: '#1F7A38', bold: true, angle: -Math.PI/2 })
       }
       if (edges.right) {
         ctx.beginPath(); ctx.moveTo(ox+dw, oy+2); ctx.lineTo(ox+dw, oy+dh-2); ctx.stroke()
-        ctx.save(); ctx.translate(ox+dw+6, oy+dh/2); ctx.rotate(-Math.PI/2)
-        ctx.textAlign='center'; ctx.textBaseline='top'; ctx.fillText(mk(edges.right), 0, 0); ctx.restore()
+        allLabels.push({ x: ox+dw+10, y: oy+dh/2, text: mk(edges.right), color: '#1F7A38', bold: true, angle: -Math.PI/2 })
       }
       ctx.restore()
     }
@@ -580,9 +576,6 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     })
 
     // Разметка — полки/стойки/царги (вспомогательные линии для позиционирования присадки)
-    // Подписи собираем отдельно и разводим, если несколько линий расположены близко —
-    // иначе текст соседних полок/стоек накладывается друг на друга и становится нечитаемым
-    const shelfLabels = [], uprightLabels = []
     ;(contour.layout || []).forEach((g, gi) => {
       const thick = g.thickness || 18
       const colors = g.kind === 'upright'
@@ -612,33 +605,8 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       }
       ctx.setLineDash([])
       const text = `${colors.label} ${Math.round(g.pos||0)}/${Math.round(thick)}`
-      if (g.kind === 'upright') uprightLabels.push({ x: bx+3, y: oy+12, text, color: colors.stroke, bold: isHi })
-      else shelfLabels.push({ x: bx+3, y: by+bh/2, text, color: colors.stroke, bold: isHi })
-    })
-
-    // Разводим подписи полок/царг по вертикали (если ближе минимального шага — раздвигаем)
-    const LABEL_GAP_Y = 11
-    shelfLabels.sort((a,b) => a.y - b.y)
-    for (let k = 1; k < shelfLabels.length; k++) {
-      if (shelfLabels[k].y - shelfLabels[k-1].y < LABEL_GAP_Y) {
-        shelfLabels[k].y = shelfLabels[k-1].y + LABEL_GAP_Y
-      }
-    }
-    // Разводим подписи стоек по горизонтали (по ширине текста)
-    uprightLabels.sort((a,b) => a.x - b.x)
-    for (let k = 1; k < uprightLabels.length; k++) {
-      const needW = uprightLabels[k-1].text.length * 5.2 + 8
-      if (uprightLabels[k].x - uprightLabels[k-1].x < needW) {
-        uprightLabels[k].x = uprightLabels[k-1].x + needW
-      }
-    }
-    ;[...shelfLabels, ...uprightLabels].forEach(lb => {
-      ctx.font = lb.bold ? 'bold 9px sans-serif' : '9px sans-serif'
-      ctx.fillStyle = lb.color
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3
-      ctx.strokeText(lb.text, lb.x, lb.y)
-      ctx.fillText(lb.text, lb.x, lb.y)
+      if (g.kind === 'upright') allLabels.push({ x: bx+bw/2, y: oy+14, text, color: colors.stroke, bold: isHi })
+      else allLabels.push({ x: bx+18, y: by+bh/2, text, color: colors.stroke, bold: isHi })
     })
 
     // Размерная цепочка между полками/царгами (по Y) и стойками (по X) — можно скрыть тем же переключателем размеров
@@ -647,14 +615,13 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       if (shelves.length) {
         let prevEdge = 0
         const chainX = ox - 6
-        ctx.font = '9px sans-serif'; ctx.fillStyle = '#8B5E2A'; ctx.strokeStyle = 'rgba(139,94,42,0.5)'; ctx.lineWidth = 1
-        ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.setLineDash([2,2])
+        ctx.strokeStyle = 'rgba(139,94,42,0.5)'; ctx.lineWidth = 1; ctx.setLineDash([2,2])
         for (const g of shelves) {
           const gap = (g.pos||0) - prevEdge
           const y1 = oy + dh - prevEdge*sc, y2 = oy + dh - (g.pos||0)*sc
           if (gap > 1) {
             ctx.beginPath(); ctx.moveTo(chainX, y1); ctx.lineTo(chainX, y2); ctx.stroke()
-            ctx.fillText(Math.round(gap), chainX-3, (y1+y2)/2)
+            allLabels.push({ x: chainX-8, y: (y1+y2)/2, text: String(Math.round(gap)), color: '#8B5E2A' })
           }
           prevEdge = (g.pos||0) + (g.thickness||18)
         }
@@ -662,7 +629,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         if (lastGap > 1) {
           const y1 = oy + dh - prevEdge*sc, y2 = oy
           ctx.beginPath(); ctx.moveTo(chainX, y1); ctx.lineTo(chainX, y2); ctx.stroke()
-          ctx.fillText(Math.round(lastGap), chainX-3, (y1+y2)/2)
+          allLabels.push({ x: chainX-8, y: (y1+y2)/2, text: String(Math.round(lastGap)), color: '#8B5E2A' })
         }
         ctx.setLineDash([])
       }
@@ -670,14 +637,13 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       if (uprights.length) {
         let prevEdge = 0
         const chainY = oy + dh + 14
-        ctx.font = '9px sans-serif'; ctx.fillStyle = '#2A5E8B'; ctx.strokeStyle = 'rgba(42,94,139,0.5)'; ctx.lineWidth = 1
-        ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.setLineDash([2,2])
+        ctx.strokeStyle = 'rgba(42,94,139,0.5)'; ctx.lineWidth = 1; ctx.setLineDash([2,2])
         for (const g of uprights) {
           const gap = (g.pos||0) - prevEdge
           const x1 = ox + prevEdge*sc, x2 = ox + (g.pos||0)*sc
           if (gap > 1) {
             ctx.beginPath(); ctx.moveTo(x1, chainY); ctx.lineTo(x2, chainY); ctx.stroke()
-            ctx.fillText(Math.round(gap), (x1+x2)/2, chainY+2)
+            allLabels.push({ x: (x1+x2)/2, y: chainY+9, text: String(Math.round(gap)), color: '#2A5E8B' })
           }
           prevEdge = (g.pos||0) + (g.thickness||18)
         }
@@ -685,7 +651,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         if (lastGap > 1) {
           const x1 = ox + prevEdge*sc, x2 = ox + dw
           ctx.beginPath(); ctx.moveTo(x1, chainY); ctx.lineTo(x2, chainY); ctx.stroke()
-          ctx.fillText(Math.round(lastGap), (x1+x2)/2, chainY+2)
+          allLabels.push({ x: (x1+x2)/2, y: chainY+9, text: String(Math.round(lastGap)), color: '#2A5E8B' })
         }
         ctx.setLineDash([])
       }
@@ -718,8 +684,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           // точка входа сверла на торце
           ctx.beginPath(); ctx.arc(px, py, Math.max(2, dPx*0.18), 0, Math.PI*2)
           ctx.fillStyle = '#7B4FC9'; ctx.fill()
+          obstacles.push({ x: px, y: py, r: Math.max(dPx/2, 4) })
           if (pi === 0 && showLengths) {
-            drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, depthPx)
+            allLabels.push(...drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, depthPx))
           }
         })
       } else {
@@ -727,6 +694,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
           const r = Math.max(3, dPx/2)
+          obstacles.push({ x: px, y: py, r })
           if (isThrough) {
             // Сквозное — как настоящий вырез, цвет контура детали
             ctx.fillStyle = '#E6F1FB'; ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.4
@@ -740,7 +708,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
             ctx.fillText(dr.face === 'front' ? 'Л' : 'И', px, py)
           }
           if (pi === 0 && showLengths) {
-            drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y)
+            allLabels.push(...drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y))
           }
         })
       }
@@ -756,9 +724,6 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     // Центр детали на canvas
     const cxD = ox + dw/2, cyD = oy + dh/2
 
-    // Собираем все подписи с их позициями
-    const labels = []
-
     // Длины отрезков
     if (showLengths) {
       for (let i = 0; i < n; i++) {
@@ -773,8 +738,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         // Проверяем направление нормали — она должна смотреть от центра
         const toCx = mx - cxD, toCy = my - cyD
         if (nx*toCx + ny*toCy < 0) { nx = -nx; ny = -ny }
-        labels.push({ x: mx + nx*13, y: my + ny*13, text: `${len}`, color:'#185FA5',
-          angle: Math.atan2(dy, dx), rotate: true })
+        let ang = Math.atan2(dy, dx)
+        if (ang > Math.PI/2 || ang < -Math.PI/2) ang += Math.PI
+        allLabels.push({ x: mx + nx*13, y: my + ny*13, text: `${len}`, color:'#185FA5', angle: ang })
       }
     }
 
@@ -796,46 +762,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         const toD = Math.hypot(toCx, toCy) || 1
         // Смещаем дальше для больших углов (больше текста)
         const dist = angleDeg === 90 ? 16 : 20
-        labels.push({ x: px + (toCx/toD)*dist, y: py + (toCy/toD)*dist,
-          text: `${angleDeg}°`, color:'#E24B4A', rotate: false })
+        allLabels.push({ x: px + (toCx/toD)*dist, y: py + (toCy/toD)*dist,
+          text: `${angleDeg}°`, color:'#E24B4A' })
       }
-    }
-
-    // Разрешаем пересечения — сдвигаем метки друг от друга
-    const FONT_H = 9, FONT_W = 6
-    for (let iter = 0; iter < 3; iter++) {
-      for (let i = 0; i < labels.length; i++) {
-        for (let j = i+1; j < labels.length; j++) {
-          const a = labels[i], b = labels[j]
-          const dx = b.x - a.x, dy = b.y - a.y
-          const dist = Math.hypot(dx, dy)
-          if (dist < FONT_H * 1.5 && dist > 0) {
-            const push = (FONT_H * 1.5 - dist) / 2
-            labels[i].x -= (dx/dist)*push
-            labels[i].y -= (dy/dist)*push
-            labels[j].x += (dx/dist)*push
-            labels[j].y += (dy/dist)*push
-          }
-        }
-      }
-    }
-
-    // Рисуем подписи
-    for (const lb of labels) {
-      ctx.save()
-      ctx.translate(lb.x, lb.y)
-      if (lb.rotate) {
-        let a = lb.angle
-        if (a > Math.PI/2 || a < -Math.PI/2) a += Math.PI
-        ctx.rotate(a)
-      }
-      ctx.font = '9px sans-serif'
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 3
-      ctx.strokeText(lb.text, 0, 0)
-      ctx.fillStyle = lb.color
-      ctx.fillText(lb.text, 0, 0)
-      ctx.restore()
     }
 
     // Маркеры внешнего контура (всегда видны)
@@ -846,6 +775,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         const isActive = activeHoleIdx === null && m.idx === activeIdx
         const isArcSel = activeHoleIdx === null && arcPoints.includes(m.idx)
         const r = arcMode && activeHoleIdx === null ? 10 : (isActive ? 5 : 3.5)
+        obstacles.push({ x: m.x, y: m.y, r })
         ctx.beginPath()
         ctx.arc(m.x, m.y, r, 0, Math.PI * 2)
         ctx.fillStyle = isArcSel ? '#F5A623' : isActive ? '#E24B4A' : '#185FA5'
@@ -869,6 +799,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         const isActive = isActiveHole && m.idx === activeIdx
         const isArcSel = isActiveHole && arcPoints.includes(m.idx)
         const r = arcMode && isActiveHole ? 10 : (isActive ? 5 : 3.5)
+        obstacles.push({ x: m.x, y: m.y, r })
         ctx.beginPath()
         ctx.arc(m.x, m.y, r, 0, Math.PI * 2)
         ctx.fillStyle = isArcSel ? '#F5A623' : isActive ? '#E24B4A' :
@@ -882,6 +813,58 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         }
       })
     })
+
+    // ── Единая развязка всех подписей: разводим их между собой и от маркеров/точек,
+    // затем рисуем разом (без подложки — компактность и отсутствие пересечений важнее)
+    ctx.font = '9px sans-serif'
+    for (const lb of allLabels) {
+      ctx.font = lb.bold ? 'bold 9px sans-serif' : '9px sans-serif'
+      lb.hw = ctx.measureText(lb.text).width / 2 + 1.5
+      lb.hh = 6
+    }
+    const LBL_ITER = 8
+    for (let iter = 0; iter < LBL_ITER; iter++) {
+      for (let i = 0; i < allLabels.length; i++) {
+        for (let j = i + 1; j < allLabels.length; j++) {
+          const A = allLabels[i], B = allLabels[j]
+          const dx = B.x - A.x, dy = B.y - A.y
+          const minDx = A.hw + B.hw, minDy = A.hh + B.hh
+          if (Math.abs(dx) < minDx && Math.abs(dy) < minDy) {
+            const overlapX = minDx - Math.abs(dx)
+            const overlapY = minDy - Math.abs(dy)
+            if (overlapX < overlapY) {
+              const push = overlapX / 2 * (dx === 0 ? 1 : Math.sign(dx))
+              A.x -= push; B.x += push
+            } else {
+              const push = overlapY / 2 * (dy === 0 ? 1 : Math.sign(dy))
+              A.y -= push; B.y += push
+            }
+          }
+        }
+      }
+      for (const lb of allLabels) {
+        for (const ob of obstacles) {
+          const dx = lb.x - ob.x, dy = lb.y - ob.y
+          const dist = Math.hypot(dx, dy) || 0.01
+          const minDist = ob.r + Math.max(lb.hw, lb.hh) + 2
+          if (dist < minDist) {
+            const push = minDist - dist
+            lb.x += (dx / dist) * push
+            lb.y += (dy / dist) * push
+          }
+        }
+      }
+    }
+    for (const lb of allLabels) {
+      ctx.save()
+      ctx.translate(lb.x, lb.y)
+      if (lb.angle) ctx.rotate(lb.angle)
+      ctx.font = lb.bold ? 'bold 9px sans-serif' : '9px sans-serif'
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillStyle = lb.color
+      ctx.fillText(lb.text, 0, 0)
+      ctx.restore()
+    }
 
   }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges])
 
