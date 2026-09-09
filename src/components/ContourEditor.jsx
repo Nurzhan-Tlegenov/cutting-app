@@ -462,7 +462,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const onEnd = (e) => {
       if (e.touches.length < 2) {
         state.active = false
-        zoomAnchorRef.current = null
+        // Небольшая задержка — чтобы последнее движение зума успело отрисоваться
+        // с этой же точкой привязки, а не сбросилось в центр раньше времени
+        setTimeout(() => { zoomAnchorRef.current = null }, 60)
       }
     }
     el.addEventListener('touchstart', onStart, { passive: true })
@@ -477,8 +479,10 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     }
   }, [])
 
-  // Для центрирования при повороте (зум щипком наводится сам через zoomAnchorRef выше)
+  // Для центрирования только при смене zoom/поворота (не при любой перерисовке —
+  // иначе выбор точки/правка контура будет сбрасывать прокрутку пользователя)
   const prevRotationRef = useRef(rotation)
+  const prevZoomForScrollRef = useRef(zoom)
 
   useEffect(() => {
     const canvas = ref.current
@@ -505,20 +509,33 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     canvas.style.height = CSS_H + 'px'
     ctx.scale(DPR, DPR)
 
-    // Позиционируем видимую область: если пользователь только что масштабировал щипком —
-    // наводим на ту же точку, куда он щипал (а не всегда возвращаем в центр).
-    // При повороте детали — наоборот, всегда возвращаем в центр.
+    // Центрируем канвас через margin, если он МЕНЬШЕ видимой области (зум < 100%) —
+    // без flexbox, чтобы не ломать ручную прокрутку/наведение при зуме > 100%
+    if (wrapRef.current) {
+      const wrap = wrapRef.current
+      const extraW = Math.max(0, wrap.clientWidth - CSS_W)
+      const extraH = Math.max(0, wrap.clientHeight - CSS_H)
+      canvas.style.marginLeft = (extraW / 2) + 'px'
+      canvas.style.marginTop = (extraH / 2) + 'px'
+    }
+
+    // Прокрутку трогаем ТОЛЬКО когда реально поменялся zoom или поворот — иначе любая
+    // перерисовка (выбор точки, правка контура) будет сбрасывать позицию пользователя.
     if (wrapRef.current) {
       const wrap = wrapRef.current
       const rotationChanged = prevRotationRef.current !== rotation
+      const zoomChanged = prevZoomForScrollRef.current !== zoom
       prevRotationRef.current = rotation
-      const anchor = rotationChanged ? null : zoomAnchorRef.current
-      if (anchor) {
-        wrap.scrollLeft = Math.max(0, anchor.fracX * CSS_W - anchor.midX)
-        wrap.scrollTop = Math.max(0, anchor.fracY * CSS_H - anchor.midY)
-      } else {
-        wrap.scrollLeft = Math.max(0, (CSS_W - wrap.clientWidth) / 2)
-        wrap.scrollTop = Math.max(0, (CSS_H - wrap.clientHeight) / 2)
+      prevZoomForScrollRef.current = zoom
+      if (rotationChanged || zoomChanged || zoomAnchorRef.current) {
+        const anchor = rotationChanged ? null : zoomAnchorRef.current
+        if (anchor) {
+          wrap.scrollLeft = Math.max(0, anchor.fracX * CSS_W - anchor.midX)
+          wrap.scrollTop = Math.max(0, anchor.fracY * CSS_H - anchor.midY)
+        } else {
+          wrap.scrollLeft = Math.max(0, (CSS_W - wrap.clientWidth) / 2)
+          wrap.scrollTop = Math.max(0, (CSS_H - wrap.clientHeight) / 2)
+        }
       }
     }
 
@@ -1004,11 +1021,10 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   }
 
   return (
-    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y',
-      display:'flex', justifyContent:'center', alignItems:'center' }}>
+    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y' }}>
       <canvas ref={ref}
         onClick={handleTap}
-        style={{ display:'block', cursor:'pointer', touchAction:'manipulation', flexShrink:0,
+        style={{ display:'block', cursor:'pointer', touchAction:'manipulation',
           outline: placeMode ? '2px solid #0E8A6D' : 'none' }} />
     </div>
   )
