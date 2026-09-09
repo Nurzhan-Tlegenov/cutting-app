@@ -411,7 +411,7 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0 }) {
   const ref = useRef(null)
   const wrapRef = useRef(null)
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
@@ -464,12 +464,16 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     if (!canvas || !w || !h) return
     const ctx = canvas.getContext('2d')
     const DPR = window.devicePixelRatio || 1
+    const rot90 = rotation === 90 || rotation === 270
+    // При повороте на 90/270 деталь ложится "на бок" — под неё нужно отвести
+    // столько же места, сколько было бы под её перевёрнутый силуэт
+    const fitW = rot90 ? h : w, fitH = rot90 ? w : h
 
     // Высокое разрешение — базовая ширина берётся от контейнера (не масштабируется зумом),
     // сам масштаб детали внутри регулируется зумом отдельно
     const baseW = wrapRef.current?.clientWidth || canvas.offsetWidth || 280
     const CSS_W = Math.round(baseW * zoom)
-    const CSS_H = Math.round(CSS_W * (h / w) * 0.75 + 60)
+    const CSS_H = Math.round(CSS_W * (fitH / fitW) * 0.75 + 60)
     canvas.width = CSS_W * DPR
     canvas.height = CSS_H * DPR
     canvas.style.width = CSS_W + 'px'
@@ -484,7 +488,10 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     }
 
     const PAD = 26
-    const sc = Math.min((CSS_W - PAD*2) / w, (CSS_H - PAD*2) / h)
+    // sc считается от "повёрнутых" габаритов (fitW/fitH), а сама деталь ниже рисуется
+    // в исходной ориентации (w×h) — и целиком поворачивается трансформацией канваса.
+    // Так после поворота её силуэт точно попадает в те же границы.
+    const sc = Math.min((CSS_W - PAD*2) / fitW, (CSS_H - PAD*2) / fitH)
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
@@ -495,6 +502,16 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const obstacles = []   // { x, y, r } — маркеры/точки, от которых подписи отталкиваются
 
     ctx.clearRect(0, 0, CSS_W, CSS_H)
+
+    // Поворот превью на удобный пользователю угол (0/90/180/270) — визуальный,
+    // сами данные детали не меняются. Всё дальше рисуется как обычно (в исходной
+    // ориентации), а сама сцена целиком поворачивается вокруг центра канваса.
+    ctx.save()
+    if (rotation) {
+      ctx.translate(CSS_W/2, CSS_H/2)
+      ctx.rotate(rotation * Math.PI / 180)
+      ctx.translate(-CSS_W/2, -CSS_H/2)
+    }
 
     // Сетка фона
     ctx.strokeStyle = '#f0f0f0'; ctx.lineWidth = 0.5
@@ -858,7 +875,8 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     for (const lb of allLabels) {
       ctx.save()
       ctx.translate(lb.x, lb.y)
-      if (lb.angle) ctx.rotate(lb.angle)
+      // Компенсируем общий поворот сцены — текст остаётся читаемым при любом повороте детали
+      ctx.rotate((lb.angle || 0) - rotation * Math.PI / 180)
       ctx.font = lb.bold ? 'bold 9px sans-serif' : '9px sans-serif'
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       ctx.fillStyle = lb.color
@@ -866,7 +884,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       ctx.restore()
     }
 
-  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges])
+    ctx.restore() // закрываем поворот сцены
+
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges, rotation])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -875,11 +895,25 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const DPR = window.devicePixelRatio || 1
     const CSS_W = rect.width
     const CSS_H = rect.height
-    const cx = (e.clientX - rect.left)
-    const cy = (e.clientY - rect.top)
+    let cx = (e.clientX - rect.left)
+    let cy = (e.clientY - rect.top)
 
-    const PAD = 16
-    const sc = Math.min((CSS_W - PAD*2) / w, (CSS_H - PAD*2) / h)
+    // Превью может быть визуально повёрнуто (0/90/180/270) — переводим точку нажатия
+    // обратно в исходную (неповёрнутую) систему координат, чтобы все точки/маркеры
+    // остались кликабельными именно там, где они нарисованы на экране
+    if (rotation) {
+      const rad = -rotation * Math.PI / 180
+      const cxCenter = CSS_W / 2, cyCenter = CSS_H / 2
+      const dx = cx - cxCenter, dy = cy - cyCenter
+      const cos = Math.cos(rad), sin = Math.sin(rad)
+      cx = cxCenter + dx*cos - dy*sin
+      cy = cyCenter + dx*sin + dy*cos
+    }
+
+    const rot90 = rotation === 90 || rotation === 270
+    const fitW = rot90 ? h : w, fitH = rot90 ? w : h
+    const PAD = 26
+    const sc = Math.min((CSS_W - PAD*2) / fitW, (CSS_H - PAD*2) / fitH)
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
@@ -1163,6 +1197,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
   const [placeDrillIdx, setPlaceDrillIdx] = useState(null) // индекс присадки в режиме "указать нажатием"
   const [placeLayoutIdx, setPlaceLayoutIdx] = useState(null) // индекс линии разметки в режиме "указать нажатием"
   const [zoom, setZoom] = useState(1) // масштаб превью детали (кнопки/списки не масштабируются)
+  const [rotation, setRotation] = useState(0) // визуальный поворот превью 0/90/180/270 — только для удобства редактирования
   const [highlightLayoutIdx, setHighlightLayoutIdx] = useState(null) // подсветка линии разметки при тапе по превью
   // Генератор добавления линий разметки (кол-во, проём, отступы — общий для полки/стойки/царги)
   const [genType, setGenType] = useState(null)
@@ -1758,12 +1793,19 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
       {w > 0 && h > 0 && (
         <>
           {/* Подсказка pinch-zoom — масштабируется только сама деталь в превью, щипком двух пальцев */}
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-            <span style={{ fontSize:10, color:'var(--text-hint)' }}>🤏 Щипком двух пальцев — масштаб детали</span>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6, gap:6 }}>
+            <span style={{ fontSize:10, color:'var(--text-hint)', flex:1 }}>🤏 Щипком двух пальцев — масштаб детали</span>
+            <button type="button" onClick={() => setRotation(r => (r + 90) % 360)}
+              title="Повернуть превью на 90°"
+              style={{ fontSize:11, padding:'4px 9px', border: rotation ? '1px solid var(--blue)' : '0.5px solid var(--border-md)',
+                borderRadius:6, background: rotation ? 'var(--blue-light)' : 'transparent',
+                color: rotation ? 'var(--blue-dark)' : 'var(--text-muted)', cursor:'pointer', flexShrink:0 }}>
+              ⟳ {rotation}°
+            </button>
             {Math.abs(zoom-1) > 0.02 && (
               <button type="button" onClick={() => setZoom(1)}
                 style={{ fontSize:10, padding:'3px 7px', border:'0.5px solid var(--border-md)', borderRadius:6,
-                  background:'transparent', color:'var(--text-muted)', cursor:'pointer' }}>
+                  background:'transparent', color:'var(--text-muted)', cursor:'pointer', flexShrink:0 }}>
                 {Math.round(zoom*100)}% · сброс
               </button>
             )}
@@ -1830,7 +1872,8 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               placeMode={placeDrillIdx !== null || placeLayoutIdx !== null}
               onPlaceTap={placeLayoutIdx !== null ? handlePlaceLayoutTap : handlePlaceDrillTap}
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles}
-              zoom={zoom} onZoomChange={setZoom} onLayoutTap={handleLayoutBandTap} highlightLayoutIdx={highlightLayoutIdx} />
+              zoom={zoom} onZoomChange={setZoom} onLayoutTap={handleLayoutBandTap} highlightLayoutIdx={highlightLayoutIdx}
+              rotation={rotation} />
           </div>
 
           {/* Правая колонка — всегда toggles + кнопки типа если точка выбрана */}
