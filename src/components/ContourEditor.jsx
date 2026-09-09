@@ -202,41 +202,31 @@ function attachedTargetForGuide(dr, guide) {
 // Кратность — это расстояние МЕЖДУ отверстиями (базовым и зеркальным), а не снап
 // каждой стороны по отдельности. Введённый отступ — это МИНИМУМ от края.
 //
-// Если для зеркала не задан отдельный минимум — считаем, что обе стороны должны
-// быть симметричны и одновременно совпасть с кратной сеткой: ищем наименьший x ≥
-// заданного минимума, при котором (span - 2x) кратно шагу.
-//
-// Если для зеркала задан СВОЙ минимум — базовая сторона остаётся ровно такой, как
-// введена (зафиксирована), а зеркальная подгоняется под неё: ищем наименьший
-// mirror ≥ его минимума, при котором (span - base - mirror) кратно шагу.
-function resolveKratnostAxis(sides, offsets, span, sideNear, sideFar, mirrorEnabled, mirrorMinRaw, pitchStep) {
-  const baseSide = sides.includes(sideNear) ? sideNear : sides.includes(sideFar) ? sideFar : null
-  if (!baseSide) return null
-  const rawBase = offsets[baseSide] ?? 0
+// baseFixed=false: обе стороны симметрично двигаются к ближайшему валидному значению.
+// baseFixed=true: базовая сторона остаётся ровно такой, как введена (зафиксирована),
+// а зеркальная подгоняется под неё (используя свой минимум, если задан).
+function resolveKratnostValue(rawBase, span, mirrorEnabled, mirrorMinRaw, pitchStep, baseFixed) {
   const mod = (v, m) => ((v % m) + m) % m
+  if (!pitchStep) return { base: rawBase, mirror: mirrorEnabled ? (mirrorMinRaw ?? rawBase) : null }
+  if (!mirrorEnabled) return { base: Math.ceil(rawBase / pitchStep) * pitchStep, mirror: null }
 
-  if (!pitchStep) return { baseSide, base: rawBase, mirror: mirrorEnabled ? (mirrorMinRaw ?? rawBase) : null }
-
-  if (!mirrorEnabled) {
-    return { baseSide, base: Math.ceil(rawBase / pitchStep) * pitchStep, mirror: null }
-  }
-
-  if (mirrorMinRaw == null) {
+  if (!baseFixed) {
     // Симметричный случай — обе стороны двигаются вместе к ближайшему валидному значению
     let x = rawBase
     for (let k = 0; k < pitchStep; k++) {
       const cand = rawBase + k
       if (mod(span - 2 * cand, pitchStep) === 0) { x = cand; break }
     }
-    return { baseSide, base: x, mirror: x }
+    return { base: x, mirror: x }
   }
   // Базовая сторона зафиксирована как введено, зеркало подгоняем под неё
-  let m = mirrorMinRaw
+  const mn = mirrorMinRaw ?? rawBase
+  let m = mn
   for (let k = 0; k < pitchStep; k++) {
-    const cand = mirrorMinRaw + k
+    const cand = mn + k
     if (mod(span - rawBase - cand, pitchStep) === 0) { m = cand; break }
   }
-  return { baseSide, base: rawBase, mirror: m }
+  return { base: rawBase, mirror: m }
 }
 
 // ─── Центр присадки по плоскости от сторон (offsets — расстояние до ЦЕНТРА) ──
@@ -246,14 +236,20 @@ function faceDrillCenterFromSides(dr, panelW, panelH, pitchStep) {
   if (sides.includes('left') && sides.includes('right')) {
     x = ((offsets.left ?? 0) + (panelW - (offsets.right ?? 0))) / 2
   } else if (sides.includes('left') || sides.includes('right')) {
-    axisX = resolveKratnostAxis(sides, offsets, panelW, 'left', 'right', !!dr.mirrorX, dr.mirrorMinX, pitchStep)
-    x = axisX.baseSide === 'left' ? axisX.base : panelW - axisX.base
+    const baseSide = sides.includes('left') ? 'left' : 'right'
+    const baseFixed = !!dr.baseFixedX || dr.mirrorMinX != null
+    const r = resolveKratnostValue(offsets[baseSide] ?? 0, panelW, !!dr.mirrorX, dr.mirrorMinX, pitchStep, baseFixed)
+    axisX = { baseSide, ...r }
+    x = baseSide === 'left' ? axisX.base : panelW - axisX.base
   }
   if (sides.includes('top') && sides.includes('bottom')) {
     y = ((offsets.bottom ?? 0) + (panelH - (offsets.top ?? 0))) / 2
   } else if (sides.includes('bottom') || sides.includes('top')) {
-    axisY = resolveKratnostAxis(sides, offsets, panelH, 'bottom', 'top', !!dr.mirrorY, dr.mirrorMinY, pitchStep)
-    y = axisY.baseSide === 'bottom' ? axisY.base : panelH - axisY.base
+    const baseSide = sides.includes('bottom') ? 'bottom' : 'top'
+    const baseFixed = !!dr.baseFixedY || dr.mirrorMinY != null
+    const r = resolveKratnostValue(offsets[baseSide] ?? 0, panelH, !!dr.mirrorY, dr.mirrorMinY, pitchStep, baseFixed)
+    axisY = { baseSide, ...r }
+    y = baseSide === 'bottom' ? axisY.base : panelH - axisY.base
   }
   return { x, y, axisX, axisY }
 }
@@ -357,11 +353,22 @@ function baseEdgeDrillPoints(dr, panelW, panelH) {
   const fromEnd = dr.alongFrom === 'end'
   const dir = edge === 'left' ? { dx: 1, dy: 0 } : edge === 'right' ? { dx: -1, dy: 0 }
     : edge === 'top' ? { dx: 0, dy: -1 } : { dx: 0, dy: 1 } // bottom
+  const total = (edge === 'left' || edge === 'right') ? panelH : panelW
+  const alongIsX = (edge === 'top' || edge === 'bottom')
+
+  // Кратность вдоль торца — считается для одиночной точки (не для ряда)
+  const alongMirrorActive = alongIsX ? !!dr.mirrorX : !!dr.mirrorY
+  const pitchStep = dr.pitchEnabled ? (dr.pitchStep || 32) : 0
+  let axisAlong = null
+  if (count === 1 && pitchStep) {
+    const baseFixed = !!dr.baseFixed || dr.mirrorMinAlong != null
+    axisAlong = resolveKratnostValue(along, total, alongMirrorActive, dr.mirrorMinAlong, pitchStep, baseFixed)
+  }
+
   const pts = []
   for (let k = 0; k < count; k++) {
-    const a = along + (offsetStart + k) * step // расстояние до центра k-го отверстия
-    const total = (edge === 'left' || edge === 'right') ? panelH : panelW
-    const center = fromEnd ? (total - a) : a
+    const rawA = axisAlong ? axisAlong.base : (along + (offsetStart + k) * step) // расстояние до центра k-го отверстия
+    const center = fromEnd ? (total - rawA) : rawA
     let x, y
     if (edge === 'bottom') { y = 0; x = center }
     else if (edge === 'top') { y = panelH; x = center }
@@ -369,18 +376,30 @@ function baseEdgeDrillPoints(dr, panelW, panelH) {
     else { x = panelW; y = center } // right
     pts.push({ x, y, dx: dir.dx, dy: dir.dy })
   }
-  return pts
+  return { pts, axisAlong, alongIsX, fromEnd }
 }
 
-// ─── Зеркалирование точек присадки (множит комплект) ─────────────────────────
-function mirrorDrillPoints(pts, dr, panelW, panelH, isEdge) {
+// ─── Зеркалирование точек присадки по торцу — вдоль того же торца (с кратностью,
+// если включена) и/или поперёк (переключение на противоположный торец) ─────────
+function mirrorEdgePoints(pts, dr, panelW, panelH, axisAlong, alongIsX, fromEnd) {
   let result = pts.map(p => ({ ...p }))
-  if (dr.mirrorX) {
-    result = result.concat(pts.map(p => ({ ...p, x: panelW - p.x, dx: isEdge ? -p.dx : p.dx })))
+  const mirrorAlongFlag = alongIsX ? dr.mirrorX : dr.mirrorY
+  const mirrorCrossFlag = alongIsX ? dr.mirrorY : dr.mirrorX
+  if (mirrorAlongFlag) {
+    result = result.concat(pts.map(p => {
+      if (axisAlong && axisAlong.mirror != null) {
+        const total = alongIsX ? panelW : panelH
+        const mirroredCenter = fromEnd ? axisAlong.mirror : (total - axisAlong.mirror)
+        return alongIsX ? { ...p, x: mirroredCenter } : { ...p, y: mirroredCenter }
+      }
+      return alongIsX ? { ...p, x: panelW - p.x } : { ...p, y: panelH - p.y }
+    }))
   }
-  if (dr.mirrorY) {
+  if (mirrorCrossFlag) {
     const cur = result
-    result = cur.concat(cur.map(p => ({ ...p, y: panelH - p.y, dy: isEdge ? -p.dy : p.dy })))
+    result = cur.concat(cur.map(p => alongIsX
+      ? { ...p, y: panelH - p.y, dy: -p.dy }
+      : { ...p, x: panelW - p.x, dx: -p.dx }))
   }
   return result
 }
@@ -388,8 +407,8 @@ function mirrorDrillPoints(pts, dr, panelW, panelH, isEdge) {
 // ─── Итоговые точки присадки (ряд + зеркало) — единая точка входа для рендера и экспорта
 function getDrillPoints(dr, panelW, panelH, layout) {
   if (dr.kind === 'edge') {
-    const base = baseEdgeDrillPoints(dr, panelW, panelH)
-    return mirrorDrillPoints(base, dr, panelW, panelH, true)
+    const { pts, axisAlong, alongIsX, fromEnd } = baseEdgeDrillPoints(dr, panelW, panelH)
+    return mirrorEdgePoints(pts, dr, panelW, panelH, axisAlong, alongIsX, fromEnd)
   }
   // Присадка по плоскости зеркалится внутри baseFaceDrillPoints — по ширине
   // конкретной линии разметки (если есть привязка), а не всей детали
@@ -825,10 +844,23 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           ctx.beginPath(); ctx.arc(px, py, Math.max(2, dPx*0.18), 0, Math.PI*2)
           ctx.fillStyle = '#7B4FC9'; ctx.fill()
           obstacles.push({ x: px, y: py, r: Math.max(dPx/2, 4) })
-          if (pi === 0 && showLengths) {
+          // Выноску до края рисуем и для базовой, и для зеркальной точки (не только первой)
+          if ((pi === 0 || pi === 1) && showLengths) {
             allLabels.push(...drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, depthPx))
           }
         })
+        // Расстояние между базовым и зеркальным отверстием (если это простое зеркало, не ряд)
+        if (showLengths && pts.length >= 2 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
+          const p0 = pts[0], p1 = pts[1]
+          const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
+          const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
+          const distMm = Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y))
+          ctx.save()
+          ctx.strokeStyle = 'rgba(123,79,201,0.45)'; ctx.setLineDash([2,2]); ctx.lineWidth = 1
+          ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px1, py1); ctx.stroke()
+          ctx.restore()
+          allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `↔${distMm}`, color: '#7B4FC9', bold: true })
+        }
       } else {
         const isThrough = (dr.face || 'both') === 'both'
         pts.forEach((p, pi) => {
@@ -847,10 +879,23 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
             ctx.fillText(dr.face === 'front' ? 'Л' : 'И', px, py)
           }
-          if (pi === 0 && showLengths) {
+          // Выноску до края рисуем и для базовой, и для зеркальной точки (не только первой)
+          if ((pi === 0 || pi === 1) && showLengths) {
             allLabels.push(...drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y))
           }
         })
+        // Расстояние между базовым и зеркальным отверстием (если это простое зеркало, не ряд)
+        if (showLengths && pts.length >= 2 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
+          const p0 = pts[0], p1 = pts[1]
+          const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
+          const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
+          const distMm = Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y))
+          ctx.save()
+          ctx.strokeStyle = 'rgba(24,95,165,0.45)'; ctx.setLineDash([2,2]); ctx.lineWidth = 1
+          ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px1, py1); ctx.stroke()
+          ctx.restore()
+          allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `↔${distMm}`, color: '#185FA5', bold: true })
+        }
       }
     })
 
@@ -1326,12 +1371,24 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
   const [openHoleCardIdx, setOpenHoleCardIdx] = useState(null)
   const [openGrooveCardIdx, setOpenGrooveCardIdx] = useState(null)
 
-  // База фурнитуры (общая для присадки по плоскости и по торцу)
+  // База фурнитуры (общая для присадки по плоскости и по торцу).
+  // Одна запись может содержать ОБА варианта — параметры для плоскости и для торца
+  // (например у конфирмата это разные диаметр/глубина с каждой стороны соединения) —
+  // программа сама подставляет нужный вариант в зависимости от того, в какой карточке
+  // выбрана эта фурнитура.
   const [hardwarePresets, setHardwarePresets] = useState(() => loadHardwarePresets())
   const [savingHardwareFor, setSavingHardwareFor] = useState(null) // индекс присадки, для которой открыта форма сохранения
   const [newHardwareName, setNewHardwareName] = useState('')
-  const addHardwarePreset = (preset) => {
-    const next = [...hardwarePresets, { id: 'hw'+Date.now().toString(36), ...preset }]
+  const saveHardwareSpec = (name, kind, spec) => {
+    const trimmed = (name || '').trim()
+    if (!trimmed) return
+    const idx = hardwarePresets.findIndex(p => p.name.toLowerCase() === trimmed.toLowerCase())
+    let next
+    if (idx >= 0) {
+      next = hardwarePresets.map((p, i) => i === idx ? { ...p, [kind]: spec } : p)
+    } else {
+      next = [...hardwarePresets, { id: 'hw'+Date.now().toString(36)+Math.random().toString(36).slice(2,5), name: trimmed, [kind]: spec }]
+    }
     setHardwarePresets(next)
     saveHardwarePresetsToStorage(next)
   }
@@ -1340,6 +1397,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     setHardwarePresets(next)
     saveHardwarePresetsToStorage(next)
   }
+  // Обратная совместимость со старыми записями (плоский {d,depth} без разделения)
+  const hwFaceSpec = (hp) => hp.face || (hp.d != null && !hp.edge ? { d: hp.d, depth: hp.depth, faceSide: 'both' } : null)
+  const hwEdgeSpec = (hp) => hp.edge || (hp.d != null && !hp.face ? { d: hp.d, depth: hp.depth } : null)
   // Генератор добавления линий разметки (кол-во, проём, отступы — общий для полки/стойки/царги)
   const [genType, setGenType] = useState(null)
   const [genCount, setGenCount] = useState(1)
@@ -2615,38 +2675,48 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     ))}
                   </div>
 
-                  {/* Фурнитура — общая база для присадки по плоскости и по торцу */}
-                  {hardwarePresets.length > 0 && (
+                  {/* Фурнитура — общая база для присадки по плоскости и по торцу.
+                      Показываем только те записи, у которых ЕСТЬ параметры для плоскости;
+                      если у той же фурнитуры есть ещё и торцевая часть — помечаем "+Тц" */}
+                  {hardwarePresets.some(hp => hwFaceSpec(hp)) && (
                     <div style={{ display:'flex', gap:3, flexWrap:'wrap', marginBottom:5 }}>
-                      {hardwarePresets.map(hp => (
-                        <button key={hp.id} type="button"
-                          onClick={() => updDrilling(i, { d: hp.d, depth: hp.depth, hardwareId: hp.id })}
-                          onContextMenu={e => { e.preventDefault(); if (confirm(`Удалить "${hp.name}" из базы фурнитуры?`)) removeHardwarePreset(hp.id) }}
-                          style={{ padding:'4px 8px', borderRadius:20, fontSize:10.5, border:'none',
-                            background: dr.hardwareId===hp.id ? 'var(--teal)' : 'var(--bg3)',
-                            color: dr.hardwareId===hp.id ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
-                          {hp.name} · ⌀{hp.d}×{hp.depth}
-                        </button>
-                      ))}
+                      {hardwarePresets.filter(hp => hwFaceSpec(hp)).map(hp => {
+                        const fs = hwFaceSpec(hp)
+                        return (
+                          <button key={hp.id} type="button"
+                            onClick={() => updDrilling(i, { d: fs.d, depth: fs.depth, face: fs.faceSide || dr.face, hardwareId: hp.id })}
+                            onContextMenu={e => { e.preventDefault(); if (confirm(`Удалить "${hp.name}" из базы фурнитуры?`)) removeHardwarePreset(hp.id) }}
+                            style={{ padding:'4px 8px', borderRadius:20, fontSize:10.5, border:'none',
+                              background: dr.hardwareId===hp.id ? 'var(--teal)' : 'var(--bg3)',
+                              color: dr.hardwareId===hp.id ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
+                            {hp.name} · Пл ⌀{fs.d}×{fs.depth}{hwEdgeSpec(hp) ? ' +Тц' : ''}
+                          </button>
+                        )
+                      })}
                     </div>
                   )}
                   {savingHardwareFor === i ? (
-                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
-                      <input type="text" value={newHardwareName} onChange={e=>setNewHardwareName(e.target.value)}
-                        placeholder="Название (Конфирмат 7х50)" autoFocus
-                        style={{ flex:1, fontSize:11.5, padding:'5px 7px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)' }} />
-                      <button type="button" onClick={() => {
-                        if (newHardwareName.trim()) addHardwarePreset({ name:newHardwareName.trim(), d:dr.d??8, depth:dr.depth??13 })
-                        setSavingHardwareFor(null); setNewHardwareName('')
-                      }} style={{ padding:'5px 10px', border:'none', borderRadius:'var(--radius)', background:'var(--teal)', color:'white', fontSize:11, cursor:'pointer' }}>✓</button>
-                      <button type="button" onClick={() => { setSavingHardwareFor(null); setNewHardwareName('') }}
-                        style={{ padding:'5px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:11, cursor:'pointer' }}>✕</button>
+                    <div style={{ marginBottom:5 }}>
+                      <div style={{ display:'flex', gap:4, marginBottom:4 }}>
+                        <input type="text" value={newHardwareName} onChange={e=>setNewHardwareName(e.target.value)}
+                          placeholder="Название (Конфирмат 7х50)" autoFocus
+                          style={{ flex:1, fontSize:11.5, padding:'5px 7px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)' }} />
+                        <button type="button" onClick={() => {
+                          saveHardwareSpec(newHardwareName, 'face', { d: dr.d??8, depth: dr.depth??13, faceSide: dr.face||'both' })
+                          setSavingHardwareFor(null); setNewHardwareName('')
+                        }} style={{ padding:'5px 10px', border:'none', borderRadius:'var(--radius)', background:'var(--teal)', color:'white', fontSize:11, cursor:'pointer' }}>✓</button>
+                        <button type="button" onClick={() => { setSavingHardwareFor(null); setNewHardwareName('') }}
+                          style={{ padding:'5px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:11, cursor:'pointer' }}>✕</button>
+                      </div>
+                      <p style={{ fontSize:10, color:'var(--text-hint)', margin:0 }}>
+                        Сохранится с текущей стороной («{dr.face==='front'?'Лицо':dr.face==='back'?'Изнанка':'С двух сторон'}»), диаметром и глубиной. Если фурнитура с таким названием уже есть — её часть «для плоскости» обновится, а часть «для торца» (если есть) не тронется.
+                      </p>
                     </div>
                   ) : (
                     <button type="button" onClick={() => setSavingHardwareFor(i)}
                       style={{ fontSize:10.5, padding:'3px 8px', marginBottom:5, border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
                         background:'transparent', color:'var(--text-hint)', cursor:'pointer' }}>
-                      + Сохранить текущие D/глубину как фурнитуру
+                      + Сохранить как фурнитуру (для плоскости)
                     </button>
                   )}
 
@@ -2711,14 +2781,26 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:5 }}>
                       <NumField label="Шаг кратности" value={dr.pitchStep??32} onChange={v=>updDrilling(i,{pitchStep:v})} />
                       {dr.mirrorX && (
-                        <NumField label="Мин. от края (зеркало X)"
-                          value={dr.mirrorMinX ?? (dr.offsets?.left ?? dr.offsets?.right ?? 0)}
-                          onChange={v=>updDrilling(i,{mirrorMinX:v})} />
+                        <>
+                          <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'var(--text-muted)', cursor:'pointer' }}>
+                            <input type="checkbox" checked={!!dr.baseFixedX} onChange={e=>updDrilling(i,{baseFixedX:e.target.checked})} />
+                            Слева/справа от базы
+                          </label>
+                          <NumField label="Мин. от края (зеркало X)"
+                            value={dr.mirrorMinX ?? (dr.offsets?.left ?? dr.offsets?.right ?? 0)}
+                            onChange={v=>updDrilling(i,{mirrorMinX:v})} />
+                        </>
                       )}
                       {dr.mirrorY && (
-                        <NumField label="Мин. от края (зеркало Y)"
-                          value={dr.mirrorMinY ?? (dr.offsets?.bottom ?? dr.offsets?.top ?? 0)}
-                          onChange={v=>updDrilling(i,{mirrorMinY:v})} />
+                        <>
+                          <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'var(--text-muted)', cursor:'pointer' }}>
+                            <input type="checkbox" checked={!!dr.baseFixedY} onChange={e=>updDrilling(i,{baseFixedY:e.target.checked})} />
+                            Верх/низ от базы
+                          </label>
+                          <NumField label="Мин. от края (зеркало Y)"
+                            value={dr.mirrorMinY ?? (dr.offsets?.bottom ?? dr.offsets?.top ?? 0)}
+                            onChange={v=>updDrilling(i,{mirrorMinY:v})} />
+                        </>
                       )}
                     </div>
                   )}
@@ -2801,38 +2883,47 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     <NumField label="От пласти" value={dr.offsetFace??(defaultThickness/2)} onChange={v=>updDrilling(i,{offsetFace:v})} />
                   </div>
 
-                  {/* Фурнитура — общая база для присадки по плоскости и по торцу */}
-                  {hardwarePresets.length > 0 && (
+                  {/* Фурнитура — показываем только записи с параметрами "для торца";
+                      если у той же фурнитуры есть ещё и часть "для плоскости" — помечаем "+Пл" */}
+                  {hardwarePresets.some(hp => hwEdgeSpec(hp)) && (
                     <div style={{ display:'flex', gap:3, flexWrap:'wrap', marginBottom:5 }}>
-                      {hardwarePresets.map(hp => (
-                        <button key={hp.id} type="button"
-                          onClick={() => updDrilling(i, { d: hp.d, depth: hp.depth, hardwareId: hp.id })}
-                          onContextMenu={e => { e.preventDefault(); if (confirm(`Удалить "${hp.name}" из базы фурнитуры?`)) removeHardwarePreset(hp.id) }}
-                          style={{ padding:'4px 8px', borderRadius:20, fontSize:10.5, border:'none',
-                            background: dr.hardwareId===hp.id ? 'var(--teal)' : 'var(--bg3)',
-                            color: dr.hardwareId===hp.id ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
-                          {hp.name} · ⌀{hp.d}×{hp.depth}
-                        </button>
-                      ))}
+                      {hardwarePresets.filter(hp => hwEdgeSpec(hp)).map(hp => {
+                        const es = hwEdgeSpec(hp)
+                        return (
+                          <button key={hp.id} type="button"
+                            onClick={() => updDrilling(i, { d: es.d, depth: es.depth, hardwareId: hp.id })}
+                            onContextMenu={e => { e.preventDefault(); if (confirm(`Удалить "${hp.name}" из базы фурнитуры?`)) removeHardwarePreset(hp.id) }}
+                            style={{ padding:'4px 8px', borderRadius:20, fontSize:10.5, border:'none',
+                              background: dr.hardwareId===hp.id ? 'var(--teal)' : 'var(--bg3)',
+                              color: dr.hardwareId===hp.id ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
+                            {hp.name} · Тц ⌀{es.d}×{es.depth}{hwFaceSpec(hp) ? ' +Пл' : ''}
+                          </button>
+                        )
+                      })}
                     </div>
                   )}
                   {savingHardwareFor === i ? (
-                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
-                      <input type="text" value={newHardwareName} onChange={e=>setNewHardwareName(e.target.value)}
-                        placeholder="Название (Конфирмат 7х50)" autoFocus
-                        style={{ flex:1, fontSize:11.5, padding:'5px 7px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)' }} />
-                      <button type="button" onClick={() => {
-                        if (newHardwareName.trim()) addHardwarePreset({ name:newHardwareName.trim(), d:dr.d??5, depth:dr.depth??35 })
-                        setSavingHardwareFor(null); setNewHardwareName('')
-                      }} style={{ padding:'5px 10px', border:'none', borderRadius:'var(--radius)', background:'var(--teal)', color:'white', fontSize:11, cursor:'pointer' }}>✓</button>
-                      <button type="button" onClick={() => { setSavingHardwareFor(null); setNewHardwareName('') }}
-                        style={{ padding:'5px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:11, cursor:'pointer' }}>✕</button>
+                    <div style={{ marginBottom:5 }}>
+                      <div style={{ display:'flex', gap:4, marginBottom:4 }}>
+                        <input type="text" value={newHardwareName} onChange={e=>setNewHardwareName(e.target.value)}
+                          placeholder="Название (Конфирмат 7х50)" autoFocus
+                          style={{ flex:1, fontSize:11.5, padding:'5px 7px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)' }} />
+                        <button type="button" onClick={() => {
+                          saveHardwareSpec(newHardwareName, 'edge', { d: dr.d??5, depth: dr.depth??35 })
+                          setSavingHardwareFor(null); setNewHardwareName('')
+                        }} style={{ padding:'5px 10px', border:'none', borderRadius:'var(--radius)', background:'var(--teal)', color:'white', fontSize:11, cursor:'pointer' }}>✓</button>
+                        <button type="button" onClick={() => { setSavingHardwareFor(null); setNewHardwareName('') }}
+                          style={{ padding:'5px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:11, cursor:'pointer' }}>✕</button>
+                      </div>
+                      <p style={{ fontSize:10, color:'var(--text-hint)', margin:0 }}>
+                        Если фурнитура с таким названием уже есть — её часть «для торца» обновится, часть «для плоскости» не тронется. Так у одного конфирмата могут храниться сразу обе части.
+                      </p>
                     </div>
                   ) : (
                     <button type="button" onClick={() => setSavingHardwareFor(i)}
                       style={{ fontSize:10.5, padding:'3px 8px', marginBottom:5, border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
                         background:'transparent', color:'var(--text-hint)', cursor:'pointer' }}>
-                      + Сохранить текущие D/глубину как фурнитуру
+                      + Сохранить как фурнитуру (для торца)
                     </button>
                   )}
 
@@ -2854,6 +2945,36 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                       ↕ Верх/низ
                     </label>
                   </div>
+
+                  {(() => {
+                    const alongIsX = (dr.edgeSide === 'top' || dr.edgeSide === 'bottom')
+                    const alongMirrorOn = alongIsX ? dr.mirrorX : dr.mirrorY
+                    return (
+                      <>
+                        <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                          padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pitchEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
+                          <input type="checkbox" checked={!!dr.pitchEnabled} onChange={e=>updDrilling(i,{pitchEnabled:e.target.checked, pitchStep: dr.pitchStep||32})} />
+                          Кратность (вдоль торца) — отступ считается минимумом
+                        </label>
+                        {dr.pitchEnabled && (
+                          <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:5 }}>
+                            <NumField label="Шаг кратности" value={dr.pitchStep??32} onChange={v=>updDrilling(i,{pitchStep:v})} />
+                            {alongMirrorOn && (
+                              <>
+                                <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'var(--text-muted)', cursor:'pointer' }}>
+                                  <input type="checkbox" checked={!!dr.baseFixed} onChange={e=>updDrilling(i,{baseFixed:e.target.checked})} />
+                                  От базы
+                                </label>
+                                <NumField label="Мин. вдоль торца (зеркало)"
+                                  value={dr.mirrorMinAlong ?? dr.offsetAlong ?? 50}
+                                  onChange={v=>updDrilling(i,{mirrorMinAlong:v})} />
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
 
                   <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', margin:'2px 0 4px', cursor:'pointer' }}>
                     <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
