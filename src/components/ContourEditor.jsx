@@ -418,11 +418,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   const w = Number(detail.h) || 0
   const h = Number(detail.w) || 0
 
-  // Pinch-to-zoom двумя пальцами прямо в окне превью
+  // Pinch-to-zoom двумя пальцами прямо в окне превью — зумируем в ту область, где щипок
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
   const onZoomChangeRef = useRef(onZoomChange)
   onZoomChangeRef.current = onZoomChange
+  const zoomAnchorRef = useRef(null) // {fracX, fracY, midX, midY} — куда навести после ресайза канваса
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
@@ -433,6 +434,18 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         state.active = true
         state.dist = getDist(e.touches)
         state.zoom = zoomRef.current
+        // Запоминаем, куда именно щипаем — относительно текущего канваса и видимой области
+        const wrap = wrapRef.current
+        const canvas = ref.current
+        if (wrap && canvas) {
+          const wrapRect = wrap.getBoundingClientRect()
+          const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - wrapRect.left
+          const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - wrapRect.top
+          const canvasX = wrap.scrollLeft + midX
+          const canvasY = wrap.scrollTop + midY
+          const cw = canvas.offsetWidth || 1, ch = canvas.offsetHeight || 1
+          zoomAnchorRef.current = { fracX: canvasX / cw, fracY: canvasY / ch, midX, midY }
+        }
       }
     }
     const onMove = (e) => {
@@ -446,7 +459,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         }
       }
     }
-    const onEnd = (e) => { if (e.touches.length < 2) state.active = false }
+    const onEnd = (e) => {
+      if (e.touches.length < 2) {
+        state.active = false
+        zoomAnchorRef.current = null
+      }
+    }
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
@@ -458,6 +476,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       el.removeEventListener('touchcancel', onEnd)
     }
   }, [])
+
+  // Для центрирования при повороте (зум щипком наводится сам через zoomAnchorRef выше)
+  const prevRotationRef = useRef(rotation)
 
   useEffect(() => {
     const canvas = ref.current
@@ -473,25 +494,34 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     // сам масштаб детали внутри регулируется зумом отдельно
     const baseW = wrapRef.current?.clientWidth || canvas.offsetWidth || 280
     const CSS_W = Math.round(baseW * zoom)
-    const CSS_H = Math.round(CSS_W * (fitH / fitW) * 0.75 + 60)
+    const PAD = 30
+    // Отступы одинаковые со всех сторон (не только у ширины) — деталь всегда точно
+    // по центру и растягивается на всё доступное место, при любом повороте
+    const sc = (CSS_W - PAD*2) / fitW
+    const CSS_H = Math.round(fitH * sc + PAD*2)
     canvas.width = CSS_W * DPR
     canvas.height = CSS_H * DPR
     canvas.style.width = CSS_W + 'px'
     canvas.style.height = CSS_H + 'px'
     ctx.scale(DPR, DPR)
 
-    // Деталь всегда должна оставаться по центру видимой области превью
+    // Позиционируем видимую область: если пользователь только что масштабировал щипком —
+    // наводим на ту же точку, куда он щипал (а не всегда возвращаем в центр).
+    // При повороте детали — наоборот, всегда возвращаем в центр.
     if (wrapRef.current) {
       const wrap = wrapRef.current
-      wrap.scrollLeft = Math.max(0, (CSS_W - wrap.clientWidth) / 2)
-      wrap.scrollTop = Math.max(0, (CSS_H - wrap.clientHeight) / 2)
+      const rotationChanged = prevRotationRef.current !== rotation
+      prevRotationRef.current = rotation
+      const anchor = rotationChanged ? null : zoomAnchorRef.current
+      if (anchor) {
+        wrap.scrollLeft = Math.max(0, anchor.fracX * CSS_W - anchor.midX)
+        wrap.scrollTop = Math.max(0, anchor.fracY * CSS_H - anchor.midY)
+      } else {
+        wrap.scrollLeft = Math.max(0, (CSS_W - wrap.clientWidth) / 2)
+        wrap.scrollTop = Math.max(0, (CSS_H - wrap.clientHeight) / 2)
+      }
     }
 
-    const PAD = 26
-    // sc считается от "повёрнутых" габаритов (fitW/fitH), а сама деталь ниже рисуется
-    // в исходной ориентации (w×h) — и целиком поворачивается трансформацией канваса.
-    // Так после поворота её силуэт точно попадает в те же границы.
-    const sc = Math.min((CSS_W - PAD*2) / fitW, (CSS_H - PAD*2) / fitH)
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
@@ -912,8 +942,8 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
 
     const rot90 = rotation === 90 || rotation === 270
     const fitW = rot90 ? h : w, fitH = rot90 ? w : h
-    const PAD = 26
-    const sc = Math.min((CSS_W - PAD*2) / fitW, (CSS_H - PAD*2) / fitH)
+    const PAD = 30
+    const sc = (CSS_W - PAD*2) / fitW
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
 
@@ -974,10 +1004,11 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   }
 
   return (
-    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y' }}>
+    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y',
+      display:'flex', justifyContent:'center', alignItems:'center' }}>
       <canvas ref={ref}
         onClick={handleTap}
-        style={{ display:'block', cursor:'pointer', touchAction:'manipulation',
+        style={{ display:'block', cursor:'pointer', touchAction:'manipulation', flexShrink:0,
           outline: placeMode ? '2px solid #0E8A6D' : 'none' }} />
     </div>
   )
