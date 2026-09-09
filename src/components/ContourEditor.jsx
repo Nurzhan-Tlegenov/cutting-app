@@ -190,6 +190,51 @@ function findLayoutGuides(layout, ids) {
   return (layout || []).filter(g => ids.includes(g.id))
 }
 
+// ─── Блоки полок/стоек ────────────────────────────────────────────────────────
+// Полка, поставленная ОДНА — независимая, определяет границы проёмов сама.
+// Несколько полок, поставленных ОДНИМ действием ("N штук в проём") — это БЛОК:
+// у них общий blockId и ссылки на границы (либо край детали, либо конкретная
+// независимая полка). Если независимая полка потом двигается — границы блока
+// меняются, и весь блок пересчитывает равные проёмы заново, "утягивая" за собой
+// привязанную к этим полкам присадку (она уже сама смотрит на текущий guide.pos).
+function resolveBoundary(ref, byId) {
+  if (!ref) return 0
+  if (ref.guideId != null) {
+    const g = byId[ref.guideId]
+    if (g) return ref.edge === 'far' ? (g.pos || 0) + (g.thickness || 18) : (g.pos || 0)
+  }
+  return ref.value ?? 0
+}
+function resolveEffectiveLayout(layout, w, h) {
+  if (!layout || !layout.length || !layout.some(g => g.blockId)) return layout || []
+  const byId = {}
+  layout.forEach(g => { byId[g.id] = g })
+  const groups = {}
+  layout.forEach(g => { if (g.blockId) (groups[g.blockId] = groups[g.blockId] || []).push(g) })
+  const out = layout.map(g => ({ ...g }))
+  Object.keys(groups).forEach(bid => {
+    const members = groups[bid].slice().sort((a, b) => (a.blockIndex ?? 0) - (b.blockIndex ?? 0))
+    const first = members[0]
+    const isUpright = first.kind === 'upright'
+    const total = isUpright ? w : h
+    const start = resolveBoundary(first.blockStartRef, byId)
+    const end = resolveBoundary(first.blockEndRef, byId) || total
+    const n = members.length
+    const thickness = first.thickness || 18
+    const span = Math.max(0, end - start)
+    const openSpan = Math.max(0, span - thickness * n)
+    const step = openSpan / (n + 1)
+    let cursor = start
+    members.forEach(m => {
+      const pos = cursor + step
+      const idx = out.findIndex(x => x.id === m.id)
+      if (idx >= 0) out[idx] = { ...out[idx], pos: Math.round(pos) }
+      cursor = pos + thickness
+    })
+  })
+  return out
+}
+
 // ─── Целевая координата вдоль оси привязки (центр толщины ± зазор) ───────────
 function attachedTargetForGuide(dr, guide) {
   const gap = dr.gap ?? 0
@@ -419,22 +464,27 @@ function getDrillPoints(dr, panelW, panelH, layout) {
 // Считаем расстояния ЖИВЬЁМ из текущей позиции точки — выноска всегда точна и всегда
 // отображается, независимо от того, как отверстие было установлено (пальцем или цифрами).
 // Расстояние — до ЦЕНТРА отверстия (как и хранится в offsets).
+// xLo/xHi/yLo/yHi — границы САМОЙ ЛИНИИ разметки (или всей детали, если без привязки).
+// mirrorX/mirrorY — эта точка является зеркальной копией по этой оси → меряем от
+// ПРОТИВОПОЛОЖНОГО края линии, а не от того же, что и у базовой точки.
 // Рисует только линии-выноски, подписи возвращает — чтобы их развести с остальными
 // подписями/маркерами на канвасе в единой системе.
-function drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY) {
+function drawFaceLeader(ctx, dr, px, py, sc, ox, oy, dh, dataX, dataY, xLo, xHi, yLo, yHi, mirrorX, mirrorY) {
   const sides = dr.sides || []
-  const xSide = sides.includes('left') ? 'left' : sides.includes('right') ? 'right' : (dataX <= w/2 ? 'left' : 'right')
-  const ySide = sides.includes('bottom') ? 'bottom' : sides.includes('top') ? 'top' : (dataY <= h/2 ? 'bottom' : 'top')
-  const distX = xSide === 'left' ? dataX : (w - dataX)
-  const distY = ySide === 'bottom' ? dataY : (h - dataY)
+  let xSide = sides.includes('left') ? 'left' : sides.includes('right') ? 'right' : (dataX <= (xLo+xHi)/2 ? 'left' : 'right')
+  let ySide = sides.includes('bottom') ? 'bottom' : sides.includes('top') ? 'top' : (dataY <= (yLo+yHi)/2 ? 'bottom' : 'top')
+  if (mirrorX) xSide = xSide === 'left' ? 'right' : 'left'
+  if (mirrorY) ySide = ySide === 'bottom' ? 'top' : 'bottom'
+  const distX = xSide === 'left' ? (dataX - xLo) : (xHi - dataX)
+  const distY = ySide === 'bottom' ? (dataY - yLo) : (yHi - dataY)
 
   ctx.save()
   ctx.strokeStyle = 'rgba(24,95,165,0.6)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
 
-  const exX = xSide === 'left' ? ox : ox + w * sc
+  const exX = ox + (xSide === 'left' ? xLo : xHi) * sc
   ctx.beginPath(); ctx.moveTo(exX, py); ctx.lineTo(px, py); ctx.stroke()
 
-  const exY = ySide === 'bottom' ? oy + dh : oy
+  const exY = oy + dh - (ySide === 'bottom' ? yLo : yHi) * sc
   ctx.beginPath(); ctx.moveTo(px, exY); ctx.lineTo(px, py); ctx.stroke()
   ctx.restore()
 
@@ -506,7 +556,7 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0 }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, showDrillDims=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0 }) {
   const ref = useRef(null)
   const wrapRef = useRef(null)
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
@@ -821,6 +871,20 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       const d = dr.d || 8
       const dPx = d * sc
       const pts = getDrillPoints(dr, w, h, contour.layout)
+      // Если присадка привязана к ОДНОЙ линии разметки — размеры меряем от её границ,
+      // а не от краёв всей детали
+      const attachedSingleGuide = (dr.attachTo && dr.attachTo.length === 1)
+        ? (contour.layout || []).find(g => g.id === dr.attachTo[0]) : null
+      let gXLo = 0, gXHi = w, gYLo = 0, gYHi = h
+      if (attachedSingleGuide) {
+        if (attachedSingleGuide.kind === 'upright') {
+          gYLo = attachedSingleGuide.insetBottom || 0
+          gYHi = h - (attachedSingleGuide.insetTop || 0)
+        } else {
+          gXLo = attachedSingleGuide.insetLeft || 0
+          gXHi = w - (attachedSingleGuide.insetRight || 0)
+        }
+      }
 
       if (dr.kind === 'edge') {
         const depthPx = (dr.depth || 15) * sc
@@ -845,12 +909,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           ctx.fillStyle = '#7B4FC9'; ctx.fill()
           obstacles.push({ x: px, y: py, r: Math.max(dPx/2, 4) })
           // Выноску до края рисуем и для базовой, и для зеркальной точки (не только первой)
-          if ((pi === 0 || pi === 1) && showLengths) {
+          if ((pi === 0 || pi === 1) && showDrillDims) {
             allLabels.push(...drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, depthPx))
           }
         })
         // Расстояние между базовым и зеркальным отверстием (если это простое зеркало, не ряд)
-        if (showLengths && pts.length >= 2 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
+        if (showDrillDims && pts.length >= 2 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
           const p0 = pts[0], p1 = pts[1]
           const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
           const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
@@ -880,12 +944,15 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
             ctx.fillText(dr.face === 'front' ? 'Л' : 'И', px, py)
           }
           // Выноску до края рисуем и для базовой, и для зеркальной точки (не только первой)
-          if ((pi === 0 || pi === 1) && showLengths) {
-            allLabels.push(...drawFaceLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y))
+          if ((pi === 0 || pi === 1) && showDrillDims) {
+            const isMirror = pi === 1
+            const mX = isMirror && !!dr.mirrorX
+            const mY = isMirror && !dr.mirrorX && !!dr.mirrorY
+            allLabels.push(...drawFaceLeader(ctx, dr, px, py, sc, ox, oy, dh, p.x, p.y, gXLo, gXHi, gYLo, gYHi, mX, mY))
           }
         })
         // Расстояние между базовым и зеркальным отверстием (если это простое зеркало, не ряд)
-        if (showLengths && pts.length >= 2 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
+        if (showDrillDims && pts.length >= 2 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
           const p0 = pts[0], p1 = pts[1]
           const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
           const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
@@ -1054,7 +1121,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
 
     ctx.restore() // закрываем поворот сцены
 
-  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges, rotation])
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, showDrillDims, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges, rotation])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -1359,6 +1426,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
   const [showMarkers, setShowMarkers] = useState(true)
   const [showLengths, setShowLengths] = useState(true)
   const [showAngles, setShowAngles] = useState(true)
+  const [showDrillDims, setShowDrillDims] = useState(true) // отдельный переключатель размеров присадки
   const [arcMode, setArcMode] = useState(false)
   const [arcPoints, setArcPoints] = useState([]) // индексы выбранных точек
   const [placeDrillIdx, setPlaceDrillIdx] = useState(null) // индекс присадки в режиме "указать нажатием"
@@ -1862,19 +1930,27 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
 
   // Разметка (полки/стойки/царги)
 
-  // Найти свободные проёмы вдоль оси данного типа разметки
+  // Обёртка над upd для массива разметки — сразу пересчитывает положения блоков
+  // (несколько полок, поставленных одним действием) от их текущих границ
+  const updateLayoutArray = (newArr) => upd({ layout: resolveEffectiveLayout(newArr, w, h) })
+
+  // Найти свободные проёмы вдоль оси данного типа разметки.
+  // Границы проёмов определяют только НЕЗАВИСИМЫЕ полки/стойки (не входящие в блок) —
+  // блок сам занимает один проём целиком и не дробит его для других блоков.
   const computeOpenings = (kind) => {
     const isUpright = kind === 'upright'
     const total = isUpright ? w : h
-    const same = contour.layout.filter(g => (g.kind==='upright') === isUpright).sort((a,b)=>(a.pos||0)-(b.pos||0))
+    const same = contour.layout.filter(g => (g.kind==='upright') === isUpright && !g.blockId).sort((a,b)=>(a.pos||0)-(b.pos||0))
     const openings = []
     let prevEdge = 0
+    let prevGuideId = null
     for (const g of same) {
-      if ((g.pos||0) - prevEdge > 1) openings.push({ start: prevEdge, end: g.pos||0 })
+      if ((g.pos||0) - prevEdge > 1) openings.push({ start: prevEdge, end: g.pos||0, startRef: prevGuideId ? { guideId: prevGuideId, edge: 'far' } : { value: 0 }, endRef: { guideId: g.id, edge: 'near' } })
       prevEdge = (g.pos||0) + (g.thickness||18)
+      prevGuideId = g.id
     }
-    if (total - prevEdge > 1) openings.push({ start: prevEdge, end: total })
-    return openings.length ? openings : [{ start: 0, end: total }]
+    if (total - prevEdge > 1) openings.push({ start: prevEdge, end: total, startRef: prevGuideId ? { guideId: prevGuideId, edge: 'far' } : { value: 0 }, endRef: { value: total } })
+    return openings.length ? openings : [{ start: 0, end: total, startRef: { value: 0 }, endRef: { value: total } }]
   }
 
   // Открыть генератор для конкретного типа (полка/стойка/царга)
@@ -1917,30 +1993,41 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
       pos = Math.max(op.start, Math.min(op.end - thickness, pos))
       newGuides.push(mkBase(pos))
     } else {
-      // Проёмы (не позиции) должны быть равны: из общего проёма вычитаем суммарную
-      // толщину всех N линий, оставшееся делим на N+1 равных проёмов, и расставляем
-      // линии впритык к этим проёмам одна за другой.
+      // Несколько линий одним действием — это БЛОК: запоминаем ссылки на границы
+      // занимаемого проёма (край детали или конкретная независимая полка), чтобы
+      // при изменении этой границы блок пересчитал равные проёмы заново.
+      const blockId = 'blk' + Date.now().toString(36) + Math.random().toString(36).slice(2,5)
       const span = op.end - op.start
       const openSpan = Math.max(0, span - thickness * n)
       const step = openSpan / (n + 1)
       let cursor = op.start
       for (let k = 1; k <= n; k++) {
         const pos = cursor + step
-        newGuides.push(mkBase(pos))
+        const g = mkBase(pos)
+        newGuides.push({ ...g, blockId, blockIndex: k - 1, blockStartRef: op.startRef, blockEndRef: op.endRef })
         cursor = pos + thickness
       }
     }
-    upd({ layout: [...newGuides, ...contour.layout] })
+    updateLayoutArray([...newGuides, ...contour.layout])
     setOpenLayoutId(newGuides[0]?.id ?? null) // новая карточка(и) открыта, остальные сворачиваются
     setGenType(null)
   }
   const updLayout = (i, patch) => {
     const ls = [...contour.layout]
-    ls[i] = { ...ls[i], ...patch }
-    upd({ layout: ls })
+    const target = ls[i]
+    const sharedKeys = ['thickness','insetLeft','insetRight','insetBottom','insetTop']
+    const isShared = target?.blockId && Object.keys(patch).some(k => sharedKeys.includes(k))
+    if (isShared) {
+      for (let j = 0; j < ls.length; j++) {
+        if (ls[j].blockId === target.blockId) ls[j] = { ...ls[j], ...patch }
+      }
+    } else {
+      ls[i] = { ...ls[i], ...patch }
+    }
+    updateLayoutArray(ls)
   }
   const removeLayout = (i) => {
-    upd({ layout: contour.layout.filter((_,j) => j !== i) })
+    updateLayoutArray(contour.layout.filter((_,j) => j !== i))
   }
 
   // Разместить линию разметки нажатием на детали
@@ -2079,7 +2166,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               onTap={handleTap}
               placeMode={placeDrillIdx !== null || placeLayoutIdx !== null}
               onPlaceTap={placeLayoutIdx !== null ? handlePlaceLayoutTap : handlePlaceDrillTap}
-              showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles}
+              showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} showDrillDims={showDrillDims}
               zoom={zoom} onZoomChange={setZoom} onLayoutTap={handleLayoutBandTap} highlightLayoutIdx={highlightLayoutIdx}
               rotation={rotation} />
           </div>
@@ -2091,6 +2178,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               { key:'markers', icon:'●', val:showMarkers, set:setShowMarkers },
               { key:'lengths', icon:'↔', val:showLengths, set:setShowLengths },
               { key:'angles',  icon:'∠', val:showAngles,  set:setShowAngles },
+              { key:'drilldims', icon:'⌾', val:showDrillDims, set:setShowDrillDims },
             ].map(({key, icon, val, set}) => (
               <button key={key} type="button" onClick={() => set(v => !v)}
                 style={{ width:26, height:26, border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
@@ -2560,38 +2648,62 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
             // а не по порядку создания — иначе номера скачут при добавлении новых линий
             const sameKind = contour.layout.filter(x => x.kind === g.kind).sort((a,b)=>(a.pos||0)-(b.pos||0))
             const orderNum = sameKind.findIndex(x => x.id === g.id) + 1
+            const blockSiblings = g.blockId ? contour.layout.filter(x => x.blockId === g.blockId) : []
             return (
             <CollapsibleItem key={g.id}
               innerRef={el => { layoutItemRefs.current[i] = el }}
               highlighted={highlightLayoutIdx === i}
               open={openLayoutId === g.id}
               onToggleOpen={() => setOpenLayoutId(openLayoutId === g.id ? null : g.id)}
-              title={`${g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #${orderNum} · ${Math.round(g.pos||0)}мм`}
+              title={`${g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #${orderNum} · ${Math.round(g.pos||0)}мм${g.blockId?' 🔗':''}`}
               onRemove={() => removeLayout(i)}>
+
+              {g.blockId && (
+                <div style={{ padding:'6px 8px', marginBottom:6, background:'rgba(139,94,42,0.1)', borderRadius:'var(--radius)' }}>
+                  <p style={{ fontSize:10.5, color:'#8B5E2A', margin:'0 0 4px' }}>
+                    🔗 Часть блока из {blockSiblings.length} шт. Позиция пересчитывается автоматически при изменении границ проёма — вручную её задать нельзя.
+                  </p>
+                  <button type="button" onClick={() => {
+                    const ls = contour.layout.map(x => x.id === g.id
+                      ? { ...x, blockId: undefined, blockIndex: undefined, blockStartRef: undefined, blockEndRef: undefined }
+                      : x)
+                    updateLayoutArray(ls)
+                  }} style={{ fontSize:10.5, padding:'3px 8px', border:'0.5px solid #8B5E2A', borderRadius:'var(--radius)',
+                    background:'transparent', color:'#8B5E2A', cursor:'pointer' }}>
+                    Отвязать от блока (сделать независимой)
+                  </button>
+                </div>
+              )}
 
               <button type="button"
                 onClick={() => setPlaceLayoutIdx(placeLayoutIdx === i ? null : i)}
                 style={{ width:'100%', padding:'6px', marginBottom:6, borderRadius:'var(--radius)',
                   border: placeLayoutIdx === i ? '1px solid #8B5E2A' : '0.5px dashed var(--border-md)',
                   background: placeLayoutIdx === i ? 'rgba(139,94,42,0.1)' : 'transparent',
-                  fontSize:11.5, color: placeLayoutIdx === i ? '#8B5E2A' : 'var(--text-muted)', cursor:'pointer' }}>
+                  fontSize:11.5, color: placeLayoutIdx === i ? '#8B5E2A' : 'var(--text-muted)', cursor:'pointer',
+                  opacity: g.blockId ? 0.4 : 1, pointerEvents: g.blockId ? 'none' : 'auto' }}
+                disabled={!!g.blockId}>
                 {placeLayoutIdx === i ? '👆 Жду нажатия на детали…' : '📍 Указать нажатием на детали'}
               </button>
 
-              <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:3 }}>Отсчитывать позицию от</label>
-              <div style={{ display:'flex', gap:3, marginBottom:5 }}>
-                {(isUpright ? [['left','Левого края'],['right','Правого края']] : [['bottom','Низа'],['top','Верха']]).map(([id,lb])=>(
-                  <button key={id} type="button" onClick={() => updLayout(i,{posFrom:id})}
-                    style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
-                      background: posFrom===id?'var(--blue)':'var(--bg3)',
-                      color: posFrom===id?'white':'var(--text-muted)', cursor:'pointer' }}>
-                      {lb}
-                    </button>
-                ))}
-              </div>
+              {!g.blockId && (
+                <>
+                  <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:3 }}>Отсчитывать позицию от</label>
+                  <div style={{ display:'flex', gap:3, marginBottom:5 }}>
+                    {(isUpright ? [['left','Левого края'],['right','Правого края']] : [['bottom','Низа'],['top','Верха']]).map(([id,lb])=>(
+                      <button key={id} type="button" onClick={() => updLayout(i,{posFrom:id})}
+                        style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                          background: posFrom===id?'var(--blue)':'var(--bg3)',
+                          color: posFrom===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                          {lb}
+                        </button>
+                    ))}
+                  </div>
+                </>
+              )}
 
               <div style={{ display:'flex', gap:5, marginBottom:6 }}>
-                <NumField label="Позиция" value={displayPos} onChange={setDisplayPos} />
+                {!g.blockId && <NumField label="Позиция" value={displayPos} onChange={setDisplayPos} />}
                 <NumField label="Толщина материала" value={g.thickness??defaultThickness} onChange={v=>updLayout(i,{thickness:v})} />
               </div>
 
@@ -2684,7 +2796,18 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         const fs = hwFaceSpec(hp)
                         return (
                           <button key={hp.id} type="button"
-                            onClick={() => updDrilling(i, { d: fs.d, depth: fs.depth, face: fs.faceSide || dr.face, hardwareId: hp.id })}
+                            onClick={() => updDrilling(i, {
+                              d: fs.d, depth: fs.depth, face: fs.faceSide || dr.face,
+                              sides: fs.sides ?? dr.sides, offsets: fs.offsets ?? dr.offsets,
+                              row: fs.row ?? dr.row, rowDir: fs.rowDir ?? dr.rowDir,
+                              rowStep: fs.rowStep ?? dr.rowStep, rowCount: fs.rowCount ?? dr.rowCount,
+                              mirrorX: fs.mirrorX ?? dr.mirrorX, mirrorY: fs.mirrorY ?? dr.mirrorY,
+                              pitchEnabled: fs.pitchEnabled ?? dr.pitchEnabled, pitchStep: fs.pitchStep ?? dr.pitchStep,
+                              baseFixedX: fs.baseFixedX ?? dr.baseFixedX, baseFixedY: fs.baseFixedY ?? dr.baseFixedY,
+                              mirrorMinX: fs.mirrorMinX, mirrorMinY: fs.mirrorMinY,
+                              attachTo: fs.attachTo ?? dr.attachTo, gap: fs.gap ?? dr.gap, gapDir: fs.gapDir ?? dr.gapDir,
+                              hardwareId: hp.id,
+                            })}
                             onContextMenu={e => { e.preventDefault(); if (confirm(`Удалить "${hp.name}" из базы фурнитуры?`)) removeHardwarePreset(hp.id) }}
                             style={{ padding:'4px 8px', borderRadius:20, fontSize:10.5, border:'none',
                               background: dr.hardwareId===hp.id ? 'var(--teal)' : 'var(--bg3)',
@@ -2702,7 +2825,16 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                           placeholder="Название (Конфирмат 7х50)" autoFocus
                           style={{ flex:1, fontSize:11.5, padding:'5px 7px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)' }} />
                         <button type="button" onClick={() => {
-                          saveHardwareSpec(newHardwareName, 'face', { d: dr.d??8, depth: dr.depth??13, faceSide: dr.face||'both' })
+                          saveHardwareSpec(newHardwareName, 'face', {
+                            d: dr.d??8, depth: dr.depth??13, faceSide: dr.face||'both',
+                            sides: dr.sides||[], offsets: dr.offsets||{},
+                            row: !!dr.row, rowDir: dr.rowDir||'x', rowStep: dr.rowStep??32, rowCount: dr.rowCount??2,
+                            mirrorX: !!dr.mirrorX, mirrorY: !!dr.mirrorY,
+                            pitchEnabled: !!dr.pitchEnabled, pitchStep: dr.pitchStep??32,
+                            baseFixedX: !!dr.baseFixedX, baseFixedY: !!dr.baseFixedY,
+                            mirrorMinX: dr.mirrorMinX, mirrorMinY: dr.mirrorMinY,
+                            attachTo: dr.attachTo||[], gap: dr.gap??0, gapDir: dr.gapDir||'pos',
+                          })
                           setSavingHardwareFor(null); setNewHardwareName('')
                         }} style={{ padding:'5px 10px', border:'none', borderRadius:'var(--radius)', background:'var(--teal)', color:'white', fontSize:11, cursor:'pointer' }}>✓</button>
                         <button type="button" onClick={() => { setSavingHardwareFor(null); setNewHardwareName('') }}
@@ -2891,7 +3023,16 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         const es = hwEdgeSpec(hp)
                         return (
                           <button key={hp.id} type="button"
-                            onClick={() => updDrilling(i, { d: es.d, depth: es.depth, hardwareId: hp.id })}
+                            onClick={() => updDrilling(i, {
+                              d: es.d, depth: es.depth,
+                              edgeSide: es.edgeSide ?? dr.edgeSide, alongFrom: es.alongFrom ?? dr.alongFrom,
+                              offsetAlong: es.offsetAlong ?? dr.offsetAlong, offsetFace: es.offsetFace ?? dr.offsetFace,
+                              row: es.row ?? dr.row, rowStep: es.rowStep ?? dr.rowStep, rowCount: es.rowCount ?? dr.rowCount,
+                              mirrorX: es.mirrorX ?? dr.mirrorX, mirrorY: es.mirrorY ?? dr.mirrorY,
+                              pitchEnabled: es.pitchEnabled ?? dr.pitchEnabled, pitchStep: es.pitchStep ?? dr.pitchStep,
+                              baseFixed: es.baseFixed ?? dr.baseFixed, mirrorMinAlong: es.mirrorMinAlong,
+                              hardwareId: hp.id,
+                            })}
                             onContextMenu={e => { e.preventDefault(); if (confirm(`Удалить "${hp.name}" из базы фурнитуры?`)) removeHardwarePreset(hp.id) }}
                             style={{ padding:'4px 8px', borderRadius:20, fontSize:10.5, border:'none',
                               background: dr.hardwareId===hp.id ? 'var(--teal)' : 'var(--bg3)',
@@ -2909,7 +3050,15 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                           placeholder="Название (Конфирмат 7х50)" autoFocus
                           style={{ flex:1, fontSize:11.5, padding:'5px 7px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)' }} />
                         <button type="button" onClick={() => {
-                          saveHardwareSpec(newHardwareName, 'edge', { d: dr.d??5, depth: dr.depth??35 })
+                          saveHardwareSpec(newHardwareName, 'edge', {
+                            d: dr.d??5, depth: dr.depth??35,
+                            edgeSide: dr.edgeSide||'left', alongFrom: dr.alongFrom||'start',
+                            offsetAlong: dr.offsetAlong??50, offsetFace: dr.offsetFace,
+                            row: !!dr.row, rowStep: dr.rowStep??32, rowCount: dr.rowCount??2,
+                            mirrorX: !!dr.mirrorX, mirrorY: !!dr.mirrorY,
+                            pitchEnabled: !!dr.pitchEnabled, pitchStep: dr.pitchStep??32,
+                            baseFixed: !!dr.baseFixed, mirrorMinAlong: dr.mirrorMinAlong,
+                          })
                           setSavingHardwareFor(null); setNewHardwareName('')
                         }} style={{ padding:'5px 10px', border:'none', borderRadius:'var(--radius)', background:'var(--teal)', color:'white', fontSize:11, cursor:'pointer' }}>✓</button>
                         <button type="button" onClick={() => { setSavingHardwareFor(null); setNewHardwareName('') }}
