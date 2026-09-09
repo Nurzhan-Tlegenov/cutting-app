@@ -198,33 +198,70 @@ function attachedTargetForGuide(dr, guide) {
   return { axis: guide.kind === 'upright' ? 'x' : 'y', value: center }
 }
 
-// ─── Кратность (система 32): округляем расстояние ВВЕРХ до ближайшего кратного шагу,
-// не давая уйти МЕНЬШЕ введённого минимума от края
-function snapUpToPitch(value, step) {
-  if (!step) return value
-  return Math.ceil((value || 0) / step) * step
+// ─── Кратность (система 32) ───────────────────────────────────────────────────
+// Кратность — это расстояние МЕЖДУ отверстиями (базовым и зеркальным), а не снап
+// каждой стороны по отдельности. Введённый отступ — это МИНИМУМ от края.
+//
+// Если для зеркала не задан отдельный минимум — считаем, что обе стороны должны
+// быть симметричны и одновременно совпасть с кратной сеткой: ищем наименьший x ≥
+// заданного минимума, при котором (span - 2x) кратно шагу.
+//
+// Если для зеркала задан СВОЙ минимум — базовая сторона остаётся ровно такой, как
+// введена (зафиксирована), а зеркальная подгоняется под неё: ищем наименьший
+// mirror ≥ его минимума, при котором (span - base - mirror) кратно шагу.
+function resolveKratnostAxis(sides, offsets, span, sideNear, sideFar, mirrorEnabled, mirrorMinRaw, pitchStep) {
+  const baseSide = sides.includes(sideNear) ? sideNear : sides.includes(sideFar) ? sideFar : null
+  if (!baseSide) return null
+  const rawBase = offsets[baseSide] ?? 0
+  const mod = (v, m) => ((v % m) + m) % m
+
+  if (!pitchStep) return { baseSide, base: rawBase, mirror: mirrorEnabled ? (mirrorMinRaw ?? rawBase) : null }
+
+  if (!mirrorEnabled) {
+    return { baseSide, base: Math.ceil(rawBase / pitchStep) * pitchStep, mirror: null }
+  }
+
+  if (mirrorMinRaw == null) {
+    // Симметричный случай — обе стороны двигаются вместе к ближайшему валидному значению
+    let x = rawBase
+    for (let k = 0; k < pitchStep; k++) {
+      const cand = rawBase + k
+      if (mod(span - 2 * cand, pitchStep) === 0) { x = cand; break }
+    }
+    return { baseSide, base: x, mirror: x }
+  }
+  // Базовая сторона зафиксирована как введено, зеркало подгоняем под неё
+  let m = mirrorMinRaw
+  for (let k = 0; k < pitchStep; k++) {
+    const cand = mirrorMinRaw + k
+    if (mod(span - rawBase - cand, pitchStep) === 0) { m = cand; break }
+  }
+  return { baseSide, base: rawBase, mirror: m }
 }
 
 // ─── Центр присадки по плоскости от сторон (offsets — расстояние до ЦЕНТРА) ──
-// pitchStep>0 — включена кратность: офсет считается МИНИМУМОМ от края и округляется
-// вверх до ближайшего кратного (например 50мм при шаге 32 → 64мм)
-function faceDrillCenterFromSides(sides, offsets, panelW, panelH, pitchStep) {
-  const off = (v) => pitchStep ? snapUpToPitch(v ?? 0, pitchStep) : (v ?? 0)
-  let x = panelW / 2, y = panelH / 2
+function faceDrillCenterFromSides(dr, panelW, panelH, pitchStep) {
+  const sides = dr.sides || [], offsets = dr.offsets || {}
+  let x = panelW / 2, y = panelH / 2, axisX = null, axisY = null
   if (sides.includes('left') && sides.includes('right')) {
-    x = (off(offsets.left) + (panelW - off(offsets.right))) / 2
-  } else if (sides.includes('left')) x = off(offsets.left)
-  else if (sides.includes('right')) x = panelW - off(offsets.right)
+    x = ((offsets.left ?? 0) + (panelW - (offsets.right ?? 0))) / 2
+  } else if (sides.includes('left') || sides.includes('right')) {
+    axisX = resolveKratnostAxis(sides, offsets, panelW, 'left', 'right', !!dr.mirrorX, dr.mirrorMinX, pitchStep)
+    x = axisX.baseSide === 'left' ? axisX.base : panelW - axisX.base
+  }
   if (sides.includes('top') && sides.includes('bottom')) {
-    y = (off(offsets.bottom) + (panelH - off(offsets.top))) / 2
-  } else if (sides.includes('bottom')) y = off(offsets.bottom)
-  else if (sides.includes('top')) y = panelH - off(offsets.top)
-  return { x, y }
+    y = ((offsets.bottom ?? 0) + (panelH - (offsets.top ?? 0))) / 2
+  } else if (sides.includes('bottom') || sides.includes('top')) {
+    axisY = resolveKratnostAxis(sides, offsets, panelH, 'bottom', 'top', !!dr.mirrorY, dr.mirrorMinY, pitchStep)
+    y = axisY.baseSide === 'bottom' ? axisY.base : panelH - axisY.base
+  }
+  return { x, y, axisX, axisY }
 }
 
 // ─── Точки присадки по плоскости (базовые, с рядом, для одной привязки/без неё) ─
 // Свободная ось (не управляемая привязкой) считается от ГРАНИЦ САМОЙ ЛИНИИ
 // разметки (с учётом её отступов слева/справа или снизу/сверху), а не от краёв детали.
+// Возвращает { pts, axisX, axisY } — оси нужны дальше для зеркалирования с кратностью.
 function faceDrillPointsForGuide(dr, panelW, panelH, guide) {
   let effW = panelW, effH = panelH, offX0 = 0, offY0 = 0
   if (guide) {
@@ -237,7 +274,7 @@ function faceDrillPointsForGuide(dr, panelW, panelH, guide) {
     }
   }
   const pitchStep = dr.pitchEnabled ? (dr.pitchStep || 32) : 0
-  const center = faceDrillCenterFromSides(dr.sides || [], dr.offsets || {}, effW, effH, pitchStep)
+  const center = faceDrillCenterFromSides(dr, effW, effH, pitchStep)
   let baseX = center.x + offX0, baseY = center.y + offY0
   if (guide) {
     const att = attachedTargetForGuide(dr, guide)
@@ -254,15 +291,14 @@ function faceDrillPointsForGuide(dr, panelW, panelH, guide) {
       ? { x: baseX, y: baseY + off }
       : { x: baseX + off, y: baseY })
   }
-  return pts
+  return { pts, axisX: center.axisX, axisY: center.axisY }
 }
 
 // ─── Зеркалирование присадки по плоскости в пределах ширины САМОЙ линии разметки
 // (а не всей детали) — чтобы «зеркалить» давало симметрию по границам линии.
-// При включённой кратности зеркальная сторона считается НЕЗАВИСИМО от своего
-// минимального отступа (dr.mirrorMinX/Y, по умолчанию — тот же, что у базовой стороны)
-// и тоже округляется вверх до кратного — а не просто отражает координату.
-function mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide) {
+// axisX/axisY — уже посчитанные (с учётом кратности) базовое и зеркальное значения
+// для этой оси; если кратность выключена — обычное геометрическое отражение.
+function mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide, axisX, axisY) {
   let xLo = 0, xHi = panelW, yLo = 0, yHi = panelH
   if (guide) {
     if (guide.kind === 'upright') {
@@ -273,18 +309,11 @@ function mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide) {
       xHi = panelW - (guide.insetRight || 0)
     }
   }
-  const pitchStep = dr.pitchEnabled ? (dr.pitchStep || 32) : 0
-  const sides = dr.sides || [], offsets = dr.offsets || {}
-  const xBaseSide = sides.includes('left') ? 'left' : sides.includes('right') ? 'right' : null
-  const yBaseSide = sides.includes('bottom') ? 'bottom' : sides.includes('top') ? 'top' : null
-
   let result = pts.map(p => ({ ...p }))
   if (dr.mirrorX) {
     result = result.concat(pts.map(p => {
-      if (pitchStep && xBaseSide) {
-        const minV = dr.mirrorMinX ?? offsets[xBaseSide] ?? 0
-        const snapped = snapUpToPitch(minV, pitchStep)
-        return { ...p, x: xBaseSide === 'left' ? (xHi - snapped) : (xLo + snapped) }
+      if (axisX && axisX.mirror != null) {
+        return { ...p, x: axisX.baseSide === 'left' ? (xHi - axisX.mirror) : (xLo + axisX.mirror) }
       }
       return { ...p, x: xLo + xHi - p.x }
     }))
@@ -292,10 +321,8 @@ function mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide) {
   if (dr.mirrorY) {
     const cur = result
     result = cur.concat(cur.map(p => {
-      if (pitchStep && yBaseSide) {
-        const minV = dr.mirrorMinY ?? offsets[yBaseSide] ?? 0
-        const snapped = snapUpToPitch(minV, pitchStep)
-        return { ...p, y: yBaseSide === 'bottom' ? (yHi - snapped) : (yLo + snapped) }
+      if (axisY && axisY.mirror != null) {
+        return { ...p, y: axisY.baseSide === 'bottom' ? (yHi - axisY.mirror) : (yLo + axisY.mirror) }
       }
       return { ...p, y: yLo + yHi - p.y }
     }))
@@ -307,13 +334,13 @@ function mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide) {
 function baseFaceDrillPoints(dr, panelW, panelH, layout) {
   const guides = findLayoutGuides(layout, dr.attachTo)
   if (!guides.length) {
-    const pts = faceDrillPointsForGuide(dr, panelW, panelH, null)
-    return mirrorFacePointsForGuide(pts, dr, panelW, panelH, null)
+    const { pts, axisX, axisY } = faceDrillPointsForGuide(dr, panelW, panelH, null)
+    return mirrorFacePointsForGuide(pts, dr, panelW, panelH, null, axisX, axisY)
   }
   let all = []
   for (const guide of guides) {
-    const pts = faceDrillPointsForGuide(dr, panelW, panelH, guide)
-    all = all.concat(mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide))
+    const { pts, axisX, axisY } = faceDrillPointsForGuide(dr, panelW, panelH, guide)
+    all = all.concat(mirrorFacePointsForGuide(pts, dr, panelW, panelH, guide, axisX, axisY))
   }
   return all
 }
@@ -2655,55 +2682,13 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                           )
                         })}
                       </div>
-                      {attachedIds.length > 0 && (
-                        <div style={{ display:'flex', gap:4, alignItems:'flex-end' }}>
-                          <NumField label="Зазор от линии" value={dr.gap??0} onChange={v=>updDrilling(i,{gap:v})} />
-                          <div style={{ display:'flex', gap:4 }}>
-                            {(primaryGuide?.kind === 'upright'
-                              ? [['pos','Вправо'],['neg','Влево']]
-                              : [['pos','Вверх'],['neg','Вниз']]
-                            ).map(([id,label])=>(
-                              <button key={id} type="button" onClick={() => updDrilling(i,{gapDir:id})}
-                                style={{ padding:'5px 6px', borderRadius:'var(--radius)', border:'none', fontSize:11,
-                                  background: (dr.gapDir||'pos')===id?'var(--blue)':'var(--bg3)',
-                                  color: (dr.gapDir||'pos')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </>
                   )}
 
                   <SideOffsetPicker activeSides={dr.sides||[]} offsets={dr.offsets||{}} allowedSides={allowedSides}
                     onChange={({sides,offsets})=>updDrilling(i,{sides,offsets})} />
 
-                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', margin:'6px 0 4px', cursor:'pointer' }}>
-                    <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
-                    Ряд отверстий
-                  </label>
-                  {dr.row && (
-                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
-                      <div style={{ flex:1 }}>
-                        <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Направление</label>
-                        <div style={{ display:'flex', gap:4 }}>
-                          {[['x','↔'],['y','↕']].map(([id,label])=>(
-                            <button key={id} type="button" onClick={() => updDrilling(i,{rowDir:id})}
-                              style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:12,
-                                background: (dr.rowDir||'x')===id?'var(--blue)':'var(--bg3)',
-                                color: (dr.rowDir||'x')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <NumField label="Шаг" value={dr.rowStep??32} onChange={v=>updDrilling(i,{rowStep:v})} />
-                      <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
-                    </div>
-                  )}
-
-                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'3px 0 4px' }}>Размножить (зеркало)</label>
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'6px 0 4px' }}>Размножить (зеркало)</label>
                   <div style={{ display:'flex', gap:4, marginBottom:5 }}>
                     <label style={{ flex:1, display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
                       padding:'5px 6px', borderRadius:'var(--radius)', background: dr.mirrorX?'var(--blue-light)':'var(--bg3)' }}>
@@ -2735,6 +2720,50 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                           value={dr.mirrorMinY ?? (dr.offsets?.bottom ?? dr.offsets?.top ?? 0)}
                           onChange={v=>updDrilling(i,{mirrorMinY:v})} />
                       )}
+                    </div>
+                  )}
+
+                  {/* Реже используемые настройки — внизу */}
+                  {attachedIds.length > 0 && (
+                    <div style={{ display:'flex', gap:4, alignItems:'flex-end', marginBottom:5 }}>
+                      <NumField label="Зазор от линии" value={dr.gap??0} onChange={v=>updDrilling(i,{gap:v})} />
+                      <div style={{ display:'flex', gap:4 }}>
+                        {(primaryGuide?.kind === 'upright'
+                          ? [['pos','Вправо'],['neg','Влево']]
+                          : [['pos','Вверх'],['neg','Вниз']]
+                        ).map(([id,label])=>(
+                          <button key={id} type="button" onClick={() => updDrilling(i,{gapDir:id})}
+                            style={{ padding:'5px 6px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                              background: (dr.gapDir||'pos')===id?'var(--blue)':'var(--bg3)',
+                              color: (dr.gapDir||'pos')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', margin:'2px 0 4px', cursor:'pointer' }}>
+                    <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
+                    Ряд отверстий
+                  </label>
+                  {dr.row && (
+                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
+                      <div style={{ flex:1 }}>
+                        <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:2 }}>Направление</label>
+                        <div style={{ display:'flex', gap:4 }}>
+                          {[['x','↔'],['y','↕']].map(([id,label])=>(
+                            <button key={id} type="button" onClick={() => updDrilling(i,{rowDir:id})}
+                              style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:12,
+                                background: (dr.rowDir||'x')===id?'var(--blue)':'var(--bg3)',
+                                color: (dr.rowDir||'x')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <NumField label="Шаг" value={dr.rowStep??32} onChange={v=>updDrilling(i,{rowStep:v})} />
+                      <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
                     </div>
                   )}
                 </>
@@ -2812,19 +2841,8 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     <NumField label="Глубина" value={dr.depth??35} onChange={v=>updDrilling(i,{depth:v, hardwareId:null})} />
                   </div>
 
-                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', margin:'0 0 4px', cursor:'pointer' }}>
-                    <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
-                    Ряд отверстий вдоль торца
-                  </label>
-                  {dr.row && (
-                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
-                      <NumField label="Шаг" value={dr.rowStep??32} onChange={v=>updDrilling(i,{rowStep:v})} />
-                      <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
-                    </div>
-                  )}
-
-                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'3px 0 4px' }}>Размножить (зеркало)</label>
-                  <div style={{ display:'flex', gap:4 }}>
+                  <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'0 0 4px' }}>Размножить (зеркало)</label>
+                  <div style={{ display:'flex', gap:4, marginBottom:5 }}>
                     <label style={{ flex:1, display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
                       padding:'5px 6px', borderRadius:'var(--radius)', background: dr.mirrorX?'var(--blue-light)':'var(--bg3)' }}>
                       <input type="checkbox" checked={!!dr.mirrorX} onChange={e=>updDrilling(i,{mirrorX:e.target.checked})} />
@@ -2836,6 +2854,17 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                       ↕ Верх/низ
                     </label>
                   </div>
+
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', margin:'2px 0 4px', cursor:'pointer' }}>
+                    <input type="checkbox" checked={!!dr.row} onChange={e=>updDrilling(i,{row:e.target.checked})} />
+                    Ряд отверстий вдоль торца
+                  </label>
+                  {dr.row && (
+                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
+                      <NumField label="Шаг" value={dr.rowStep??32} onChange={v=>updDrilling(i,{rowStep:v})} />
+                      <NumField label="Кол-во" value={dr.rowCount??2} onChange={v=>updDrilling(i,{rowCount:Math.max(1,Math.round(v))})} />
+                    </div>
+                  )}
                 </>
               )}
             </CollapsibleItem>
