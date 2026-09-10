@@ -252,8 +252,10 @@ function attachedTargetForGuide(dr, guide) {
 // а зеркальная подгоняется под неё (используя свой минимум, если задан).
 function resolveKratnostValue(rawBase, span, mirrorEnabled, mirrorMinRaw, pitchStep, baseFixed) {
   const mod = (v, m) => ((v % m) + m) % m
-  if (!pitchStep) return { base: rawBase, mirror: mirrorEnabled ? (mirrorMinRaw ?? rawBase) : null }
-  if (!mirrorEnabled) return { base: Math.ceil(rawBase / pitchStep) * pitchStep, mirror: null }
+  // Кратность имеет смысл только когда есть с ЧЕМ мерить расстояние (зеркало по
+  // этой же оси). Без зеркала — оставляем введённое значение как есть, без снапа,
+  // иначе точное значение (например 8мм) неожиданно "слетает" на шаг кратности.
+  if (!pitchStep || !mirrorEnabled) return { base: rawBase, mirror: mirrorEnabled ? (mirrorMinRaw ?? rawBase) : null }
 
   if (!baseFixed) {
     // Симметричный случай — обе стороны двигаются вместе к ближайшему валидному значению
@@ -449,15 +451,44 @@ function mirrorEdgePoints(pts, dr, panelW, panelH, axisAlong, alongIsX, fromEnd)
   return result
 }
 
+// ─── Парная фурнитура — независимый "штамп": к каждой уже посчитанной точке
+// (после ряда/зеркала/привязки — она уже точно на своём месте, "привязана" куда надо)
+// добавляем вторую точку со своим железом, сдвинутую на pairGap.
+// По умолчанию порядок фиксирован (основная, потом пара) на каждой точке одинаково.
+// Если включён pairMirrorSwap — на зеркальных копиях (не на самой первой/базовой
+// точке) основное и парное железо меняются местами — по желанию пользователя.
+function stampPairs(pts, dr, isEdgeKind) {
+  if (!dr.pairEnabled) return pts
+  const gap = dr.pairGap ?? 32
+  const axis = dr.pairAxis || 'x'
+  const swap = !!dr.pairMirrorSwap && !dr.row // с рядом свап пока не комбинируем — там idx>0 не значит "зеркало"
+  const out = []
+  pts.forEach((p, idx) => {
+    const pairPt = isEdgeKind
+      ? (p.dx !== 0 ? { ...p, y: p.y + gap } : { ...p, x: p.x + gap })
+      : (axis === 'y' ? { ...p, y: p.y + gap } : { ...p, x: p.x + gap })
+    if (swap && idx > 0) {
+      // Зеркальная копия — меняем местами, какое из двух отверстий "основное"
+      out.push({ ...p, isPair: true })
+      out.push({ ...pairPt, isPair: false })
+    } else {
+      out.push(p)
+      out.push({ ...pairPt, isPair: true })
+    }
+  })
+  return out
+}
+
 // ─── Итоговые точки присадки (ряд + зеркало) — единая точка входа для рендера и экспорта
 function getDrillPoints(dr, panelW, panelH, layout) {
   if (dr.kind === 'edge') {
     const { pts, axisAlong, alongIsX, fromEnd } = baseEdgeDrillPoints(dr, panelW, panelH)
-    return mirrorEdgePoints(pts, dr, panelW, panelH, axisAlong, alongIsX, fromEnd)
+    const mirrored = mirrorEdgePoints(pts, dr, panelW, panelH, axisAlong, alongIsX, fromEnd)
+    return stampPairs(mirrored, dr, true)
   }
   // Присадка по плоскости зеркалится внутри baseFaceDrillPoints — по ширине
   // конкретной линии разметки (если есть привязка), а не всей детали
-  return baseFaceDrillPoints(dr, panelW, panelH, layout)
+  return stampPairs(baseFaceDrillPoints(dr, panelW, panelH, layout), dr, false)
 }
 
 // ─── Выноска размера для присадки по плоскости ───────────────────────────────
@@ -886,36 +917,47 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         }
       }
 
+      // Индекс геометрического зеркала базовой точки (не пары!) — первая НЕ-парная
+      // точка после индекса 0; нужен для выносок и линии расстояния между зеркалами
+      const mirrorIdx = pts.findIndex((p, idx) => idx > 0 && !p.isPair)
+      const labelIdxs = new Set([0])
+      if (mirrorIdx >= 0) labelIdxs.add(mirrorIdx)
+      if (dr.pairEnabled && pts[1]?.isPair) labelIdxs.add(1)
+
       if (dr.kind === 'edge') {
         const depthPx = (dr.depth || 15) * sc
         const halfD = d / 2
         pts.forEach((p, pi) => {
+          const useD = p.isPair ? (dr.pairD ?? d) : d
+          const useDepth = p.isPair ? (dr.pairDepth ?? dr.depth) : (dr.depth || 15)
+          const useDPx = useD * sc
+          const useDepthPx = useDepth * sc
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
-          const ix = px + p.dx * depthPx   // внутренний конец по X (canvas)
-          const iy = py - p.dy * depthPx   // внутренний конец по Y (canvas, инверсия)
+          const ix = px + p.dx * useDepthPx   // внутренний конец по X (canvas)
+          const iy = py - p.dy * useDepthPx   // внутренний конец по Y (canvas, инверсия)
           ctx.fillStyle = 'rgba(123,79,201,0.28)'
           ctx.strokeStyle = '#7B4FC9'; ctx.lineWidth = 1.2
           ctx.beginPath()
           if (p.dx !== 0) {
             const rx = Math.min(px, ix), rw = Math.abs(ix - px)
-            ctx.rect(rx, py - dPx/2, rw, dPx)
+            ctx.rect(rx, py - useDPx/2, rw, useDPx)
           } else {
             const ry = Math.min(py, iy), rh = Math.abs(iy - py)
-            ctx.rect(px - dPx/2, ry, dPx, rh)
+            ctx.rect(px - useDPx/2, ry, useDPx, rh)
           }
           ctx.fill(); ctx.stroke()
           // точка входа сверла на торце
-          ctx.beginPath(); ctx.arc(px, py, Math.max(2, dPx*0.18), 0, Math.PI*2)
+          ctx.beginPath(); ctx.arc(px, py, Math.max(2, useDPx*0.18), 0, Math.PI*2)
           ctx.fillStyle = '#7B4FC9'; ctx.fill()
-          obstacles.push({ x: px, y: py, r: Math.max(dPx/2, 4) })
-          // Выноску до края рисуем и для базовой, и для зеркальной точки (не только первой)
-          if ((pi === 0 || pi === 1) && showDrillDims) {
-            allLabels.push(...drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, depthPx))
+          obstacles.push({ x: px, y: py, r: Math.max(useDPx/2, 4) })
+          // Выноску до края рисуем и для базовой, и для зеркальной/парной точки
+          if (labelIdxs.has(pi) && showDrillDims) {
+            allLabels.push(...drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, useDepthPx/sc))
           }
         })
-        // Расстояние между базовым и зеркальным отверстием (если это простое зеркало, не ряд)
-        if (showDrillDims && pts.length >= 2 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
-          const p0 = pts[0], p1 = pts[1]
+        // Расстояние между базовым и зеркальным отверстием (геометрическое зеркало, не пара)
+        if (showDrillDims && mirrorIdx >= 0 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
+          const p0 = pts[0], p1 = pts[mirrorIdx]
           const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
           const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
           const distMm = Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y))
@@ -925,12 +967,24 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           ctx.restore()
           allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `↔${distMm}`, color: '#7B4FC9', bold: true })
         }
+        // Расстояние до парного отверстия (если включена парная фурнитура)
+        if (showDrillDims && dr.pairEnabled && pts[1]?.isPair) {
+          const p0 = pts[0], p1 = pts[1]
+          const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
+          const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
+          const distMm = Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y))
+          ctx.save()
+          ctx.strokeStyle = 'rgba(16,163,127,0.5)'; ctx.setLineDash([2,2]); ctx.lineWidth = 1
+          ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px1, py1); ctx.stroke()
+          ctx.restore()
+          allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `⚭${distMm}`, color: '#0E8A6D', bold: true })
+        }
       } else {
         pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
-          const useD = (dr.pairEnabled && pi === 1) ? (dr.pairD ?? dr.d) : dr.d
-          const useDepth = (dr.pairEnabled && pi === 1) ? (dr.pairDepth ?? dr.depth) : dr.depth
-          const useFace = (dr.pairEnabled && pi === 1) ? (dr.pairFace ?? dr.face) : dr.face
+          const useD = p.isPair ? (dr.pairD ?? dr.d) : dr.d
+          const useDepth = p.isPair ? (dr.pairDepth ?? dr.depth) : dr.depth
+          const useFace = p.isPair ? (dr.pairFace ?? dr.face) : dr.face
           const r = Math.max(3, (useD || 8) * sc / 2)
           // Сквозное — определяется по глубине: если глубина присадки равна толщине
           // материала (с небольшим допуском), значит отверстие проходит насквозь.
@@ -955,17 +1009,17 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
             ctx.fillText('Л', px, py)
           }
-          // Выноску до края рисуем и для базовой, и для зеркальной точки (не только первой)
-          if ((pi === 0 || pi === 1) && showDrillDims) {
-            const isMirror = pi === 1
+          // Выноску до края рисуем и для базовой, и для зеркальной/парной точки
+          if (labelIdxs.has(pi) && showDrillDims) {
+            const isMirror = pi === mirrorIdx
             const mX = isMirror && !!dr.mirrorX
             const mY = isMirror && !dr.mirrorX && !!dr.mirrorY
             allLabels.push(...drawFaceLeader(ctx, dr, px, py, sc, ox, oy, dh, p.x, p.y, gXLo, gXHi, gYLo, gYHi, mX, mY))
           }
         })
-        // Расстояние между базовым и зеркальным отверстием (если это простое зеркало, не ряд)
-        if (showDrillDims && pts.length >= 2 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
-          const p0 = pts[0], p1 = pts[1]
+        // Расстояние между базовым и зеркальным отверстием (геометрическое зеркало, не пара)
+        if (showDrillDims && mirrorIdx >= 0 && !dr.row && (dr.mirrorX || dr.mirrorY)) {
+          const p0 = pts[0], p1 = pts[mirrorIdx]
           const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
           const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
           const distMm = Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y))
@@ -974,6 +1028,18 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px1, py1); ctx.stroke()
           ctx.restore()
           allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `↔${distMm}`, color: '#185FA5', bold: true })
+        }
+        // Расстояние до парного отверстия (если включена парная фурнитура)
+        if (showDrillDims && dr.pairEnabled && pts[1]?.isPair) {
+          const p0 = pts[0], p1 = pts[1]
+          const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
+          const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
+          const distMm = Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y))
+          ctx.save()
+          ctx.strokeStyle = 'rgba(16,163,127,0.5)'; ctx.setLineDash([2,2]); ctx.lineWidth = 1
+          ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px1, py1); ctx.stroke()
+          ctx.restore()
+          allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `⚭${distMm}`, color: '#0E8A6D', bold: true })
         }
       }
     })
@@ -2099,6 +2165,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     contour.vertices.some(v => v.r > 0) ||
     contour.holes.length > 0 || contour.grooves.length > 0 || contour.drillings.length > 0
 
+  // Какие линии разметки уже используются хоть какой-то присадкой — чтобы визуально
+  // отметить их в списке привязки, не заставляя пользователя вести счёт вручную
+  const guidesWithDrilling = new Set()
+  contour.drillings.forEach(d => (d.attachTo || []).forEach(id => guidesWithDrilling.add(id)))
+
   const activeVertex = activeIdx !== null ? getActiveVerts()[activeIdx] : null
 
   return (
@@ -2683,9 +2754,20 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
             const total = isUpright ? w : h
             const posFrom = g.posFrom || (isUpright ? 'left' : 'bottom')
             const isFar = posFrom === 'top' || posFrom === 'right'
-            const displayPos = isFar ? Math.round(total - (g.pos||0) - (g.thickness||18)) : Math.round(g.pos||0)
+            // Границы ПРОЁМА, а не всей детали: ищем ближайшую независимую линию
+            // того же вида по обе стороны — расстояние считаем именно от неё,
+            // а не от абсолютного нуля детали (если соседей нет — от края детали).
+            const sameIndependent = contour.layout.filter(x => x.kind === g.kind && !x.blockId).sort((a,b)=>(a.pos||0)-(b.pos||0))
+            const myPos = sameIndependent.findIndex(x => x.id === g.id)
+            const belowNeighbor = myPos > 0 ? sameIndependent[myPos-1] : null
+            const aboveNeighbor = (myPos >= 0 && myPos < sameIndependent.length-1) ? sameIndependent[myPos+1] : null
+            const belowBoundary = belowNeighbor ? (belowNeighbor.pos||0) + (belowNeighbor.thickness||18) : 0
+            const aboveBoundary = aboveNeighbor ? (aboveNeighbor.pos||0) : total
+            const displayPos = isFar
+              ? Math.round(aboveBoundary - (g.pos||0) - (g.thickness||18))
+              : Math.round((g.pos||0) - belowBoundary)
             const setDisplayPos = (v) => {
-              const newPos = isFar ? (total - v - (g.thickness||18)) : v
+              const newPos = isFar ? (aboveBoundary - v - (g.thickness||18)) : (belowBoundary + v)
               updLayout(i, { pos: Math.max(0, Math.round(newPos)) })
             }
             // Номер по физическому порядку от начала детали (0,0 — левый нижний угол),
@@ -2747,7 +2829,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               )}
 
               <div style={{ display:'flex', gap:5, marginBottom:6 }}>
-                {!g.blockId && <NumField label="Позиция" value={displayPos} onChange={setDisplayPos} />}
+                {!g.blockId && <NumField label="Позиция в проёме" value={displayPos} onChange={setDisplayPos} />}
                 <NumField label="Толщина материала" value={g.thickness??defaultThickness} onChange={v=>updLayout(i,{thickness:v})} />
               </div>
 
@@ -2918,15 +3000,18 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         </button>
                         {contour.layout.map((g, gi) => {
                           const on = attachedIds.includes(g.id)
+                          const used = guidesWithDrilling.has(g.id)
                           const sameKindG = contour.layout.filter(x => x.kind === g.kind).sort((a,b)=>(a.pos||0)-(b.pos||0))
                           const gOrderNum = sameKindG.findIndex(x => x.id === g.id) + 1
                           return (
                             <button key={g.id} type="button"
                               onClick={() => updDrilling(i,{attachTo: on ? attachedIds.filter(id=>id!==g.id) : [...attachedIds, g.id]})}
+                              title={used ? 'На этой линии уже есть присадка' : undefined}
                               style={{ padding:'4px 9px', borderRadius:20, fontSize:11, border:'none',
-                                background: on ? 'var(--blue)' : 'var(--bg3)',
-                                color: on ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
-                              {g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #{gOrderNum}
+                                background: on ? 'var(--blue)' : (used ? 'rgba(0,0,0,0.16)' : 'var(--bg3)'),
+                                color: on ? 'white' : (used ? 'var(--text-muted)' : 'var(--text-muted)'), cursor:'pointer',
+                                fontWeight: used && !on ? 600 : 400 }}>
+                              {g.kind==='upright'?'▏ Стойка':g.kind==='rail'?'▬ Царга':'▭ Полка'} #{gOrderNum}{used ? ' •' : ''}
                             </button>
                           )
                         })}
@@ -2951,42 +3036,59 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     </label>
                   </div>
 
-                  {(dr.mirrorX || dr.mirrorY) && !dr.row && (
-                    <>
-                      <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
-                        padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pairEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
-                        <input type="checkbox" checked={!!dr.pairEnabled} onChange={e=>updDrilling(i,{pairEnabled:e.target.checked})} />
-                        Парная фурнитура — на второй стороне другое отверстие (например конфирмат + шкант)
-                      </label>
-                      {dr.pairEnabled && (
-                        <div style={{ padding:7, marginBottom:5, background:'var(--bg2)', borderRadius:'var(--radius)' }}>
-                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
-                            <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие (на зеркальной стороне)</span>
-                            <button type="button" onClick={() => updDrilling(i, {
-                              d: dr.pairD ?? dr.d, depth: dr.pairDepth ?? dr.depth, face: dr.pairFace ?? dr.face,
-                              pairD: dr.d, pairDepth: dr.depth, pairFace: dr.face,
-                            })} style={{ fontSize:10.5, padding:'3px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
-                              background:'transparent', color:'var(--text-muted)', cursor:'pointer' }}>
-                              ⇄ Поменять местами
-                            </button>
-                          </div>
-                          <div style={{ display:'flex', gap:4, marginBottom:5 }}>
-                            {[['front','Лицо'],['back','Изнанка']].map(([id,label])=>(
-                              <button key={id} type="button" onClick={() => updDrilling(i, { pairFace: id })}
-                                style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
-                                  background: (dr.pairFace ?? dr.face)===id?'var(--blue)':'var(--bg3)',
-                                  color: (dr.pairFace ?? dr.face)===id?'white':'var(--text-muted)', cursor:'pointer' }}>
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                          <div style={{ display:'flex', gap:5 }}>
-                            <NumField label="Диаметр D" value={dr.pairD ?? dr.d ?? 8} onChange={v=>updDrilling(i,{pairD:v})} />
-                            <NumField label="Глубина" value={dr.pairDepth ?? dr.depth ?? 13} onChange={v=>updDrilling(i,{pairDepth:v})} />
-                          </div>
-                        </div>
+                  <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                    padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pairEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
+                    <input type="checkbox" checked={!!dr.pairEnabled} onChange={e=>updDrilling(i,{pairEnabled:e.target.checked})} />
+                    Парная фурнитура — рядом ещё одно отверстие (например конфирмат + шкант)
+                  </label>
+                  {dr.pairEnabled && (
+                    <div style={{ padding:7, marginBottom:5, background:'var(--bg2)', borderRadius:'var(--radius)' }}>
+                      <p style={{ fontSize:10, color:'var(--text-hint)', margin:'0 0 5px' }}>
+                        Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково, даже если основное отверстие само зеркалится или размножено кратностью.
+                      </p>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                        <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие (рядом с основным)</span>
+                        <button type="button" onClick={() => updDrilling(i, {
+                          d: dr.pairD ?? dr.d, depth: dr.pairDepth ?? dr.depth, face: dr.pairFace ?? dr.face,
+                          pairD: dr.d, pairDepth: dr.depth, pairFace: dr.face,
+                        })} style={{ fontSize:10.5, padding:'3px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                          background:'transparent', color:'var(--text-muted)', cursor:'pointer' }}>
+                          ⇄ Поменять местами
+                        </button>
+                      </div>
+                      <div style={{ display:'flex', gap:4, marginBottom:5 }}>
+                        {[['front','Лицо'],['back','Изнанка']].map(([id,label])=>(
+                          <button key={id} type="button" onClick={() => updDrilling(i, { pairFace: id })}
+                            style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                              background: (dr.pairFace ?? dr.face)===id?'var(--blue)':'var(--bg3)',
+                              color: (dr.pairFace ?? dr.face)===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{ display:'flex', gap:5, marginBottom:5 }}>
+                        <NumField label="Диаметр D" value={dr.pairD ?? dr.d ?? 8} onChange={v=>updDrilling(i,{pairD:v})} />
+                        <NumField label="Глубина" value={dr.pairDepth ?? dr.depth ?? 13} onChange={v=>updDrilling(i,{pairDepth:v})} />
+                      </div>
+                      <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:3 }}>Направление сдвига пары</label>
+                      <div style={{ display:'flex', gap:4, marginBottom:5 }}>
+                        {[['x','↔ По X'],['y','↕ По Y']].map(([id,lb])=>(
+                          <button key={id} type="button" onClick={() => updDrilling(i,{pairAxis:id})}
+                            style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                              background: (dr.pairAxis||'x')===id?'var(--blue)':'var(--bg3)',
+                              color: (dr.pairAxis||'x')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                            {lb}
+                          </button>
+                        ))}
+                      </div>
+                      <NumField label="Шаг между отверстиями (например 32)" value={dr.pairGap??32} onChange={v=>updDrilling(i,{pairGap:v})} />
+                      {!dr.row && (dr.mirrorX || dr.mirrorY) && (
+                        <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:11.5, color:'var(--text-muted)', cursor:'pointer', marginTop:5 }}>
+                          <input type="checkbox" checked={!!dr.pairMirrorSwap} onChange={e=>updDrilling(i,{pairMirrorSwap:e.target.checked})} />
+                          Менять местами при отражении (было: конфирмат-шкант / конфирмат-шкант → станет конфирмат-шкант / шкант-конфирмат)
+                        </label>
                       )}
-                    </>
+                    </div>
                   )}
 
                   <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
@@ -3181,6 +3283,41 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                       ↕ Верх/низ
                     </label>
                   </div>
+
+                  <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                    padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pairEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
+                    <input type="checkbox" checked={!!dr.pairEnabled} onChange={e=>updDrilling(i,{pairEnabled:e.target.checked})} />
+                    Парная фурнитура — рядом ещё одно отверстие (например конфирмат + шкант)
+                  </label>
+                  {dr.pairEnabled && (
+                    <div style={{ padding:7, marginBottom:5, background:'var(--bg2)', borderRadius:'var(--radius)' }}>
+                      <p style={{ fontSize:10, color:'var(--text-hint)', margin:'0 0 5px' }}>
+                        Сдвиг всегда вдоль того же торца. Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково.
+                      </p>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                        <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие (рядом с основным)</span>
+                        <button type="button" onClick={() => updDrilling(i, {
+                          d: dr.pairD ?? dr.d, depth: dr.pairDepth ?? dr.depth,
+                          pairD: dr.d, pairDepth: dr.depth,
+                        })} style={{ fontSize:10.5, padding:'3px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                          background:'transparent', color:'var(--text-muted)', cursor:'pointer' }}>
+                          ⇄ Поменять местами
+                        </button>
+                      </div>
+                      <div style={{ display:'flex', gap:5, marginBottom:5 }}>
+                        <NumField label="Диаметр D" value={dr.pairD ?? dr.d ?? 5} onChange={v=>updDrilling(i,{pairD:v})} />
+                        <NumField label="Глубина" value={dr.pairDepth ?? dr.depth ?? 35} onChange={v=>updDrilling(i,{pairDepth:v})} />
+                      </div>
+                      <NumField label="Шаг между отверстиями (например 32)" value={dr.pairGap??32} onChange={v=>updDrilling(i,{pairGap:v})} />
+                      {!dr.row && (dr.mirrorX || dr.mirrorY) && (
+                        <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:11.5, color:'var(--text-muted)', cursor:'pointer', marginTop:5 }}>
+                          <input type="checkbox" checked={!!dr.pairMirrorSwap} onChange={e=>updDrilling(i,{pairMirrorSwap:e.target.checked})} />
+                          Менять местами при отражении
+                        </label>
+                      )}
+                    </div>
+                  )}
+
 
                   {(() => {
                     const alongIsX = (dr.edgeSide === 'top' || dr.edgeSide === 'bottom')
