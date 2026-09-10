@@ -556,7 +556,7 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, showDrillDims=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0 }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, showDrillDims=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0, materialThickness=16 }) {
   const ref = useRef(null)
   const wrapRef = useRef(null)
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
@@ -926,22 +926,34 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `↔${distMm}`, color: '#7B4FC9', bold: true })
         }
       } else {
-        const isThrough = (dr.face || 'both') === 'both'
         pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
-          const r = Math.max(3, dPx/2)
+          const useD = (dr.pairEnabled && pi === 1) ? (dr.pairD ?? dr.d) : dr.d
+          const useDepth = (dr.pairEnabled && pi === 1) ? (dr.pairDepth ?? dr.depth) : dr.depth
+          const useFace = (dr.pairEnabled && pi === 1) ? (dr.pairFace ?? dr.face) : dr.face
+          const r = Math.max(3, (useD || 8) * sc / 2)
+          // Сквозное — определяется по глубине: если глубина присадки равна толщине
+          // материала (с небольшим допуском), значит отверстие проходит насквозь.
+          const pIsThrough = Math.abs((useDepth || 0) - materialThickness) < 0.6
           obstacles.push({ x: px, y: py, r })
-          if (isThrough) {
-            // Сквозное — как настоящий вырез, цвет контура детали
-            ctx.fillStyle = '#E6F1FB'; ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.4
+          if (pIsThrough) {
+            // Сквозное — розовый
+            ctx.fillStyle = 'rgba(236,72,153,0.32)'; ctx.strokeStyle = '#EC4899'; ctx.lineWidth = 1.4
             ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill(); ctx.stroke()
-          } else {
-            // Глухое (лицо/изнанка) — полупрозрачное, другим цветом, с меткой стороны
-            ctx.fillStyle = 'rgba(245,166,35,0.35)'; ctx.strokeStyle = '#C77D0E'; ctx.lineWidth = 1.4
+          } else if (useFace === 'back') {
+            // Глухое с изнанки — синий
+            ctx.fillStyle = 'rgba(37,99,235,0.32)'; ctx.strokeStyle = '#2563EB'; ctx.lineWidth = 1.4
             ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill(); ctx.stroke()
-            ctx.fillStyle = '#8A5300'; ctx.font = `bold ${Math.max(7, Math.round(r))}px sans-serif`
+            ctx.fillStyle = '#FFFFFF'; ctx.font = `bold ${Math.max(7, Math.round(r))}px sans-serif`
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-            ctx.fillText(dr.face === 'front' ? 'Л' : 'И', px, py)
+            ctx.fillText('И', px, py)
+          } else {
+            // Глухое с лица — белый
+            ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.strokeStyle = '#94A3B8'; ctx.lineWidth = 1.4
+            ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill(); ctx.stroke()
+            ctx.fillStyle = '#475569'; ctx.font = `bold ${Math.max(7, Math.round(r))}px sans-serif`
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+            ctx.fillText('Л', px, py)
           }
           // Выноску до края рисуем и для базовой, и для зеркальной точки (не только первой)
           if ((pi === 0 || pi === 1) && showDrillDims) {
@@ -1466,8 +1478,39 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     saveHardwarePresetsToStorage(next)
   }
   // Обратная совместимость со старыми записями (плоский {d,depth} без разделения)
-  const hwFaceSpec = (hp) => hp.face || (hp.d != null && !hp.edge ? { d: hp.d, depth: hp.depth, faceSide: 'both' } : null)
+  const hwFaceSpec = (hp) => hp.face || (hp.d != null && !hp.edge ? { d: hp.d, depth: hp.depth, faceSide: 'front' } : null)
   const hwEdgeSpec = (hp) => hp.edge || (hp.d != null && !hp.face ? { d: hp.d, depth: hp.depth } : null)
+  const applyHardwareToDrilling = (i, dr, hp, kind) => {
+    if (kind === 'face') {
+      const fs = hwFaceSpec(hp)
+      if (!fs) return
+      updDrilling(i, {
+        d: fs.d, depth: fs.depth, face: fs.faceSide || dr.face,
+        sides: fs.sides ?? dr.sides, offsets: fs.offsets ?? dr.offsets,
+        row: fs.row ?? dr.row, rowDir: fs.rowDir ?? dr.rowDir,
+        rowStep: fs.rowStep ?? dr.rowStep, rowCount: fs.rowCount ?? dr.rowCount,
+        mirrorX: fs.mirrorX ?? dr.mirrorX, mirrorY: fs.mirrorY ?? dr.mirrorY,
+        pitchEnabled: fs.pitchEnabled ?? dr.pitchEnabled, pitchStep: fs.pitchStep ?? dr.pitchStep,
+        baseFixedX: fs.baseFixedX ?? dr.baseFixedX, baseFixedY: fs.baseFixedY ?? dr.baseFixedY,
+        mirrorMinX: fs.mirrorMinX, mirrorMinY: fs.mirrorMinY,
+        attachTo: fs.attachTo ?? dr.attachTo, gap: fs.gap ?? dr.gap, gapDir: fs.gapDir ?? dr.gapDir,
+        hardwareId: hp.id,
+      })
+    } else {
+      const es = hwEdgeSpec(hp)
+      if (!es) return
+      updDrilling(i, {
+        d: es.d, depth: es.depth,
+        edgeSide: es.edgeSide ?? dr.edgeSide, alongFrom: es.alongFrom ?? dr.alongFrom,
+        offsetAlong: es.offsetAlong ?? dr.offsetAlong, offsetFace: es.offsetFace ?? dr.offsetFace,
+        row: es.row ?? dr.row, rowStep: es.rowStep ?? dr.rowStep, rowCount: es.rowCount ?? dr.rowCount,
+        mirrorX: es.mirrorX ?? dr.mirrorX, mirrorY: es.mirrorY ?? dr.mirrorY,
+        pitchEnabled: es.pitchEnabled ?? dr.pitchEnabled, pitchStep: es.pitchStep ?? dr.pitchStep,
+        baseFixed: es.baseFixed ?? dr.baseFixed, mirrorMinAlong: es.mirrorMinAlong,
+        hardwareId: hp.id,
+      })
+    }
+  }
   // Генератор добавления линий разметки (кол-во, проём, отступы — общий для полки/стойки/царги)
   const [genType, setGenType] = useState(null)
   const [genCount, setGenCount] = useState(1)
@@ -1877,7 +1920,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     if (kind === 'face') {
       upd({ drillings: [{
         id,
-        kind: 'face', face: 'both', d: 8, depth: 13,
+        kind: 'face', face: 'front', d: 8, depth: 13,
         sides: [], offsets: {}, attachTo: [],
         row: false, rowDir: 'x', rowStep: 32, rowCount: 2,
       }, ...contour.drillings] })
@@ -2167,6 +2210,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               placeMode={placeDrillIdx !== null || placeLayoutIdx !== null}
               onPlaceTap={placeLayoutIdx !== null ? handlePlaceLayoutTap : handlePlaceDrillTap}
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} showDrillDims={showDrillDims}
+              materialThickness={defaultThickness}
               zoom={zoom} onZoomChange={setZoom} onLayoutTap={handleLayoutBandTap} highlightLayoutIdx={highlightLayoutIdx}
               rotation={rotation} />
           </div>
@@ -2777,56 +2821,59 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                 <>
                   <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:4 }}>Сторона</label>
                   <div style={{ display:'flex', gap:4, marginBottom:5 }}>
-                    {[['front','Лицо'],['back','Изнанка'],['both','С двух сторон']].map(([id,label])=>(
+                    {[['front','Лицо'],['back','Изнанка']].map(([id,label])=>(
                       <button key={id} type="button" onClick={() => updDrilling(i, { face: id })}
                         style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
-                          background: (dr.face||'both')===id?'var(--blue)':'var(--bg3)',
-                          color: (dr.face||'both')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                          background: (dr.face||'front')===id?'var(--blue)':'var(--bg3)',
+                          color: (dr.face||'front')===id?'white':'var(--text-muted)', cursor:'pointer' }}>
                         {label}
                       </button>
                     ))}
                   </div>
+                  <p style={{ fontSize:10, color:'var(--text-hint)', margin:'-3px 0 6px' }}>
+                    Сквозное определяется автоматически: если глубина равна толщине материала ({defaultThickness}мм) — отверстие насквозь.
+                  </p>
 
                   {/* Фурнитура — общая база для присадки по плоскости и по торцу.
-                      Показываем только те записи, у которых ЕСТЬ параметры для плоскости;
-                      если у той же фурнитуры есть ещё и торцевая часть — помечаем "+Тц" */}
+                      Выпадающий список, а не постоянный ряд бейджей — компактнее.
+                      Показываются только записи, у которых ЕСТЬ параметры "для плоскости". */}
                   {hardwarePresets.some(hp => hwFaceSpec(hp)) && (
-                    <div style={{ display:'flex', gap:3, flexWrap:'wrap', marginBottom:5 }}>
-                      {hardwarePresets.filter(hp => hwFaceSpec(hp)).map(hp => {
-                        const fs = hwFaceSpec(hp)
-                        return (
-                          <button key={hp.id} type="button"
-                            onClick={() => updDrilling(i, {
-                              d: fs.d, depth: fs.depth, face: fs.faceSide || dr.face,
-                              sides: fs.sides ?? dr.sides, offsets: fs.offsets ?? dr.offsets,
-                              row: fs.row ?? dr.row, rowDir: fs.rowDir ?? dr.rowDir,
-                              rowStep: fs.rowStep ?? dr.rowStep, rowCount: fs.rowCount ?? dr.rowCount,
-                              mirrorX: fs.mirrorX ?? dr.mirrorX, mirrorY: fs.mirrorY ?? dr.mirrorY,
-                              pitchEnabled: fs.pitchEnabled ?? dr.pitchEnabled, pitchStep: fs.pitchStep ?? dr.pitchStep,
-                              baseFixedX: fs.baseFixedX ?? dr.baseFixedX, baseFixedY: fs.baseFixedY ?? dr.baseFixedY,
-                              mirrorMinX: fs.mirrorMinX, mirrorMinY: fs.mirrorMinY,
-                              attachTo: fs.attachTo ?? dr.attachTo, gap: fs.gap ?? dr.gap, gapDir: fs.gapDir ?? dr.gapDir,
-                              hardwareId: hp.id,
-                            })}
-                            onContextMenu={e => { e.preventDefault(); if (confirm(`Удалить "${hp.name}" из базы фурнитуры?`)) removeHardwarePreset(hp.id) }}
-                            style={{ padding:'4px 8px', borderRadius:20, fontSize:10.5, border:'none',
-                              background: dr.hardwareId===hp.id ? 'var(--teal)' : 'var(--bg3)',
-                              color: dr.hardwareId===hp.id ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
-                            {hp.name} · Пл ⌀{fs.d}×{fs.depth}{hwEdgeSpec(hp) ? ' +Тц' : ''}
-                          </button>
-                        )
-                      })}
+                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
+                      <select value={dr.hardwareId || ''} onChange={e => {
+                          const hp = hardwarePresets.find(x => x.id === e.target.value)
+                          if (hp) applyHardwareToDrilling(i, dr, hp, 'face')
+                        }}
+                        style={{ flex:1, padding:'6px 7px', fontSize:11.5,
+                          borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)', background:'var(--bg2)', color:'var(--text-muted)' }}>
+                        <option value="">— выбрать фурнитуру —</option>
+                        {hardwarePresets.filter(hp => hwFaceSpec(hp)).map(hp => {
+                          const fs = hwFaceSpec(hp)
+                          return (
+                            <option key={hp.id} value={hp.id}>
+                              {hp.name} · Пл ⌀{fs.d}×{fs.depth}{hwEdgeSpec(hp) ? ' +Тц' : ''}
+                            </option>
+                          )
+                        })}
+                      </select>
+                      {dr.hardwareId && (
+                        <button type="button" onClick={() => { if (confirm('Удалить эту фурнитуру из базы совсем?')) { removeHardwarePreset(dr.hardwareId); updDrilling(i,{hardwareId:null}) } }}
+                          style={{ padding:'6px 9px', fontSize:11, border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                            background:'transparent', color:'var(--danger)', cursor:'pointer' }}>🗑</button>
+                      )}
                     </div>
                   )}
                   {savingHardwareFor === i ? (
                     <div style={{ marginBottom:5 }}>
                       <div style={{ display:'flex', gap:4, marginBottom:4 }}>
                         <input type="text" value={newHardwareName} onChange={e=>setNewHardwareName(e.target.value)}
-                          placeholder="Название (Конфирмат 7х50)" autoFocus
+                          placeholder="Название (Конфирмат 7х50)" autoFocus list={`hw-names-face-${i}`}
                           style={{ flex:1, fontSize:11.5, padding:'5px 7px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)' }} />
+                        <datalist id={`hw-names-face-${i}`}>
+                          {hardwarePresets.map(hp => <option key={hp.id} value={hp.name} />)}
+                        </datalist>
                         <button type="button" onClick={() => {
                           saveHardwareSpec(newHardwareName, 'face', {
-                            d: dr.d??8, depth: dr.depth??13, faceSide: dr.face||'both',
+                            d: dr.d??8, depth: dr.depth??13, faceSide: dr.face||'front',
                             sides: dr.sides||[], offsets: dr.offsets||{},
                             row: !!dr.row, rowDir: dr.rowDir||'x', rowStep: dr.rowStep??32, rowCount: dr.rowCount??2,
                             mirrorX: !!dr.mirrorX, mirrorY: !!dr.mirrorY,
@@ -2903,6 +2950,44 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                       ↕ По Y
                     </label>
                   </div>
+
+                  {(dr.mirrorX || dr.mirrorY) && !dr.row && (
+                    <>
+                      <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
+                        padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pairEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
+                        <input type="checkbox" checked={!!dr.pairEnabled} onChange={e=>updDrilling(i,{pairEnabled:e.target.checked})} />
+                        Парная фурнитура — на второй стороне другое отверстие (например конфирмат + шкант)
+                      </label>
+                      {dr.pairEnabled && (
+                        <div style={{ padding:7, marginBottom:5, background:'var(--bg2)', borderRadius:'var(--radius)' }}>
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                            <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие (на зеркальной стороне)</span>
+                            <button type="button" onClick={() => updDrilling(i, {
+                              d: dr.pairD ?? dr.d, depth: dr.pairDepth ?? dr.depth, face: dr.pairFace ?? dr.face,
+                              pairD: dr.d, pairDepth: dr.depth, pairFace: dr.face,
+                            })} style={{ fontSize:10.5, padding:'3px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                              background:'transparent', color:'var(--text-muted)', cursor:'pointer' }}>
+                              ⇄ Поменять местами
+                            </button>
+                          </div>
+                          <div style={{ display:'flex', gap:4, marginBottom:5 }}>
+                            {[['front','Лицо'],['back','Изнанка']].map(([id,label])=>(
+                              <button key={id} type="button" onClick={() => updDrilling(i, { pairFace: id })}
+                                style={{ flex:1, padding:'5px 3px', borderRadius:'var(--radius)', border:'none', fontSize:11,
+                                  background: (dr.pairFace ?? dr.face)===id?'var(--blue)':'var(--bg3)',
+                                  color: (dr.pairFace ?? dr.face)===id?'white':'var(--text-muted)', cursor:'pointer' }}>
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{ display:'flex', gap:5 }}>
+                            <NumField label="Диаметр D" value={dr.pairD ?? dr.d ?? 8} onChange={v=>updDrilling(i,{pairD:v})} />
+                            <NumField label="Глубина" value={dr.pairDepth ?? dr.depth ?? 13} onChange={v=>updDrilling(i,{pairDepth:v})} />
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
 
                   <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
                     padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pitchEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
@@ -3018,37 +3103,39 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   {/* Фурнитура — показываем только записи с параметрами "для торца";
                       если у той же фурнитуры есть ещё и часть "для плоскости" — помечаем "+Пл" */}
                   {hardwarePresets.some(hp => hwEdgeSpec(hp)) && (
-                    <div style={{ display:'flex', gap:3, flexWrap:'wrap', marginBottom:5 }}>
-                      {hardwarePresets.filter(hp => hwEdgeSpec(hp)).map(hp => {
-                        const es = hwEdgeSpec(hp)
-                        return (
-                          <button key={hp.id} type="button"
-                            onClick={() => updDrilling(i, {
-                              d: es.d, depth: es.depth,
-                              edgeSide: es.edgeSide ?? dr.edgeSide, alongFrom: es.alongFrom ?? dr.alongFrom,
-                              offsetAlong: es.offsetAlong ?? dr.offsetAlong, offsetFace: es.offsetFace ?? dr.offsetFace,
-                              row: es.row ?? dr.row, rowStep: es.rowStep ?? dr.rowStep, rowCount: es.rowCount ?? dr.rowCount,
-                              mirrorX: es.mirrorX ?? dr.mirrorX, mirrorY: es.mirrorY ?? dr.mirrorY,
-                              pitchEnabled: es.pitchEnabled ?? dr.pitchEnabled, pitchStep: es.pitchStep ?? dr.pitchStep,
-                              baseFixed: es.baseFixed ?? dr.baseFixed, mirrorMinAlong: es.mirrorMinAlong,
-                              hardwareId: hp.id,
-                            })}
-                            onContextMenu={e => { e.preventDefault(); if (confirm(`Удалить "${hp.name}" из базы фурнитуры?`)) removeHardwarePreset(hp.id) }}
-                            style={{ padding:'4px 8px', borderRadius:20, fontSize:10.5, border:'none',
-                              background: dr.hardwareId===hp.id ? 'var(--teal)' : 'var(--bg3)',
-                              color: dr.hardwareId===hp.id ? 'white' : 'var(--text-muted)', cursor:'pointer' }}>
-                            {hp.name} · Тц ⌀{es.d}×{es.depth}{hwFaceSpec(hp) ? ' +Пл' : ''}
-                          </button>
-                        )
-                      })}
+                    <div style={{ display:'flex', gap:4, marginBottom:5 }}>
+                      <select value={dr.hardwareId || ''} onChange={e => {
+                          const hp = hardwarePresets.find(x => x.id === e.target.value)
+                          if (hp) applyHardwareToDrilling(i, dr, hp, 'edge')
+                        }}
+                        style={{ flex:1, padding:'6px 7px', fontSize:11.5,
+                          borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)', background:'var(--bg2)', color:'var(--text-muted)' }}>
+                        <option value="">— выбрать фурнитуру —</option>
+                        {hardwarePresets.filter(hp => hwEdgeSpec(hp)).map(hp => {
+                          const es = hwEdgeSpec(hp)
+                          return (
+                            <option key={hp.id} value={hp.id}>
+                              {hp.name} · Тц ⌀{es.d}×{es.depth}{hwFaceSpec(hp) ? ' +Пл' : ''}
+                            </option>
+                          )
+                        })}
+                      </select>
+                      {dr.hardwareId && (
+                        <button type="button" onClick={() => { if (confirm('Удалить эту фурнитуру из базы совсем?')) { removeHardwarePreset(dr.hardwareId); updDrilling(i,{hardwareId:null}) } }}
+                          style={{ padding:'6px 9px', fontSize:11, border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+                            background:'transparent', color:'var(--danger)', cursor:'pointer' }}>🗑</button>
+                      )}
                     </div>
                   )}
                   {savingHardwareFor === i ? (
                     <div style={{ marginBottom:5 }}>
                       <div style={{ display:'flex', gap:4, marginBottom:4 }}>
                         <input type="text" value={newHardwareName} onChange={e=>setNewHardwareName(e.target.value)}
-                          placeholder="Название (Конфирмат 7х50)" autoFocus
+                          placeholder="Название (Конфирмат 7х50)" autoFocus list={`hw-names-edge-${i}`}
                           style={{ flex:1, fontSize:11.5, padding:'5px 7px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)' }} />
+                        <datalist id={`hw-names-edge-${i}`}>
+                          {hardwarePresets.map(hp => <option key={hp.id} value={hp.name} />)}
+                        </datalist>
                         <button type="button" onClick={() => {
                           saveHardwareSpec(newHardwareName, 'edge', {
                             d: dr.d??5, depth: dr.depth??35,
