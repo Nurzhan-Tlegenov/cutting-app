@@ -3300,9 +3300,6 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     </div>
                   )}
 
-                  <ExtraHolesEditor dr={dr} i={i} allowEdgeType={false}
-                    addExtraHole={addExtraHole} updateExtraHole={updateExtraHole} removeExtraHole={removeExtraHole} />
-
                   <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5 }}>
                     <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
                       padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pitchEnabled?'var(--blue-light)':'var(--bg3)', flexShrink:0 }}>
@@ -3387,6 +3384,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                       </div>
                     )}
                   </div>
+
+                  <ExtraHolesEditor dr={dr} i={i} allowEdgeType={false}
+                    addExtraHole={addExtraHole} updateExtraHole={updateExtraHole} removeExtraHole={removeExtraHole} />
                 </>
               )}
 
@@ -3567,9 +3567,6 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                     </div>
                   )}
 
-                  <ExtraHolesEditor dr={dr} i={i} allowEdgeType={true}
-                    addExtraHole={addExtraHole} updateExtraHole={updateExtraHole} removeExtraHole={removeExtraHole} />
-
                   {(() => {
                     const alongIsX = (dr.edgeSide === 'top' || dr.edgeSide === 'bottom')
                     const alongMirrorOn = alongIsX ? dr.mirrorX : dr.mirrorY
@@ -3619,6 +3616,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                       </div>
                     )}
                   </div>
+
+                  <ExtraHolesEditor dr={dr} i={i} allowEdgeType={true}
+                    addExtraHole={addExtraHole} updateExtraHole={updateExtraHole} removeExtraHole={removeExtraHole} />
                 </>
               )}
             </CollapsibleItem>
