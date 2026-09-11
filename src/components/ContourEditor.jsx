@@ -911,6 +911,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
 
     // Присадка — реальная геометрия отверстий + выноски размеров
     ;(contour.drillings || []).forEach(dr => {
+      ctx.save()
+      const isPreview = dr.installed === false
+      if (isPreview) { ctx.globalAlpha = 0.45; ctx.setLineDash([3,3]) }
       const d = dr.d || 8
       const dPx = d * sc
       const pts = getDrillPoints(dr, w, h, contour.layout)
@@ -1054,6 +1057,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `⚭${distMm}`, color: '#0E8A6D', bold: true })
         }
       }
+      ctx.restore()
     })
 
     // Размеры отрезков + углы — умное позиционирование
@@ -1483,6 +1487,21 @@ function CollapsibleItem({ title, onRemove, children, innerRef, highlighted, ope
           style={{ background:'none', border:'none', color:'var(--text-hint)', cursor:'pointer', fontSize:15, padding:0 }}>✕</button>
       </div>
       {open && <div style={{ padding:'0 8px 8px' }}>{children}</div>}
+    </div>
+  )
+}
+
+// Свёрнутая по умолчанию подсказка — раскрывается по тапу, чтобы не раздувать карточку
+function Hint({ children }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginBottom:5 }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{ fontSize:10, padding:'2px 7px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+          background:'transparent', color:'var(--text-hint)', cursor:'pointer' }}>
+        {open ? '▲ Скрыть подсказку' : '? Подсказка'}
+      </button>
+      {open && <p style={{ fontSize:10, color:'var(--text-hint)', margin:'4px 0 0' }}>{children}</p>}
     </div>
   )
 }
@@ -2002,14 +2021,14 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     const id = makeDrillId()
     if (kind === 'face') {
       upd({ drillings: [{
-        id,
+        id, installed: false,
         kind: 'face', face: 'front', d: 8, depth: 13,
         sides: [], offsets: {}, attachTo: [],
         row: false, rowDir: 'x', rowStep: 32, rowCount: 2,
       }, ...contour.drillings] })
     } else {
       upd({ drillings: [{
-        id,
+        id, installed: false,
         kind: 'edge', edgeSide: 'left', alongFrom: 'start',
         offsetAlong: 50, offsetFace: defaultThickness / 2, d: 5, depth: 35,
         row: false, rowStep: 32, rowCount: 2,
@@ -2019,12 +2038,14 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
   }
   const updDrilling = (i, patch) => {
     const ds = [...contour.drillings]
-    ds[i] = { ...ds[i], ...patch }
+    // Любое изменение параметров возвращает присадку в режим предпросмотра —
+    // "установленной" (готовой к производству) она станет только по кнопке «Установить».
+    ds[i] = { ...ds[i], ...patch, installed: 'installed' in patch ? patch.installed : false }
     upd({ drillings: ds })
   }
   const duplicateDrilling = (i) => {
     const id = makeDrillId()
-    upd({ drillings: [{ ...contour.drillings[i], id }, ...contour.drillings] })
+    upd({ drillings: [{ ...contour.drillings[i], id, installed: false }, ...contour.drillings] })
     setOpenDrillId(id)
   }
 
@@ -2895,25 +2916,17 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
             <CollapsibleItem key={dr.id || i}
               open={openDrillId === (dr.id || i)}
               onToggleOpen={() => setOpenDrillId(openDrillId === (dr.id || i) ? null : (dr.id || i))}
-              title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}${dr.mirrorX||dr.mirrorY ? ' ⇄' : ''}${attachedGuides.length>1 ? ` ×${attachedGuides.length}линии` : ''}`}
+              title={`${dr.kind==='edge' ? '⊢ По торцу' : '⊙ По плоскости'} #${i+1} · ⌀${dr.d??8}${dr.row ? ` ×${Math.max(1,Math.round(dr.rowCount||1))}` : ''}${dr.mirrorX||dr.mirrorY ? ' ⇄' : ''}${attachedGuides.length>1 ? ` ×${attachedGuides.length}линии` : ''}${dr.installed===false ? ' · план' : ''}`}
               onRemove={() => upd({ drillings: contour.drillings.filter((_,j)=>j!==i) })}>
 
-              {/* Копировать + Указать нажатием */}
-              <div style={{ display:'flex', gap:4, marginBottom:5 }}>
-                <button type="button" onClick={() => duplicateDrilling(i)}
-                  style={{ flex:1, padding:'6px', borderRadius:'var(--radius)', border:'0.5px solid var(--border-md)',
-                    background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
-                  ⧉ Копировать
-                </button>
-                <button type="button"
-                  onClick={() => setPlaceDrillIdx(placeDrillIdx === i ? null : i)}
-                  style={{ flex:2, padding:'6px', borderRadius:'var(--radius)',
-                    border: placeDrillIdx === i ? '1px solid #0E8A6D' : '0.5px dashed var(--border-md)',
-                    background: placeDrillIdx === i ? 'rgba(14,138,109,0.1)' : 'transparent',
-                    fontSize:12, color: placeDrillIdx === i ? '#0E8A6D' : 'var(--text-muted)', cursor:'pointer' }}>
-                  {placeDrillIdx === i ? '👆 Жду нажатия…' : '📍 Указать нажатием'}
-                </button>
-              </div>
+              {/* Установка присадки: пока не нажали «Установить» — на детали видно
+                  только предпросмотр (пунктиром, полупрозрачно), параметры можно менять свободно. */}
+              <button type="button" onClick={() => updDrilling(i, { installed: !dr.installed })}
+                style={{ width:'100%', padding:'7px', marginBottom:5, borderRadius:'var(--radius)', border:'none',
+                  background: dr.installed ? 'var(--teal)' : 'rgba(14,138,109,0.12)',
+                  color: dr.installed ? 'white' : '#0E8A6D', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+                {dr.installed ? '✓ Установлено — нажмите, чтобы изменить' : '⚙ Установить'}
+              </button>
 
               {/* По плоскости */}
               {dr.kind === 'face' && (
@@ -2929,9 +2942,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                       </button>
                     ))}
                   </div>
-                  <p style={{ fontSize:10, color:'var(--text-hint)', margin:'-3px 0 6px' }}>
-                    Сквозное определяется автоматически: если глубина равна толщине материала ({defaultThickness}мм) — отверстие насквозь.
-                  </p>
+                  <Hint>Сквозное определяется автоматически: если глубина равна толщине материала ({defaultThickness}мм) — отверстие насквозь.</Hint>
 
                   {/* Фурнитура — общая база для присадки по плоскости и по торцу.
                       Выпадающий список, а не постоянный ряд бейджей — компактнее.
@@ -2989,9 +3000,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         <button type="button" onClick={() => { setSavingHardwareFor(null); setNewHardwareName('') }}
                           style={{ padding:'5px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:11, cursor:'pointer' }}>✕</button>
                       </div>
-                      <p style={{ fontSize:10, color:'var(--text-hint)', margin:0 }}>
-                        Сохранится с текущей стороной («{dr.face==='front'?'Лицо':dr.face==='back'?'Изнанка':'С двух сторон'}»), диаметром и глубиной. Если фурнитура с таким названием уже есть — её часть «для плоскости» обновится, а часть «для торца» (если есть) не тронется.
-                      </p>
+                      <Hint>Сохранится с текущей стороной («{dr.face==='front'?'Лицо':dr.face==='back'?'Изнанка':'С двух сторон'}»), диаметром и глубиной. Если фурнитура с таким названием уже есть — её часть «для плоскости» обновится, а часть «для торца» (если есть) не тронется.</Hint>
                     </div>
                   ) : (
                     <button type="button" onClick={() => setSavingHardwareFor(i)}
@@ -3063,9 +3072,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   </label>
                   {dr.pairEnabled && (
                     <div style={{ padding:7, marginBottom:5, background:'var(--bg2)', borderRadius:'var(--radius)' }}>
-                      <p style={{ fontSize:10, color:'var(--text-hint)', margin:'0 0 5px' }}>
-                        Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково, даже если основное отверстие само зеркалится или размножено кратностью.
-                      </p>
+                      <Hint>Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково, даже если основное отверстие само зеркалится или размножено кратностью.</Hint>
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
                         <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие (рядом с основным)</span>
                         <button type="button" onClick={() => updDrilling(i, {
@@ -3102,12 +3109,6 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         ))}
                       </div>
                       <NumField label="Шаг между отверстиями (например 32)" value={dr.pairGap??32} onChange={v=>updDrilling(i,{pairGap:v})} />
-                      {(dr.mirrorX || dr.mirrorY) && (
-                        <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:11.5, color:'var(--text-muted)', cursor:'pointer', marginTop:5 }}>
-                          <input type="checkbox" checked={dr.pairMirrorSwap !== false} onChange={e=>updDrilling(i,{pairMirrorSwap:e.target.checked})} />
-                          Менять местами при отражении (по умолчанию вкл.): конфирмат-шкант / шкант-конфирмат
-                        </label>
-                      )}
                     </div>
                   )}
 
@@ -3275,9 +3276,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         <button type="button" onClick={() => { setSavingHardwareFor(null); setNewHardwareName('') }}
                           style={{ padding:'5px 8px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:11, cursor:'pointer' }}>✕</button>
                       </div>
-                      <p style={{ fontSize:10, color:'var(--text-hint)', margin:0 }}>
-                        Если фурнитура с таким названием уже есть — её часть «для торца» обновится, часть «для плоскости» не тронется. Так у одного конфирмата могут храниться сразу обе части.
-                      </p>
+                      <Hint>Если фурнитура с таким названием уже есть — её часть «для торца» обновится, часть «для плоскости» не тронется. Так у одного конфирмата могут храниться сразу обе части.</Hint>
                     </div>
                   ) : (
                     <button type="button" onClick={() => setSavingHardwareFor(i)}
@@ -3313,9 +3312,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   </label>
                   {dr.pairEnabled && (
                     <div style={{ padding:7, marginBottom:5, background:'var(--bg2)', borderRadius:'var(--radius)' }}>
-                      <p style={{ fontSize:10, color:'var(--text-hint)', margin:'0 0 5px' }}>
-                        Сдвиг всегда вдоль того же торца. Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково.
-                      </p>
+                      <Hint>Сдвиг всегда вдоль того же торца. Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково.</Hint>
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
                         <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие (рядом с основным)</span>
                         <button type="button" onClick={() => updDrilling(i, {
@@ -3331,12 +3328,6 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         <NumField label="Глубина" value={dr.pairDepth ?? 13} onChange={v=>updDrilling(i,{pairDepth:v})} />
                       </div>
                       <NumField label="Шаг между отверстиями (например 32)" value={dr.pairGap??32} onChange={v=>updDrilling(i,{pairGap:v})} />
-                      {(dr.mirrorX || dr.mirrorY) && (
-                        <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:11.5, color:'var(--text-muted)', cursor:'pointer', marginTop:5 }}>
-                          <input type="checkbox" checked={dr.pairMirrorSwap !== false} onChange={e=>updDrilling(i,{pairMirrorSwap:e.target.checked})} />
-                          Менять местами при отражении (по умолчанию вкл.)
-                        </label>
-                      )}
                     </div>
                   )}
 
