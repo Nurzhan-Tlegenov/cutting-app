@@ -1,16 +1,37 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
 
 // ─── База фурнитуры (конфирматы, шканты, полкодержатели, минификсы...) ───────
-// Единая для присадки по плоскости и по торцу. Хранится на устройстве.
-const HARDWARE_KEY = 'raskoypro_hardware_presets_v1'
-function loadHardwarePresets() {
-  try {
-    const raw = localStorage.getItem(HARDWARE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
+// Единая для присадки по плоскости и по торцу. Хранится в Supabase, привязана
+// к user_id (логину), а не к устройству — видна пользователю на любом телефоне,
+// и только ему (RLS на таблице hardware_presets).
+async function loadHardwarePresetsFromDb(userId) {
+  if (!userId) return []
+  const { data, error } = await supabase
+    .from('hardware_presets')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  if (error) { console.error(error); return [] }
+  return (data || []).map(row => ({ id: row.id, name: row.name, face: row.face || null, edge: row.edge || null }))
 }
-function saveHardwarePresetsToStorage(list) {
-  try { localStorage.setItem(HARDWARE_KEY, JSON.stringify(list)) } catch {}
+async function upsertHardwarePresetToDb(userId, existingId, name, patch) {
+  if (!userId) return null
+  if (existingId) {
+    const { data, error } = await supabase.from('hardware_presets')
+      .update(patch).eq('id', existingId).eq('user_id', userId).select().single()
+    if (error) { console.error(error); return null }
+    return data
+  }
+  const { data, error } = await supabase.from('hardware_presets')
+    .insert({ user_id: userId, name, ...patch }).select().single()
+  if (error) { console.error(error); return null }
+  return data
+}
+async function deleteHardwarePresetFromDb(userId, id) {
+  const { error } = await supabase.from('hardware_presets').delete().eq('id', id).eq('user_id', userId)
+  if (error) console.error(error)
 }
 
 
@@ -1719,26 +1740,44 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
   // (например у конфирмата это разные диаметр/глубина с каждой стороны соединения) —
   // программа сама подставляет нужный вариант в зависимости от того, в какой карточке
   // выбрана эта фурнитура.
-  const [hardwarePresets, setHardwarePresets] = useState(() => loadHardwarePresets())
+  // Привязана к аккаунту (user_id в Supabase), а не к устройству — видна пользователю
+  // на любом телефоне после входа под своим логином, и только ему.
+  const { user } = useAuth()
+  const [hardwarePresets, setHardwarePresets] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    if (user?.id) {
+      loadHardwarePresetsFromDb(user.id).then(list => { if (!cancelled) setHardwarePresets(list) })
+    } else {
+      setHardwarePresets([])
+    }
+    return () => { cancelled = true }
+  }, [user?.id])
   const [savingHardwareFor, setSavingHardwareFor] = useState(null) // индекс присадки, для которой открыта форма сохранения
   const [newHardwareName, setNewHardwareName] = useState('')
   const saveHardwareSpec = (name, kind, spec) => {
     const trimmed = (name || '').trim()
-    if (!trimmed) return
-    const idx = hardwarePresets.findIndex(p => p.name.toLowerCase() === trimmed.toLowerCase())
-    let next
-    if (idx >= 0) {
-      next = hardwarePresets.map((p, i) => i === idx ? { ...p, [kind]: spec } : p)
+    if (!trimmed || !user?.id) return
+    const existing = hardwarePresets.find(p => p.name.toLowerCase() === trimmed.toLowerCase())
+    // Оптимистично обновляем список сразу, не дожидаясь ответа сервера
+    if (existing) {
+      setHardwarePresets(hardwarePresets.map(p => p.id === existing.id ? { ...p, [kind]: spec } : p))
     } else {
-      next = [...hardwarePresets, { id: 'hw'+Date.now().toString(36)+Math.random().toString(36).slice(2,5), name: trimmed, [kind]: spec }]
+      const tempId = 'tmp'+Date.now().toString(36)
+      setHardwarePresets([...hardwarePresets, { id: tempId, name: trimmed, [kind]: spec }])
     }
-    setHardwarePresets(next)
-    saveHardwarePresetsToStorage(next)
+    upsertHardwarePresetToDb(user.id, existing?.id, trimmed, { name: trimmed, [kind]: spec }).then(row => {
+      if (!row) return
+      setHardwarePresets(list => {
+        const withoutTemp = list.filter(p => p.id !== row.id && !String(p.id).startsWith('tmp'))
+        return [...withoutTemp, { id: row.id, name: row.name, face: row.face || null, edge: row.edge || null }]
+      })
+    })
   }
   const removeHardwarePreset = (id) => {
-    const next = hardwarePresets.filter(p => p.id !== id)
-    setHardwarePresets(next)
-    saveHardwarePresetsToStorage(next)
+    if (!user?.id) return
+    setHardwarePresets(hardwarePresets.filter(p => p.id !== id))
+    deleteHardwarePresetFromDb(user.id, id)
   }
   // Обратная совместимость со старыми записями (плоский {d,depth} без разделения)
   const hwFaceSpec = (hp) => hp.face || (hp.d != null && !hp.edge ? { d: hp.d, depth: hp.depth, faceSide: 'front' } : null)
