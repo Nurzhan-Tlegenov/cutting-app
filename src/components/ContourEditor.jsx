@@ -1621,7 +1621,7 @@ function ExtraHolesEditor({ dr, i, allowEdgeType, addExtraHole, updateExtraHole,
                 ))}
               </div>
               {allowEdgeType ? (
-                <NumField label="Вглубь от торца (например 34)" value={eh.offsetIn??34} onChange={v=>updateExtraHole(i, eh.id, {offsetIn:v})} />
+                <NumField label="Вглубь от торца" value={eh.offsetIn??34} onChange={v=>updateExtraHole(i, eh.id, {offsetIn:v})} />
               ) : (
                 <div style={{ display:'flex', gap:4, alignItems:'flex-end' }}>
                   <div style={{ display:'flex', gap:4 }}>
@@ -1647,13 +1647,13 @@ function ExtraHolesEditor({ dr, i, allowEdgeType, addExtraHole, updateExtraHole,
         <button type="button" onClick={() => addExtraHole(i, 'face')}
           style={{ flex:1, padding:'6px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
             background:'transparent', fontSize:11.5, color:'var(--text-muted)', cursor:'pointer' }}>
-          + Ещё отверстие (по плоскости)
+          + Ещё по плоскости
         </button>
         {allowEdgeType && (
           <button type="button" onClick={() => addExtraHole(i, 'edge')}
             style={{ flex:1, padding:'6px', border:'0.5px dashed var(--border-md)', borderRadius:'var(--radius)',
               background:'transparent', fontSize:11.5, color:'var(--text-muted)', cursor:'pointer' }}>
-            + Ещё отверстие (торцевое)
+            + Ещё по торцу
           </button>
         )}
       </div>
@@ -3194,8 +3194,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   {contour.layout.length > 0 && (
                     <>
                       <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', marginBottom:4 }}>
-                        Привязать к линиям разметки (можно несколько)
+                        Линии разметки
                       </label>
+                      <Hint>Можно выбрать несколько линий сразу.</Hint>
                       <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:5 }}>
                         <button type="button" onClick={() => updDrilling(i,{attachTo:[]})}
                           style={{ padding:'4px 9px', borderRadius:20, fontSize:11, border:'none',
@@ -3244,13 +3245,13 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
                     padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pairEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
                     <input type="checkbox" checked={!!dr.pairEnabled} onChange={e=>updDrilling(i,{pairEnabled:e.target.checked})} />
-                    Парная фурнитура — рядом ещё одно отверстие (например конфирмат + шкант)
+                    Парная фурнитура
                   </label>
                   {dr.pairEnabled && (
                     <div style={{ padding:7, marginBottom:5, background:'var(--bg2)', borderRadius:'var(--radius)' }}>
-                      <Hint>Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково, даже если основное отверстие само зеркалится или размножено кратностью.</Hint>
+                      <Hint>Рядом с основным ещё одно отверстие (например конфирмат + шкант). Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково, даже если основное отверстие само зеркалится или размножено кратностью.</Hint>
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
-                        <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие (рядом с основным)</span>
+                        <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие</span>
                         <button type="button" onClick={() => updDrilling(i, {
                           d: dr.pairD ?? 8, depth: dr.pairDepth ?? 13, face: dr.pairFace ?? dr.face,
                           pairD: dr.d, pairDepth: dr.depth, pairFace: dr.face,
@@ -3284,7 +3285,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                           </button>
                         ))}
                       </div>
-                      <NumField label="Шаг между отверстиями (например 32)" value={dr.pairGap??32} onChange={v=>updDrilling(i,{pairGap:v})} />
+                      <NumField label="Шаг между отверстиями" value={dr.pairGap??32} onChange={v=>updDrilling(i,{pairGap:v})} />
                     </div>
                   )}
 
@@ -3294,10 +3295,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
                     padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pitchEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
                     <input type="checkbox" checked={!!dr.pitchEnabled} onChange={e=>updDrilling(i,{pitchEnabled:e.target.checked, pitchStep: dr.pitchStep||32})} />
-                    Кратность — введённый отступ считается минимумом, положение округляется до шага
+                    Кратность
                   </label>
                   {dr.pitchEnabled && (
                     <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:5 }}>
+                      <div style={{ width:'100%' }}><Hint>Введённый отступ считается минимумом, положение округляется до шага.</Hint></div>
                       <NumField label="Шаг кратности" value={dr.pitchStep??32} onChange={v=>updDrilling(i,{pitchStep:v})} />
                       {dr.mirrorX && (
                         <>
@@ -3489,10 +3491,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
                     padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pairEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
                     <input type="checkbox" checked={!!dr.pairEnabled} onChange={e=>updDrilling(i,{pairEnabled:e.target.checked})} />
-                    Парная фурнитура — рядом ещё одно отверстие (например конфирмат + шкант)
+                    Парная фурнитура
                   </label>
                   {dr.pairEnabled && (
                     <div style={{ padding:7, marginBottom:5, background:'var(--bg2)', borderRadius:'var(--radius)' }}>
+                      <Hint>Рядом с основным ещё одно отверстие (например конфирмат + шкант).</Hint>
                       <label style={{ fontSize:10, color:'var(--text-hint)', display:'block', marginBottom:3 }}>Тип второго отверстия</label>
                       <div style={{ display:'flex', gap:4, marginBottom:6 }}>
                         {[['edge','⊢ Торцевое'],['face','⊙ По плоскости']].map(([id,label])=>(
@@ -3521,13 +3524,13 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                             <NumField label="Диаметр D" value={dr.pairD ?? 15} onChange={v=>updDrilling(i,{pairD:v})} />
                             <NumField label="Глубина" value={dr.pairDepth ?? 12.5} onChange={v=>updDrilling(i,{pairDepth:v})} />
                           </div>
-                          <NumField label="Вглубь от торца (например 34)" value={dr.pairFaceOffsetIn??34} onChange={v=>updDrilling(i,{pairFaceOffsetIn:v})} />
+                          <NumField label="Вглубь от торца" value={dr.pairFaceOffsetIn??34} onChange={v=>updDrilling(i,{pairFaceOffsetIn:v})} />
                         </>
                       ) : (
                         <>
                           <Hint>Сдвиг всегда вдоль того же торца. Не зависит от зеркала — порядок «основное → пара» сохраняется всегда одинаково.</Hint>
                           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
-                            <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие (рядом с основным)</span>
+                            <span style={{ fontSize:11, color:'var(--text-hint)' }}>Второе отверстие</span>
                             <button type="button" onClick={() => updDrilling(i, {
                               d: dr.pairD ?? 8, depth: dr.pairDepth ?? 13,
                               pairD: dr.d, pairDepth: dr.depth,
@@ -3540,7 +3543,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                             <NumField label="Диаметр D" value={dr.pairD ?? 8} onChange={v=>updDrilling(i,{pairD:v})} />
                             <NumField label="Глубина" value={dr.pairDepth ?? 13} onChange={v=>updDrilling(i,{pairDepth:v})} />
                           </div>
-                          <NumField label="Шаг между отверстиями (например 32)" value={dr.pairGap??32} onChange={v=>updDrilling(i,{pairGap:v})} />
+                          <NumField label="Шаг между отверстиями" value={dr.pairGap??32} onChange={v=>updDrilling(i,{pairGap:v})} />
                         </>
                       )}
                     </div>
@@ -3557,10 +3560,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)', cursor:'pointer',
                           padding:'5px 6px', borderRadius:'var(--radius)', background: dr.pitchEnabled?'var(--blue-light)':'var(--bg3)', marginBottom:5 }}>
                           <input type="checkbox" checked={!!dr.pitchEnabled} onChange={e=>updDrilling(i,{pitchEnabled:e.target.checked, pitchStep: dr.pitchStep||32})} />
-                          Кратность (вдоль торца) — отступ считается минимумом
+                          Кратность (вдоль торца)
                         </label>
                         {dr.pitchEnabled && (
                           <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:5 }}>
+                            <div style={{ width:'100%' }}><Hint>Отступ считается минимумом.</Hint></div>
                             <NumField label="Шаг кратности" value={dr.pitchStep??32} onChange={v=>updDrilling(i,{pitchStep:v})} />
                             {alongMirrorOn && (
                               <>
