@@ -287,8 +287,13 @@ function resolveKratnostValue(rawBase, span, mirrorEnabled, mirrorMinRaw, pitchS
     }
     return { base: x, mirror: x }
   }
-  // Базовая сторона зафиксирована как введено, зеркало подгоняем под неё
-  const mn = mirrorMinRaw ?? rawBase
+  // Базовая сторона зафиксирована как введено. Если для зеркала не задан свой
+  // отдельный минимум — зеркалим один в один (то самое число, без подгонки под
+  // шаг): это интуитивно и есть "зеркало". Модульная подгонка (кратность гарантирует
+  // расстояние между отверстиями, кратное шагу) включается, только если явно задан
+  // свой минимум для зеркальной стороны через "Мин. от края (зеркало)".
+  if (mirrorMinRaw == null) return { base: rawBase, mirror: rawBase }
+  const mn = mirrorMinRaw
   let m = mn
   for (let k = 0; k < pitchStep; k++) {
     const cand = mn + k
