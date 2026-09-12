@@ -1140,7 +1140,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           // Диаметр и глубина — короткой подписью прямо у отверстия, а не отдельной выноской
           if (showDrillDims) allLabels.push(drillSizeTag(px, py, p.dx, p.dy, useD, useDepth, '#7B4FC9'))
           if (labelIdxs.has(pi) && showDrillDims) {
-            const key = `${!!p.mAlong}_${!!p.mCross}`
+            const key = dr.pairEnabled ? `edge_${!!p.mCross}` : `${!!p.mAlong}_${!!p.mCross}`
             if (!cornerGroups.has(key)) cornerGroups.set(key, [])
             cornerGroups.get(key).push(p)
           }
@@ -1203,16 +1203,21 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
             ctx.fillText('Л', px, py)
           }
-          // Собираем угол зеркалирования — размеры нарисуем после цикла, чтобы для
-          // пары построить цепочку край→точка→точка→край, а не два независимых числа
+          // Собираем точки по РЯДАМ (а не по углам) — для цепочки все точки одного
+          // ряда (общая координата поперёк оси пары) должны идти В ОДНОЙ цепочке,
+          // иначе средний отрезок между зеркальными парами вообще не считается.
           if (labelIdxs.has(pi) && showDrillDims) {
-            const key = `${!!p.mX}_${!!p.mY}`
+            const pairAxis = dr.pairAxis || 'x'
+            const key = dr.pairEnabled
+              ? (pairAxis === 'x' ? `row_${!!p.mY}` : `col_${!!p.mX}`)
+              : `${!!p.mX}_${!!p.mY}`
             if (!cornerGroups.has(key)) cornerGroups.set(key, [])
             cornerGroups.get(key).push(p)
           }
         })
-        // Размер вдоль оси пары — цепочкой (край → отверстие → пара → край), как на
-        // чертеже; кросс-ось — одной обычной выноской. Без пары — как раньше, обе оси
+        // Размер вдоль оси пары — цепочкой (край → отверстие → …→ отверстие → край),
+        // как на чертеже, ОДНА цепочка на весь ряд (включая зеркальную сторону);
+        // кросс-ось — одной обычной выноской на ряд. Без пары — как раньше, обе оси
         // независимыми выносками до края.
         if (showDrillDims) {
           const pairAxis = dr.pairAxis || 'x'
@@ -1223,7 +1228,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
               allLabels.push(...drawFaceLeader(ctx, dr, px, py, sc, ox, oy, dh, rep.x, rep.y, gXLo, gXHi, gYLo, gYHi, !!rep.mX, !!rep.mY))
               return
             }
-            // Кросс-ось (та, что не по оси пары) — одна выноска на группу
+            // Кросс-ось (та, что не по оси пары) — одна выноска на весь ряд
             if (pairAxis === 'x') {
               allLabels.push(...drawFaceLeaderSingleAxis(ctx, dr, px, py, sc, ox, oy, dh, rep.x, rep.y, gXLo, gXHi, gYLo, gYHi, 'y', !!rep.mY))
               const sorted = [...group].sort((a,b) => a.x - b.x)
@@ -3310,7 +3315,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                             row: !!dr.row, rowDir: dr.rowDir||'x', rowStep: dr.rowStep??32, rowCount: dr.rowCount??2,
                             mirrorX: !!dr.mirrorX, mirrorY: !!dr.mirrorY,
                             pitchEnabled: !!dr.pitchEnabled, pitchStep: dr.pitchStep??32,
-                            baseFixedX: !!dr.baseFixedX, baseFixedY: !!dr.baseFixedY,
+                            baseFixedX: dr.baseFixedX !== false, baseFixedY: dr.baseFixedY !== false,
                             mirrorMinX: dr.mirrorMinX, mirrorMinY: dr.mirrorMinY,
                             attachTo: dr.attachTo||[], gap: dr.gap??0, gapDir: dr.gapDir||'pos',
                             pairEnabled: !!dr.pairEnabled, pairD: dr.pairD??8, pairDepth: dr.pairDepth??13,
@@ -3590,7 +3595,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                             row: !!dr.row, rowStep: dr.rowStep??32, rowCount: dr.rowCount??2,
                             mirrorX: !!dr.mirrorX, mirrorY: !!dr.mirrorY,
                             pitchEnabled: !!dr.pitchEnabled, pitchStep: dr.pitchStep??32,
-                            baseFixed: !!dr.baseFixed, mirrorMinAlong: dr.mirrorMinAlong,
+                            baseFixed: dr.baseFixed !== false, mirrorMinAlong: dr.mirrorMinAlong,
                             pairEnabled: !!dr.pairEnabled, pairD: dr.pairD??8, pairDepth: dr.pairDepth??13,
                             pairGap: dr.pairGap??32, pairMirrorSwap: dr.pairMirrorSwap !== false,
                             pairKind: dr.pairKind||'edge', pairFace: dr.pairFace||'front', pairFaceOffsetIn: dr.pairFaceOffsetIn??34,
