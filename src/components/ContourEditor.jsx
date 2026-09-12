@@ -305,7 +305,7 @@ function faceDrillCenterFromSides(dr, panelW, panelH, pitchStep) {
     x = ((offsets.left ?? 0) + (panelW - (offsets.right ?? 0))) / 2
   } else if (sides.includes('left') || sides.includes('right')) {
     const baseSide = sides.includes('left') ? 'left' : 'right'
-    const baseFixed = !!dr.baseFixedX || dr.mirrorMinX != null
+    const baseFixed = dr.baseFixedX !== false
     const r = resolveKratnostValue(offsets[baseSide] ?? 0, panelW, !!dr.mirrorX, dr.mirrorMinX, pitchStep, baseFixed)
     axisX = { baseSide, ...r }
     x = baseSide === 'left' ? axisX.base : panelW - axisX.base
@@ -314,7 +314,7 @@ function faceDrillCenterFromSides(dr, panelW, panelH, pitchStep) {
     y = ((offsets.bottom ?? 0) + (panelH - (offsets.top ?? 0))) / 2
   } else if (sides.includes('bottom') || sides.includes('top')) {
     const baseSide = sides.includes('bottom') ? 'bottom' : 'top'
-    const baseFixed = !!dr.baseFixedY || dr.mirrorMinY != null
+    const baseFixed = dr.baseFixedY !== false
     const r = resolveKratnostValue(offsets[baseSide] ?? 0, panelH, !!dr.mirrorY, dr.mirrorMinY, pitchStep, baseFixed)
     axisY = { baseSide, ...r }
     y = baseSide === 'bottom' ? axisY.base : panelH - axisY.base
@@ -432,7 +432,7 @@ function baseEdgeDrillPoints(dr, panelW, panelH) {
   const pitchStep = dr.pitchEnabled ? (dr.pitchStep || 32) : 0
   let axisAlong = null
   if (count === 1 && pitchStep) {
-    const baseFixed = !!dr.baseFixed || dr.mirrorMinAlong != null
+    const baseFixed = dr.baseFixed !== false
     axisAlong = resolveKratnostValue(along, total, alongMirrorActive, dr.mirrorMinAlong, pitchStep, baseFixed)
   }
 
@@ -615,7 +615,75 @@ function drawFaceLeader(ctx, dr, px, py, sc, ox, oy, dh, dataX, dataY, xLo, xHi,
   ]
 }
 
-// ─── Выноска размера для присадки по торцу (вдоль торца + глубина) ───────────
+// ─── Цепочка размеров вдоль оси, как на чертеже: край → отверстие → отверстие →
+// край, каждый сегмент подписан отдельно (например <37><32><69>). Линия цепочки
+// вынесена в сторону от самих отверстий на offsetPx, с выносными чёрточками от
+// каждой точки — чтобы подписи не перекрывали кружки/прямоугольники отверстий.
+// screenCoords — экранные координаты ВСЕХ точек цепочки по ходу (включая оба
+// края), уже в том порядке, в котором их нужно соединить.
+function drawDimChainScreen(ctx, screenCoords, screenCrossFixed, isHorizontal, offsetPx, mmDistances, color) {
+  ctx.save()
+  ctx.strokeStyle = color; ctx.setLineDash([2,2]); ctx.lineWidth = 1
+  const labels = []
+  const lineCross = screenCrossFixed + offsetPx
+  screenCoords.forEach(c => {
+    ctx.beginPath()
+    if (isHorizontal) { ctx.moveTo(c, screenCrossFixed); ctx.lineTo(c, lineCross) }
+    else { ctx.moveTo(screenCrossFixed, c); ctx.lineTo(lineCross, c) }
+    ctx.stroke()
+  })
+  for (let k = 0; k < screenCoords.length - 1; k++) {
+    const a = screenCoords[k], b = screenCoords[k + 1]
+    ctx.beginPath()
+    if (isHorizontal) { ctx.moveTo(a, lineCross); ctx.lineTo(b, lineCross) }
+    else { ctx.moveTo(lineCross, a); ctx.lineTo(lineCross, b) }
+    ctx.stroke()
+    const mid = (a + b) / 2
+    labels.push(isHorizontal
+      ? { x: mid, y: lineCross + (offsetPx > 0 ? 10 : -10), text: String(mmDistances[k]), color, bold: true }
+      : { x: lineCross + (offsetPx > 0 ? 8 : -8), y: mid, text: String(mmDistances[k]), color, bold: true })
+  }
+  ctx.restore()
+  return labels
+}
+
+// ─── Короткая подпись "⌀D×глубина" рядом с отверстием — без отдельной линии-выноски
+function drillSizeTag(px, py, dxDir, dyDir, d, depth, color) {
+  const off = 11
+  const x = px + (dxDir > 0 ? off : dxDir < 0 ? -off : 0)
+  const y = py + (dyDir > 0 ? -off : dyDir < 0 ? off : -off)
+  return { x, y, text: `⌀${Math.round(d)}×${Math.round(depth)}`, color, bold: false }
+}
+
+
+// ─── Та же выноска, что drawFaceLeader, но только по ОДНОЙ оси — нужна для
+// кросс-оси у пары (когда вдоль оси пары рисуется цепочка, а не отдельное число)
+function drawFaceLeaderSingleAxis(ctx, dr, px, py, sc, ox, oy, dh, dataX, dataY, xLo, xHi, yLo, yHi, axis, mirrorFlag) {
+  const sides = dr.sides || []
+  const labels = []
+  ctx.save()
+  ctx.strokeStyle = 'rgba(24,95,165,0.6)'; ctx.setLineDash([3,3]); ctx.lineWidth = 1
+  if (axis === 'x') {
+    let xSide = sides.includes('left') ? 'left' : sides.includes('right') ? 'right' : (dataX <= (xLo+xHi)/2 ? 'left' : 'right')
+    if (mirrorFlag) xSide = xSide === 'left' ? 'right' : 'left'
+    const distX = xSide === 'left' ? (dataX - xLo) : (xHi - dataX)
+    const exX = ox + (xSide === 'left' ? xLo : xHi) * sc
+    ctx.beginPath(); ctx.moveTo(exX, py); ctx.lineTo(px, py); ctx.stroke()
+    labels.push({ x: (exX + px) / 2, y: py - 6, text: String(Math.round(distX)), color: '#185FA5' })
+  } else {
+    let ySide = sides.includes('bottom') ? 'bottom' : sides.includes('top') ? 'top' : (dataY <= (yLo+yHi)/2 ? 'bottom' : 'top')
+    if (mirrorFlag) ySide = ySide === 'bottom' ? 'top' : 'bottom'
+    const distY = ySide === 'bottom' ? (dataY - yLo) : (yHi - dataY)
+    const exY = oy + dh - (ySide === 'bottom' ? yLo : yHi) * sc
+    ctx.beginPath(); ctx.moveTo(px, exY); ctx.lineTo(px, py); ctx.stroke()
+    labels.push({ x: px + 8, y: (exY + py) / 2, text: String(Math.round(distY)), color: '#185FA5' })
+  }
+  ctx.restore()
+  return labels
+}
+
+// ─── Выноска размера для присадки по торцу (вдоль торца, до ближайшего угла) —
+// глубину/диаметр теперь подписываем короткой меткой рядом с самим отверстием.
 // Также считается живьём от фактического положения точки — не зависит от способа установки.
 function drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY, dxDir, dyDir, halfD, depthPx) {
   ctx.save()
@@ -637,17 +705,7 @@ function drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, dataX, dataY, dxD
     ctx.beginPath(); ctx.moveTo(cornerX, py); ctx.lineTo(px, py); ctx.stroke()
     labels.push({ x: (cornerX + px) / 2, y: py + (dyDir < 0 ? 9 : -9), text: String(Math.round(fromLeft ? distLeft : distRight)), color: '#7B4FC9' })
   }
-
-  // Выноска глубины — вдоль направления сверления, до внутреннего конца
-  const ix = px + dxDir * depthPx, iy = py - dyDir * depthPx
-  ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ix, iy); ctx.stroke()
   ctx.restore()
-
-  const depthLabel = String(Math.round((dr.depth || 15)))
-  labels.push({
-    x: (px + ix) / 2, y: (py + iy) / 2, text: depthLabel, color: '#7B4FC9',
-    angle: dxDir === 0 ? Math.PI / 2 : 0,
-  })
   return labels
 }
 
@@ -1023,6 +1081,8 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       if (dr.kind === 'edge') {
         const depthPx = (dr.depth || 15) * sc
         const halfD = d / 2
+        const alongIsXEdge = (dr.edgeSide === 'top' || dr.edgeSide === 'bottom')
+        const cornerGroups = new Map() // "mAlong_mCross" → [точки]
         pts.forEach((p, pi) => {
           if (p.isFaceType) {
             // Пара (или доп. отверстие) — отверстие по плоскости, а не в торец
@@ -1047,6 +1107,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
               ctx.fillStyle = '#475569'; ctx.font = `bold ${Math.max(7, Math.round(r))}px sans-serif`
               ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Л', px, py)
             }
+            if (showDrillDims) allLabels.push(drillSizeTag(px, py, 0, -1, useD, useDepth, '#EC4899'))
             // Отверстие по плоскости (пара/доп. у торцевой присадки) — выноска до
             // ближайшего края по X и по Y, а не по торцу (у него нет направления сверления)
             if (labelIdxs.has(pi) && showDrillDims) {
@@ -1076,25 +1137,43 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           ctx.beginPath(); ctx.arc(px, py, Math.max(2, useDPx*0.18), 0, Math.PI*2)
           ctx.fillStyle = '#7B4FC9'; ctx.fill()
           obstacles.push({ x: px, y: py, r: Math.max(useDPx/2, 4) })
-          // Выноску до края рисуем для каждого угла зеркалирования (и его пары) —
-          // drawEdgeLeader сама находит ближайший угол по факту положения точки
+          // Диаметр и глубина — короткой подписью прямо у отверстия, а не отдельной выноской
+          if (showDrillDims) allLabels.push(drillSizeTag(px, py, p.dx, p.dy, useD, useDepth, '#7B4FC9'))
           if (labelIdxs.has(pi) && showDrillDims) {
-            allLabels.push(...drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, useDepthPx/sc))
+            const key = `${!!p.mAlong}_${!!p.mCross}`
+            if (!cornerGroups.has(key)) cornerGroups.set(key, [])
+            cornerGroups.get(key).push(p)
           }
         })
-        // Расстояние до парного отверстия (если включена парная фурнитура)
-        if (showDrillDims && dr.pairEnabled && pts[1]?.isPair) {
-          const p0 = pts[0], p1 = pts[1]
-          const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
-          const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
-          const distMm = Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y))
-          ctx.save()
-          ctx.strokeStyle = 'rgba(16,163,127,0.5)'; ctx.setLineDash([2,2]); ctx.lineWidth = 1
-          ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px1, py1); ctx.stroke()
-          ctx.restore()
-          allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `⚭${distMm}`, color: '#0E8A6D', bold: true })
+        // Размер "вдоль торца" — цепочкой (край → отверстие → пара → край), как на
+        // чертеже, для каждого угла зеркалирования отдельно; без пары — как раньше,
+        // одна выноска до ближайшего угла.
+        if (showDrillDims) {
+          cornerGroups.forEach(group => {
+            if (group.length === 1) {
+              const p = group[0]
+              const px = ox + p.x * sc, py = oy + dh - p.y * sc
+              allLabels.push(...drawEdgeLeader(ctx, dr, px, py, w, h, sc, ox, oy, dh, p.x, p.y, p.dx, p.dy, halfD, 0))
+              return
+            }
+            const total = alongIsXEdge ? w : h
+            const sorted = [...group].sort((a, b) => alongIsXEdge ? a.x - b.x : a.y - b.y)
+            const coordsMm = [0, ...sorted.map(p => alongIsXEdge ? p.x : p.y), total]
+            const dists = []
+            for (let k = 0; k < coordsMm.length - 1; k++) dists.push(Math.round(coordsMm[k+1] - coordsMm[k]))
+            const rep = sorted[0]
+            const screenCoords = [
+              alongIsXEdge ? ox : (oy + dh),
+              ...sorted.map(p => alongIsXEdge ? (ox + p.x*sc) : (oy + dh - p.y*sc)),
+              alongIsXEdge ? (ox + w*sc) : oy,
+            ]
+            const crossFixed = alongIsXEdge ? (oy + dh - rep.y*sc) : (ox + rep.x*sc)
+            const offsetPx = alongIsXEdge ? Math.sign(rep.dy || 1) * 16 : -Math.sign(rep.dx || 1) * 16
+            allLabels.push(...drawDimChainScreen(ctx, screenCoords, crossFixed, alongIsXEdge, offsetPx, dists, '#7B4FC9'))
+          })
         }
       } else {
+        const cornerGroups = new Map() // "mX_mY" → [точки]
         pts.forEach((p, pi) => {
           const px = ox + p.x * sc, py = oy + dh - p.y * sc
           const useD = p.ehD ?? (p.isPair ? (dr.pairD ?? 8) : dr.d)
@@ -1124,23 +1203,47 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
             ctx.fillText('Л', px, py)
           }
-          // Выноску до края рисуем для каждого угла зеркалирования (и его пары) —
-          // mX/mY у самой точки уже точно говорят, по какой оси она отражена
+          // Собираем угол зеркалирования — размеры нарисуем после цикла, чтобы для
+          // пары построить цепочку край→точка→точка→край, а не два независимых числа
           if (labelIdxs.has(pi) && showDrillDims) {
-            allLabels.push(...drawFaceLeader(ctx, dr, px, py, sc, ox, oy, dh, p.x, p.y, gXLo, gXHi, gYLo, gYHi, !!p.mX, !!p.mY))
+            const key = `${!!p.mX}_${!!p.mY}`
+            if (!cornerGroups.has(key)) cornerGroups.set(key, [])
+            cornerGroups.get(key).push(p)
           }
         })
-        // Расстояние до парного отверстия (если включена парная фурнитура)
-        if (showDrillDims && dr.pairEnabled && pts[1]?.isPair) {
-          const p0 = pts[0], p1 = pts[1]
-          const px0 = ox + p0.x*sc, py0 = oy + dh - p0.y*sc
-          const px1 = ox + p1.x*sc, py1 = oy + dh - p1.y*sc
-          const distMm = Math.round(Math.hypot(p1.x - p0.x, p1.y - p0.y))
-          ctx.save()
-          ctx.strokeStyle = 'rgba(16,163,127,0.5)'; ctx.setLineDash([2,2]); ctx.lineWidth = 1
-          ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px1, py1); ctx.stroke()
-          ctx.restore()
-          allLabels.push({ x: (px0+px1)/2, y: (py0+py1)/2, text: `⚭${distMm}`, color: '#0E8A6D', bold: true })
+        // Размер вдоль оси пары — цепочкой (край → отверстие → пара → край), как на
+        // чертеже; кросс-ось — одной обычной выноской. Без пары — как раньше, обе оси
+        // независимыми выносками до края.
+        if (showDrillDims) {
+          const pairAxis = dr.pairAxis || 'x'
+          cornerGroups.forEach(group => {
+            const rep = group[0]
+            const px = ox + rep.x * sc, py = oy + dh - rep.y * sc
+            if (group.length === 1) {
+              allLabels.push(...drawFaceLeader(ctx, dr, px, py, sc, ox, oy, dh, rep.x, rep.y, gXLo, gXHi, gYLo, gYHi, !!rep.mX, !!rep.mY))
+              return
+            }
+            // Кросс-ось (та, что не по оси пары) — одна выноска на группу
+            if (pairAxis === 'x') {
+              allLabels.push(...drawFaceLeaderSingleAxis(ctx, dr, px, py, sc, ox, oy, dh, rep.x, rep.y, gXLo, gXHi, gYLo, gYHi, 'y', !!rep.mY))
+              const sorted = [...group].sort((a,b) => a.x - b.x)
+              const coordsMm = [gXLo, ...sorted.map(p=>p.x), gXHi]
+              const dists = []
+              for (let k=0;k<coordsMm.length-1;k++) dists.push(Math.round(coordsMm[k+1]-coordsMm[k]))
+              const screenCoords = [ox+gXLo*sc, ...sorted.map(p=>ox+p.x*sc), ox+gXHi*sc]
+              const offsetPx = !!rep.mY ? -16 : 16
+              allLabels.push(...drawDimChainScreen(ctx, screenCoords, py, true, offsetPx, dists, '#185FA5'))
+            } else {
+              allLabels.push(...drawFaceLeaderSingleAxis(ctx, dr, px, py, sc, ox, oy, dh, rep.x, rep.y, gXLo, gXHi, gYLo, gYHi, 'x', !!rep.mX))
+              const sorted = [...group].sort((a,b) => a.y - b.y)
+              const coordsMm = [gYLo, ...sorted.map(p=>p.y), gYHi]
+              const dists = []
+              for (let k=0;k<coordsMm.length-1;k++) dists.push(Math.round(coordsMm[k+1]-coordsMm[k]))
+              const screenCoords = [oy+dh-gYLo*sc, ...sorted.map(p=>oy+dh-p.y*sc), oy+dh-gYHi*sc]
+              const offsetPx = !!rep.mX ? 16 : -16
+              allLabels.push(...drawDimChainScreen(ctx, screenCoords, px, false, offsetPx, dists, '#185FA5'))
+            }
+          })
         }
       }
       // Доп. отверстия составной присадки — тонкая выноска от базовой точки
@@ -3353,13 +3456,13 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   </div>
                   {dr.pitchEnabled && (
                     <div style={{ marginBottom:5 }}>
-                      <Hint>Введённый отступ считается минимумом, положение округляется до шага.</Hint>
+                      <Hint>Введённый отступ считается минимумом и остаётся как введён — округляется под шаг только зеркальная сторона (можно выключить ниже, тогда обе стороны подстроятся симметрично).</Hint>
                       {(dr.mirrorX || dr.mirrorY) && (
                         <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
                           {dr.mirrorX && (
                             <>
                               <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'var(--text-muted)', cursor:'pointer' }}>
-                                <input type="checkbox" checked={!!dr.baseFixedX} onChange={e=>updDrilling(i,{baseFixedX:e.target.checked})} />
+                                <input type="checkbox" checked={dr.baseFixedX !== false} onChange={e=>updDrilling(i,{baseFixedX:e.target.checked})} />
                                 Слева/справа от базы
                               </label>
                               <NumField label="Мин. от края (зеркало X)"
@@ -3370,7 +3473,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                           {dr.mirrorY && (
                             <>
                               <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'var(--text-muted)', cursor:'pointer' }}>
-                                <input type="checkbox" checked={!!dr.baseFixedY} onChange={e=>updDrilling(i,{baseFixedY:e.target.checked})} />
+                                <input type="checkbox" checked={dr.baseFixedY !== false} onChange={e=>updDrilling(i,{baseFixedY:e.target.checked})} />
                                 Верх/низ от базы
                               </label>
                               <NumField label="Мин. от края (зеркало Y)"
@@ -3631,11 +3734,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                         </div>
                         {dr.pitchEnabled && (
                           <div style={{ marginBottom:5 }}>
-                            <Hint>Отступ считается минимумом.</Hint>
+                            <Hint>Отступ считается минимумом и остаётся как введён — округляется под шаг только зеркальная сторона.</Hint>
                             {alongMirrorOn && (
                               <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
                                 <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, color:'var(--text-muted)', cursor:'pointer' }}>
-                                  <input type="checkbox" checked={!!dr.baseFixed} onChange={e=>updDrilling(i,{baseFixed:e.target.checked})} />
+                                  <input type="checkbox" checked={dr.baseFixed !== false} onChange={e=>updDrilling(i,{baseFixed:e.target.checked})} />
                                   От базы
                                 </label>
                                 <NumField label="Мин. вдоль торца (зеркало)"
