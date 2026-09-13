@@ -9,6 +9,32 @@
  * угол, Y вверх (мебельный стандарт, как в ContourEditor).
  */
 
+// ─── Поворот точки на N шагов по 90° (0/90/180/270) — используется картой
+// раскроя и для присадки, и для полигона true-shape детали, чтобы оба
+// оставались согласованы при любом повороте, а не только при 90° ──────────
+export function rotatePointTimes(x, y, panelW, panelH, times) {
+  let px = x, py = y, curW = panelW, curH = panelH
+  const n = ((Math.round(times) % 4) + 4) % 4
+  for (let i = 0; i < n; i++) {
+    const nx = py, ny = curW - px
+    px = nx; py = ny
+    const nw = curH, nh = curW
+    curW = nw; curH = nh
+  }
+  return { x: px, y: py }
+}
+
+// ─── Поворот набора сторон кромки на N шагов по 90° ───────────────────────
+export function rotateEdgesTimes(edges, times) {
+  const n = ((Math.round(times) % 4) + 4) % 4
+  let { top, right, bottom, left } = edges
+  for (let i = 0; i < n; i++) {
+    const nTop = left, nRight = top, nBottom = right, nLeft = bottom
+    top = nTop; right = nRight; bottom = nBottom; left = nLeft
+  }
+  return { top, right, bottom, left }
+}
+
 function findLayoutGuides(layout, ids) {
   if (!ids || !ids.length) return []
   return (layout || []).filter(g => ids.includes(g.id))
