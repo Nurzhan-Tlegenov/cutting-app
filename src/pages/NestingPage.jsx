@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { runNesting, computeOffcuts, computeOffcutAtPoint } from '../lib/nesting'
-import { getAllDrillPoints } from '../lib/drillGeometry'
+import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import BottomNav from '../components/BottomNav'
 
 const COLORS = [
@@ -118,14 +118,25 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         { x: o.x, y: o.y, w: o.w - kerf, h: o.h - kerf }
       ))
 
-      // Заливка — все детали одним светло-серым цветом, без разноцветной
-      // раскраски внутри контура (цвет остаётся только в лёгком выделении
-      // при перетаскивании/коллизии — чтобы это оставалось заметным)
+      // Деталь — если есть реальный контур (true-shape нестинг для фрезера),
+      // рисуем именно его; иначе — прямоугольник, как раньше
+      const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
       ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : PART_FILL)
-      ctx.fillRect(x, y, w, h)
       ctx.strokeStyle = hasCollision ? '#E24B4A' : PART_STROKE
       ctx.lineWidth = hasCollision ? 2 : 1
-      ctx.strokeRect(x, y, w, h)
+      if (hasShape) {
+        ctx.beginPath()
+        p.polygon.forEach((pt, vi) => {
+          const sx = x + pt.x * sc, sy = y + h - pt.y * sc
+          if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy)
+        })
+        ctx.closePath()
+        ctx.fill()
+        ctx.stroke()
+      } else {
+        ctx.fillRect(x, y, w, h)
+        ctx.strokeRect(x, y, w, h)
+      }
 
       // Кромка — рисуется НЕ по самому контуру, а с небольшим отступом внутрь,
       // чтобы контур детали и линия кромки не сливались, но было видно, на
@@ -151,11 +162,11 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           const panelH = Number(detail.length) || 0  // Y, "родная" ориентация
           const pts = getAllDrillPoints(contour, panelW, panelH)
           if (pts.length) {
+            const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
             ctx.fillStyle = '#6A4A17'
             pts.forEach(pt => {
-              // Точка в "родной" ориентации детали → в текущей (с учётом поворота на листе)
-              let fx = pt.x, fy = pt.y
-              if (p.rotated) { const nx = pt.y, ny = panelW - pt.x; fx = nx; fy = ny }
+              // Точка в "родной" ориентации детали → в текущей (с учётом поворота на листе, 0/90/180/270)
+              const { x: fx, y: fy } = rotatePointTimes(pt.x, pt.y, panelW, panelH, times)
               const sx = x + fx * sc
               const sy = y + h - fy * sc
               const r = Math.max(1.3, (pt.d || 8) * sc / 2)
@@ -293,11 +304,14 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       lastTap.current = { idx: drag.idx, time: now }
       if (isDoubleTap) {
         const p = placedRef.current[drag.idx]
+        const newRotation = ((p.rotation ?? (p.rotated ? 90 : 0)) + 90) % 360
+        const edges = rotateEdgesTimes({ top: p.edgeTop, right: p.edgeRight, bottom: p.edgeBottom, left: p.edgeLeft }, 1)
         const rotated = {
           ...p, w: p.h, h: p.w,
-          origX: p.origY, origY: p.origX, rotated: !p.rotated,
-          edgeTop: p.edgeLeft, edgeRight: p.edgeTop,
-          edgeBottom: p.edgeRight, edgeLeft: p.edgeBottom,
+          origX: p.origY, origY: p.origX,
+          rotation: newRotation, rotated: newRotation === 90 || newRotation === 270,
+          edgeTop: edges.top, edgeRight: edges.right, edgeBottom: edges.bottom, edgeLeft: edges.left,
+          polygon: Array.isArray(p.polygon) ? p.polygon.map(pt => rotatePointTimes(pt.x, pt.y, p.origX, p.origY, 1)) : p.polygon,
         }
         if (rotated.x + rotated.w <= usableX && rotated.y + rotated.h <= usableY) {
           const updated = placedRef.current.map((item, i) => i === drag.idx ? rotated : item)

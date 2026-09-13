@@ -76,6 +76,8 @@
  *   по меньшей стороне (0 = критерий выключен).
  */
 
+import { needsTrueShape, packTrueShape } from './trueShapeNesting'
+
 const BORDER_PENALTY = 2000000
 const ORIGIN_TIEBREAK = 5
 const EPS = 0.5 // мм, допуск на сравнение с границей (из-за kerf/округлений)
@@ -96,6 +98,19 @@ export async function runNesting({
 }) {
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
+
+  // ЧПУ-фрезер режет по любому контуру — если среди деталей есть хоть одна
+  // с реально нарисованным (не прямоугольным) внешним контуром, укладка
+  // обязана идти по этому контуру, а не по его прямоугольнику: это и есть
+  // алгоритм нестинга для фрезера, а не отдельный опциональный режим.
+  // Форматно-раскроечный станок (guillotine) сюда не попадает ни при каких
+  // контурах — там физически обязателен прямоугольный сквозной рез.
+  if (cuttingMethod !== 'guillotine' && needsTrueShape(details)) {
+    return await packTrueShape({
+      details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, optimizeSeconds,
+      smallPartsToCenter, smallPartsMaxSquareSide, smallPartsMaxSide,
+    })
+  }
 
   const smallPartsMaxArea = smallPartsMaxSquareSide > 0 ? smallPartsMaxSquareSide * smallPartsMaxSquareSide : 0
 
