@@ -412,6 +412,8 @@ export default function NestingPage() {
   const [elapsedSec, setElapsedSec] = useState(0)
   const [showDebugExport, setShowDebugExport] = useState(false)
   const [copyStatus, setCopyStatus] = useState('')
+  const [showResultExport, setShowResultExport] = useState(false)
+  const [resultCopyStatus, setResultCopyStatus] = useState('')
   const [activeSheet, setActiveSheet] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [sheetsData, setSheetsData] = useState([])
@@ -519,6 +521,34 @@ export default function NestingPage() {
       setCopyStatus('Не удалось скопировать — выделите текст вручную')
     }
     setTimeout(() => setCopyStatus(''), 2500)
+  }
+
+  // Экспорт РЕЗУЛЬТАТА укладки — не что было на входе, а что реально сейчас
+  // разложено на листах (координаты, поворот, точный полигон каждой детали).
+  // Именно это нужно смотреть, если входные контуры верны, а на экране всё
+  // равно видно пересечение или неплотную укладку — тут видно ТОЧНО то,
+  // что сейчас показывает карта раскроя.
+  const resultExportText = JSON.stringify({
+    usableX: result?.usableX, usableY: result?.usableY,
+    sheetsCount: sheetsData.length,
+    sheets: sheetsData.map(s => ({
+      index: s.index,
+      placed: s.placed.map(p => ({
+        detailIndex: p.detailIndex, label: p.label, prefix: p.prefix,
+        x: p.x, y: p.y, w: p.w, h: p.h, origX: p.origX, origY: p.origY,
+        rotated: p.rotated, rotation: p.rotation,
+        polygon: p.polygon,
+      })),
+    })),
+  }, null, 2)
+  async function copyResultExport() {
+    try {
+      await navigator.clipboard.writeText(resultExportText)
+      setResultCopyStatus('Скопировано ✓')
+    } catch {
+      setResultCopyStatus('Не удалось скопировать — выделите текст вручную')
+    }
+    setTimeout(() => setResultCopyStatus(''), 2500)
   }
 
   if (!order) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
@@ -690,6 +720,34 @@ export default function NestingPage() {
               </button>
               <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                 Нажмите в поле выше, чтобы выделить текст, или на кнопку — чтобы скопировать. Это точные координаты контура детали, которые можно прислать разработчику.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Экспорт РЕЗУЛЬТАТА укладки — что реально сейчас на листах (координаты,
+          повороты, точные полигоны). Показывается только после того, как
+          раскрой посчитан */}
+      {result && (
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={() => setShowResultExport(v => !v)}
+            style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+              background: 'transparent', color: 'var(--text-hint)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
+            {showResultExport ? '▼' : '▶'} Экспорт результата раскроя (для отладки)
+          </button>
+          {showResultExport && (
+            <div style={{ marginTop: 6 }}>
+              <textarea readOnly value={resultExportText}
+                style={{ width: '100%', height: 160, fontSize: 11, fontFamily: 'monospace', padding: 6, boxSizing: 'border-box' }}
+                onFocus={e => e.target.select()} />
+              <button onClick={copyResultExport}
+                style={{ marginTop: 6, width: '100%', padding: 8, borderRadius: 'var(--radius)', border: 'none',
+                  background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+                {resultCopyStatus || 'Скопировать'}
+              </button>
+              <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+                Это координаты и полигоны того, что сейчас реально показано на листах — если сверить их не по картинке, а по цифрам, видно точное расхождение.
               </p>
             </div>
           )}
