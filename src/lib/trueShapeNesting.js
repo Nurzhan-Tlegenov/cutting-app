@@ -50,7 +50,7 @@
 
 const MIN_CELL_MM = 4
 const MAX_CELL_MM = 12
-const TARGET_CELLS = 60000
+const TARGET_CELLS = 100000 // компромисс точность/скорость (было 60000, затем 160000 — на большом числе деталей это давало слишком дорогой перебор кандидатов)
 const MAX_COMPACT_PASSES = 3
 
 // Скругление угла (радиус на обычной точке контура) — превращаем в несколько
@@ -63,7 +63,7 @@ const MAX_COMPACT_PASSES = 3
 // угол паза скруглён, но радиус игнорировался, туда легально ставили соседнюю
 // деталь вплотную к ТЕОРЕТИЧЕСКОЙ острой точке, а настоящий (скруглённый)
 // материал там на самом деле чуть выступает дальше в паз.
-function roundCorner(prev, curr, next, r, segments = 8) {
+function roundCorner(prev, curr, next, r, segments = 16) {
   const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
   const dx1 = next.x - curr.x, dy1 = next.y - curr.y
   const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
@@ -99,7 +99,7 @@ function roundCorner(prev, curr, next, r, segments = 8) {
 
 // Явный fillet (дуга на стыке прямой и дуги через 3+ точек) — параметры уже
 // посчитаны в ContourEditor и сохранены в самой вершине, просто сэмплируем.
-function sampleFillet(v, segments = 8) {
+function sampleFillet(v, segments = 16) {
   const ccw = !!v.fccw
   let a0 = v.fa0, a1 = v.fa1
   let diff = a1 - a0
@@ -122,7 +122,7 @@ function circumcenter(a, b, c) {
 
 // Дуга через 3 точки (circumcircle) — та же логика направления обхода, что и
 // drawArc3 в ContourEditor.jsx: идём от sp к ep так, чтобы пройти через mid.
-function sampleArc3(sp, mid, ep, segments = 10) {
+function sampleArc3(sp, mid, ep, segments = 16) {
   const C = circumcenter(sp, mid, ep)
   if (!C) return [[sp.x, sp.y], [ep.x, ep.y]] // почти на одной прямой — сэмплировать нечего
   const R = Math.hypot(sp.x - C.x, sp.y - C.y)
@@ -351,7 +351,7 @@ function contactScore(occ, cols, rows, gx, gy, boundaryOffsets, boundarySet) {
   return contact
 }
 
-const MAX_CANDIDATES = 4000 // ограничение на число вариантов, которые реально оцениваем — держит расчёт быстрым
+const MAX_CANDIDATES = 1500 // ограничение на число вариантов, которые реально оцениваем — держит расчёт быстрым (было 4000 — на большом числе деталей это ощутимо дорого)
 
 // avoidBorder=true — кандидаты, касающиеся края используемой зоны, вообще не
 // рассматриваются (для мелких деталей: сначала пробуем без края, и только
@@ -403,13 +403,14 @@ function placeInstance(occ, cols, rows, inst) {
 
 const YIELD_EVERY_PIECES = 3 // как часто внутри одной попытки укладки отдаём управление браузеру — иначе таймер и спиннер "замирают"
 
-async function attemptPack(pieceInstances, cols, rows) {
+async function attemptPack(pieceInstances, cols, rows, deadline) {
   const sheets = []
   let cur = null
   const openSheet = () => { cur = { index: sheets.length, occ: new Uint8Array(cols * rows), placed: [] }; sheets.push(cur) }
   openSheet()
   let n = 0
   for (const inst of pieceInstances) {
+    if (deadline && Date.now() > deadline) break // одна попытка сама по себе может быть слишком долгой на большом заказе — прерываем, а не игнорируем бюджет времени
     let placement = placeInstance(cur.occ, cols, rows, inst)
     if (!placement) {
       openSheet()
@@ -431,13 +432,15 @@ function rebuildOccupancy(sheet, cols, rows) {
 
 // Компакция: пробуем переложить детали с ПОСЛЕДНИХ листов на более ранние,
 // если там реально есть куда — может схлопнуть число листов и уплотнить хвост.
-async function compactSheets(sheets, cols, rows) {
+async function compactSheets(sheets, cols, rows, deadline) {
   for (let pass = 0; pass < MAX_COMPACT_PASSES; pass++) {
+    if (Date.now() > deadline) break
     let moved = false
     let n = 0
-    for (let si = sheets.length - 1; si >= 1; si--) {
+    outer: for (let si = sheets.length - 1; si >= 1; si--) {
       const sheet = sheets[si]
       for (let pi = sheet.placed.length - 1; pi >= 0; pi--) {
+        if (Date.now() > deadline) break outer
         const item = sheet.placed[pi]
         for (let ti = 0; ti < si; ti++) {
           const target = sheets[ti]
@@ -476,6 +479,105 @@ function better(a, b) {
   return a.lastFill > b.lastFill
 }
 
+// ─── Финальная проверка ПО ТОЧНОЙ геометрии (не по сетке) ─────────────────
+// Сетка (даже мелкая) — это всегда приближение: ячейка проверяется по своему
+// центру, и прямо на изгибе/дуге могут случайно допустить чуть большее
+// касание, чем есть на самом деле. Поэтому после укладки по сетке — отдельно,
+// точной математикой (пересечение отрезков + "точка внутри полигона")
+// проверяем ВСЕ пары деталей на каждом листе. Если где-то всё же нашлось
+// пересечение — это надёжная защита, а не догадка: деталь снимается с листа
+// и переставляется заново (в худшем случае — на новый лист).
+function segmentsIntersect(a1, a2, b1, b2) {
+  const d = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+  const d1 = d(b1, b2, a1), d2 = d(b1, b2, a2), d3 = d(a1, a2, b1), d4 = d(a1, a2, b2)
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+}
+function pointInPolygonExact(pt, poly) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1]
+    const cross = ((yi > pt[1]) !== (yj > pt[1])) && (pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi)
+    if (cross) inside = !inside
+  }
+  return inside
+}
+function polygonsOverlapExact(polyA, polyB) {
+  for (let i = 0; i < polyA.length; i++) {
+    const a1 = polyA[i], a2 = polyA[(i + 1) % polyA.length]
+    for (let j = 0; j < polyB.length; j++) {
+      const b1 = polyB[j], b2 = polyB[(j + 1) % polyB.length]
+      if (segmentsIntersect(a1, a2, b1, b2)) return true
+    }
+  }
+  return pointInPolygonExact(polyA[0], polyB) || pointInPolygonExact(polyB[0], polyA)
+}
+function absolutePolygon(item) {
+  const p = item.placement
+  return p.variant.polygon.map(([x, y]) => [p.gx * item.inst.cellSize + x, p.gy * item.inst.cellSize + y])
+}
+
+async function validateAndFixOverlaps(sheets, cols, rows) {
+  const MAX_PASSES = 20 // с запасом — каждое исправление снимается и переставляется заново, изредка это создаёт новую коллизию, для которой нужен ещё один проход
+  let remaining = 0
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    let fixedAny = false
+    for (let si = 0; si < sheets.length; si++) {
+      const sheet = sheets[si]
+      let restart = true
+      while (restart) {
+        restart = false
+        outer: for (let i = 0; i < sheet.placed.length; i++) {
+          const polyA = absolutePolygon(sheet.placed[i])
+          for (let j = i + 1; j < sheet.placed.length; j++) {
+            const polyB = absolutePolygon(sheet.placed[j])
+            if (polygonsOverlapExact(polyA, polyB)) {
+              // Снимаем ВТОРУЮ деталь пары и переставляем заново на уточнённой сетке
+              const item = sheet.placed.splice(j, 1)[0]
+              rebuildOccupancy(sheet, cols, rows)
+              let placement = placeInstance(sheet.occ, cols, rows, item.inst)
+              let targetSheet = sheet
+              if (!placement) {
+                // Не нашлось места даже на этом листе заново — на новый лист, чтобы не потерять деталь
+                targetSheet = { index: sheets.length, occ: new Uint8Array(cols * rows), placed: [] }
+                sheets.push(targetSheet)
+                placement = placeInstance(targetSheet.occ, cols, rows, item.inst)
+              }
+              if (placement) {
+                markOccupied(targetSheet.occ, cols, rows, placement.gx, placement.gy, placement.variant.dilated)
+                targetSheet.placed.push({ inst: item.inst, placement })
+              }
+              fixedAny = true
+              restart = true // состав этого листа изменился — перепроверяем ЕГО ЖЕ заново, не переходя к следующему
+              break outer
+            }
+          }
+        }
+      }
+    }
+    if (!fixedAny) { remaining = 0; break }
+    await new Promise(r => setTimeout(r, 0))
+    remaining = fixedAny ? 1 : 0
+  }
+  if (remaining) {
+    // Не должно происходить, но если всё же осталось пересечение после MAX_PASSES —
+    // явно сообщаем в консоль вместо того, чтобы молча отдать плохой раскрой.
+    let stillBad = 0
+    sheets.forEach(sheet => {
+      for (let i = 0; i < sheet.placed.length; i++) {
+        for (let j = i + 1; j < sheet.placed.length; j++) {
+          if (polygonsOverlapExact(absolutePolygon(sheet.placed[i]), absolutePolygon(sheet.placed[j]))) stillBad++
+        }
+      }
+    })
+    if (stillBad) console.warn(`[trueShapeNesting] После ${MAX_PASSES} проходов исправления осталось пересечений: ${stillBad}`)
+  }
+  for (let si = sheets.length - 1; si >= 1; si--) {
+    if (sheets[si].placed.length === 0) sheets.splice(si, 1)
+  }
+  sheets.forEach((s, i) => { s.index = i })
+  return sheets
+}
+
 export async function packTrueShape({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, optimizeSeconds = 12,
   smallPartsToCenter = false, smallPartsMaxSquareSide = 0, smallPartsMaxSide = 0,
@@ -485,7 +587,7 @@ export async function packTrueShape({
   const cellSize = Math.min(MAX_CELL_MM, Math.max(MIN_CELL_MM, Math.sqrt((usableX * usableY) / TARGET_CELLS)))
   const cols = Math.max(1, Math.ceil(usableX / cellSize))
   const rows = Math.max(1, Math.ceil(usableY / cellSize))
-  const padCells = kerf > 0 ? Math.max(1, Math.ceil(kerf / cellSize)) : 0
+  const padCells = Math.max(1, Math.ceil(kerf / cellSize)) + 1 // +1 ячейка сверх керфа — запас на ошибку растеризации у изгибов/дуг (проверка "по центру ячейки" не идеальна ровно на границе)
   const smallMaxArea = smallPartsMaxSquareSide > 0 ? smallPartsMaxSquareSide * smallPartsMaxSquareSide : 0
 
   const kindsByDetail = details.map(d => buildPieceKind(d, cellSize, padCells))
@@ -520,13 +622,31 @@ export async function packTrueShape({
   // rectangle-алгоритме), без произвольного искусственного потолка. Внутри
   // attemptPack/compactSheets регулярно отдаём управление браузеру, поэтому
   // длинный бюджет не "замораживает" вкладку и таймер продолжает тикать.
+  //
+  // ВАЖНО: на большом заказе ОДНА попытка укладки сама по себе может занять
+  // больше времени, чем весь заданный бюджет — значит, дедлайн внутри самой
+  // attemptPack (нужен, чтобы не "зависнуть" на составлении лучшей укладки)
+  // не должен обрывать деталь на середине списка непомещённой. Поэтому самая
+  // первая попытка ВСЕГДА идёт без дедлайна — обязана разместить все детали
+  // целиком, это гарантированный базовый результат. Дальнейшие попытки (ищут
+  // укладку плотнее) уже ограничены оставшимся бюджетом, и если такая попытка
+  // не успела разместить все детали до дедлайна — она отбрасывается, а не
+  // подменяет собой базовый (полный) результат.
+  const totalInstances = instances.length
   const budgetMs = Math.max(0, Number(optimizeSeconds) || 0) * 1000
   const startTime = Date.now()
-  for (const order of orderings) {
-    const sheets = await attemptPack(order, cols, rows)
-    const score = scoreSheets(sheets, cols, rows)
-    if (!best || better(score, bestScore)) { best = sheets; bestScore = score }
+
+  best = await attemptPack(orderings[0], cols, rows, null)
+  bestScore = scoreSheets(best, cols, rows)
+
+  for (let oi = 1; oi < orderings.length; oi++) {
     if (Date.now() - startTime > budgetMs) break
+    const sheets = await attemptPack(orderings[oi], cols, rows, startTime + budgetMs)
+    const placedCount = sheets.reduce((a, s) => a + s.placed.length, 0)
+    if (placedCount === totalInstances) {
+      const score = scoreSheets(sheets, cols, rows)
+      if (better(score, bestScore)) { best = sheets; bestScore = score }
+    }
   }
   // Несколько случайных перестановок в оставшееся время бюджета — те же
   // структурные порядки не всегда лучшие для конкретного набора силуэтов.
@@ -535,13 +655,16 @@ export async function packTrueShape({
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
     }
-    const sheets = await attemptPack(shuffled, cols, rows)
+    const sheets = await attemptPack(shuffled, cols, rows, startTime + budgetMs)
+    const placedCount = sheets.reduce((a, s) => a + s.placed.length, 0)
+    if (placedCount !== totalInstances) continue // не успела разместить все детали до дедлайна — не годится как результат
     const score = scoreSheets(sheets, cols, rows)
     if (better(score, bestScore)) { best = sheets; bestScore = score }
     await new Promise(r => setTimeout(r, 0))
   }
 
-  best = await compactSheets(best, cols, rows)
+  best = await compactSheets(best, cols, rows, startTime + budgetMs + 1500)
+  best = await validateAndFixOverlaps(best, cols, rows)
 
   const resultSheets = best.map(s => ({
     index: s.index,

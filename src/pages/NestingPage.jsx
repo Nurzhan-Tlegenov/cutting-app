@@ -410,6 +410,8 @@ export default function NestingPage() {
   const [running, setRunning] = useState(false)
   const [nestError, setNestError] = useState('')
   const [elapsedSec, setElapsedSec] = useState(0)
+  const [showDebugExport, setShowDebugExport] = useState(false)
+  const [copyStatus, setCopyStatus] = useState('')
   const [activeSheet, setActiveSheet] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [sheetsData, setSheetsData] = useState([])
@@ -500,6 +502,23 @@ export default function NestingPage() {
 
   function onManualOffcuts(sheetIdx, list) {
     setSheetsData(prev => prev.map((s, i) => i === sheetIdx ? { ...s, manualOffcuts: list } : s))
+  }
+
+  const debugExportText = JSON.stringify(
+    details.filter(d => d.contour).map(d => ({
+      name: d.display_name || d.name, width: d.width, length: d.length, qty: d.qty, rotatable: d.rotatable,
+      contour: (() => { try { return JSON.parse(d.contour) } catch { return d.contour } })(),
+    })),
+    null, 2
+  )
+  async function copyDebugExport() {
+    try {
+      await navigator.clipboard.writeText(debugExportText)
+      setCopyStatus('Скопировано ✓')
+    } catch {
+      setCopyStatus('Не удалось скопировать — выделите текст вручную')
+    }
+    setTimeout(() => setCopyStatus(''), 2500)
   }
 
   if (!order) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
@@ -650,6 +669,32 @@ export default function NestingPage() {
           Больше времени — плотнее укладка на первых листах и меньше остаётся на последнем. 0 — без доп. оптимизации (быстрый расчёт).
         </p>
       </div>
+
+      {/* Экспорт контуров для отладки — скопировать точные координаты детали разработчику */}
+      {details.some(d => d.contour) && (
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={() => setShowDebugExport(v => !v)}
+            style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+              background: 'transparent', color: 'var(--text-hint)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
+            {showDebugExport ? '▼' : '▶'} Экспорт контуров деталей (для отладки)
+          </button>
+          {showDebugExport && (
+            <div style={{ marginTop: 6 }}>
+              <textarea readOnly value={debugExportText}
+                style={{ width: '100%', height: 160, fontSize: 11, fontFamily: 'monospace', padding: 6, boxSizing: 'border-box' }}
+                onFocus={e => e.target.select()} />
+              <button onClick={copyDebugExport}
+                style={{ marginTop: 6, width: '100%', padding: 8, borderRadius: 'var(--radius)', border: 'none',
+                  background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+                {copyStatus || 'Скопировать'}
+              </button>
+              <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+                Нажмите в поле выше, чтобы выделить текст, или на кнопку — чтобы скопировать. Это точные координаты контура детали, которые можно прислать разработчику.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Кнопка раскроя */}
       <button onClick={doNesting} disabled={running}
