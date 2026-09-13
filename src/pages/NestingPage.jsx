@@ -21,7 +21,7 @@ function rectsOverlap(a, b) {
          a.y < b.y + b.h - 1 && a.y + a.h - 1 > b.y
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcut, onManualOffcut }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   const placedRef = useRef(sheet.placed)
@@ -31,7 +31,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   useEffect(() => {
     placedRef.current = sheet.placed
     redraw(sheet.placed)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcut])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts])
 
   const PADDING = 8
   const canvasW = typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360
@@ -86,21 +86,23 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       })
     }
 
-    // Обрезок, выбранный вручную (удержанием пальца) — деловой обрезок
-    if (showOffcuts && offcutMode === 'manual' && manualOffcut) {
-      const o = manualOffcut
-      const ox = rx + toC(o.x), oy = ry + toC(o.y)
-      const ow = toC(o.w), oh = toC(o.h)
-      ctx.fillStyle = 'rgba(230,126,34,0.14)'
-      ctx.fillRect(ox, oy, ow, oh)
-      ctx.strokeStyle = '#B85C00'
-      ctx.lineWidth = 1.5
-      ctx.strokeRect(ox, oy, ow, oh)
-      ctx.fillStyle = '#B85C00'
-      ctx.font = `bold ${Math.max(9, Math.min(11, ow / 8))}px sans-serif`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(`${o.w}×${o.h}`, ox + ow / 2, oy + oh / 2)
+    // Обрезки, выбранные вручную (удержанием пальца) — деловые обрезки,
+    // можно выбрать несколько; повторное удержание на уже выбранном — снимает его
+    if (showOffcuts && offcutMode === 'manual' && manualOffcuts && manualOffcuts.length) {
+      manualOffcuts.forEach(o => {
+        const ox = rx + toC(o.x), oy = ry + toC(o.y)
+        const ow = toC(o.w), oh = toC(o.h)
+        ctx.fillStyle = 'rgba(230,126,34,0.14)'
+        ctx.fillRect(ox, oy, ow, oh)
+        ctx.strokeStyle = '#B85C00'
+        ctx.lineWidth = 1.5
+        ctx.strokeRect(ox, oy, ow, oh)
+        ctx.fillStyle = '#B85C00'
+        ctx.font = `bold ${Math.max(9, Math.min(11, ow / 8))}px sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(`${o.w}×${o.h}`, ox + ow / 2, oy + oh / 2)
+      })
     }
 
     // Детали
@@ -171,7 +173,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       if (h > 14) ctx.fillText(lbl, x + w / 2, y + h / 2 - 5)
       ctx.fillStyle = 'rgba(0,0,0,0.4)'
       ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
-      if (h > 26) ctx.fillText(`${p.origX}×${p.origY}`, x + w / 2, y + h / 2 + 6)
+      if (h > 26) ctx.fillText(`${p.origY}×${p.origX}`, x + w / 2, y + h / 2 + 6)
     })
 
     // Рамка: X=sheetW(горизонталь), Y=sheetL(вертикаль)
@@ -233,14 +235,22 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     const idx = findPiece(x, y)
     if (idx === -1) {
       // Пустое место на листе: в режиме "Вручную" удержание пальца задаёт
-      // деловой обрезок, растущий из этой точки до ближайших деталей/краёв
-      if (showOffcuts && offcutMode === 'manual' && onManualOffcut) {
+      // деловой обрезок, растущий из этой точки до ближайших деталей/краёв.
+      // Удержание на уже выбранном обрезке — снимает именно его, остальные
+      // выбранные обрезки не трогает.
+      if (showOffcuts && offcutMode === 'manual' && onManualOffcuts) {
         clearLongPress()
         longPressRef.current = setTimeout(() => {
           const mx = fromC(x - (PADDING + toC(marginL)))
           const my = fromC(y - (PADDING + toC(marginT)))
-          const rect = computeOffcutAtPoint(mx, my, placedRef.current, usableX, usableY)
-          if (rect) onManualOffcut(sheet.index, rect)
+          const list = manualOffcuts || []
+          const hitIdx = list.findIndex(o => mx >= o.x && mx <= o.x + o.w && my >= o.y && my <= o.y + o.h)
+          if (hitIdx !== -1) {
+            onManualOffcuts(sheet.index, list.filter((_, i) => i !== hitIdx))
+          } else {
+            const rect = computeOffcutAtPoint(mx, my, placedRef.current, usableX, usableY)
+            if (rect) onManualOffcuts(sheet.index, [...list, rect])
+          }
         }, LONG_PRESS_MS)
       }
       return
@@ -431,8 +441,8 @@ export default function NestingPage() {
     setSheetsData(prev => prev.map((s, i) => i === sheetIdx ? { ...s, placed: newPlaced } : s))
   }
 
-  function onManualOffcut(sheetIdx, rect) {
-    setSheetsData(prev => prev.map((s, i) => i === sheetIdx ? { ...s, manualOffcut: rect } : s))
+  function onManualOffcuts(sheetIdx, list) {
+    setSheetsData(prev => prev.map((s, i) => i === sheetIdx ? { ...s, manualOffcuts: list } : s))
   }
 
   if (!order) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
@@ -652,11 +662,11 @@ export default function NestingPage() {
                     color: offcutMode === 'manual' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
                   Вручную
                 </button>
-                {offcutMode === 'manual' && sheetsData[activeSheet]?.manualOffcut && (
-                  <button onClick={() => onManualOffcut(activeSheet, null)}
+                {offcutMode === 'manual' && sheetsData[activeSheet]?.manualOffcuts?.length > 0 && (
+                  <button onClick={() => onManualOffcuts(activeSheet, [])}
                     style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
                       background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
-                    ✕
+                    Очистить ({sheetsData[activeSheet].manualOffcuts.length})
                   </button>
                 )}
               </div>
@@ -668,12 +678,12 @@ export default function NestingPage() {
               marginL={order.margin_left} marginT={order.margin_top}
               kerf={order.kerf_width} colorMap={colorMap} details={details}
               onMove={onMove} interactive={true} showOffcuts={showOffcuts}
-              offcutMode={offcutMode} manualOffcut={sheetsData[activeSheet]?.manualOffcut}
-              onManualOffcut={onManualOffcut}
+              offcutMode={offcutMode} manualOffcuts={sheetsData[activeSheet]?.manualOffcuts}
+              onManualOffcuts={onManualOffcuts}
             />
             <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 6 }}>
               {showOffcuts && offcutMode === 'manual'
-                ? 'Удержи палец на свободном месте — определится деловой обрезок'
+                ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                 : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить'}
             </p>
           </div>

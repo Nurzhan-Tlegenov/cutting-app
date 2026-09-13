@@ -715,26 +715,55 @@ export function computeOffcuts(sheet, usableX, usableY) {
 // упрёмся в деталь или в границу листа — это и есть сквозной рез, не
 // пересекающий деталей. Несколько проходов нужны для сходимости, т.к.
 // расширение одной стороны может открыть/закрыть ограничения для других.
+// ─── Деловой обрезок вручную — от точки, выбранной пользователем удержанием
+// пальца на карте. Это НЕ сквозной рез форматно-раскроечного станка (который
+// резал бы через всю полосу листа) — прямоугольник растёт от самой точки
+// свободно по X и по Y, независимо от того, по ширине или длине детали он
+// получится. Сначала находим свободный "крест" ровно через точку (по её
+// строке и по её столбцу), затем подрезаем углы, если в них всё же попала
+// деталь, которая не пересекала сам крест.
 export function computeOffcutAtPoint(px, py, placed, usableX, usableY) {
   const parts = (placed || []).map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h }))
-  const overlapsPoint = parts.some(o => px >= o.x && px <= o.x + o.w && py >= o.y && py <= o.y + o.h)
-  if (overlapsPoint) return null
+  if (parts.some(o => px >= o.x && px <= o.x + o.w && py >= o.y && py <= o.y + o.h)) return null
 
-  let x0 = 0, x1 = usableX, y0 = 0, y1 = usableY
-  for (let iter = 0; iter < 6; iter++) {
-    let r = x1
-    parts.forEach(o => { if (o.y < y1 && o.y + o.h > y0 && o.x >= px && o.x < r) r = o.x })
-    x1 = r
-    let l = x0
-    parts.forEach(o => { if (o.y < y1 && o.y + o.h > y0 && o.x + o.w <= px && o.x + o.w > l) l = o.x + o.w })
-    x0 = l
-    let b = y1
-    parts.forEach(o => { if (o.x < x1 && o.x + o.w > x0 && o.y >= py && o.y < b) b = o.y })
-    y1 = b
-    let t = y0
-    parts.forEach(o => { if (o.x < x1 && o.x + o.w > x0 && o.y + o.h <= py && o.y + o.h > t) t = o.y + o.h })
-    y0 = t
+  // Свободный ход по X ровно на высоте точки (py)
+  let x0 = 0, x1 = usableX
+  parts.forEach(o => {
+    if (o.y < py && o.y + o.h > py) {
+      if (o.x + o.w <= px) x0 = Math.max(x0, o.x + o.w)
+      if (o.x >= px) x1 = Math.min(x1, o.x)
+    }
+  })
+  // Свободный ход по Y ровно на ширине точки (px)
+  let y0 = 0, y1 = usableY
+  parts.forEach(o => {
+    if (o.x < px && o.x + o.w > px) {
+      if (o.y + o.h <= py) y0 = Math.max(y0, o.y + o.h)
+      if (o.y >= py) y1 = Math.min(y1, o.y)
+    }
+  })
+
+  // Углы получившегося прямоугольника могли задеть деталь, которая сама не
+  // пересекала ни строку, ни столбец точки — подрезаем с наименьшей потерей
+  // площади, пока пересечений не останется
+  for (let iter = 0; iter < 8; iter++) {
+    let hit = null
+    for (const o of parts) {
+      if (x0 < o.x + o.w && x1 > o.x && y0 < o.y + o.h && y1 > o.y) { hit = o; break }
+    }
+    if (!hit) break
+    const h = y1 - y0, w = x1 - x0
+    const options = [
+      { area: (hit.x - x0) * h, apply: () => { x1 = hit.x } },
+      { area: (x1 - (hit.x + hit.w)) * h, apply: () => { x0 = hit.x + hit.w } },
+      { area: w * (hit.y - y0), apply: () => { y1 = hit.y } },
+      { area: w * (y1 - (hit.y + hit.h)), apply: () => { y0 = hit.y + hit.h } },
+    ].filter(o => o.area > 0.01)
+    if (!options.length) return null
+    options.sort((a, b) => b.area - a.area)
+    options[0].apply()
   }
+
   if (x1 - x0 < 5 || y1 - y0 < 5) return null
   return { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) }
 }
