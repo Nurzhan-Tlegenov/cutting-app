@@ -112,16 +112,68 @@ function sampleFillet(v, segments = 8) {
   return pts
 }
 
+function circumcenter(a, b, c) {
+  const D = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
+  if (Math.abs(D) < 0.001) return null
+  const ux = ((a.x * a.x + a.y * a.y) * (b.y - c.y) + (b.x * b.x + b.y * b.y) * (c.y - a.y) + (c.x * c.x + c.y * c.y) * (a.y - b.y)) / D
+  const uy = ((a.x * a.x + a.y * a.y) * (c.x - b.x) + (b.x * b.x + b.y * b.y) * (a.x - c.x) + (c.x * c.x + c.y * c.y) * (b.x - a.x)) / D
+  return { x: ux, y: uy }
+}
+
+// Дуга через 3 точки (circumcircle) — та же логика направления обхода, что и
+// drawArc3 в ContourEditor.jsx: идём от sp к ep так, чтобы пройти через mid.
+function sampleArc3(sp, mid, ep, segments = 10) {
+  const C = circumcenter(sp, mid, ep)
+  if (!C) return [[sp.x, sp.y], [ep.x, ep.y]] // почти на одной прямой — сэмплировать нечего
+  const R = Math.hypot(sp.x - C.x, sp.y - C.y)
+  const sa = Math.atan2(sp.y - C.y, sp.x - C.x)
+  const ma = Math.atan2(mid.y - C.y, mid.x - C.x)
+  const ea = Math.atan2(ep.y - C.y, ep.x - C.x)
+  let dma = ma - sa; while (dma < 0) dma += Math.PI * 2
+  let dea = ea - sa; while (dea < 0) dea += Math.PI * 2
+  const anticlockwise = dma > dea
+  const sweepEnd = anticlockwise ? sa - (Math.PI * 2 - dea) : sa + dea
+  const pts = []
+  for (let i = 0; i <= segments; i++) {
+    const a = sa + (sweepEnd - sa) * (i / segments)
+    pts.push([C.x + R * Math.cos(a), C.y + R * Math.sin(a)])
+  }
+  return pts
+}
+
 // Внешний контур детали → плоский список точек полигона, С УЧЁТОМ радиусов
-// скругления (roundCorner) и явных fillet-дуг (sampleFillet). Точки типа
-// 'arc' (свободная дуга через 3+ точек) — известное ограничение, берём как
-// заданы (их точное геометрическое построение — из ContourEditor и требует
-// отдельного переноса, не задействовано в укладке).
+// скругления (roundCorner), явных fillet-дуг (sampleFillet) и свободных дуг
+// через 3+ точки (sampleArc3, тип 'arc') — повторяет обход buildPath из
+// ContourEditor.jsx, а не просто берёт сырые координаты вершин. Это важно:
+// дуга через точки — не маленькое скругление угла, а часто заметный изгиб
+// границы детали, и если брать вместо неё прямую (хорду), настоящий материал
+// детали в этом месте оказывается ближе к соседней детали, чем показывает
+// прямая — соседнюю деталь можно легально поставить туда, где на самом деле
+// уже есть материал, и в реальности они пересекутся.
 function verticesToPolygon(vertices) {
   const n = vertices.length
   const poly = []
-  for (let i = 0; i < n; i++) {
+  let i = 0
+  while (i < n) {
     const curr = vertices[i]
+    if (curr.type === 'arc') {
+      const arcGroup = []
+      let j = i
+      while (j < n && vertices[j % n].type === 'arc') { arcGroup.push(vertices[j % n]); j++ }
+      const sp = vertices[(i - 1 + n) % n]
+      const ep = vertices[j % n]
+      if (arcGroup.length === 1) {
+        poly.push(...sampleArc3(sp, arcGroup[0], ep))
+      } else {
+        for (let k = 0; k + 1 < arcGroup.length; k++) {
+          const s = k === 0 ? sp : arcGroup[k - 1]
+          const e = k === arcGroup.length - 2 ? ep : arcGroup[k + 2]
+          poly.push(...sampleArc3(s, arcGroup[k], e))
+        }
+      }
+      i = j // индекс next-точки (не входящей в группу) обработается на следующей итерации как обычная точка
+      continue
+    }
     if (curr.type === 'fillet' && curr.fcx != null && curr.fcy != null && curr.fr != null) {
       poly.push(...sampleFillet(curr))
     } else if ((curr.r || 0) > 0 && (!curr.type || curr.type === 'point')) {
@@ -130,6 +182,7 @@ function verticesToPolygon(vertices) {
     } else {
       poly.push([Number(curr.x) || 0, Number(curr.y) || 0])
     }
+    i++
   }
   return poly
 }

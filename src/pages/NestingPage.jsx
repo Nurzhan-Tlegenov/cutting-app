@@ -16,6 +16,44 @@ const EDGE_COLOR = '#185FA5'
 const EDGE_GAP = 3                 // отступ линии кромки от контура детали, px
 const LONG_PRESS_MS = 550
 
+// ─── Проверка пересечения двух полигонов (для true-shape деталей) — обычная
+// bbox-проверка слишком грубая: деталь, аккуратно уложенная в паз соседней,
+// всегда "пересекается" по прямоугольнику, хотя по факту нет. Полигон уже в
+// АБСОЛЮТНЫХ координатах листа (вершины + смещение x,y детали) ────────────
+function segmentsIntersect(a1, a2, b1, b2) {
+  const d = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+  const d1 = d(b1, b2, a1), d2 = d(b1, b2, a2), d3 = d(a1, a2, b1), d4 = d(a1, a2, b2)
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+}
+function pointInPolygon(pt, poly) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y
+    const cross = ((yi > pt.y) !== (yj > pt.y)) && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi)
+    if (cross) inside = !inside
+  }
+  return inside
+}
+function polygonsOverlap(polyA, polyB) {
+  for (let i = 0; i < polyA.length; i++) {
+    const a1 = polyA[i], a2 = polyA[(i + 1) % polyA.length]
+    for (let j = 0; j < polyB.length; j++) {
+      const b1 = polyB[j], b2 = polyB[(j + 1) % polyB.length]
+      if (segmentsIntersect(a1, a2, b1, b2)) return true
+    }
+  }
+  return pointInPolygon(polyA[0], polyB) || pointInPolygon(polyB[0], polyA)
+}
+// Абсолютный полигон детали на листе: свой polygon (если true-shape) со
+// смещением на x,y, иначе — прямоугольник по w/h (минус kerf, как и рисуем)
+function absolutePoly(p, kerf) {
+  if (Array.isArray(p.polygon) && p.polygon.length > 2) {
+    return p.polygon.map(pt => ({ x: p.x + pt.x, y: p.y + pt.y }))
+  }
+  const w = p.w - kerf, h = p.h - kerf
+  return [{ x: p.x, y: p.y }, { x: p.x + w, y: p.y }, { x: p.x + w, y: p.y + h }, { x: p.x, y: p.y + h }]
+}
+
 function rectsOverlap(a, b) {
   return a.x < b.x + b.w - 1 && a.x + a.w - 1 > b.x &&
          a.y < b.y + b.h - 1 && a.y + a.h - 1 > b.y
@@ -112,11 +150,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       const w = toC(p.w) - toC(kerf), h = toC(p.h) - toC(kerf)
       const isDragging = i === dragIdx
 
-      // Проверяем коллизии
-      const hasCollision = isDragging && items.some((o, j) => j !== i && rectsOverlap(
-        { x: p.x, y: p.y, w: p.w - kerf, h: p.h - kerf },
-        { x: o.x, y: o.y, w: o.w - kerf, h: o.h - kerf }
-      ))
+      // Проверяем коллизии (по полигону, если есть — bbox слишком грубый для
+      // true-shape деталей, уложенных вплотную в паз соседней)
+      const hasCollision = isDragging && items.some((o, j) => j !== i &&
+        polygonsOverlap(absolutePoly(p, kerf), absolutePoly(o, kerf)))
 
       // Деталь — если есть реальный контур (true-shape нестинг для фрезера),
       // рисуем именно его; иначе — прямоугольник, как раньше
@@ -314,22 +351,28 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           polygon: Array.isArray(p.polygon) ? p.polygon.map(pt => rotatePointTimes(pt.x, pt.y, p.origX, p.origY, 1)) : p.polygon,
         }
         if (rotated.x + rotated.w <= usableX && rotated.y + rotated.h <= usableY) {
-          const updated = placedRef.current.map((item, i) => i === drag.idx ? rotated : item)
-          placedRef.current = updated
-          redraw(updated)
-          if (onMove) onMove(sheet.index, updated)
+          const rotatedPoly = absolutePoly(rotated, kerf)
+          const collides = placedRef.current.some((o, j) => j !== drag.idx &&
+            polygonsOverlap(rotatedPoly, absolutePoly(o, kerf)))
+          if (!collides) {
+            const updated = placedRef.current.map((item, i) => i === drag.idx ? rotated : item)
+            placedRef.current = updated
+            redraw(updated)
+            if (onMove) onMove(sheet.index, updated)
+          } else {
+            redraw(placedRef.current) // ничего не меняли — просто перерисуем, чтобы явно не "зависало" визуально
+          }
         }
         draggingRef.current = null
         return
       }
     }
 
-    // Проверяем коллизии — если есть, возвращаем на место
+    // Проверяем коллизии — если есть, возвращаем на место (по полигону, а не
+    // по прямоугольнику — см. причину выше)
     const p = placedRef.current[drag.idx]
-    const hasCollision = placedRef.current.some((o, j) => j !== drag.idx && rectsOverlap(
-      { x: p.x, y: p.y, w: p.w - kerf, h: p.h - kerf },
-      { x: o.x, y: o.y, w: o.w - kerf, h: o.h - kerf }
-    ))
+    const hasCollision = placedRef.current.some((o, j) => j !== drag.idx &&
+      polygonsOverlap(absolutePoly(p, kerf), absolutePoly(o, kerf)))
 
     if (hasCollision) {
       const restored = placedRef.current.map((item, i) => i === drag.idx ? { ...item, x: drag.origX, y: drag.origY } : item)
