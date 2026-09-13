@@ -53,6 +53,87 @@ const MAX_CELL_MM = 12
 const TARGET_CELLS = 60000
 const MAX_COMPACT_PASSES = 3
 
+// Скругление угла (радиус на обычной точке контура) — превращаем в несколько
+// точек дуги, а не отбрасываем радиус. Это работает одинаково корректно и для
+// ВЫПУКЛОГО угла (скругление СРЕЗАЕТ материал), и для ВОГНУТОГО, "внутреннего"
+// угла паза (скругление, наоборот, ДОБАВЛЯЕТ материал в паз) — направление
+// получается автоматически из той же тангенциальной геометрии, что и в
+// ContourEditor (buildPath/arcTo), без отдельного разбора "выпуклый/вогнутый".
+// Именно вогнутый случай и был причиной реального пересечения деталей: если
+// угол паза скруглён, но радиус игнорировался, туда легально ставили соседнюю
+// деталь вплотную к ТЕОРЕТИЧЕСКОЙ острой точке, а настоящий (скруглённый)
+// материал там на самом деле чуть выступает дальше в паз.
+function roundCorner(prev, curr, next, r, segments = 8) {
+  const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
+  const dx1 = next.x - curr.x, dy1 = next.y - curr.y
+  const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
+  if (r <= 0 || d0 === 0 || d1 === 0) return [[curr.x, curr.y]]
+  const u0 = [dx0 / d0, dy0 / d0], u1 = [dx1 / d1, dy1 / d1]
+  const dot = Math.max(-1, Math.min(1, u0[0] * u1[0] + u0[1] * u1[1]))
+  const theta = Math.acos(dot)
+  const half = theta / 2
+  if (half < 1e-6 || half > Math.PI / 2 - 1e-9) return [[curr.x, curr.y]] // почти прямая или почти разворот — скругление не имеет смысла
+  let tt = r / Math.tan(half)
+  const maxT = Math.min(d0, d1)
+  let rr = r
+  if (tt > maxT) { tt = maxT; rr = tt * Math.tan(half) } // радиус физически не влезает между соседними вершинами — тот же принцип, что в ContourEditor (min(r,d0,d1))
+  const centerDist = tt / Math.cos(half)
+  const bx = u0[0] + u1[0], by = u0[1] + u1[1]
+  const blen = Math.hypot(bx, by) || 1
+  const bux = bx / blen, buy = by / blen
+  const cx = curr.x + centerDist * bux, cy = curr.y + centerDist * buy
+  const pIn = [curr.x + tt * u0[0], curr.y + tt * u0[1]]
+  const pOut = [curr.x + tt * u1[0], curr.y + tt * u1[1]]
+  let a0 = Math.atan2(pIn[1] - cy, pIn[0] - cx)
+  let a1 = Math.atan2(pOut[1] - cy, pOut[0] - cx)
+  let diff = a1 - a0
+  while (diff > Math.PI) diff -= Math.PI * 2
+  while (diff < -Math.PI) diff += Math.PI * 2
+  const pts = []
+  for (let i = 0; i <= segments; i++) {
+    const a = a0 + diff * (i / segments)
+    pts.push([cx + rr * Math.cos(a), cy + rr * Math.sin(a)])
+  }
+  return pts
+}
+
+// Явный fillet (дуга на стыке прямой и дуги через 3+ точек) — параметры уже
+// посчитаны в ContourEditor и сохранены в самой вершине, просто сэмплируем.
+function sampleFillet(v, segments = 8) {
+  const ccw = !!v.fccw
+  let a0 = v.fa0, a1 = v.fa1
+  let diff = a1 - a0
+  if (ccw) { while (diff > 0) diff -= Math.PI * 2 } else { while (diff < 0) diff += Math.PI * 2 }
+  const pts = []
+  for (let i = 0; i <= segments; i++) {
+    const a = a0 + diff * (i / segments)
+    pts.push([v.fcx + v.fr * Math.cos(a), v.fcy + v.fr * Math.sin(a)])
+  }
+  return pts
+}
+
+// Внешний контур детали → плоский список точек полигона, С УЧЁТОМ радиусов
+// скругления (roundCorner) и явных fillet-дуг (sampleFillet). Точки типа
+// 'arc' (свободная дуга через 3+ точек) — известное ограничение, берём как
+// заданы (их точное геометрическое построение — из ContourEditor и требует
+// отдельного переноса, не задействовано в укладке).
+function verticesToPolygon(vertices) {
+  const n = vertices.length
+  const poly = []
+  for (let i = 0; i < n; i++) {
+    const curr = vertices[i]
+    if (curr.type === 'fillet' && curr.fcx != null && curr.fcy != null && curr.fr != null) {
+      poly.push(...sampleFillet(curr))
+    } else if ((curr.r || 0) > 0 && (!curr.type || curr.type === 'point')) {
+      const prev = vertices[(i - 1 + n) % n], next = vertices[(i + 1) % n]
+      poly.push(...roundCorner(prev, curr, next, curr.r))
+    } else {
+      poly.push([Number(curr.x) || 0, Number(curr.y) || 0])
+    }
+  }
+  return poly
+}
+
 function parsePolygonFromDetail(d) {
   let contour = null
   try { contour = d.contour ? JSON.parse(d.contour) : null } catch { contour = null }
@@ -60,7 +141,7 @@ function parsePolygonFromDetail(d) {
   if (!contour || !contour.vertices || contour.vertices.length <= 4) {
     return { polygon: [[0, 0], [w, 0], [w, h], [0, h]], w, h, custom: false }
   }
-  const poly = contour.vertices.map(v => [Number(v.x) || 0, Number(v.y) || 0])
+  const poly = verticesToPolygon(contour.vertices)
   return { polygon: poly, w, h, custom: true }
 }
 
@@ -127,7 +208,17 @@ function dilateOffsets(offsets, pad) {
 
 function buildVariant(polygon, w, h, cellSize, padCells, angle) {
   const { cols, rows, offsets } = rasterize(polygon, w, h, cellSize)
-  return { angle, w, h, polygon, cols, rows, offsets, dilated: dilateOffsets(offsets, padCells) }
+  // Для оценки прилегания (contactScore) достаточно ячеек НА ГРАНИЦЕ силуэта
+  // (у которых хоть один из 4 соседей не входит в саму деталь) — внутренние
+  // ячейки крупной детали никогда ни с чем не соприкасаются, перебирать их на
+  // каждой из тысяч проверяемых позиций смысла нет и это на порядки дороже.
+  const set = new Set(offsets.map(([dx, dy]) => dx + ',' + dy))
+  const boundary = offsets.filter(([dx, dy]) =>
+    !set.has((dx + 1) + ',' + dy) || !set.has((dx - 1) + ',' + dy) ||
+    !set.has(dx + ',' + (dy + 1)) || !set.has(dx + ',' + (dy - 1))
+  )
+  const boundarySet = new Set(boundary.map(([dx, dy]) => dx + ',' + dy))
+  return { angle, w, h, polygon, cols, rows, offsets, boundary, boundarySet, dilated: dilateOffsets(offsets, padCells) }
 }
 
 // 0° и 180° — всегда (не трогают направление текстуры). 90° и 270° — только
@@ -185,19 +276,22 @@ function touchesBorder(gx, gy, variant, cols, rows) {
 
 // Оценка размещения: не просто "первая снизу-слева свободная позиция" (это
 // НЕ затягивает деталь в вогнутый паз соседней — просто уедет правее по той
-// же нижней строке), а "лучшая по прилеганию" — максимум касания с уже
-// уложенными деталями и краем листа, при прочих равных — ниже и левее.
-// Именно это заставляет деталь реально войти в вогнутость соседней.
-function contactScore(occ, cols, rows, gx, gy, exactOffsets) {
+// же нижней строке), а "лучшая по прилеганию" — максимум касания С УЖЕ
+// УЛОЖЕННЫМИ ДЕТАЛЯМИ (не с краем листа — иначе деталь начинает предпочитать
+// голый угол/край листа обычному прилеганию к соседям, и укладка расползается
+// по краям, оставляя пустую середину). При прочих равных — ниже и левее.
+// Перебираем только ГРАНИЦУ силуэта (boundaryOffsets), а не всю площадь —
+// внутренние ячейки крупной детали физически ни с чем снаружи соприкасаться
+// не могут, и перебирать их на каждой позиции на порядки дороже без пользы.
+function contactScore(occ, cols, rows, gx, gy, boundaryOffsets, boundarySet) {
   let contact = 0
-  const set = new Set(exactOffsets.map(([dx, dy]) => dx + ',' + dy))
-  for (const [dx, dy] of exactOffsets) {
+  for (const [dx, dy] of boundaryOffsets) {
     const cx = gx + dx, cy = gy + dy
     ;[[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([ox, oy]) => {
       const ndx = dx + ox, ndy = dy + oy
-      if (set.has(ndx + ',' + ndy)) return // сосед — тоже часть этой же детали, не считаем
+      if (boundarySet.has(ndx + ',' + ndy)) return // сосед — тоже часть этой же детали, не считаем
       const ncx = cx + ox, ncy = cy + oy
-      if (ncx < 0 || ncy < 0 || ncx >= cols || ncy >= rows) { contact++; return } // край листа
+      if (ncx < 0 || ncy < 0 || ncx >= cols || ncy >= rows) return // край листа — не считаем контактом
       if (occ[ncy * cols + ncx]) contact++ // уже занято соседней деталью
     })
   }
@@ -220,17 +314,21 @@ function tryPlace(occ, cols, rows, variants, avoidBorder) {
       for (const iv of intervals) {
         const maxGx = Math.min(iv.end - variant.cols, cols - variant.cols)
         if (maxGx < iv.start) continue
-        // Кандидаты — только "углы" свободного участка (его начало и конец),
-        // а не КАЖДАЯ ячейка внутри интервала: это стандартный приём (как
-        // углы свободных прямоугольников в MaxRects/Guillotine), который и
-        // делает поиск быстрым, и не даёт ему "проскочить" мимо вогнутого паза.
+        // Кандидаты — "углы" свободного участка (его начало и конец), это
+        // стандартный приём (как углы свободных прямоугольников в MaxRects/
+        // Guillotine), который делает поиск быстрым и не даёт ему "проскочить"
+        // мимо вогнутого паза. На почти пустом листе одного такого интервала
+        // мало — его единственные "углы" совпадают с краями самого листа, и
+        // ни одного варианта подальше от края тогда вообще не появится —
+        // поэтому для широких интервалов добавляем ещё и середину.
         const candidatesX = new Set([iv.start, maxGx])
+        if (maxGx - iv.start > variant.cols) candidatesX.add(iv.start + Math.floor((maxGx - iv.start) / 2))
         for (const gx of candidatesX) {
           if (evaluated >= MAX_CANDIDATES) break
           if (avoidBorder && touchesBorder(gx, gy, variant, cols, rows)) continue
           if (fits(occ, cols, rows, gx, gy, variant.dilated, variant.cols, variant.rows)) {
             evaluated++
-            const score = contactScore(occ, cols, rows, gx, gy, variant.offsets)
+            const score = contactScore(occ, cols, rows, gx, gy, variant.boundary, variant.boundarySet)
             // Прилегание — главный критерий (затягивает в паз); ниже и левее — тай-брейк
             const key = score * 1e6 - (gy * cols + gx)
             if (key > bestScore) { bestScore = key; best = { gx, gy, variant } }
@@ -250,11 +348,14 @@ function placeInstance(occ, cols, rows, inst) {
   return tryPlace(occ, cols, rows, inst.variants, false)
 }
 
-function attemptPack(pieceInstances, cols, rows) {
+const YIELD_EVERY_PIECES = 3 // как часто внутри одной попытки укладки отдаём управление браузеру — иначе таймер и спиннер "замирают"
+
+async function attemptPack(pieceInstances, cols, rows) {
   const sheets = []
   let cur = null
   const openSheet = () => { cur = { index: sheets.length, occ: new Uint8Array(cols * rows), placed: [] }; sheets.push(cur) }
   openSheet()
+  let n = 0
   for (const inst of pieceInstances) {
     let placement = placeInstance(cur.occ, cols, rows, inst)
     if (!placement) {
@@ -264,6 +365,8 @@ function attemptPack(pieceInstances, cols, rows) {
     }
     markOccupied(cur.occ, cols, rows, placement.gx, placement.gy, placement.variant.dilated)
     cur.placed.push({ inst, placement })
+    n++
+    if (n % YIELD_EVERY_PIECES === 0) await new Promise(r => setTimeout(r, 0))
   }
   return sheets
 }
@@ -275,9 +378,10 @@ function rebuildOccupancy(sheet, cols, rows) {
 
 // Компакция: пробуем переложить детали с ПОСЛЕДНИХ листов на более ранние,
 // если там реально есть куда — может схлопнуть число листов и уплотнить хвост.
-function compactSheets(sheets, cols, rows) {
+async function compactSheets(sheets, cols, rows) {
   for (let pass = 0; pass < MAX_COMPACT_PASSES; pass++) {
     let moved = false
+    let n = 0
     for (let si = sheets.length - 1; si >= 1; si--) {
       const sheet = sheets[si]
       for (let pi = sheet.placed.length - 1; pi >= 0; pi--) {
@@ -294,6 +398,8 @@ function compactSheets(sheets, cols, rows) {
             break
           }
         }
+        n++
+        if (n % YIELD_EVERY_PIECES === 0) await new Promise(r => setTimeout(r, 0))
       }
     }
     for (let si = sheets.length - 1; si >= 1; si--) {
@@ -357,14 +463,17 @@ export async function packTrueShape({
   ]
 
   let best = null, bestScore = null
-  const budgetMs = Math.min(8000, Math.max(0, Number(optimizeSeconds) || 0) * 1000 + 800)
+  // Бюджет — ровно то, что задал пользователь в настройках раскроя (как и в
+  // rectangle-алгоритме), без произвольного искусственного потолка. Внутри
+  // attemptPack/compactSheets регулярно отдаём управление браузеру, поэтому
+  // длинный бюджет не "замораживает" вкладку и таймер продолжает тикать.
+  const budgetMs = Math.max(0, Number(optimizeSeconds) || 0) * 1000
   const startTime = Date.now()
   for (const order of orderings) {
-    const sheets = attemptPack(order, cols, rows)
+    const sheets = await attemptPack(order, cols, rows)
     const score = scoreSheets(sheets, cols, rows)
     if (!best || better(score, bestScore)) { best = sheets; bestScore = score }
     if (Date.now() - startTime > budgetMs) break
-    await new Promise(r => setTimeout(r, 0))
   }
   // Несколько случайных перестановок в оставшееся время бюджета — те же
   // структурные порядки не всегда лучшие для конкретного набора силуэтов.
@@ -373,13 +482,13 @@ export async function packTrueShape({
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
     }
-    const sheets = attemptPack(shuffled, cols, rows)
+    const sheets = await attemptPack(shuffled, cols, rows)
     const score = scoreSheets(sheets, cols, rows)
     if (better(score, bestScore)) { best = sheets; bestScore = score }
     await new Promise(r => setTimeout(r, 0))
   }
 
-  best = compactSheets(best, cols, rows)
+  best = await compactSheets(best, cols, rows)
 
   const resultSheets = best.map(s => ({
     index: s.index,
