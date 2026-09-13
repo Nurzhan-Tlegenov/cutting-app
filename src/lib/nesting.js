@@ -709,3 +709,32 @@ export function computeOffcuts(sheet, usableX, usableY) {
     .map(r => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), area: r.w * r.h }))
     .sort((a, b) => b.area - a.area).slice(0, 8)
 }
+
+// ─── Деловой обрезок вручную — от точки, выбранной пользователем удержанием
+// пальца на карте. Растим прямоугольник во все 4 стороны от точки, пока не
+// упрёмся в деталь или в границу листа — это и есть сквозной рез, не
+// пересекающий деталей. Несколько проходов нужны для сходимости, т.к.
+// расширение одной стороны может открыть/закрыть ограничения для других.
+export function computeOffcutAtPoint(px, py, placed, usableX, usableY) {
+  const parts = (placed || []).map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h }))
+  const overlapsPoint = parts.some(o => px >= o.x && px <= o.x + o.w && py >= o.y && py <= o.y + o.h)
+  if (overlapsPoint) return null
+
+  let x0 = 0, x1 = usableX, y0 = 0, y1 = usableY
+  for (let iter = 0; iter < 6; iter++) {
+    let r = x1
+    parts.forEach(o => { if (o.y < y1 && o.y + o.h > y0 && o.x >= px && o.x < r) r = o.x })
+    x1 = r
+    let l = x0
+    parts.forEach(o => { if (o.y < y1 && o.y + o.h > y0 && o.x + o.w <= px && o.x + o.w > l) l = o.x + o.w })
+    x0 = l
+    let b = y1
+    parts.forEach(o => { if (o.x < x1 && o.x + o.w > x0 && o.y >= py && o.y < b) b = o.y })
+    y1 = b
+    let t = y0
+    parts.forEach(o => { if (o.x < x1 && o.x + o.w > x0 && o.y + o.h <= py && o.y + o.h > t) t = o.y + o.h })
+    y0 = t
+  }
+  if (x1 - x0 < 5 || y1 - y0 < 5) return null
+  return { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) }
+}

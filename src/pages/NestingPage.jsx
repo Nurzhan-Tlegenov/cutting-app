@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { runNesting, computeOffcuts } from '../lib/nesting'
+import { runNesting, computeOffcuts, computeOffcutAtPoint } from '../lib/nesting'
+import { getAllDrillPoints } from '../lib/drillGeometry'
 import BottomNav from '../components/BottomNav'
 
 const COLORS = [
@@ -9,27 +10,34 @@ const COLORS = [
   '#C0DD97','#F4C0D1','#B4B2A9','#85B7EB','#5DCAA5',
 ]
 
+const PART_FILL = '#EFEDE7'       // единый светло-серый цвет всех деталей
+const PART_STROKE = 'rgba(0,0,0,0.35)'
+const EDGE_COLOR = '#185FA5'
+const EDGE_GAP = 3                 // отступ линии кромки от контура детали, px
+const LONG_PRESS_MS = 550
+
 function rectsOverlap(a, b) {
   return a.x < b.x + b.w - 1 && a.x + a.w - 1 > b.x &&
          a.y < b.y + b.h - 1 && a.y + a.h - 1 > b.y
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, onMove, interactive, showOffcuts }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcut, onManualOffcut }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   const placedRef = useRef(sheet.placed)
   const lastTap = useRef({ idx: -1, time: 0 })
+  const longPressRef = useRef(null)
 
   useEffect(() => {
     placedRef.current = sheet.placed
     redraw(sheet.placed)
-  }, [sheet.placed, showOffcuts])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcut])
 
   const PADDING = 8
   const canvasW = typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360
   const sc = (canvasW - PADDING * 2) / sheetW
   const canvasH = Math.round(sc * sheetL) + PADDING * 2
-  
+  const DPR = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1
 
   const toC = v => v * sc
   const fromC = v => v / sc
@@ -37,7 +45,12 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   function redraw(items, dragIdx = -1) {
     const canvas = canvasRef.current
     if (!canvas) return
+    if (canvas.width !== Math.round(canvasW * DPR) || canvas.height !== Math.round(canvasH * DPR)) {
+      canvas.width = Math.round(canvasW * DPR)
+      canvas.height = Math.round(canvasH * DPR)
+    }
     const ctx = canvas.getContext('2d')
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
     ctx.clearRect(0, 0, canvasW, canvasH)
 
     // Фон листа
@@ -50,8 +63,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     ctx.fillStyle = '#fff'
     ctx.fillRect(rx, ry, rw, rh)
 
-    // Обрезки
-    if (showOffcuts && sheet.freeRects) {
+    // Обрезки — автоматически посчитанные (свободные прямоугольники раскроя)
+    if (showOffcuts && offcutMode === 'auto' && sheet.freeRects) {
       const offcuts = computeOffcuts(sheet, usableX, usableY)
       offcuts.forEach(o => {
         const ox = rx + toC(o.x), oy = ry + toC(o.y)
@@ -63,7 +76,6 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         ctx.setLineDash([3, 3])
         ctx.strokeRect(ox, oy, ow, oh)
         ctx.setLineDash([])
-        // Размер обрезка
         ctx.fillStyle = '#3B6D11'
         ctx.font = `${Math.max(8, Math.min(10, ow / 8))}px sans-serif`
         ctx.textAlign = 'center'
@@ -72,6 +84,23 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           ctx.fillText(`${o.w}×${o.h}`, ox + ow / 2, oy + oh / 2)
         }
       })
+    }
+
+    // Обрезок, выбранный вручную (удержанием пальца) — деловой обрезок
+    if (showOffcuts && offcutMode === 'manual' && manualOffcut) {
+      const o = manualOffcut
+      const ox = rx + toC(o.x), oy = ry + toC(o.y)
+      const ow = toC(o.w), oh = toC(o.h)
+      ctx.fillStyle = 'rgba(230,126,34,0.14)'
+      ctx.fillRect(ox, oy, ow, oh)
+      ctx.strokeStyle = '#B85C00'
+      ctx.lineWidth = 1.5
+      ctx.strokeRect(ox, oy, ow, oh)
+      ctx.fillStyle = '#B85C00'
+      ctx.font = `bold ${Math.max(9, Math.min(11, ow / 8))}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(`${o.w}×${o.h}`, ox + ow / 2, oy + oh / 2)
     }
 
     // Детали
@@ -87,19 +116,52 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         { x: o.x, y: o.y, w: o.w - kerf, h: o.h - kerf }
       ))
 
-      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.4)' : (isDragging ? colorMap[p.detailIndex] + 'cc' : colorMap[p.detailIndex] || COLORS[p.detailIndex % COLORS.length])
+      // Заливка — все детали одним светло-серым цветом, без разноцветной
+      // раскраски внутри контура (цвет остаётся только в лёгком выделении
+      // при перетаскивании/коллизии — чтобы это оставалось заметным)
+      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : PART_FILL)
       ctx.fillRect(x, y, w, h)
-      ctx.strokeStyle = hasCollision ? '#E24B4A' : 'rgba(0,0,0,0.15)'
-      ctx.lineWidth = hasCollision ? 2 : 0.5
+      ctx.strokeStyle = hasCollision ? '#E24B4A' : PART_STROKE
+      ctx.lineWidth = hasCollision ? 2 : 1
       ctx.strokeRect(x, y, w, h)
 
-      // Кромка
-      ctx.strokeStyle = '#185FA5'
+      // Кромка — рисуется НЕ по самому контуру, а с небольшим отступом внутрь,
+      // чтобы контур детали и линия кромки не сливались, но было видно, на
+      // какой стороне кромка
+      ctx.strokeStyle = EDGE_COLOR
       ctx.lineWidth = 2
-      if (p.edgeTop) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.stroke() }
-      if (p.edgeBottom) { ctx.beginPath(); ctx.moveTo(x, y + h); ctx.lineTo(x + w, y + h); ctx.stroke() }
-      if (p.edgeLeft) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + h); ctx.stroke() }
-      if (p.edgeRight) { ctx.beginPath(); ctx.moveTo(x + w, y); ctx.lineTo(x + w, y + h); ctx.stroke() }
+      const g = EDGE_GAP
+      if (p.edgeTop) { ctx.beginPath(); ctx.moveTo(x + g, y + g); ctx.lineTo(x + w - g, y + g); ctx.stroke() }
+      if (p.edgeBottom) { ctx.beginPath(); ctx.moveTo(x + g, y + h - g); ctx.lineTo(x + w - g, y + h - g); ctx.stroke() }
+      if (p.edgeLeft) { ctx.beginPath(); ctx.moveTo(x + g, y + g); ctx.lineTo(x + g, y + h - g); ctx.stroke() }
+      if (p.edgeRight) { ctx.beginPath(); ctx.moveTo(x + w - g, y + g); ctx.lineTo(x + w - g, y + h - g); ctx.stroke() }
+
+      // Присадка — реальные точки сверления детали, повёрнутые вместе с ней
+      const detail = details && details[p.detailIndex]
+      if (detail && detail.contour) {
+        let contour = detail._parsedContour
+        if (contour === undefined) {
+          try { contour = detail.contour ? JSON.parse(detail.contour) : null } catch { contour = null }
+          detail._parsedContour = contour
+        }
+        if (contour) {
+          const panelW = Number(detail.width) || 0   // X, "родная" ориентация
+          const panelH = Number(detail.length) || 0  // Y, "родная" ориентация
+          const pts = getAllDrillPoints(contour, panelW, panelH)
+          if (pts.length) {
+            ctx.fillStyle = '#6A4A17'
+            pts.forEach(pt => {
+              // Точка в "родной" ориентации детали → в текущей (с учётом поворота на листе)
+              let fx = pt.x, fy = pt.y
+              if (p.rotated) { const nx = pt.y, ny = panelW - pt.x; fx = nx; fy = ny }
+              const sx = x + fx * sc
+              const sy = y + h - fy * sc
+              const r = Math.max(1.3, (pt.d || 8) * sc / 2)
+              ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill()
+            })
+          }
+        }
+      }
 
       // Метка
       ctx.fillStyle = 'rgba(0,0,0,0.6)'
@@ -109,7 +171,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       if (h > 14) ctx.fillText(lbl, x + w / 2, y + h / 2 - 5)
       ctx.fillStyle = 'rgba(0,0,0,0.4)'
       ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
-      if (h > 26) ctx.fillText(`${p.originalW}×${p.originalH}`, x + w / 2, y + h / 2 + 6)
+      if (h > 26) ctx.fillText(`${p.origX}×${p.origY}`, x + w / 2, y + h / 2 + 6)
     })
 
     // Рамка: X=sheetW(горизонталь), Y=sheetL(вертикаль)
@@ -121,8 +183,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
   function getPointer(e) {
     const rect = canvasRef.current.getBoundingClientRect()
-    const scaleX = canvasRef.current.width / rect.width
-    const touch = e.touches?.[0] || e
+    const scaleX = rect.width ? canvasW / rect.width : 1
+    const touch = e.touches?.[0] || e.changedTouches?.[0] || e
     return {
       x: (touch.clientX - rect.left) * scaleX,
       y: (touch.clientY - rect.top) * scaleX
@@ -161,18 +223,38 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     return { x: sx, y: sy }
   }
 
+  function clearLongPress() {
+    if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null }
+  }
+
   function onPointerDown(e) {
     if (!interactive) return
     const { x, y } = getPointer(e)
     const idx = findPiece(x, y)
-    if (idx === -1) return
+    if (idx === -1) {
+      // Пустое место на листе: в режиме "Вручную" удержание пальца задаёт
+      // деловой обрезок, растущий из этой точки до ближайших деталей/краёв
+      if (showOffcuts && offcutMode === 'manual' && onManualOffcut) {
+        clearLongPress()
+        longPressRef.current = setTimeout(() => {
+          const mx = fromC(x - (PADDING + toC(marginL)))
+          const my = fromC(y - (PADDING + toC(marginT)))
+          const rect = computeOffcutAtPoint(mx, my, placedRef.current, usableX, usableY)
+          if (rect) onManualOffcut(sheet.index, rect)
+        }, LONG_PRESS_MS)
+      }
+      return
+    }
     e.preventDefault()
     const p = placedRef.current[idx]
     draggingRef.current = { idx, startX: x, startY: y, origX: p.x, origY: p.y }
   }
 
   function onPointerMove(e) {
-    if (!draggingRef.current) return
+    if (!draggingRef.current) {
+      clearLongPress()
+      return
+    }
     e.preventDefault()
     const { x, y } = getPointer(e)
     const { idx, startX, startY, origX, origY } = draggingRef.current
@@ -189,6 +271,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   }
 
   function onPointerUp(e) {
+    clearLongPress()
     const drag = draggingRef.current
     if (!drag) return
     const { x, y } = getPointer(e)
@@ -202,7 +285,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         const p = placedRef.current[drag.idx]
         const rotated = {
           ...p, w: p.h, h: p.w,
-          originalW: p.originalH, originalH: p.originalW, rotated: !p.rotated,
+          origX: p.origY, origY: p.origX, rotated: !p.rotated,
           edgeTop: p.edgeLeft, edgeRight: p.edgeTop,
           edgeBottom: p.edgeRight, edgeLeft: p.edgeBottom,
         }
@@ -243,8 +326,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   }, [])
 
   return (
-    <canvas ref={canvasRef} width={canvasW} height={canvasH}
-      style={{ width: '100%', borderRadius: 8, display: 'block', touchAction: interactive ? 'none' : 'auto' }}
+    <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
+      style={{ width: canvasW, height: canvasH, maxWidth: '100%', borderRadius: 8, display: 'block', touchAction: interactive ? 'none' : 'auto' }}
       onMouseDown={onPointerDown} onMouseMove={onPointerMove} onMouseUp={onPointerUp}
       onTouchStart={onPointerDown} onTouchMove={onPointerMove} onTouchEnd={onPointerUp}
     />
@@ -266,6 +349,7 @@ export default function NestingPage() {
   const [nestDir, setNestDir] = useState('auto')
   const [cuttingMethod, setCuttingMethod] = useState('nesting')
   const [showOffcuts, setShowOffcuts] = useState(false)
+  const [offcutMode, setOffcutMode] = useState('auto') // 'auto' | 'manual'
   const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
   const [smallPartsMaxSquareSideMm, setSmallPartsMaxSquareSideMm] = useState('') // мм, заполнится глобальным дефолтом заказа
   const [smallPartsMaxSideMm, setSmallPartsMaxSideMm] = useState('')   // мм, заполнится глобальным дефолтом заказа
@@ -345,6 +429,10 @@ export default function NestingPage() {
 
   function onMove(sheetIdx, newPlaced) {
     setSheetsData(prev => prev.map((s, i) => i === sheetIdx ? { ...s, placed: newPlaced } : s))
+  }
+
+  function onManualOffcut(sheetIdx, rect) {
+    setSheetsData(prev => prev.map((s, i) => i === sheetIdx ? { ...s, manualOffcut: rect } : s))
   }
 
   if (!order) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
@@ -550,16 +638,43 @@ export default function NestingPage() {
                 </button>
               </div>
             </div>
+            {showOffcuts && (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <button onClick={() => setOffcutMode('auto')}
+                  style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
+                    background: offcutMode === 'auto' ? 'var(--teal)' : 'var(--bg2)',
+                    color: offcutMode === 'auto' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                  Авто
+                </button>
+                <button onClick={() => setOffcutMode('manual')}
+                  style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
+                    background: offcutMode === 'manual' ? '#B85C00' : 'var(--bg2)',
+                    color: offcutMode === 'manual' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                  Вручную
+                </button>
+                {offcutMode === 'manual' && sheetsData[activeSheet]?.manualOffcut && (
+                  <button onClick={() => onManualOffcut(activeSheet, null)}
+                    style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+                      background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
             <SheetCanvas
               sheet={sheetsData[activeSheet]}
               usableX={result.usableX} usableY={result.usableY}
               sheetL={order.sheet_length} sheetW={order.sheet_width}
               marginL={order.margin_left} marginT={order.margin_top}
-              kerf={order.kerf_width} colorMap={colorMap}
+              kerf={order.kerf_width} colorMap={colorMap} details={details}
               onMove={onMove} interactive={true} showOffcuts={showOffcuts}
+              offcutMode={offcutMode} manualOffcut={sheetsData[activeSheet]?.manualOffcut}
+              onManualOffcut={onManualOffcut}
             />
             <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 6 }}>
-              Двойной тап — повернуть деталь · Удержи и тяни — переместить
+              {showOffcuts && offcutMode === 'manual'
+                ? 'Удержи палец на свободном месте — определится деловой обрезок'
+                : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить'}
             </p>
           </div>
 
@@ -570,7 +685,7 @@ export default function NestingPage() {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', borderBottom: '0.5px solid var(--border)' }}>
                 <div style={{ width: 12, height: 12, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{p.label}</span>
-                <span style={{ color: 'var(--text-hint)' }}>{p.origY ?? p.originalH}×{p.origX ?? p.originalW}</span>
+                <span style={{ color: 'var(--text-hint)' }}>{p.origY}×{p.origX}</span>
                 {p.rotated && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻</span>}
               </div>
             ))}
