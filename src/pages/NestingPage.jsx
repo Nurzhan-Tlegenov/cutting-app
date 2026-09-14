@@ -34,6 +34,26 @@ function pointInPolygon(pt, poly) {
   }
   return inside
 }
+// Самый широкий отрезок материала детали вдоль горизонтальной линии y —
+// нужен, чтобы поставить подпись гарантированно НА детали, а не в пустом
+// пазу, если центр масс контура (из-за вогнутости) оказался вне материала.
+function widestSegmentAtY(poly, y) {
+  const xs = []
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length]
+    if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) {
+      const t = (y - a.y) / (b.y - a.y)
+      xs.push(a.x + t * (b.x - a.x))
+    }
+  }
+  xs.sort((a, b) => a - b)
+  let best = null, bestLen = 0
+  for (let i = 0; i + 1 < xs.length; i += 2) {
+    const len = xs[i + 1] - xs[i]
+    if (len > bestLen) { bestLen = len; best = [xs[i], xs[i + 1]] }
+  }
+  return best
+}
 function polygonsOverlap(polyA, polyB) {
   for (let i = 0; i < polyA.length; i++) {
     const a1 = polyA[i], a2 = polyA[(i + 1) % polyA.length]
@@ -213,15 +233,36 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         }
       }
 
-      // Метка
+      // Метка — точка для подписи ищется на самом материале, а не в центре
+      // габарита: для детали с вырезом центр габарита может попасть прямо в
+      // пустой паз (не на деталь). Если есть контур — берём центр масс
+      // полигона, а если он (из-за вогнутости) оказался вне детали —
+      // берём середину самого широкого отрезка материала по центральной
+      // горизонтали.
+      let labelLX = w / (2 * sc), labelLY = h / (2 * sc) // локальные мм-координаты (0..origX, 0..origY), по умолчанию — центр габарита
+      if (hasShape) {
+        let cx = 0, cy = 0
+        p.polygon.forEach(pt => { cx += pt.x; cy += pt.y })
+        cx /= p.polygon.length; cy /= p.polygon.length
+        if (pointInPolygon({ x: cx, y: cy }, p.polygon)) {
+          labelLX = cx; labelLY = cy
+        } else {
+          const scanY = p.origY / 2
+          const seg = widestSegmentAtY(p.polygon, scanY)
+          if (seg) { labelLX = (seg[0] + seg[1]) / 2; labelLY = scanY }
+        }
+      }
+      const lx = x + labelLX * sc, ly = y + h - labelLY * sc
+
       ctx.fillStyle = 'rgba(0,0,0,0.6)'
       ctx.font = `${Math.max(7, Math.min(10, w / 7))}px sans-serif`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lbl = (p.prefix ? p.prefix.slice(0,3) + ' ' : '') + p.label.replace(/Деталь\s*/, 'Д')
-      if (h > 14) ctx.fillText(lbl, x + w / 2, y + h / 2 - 5)
+      if (h > 14) ctx.fillText(lbl, lx, ly - 5)
       ctx.fillStyle = 'rgba(0,0,0,0.4)'
       ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
-      if (h > 26) ctx.fillText(`${p.origY}×${p.origX}`, x + w / 2, y + h / 2 + 6)
+      if (h > 26) ctx.fillText(`${p.origY}×${p.origX}`, lx, ly + 6)
+      if (h > 40) ctx.fillText(`(${Math.round(p.x)}, ${Math.round(p.y)})`, lx, ly + 16)
     })
 
     // Рамка: X=sheetW(горизонталь), Y=sheetL(вертикаль)

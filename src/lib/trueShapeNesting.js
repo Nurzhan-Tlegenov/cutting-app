@@ -327,15 +327,15 @@ function touchesBorder(gx, gy, variant, cols, rows) {
   return gx === 0 || gy === 0 || gx + variant.cols >= cols || gy + variant.rows >= rows
 }
 
-// Оценка размещения: не просто "первая снизу-слева свободная позиция" (это
-// НЕ затягивает деталь в вогнутый паз соседней — просто уедет правее по той
-// же нижней строке), а "лучшая по прилеганию" — максимум касания С УЖЕ
-// УЛОЖЕННЫМИ ДЕТАЛЯМИ (не с краем листа — иначе деталь начинает предпочитать
-// голый угол/край листа обычному прилеганию к соседям, и укладка расползается
-// по краям, оставляя пустую середину). При прочих равных — ниже и левее.
-// Перебираем только ГРАНИЦУ силуэта (boundaryOffsets), а не всю площадь —
-// внутренние ячейки крупной детали физически ни с чем снаружи соприкасаться
-// не могут, и перебирать их на каждой позиции на порядки дороже без пользы.
+// Оценка размещения: раньше здесь был "максимум контакта" — но контакт не то
+// же самое, что компактность. Проверено на реальном случае: два одинаковых
+// вогнутых силуэта, поставленные ВПЛОТНУЮ ДРУГ К ДРУГУ прямой стороной, дают
+// БОЛЬШЕ контакта (полная сторона), чем деталь, задвинутая в паз соседней
+// (контакт только по кромке паза) — хотя вложение экономит гораздо больше
+// места. Поэтому главный критерий — МИНИМАЛЬНАЯ итоговая занятая площадь
+// листа (габарит всех уложенных деталей после этого размещения), а контакт —
+// только добавка при равной площади (не даёт метаться между позициями с
+// одинаковым габаритом, но разным реальным прилеганием).
 function contactScore(occ, cols, rows, gx, gy, boundaryOffsets, boundarySet) {
   let contact = 0
   for (const [dx, dy] of boundaryOffsets) {
@@ -351,18 +351,16 @@ function contactScore(occ, cols, rows, gx, gy, boundaryOffsets, boundarySet) {
   return contact
 }
 
-const MAX_CANDIDATES = 1500 // ограничение на число вариантов, которые реально оцениваем — держит расчёт быстрым (было 4000 — на большом числе деталей это ощутимо дорого)
-const CONTACT_TOLERANCE = 6 // ширина "полосы" контакта в ячейках — см. комментарий у key ниже
+const MAX_CANDIDATES = 1500 // ограничение на число вариантов, которые реально оцениваем — держит расчёт быстрым
 
 // avoidBorder=true — кандидаты, касающиеся края используемой зоны, вообще не
 // рассматриваются (для мелких деталей: сначала пробуем без края, и только
 // если ничего не нашлось — второй вызов с avoidBorder=false).
-let __callCounter = 0
-function tryPlace(occ, cols, rows, variants, avoidBorder, anchorXs) {
-  __callCounter++
+// envCols/envRows — текущий занятый габарит листа (в ячейках) ДО этого
+// размещения; нужен, чтобы оценить, насколько каждая позиция его увеличит.
+function tryPlace(occ, cols, rows, variants, avoidBorder, anchorXs, envCols, envRows) {
   let best = null, bestScore = -Infinity
   let evaluated = 0
-  const DBG = globalThis.__DBG2__ === __callCounter
   for (let gy = 0; gy <= rows - 1 && evaluated < MAX_CANDIDATES; gy++) {
     const intervals = freeIntervals(occ, cols, gy)
     if (!intervals.length) continue
@@ -392,19 +390,15 @@ function tryPlace(occ, cols, rows, variants, avoidBorder, anchorXs) {
         for (const gx of candidatesX) {
           if (evaluated >= MAX_CANDIDATES) break
           if (avoidBorder && touchesBorder(gx, gy, variant, cols, rows)) continue
-          const passFits = fits(occ, cols, rows, gx, gy, variant.dilated, variant.cols, variant.rows)
-          if (DBG && gy < 3) console.log('  gy',gy,'gx',gx,'cols(var)',variant.cols,'fits',passFits)
-          if (passFits) {
+          if (fits(occ, cols, rows, gx, gy, variant.dilated, variant.cols, variant.rows)) {
             evaluated++
+            const newCols = Math.max(envCols, gx + variant.cols)
+            const newRows = Math.max(envRows, gy + variant.rows)
+            const area = newCols * newRows
             const score = contactScore(occ, cols, rows, gx, gy, variant.boundary, variant.boundarySet)
-            // Прилегание — главный критерий (затягивает в паз); ниже и левее — тай-брейк
-            // Контакт округляем до "полос" по CONTACT_TOLERANCE — иначе даже
-            // разница в 1 занятую ячейку контакта побеждает выигрыш в сотню мм
-            // компактности (позиция в этой формуле не может её перевесить,
-            // раз уж контакт умножен на 1e6). Полосы делают крупную выгоду по
-            // положению значимой, а настоящую вогнутость (десятки ячеек
-            // контакта) — всё ещё решающей.
-            const key = Math.floor(score / CONTACT_TOLERANCE) * 1e6 - (gy * cols + gx)
+            // Площадь — главный критерий (меньше — лучше); контакт — добавка
+            // при равной площади; ниже и левее — финальный тай-брейк.
+            const key = -area * 1e6 + score * 10 - (gy * cols + gx) * 0.001
             if (key > bestScore) { bestScore = key; best = { gx, gy, variant } }
           }
         }
@@ -414,12 +408,12 @@ function tryPlace(occ, cols, rows, variants, avoidBorder, anchorXs) {
   return best
 }
 
-function placeInstance(occ, cols, rows, inst, anchorXs) {
+function placeInstance(occ, cols, rows, inst, anchorXs, envCols, envRows) {
   if (inst.isSmall) {
-    const away = tryPlace(occ, cols, rows, inst.variants, true, anchorXs)
+    const away = tryPlace(occ, cols, rows, inst.variants, true, anchorXs, envCols, envRows)
     if (away) return away
   }
-  return tryPlace(occ, cols, rows, inst.variants, false, anchorXs)
+  return tryPlace(occ, cols, rows, inst.variants, false, anchorXs, envCols, envRows)
 }
 
 const YIELD_EVERY_PIECES = 3 // как часто внутри одной попытки укладки отдаём управление браузеру — иначе таймер и спиннер "замирают"
@@ -427,20 +421,33 @@ const YIELD_EVERY_PIECES = 3 // как часто внутри одной поп
 async function attemptPack(pieceInstances, cols, rows, deadline) {
   const sheets = []
   let cur = null
-  const openSheet = () => { cur = { index: sheets.length, occ: new Uint8Array(cols * rows), placed: [] }; sheets.push(cur) }
+  const openSheet = () => { cur = { index: sheets.length, occ: new Uint8Array(cols * rows), placed: [], envCols: 0, envRows: 0 }; sheets.push(cur) }
   openSheet()
   let n = 0
   for (const inst of pieceInstances) {
     if (deadline && Date.now() > deadline) break // одна попытка сама по себе может быть слишком долгой на большом заказе — прерываем, а не игнорируем бюджет времени
-    const anchorXs = cur.placed.map(item => item.placement.gx + item.placement.variant.cols)
-    let placement = placeInstance(cur.occ, cols, rows, inst, anchorXs)
+    // Якоря — не только правый край габарита уже уложенных деталей, но и
+    // координаты ВСЕХ их вершин (в клетках). Это важно для деталей с пазом:
+    // новая деталь должна суметь встать так, чтобы её край совпал именно с
+    // краем ВЫРЕЗА соседней (а это может быть любая вершина её контура, а
+    // не только правая граница габарита) — иначе состыковать зубец в паз
+    // просто негде "зацепиться" среди проверяемых позиций.
+    const anchorXs = []
+    cur.placed.forEach(item => {
+      const { gx, variant } = item.placement
+      anchorXs.push(gx + variant.cols)
+      variant.polygon.forEach(([vx]) => anchorXs.push(gx + Math.round(vx / inst.cellSize)))
+    })
+    let placement = placeInstance(cur.occ, cols, rows, inst, anchorXs, cur.envCols, cur.envRows)
     if (!placement) {
       openSheet()
-      placement = placeInstance(cur.occ, cols, rows, inst, [])
+      placement = placeInstance(cur.occ, cols, rows, inst, [], 0, 0)
       if (!placement) continue // деталь физически больше листа — пропускаем, как и rectangle-алгоритм не обрабатывает этот случай отдельно
     }
     markOccupied(cur.occ, cols, rows, placement.gx, placement.gy, placement.variant.dilated)
     cur.placed.push({ inst, placement })
+    cur.envCols = Math.max(cur.envCols, placement.gx + placement.variant.cols)
+    cur.envRows = Math.max(cur.envRows, placement.gy + placement.variant.rows)
     n++
     if (n % YIELD_EVERY_PIECES === 0) await new Promise(r => setTimeout(r, 0))
   }
@@ -449,7 +456,62 @@ async function attemptPack(pieceInstances, cols, rows, deadline) {
 
 function rebuildOccupancy(sheet, cols, rows) {
   sheet.occ = new Uint8Array(cols * rows)
-  sheet.placed.forEach(item => markOccupied(sheet.occ, cols, rows, item.placement.gx, item.placement.gy, item.placement.variant.dilated))
+  sheet.envCols = 0; sheet.envRows = 0
+  sheet.placed.forEach(item => {
+    markOccupied(sheet.occ, cols, rows, item.placement.gx, item.placement.gy, item.placement.variant.dilated)
+    sheet.envCols = Math.max(sheet.envCols, item.placement.gx + item.placement.variant.cols)
+    sheet.envRows = Math.max(sheet.envRows, item.placement.gy + item.placement.variant.rows)
+  })
+}
+
+// ─── "Гравитация" — стягивает уже уложенные детали друг к другу и к началу
+// координат. Конструктивная укладка (contact-score) находит ХОРОШУЮ позицию
+// для каждой детали В МОМЕНТ её размещения, но не возвращается позже, чтобы
+// подвинуть её ближе, если после неё встали другие детали. Без этого шага
+// между одинаковыми деталями остаются немотивированные разрывы (деталь просто
+// осталась там, где её поставили первой, хотя место рядом с соседом уже
+// давно свободно). Два ОТДЕЛЬНЫХ прохода (влево, затем вниз), а не сдвиг по
+// обеим осям сразу у каждой детали по очереди — иначе порядок обработки
+// уводит детали по диагонали в стороны вместо аккуратного смыкания рядов.
+function gravityAxis(sheet, cols, rows, axis) {
+  let moved = false
+  const order = sheet.placed.map((_, i) => i)
+    .sort((a, b) => (axis === 'x' ? sheet.placed[a].placement.gx - sheet.placed[b].placement.gx
+                                   : sheet.placed[a].placement.gy - sheet.placed[b].placement.gy))
+  for (const idx of order) {
+    const item = sheet.placed[idx]
+    const variant = item.placement.variant
+    const occ = new Uint8Array(cols * rows)
+    sheet.placed.forEach((o, i) => { if (i !== idx) markOccupied(occ, cols, rows, o.placement.gx, o.placement.gy, o.placement.variant.dilated) })
+    const { gx, gy } = item.placement
+    if (axis === 'x') {
+      let nx = gx
+      while (nx > 0 && fits(occ, cols, rows, nx - 1, gy, variant.dilated, variant.cols, variant.rows)) nx--
+      if (nx !== gx) { item.placement = { ...item.placement, gx: nx }; moved = true }
+    } else {
+      let ny = gy
+      while (ny > 0 && fits(occ, cols, rows, gx, ny - 1, variant.dilated, variant.cols, variant.rows)) ny--
+      if (ny !== gy) { item.placement = { ...item.placement, gy: ny }; moved = true }
+    }
+    markOccupied(occ, cols, rows, item.placement.gx, item.placement.gy, variant.dilated)
+    sheet.occ = occ
+  }
+  return moved
+}
+
+async function gravityCompact(sheets, cols, rows, deadline) {
+  for (const sheet of sheets) {
+    for (let pass = 0; pass < 6; pass++) {
+      if (Date.now() > deadline) return sheets
+      const movedX = gravityAxis(sheet, cols, rows, 'x')
+      await new Promise(r => setTimeout(r, 0))
+      const movedY = gravityAxis(sheet, cols, rows, 'y')
+      await new Promise(r => setTimeout(r, 0))
+      if (!movedX && !movedY) break
+    }
+    rebuildOccupancy(sheet, cols, rows)
+  }
+  return sheets
 }
 
 // Компакция: пробуем переложить детали с ПОСЛЕДНИХ листов на более ранние,
@@ -467,12 +529,14 @@ async function compactSheets(sheets, cols, rows, deadline) {
         for (let ti = 0; ti < si; ti++) {
           const target = sheets[ti]
           const anchorXs = target.placed.map(p => p.placement.gx + p.placement.variant.cols)
-          const placement = placeInstance(target.occ, cols, rows, item.inst, anchorXs)
+          const placement = placeInstance(target.occ, cols, rows, item.inst, anchorXs, target.envCols, target.envRows)
           if (placement) {
             sheet.placed.splice(pi, 1)
             rebuildOccupancy(sheet, cols, rows)
             markOccupied(target.occ, cols, rows, placement.gx, placement.gy, placement.variant.dilated)
             target.placed.push({ inst: item.inst, placement })
+            target.envCols = Math.max(target.envCols, placement.gx + placement.variant.cols)
+            target.envRows = Math.max(target.envRows, placement.gy + placement.variant.rows)
             moved = true
             break
           }
@@ -558,17 +622,19 @@ async function validateAndFixOverlaps(sheets, cols, rows) {
               const item = sheet.placed.splice(j, 1)[0]
               rebuildOccupancy(sheet, cols, rows)
               const anchorXs = sheet.placed.map(p => p.placement.gx + p.placement.variant.cols)
-              let placement = placeInstance(sheet.occ, cols, rows, item.inst, anchorXs)
+              let placement = placeInstance(sheet.occ, cols, rows, item.inst, anchorXs, sheet.envCols, sheet.envRows)
               let targetSheet = sheet
               if (!placement) {
                 // Не нашлось места даже на этом листе заново — на новый лист, чтобы не потерять деталь
-                targetSheet = { index: sheets.length, occ: new Uint8Array(cols * rows), placed: [] }
+                targetSheet = { index: sheets.length, occ: new Uint8Array(cols * rows), placed: [], envCols: 0, envRows: 0 }
                 sheets.push(targetSheet)
-                placement = placeInstance(targetSheet.occ, cols, rows, item.inst, [])
+                placement = placeInstance(targetSheet.occ, cols, rows, item.inst, [], 0, 0)
               }
               if (placement) {
                 markOccupied(targetSheet.occ, cols, rows, placement.gx, placement.gy, placement.variant.dilated)
                 targetSheet.placed.push({ inst: item.inst, placement })
+                targetSheet.envCols = Math.max(targetSheet.envCols, placement.gx + placement.variant.cols)
+                targetSheet.envRows = Math.max(targetSheet.envRows, placement.gy + placement.variant.rows)
               }
               fixedAny = true
               restart = true // состав этого листа изменился — перепроверяем ЕГО ЖЕ заново, не переходя к следующему
@@ -687,6 +753,7 @@ export async function packTrueShape({
     await new Promise(r => setTimeout(r, 0))
   }
 
+  best = await gravityCompact(best, cols, rows, startTime + budgetMs + 1000)
   best = await compactSheets(best, cols, rows, startTime + budgetMs + 1500)
   best = await validateAndFixOverlaps(best, cols, rows)
 
