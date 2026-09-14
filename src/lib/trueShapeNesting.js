@@ -187,7 +187,7 @@ function verticesToPolygon(vertices) {
   return poly
 }
 
-function parsePolygonFromDetail(d) {
+export function parsePolygonFromDetail(d) {
   let contour = null
   try { contour = d.contour ? JSON.parse(d.contour) : null } catch { contour = null }
   const w = Number(d.width) || 0, h = Number(d.length) || 0
@@ -276,8 +276,15 @@ function buildVariant(polygon, w, h, cellSize, padCells, angle) {
 
 // 0° и 180° — всегда (не трогают направление текстуры). 90° и 270° — только
 // если у детали отключена текстура (rotatable=true).
-function buildPieceKind(detail, cellSize, padCells) {
-  const { polygon, w, h } = parsePolygonFromDetail(detail)
+function buildPieceKind(detail, cellSize, kerf) {
+  const { polygon, w, h, custom } = parsePolygonFromDetail(detail)
+  // Запас "+1 ячейка сверх керфа" нужен только для реально нарисованного
+  // контура (там растеризация "по центру ячейки" у дуг/радиусов не идеальна
+  // ровно на границе) — для обычного прямоугольника это лишнее и на грубой
+  // сетке может съесть весь физический зазор между деталями (900+900мм на
+  // листе 1830мм — запаса всего ~27мм, а "лишняя" ячейка на грубой сетке
+  // может стоить 10-15мм с каждой стороны).
+  const padCells = custom ? Math.max(1, Math.ceil(kerf / cellSize)) + 1 : Math.max(1, Math.ceil(kerf / cellSize))
   const poly90 = rotate90(polygon, w)
   const poly180 = rotate90(poly90, h)
   const variants = [
@@ -351,7 +358,7 @@ function contactScore(occ, cols, rows, gx, gy, boundaryOffsets, boundarySet) {
   return contact
 }
 
-const MAX_CANDIDATES = 1500 // ограничение на число вариантов, которые реально оцениваем — держит расчёт быстрым
+const MAX_CANDIDATES = 3000 // ограничение на число вариантов, которые реально оцениваем — держит расчёт быстрым (считаются ВСЕ попытки, не только удачные)
 
 // avoidBorder=true — кандидаты, касающиеся края используемой зоны, вообще не
 // рассматриваются (для мелких деталей: сначала пробуем без края, и только
@@ -361,37 +368,65 @@ const MAX_CANDIDATES = 1500 // ограничение на число вариа
 function tryPlace(occ, cols, rows, variants, avoidBorder, anchorXs, envCols, envRows) {
   let best = null, bestScore = -Infinity
   let evaluated = 0
-  for (let gy = 0; gy <= rows - 1 && evaluated < MAX_CANDIDATES; gy++) {
+  // Лимит кандидатов — от размера детали, не фиксированный: fits() стоит
+  // O(число занятых ячеек детали), и для крупной сплошной детали (тысячи
+  // ячеек) даже 1500 честных попыток — уже десятки миллионов операций.
+  // Держим общий БЮДЖЕТ ОПЕРАЦИЙ примерно постоянным независимо от размера
+  // детали, а не число попыток.
+  const maxDilated = Math.max(1, ...variants.map(v => v.dilated.length))
+  const localMax = Math.min(MAX_CANDIDATES, Math.max(300, Math.floor(20_000_000 / maxDilated)))
+  let prevSignature = null
+  for (let gy = 0; gy <= rows - 1 && evaluated < localMax; gy++) {
     const intervals = freeIntervals(occ, cols, gy)
-    if (!intervals.length) continue
+    if (!intervals.length) { prevSignature = ''; continue }
+    // Строка с ТОЙ ЖЕ структурой свободных участков, что и предыдущая, не
+    // даёт ничего нового: кандидаты будут теми же самыми, а итоговый габарит
+    // только больше (выше по листу) — заведомо не лучше. Пропускаем, не теряя
+    // ни одной реальной возможности — переход между разными структурами (где
+    // что-то заканчивается/начинается) НЕ пропускается, а именно там и
+    // открываются узкие проходы для вложения контур-в-контур.
+    const signature = intervals.map(iv => iv.start + '-' + iv.end).join(',')
+    // Пропуск одинаковых строк ОПАСЕН для avoidBorder: близость к краю листа
+    // зависит от АБСОЛЮТНОЙ строки (верх/низ), а не от формы свободного
+    // участка — у двух рядов с одинаковой структурой (например, 0-й и 50-й)
+    // разный статус "у края", и пропуская их как "одинаковые", мы никогда не
+    // доходим до строк, где деталь уже не касается верхней/нижней границы.
+    if (!avoidBorder && signature === prevSignature) continue
+    prevSignature = signature
     for (const variant of variants) {
       if (gy + variant.rows > rows) continue
       for (const iv of intervals) {
-        const maxGx = Math.min(iv.end - variant.cols, cols - variant.cols)
-        if (maxGx < iv.start) continue
-        // Кандидаты — не только "углы" свободного участка (его начало и
-        // конец — стандартный приём, как углы свободных прямоугольников в
-        // MaxRects/Guillotine), но и позиции ВПЛОТНУЮ К КРАЮ уже уложенных
-        // деталей (anchorXs). Это важно: край свободного участка в ЭТОЙ
-        // строке — не всегда то же самое место, где деталь реально упрётся
-        // в соседнюю — соседняя может быть шире именно в ДРУГИХ строках (как
-        // деталь с широкой верхней частью и узкой нижней), и тогда просто
-        // "конец свободного места в этой строке" даёт куда более рыхлую
-        // позицию, чем "вплотную к правому краю соседней детали".
-        const candidatesX = new Set([iv.start, maxGx])
-        if (maxGx - iv.start > variant.cols) candidatesX.add(iv.start + Math.floor((maxGx - iv.start) / 2))
-        if (anchorXs) {
-          for (const ax of anchorXs) {
-            if (ax >= iv.start && ax <= maxGx) candidatesX.add(ax)
-            const axLeft = ax - variant.cols
-            if (axLeft >= iv.start && axLeft <= maxGx) candidatesX.add(axLeft)
+        const fitsFullWidth = variant.cols <= iv.end - iv.start
+        const candidatesX = new Set([iv.start])
+        if (fitsFullWidth) {
+          // Обычный случай: весь габарит детали помещается в этот участок —
+          // как раньше, пробуем оба края и середину.
+          const rightAligned = iv.end - variant.cols
+          candidatesX.add(rightAligned)
+          if (iv.end - iv.start > variant.cols) candidatesX.add(iv.start + Math.floor((iv.end - iv.start - variant.cols) / 2))
+          if (anchorXs) {
+            for (const ax of anchorXs) {
+              if (ax >= iv.start && ax <= rightAligned) candidatesX.add(ax)
+              const axLeft = ax - variant.cols
+              if (axLeft >= iv.start && axLeft <= rightAligned) candidatesX.add(axLeft)
+            }
           }
         }
+        // Узкий участок (габарит детали шире, чем свободно ИМЕННО в этой
+        // строке) — не пропускаем целиком (это и есть путь к вложению
+        // контур-в-контур: узкая ножка детали может пройти тут, а более
+        // широкая часть встанет выше/ниже, где просторнее), но и НЕ плодим
+        // здесь много кандидатов — дорого на каждой строке, если детали
+        // вокруг уже много: пробуем только левый край участка (iv.start,
+        // уже добавлен выше) — этого достаточно, чтобы найти вложение, а
+        // настоящую проверку (влезает ли ВСЯ деталь по всем её строкам)
+        // всё равно делает fits() ниже.
         for (const gx of candidatesX) {
-          if (evaluated >= MAX_CANDIDATES) break
+          if (evaluated >= localMax) break
+          evaluated++ // считаем ЛЮБУЮ попытку, а не только удачную — иначе при большом числе неудачных кандидатов лимит вообще не срабатывает
+          if (gx + variant.cols > cols) continue
           if (avoidBorder && touchesBorder(gx, gy, variant, cols, rows)) continue
           if (fits(occ, cols, rows, gx, gy, variant.dilated, variant.cols, variant.rows)) {
-            evaluated++
             const newCols = Math.max(envCols, gx + variant.cols)
             const newRows = Math.max(envRows, gy + variant.rows)
             const area = newCols * newRows
@@ -418,36 +453,104 @@ function placeInstance(occ, cols, rows, inst, anchorXs, envCols, envRows) {
 
 const YIELD_EVERY_PIECES = 3 // как часто внутри одной попытки укладки отдаём управление браузеру — иначе таймер и спиннер "замирают"
 
+function cloneOcc(occ) { return occ.slice() }
+
+// ─── Просчёт ПАРЫ одинаковых деталей подряд — не по одной, а сразу вдвоём.
+// Иначе первая из двух ставится в ЛЮБОМ повороте (для неё самой, в одиночку,
+// все повороты выглядят одинаково хорошо — сравнивать пока не с чем), а
+// именно от ЭТОГО произвольного выбора зависит, сможет ли вторая деталь той
+// же формы лечь в её вырез. Проверено на реальном образце (эталонный DXF):
+// деталь с вырезом входит в паз такой же детали, повёрнутой на 180°, ТОЛЬКО
+// если первая стоит в конкретном повороте — при другом эта же пара пересекается.
+// Перебираем все сочетания поворотов обеих деталей и берём то, что даёт
+// наименьший общий габарит пары — это и есть выбор "какой стороной поставить
+// первую", которого обычная поштучная укладка в принципе не делает.
+function tryPlacePair(occ, cols, rows, instA, instB, anchorXs, envCols, envRows) {
+  let best = null, bestArea = Infinity, bestScore = -Infinity
+  for (const vA of instA.variants) {
+    const placeA = tryPlace(occ, cols, rows, [vA], false, anchorXs, envCols, envRows)
+    if (!placeA) continue
+    const occ2 = cloneOcc(occ)
+    markOccupied(occ2, cols, rows, placeA.gx, placeA.gy, placeA.variant.dilated)
+    const envCols2 = Math.max(envCols, placeA.gx + placeA.variant.cols)
+    const envRows2 = Math.max(envRows, placeA.gy + placeA.variant.rows)
+    const anchorXs2 = anchorXs.concat([placeA.gx + placeA.variant.cols])
+    vA.polygon.forEach(([vx]) => anchorXs2.push(placeA.gx + Math.round(vx / instA.cellSize)))
+    for (const vB of instB.variants) {
+      const placeB = tryPlace(occ2, cols, rows, [vB], false, anchorXs2, envCols2, envRows2)
+      if (!placeB) continue
+      const totalCols = Math.max(envCols2, placeB.gx + placeB.variant.cols)
+      const totalRows = Math.max(envRows2, placeB.gy + placeB.variant.rows)
+      const area = totalCols * totalRows
+      if (area < bestArea) { bestArea = area; best = { placeA, placeB } }
+    }
+  }
+  return best
+}
+
 async function attemptPack(pieceInstances, cols, rows, deadline) {
   const sheets = []
   let cur = null
   const openSheet = () => { cur = { index: sheets.length, occ: new Uint8Array(cols * rows), placed: [], envCols: 0, envRows: 0 }; sheets.push(cur) }
   openSheet()
   let n = 0
-  for (const inst of pieceInstances) {
+  let idx = 0
+  while (idx < pieceInstances.length) {
     if (deadline && Date.now() > deadline) break // одна попытка сама по себе может быть слишком долгой на большом заказе — прерываем, а не игнорируем бюджет времени
+    const inst = pieceInstances[idx]
     // Якоря — не только правый край габарита уже уложенных деталей, но и
     // координаты ВСЕХ их вершин (в клетках). Это важно для деталей с пазом:
     // новая деталь должна суметь встать так, чтобы её край совпал именно с
     // краем ВЫРЕЗА соседней (а это может быть любая вершина её контура, а
     // не только правая граница габарита) — иначе состыковать зубец в паз
     // просто негде "зацепиться" среди проверяемых позиций.
-    const anchorXs = []
+    const anchorXsRaw = []
     cur.placed.forEach(item => {
       const { gx, variant } = item.placement
-      anchorXs.push(gx + variant.cols)
-      variant.polygon.forEach(([vx]) => anchorXs.push(gx + Math.round(vx / inst.cellSize)))
+      anchorXsRaw.push(gx + variant.cols)
+      variant.polygon.forEach(([vx]) => anchorXsRaw.push(gx + Math.round(vx / inst.cellSize)))
     })
+    const anchorXs = [...new Set(anchorXsRaw)] // одинаковые детали дают одни и те же смещения вершин — без дедупликации список раздувается и на каждой позиции перебирается заново
+
+    // Следующая деталь той же формы — просчитываем ОБЕ сразу (см. tryPlacePair),
+    // не только эту одну: именно связка "какой стороной ставим первую" решает,
+    // войдёт ли вторая в её вырез. Только когда у детали больше 1 варианта
+    // поворота — для симметричного прямоугольника (1 вариант) выбор не стоит.
+    // Просчёт пары — только для ПЕРВЫХ двух деталей на листе (когда ещё не с
+    // чем сравнивать: у первой детали в одиночку все повороты выглядят
+    // одинаково хорошо, и именно это решает, войдёт ли вторая в её паз).
+    // Дальше по листу уже есть за что "зацепиться" (anchorXs от соседей),
+    // и парный перебор только замедляет расчёт, не давая сопоставимой пользы.
+    const nextInst = pieceInstances[idx + 1]
+    if (cur.placed.length === 0 && nextInst && nextInst.detailIndex === inst.detailIndex && inst.variants.length > 1) {
+      const pair = tryPlacePair(cur.occ, cols, rows, inst, nextInst, anchorXs, cur.envCols, cur.envRows)
+      if (pair) {
+        markOccupied(cur.occ, cols, rows, pair.placeA.gx, pair.placeA.gy, pair.placeA.variant.dilated)
+        cur.placed.push({ inst, placement: pair.placeA })
+        cur.envCols = Math.max(cur.envCols, pair.placeA.gx + pair.placeA.variant.cols)
+        cur.envRows = Math.max(cur.envRows, pair.placeA.gy + pair.placeA.variant.rows)
+        markOccupied(cur.occ, cols, rows, pair.placeB.gx, pair.placeB.gy, pair.placeB.variant.dilated)
+        cur.placed.push({ inst: nextInst, placement: pair.placeB })
+        cur.envCols = Math.max(cur.envCols, pair.placeB.gx + pair.placeB.variant.cols)
+        cur.envRows = Math.max(cur.envRows, pair.placeB.gy + pair.placeB.variant.rows)
+        idx += 2
+        n += 2
+        if (n % YIELD_EVERY_PIECES === 0) await new Promise(r => setTimeout(r, 0))
+        continue
+      }
+    }
+
     let placement = placeInstance(cur.occ, cols, rows, inst, anchorXs, cur.envCols, cur.envRows)
     if (!placement) {
       openSheet()
       placement = placeInstance(cur.occ, cols, rows, inst, [], 0, 0)
-      if (!placement) continue // деталь физически больше листа — пропускаем, как и rectangle-алгоритм не обрабатывает этот случай отдельно
+      if (!placement) { idx++; continue } // деталь физически больше листа — пропускаем, как и rectangle-алгоритм не обрабатывает этот случай отдельно
     }
     markOccupied(cur.occ, cols, rows, placement.gx, placement.gy, placement.variant.dilated)
     cur.placed.push({ inst, placement })
     cur.envCols = Math.max(cur.envCols, placement.gx + placement.variant.cols)
     cur.envRows = Math.max(cur.envRows, placement.gy + placement.variant.rows)
+    idx++
     n++
     if (n % YIELD_EVERY_PIECES === 0) await new Promise(r => setTimeout(r, 0))
   }
@@ -566,6 +669,55 @@ function better(a, b) {
   return a.lastFill > b.lastFill
 }
 
+// ─── Генетический алгоритм по порядку укладки — та же логика (турнирный
+// отбор / order crossover / направленная мутация), что уже проверена в
+// rectangle-алгоритме (src/lib/nesting.js), продублирована здесь напрямую:
+// связывать модули ради нескольких небольших чистых функций не стоило —
+// проще и безопаснее держать копию, не рискуя случайно задеть отточенный
+// прямоугольный путь при развитии true-shape отдельно.
+function shuffleTS(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
+function tournamentSelectTS(evaluated, k) {
+  let winner = null
+  for (let i = 0; i < k; i++) {
+    const cand = evaluated[Math.floor(Math.random() * evaluated.length)]
+    if (!winner || better(cand.stat, winner.stat)) winner = cand
+  }
+  return winner
+}
+function orderCrossoverTS(parentA, parentB) {
+  const n = parentA.length
+  let i = Math.floor(Math.random() * n), j = Math.floor(Math.random() * n)
+  if (i > j) [i, j] = [j, i]
+  const child = new Array(n).fill(null)
+  const usedIds = new Set()
+  for (let k = i; k <= j; k++) { child[k] = parentA[k]; usedIds.add(parentA[k].id) }
+  const emptyPositions = []
+  for (let k = 0; k < n; k++) {
+    const pos = (j + 1 + k) % n
+    if (pos < i || pos > j) emptyPositions.push(pos)
+  }
+  let ptr = 0
+  for (let k = 0; k < n; k++) {
+    const gene = parentB[(j + 1 + k) % n]
+    if (!usedIds.has(gene.id)) { child[emptyPositions[ptr]] = gene; usedIds.add(gene.id); ptr++ }
+  }
+  return child
+}
+function perturbOrderTS(order) {
+  const arr = order.slice()
+  const swaps = 1 + Math.floor(Math.random() * 5)
+  for (let s = 0; s < swaps; s++) {
+    const i = Math.floor(Math.random() * arr.length), j = Math.floor(Math.random() * arr.length)
+    ;[arr[i], arr[j]] = [arr[j], arr[i]]
+  }
+  return arr
+}
+
 // ─── Финальная проверка ПО ТОЧНОЙ геометрии (не по сетке) ─────────────────
 // Сетка (даже мелкая) — это всегда приближение: ячейка проверяется по своему
 // центру, и прямо на изгибе/дуге могут случайно допустить чуть большее
@@ -677,10 +829,8 @@ export async function packTrueShape({
   const cellSize = Math.min(MAX_CELL_MM, Math.max(MIN_CELL_MM, Math.sqrt((usableX * usableY) / TARGET_CELLS)))
   const cols = Math.max(1, Math.ceil(usableX / cellSize))
   const rows = Math.max(1, Math.ceil(usableY / cellSize))
-  const padCells = Math.max(1, Math.ceil(kerf / cellSize)) + 1 // +1 ячейка сверх керфа — запас на ошибку растеризации у изгибов/дуг (проверка "по центру ячейки" не идеальна ровно на границе)
+  const kindsByDetail = details.map(d => buildPieceKind(d, cellSize, kerf))
   const smallMaxArea = smallPartsMaxSquareSide > 0 ? smallPartsMaxSquareSide * smallPartsMaxSquareSide : 0
-
-  const kindsByDetail = details.map(d => buildPieceKind(d, cellSize, padCells))
 
   const instances = []
   details.forEach((d, di) => {
@@ -692,7 +842,7 @@ export async function packTrueShape({
     )
     for (let q = 0; q < (Number(d.qty) || 1); q++) {
       instances.push({
-        detailIndex: di, cellSize, isSmall,
+        id: instances.length, detailIndex: di, cellSize, isSmall,
         variants: kindsByDetail[di],
         label: d.display_name || d.name, prefix: d.prefix,
         edgeTop: d.edge_top, edgeRight: d.edge_right, edgeBottom: d.edge_bottom, edgeLeft: d.edge_left,
@@ -701,56 +851,84 @@ export async function packTrueShape({
     }
   })
 
-  const orderings = [
-    instances.slice().sort((a, b) => b.area - a.area),
-    instances.slice().sort((a, b) => Math.max(b.variants[0].w, b.variants[0].h) - Math.max(a.variants[0].w, a.variants[0].h)),
-    instances.slice().sort((a, b) => Math.min(a.variants[0].w, a.variants[0].h) - Math.min(b.variants[0].w, b.variants[0].h)),
-  ]
-
-  let best = null, bestScore = null
-  // Бюджет — ровно то, что задал пользователь в настройках раскроя (как и в
-  // rectangle-алгоритме), без произвольного искусственного потолка. Внутри
-  // attemptPack/compactSheets регулярно отдаём управление браузеру, поэтому
-  // длинный бюджет не "замораживает" вкладку и таймер продолжает тикать.
-  //
-  // ВАЖНО: на большом заказе ОДНА попытка укладки сама по себе может занять
-  // больше времени, чем весь заданный бюджет — значит, дедлайн внутри самой
-  // attemptPack (нужен, чтобы не "зависнуть" на составлении лучшей укладки)
-  // не должен обрывать деталь на середине списка непомещённой. Поэтому самая
-  // первая попытка ВСЕГДА идёт без дедлайна — обязана разместить все детали
-  // целиком, это гарантированный базовый результат. Дальнейшие попытки (ищут
-  // укладку плотнее) уже ограничены оставшимся бюджетом, и если такая попытка
-  // не успела разместить все детали до дедлайна — она отбрасывается, а не
-  // подменяет собой базовый (полный) результат.
   const totalInstances = instances.length
   const budgetMs = Math.max(0, Number(optimizeSeconds) || 0) * 1000
   const startTime = Date.now()
 
-  best = await attemptPack(orderings[0], cols, rows, null)
-  bestScore = scoreSheets(best, cols, rows)
+  // Базовый результат ВСЕГДА без дедлайна — обязан разместить все детали
+  // целиком, это гарантированная основа, даже если бюджет = 0.
+  const seedOrder = instances.slice().sort((a, b) => b.area - a.area)
+  let best = await attemptPack(seedOrder, cols, rows, null)
+  let bestScore = scoreSheets(best, cols, rows)
 
-  for (let oi = 1; oi < orderings.length; oi++) {
-    if (Date.now() - startTime > budgetMs) break
-    const sheets = await attemptPack(orderings[oi], cols, rows, startTime + budgetMs)
-    const placedCount = sheets.reduce((a, s) => a + s.placed.length, 0)
-    if (placedCount === totalInstances) {
-      const score = scoreSheets(sheets, cols, rows)
-      if (better(score, bestScore)) { best = sheets; bestScore = score }
+  // ─── Генетический алгоритм поверх ПОРЯДКА укладки деталей ─────────────────
+  // Это тот же самый, уже проверенный на прямоугольном алгоритме приём
+  // (популяция, турнирный отбор, order crossover, элитизм, мутация) — просто
+  // "декодер" каждой особи здесь не rectangle packAttempt, а true-shape
+  // attemptPack. Именно порядок ("какая деталь встаёт раньше остальных")
+  // определяет, останется ли для следующей детали её вогнутость свободной —
+  // жадный перебор нескольких шаблонов порядка (как было раньше) находит
+  // заметно менее плотные решения, чем эволюционный поиск по этому же
+  // пространству.
+  //
+  // Популяция и число поколений НАМНОГО меньше, чем в rectangle-алгоритме —
+  // там "особь" это дешёвая операция с прямоугольниками, здесь одна попытка
+  // укладки может стоить секунды (растеризация контуров, оценка контакта по
+  // границе силуэта). Компакция между листами — дорогая для true-shape, и
+  // внутри поколений не делается вообще (иначе одно поколение съедало бы
+  // весь бюджет) — она нужна только один раз, в конце, поверх лучшей найденной особи.
+  if (budgetMs > 0 && totalInstances > 1 && Date.now() - startTime < budgetMs) {
+    const POP_SIZE = totalInstances > 40 ? 8 : 12
+    const ELITE_COUNT = 2
+    const TOURNAMENT_SIZE = 3
+    const MUTATION_RATE = 0.4
+
+    const evalOrder = async (order, deadline) => {
+      const sheets = await attemptPack(order, cols, rows, deadline)
+      const placedCount = sheets.reduce((a, s) => a + s.placed.length, 0)
+      if (placedCount !== totalInstances) return null // не успела разместить все детали до дедлайна — не годится как особь
+      return { order, sheets, stat: scoreSheets(sheets, cols, rows) }
     }
-  }
-  // Несколько случайных перестановок в оставшееся время бюджета — те же
-  // структурные порядки не всегда лучшие для конкретного набора силуэтов.
-  while (Date.now() - startTime < budgetMs) {
-    const shuffled = instances.slice()
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+
+    let population = [
+      seedOrder,
+      instances.slice().sort((a, b) => Math.max(b.variants[0].w, b.variants[0].h) - Math.max(a.variants[0].w, a.variants[0].h)),
+      instances.slice().sort((a, b) => Math.min(a.variants[0].w, a.variants[0].h) - Math.min(b.variants[0].w, b.variants[0].h)),
+    ]
+    while (population.length < POP_SIZE) population.push(shuffleTS(instances.slice()))
+
+    let evaluated = []
+    for (const order of population) {
+      if (Date.now() - startTime > budgetMs) break
+      const res = await evalOrder(order, startTime + budgetMs)
+      if (res) evaluated.push(res)
     }
-    const sheets = await attemptPack(shuffled, cols, rows, startTime + budgetMs)
-    const placedCount = sheets.reduce((a, s) => a + s.placed.length, 0)
-    if (placedCount !== totalInstances) continue // не успела разместить все детали до дедлайна — не годится как результат
-    const score = scoreSheets(sheets, cols, rows)
-    if (better(score, bestScore)) { best = sheets; bestScore = score }
-    await new Promise(r => setTimeout(r, 0))
+    if (evaluated.length) {
+      evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
+      if (better(evaluated[0].stat, bestScore)) { best = evaluated[0].sheets; bestScore = evaluated[0].stat }
+
+      while (Date.now() - startTime < budgetMs && evaluated.length >= 2) {
+        const nextGen = evaluated.slice(0, ELITE_COUNT).map(e => e.order)
+        while (nextGen.length < POP_SIZE && Date.now() - startTime < budgetMs) {
+          const parentA = tournamentSelectTS(evaluated, TOURNAMENT_SIZE)
+          const parentB = tournamentSelectTS(evaluated, TOURNAMENT_SIZE)
+          let child = orderCrossoverTS(parentA.order, parentB.order)
+          if (Math.random() < MUTATION_RATE) child = perturbOrderTS(child)
+          nextGen.push(child)
+        }
+        const nextEvaluated = []
+        for (const order of nextGen) {
+          if (Date.now() - startTime > budgetMs) break
+          const res = await evalOrder(order, startTime + budgetMs)
+          if (res) nextEvaluated.push(res)
+        }
+        if (!nextEvaluated.length) break
+        evaluated = nextEvaluated
+        evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
+        if (better(evaluated[0].stat, bestScore)) { best = evaluated[0].sheets; bestScore = evaluated[0].stat }
+        await new Promise(r => setTimeout(r, 0))
+      }
+    }
   }
 
   best = await gravityCompact(best, cols, rows, startTime + budgetMs + 1000)
