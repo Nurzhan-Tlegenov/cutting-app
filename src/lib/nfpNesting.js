@@ -142,7 +142,13 @@ function attemptPack(order, usableX, usableY) {
 function scoreSheets(sheets) {
   const last = sheets[sheets.length - 1]
   const lastArea = last.reduce((s, p) => s + (p.bb.maxX - p.bb.minX) * (p.bb.maxY - p.bb.minY), 0)
-  return [sheets.length, -lastArea]
+  // При равном числе листов лучше та раскладка, где на ПОСЛЕДНЕМ листе
+  // МЕНЬШЕ материала (ближе к тому, чтобы не понадобился вовсе) — поэтому
+  // берём lastArea напрямую, без минуса; better() ниже выбирает меньший
+  // ключ. Раньше здесь стоял минус — это меняло критерий на обратный
+  // (предпочитало БОЛЬШИЙ остаток на последнем листе) и мешало генетике
+  // сходиться к более плотным раскладкам.
+  return [sheets.length, lastArea]
 }
 function better(a, b) { return a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]) }
 
@@ -150,6 +156,21 @@ function shuffle(arr) {
   const a = arr.slice()
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]] }
   return a
+}
+// Чередование крупных/мелких деталей: сортируем по убыванию площади, потом
+// берём по одной поочерёдно с двух концов (самая крупная, самая мелкая,
+// следующая крупная, следующая мелкая, ...). Так мелкие детали пробуют
+// занять место РЯДОМ с каждой крупной сразу же, а не только после того, как
+// ВСЕ крупные уже заняли максимально плотный, но неудобной формы блок.
+function interleaveByAreaBand(instances) {
+  const sorted = instances.slice().sort((a,b)=>(b.w*b.h)-(a.w*a.h))
+  const result = []
+  let lo = 0, hi = sorted.length - 1
+  while (lo <= hi) {
+    result.push(sorted[lo++])
+    if (lo <= hi) result.push(sorted[hi--])
+  }
+  return result
 }
 function tournamentSelect(pop, size) {
   let best = null
@@ -213,6 +234,8 @@ export async function packNFP({
       seedOrder,
       instances.slice().sort((a,b)=>Math.max(b.w,b.h)-Math.max(a.w,a.h)),
       instances.slice().sort((a,b)=>Math.min(a.w,a.h)-Math.min(b.w,b.h)),
+      instances.slice().sort((a,b)=>(a.w*a.h)-(b.w*b.h)), // сначала мелкие
+      interleaveByAreaBand(instances), // чередование крупных и мелких — мелкие успевают занять то, что крупные ещё не "забронировали"
     ]
     while (population.length < POP_SIZE) population.push(shuffle(instances))
 
