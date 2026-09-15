@@ -496,6 +496,10 @@ export default function NestingPage() {
     setNestError('')
     setElapsedSec(0)
     const timerId = setInterval(() => setElapsedSec(s => s + 1), 1000)
+    // ЭКСПЕРИМЕНТ: добавьте ?nfp=1 в адрес страницы раскроя, чтобы прогнать
+    // этот заказ через новый NFP-алгоритм вместо обычного — для сравнения.
+    // Без этого параметра всё работает как раньше, никаких изменений.
+    const useNfp = new URLSearchParams(window.location.search).get('nfp') === '1'
     setTimeout(async () => {
       try {
         const res = await runNesting({
@@ -509,6 +513,7 @@ export default function NestingPage() {
           smallPartsMaxSide: smallPartsMaxSideMm === '' ? 0 : Number(smallPartsMaxSideMm),
           optimizeSeconds: optimizeSeconds === '' ? 12 : Number(optimizeSeconds),
           cuttingMethod,
+          algo: useNfp ? 'nfp' : 'raster',
         })
         setResult(res)
         setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
@@ -943,7 +948,14 @@ export default function NestingPage() {
 
           <div className="card" style={{ padding: 8, marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>Лист {activeSheet + 1} из {sheetsData.length}</span>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>
+                Лист {activeSheet + 1} из {sheetsData.length}
+                {new URLSearchParams(window.location.search).get('nfp') === '1' && (
+                  <span style={{ marginLeft: 6, fontSize: 10, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: 8 }}>
+                    NFP (эксперимент)
+                  </span>
+                )}
+              </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{sheetsData[activeSheet]?.placed.length} дет.</span>
                 <button onClick={() => downloadSheetDxf(activeSheet)}

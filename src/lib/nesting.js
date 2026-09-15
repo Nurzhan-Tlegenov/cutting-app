@@ -77,6 +77,7 @@
  */
 
 import { needsTrueShape, packTrueShape } from './trueShapeNesting'
+import { packNFP } from './nfpNesting'
 
 const BORDER_PENALTY = 2000000
 const ORIGIN_TIEBREAK = 5
@@ -95,9 +96,17 @@ export async function runNesting({
   smallPartsMaxSide = 0,          // порог меньшей стороны детали (мм). 0 = критерий выключен
   optimizeSeconds = 12,           // сколько секунд гонять поиск плотной укладки — из настроек раскроя
   cuttingMethod = 'nesting',      // 'nesting' (фрезер, ЧПУ — свободная укладка) | 'guillotine' (форматно-раскроечный станок — только сквозные резы)
+  algo = 'raster',                // ЭКСПЕРИМЕНТ: 'raster' (по умолчанию, проверенный) | 'nfp' (новый, точный по контуру — для сравнения на реальных заказах)
 }) {
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
+
+  // ЭКСПЕРИМЕНТАЛЬНЫЙ путь — только по явному запросу (algo='nfp'), обычная
+  // работа приложения его не трогает. Не привязан к needsTrueShape: сравнивать
+  // интересно и на простых прямоугольных заказах тоже.
+  if (algo === 'nfp') {
+    return await packNFP({ details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, optimizeSeconds })
+  }
 
   // ЧПУ-фрезер режет по любому контуру — если среди деталей есть хоть одна
   // с реально нарисованным (не прямоугольным) внешним контуром, укладка
