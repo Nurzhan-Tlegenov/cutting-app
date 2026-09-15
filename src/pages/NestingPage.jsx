@@ -66,10 +66,17 @@ function polygonsOverlap(polyA, polyB) {
   return pointInPolygon(polyA[0], polyB) || pointInPolygon(polyB[0], polyA)
 }
 // Абсолютный полигон детали на листе: свой polygon (если true-shape) со
-// смещением на x,y, иначе — прямоугольник по w/h (минус kerf, как и рисуем)
+// смещением на x,y, иначе — прямоугольник по w/h (минус kerf, как и рисуем).
+// ВАЖНО: тот же переворот по Y, что и в отрисовке/DXF-экспорте — локальные
+// точки контура (pt.y) заданы "снизу вверх", а p.y — это позиция "сверху
+// вниз" (от верха рабочей зоны). Без этого переворота при перетаскивании
+// двух контурных деталей друг НАД другом (разная p.y) проверка пересечения
+// сравнивает их в несовместимых системах координат — отсюда ложные
+// срабатывания именно при вертикальном совмещении и отсутствие проблемы
+// при горизонтальном (там p.y одинаковый у обеих, ошибка не проявляется).
 function absolutePoly(p, kerf) {
   if (Array.isArray(p.polygon) && p.polygon.length > 2) {
-    return p.polygon.map(pt => ({ x: p.x + pt.x, y: p.y + pt.y }))
+    return p.polygon.map(pt => ({ x: p.x + pt.x, y: p.y + (p.origY - pt.y) }))
   }
   const w = p.w - kerf, h = p.h - kerf
   return [{ x: p.x, y: p.y }, { x: p.x + w, y: p.y }, { x: p.x + w, y: p.y + h }, { x: p.x, y: p.y + h }]
@@ -496,10 +503,10 @@ export default function NestingPage() {
     setNestError('')
     setElapsedSec(0)
     const timerId = setInterval(() => setElapsedSec(s => s + 1), 1000)
-    // ЭКСПЕРИМЕНТ: добавьте ?nfp=1 в адрес страницы раскроя, чтобы прогнать
-    // этот заказ через новый NFP-алгоритм вместо обычного — для сравнения.
-    // Без этого параметра всё работает как раньше, никаких изменений.
-    const useNfp = new URLSearchParams(window.location.search).get('nfp') === '1'
+    // NFP теперь основной алгоритм — работает всегда, без параметров в адресе.
+    // На случай отката/сравнения со старым: ?raster=1 в адресе страницы
+    // раскроя считает этим заказом старым растровым алгоритмом.
+    const useRaster = new URLSearchParams(window.location.search).get('raster') === '1'
     setTimeout(async () => {
       try {
         const res = await runNesting({
@@ -513,7 +520,7 @@ export default function NestingPage() {
           smallPartsMaxSide: smallPartsMaxSideMm === '' ? 0 : Number(smallPartsMaxSideMm),
           optimizeSeconds: optimizeSeconds === '' ? 12 : Number(optimizeSeconds),
           cuttingMethod,
-          algo: useNfp ? 'nfp' : 'raster',
+          algo: useRaster ? 'raster' : 'nfp',
         })
         setResult(res)
         setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
@@ -950,9 +957,9 @@ export default function NestingPage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 500 }}>
                 Лист {activeSheet + 1} из {sheetsData.length}
-                {new URLSearchParams(window.location.search).get('nfp') === '1' && (
+                {new URLSearchParams(window.location.search).get('raster') === '1' && (
                   <span style={{ marginLeft: 6, fontSize: 10, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: 8 }}>
-                    NFP (эксперимент)
+                    старый растровый (откат)
                   </span>
                 )}
               </span>
