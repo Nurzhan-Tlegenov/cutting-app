@@ -65,7 +65,7 @@ export function buildNestingDxf(sheetsData, order) {
         const [x2, y2] = poly[(i + 1) % poly.length]
         body += line(baseX + x1, baseY + y1, baseX + x2, baseY + y2, 'detal')
       }
-      const label = (p.prefix ? p.prefix + ' ' : '') + (p.label || '') + ` ${p.origY}x${p.origX}`
+      const label = (p.prefix ? p.prefix + ' ' : '') + (p.label || '') + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`
       body += text(baseX + poly[0][0] + 10, baseY + poly[0][1] + 10, label, 'Solid Edge 2D NestingPartName', 25)
     })
   })

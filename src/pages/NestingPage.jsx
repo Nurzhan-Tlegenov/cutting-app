@@ -11,8 +11,20 @@ const COLORS = [
   '#C0DD97','#F4C0D1','#B4B2A9','#85B7EB','#5DCAA5',
 ]
 
-const PART_FILL = '#EFEDE7'       // единый светло-серый цвет всех деталей
-const PART_STROKE = 'rgba(0,0,0,0.35)'
+const PART_STROKE = 'rgba(20,20,20,0.8)'
+// Палитра различимых оттенков по кругу — раньше все детали были одного
+// серого цвета, и там, где они по-настоящему плотно соприкасаются (не
+// просто стоят в клетках сетки с запасом), две одинаковые заливки сливаются
+// в одно неразличимое пятно и создают ощущение "что-то не так", хотя на
+// самом деле всё верно. Разный цвет соседних деталей делает границу между
+// ними однозначной без раздумий. 10 цветов (не 6) — с учётом того, что
+// порядок укладки не гарантирует пространственного разнесения одинаковых
+// по номеру-в-очереди деталей, чем больше цветов в цикле, тем меньше шанс,
+// что именно СОСЕДНИЕ по факту детали получат одинаковый цвет.
+const PART_PALETTE = [
+  '#DCE8FA', '#FAE3D6', '#DFF3E3', '#F8DCE6', '#EFEAD0',
+  '#DAF0F0', '#F0E0F5', '#E8E4D9', '#D8ECEA', '#FCE7CB',
+]
 const EDGE_COLOR = '#185FA5'
 const EDGE_GAP = 3                 // отступ линии кромки от контура детали, px
 const LONG_PRESS_MS = 550
@@ -191,9 +203,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // Деталь — если есть реальный контур (true-shape нестинг для фрезера),
       // рисуем именно его; иначе — прямоугольник, как раньше
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
-      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : PART_FILL)
+      const baseFill = PART_PALETTE[i % PART_PALETTE.length]
+      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : baseFill)
       ctx.strokeStyle = hasCollision ? '#E24B4A' : PART_STROKE
-      ctx.lineWidth = hasCollision ? 2 : 1
+      ctx.lineWidth = hasCollision ? 2.5 : 1.4
       if (hasShape) {
         ctx.beginPath()
         p.polygon.forEach((pt, vi) => {
@@ -283,7 +296,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       if (h > 14) ctx.fillText(lbl, lx, ly - 5)
       ctx.fillStyle = 'rgba(0,0,0,0.4)'
       ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
-      if (h > 26) ctx.fillText(`${p.origY}×${p.origX}`, lx, ly + 6)
+      if (h > 26) ctx.fillText(`${Math.round(p.origY)}×${Math.round(p.origX)}`, lx, ly + 6)
       if (h > 40) ctx.fillText(`(${Math.round(p.x)}, ${Math.round(p.y)})`, lx, ly + 16)
     })
 
@@ -1039,7 +1052,7 @@ export default function NestingPage() {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', borderBottom: '0.5px solid var(--border)' }}>
                 <div style={{ width: 12, height: 12, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{p.label}</span>
-                <span style={{ color: 'var(--text-hint)' }}>{p.origY}×{p.origX}</span>
+                <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
                 {p.rotated && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻</span>}
               </div>
             ))}
