@@ -102,16 +102,38 @@ function placeOne(variants, placed, usableX, usableY) {
 
 function attemptPack(order, usableX, usableY) {
   const sheets = [[]]
-  for (const inst of order) {
+  for (let idx = 0; idx < order.length; idx++) {
+    const inst = order[idx]
     let done = false
     for (const sheet of sheets) {
+      if (sheet.length === 0) continue // пустой лист — обрабатываем отдельно ниже, с оглядкой на следующую деталь
       const res = placeOne(inst.variants, sheet, usableX, usableY)
       if (res) { sheet.push({ inst, ...res }); done = true; break }
     }
     if (!done) {
-      const res = placeOne(inst.variants, [], usableX, usableY)
-      if (!res) return null // деталь не влезает даже на пустой лист — недопустимая особь
-      sheets.push([{ inst, ...res }])
+      // Первая деталь НА ПУСТОМ ЛИСТЕ (неважно, самый первый лист заказа или
+      // очередной новый) — все повороты дают одинаковый счёт (не с чем
+      // сравнивать), поэтому раньше брался первый попавшийся (угол 0°), а
+      // нужный для плотного прилегания следующей детали разворот мог
+      // оказаться именно ЗЕРКАЛЬНЫМ к нему (то же самое вложение, но с
+      // направлением "за пределы листа" вместо "внутрь"). Пробуем все
+      // варианты поворота первой детали и смотрим на ШАГ ВПЕРЁД — куда
+      // встанет следующая деталь — вместо произвольного выбора без сравнения.
+      const targetSheet = sheets.find(s => s.length === 0) || (sheets.push([]), sheets[sheets.length - 1])
+      const nextInst = order[idx + 1]
+      let bestFirst = null, bestLookaheadScore = Infinity
+      for (const v of inst.variants) {
+        const res = placeOne([v], [], usableX, usableY)
+        if (!res) continue
+        let lookaheadScore = 0
+        if (nextInst) {
+          const res2 = placeOne(nextInst.variants, [{ inst, ...res }], usableX, usableY)
+          lookaheadScore = res2 ? (res2.bb.maxX * res2.bb.maxY) : Infinity
+        }
+        if (lookaheadScore < bestLookaheadScore) { bestLookaheadScore = lookaheadScore; bestFirst = res }
+      }
+      if (!bestFirst) return null
+      targetSheet.push({ inst, ...bestFirst })
     }
   }
   return sheets.filter(s => s.length > 0)
