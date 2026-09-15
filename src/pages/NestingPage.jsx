@@ -630,8 +630,16 @@ export default function NestingPage() {
     let entities = polygonToDxfEntity([[0, 0], [sheetW, 0], [sheetW, sheetL], [0, sheetL]], 'sheet')
     sheet.placed.forEach(p => {
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
+      // ВАЖНО: локальные точки контура (pt.y) заданы "снизу вверх" (как в
+      // редакторе контура), а p.y — это позиция детали "сверху вниз" (от
+      // верха рабочей зоны, как и на экране). На канвасе это совмещается
+      // переворотом (h - pt.y*sc в redraw) — здесь нужен ТОТ ЖЕ переворот,
+      // иначе экспорт расходится с тем, что реально показано на экране
+      // (для прямоугольных деталей ошибки не видно из-за их симметрии, для
+      // контурных Г/П-образных деталей — расхождение видно как несовпадение
+      // наложений между экраном и DXF).
       const poly = hasShape
-        ? p.polygon.map(pt => [p.x + pt.x, p.y + pt.y])
+        ? p.polygon.map(pt => [p.x + pt.x, p.y + (p.origY - pt.y)])
         : (() => { const w = p.w - kerf, h = p.h - kerf; return [[p.x, p.y], [p.x + w, p.y], [p.x + w, p.y + h], [p.x, p.y + h]] })()
       entities += polygonToDxfEntity(poly, 'detal')
 
@@ -651,7 +659,10 @@ export default function NestingPage() {
       }
       const label = ((p.prefix ? p.prefix + ' ' : '') + (p.label || '').replace(/Деталь\s*/, 'Д') + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`).trim()
       const textHeight = Math.max(15, Math.min(40, Math.min(p.origX, p.origY) / 8))
-      entities += textToDxfEntity(label, p.x + labelLX, p.y + labelLY, textHeight, 'Solid Edge 2D NestingPartName')
+      // Тот же переворот по Y, что и у контура выше — иначе подпись у
+      // контурных деталей уедет не туда (для прямоугольных labelLY=origY/2,
+      // переворот не меняет результат, поэтому там расхождения не было).
+      entities += textToDxfEntity(label, p.x + labelLX, p.y + (p.origY - labelLY), textHeight, 'Solid Edge 2D NestingPartName')
     })
     return `0\r\nSECTION\r\n2\r\nHEADER\r\n9\r\n$ACADVER\r\n1\r\nAC1009\r\n0\r\nENDSEC\r\n`
       + `0\r\nSECTION\r\n2\r\nENTITIES\r\n${entities}0\r\nENDSEC\r\n0\r\nEOF\r\n`
