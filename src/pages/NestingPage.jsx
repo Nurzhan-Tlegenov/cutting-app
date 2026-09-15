@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { runNesting, computeOffcuts, computeOffcutAtPoint } from '../lib/nesting'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
+import { buildNestingDxf } from '../lib/dxfExport'
 import BottomNav from '../components/BottomNav'
 
 const COLORS = [
@@ -592,6 +593,83 @@ export default function NestingPage() {
     setTimeout(() => setResultCopyStatus(''), 2500)
   }
 
+  // Скачать DXF раскроя — все листы в ряд, чтобы визуально сравнить с
+  // эталонным DXF: контур листа и контур каждой детали настоящими линиями
+  // (полигон уже с сэмплированными дугами/радиусами, если они есть), плюс
+  // подписи. Так пересечение/неплотная укладка видны глазами в любом
+  // CAD-просмотрщике, а не только по цифрам.
+  function downloadNestingDxf() {
+    const dxf = buildNestingDxf(sheetsData, order)
+    const blob = new Blob([dxf], { type: 'application/dxf' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${order.order_number || 'raskroy'}.dxf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  // ─── Экспорт РЕЗУЛЬТАТА раскроя в DXF — не пересчитанная заново геометрия,
+  // а РОВНО то, что сейчас лежит в sheetsData (те же координаты, что и на
+  // экране): если детали накладываются друг на друга, это будет видно и в
+  // DXF, открытом в любой CAD-программе — сверка "как есть" против образца.
+  function polygonToDxfEntity(points, layer) {
+    let s = `0\r\nLWPOLYLINE\r\n8\r\n${layer}\r\n90\r\n${points.length}\r\n70\r\n1\r\n`
+    points.forEach(([x, y]) => { s += `10\r\n${x.toFixed(2)}\r\n20\r\n${y.toFixed(2)}\r\n` })
+    return s
+  }
+  function textToDxfEntity(text, x, y, height, layer) {
+    return `0\r\nTEXT\r\n8\r\n${layer}\r\n10\r\n${x.toFixed(2)}\r\n20\r\n${y.toFixed(2)}\r\n40\r\n${height.toFixed(2)}\r\n1\r\n${text}\r\n`
+  }
+  function buildSheetDxf(sheetIdx) {
+    const sheet = sheetsData[sheetIdx]
+    if (!sheet || !order) return ''
+    const sheetW = order.sheet_width, sheetL = order.sheet_length, kerf = order.kerf_width || 0
+    let entities = polygonToDxfEntity([[0, 0], [sheetW, 0], [sheetW, sheetL], [0, sheetL]], 'sheet')
+    sheet.placed.forEach(p => {
+      const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
+      const poly = hasShape
+        ? p.polygon.map(pt => [p.x + pt.x, p.y + pt.y])
+        : (() => { const w = p.w - kerf, h = p.h - kerf; return [[p.x, p.y], [p.x + w, p.y], [p.x + w, p.y + h], [p.x, p.y + h]] })()
+      entities += polygonToDxfEntity(poly, 'detal')
+
+      // Подпись — та же логика, что и на карте (по контуру детали, не по
+      // центру габарита, чтобы не попасть в пустой паз у криволинейной детали)
+      let labelLX = p.origX / 2, labelLY = p.origY / 2
+      if (hasShape) {
+        let cx = 0, cy = 0
+        p.polygon.forEach(pt => { cx += pt.x; cy += pt.y })
+        cx /= p.polygon.length; cy /= p.polygon.length
+        if (pointInPolygon({ x: cx, y: cy }, p.polygon)) { labelLX = cx; labelLY = cy }
+        else {
+          const scanY = p.origY / 2
+          const seg = widestSegmentAtY(p.polygon, scanY)
+          if (seg) { labelLX = (seg[0] + seg[1]) / 2; labelLY = scanY }
+        }
+      }
+      const label = ((p.prefix ? p.prefix + ' ' : '') + (p.label || '').replace(/Деталь\s*/, 'Д') + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`).trim()
+      const textHeight = Math.max(15, Math.min(40, Math.min(p.origX, p.origY) / 8))
+      entities += textToDxfEntity(label, p.x + labelLX, p.y + labelLY, textHeight, 'Solid Edge 2D NestingPartName')
+    })
+    return `0\r\nSECTION\r\n2\r\nHEADER\r\n9\r\n$ACADVER\r\n1\r\nAC1009\r\n0\r\nENDSEC\r\n`
+      + `0\r\nSECTION\r\n2\r\nENTITIES\r\n${entities}0\r\nENDSEC\r\n0\r\nEOF\r\n`
+  }
+  function downloadSheetDxf(sheetIdx) {
+    const content = buildSheetDxf(sheetIdx)
+    if (!content) return
+    const blob = new Blob([content], { type: 'application/dxf' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${order?.order_number || 'раскрой'}_лист${sheetIdx + 1}.dxf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   if (!order) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
 
   const totalQty = details.reduce((s, d) => s + (Number(d.qty) || 1), 0)
@@ -772,6 +850,22 @@ export default function NestingPage() {
           раскрой посчитан */}
       {result && (
         <div style={{ marginBottom: 12 }}>
+          <button onClick={downloadNestingDxf}
+            style={{ width: '100%', padding: 10, borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
+              background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+            ⬇ Скачать DXF раскроя (для сверки)
+          </button>
+          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+            Все листы в ряд, контур каждой детали настоящими линиями — пересечения и неплотная укладка видны в любой CAD-программе.
+          </p>
+        </div>
+      )}
+
+      {/* Экспорт РЕЗУЛЬТАТА укладки — что реально сейчас на листах (координаты,
+          повороты, точные полигоны). Показывается только после того, как
+          раскрой посчитан */}
+      {result && (
+        <div style={{ marginBottom: 12 }}>
           <button onClick={() => setShowResultExport(v => !v)}
             style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
               background: 'transparent', color: 'var(--text-hint)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
@@ -841,6 +935,11 @@ export default function NestingPage() {
               <span style={{ fontSize: 13, fontWeight: 500 }}>Лист {activeSheet + 1} из {sheetsData.length}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{sheetsData[activeSheet]?.placed.length} дет.</span>
+                <button onClick={() => downloadSheetDxf(activeSheet)}
+                  style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)',
+                    background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
+                  DXF
+                </button>
                 <button onClick={() => setShowOffcuts(v => !v)}
                   style={{ padding: '4px 10px', borderRadius: 20, border: `0.5px solid ${showOffcuts ? 'var(--teal)' : 'var(--border-md)'}`,
                     background: showOffcuts ? 'var(--teal-light)' : 'transparent',
