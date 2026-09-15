@@ -187,12 +187,64 @@ function verticesToPolygon(vertices) {
   return poly
 }
 
+// Вырез, доходящий до края детали (не полностью внутри), физически меняет
+// силуэт материала — его нужно вычесть из внешнего контура, а не просто
+// проигнорировать. Обрабатываем осевой (прямоугольный) вырез, касающийся
+// 1 стороны ("ступенька" на кромке) или 2 соседних сторон (угловой вырез,
+// типичный случай Г-детали). Вырез, касающийся 2 противоположных сторон
+// или 3+ сторон сразу, разрезал бы деталь на несвязные куски — такой случай
+// пропускаем (возвращаем null, силуэт остаётся как раньше, без вычитания) —
+// это не должно встречаться у реальных деталей.
+function subtractEdgeRectHole(w, h, hole) {
+  const x0 = Math.max(0, hole.x0), x1 = Math.min(w, hole.x1)
+  const y0 = Math.max(0, hole.y0), y1 = Math.min(h, hole.y1)
+  if (x1 <= x0 + 1e-6 || y1 <= y0 + 1e-6) return null // вырез не задевает деталь вообще
+
+  const EPS = 1e-6
+  const touchLeft = x0 <= EPS, touchRight = x1 >= w - EPS
+  const touchBottom = y0 <= EPS, touchTop = y1 >= h - EPS
+  const touchCount = [touchLeft, touchRight, touchBottom, touchTop].filter(Boolean).length
+  if (touchCount === 0) return null // вырез целиком внутри — не влияет на силуэт для укладки
+  if (touchCount >= 2 && ((touchLeft && touchRight) || (touchBottom && touchTop))) return null // сквозной разрез — деталь распалась бы на части
+  if (touchCount > 2) return null // не должно встречаться у прямоугольного выреза на прямоугольной детали
+
+  // Один угол (2 соседние стороны) — классическая Г-деталь.
+  if (touchCount === 2) {
+    if (touchBottom && touchLeft)  return [[x1,0],[w,0],[w,h],[0,h],[0,y1],[x1,y1]]
+    if (touchBottom && touchRight) return [[0,0],[x0,0],[x0,y1],[w,y1],[w,h],[0,h]]
+    if (touchTop && touchLeft)     return [[0,0],[w,0],[w,h],[x1,h],[x1,y0],[0,y0]]
+    if (touchTop && touchRight)    return [[0,0],[w,0],[w,y0],[x0,y0],[x0,h],[0,h]]
+  }
+  // Одна сторона — "ступенька" посередине кромки.
+  if (touchCount === 1) {
+    if (touchBottom) return [[0,0],[x0,0],[x0,y1],[x1,y1],[x1,0],[w,0],[w,h],[0,h]]
+    if (touchTop)    return [[0,0],[w,0],[w,h],[x1,h],[x1,y0],[x0,y0],[x0,h],[0,h]]
+    if (touchLeft)   return [[0,0],[w,0],[w,h],[0,h],[0,y1],[x1,y1],[x1,y0],[0,y0]]
+    if (touchRight)  return [[0,0],[w,0],[w,y0],[x0,y0],[x0,y1],[w,y1],[w,h],[0,h]]
+  }
+  return null
+}
+
 export function parsePolygonFromDetail(d) {
   let contour = null
   try { contour = d.contour ? JSON.parse(d.contour) : null } catch { contour = null }
   const w = Number(d.width) || 0, h = Number(d.length) || 0
+  const baseRect = [[0, 0], [w, 0], [w, h], [0, h]]
   if (!contour || !contour.vertices || contour.vertices.length <= 4) {
-    return { polygon: [[0, 0], [w, 0], [w, h], [0, h]], w, h, custom: false }
+    // Даже у формально "прямоугольной" детали могут быть вырезы, доходящие
+    // до края (сделанные инструментом "Вырезы", а не рисованием контура) —
+    // проверяем их и вычитаем из силуэта, если да.
+    const edgeHoles = (contour?.holes || []).filter(hh => hh.type === 'rect')
+    for (const hh of edgeHoles) {
+      // прямоугольный вырез уже хранит свои 4 угла в contour.holes[].vertices
+      // (посчитаны редактором контура) — берём их напрямую как x0..y1.
+      const hv = hh.vertices
+      if (!Array.isArray(hv) || hv.length < 4) continue
+      const xs = hv.map(p => p.x), ys = hv.map(p => p.y)
+      const modified = subtractEdgeRectHole(w, h, { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) })
+      if (modified) return { polygon: modified, w, h, custom: true }
+    }
+    return { polygon: baseRect, w, h, custom: false }
   }
   const poly = verticesToPolygon(contour.vertices)
   return { polygon: poly, w, h, custom: true }
