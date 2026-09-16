@@ -96,13 +96,18 @@ export async function runNesting({
   smallPartsMaxSide = 0,          // порог меньшей стороны детали (мм). 0 = критерий выключен
   optimizeSeconds = 12,           // сколько секунд гонять поиск плотной укладки — из настроек раскроя
   cuttingMethod = 'nesting',      // 'nesting' (фрезер, ЧПУ — свободная укладка) | 'guillotine' (форматно-раскроечный станок — только сквозные резы)
-  algo = 'nfp',                   // 'nfp' (основной, точный по контуру) | 'raster' (прежний растровый — на случай отката/сравнения)
+  algo = 'raster',                // 'raster' (основной, проверенный) | 'nfp' (экспериментальный, точный по контуру — ТОЛЬКО для фрезера, см. ниже)
 }) {
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
 
-  // Основной путь — NFP (точная укладка по контуру, не растровая маска).
-  if (algo === 'nfp') {
+  // ВАЖНО: NFP умеет укладывать только свободно (для фрезера) — понятия
+  // "сквозной рез" там нет вообще. Раньше эта проверка стояла ДО проверки
+  // cuttingMethod, из-за чего NFP включался всегда, даже для форматно-
+  // раскроечного станка — тот молча укладывал как для фрезера, без единого
+  // сквозного реза. Теперь NFP физически недостижим для guillotine, каким
+  // бы ни был algo.
+  if (algo === 'nfp' && cuttingMethod !== 'guillotine') {
     return await packNFP({ details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, optimizeSeconds })
   }
 

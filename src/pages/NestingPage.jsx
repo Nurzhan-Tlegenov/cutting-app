@@ -530,10 +530,12 @@ export default function NestingPage() {
     setNestError('')
     setElapsedSec(0)
     const timerId = setInterval(() => setElapsedSec(s => s + 1), 1000)
-    // NFP теперь основной алгоритм — работает всегда, без параметров в адресе.
-    // На случай отката/сравнения со старым: ?raster=1 в адресе страницы
-    // раскроя считает этим заказом старым растровым алгоритмом.
-    const useRaster = new URLSearchParams(window.location.search).get('raster') === '1'
+    // Вернулись на старый растровый алгоритм по умолчанию — NFP пока хуже
+    // укладывает обычные прямоугольные детали и, что важно, не должен был
+    // вообще касаться форматно-раскроечного станка (это отдельно исправлено
+    // в nesting.js). ?nfp=1 — намеренно прогнать ЭТОТ заказ через NFP для
+    // сравнения (имеет смысл только для фрезера, не для гильотины).
+    const useNfp = new URLSearchParams(window.location.search).get('nfp') === '1'
     setTimeout(async () => {
       try {
         const res = await runNesting({
@@ -547,7 +549,7 @@ export default function NestingPage() {
           smallPartsMaxSide: smallPartsMaxSideMm === '' ? 0 : Number(smallPartsMaxSideMm),
           optimizeSeconds: optimizeSeconds === '' ? 12 : Number(optimizeSeconds),
           cuttingMethod,
-          algo: useRaster ? 'raster' : 'nfp',
+          algo: useNfp ? 'nfp' : 'raster',
         })
         setResult(res)
         setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
@@ -984,9 +986,9 @@ export default function NestingPage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 500 }}>
                 Лист {activeSheet + 1} из {sheetsData.length}
-                {new URLSearchParams(window.location.search).get('raster') === '1' && (
+                {new URLSearchParams(window.location.search).get('nfp') === '1' && (
                   <span style={{ marginLeft: 6, fontSize: 10, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: 8 }}>
-                    старый растровый (откат)
+                    NFP (эксперимент)
                   </span>
                 )}
               </span>
