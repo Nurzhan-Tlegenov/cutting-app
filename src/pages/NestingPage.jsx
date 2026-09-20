@@ -22,6 +22,7 @@ const LONG_PRESS_MS = 550
 // Удержание пальца на детали, после которого её можно двигать (короткое
 // касание/скольжение деталь не двигает; двойной тап — поворот)
 const DRAG_HOLD_MS = 250
+const ZOOM_LEVELS = [1, 1.5, 2, 3] // масштаб карты раскроя
 
 // ─── Проверка пересечения двух полигонов (для true-shape деталей) — обычная
 // bbox-проверка слишком грубая: деталь, аккуратно уложенная в паз соседней,
@@ -97,14 +98,60 @@ function findDimSpots(poly, origX, origY, wLenMm, lLenMm, thMm) {
   return { top, left }
 }
 const dimSpotCache = new WeakMap() // полигон → { key, spots }, чтобы не пересчитывать при каждой перерисовке
+// Интервалы материала полигона вдоль горизонтальной линии y: [[xl, xr], ...]
+function intervalsAt(poly, y) {
+  const xs = []
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length]
+    if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x))
+  }
+  xs.sort((p, q) => p - q)
+  const out = []
+  for (let i = 0; i + 1 < xs.length; i += 2) out.push([xs[i], xs[i + 1]])
+  return out
+}
+// Занятое деталью место как набор прямоугольников для расчёта обрезка.
+// Прямоугольная деталь — один прямоугольник (видимая часть + зазор на рез
+// со всех сторон). Фигурная (Г, П и т.п.) — набор горизонтальных полос
+// по самому материалу, чтобы пустая часть внутри габарита оставалась
+// свободной и в ней можно было выбрать обрезок.
+function partObstacles(p, kerf) {
+  if (!(Array.isArray(p.polygon) && p.polygon.length > 2)) {
+    return [{ x: p.x - kerf, y: p.y - kerf, w: p.w + kerf, h: p.h + kerf }]
+  }
+  const poly = absolutePoly(p, kerf)
+  const ys = [...new Set(poly.map(q => Math.round(q.y * 10) / 10))].sort((a, b) => a - b)
+  const out = []
+  const addSlab = (ya, yb, depth) => {
+    if (yb - ya < 0.3) return
+    const e = Math.min(0.05, (yb - ya) / 10)
+    const i0 = intervalsAt(poly, ya + e), im = intervalsAt(poly, (ya + yb) / 2), i1 = intervalsAt(poly, yb - e)
+    const same = i0.length === im.length && i1.length === im.length
+    const straight = same && im.every((iv, k) =>
+      Math.abs(iv[0] - i0[k][0]) <= 1 && Math.abs(iv[1] - i0[k][1]) <= 1 &&
+      Math.abs(iv[0] - i1[k][0]) <= 1 && Math.abs(iv[1] - i1[k][1]) <= 1)
+    if (!straight && depth < 1 && yb - ya > 25) {
+      const n = Math.ceil((yb - ya) / 25)
+      for (let k = 0; k < n; k++) addSlab(ya + (yb - ya) * k / n, ya + (yb - ya) * (k + 1) / n, 1)
+      return
+    }
+    im.forEach((iv, k) => {
+      let xl = iv[0], xr = iv[1]
+      if (same) { xl = Math.min(xl, i0[k][0], i1[k][0]); xr = Math.max(xr, i0[k][1], i1[k][1]) }
+      out.push({ x: xl - kerf, y: ya - kerf, w: xr - xl + 2 * kerf, h: yb - ya + 2 * kerf })
+    })
+  }
+  for (let i = 0; i + 1 < ys.length; i++) addSlab(ys[i], ys[i + 1], 0)
+  return out.length ? out : [{ x: p.x - kerf, y: p.y - kerf, w: p.w + kerf, h: p.h + kerf }]
+}
+
 // ─── Линии реза (форматно-раскроечный станок) ─────────────────────────────
 // Строятся по ТЕКУЩЕЙ карте раскроя (в экранных координатах, Y сверху вниз),
 // поэтому после любого редактирования (перенос, поворот) пересчитываются
 // заново. Сквозной рез — линия через весь участок листа, не пересекающая
 // ни одной детали. Деталь занимает [x, x+w]×[y, y+h], где w/h включают
 // ширину реза на правой и нижней стороне; линия рисуется по центру пропила.
-// Участок делится рекурсивно; номер реза — порядок обхода "в ширину"
-// (сначала резы по всему листу, затем по полосам).
+// Участок делится рекурсивно.
 function decomposeCuts(rects, usableX, usableY, kerf, pref) {
   const EPS = 0.5
   const lines = [], unsplit = []
@@ -120,7 +167,7 @@ function decomposeCuts(rects, usableX, usableY, kerf, pref) {
     })
     cands.sort((p, q) => p.c - q.c)
     for (const cd of cands) {
-      if (cd.c <= a0 + EPS || cd.c >= a1 - 1) continue
+      if (cd.c <= a0 + EPS || cd.c >= a1 - kerf - EPS) continue
       const crosses = reg.parts.some(o => {
         const s0 = v ? o.x : o.y, len = v ? o.w : o.h
         return s0 < cd.c - EPS && s0 + len > cd.c + EPS
@@ -150,11 +197,20 @@ function decomposeCuts(rects, usableX, usableY, kerf, pref) {
     }
     if (!done && reg.parts.length > 1) unsplit.push(reg)
   }
-  lines.forEach((l, i) => { l.n = i + 1 })
   return { lines, unsplit }
 }
-function computeCutLines(items, usableX, usableY, kerf) {
+function computeCutLines(items, usableX, usableY, kerf, offcuts = []) {
   const rects = items.map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h }))
+  // Выбранные обрезки — деловые заготовки, такие же "детали" для резов; у
+  // обрезка зазор на рез идёт с каждой стороны, поэтому добавляем kerf
+  // справа и снизу (как у обычной детали)
+  // Обрезок хранится вместе с продлением до физического края листа — для
+  // резов берём его часть в пределах рабочей зоны
+  offcuts.forEach(o => {
+    const x0 = Math.max(0, o.x), y0 = Math.max(0, o.y)
+    const x1 = Math.min(usableX, o.x + o.w), y1 = Math.min(usableY, o.y + o.h)
+    if (x1 - x0 > 1 && y1 - y0 > 1) rects.push({ x: x0, y: y0, w: x1 - x0 + kerf, h: y1 - y0 + kerf })
+  })
   const a = decomposeCuts(rects, usableX, usableY, kerf, 'v')
   const b = decomposeCuts(rects, usableX, usableY, kerf, 'h')
   const len = r => r.lines.reduce((t, l) => t + (l.to - l.from), 0)
@@ -222,7 +278,7 @@ function rectsOverlap(a, b) {
          a.y < b.y + b.h - 1 && a.y + a.h - 1 > b.y
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, zoom = 1 }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   // СИСТЕМА КООРДИНАТ. Во ВСЕХ данных раскроя (placed, freeRects, ручные
@@ -258,13 +314,14 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   useEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom])
 
   const PADDING = 8
-  const canvasW = typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360
+  const canvasW = (typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360) * zoom
   const sc = (canvasW - PADDING * 2) / sheetW
   const canvasH = Math.round(sc * sheetL) + PADDING * 2
-  const DPR = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1
+  // При увеличении холст большой — ограничиваем плотность пикселей, чтобы не упереться в лимит памяти телефона
+  const DPR = Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, Math.sqrt(12e6 / (canvasW * canvasH)))
 
   const toC = v => v * sc
   const fromC = v => v / sc
@@ -292,7 +349,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
     // Обрезки, выбранные вручную (удержанием пальца) — деловые обрезки,
     // можно выбрать несколько; повторное удержание на уже выбранном — снимает его
-    if (showOffcuts && offcutMode === 'manual' && manualOffcuts && manualOffcuts.length) {
+    if (showOffcuts && (offcutMode === 'manual' || offcutMode === 'cuts') && manualOffcuts && manualOffcuts.length) {
       flipRects(manualOffcuts).forEach(o => {
         const ox = rx + toC(o.x), oy = ry + toC(o.y)
         const ow = toC(o.w), oh = toC(o.h)
@@ -467,7 +524,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     // Линии реза — по текущему расположению деталей (пересчитываются при
     // любом редактировании карты)
     if (showOffcuts && offcutMode === 'cuts') {
-      const { lines, unsplit } = computeCutLines(items, usableX, usableY, kerf)
+      const { lines, unsplit } = computeCutLines(items, usableX, usableY, kerf, flipRects(manualOffcuts || []))
       // Участки, которые нельзя разрезать насквозь (после ручной правки)
       unsplit.forEach(r => {
         ctx.strokeStyle = '#E24B4A'
@@ -492,17 +549,6 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
       })
       ctx.setLineDash([])
-      // Номера резов (порядок реза) — в начале каждой линии
-      ctx.font = 'bold 9px sans-serif'
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      lines.forEach(l => {
-        const cx = l.v ? rx + toC(l.pos) : rx + toC(l.from) + 8
-        const cy = l.v ? ry + toC(l.from) + 8 : ry + toC(l.pos)
-        ctx.fillStyle = '#7B1FA2'
-        ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2); ctx.fill()
-        ctx.fillStyle = '#fff'
-        ctx.fillText(String(l.n), cx, cy)
-      })
     }
 
     // Рамка: X=sheetW(горизонталь), Y=sheetL(вертикаль)
@@ -529,7 +575,15 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       const p = items[i]
       const px = rx2 + toC(p.x), py = ry2 + toC(p.y)
       const pw = toC(p.w - kerf), ph = toC(p.h - kerf)
-      if (cx >= px && cx <= px + pw && cy >= py && cy <= py + ph) return i
+      if (cx >= px && cx <= px + pw && cy >= py && cy <= py + ph) {
+        // Фигурная деталь (Г, П...): выбирается только сама деталь, а не
+        // пустая часть внутри её габарита — там можно выбрать обрезок
+        if (Array.isArray(p.polygon) && p.polygon.length > 2) {
+          if (pointInPolygon({ x: fromC(cx - rx2), y: fromC(cy - ry2) }, absolutePoly(p, kerf))) return i
+          continue
+        }
+        return i
+      }
     }
     return -1
   }
@@ -590,7 +644,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
             // по тем же резам.
             // Деталь: видимая часть — (w-kerf)×(h-kerf), справа и снизу зазор
             // уже входит в p.w/p.h, поэтому добавляем его слева и сверху.
-            const busyParts = placedRef.current.map(p => ({ x: p.x - kerf, y: p.y - kerf, w: p.w + kerf, h: p.h + kerf }))
+            const busyParts = placedRef.current.flatMap(p => partObstacles(p, kerf))
             // Ранее выбранные обрезки — такая же занятая часть листа, зазор со всех сторон
             const taken = flipRects(list).map(o => ({ x: o.x - kerf, y: o.y - kerf, w: o.w + 2 * kerf, h: o.h + 2 * kerf }))
             const rect = computeOffcutAtPoint(mx, my, [...busyParts, ...taken], usableX, usableY)
@@ -711,9 +765,20 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     redraw(placedRef.current)
   }, [])
 
+  // При увеличении холст прокручивается пальцем. Когда деталь "взята"
+  // (удержание), скольжение должно двигать деталь, а не прокручивать —
+  // для этого нужен не-passive слушатель touchmove.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const block = e => { if (draggingRef.current?.active && e.cancelable) e.preventDefault() }
+    canvas.addEventListener('touchmove', block, { passive: false })
+    return () => canvas.removeEventListener('touchmove', block)
+  }, [])
+
   return (
     <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
-      style={{ width: canvasW, height: canvasH, maxWidth: '100%', borderRadius: 8, display: 'block', touchAction: interactive ? 'none' : 'auto' }}
+      style={{ width: canvasW, height: canvasH, maxWidth: zoom > 1 ? 'none' : '100%', borderRadius: 8, display: 'block', touchAction: interactive ? (zoom > 1 ? 'pan-x pan-y' : 'none') : 'auto' }}
       onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
       onMouseMove={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerMove(e) }}
       onMouseUp={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerUp(e) }}
@@ -745,6 +810,20 @@ export default function NestingPage() {
   const [cuttingMethod, setCuttingMethod] = useState('nesting')
   const [showOffcuts, setShowOffcuts] = useState(false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
+  const [zoom, setZoom] = useState(1)
+  const zoomWrapRef = useRef(null)
+  function changeZoom(nz) {
+    const el = zoomWrapRef.current, oz = zoom
+    setZoom(nz)
+    if (el && oz > 0) {
+      const cx = el.scrollLeft + el.clientWidth / 2, cy = el.scrollTop + el.clientHeight / 2
+      // после перерисовки холста возвращаем в центр вида ту же точку листа
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        el.scrollLeft = cx * nz / oz - el.clientWidth / 2
+        el.scrollTop = cy * nz / oz - el.clientHeight / 2
+      }))
+    }
+  }
   const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
   const [smallPartsMaxSquareSideMm, setSmallPartsMaxSquareSideMm] = useState('') // мм, заполнится глобальным дефолтом заказа
   const [smallPartsMaxSideMm, setSmallPartsMaxSideMm] = useState('')   // мм, заполнится глобальным дефолтом заказа
@@ -1282,7 +1361,23 @@ export default function NestingPage() {
                 )}
               </div>
             )}
+            {/* Масштаб карты — увеличить, чтобы точнее выбрать участок обрезка */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>Масштаб</span>
+              <button onClick={() => { const i = ZOOM_LEVELS.indexOf(zoom); if (i > 0) changeZoom(ZOOM_LEVELS[i - 1]) }}
+                disabled={zoom <= ZOOM_LEVELS[0]}
+                style={{ width: 30, height: 26, borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+                  background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, cursor: 'pointer', opacity: zoom <= ZOOM_LEVELS[0] ? 0.4 : 1 }}>−</button>
+              <span style={{ fontSize: 12, minWidth: 34, textAlign: 'center' }}>{zoom}×</span>
+              <button onClick={() => { const i = ZOOM_LEVELS.indexOf(zoom); if (i < ZOOM_LEVELS.length - 1) changeZoom(ZOOM_LEVELS[i + 1]) }}
+                disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
+                style={{ width: 30, height: 26, borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+                  background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, cursor: 'pointer', opacity: zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1] ? 0.4 : 1 }}>+</button>
+            </div>
+            <div ref={zoomWrapRef}
+              style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8 }}>
             <SheetCanvas
+              zoom={zoom}
               sheet={sheetsData[activeSheet]}
               usableX={result.usableX} usableY={result.usableY}
               sheetL={order.sheet_length} sheetW={order.sheet_width}
@@ -1292,11 +1387,12 @@ export default function NestingPage() {
               offcutMode={offcutMode} manualOffcuts={sheetsData[activeSheet]?.manualOffcuts}
               onManualOffcuts={onManualOffcuts}
             />
+            </div>
             <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 6 }}>
               {showOffcuts && offcutMode === 'manual'
                 ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                 : (showOffcuts && offcutMode === 'cuts'
-                  ? 'Линии реза пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
+                  ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
                   : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить')}
             </p>
           </div>
