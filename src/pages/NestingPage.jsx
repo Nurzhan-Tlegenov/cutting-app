@@ -61,6 +61,42 @@ function widestSegmentAtY(poly, y) {
   }
   return best
 }
+// Помещается ли прямоугольник подписи (центр cx,cy, полуразмеры hw,hh, мм)
+// целиком в материал детали — проверка по сетке точек внутри полигона.
+function rectInsidePoly(poly, cx, cy, hw, hh) {
+  for (let i = 0; i <= 6; i++) {
+    for (let j = 0; j <= 2; j++) {
+      const pt = { x: cx - hw + (2 * hw * i) / 6, y: cy - hh + (2 * hh * j) / 2 }
+      if (!pointInPolygon(pt, poly)) return false
+    }
+  }
+  return true
+}
+// Места для размеров ВНУТРИ контура фигурной детали (локальные мм, Y вверх):
+// ширина (X) — горизонтальный текст как можно ближе к верху, длина (Y) —
+// вертикальный текст как можно ближе к левому краю. Если на материале
+// подходящего места нет — соответствующий размер не рисуется.
+function findDimSpots(poly, origX, origY, wLenMm, lLenMm, thMm) {
+  const step = 3, pad = 2
+  let top = null, left = null
+  for (let cy = origY - thMm / 2 - pad; cy > thMm / 2; cy -= step) {
+    const seg = widestSegmentAtY(poly, cy)
+    if (seg && seg[1] - seg[0] >= wLenMm + 2 * pad) {
+      const cx = (seg[0] + seg[1]) / 2
+      if (rectInsidePoly(poly, cx, cy, wLenMm / 2 + pad / 2, thMm / 2)) { top = { x: cx, y: cy }; break }
+    }
+  }
+  const T = poly.map(pt => ({ x: pt.y, y: pt.x }))
+  for (let cx = thMm / 2 + pad; cx < origX - thMm / 2; cx += step) {
+    const seg = widestSegmentAtY(T, cx)
+    if (seg && seg[1] - seg[0] >= lLenMm + 2 * pad) {
+      const cy = (seg[0] + seg[1]) / 2
+      if (rectInsidePoly(poly, cx, cy, thMm / 2, lLenMm / 2 + pad / 2)) { left = { x: cx, y: cy }; break }
+    }
+  }
+  return { top, left }
+}
+const dimSpotCache = new WeakMap() // полигон → { key, spots }, чтобы не пересчитывать при каждой перерисовке
 function polygonsOverlap(polyA, polyB) {
   for (let i = 0; i < polyA.length; i++) {
     const a1 = polyA[i], a2 = polyA[(i + 1) % polyA.length]
@@ -342,15 +378,33 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       ctx.fillStyle = 'rgba(0,0,0,0.7)'
       ctx.font = '8px sans-serif'
       const wTxt = String(Math.round(p.origX)), lTxt = String(Math.round(p.origY))
-      if (h > 16 && ctx.measureText(wTxt).width < w - 6) {
-        ctx.fillText(wTxt, x + w / 2, y + 7)
-      }
-      if (w > 16 && ctx.measureText(lTxt).width < h - 6) {
-        ctx.save()
-        ctx.translate(x + 7, y + h / 2)
-        ctx.rotate(-Math.PI / 2)
-        ctx.fillText(lTxt, 0, 0)
-        ctx.restore()
+      const wPx = ctx.measureText(wTxt).width, lPx = ctx.measureText(lTxt).width
+      if (hasShape) {
+        // Фигурная деталь: размеры ставим на сам материал внутри контура
+        const key = `${sc}|${wTxt}|${lTxt}`
+        let cached = dimSpotCache.get(p.polygon)
+        if (!cached || cached.key !== key) {
+          cached = { key, spots: findDimSpots(p.polygon, p.origX, p.origY, wPx / sc, lPx / sc, 10 / sc) }
+          dimSpotCache.set(p.polygon, cached)
+        }
+        const { top, left } = cached.spots
+        if (top) ctx.fillText(wTxt, x + top.x * sc, y + h - top.y * sc)
+        if (left) {
+          ctx.save()
+          ctx.translate(x + left.x * sc, y + h - left.y * sc)
+          ctx.rotate(-Math.PI / 2)
+          ctx.fillText(lTxt, 0, 0)
+          ctx.restore()
+        }
+      } else {
+        if (h > 16 && wPx < w - 6) ctx.fillText(wTxt, x + w / 2, y + 7)
+        if (w > 16 && lPx < h - 6) {
+          ctx.save()
+          ctx.translate(x + 7, y + h / 2)
+          ctx.rotate(-Math.PI / 2)
+          ctx.fillText(lTxt, 0, 0)
+          ctx.restore()
+        }
       }
     })
 
