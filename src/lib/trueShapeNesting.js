@@ -47,6 +47,8 @@
  *   - Обрезки (авто/вручную) на true-shape листах считаются от прямоугольных
  *     габаритов детали, не от её точного контура.
  */
+import { gravityPolygons } from './gravity'
+
 
 const MIN_CELL_MM = 4
 const MAX_CELL_MM = 12
@@ -875,6 +877,7 @@ async function validateAndFixOverlaps(sheets, cols, rows) {
 export async function packTrueShape({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, optimizeSeconds = 12,
   smallPartsToCenter = false, smallPartsMaxSquareSide = 0, smallPartsMaxSide = 0,
+  direction = 'auto',
 }) {
   const usableX = sheetW - marginL - marginR
   const usableY = sheetL - marginT - marginB
@@ -990,7 +993,10 @@ export async function packTrueShape({
   const resultSheets = best.map(s => ({
     index: s.index,
     freeRects: [], // для true-shape листов автообрезки (по прямоугольным freeRects) не считаются — см. ограничения выше
-    placed: s.placed.map(({ inst, placement }) => {
+    // Растровая укладка даёт зазор кратный ячейке (до ~2 ячеек вместо kerf).
+    // Финальная точная стяжка к (0,0) убирает лишнее до ровно kerf между
+    // реальными контурами — см. gravity.js.
+    placed: gravityPolygons(s.placed.map(({ inst, placement }) => {
       const v = placement.variant
       const times = v.angle / 90
       const rotated = v.angle === 90 || v.angle === 270
@@ -1009,7 +1015,7 @@ export async function packTrueShape({
         edgeTop: top, edgeRight: right, edgeBottom: bottom, edgeLeft: left,
         polygon: v.polygon.map(([x, y]) => ({ x, y })),
       }
-    }),
+    }), direction, kerf),
   }))
 
   return { sheets: resultSheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }

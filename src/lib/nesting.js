@@ -78,6 +78,7 @@
 
 import { needsTrueShape, packTrueShape } from './trueShapeNesting'
 import { packNFP } from './nfpNesting'
+import { gravityRects } from './gravity'
 
 const BORDER_PENALTY = 2000000
 const ORIGIN_TIEBREAK = 5
@@ -120,7 +121,7 @@ export async function runNesting({
   if (cuttingMethod !== 'guillotine' && needsTrueShape(details)) {
     return await packTrueShape({
       details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, optimizeSeconds,
-      smallPartsToCenter, smallPartsMaxSquareSide, smallPartsMaxSide,
+      smallPartsToCenter, smallPartsMaxSquareSide, smallPartsMaxSide, direction,
     })
   }
 
@@ -249,6 +250,19 @@ export async function runNesting({
   // найденного решения — дёшево (компакция сама по себе быстрая операция),
   // но может дожать последний лист чуть плотнее.
   best.sheets = await intensifyCompaction(best.sheets, direction, usableX, usableY)
+
+  // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
+  // Для форматно-раскроечного станка не применяется: там раскладка обязана
+  // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
+  if (cuttingMethod !== 'guillotine') {
+    best.sheets = best.sheets.map(sheet => {
+      const placed = gravityRects(sheet.placed, direction)
+      if (placed === sheet.placed) return sheet
+      const next = { ...sheet, placed, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+      placed.forEach(pp => { split(next, pp); prune(next) })
+      return next
+    })
+  }
 
   return { sheets: best.sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }
