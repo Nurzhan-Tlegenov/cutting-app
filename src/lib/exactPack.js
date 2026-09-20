@@ -409,7 +409,7 @@ async function fillSheet(sheet, pool, ctx, deadline) {
     const failed = []
     for (const inst of cand) {
       if (Date.now() > deadline || usableX * usableY - trial.used < inst.polyArea) { failed.push(inst); continue }
-      const r = tryInsert(trial, inst, usableX, usableY, kerf, direction, Math.random() < 0.3)
+      const r = tryInsert(trial, inst, usableX, usableY, kerf, direction)
       if (r) commit(trial, inst, r); else failed.push(inst)
     }
     if (trial.used >= sheet.used - 1e-6) { sheet = trial; pool = pool.filter(x => !pickSet.has(x)).concat(failed) }
@@ -539,11 +539,7 @@ async function polishLast(sheet, ctx, deadline) {
 export async function packExact({ instances, kerf, usableX, usableY, direction, deadline }) {
   const t0 = Date.now()
   const T = Math.max(1, deadline - t0)
-  // Фазы: поиск порядка → дожим листов → сверка → оптимизация обрезка (до
-  // конца таймера). Поиск НЕ останавливается, если всё уместилось на один
-  // лист: тогда задача — максимальный деловой обрезок, и поиску отдаётся
-  // больше времени.
-  const searchDeadline = () => t0 + T * (bestStat && bestStat.count === 1 ? 0.5 : 0.25)
+  const searchDeadline = t0 + T * 0.3 // остальное — «дожим» листов
   instances.forEach(i => { i.polyArea = polyArea(i.variants[0].polygon) })
   // «Плотность» детали = площадь контура / площадь габарита. Сплошные
   // прямоугольники укладываются почти без потерь, вогнутые (Г, Т, дуги) —
@@ -577,10 +573,12 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
   // укладки нет вовсе, поэтому им отводится весь бюджет, а не его половина.
   for (const o of orders) { if (Date.now() < deadline) await consider(o, deadline) }
   let guard = 0
-  while (Date.now() < searchDeadline() && bestOrder && instances.length > 1 && guard++ < 1000) {
+  // Если всё уложено на один лист, порядок дальше не ищем — оставшееся время
+  // уходит на сборку одного делового обрезка (см. polishLast ниже).
+  while (Date.now() < searchDeadline && bestOrder && instances.length > 1 && guard++ < 500 && bestStat.count > 1) {
     const r = Math.random()
     const base = (frontOrder && Math.random() < 0.3) ? frontOrder : bestOrder
-    await consider(r < 0.1 ? shuffle(instances.slice()) : r < 0.6 ? promote(base, laterIds) : perturb(base), searchDeadline())
+    await consider(r < 0.1 ? shuffle(instances.slice()) : r < 0.6 ? promote(base, laterIds) : perturb(base), searchDeadline)
   }
   if (!best) return null
   // Дожим: каждый лист по очереди набивается до предела перестановкой соседей
@@ -591,13 +589,13 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
     const copy = sheets => sheets.map(sh => sheetWithout(sh, new Set(), usableX, usableY))
     const list = [best]
     if (front && front !== best && frontStat.count <= bestStat.count + 1 && frontStat.used[0] > bestStat.used[0] + usableX * usableY * 0.03) list.push(front)
-    const improveEnd = t0 + T * 0.82 // дальше — сверка (sweepForward) и оптимизация обрезка
+    const improveEnd = deadline - T * 0.15 // последние 15% времени — итоговая сверка
     const tStart = Date.now()
     let winner = { sheets: best, st: bestStat }
     for (let ci = 0; ci < list.length; ci++) {
       const share = tStart + (improveEnd - tStart) * (ci + 1) / list.length
       let improved = await improveSheets(copy(list[ci]), ctx, share)
-      improved = await sweepForward(improved, ctx, Math.min(deadline, share + T * 0.08 / list.length))
+      improved = await sweepForward(improved, ctx, Math.min(deadline, share + (deadline - improveEnd) / list.length))
       const st = stat(improved)
       if (exactBetter(st, winner.st)) winner = { sheets: improved, st }
     }
