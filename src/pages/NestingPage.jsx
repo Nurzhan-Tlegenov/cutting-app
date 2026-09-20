@@ -171,6 +171,21 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   // не меняются. Преобразование — инволюция: применённое дважды даёт исходное.
   const flipY = list => list.map(p => ({ ...p, y: usableY - p.y - (p.h - kerf) }))
   const flipRects = list => (list || []).map(o => ({ ...o, y: usableY - o.y - o.h }))
+  // Обрезок, стороной касающийся края рабочей зоны, продолжается до
+  // ФИЗИЧЕСКОГО края листа (на размер отступа от кромки): его потом отрезают
+  // по тем же резам. Прямоугольник — в экранных координатах (Y сверху вниз).
+  const marginR = sheetW - usableX - marginL
+  const marginB = sheetL - usableY - marginT
+  function extendToSheetEdge(r) {
+    const e = 0.5
+    let { x, y, w, h } = r
+    const atL = x <= e, atR = x + w >= usableX - e, atT = y <= e, atB = y + h >= usableY - e
+    if (atL) { x -= marginL; w += marginL }
+    if (atR) w += marginR
+    if (atT) { y -= marginT; h += marginT }
+    if (atB) h += marginB
+    return { ...r, x, y, w, h }
+  }
   const placedRef = useRef(sheet.placed)
   const lastTap = useRef({ idx: -1, time: 0 })
   const lastTouchRef = useRef(0) // время последнего touch-события: браузер после касания шлёт ещё и эмулированные mouse-события
@@ -213,7 +228,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
     // Обрезки — автоматически посчитанные (свободные прямоугольники раскроя)
     if (showOffcuts && offcutMode === 'auto' && sheet.freeRects) {
-      const offcuts = flipRects(computeOffcuts(sheet, usableX, usableY))
+      const offcuts = flipRects(computeOffcuts(sheet, usableX, usableY)).map(extendToSheetEdge)
       offcuts.forEach(o => {
         const ox = rx + toC(o.x), oy = ry + toC(o.y)
         const ow = toC(o.w), oh = toC(o.h)
@@ -497,7 +512,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
             // Ранее выбранные обрезки — такая же занятая часть листа, зазор со всех сторон
             const taken = flipRects(list).map(o => ({ x: o.x - kerf, y: o.y - kerf, w: o.w + 2 * kerf, h: o.h + 2 * kerf }))
             const rect = computeOffcutAtPoint(mx, my, [...busyParts, ...taken], usableX, usableY)
-            if (rect) onManualOffcuts(sheet.index, [...list, flipRects([rect])[0]])
+            if (rect) onManualOffcuts(sheet.index, [...list, flipRects([extendToSheetEdge(rect)])[0]])
           }
         }, LONG_PRESS_MS)
       }
