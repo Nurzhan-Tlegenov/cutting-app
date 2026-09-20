@@ -487,12 +487,16 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           if (hitIdx !== -1) {
             onManualOffcuts(sheet.index, list.filter((_, i) => i !== hitIdx))
           } else {
-            // Уже выбранные обрезки — такая же занятая часть листа, как и
-            // детали: новый обрезок формируется только из оставшегося места
-            // и не режется сквозь ранее выбранный
-            // Вокруг ранее выбранных обрезков оставляем зазор на ширину реза (kerf)
+            // Обрезок — честная заготовка: с каждой стороны, где он граничит
+            // с деталью или другим обрезком, оставляем зазор на ширину реза
+            // (kerf). У края листа зазора нет — там обрезок потом отрезают
+            // по тем же резам.
+            // Деталь: видимая часть — (w-kerf)×(h-kerf), справа и снизу зазор
+            // уже входит в p.w/p.h, поэтому добавляем его слева и сверху.
+            const busyParts = placedRef.current.map(p => ({ x: p.x - kerf, y: p.y - kerf, w: p.w + kerf, h: p.h + kerf }))
+            // Ранее выбранные обрезки — такая же занятая часть листа, зазор со всех сторон
             const taken = flipRects(list).map(o => ({ x: o.x - kerf, y: o.y - kerf, w: o.w + 2 * kerf, h: o.h + 2 * kerf }))
-            const rect = computeOffcutAtPoint(mx, my, [...placedRef.current, ...taken], usableX, usableY)
+            const rect = computeOffcutAtPoint(mx, my, [...busyParts, ...taken], usableX, usableY)
             if (rect) onManualOffcuts(sheet.index, [...list, flipRects([rect])[0]])
           }
         }, LONG_PRESS_MS)
