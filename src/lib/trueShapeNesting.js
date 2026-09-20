@@ -1032,9 +1032,12 @@ export async function packTrueShape({
   if (useExact) {
     const polyArea = pts => { let a = 0; for (let i = 0; i < pts.length; i++) { const q = pts[(i + 1) % pts.length]; a += pts[i].x * q.y - q.x * pts[i].y } return Math.abs(a) / 2 }
     const lastSheet = resultSheets[resultSheets.length - 1]
+    let envX = 0, envY = 0
+    if (lastSheet) lastSheet.placed.forEach(p => p.polygon.forEach(pt => { envX = Math.max(envX, p.x + pt.x); envY = Math.max(envY, p.y + pt.y) }))
     const baseStat = {
       count: resultSheets.length,
       lastUsed: lastSheet ? lastSheet.placed.reduce((acc, p) => acc + polyArea(p.polygon), 0) : 0,
+      lastEnv: envX * envY,
     }
     const exact = await packExact({
       instances, kerf, usableX, usableY, direction,

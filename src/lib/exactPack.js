@@ -25,6 +25,9 @@ import { makeEntry, slideEntry, entryClear, bboxOf, orderFor } from './gravity'
 
 const GRID_STEP = 40   // мм, шаг сетки X-кандидатов
 const BUCKET = 10      // мм, округление X-кандидатов (дубли не считаем)
+const CELL = 10        // мм, ячейка растра «пустот» (только для оценки, не для самой укладки)
+const TOP_PER_VARIANT = 3   // сколько лучших по габариту кандидатов каждого поворота проверяем на «запертые пустоты»
+const TRAPPED_WEIGHT = 1.5  // штраф за запертую пустоту относительно занятого габарита
 
 function polyArea(poly) {
   let a = 0
@@ -33,6 +36,59 @@ function polyArea(poly) {
     a += x1 * y2 - x2 * y1
   }
   return Math.abs(a) / 2
+}
+
+function pointInPoly(px, py, poly) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j]
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside
+  }
+  return inside
+}
+
+// Ячейки растра, занятые контуром (по центру ячейки).
+function polyCells(poly, cols, rows) {
+  const bb = bboxOf(poly)
+  const c0 = Math.max(0, Math.floor(bb.minX / CELL)), c1 = Math.min(cols - 1, Math.floor(bb.maxX / CELL))
+  const r0 = Math.max(0, Math.floor(bb.minY / CELL)), r1 = Math.min(rows - 1, Math.floor(bb.maxY / CELL))
+  const out = []
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      if (pointInPoly((c + 0.5) * CELL, (r + 0.5) * CELL, poly)) out.push(r * cols + c)
+    }
+  }
+  return out
+}
+
+// «Запертая» пустота: свободные ячейки, до которых уже нельзя добраться со
+// стороны верха и правого края листа (детали ставятся, падая сверху, и
+// съезжают к нулю — в замкнутый карман никто больше не попадёт). Именно такой
+// карман остаётся, если Г-образную деталь положить в угол листа «пустой
+// стороной» — её вогнутость оказывается закрыта краями листа.
+function trappedArea(sheet, extraCells, topRow) {
+  const { grid, cols } = sheet
+  // выше topRow (габарит занятого + деталь) всё свободно и открыто — считаем
+  // только нижнюю часть листа
+  const rows = Math.min(sheet.rows, topRow + 2)
+  const occ = grid.slice(0, cols * rows)
+  for (const i of extraCells) if (i < occ.length) occ[i] = 1
+  const seen = new Uint8Array(cols * rows)
+  const stack = []
+  const push = i => { if (!occ[i] && !seen[i]) { seen[i] = 1; stack.push(i) } }
+  for (let c = 0; c < cols; c++) push((rows - 1) * cols + c)
+  for (let r = 0; r < rows; r++) push(r * cols + cols - 1)
+  while (stack.length) {
+    const i = stack.pop()
+    const c = i % cols, r = (i - c) / cols
+    if (c > 0) push(i - 1)
+    if (c < cols - 1) push(i + 1)
+    if (r > 0) push(i - cols)
+    if (r < rows - 1) push(i + cols)
+  }
+  let free = 0
+  for (let i = 0; i < occ.length; i++) if (!occ[i] && !seen[i]) free++
+  return free * CELL * CELL
 }
 
 function candidateXs(sheet, lbw, bw, usableX, kerf) {
@@ -52,11 +108,12 @@ function candidateXs(sheet, lbw, bw, usableX, kerf) {
 // Лучшее место для детали на листе или null.
 function tryInsert(sheet, inst, usableX, usableY, kerf, direction) {
   const orders = orderFor(direction)[0]
-  let best = null, bestKey = Infinity
+  const shortlist = []
   for (const variant of inst.variants) {
     const lb = bboxOf(variant.polygon)
     const bw = lb.maxX - lb.minX, bh = lb.maxY - lb.minY
     if (bw > usableX + 1e-6 || bh > usableY + 1e-6) continue
+    const found = []
     for (const x0 of candidateXs(sheet, lb.minX, bw, usableX, kerf)) {
       const tx = x0 - lb.minX, ty = usableY - lb.maxY
       const e = makeEntry(variant.polygon.map(p => [p[0] + tx, p[1] + ty]))
@@ -69,9 +126,25 @@ function tryInsert(sheet, inst, usableX, usableY, kerf, direction) {
       if (e.bb.minX < -0.01 || e.bb.minY < -0.01 || e.bb.maxX > usableX + 0.01 || e.bb.maxY > usableY + 0.01) continue
       if (!entryClear(e, sheet.entries, kerf)) continue
       const envX = Math.max(sheet.envX, e.bb.maxX), envY = Math.max(sheet.envY, e.bb.maxY)
-      const key = envX * envY * 1000 + (e.bb.minX + e.bb.minY)
-      if (key < bestKey) { bestKey = key; best = { variant, entry: e, tx: tx + e.dx, ty: ty + e.dy } }
+      found.push({ variant, entry: e, tx: tx + e.dx, ty: ty + e.dy, env: envX * envY, key: envX * envY * 1000 + (e.bb.minX + e.bb.minY) })
     }
+    found.sort((a, b) => a.key - b.key)
+    shortlist.push(...found.slice(0, TOP_PER_VARIANT))
+  }
+  if (!shortlist.length) return null
+
+  // Итоговый выбор — среди лучших по габариту кандидатов ВСЕХ поворотов:
+  // занятый габарит + штраф за запертую пустоту. Так при равном габарите
+  // деталь встаёт тем поворотом, который заполняет угол листа своим телом, а
+  // вогнутость оставляет открытой для следующих деталей.
+  let best = null, bestCost = Infinity
+  const minEnv = Math.min(...shortlist.map(c => c.env))
+  for (const c of shortlist) {
+    if (c.env > minEnv * 1.15) continue // заметно больший габарит — пустоты не спасут
+    const topRow = Math.min(sheet.rows - 1, Math.ceil(Math.max(sheet.envY, c.entry.bb.maxY) / CELL))
+    const trapped = trappedArea(sheet, polyCells(c.entry.poly, sheet.cols, sheet.rows), topRow)
+    const cost = c.env + TRAPPED_WEIGHT * trapped + (c.entry.bb.minX + c.entry.bb.minY) * 1e-3
+    if (cost < bestCost) { bestCost = cost; best = c }
   }
   return best
 }
@@ -87,7 +160,7 @@ async function packOrder(order, usableX, usableY, kerf, direction, deadline) {
       if (r) { commit(sheet, inst, r); placed = true; break }
     }
     if (!placed) {
-      const sheet = { entries: [], meta: [], envX: 0, envY: 0, used: 0 }
+      const sheet = newSheet(usableX, usableY)
       const r = tryInsert(sheet, inst, usableX, usableY, kerf, direction)
       if (!r) return null // деталь не влезает даже на пустой лист
       commit(sheet, inst, r)
@@ -98,7 +171,13 @@ async function packOrder(order, usableX, usableY, kerf, direction, deadline) {
   return sheets
 }
 
+function newSheet(usableX, usableY) {
+  const cols = Math.max(1, Math.ceil(usableX / CELL)), rows = Math.max(1, Math.ceil(usableY / CELL))
+  return { entries: [], meta: [], envX: 0, envY: 0, used: 0, cols, rows, grid: new Uint8Array(cols * rows) }
+}
+
 function commit(sheet, inst, r) {
+  for (const i of polyCells(r.entry.poly, sheet.cols, sheet.rows)) sheet.grid[i] = 1
   sheet.entries.push(r.entry)
   sheet.meta.push({ inst, variant: r.variant, x: r.tx, y: r.ty })
   sheet.envX = Math.max(sheet.envX, r.entry.bb.maxX)
@@ -107,12 +186,18 @@ function commit(sheet, inst, r) {
 }
 
 function stat(sheets) {
-  return { count: sheets.length, lastUsed: sheets.length ? sheets[sheets.length - 1].used : 0 }
+  const last = sheets[sheets.length - 1]
+  return { count: sheets.length, lastUsed: last ? last.used : 0, lastEnv: last ? last.envX * last.envY : 0 }
 }
+// Меньше листов; при равенстве — меньше материала на последнем листе;
+// при равенстве и этого — меньший занятый габарит последнего листа.
+// Полное равенство — в пользу первого аргумента (точной укладки).
 export function exactBetter(a, b) {
   if (!b) return true
   if (a.count !== b.count) return a.count < b.count
-  return a.lastUsed < b.lastUsed
+  const tol = Math.max(1, b.lastUsed * 1e-4)
+  if (Math.abs(a.lastUsed - b.lastUsed) > tol) return a.lastUsed < b.lastUsed
+  return a.lastEnv <= b.lastEnv + 1
 }
 
 function shuffle(arr) {

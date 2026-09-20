@@ -306,7 +306,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       if (h > 14) ctx.fillText(lbl, lx, ly - 5)
       ctx.fillStyle = 'rgba(0,0,0,0.4)'
       ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
-      if (h > 26) ctx.fillText(`${Math.round(p.origY)}×${Math.round(p.origX)}`, lx, ly + 6)
+      if (h > 26) ctx.fillText(`${Math.round(p.origY)}×${Math.round(p.origX)}${p.rotation ? ' ↻' + p.rotation + '°' : ''}`, lx, ly + 6)
       if (h > 40) ctx.fillText(`(${Math.round(p.x)}, ${Math.round(usableY - p.y - (p.h - kerf))})`, lx, ly + 16)
     })
 
@@ -1062,7 +1062,7 @@ export default function NestingPage() {
                 <div style={{ width: 12, height: 12, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{p.label}</span>
                 <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
-                {p.rotated && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻</span>}
+                {(p.rotation || p.rotated) && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻{p.rotation ?? 90}°</span>}
               </div>
             ))}
           </div>
