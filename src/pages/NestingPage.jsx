@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { runNesting, computeOffcutAtPoint } from '../lib/nesting'
@@ -22,7 +22,6 @@ const LONG_PRESS_MS = 550
 // Удержание пальца на детали, после которого её можно двигать (короткое
 // касание/скольжение деталь не двигает; двойной тап — поворот)
 const DRAG_HOLD_MS = 250
-const ZOOM_LEVELS = [1, 1.5, 2, 3] // масштаб карты раскроя
 
 // ─── Проверка пересечения двух полигонов (для true-shape деталей) — обычная
 // bbox-проверка слишком грубая: деталь, аккуратно уложенная в паз соседней,
@@ -278,9 +277,18 @@ function rectsOverlap(a, b) {
          a.y < b.y + b.h - 1 && a.y + a.h - 1 > b.y
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, zoom = 1 }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
+  // Масштаб карты — щипком двух пальцев (как в редакторе контура), с
+  // фокусом в точке между пальцами, как при просмотре фотографии
+  const [zoom, setZoom] = useState(1)
+  const [pinching, setPinching] = useState(false)
+  const wrapRef = useRef(null)
+  const zoomRef = useRef(1)
+  zoomRef.current = zoom
+  const anchorRef = useRef(null) // { fracX, fracY, midX, midY } — точка листа под пальцами
+  const pinchRef = useRef({ active: false, dist: 0, zoom: 1 })
   // СИСТЕМА КООРДИНАТ. Во ВСЕХ данных раскроя (placed, freeRects, ручные
   // обрезки, DXF) Y отсчитывается ВВЕРХ от низа рабочей зоны — как в DXF/CAD.
   // Контур polygon (Y вверх, как в редакторе) кладётся в ту же ось без
@@ -311,17 +319,19 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   const lastTouchRef = useRef(0) // время последнего touch-события: браузер после касания шлёт ещё и эмулированные mouse-события
   const longPressRef = useRef(null)
 
-  useEffect(() => {
+  // useLayoutEffect: при смене масштаба холст пересоздаётся — перерисовываем
+  // до показа на экране, чтобы не мигал пустым
+  useLayoutEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching])
 
   const PADDING = 8
   const canvasW = (typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360) * zoom
   const sc = (canvasW - PADDING * 2) / sheetW
   const canvasH = Math.round(sc * sheetL) + PADDING * 2
   // При увеличении холст большой — ограничиваем плотность пикселей, чтобы не упереться в лимит памяти телефона
-  const DPR = Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, Math.sqrt(12e6 / (canvasW * canvasH)))
+  const DPR = pinching ? 1 : Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, Math.sqrt(12e6 / (canvasW * canvasH)))
 
   const toC = v => v * sc
   const fromC = v => v / sc
@@ -776,17 +786,102 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     return () => canvas.removeEventListener('touchmove', block)
   }, [])
 
+  // Pinch-zoom двумя пальцами
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const st = pinchRef.current
+    const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const setAnchor = (t, fresh) => {
+      const cv = canvasRef.current
+      if (!cv) return
+      const wr = el.getBoundingClientRect()
+      const midX = (t[0].clientX + t[1].clientX) / 2 - wr.left
+      const midY = (t[0].clientY + t[1].clientY) / 2 - wr.top
+      if (fresh || !anchorRef.current) {
+        anchorRef.current = {
+          fracX: (el.scrollLeft + midX) / (cv.offsetWidth || 1),
+          fracY: (el.scrollTop + midY) / (cv.offsetHeight || 1), midX, midY,
+        }
+      } else { anchorRef.current.midX = midX; anchorRef.current.midY = midY }
+    }
+    const applyAnchor = () => {
+      const a = anchorRef.current, cv = canvasRef.current
+      if (!a || !cv) return
+      el.scrollLeft = Math.max(0, a.fracX * cv.offsetWidth - a.midX)
+      el.scrollTop = Math.max(0, a.fracY * cv.offsetHeight - a.midY)
+    }
+    const onStart = e => {
+      if (e.touches.length !== 2) return
+      st.active = true
+      st.dist = dist(e.touches)
+      st.zoom = zoomRef.current
+      // второй палец — это не перетаскивание детали и не выбор обрезка
+      if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null }
+      draggingRef.current = null
+      setPinching(true)
+      setAnchor(e.touches, true)
+    }
+    const onMove = e => {
+      if (!st.active || e.touches.length !== 2) return
+      if (e.cancelable) e.preventDefault()
+      if (st.dist <= 0) return
+      let nz = Math.max(1, Math.min(4, st.zoom * dist(e.touches) / st.dist))
+      if (nz < 1.04) nz = 1
+      setAnchor(e.touches, false)
+      if (Math.abs(nz - zoomRef.current) < 0.001) applyAnchor() // только сдвиг двумя пальцами
+      else setZoom(nz)
+    }
+    const onEnd = e => {
+      if (e.touches.length < 2 && st.active) {
+        st.active = false
+        setPinching(false)
+        setTimeout(() => { anchorRef.current = null }, 150)
+      }
+    }
+    el.addEventListener('touchstart', onStart, { passive: true })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd, { passive: true })
+    el.addEventListener('touchcancel', onEnd, { passive: true })
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
+    }
+  }, [])
+
+  // После смены масштаба возвращаем под пальцы ту же точку листа
+  useLayoutEffect(() => {
+    const a = anchorRef.current, el = wrapRef.current, cv = canvasRef.current
+    if (!a || !el || !cv) return
+    el.scrollLeft = Math.max(0, a.fracX * cv.offsetWidth - a.midX)
+    el.scrollTop = Math.max(0, a.fracY * cv.offsetHeight - a.midY)
+  }, [zoom])
+
   return (
-    <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
-      style={{ width: canvasW, height: canvasH, maxWidth: zoom > 1 ? 'none' : '100%', borderRadius: 8, display: 'block', touchAction: interactive ? (zoom > 1 ? 'pan-x pan-y' : 'none') : 'auto' }}
-      onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
-      onMouseMove={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerMove(e) }}
-      onMouseUp={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerUp(e) }}
-      onTouchStart={e => { lastTouchRef.current = Date.now(); onPointerDown(e) }}
-      onTouchMove={e => { lastTouchRef.current = Date.now(); onPointerMove(e) }}
-      onTouchEnd={e => { lastTouchRef.current = Date.now(); onPointerUp(e) }}
-      onTouchCancel={() => { clearLongPress(); draggingRef.current = null }}
-    />
+    <div style={{ position: 'relative' }}>
+      <div ref={wrapRef}
+        style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8 }}>
+        <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
+          style={{ width: canvasW, height: canvasH, maxWidth: zoom > 1 ? 'none' : '100%', borderRadius: 8, display: 'block', touchAction: interactive ? (zoom > 1 ? 'pan-x pan-y' : 'none') : 'auto' }}
+          onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
+          onMouseMove={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerMove(e) }}
+          onMouseUp={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerUp(e) }}
+          onTouchStart={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) return; onPointerDown(e) }}
+          onTouchMove={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) return; onPointerMove(e) }}
+          onTouchEnd={e => { lastTouchRef.current = Date.now(); onPointerUp(e) }}
+          onTouchCancel={() => { clearLongPress(); draggingRef.current = null }}
+        />
+      </div>
+      {zoom > 1.02 && (
+        <button type="button" onClick={() => { setZoom(1); if (wrapRef.current) { wrapRef.current.scrollLeft = 0; wrapRef.current.scrollTop = 0 } }}
+          style={{ position: 'absolute', top: 6, right: 6, fontSize: 10, padding: '3px 8px', border: '0.5px solid var(--border-md)',
+            borderRadius: 6, background: 'rgba(255,255,255,0.92)', color: 'var(--text-muted)', cursor: 'pointer' }}>
+          {Math.round(zoom * 100)}% · сброс
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -810,20 +905,6 @@ export default function NestingPage() {
   const [cuttingMethod, setCuttingMethod] = useState('nesting')
   const [showOffcuts, setShowOffcuts] = useState(false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
-  const [zoom, setZoom] = useState(1)
-  const zoomWrapRef = useRef(null)
-  function changeZoom(nz) {
-    const el = zoomWrapRef.current, oz = zoom
-    setZoom(nz)
-    if (el && oz > 0) {
-      const cx = el.scrollLeft + el.clientWidth / 2, cy = el.scrollTop + el.clientHeight / 2
-      // после перерисовки холста возвращаем в центр вида ту же точку листа
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        el.scrollLeft = cx * nz / oz - el.clientWidth / 2
-        el.scrollTop = cy * nz / oz - el.clientHeight / 2
-      }))
-    }
-  }
   const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
   const [smallPartsMaxSquareSideMm, setSmallPartsMaxSquareSideMm] = useState('') // мм, заполнится глобальным дефолтом заказа
   const [smallPartsMaxSideMm, setSmallPartsMaxSideMm] = useState('')   // мм, заполнится глобальным дефолтом заказа
@@ -1361,23 +1442,7 @@ export default function NestingPage() {
                 )}
               </div>
             )}
-            {/* Масштаб карты — увеличить, чтобы точнее выбрать участок обрезка */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6 }}>
-              <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>Масштаб</span>
-              <button onClick={() => { const i = ZOOM_LEVELS.indexOf(zoom); if (i > 0) changeZoom(ZOOM_LEVELS[i - 1]) }}
-                disabled={zoom <= ZOOM_LEVELS[0]}
-                style={{ width: 30, height: 26, borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
-                  background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, cursor: 'pointer', opacity: zoom <= ZOOM_LEVELS[0] ? 0.4 : 1 }}>−</button>
-              <span style={{ fontSize: 12, minWidth: 34, textAlign: 'center' }}>{zoom}×</span>
-              <button onClick={() => { const i = ZOOM_LEVELS.indexOf(zoom); if (i < ZOOM_LEVELS.length - 1) changeZoom(ZOOM_LEVELS[i + 1]) }}
-                disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
-                style={{ width: 30, height: 26, borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
-                  background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 16, lineHeight: 1, cursor: 'pointer', opacity: zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1] ? 0.4 : 1 }}>+</button>
-            </div>
-            <div ref={zoomWrapRef}
-              style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8 }}>
             <SheetCanvas
-              zoom={zoom}
               sheet={sheetsData[activeSheet]}
               usableX={result.usableX} usableY={result.usableY}
               sheetL={order.sheet_length} sheetW={order.sheet_width}
@@ -1387,13 +1452,12 @@ export default function NestingPage() {
               offcutMode={offcutMode} manualOffcuts={sheetsData[activeSheet]?.manualOffcuts}
               onManualOffcuts={onManualOffcuts}
             />
-            </div>
             <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 6 }}>
               {showOffcuts && offcutMode === 'manual'
                 ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                 : (showOffcuts && offcutMode === 'cuts'
                   ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                  : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить')}
+                  : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить · Двумя пальцами — масштаб')}
             </p>
           </div>
 
