@@ -1036,6 +1036,7 @@ export async function packTrueShape({
     if (lastSheet) lastSheet.placed.forEach(p => p.polygon.forEach(pt => { envX = Math.max(envX, p.x + pt.x); envY = Math.max(envY, p.y + pt.y) }))
     const baseStat = {
       count: resultSheets.length,
+      used: resultSheets.map(sh => sh.placed.reduce((acc, p) => acc + polyArea(p.polygon), 0)),
       lastUsed: lastSheet ? lastSheet.placed.reduce((acc, p) => acc + polyArea(p.polygon), 0) : 0,
       lastEnv: envX * envY,
     }
