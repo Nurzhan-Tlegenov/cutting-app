@@ -229,7 +229,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         if (ow > 30 && oh > 14) {
-          ctx.fillText(`${o.w}×${o.h}`, ox + ow / 2, oy + oh / 2)
+          ctx.fillText(`${o.h}×${o.w}`, ox + ow / 2, oy + oh / 2)
         }
       })
     }
@@ -249,7 +249,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         ctx.font = `bold ${Math.max(9, Math.min(11, ow / 8))}px sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
-        ctx.fillText(`${o.w}×${o.h}`, ox + ow / 2, oy + oh / 2)
+        ctx.fillText(`${o.h}×${o.w}`, ox + ow / 2, oy + oh / 2)
       })
     }
 
@@ -487,7 +487,11 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           if (hitIdx !== -1) {
             onManualOffcuts(sheet.index, list.filter((_, i) => i !== hitIdx))
           } else {
-            const rect = computeOffcutAtPoint(mx, my, placedRef.current, usableX, usableY)
+            // Уже выбранные обрезки — такая же занятая часть листа, как и
+            // детали: новый обрезок формируется только из оставшегося места
+            // и не режется сквозь ранее выбранный
+            const taken = flipRects(list).map(o => ({ x: o.x, y: o.y, w: o.w, h: o.h }))
+            const rect = computeOffcutAtPoint(mx, my, [...placedRef.current, ...taken], usableX, usableY)
             if (rect) onManualOffcuts(sheet.index, [...list, flipRects([rect])[0]])
           }
         }, LONG_PRESS_MS)
