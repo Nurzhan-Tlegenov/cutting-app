@@ -23,8 +23,8 @@
 
 import { makeEntry, slideEntry, entryClear, bboxOf, orderFor } from './gravity'
 
-const GRID_STEP = 40   // мм, шаг сетки X-кандидатов
-const BUCKET = 10      // мм, округление X-кандидатов (дубли не считаем)
+const GRID_STEP = 60   // мм, шаг сетки X-кандидатов
+const BUCKET = 20      // мм, округление X-кандидатов (дубли не считаем)
 const CELL = 10        // мм, ячейка растра «пустот» (только для оценки, не для самой укладки)
 const TOP_PER_VARIANT = 3   // сколько лучших по габариту кандидатов каждого поворота проверяем на «запертые пустоты»
 const TRAPPED_WEIGHT = 1.5  // штраф за запертую пустоту относительно занятого габарита
@@ -91,7 +91,7 @@ function trappedArea(sheet, extraCells, topRow) {
   return free * CELL * CELL
 }
 
-function candidateXs(sheet, lbw, bw, usableX, kerf) {
+function candidateXs(sheet, bw, usableX, kerf) {
   const maxX = usableX - bw
   const set = new Set()
   const add = v => { if (v >= -1e-9 && v <= maxX + 1e-9) set.add(Math.round(Math.max(0, Math.min(maxX, v)) / BUCKET) * BUCKET) }
@@ -105,31 +105,61 @@ function candidateXs(sheet, lbw, bw, usableX, kerf) {
   return [...set].sort((a, b) => a - b)
 }
 
+// То же по Y — для боковой подачи (деталь заезжает в проём сбоку).
+function candidateYs(sheet, bh, usableY, kerf) {
+  const maxY = usableY - bh
+  const set = new Set()
+  const add = v => { if (v >= -1e-9 && v <= maxY + 1e-9) set.add(Math.round(Math.max(0, Math.min(maxY, v)) / BUCKET) * BUCKET) }
+  for (let y = 0; y <= maxY; y += GRID_STEP) add(y)
+  add(0); add(maxY)
+  for (const o of sheet.entries) {
+    add(o.bb.maxY + kerf); add(o.bb.minY - kerf - bh)
+    add(o.bb.minY); add(o.bb.maxY - bh)
+    for (const [, vy] of o.poly) { add(vy + kerf); add(vy - kerf - bh) }
+  }
+  return [...set].sort((a, b) => a - b)
+}
+
 // Лучшее место для детали на листе или null.
+// Два способа подачи: сверху (деталь падает в столбец, затем съезжает к нулю)
+// и справа (заезжает в горизонтальные проёмы, недоступные сверху).
 function tryInsert(sheet, inst, usableX, usableY, kerf, direction) {
-  const orders = orderFor(direction)[0]
+  const dropOrder = orderFor(direction)[0]
+  const sideOrder = dropOrder.slice().reverse()
   const shortlist = []
+  const settle = (e, order) => {
+    for (let pass = 0; pass < 8; pass++) {
+      let moved = false
+      for (const axis of order) moved = slideEntry(e, sheet.entries, axis, kerf) || moved
+      if (!moved) break
+    }
+  }
   for (const variant of inst.variants) {
     const lb = bboxOf(variant.polygon)
     const bw = lb.maxX - lb.minX, bh = lb.maxY - lb.minY
     if (bw > usableX + 1e-6 || bh > usableY + 1e-6) continue
     const found = []
-    for (const x0 of candidateXs(sheet, lb.minX, bw, usableX, kerf)) {
-      const tx = x0 - lb.minX, ty = usableY - lb.maxY
+    const consider = (tx, ty, order) => {
       const e = makeEntry(variant.polygon.map(p => [p[0] + tx, p[1] + ty]))
-      if (!entryClear(e, sheet.entries, kerf)) continue
-      for (let pass = 0; pass < 8; pass++) {
-        let moved = false
-        for (const axis of orders) moved = slideEntry(e, sheet.entries, axis, kerf) || moved
-        if (!moved) break
-      }
-      if (e.bb.minX < -0.01 || e.bb.minY < -0.01 || e.bb.maxX > usableX + 0.01 || e.bb.maxY > usableY + 0.01) continue
-      if (!entryClear(e, sheet.entries, kerf)) continue
+      if (!entryClear(e, sheet.entries, kerf)) return
+      settle(e, order)
+      if (e.bb.minX < -0.01 || e.bb.minY < -0.01 || e.bb.maxX > usableX + 0.01 || e.bb.maxY > usableY + 0.01) return
+      if (!entryClear(e, sheet.entries, kerf)) return
       const envX = Math.max(sheet.envX, e.bb.maxX), envY = Math.max(sheet.envY, e.bb.maxY)
       found.push({ variant, entry: e, tx: tx + e.dx, ty: ty + e.dy, env: envX * envY, key: envX * envY * 1000 + (e.bb.minX + e.bb.minY) })
     }
+    for (const x0 of candidateXs(sheet, bw, usableX, kerf)) consider(x0 - lb.minX, usableY - lb.maxY, dropOrder)
+    if (sheet.entries.length) {
+      for (const y0 of candidateYs(sheet, bh, usableY, kerf)) consider(usableX - lb.maxX, y0 - lb.minY, sideOrder)
+    }
     found.sort((a, b) => a.key - b.key)
-    shortlist.push(...found.slice(0, TOP_PER_VARIANT))
+    // одинаковые итоговые позиции (разные старты сошлись в одну точку) не дублируем
+    const uniq = []
+    for (const f of found) {
+      if (!uniq.some(u => Math.abs(u.entry.bb.minX - f.entry.bb.minX) < 0.5 && Math.abs(u.entry.bb.minY - f.entry.bb.minY) < 0.5)) uniq.push(f)
+      if (uniq.length >= TOP_PER_VARIANT) break
+    }
+    shortlist.push(...uniq)
   }
   if (!shortlist.length) return null
 
@@ -156,6 +186,7 @@ async function packOrder(order, usableX, usableY, kerf, direction, deadline) {
     if (Date.now() > deadline) return null
     let placed = false
     for (const sheet of sheets) {
+      if (usableX * usableY - sheet.used < inst.polyArea) continue // по площади заведомо не влезает
       const r = tryInsert(sheet, inst, usableX, usableY, kerf, direction)
       if (r) { commit(sheet, inst, r); placed = true; break }
     }
@@ -206,6 +237,19 @@ function shuffle(arr) {
   }
   return arr
 }
+// Мутация «дожать первый лист»: деталь с более позднего листа переносится
+// ближе к началу порядка — тогда она первой претендует на место на ранних
+// листах, а вместо неё туда встаёт то, что раньше их занимало впустую.
+function promote(order, laterIds) {
+  const a = order.slice()
+  const cand = a.map((x, i) => i).filter(i => laterIds.has(a[i].id))
+  if (!cand.length) return perturb(order)
+  const from = cand[Math.floor(Math.random() * cand.length)]
+  const [piece] = a.splice(from, 1)
+  const to = Math.floor(Math.random() * Math.max(1, Math.ceil(a.length * 0.6)))
+  a.splice(to, 0, piece)
+  return a
+}
 function perturb(order) {
   const a = order.slice()
   const swaps = 1 + Math.floor(Math.random() * 3)
@@ -221,21 +265,28 @@ function perturb(order) {
  * sheets[i].meta[k] = { inst, variant, x, y } (x,y — сдвиг локального контура).
  */
 export async function packExact({ instances, kerf, usableX, usableY, direction, deadline }) {
+  instances.forEach(i => { i.polyArea = polyArea(i.variants[0].polygon) })
   const orders = [
     instances.slice().sort((a, b) => b.area - a.area),
     instances.slice().sort((a, b) => Math.max(b.variants[0].w, b.variants[0].h) - Math.max(a.variants[0].w, a.variants[0].h)),
   ]
   let best = null, bestStat = null, bestOrder = null
+  let laterIds = new Set()
   const consider = async order => {
     const sheets = await packOrder(order, usableX, usableY, kerf, direction, deadline)
     if (!sheets) return
     const st = stat(sheets)
-    if (exactBetter(st, bestStat)) { best = sheets; bestStat = st; bestOrder = order }
+    if (exactBetter(st, bestStat)) {
+      best = sheets; bestStat = st; bestOrder = order
+      laterIds = new Set(sheets.slice(1).flatMap(sh => sh.meta.map(m => m.inst.id)))
+    }
   }
   for (const o of orders) { if (Date.now() < deadline) await consider(o) }
   let guard = 0
-  while (Date.now() < deadline && bestOrder && instances.length > 1 && guard++ < 500) {
-    await consider(Math.random() < 0.25 ? shuffle(instances.slice()) : perturb(bestOrder))
+  // Всё уложено на один лист — лучше уже некуда, дальше искать незачем.
+  while (Date.now() < deadline && bestOrder && instances.length > 1 && guard++ < 500 && bestStat.count > 1) {
+    const r = Math.random()
+    await consider(r < 0.1 ? shuffle(instances.slice()) : r < 0.6 ? promote(bestOrder, laterIds) : perturb(bestOrder))
   }
   return best ? { sheets: best, stat: bestStat } : null
 }

@@ -32,6 +32,7 @@ const EPS = 1e-6
 const MOVE_EPS = 0.01      // мм — сдвиг меньше этого не считаем сдвигом
 const MAX_PASSES = 30
 const MIN_STEP = 2         // мм — минимальный шаг поиска контакта (тоньше деталей не бывает)
+const MAX_CRAWL = 24       // мм — максимальный шаг при скольжении вплотную к соседу (при нарушении зазора уточняется делением пополам)
 
 function orderFor(direction) {
   if (direction === 'along_y') return [['y', 'x']]
@@ -101,9 +102,10 @@ function bboxOf(poly) {
 
 function isAxisRect(poly) {
   if (poly.length !== 4) return false
-  const xs = new Set(poly.map(p => Math.round(p[0] * 1000)))
-  const ys = new Set(poly.map(p => Math.round(p[1] * 1000)))
-  return xs.size === 2 && ys.size === 2
+  const e = 1e-6
+  const [a, b, c, d] = poly
+  return (Math.abs(a[0] - b[0]) < e && Math.abs(b[1] - c[1]) < e && Math.abs(c[0] - d[0]) < e && Math.abs(d[1] - a[1]) < e) ||
+         (Math.abs(a[1] - b[1]) < e && Math.abs(b[0] - c[0]) < e && Math.abs(c[1] - d[1]) < e && Math.abs(d[0] - a[0]) < e)
 }
 
 function orient(ax, ay, bx, by, cx, cy) { return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax) }
@@ -159,25 +161,26 @@ function bboxGap(a, b) {
   return { sx, sy, lb: Math.hypot(Math.max(0, sx), Math.max(0, sy)) }
 }
 
-// Расстояние между двумя деталями A (сдвинутой на shift по оси) и B.
-function pairDist(A, B, shiftAxis, shift, need) {
-  const bbA = { minX: A.bb.minX, maxX: A.bb.maxX, minY: A.bb.minY, maxY: A.bb.maxY }
-  if (shiftAxis === 'x') { bbA.minX -= shift; bbA.maxX -= shift } else { bbA.minY -= shift; bbA.maxY -= shift }
-  const g = bboxGap(bbA, B.bb)
-  if (A.rect && B.rect) {
-    // прямоугольник-прямоугольник: точная формула
-    if (g.sx < 0 && g.sy < 0) return -1
-    return g.lb
-  }
-  if (g.lb > need + 5) return g.lb // заведомо далеко — точное значение не нужно (нижняя оценка безопасна)
-  const shifted = A.poly.map(p => shiftAxis === 'x' ? [p[0] - shift, p[1]] : [p[0], p[1] - shift])
-  return polyDist(shifted, B.poly)
-}
-
+// Минимальное расстояние от детали A (сдвинутой на shift к нулю по оси) до
+// любой из others. Возвращает точное значение, если оно меньше need+5, иначе —
+// нижнюю оценку (для шага поиска контакта её достаточно и она безопасна).
 function minDist(A, others, axis, shift, need) {
+  const bbA = { minX: A.bb.minX, maxX: A.bb.maxX, minY: A.bb.minY, maxY: A.bb.maxY }
+  if (axis === 'x') { bbA.minX -= shift; bbA.maxX -= shift } else { bbA.minY -= shift; bbA.maxY -= shift }
+  let shifted = null
   let m = Infinity
   for (const B of others) {
-    const d = pairDist(A, B, axis, shift, need)
+    const g = bboxGap(bbA, B.bb)
+    if (g.lb >= m) continue
+    let d
+    if (A.rect && B.rect) {
+      d = (g.sx < 0 && g.sy < 0) ? -1 : g.lb
+    } else if (g.lb > need + 5) {
+      d = g.lb
+    } else {
+      if (!shifted) shifted = A.poly.map(p => axis === 'x' ? [p[0] - shift, p[1]] : [p[0], p[1] - shift])
+      d = polyDist(shifted, B.poly)
+    }
     if (d < m) m = d
     if (m < need - EPS) return m
   }
@@ -205,9 +208,12 @@ function maxSlide(A, all, axis, kerf) {
   if (minDist(A, others, axis, 0, need) < need - EPS) return 0 // уже теснее kerf — не трогаем
 
   let t = 0
+  let crawl = MIN_STEP // шаг «ползком» вдоль стенки: удваивается, пока деталь скользит вплотную к соседу
   for (let guard = 0; guard < 20000; guard++) {
     const f = minDist(A, others, axis, t, need)
-    const step = Math.max(f - kerf, MIN_STEP)
+    const slack = f - kerf
+    crawl = slack < 1 ? Math.min(crawl * 2, MAX_CRAWL) : MIN_STEP
+    const step = Math.max(slack, crawl)
     const nt = Math.min(t + step, limit)
     const fn = minDist(A, others, axis, nt, need)
     if (fn < need - EPS) {

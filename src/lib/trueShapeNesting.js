@@ -914,7 +914,7 @@ export async function packTrueShape({
   // «в центр» точная укладка не умеет (она прижимает всё к нулю), поэтому при
   // их наличии весь бюджет остаётся растровому поиску, как раньше.
   const useExact = totalBudgetMs > 0 && !instances.some(i => i.isSmall)
-  const budgetMs = useExact ? totalBudgetMs * 0.35 : totalBudgetMs
+  const budgetMs = useExact ? totalBudgetMs * 0.2 : totalBudgetMs
   const startTime = Date.now()
 
   // Базовый результат ВСЕГДА без дедлайна — обязан разместить все детали
@@ -1041,7 +1041,7 @@ export async function packTrueShape({
     }
     const exact = await packExact({
       instances, kerf, usableX, usableY, direction,
-      deadline: Date.now() + Math.max(2500, totalBudgetMs * 0.65),
+      deadline: Date.now() + Math.max(2500, totalBudgetMs * 0.8),
     })
     if (exact && exactBetter(exact.stat, baseStat)) {
       resultSheets = exact.sheets.map((sh, si) => ({
