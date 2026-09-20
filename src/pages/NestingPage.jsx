@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { runNesting, computeOffcuts, computeOffcutAtPoint } from '../lib/nesting'
+import { runNesting, computeOffcutAtPoint } from '../lib/nesting'
 import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
@@ -97,6 +97,70 @@ function findDimSpots(poly, origX, origY, wLenMm, lLenMm, thMm) {
   return { top, left }
 }
 const dimSpotCache = new WeakMap() // полигон → { key, spots }, чтобы не пересчитывать при каждой перерисовке
+// ─── Линии реза (форматно-раскроечный станок) ─────────────────────────────
+// Строятся по ТЕКУЩЕЙ карте раскроя (в экранных координатах, Y сверху вниз),
+// поэтому после любого редактирования (перенос, поворот) пересчитываются
+// заново. Сквозной рез — линия через весь участок листа, не пересекающая
+// ни одной детали. Деталь занимает [x, x+w]×[y, y+h], где w/h включают
+// ширину реза на правой и нижней стороне; линия рисуется по центру пропила.
+// Участок делится рекурсивно; номер реза — порядок обхода "в ширину"
+// (сначала резы по всему листу, затем по полосам).
+function decomposeCuts(rects, usableX, usableY, kerf, pref) {
+  const EPS = 0.5
+  const lines = [], unsplit = []
+  const queue = [{ x0: 0, y0: 0, x1: usableX, y1: usableY, parts: rects }]
+  const findCut = (reg, axis) => {
+    const v = axis === 'v'
+    const a0 = v ? reg.x0 : reg.y0, a1 = v ? reg.x1 : reg.y1
+    const cands = []
+    reg.parts.forEach(o => {
+      const s0 = v ? o.x : o.y, len = v ? o.w : o.h
+      cands.push({ c: s0 + len, line: s0 + len - kerf / 2 })            // за правым/нижним краем детали
+      if (s0 - kerf > a0 + EPS) cands.push({ c: s0 - kerf, line: s0 - kerf / 2 }) // перед левым/верхним краем (пустая полоса до детали)
+    })
+    cands.sort((p, q) => p.c - q.c)
+    for (const cd of cands) {
+      if (cd.c <= a0 + EPS || cd.c >= a1 - 1) continue
+      const crosses = reg.parts.some(o => {
+        const s0 = v ? o.x : o.y, len = v ? o.w : o.h
+        return s0 < cd.c - EPS && s0 + len > cd.c + EPS
+      })
+      if (!crosses) return cd
+    }
+    return null
+  }
+  while (queue.length) {
+    const reg = queue.shift()
+    if (!reg.parts.length) continue
+    const order = pref === 'v' ? ['v', 'h'] : ['h', 'v']
+    let done = false
+    for (const axis of order) {
+      const cd = findCut(reg, axis)
+      if (!cd) continue
+      const v = axis === 'v'
+      lines.push(v
+        ? { v: true, pos: cd.line, from: reg.y0, to: reg.y1 }
+        : { v: false, pos: cd.line, from: reg.x0, to: reg.x1 })
+      const mid = o => v ? o.x + o.w / 2 : o.y + o.h / 2
+      const A = reg.parts.filter(o => mid(o) < cd.c), B = reg.parts.filter(o => mid(o) >= cd.c)
+      queue.push(v ? { ...reg, x1: cd.c, parts: A } : { ...reg, y1: cd.c, parts: A })
+      queue.push(v ? { ...reg, x0: cd.c, parts: B } : { ...reg, y0: cd.c, parts: B })
+      done = true
+      break
+    }
+    if (!done && reg.parts.length > 1) unsplit.push(reg)
+  }
+  lines.forEach((l, i) => { l.n = i + 1 })
+  return { lines, unsplit }
+}
+function computeCutLines(items, usableX, usableY, kerf) {
+  const rects = items.map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h }))
+  const a = decomposeCuts(rects, usableX, usableY, kerf, 'v')
+  const b = decomposeCuts(rects, usableX, usableY, kerf, 'h')
+  const len = r => r.lines.reduce((t, l) => t + (l.to - l.from), 0)
+  if (a.unsplit.length !== b.unsplit.length) return a.unsplit.length < b.unsplit.length ? a : b
+  return len(a) <= len(b) ? a : b
+}
 function polygonsOverlap(polyA, polyB) {
   for (let i = 0; i < polyA.length; i++) {
     const a1 = polyA[i], a2 = polyA[(i + 1) % polyA.length]
@@ -225,29 +289,6 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     const rw = toC(usableX), rh = toC(usableY)
     ctx.fillStyle = '#fff'
     ctx.fillRect(rx, ry, rw, rh)
-
-    // Обрезки — автоматически посчитанные (свободные прямоугольники раскроя)
-    if (showOffcuts && offcutMode === 'auto' && sheet.freeRects) {
-      const offcuts = flipRects(computeOffcuts(sheet, usableX, usableY)).map(extendToSheetEdge)
-      offcuts.forEach(o => {
-        const ox = rx + toC(o.x), oy = ry + toC(o.y)
-        const ow = toC(o.w), oh = toC(o.h)
-        ctx.fillStyle = 'rgba(99,152,6,0.08)'
-        ctx.fillRect(ox, oy, ow, oh)
-        ctx.strokeStyle = '#3B6D11'
-        ctx.lineWidth = 0.8
-        ctx.setLineDash([3, 3])
-        ctx.strokeRect(ox, oy, ow, oh)
-        ctx.setLineDash([])
-        ctx.fillStyle = '#3B6D11'
-        ctx.font = `${Math.max(8, Math.min(10, ow / 8))}px sans-serif`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        if (ow > 30 && oh > 14) {
-          ctx.fillText(`${o.h}×${o.w}`, ox + ow / 2, oy + oh / 2)
-        }
-      })
-    }
 
     // Обрезки, выбранные вручную (удержанием пальца) — деловые обрезки,
     // можно выбрать несколько; повторное удержание на уже выбранном — снимает его
@@ -422,6 +463,47 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         }
       }
     })
+
+    // Линии реза — по текущему расположению деталей (пересчитываются при
+    // любом редактировании карты)
+    if (showOffcuts && offcutMode === 'cuts') {
+      const { lines, unsplit } = computeCutLines(items, usableX, usableY, kerf)
+      // Участки, которые нельзя разрезать насквозь (после ручной правки)
+      unsplit.forEach(r => {
+        ctx.strokeStyle = '#E24B4A'
+        ctx.lineWidth = 1.2
+        ctx.setLineDash([2, 3])
+        ctx.strokeRect(rx + toC(r.x0), ry + toC(r.y0), toC(r.x1 - r.x0), toC(r.y1 - r.y0))
+        ctx.setLineDash([])
+      })
+      ctx.strokeStyle = '#7B1FA2'
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([6, 3])
+      const ext = (a0, a1, lo, hi, mLo, mHi) => [a0 <= 0.5 ? a0 - mLo : a0, a1 >= hi - 0.5 ? a1 + mHi : a1]
+      lines.forEach(l => {
+        let x1, y1, x2, y2
+        if (l.v) {
+          const [ya, yb] = ext(l.from, l.to, 0, usableY, marginT, marginB)
+          x1 = x2 = rx + toC(l.pos); y1 = ry + toC(ya); y2 = ry + toC(yb)
+        } else {
+          const [xa, xb] = ext(l.from, l.to, 0, usableX, marginL, marginR)
+          y1 = y2 = ry + toC(l.pos); x1 = rx + toC(xa); x2 = rx + toC(xb)
+        }
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
+      })
+      ctx.setLineDash([])
+      // Номера резов (порядок реза) — в начале каждой линии
+      ctx.font = 'bold 9px sans-serif'
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      lines.forEach(l => {
+        const cx = l.v ? rx + toC(l.pos) : rx + toC(l.from) + 8
+        const cy = l.v ? ry + toC(l.from) + 8 : ry + toC(l.pos)
+        ctx.fillStyle = '#7B1FA2'
+        ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2); ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.fillText(String(l.n), cx, cy)
+      })
+    }
 
     // Рамка: X=sheetW(горизонталь), Y=sheetL(вертикаль)
     ctx.strokeStyle = '#888780'
@@ -662,7 +744,7 @@ export default function NestingPage() {
   const [nestDir, setNestDir] = useState('auto')
   const [cuttingMethod, setCuttingMethod] = useState('nesting')
   const [showOffcuts, setShowOffcuts] = useState(false)
-  const [offcutMode, setOffcutMode] = useState('auto') // 'auto' | 'manual'
+  const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
   const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
   const [smallPartsMaxSquareSideMm, setSmallPartsMaxSquareSideMm] = useState('') // мм, заполнится глобальным дефолтом заказа
   const [smallPartsMaxSideMm, setSmallPartsMaxSideMm] = useState('')   // мм, заполнится глобальным дефолтом заказа
@@ -1179,11 +1261,11 @@ export default function NestingPage() {
             </div>
             {showOffcuts && (
               <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                <button onClick={() => setOffcutMode('auto')}
+                <button onClick={() => setOffcutMode('cuts')}
                   style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
-                    background: offcutMode === 'auto' ? 'var(--teal)' : 'var(--bg2)',
-                    color: offcutMode === 'auto' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
-                  Авто
+                    background: offcutMode === 'cuts' ? '#7B1FA2' : 'var(--bg2)',
+                    color: offcutMode === 'cuts' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                  Линии реза
                 </button>
                 <button onClick={() => setOffcutMode('manual')}
                   style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
@@ -1213,7 +1295,9 @@ export default function NestingPage() {
             <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 6 }}>
               {showOffcuts && offcutMode === 'manual'
                 ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
-                : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить'}
+                : (showOffcuts && offcutMode === 'cuts'
+                  ? 'Линии реза пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
+                  : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить')}
             </p>
           </div>
 
