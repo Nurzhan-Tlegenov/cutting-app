@@ -286,45 +286,72 @@ function piecesConflict(a, b, kerf) {
   return polyGap(absolutePoly(a, kerf), absolutePoly(b, kerf)) < kerf - 0.5
 }
 
-// Магнит по контуру: фигурная деталь притягивается к соседу так, чтобы
-// зазор между контурами был ровно kerf (в т.ч. внутри Г-образной). Ищем
-// ближайшее по оси положение, где зазор равен kerf.
+// Магнит по контуру: фигурная деталь притягивается к соседям так, чтобы зазор
+// между контурами был ровно kerf. Притяжение работает по обеим осям сразу —
+// деталь встаёт в угол между двумя сторонами (в т.ч. внутри выреза Г-образной).
+// Если рядом только одна сторона — притягивается к ней по одной оси, а вдоль
+// неё деталь свободно скользит (пока не появится вторая сторона в пределах snap).
 function snapPolygonGap(m, sx, sy, items, idx, kerf, snap) {
   const mShape = hasShapeOf(m)
-  const step = 4
+  const step = 4, TOL = 0.005
+  const R = snap * 2 + kerf
+  const near = []
   for (let i = 0; i < items.length; i++) {
     if (i === idx) continue
     const o = items[i]
     if (!mShape && !hasShapeOf(o)) continue
-    if (sx >= o.x + o.w + snap || o.x >= sx + m.w + snap || sy >= o.y + o.h + snap || o.y >= sy + m.h + snap) continue
-    const oPoly = absolutePoly(o, kerf)
-    const f = (px, py) => polyGap(absolutePoly({ ...m, x: px, y: py }, kerf), oPoly) - kerf
-    const f0 = f(sx, sy)
-    if (Math.abs(f0) < 0.05 || f0 > snap) continue
+    if (sx >= o.x + o.w + R || o.x >= sx + m.w + R || sy >= o.y + o.h + R || o.y >= sy + m.h + R) continue
+    near.push({ poly: absolutePoly(o, kerf), x0: o.x, y0: o.y, x1: o.x + o.w - kerf, y1: o.y + o.h - kerf })
+  }
+  if (!near.length) return { x: sx, y: sy }
+
+  // Зазор до ВСЕХ соседей не меньше kerf в положении (x, y)?
+  const clearAt = (x, y) => {
+    const bx1 = x + m.w - kerf, by1 = y + m.h - kerf
+    let mp = null
+    for (const n of near) {
+      const gx = Math.max(n.x0 - bx1, x - n.x1), gy = Math.max(n.y0 - by1, y - n.y1)
+      if (Math.hypot(Math.max(0, gx), Math.max(0, gy)) >= kerf) continue // габариты далеко — заведомо ок
+      if (!mp) mp = absolutePoly({ ...m, x, y }, kerf)
+      if (polyGap(mp, n.poly) < kerf - TOL) return false
+    }
+    return true
+  }
+  // Ближайший по оси сдвиг (в пределах snap), при котором деталь касается
+  // какой-либо стороны соседа с зазором ровно kerf
+  const findRoot = (axis, x, y) => {
+    const at = d => axis === 'x' ? clearAt(x + d, y) : clearAt(x, y + d)
+    const c0 = at(0)
     let best = null
-    for (const axis of ['x', 'y']) {
-      const g = d => axis === 'x' ? f(sx + d, sy) : f(sx, sy + d)
-      for (const dir of [1, -1]) {
-        let prev = f0, pd = 0
-        for (let d = step; d <= snap + step; d += step) {
-          const cur = g(dir * d)
-          if ((prev < 0) !== (cur < 0)) {
-            let lo = pd, hi = d, flo = prev
-            for (let it = 0; it < 9; it++) {
-              const mid = (lo + hi) / 2, fm = g(dir * mid)
-              if ((fm < 0) === (flo < 0)) { lo = mid; flo = fm } else hi = mid
-            }
-            const root = dir * hi // hi — сторона, где зазор уже ≥ kerf
-            if (Math.abs(root) <= snap && (!best || Math.abs(root) < Math.abs(best.d))) best = { axis, d: root }
-            break
-          }
-          prev = cur; pd = d
+    for (const dir of [1, -1]) {
+      let prevClear = c0, pd = 0
+      for (let d = step; d <= snap; d += step) {
+        const c = at(dir * d)
+        if (c !== prevClear) {
+          let a = prevClear ? pd : d, b = prevClear ? d : pd // a — сторона с зазором ≥ kerf, b — нарушение
+          for (let it = 0; it < 9; it++) { const mid = (a + b) / 2; if (at(dir * mid)) a = mid; else b = mid }
+          const root = dir * a
+          if (best === null || Math.abs(root) < Math.abs(best)) best = root
+          break
         }
+        prevClear = c; pd = d
       }
     }
-    if (best) { if (best.axis === 'x') sx += best.d; else sy += best.d }
+    return best
   }
-  return { x: sx, y: sy }
+  // Обе оси подряд; порядок осей влияет на результат, берём тот, где сдвиг меньше
+  const tryOrder = order => {
+    let x = sx, y = sy
+    for (const axis of order) {
+      const r = findRoot(axis, x, y)
+      if (r !== null) { if (axis === 'x') x += r; else y += r }
+    }
+    return { x, y }
+  }
+  const cands = [tryOrder(['x', 'y']), tryOrder(['y', 'x'])].filter(c => clearAt(c.x, c.y))
+  if (!cands.length) return { x: sx, y: sy }
+  cands.sort((p, q) => (Math.abs(p.x - sx) + Math.abs(p.y - sy)) - (Math.abs(q.x - sx) + Math.abs(q.y - sy)))
+  return cands[0]
 }
 
 // Деталь выходит за границы рабочей зоны листа
