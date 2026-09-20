@@ -140,14 +140,6 @@ function largestFreeRect(grid, cols, rows) {
 }
 function sheetOffcut(sheet) { return largestFreeRect(sheet.grid, sheet.cols, sheet.rows) }
 
-/** Обрезок для листа, заданного контурами [[x,y],...] (для сравнения с растровым результатом). */
-export function offcutOfPolys(polys, usableX, usableY) {
-  const cols = Math.max(1, Math.ceil(usableX / CELL)), rows = Math.max(1, Math.ceil(usableY / CELL))
-  const grid = new Uint8Array(cols * rows)
-  for (const poly of polys) for (const c of polyCells(poly, cols, rows)) grid[c] = 1
-  return largestFreeRect(grid, cols, rows)
-}
-
 function candidateXs(sheet, bw, usableX, kerf, step = GRID_STEP, bucket = BUCKET) {
   const maxX = usableX - bw
   const set = new Set()
@@ -297,16 +289,12 @@ function stat(sheets) {
     used: sheets.map(sh => sh.used),
     lastUsed: last ? last.used : 0,
     lastEnv: last ? last.envX * last.envY : 0,
-    offcut: last ? sheetOffcut(last) : 0,
   }
 }
-// Порядок критериев:
-//   1) меньше листов;
-//   2) «фронтальная загрузка»: первый лист заполнен больше, при равенстве —
-//      второй и т.д. (лексикографически по занятой площади);
-//   3) при равной загрузке — БОЛЬШЕ деловой обрезок (наибольший свободный
-//      прямоугольник на последнем листе);
-//   4) при равном обрезке — меньше занятый габарит последнего листа.
+// Лучше — меньше листов. При равном числе листов — «фронтальная загрузка»:
+// первый лист заполнен больше, при равенстве — второй и т.д. (лексикографически
+// по занятой площади). Так лист набивается до предела, прежде чем начинается
+// следующий, а остаток — один крупный обрезок на последнем листе.
 export function exactBetter(a, b) {
   if (!b) return true
   if (a.count !== b.count) return a.count < b.count
@@ -315,11 +303,10 @@ export function exactBetter(a, b) {
       const tol = Math.max(1, b.used[i] * 1e-4)
       if (Math.abs(a.used[i] - b.used[i]) > tol) return a.used[i] > b.used[i]
     }
-  } else {
-    const tol = Math.max(1, b.lastUsed * 1e-4)
-    if (Math.abs(a.lastUsed - b.lastUsed) > tol) return a.lastUsed < b.lastUsed
+    return true
   }
-  if (a.offcut != null && b.offcut != null && Math.abs(a.offcut - b.offcut) > CELL * CELL) return a.offcut > b.offcut
+  const tol = Math.max(1, b.lastUsed * 1e-4)
+  if (Math.abs(a.lastUsed - b.lastUsed) > tol) return a.lastUsed < b.lastUsed
   return a.lastEnv <= b.lastEnv + 1
 }
 

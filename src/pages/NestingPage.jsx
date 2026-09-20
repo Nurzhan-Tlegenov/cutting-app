@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { runNesting, computeOffcuts, computeOffcutAtPoint } from '../lib/nesting'
+import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
 import BottomNav from '../components/BottomNav'
@@ -561,6 +562,7 @@ export default function NestingPage() {
           cuttingMethod,
           algo: useNfp ? 'nfp' : 'raster',
         })
+        res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
         setResult(res)
         setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
         setActiveSheet(0)
@@ -963,6 +965,12 @@ export default function NestingPage() {
         )}
         {running ? `Считаю раскрой... ${elapsedSec} сек` : result ? '🔄 Пересчитать раскрой' : '▶ Выполнить раскрой'}
       </button>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', margin: '-8px 0 12px' }}>
+        Алгоритм раскроя v{NESTING_VERSION}
+        {result && (result.algoVersion || 'до версионирования') !== NESTING_VERSION
+          ? ` · этот раскрой посчитан: ${result.algoVersion ? 'v' + result.algoVersion : 'до версионирования'}`
+          : ''}
+      </div>
       <style>{`@keyframes nesting-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       {running && (
         <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', marginTop: -4, marginBottom: 16 }}>

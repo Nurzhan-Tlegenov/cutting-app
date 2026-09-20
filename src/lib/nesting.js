@@ -517,8 +517,6 @@ function evaluate(sheets, usableX, usableY) {
     utilization: total ? used / total : 0,
     lastSheetArea: lastUsed,     // сколько площади реально занято на последнем листе
     lastSheetParts: lastSheet ? lastSheet.placed.length : 0,
-    // деловой обрезок: самый большой свободный прямоугольник последнего листа
-    lastOffcut: lastSheet ? (lastSheet.freeRects || []).reduce((m, r) => Math.max(m, r.w * r.h), 0) : 0,
   }
 }
 
@@ -531,8 +529,6 @@ function evaluate(sheets, usableX, usableY) {
 function better(a, b) {
   if (a.sheetCount !== b.sheetCount) return a.sheetCount < b.sheetCount
   if (Math.abs(a.lastSheetArea - b.lastSheetArea) > 1) return a.lastSheetArea < b.lastSheetArea
-  // при равной загрузке — больший деловой обрезок, затем плотность
-  if (Math.abs(a.lastOffcut - b.lastOffcut) > 1) return a.lastOffcut > b.lastOffcut
   return a.utilization > b.utilization
 }
 

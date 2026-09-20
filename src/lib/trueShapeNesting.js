@@ -48,7 +48,7 @@
  *     габаритов детали, не от её точного контура.
  */
 import { gravityPolygons } from './gravity'
-import { packExact, exactBetter, offcutOfPolys } from './exactPack'
+import { packExact, exactBetter } from './exactPack'
 
 
 const MIN_CELL_MM = 4
@@ -1039,8 +1039,6 @@ export async function packTrueShape({
       used: resultSheets.map(sh => sh.placed.reduce((acc, p) => acc + polyArea(p.polygon), 0)),
       lastUsed: lastSheet ? lastSheet.placed.reduce((acc, p) => acc + polyArea(p.polygon), 0) : 0,
       lastEnv: envX * envY,
-      used: resultSheets.map(sh => sh.placed.reduce((acc, p) => acc + polyArea(p.polygon), 0)),
-      offcut: lastSheet ? offcutOfPolys(lastSheet.placed.map(p => p.polygon.map(pt => [p.x + pt.x, p.y + pt.y])), usableX, usableY) : 0,
     }
     const exact = await packExact({
       instances, kerf, usableX, usableY, direction,
