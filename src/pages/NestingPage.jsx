@@ -13,19 +13,9 @@ const COLORS = [
 ]
 
 const PART_STROKE = 'rgba(20,20,20,0.8)'
-// Палитра различимых оттенков по кругу — раньше все детали были одного
-// серого цвета, и там, где они по-настоящему плотно соприкасаются (не
-// просто стоят в клетках сетки с запасом), две одинаковые заливки сливаются
-// в одно неразличимое пятно и создают ощущение "что-то не так", хотя на
-// самом деле всё верно. Разный цвет соседних деталей делает границу между
-// ними однозначной без раздумий. 10 цветов (не 6) — с учётом того, что
-// порядок укладки не гарантирует пространственного разнесения одинаковых
-// по номеру-в-очереди деталей, чем больше цветов в цикле, тем меньше шанс,
-// что именно СОСЕДНИЕ по факту детали получат одинаковый цвет.
-const PART_PALETTE = [
-  '#DCE8FA', '#FAE3D6', '#DFF3E3', '#F8DCE6', '#EFEAD0',
-  '#DAF0F0', '#F0E0F5', '#E8E4D9', '#D8ECEA', '#FCE7CB',
-]
+// Заливка деталей на карте раскроя — единый светло-серый (границы деталей
+// видны по тёмному контуру)
+const PART_FILL = '#E6E6E6'
 const EDGE_COLOR = '#185FA5'
 const EDGE_GAP = 3                 // отступ линии кромки от контура детали, px
 const LONG_PRESS_MS = 550
@@ -247,7 +237,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // Деталь — если есть реальный контур (true-shape нестинг для фрезера),
       // рисуем именно его; иначе — прямоугольник, как раньше
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
-      const baseFill = PART_PALETTE[i % PART_PALETTE.length]
+      const baseFill = PART_FILL
       ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : baseFill)
       ctx.strokeStyle = hasCollision ? '#E24B4A' : PART_STROKE
       ctx.lineWidth = hasCollision ? 2.5 : 1.4
@@ -333,15 +323,35 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       }
       const lx = x + labelLX * sc, ly = y + h - labelLY * sc
 
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+
+      // Название детали — в центре
       ctx.fillStyle = 'rgba(0,0,0,0.6)'
       ctx.font = `${Math.max(7, Math.min(10, w / 7))}px sans-serif`
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
       const lbl = (p.prefix ? p.prefix.slice(0,3) + ' ' : '') + p.label.replace(/Деталь\s*/, 'Д')
-      if (h > 14) ctx.fillText(lbl, lx, ly - 5)
-      ctx.fillStyle = 'rgba(0,0,0,0.4)'
-      ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
-      if (h > 26) ctx.fillText(`${Math.round(p.origY)}×${Math.round(p.origX)}${p.rotation ? ' ↻' + p.rotation + '°' : ''}`, lx, ly + 6)
-      if (h > 40) ctx.fillText(`(${Math.round(p.x)}, ${Math.round(usableY - p.y - (p.h - kerf))})`, lx, ly + 16)
+      if (h > 14) ctx.fillText(lbl, lx, ly - (p.rotation ? 5 : 0))
+      // Угол поворота — под названием, внутри контура детали
+      if (p.rotation && h > 26) {
+        ctx.fillStyle = 'rgba(0,0,0,0.45)'
+        ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
+        ctx.fillText('↻' + p.rotation + '°', lx, ly + 6)
+      }
+
+      // Размеры — по сторонам: Ширина (X) вдоль верхней стороны,
+      // Длина (Y) вдоль левой стороны (текст повёрнут вдоль стороны)
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'
+      ctx.font = '8px sans-serif'
+      const wTxt = String(Math.round(p.origX)), lTxt = String(Math.round(p.origY))
+      if (h > 16 && ctx.measureText(wTxt).width < w - 6) {
+        ctx.fillText(wTxt, x + w / 2, y + 7)
+      }
+      if (w > 16 && ctx.measureText(lTxt).width < h - 6) {
+        ctx.save()
+        ctx.translate(x + 7, y + h / 2)
+        ctx.rotate(-Math.PI / 2)
+        ctx.fillText(lTxt, 0, 0)
+        ctx.restore()
+      }
     })
 
     // Рамка: X=sheetW(горизонталь), Y=sheetL(вертикаль)
