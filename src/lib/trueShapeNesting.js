@@ -48,6 +48,7 @@
  *     габаритов детали, не от её точного контура.
  */
 import { gravityPolygons } from './gravity'
+import { packExact, exactBetter } from './exactPack'
 
 
 const MIN_CELL_MM = 4
@@ -907,7 +908,13 @@ export async function packTrueShape({
   })
 
   const totalInstances = instances.length
-  const budgetMs = Math.max(0, Number(optimizeSeconds) || 0) * 1000
+  const totalBudgetMs = Math.max(0, Number(optimizeSeconds) || 0) * 1000
+  // Растровый поиск даёт грубую основу (сетка ~7 мм), точная укладка по
+  // контурам (exactPack.js) — плотную. Время делим между ними; мелкие детали
+  // «в центр» точная укладка не умеет (она прижимает всё к нулю), поэтому при
+  // их наличии весь бюджет остаётся растровому поиску, как раньше.
+  const useExact = totalBudgetMs > 0 && !instances.some(i => i.isSmall)
+  const budgetMs = useExact ? totalBudgetMs * 0.35 : totalBudgetMs
   const startTime = Date.now()
 
   // Базовый результат ВСЕГДА без дедлайна — обязан разместить все детали
@@ -990,7 +997,7 @@ export async function packTrueShape({
   best = await compactSheets(best, cols, rows, startTime + budgetMs + 1500)
   best = await validateAndFixOverlaps(best, cols, rows)
 
-  const resultSheets = best.map(s => ({
+  let resultSheets = best.map(s => ({
     index: s.index,
     freeRects: [], // для true-shape листов автообрезки (по прямоугольным freeRects) не считаются — см. ограничения выше
     // Растровая укладка даёт зазор кратный ячейке (до ~2 ячеек вместо kerf).
@@ -1017,6 +1024,45 @@ export async function packTrueShape({
       }
     }), direction, kerf),
   }))
+
+
+  // ─── Точная укладка по контурам (тетрис с миллиметровой точностью) ────────
+  // Сравниваем с растровым результатом: меньше листов — лучше; при равенстве —
+  // меньше материала на последнем листе (первые листы плотнее).
+  if (useExact) {
+    const polyArea = pts => { let a = 0; for (let i = 0; i < pts.length; i++) { const q = pts[(i + 1) % pts.length]; a += pts[i].x * q.y - q.x * pts[i].y } return Math.abs(a) / 2 }
+    const lastSheet = resultSheets[resultSheets.length - 1]
+    const baseStat = {
+      count: resultSheets.length,
+      lastUsed: lastSheet ? lastSheet.placed.reduce((acc, p) => acc + polyArea(p.polygon), 0) : 0,
+    }
+    const exact = await packExact({
+      instances, kerf, usableX, usableY, direction,
+      deadline: Date.now() + Math.max(2500, totalBudgetMs * 0.65),
+    })
+    if (exact && exactBetter(exact.stat, baseStat)) {
+      resultSheets = exact.sheets.map((sh, si) => ({
+        index: si,
+        freeRects: [],
+        placed: gravityPolygons(sh.meta.map(({ inst, variant: v, x, y }) => {
+          const times = v.angle / 90
+          let top = inst.edgeTop, right = inst.edgeRight, bottom = inst.edgeBottom, left = inst.edgeLeft
+          for (let i = 0; i < times; i++) {
+            const nTop = left, nRight = top, nBottom = right, nLeft = bottom
+            top = nTop; right = nRight; bottom = nBottom; left = nLeft
+          }
+          return {
+            detailIndex: inst.detailIndex, label: inst.label, prefix: inst.prefix,
+            x, y, w: v.w + kerf, h: v.h + kerf,
+            origX: v.w, origY: v.h, rotated: v.angle === 90 || v.angle === 270, rotation: v.angle,
+            rotatable: inst.variants.length > 2, isSmall: inst.isSmall,
+            edgeTop: top, edgeRight: right, edgeBottom: bottom, edgeLeft: left,
+            polygon: v.polygon.map(([px, py]) => ({ x: px, y: py })),
+          }
+        }), direction, kerf),
+      }))
+    }
+  }
 
   return { sheets: resultSheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }

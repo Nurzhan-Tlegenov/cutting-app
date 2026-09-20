@@ -289,3 +289,31 @@ export function gravityPolygons(placed, direction, kerf) {
   }
   return best || placed
 }
+
+// ─── Примитивы для точной укладки (exactPack.js) ────────────────────────────
+
+export function makeEntry(poly) {
+  return { poly, bb: bboxOf(poly), rect: isAxisRect(poly), fixed: false, dx: 0, dy: 0 }
+}
+
+/** Сдвигает деталь к нулю по оси до контакта (с зазором kerf). true — если сдвинулась. */
+export function slideEntry(e, entries, axis, kerf) {
+  const t = maxSlide(e, entries, axis, kerf)
+  if (t > MOVE_EPS) { applyMove(e, axis, t); return true }
+  return false
+}
+
+/** true, если деталь не пересекает другие и держит с ними зазор >= kerf. */
+export function entryClear(e, entries, kerf) {
+  const need = kerf - 0.02
+  for (const B of entries) {
+    if (B === e) continue
+    const g = bboxGap(e.bb, B.bb)
+    if (g.lb > kerf + 1) continue
+    const d = (e.rect && B.rect) ? ((g.sx < 0 && g.sy < 0) ? -1 : g.lb) : polyDist(e.poly, B.poly)
+    if (d < need) return false
+  }
+  return true
+}
+
+export { bboxOf, orderFor }
