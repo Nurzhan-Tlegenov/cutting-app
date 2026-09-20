@@ -243,12 +243,88 @@ function absolutePoly(p, kerf) {
   return [{ x: p.x, y: p.y }, { x: p.x + w, y: p.y }, { x: p.x + w, y: p.y + h }, { x: p.x, y: p.y + h }]
 }
 
-// Пересечение двух деталей: сначала дешёвая проверка габаритов (с учётом
-// kerf), и только если габариты пересеклись — точная по полигонам.
+// Минимальный зазор между двумя полигонами (0, если пересекаются). Для
+// непересекающихся многоугольников кратчайшее расстояние достигается между
+// вершиной одного и ребром другого.
+function pointSegDist(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, l = dx * dx + dy * dy
+  let t = l ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / l : 0
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}
+function polyGap(A, B) {
+  if (polygonsOverlap(A, B)) return 0
+  let m = Infinity
+  for (let i = 0; i < A.length; i++) {
+    for (let j = 0; j < B.length; j++) {
+      const b1 = B[j], b2 = B[(j + 1) % B.length]
+      m = Math.min(m, pointSegDist(A[i], b1, b2))
+    }
+  }
+  for (let j = 0; j < B.length; j++) {
+    for (let i = 0; i < A.length; i++) {
+      const a1 = A[i], a2 = A[(i + 1) % A.length]
+      m = Math.min(m, pointSegDist(B[j], a1, a2))
+    }
+  }
+  return m
+}
+const hasShapeOf = p => Array.isArray(p.polygon) && p.polygon.length > 2
+
+// Конфликт двух деталей. Прямоугольные — пересечение (зазор на рез уже
+// заложен в размеры). Если хотя бы одна деталь фигурная (Г, П...) —
+// требуем зазор НЕ МЕНЬШЕ ширины реза по самому контуру, в том числе во
+// внутренней части (вложенные друг в друга детали).
 function piecesConflict(a, b, kerf) {
-  if (a.x >= b.x + b.w - kerf || b.x >= a.x + a.w - kerf ||
-      a.y >= b.y + b.h - kerf || b.y >= a.y + a.h - kerf) return false
-  return polygonsOverlap(absolutePoly(a, kerf), absolutePoly(b, kerf))
+  if (!hasShapeOf(a) && !hasShapeOf(b)) {
+    if (a.x >= b.x + b.w - kerf || b.x >= a.x + a.w - kerf ||
+        a.y >= b.y + b.h - kerf || b.y >= a.y + a.h - kerf) return false
+    return polygonsOverlap(absolutePoly(a, kerf), absolutePoly(b, kerf))
+  }
+  // габариты (с учётом kerf) разнесены дальше kerf — конфликта нет
+  if (a.x >= b.x + b.w || b.x >= a.x + a.w || a.y >= b.y + b.h || b.y >= a.y + a.h) return false
+  return polyGap(absolutePoly(a, kerf), absolutePoly(b, kerf)) < kerf - 0.5
+}
+
+// Магнит по контуру: фигурная деталь притягивается к соседу так, чтобы
+// зазор между контурами был ровно kerf (в т.ч. внутри Г-образной). Ищем
+// ближайшее по оси положение, где зазор равен kerf.
+function snapPolygonGap(m, sx, sy, items, idx, kerf, snap) {
+  const mShape = hasShapeOf(m)
+  const step = 4
+  for (let i = 0; i < items.length; i++) {
+    if (i === idx) continue
+    const o = items[i]
+    if (!mShape && !hasShapeOf(o)) continue
+    if (sx >= o.x + o.w + snap || o.x >= sx + m.w + snap || sy >= o.y + o.h + snap || o.y >= sy + m.h + snap) continue
+    const oPoly = absolutePoly(o, kerf)
+    const f = (px, py) => polyGap(absolutePoly({ ...m, x: px, y: py }, kerf), oPoly) - kerf
+    const f0 = f(sx, sy)
+    if (Math.abs(f0) < 0.05 || f0 > snap) continue
+    let best = null
+    for (const axis of ['x', 'y']) {
+      const g = d => axis === 'x' ? f(sx + d, sy) : f(sx, sy + d)
+      for (const dir of [1, -1]) {
+        let prev = f0, pd = 0
+        for (let d = step; d <= snap + step; d += step) {
+          const cur = g(dir * d)
+          if ((prev < 0) !== (cur < 0)) {
+            let lo = pd, hi = d, flo = prev
+            for (let it = 0; it < 9; it++) {
+              const mid = (lo + hi) / 2, fm = g(dir * mid)
+              if ((fm < 0) === (flo < 0)) { lo = mid; flo = fm } else hi = mid
+            }
+            const root = dir * hi // hi — сторона, где зазор уже ≥ kerf
+            if (Math.abs(root) <= snap && (!best || Math.abs(root) < Math.abs(best.d))) best = { axis, d: root }
+            break
+          }
+          prev = cur; pd = d
+        }
+      }
+    }
+    if (best) { if (best.axis === 'x') sx += best.d; else sy += best.d }
+  }
+  return { x: sx, y: sy }
 }
 
 // Деталь выходит за границы рабочей зоны листа
@@ -700,8 +776,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     let nx = Math.max(0, Math.min(usableX - p.w, origX + dx))
     let ny = Math.max(0, Math.min(usableY - p.h, origY + dy))
     const snapped = applyMagnet(nx, ny, p.w, p.h, idx, placedRef.current)
-    nx = Math.max(0, Math.min(usableX - p.w, snapped.x))
-    ny = Math.max(0, Math.min(usableY - p.h, snapped.y))
+    // Точный магнит по контуру для фигурных деталей: зазор ровно kerf, в том числе внутри Г-образной
+    const refined = snapPolygonGap(p, snapped.x, snapped.y, placedRef.current, idx, kerf, 50)
+    nx = Math.max(0, Math.min(usableX - p.w, refined.x))
+    ny = Math.max(0, Math.min(usableY - p.h, refined.y))
     const updated = placedRef.current.map((item, i) => i === idx ? { ...item, x: nx, y: ny } : item)
     placedRef.current = updated
     redraw(updated, idx)
