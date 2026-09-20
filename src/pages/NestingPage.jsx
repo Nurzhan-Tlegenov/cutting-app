@@ -95,6 +95,31 @@ function absolutePoly(p, kerf) {
   return [{ x: p.x, y: p.y }, { x: p.x + w, y: p.y }, { x: p.x + w, y: p.y + h }, { x: p.x, y: p.y + h }]
 }
 
+// Пересечение двух деталей: сначала дешёвая проверка габаритов (с учётом
+// kerf), и только если габариты пересеклись — точная по полигонам.
+function piecesConflict(a, b, kerf) {
+  if (a.x >= b.x + b.w - kerf || b.x >= a.x + a.w - kerf ||
+      a.y >= b.y + b.h - kerf || b.y >= a.y + a.h - kerf) return false
+  return polygonsOverlap(absolutePoly(a, kerf), absolutePoly(b, kerf))
+}
+
+// Деталь выходит за границы рабочей зоны листа
+function outOfSheet(p, usableX, usableY) {
+  return p.x < -0.5 || p.y < -0.5 || p.x + p.w > usableX + 0.5 || p.y + p.h > usableY + 0.5
+}
+
+// Индексы деталей, которые пересекаются с другой деталью или вылезли за лист
+function conflictSet(items, kerf, usableX, usableY) {
+  const bad = new Set()
+  for (let i = 0; i < items.length; i++) {
+    if (outOfSheet(items[i], usableX, usableY)) bad.add(i)
+    for (let j = i + 1; j < items.length; j++) {
+      if (piecesConflict(items[i], items[j], kerf)) { bad.add(i); bad.add(j) }
+    }
+  }
+  return bad
+}
+
 function rectsOverlap(a, b) {
   return a.x < b.x + b.w - 1 && a.x + a.w - 1 > b.x &&
          a.y < b.y + b.h - 1 && a.y + a.h - 1 > b.y
@@ -200,6 +225,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     // нарисованная позже, может закрасить своей заливкой подпись соседней,
     // нарисованной раньше — раньше это было незаметно, пока детали не
     // начали по-настоящему стыковаться вплотную.
+    const conflicts = conflictSet(items, kerf, usableX, usableY)
     items.forEach((p, i) => {
       // p.x,p.w = X-координаты; p.y,p.h = Y-координаты
       const x = rx + toC(p.x), y = ry + toC(p.y)
@@ -208,8 +234,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
       // Проверяем коллизии (по полигону, если есть — bbox слишком грубый для
       // true-shape деталей, уложенных вплотную в паз соседней)
-      const hasCollision = isDragging && items.some((o, j) => j !== i &&
-        polygonsOverlap(absolutePoly(p, kerf), absolutePoly(o, kerf)))
+      const hasCollision = conflicts.has(i)
 
       // Деталь — если есть реальный контур (true-shape нестинг для фрезера),
       // рисуем именно его; иначе — прямоугольник, как раньше
@@ -340,24 +365,31 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     return -1
   }
 
+  // Магнит: деталь притягивается к соседям и краям. Размеры p.w/p.h уже
+  // включают ширину реза (kerf), поэтому стык "o.x + o.w" даёт зазор ровно
+  // в kerf между видимыми контурами. Берём БЛИЖАЙШУЮ точку притяжения по
+  // каждой оси, а к соседям притягиваемся только если они рядом по
+  // перпендикулярной оси (иначе деталь "прилипала" к далёким).
   function applyMagnet(nx, ny, pw, ph, idx, items) {
     const SNAP = 50
-    let sx = nx, sy = ny
+    const pick = (val, cands) => {
+      let best = val, bestD = SNAP
+      for (const c of cands) {
+        const d = Math.abs(val - c)
+        if (d < bestD) { bestD = d; best = c }
+      }
+      return best
+    }
+    const cx = [0, usableX - pw], cy = [0, usableY - ph]
     for (let i = 0; i < items.length; i++) {
       if (i === idx) continue
       const o = items[i]
-      if (Math.abs(sx - (o.x + o.w)) < SNAP) sx = o.x + o.w
-      if (Math.abs(sx - (o.x - pw)) < SNAP) sx = o.x - pw
-      if (Math.abs(sx - o.x) < SNAP) sx = o.x
-      if (Math.abs(sy - (o.y + o.h)) < SNAP) sy = o.y + o.h
-      if (Math.abs(sy - (o.y - ph)) < SNAP) sy = o.y - ph
-      if (Math.abs(sy - o.y) < SNAP) sy = o.y
+      const nearY = ny < o.y + o.h + SNAP && ny + ph > o.y - SNAP
+      const nearX = nx < o.x + o.w + SNAP && nx + pw > o.x - SNAP
+      if (nearY) cx.push(o.x + o.w, o.x - pw, o.x, o.x + o.w - pw)
+      if (nearX) cy.push(o.y + o.h, o.y - ph, o.y, o.y + o.h - ph)
     }
-    if (Math.abs(sx) < SNAP) sx = 0
-    if (Math.abs(sy) < SNAP) sy = 0
-    if (Math.abs(sx + pw - usableX) < SNAP) sx = usableX - pw
-    if (Math.abs(sy + ph - usableY) < SNAP) sy = usableY - ph
-    return { x: sx, y: sy }
+    return { x: pick(nx, cx), y: pick(ny, cy) }
   }
 
   function clearLongPress() {
@@ -392,7 +424,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     }
     e.preventDefault()
     const p = placedRef.current[idx]
-    draggingRef.current = { idx, startX: x, startY: y, origX: p.x, origY: p.y }
+    const wasConflict = conflictSet(placedRef.current, kerf, usableX, usableY).has(idx)
+    draggingRef.current = { idx, startX: x, startY: y, origX: p.x, origY: p.y, wasConflict }
   }
 
   function onPointerMove(e) {
@@ -437,19 +470,13 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           edgeTop: edges.top, edgeRight: edges.right, edgeBottom: edges.bottom, edgeLeft: edges.left,
           polygon: Array.isArray(p.polygon) ? p.polygon.map(pt => rotatePointTimes(pt.x, pt.y, p.origX, p.origY, 1)) : p.polygon,
         }
-        if (rotated.x + rotated.w <= usableX && rotated.y + rotated.h <= usableY) {
-          const rotatedPoly = absolutePoly(rotated, kerf)
-          const collides = placedRef.current.some((o, j) => j !== drag.idx &&
-            polygonsOverlap(rotatedPoly, absolutePoly(o, kerf)))
-          if (!collides) {
-            const updated = placedRef.current.map((item, i) => i === drag.idx ? rotated : item)
-            placedRef.current = updated
-            redraw(updated)
-            if (onMove) onMove(sheet.index, flipY(updated))
-          } else {
-            redraw(placedRef.current) // ничего не меняли — просто перерисуем, чтобы явно не "зависало" визуально
-          }
-        }
+        // Поворот разрешён всегда. Если после поворота деталь пересекается
+        // с соседями или выходит за лист — она подсветится красным, и
+        // пользователь сам сдвинет её.
+        const updated = placedRef.current.map((item, i) => i === drag.idx ? rotated : item)
+        placedRef.current = updated
+        redraw(updated)
+        if (onMove) onMove(sheet.index, flipY(updated))
         draggingRef.current = null
         return
       }
@@ -459,9 +486,12 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     // по прямоугольнику — см. причину выше)
     const p = placedRef.current[drag.idx]
     const hasCollision = placedRef.current.some((o, j) => j !== drag.idx &&
-      polygonsOverlap(absolutePoly(p, kerf), absolutePoly(o, kerf)))
+      piecesConflict(p, o, kerf))
 
-    if (hasCollision) {
+    // Возвращаем на место только если до перетаскивания деталь стояла
+    // корректно. Если она уже была "в красном" (после поворота) — оставляем
+    // где отпустили, красная подсветка покажет, что конфликт остался.
+    if (hasCollision && !drag.wasConflict) {
       const restored = placedRef.current.map((item, i) => i === drag.idx ? { ...item, x: drag.origX, y: drag.origY } : item)
       placedRef.current = restored
       redraw(restored)
