@@ -232,8 +232,14 @@ function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false
     const topRow = Math.min(sheet.rows - 1, Math.ceil(Math.max(sheet.envY, c.entry.bb.maxY) / CELL))
     const trapped = trappedArea(sheet, polyCells(c.entry.poly, sheet.cols, sheet.rows), topRow)
     const cost = c.env + TRAPPED_WEIGHT * trapped + (c.entry.bb.minX + c.entry.bb.minY) * 1e-3
+    c.cost = cost
     if (cost < bestCost) { bestCost = cost; best = c }
   }
+  // Почти равноценные варианты (разница < 0,3%, например поворот детали-пары
+  // на 0° или 90° в пустом углу) выбираем случайно: так разные попытки поиска
+  // порядка приходят к разным раскладкам, а не к одной и той же.
+  const near = shortlist.filter(c => c.cost != null && c.cost <= bestCost * 1.003)
+  if (near.length > 1) best = near[Math.floor(Math.random() * near.length)]
   return best
 }
 
@@ -248,7 +254,7 @@ async function packOrder(order, usableX, usableY, kerf, direction, deadline) {
     let placed = false
     for (const sheet of sheets) {
       if (usableX * usableY - sheet.used < inst.polyArea) continue // по площади заведомо не влезает
-      const key = sheet.uid + ':' + sheet.ver + ':' + inst.detailIndex
+      const key = sheet.uid + ':' + sheet.ver + ':' + (inst.kind ?? inst.detailIndex)
       if (noFit.has(key)) continue
       const r = tryInsert(sheet, inst, usableX, usableY, kerf, direction)
       if (r) { commit(sheet, inst, r); placed = true; break }
@@ -275,10 +281,11 @@ function newSheet(usableX, usableY) {
 function commit(sheet, inst, r) {
   for (const i of polyCells(r.entry.poly, sheet.cols, sheet.rows)) sheet.grid[i] = 1
   sheet.entries.push(r.entry)
-  sheet.meta.push({ inst, variant: r.variant, x: r.tx, y: r.ty, area: polyArea(r.variant.polygon) })
+  const matArea = r.variant.matArea ?? polyArea(r.variant.polygon)
+  sheet.meta.push({ inst, variant: r.variant, x: r.tx, y: r.ty, area: matArea })
   sheet.envX = Math.max(sheet.envX, r.entry.bb.maxX)
   sheet.envY = Math.max(sheet.envY, r.entry.bb.maxY)
-  sheet.used += polyArea(r.variant.polygon)
+  sheet.used += matArea
   sheet.ver++
 }
 
@@ -387,7 +394,7 @@ async function fillSheet(sheet, pool, ctx, deadline) {
     const seenKinds = new Set()
     const pick = pool.map(inst => ({ inst, w: inst.polyArea * (0.4 + Math.random()) }))
       .sort((a, b) => b.w - a.w)
-      .filter(o => { if (seenKinds.has(o.inst.detailIndex)) return false; seenKinds.add(o.inst.detailIndex); return true })
+      .filter(o => { const kd = o.inst.kind ?? o.inst.detailIndex; if (seenKinds.has(kd)) return false; seenKinds.add(kd); return true })
       .slice(0, 4).map(o => o.inst)
     const pickSet = new Set(pick)
     const cand = removed.concat(pick)
@@ -462,7 +469,7 @@ async function sweepForward(sheets, ctx, deadline) {
         const removeIdx = new Set()
         for (let k = 0; k < from.meta.length; k++) {
           const inst = from.meta[k].inst
-          const key = i + ':' + ver[i] + ':' + inst.detailIndex
+          const key = i + ':' + ver[i] + ':' + (inst.kind ?? inst.detailIndex)
           if (tried.has(key)) continue
           if (Date.now() > deadline) break
           if (usableX * usableY - result[i].used < inst.polyArea) { tried.add(key); continue }
@@ -519,6 +526,95 @@ async function polishLast(sheet, ctx, deadline) {
   return best
 }
 
+// ─── Парные детали ────────────────────────────────────────────────────────
+// Две одинаковые вогнутые детали (Г, Т, ступенька) часто вкладываются друг в
+// друга в идеальный прямоугольник: у Г-образных деталей с равными плечами
+// пара даёт ровно прямоугольник. Но с резом kerf это вложение НЕ получается
+// «пошаговой» укладкой у нуля листа: плечо и вырез одной ширины, и зазор реза
+// требует, чтобы первая деталь стояла чуть выше пола (на kerf). Поэтому пара
+// собирается ОТДЕЛЬНО — первая деталь смещена на kerf от угла, вторая
+// заезжает в её вырез — и дальше укладывается как единый прямоугольник.
+// Парой считаем только почти идеальное вложение (заполнение ≥ 97% габарита):
+// иначе пустоты внутри пары не смогут занять другие детали.
+const PAIR_MIN_DENSITY = 0.97
+
+function buildPair(inst, kerf, usableX, usableY) {
+  const A = inst.variants[0]
+  const areaA = polyArea(A.polygon)
+  const sheet = newSheet(usableX, usableY)
+  const spA = simplified(A)
+  const eA = makeEntry(spA.poly.map(p => [p[0] + kerf, p[1] + kerf]), spA.pad)
+  commit(sheet, inst, { entry: eA, variant: A, tx: kerf, ty: kerf })
+  const r = tryInsert(sheet, inst, usableX, usableY, kerf, 'auto', true)
+  if (!r) return null
+  const minX = Math.min(eA.bb.minX, r.entry.bb.minX), minY = Math.min(eA.bb.minY, r.entry.bb.minY)
+  const maxX = Math.max(eA.bb.maxX, r.entry.bb.maxX), maxY = Math.max(eA.bb.maxY, r.entry.bb.maxY)
+  const W = maxX - minX, H = maxY - minY
+  if (W > usableX + 1e-6 || H > usableY + 1e-6) return null
+  const density = (2 * areaA) / (W * H)
+  return {
+    density, W, H, matArea: 2 * areaA,
+    parts: [
+      { variant: A, ox: kerf - minX, oy: kerf - minY },
+      { variant: r.variant, ox: r.tx - minX, oy: r.ty - minY },
+    ],
+  }
+}
+
+// Заменяет пары одинаковых вогнутых деталей составными «деталями-парами».
+function tileIntoPairs(instances, kerf, usableX, usableY) {
+  const byDetail = new Map()
+  for (const inst of instances) {
+    if (!byDetail.has(inst.detailIndex)) byDetail.set(inst.detailIndex, [])
+    byDetail.get(inst.detailIndex).push(inst)
+  }
+  const out = []
+  let nextId = instances.reduce((m, i) => Math.max(m, i.id), 0) + 1
+  for (const group of byDetail.values()) {
+    const first = group[0]
+    const v0 = first.variants[0]
+    const concave = polyArea(v0.polygon) < 0.97 * v0.w * v0.h
+    const pair = (group.length >= 2 && concave && !first.isSmall) ? buildPair(first, kerf, usableX, usableY) : null
+    if (!pair || pair.density < PAIR_MIN_DENSITY) { out.push(...group); continue }
+    const rotatable = first.variants.length > 2
+    const rect = (w, h) => [[0, 0], [w, 0], [w, h], [0, h]]
+    const variants = [{ angle: 0, w: pair.W, h: pair.H, polygon: rect(pair.W, pair.H), matArea: pair.matArea }]
+    // 90° — только если у детали включено вращение (и пара так помещается)
+    if (rotatable && pair.H <= usableX && pair.W <= usableY) {
+      variants.push({ angle: 90, w: pair.H, h: pair.W, polygon: rect(pair.H, pair.W), matArea: pair.matArea })
+    }
+    const n = Math.floor(group.length / 2)
+    for (let k = 0; k < n; k++) {
+      out.push({
+        id: nextId++, detailIndex: first.detailIndex, kind: 'pair' + first.detailIndex, isComposite: true,
+        src: first, parts: pair.parts, W: pair.W, H: pair.H, matArea: pair.matArea,
+        variants, area: pair.W * pair.H, cellSize: first.cellSize, isSmall: false,
+        label: first.label, prefix: first.prefix,
+      })
+    }
+    if (group.length % 2) out.push(group[group.length - 1])
+  }
+  return out
+}
+
+/**
+ * Разворачивает размещение «детали-пары» в две настоящие детали (для
+ * обычных деталей возвращает их же). Результат: [{ inst, variant, x, y }].
+ */
+export function expandPlacement(m) {
+  const inst = m.inst
+  if (!inst.isComposite) return [m]
+  const ang = m.variant.angle // 0 или 90
+  return inst.parts.map(part => {
+    let pts = part.variant.polygon.map(([px, py]) => [px + part.ox, py + part.oy])
+    if (ang === 90) pts = pts.map(([x, y]) => [y, inst.W - x])
+    const bb = bboxOf(pts)
+    const v = inst.src.variants.find(vv => vv.angle === (part.variant.angle + ang) % 360)
+    const vb = bboxOf(v.polygon)
+    return { inst: inst.src, variant: v, x: m.x + bb.minX - vb.minX, y: m.y + bb.minY - vb.minY }
+  })
+}
+
 /**
  * Возвращает { sheets, stat } или null, если не успели уложить все детали.
  * sheets[i].meta[k] = { inst, variant, x, y } (x,y — сдвиг локального контура).
@@ -527,7 +623,8 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
   const t0 = Date.now()
   const T = Math.max(1, deadline - t0)
   const searchDeadline = t0 + T * 0.3 // остальное — «дожим» листов
-  instances.forEach(i => { i.polyArea = polyArea(i.variants[0].polygon) })
+  instances = tileIntoPairs(instances, kerf, usableX, usableY)
+  instances.forEach(i => { i.polyArea = i.matArea ?? polyArea(i.variants[0].polygon) })
   // «Плотность» детали = площадь контура / площадь габарита. Сплошные
   // прямоугольники укладываются почти без потерь, вогнутые (Г, Т, дуги) —
   // всегда оставляют пустоты. Чтобы ПЕРВЫЕ листы были забиты максимально,

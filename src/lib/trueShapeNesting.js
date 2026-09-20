@@ -48,7 +48,7 @@
  *     габаритов детали, не от её точного контура.
  */
 import { gravityPolygons } from './gravity'
-import { packExact, exactBetter } from './exactPack'
+import { packExact, exactBetter, expandPlacement } from './exactPack'
 
 
 const MIN_CELL_MM = 4
@@ -1048,7 +1048,7 @@ export async function packTrueShape({
       resultSheets = exact.sheets.map((sh, si) => ({
         index: si,
         freeRects: [],
-        placed: gravityPolygons(sh.meta.map(({ inst, variant: v, x, y }) => {
+        placed: gravityPolygons(sh.meta.flatMap(expandPlacement).map(({ inst, variant: v, x, y }) => {
           const times = v.angle / 90
           let top = inst.edgeTop, right = inst.edgeRight, bottom = inst.edgeBottom, left = inst.edgeLeft
           for (let i = 0; i < times; i++) {
