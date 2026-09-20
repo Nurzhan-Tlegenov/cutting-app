@@ -29,6 +29,9 @@ const PART_PALETTE = [
 const EDGE_COLOR = '#185FA5'
 const EDGE_GAP = 3                 // отступ линии кромки от контура детали, px
 const LONG_PRESS_MS = 550
+// Удержание пальца на детали, после которого её можно двигать (короткое
+// касание/скольжение деталь не двигает; двойной тап — поворот)
+const DRAG_HOLD_MS = 350
 
 // ─── Проверка пересечения двух полигонов (для true-shape деталей) — обычная
 // bbox-проверка слишком грубая: деталь, аккуратно уложенная в паз соседней,
@@ -104,15 +107,19 @@ function piecesConflict(a, b, kerf) {
 }
 
 // Деталь выходит за границы рабочей зоны листа
-function outOfSheet(p, usableX, usableY) {
-  return p.x < -0.5 || p.y < -0.5 || p.x + p.w > usableX + 0.5 || p.y + p.h > usableY + 0.5
+// (p.w/p.h включают kerf, а реально видимая деталь на kerf меньше — как и в
+// отрисовке; автораскрой ставит детали именно так, поэтому проверяем по
+// видимому размеру, иначе "правильная" укладка окажется красной)
+function outOfSheet(p, usableX, usableY, kerf) {
+  return p.x < -0.5 || p.y < -0.5 ||
+    p.x + p.w - kerf > usableX + 0.5 || p.y + p.h - kerf > usableY + 0.5
 }
 
 // Индексы деталей, которые пересекаются с другой деталью или вылезли за лист
 function conflictSet(items, kerf, usableX, usableY) {
   const bad = new Set()
   for (let i = 0; i < items.length; i++) {
-    if (outOfSheet(items[i], usableX, usableY)) bad.add(i)
+    if (outOfSheet(items[i], usableX, usableY, kerf)) bad.add(i)
     for (let j = i + 1; j < items.length; j++) {
       if (piecesConflict(items[i], items[j], kerf)) { bad.add(i); bad.add(j) }
     }
@@ -140,6 +147,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   const flipRects = list => (list || []).map(o => ({ ...o, y: usableY - o.y - o.h }))
   const placedRef = useRef(sheet.placed)
   const lastTap = useRef({ idx: -1, time: 0 })
+  const lastTouchRef = useRef(0) // время последнего touch-события: браузер после касания шлёт ещё и эмулированные mouse-события
   const longPressRef = useRef(null)
 
   useEffect(() => {
@@ -425,7 +433,18 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     e.preventDefault()
     const p = placedRef.current[idx]
     const wasConflict = conflictSet(placedRef.current, kerf, usableX, usableY).has(idx)
-    draggingRef.current = { idx, startX: x, startY: y, origX: p.x, origY: p.y, wasConflict }
+    const drag = { idx, startX: x, startY: y, origX: p.x, origY: p.y, wasConflict, active: false, moved: false, startTime: Date.now() }
+    draggingRef.current = drag
+    // Двигать деталь можно только после удержания пальца на ней
+    clearLongPress()
+    longPressRef.current = setTimeout(() => {
+      longPressRef.current = null
+      if (draggingRef.current === drag && !drag.moved) {
+        drag.active = true
+        if (navigator.vibrate) navigator.vibrate(15)
+        redraw(placedRef.current, idx) // подсветить: деталь "взята"
+      }
+    }, DRAG_HOLD_MS)
   }
 
   function onPointerMove(e) {
@@ -435,7 +454,13 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     }
     e.preventDefault()
     const { x, y } = getPointer(e)
-    const { idx, startX, startY, origX, origY } = draggingRef.current
+    const drag0 = draggingRef.current
+    if (!drag0.active) {
+      // Ещё не удержали — палец уехал: это не перетаскивание, отменяем
+      if (Math.hypot(x - drag0.startX, y - drag0.startY) > 10) { drag0.moved = true; clearLongPress() }
+      return
+    }
+    const { idx, startX, startY, origX, origY } = drag0
     const p = placedRef.current[idx]
     const dx = fromC(x - startX), dy = fromC(y - startY)
     let nx = Math.max(0, Math.min(usableX - p.w, origX + dx))
@@ -455,7 +480,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     const { x, y } = getPointer(e)
     const dist = Math.hypot(x - drag.startX, y - drag.startY)
 
-    if (dist < 8 && interactive) {
+    if (!drag.active && !drag.moved && dist < 8 && interactive && (Date.now() - drag.startTime) < DRAG_HOLD_MS) {
       const now = Date.now()
       const isDoubleTap = lastTap.current.idx === drag.idx && (now - lastTap.current.time) < 400
       lastTap.current = { idx: drag.idx, time: now }
@@ -480,6 +505,13 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         draggingRef.current = null
         return
       }
+    }
+
+    // Это было касание/скольжение без удержания — деталь не двигаем
+    if (!drag.active) {
+      draggingRef.current = null
+      redraw(placedRef.current)
+      return
     }
 
     // Проверяем коллизии — если есть, возвращаем на место (по полигону, а не
@@ -512,8 +544,13 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   return (
     <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
       style={{ width: canvasW, height: canvasH, maxWidth: '100%', borderRadius: 8, display: 'block', touchAction: interactive ? 'none' : 'auto' }}
-      onMouseDown={onPointerDown} onMouseMove={onPointerMove} onMouseUp={onPointerUp}
-      onTouchStart={onPointerDown} onTouchMove={onPointerMove} onTouchEnd={onPointerUp}
+      onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
+      onMouseMove={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerMove(e) }}
+      onMouseUp={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerUp(e) }}
+      onTouchStart={e => { lastTouchRef.current = Date.now(); onPointerDown(e) }}
+      onTouchMove={e => { lastTouchRef.current = Date.now(); onPointerMove(e) }}
+      onTouchEnd={e => { lastTouchRef.current = Date.now(); onPointerUp(e) }}
+      onTouchCancel={() => { clearLongPress(); draggingRef.current = null }}
     />
   )
 }
