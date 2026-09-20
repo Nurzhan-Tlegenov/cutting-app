@@ -114,6 +114,40 @@ function trappedArea(sheet, extraCells, topRow) {
   return free * CELL * CELL
 }
 
+// Самый большой свободный прямоугольник на растре листа (площадь, мм²) —
+// это и есть «деловой обрезок»: чем он больше, тем лучше. Классический
+// алгоритм по гистограммам за один проход.
+function largestFreeRect(grid, cols, rows) {
+  const h = new Int32Array(cols)
+  let best = 0
+  const stack = []
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) h[c] = grid[r * cols + c] ? 0 : h[c] + 1
+    stack.length = 0
+    for (let c = 0; c <= cols; c++) {
+      const cur = c === cols ? 0 : h[c]
+      let start = c
+      while (stack.length && stack[stack.length - 1][1] >= cur) {
+        const [sc, sh] = stack.pop()
+        const area = sh * (c - sc)
+        if (area > best) best = area
+        start = sc
+      }
+      stack.push([start, cur])
+    }
+  }
+  return best * CELL * CELL
+}
+function sheetOffcut(sheet) { return largestFreeRect(sheet.grid, sheet.cols, sheet.rows) }
+
+/** Обрезок для листа, заданного контурами [[x,y],...] (для сравнения с растровым результатом). */
+export function offcutOfPolys(polys, usableX, usableY) {
+  const cols = Math.max(1, Math.ceil(usableX / CELL)), rows = Math.max(1, Math.ceil(usableY / CELL))
+  const grid = new Uint8Array(cols * rows)
+  for (const poly of polys) for (const c of polyCells(poly, cols, rows)) grid[c] = 1
+  return largestFreeRect(grid, cols, rows)
+}
+
 function candidateXs(sheet, bw, usableX, kerf, step = GRID_STEP, bucket = BUCKET) {
   const maxX = usableX - bw
   const set = new Set()
@@ -263,12 +297,16 @@ function stat(sheets) {
     used: sheets.map(sh => sh.used),
     lastUsed: last ? last.used : 0,
     lastEnv: last ? last.envX * last.envY : 0,
+    offcut: last ? sheetOffcut(last) : 0,
   }
 }
-// Лучше — меньше листов. При равном числе листов — «фронтальная загрузка»:
-// первый лист заполнен больше, при равенстве — второй и т.д. (лексикографически
-// по занятой площади). Так лист набивается до предела, прежде чем начинается
-// следующий, а остаток — один крупный обрезок на последнем листе.
+// Порядок критериев:
+//   1) меньше листов;
+//   2) «фронтальная загрузка»: первый лист заполнен больше, при равенстве —
+//      второй и т.д. (лексикографически по занятой площади);
+//   3) при равной загрузке — БОЛЬШЕ деловой обрезок (наибольший свободный
+//      прямоугольник на последнем листе);
+//   4) при равном обрезке — меньше занятый габарит последнего листа.
 export function exactBetter(a, b) {
   if (!b) return true
   if (a.count !== b.count) return a.count < b.count
@@ -277,10 +315,11 @@ export function exactBetter(a, b) {
       const tol = Math.max(1, b.used[i] * 1e-4)
       if (Math.abs(a.used[i] - b.used[i]) > tol) return a.used[i] > b.used[i]
     }
-    return true
+  } else {
+    const tol = Math.max(1, b.lastUsed * 1e-4)
+    if (Math.abs(a.lastUsed - b.lastUsed) > tol) return a.lastUsed < b.lastUsed
   }
-  const tol = Math.max(1, b.lastUsed * 1e-4)
-  if (Math.abs(a.lastUsed - b.lastUsed) > tol) return a.lastUsed < b.lastUsed
+  if (a.offcut != null && b.offcut != null && Math.abs(a.offcut - b.offcut) > CELL * CELL) return a.offcut > b.offcut
   return a.lastEnv <= b.lastEnv + 1
 }
 
@@ -370,7 +409,7 @@ async function fillSheet(sheet, pool, ctx, deadline) {
     const failed = []
     for (const inst of cand) {
       if (Date.now() > deadline || usableX * usableY - trial.used < inst.polyArea) { failed.push(inst); continue }
-      const r = tryInsert(trial, inst, usableX, usableY, kerf, direction)
+      const r = tryInsert(trial, inst, usableX, usableY, kerf, direction, Math.random() < 0.3)
       if (r) commit(trial, inst, r); else failed.push(inst)
     }
     if (trial.used >= sheet.used - 1e-6) { sheet = trial; pool = pool.filter(x => !pickSet.has(x)).concat(failed) }
@@ -452,13 +491,59 @@ async function sweepForward(sheets, ctx, deadline) {
   return result
 }
 
+// Оптимизация обрезка: у последнего листа убираем несколько деталей (чаще —
+// самых дальних от нуля, они и «съедают» обрезок) и укладываем заново; если
+// все встали и свободный прямоугольник вырос (или не уменьшился при меньшем
+// габарите) — перестановка принимается. Материала не добавляем и не убираем.
+async function polishLast(sheet, ctx, deadline) {
+  const { usableX, usableY, kerf, direction } = ctx
+  const score = sh => ({ off: sheetOffcut(sh), env: sh.envX * sh.envY })
+  const better = (a, b) => (Math.abs(a.off - b.off) > CELL * CELL ? a.off > b.off : a.env <= b.env)
+  let cur = sheet, curS = score(cur)
+  let best = cur, bestS = curS
+  let iter = 0
+  while (Date.now() < deadline && cur.entries.length > 1) {
+    iter++
+    const n = cur.entries.length
+    const k = Math.min(n, 1 + Math.floor(Math.random() * 4))
+    const ranked = cur.entries.map((e, i) => ({ i, d: e.bb.maxX + e.bb.maxY + Math.random() * 400 })).sort((a, b) => b.d - a.d)
+    const seed = cur.entries[ranked[Math.floor(Math.random() * Math.min(4, n))].i]
+    const cx = (seed.bb.minX + seed.bb.maxX) / 2, cy = (seed.bb.minY + seed.bb.maxY) / 2
+    const idxs = cur.entries.map((e, i) => ({ i, d: Math.hypot((e.bb.minX + e.bb.maxX) / 2 - cx, (e.bb.minY + e.bb.maxY) / 2 - cy) }))
+      .sort((a, b) => a.d - b.d).slice(0, k).map(o => o.i)
+    const removed = idxs.map(i => cur.meta[i].inst)
+      .map(inst => ({ inst, w: inst.polyArea * (0.6 + 0.8 * Math.random()) })).sort((a, b) => b.w - a.w).map(o => o.inst)
+    const trial = sheetWithout(cur, new Set(idxs), usableX, usableY)
+    let ok = true
+    for (const inst of removed) {
+      const r = tryInsert(trial, inst, usableX, usableY, kerf, direction)
+      if (!r) { ok = false; break }
+      commit(trial, inst, r)
+    }
+    if (ok) {
+      const sc = score(trial)
+      if (better(sc, curS)) {
+        cur = trial; curS = sc
+        if (Math.abs(sc.off - bestS.off) > 1 ? sc.off > bestS.off : sc.env < bestS.env) { best = trial; bestS = sc }
+      }
+    }
+    if (iter % 2 === 0) await new Promise(res => setTimeout(res, 0))
+  }
+  return best
+}
+
 /**
  * Возвращает { sheets, stat } или null, если не успели уложить все детали.
  * sheets[i].meta[k] = { inst, variant, x, y } (x,y — сдвиг локального контура).
  */
 export async function packExact({ instances, kerf, usableX, usableY, direction, deadline }) {
   const t0 = Date.now()
-  const searchDeadline = t0 + (deadline - t0) * 0.3 // остальное — «дожим» листов
+  const T = Math.max(1, deadline - t0)
+  // Фазы: поиск порядка → дожим листов → сверка → оптимизация обрезка (до
+  // конца таймера). Поиск НЕ останавливается, если всё уместилось на один
+  // лист: тогда задача — максимальный деловой обрезок, и поиску отдаётся
+  // больше времени.
+  const searchDeadline = () => t0 + T * (bestStat && bestStat.count === 1 ? 0.5 : 0.25)
   instances.forEach(i => { i.polyArea = polyArea(i.variants[0].polygon) })
   // «Плотность» детали = площадь контура / площадь габарита. Сплошные
   // прямоугольники укладываются почти без потерь, вогнутые (Г, Т, дуги) —
@@ -492,11 +577,10 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
   // укладки нет вовсе, поэтому им отводится весь бюджет, а не его половина.
   for (const o of orders) { if (Date.now() < deadline) await consider(o, deadline) }
   let guard = 0
-  // Всё уложено на один лист — лучше уже некуда, дальше искать незачем.
-  while (Date.now() < searchDeadline && bestOrder && instances.length > 1 && guard++ < 500 && bestStat.count > 1) {
+  while (Date.now() < searchDeadline() && bestOrder && instances.length > 1 && guard++ < 1000) {
     const r = Math.random()
     const base = (frontOrder && Math.random() < 0.3) ? frontOrder : bestOrder
-    await consider(r < 0.1 ? shuffle(instances.slice()) : r < 0.6 ? promote(base, laterIds) : perturb(base), searchDeadline)
+    await consider(r < 0.1 ? shuffle(instances.slice()) : r < 0.6 ? promote(base, laterIds) : perturb(base), searchDeadline())
   }
   if (!best) return null
   // Дожим: каждый лист по очереди набивается до предела перестановкой соседей
@@ -507,17 +591,27 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
     const copy = sheets => sheets.map(sh => sheetWithout(sh, new Set(), usableX, usableY))
     const list = [best]
     if (front && front !== best && frontStat.count <= bestStat.count + 1 && frontStat.used[0] > bestStat.used[0] + usableX * usableY * 0.03) list.push(front)
-    const improveEnd = deadline - (deadline - t0) * 0.15 // последние 15% времени — итоговая проверка
+    const improveEnd = t0 + T * 0.82 // дальше — сверка (sweepForward) и оптимизация обрезка
     const tStart = Date.now()
     let winner = { sheets: best, st: bestStat }
     for (let ci = 0; ci < list.length; ci++) {
       const share = tStart + (improveEnd - tStart) * (ci + 1) / list.length
       let improved = await improveSheets(copy(list[ci]), ctx, share)
-      improved = await sweepForward(improved, ctx, Math.min(deadline, share + (deadline - improveEnd) / list.length))
+      improved = await sweepForward(improved, ctx, Math.min(deadline, share + T * 0.08 / list.length))
       const st = stat(improved)
       if (exactBetter(st, winner.st)) winner = { sheets: improved, st }
     }
     best = winner.sheets; bestStat = winner.st
+  }
+  // Оптимизация обрезка на последнем листе — до конца таймера.
+  if (Date.now() < deadline) {
+    const ctx = { usableX, usableY, kerf, direction }
+    const lastIdx = best.length - 1
+    const start = sheetWithout(best[lastIdx], new Set(), usableX, usableY)
+    const polished = await polishLast(start, ctx, deadline)
+    const cand = best.slice(0, lastIdx).concat([polished])
+    const st = stat(cand)
+    if (exactBetter(st, bestStat)) { best = cand; bestStat = st }
   }
   return { sheets: best, stat: bestStat }
 }
