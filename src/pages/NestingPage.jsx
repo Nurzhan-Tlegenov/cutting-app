@@ -102,13 +102,23 @@ function rectsOverlap(a, b) {
 function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
+  // СИСТЕМА КООРДИНАТ. Во ВСЕХ данных раскроя (placed, freeRects, ручные
+  // обрезки, DXF) Y отсчитывается ВВЕРХ от низа рабочей зоны — как в DXF/CAD.
+  // Контур polygon (Y вверх, как в редакторе) кладётся в ту же ось без
+  // переворота: именно так true-shape укладка проверяла пересечения и
+  // вложение деталей друг в друга. Канвас рисует «сверху вниз», поэтому внутри
+  // SheetCanvas все координаты по Y переводятся в экранные (от верха) на входе
+  // и обратно на выходе (onMove / onManualOffcuts). Сохранённые данные при этом
+  // не меняются. Преобразование — инволюция: применённое дважды даёт исходное.
+  const flipY = list => list.map(p => ({ ...p, y: usableY - p.y - (p.h - kerf) }))
+  const flipRects = list => (list || []).map(o => ({ ...o, y: usableY - o.y - o.h }))
   const placedRef = useRef(sheet.placed)
   const lastTap = useRef({ idx: -1, time: 0 })
   const longPressRef = useRef(null)
 
   useEffect(() => {
-    placedRef.current = sheet.placed
-    redraw(sheet.placed)
+    placedRef.current = flipY(sheet.placed)
+    redraw(placedRef.current)
   }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts])
 
   const PADDING = 8
@@ -143,7 +153,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
     // Обрезки — автоматически посчитанные (свободные прямоугольники раскроя)
     if (showOffcuts && offcutMode === 'auto' && sheet.freeRects) {
-      const offcuts = computeOffcuts(sheet, usableX, usableY)
+      const offcuts = flipRects(computeOffcuts(sheet, usableX, usableY))
       offcuts.forEach(o => {
         const ox = rx + toC(o.x), oy = ry + toC(o.y)
         const ow = toC(o.w), oh = toC(o.h)
@@ -167,7 +177,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     // Обрезки, выбранные вручную (удержанием пальца) — деловые обрезки,
     // можно выбрать несколько; повторное удержание на уже выбранном — снимает его
     if (showOffcuts && offcutMode === 'manual' && manualOffcuts && manualOffcuts.length) {
-      manualOffcuts.forEach(o => {
+      flipRects(manualOffcuts).forEach(o => {
         const ox = rx + toC(o.x), oy = ry + toC(o.y)
         const ow = toC(o.w), oh = toC(o.h)
         ctx.fillStyle = 'rgba(230,126,34,0.14)'
@@ -297,7 +307,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       ctx.fillStyle = 'rgba(0,0,0,0.4)'
       ctx.font = `${Math.max(6, Math.min(8, w / 9))}px sans-serif`
       if (h > 26) ctx.fillText(`${Math.round(p.origY)}×${Math.round(p.origX)}`, lx, ly + 6)
-      if (h > 40) ctx.fillText(`(${Math.round(p.x)}, ${Math.round(p.y)})`, lx, ly + 16)
+      if (h > 40) ctx.fillText(`(${Math.round(p.x)}, ${Math.round(usableY - p.y - (p.h - kerf))})`, lx, ly + 16)
     })
 
     // Рамка: X=sheetW(горизонталь), Y=sheetL(вертикаль)
@@ -367,13 +377,13 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         longPressRef.current = setTimeout(() => {
           const mx = fromC(x - (PADDING + toC(marginL)))
           const my = fromC(y - (PADDING + toC(marginT)))
-          const list = manualOffcuts || []
-          const hitIdx = list.findIndex(o => mx >= o.x && mx <= o.x + o.w && my >= o.y && my <= o.y + o.h)
+          const list = manualOffcuts || []            // хранится в системе «Y от низа»
+          const hitIdx = flipRects(list).findIndex(o => mx >= o.x && mx <= o.x + o.w && my >= o.y && my <= o.y + o.h)
           if (hitIdx !== -1) {
             onManualOffcuts(sheet.index, list.filter((_, i) => i !== hitIdx))
           } else {
             const rect = computeOffcutAtPoint(mx, my, placedRef.current, usableX, usableY)
-            if (rect) onManualOffcuts(sheet.index, [...list, rect])
+            if (rect) onManualOffcuts(sheet.index, [...list, flipRects([rect])[0]])
           }
         }, LONG_PRESS_MS)
       }
@@ -434,7 +444,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
             const updated = placedRef.current.map((item, i) => i === drag.idx ? rotated : item)
             placedRef.current = updated
             redraw(updated)
-            if (onMove) onMove(sheet.index, updated)
+            if (onMove) onMove(sheet.index, flipY(updated))
           } else {
             redraw(placedRef.current) // ничего не меняли — просто перерисуем, чтобы явно не "зависало" визуально
           }
@@ -454,10 +464,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       const restored = placedRef.current.map((item, i) => i === drag.idx ? { ...item, x: drag.origX, y: drag.origY } : item)
       placedRef.current = restored
       redraw(restored)
-      if (onMove) onMove(sheet.index, restored)
+      if (onMove) onMove(sheet.index, flipY(restored))
     } else {
       redraw(placedRef.current)
-      if (onMove) onMove(sheet.index, placedRef.current)
+      if (onMove) onMove(sheet.index, flipY(placedRef.current))
     }
     draggingRef.current = null
   }
@@ -671,17 +681,14 @@ export default function NestingPage() {
     let entities = polygonToDxfEntity([[0, 0], [sheetW, 0], [sheetW, sheetL], [0, sheetL]], 'sheet')
     sheet.placed.forEach(p => {
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
-      // ВАЖНО: локальные точки контура (pt.y) заданы "снизу вверх" (как в
-      // редакторе контура), а p.y — это позиция детали "сверху вниз" (от
-      // верха рабочей зоны, как и на экране). На канвасе это совмещается
-      // переворотом (h - pt.y*sc в redraw) — здесь нужен ТОТ ЖЕ переворот,
-      // иначе экспорт расходится с тем, что реально показано на экране
-      // (для прямоугольных деталей ошибки не видно из-за их симметрии, для
-      // контурных Г/П-образных деталей — расхождение видно как несовпадение
-      // наложений между экраном и DXF).
+      // Система координат — как у укладки (trueShapeNesting): Y вверх от низа
+      // рабочей зоны, контур polygon кладётся БЕЗ переворота; плюс отступы
+      // листа (левый и нижний). Канвас переводит в экранные координаты сам
+      // (см. flipY в SheetCanvas), поэтому экран и DXF показывают одно и то же.
+      const ox = Number(order.margin_left) || 0, oy = Number(order.margin_bottom) || 0
       const poly = hasShape
-        ? p.polygon.map(pt => [p.x + pt.x, p.y + (p.origY - pt.y)])
-        : (() => { const w = p.w - kerf, h = p.h - kerf; return [[p.x, p.y], [p.x + w, p.y], [p.x + w, p.y + h], [p.x, p.y + h]] })()
+        ? p.polygon.map(pt => [ox + p.x + pt.x, oy + p.y + pt.y])
+        : (() => { const w = p.w - kerf, h = p.h - kerf; return [[ox + p.x, oy + p.y], [ox + p.x + w, oy + p.y], [ox + p.x + w, oy + p.y + h], [ox + p.x, oy + p.y + h]] })()
       entities += polygonToDxfEntity(poly, 'detal')
 
       // Подпись — та же логика, что и на карте (по контуру детали, не по
@@ -703,7 +710,7 @@ export default function NestingPage() {
       // Тот же переворот по Y, что и у контура выше — иначе подпись у
       // контурных деталей уедет не туда (для прямоугольных labelLY=origY/2,
       // переворот не меняет результат, поэтому там расхождения не было).
-      entities += textToDxfEntity(label, p.x + labelLX, p.y + (p.origY - labelLY), textHeight, 'Solid Edge 2D NestingPartName')
+      entities += textToDxfEntity(label, ox + p.x + labelLX, oy + p.y + labelLY, textHeight, 'Solid Edge 2D NestingPartName')
     })
     return `0\r\nSECTION\r\n2\r\nHEADER\r\n9\r\n$ACADVER\r\n1\r\nAC1009\r\n0\r\nENDSEC\r\n`
       + `0\r\nSECTION\r\n2\r\nENTITIES\r\n${entities}0\r\nENDSEC\r\n0\r\nEOF\r\n`

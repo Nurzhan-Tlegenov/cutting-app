@@ -41,7 +41,7 @@ export function buildNestingDxf(sheetsData, order) {
   const sheetW = Number(order.sheet_width) || 0
   const sheetL = Number(order.sheet_length) || 0
   const marginL = Number(order.margin_left) || 0
-  const marginT = Number(order.margin_top) || 0
+  const marginB = Number(order.margin_bottom) || 0
 
   let body = ''
   sheetsData.forEach((sheet, si) => {
@@ -58,7 +58,7 @@ export function buildNestingDxf(sheetsData, order) {
 
     sheet.placed.forEach(p => {
       const baseX = offsetX + marginL + p.x
-      const baseY = marginT + p.y
+      const baseY = marginB + p.y
       const poly = piecePolygonLocal(p)
       for (let i = 0; i < poly.length; i++) {
         const [x1, y1] = poly[i]
