@@ -490,7 +490,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
             // Уже выбранные обрезки — такая же занятая часть листа, как и
             // детали: новый обрезок формируется только из оставшегося места
             // и не режется сквозь ранее выбранный
-            const taken = flipRects(list).map(o => ({ x: o.x, y: o.y, w: o.w, h: o.h }))
+            // Вокруг ранее выбранных обрезков оставляем зазор на ширину реза (kerf)
+            const taken = flipRects(list).map(o => ({ x: o.x - kerf, y: o.y - kerf, w: o.w + 2 * kerf, h: o.h + 2 * kerf }))
             const rect = computeOffcutAtPoint(mx, my, [...placedRef.current, ...taken], usableX, usableY)
             if (rect) onManualOffcuts(sheet.index, [...list, flipRects([rect])[0]])
           }
