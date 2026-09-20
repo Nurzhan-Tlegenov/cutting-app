@@ -31,7 +31,7 @@ const EDGE_GAP = 3                 // отступ линии кромки от 
 const LONG_PRESS_MS = 550
 // Удержание пальца на детали, после которого её можно двигать (короткое
 // касание/скольжение деталь не двигает; двойной тап — поворот)
-const DRAG_HOLD_MS = 350
+const DRAG_HOLD_MS = 250
 
 // ─── Проверка пересечения двух полигонов (для true-shape деталей) — обычная
 // bbox-проверка слишком грубая: деталь, аккуратно уложенная в паз соседней,
@@ -457,7 +457,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     const drag0 = draggingRef.current
     if (!drag0.active) {
       // Ещё не удержали — палец уехал: это не перетаскивание, отменяем
-      if (Math.hypot(x - drag0.startX, y - drag0.startY) > 10) { drag0.moved = true; clearLongPress() }
+      if (Math.hypot(x - drag0.startX, y - drag0.startY) > 16) { drag0.moved = true; clearLongPress() }
       return
     }
     const { idx, startX, startY, origX, origY } = drag0
