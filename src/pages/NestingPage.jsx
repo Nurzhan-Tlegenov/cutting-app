@@ -990,117 +990,293 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   )
 }
 
+
+// ─── Конфигурации раскроя ────────────────────────────────────────────────────
+// Каждая конфигурация — свой набор настроек (укладка, время оптимизации, мелкие
+// детали) и свой результат. Считаются одновременно, каждая в своём Web Worker
+// (алгоритм один и тот же — различается только привязка укладки).
+const DIR_OPTIONS = [['auto', 'Авто'], ['along_y', 'Вдоль длины (Y)'], ['along_x', 'Вдоль ширины (X)']]
+const DIR_SHORT = { auto: 'Авто', along_y: 'Вдоль Y', along_x: 'Вдоль X' }
+
+let CFG_SEQ = 0
+function newCfg(over = {}) {
+  return {
+    id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', side: '', secs: '12',
+    open: true, status: 'idle', // idle | queued | running | done | error
+    startedAt: 0, doneAt: 0, error: '',
+    result: null, sheetsData: [], activeSheet: 0, saved: false,
+    ...over,
+  }
+}
+
+function polyAreaMm(pts) {
+  let a = 0
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length]
+    a += p.x * q.y - q.x * p.y
+  }
+  return Math.abs(a) / 2
+}
+function partAreaMm(p) {
+  return Array.isArray(p.polygon) && p.polygon.length > 2 ? polyAreaMm(p.polygon) : (p.origX || 0) * (p.origY || 0)
+}
+// Итоги для сравнения конфигураций: листов, средняя загрузка, заполнение последнего листа
+function summarize(sheets, usableX, usableY) {
+  if (!sheets?.length || !usableX || !usableY) return null
+  const areas = sheets.map(s => s.placed.reduce((a, p) => a + partAreaMm(p), 0))
+  const sheetArea = usableX * usableY
+  return {
+    count: sheets.length,
+    util: areas.reduce((a, b) => a + b, 0) / (sheets.length * sheetArea),
+    lastFill: areas[areas.length - 1] / sheetArea,
+  }
+}
+// Лучше — меньше листов; при равенстве — меньше материала на последнем листе
+// (тот же критерий «фронтальной загрузки», что и в самом алгоритме)
+function betterSummary(a, b) {
+  if (a.count !== b.count) return a.count < b.count
+  return a.lastFill < b.lastFill - 0.0005
+}
+
+// Один расчёт = один Web Worker: конфигурации считаются параллельно и не
+// блокируют интерфейс. Если воркер не поднялся (старый браузер, ограничения
+// окружения) — считаем в основном потоке, по очереди (алгоритм хранит
+// направление в состоянии модуля, поэтому одновременно в одном потоке нельзя).
+let mainThreadQueue = Promise.resolve()
+function startNestingJob(params) {
+  let worker = null
+  let rejectFn = null
+  let cancelled = false
+  const promise = new Promise((resolve, reject) => {
+    rejectFn = reject
+    const fallback = () => {
+      mainThreadQueue = mainThreadQueue.catch(() => {}).then(async () => {
+        if (cancelled) return
+        await new Promise(r => setTimeout(r, 100)) // дать интерфейсу отрисовать состояние «считаю»
+        return runNesting(params)
+      }).then(res => { if (!cancelled) resolve(res) }, err => { if (!cancelled) reject(err) })
+    }
+    try {
+      worker = new Worker(new URL('../lib/nestingWorker.js', import.meta.url), { type: 'module' })
+    } catch { fallback(); return }
+    worker.onmessage = e => {
+      worker?.terminate(); worker = null
+      if (e.data?.ok) resolve(e.data.res)
+      else reject(new Error(e.data?.error || 'ошибка расчёта'))
+    }
+    worker.onerror = () => {
+      worker?.terminate(); worker = null
+      if (!cancelled) fallback()
+    }
+    worker.postMessage({ params })
+  })
+  return {
+    promise,
+    cancel: () => { cancelled = true; worker?.terminate(); worker = null; rejectFn?.(new Error('cancelled')) },
+  }
+}
+
 export default function NestingPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
-  const [result, setResult] = useState(null)
-  const [running, setRunning] = useState(false)
-  const [nestError, setNestError] = useState('')
-  const [elapsedSec, setElapsedSec] = useState(0)
+  const [configs, setConfigs] = useState(() => [newCfg()])
+  const [focusId, setFocusId] = useState(null)   // конфигурация, по которой считается шапка со статистикой
+  const [parallel, setParallel] = useState(true) // считать конфигурации одновременно или по очереди
+  const [tick, setTick] = useState(0)
   const [showDebugExport, setShowDebugExport] = useState(false)
   const [copyStatus, setCopyStatus] = useState('')
   const [showResultExport, setShowResultExport] = useState(false)
   const [resultCopyStatus, setResultCopyStatus] = useState('')
-  const [activeSheet, setActiveSheet] = useState(0)
-  const [submitting, setSubmitting] = useState(false)
-  const [sheetsData, setSheetsData] = useState([])
-  const [nestDir, setNestDir] = useState('auto')
+  const [busyId, setBusyId] = useState(null)     // конфигурация, которая сейчас сохраняется / оформляется
   const [cuttingMethod, setCuttingMethod] = useState('nesting')
   const [showOffcuts, setShowOffcuts] = useState(false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
-  const [smallPartsToCenter, setSmallPartsToCenter] = useState(false)
-  const [smallPartsMaxSquareSideMm, setSmallPartsMaxSquareSideMm] = useState('') // мм, заполнится глобальным дефолтом заказа
-  const [smallPartsMaxSideMm, setSmallPartsMaxSideMm] = useState('')   // мм, заполнится глобальным дефолтом заказа
-  const [optimizeSeconds, setOptimizeSeconds] = useState('')          // сек, заполнится глобальным дефолтом заказа
+  const jobsRef = useRef({})     // cfgId -> { cancel }
+  const skipRef = useRef(new Set()) // конфигурации, снятые из очереди
+  const configsRef = useRef(configs)
+  configsRef.current = configs
 
   const colorMap = {}
   details.forEach((d, i) => { colorMap[i] = COLORS[i % COLORS.length] })
 
+  const anyRunning = configs.some(c => c.status === 'running' || c.status === 'queued')
+
   useEffect(() => { fetchOrder() }, [id])
+  useEffect(() => () => {
+    Object.values(jobsRef.current).forEach(j => j.cancel())
+    jobsRef.current = {}
+  }, [])
+  useEffect(() => {
+    if (!anyRunning) return
+    const t = setInterval(() => setTick(x => x + 1), 1000)
+    return () => clearInterval(t)
+  }, [anyRunning])
+
+  // Конфигурация, по которой показываем шапку (листы/площадь), экспорт для
+  // отладки и общие итоги: последняя открытая, у которой есть результат.
+  const focus = configs.find(c => c.id === focusId && c.result) || configs.find(c => c.result) || null
+  const result = focus?.result || null
+  const sheetsData = focus?.sheetsData || []
+
+  function updateCfg(cfgId, patch) {
+    setConfigs(cs => cs.map(c => c.id === cfgId ? { ...c, ...(typeof patch === 'function' ? patch(c) : patch) } : c))
+  }
 
   async function fetchOrder() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
     setOrder(o); setDetails(d || [])
     if (o) {
-      setSmallPartsToCenter(!!o.small_parts_to_center)
-      setSmallPartsMaxSquareSideMm(o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '')
-      setSmallPartsMaxSideMm(o.small_parts_max_side ? String(o.small_parts_max_side) : '')
-      setOptimizeSeconds(o.optimize_seconds != null ? String(o.optimize_seconds) : '12')
       setCuttingMethod(o.cutting_method || 'nesting')
-    }
-    if (o?.nesting_result) {
-      const saved = JSON.parse(o.nesting_result)
-      setResult(saved); setSheetsData(saved.sheets)
+      let saved = null
+      if (o.nesting_result) { try { saved = JSON.parse(o.nesting_result) } catch { saved = null } }
+      // Первая конфигурация — настройки заказа (и уже сохранённый раскрой, если он есть)
+      const first = newCfg({
+        small: !!o.small_parts_to_center,
+        sq: o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '',
+        side: o.small_parts_max_side ? String(o.small_parts_max_side) : '',
+        secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
+        ...(saved ? {
+          dir: saved.config?.dir || 'auto',
+          status: 'done', result: saved, sheetsData: saved.sheets || [],
+          startedAt: 0, doneAt: 0, saved: true,
+        } : {}),
+      })
+      setConfigs([first])
+      setFocusId(first.id)
     }
   }
 
-  async function doNesting() {
-    if (!details.length || !order) return
-    setRunning(true)
-    setNestError('')
-    setElapsedSec(0)
-    const timerId = setInterval(() => setElapsedSec(s => s + 1), 1000)
-    // Вернулись на старый растровый алгоритм по умолчанию — NFP пока хуже
-    // укладывает обычные прямоугольные детали и, что важно, не должен был
-    // вообще касаться форматно-раскроечного станка (это отдельно исправлено
-    // в nesting.js). ?nfp=1 — намеренно прогнать ЭТОТ заказ через NFP для
-    // сравнения (имеет смысл только для фрезера, не для гильотины).
-    const useNfp = new URLSearchParams(window.location.search).get('nfp') === '1'
-    setTimeout(async () => {
-      try {
-        const res = await runNesting({
-          details, direction: nestDir,
-          sheetL: order.sheet_length, sheetW: order.sheet_width,
-          marginT: order.margin_top, marginR: order.margin_right,
-          marginB: order.margin_bottom, marginL: order.margin_left,
-          kerf: order.kerf_width,
-          smallPartsToCenter,
-          smallPartsMaxSquareSide: smallPartsMaxSquareSideMm === '' ? 0 : Number(smallPartsMaxSquareSideMm),
-          smallPartsMaxSide: smallPartsMaxSideMm === '' ? 0 : Number(smallPartsMaxSideMm),
-          optimizeSeconds: optimizeSeconds === '' ? 12 : Number(optimizeSeconds),
-          cuttingMethod,
-          algo: useNfp ? 'nfp' : 'raster',
-        })
-        res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
-        setResult(res)
-        setSheetsData(res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })))
-        setActiveSheet(0)
-      } catch (err) {
-        console.error('Ошибка раскроя:', err)
-        setNestError('Не удалось выполнить раскрой: ' + (err?.message || 'неизвестная ошибка') + '. Попробуйте ещё раз или уменьшите время оптимизации.')
-      } finally {
-        setRunning(false)
-        clearInterval(timerId)
-      }
-    }, 100)
-  }
-
+  // Общие настройки заказа запоминаем по последней правке любой конфигурации
   async function saveSmallPartsSettings(patch) {
     await supabase.from('orders').update(patch).eq('id', id)
   }
 
-  async function saveNesting() {
-    if (!result) return
-    const toSave = { ...result, sheets: sheetsData }
+  function addCfg() {
+    const last = configs[configs.length - 1]
+    const used = new Set(configs.map(c => c.dir))
+    const dir = ['auto', 'along_y', 'along_x'].find(d => !used.has(d)) || last.dir
+    const cfg = newCfg({ small: last.small, sq: last.sq, side: last.side, secs: last.secs, dir })
+    setConfigs(cs => [...cs.map(c => ({ ...c, open: false })), cfg])
+  }
+
+  function removeCfg(cfgId) {
+    const job = jobsRef.current[cfgId]
+    if (job) { delete jobsRef.current[cfgId]; job.cancel() }
+    setConfigs(cs => cs.length > 1 ? cs.filter(c => c.id !== cfgId) : cs)
+  }
+
+  // Запуск одной конфигурации. Возвращает промис, который завершается, когда расчёт закончен.
+  function launch(cfg) {
+    // ?nfp=1 — прогнать ЭТОТ заказ через NFP для сравнения (только для фрезера)
+    const useNfp = new URLSearchParams(window.location.search).get('nfp') === '1'
+    const params = {
+      details, direction: cfg.dir,
+      sheetL: order.sheet_length, sheetW: order.sheet_width,
+      marginT: order.margin_top, marginR: order.margin_right,
+      marginB: order.margin_bottom, marginL: order.margin_left,
+      kerf: order.kerf_width,
+      smallPartsToCenter: cfg.small,
+      smallPartsMaxSquareSide: cfg.sq === '' ? 0 : Number(cfg.sq),
+      smallPartsMaxSide: cfg.side === '' ? 0 : Number(cfg.side),
+      optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
+      cuttingMethod,
+      algo: useNfp ? 'nfp' : 'raster',
+    }
+    updateCfg(cfg.id, { status: 'running', startedAt: Date.now(), error: '' })
+    const job = startNestingJob(params)
+    jobsRef.current[cfg.id] = job
+    return job.promise.then(res => {
+      if (jobsRef.current[cfg.id] !== job) return // остановлена или заменена
+      delete jobsRef.current[cfg.id]
+      res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
+      updateCfg(cfg.id, {
+        status: 'done', doneAt: Date.now(), result: res, saved: false, activeSheet: 0,
+        sheetsData: res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })),
+      })
+      setFocusId(f => (configsRef.current.some(c => c.id === f && c.result) ? f : cfg.id))
+    }).catch(err => {
+      if (jobsRef.current[cfg.id] !== job) return
+      delete jobsRef.current[cfg.id]
+      console.error('Ошибка раскроя:', err)
+      updateCfg(cfg.id, {
+        status: 'error', doneAt: Date.now(),
+        error: 'Не удалось выполнить раскрой: ' + (err?.message || 'неизвестная ошибка') + '. Попробуйте ещё раз или уменьшите время оптимизации.',
+      })
+    })
+  }
+
+  function runCfg(cfgId) {
+    const cfg = configsRef.current.find(c => c.id === cfgId)
+    if (!cfg || !order || !details.length) return
+    if (cfg.status === 'running') return
+    launch(cfg)
+  }
+
+  async function runAll() {
+    if (!order || !details.length) return
+    const list = configsRef.current.filter(c => c.status !== 'running')
+    if (!list.length) return
+    if (parallel) {
+      list.forEach(c => launch(c))
+      return
+    }
+    list.forEach(c => updateCfg(c.id, { status: 'queued', error: '' }))
+    for (const c of list) {
+      if (skipRef.current.has(c.id)) { skipRef.current.delete(c.id); continue }
+      const cur = configsRef.current.find(x => x.id === c.id)
+      if (!cur) continue
+      await launch(cur)
+    }
+  }
+
+  function stopCfg(cfgId) {
+    const cur = configsRef.current.find(c => c.id === cfgId)
+    if (cur?.status === 'queued') skipRef.current.add(cfgId)
+    const job = jobsRef.current[cfgId]
+    if (job) { delete jobsRef.current[cfgId]; job.cancel() }
+    updateCfg(cfgId, { status: 'idle' })
+  }
+
+  async function saveNesting(cfg) {
+    if (!cfg?.result) return
+    const toSave = {
+      ...cfg.result, sheets: cfg.sheetsData,
+      config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, secs: cfg.secs },
+    }
     await supabase.from('orders').update({ nesting_result: JSON.stringify(toSave) }).eq('id', id)
   }
 
-  async function submitOrder() {
-    setSubmitting(true)
-    await saveNesting()
+  // «Выбрать вариант» — записать этот результат в заказ (остальные остаются на экране)
+  async function chooseCfg(cfg) {
+    setBusyId(cfg.id)
+    await saveNesting(cfg)
+    setConfigs(cs => cs.map(c => ({ ...c, saved: c.id === cfg.id })))
+    setFocusId(cfg.id)
+    setBusyId(null)
+  }
+
+  async function submitOrder(cfg) {
+    setBusyId(cfg.id)
+    await saveNesting(cfg)
     await supabase.from('orders').update({ status: 'new', submitted_at: new Date().toISOString() }).eq('id', id)
     navigate(`/orders/${id}`)
   }
 
-  function onMove(sheetIdx, newPlaced) {
-    setSheetsData(prev => prev.map((s, i) => i === sheetIdx ? { ...s, placed: newPlaced } : s))
+  function onMoveCfg(cfgId, sheetIdx, newPlaced) {
+    setConfigs(cs => cs.map(c => c.id !== cfgId ? c : {
+      ...c, saved: false,
+      sheetsData: c.sheetsData.map((s, i) => i === sheetIdx ? { ...s, placed: newPlaced } : s),
+    }))
   }
 
-  function onManualOffcuts(sheetIdx, list) {
-    setSheetsData(prev => prev.map((s, i) => i === sheetIdx ? { ...s, manualOffcuts: list } : s))
+  function onManualOffcutsCfg(cfgId, sheetIdx, list) {
+    setConfigs(cs => cs.map(c => c.id !== cfgId ? c : {
+      ...c, saved: false,
+      sheetsData: c.sheetsData.map((s, i) => i === sheetIdx ? { ...s, manualOffcuts: list } : s),
+    }))
   }
 
   const debugExportText = JSON.stringify(
@@ -1153,13 +1329,13 @@ export default function NestingPage() {
   // (полигон уже с сэмплированными дугами/радиусами, если они есть), плюс
   // подписи. Так пересечение/неплотная укладка видны глазами в любом
   // CAD-просмотрщике, а не только по цифрам.
-  function downloadNestingDxf() {
-    const dxf = buildNestingDxf(sheetsData, order)
+  function downloadNestingDxf(sheets = sheetsData, suffix = '') {
+    const dxf = buildNestingDxf(sheets, order)
     const blob = new Blob([dxf], { type: 'application/dxf' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${order.order_number || 'raskroy'}.dxf`
+    a.download = `${order.order_number || 'raskroy'}${suffix}.dxf`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -1178,8 +1354,8 @@ export default function NestingPage() {
   function textToDxfEntity(text, x, y, height, layer) {
     return `0\r\nTEXT\r\n8\r\n${layer}\r\n10\r\n${x.toFixed(2)}\r\n20\r\n${y.toFixed(2)}\r\n40\r\n${height.toFixed(2)}\r\n1\r\n${text}\r\n`
   }
-  function buildSheetDxf(sheetIdx) {
-    const sheet = sheetsData[sheetIdx]
+  function buildSheetDxf(sheetIdx, sheets = sheetsData) {
+    const sheet = sheets[sheetIdx]
     if (!sheet || !order) return ''
     const sheetW = order.sheet_width, sheetL = order.sheet_length, kerf = order.kerf_width || 0
     let entities = polygonToDxfEntity([[0, 0], [sheetW, 0], [sheetW, sheetL], [0, sheetL]], 'sheet')
@@ -1219,19 +1395,20 @@ export default function NestingPage() {
     return `0\r\nSECTION\r\n2\r\nHEADER\r\n9\r\n$ACADVER\r\n1\r\nAC1009\r\n0\r\nENDSEC\r\n`
       + `0\r\nSECTION\r\n2\r\nENTITIES\r\n${entities}0\r\nENDSEC\r\n0\r\nEOF\r\n`
   }
-  function downloadSheetDxf(sheetIdx) {
-    const content = buildSheetDxf(sheetIdx)
+  function downloadSheetDxf(sheetIdx, sheets = sheetsData, suffix = '') {
+    const content = buildSheetDxf(sheetIdx, sheets)
     if (!content) return
     const blob = new Blob([content], { type: 'application/dxf' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${order?.order_number || 'раскрой'}_лист${sheetIdx + 1}.dxf`
+    a.download = `${order?.order_number || 'раскрой'}${suffix}_лист${sheetIdx + 1}.dxf`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }
+
 
   if (!order) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
 
@@ -1249,8 +1426,289 @@ export default function NestingPage() {
   }, {})
   const totalEdge = Object.values(edgeByType).reduce((s, v) => s + v, 0)
   const sheetsCount = sheetsData.length
-  const usableArea = result ? (result.usableW / 1000) * (result.usableH / 1000) : 0
+  const usableArea = result ? ((result.usableX ?? result.usableW) / 1000) * ((result.usableY ?? result.usableH) / 1000) : 0
   const totalArea = sheetsCount * usableArea
+  const focusIdx = focus ? configs.indexOf(focus) : -1
+
+  // Сравнение конфигураций: «лучший» — меньше листов, затем меньше на последнем
+  const sums = configs.map(c => (c.status === 'done' && c.result) ? summarize(c.sheetsData, c.result.usableX, c.result.usableY) : null)
+  let bestIdx = -1
+  if (sums.filter(Boolean).length >= 2) sums.forEach((s, i) => { if (s && (bestIdx < 0 || betterSummary(s, sums[bestIdx]))) bestIdx = i })
+
+  const badge = (text, bg, color) => (
+    <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 500, padding: '1px 7px', borderRadius: 8, background: bg, color, verticalAlign: 'middle' }}>{text}</span>
+  )
+  const pct = v => Math.round(v * 100) + '%'
+  const cfgSecs = c => c.status === 'running'
+    ? Math.floor((Date.now() - c.startedAt) / 1000)
+    : (c.doneAt && c.startedAt ? Math.round((c.doneAt - c.startedAt) / 1000) : null)
+  void tick
+
+  function renderConfig(cfg, idx) {
+    const isRunning = cfg.status === 'running', isQueued = cfg.status === 'queued'
+    const s = sums[idx]
+    const secs = cfgSecs(cfg)
+    let statusLine = 'не считался'
+    if (isQueued) statusLine = 'в очереди'
+    else if (isRunning) statusLine = `считаю… ${secs} с`
+    else if (cfg.status === 'error') statusLine = 'ошибка расчёта'
+    else if (s) statusLine = `${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${secs != null ? ` · ${secs} с` : ''}`
+    else if (cfg.result) statusLine = 'результат загружен'
+
+    const canvasSheet = cfg.sheetsData[cfg.activeSheet]
+    const persist = patch => saveSmallPartsSettings(patch)
+
+    return (
+      <div key={cfg.id} className="card"
+        style={{ marginBottom: 10, padding: 0, overflow: 'hidden', border: idx === bestIdx ? '1px solid var(--teal)' : undefined }}>
+        {/* Заголовок — виден всегда, по нажатию раскрывает конфигурацию */}
+        <div onClick={() => { updateCfg(cfg.id, { open: !cfg.open }); if (!cfg.open && cfg.result) setFocusId(cfg.id) }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-hint)', width: 12 }}>{cfg.open ? '▼' : '▶'}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 500 }}>
+              Конфигурация {idx + 1} · {DIR_SHORT[cfg.dir]}
+              {idx === bestIdx && badge('★ лучший', 'var(--teal-light)', 'var(--teal)')}
+              {cfg.saved && badge('✓ в заказе', '#e6f4ea', '#1e7e34')}
+            </div>
+            <div style={{ fontSize: 11, color: cfg.status === 'error' ? '#dc3545' : 'var(--text-hint)', marginTop: 2 }}>
+              {cfg.secs === '' ? 12 : cfg.secs} с{cfg.small ? ' · мелкие в центр' : ''} · {statusLine}
+            </div>
+          </div>
+          {(isRunning || isQueued) && (
+            <span style={{ display: 'inline-block', width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+              border: '2px solid var(--text-hint)', borderTopColor: 'transparent', animation: 'nesting-spin 0.8s linear infinite' }} />
+          )}
+          <button onClick={e => { e.stopPropagation(); (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id) }}
+            disabled={!details.length}
+            style={{ flexShrink: 0, width: 34, height: 34, borderRadius: '50%', border: '0.5px solid var(--border-md)',
+              background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}>
+            {(isRunning || isQueued) ? '■' : cfg.result ? '🔄' : '▶'}
+          </button>
+        </div>
+
+        {cfg.open && (
+          <div style={{ padding: '10px 12px 12px', borderTop: '0.5px solid var(--border)' }}>
+            {/* Направление укладки */}
+            <p className="section-title">Направление укладки</p>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+              {DIR_OPTIONS.map(([val, label]) => (
+                <button key={val} onClick={() => updateCfg(cfg.id, { dir: val })}
+                  style={{ flex: 1, padding: '8px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 12,
+                    background: cfg.dir === val ? 'var(--blue)' : 'var(--bg2)',
+                    color: cfg.dir === val ? 'white' : 'var(--text-muted)', cursor: 'pointer', fontWeight: cfg.dir === val ? 500 : 400 }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Мелкие детали */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: cfg.small ? 8 : 0 }}>
+                <input type="checkbox" checked={cfg.small}
+                  onChange={e => { const v = e.target.checked; updateCfg(cfg.id, { small: v }); persist({ small_parts_to_center: v }) }}
+                  style={{ width: 18, height: 18 }} />
+                <span className="section-title" style={{ margin: 0 }}>Мелкие детали — в середину листа</span>
+              </label>
+              {cfg.small && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Площадь до (квадрат), мм</span>
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.sq} placeholder="напр. 400"
+                      onChange={e => updateCfg(cfg.id, { sq: e.target.value.replace(/[^0-9]/g, '') })}
+                      onBlur={e => persist({ small_parts_max_square_side: e.target.value === '' ? 0 : Number(e.target.value) })}
+                      style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Сторона до, мм</span>
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.side} placeholder="напр. 350"
+                      onChange={e => updateCfg(cfg.id, { side: e.target.value.replace(/[^0-9]/g, '') })}
+                      onBlur={e => persist({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
+                      style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
+                  </div>
+                </div>
+              )}
+              {cfg.small && cfg.sq !== '' && (
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+                  Мелкая — это деталь, которая уместилась бы в квадрат {cfg.sq}×{cfg.sq} мм (по площади).
+                </p>
+              )}
+              {cfg.small && cfg.sq === '' && cfg.side === '' && (
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+                  Задайте хотя бы один порог — иначе ни одна деталь не будет считаться мелкой.
+                </p>
+              )}
+            </div>
+
+            {/* Время оптимизации */}
+            <div style={{ marginBottom: 12 }}>
+              <p className="section-title">Время оптимизации, сек</p>
+              <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.secs} placeholder="напр. 12"
+                onChange={e => updateCfg(cfg.id, { secs: e.target.value.replace(/[^0-9]/g, '') })}
+                onBlur={e => persist({ optimize_seconds: e.target.value === '' ? 12 : Number(e.target.value) })}
+                style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
+              <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+                Больше времени — плотнее укладка на первых листах и меньше остаётся на последнем. 0 — без доп. оптимизации (быстрый расчёт).
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: cfg.error || cfg.result ? 12 : 0 }}>
+              <button onClick={() => (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id)} disabled={!details.length}
+                style={{ flex: 1, padding: 11, background: (isRunning || isQueued) ? 'var(--bg2)' : 'var(--blue)',
+                  color: (isRunning || isQueued) ? 'var(--text-muted)' : 'white', border: 'none', borderRadius: 'var(--radius)',
+                  fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+                {isRunning ? `■ Остановить (${secs} с)` : isQueued ? '■ Убрать из очереди' : cfg.result ? '🔄 Пересчитать' : '▶ Выполнить раскрой'}
+              </button>
+              {configs.length > 1 && (
+                <button onClick={() => removeCfg(cfg.id)}
+                  style={{ padding: '11px 14px', background: 'transparent', color: 'var(--text-hint)',
+                    border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', fontSize: 13, cursor: 'pointer' }}>
+                  Удалить
+                </button>
+              )}
+            </div>
+            {isRunning && (
+              <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', margin: '-4px 0 8px' }}>
+                Идёт поиск более плотной укладки, страница остаётся отзывчивой — можно раскрыть другую конфигурацию.
+              </p>
+            )}
+            {cfg.error && (
+              <div style={{ padding: 10, marginBottom: 8, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.1)', color: '#dc3545', fontSize: 13 }}>
+                {cfg.error}
+              </div>
+            )}
+
+            {/* Результат этой конфигурации */}
+            {cfg.result && canvasSheet && (
+              <div>
+                {(cfg.result.algoVersion || 'до версионирования') !== NESTING_VERSION && (
+                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>
+                    Этот раскрой посчитан: {cfg.result.algoVersion ? 'v' + cfg.result.algoVersion : 'до версионирования'}
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
+                  {cfg.sheetsData.map((sh, i) => (
+                    <button key={i} onClick={() => updateCfg(cfg.id, { activeSheet: i })}
+                      style={{ flexShrink: 0, padding: '6px 14px', borderRadius: 20, border: 'none',
+                        background: cfg.activeSheet === i ? 'var(--blue)' : 'var(--bg2)',
+                        color: cfg.activeSheet === i ? 'white' : 'var(--text-muted)', fontSize: 13, cursor: 'pointer' }}>
+                      Лист {i + 1} · {sh.placed.length}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ background: 'transparent', borderRadius: 'var(--radius)', padding: 8, marginBottom: 12, border: '0.5px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500 }}>
+                      Лист {cfg.activeSheet + 1} из {cfg.sheetsData.length}
+                      {new URLSearchParams(window.location.search).get('nfp') === '1' && (
+                        <span style={{ marginLeft: 6, fontSize: 10, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: 8 }}>
+                          NFP (эксперимент)
+                        </span>
+                      )}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{canvasSheet.placed.length} дет.</span>
+                      <button onClick={() => downloadSheetDxf(cfg.activeSheet, cfg.sheetsData, `_k${idx + 1}`)}
+                        style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)',
+                          background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
+                        DXF
+                      </button>
+                      <button onClick={() => setShowOffcuts(v => !v)}
+                        style={{ padding: '4px 10px', borderRadius: 20, border: `0.5px solid ${showOffcuts ? 'var(--teal)' : 'var(--border-md)'}`,
+                          background: showOffcuts ? 'var(--teal-light)' : 'transparent',
+                          color: showOffcuts ? 'var(--teal)' : 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
+                        {showOffcuts ? '✓ Обрезки' : 'Обрезки'}
+                      </button>
+                    </div>
+                  </div>
+                  {showOffcuts && (
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                      <button onClick={() => setOffcutMode('cuts')}
+                        style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
+                          background: offcutMode === 'cuts' ? '#7B1FA2' : 'var(--bg2)',
+                          color: offcutMode === 'cuts' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                        Линии реза
+                      </button>
+                      <button onClick={() => setOffcutMode('manual')}
+                        style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
+                          background: offcutMode === 'manual' ? '#B85C00' : 'var(--bg2)',
+                          color: offcutMode === 'manual' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                        Вручную
+                      </button>
+                      {offcutMode === 'manual' && canvasSheet.manualOffcuts?.length > 0 && (
+                        <button onClick={() => onManualOffcutsCfg(cfg.id, cfg.activeSheet, [])}
+                          style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+                            background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
+                          Очистить ({canvasSheet.manualOffcuts.length})
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <SheetCanvas
+                    key={cfg.id}
+                    sheet={canvasSheet}
+                    usableX={cfg.result.usableX} usableY={cfg.result.usableY}
+                    sheetL={order.sheet_length} sheetW={order.sheet_width}
+                    marginL={order.margin_left} marginT={order.margin_top}
+                    kerf={order.kerf_width} colorMap={colorMap} details={details}
+                    onMove={(si, np) => onMoveCfg(cfg.id, si, np)} interactive={true} showOffcuts={showOffcuts}
+                    offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
+                    onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
+                  />
+                  <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 6 }}>
+                    {showOffcuts && offcutMode === 'manual'
+                      ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
+                      : (showOffcuts && offcutMode === 'cuts'
+                        ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
+                        : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить · Двумя пальцами — масштаб')}
+                  </p>
+                </div>
+
+                {/* Легенда */}
+                <div style={{ marginBottom: 12 }}>
+                  <p className="section-title">Детали на листе {cfg.activeSheet + 1}</p>
+                  {canvasSheet.placed.map((p, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', borderBottom: '0.5px solid var(--border)' }}>
+                      <div style={{ width: 12, height: 12, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>{p.label}</span>
+                      <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
+                      {(p.rotation || p.rotated) && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻{p.rotation ?? 90}°</span>}
+                    </div>
+                  ))}
+                </div>
+
+                <button onClick={() => downloadNestingDxf(cfg.sheetsData, `_k${idx + 1}`)}
+                  style={{ width: '100%', padding: 10, marginBottom: 10, borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
+                    background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+                  ⬇ Скачать DXF раскроя (для сверки)
+                </button>
+
+                {/* Согласиться с вариантом → сохранить → на производство */}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => chooseCfg(cfg)} disabled={busyId === cfg.id || cfg.saved}
+                    style={{ flex: 1, padding: 12, borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500,
+                      cursor: (busyId === cfg.id || cfg.saved) ? 'default' : 'pointer',
+                      border: '0.5px solid var(--teal)',
+                      background: cfg.saved ? '#e6f4ea' : 'var(--teal-light)', color: cfg.saved ? '#1e7e34' : 'var(--teal)' }}>
+                    {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение...' : 'Выбрать вариант'}
+                  </button>
+                  <button onClick={() => submitOrder(cfg)} disabled={busyId === cfg.id}
+                    style={{ flex: 1, padding: 12, background: 'var(--teal)', color: 'white', border: 'none',
+                      borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: busyId === cfg.id ? 'default' : 'pointer' }}>
+                    {busyId === cfg.id ? 'Отправка...' : '✓ Оформить заказ'}
+                  </button>
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', marginTop: 8 }}>
+                  «Выбрать вариант» сохраняет этот раскрой в заказ, остальные конфигурации остаются на экране. «Оформить заказ» — сохранит и отправит на производство.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
@@ -1264,7 +1722,7 @@ export default function NestingPage() {
       </div>
 
       {/* Статистика */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: focus && configs.length > 1 ? 4 : 12 }}>
         {[['Листов', sheetsCount || '—'],['Деталей', totalQty],['Кромка (п.м.)', totalEdge.toFixed(1)],['Площадь (м²)', totalArea ? totalArea.toFixed(2) : '—']].map(([label, val]) => (
           <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '10px 12px' }}>
             <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{label}</div>
@@ -1272,6 +1730,11 @@ export default function NestingPage() {
           </div>
         ))}
       </div>
+      {focus && configs.length > 1 && (
+        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 12px' }}>
+          Листы и площадь — по конфигурации {focusIdx + 1} ({DIR_SHORT[focus.dir]}). Кромка и детали от раскроя не зависят.
+        </p>
+      )}
 
       {/* Кромка по типам */}
       {Object.keys(edgeByType).length > 0 && (
@@ -1286,7 +1749,7 @@ export default function NestingPage() {
         </div>
       )}
 
-      {/* Тип станка */}
+      {/* Тип станка — общий для всех конфигураций */}
       <div style={{ marginBottom: 12 }}>
         <p className="section-title">Станок</p>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -1307,80 +1770,38 @@ export default function NestingPage() {
         </p>
       </div>
 
-      {/* Направление укладки */}
-      <div style={{ marginBottom: 12 }}>
-        <p className="section-title">Направление укладки</p>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {[['auto','Авто'],['along_y','Вдоль длины (Y)'],['along_x','Вдоль ширины (X)']].map(([val, label]) => (
-            <button key={val} onClick={() => setNestDir(val)}
-              style={{ flex: 1, padding: '8px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 12,
-                background: nestDir === val ? 'var(--blue)' : 'var(--bg2)',
-                color: nestDir === val ? 'white' : 'var(--text-muted)', cursor: 'pointer', fontWeight: nestDir === val ? 500 : 400 }}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Конфигурации раскроя */}
+      <p className="section-title">Конфигурации раскроя</p>
+      {configs.map((cfg, idx) => renderConfig(cfg, idx))}
 
-      {/* Мелкие детали */}
-      <div style={{ marginBottom: 12 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: smallPartsToCenter ? 8 : 0 }}>
-          <input type="checkbox" checked={smallPartsToCenter}
-            onChange={e => {
-              const v = e.target.checked
-              setSmallPartsToCenter(v)
-              saveSmallPartsSettings({ small_parts_to_center: v })
-            }}
-            style={{ width: 18, height: 18 }} />
-          <span className="section-title" style={{ margin: 0 }}>Мелкие детали — в середину листа</span>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <button onClick={addCfg}
+          style={{ flex: 1, padding: 11, borderRadius: 'var(--radius)', border: '0.5px dashed var(--border-md)',
+            background: 'transparent', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}>
+          + Новая конфигурация
+        </button>
+        <button onClick={runAll} disabled={anyRunning || !details.length}
+          style={{ flex: 1, padding: 11, borderRadius: 'var(--radius)', border: 'none', fontSize: 14, fontWeight: 500,
+            background: (anyRunning || !details.length) ? 'var(--bg2)' : 'var(--blue)',
+            color: (anyRunning || !details.length) ? 'var(--text-hint)' : 'white',
+            cursor: (anyRunning || !details.length) ? 'default' : 'pointer' }}>
+          {anyRunning ? 'Считаю…' : configs.length > 1 ? '▶ Запустить все' : '▶ Выполнить раскрой'}
+        </button>
+      </div>
+      {configs.length > 1 && (
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', marginBottom: 6 }}>
+          <input type="checkbox" checked={parallel} onChange={e => setParallel(e.target.checked)}
+            style={{ width: 18, height: 18, marginTop: 1, flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Считать одновременно. Время оптимизации идёт по часам, поэтому на слабом телефоне каждая конфигурация
+            получит меньше вычислений — если результат хуже, чем при одиночном расчёте, снимите галочку (пойдут по очереди).
+          </span>
         </label>
-        {smallPartsToCenter && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Площадь до (квадрат), мм</span>
-              <input
-                type="text" inputMode="numeric" pattern="[0-9]*"
-                value={smallPartsMaxSquareSideMm} placeholder="напр. 400"
-                onChange={e => setSmallPartsMaxSquareSideMm(e.target.value.replace(/[^0-9]/g, ''))}
-                onBlur={e => saveSmallPartsSettings({ small_parts_max_square_side: e.target.value === '' ? 0 : Number(e.target.value) })}
-                style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Сторона до, мм</span>
-              <input
-                type="text" inputMode="numeric" pattern="[0-9]*"
-                value={smallPartsMaxSideMm} placeholder="напр. 350"
-                onChange={e => setSmallPartsMaxSideMm(e.target.value.replace(/[^0-9]/g, ''))}
-                onBlur={e => saveSmallPartsSettings({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
-                style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
-            </div>
-          </div>
-        )}
-        {smallPartsToCenter && smallPartsMaxSquareSideMm !== '' && (
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-            Мелкая — это деталь, которая уместилась бы в квадрат {smallPartsMaxSquareSideMm}×{smallPartsMaxSquareSideMm} мм (по площади).
-          </p>
-        )}
-        {smallPartsToCenter && smallPartsMaxSquareSideMm === '' && smallPartsMaxSideMm === '' && (
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-            Задайте хотя бы один порог — иначе ни одна деталь не будет считаться мелкой.
-          </p>
-        )}
+      )}
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', margin: '4px 0 12px' }}>
+        Алгоритм раскроя v{NESTING_VERSION}
       </div>
-
-      {/* Время оптимизации плотности */}
-      <div style={{ marginBottom: 12 }}>
-        <p className="section-title">Время оптимизации, сек</p>
-        <input
-          type="text" inputMode="numeric" pattern="[0-9]*"
-          value={optimizeSeconds} placeholder="напр. 12"
-          onChange={e => setOptimizeSeconds(e.target.value.replace(/[^0-9]/g, ''))}
-          onBlur={e => saveSmallPartsSettings({ optimize_seconds: e.target.value === '' ? 12 : Number(e.target.value) })}
-          style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
-        <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-          Больше времени — плотнее укладка на первых листах и меньше остаётся на последнем. 0 — без доп. оптимизации (быстрый расчёт).
-        </p>
-      </div>
+      <style>{`@keyframes nesting-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
 
       {/* Экспорт контуров для отладки — скопировать точные координаты детали разработчику */}
       {details.some(d => d.contour) && (
@@ -1408,31 +1829,13 @@ export default function NestingPage() {
         </div>
       )}
 
-      {/* Экспорт РЕЗУЛЬТАТА укладки — что реально сейчас на листах (координаты,
-          повороты, точные полигоны). Показывается только после того, как
-          раскрой посчитан */}
-      {result && (
-        <div style={{ marginBottom: 12 }}>
-          <button onClick={downloadNestingDxf}
-            style={{ width: '100%', padding: 10, borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
-              background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
-            ⬇ Скачать DXF раскроя (для сверки)
-          </button>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-            Все листы в ряд, контур каждой детали настоящими линиями — пересечения и неплотная укладка видны в любой CAD-программе.
-          </p>
-        </div>
-      )}
-
-      {/* Экспорт РЕЗУЛЬТАТА укладки — что реально сейчас на листах (координаты,
-          повороты, точные полигоны). Показывается только после того, как
-          раскрой посчитан */}
+      {/* Экспорт РЕЗУЛЬТАТА укладки (по конфигурации, выбранной для шапки) */}
       {result && (
         <div style={{ marginBottom: 12 }}>
           <button onClick={() => setShowResultExport(v => !v)}
             style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
               background: 'transparent', color: 'var(--text-hint)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
-            {showResultExport ? '▼' : '▶'} Экспорт результата раскроя (для отладки)
+            {showResultExport ? '▼' : '▶'} Экспорт результата раскроя (для отладки){configs.length > 1 ? ` — конфигурация ${focusIdx + 1}` : ''}
           </button>
           {showResultExport && (
             <div style={{ marginTop: 6 }}>
@@ -1449,144 +1852,6 @@ export default function NestingPage() {
               </p>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Кнопка раскроя */}
-      <button onClick={doNesting} disabled={running}
-        style={{ width: '100%', padding: 12, background: running ? 'var(--bg2)' : 'var(--blue)',
-          color: running ? 'var(--text-hint)' : 'white', border: 'none', borderRadius: 'var(--radius)',
-          fontSize: 15, fontWeight: 500, cursor: running ? 'default' : 'pointer', marginBottom: running ? 8 : 16,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-        {running && (
-          <span style={{
-            display: 'inline-block', width: 14, height: 14, borderRadius: '50%',
-            border: '2px solid var(--text-hint)', borderTopColor: 'transparent',
-            animation: 'nesting-spin 0.8s linear infinite',
-          }} />
-        )}
-        {running ? `Считаю раскрой... ${elapsedSec} сек` : result ? '🔄 Пересчитать раскрой' : '▶ Выполнить раскрой'}
-      </button>
-      <div style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', margin: '-8px 0 12px' }}>
-        Алгоритм раскроя v{NESTING_VERSION}
-        {result && (result.algoVersion || 'до версионирования') !== NESTING_VERSION
-          ? ` · этот раскрой посчитан: ${result.algoVersion ? 'v' + result.algoVersion : 'до версионирования'}`
-          : ''}
-      </div>
-      <style>{`@keyframes nesting-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
-      {running && (
-        <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', marginTop: -4, marginBottom: 16 }}>
-          Идёт поиск более плотной укладки, страница остаётся отзывчивой — можно подождать.
-        </p>
-      )}
-      {nestError && (
-        <div style={{ padding: 10, marginBottom: 16, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.1)', color: '#dc3545', fontSize: 13 }}>
-          {nestError}
-        </div>
-      )}
-
-      {/* Карты */}
-      {sheetsData.length > 0 && (
-        <div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
-            {sheetsData.map((s, i) => (
-              <button key={i} onClick={() => setActiveSheet(i)}
-                style={{ flexShrink: 0, padding: '6px 14px', borderRadius: 20, border: 'none',
-                  background: activeSheet === i ? 'var(--blue)' : 'var(--bg2)',
-                  color: activeSheet === i ? 'white' : 'var(--text-muted)', fontSize: 13, cursor: 'pointer' }}>
-                Лист {i + 1} · {s.placed.length}
-              </button>
-            ))}
-          </div>
-
-          <div className="card" style={{ padding: 8, marginBottom: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>
-                Лист {activeSheet + 1} из {sheetsData.length}
-                {new URLSearchParams(window.location.search).get('nfp') === '1' && (
-                  <span style={{ marginLeft: 6, fontSize: 10, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: 8 }}>
-                    NFP (эксперимент)
-                  </span>
-                )}
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{sheetsData[activeSheet]?.placed.length} дет.</span>
-                <button onClick={() => downloadSheetDxf(activeSheet)}
-                  style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)',
-                    background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
-                  DXF
-                </button>
-                <button onClick={() => setShowOffcuts(v => !v)}
-                  style={{ padding: '4px 10px', borderRadius: 20, border: `0.5px solid ${showOffcuts ? 'var(--teal)' : 'var(--border-md)'}`,
-                    background: showOffcuts ? 'var(--teal-light)' : 'transparent',
-                    color: showOffcuts ? 'var(--teal)' : 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
-                  {showOffcuts ? '✓ Обрезки' : 'Обрезки'}
-                </button>
-              </div>
-            </div>
-            {showOffcuts && (
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                <button onClick={() => setOffcutMode('cuts')}
-                  style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
-                    background: offcutMode === 'cuts' ? '#7B1FA2' : 'var(--bg2)',
-                    color: offcutMode === 'cuts' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
-                  Линии реза
-                </button>
-                <button onClick={() => setOffcutMode('manual')}
-                  style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
-                    background: offcutMode === 'manual' ? '#B85C00' : 'var(--bg2)',
-                    color: offcutMode === 'manual' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
-                  Вручную
-                </button>
-                {offcutMode === 'manual' && sheetsData[activeSheet]?.manualOffcuts?.length > 0 && (
-                  <button onClick={() => onManualOffcuts(activeSheet, [])}
-                    style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
-                      background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
-                    Очистить ({sheetsData[activeSheet].manualOffcuts.length})
-                  </button>
-                )}
-              </div>
-            )}
-            <SheetCanvas
-              sheet={sheetsData[activeSheet]}
-              usableX={result.usableX} usableY={result.usableY}
-              sheetL={order.sheet_length} sheetW={order.sheet_width}
-              marginL={order.margin_left} marginT={order.margin_top}
-              kerf={order.kerf_width} colorMap={colorMap} details={details}
-              onMove={onMove} interactive={true} showOffcuts={showOffcuts}
-              offcutMode={offcutMode} manualOffcuts={sheetsData[activeSheet]?.manualOffcuts}
-              onManualOffcuts={onManualOffcuts}
-            />
-            <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 6 }}>
-              {showOffcuts && offcutMode === 'manual'
-                ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
-                : (showOffcuts && offcutMode === 'cuts'
-                  ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                  : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить · Двумя пальцами — масштаб')}
-            </p>
-          </div>
-
-          {/* Легенда */}
-          <div className="card" style={{ marginBottom: 12 }}>
-            <p className="section-title">Детали на листе {activeSheet + 1}</p>
-            {sheetsData[activeSheet]?.placed.map((p, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', borderBottom: '0.5px solid var(--border)' }}>
-                <div style={{ width: 12, height: 12, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
-                <span style={{ flex: 1 }}>{p.label}</span>
-                <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
-                {(p.rotation || p.rotated) && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻{p.rotation ?? 90}°</span>}
-              </div>
-            ))}
-          </div>
-
-          <button onClick={submitOrder} disabled={submitting}
-            style={{ width: '100%', padding: 12, background: 'var(--teal)', color: 'white',
-              border: 'none', borderRadius: 'var(--radius)', fontSize: 15, fontWeight: 500, cursor: submitting ? 'default' : 'pointer' }}>
-            {submitting ? 'Отправка...' : '✓ Оформить заказ'}
-          </button>
-          <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', marginTop: 8, marginBottom: 16 }}>
-            Раскрой сохранится и заказ уйдёт на производство
-          </p>
         </div>
       )}
       <BottomNav />
