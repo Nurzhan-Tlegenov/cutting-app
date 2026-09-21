@@ -173,7 +173,7 @@ function candidateYs(sheet, bh, usableY, kerf, step = GRID_STEP, bucket = BUCKET
 // Два способа подачи: сверху (деталь падает в столбец, затем съезжает к нулю)
 // и справа (заезжает в горизонтальные проёмы, недоступные сверху).
 // dense=true — частая сетка стартов (для итоговой проверки «не влезает ли ещё что-то»).
-function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false) {
+function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false, deterministic = false) {
   const step = dense ? 20 : GRID_STEP, bucket = dense ? 5 : BUCKET
   const dropOrder = orderFor(direction)[0]
   // Привязка к стороне: для along_y / along_x «занятый габарит» меряется как
@@ -247,8 +247,11 @@ function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false
   // Почти равноценные варианты (разница < 0,3%, например поворот детали-пары
   // на 0° или 90° в пустом углу) выбираем случайно: так разные попытки поиска
   // порядка приходят к разным раскладкам, а не к одной и той же.
+  // Для сборки пары (deterministic) «запертые пустоты» не штрафуем: внутри пары
+  // они неизбежны, а нужна именно минимальная плотная упаковка двух деталей.
+  if (deterministic) return shortlist.slice().sort((a, b) => a.env - b.env || anchorTie(a.entry.bb) - anchorTie(b.entry.bb))[0]
   const near = shortlist.filter(c => c.cost != null && c.cost <= bestCost * 1.003)
-  if (near.length > 1) best = near[Math.floor(Math.random() * near.length)]
+  if (near.length > 1 && !deterministic) best = near[Math.floor(Math.random() * near.length)]
   return best
 }
 
@@ -545,16 +548,19 @@ async function polishLast(sheet, ctx, deadline) {
 // заезжает в её вырез — и дальше укладывается как единый прямоугольник.
 // Парой считаем только почти идеальное вложение (заполнение ≥ 97% габарита):
 // иначе пустоты внутри пары не смогут занять другие детали.
-const PAIR_MIN_DENSITY = 0.97
+// Порог снижен с 0.97 до 0.95: габарит пары включает зазор реза kerf по краю, и
+// реальная пара Z-образных деталей 700×700 (мебельный реальный случай) даёт
+// 0.962–0.970 — при 0.97 пара не собиралась, и 2 детали не помещались на лист.
+const PAIR_MIN_DENSITY = 0.95
 
-function buildPair(inst, kerf, usableX, usableY) {
+function buildPair(inst, kerf, usableX, usableY, dir = 'auto', deterministic = false) {
   const A = inst.variants[0]
   const areaA = polyArea(A.polygon)
   const sheet = newSheet(usableX, usableY)
   const spA = simplified(A)
   const eA = makeEntry(spA.poly.map(p => [p[0] + kerf, p[1] + kerf]), spA.pad)
   commit(sheet, inst, { entry: eA, variant: A, tx: kerf, ty: kerf })
-  const r = tryInsert(sheet, inst, usableX, usableY, kerf, 'auto', true)
+  const r = tryInsert(sheet, inst, usableX, usableY, kerf, dir, true, deterministic)
   if (!r) return null
   const minX = Math.min(eA.bb.minX, r.entry.bb.minX), minY = Math.min(eA.bb.minY, r.entry.bb.minY)
   const maxX = Math.max(eA.bb.maxX, r.entry.bb.maxX), maxY = Math.max(eA.bb.maxY, r.entry.bb.maxY)
@@ -583,15 +589,37 @@ function tileIntoPairs(instances, kerf, usableX, usableY) {
     const first = group[0]
     const v0 = first.variants[0]
     const concave = polyArea(v0.polygon) < 0.97 * v0.w * v0.h
-    const pair = (group.length >= 2 && concave && !first.isSmall) ? buildPair(first, kerf, usableX, usableY) : null
-    if (!pair || pair.density < PAIR_MIN_DENSITY) { out.push(...group); continue }
+    // Две одинаковые вогнутые детали вкладываются друг в друга НЕ одним способом:
+    // сдвиг вдоль Y (пара «стоит», ~704×1036) и сдвиг вдоль X (пара «лежит»,
+    // ~1038×704). Раньше собиралась только одна ориентация (auto), и при
+    // выключенном вращении «лежачих» пар не было вообще — лист нельзя было
+    // заполнить (5 «стоячих» пар в ширину 1820 мм не входят, а «лежачая» —
+    // входит рядом с двумя «стоячими»). Собираем обе, пакер выбирает сам.
+    const pairs = []
+    if (group.length >= 2 && concave && !first.isSmall) {
+      // Выбор между «почти равноценными» кандидатами внутри tryInsert случайный
+      // (нужен поиску порядка), а для пары нужны ОБЕ ориентации стабильно —
+      // поэтому несколько детерминированных попыток и несколько случайных.
+      const dirs = ['auto', 'along_y', 'along_x']
+      for (let attempt = 0; attempt < 12 && pairs.length < 2; attempt++) {
+        const p = buildPair(first, kerf, usableX, usableY, dirs[attempt % 3], attempt < 3)
+        if (!p || p.density < PAIR_MIN_DENSITY) continue
+        if (pairs.some(q => Math.abs(q.W - p.W) < 2 && Math.abs(q.H - p.H) < 2)) continue
+        pairs.push(p)
+      }
+    }
+    if (!pairs.length) { out.push(...group); continue }
     const rotatable = first.variants.length > 2
     const rect = (w, h) => [[0, 0], [w, 0], [w, h], [0, h]]
-    const variants = [{ angle: 0, w: pair.W, h: pair.H, polygon: rect(pair.W, pair.H), matArea: pair.matArea }]
-    // 90° — только если у детали включено вращение (и пара так помещается)
-    if (rotatable && pair.H <= usableX && pair.W <= usableY) {
-      variants.push({ angle: 90, w: pair.H, h: pair.W, polygon: rect(pair.H, pair.W), matArea: pair.matArea })
+    const variants = []
+    for (const pair of pairs) {
+      variants.push({ angle: 0, w: pair.W, h: pair.H, polygon: rect(pair.W, pair.H), matArea: pair.matArea, parts: pair.parts, W: pair.W })
+      // 90° — только если у детали включено вращение (и пара так помещается)
+      if (rotatable && pair.H <= usableX && pair.W <= usableY) {
+        variants.push({ angle: 90, w: pair.H, h: pair.W, polygon: rect(pair.H, pair.W), matArea: pair.matArea, parts: pair.parts, W: pair.W })
+      }
     }
+    const pair = pairs[0]
     const n = Math.floor(group.length / 2)
     for (let k = 0; k < n; k++) {
       out.push({
@@ -614,9 +642,11 @@ export function expandPlacement(m) {
   const inst = m.inst
   if (!inst.isComposite) return [m]
   const ang = m.variant.angle // 0 или 90
-  return inst.parts.map(part => {
+  // Разные ориентации пары («стоит»/«лежит») хранят свои parts и W в варианте.
+  const parts = m.variant.parts || inst.parts, W = m.variant.W ?? inst.W
+  return parts.map(part => {
     let pts = part.variant.polygon.map(([px, py]) => [px + part.ox, py + part.oy])
-    if (ang === 90) pts = pts.map(([x, y]) => [y, inst.W - x])
+    if (ang === 90) pts = pts.map(([x, y]) => [y, W - x])
     const bb = bboxOf(pts)
     const v = inst.src.variants.find(vv => vv.angle === (part.variant.angle + ang) % 360)
     const vb = bboxOf(v.polygon)

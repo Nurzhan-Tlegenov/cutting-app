@@ -228,12 +228,36 @@ function subtractEdgeRectHole(w, h, hole) {
   return null
 }
 
+// Есть ли у внешнего контура форма, отличная от прямоугольника w×h: больше
+// 4 вершин, радиус скругления на любой вершине (даже если вершин всего 4 —
+// прямоугольник со скруглённым углом), дуга/fillet, либо 4 вершины не в углах
+// габарита (трапеция и т.п.). Раньше проверялось только число вершин > 4, и
+// деталь 300×300 с одним скруглённым углом считалась прямоугольником — радиус
+// не попадал ни в раскрой, ни в карту, ни в DXF.
+export function hasCustomOutline(contour, w, h) {
+  const v = contour && contour.vertices
+  if (!Array.isArray(v) || v.length < 3) return false
+  if (v.length > 4) return true
+  const tol = 0.01
+  return v.some(p => {
+    if ((Number(p.r) || 0) > 0) return true
+    if (p.type && p.type !== 'point') return true
+    if (w > 0 && h > 0) {
+      const x = Number(p.x) || 0, y = Number(p.y) || 0
+      const onX = Math.abs(x) < tol || Math.abs(x - w) < tol
+      const onY = Math.abs(y) < tol || Math.abs(y - h) < tol
+      if (!(onX && onY)) return true
+    }
+    return false
+  })
+}
+
 export function parsePolygonFromDetail(d) {
   let contour = null
   try { contour = d.contour ? JSON.parse(d.contour) : null } catch { contour = null }
   const w = Number(d.width) || 0, h = Number(d.length) || 0
   const baseRect = [[0, 0], [w, 0], [w, h], [0, h]]
-  if (!contour || !contour.vertices || contour.vertices.length <= 4) {
+  if (!hasCustomOutline(contour, w, h)) {
     // Даже у формально "прямоугольной" детали могут быть вырезы, доходящие
     // до края (сделанные инструментом "Вырезы", а не рисованием контура) —
     // проверяем их и вычитаем из силуэта, если да.
@@ -260,7 +284,7 @@ export function needsTrueShape(details) {
   return (details || []).some(d => {
     try {
       const c = d.contour ? JSON.parse(d.contour) : null
-      return !!(c && c.vertices && c.vertices.length > 4)
+      return hasCustomOutline(c, Number(d.width) || 0, Number(d.length) || 0)
     } catch { return false }
   })
 }
