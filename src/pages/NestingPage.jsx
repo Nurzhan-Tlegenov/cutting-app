@@ -996,7 +996,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 // Каждая конфигурация — свой набор настроек (укладка, время оптимизации, мелкие
 // детали) и свой результат. Считаются одновременно, каждая в своём Web Worker
 // (алгоритм один и тот же — различается только привязка укладки).
-const DIR_OPTIONS = [['auto', 'Авто'], ['along_y', 'Вдоль длины (Y)'], ['along_x', 'Вдоль ширины (X)']]
+const DIR_OPTIONS = [['auto', 'Авто'], ['along_y', 'Вдоль Y'], ['along_x', 'Вдоль X']]
 const DIR_SHORT = { auto: 'Авто', along_y: 'Вдоль Y', along_x: 'Вдоль X' }
 
 let CFG_SEQ = 0
@@ -1461,18 +1461,18 @@ export default function NestingPage() {
 
     return (
       <div key={cfg.id} className="card"
-        style={{ marginBottom: 10, padding: 0, overflow: 'hidden', border: idx === bestIdx ? '1px solid var(--teal)' : undefined }}>
+        style={{ marginBottom: 8, padding: 0, overflow: 'hidden', border: idx === bestIdx ? '1px solid var(--teal)' : undefined }}>
         {/* Заголовок — виден всегда, по нажатию раскрывает конфигурацию */}
         <div onClick={() => { updateCfg(cfg.id, { open: !cfg.open }); if (!cfg.open && cfg.result) setFocusId(cfg.id) }}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', cursor: 'pointer' }}>
           <span style={{ fontSize: 12, color: 'var(--text-hint)', width: 12 }}>{cfg.open ? '▼' : '▶'}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 500 }}>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>
               Конфигурация {idx + 1} · {DIR_SHORT[cfg.dir]}
               {idx === bestIdx && badge('★ лучший', 'var(--teal-light)', 'var(--teal)')}
               {cfg.saved && badge('✓ в заказе', '#e6f4ea', '#1e7e34')}
             </div>
-            <div style={{ fontSize: 11, color: cfg.status === 'error' ? '#dc3545' : 'var(--text-hint)', marginTop: 2 }}>
+            <div style={{ fontSize: 10.5, color: cfg.status === 'error' ? '#dc3545' : 'var(--text-hint)', marginTop: 1 }}>
               {cfg.secs === '' ? 12 : cfg.secs} с{cfg.small ? ' · мелкие в центр' : ''} · {statusLine}
             </div>
           </div>
@@ -1482,20 +1482,19 @@ export default function NestingPage() {
           )}
           <button onClick={e => { e.stopPropagation(); (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id) }}
             disabled={!details.length}
-            style={{ flexShrink: 0, width: 34, height: 34, borderRadius: '50%', border: '0.5px solid var(--border-md)',
-              background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}>
+            style={{ flexShrink: 0, width: 28, height: 28, borderRadius: '50%', border: '0.5px solid var(--border-md)',
+              background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
             {(isRunning || isQueued) ? '■' : cfg.result ? '🔄' : '▶'}
           </button>
         </div>
 
         {cfg.open && (
-          <div style={{ padding: '10px 12px 12px', borderTop: '0.5px solid var(--border)' }}>
+          <div style={{ padding: '8px 10px 10px', borderTop: '0.5px solid var(--border)' }}>
             {/* Направление укладки */}
-            <p className="section-title">Направление укладки</p>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               {DIR_OPTIONS.map(([val, label]) => (
                 <button key={val} onClick={() => updateCfg(cfg.id, { dir: val })}
-                  style={{ flex: 1, padding: '8px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 12,
+                  style={{ flex: 1, padding: '6px 2px', borderRadius: 'var(--radius)', border: 'none', fontSize: 12,
                     background: cfg.dir === val ? 'var(--blue)' : 'var(--bg2)',
                     color: cfg.dir === val ? 'white' : 'var(--text-muted)', cursor: 'pointer', fontWeight: cfg.dir === val ? 500 : 400 }}>
                   {label}
@@ -1503,76 +1502,63 @@ export default function NestingPage() {
               ))}
             </div>
 
-            {/* Мелкие детали */}
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: cfg.small ? 8 : 0 }}>
+            {/* Мелкие детали + время оптимизации — в одну строку */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1, fontSize: 13 }}>
                 <input type="checkbox" checked={cfg.small}
                   onChange={e => { const v = e.target.checked; updateCfg(cfg.id, { small: v }); persist({ small_parts_to_center: v }) }}
-                  style={{ width: 18, height: 18 }} />
-                <span className="section-title" style={{ margin: 0 }}>Мелкие детали — в середину листа</span>
+                  style={{ width: 17, height: 17, flexShrink: 0 }} />
+                Мелкие — в центр
               </label>
-              {cfg.small && (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Площадь до (квадрат), мм</span>
-                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.sq} placeholder="напр. 400"
-                      onChange={e => updateCfg(cfg.id, { sq: e.target.value.replace(/[^0-9]/g, '') })}
-                      onBlur={e => persist({ small_parts_max_square_side: e.target.value === '' ? 0 : Number(e.target.value) })}
-                      style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Сторона до, мм</span>
-                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.side} placeholder="напр. 350"
-                      onChange={e => updateCfg(cfg.id, { side: e.target.value.replace(/[^0-9]/g, '') })}
-                      onBlur={e => persist({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
-                      style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
-                  </div>
-                </div>
-              )}
-              {cfg.small && cfg.sq !== '' && (
-                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-                  Мелкая — это деталь, которая уместилась бы в квадрат {cfg.sq}×{cfg.sq} мм (по площади).
-                </p>
-              )}
-              {cfg.small && cfg.sq === '' && cfg.side === '' && (
-                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-                  Задайте хотя бы один порог — иначе ни одна деталь не будет считаться мелкой.
-                </p>
-              )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flexShrink: 0 }}
+                title="Больше времени — плотнее укладка на первых листах. 0 — быстрый расчёт без доп. оптимизации">
+                Время, с
+                <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.secs} placeholder="12"
+                  onChange={e => updateCfg(cfg.id, { secs: e.target.value.replace(/[^0-9]/g, '') })}
+                  onBlur={e => persist({ optimize_seconds: e.target.value === '' ? 12 : Number(e.target.value) })}
+                  style={{ width: 52, fontSize: 14, padding: '3px 6px', boxSizing: 'border-box' }} />
+              </label>
             </div>
-
-            {/* Время оптимизации */}
-            <div style={{ marginBottom: 12 }}>
-              <p className="section-title">Время оптимизации, сек</p>
-              <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.secs} placeholder="напр. 12"
-                onChange={e => updateCfg(cfg.id, { secs: e.target.value.replace(/[^0-9]/g, '') })}
-                onBlur={e => persist({ optimize_seconds: e.target.value === '' ? 12 : Number(e.target.value) })}
-                style={{ width: '100%', fontSize: 14, padding: '5px 6px', boxSizing: 'border-box' }} />
-              <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-                Больше времени — плотнее укладка на первых листах и меньше остаётся на последнем. 0 — без доп. оптимизации (быстрый расчёт).
+            {cfg.small && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
+                  title="Мелкая — деталь, которая по площади уместилась бы в такой квадрат">
+                  Квадрат до, мм
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.sq} placeholder="напр. 400"
+                    onChange={e => updateCfg(cfg.id, { sq: e.target.value.replace(/[^0-9]/g, '') })}
+                    onBlur={e => persist({ small_parts_max_square_side: e.target.value === '' ? 0 : Number(e.target.value) })}
+                    style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
+                </label>
+                <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}>
+                  Сторона до, мм
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.side} placeholder="напр. 350"
+                    onChange={e => updateCfg(cfg.id, { side: e.target.value.replace(/[^0-9]/g, '') })}
+                    onBlur={e => persist({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
+                    style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
+                </label>
+              </div>
+            )}
+            {cfg.small && cfg.sq === '' && cfg.side === '' && (
+              <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>
+                Задайте хотя бы один порог — иначе мелких деталей не будет.
               </p>
-            </div>
+            )}
 
-            <div style={{ display: 'flex', gap: 8, marginBottom: cfg.error || cfg.result ? 12 : 0 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: cfg.error || cfg.result ? 8 : 0 }}>
               <button onClick={() => (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id)} disabled={!details.length}
-                style={{ flex: 1, padding: 11, background: (isRunning || isQueued) ? 'var(--bg2)' : 'var(--blue)',
+                style={{ flex: 1, padding: 8, background: (isRunning || isQueued) ? 'var(--bg2)' : 'var(--blue)',
                   color: (isRunning || isQueued) ? 'var(--text-muted)' : 'white', border: 'none', borderRadius: 'var(--radius)',
-                  fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+                  fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
                 {isRunning ? `■ Остановить (${secs} с)` : isQueued ? '■ Убрать из очереди' : cfg.result ? '🔄 Пересчитать' : '▶ Выполнить раскрой'}
               </button>
               {configs.length > 1 && (
                 <button onClick={() => removeCfg(cfg.id)}
-                  style={{ padding: '11px 14px', background: 'transparent', color: 'var(--text-hint)',
-                    border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', fontSize: 13, cursor: 'pointer' }}>
+                  style={{ padding: '8px 12px', background: 'transparent', color: 'var(--text-hint)',
+                    border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', fontSize: 12, cursor: 'pointer' }}>
                   Удалить
                 </button>
               )}
             </div>
-            {isRunning && (
-              <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', margin: '-4px 0 8px' }}>
-                Идёт поиск более плотной укладки, страница остаётся отзывчивой — можно раскрыть другую конфигурацию.
-              </p>
-            )}
             {cfg.error && (
               <div style={{ padding: 10, marginBottom: 8, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.1)', color: '#dc3545', fontSize: 13 }}>
                 {cfg.error}
@@ -1587,20 +1573,20 @@ export default function NestingPage() {
                     Этот раскрой посчитан: {cfg.result.algoVersion ? 'v' + cfg.result.algoVersion : 'до версионирования'}
                   </p>
                 )}
-                <div style={{ display: 'flex', gap: 6, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
+                <div style={{ display: 'flex', gap: 5, marginBottom: 6, overflowX: 'auto', paddingBottom: 2 }}>
                   {cfg.sheetsData.map((sh, i) => (
                     <button key={i} onClick={() => updateCfg(cfg.id, { activeSheet: i })}
-                      style={{ flexShrink: 0, padding: '6px 14px', borderRadius: 20, border: 'none',
+                      style={{ flexShrink: 0, padding: '4px 10px', borderRadius: 16, border: 'none',
                         background: cfg.activeSheet === i ? 'var(--blue)' : 'var(--bg2)',
-                        color: cfg.activeSheet === i ? 'white' : 'var(--text-muted)', fontSize: 13, cursor: 'pointer' }}>
+                        color: cfg.activeSheet === i ? 'white' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                       Лист {i + 1} · {sh.placed.length}
                     </button>
                   ))}
                 </div>
 
-                <div style={{ background: 'transparent', borderRadius: 'var(--radius)', padding: 8, marginBottom: 12, border: '0.5px solid var(--border)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500 }}>
+                <div style={{ background: 'transparent', borderRadius: 'var(--radius)', padding: 6, marginBottom: 6, border: '0.5px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 500 }}>
                       Лист {cfg.activeSheet + 1} из {cfg.sheetsData.length}
                       {new URLSearchParams(window.location.search).get('nfp') === '1' && (
                         <span style={{ marginLeft: 6, fontSize: 10, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: 8 }}>
@@ -1657,52 +1643,53 @@ export default function NestingPage() {
                     offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
                     onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
                   />
-                  <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 6 }}>
+                  <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                     {showOffcuts && offcutMode === 'manual'
                       ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                       : (showOffcuts && offcutMode === 'cuts'
                         ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                        : 'Двойной тап — повернуть деталь · Удержи и тяни — переместить · Двумя пальцами — масштаб')}
+                        : 'Двойной тап — поворот · удержи и тяни — перенос · щипок — масштаб')}
                   </p>
                 </div>
 
-                {/* Легенда */}
-                <div style={{ marginBottom: 12 }}>
-                  <p className="section-title">Детали на листе {cfg.activeSheet + 1}</p>
+                {/* Легенда — свёрнута, чтобы не растягивать страницу */}
+                <details style={{ marginBottom: 8 }}>
+                  <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 0' }}>
+                    Детали на листе {cfg.activeSheet + 1} ({canvasSheet.placed.length})
+                  </summary>
                   {canvasSheet.placed.map((p, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', borderBottom: '0.5px solid var(--border)' }}>
-                      <div style={{ width: 12, height: 12, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '2px 0', borderBottom: '0.5px solid var(--border)' }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
                       <span style={{ flex: 1 }}>{p.label}</span>
                       <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
                       {(p.rotation || p.rotated) && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻{p.rotation ?? 90}°</span>}
                     </div>
                   ))}
-                </div>
+                </details>
 
-                <button onClick={() => downloadNestingDxf(cfg.sheetsData, `_k${idx + 1}`)}
-                  style={{ width: '100%', padding: 10, marginBottom: 10, borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
-                    background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
-                  ⬇ Скачать DXF раскроя (для сверки)
-                </button>
-
-                {/* Согласиться с вариантом → сохранить → на производство */}
-                <div style={{ display: 'flex', gap: 8 }}>
+                {/* DXF · выбрать вариант · оформить — в одну строку */}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => downloadNestingDxf(cfg.sheetsData, `_k${idx + 1}`)}
+                    title="Скачать DXF всех листов (для сверки)"
+                    style={{ flex: '0 0 auto', padding: '9px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
+                      background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+                    ⬇ DXF
+                  </button>
                   <button onClick={() => chooseCfg(cfg)} disabled={busyId === cfg.id || cfg.saved}
-                    style={{ flex: 1, padding: 12, borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500,
+                    title="Сохранить этот раскрой в заказ; остальные конфигурации остаются на экране"
+                    style={{ flex: 1, padding: 9, borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500,
                       cursor: (busyId === cfg.id || cfg.saved) ? 'default' : 'pointer',
                       border: '0.5px solid var(--teal)',
                       background: cfg.saved ? '#e6f4ea' : 'var(--teal-light)', color: cfg.saved ? '#1e7e34' : 'var(--teal)' }}>
-                    {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение...' : 'Выбрать вариант'}
+                    {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение…' : 'Выбрать'}
                   </button>
                   <button onClick={() => submitOrder(cfg)} disabled={busyId === cfg.id}
-                    style={{ flex: 1, padding: 12, background: 'var(--teal)', color: 'white', border: 'none',
-                      borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: busyId === cfg.id ? 'default' : 'pointer' }}>
-                    {busyId === cfg.id ? 'Отправка...' : '✓ Оформить заказ'}
+                    title="Сохранить раскрой и отправить заказ на производство"
+                    style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
+                      borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: busyId === cfg.id ? 'default' : 'pointer' }}>
+                    {busyId === cfg.id ? 'Отправка…' : '✓ Оформить'}
                   </button>
                 </div>
-                <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', marginTop: 8 }}>
-                  «Выбрать вариант» сохраняет этот раскрой в заказ, остальные конфигурации остаются на экране. «Оформить заказ» — сохранит и отправит на производство.
-                </p>
               </div>
             )}
           </div>
@@ -1713,7 +1700,7 @@ export default function NestingPage() {
 
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, paddingTop: 4 }}>
         <button onClick={() => navigate(`/orders/${id}`)}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, cursor: 'pointer' }}>←</button>
         <div style={{ flex: 1 }}>
@@ -1723,66 +1710,57 @@ export default function NestingPage() {
       </div>
 
       {/* Статистика */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: focus && configs.length > 1 ? 4 : 12 }}>
-        {[['Листов', sheetsCount || '—'],['Деталей', totalQty],['Кромка (п.м.)', totalEdge.toFixed(1)],['Площадь (м²)', totalArea ? totalArea.toFixed(2) : '—']].map(([label, val]) => (
-          <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '10px 12px' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{label}</div>
-            <div style={{ fontSize: 20, fontWeight: 500, marginTop: 2 }}>{val}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: focus && configs.length > 1 ? 3 : 8 }}>
+        {[['Листов', sheetsCount || '—'],['Деталей', totalQty],['Кромка, м', totalEdge.toFixed(1)],['Площадь, м²', totalArea ? totalArea.toFixed(2) : '—']].map(([label, val]) => (
+          <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '5px 8px' }}>
+            <div style={{ fontSize: 10, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{label}</div>
+            <div style={{ fontSize: 16, fontWeight: 500, lineHeight: 1.2 }}>{val}</div>
           </div>
         ))}
       </div>
       {focus && configs.length > 1 && (
-        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 12px' }}>
-          Листы и площадь — по конфигурации {focusIdx + 1} ({DIR_SHORT[focus.dir]}). Кромка и детали от раскроя не зависят.
+        <p style={{ fontSize: 10, color: 'var(--text-hint)', margin: '0 0 8px' }}>
+          Листы и площадь — по конфигурации {focusIdx + 1} ({DIR_SHORT[focus.dir]})
         </p>
       )}
 
       {/* Кромка по типам */}
       {Object.keys(edgeByType).length > 0 && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <p className="section-title">Метраж кромки</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
           {Object.entries(edgeByType).map(([name, len]) => (
-            <div key={name} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '0.5px solid var(--border)' }}>
-              <span style={{ fontSize: 13 }}>{name}</span>
-              <span style={{ fontSize: 13, fontWeight: 500 }}>{len.toFixed(1)} п.м.</span>
-            </div>
+            <span key={name} style={{ fontSize: 11, background: 'var(--bg2)', borderRadius: 10, padding: '2px 9px', color: 'var(--text-muted)' }}>
+              {name} · <span style={{ fontWeight: 500 }}>{len.toFixed(1)} м</span>
+            </span>
           ))}
         </div>
       )}
 
       {/* Тип станка — общий для всех конфигураций */}
-      <div style={{ marginBottom: 12 }}>
-        <p className="section-title">Станок</p>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Форматно-раскроечный (пила)']].map(([val, label]) => (
-            <div key={val} onClick={() => { setCuttingMethod(val); saveSmallPartsSettings({ cutting_method: val }) }}
-              style={{ flex: 1, padding: '8px 6px', borderRadius: 'var(--radius)', textAlign: 'center',
-                fontSize: 13, cursor: 'pointer',
-                background: cuttingMethod === val ? 'var(--blue)' : 'var(--bg2)',
-                color: cuttingMethod === val ? 'white' : 'var(--text-muted)', fontWeight: cuttingMethod === val ? 500 : 400 }}>
-              {label}
-            </div>
-          ))}
-        </div>
-        <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-          {cuttingMethod === 'guillotine'
-            ? 'Только сквозные резы через весь лист/полосу — раскладка гарантированно режется на пиле.'
-            : 'Свободная укладка без ограничения на сквозной рез — для резки фрезой по любому контуру.'}
-        </p>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)']].map(([val, label]) => (
+          <div key={val} onClick={() => { setCuttingMethod(val); saveSmallPartsSettings({ cutting_method: val }) }}
+            title={val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
+            style={{ flex: 1, padding: '6px 4px', borderRadius: 'var(--radius)', textAlign: 'center',
+              fontSize: 12, cursor: 'pointer',
+              background: cuttingMethod === val ? 'var(--blue)' : 'var(--bg2)',
+              color: cuttingMethod === val ? 'white' : 'var(--text-muted)', fontWeight: cuttingMethod === val ? 500 : 400 }}>
+            {label}
+          </div>
+        ))}
       </div>
 
       {/* Конфигурации раскроя */}
-      <p className="section-title">Конфигурации раскроя</p>
+      <p className="section-title" style={{ margin: '0 0 6px' }}>Конфигурации раскроя</p>
       {configs.map((cfg, idx) => renderConfig(cfg, idx))}
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
         <button onClick={addCfg}
-          style={{ flex: 1, padding: 11, borderRadius: 'var(--radius)', border: '0.5px dashed var(--border-md)',
-            background: 'transparent', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}>
+          style={{ flex: 1, padding: 8, borderRadius: 'var(--radius)', border: '0.5px dashed var(--border-md)',
+            background: 'transparent', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer' }}>
           + Новая конфигурация
         </button>
         <button onClick={runAll} disabled={anyRunning || !details.length}
-          style={{ flex: 1, padding: 11, borderRadius: 'var(--radius)', border: 'none', fontSize: 14, fontWeight: 500,
+          style={{ flex: 1, padding: 8, borderRadius: 'var(--radius)', border: 'none', fontSize: 13, fontWeight: 500,
             background: (anyRunning || !details.length) ? 'var(--bg2)' : 'var(--blue)',
             color: (anyRunning || !details.length) ? 'var(--text-hint)' : 'white',
             cursor: (anyRunning || !details.length) ? 'default' : 'pointer' }}>
@@ -1790,16 +1768,14 @@ export default function NestingPage() {
         </button>
       </div>
       {configs.length > 1 && (
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', marginBottom: 6 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 4, fontSize: 12, color: 'var(--text-muted)' }}
+          title="Время оптимизации идёт по часам: на слабом телефоне при одновременном расчёте каждая конфигурация получает меньше вычислений. Если результат хуже — снимите галочку, конфигурации пойдут по очереди.">
           <input type="checkbox" checked={parallel} onChange={e => setParallel(e.target.checked)}
-            style={{ width: 18, height: 18, marginTop: 1, flexShrink: 0 }} />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Считать одновременно. Время оптимизации идёт по часам, поэтому на слабом телефоне каждая конфигурация
-            получит меньше вычислений — если результат хуже, чем при одиночном расчёте, снимите галочку (пойдут по очереди).
-          </span>
+            style={{ width: 16, height: 16, flexShrink: 0 }} />
+          Считать одновременно (на слабом телефоне — по очереди)
         </label>
       )}
-      <div style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', margin: '4px 0 12px' }}>
+      <div style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', margin: '2px 0 8px' }}>
         Алгоритм раскроя v{NESTING_VERSION}
       </div>
       <style>{`@keyframes nesting-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
