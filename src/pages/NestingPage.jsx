@@ -675,9 +675,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     const rect = canvasRef.current.getBoundingClientRect()
     const scaleX = rect.width ? canvasW / rect.width : 1
     const touch = e.touches?.[0] || e.changedTouches?.[0] || e
+    const scaleY = rect.height ? canvasH / rect.height : scaleX
     return {
       x: (touch.clientX - rect.left) * scaleX,
-      y: (touch.clientY - rect.top) * scaleX
+      y: (touch.clientY - rect.top) * scaleY
     }
   }
 
@@ -969,7 +970,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       <div ref={wrapRef}
         style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8 }}>
         <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
-          style={{ width: canvasW, height: canvasH, maxWidth: zoom > 1 ? 'none' : '100%', borderRadius: 8, display: 'block', touchAction: interactive ? (zoom > 1 ? 'pan-x pan-y' : 'none') : 'auto' }}
+          style={{ width: canvasW, height: 'auto', aspectRatio: `${canvasW} / ${canvasH}`, maxWidth: zoom > 1 ? 'none' : '100%', borderRadius: 8, display: 'block', touchAction: interactive ? (zoom > 1 ? 'pan-x pan-y' : 'none') : 'auto' }}
           onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
           onMouseMove={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerMove(e) }}
           onMouseUp={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerUp(e) }}
