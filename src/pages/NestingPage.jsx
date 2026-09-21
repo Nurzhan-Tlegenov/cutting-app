@@ -1573,17 +1573,6 @@ export default function NestingPage() {
                     Этот раскрой посчитан: {cfg.result.algoVersion ? 'v' + cfg.result.algoVersion : 'до версионирования'}
                   </p>
                 )}
-                <div style={{ display: 'flex', gap: 5, marginBottom: 6, overflowX: 'auto', paddingBottom: 2 }}>
-                  {cfg.sheetsData.map((sh, i) => (
-                    <button key={i} onClick={() => updateCfg(cfg.id, { activeSheet: i })}
-                      style={{ flexShrink: 0, padding: '4px 10px', borderRadius: 16, border: 'none',
-                        background: cfg.activeSheet === i ? 'var(--blue)' : 'var(--bg2)',
-                        color: cfg.activeSheet === i ? 'white' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
-                      Лист {i + 1} · {sh.placed.length}
-                    </button>
-                  ))}
-                </div>
-
                 <div style={{ background: 'transparent', borderRadius: 'var(--radius)', padding: 6, marginBottom: 6, border: '0.5px solid var(--border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                     <span style={{ fontSize: 12, fontWeight: 500 }}>
@@ -1650,6 +1639,18 @@ export default function NestingPage() {
                         ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
                         : 'Двойной тап — поворот · удержи и тяни — перенос · щипок — масштаб')}
                   </p>
+                </div>
+
+                {/* Переключатель листов — под картой, чтобы палец не закрывал карту */}
+                <div style={{ display: 'flex', gap: 5, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                  {cfg.sheetsData.map((sh, i) => (
+                    <button key={i} onClick={() => updateCfg(cfg.id, { activeSheet: i })}
+                      style={{ flexShrink: 0, padding: '4px 10px', borderRadius: 16, border: 'none',
+                        background: cfg.activeSheet === i ? 'var(--blue)' : 'var(--bg2)',
+                        color: cfg.activeSheet === i ? 'white' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+                      Лист {i + 1} · {sh.placed.length}
+                    </button>
+                  ))}
                 </div>
 
                 {/* Легенда — свёрнута, чтобы не растягивать страницу */}
