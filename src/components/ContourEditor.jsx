@@ -1312,17 +1312,18 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
         const da = Math.hypot(ax,ay), db = Math.hypot(bx,by)
         if (da < 1 || db < 1) continue
         const dot = (ax*bx+ay*by)/(da*db)
-        const angleDeg = Math.round(Math.acos(Math.max(-1,Math.min(1,dot)))*180/Math.PI)
-        if (angleDeg === 180) continue
+        // Точность: 1 знак после запятой (раньше округлялось до целого)
+        const angleDeg = Math.round(Math.acos(Math.max(-1,Math.min(1,dot)))*180/Math.PI*10)/10
+        if (angleDeg >= 179.95) continue
 
         const px = ox + curr.x*sc, py = oy + dh - curr.y*sc
         // Биссектриса угла — направление к центру детали
         const toCx = cxD - px, toCy = cyD - py
         const toD = Math.hypot(toCx, toCy) || 1
         // Смещаем дальше для больших углов (больше текста)
-        const dist = angleDeg === 90 ? 16 : 20
+        const dist = Math.abs(angleDeg - 90) < 0.05 ? 16 : 20
         allLabels.push({ x: px + (toCx/toD)*dist, y: py + (toCy/toD)*dist,
-          text: `${angleDeg}°`, color:'#E24B4A' })
+          text: `${angleDeg.toFixed(1)}°`, color:'#E24B4A' })
       }
     }
 
