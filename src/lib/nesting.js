@@ -452,14 +452,14 @@ function compactPass(sheets, direction, usableX, usableY) {
             : { ...piece, x: 0, y: 0 }
 
           if (target.family === 'guillotine') {
-            const spot = fitFixedGuillotine(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall)
+            const spot = fitFixedGuillotine(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall, direction)
             if (spot) {
               const placed = { ...makePlaced(), x: spot.x, y: spot.y, _freeRectIdx: spot.idx }
               target.placed.push(placed); splitGuillotine(target, placed); delete placed._freeRectIdx
               moved = true; break outer
             }
           } else {
-            const spot = fitFixed(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall)
+            const spot = fitFixed(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall, direction)
             if (spot) {
               const placed = { ...makePlaced(), x: spot.x, y: spot.y }
               target.placed.push(placed); split(target, placed); prune(target)
@@ -486,22 +486,11 @@ function compactUntilStable(sheets, direction, usableX, usableY) {
 
 // Поиск места для уже готового (фиксированного) w×h — используется компакцией,
 // где ориентация уже выбрана и повторно не перебирается.
-function fitFixed(freeRects, w, h, usableX, usableY, isSmall) {
+function fitFixed(freeRects, w, h, usableX, usableY, isSmall, direction) {
   let best = null, bestScore = Infinity
   for (const rect of freeRects) {
     if (w > rect.w || h > rect.h) continue
-    const short = Math.min(rect.w - w, rect.h - h)
-    const long_ = Math.max(rect.w - w, rect.h - h)
-    let score = short * 1000 + long_
-    if (isSmall) {
-      let borderTouch = 0
-      if (rect.x <= EPS) borderTouch++
-      if (rect.y <= EPS) borderTouch++
-      if (Math.abs(rect.x + w - usableX) <= EPS) borderTouch++
-      if (Math.abs(rect.y + h - usableY) <= EPS) borderTouch++
-      score += borderTouch * BORDER_PENALTY
-      if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
-    }
+    const score = scoreSpot(rect, w, h, direction, undefined, usableX, usableY, isSmall)
     if (score < bestScore) { bestScore = score; best = { x: rect.x, y: rect.y } }
   }
   return best
@@ -532,6 +521,54 @@ function better(a, b) {
   return a.utilization > b.utilization
 }
 
+// ─── ЕДИНАЯ оценка позиции (меньше = лучше) ────────────────────────────────
+// Используется и при укладке, и при компакции, и в MaxRects, и в Guillotine —
+// поэтому точка привязки везде одна и та же.
+//
+//   auto     : score = fit                      (BSSF/BAF, как раньше)
+//   along_y  : привязка = вся сторона Y (линия x=0)  → главный ключ  = x
+//   along_x  : привязка = вся сторона X (линия y=0)  → главный ключ  = y
+//
+// Для along_* порядок ключей: [расстояние до стороны] → [fit по BSSF/BAF] → [другая ось].
+// Ключи упакованы в одно число строго лексикографически (масштабы считаются
+// от размера листа), так что мелкий ключ никогда не перебьёт крупный.
+function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall) {
+  const short = Math.min(rect.w - w, rect.h - h)
+  const long_ = Math.max(rect.w - w, rect.h - h)
+  const fit = mode === 'baf' ? rect.w * rect.h - w * h : short * 1000 + long_
+
+  const along = direction === 'along_y' || direction === 'along_x'
+  const span = Math.max(usableX, usableY) + 1
+  const fitSpan = Math.max(span * 1001, usableX * usableY) + 1
+
+  let score
+  if (along) {
+    const anchor = Math.round(direction === 'along_y' ? rect.x : rect.y) // расстояние до выбранной стороны (мм)
+    const other  = direction === 'along_y' ? rect.y : rect.x
+    score = anchor * (fitSpan * span) + fit * span + other
+    const preferred = direction === 'along_y' ? h >= w : w >= h            // ориентация вдоль выбранной стороны
+    if (!preferred) score += 0.5
+  } else {
+    score = fit
+  }
+
+  if (isSmall) {
+    let borderTouch = 0
+    if (rect.x <= EPS) borderTouch++
+    if (rect.y <= EPS) borderTouch++
+    if (Math.abs(rect.x + w - usableX) <= EPS) borderTouch++
+    if (Math.abs(rect.y + h - usableY) <= EPS) borderTouch++
+    if (along) {
+      // мелкие детали: край листа важнее привязки (как и раньше — не запрет, а сильный штраф)
+      score += borderTouch * (span * fitSpan * span)
+    } else {
+      score += borderTouch * BORDER_PENALTY
+      if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
+    }
+  }
+  return score
+}
+
 function chooseSpot(freeRects, piece, direction, usableX, usableY, mode) {
   let best = null, bestScore = Infinity
   const oris = [{ pw: piece.pw, ph: piece.ph, rotated: false }]
@@ -541,31 +578,7 @@ function chooseSpot(freeRects, piece, direction, usableX, usableY, mode) {
   for (const rect of freeRects) {
     for (const o of oris) {
       if (o.pw > rect.w || o.ph > rect.h) continue
-      const short = Math.min(rect.w - o.pw, rect.h - o.ph)
-      const long_ = Math.max(rect.w - o.pw, rect.h - o.ph)
-      const leftoverArea = rect.w * rect.h - o.pw * o.ph
-      let score
-      if (direction === 'along_y') {
-        score = rect.x * 100000 + rect.y * 100 + short
-      } else if (direction === 'along_x') {
-        score = rect.y * 100000 + rect.x * 100 + short
-      } else if (mode === 'baf') {
-        score = leftoverArea
-      } else {
-        score = short * 1000 + long_
-      }
-      if (direction === 'along_y' && o.ph >= o.pw) score -= 50
-      if (direction === 'along_x' && o.pw >= o.ph) score -= 50
-
-      if (piece.isSmall) {
-        let borderTouch = 0
-        if (rect.x <= EPS) borderTouch++
-        if (rect.y <= EPS) borderTouch++
-        if (Math.abs(rect.x + o.pw - usableX) <= EPS) borderTouch++
-        if (Math.abs(rect.y + o.ph - usableY) <= EPS) borderTouch++
-        score += borderTouch * BORDER_PENALTY
-        if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
-      }
+      const score = scoreSpot(rect, o.pw, o.ph, direction, mode, usableX, usableY, piece.isSmall)
 
       if (score < bestScore) {
         bestScore = score
@@ -617,31 +630,7 @@ function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mod
   freeRects.forEach((rect, idx) => {
     for (const o of oris) {
       if (o.pw > rect.w || o.ph > rect.h) continue
-      const short = Math.min(rect.w - o.pw, rect.h - o.ph)
-      const long_ = Math.max(rect.w - o.pw, rect.h - o.ph)
-      const leftoverArea = rect.w * rect.h - o.pw * o.ph
-      let score
-      if (direction === 'along_y') {
-        score = rect.x * 100000 + rect.y * 100 + short
-      } else if (direction === 'along_x') {
-        score = rect.y * 100000 + rect.x * 100 + short
-      } else if (mode === 'baf') {
-        score = leftoverArea
-      } else {
-        score = short * 1000 + long_
-      }
-      if (direction === 'along_y' && o.ph >= o.pw) score -= 50
-      if (direction === 'along_x' && o.pw >= o.ph) score -= 50
-
-      if (piece.isSmall) {
-        let borderTouch = 0
-        if (rect.x <= EPS) borderTouch++
-        if (rect.y <= EPS) borderTouch++
-        if (Math.abs(rect.x + o.pw - usableX) <= EPS) borderTouch++
-        if (Math.abs(rect.y + o.ph - usableY) <= EPS) borderTouch++
-        score += borderTouch * BORDER_PENALTY
-        if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
-      }
+      const score = scoreSpot(rect, o.pw, o.ph, direction, mode, usableX, usableY, piece.isSmall)
 
       if (score < bestScore) {
         bestScore = score
@@ -687,22 +676,11 @@ function splitGuillotine(sheet, p) {
 
 // Guillotine-аналог fitFixed (для компакции) — тоже возвращает индекс
 // свободного прямоугольника, чтобы компакция могла вызвать splitGuillotine.
-function fitFixedGuillotine(freeRects, w, h, usableX, usableY, isSmall) {
+function fitFixedGuillotine(freeRects, w, h, usableX, usableY, isSmall, direction) {
   let best = null, bestScore = Infinity, bestIdx = -1
   freeRects.forEach((rect, idx) => {
     if (w > rect.w || h > rect.h) return
-    const short = Math.min(rect.w - w, rect.h - h)
-    const long_ = Math.max(rect.w - w, rect.h - h)
-    let score = short * 1000 + long_
-    if (isSmall) {
-      let borderTouch = 0
-      if (rect.x <= EPS) borderTouch++
-      if (rect.y <= EPS) borderTouch++
-      if (Math.abs(rect.x + w - usableX) <= EPS) borderTouch++
-      if (Math.abs(rect.y + h - usableY) <= EPS) borderTouch++
-      score += borderTouch * BORDER_PENALTY
-      if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
-    }
+    const score = scoreSpot(rect, w, h, direction, undefined, usableX, usableY, isSmall)
     if (score < bestScore) { bestScore = score; best = { x: rect.x, y: rect.y }; bestIdx = idx }
   })
   if (!best) return null
