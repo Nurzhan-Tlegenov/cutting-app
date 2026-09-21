@@ -413,6 +413,19 @@ function contactScore(occ, cols, rows, gx, gy, boundaryOffsets, boundarySet) {
   return contact
 }
 
+// Направление укладки текущего расчёта (auto | along_y | along_x). Задаётся один
+// раз в packTrueShape — так не нужно тащить параметр через все вызовы tryPlace.
+let ACTIVE_DIRECTION = 'auto'
+
+// Мера занятого габарита. auto — площадь прямоугольника (как раньше);
+// along_y / along_x — полоса от выбранной стороны на всю длину листа, то есть
+// «сначала как можно меньше отъехать от стороны», и только потом — вдоль неё.
+function envMeasure(envC, envR, cols, rows) {
+  if (ACTIVE_DIRECTION === 'along_y') return envC * rows + envR
+  if (ACTIVE_DIRECTION === 'along_x') return envR * cols + envC
+  return envC * envR
+}
+
 const MAX_CANDIDATES = 3000 // ограничение на число вариантов, которые реально оцениваем — держит расчёт быстрым (считаются ВСЕ попытки, не только удачные)
 
 // avoidBorder=true — кандидаты, касающиеся края используемой зоны, вообще не
@@ -484,11 +497,12 @@ function tryPlace(occ, cols, rows, variants, avoidBorder, anchorXs, envCols, env
           if (fits(occ, cols, rows, gx, gy, variant.dilated, variant.cols, variant.rows)) {
             const newCols = Math.max(envCols, gx + variant.cols)
             const newRows = Math.max(envRows, gy + variant.rows)
-            const area = newCols * newRows
+            const area = envMeasure(newCols, newRows, cols, rows)
             const score = contactScore(occ, cols, rows, gx, gy, variant.boundary, variant.boundarySet)
             // Площадь — главный критерий (меньше — лучше); контакт — добавка
             // при равной площади; ниже и левее — финальный тай-брейк.
-            const key = -area * 1e6 + score * 10 - (gy * cols + gx) * 0.001
+            const pos = ACTIVE_DIRECTION === 'along_y' ? gx * rows + gy : gy * cols + gx
+            const key = -area * 1e6 + score * 10 - pos * 0.001
             if (key > bestScore) { bestScore = key; best = { gx, gy, variant } }
           }
         }
@@ -536,7 +550,7 @@ function tryPlacePair(occ, cols, rows, instA, instB, anchorXs, envCols, envRows)
       if (!placeB) continue
       const totalCols = Math.max(envCols2, placeB.gx + placeB.variant.cols)
       const totalRows = Math.max(envRows2, placeB.gy + placeB.variant.rows)
-      const area = totalCols * totalRows
+      const area = envMeasure(totalCols, totalRows, cols, rows)
       if (area < bestArea) { bestArea = area; best = { placeA, placeB } }
     }
   }
@@ -880,6 +894,7 @@ export async function packTrueShape({
   smallPartsToCenter = false, smallPartsMaxSquareSide = 0, smallPartsMaxSide = 0,
   direction = 'auto',
 }) {
+  ACTIVE_DIRECTION = direction
   const usableX = sheetW - marginL - marginR
   const usableY = sheetL - marginT - marginB
   const cellSize = Math.min(MAX_CELL_MM, Math.max(MIN_CELL_MM, Math.sqrt((usableX * usableY) / TARGET_CELLS)))

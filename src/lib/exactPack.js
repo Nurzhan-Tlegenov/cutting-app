@@ -176,6 +176,14 @@ function candidateYs(sheet, bh, usableY, kerf, step = GRID_STEP, bucket = BUCKET
 function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false) {
   const step = dense ? 20 : GRID_STEP, bucket = dense ? 5 : BUCKET
   const dropOrder = orderFor(direction)[0]
+  // Привязка к стороне: для along_y / along_x «занятый габарит» меряется как
+  // полоса от выбранной стороны на всю длину листа (envX*usableY / envY*usableX),
+  // а не как площадь прямоугольника envX*envY. Сам критерий (минимум габарита,
+  // штраф за запертые пустоты, вложение в пазы) остаётся тем же — меняется
+  // только точка отсчёта. auto — без изменений.
+  const alongY = direction === 'along_y', alongX = direction === 'along_x'
+  const envMeasure = (ex, ey) => alongY ? ex * usableY + ey : alongX ? ey * usableX + ex : ex * ey
+  const anchorTie = bb => alongY ? 10 * bb.minX + bb.minY : alongX ? 10 * bb.minY + bb.minX : bb.minX + bb.minY
   const sideOrder = dropOrder.slice().reverse()
   const shortlist = []
   const settle = (e, order) => {
@@ -204,7 +212,8 @@ function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false
       if (e.bb.minX < -0.01 || e.bb.minY < -0.01 || e.bb.maxX > usableX + 0.01 || e.bb.maxY > usableY + 0.01) return
       if (!entryClear(e, sheet.entries, kerf)) return
       const envX = Math.max(sheet.envX, e.bb.maxX), envY = Math.max(sheet.envY, e.bb.maxY)
-      found.push({ variant, entry: e, tx: tx + e.dx, ty: ty + e.dy, env: envX * envY, key: envX * envY * 1000 + (e.bb.minX + e.bb.minY) })
+      const env = envMeasure(envX, envY)
+      found.push({ variant, entry: e, tx: tx + e.dx, ty: ty + e.dy, env, key: env * 1000 + anchorTie(e.bb) })
     }
     for (const x0 of candidateXs(sheet, bw, usableX, kerf, step, bucket)) consider(x0 - lb.minX, usableY - lb.maxY, dropOrder)
     if (sheet.entries.length) {
@@ -231,7 +240,7 @@ function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false
     if (c.env > minEnv * 1.15) continue // заметно больший габарит — пустоты не спасут
     const topRow = Math.min(sheet.rows - 1, Math.ceil(Math.max(sheet.envY, c.entry.bb.maxY) / CELL))
     const trapped = trappedArea(sheet, polyCells(c.entry.poly, sheet.cols, sheet.rows), topRow)
-    const cost = c.env + TRAPPED_WEIGHT * trapped + (c.entry.bb.minX + c.entry.bb.minY) * 1e-3
+    const cost = c.env + TRAPPED_WEIGHT * trapped + anchorTie(c.entry.bb) * 1e-3
     c.cost = cost
     if (cost < bestCost) { bestCost = cost; best = c }
   }
