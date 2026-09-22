@@ -19,6 +19,7 @@ import {
 } from './nfpGeometry'
 
 function rotate90(polygon, w) { return polygon.map(([x, y]) => [y, w - x]) }
+function polygonArea(poly) { let a=0; for (let i=0;i<poly.length;i++){const q=poly[(i+1)%poly.length]; a+=poly[i][0]*q[1]-q[0]*poly[i][1]} return Math.abs(a)/2 }
 
 // Один вариант поворота детали: полигон для экспорта/рендера (БЕЗ раздутия
 // на kerf — как и раньше, в DXF идёт чистый контур детали) + раздутые на
@@ -53,7 +54,7 @@ function buildPieceVariants(detail, kerf) {
 // уложенных на листе — кандидаты из NFP против каждого соседа + пересечения
 // NFP пар соседей друг с другом + точки на рёбрах NFP, выровненные по
 // краям соседей и границам листа.
-function placeOne(variants, placed, usableX, usableY) {
+function placeOne(variants, placed, usableX, usableY, scoreMode = 'auto') {
   let best = null, bestScore = Infinity
   for (const v of variants) {
     const bb0 = bboxOf(v.polygon)
@@ -104,7 +105,15 @@ function placeOne(variants, placed, usableX, usableY) {
       if (!absParts) absParts = v.parts.map(part => translate(part, ox, oy))
       let envMaxX = ox + bb0.maxX, envMaxY = oy + bb0.maxY
       for (const p of placed) { envMaxX = Math.max(envMaxX, p.bb.maxX); envMaxY = Math.max(envMaxY, p.bb.maxY) }
-      const score = envMaxX * envMaxY + oy * 0.001 + ox * 0.0001
+      // 'tall'/'wide' — для поиска ОБЕИХ ориентаций сцепки пары (см.
+      // buildPairSubs): 'auto' минимизирует площадь габарита и почти всегда
+      // находит только одну из двух (у них площадь габарита практически
+      // одинаковая — 704x1036 против 1038x704 — так что вторая, с виду ничуть
+      // не хуже, просто никогда не побеждает в сравнении по площади и даже не
+      // пробуется отдельно).
+      const score = scoreMode === 'tall' ? envMaxX * 1e6 + envMaxY
+        : scoreMode === 'wide' ? envMaxY * 1e6 + envMaxX
+        : envMaxX * envMaxY + oy * 0.001 + ox * 0.0001
       if (score < bestScore) {
         bestScore = score
         best = { angle: v.angle, x: ox, y: oy, polygon: translate(v.polygon, ox, oy), absParts, bb: bboxOf(translate(v.polygon, ox, oy)) }
@@ -112,6 +121,118 @@ function placeOne(variants, placed, usableX, usableY) {
     }
   }
   return best
+}
+
+
+// ─── Сцепка одинаковых деталей в пару ──────────────────────────────────────
+// Та же идея, что в exactPack.js (tileIntoPairs): две одинаковые вогнутые
+// детали часто вкладываются друг в друга почти без зазора. Там это строилось
+// по габаритам; здесь — через настоящий NFP-контакт (placeOne), поэтому
+// сцепка получается по РЕАЛЬНОМУ контуру, а не по прямоугольнику. Генетике
+// такая пара скармливается как ОДНА деталь (атомарный блок) — это даёт ей
+// сразу готовый плотный строительный элемент вместо необходимости самой
+// случайно нащупать взаимный разворот двух конкретных копий.
+function rot90Poly(poly, w) { return poly.map(([x,y]) => [y, w-x]) }
+function rot90Parts(parts, w) { return parts.map(p => rot90Poly(p, w)) }
+
+// Пробуем несколько РАЗНЫХ (не совпадающих по итоговому габариту) способов
+// сцепить деталь саму с собой — аналог along_y/along_x в exactPack.js:
+// одна сцепка обычно выходит "высокой" (в столбец), другая "широкой".
+function buildPairSubs(inst) {
+  const v0 = inst.variants[0]
+  const bb0 = bboxOf(v0.polygon)
+  const firstPoly = translate(v0.polygon, -bb0.minX, -bb0.minY)
+  const firstParts = v0.parts.map(p => translate(p, -bb0.minX, -bb0.minY))
+  const firstPlaced = { bb: bboxOf(firstPoly), absParts: firstParts }
+  // Область поиска контакта — не безграничная: с безграничной (например,
+  // 1e7 мм) 3 угловых кандидата placeOne (запасной вариант "хоть где-то, но
+  // без пересечения" для случая листа, где иначе некуда) сами оказываются на
+  // расстоянии тысяч метров — формально не пересекаются ни с чем, значит
+  // "проходят" по критерию, и при выборе минимальной ширины ('tall' режим)
+  // именно такой уехавший кандидат может победить настоящий контакт. Пара не
+  // может быть больше нескольких размеров самой детали.
+  const span = Math.max(firstPlaced.bb.maxX, firstPlaced.bb.maxY)
+  const BIG = span * 4
+  const singleArea = firstPlaced.bb.maxX * firstPlaced.bb.maxY
+  const out = []
+  // 'wide' и 'tall' — две принципиально разные ориентации сцепки (см.
+  // комментарий у scoreMode в placeOne); 'auto' — на случай, если для формы
+  // почему-то находится третья, отличная от первых двух.
+  for (const mode of ['tall', 'wide', 'auto']) {
+    for (const v of inst.variants) {
+      const res = placeOne([v], [firstPlaced], BIG, BIG, mode)
+      if (!res) continue
+      const minX = Math.min(0, res.bb.minX), minY = Math.min(0, res.bb.minY)
+      const maxX = Math.max(firstPlaced.bb.maxX, res.bb.maxX), maxY = Math.max(firstPlaced.bb.maxY, res.bb.maxY)
+      const W = maxX - minX, H = maxY - minY
+      if (W > span * 2.2 || H > span * 2.2) continue // не настоящий контакт — отбрасываем
+      // Детали просто встали рядом, без вложения одна в другую (площадь
+      // габарита пары ~= сумме двух отдельных габаритов) — это не сцепка,
+      // а то же самое, что генетика и без подсказки легко находит сама.
+      // Пропускаем: иначе такой "пустой" вариант чередуется с настоящим и
+      // портит половину сцепленных деталей.
+      if (W * H > singleArea * 1.85) continue
+      if (out.some(o => Math.abs(o.W-W)<1 && Math.abs(o.H-H)<1)) continue
+      const dx = -minX, dy = -minY
+      out.push({
+        W, H,
+        subs: [
+          { angle: v0.angle, polygon: translate(firstPoly, dx, dy), parts: firstParts.map(p => translate(p, dx, dy)) },
+          { angle: v.angle, polygon: translate(res.polygon, dx, dy), parts: res.absParts.map(p => translate(p, dx, dy)) },
+        ],
+      })
+    }
+  }
+  return out
+}
+
+// Варианты поворота ГОТОВОЙ пары целиком: 0°/180° — всегда (каждая из двух
+// деталей внутри пары остаётся в разрешённом для неё положении 0/180, значит
+// направление текстуры не нарушается); 90°/270° — только если сама деталь
+// допускает вращение (тот же признак rotatable, что и у одиночной детали).
+function buildCompositeVariants(baseSubs, W0, H0, rotatable) {
+  const mk = (subs, w, h, angle) => ({ angle, w, h, polygon: [[0,0],[w,0],[w,h],[0,h]], subs, parts: subs.flatMap(s=>s.parts) })
+  const rot = (subs, w) => subs.map(s => ({ angle: (s.angle+90)%360, polygon: rot90Poly(s.polygon, w), parts: rot90Parts(s.parts, w) }))
+  const subs90 = rot(baseSubs, W0)
+  const subs180 = rot(subs90, H0)
+  const variants = [mk(baseSubs, W0, H0, 0), mk(subs180, W0, H0, 180)]
+  if (rotatable) {
+    variants.push(mk(subs90, H0, W0, 90))
+    variants.push(mk(rot(subs180, W0), H0, W0, 270))
+  }
+  return variants
+}
+
+function buildPairInstances(inst, count, nextIdStart) {
+  const candidates = buildPairSubs(inst)
+  if (!candidates.length) return []
+  const rotatable = inst.variants.length > 2
+  const instances = []
+  for (let k = 0; k < count; k++) {
+    const cand = candidates[k % candidates.length] // чередуем найденные способы сцепки — разнообразие для генетики
+    instances.push({
+      id: nextIdStart + k, detailIndex: inst.detailIndex, isComposite: true, src: inst,
+      label: inst.label, prefix: inst.prefix,
+      edgeTop: inst.edgeTop, edgeRight: inst.edgeRight, edgeBottom: inst.edgeBottom, edgeLeft: inst.edgeLeft,
+      variants: buildCompositeVariants(cand.subs, cand.W, cand.H, rotatable),
+      w: cand.W, h: cand.H,
+    })
+  }
+  return instances
+}
+
+// Кладём результат placeOne в лист. Для сцепки — разворачиваем в ДВЕ реальные
+// детали (у каждой свой угол поворота и, значит, свой разворот кромки) —
+// дальше по коду (сортировка, генетика, вывод) они неотличимы от обычных
+// одиночно уложенных деталей.
+function commitInstance(sheet, inst, res) {
+  if (!inst.isComposite) { sheet.push({ inst, ...res }); return }
+  const variant = inst.variants.find(v => v.angle === res.angle)
+  for (const sub of variant.subs) {
+    const absPolygon = translate(sub.polygon, res.x, res.y)
+    const absParts = sub.parts.map(p => translate(p, res.x, res.y))
+    sheet.push({ inst: inst.src, angle: sub.angle, x: res.x, y: res.y, polygon: absPolygon, absParts, bb: bboxOf(absPolygon) })
+  }
 }
 
 function attemptPack(order, usableX, usableY) {
@@ -122,7 +243,7 @@ function attemptPack(order, usableX, usableY) {
     for (const sheet of sheets) {
       if (sheet.length === 0) continue // пустой лист — обрабатываем отдельно ниже, с оглядкой на следующую деталь
       const res = placeOne(inst.variants, sheet, usableX, usableY)
-      if (res) { sheet.push({ inst, ...res }); done = true; break }
+      if (res) { commitInstance(sheet, inst, res); done = true; break }
     }
     if (!done) {
       // Первая деталь НА ПУСТОМ ЛИСТЕ (неважно, самый первый лист заказа или
@@ -147,7 +268,7 @@ function attemptPack(order, usableX, usableY) {
         if (lookaheadScore < bestLookaheadScore) { bestLookaheadScore = lookaheadScore; bestFirst = res }
       }
       if (!bestFirst) return null
-      targetSheet.push({ inst, ...bestFirst })
+      commitInstance(targetSheet, inst, bestFirst)
     }
   }
   return sheets.filter(s => s.length > 0)
@@ -213,6 +334,39 @@ function perturbOrder(order) {
   return a
 }
 
+// «Сдвиг вперёд»: то же, что sweepForward в exactPack.js, но через настоящую
+// NFP-притирку (placeOne), а не растровую сетку. ГА подбирает ПОРЯДОК
+// деталей, но даже у хорошего порядка последний лист часто остаётся
+// недобитым — потому что деталь, которая случайно ушла на следующий лист
+// при жадной раскладке attemptPack, вообще-то помещалась бы и на предыдущий
+// (просто раньше там для неё не нашлось повода попробовать). Здесь для
+// каждой детали с поздних листов пробуем реальную NFP-позицию на каждом
+// более раннем листе; если помещается — переносим. Повторяем по кругу, пока
+// что-то переносится.
+async function sweepForwardNFP(sheets, usableX, usableY, deadline) {
+  let result = sheets.map(s => s.slice())
+  for (let round = 0; round < 6 && Date.now() < deadline; round++) {
+    let moved = false
+    for (let i = 0; i < result.length - 1 && Date.now() < deadline; i++) {
+      for (let j = result.length - 1; j > i; j--) {
+        const from = result[j]
+        for (let k = from.length - 1; k >= 0 && Date.now() < deadline; k--) {
+          const inst = from[k].inst
+          const res = placeOne(inst.variants, result[i], usableX, usableY)
+          if (res) {
+            result[i] = result[i].concat([{ inst, ...res }])
+            from.splice(k, 1)
+            moved = true
+          }
+        }
+      }
+    }
+    result = result.filter(s => s.length)
+    if (!moved) break
+  }
+  return result
+}
+
 export async function packNFP({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
   optimizeSeconds = 15,
@@ -221,17 +375,31 @@ export async function packNFP({
   const usableY = sheetL - marginT - marginB
 
   const instances = []
+  const usableXForPairs = sheetW - marginL - marginR, usableYForPairs = sheetL - marginT - marginB
   details.forEach((d, di) => {
     const variants = buildPieceVariants(d, kerf)
     const v0bb = bboxOf(variants[0].polygon)
-    for (let q=0; q<(Number(d.qty)||1); q++) {
-      instances.push({
-        id: instances.length, detailIndex: di, variants,
-        label: d.display_name || d.name, prefix: d.prefix,
-        edgeTop: d.edge_top, edgeRight: d.edge_right, edgeBottom: d.edge_bottom, edgeLeft: d.edge_left,
-        w: v0bb.maxX-v0bb.minX, h: v0bb.maxY-v0bb.minY,
-      })
+    const qty = Number(d.qty) || 1
+    const singleInst = {
+      id: -1, detailIndex: di, variants,
+      label: d.display_name || d.name, prefix: d.prefix,
+      edgeTop: d.edge_top, edgeRight: d.edge_right, edgeBottom: d.edge_bottom, edgeLeft: d.edge_left,
+      w: v0bb.maxX-v0bb.minX, h: v0bb.maxY-v0bb.minY,
     }
+    // Вогнутая деталь, которых в заказе больше одной — пробуем сцепить парами.
+    const concave = polygonArea(variants[0].polygon) < 0.97 * singleInst.w * singleInst.h
+    const pairCount = concave ? Math.floor(qty / 2) : 0
+    if (pairCount > 0) {
+      const pairs = buildPairInstances(singleInst, pairCount, instances.length)
+      if (pairs.length === pairCount) {
+        instances.push(...pairs)
+        for (let q = pairCount * 2; q < qty; q++) instances.push({ ...singleInst, id: instances.length })
+        return
+      }
+      // Не удалось построить сцепку (например, для этой формы NFP не нашёл
+      // контакта) — откатываемся на обычные одиночные детали, как раньше.
+    }
+    for (let q = 0; q < qty; q++) instances.push({ ...singleInst, id: instances.length })
   })
 
   const startTime = Date.now()
@@ -284,18 +452,38 @@ export async function packNFP({
     }
   }
 
+  // Дожим лучшей найденной раскладки — до конца бюджета времени.
+  if (best.length > 1 && Date.now() - startTime < budgetMs) {
+    const swept = await sweepForwardNFP(best, usableX, usableY, startTime + budgetMs)
+    const sweptStat = scoreSheets(swept)
+    if (better(sweptStat, bestStat)) { best = swept; bestStat = sweptStat }
+  }
+
   return {
     sheets: best.map((sheet, i) => ({
       index: i,
       freeRects: [],
-      placed: sheet.map(p => ({
-        detailIndex: p.inst.detailIndex, label: p.inst.label, prefix: p.inst.prefix,
-        x: p.x, y: p.y, w: p.bb.maxX-p.bb.minX, h: p.bb.maxY-p.bb.minY,
-        origX: p.bb.maxX-p.bb.minX, origY: p.bb.maxY-p.bb.minY,
-        rotated: p.angle===90||p.angle===270, rotation: p.angle,
-        edgeTop: p.inst.edgeTop, edgeRight: p.inst.edgeRight, edgeBottom: p.inst.edgeBottom, edgeLeft: p.inst.edgeLeft,
-        polygon: p.polygon.map(([x,y])=>({x: x-p.x, y: y-p.y})),
-      })),
+      placed: sheet.map(p => {
+        // Поворот кромки вслед за поворотом детали (той же логикой, что и в
+        // растровом алгоритме, trueShapeNesting.js) — раньше здесь кромка
+        // всегда отдавалась "как есть", без учёта угла поворота детали;
+        // для деталей со сцепкой (внутри пары обе копии повёрнуты по-разному)
+        // это стало бы заметной ошибкой, поэтому чиним для всех сразу.
+        const times = ((p.angle % 360) + 360) % 360 / 90
+        let top = p.inst.edgeTop, right = p.inst.edgeRight, bottom = p.inst.edgeBottom, left = p.inst.edgeLeft
+        for (let i = 0; i < times; i++) {
+          const nTop = left, nRight = top, nBottom = right, nLeft = bottom
+          top = nTop; right = nRight; bottom = nBottom; left = nLeft
+        }
+        return {
+          detailIndex: p.inst.detailIndex, label: p.inst.label, prefix: p.inst.prefix,
+          x: p.x, y: p.y, w: p.bb.maxX-p.bb.minX, h: p.bb.maxY-p.bb.minY,
+          origX: p.bb.maxX-p.bb.minX, origY: p.bb.maxY-p.bb.minY,
+          rotated: p.angle===90||p.angle===270, rotation: p.angle,
+          edgeTop: top, edgeRight: right, edgeBottom: bottom, edgeLeft: left,
+          polygon: p.polygon.map(([x,y])=>({x: x-p.x, y: y-p.y})),
+        }
+      }),
     })),
     usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
   }
