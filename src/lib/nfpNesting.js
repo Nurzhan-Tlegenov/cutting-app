@@ -76,18 +76,32 @@ function placeOne(variants, placed, usableX, usableY) {
       for (const pt of edgesAgainstAlignmentLines(nfp.edges, [...xLines], [...yLines])) candidates.push(pt)
     }
 
+    // Габариты кусков движущейся детали в её ЛОКАЛЬНОЙ системе (сдвигаем на
+    // (ox,oy) при проверке кандидата) — чтобы для каждой пары (кусок
+    // движущейся, кусок соседа) сначала отсечь по bbox и только потом делать
+    // дорогой точный тест пересечения (тот же эффект, что и в nfpFromParts).
+    const partBB = v.parts.map(bboxOf)
     for (const [ox, oy] of candidates) {
       if (ox < minX - 1e-6 || ox > maxX + 1e-6 || oy < minY - 1e-6 || oy > maxY + 1e-6) continue
-      const absParts = v.parts.map(p => translate(p, ox, oy))
-      let bad = false
+      let bad = false, absParts = null
       for (const p of placed) {
+        if (p.bb.minX > ox + partBB.reduce((m,b)=>Math.max(m,b.maxX),-Infinity) || p.bb.maxX < ox + partBB.reduce((m,b)=>Math.min(m,b.minX),Infinity) ||
+            p.bb.minY > oy + partBB.reduce((m,b)=>Math.max(m,b.maxY),-Infinity) || p.bb.maxY < oy + partBB.reduce((m,b)=>Math.min(m,b.minY),Infinity)) continue
+        if (!absParts) absParts = v.parts.map(part => translate(part, ox, oy))
+        const pAbsBB = p.absPartsBB || (p.absPartsBB = p.absParts.map(bboxOf))
         outer:
-        for (const a of absParts) for (const b of p.absParts) {
-          if (polygonsOverlapRobust(a, b)) { bad = true; break outer }
+        for (let ai = 0; ai < absParts.length; ai++) {
+          const abb = { minX: partBB[ai].minX+ox, maxX: partBB[ai].maxX+ox, minY: partBB[ai].minY+oy, maxY: partBB[ai].maxY+oy }
+          for (let bi = 0; bi < p.absParts.length; bi++) {
+            const bbb = pAbsBB[bi]
+            if (abb.minX > bbb.maxX || bbb.minX > abb.maxX || abb.minY > bbb.maxY || bbb.minY > abb.maxY) continue
+            if (polygonsOverlapRobust(absParts[ai], p.absParts[bi])) { bad = true; break outer }
+          }
         }
         if (bad) break
       }
       if (bad) continue
+      if (!absParts) absParts = v.parts.map(part => translate(part, ox, oy))
       let envMaxX = ox + bb0.maxX, envMaxY = oy + bb0.maxY
       for (const p of placed) { envMaxX = Math.max(envMaxX, p.bb.maxX); envMaxY = Math.max(envMaxY, p.bb.maxY) }
       const score = envMaxX * envMaxY + oy * 0.001 + ox * 0.0001

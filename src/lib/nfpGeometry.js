@@ -61,6 +61,46 @@ export function segIntersectionPoint(p1,p2,p3,p4) {
   return [x1 + t*(x2-x1), y1 + t*(y2-y1)]
 }
 
+
+// Упрощение контура (Дуглас—Пекер) перед декомпозицией на выпуклые части.
+// Дуги/скругления приходят сэмплированными в десятки почти коллинеарных
+// точек — почти каждая такая точка формально «reflex» (даже на долю градуса)
+// и decomposeConvex режет по НЕЙ отдельную диагональ. На детали 700×700 с
+// одним скруглением это давало 54 вершины -> 51 треугольник вместо
+// нескольких настоящих выпуклых кусков, а NFP считается попарно между
+// частями ДВУХ деталей — 51×51 сумм Минковского на одно размещение, умноженное
+// на число уже уложенных соседей и особей популяции. Это и вызывало зависание.
+// eps подобран как компромисс: заметно меньше kerf/2 (не влияет на точность
+// стыковки), но достаточно, чтобы схлопнуть тесселяцию дуг.
+function simplifyForDecomp(poly, eps) {
+  const n = poly.length
+  if (n <= 6 || eps <= 0) return poly
+  const distSeg = (p, a, b) => {
+    const dx = b[0]-a[0], dy = b[1]-a[1], len2 = dx*dx+dy*dy
+    if (len2 < 1e-12) return Math.hypot(p[0]-a[0], p[1]-a[1])
+    let t = ((p[0]-a[0])*dx + (p[1]-a[1])*dy) / len2
+    t = Math.max(0, Math.min(1, t))
+    return Math.hypot(p[0]-(a[0]+t*dx), p[1]-(a[1]+t*dy))
+  }
+  const keep = new Uint8Array(n)
+  let i0 = 0, i1 = 0
+  for (let i = 1; i < n; i++) { if (poly[i][0] < poly[i0][0]) i0 = i; if (poly[i][0] > poly[i1][0]) i1 = i }
+  if (i0 === i1) return poly
+  keep[i0] = 1; keep[i1] = 1
+  const rec = (s, e) => {
+    let idx = -1, md = eps
+    for (let k = (s + 1) % n; k !== e; k = (k + 1) % n) {
+      const d = distSeg(poly[k], poly[s], poly[e])
+      if (d > md) { md = d; idx = k }
+    }
+    if (idx >= 0) { keep[idx] = 1; rec(s, idx); rec(idx, e) }
+  }
+  rec(i0, i1); rec(i1, i0)
+  const out = []
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(poly[i])
+  return out.length >= 3 ? out : poly
+}
+
 function isValidDiagonal(poly, i, j) {
   const n = poly.length
   const a = poly[i], b = poly[j]
@@ -83,8 +123,78 @@ function isReflex(poly, i) {
 // вершину, режем через ближайшую валидную диагональ, рекурсия на обеих
 // половинах. Корректно для любого простого полигона (в т.ч. с дугами,
 // сэмплированными в мелкие отрезки).
-export function decomposeConvex(inputPoly, depth = 0) {
-  const poly = ensureCCW(inputPoly)
+
+function polyIsConvex(poly) {
+  const n = poly.length
+  let sign = 0
+  for (let i = 0; i < n; i++) {
+    const c = cross(poly[i], poly[(i + 1) % n], poly[(i + 2) % n])
+    if (Math.abs(c) < 1e-7) continue
+    const s = c > 0 ? 1 : -1
+    if (sign === 0) sign = s
+    else if (s !== sign) return false
+  }
+  return true
+}
+
+// Общее ребро a[i]->a[i+1] / b[j]->b[j+1] (одна и та же диагональ разреза,
+// пройденная в разных направлениях в двух половинах декомпозиции).
+function findSharedEdge(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i], a2 = a[(i + 1) % a.length]
+    for (let j = 0; j < b.length; j++) {
+      const b1 = b[j], b2 = b[(j + 1) % b.length]
+      if (Math.hypot(a1[0] - b2[0], a1[1] - b2[1]) < 1e-6 && Math.hypot(a2[0] - b1[0], a2[1] - b1[1]) < 1e-6) return [i, j]
+    }
+  }
+  return null
+}
+
+function mergeAlongEdge(a, b, i, j) {
+  const na = a.length, nb = b.length
+  const merged = []
+  let k = (i + 1) % na
+  while (true) { merged.push(a[k]); if (k === i) break; k = (k + 1) % na }
+  let m = (j + 2) % nb
+  while (m !== j) { merged.push(b[m]); m = (m + 1) % nb }
+  return merged
+}
+
+// "Разрезать по ближайшей диагонали" (decomposeConvex) режет мелко
+// сэмплированные дуги на десятки вырожденных треугольников — это резко
+// раздувает число кусков и, вместе с ним, стоимость NFP (растёт как
+// произведение числа кусков двух деталей). Здесь эти куски СКЛЕИВАЮТСЯ
+// обратно там, где их объединение остаётся выпуклым — то есть где разрез
+// был технический (внутри плавной дуги), а не по-настоящему нужен (по
+// вогнутому углу детали). На реальной детали 700×700 (700 точек контура)
+// это сокращает число кусков с ~29 до нескольких, без потери точности:
+// объединение выпукло ⇒ ни одна вершина не "спрятана" внутри.
+function mergeConvexParts(parts) {
+  let list = parts.slice()
+  let merged = true
+  while (merged) {
+    merged = false
+    outer:
+    for (let i = 0; i < list.length; i++) {
+      for (let j = 0; j < list.length; j++) {
+        if (i === j) continue
+        const edge = findSharedEdge(list[i], list[j])
+        if (!edge) continue
+        const cand = mergeAlongEdge(list[i], list[j], edge[0], edge[1])
+        if (cand.length < 3 || !polyIsConvex(cand)) continue
+        const next = list.filter((_, k) => k !== i && k !== j)
+        next.push(cand)
+        list = next
+        merged = true
+        break outer
+      }
+    }
+  }
+  return list
+}
+
+export function decomposeConvex(inputPoly, depth = 0, simplifyEps = 0) {
+  const poly = depth === 0 ? simplifyForDecomp(ensureCCW(inputPoly), simplifyEps) : ensureCCW(inputPoly)
   const n = poly.length
   if (n < 3) return []
   if (depth > 60) return [poly]
@@ -107,7 +217,8 @@ export function decomposeConvex(inputPoly, depth = 0) {
   while (true) { partA.push(poly[k]); if (k===j) break; k=(k+1)%n }
   k = j
   while (true) { partB.push(poly[k]); if (k===i) break; k=(k+1)%n }
-  return [...decomposeConvex(partA, depth+1), ...decomposeConvex(partB, depth+1)]
+  const raw = [...decomposeConvex(partA, depth+1), ...decomposeConvex(partB, depth+1)]
+  return depth === 0 ? mergeConvexParts(raw) : raw
 }
 
 // Сумма Минковского двух выпуклых CCW-полигонов (merge-by-angle, O(n+m)).
@@ -187,9 +298,30 @@ function offsetPolygon(polyCCW, delta) {
   return out
 }
 
+// Плавная кривая (дуга/скругление), сэмплированная в полилинию, режется
+// эвристикой decomposeConvex через БЛИЖАЙШУЮ по расстоянию диагональ — на
+// мелко сэмплированной дуге ближайшая вершина почти всегда следующая по
+// контуру точка, и вместо нескольких крупных выпуклых кусков получаются
+// десятки вырожденных треугольников (реальный случай: 54 точки -> 51 кусок).
+// Число попарных сумм Минковского при построении NFP растёт как произведение
+// числа кусков двух деталей — с 51×51 это и давало зависание на десятки
+// секунд/минуты. Настоящее решение — переписать саму эвристику декомпозиции
+// (например, метод Хертель-Мельхорн вместо "ближайшая диагональ"), это
+// отдельная задача. Пока — прагматичный шаг: если после дилатации на kerf/2
+// кусков всё равно много, огрубляем контур чуть сильнее (в пределах доли
+// halfKerf — контур не сдвигается больше этой доли, слипания деталей не
+// возникает) и пробуем декомпозировать заново, пока не станет приемлемо
+// быстро или запас на упрощение не кончится.
+const NFP_MAX_PARTS = 14
 export function dilatedConvexParts(rawPolyCCW, halfKerf) {
   const offset = halfKerf > 0 ? offsetPolygon(ensureCCW(rawPolyCCW), halfKerf) : rawPolyCCW
-  return decomposeConvex(offset)
+  if (halfKerf <= 0) return decomposeConvex(offset, 0, 0)
+  const steps = [0.1, 0.2, 0.3, 0.4, 0.5]
+  let parts = decomposeConvex(offset, 0, Math.min(0.5, halfKerf * steps[0]))
+  for (let i = 1; i < steps.length && parts.length > NFP_MAX_PARTS; i++) {
+    parts = decomposeConvex(offset, 0, Math.min(0.5, halfKerf * steps[i]))
+  }
+  return parts
 }
 
 // NFP из УЖЕ раздутых выпуклых частей (посчитаны один раз на форму+поворот,
@@ -198,31 +330,150 @@ export function dilatedConvexParts(rawPolyCCW, halfKerf) {
 // sPartsAbs — абсолютные (уже сдвинутые на место) части уже уложенной детали.
 // mPartsLocal — части ДВИЖУЩЕЙСЯ детали в её локальной системе (0,0 — точка
 // привязки), уже ОТРАЖЁННЫЕ (reflectPoly) — так требует формула NFP(A,B)=A⊕(-B).
-export function nfpFromParts(sPartsAbs, mPartsLocalReflected) {
-  const points = []
-  const edgesBySubpair = []
-  for (const s of sPartsAbs) for (const m of mPartsLocalReflected) {
-    const mk = ensureCCW(minkowskiSumConvex(s, m))
-    for (const p of mk) points.push(p)
-    const edges = []
-    for (let i=0;i<mk.length;i++) edges.push([mk[i], mk[(i+1)%mk.length]])
-    edgesBySubpair.push(edges)
+function bboxFromPoints(pts) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const [x, y] of pts) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y }
+  return { minX, maxX, minY, maxY }
+}
+function bboxesOverlap(a, b, eps = 1e-6) {
+  return a.minX <= b.maxX + eps && b.minX <= a.maxX + eps && a.minY <= b.maxY + eps && b.minY <= a.maxY + eps
+}
+
+// Строго внутри выпуклого CCW-полигона (граница — НЕ внутри; нужна именно
+// эта строгость, чтобы отличить "накрыт другим куском" от "лежит ровно на
+// стыке двух кусков", который и есть настоящая граница объединения).
+function pointStrictlyInsideConvex(pt, poly, eps) {
+  const n = poly.length
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], b = poly[(i + 1) % n]
+    if ((b[0]-a[0])*(pt[1]-a[1]) - (b[1]-a[1])*(pt[0]-a[0]) < eps) return false
   }
-  // пересечения РАЗНЫХ суб-NFP между собой — вершины истинной внешней
-  // границы объединения, которых нет среди "родных" вершин ни одного куска
-  for (let i=0;i<edgesBySubpair.length;i++){
-    for (let j=i+1;j<edgesBySubpair.length;j++){
-      for (const [a1,a2] of edgesBySubpair[i]) for (const [b1,b2] of edgesBySubpair[j]) {
-        const p = segIntersectionPoint(a1,a2,b1,b2)
-        if (p) points.push(p)
-      }
+  return true
+}
+
+// Параметр t∈(0,1) пересечения отрезка (p1,p2) с (p3,p4) на самом отрезке
+// (p1,p2); null, если пересечения на обоих отрезках нет.
+function segParamT(p1, p2, p3, p4) {
+  const d1x = p2[0]-p1[0], d1y = p2[1]-p1[1], d2x = p4[0]-p3[0], d2y = p4[1]-p3[1]
+  const denom = d1x*d2y - d1y*d2x
+  if (Math.abs(denom) < 1e-12) return null
+  const t = ((p3[0]-p1[0])*d2y - (p3[1]-p1[1])*d2x) / denom
+  const u = ((p3[0]-p1[0])*d1y - (p3[1]-p1[1])*d1x) / denom
+  if (t < -1e-9 || t > 1+1e-9 || u < -1e-9 || u > 1+1e-9) return null
+  return Math.min(1, Math.max(0, t))
+}
+
+// Внешняя граница объединения нескольких выпуклых CCW-полигонов (может
+// пересекаться/накладываться как угодно). Метод: режем каждое ребро в точках
+// пересечения с ЛЮБЫМ другим ребром — получаем "арматуру" из мелких кусков
+// рёбер; кусок ребра оставляем в границе, только если он НЕ накрыт ни одним
+// ДРУГИМ полигоном (проверка — точка чуть в стороне от середины кусочка, по
+// внешней нормали своего полигона, не лежит строго внутри другого куска).
+// Оставшиеся кусочки соединяются в один замкнутый контур по общим концам.
+// Заменяет прежний способ (собрать вообще все точки пересечения кусков как
+// "кандидатов") — тот давал по 20000+ точек на деталь вместо десятков вершин
+// настоящей границы, и именно это было причиной непрактичной медлительности
+// на сложных контурах (комментарий было решено оставить как историю задачи).
+export function unionBoundary(subPolys) {
+  if (subPolys.length === 1) {
+    const p = subPolys[0]
+    return p.map((v, i) => [v, p[(i+1)%p.length]])
+  }
+  const bboxes = subPolys.map(bboxFromPoints)
+  const rawEdges = [] // {a,b,owner}
+  subPolys.forEach((poly, owner) => {
+    for (let i = 0; i < poly.length; i++) rawEdges.push({ a: poly[i], b: poly[(i+1)%poly.length], owner })
+  })
+  // Bbox каждого ребра — один раз (было: пересчитывался на КАЖДОЙ паре рёбер,
+  // O(edges²) лишних аллокаций; с ~1200 рёбрами на реальной детали это и
+  // давало десятки-сотни мс на один вызов вместо ожидаемых единиц мс).
+  const edgeBB = rawEdges.map(e => bboxFromPoints([e.a, e.b]))
+  const segments = []
+  for (let i = 0; i < rawEdges.length; i++) {
+    const e = rawEdges[i], ebb = edgeBB[i]
+    const ts = [0, 1]
+    for (let j = 0; j < rawEdges.length; j++) {
+      if (j === i) continue
+      const f = rawEdges[j]
+      if (!bboxesOverlap(ebb, edgeBB[j])) continue
+      const t = segParamT(e.a, e.b, f.a, f.b)
+      if (t !== null && t > 1e-7 && t < 1-1e-7) ts.push(t)
+    }
+    ts.sort((a,b)=>a-b)
+    for (let k = 0; k < ts.length - 1; k++) {
+      const t0 = ts[k], t1 = ts[k+1]
+      if (t1 - t0 < 1e-7) continue
+      const p0 = [e.a[0]+(e.b[0]-e.a[0])*t0, e.a[1]+(e.b[1]-e.a[1])*t0]
+      const p1 = [e.a[0]+(e.b[0]-e.a[0])*t1, e.a[1]+(e.b[1]-e.a[1])*t1]
+      segments.push({ p0, p1, owner: e.owner })
     }
   }
-  return { points, edges: edgesBySubpair.flat() }
+  const boundary = []
+  for (const seg of segments) {
+    const mid = [(seg.p0[0]+seg.p1[0])/2, (seg.p0[1]+seg.p1[1])/2]
+    const dx = seg.p1[0]-seg.p0[0], dy = seg.p1[1]-seg.p0[1]
+    const len = Math.hypot(dx,dy) || 1
+    const nx = dy/len, ny = -dx/len // внешняя нормаль стороны CCW-полигона
+    const eps = Math.max(len*0.01, 1e-3)
+    const testPt = [mid[0]+nx*eps, mid[1]+ny*eps]
+    let covered = false
+    for (let k = 0; k < subPolys.length; k++) {
+      if (k === seg.owner) continue
+      const bk = bboxes[k]
+      if (testPt[0] < bk.minX || testPt[0] > bk.maxX || testPt[1] < bk.minY || testPt[1] > bk.maxY) continue
+      if (pointStrictlyInsideConvex(testPt, subPolys[k], 1e-7)) { covered = true; break }
+    }
+    if (!covered) boundary.push([seg.p0, seg.p1])
+  }
+  return boundary
+}
+
+// Сшивает несвязный список отрезков границы в замкнутые контуры по общим
+// концам (совпадение координат с допуском). Возвращает контуры от большего
+// к меньшему по площади — для NFP нужен только внешний (первый), но на
+// случай вырожденных данных отдаём все.
+export function chainSegments(segs) {
+  const key = ([x,y]) => Math.round(x*100)+','+Math.round(y*100)
+  const byStart = new Map()
+  segs.forEach((s, i) => { const k = key(s[0]); (byStart.get(k) || byStart.set(k, []).get(k)).push(i) })
+  const used = new Array(segs.length).fill(false)
+  const loops = []
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue
+    const loop = [segs[i][0]]
+    let cur = i, guard = 0
+    while (guard++ < segs.length + 5) {
+      used[cur] = true
+      loop.push(segs[cur][1])
+      const nextK = key(segs[cur][1])
+      const cands = (byStart.get(nextK) || []).filter(j => !used[j])
+      if (!cands.length) break
+      cur = cands[0]
+      if (cur === i) break
+    }
+    if (loop.length >= 4) loops.push(loop.slice(0, -1))
+  }
+  const area = pts => { let a=0; for (let i=0;i<pts.length;i++){const q=pts[(i+1)%pts.length]; a+=pts[i][0]*q[1]-q[0]*pts[i][1]} return Math.abs(a)/2 }
+  loops.sort((a,b)=>area(b)-area(a))
+  return loops
+}
+
+export function nfpFromParts(sPartsAbs, mPartsLocalReflected) {
+  const subPolys = []
+  for (const s of sPartsAbs) for (const m of mPartsLocalReflected) subPolys.push(ensureCCW(minkowskiSumConvex(s, m)))
+  const boundarySegs = unionBoundary(subPolys)
+  const loops = chainSegments(boundarySegs)
+  const outer = loops[0] || subPolys[0] || []
+  const edges = []
+  for (let i = 0; i < outer.length; i++) edges.push([outer[i], outer[(i+1)%outer.length]])
+  return { points: outer, edges }
 }
 
 export function nfpPairwiseIntersections(edgesA, edgesB) {
   const pts = []
+  const bb = bboxFromPoints(edgesA.flat())
+  const bb2 = bboxFromPoints(edgesB.flat())
+  if (!bboxesOverlap(bb, bb2)) return pts
   for (const [a1,a2] of edgesA) for (const [b1,b2] of edgesB) {
     const p = segIntersectionPoint(a1,a2,b1,b2)
     if (p) pts.push(p)
@@ -283,6 +534,14 @@ function erodeAbs(poly, epsMM) {
   })
 }
 export function polygonsOverlapRobust(polyA, polyB, epsMM = 0.15) {
+  // Дешёвая отбраковка по габаритам ДО точного (дорогого) теста пересечения:
+  // при десятках выпуклых кусков на деталь большинство пар заведомо далеко
+  // друг от друга (см. комментарий в nfpFromParts — тот же эффект).
+  let aMinX=Infinity,aMaxX=-Infinity,aMinY=Infinity,aMaxY=-Infinity
+  for (const [x,y] of polyA) { if(x<aMinX)aMinX=x; if(x>aMaxX)aMaxX=x; if(y<aMinY)aMinY=y; if(y>aMaxY)aMaxY=y }
+  let bMinX=Infinity,bMaxX=-Infinity,bMinY=Infinity,bMaxY=-Infinity
+  for (const [x,y] of polyB) { if(x<bMinX)bMinX=x; if(x>bMaxX)bMaxX=x; if(y<bMinY)bMinY=y; if(y>bMaxY)bMaxY=y }
+  if (aMinX > bMaxX + epsMM || bMinX > aMaxX + epsMM || aMinY > bMaxY + epsMM || bMinY > aMaxY + epsMM) return false
   return polygonsOverlapExact(erodeAbs(polyA, epsMM), erodeAbs(polyB, epsMM))
 }
 
