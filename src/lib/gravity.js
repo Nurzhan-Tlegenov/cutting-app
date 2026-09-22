@@ -419,6 +419,16 @@ export function slideEntry(e, entries, axis, kerf) {
 }
 
 /** true, если деталь не пересекает другие и держит с ними зазор >= kerf. */
+function pointInPolyXY(pt, poly) {
+  const px = pt[0], py = pt[1]
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1]
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside
+  }
+  return inside
+}
+
 export function entryClear(e, entries, kerf) {
   const need = kerf - 0.02
   for (const B of entries) {
@@ -427,6 +437,12 @@ export function entryClear(e, entries, kerf) {
     const pad = (e.pad || 0) + (B.pad || 0)
     if (g.lb - pad > kerf + 1) continue
     let d = (e.rect && B.rect) ? ((g.sx < 0 && g.sy < 0) ? -1 : g.lb) : polyDist(e.poly, B.poly)
+    // polyDist видит только пересечение/сближение КОНТУРОВ: если один контур
+    // целиком лежит внутри другого (например, составная деталь-пара 704×1036
+    // накрыла мелкие детали), границы не пересекаются и расстояние выходит
+    // положительным — раньше это давало наложение деталей друг на друга
+    // (случалось при «дожиме» листа). Проверяем вложенность явно.
+    if (d >= 0 && g.sx < 0 && g.sy < 0 && (pointInPolyXY(B.poly[0], e.poly) || pointInPolyXY(e.poly[0], B.poly))) return false
     if (d >= 0) d -= pad
     if (d < need) return false
   }

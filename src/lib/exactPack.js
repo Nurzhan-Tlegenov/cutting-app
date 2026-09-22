@@ -249,7 +249,7 @@ function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false
   // порядка приходят к разным раскладкам, а не к одной и той же.
   // Для сборки пары (deterministic) «запертые пустоты» не штрафуем: внутри пары
   // они неизбежны, а нужна именно минимальная плотная упаковка двух деталей.
-  if (deterministic) return shortlist.slice().sort((a, b) => a.env - b.env || anchorTie(a.entry.bb) - anchorTie(b.entry.bb))[0]
+  if (deterministic) return shortlist.slice().sort((x, y) => x.env - y.env || anchorTie(x.entry.bb) - anchorTie(y.entry.bb))[0]
   const near = shortlist.filter(c => c.cost != null && c.cost <= bestCost * 1.003)
   if (near.length > 1 && !deterministic) best = near[Math.floor(Math.random() * near.length)]
   return best
