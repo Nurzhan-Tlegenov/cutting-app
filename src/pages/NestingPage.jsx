@@ -1193,6 +1193,7 @@ export default function NestingPage() {
       if (jobsRef.current[cfg.id] !== job) return // остановлена или заменена
       delete jobsRef.current[cfg.id]
       res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
+      res.algo = params.algo // 'nfp' | 'raster' — чтобы на карте было видно, чем реально посчитано (иначе не отличить от обычного результата)
       updateCfg(cfg.id, {
         status: 'done', doneAt: Date.now(), result: res, saved: false, activeSheet: 0,
         sheetsData: res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })),
@@ -1568,6 +1569,14 @@ export default function NestingPage() {
             {/* Результат этой конфигурации */}
             {cfg.result && canvasSheet && (
               <div>
+                {cfg.result.algo === 'nfp' && (
+                  <p style={{
+                    fontSize: 11, fontWeight: 600, color: '#9a5b00', background: '#fff3d6',
+                    border: '1px solid #f0c674', borderRadius: 6, padding: '4px 8px', margin: '0 0 8px',
+                  }}>
+                    ⚠ NFP (экспериментальный алгоритм) — не основной, только для сравнения
+                  </p>
+                )}
                 {(cfg.result.algoVersion || 'до версионирования') !== NESTING_VERSION && (
                   <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>
                     Этот раскрой посчитан: {cfg.result.algoVersion ? 'v' + cfg.result.algoVersion : 'до версионирования'}
