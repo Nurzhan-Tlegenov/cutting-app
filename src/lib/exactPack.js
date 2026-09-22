@@ -285,6 +285,93 @@ async function packOrder(order, usableX, usableY, kerf, direction, deadline) {
 }
 
 let SHEET_UID = 0
+
+// ─── Усадка листа («песок») ────────────────────────────────────────────────
+// slideEntry в tryInsert сдвигает к контактам только НОВУЮ деталь — соседи,
+// уложенные раньше, больше не двигаются. Из-за этого между уже стоящими
+// деталями годами остаются зазоры, которые могли бы закрыться, если их
+// стянуть заново все вместе — как насыпанный песок оседает при встряске и
+// освобождает место досыпать ещё. compactSheet делает именно это: стягивает
+// ВСЕ детали листа к выбранному углу (пробуем все 4 угла — не только (0,0),
+// как раньше) и возвращает выигрышный вариант — с которого дальше пробуем
+// довставить деталь со следующего листа.
+function compactSheet(sheet, kerf, usableX, usableY) {
+  const orders = [['y', 'x'], ['x', 'y']]
+  const corners = [[false, false], [true, false], [false, true], [true, true]]
+  const origPoly = sheet.entries.map(e => e.poly)
+  let bestPoly = null, bestEnv = Infinity
+  for (const [flipX, flipY] of corners) {
+    for (const order of orders) {
+      // Каждая попытка — с чистого листа (из исходных позиций), сдвиг считаем
+      // напрямую по опорной вершине контура, а не через накопленный e.dx/e.dy
+      // (он не переживает смену системы координат при отражении в угол).
+      sheet.entries.forEach((e, i) => { e.poly = origPoly[i]; e.dx = 0; e.dy = 0 })
+      const tf = ([x, y]) => [flipX ? usableX - x : x, flipY ? usableY - y : y]
+      for (const e of sheet.entries) { e.poly = e.poly.map(tf); e.bb = bboxOf(e.poly) }
+      for (let pass = 0; pass < 30; pass++) {
+        let moved = false
+        for (const axis of order) {
+          const idxs = sheet.entries.map((_, i) => i).sort((a, b) =>
+            axis === 'x' ? sheet.entries[a].bb.minX - sheet.entries[b].bb.minX : sheet.entries[a].bb.minY - sheet.entries[b].bb.minY)
+          for (const i of idxs) if (slideEntry(sheet.entries[i], sheet.entries, axis, kerf)) moved = true
+        }
+        if (!moved) break
+      }
+      for (const e of sheet.entries) { e.poly = e.poly.map(tf); e.bb = bboxOf(e.poly) }
+      const envX = Math.max(...sheet.entries.map(e => e.bb.maxX)), envY = Math.max(...sheet.entries.map(e => e.bb.maxY))
+      const env = envX * envY
+      if (env < bestEnv - 1) { bestEnv = env; bestPoly = sheet.entries.map(e => e.poly) }
+    }
+  }
+  sheet.entries.forEach((e, i) => { e.poly = origPoly[i]; e.dx = 0; e.dy = 0; e.bb = bboxOf(e.poly) })
+  if (!bestPoly) return false
+  let changed = false
+  sheet.entries.forEach((e, i) => {
+    const before = origPoly[i][0], after = bestPoly[i][0]
+    const ddx = after[0] - before[0], ddy = after[1] - before[1]
+    if (Math.abs(ddx) > 0.01 || Math.abs(ddy) > 0.01) changed = true
+    e.poly = bestPoly[i]; e.bb = bboxOf(e.poly)
+    sheet.meta[i].x += ddx; sheet.meta[i].y += ddy
+  })
+  if (!changed) return false
+  sheet.grid.fill(0)
+  for (const e of sheet.entries) for (const c of polyCells(e.poly, sheet.cols, sheet.rows)) sheet.grid[c] = 1
+  sheet.envX = Math.max(...sheet.entries.map(e => e.bb.maxX))
+  sheet.envY = Math.max(...sheet.entries.map(e => e.bb.maxY))
+  return true
+}
+
+// Стягиваем лист и, пока получается, довставляем в освободившееся место
+// детали со следующих листов — до тех пор, пока что-то помещается.
+async function settleAndPull(sheets, ctx, deadline) {
+  const { usableX, usableY, kerf, direction } = ctx
+  let result = sheets.slice()
+  for (let i = 0; i < result.length - 1 && Date.now() < deadline; i++) {
+    let progress = true
+    while (progress && Date.now() < deadline) {
+      progress = false
+      compactSheet(result[i], kerf, usableX, usableY)
+      for (let j = i + 1; j < result.length; j++) {
+        const from = result[j]
+        for (let k = 0; k < from.meta.length; k++) {
+          if (Date.now() > deadline) break
+          const inst = from.meta[k].inst
+          if (usableX * usableY - result[i].used < inst.polyArea) continue
+          const r = tryInsert(result[i], inst, usableX, usableY, kerf, direction, true)
+          if (!r) continue
+          commit(result[i], inst, r)
+          result[j] = sheetWithout(from, new Set([k]), usableX, usableY)
+          progress = true
+          break
+        }
+        if (progress) break
+      }
+    }
+  }
+  result = result.filter(sh => sh.entries.length)
+  return result
+}
+
 function newSheet(usableX, usableY) {
   const cols = Math.max(1, Math.ceil(usableX / CELL)), rows = Math.max(1, Math.ceil(usableY / CELL))
   return { entries: [], meta: [], envX: 0, envY: 0, used: 0, ver: 0, uid: ++SHEET_UID, cols, rows, grid: new Uint8Array(cols * rows) }
@@ -723,6 +810,16 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
       if (exactBetter(st, winner.st)) winner = { sheets: improved, st }
     }
     best = winner.sheets; bestStat = winner.st
+    // «Усадка + довставка»: стягиваем каждый лист по-настоящему (все детали,
+    // не только последнюю) и пробуем довставить в освободившееся место
+    // детали со следующих листов — пока помещается. Отдельно от improveSheets:
+    // там перебор случайный и по грубой оценке (trapped area на сетке), здесь —
+    // точная стяжка контуров, как в вашем примере с песком.
+    if (Date.now() < deadline) {
+      const settled = await settleAndPull(copy(best), ctx, deadline)
+      const st = stat(settled)
+      if (exactBetter(st, bestStat)) { best = settled; bestStat = st }
+    }
   }
   // Оптимизация обрезка на последнем листе — до конца таймера.
   if (Date.now() < deadline) {
