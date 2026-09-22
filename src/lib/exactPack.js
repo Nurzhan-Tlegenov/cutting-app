@@ -173,7 +173,7 @@ function candidateYs(sheet, bh, usableY, kerf, step = GRID_STEP, bucket = BUCKET
 // Два способа подачи: сверху (деталь падает в столбец, затем съезжает к нулю)
 // и справа (заезжает в горизонтальные проёмы, недоступные сверху).
 // dense=true — частая сетка стартов (для итоговой проверки «не влезает ли ещё что-то»).
-function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false, deterministic = false) {
+function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false, deterministic = false, stable = false) {
   const step = dense ? 20 : GRID_STEP, bucket = dense ? 5 : BUCKET
   const dropOrder = orderFor(direction)[0]
   // Привязка к стороне: для along_y / along_x «занятый габарит» меряется как
@@ -251,12 +251,29 @@ function tryInsert(sheet, inst, usableX, usableY, kerf, direction, dense = false
   // они неизбежны, а нужна именно минимальная плотная упаковка двух деталей.
   if (deterministic) return shortlist.slice().sort((x, y) => x.env - y.env || anchorTie(x.entry.bb) - anchorTie(y.entry.bb))[0]
   const near = shortlist.filter(c => c.cost != null && c.cost <= bestCost * 1.003)
-  if (near.length > 1 && !deterministic) best = near[Math.floor(Math.random() * near.length)]
+  // stable=true — берём ЛУЧШИЙ (первый по cost), без монетки между
+  // "почти равноценными": для структурных (заведомо детерминированных)
+  // порядков в packExact иначе один и тот же порядок деталей на практике
+  // давал разную раскладку от запуска к запуску — см. комментарий у
+  // packOrder. В отличие от deterministic (для сборки пары) здесь остаётся
+  // полная формула cost (габарит + штраф за запертую пустоту) — меняется
+  // только последний шаг (не кидаем монетку), а не сама оценка.
+  if (near.length > 1 && !stable) best = near[Math.floor(Math.random() * near.length)]
   return best
 }
 
-async function packOrder(order, usableX, usableY, kerf, direction, deadline) {
-  const sheets = []
+// stable=true — без монетки между "почти равноценными" позициями (см.
+// tryInsert). Три СТРУКТУРНЫХ порядка (по площади/плотности/стороне) в
+// packExact ниже задуманы как воспроизводимые, детерминированные попытки —
+// но пока tryInsert сам решал между близкими позициями случайно, они на
+// практике каждый раз давали немного другую раскладку. Именно из-за этого
+// одна и та же деталь то укладывалась в 1 лист, то в 2 — притом что
+// "структурный" порядок деталей был одним и тем же. Со stable=true эти три
+// попытки воспроизводимы: если такой порядок способен дать 1 лист — он даст
+// его КАЖДЫЙ раз, а не через раз. Случайность остаётся только там, где она
+// осмысленна — в последующем переборе (shuffle/promote/perturb ниже).
+async function packOrder(order, usableX, usableY, kerf, direction, deadline, stable = false, seedSheets = null) {
+  const sheets = seedSheets ? seedSheets.slice() : []
   let counter = 0
   // Одинаковые детали (одна позиция заказа), которые уже не влезли на лист в его
   // текущем состоянии, повторно на нём не пробуем — результат будет тем же.
@@ -268,13 +285,13 @@ async function packOrder(order, usableX, usableY, kerf, direction, deadline) {
       if (usableX * usableY - sheet.used < inst.polyArea) continue // по площади заведомо не влезает
       const key = sheet.uid + ':' + sheet.ver + ':' + (inst.kind ?? inst.detailIndex)
       if (noFit.has(key)) continue
-      const r = tryInsert(sheet, inst, usableX, usableY, kerf, direction)
+      const r = tryInsert(sheet, inst, usableX, usableY, kerf, direction, false, false, stable)
       if (r) { commit(sheet, inst, r); placed = true; break }
       noFit.add(key)
     }
     if (!placed) {
       const sheet = newSheet(usableX, usableY)
-      const r = tryInsert(sheet, inst, usableX, usableY, kerf, direction)
+      const r = tryInsert(sheet, inst, usableX, usableY, kerf, direction, false, false, stable)
       if (!r) return null // деталь не влезает даже на пустой лист
       commit(sheet, inst, r)
       sheets.push(sheet)
@@ -663,6 +680,111 @@ function buildPair(inst, kerf, usableX, usableY, dir = 'auto', deterministic = f
   }
 }
 
+// ─── Раскладка сеткой для одинаковых пар ──────────────────────────────────
+// tryInsert (жадная вставка по одной детали, см. ниже) даже с ЗАДАННЫМ
+// порядком и заданным составом пар не гарантирует, что они лягут ЧИСТЫМИ
+// колонками — она смотрит только на текущий лист по одной детали за раз, без
+// взгляда на итоговую сетку. А задача при одинаковых деталях — классическая
+// упаковка прямоугольников по сетке: N колонок «стоя» + M колонок «лёжа»,
+// сколько именно — считается напрямую делением, без перебора. Так же (судя
+// по геометрии) поступает эталонный раскрой конкурента — потому и уходит
+// 3 секунды, а не 13: там не перебор, а арифметика.
+function planGridTiling(tallWH, wideWH, kerf, usableX, usableY, need) {
+  let best = null
+  const maxTall = tallWH ? Math.floor((usableX + kerf) / (tallWH.w + kerf)) : 0
+  for (let nt = 0; nt <= maxTall; nt++) {
+    if (nt === 0 && !wideWH) continue
+    const usedW = nt * (tallWH.w + kerf)
+    const rowsTall = tallWH ? Math.floor((usableY + kerf) / (tallWH.h + kerf)) : 0
+    const tallCap = nt * rowsTall
+    let nw = 0, rowsWide = 0, wideCap = 0
+    if (wideWH) {
+      const remaining = usableX - usedW
+      nw = Math.max(0, Math.floor((remaining + kerf) / (wideWH.w + kerf)))
+      rowsWide = Math.floor((usableY + kerf) / (wideWH.h + kerf))
+      wideCap = nw * rowsWide
+    }
+    const cap = tallCap + wideCap
+    if (cap <= 0) continue
+    const waste = cap - Math.min(cap, need)
+    // Предпочитаем план, который закрывает нужное количество (или максимум,
+    // если целиком не влезает) с наименьшим остатком вместимости впустую —
+    // компактнее, оставляет больше места другим деталям на этом же листе.
+    if (!best || Math.min(cap, need) > Math.min(best.cap, need) ||
+        (Math.min(cap, need) === Math.min(best.cap, need) && waste < best.waste)) {
+      best = { nt, rowsTall, nw, rowsWide, cap, waste }
+    }
+  }
+  return best
+}
+
+function placeGridTiling(sheet, pairInstances, kerf, tallWH, wideWH, plan) {
+  let idx = 0
+  const place = (shape, x, y) => {
+    if (idx >= pairInstances.length) return
+    const inst = pairInstances[idx++]
+    const variant = inst.variants.find(v => v.w === shape.w && v.h === shape.h) || inst.variants[0]
+    const sp = simplified(variant)
+    const entry = makeEntry(sp.poly.map(p => [p[0] + x, p[1] + y]), sp.pad)
+    commit(sheet, inst, { entry, variant, tx: x, ty: y })
+  }
+  for (let c = 0; c < plan.nt && idx < pairInstances.length; c++) {
+    const x = c * (tallWH.w + kerf)
+    for (let r = 0; r < plan.rowsTall && idx < pairInstances.length; r++) place(tallWH, x, r * (tallWH.h + kerf))
+  }
+  const wideX0 = plan.nt * (tallWH ? tallWH.w + kerf : 0)
+  for (let c = 0; c < plan.nw && idx < pairInstances.length; c++) {
+    const x = wideX0 + c * (wideWH.w + kerf)
+    for (let r = 0; r < plan.rowsWide && idx < pairInstances.length; r++) place(wideWH, x, r * (wideWH.h + kerf))
+  }
+}
+
+// Строит один лист, заполненный сеткой пар (сколько влезло — остальные пары
+// возвращаются в pool нетронутыми, для обычной укладки следующим листом).
+function buildGridTilingSheet(pairInstances, kerf, usableX, usableY) {
+  if (pairInstances.length < 2) return null
+  const shapes = pairInstances[0].variants.filter(v => v.angle === 0)
+  const tallWH = shapes.find(v => v.h > v.w)
+  const wideWH = shapes.find(v => v.w > v.h)
+  if (!tallWH && !wideWH) return null
+  const plan = planGridTiling(tallWH, wideWH, kerf, usableX, usableY, pairInstances.length)
+  if (!plan || plan.cap < 2) return null
+  const sheet = newSheet(usableX, usableY)
+  placeGridTiling(sheet, pairInstances, kerf, tallWH, wideWH, plan)
+  return sheet
+}
+
+// После сетки пар (buildGridTilingSheet) наверху листа остаётся прямая
+// прямоугольная полоса — если есть ДРУГОЙ вид детали, много одинаковых
+// экземпляров, они почти всегда близки к прямоугольнику по форме (даже с
+// небольшим вырезом/фаской) — их выгоднее сразу разложить туда сеткой
+// рядов/колонок, а не отдавать жадному перебору по одной детали, который
+// эту полосу заполняет заметно менее эффективно (см. реальный пример: 9 из
+// 10 деталей влезали жадно, десятая уходила на второй лист, хотя места
+// в полосе было в разы больше, чем нужно).
+function fillStripWithSingles(sheet, group, kerf, usableX, usableY) {
+  if (!group.length) return 0
+  const v0 = group[0].variants[0]
+  const bb0 = bboxOf(v0.polygon)
+  const w = bb0.maxX - bb0.minX, h = bb0.maxY - bb0.minY
+  const y0 = sheet.envY > 0 ? sheet.envY + kerf : 0
+  const rows = Math.floor((usableY - y0 + kerf) / (h + kerf))
+  const cols = Math.floor((usableX + kerf) / (w + kerf))
+  if (rows < 1 || cols < 1) return 0
+  const sp = simplified(v0)
+  let idx = 0
+  for (let r = 0; r < rows && idx < group.length; r++) {
+    for (let c = 0; c < cols && idx < group.length; c++) {
+      const x = c * (w + kerf), y = y0 + r * (h + kerf)
+      const tx = x - bb0.minX, ty = y - bb0.minY
+      const entry = makeEntry(sp.poly.map(p => [p[0] + tx, p[1] + ty]), sp.pad)
+      commit(sheet, group[idx], { entry, variant: v0, tx, ty })
+      idx++
+    }
+  }
+  return idx
+}
+
 // Заменяет пары одинаковых вогнутых деталей составными «деталями-парами».
 function tileIntoPairs(instances, kerf, usableX, usableY) {
   const byDetail = new Map()
@@ -763,14 +885,63 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
     instances.slice().sort(bySolidThenArea),
     instances.slice().sort((a, b) => Math.max(b.variants[0].w, b.variants[0].h) - Math.max(a.variants[0].w, a.variants[0].h)),
   ]
+  // Сцепка (см. tileIntoPairs) на каждую конкретную укладку динамически
+  // выбирает ориентацию "стоя"/"лёжа" (обе — варианты одной composite-
+  // детали) — жадный перебор решает это по ходу дела, без взгляда вперёд, и
+  // может не попасть в то сочетание, которое реально закрывает лист (по
+  // эталонному раскрою конкурента — 2 "стоя" + 3 "лёжа" на 5 пар). Явно
+  // перебираем ВСЕ сочетания (сколько пар идёт первой, "нестандартной"
+  // ориентацией variants[1]/[0]) — для типичного числа одинаковых пар (3-8)
+  // это considerablyдёшево (десяток детерминированных попыток), а раньше
+  // такое сочетание могло найтись только случайно, если повезёт.
+  const pairGroups = new Map()
+  instances.forEach(inst => { if (inst.isComposite) { if (!pairGroups.has(inst.kind)) pairGroups.set(inst.kind, []); pairGroups.get(inst.kind).push(inst) } })
+  for (const group of pairGroups.values()) {
+    if (group.length < 2 || group[0].variants.length < 2) continue
+    const rest = instances.filter(i => !group.includes(i))
+    for (let k = 1; k < group.length; k++) {
+      // первые k инстансов пары — только "вторая" ориентация (variants[1]),
+      // остальные — только "первая" (variants[0]); порядок площадей сверху
+      // (крупное вперёд) как в основных структурных попытках.
+      const forced = group.map((inst, idx) => ({
+        ...inst, variants: idx < k ? [inst.variants[1] ?? inst.variants[0]] : [inst.variants[0]],
+      }))
+      // Крупные детали — вперёд (см. общую философию сортировки orders выше):
+      // сцепки такого типа обычно самые крупные, поэтому идут первыми.
+      orders.push(forced.concat(rest.slice().sort((a, b) => b.area - a.area)))
+    }
+  }
   let best = null, bestStat = null, bestOrder = null
+  let seededOrders = [] // [{ order, seedSheets }] — гарантированные кандидаты с сеткой пар
+  for (const group of pairGroups.values()) {
+    if (group.length < 2) continue
+    const sheet = buildGridTilingSheet(group, kerf, usableX, usableY)
+    if (!sheet) continue
+    const placedIds = new Set(sheet.meta.map(m => m.inst.id))
+    // Полоса, оставшаяся сверху над сеткой пар — сразу же сеткой докладываем
+    // туда другие детали (не участвовавшие в сцепке: одиночные, другого
+    // вида), группами по detailIndex, от крупных к мелким.
+    const remaining = instances.filter(i => !placedIds.has(i.id))
+    const byType = new Map()
+    for (const inst of remaining) { if (!byType.has(inst.detailIndex)) byType.set(inst.detailIndex, []); byType.get(inst.detailIndex).push(inst) }
+    const typeGroups = [...byType.values()].sort((a, b) => (b[0].variants[0].w * b[0].variants[0].h) - (a[0].variants[0].w * a[0].variants[0].h))
+    for (const g of typeGroups) {
+      const n = fillStripWithSingles(sheet, g, kerf, usableX, usableY)
+      if (n > 0) g.splice(0, n)
+    }
+    const rest = typeGroups.flat()
+    seededOrders.push({
+      order: rest.slice().sort((a, b) => b.area - a.area),
+      seedSheets: [sheet],
+    })
+  }
   // Кандидат «с плотным первым листом»: на 1 лист больше, чем у лучшего, но
   // первый лист забит сильнее (например, сплошные прямоугольники вперёд) —
   // после «дожима» такой вариант часто выигрывает у лучшего по числу листов.
   let front = null, frontStat = null, frontOrder = null
   let laterIds = new Set()
-  const consider = async (order, dl) => {
-    const sheets = await packOrder(order, usableX, usableY, kerf, direction, dl)
+  const consider = async (order, dl, stable = false, seedSheets = null) => {
+    const sheets = await packOrder(order, usableX, usableY, kerf, direction, dl, stable, seedSheets)
     if (!sheets) return
     const st = stat(sheets)
     if (exactBetter(st, bestStat)) {
@@ -781,7 +952,13 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
   }
   // Первые (структурные) порядки — обязаны дойти до конца: без них точной
   // укладки нет вовсе, поэтому им отводится весь бюджет, а не его половина.
-  for (const o of orders) { if (Date.now() < deadline) await consider(o, deadline) }
+  // stable=true — без монетки между "почти равноценными" позициями (см.
+  // комментарий у packOrder): раз порядок деталей детерминирован, вся
+  // раскладка тоже обязана быть воспроизводимой, а не зависеть от Math.random.
+  // Сеточные кандидаты — первыми: если раскладка сеткой сама по себе
+  // закрывает лист, дальше можно вообще не искать структурный порядок.
+  for (const so of seededOrders) { if (Date.now() < deadline) await consider(so.order, deadline, true, so.seedSheets) }
+  for (const o of orders) { if (Date.now() < deadline) await consider(o, deadline, true) }
   let guard = 0
   // Если всё уложено на один лист, порядок дальше не ищем — оставшееся время
   // уходит на сборку одного делового обрезка (см. polishLast ниже).
