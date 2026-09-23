@@ -99,15 +99,23 @@ function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, 
   return total
 }
 
-function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', nfpCache = null) {
+function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', direction = 'auto', nfpCache = null) {
   let best = null, bestScore = Infinity
   // Готовим один раз на вызов (не на каждого кандидата): рёбра листа и рёбра
   // уже стоящих деталей — нужны для метрики длины касания ниже.
   const tol = kerf * 1.2 // чуть больше реза — плавающая точка не обязана попасть ровно в 4.000
-  const boundaryEdges = [
-    [[0, 0], [usableX, 0]], [[usableX, 0], [usableX, usableY]],
-    [[usableX, usableY], [0, usableY]], [[0, usableY], [0, 0]],
-  ]
+  // Какие стороны листа считаются "стеной", к которой деталь должна
+  // прилипать — раньше считались ВСЕ четыре стороны сразу, из-за чего
+  // выгодно было липнуть к любому краю листа (включая дальний), и внутри
+  // листа между деталями оставались большие пустые промежутки. Теперь:
+  // 'auto' — только левая и нижняя (классический рост от угла (0,0));
+  // 'along_y' — только нижняя и верхняя (укладка растёт вдоль оси Y);
+  // 'along_x' — только левая и правая (укладка растёт вдоль оси X).
+  const wallEdges =
+    direction === 'along_y' ? [[[0, 0], [usableX, 0]], [[usableX, usableY], [0, usableY]]]
+    : direction === 'along_x' ? [[[usableX, 0], [usableX, usableY]], [[0, usableY], [0, 0]]]
+    : [[[0, 0], [usableX, 0]], [[0, usableY], [0, 0]]]
+  const boundaryEdges = wallEdges
   const neighborEdgesList = placed.map(p => ({ edges: edgesOfPoly(p.polygon), bb: p.bb }))
   for (const v of variants) {
     const bb0 = bboxOf(v.polygon)
@@ -260,7 +268,7 @@ function buildPairSubs(inst, kerf) {
   // почему-то находится третья, отличная от первых двух.
   for (const mode of ['tall', 'wide', 'auto']) {
     for (const v of inst.variants) {
-      const res = placeOne([v], [firstPlaced], BIG, BIG, kerf, mode)
+      const res = placeOne([v], [firstPlaced], BIG, BIG, kerf, mode, 'auto')
       if (!res) continue
       const minX = Math.min(0, res.bb.minX), minY = Math.min(0, res.bb.minY)
       const maxX = Math.max(firstPlaced.bb.maxX, res.bb.maxX), maxY = Math.max(firstPlaced.bb.maxY, res.bb.maxY)
@@ -342,14 +350,14 @@ function commitInstance(sheet, inst, res) {
   }
 }
 
-function attemptPack(order, usableX, usableY, kerf, seedSheet = null, nfpCache = null) {
+function attemptPack(order, usableX, usableY, kerf, direction, seedSheet = null, nfpCache = null) {
   const sheets = seedSheet ? [seedSheet.slice(), []] : [[]]
   for (let idx = 0; idx < order.length; idx++) {
     const inst = order[idx]
     let done = false
     for (const sheet of sheets) {
       if (sheet.length === 0) continue // пустой лист — обрабатываем отдельно ниже, с оглядкой на следующую деталь
-const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', nfpCache)
+const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
       if (res) { commitInstance(sheet, inst, res); done = true; break }
     }
     if (!done) {
@@ -365,11 +373,11 @@ const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', nfpCa
       const nextInst = order[idx + 1]
       let bestFirst = null, bestLookaheadScore = Infinity
       for (const v of inst.variants) {
-        const res = placeOne([v], [], usableX, usableY, kerf, 'auto', nfpCache)
+        const res = placeOne([v], [], usableX, usableY, kerf, 'auto', direction, nfpCache)
         if (!res) continue
         let lookaheadScore = 0
         if (nextInst) {
-          const res2 = placeOne(nextInst.variants, [{ inst, ...res }], usableX, usableY, kerf, 'auto', nfpCache)
+          const res2 = placeOne(nextInst.variants, [{ inst, ...res }], usableX, usableY, kerf, 'auto', direction, nfpCache)
           lookaheadScore = res2 ? (res2.bb.maxX * res2.bb.maxY) : Infinity
         }
         if (lookaheadScore < bestLookaheadScore) { bestLookaheadScore = lookaheadScore; bestFirst = res }
@@ -450,7 +458,7 @@ function perturbOrder(order) {
 // каждой детали с поздних листов пробуем реальную NFP-позицию на каждом
 // более раннем листе; если помещается — переносим. Повторяем по кругу, пока
 // что-то переносится.
-async function sweepForwardNFP(sheets, usableX, usableY, kerf, deadline, nfpCache = null) {
+async function sweepForwardNFP(sheets, usableX, usableY, kerf, direction, deadline, nfpCache = null) {
   let result = sheets.map(s => s.slice())
   for (let round = 0; round < 6 && Date.now() < deadline; round++) {
     let moved = false
@@ -459,7 +467,7 @@ async function sweepForwardNFP(sheets, usableX, usableY, kerf, deadline, nfpCach
         const from = result[j]
         for (let k = from.length - 1; k >= 0 && Date.now() < deadline; k--) {
           const inst = from[k].inst
-          const res = placeOne(inst.variants, result[i], usableX, usableY, kerf, 'auto', nfpCache)
+          const res = placeOne(inst.variants, result[i], usableX, usableY, kerf, 'auto', direction, nfpCache)
           if (res) {
             result[i] = result[i].concat([{ inst, ...res }])
             from.splice(k, 1)
@@ -480,7 +488,7 @@ async function sweepForwardNFP(sheets, usableX, usableY, kerf, deadline, nfpCach
 // песок, который при встряске даёт мелким кускам провалиться в щели между
 // крупными. Оставляем результат, только если стало лучше (меньше листов,
 // или столько же листов, но меньше материала на последнем).
-async function shakeNFP(sheets, usableX, usableY, kerf, deadline, nfpCache = null) {
+async function shakeNFP(sheets, usableX, usableY, kerf, direction, deadline, nfpCache = null) {
   let best = sheets.map(s => s.slice())
   let bestStat = scoreSheets(best)
   let noImprove = 0, __iters=0
@@ -511,12 +519,12 @@ async function shakeNFP(sheets, usableX, usableY, kerf, deadline, nfpCache = nul
     for (const inst of order) {
       let placed = false
       for (const sheet of trial) {
-  const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', nfpCache)
+  const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
         if (res) { sheet.push({ inst, ...res }); placed = true; break }
       }
       if (!placed) {
         const sheet = []
-  const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', nfpCache)
+  const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
         if (!res) { ok = false; break }
         sheet.push({ inst, ...res })
         trial.push(sheet)
@@ -702,7 +710,7 @@ function buildPairGridSheet(pairInstances, kerf, usableX, usableY, leftoverCompo
 
 export async function packNFP({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
-  optimizeSeconds = 15,
+  optimizeSeconds = 15, direction = 'auto',
 }) {
   const usableX = sheetW - marginL - marginR
   const usableY = sheetL - marginT - marginB
@@ -806,7 +814,7 @@ export async function packNFP({
   const seedOrder = seedRest.slice().sort((a,b)=>(b.w*b.h)-(a.w*a.h))
   const nfpCache = new Map()
   const __t0=Date.now()
-  let best = attemptPack(seedOrder, usableX, usableY, kerf, seedSheet, nfpCache)
+  let best = attemptPack(seedOrder, usableX, usableY, kerf, direction, seedSheet, nfpCache)
   if(process.env.DBGS)console.log('first attemptPack',Date.now()-__t0,'ms')
   let bestStat = scoreSheets(best)
 
@@ -836,7 +844,7 @@ export async function packNFP({
     let evaluated = []
     for (const order of population) {
       if (Date.now()-startTime > budgetMs) break
-const sheets = attemptPack(order, usableX, usableY, kerf, seedSheet, nfpCache)
+const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, nfpCache)
       if (sheets) evaluated.push({ order, sheets, stat: scoreSheets(sheets) })
     }
     if (evaluated.length) {
@@ -853,7 +861,7 @@ const sheets = attemptPack(order, usableX, usableY, kerf, seedSheet, nfpCache)
         const nextEval = []
         for (const order of nextGen) {
           if (Date.now()-startTime > budgetMs) break
-    const sheets = attemptPack(order, usableX, usableY, kerf, seedSheet, nfpCache)
+    const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, nfpCache)
           if (sheets) nextEval.push({ order, sheets, stat: scoreSheets(sheets) })
         }
         if (!nextEval.length) break
@@ -866,7 +874,7 @@ const sheets = attemptPack(order, usableX, usableY, kerf, seedSheet, nfpCache)
 
   // Дожим лучшей найденной раскладки — до конца бюджета времени.
   if (best.length > 1 && Date.now() - startTime < budgetMs) {
-    const swept = await sweepForwardNFP(best, usableX, usableY, kerf, startTime + budgetMs, nfpCache)
+    const swept = await sweepForwardNFP(best, usableX, usableY, kerf, direction, startTime + budgetMs, nfpCache)
     const sweptStat = scoreSheets(swept)
     if (better(sweptStat, bestStat)) { best = swept; bestStat = sweptStat }
   }
@@ -882,7 +890,7 @@ const sheets = attemptPack(order, usableX, usableY, kerf, seedSheet, nfpCache)
   // (меньше листов или меньше материала на последнем) — и повторять, пока
   // есть время. Работает на оставшемся бюджете после генетики и дожима.
   if (Date.now() - startTime < budgetMs) {
-    const shaken = await shakeNFP(best, usableX, usableY, kerf, startTime + budgetMs, nfpCache)
+    const shaken = await shakeNFP(best, usableX, usableY, kerf, direction, startTime + budgetMs, nfpCache)
     const shakenStat = scoreSheets(shaken)
     if (better(shakenStat, bestStat)) { best = shaken; bestStat = shakenStat }
   }

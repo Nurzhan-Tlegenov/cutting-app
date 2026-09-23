@@ -109,7 +109,7 @@ export async function runNesting({
   // сквозного реза. Теперь NFP физически недостижим для guillotine, каким
   // бы ни был algo.
   if (algo === 'nfp' && cuttingMethod !== 'guillotine') {
-    return await packNFP({ details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, optimizeSeconds })
+    return await packNFP({ details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, optimizeSeconds, direction })
   }
 
   // ЧПУ-фрезер режет по любому контуру — если среди деталей есть хоть одна
