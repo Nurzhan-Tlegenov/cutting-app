@@ -54,40 +54,125 @@ function buildPieceVariants(detail, kerf) {
 // уложенных на листе — кандидаты из NFP против каждого соседа + пересечения
 // NFP пар соседей друг с другом + точки на рёбрах NFP, выровненные по
 // краям соседей и границам листа.
-function placeOne(variants, placed, usableX, usableY, scoreMode = 'auto') {
+// ─── Длина реального касания — правильный критерий для "пазла" ────────────
+// Раньше выбирали позицию с минимальным ОБЩИМ ГАБАРИТОМ листа — это часто
+// подвигает деталь ближе к углу, но не обязательно прижимает её гранью к
+// соседям со всех сторон, откуда и брались широкие промежутки. Правильный
+// критерий (как это, судя по всему, делает эталонный раскрой конкурента,
+// где везде расстояние ровно 4мм = ширине реза) — максимум суммарной длины
+// границы, которая легла ВПЛОТНУЮ (в пределах допуска, привязанного к
+// резу) к уже стоящим деталям или краю листа. Деталь, забившаяся гранью в
+// нишу соседа, выигрывает у детали, просто задвинутой в угол.
+function edgesOfPoly(poly) {
+  const es = []
+  for (let i = 0; i < poly.length; i++) es.push([poly[i], poly[(i + 1) % poly.length]])
+  return es
+}
+function segTouchLen(a, b, c, d, tol) {
+  const abx = b[0]-a[0], aby = b[1]-a[1]
+  const lenAB = Math.hypot(abx, aby)
+  if (lenAB < 1e-9) return 0
+  const ux = abx/lenAB, uy = aby/lenAB
+  const perp = (px, py) => Math.abs((px-a[0])*uy - (py-a[1])*ux)
+  if (perp(c[0],c[1]) > tol || perp(d[0],d[1]) > tol) return 0
+  const cdx = d[0]-c[0], cdy = d[1]-c[1], lenCD = Math.hypot(cdx, cdy)
+  if (lenCD < 1e-9) return 0
+  if (Math.abs((cdx*ux+cdy*uy)/lenCD) < 0.97) return 0 // не почти-параллельны
+  const proj = (px, py) => (px-a[0])*ux + (py-a[1])*uy
+  let t0 = proj(c[0],c[1]), t1 = proj(d[0],d[1])
+  if (t0 > t1) { const tmp = t0; t0 = t1; t1 = tmp }
+  return Math.max(0, Math.min(lenAB, t1) - Math.max(0, t0))
+}
+// tol должен пропускать ровно ширину реза (деталь на расстоянии kerf от
+// соседа — это КАСАНИЕ вплотную с учётом реза, не зазор) — иначе ни одна
+// настоящая, правильно расставленная пара не засчиталась бы как контакт.
+function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, tol) {
+  let total = 0
+  for (const [a, b] of movingEdges) {
+    for (const [c, d] of boundaryEdges) total += segTouchLen(a, b, c, d, tol)
+  }
+  for (const { edges, bb } of neighborEdgesList) {
+    if (movingBB.minX > bb.maxX + tol || bb.minX > movingBB.maxX + tol ||
+        movingBB.minY > bb.maxY + tol || bb.minY > movingBB.maxY + tol) continue
+    for (const [a, b] of movingEdges) for (const [c, d] of edges) total += segTouchLen(a, b, c, d, tol)
+  }
+  return total
+}
+
+function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', nfpCache = null) {
   let best = null, bestScore = Infinity
+  // Готовим один раз на вызов (не на каждого кандидата): рёбра листа и рёбра
+  // уже стоящих деталей — нужны для метрики длины касания ниже.
+  const tol = kerf * 1.2 // чуть больше реза — плавающая точка не обязана попасть ровно в 4.000
+  const boundaryEdges = [
+    [[0, 0], [usableX, 0]], [[usableX, 0], [usableX, usableY]],
+    [[usableX, usableY], [0, usableY]], [[0, usableY], [0, 0]],
+  ]
+  const neighborEdgesList = placed.map(p => ({ edges: edgesOfPoly(p.polygon), bb: p.bb }))
   for (const v of variants) {
     const bb0 = bboxOf(v.polygon)
     const minX = -bb0.minX, maxX = usableX - bb0.maxX
     const minY = -bb0.minY, maxY = usableY - bb0.maxY
     if (maxX < minX - 1e-6 || maxY < minY - 1e-6) continue
 
+    const movingEdgesLocal = edgesOfPoly(v.polygon)
     const movingPartsReflected = v.parts.map(p => reflectPoly(p))
     const candidates = [[minX, minY], [minX, maxY], [maxX, minY]]
-    const nfpList = placed.map(p => nfpFromParts(p.absParts, movingPartsReflected))
+    if(process.env.DBGT2){var __tnfp=Date.now()}
+    // NFP зависит только от ФОРМ (соседа и вставляемой детали), не от того,
+    // где именно сосед стоит на листе — контакт между двумя копиями одной и
+    // той же детали (а таких соседей обычно много) считаем ОДИН раз в
+    // локальных координатах и просто сдвигаем на позицию каждого конкретного
+    // соседа, вместо того чтобы каждый раз пересчитывать заново. Раньше это
+    // было главной причиной, по которой "встряска" успевала всего 10-20
+    // попыток за 30 секунд — теперь одинаковых соседей это не касается.
+    const nfpList = placed.map(p => {
+      if (!nfpCache) return nfpFromParts(p.absParts, movingPartsReflected)
+      const neighborVariant = p.inst.variants.find(vv => vv.angle === p.angle) || p.inst.variants[0]
+      let inner = nfpCache.get(neighborVariant)
+      if (!inner) { inner = new Map(); nfpCache.set(neighborVariant, inner) }
+      let local = inner.get(v)
+      if (!local) { local = nfpFromParts(neighborVariant.parts, movingPartsReflected); inner.set(v, local) }
+      return {
+        points: local.points.map(([x, y]) => [x + p.x, y + p.y]),
+        edges: local.edges.map(([a, b]) => [[a[0] + p.x, a[1] + p.y], [b[0] + p.x, b[1] + p.y]]),
+      }
+    })
+    if(process.env.DBGT2)console.log('  nfpList(cached)', Date.now()-__tnfp,'ms')
+    if(process.env.DBGT2){var __ta=Date.now()}
     for (const nfp of nfpList) for (const pt of nfp.points) candidates.push(pt)
     for (let i = 0; i < nfpList.length; i++) {
       for (let j = i + 1; j < nfpList.length; j++) {
         for (const pt of nfpPairwiseIntersections(nfpList[i].edges, nfpList[j].edges)) candidates.push(pt)
       }
     }
+    if(process.env.DBGT2)console.log('  pairwise', Date.now()-__ta,'ms cands',candidates.length,'neighbors',placed.length)
+    if(process.env.DBGT2){var __tb=Date.now()}
     const xLines = new Set([minX, maxX]), yLines = new Set([minY, maxY])
     placed.forEach(p => { xLines.add(p.bb.minX); xLines.add(p.bb.maxX); yLines.add(p.bb.minY); yLines.add(p.bb.maxY) })
     for (const nfp of nfpList) {
       for (const pt of edgesAgainstAlignmentLines(nfp.edges, [...xLines], [...yLines])) candidates.push(pt)
     }
+    if(process.env.DBGT2){var __tc=Date.now()}
 
     // Габариты кусков движущейся детали в её ЛОКАЛЬНОЙ системе (сдвигаем на
     // (ox,oy) при проверке кандидата) — чтобы для каждой пары (кусок
     // движущейся, кусок соседа) сначала отсечь по bbox и только потом делать
     // дорогой точный тест пересечения (тот же эффект, что и в nfpFromParts).
     const partBB = v.parts.map(bboxOf)
+    // Общий габарит кусков движущейся детали (для быстрой грубой отсечки
+    // кандидат-сосед) — не зависит от конкретного кандидата (ox,oy), поэтому
+    // считаем один раз, а не на каждой (кандидат × сосед) паре: раньше это
+    // было спрятанной O(кандидаты × соседи × куски) стоимостью и оставалось
+    // главным тормозом уже после того, как сам расчёт контакта стал дешёвым.
+    const aggMaxX = Math.max(...partBB.map(b => b.maxX)), aggMinX = Math.min(...partBB.map(b => b.minX))
+    const aggMaxY = Math.max(...partBB.map(b => b.maxY)), aggMinY = Math.min(...partBB.map(b => b.minY))
     for (const [ox, oy] of candidates) {
       if (ox < minX - 1e-6 || ox > maxX + 1e-6 || oy < minY - 1e-6 || oy > maxY + 1e-6) continue
       let bad = false, absParts = null
       for (const p of placed) {
-        if (p.bb.minX > ox + partBB.reduce((m,b)=>Math.max(m,b.maxX),-Infinity) || p.bb.maxX < ox + partBB.reduce((m,b)=>Math.min(m,b.minX),Infinity) ||
-            p.bb.minY > oy + partBB.reduce((m,b)=>Math.max(m,b.maxY),-Infinity) || p.bb.maxY < oy + partBB.reduce((m,b)=>Math.min(m,b.minY),Infinity)) continue
+        if (p.bb.minX > ox + aggMaxX || p.bb.maxX < ox + aggMinX ||
+            p.bb.minY > oy + aggMaxY || p.bb.maxY < oy + aggMinY) continue
         if (!absParts) absParts = v.parts.map(part => translate(part, ox, oy))
         const pAbsBB = p.absPartsBB || (p.absPartsBB = p.absParts.map(bboxOf))
         outer:
@@ -106,14 +191,30 @@ function placeOne(variants, placed, usableX, usableY, scoreMode = 'auto') {
       let envMaxX = ox + bb0.maxX, envMaxY = oy + bb0.maxY
       for (const p of placed) { envMaxX = Math.max(envMaxX, p.bb.maxX); envMaxY = Math.max(envMaxY, p.bb.maxY) }
       // 'tall'/'wide' — для поиска ОБЕИХ ориентаций сцепки пары (см.
-      // buildPairSubs): 'auto' минимизирует площадь габарита и почти всегда
-      // находит только одну из двух (у них площадь габарита практически
-      // одинаковая — 704x1036 против 1038x704 — так что вторая, с виду ничуть
-      // не хуже, просто никогда не побеждает в сравнении по площади и даже не
-      // пробуется отдельно).
-      const score = scoreMode === 'tall' ? envMaxX * 1e6 + envMaxY
-        : scoreMode === 'wide' ? envMaxY * 1e6 + envMaxX
-        : envMaxX * envMaxY + oy * 0.001 + ox * 0.0001
+      // buildPairSubs), там по-прежнему важен именно габарит, не касание.
+      // 'auto' — ГЛАВНЫЙ критерий обычной укладки: раньше здесь тоже стоял
+      // минимальный габарит листа, а он не то же самое, что "деталь плотно
+      // прижата к соседям" — минимальный габарит просто подвигает деталь
+      // ближе к углу, и между деталями оставались широкие промежутки именно
+      // поэтому. Теперь среди кандидатов, выживших после проверки на
+      // пересечение, выбираем тот, что даёт МАКСИМУМ суммарной длины
+      // касания с соседями и краем листа (в пределах реза — соседняя деталь
+      // на расстоянии ровно kerf засчитывается как касание) — это и есть
+      // "деталь вписалась в нишу", а не просто "легла компактно".
+      let score
+      if (scoreMode === 'tall') score = envMaxX * 1e6 + envMaxY
+      else if (scoreMode === 'wide') score = envMaxY * 1e6 + envMaxX
+      else {
+        const movedEdges = movingEdgesLocal.map(([a, b]) => [[a[0]+ox, a[1]+oy], [b[0]+ox, b[1]+oy]])
+        const movedBB = { minX: ox+bb0.minX, maxX: ox+bb0.maxX, minY: oy+bb0.minY, maxY: oy+bb0.maxY }
+        const contact = contactLength(movedEdges, movedBB, neighborEdgesList, boundaryEdges, tol)
+        // Длина касания — основной ключ (больше — лучше, поэтому со знаком
+        // минус: ниже везде "меньше — лучше"); габарит — только для выбора
+        // среди равноценных по касанию (например, несколько углов с
+        // одинаковым контактом — предпочитаем тот, что ближе к уже занятой
+        // части листа).
+        score = -contact * 1e6 + envMaxX * envMaxY * 1e-3
+      }
       if (score < bestScore) {
         bestScore = score
         best = { angle: v.angle, x: ox, y: oy, polygon: translate(v.polygon, ox, oy), absParts, bb: bboxOf(translate(v.polygon, ox, oy)) }
@@ -136,12 +237,13 @@ function rot90Parts(parts, w) { return parts.map(p => rot90Poly(p, w)) }
 // Пробуем несколько РАЗНЫХ (не совпадающих по итоговому габариту) способов
 // сцепить деталь саму с собой — аналог along_y/along_x в exactPack.js:
 // одна сцепка обычно выходит "высокой" (в столбец), другая "широкой".
-function buildPairSubs(inst) {
+function buildPairSubs(inst, kerf) {
   const v0 = inst.variants[0]
   const bb0 = bboxOf(v0.polygon)
   const firstPoly = translate(v0.polygon, -bb0.minX, -bb0.minY)
   const firstParts = v0.parts.map(p => translate(p, -bb0.minX, -bb0.minY))
-  const firstPlaced = { bb: bboxOf(firstPoly), absParts: firstParts }
+  const firstPlaced = { bb: bboxOf(firstPoly), absParts: firstParts, polygon: firstPoly }
+
   // Область поиска контакта — не безграничная: с безграничной (например,
   // 1e7 мм) 3 угловых кандидата placeOne (запасной вариант "хоть где-то, но
   // без пересечения" для случая листа, где иначе некуда) сами оказываются на
@@ -158,7 +260,7 @@ function buildPairSubs(inst) {
   // почему-то находится третья, отличная от первых двух.
   for (const mode of ['tall', 'wide', 'auto']) {
     for (const v of inst.variants) {
-      const res = placeOne([v], [firstPlaced], BIG, BIG, mode)
+      const res = placeOne([v], [firstPlaced], BIG, BIG, kerf, mode)
       if (!res) continue
       const minX = Math.min(0, res.bb.minX), minY = Math.min(0, res.bb.minY)
       const maxX = Math.max(firstPlaced.bb.maxX, res.bb.maxX), maxY = Math.max(firstPlaced.bb.maxY, res.bb.maxY)
@@ -209,7 +311,7 @@ function buildCompositeVariants(baseSubs, W0, H0, rotatable, halfKerf) {
 }
 
 function buildPairInstances(inst, count, nextIdStart, halfKerf) {
-  const candidates = buildPairSubs(inst)
+  const candidates = buildPairSubs(inst, halfKerf * 2)
   if (!candidates.length) return []
   const rotatable = inst.variants.length > 2
   const instances = []
@@ -240,14 +342,14 @@ function commitInstance(sheet, inst, res) {
   }
 }
 
-function attemptPack(order, usableX, usableY, seedSheet = null) {
+function attemptPack(order, usableX, usableY, kerf, seedSheet = null, nfpCache = null) {
   const sheets = seedSheet ? [seedSheet.slice(), []] : [[]]
   for (let idx = 0; idx < order.length; idx++) {
     const inst = order[idx]
     let done = false
     for (const sheet of sheets) {
       if (sheet.length === 0) continue // пустой лист — обрабатываем отдельно ниже, с оглядкой на следующую деталь
-      const res = placeOne(inst.variants, sheet, usableX, usableY)
+const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', nfpCache)
       if (res) { commitInstance(sheet, inst, res); done = true; break }
     }
     if (!done) {
@@ -263,11 +365,11 @@ function attemptPack(order, usableX, usableY, seedSheet = null) {
       const nextInst = order[idx + 1]
       let bestFirst = null, bestLookaheadScore = Infinity
       for (const v of inst.variants) {
-        const res = placeOne([v], [], usableX, usableY)
+        const res = placeOne([v], [], usableX, usableY, kerf, 'auto', nfpCache)
         if (!res) continue
         let lookaheadScore = 0
         if (nextInst) {
-          const res2 = placeOne(nextInst.variants, [{ inst, ...res }], usableX, usableY)
+          const res2 = placeOne(nextInst.variants, [{ inst, ...res }], usableX, usableY, kerf, 'auto', nfpCache)
           lookaheadScore = res2 ? (res2.bb.maxX * res2.bb.maxY) : Infinity
         }
         if (lookaheadScore < bestLookaheadScore) { bestLookaheadScore = lookaheadScore; bestFirst = res }
@@ -348,7 +450,7 @@ function perturbOrder(order) {
 // каждой детали с поздних листов пробуем реальную NFP-позицию на каждом
 // более раннем листе; если помещается — переносим. Повторяем по кругу, пока
 // что-то переносится.
-async function sweepForwardNFP(sheets, usableX, usableY, deadline) {
+async function sweepForwardNFP(sheets, usableX, usableY, kerf, deadline, nfpCache = null) {
   let result = sheets.map(s => s.slice())
   for (let round = 0; round < 6 && Date.now() < deadline; round++) {
     let moved = false
@@ -357,7 +459,7 @@ async function sweepForwardNFP(sheets, usableX, usableY, deadline) {
         const from = result[j]
         for (let k = from.length - 1; k >= 0 && Date.now() < deadline; k--) {
           const inst = from[k].inst
-          const res = placeOne(inst.variants, result[i], usableX, usableY)
+          const res = placeOne(inst.variants, result[i], usableX, usableY, kerf, 'auto', nfpCache)
           if (res) {
             result[i] = result[i].concat([{ inst, ...res }])
             from.splice(k, 1)
@@ -370,6 +472,68 @@ async function sweepForwardNFP(sheets, usableX, usableY, deadline) {
     if (!moved) break
   }
   return result
+}
+
+// «Встряска»: вынуть небольшую случайную группу уже уложенных деталей
+// (с упором на последний лист — там обычно и есть проблема) и вставить их
+// заново, в новом случайном порядке, через настоящий NFP-контакт — как
+// песок, который при встряске даёт мелким кускам провалиться в щели между
+// крупными. Оставляем результат, только если стало лучше (меньше листов,
+// или столько же листов, но меньше материала на последнем).
+async function shakeNFP(sheets, usableX, usableY, kerf, deadline, nfpCache = null) {
+  let best = sheets.map(s => s.slice())
+  let bestStat = scoreSheets(best)
+  let noImprove = 0, __iters=0
+  while (Date.now() < deadline && noImprove < 300) {
+    __iters++
+    const flat = []
+    best.forEach((sheet, si) => sheet.forEach(p => flat.push({ p, si })))
+    if (flat.length < 4) break
+    const lastSi = best.length - 1
+    const pool = shuffle(flat)
+    const k = 3 + Math.floor(Math.random() * 5)
+    const picked = []
+    for (const f of pool) {
+      if (picked.length >= k) break
+      if (f.si === lastSi || Math.random() < 0.35) picked.push(f)
+    }
+    if (picked.length < 2) continue
+    // Ключ — сам объект размещения (p), а НЕ p.inst: у обеих половин бывшей
+    // сцепленной пары p.inst — ОДНА и та же ссылка (это две одинаковые
+    // детали одного вида), поэтому по p.inst нельзя отличить "вынуть эту
+    // копию" от "вынуть и её, и вторую тоже" — ровно так раньше терялись
+    // детали (вынимались обе, а возвращалась одна).
+    const pickedSet = new Set(picked.map(f => f.p))
+    let trial = best.map(sheet => sheet.filter(p => !pickedSet.has(p))).filter(s => s.length)
+    if (!trial.length) trial = [[]]
+    const order = shuffle(picked.map(f => f.p.inst))
+    let ok = true
+    for (const inst of order) {
+      let placed = false
+      for (const sheet of trial) {
+  const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', nfpCache)
+        if (res) { sheet.push({ inst, ...res }); placed = true; break }
+      }
+      if (!placed) {
+        const sheet = []
+  const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', nfpCache)
+        if (!res) { ok = false; break }
+        sheet.push({ inst, ...res })
+        trial.push(sheet)
+      }
+    }
+    if (!ok) { noImprove++; continue }
+    // Проверка целостности — не должно случаться, но лишняя не помешает:
+    // если вдруг число деталей не сошлось, такой вариант не принимаем.
+    const trialCount = trial.reduce((n, s) => n + s.length, 0)
+    const bestCount = best.reduce((n, s) => n + s.length, 0)
+    if (trialCount !== bestCount) { noImprove++; continue }
+    const trialStat = scoreSheets(trial)
+    if (better(trialStat, bestStat)) { best = trial; bestStat = trialStat; noImprove = 0 }
+    else noImprove++
+  }
+  if(process.env.DBGS)console.log('shake iters',__iters)
+  return best
 }
 
 // ─── Раскладка сеткой для сцепленных пар (перенос приёма из exactPack.js) ──
@@ -432,6 +596,20 @@ function placePairGrid(pairInstances, kerf, tallWH, wideWH, plan) {
 // мелкие детали, пока сетка строилась для крупных). Без этого другой вид
 // шёл через общий перебор вообще без подсказки и не использовал явно
 // свободное место (та же проблема, что была в exactPack.js).
+// Сколько деталей группы влезет сеткой в полосу над уже уложенным —
+// без реальной укладки, только подсчёт (для сравнения анкоров выше).
+function estimateStripFitNFP(sheet, group, kerf, usableX, usableY) {
+  if (!group.length) return 0
+  const envY = sheet.reduce((m, p) => Math.max(m, p.bb.maxY), 0)
+  const bb0 = bboxOf(group[0].variants[0].polygon)
+  const w = bb0.maxX - bb0.minX, h = bb0.maxY - bb0.minY
+  const y0 = envY > 0 ? envY + kerf : 0
+  const rows = Math.floor((usableY - y0 + kerf) / (h + kerf))
+  const cols = Math.floor((usableX + kerf) / (w + kerf))
+  if (rows < 1 || cols < 1) return 0
+  return Math.min(group.length, rows * cols)
+}
+
 function fillStripWithSinglesNFP(sheet, group, kerf, usableX, usableY) {
   if (!group.length) return 0
   const envY = sheet.reduce((m, p) => Math.max(m, p.bb.maxY), 0)
@@ -477,6 +655,7 @@ function buildPairGridSheet(pairInstances, kerf, usableX, usableY, leftoverCompo
   // соприкасается), но простое смыкание всё равно строит вторую колонку и
   // держит структуру листа — то же самое эффективно делает exactPack.js.
   const usedSingles = []
+  let extraLooseSingle = null
   if (leftoverComposites.length) {
     const usedW = plan.nt > 0 && tallWH ? plan.nt * (tallWH.w + kerf) : 0
     const wideW = plan.nw > 0 && wideWH ? plan.nw * (wideWH.w + kerf) : 0
@@ -488,25 +667,37 @@ function buildPairGridSheet(pairInstances, kerf, usableX, usableY, leftoverCompo
     const cols = Math.floor((usableX - colX + kerf) / (w + kerf))
     const slots = []
     for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) slots.push([c, r])
-    // Кладём ТОЛЬКО целыми парами слотов — если для второй половины уже
-    // непоместившейся пары места не хватает, не кладём и первую (иначе
-    // деталь-сирота остаётся на листе, а её родитель — не помеченным
-    // использованным, и общий перебор укладывает всю пару ещё раз поверх).
+    const place = (variant, c, r) => {
+      const x = colX + c * (w + kerf), y = r * (h + kerf)
+      const tx = x - bb0.minX, ty = y - bb0.minY
+      const polygon = translate(variant.polygon, tx, ty)
+      const absParts = variant.parts.map(p => translate(p, tx, ty))
+      return { angle: variant.angle, x: tx, y: ty, polygon, absParts, bb: bboxOf(polygon) }
+    }
+    // Кладём целыми парами слотов, кроме, может быть, ПОСЛЕДНЕГО нечётного
+    // слота — раньше он просто пропадал впустую (если слотов нечётное
+    // число, последний вообще не использовался), хотя туда прекрасно
+    // помещается ОДНА деталь. Кладём в него одну половину ещё одной сцепки,
+    // а вторую её половину не бросаем сиротой — отдаём его обратно как
+    // обычную одиночную деталь для дальнейшей укладки (общий перебор её
+    // разместит уже без сцепки, но всё равно на этом же листе, если влезет).
     let parentIdx = 0
     for (let s = 0; s + 1 < slots.length && parentIdx < leftoverComposites.length; s += 2) {
       const parent = leftoverComposites[parentIdx++]
       const variant = parent.src.variants[0]
-      for (const [c, r] of [slots[s], slots[s + 1]]) {
-        const x = colX + c * (w + kerf), y = r * (h + kerf)
-        const tx = x - bb0.minX, ty = y - bb0.minY
-        const polygon = translate(variant.polygon, tx, ty)
-        const absParts = variant.parts.map(p => translate(p, tx, ty))
-        sheet.push({ inst: parent.src, angle: variant.angle, x: tx, y: ty, polygon, absParts, bb: bboxOf(polygon) })
-      }
+      for (const [c, r] of [slots[s], slots[s + 1]]) sheet.push({ inst: parent.src, ...place(variant, c, r) })
       usedSingles.push(parent)
     }
+    if (slots.length % 2 === 1 && parentIdx < leftoverComposites.length) {
+      const parent = leftoverComposites[parentIdx]
+      const variant = parent.src.variants[0]
+      const [c, r] = slots[slots.length - 1]
+      sheet.push({ inst: parent.src, ...place(variant, c, r) })
+      usedSingles.push(parent)
+      extraLooseSingle = { ...parent.src, id: `${parent.id}-loose` }
+    }
   }
-  return { sheet, usedInstances: usedInstances.concat(usedSingles) }
+  return { sheet, usedInstances: usedInstances.concat(usedSingles), extraLooseSingle }
 }
 
 export async function packNFP({
@@ -556,7 +747,7 @@ export async function packNFP({
     if (!pairGroupsByType.has(inst.detailIndex)) pairGroupsByType.set(inst.detailIndex, [])
     pairGroupsByType.get(inst.detailIndex).push(inst)
   }
-  let gridSeed = null
+  let gridSeed = null, gridSeedTotal = -1
   for (const [detailIndex, group] of pairGroupsByType.entries()) {
     const plans = group.length >= 2 ? planPairGrid(
       group[0].variants.filter(v => v.angle === 0).find(v => v.h > v.w),
@@ -567,7 +758,23 @@ export async function packNFP({
     const leftoverComposites = group.slice(gridCap)
     const built = buildPairGridSheet(group, kerf, usableX, usableY, leftoverComposites)
     if (!built) continue
-    if (!gridSeed || built.sheet.length > gridSeed.sheet.length) gridSeed = { ...built, detailIndex }
+    // Раньше сравнивали только по числу деталей В САМОЙ сетке — а выигрывать
+    // должен тот вариант, что даёт больше деталей НА ЛИСТЕ ИТОГО, с учётом
+    // остальных видов, докладываемых поверх (см. комментарий ниже). Иначе
+    // в анкоре мог оказаться вид с меньшей выгодой от сцепки, а крупные
+    // детали, которым сцепка даёт больше всего экономии места, доставались
+    // бы простой сеткой поштучно — как раз это и находили на реальном заказе.
+    const usedIds = new Set(built.usedInstances.map(i => i.id))
+    const otherByType = new Map()
+    for (const inst of instances) {
+      if (usedIds.has(inst.id) || inst.detailIndex === detailIndex) continue
+      if (!otherByType.has(inst.detailIndex)) otherByType.set(inst.detailIndex, [])
+      otherByType.get(inst.detailIndex).push(inst)
+    }
+    const otherGroups = [...otherByType.values()].sort((a, b) => (b[0].w * b[0].h) - (a[0].w * a[0].h))
+    let total = built.sheet.length
+    for (const g of otherGroups) total += estimateStripFitNFP(built.sheet, g, kerf, usableX, usableY)
+    if (total > gridSeedTotal) { gridSeedTotal = total; gridSeed = { ...built, detailIndex } }
   }
   // Виды деталей, для которых сетка НЕ строилась (проиграли по числу
   // размещённых штук, или не вогнутые вовсе — сцепка для них не пробовалась)
@@ -592,11 +799,15 @@ export async function packNFP({
   if (gridSeed) {
     const usedIds = new Set(gridSeed.usedInstances.map(i => i.id))
     seedRest = instances.filter(i => !usedIds.has(i.id))
+    if (gridSeed.extraLooseSingle) seedRest = seedRest.concat([gridSeed.extraLooseSingle])
     seedSheet = gridSeed.sheet
   }
 
   const seedOrder = seedRest.slice().sort((a,b)=>(b.w*b.h)-(a.w*a.h))
-  let best = attemptPack(seedOrder, usableX, usableY, seedSheet)
+  const nfpCache = new Map()
+  const __t0=Date.now()
+  let best = attemptPack(seedOrder, usableX, usableY, kerf, seedSheet, nfpCache)
+  if(process.env.DBGS)console.log('first attemptPack',Date.now()-__t0,'ms')
   let bestStat = scoreSheets(best)
 
   let __evalCount=0
@@ -625,7 +836,7 @@ export async function packNFP({
     let evaluated = []
     for (const order of population) {
       if (Date.now()-startTime > budgetMs) break
-      const sheets = attemptPack(order, usableX, usableY, seedSheet)
+const sheets = attemptPack(order, usableX, usableY, kerf, seedSheet, nfpCache)
       if (sheets) evaluated.push({ order, sheets, stat: scoreSheets(sheets) })
     }
     if (evaluated.length) {
@@ -642,7 +853,7 @@ export async function packNFP({
         const nextEval = []
         for (const order of nextGen) {
           if (Date.now()-startTime > budgetMs) break
-          const sheets = attemptPack(order, usableX, usableY, seedSheet)
+    const sheets = attemptPack(order, usableX, usableY, kerf, seedSheet, nfpCache)
           if (sheets) nextEval.push({ order, sheets, stat: scoreSheets(sheets) })
         }
         if (!nextEval.length) break
@@ -655,9 +866,25 @@ export async function packNFP({
 
   // Дожим лучшей найденной раскладки — до конца бюджета времени.
   if (best.length > 1 && Date.now() - startTime < budgetMs) {
-    const swept = await sweepForwardNFP(best, usableX, usableY, startTime + budgetMs)
+    const swept = await sweepForwardNFP(best, usableX, usableY, kerf, startTime + budgetMs, nfpCache)
     const sweptStat = scoreSheets(swept)
     if (better(sweptStat, bestStat)) { best = swept; bestStat = sweptStat }
+  }
+
+  if(process.env.DBGS)console.log('time before shake', Date.now()-startTime,'ms of budget',budgetMs)
+  // «Встряска» — то, чего не хватало сетке и генетике: обе строят раскладку
+  // ОДИН РАЗ и не возвращаются к уже поставленным деталям. Настоящий эталон
+  // (проверено на примерах конкурента) — это неровная, но плотная мозаика,
+  // где детали цепляются друг за друга в разных, не повторяющихся местах
+  // листа; такое находится только локальным поиском по УЖЕ готовой
+  // раскладке: вынуть несколько деталей, попробовать вставить их заново в
+  // другом порядке через настоящий NFP-контакт, оставить, если стало лучше
+  // (меньше листов или меньше материала на последнем) — и повторять, пока
+  // есть время. Работает на оставшемся бюджете после генетики и дожима.
+  if (Date.now() - startTime < budgetMs) {
+    const shaken = await shakeNFP(best, usableX, usableY, kerf, startTime + budgetMs, nfpCache)
+    const shakenStat = scoreSheets(shaken)
+    if (better(shakenStat, bestStat)) { best = shaken; bestStat = shakenStat }
   }
 
   return {
