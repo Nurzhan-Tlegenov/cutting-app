@@ -122,8 +122,6 @@ function placeOne(variants, placed, usableX, usableY, scoreMode = 'auto') {
   }
   return best
 }
-
-
 // ─── Сцепка одинаковых деталей в пару ──────────────────────────────────────
 // Та же идея, что в exactPack.js (tileIntoPairs): две одинаковые вогнутые
 // детали часто вкладываются друг в друга почти без зазора. Там это строилось
@@ -190,8 +188,15 @@ function buildPairSubs(inst) {
 // деталей внутри пары остаётся в разрешённом для неё положении 0/180, значит
 // направление текстуры не нарушается); 90°/270° — только если сама деталь
 // допускает вращение (тот же признак rotatable, что и у одиночной детали).
-function buildCompositeVariants(baseSubs, W0, H0, rotatable) {
-  const mk = (subs, w, h, angle) => ({ angle, w, h, polygon: [[0,0],[w,0],[w,h],[0,h]], subs, parts: subs.flatMap(s=>s.parts) })
+function buildCompositeVariants(baseSubs, W0, H0, rotatable, halfKerf) {
+  // Для NFP-контакта с ДРУГИМИ деталями сцепке достаточно её внешнего
+  // прямоугольника вместо полного объединения кусков обеих половин (11+11=22
+  // куска) — сама пара внутри уже сцеплена заранее (buildPairSubs), а лишние
+  // куски только умножают дороговизну NFP (расчёт растёт как quadrat от
+  // числа кусков: 22×22 против 1×1) — на реальном заказе именно это съедало
+  // почти весь бюджет времени на одну-единственную раскладку. exactPack.js
+  // для пар делает то же самое (там это тоже просто прямоугольник).
+  const mk = (subs, w, h, angle) => ({ angle, w, h, polygon: [[0,0],[w,0],[w,h],[0,h]], subs, parts: dilatedConvexParts(ensureCCW([[0,0],[w,0],[w,h],[0,h]]), halfKerf) })
   const rot = (subs, w) => subs.map(s => ({ angle: (s.angle+90)%360, polygon: rot90Poly(s.polygon, w), parts: rot90Parts(s.parts, w) }))
   const subs90 = rot(baseSubs, W0)
   const subs180 = rot(subs90, H0)
@@ -203,7 +208,7 @@ function buildCompositeVariants(baseSubs, W0, H0, rotatable) {
   return variants
 }
 
-function buildPairInstances(inst, count, nextIdStart) {
+function buildPairInstances(inst, count, nextIdStart, halfKerf) {
   const candidates = buildPairSubs(inst)
   if (!candidates.length) return []
   const rotatable = inst.variants.length > 2
@@ -214,7 +219,7 @@ function buildPairInstances(inst, count, nextIdStart) {
       id: nextIdStart + k, detailIndex: inst.detailIndex, isComposite: true, src: inst,
       label: inst.label, prefix: inst.prefix,
       edgeTop: inst.edgeTop, edgeRight: inst.edgeRight, edgeBottom: inst.edgeBottom, edgeLeft: inst.edgeLeft,
-      variants: buildCompositeVariants(cand.subs, cand.W, cand.H, rotatable),
+      variants: buildCompositeVariants(cand.subs, cand.W, cand.H, rotatable, halfKerf),
       w: cand.W, h: cand.H,
     })
   }
@@ -235,8 +240,8 @@ function commitInstance(sheet, inst, res) {
   }
 }
 
-function attemptPack(order, usableX, usableY) {
-  const sheets = [[]]
+function attemptPack(order, usableX, usableY, seedSheet = null) {
+  const sheets = seedSheet ? [seedSheet.slice(), []] : [[]]
   for (let idx = 0; idx < order.length; idx++) {
     const inst = order[idx]
     let done = false
@@ -367,6 +372,143 @@ async function sweepForwardNFP(sheets, usableX, usableY, deadline) {
   return result
 }
 
+// ─── Раскладка сеткой для сцепленных пар (перенос приёма из exactPack.js) ──
+// Раз сцепка теперь считается своим внешним прямоугольником (см.
+// buildCompositeVariants выше), для НЕЁ САМОЙ верно то же, что и в
+// exactPack.js: жадная вставка по одной детали не гарантирует чистые
+// колонки, а прямая раскладка сеткой — гарантирует и мгновенна. Строим её
+// явно и отдаём в attemptPack уже готовым первым листом, а всё остальное
+// (мелкие детали, лишние пары) идёт через обычный NFP-перебор поверх неё —
+// так внешняя граница блока пар остаётся точной (реальный контур деталей
+// по краям), а сама сборка — быстрой и надёжной.
+function planPairGrid(tallWH, wideWH, kerf, usableX, usableY, need) {
+  const plans = []
+  const maxTall = tallWH ? Math.floor((usableX + kerf) / (tallWH.w + kerf)) : 0
+  for (let nt = 0; nt <= maxTall; nt++) {
+    if (nt === 0 && !wideWH) continue
+    const usedW = tallWH && nt > 0 ? nt * (tallWH.w + kerf) : 0
+    const rowsTall = tallWH ? Math.floor((usableY + kerf) / (tallWH.h + kerf)) : 0
+    const tallCap = nt * rowsTall
+    let nw = 0, rowsWide = 0, wideCap = 0
+    if (wideWH) {
+      const remaining = usableX - usedW
+      nw = Math.max(0, Math.floor((remaining + kerf) / (wideWH.w + kerf)))
+      rowsWide = Math.floor((usableY + kerf) / (wideWH.h + kerf))
+      wideCap = nw * rowsWide
+    }
+    const cap = tallCap + wideCap
+    if (cap <= 0) continue
+    plans.push({ nt, rowsTall, nw, rowsWide, cap, waste: cap - Math.min(cap, need) })
+  }
+  plans.sort((a, b) => Math.min(b.cap, need) - Math.min(a.cap, need) || a.waste - b.waste)
+  return plans
+}
+
+function placePairGrid(pairInstances, kerf, tallWH, wideWH, plan) {
+  const sheet = []
+  let idx = 0
+  const place = (shape, x, y) => {
+    if (idx >= pairInstances.length) return
+    const inst = pairInstances[idx++]
+    const variant = inst.variants.find(v => v.w === shape.w && v.h === shape.h) || inst.variants[0]
+    const polygon = translate(variant.polygon, x, y)
+    const absParts = variant.parts.map(p => translate(p, x, y))
+    commitInstance(sheet, inst, { angle: variant.angle, x, y, polygon, absParts, bb: bboxOf(polygon) })
+  }
+  for (let c = 0; c < plan.nt && idx < pairInstances.length; c++) {
+    const x = c * (tallWH.w + kerf)
+    for (let r = 0; r < plan.rowsTall && idx < pairInstances.length; r++) place(tallWH, x, r * (tallWH.h + kerf))
+  }
+  const wideX0 = plan.nt * (tallWH ? tallWH.w + kerf : 0)
+  for (let c = 0; c < plan.nw && idx < pairInstances.length; c++) {
+    const x = wideX0 + c * (wideWH.w + kerf)
+    for (let r = 0; r < plan.rowsWide && idx < pairInstances.length; r++) place(wideWH, x, r * (wideWH.h + kerf))
+  }
+  return sheet
+}
+
+// Полоса, оставшаяся НАД сеткой пар одного вида — сеткой же докладываем туда
+// ЛЮБОЙ другой вид деталей (не участвовавший в этой сетке вовсе — например,
+// мелкие детали, пока сетка строилась для крупных). Без этого другой вид
+// шёл через общий перебор вообще без подсказки и не использовал явно
+// свободное место (та же проблема, что была в exactPack.js).
+function fillStripWithSinglesNFP(sheet, group, kerf, usableX, usableY) {
+  if (!group.length) return 0
+  const envY = sheet.reduce((m, p) => Math.max(m, p.bb.maxY), 0)
+  const v0 = group[0].variants[0]
+  const bb0 = bboxOf(v0.polygon)
+  const w = bb0.maxX - bb0.minX, h = bb0.maxY - bb0.minY
+  const y0 = envY > 0 ? envY + kerf : 0
+  const rows = Math.floor((usableY - y0 + kerf) / (h + kerf))
+  const cols = Math.floor((usableX + kerf) / (w + kerf))
+  if (rows < 1 || cols < 1) return 0
+  let idx = 0
+  for (let r = 0; r < rows && idx < group.length; r++) {
+    for (let c = 0; c < cols && idx < group.length; c++) {
+      const inst = group[idx]
+      const x = c * (w + kerf), y = y0 + r * (h + kerf)
+      const tx = x - bb0.minX, ty = y - bb0.minY
+      const polygon = translate(v0.polygon, tx, ty)
+      const absParts = v0.parts.map(p => translate(p, tx, ty))
+      commitInstance(sheet, inst, { angle: v0.angle, x: tx, y: ty, polygon, absParts, bb: bboxOf(polygon) })
+      idx++
+    }
+  }
+  return idx
+}
+
+function buildPairGridSheet(pairInstances, kerf, usableX, usableY, leftoverComposites = []) {
+  if (pairInstances.length < 2) return null
+  const shapes = pairInstances[0].variants.filter(v => v.angle === 0)
+  const tallWH = shapes.find(v => v.h > v.w)
+  const wideWH = shapes.find(v => v.w > v.h)
+  if (!tallWH && !wideWH) return null
+  const plans = planPairGrid(tallWH, wideWH, kerf, usableX, usableY, pairInstances.length)
+  if (!plans.length || plans[0].cap < 2) return null
+  const plan = plans[0]
+  const used = Math.min(plan.cap, pairInstances.length)
+  const usedInstances = pairInstances.slice(0, used)
+  const sheet = placePairGrid(usedInstances, kerf, tallWH, wideWH, plan)
+  const gridUsedIds = new Set(usedInstances.map(i => i.id))
+  // Ширина, занятая сеткой пар — то, что справа, отдаём под простую колонку
+  // одиночных деталей (тот же вид, без сцепки — просто впритык друг к
+  // другу). Не любая деталь имеет вторую тесную ориентацию сцепки (у этой,
+  // например, только "лёжа" — "стоя" не сцепляется реально, только
+  // соприкасается), но простое смыкание всё равно строит вторую колонку и
+  // держит структуру листа — то же самое эффективно делает exactPack.js.
+  const usedSingles = []
+  if (leftoverComposites.length) {
+    const usedW = plan.nt > 0 && tallWH ? plan.nt * (tallWH.w + kerf) : 0
+    const wideW = plan.nw > 0 && wideWH ? plan.nw * (wideWH.w + kerf) : 0
+    const colX = usedW + wideW
+    const s0 = leftoverComposites[0].src
+    const bb0 = bboxOf(s0.variants[0].polygon)
+    const w = bb0.maxX - bb0.minX, h = bb0.maxY - bb0.minY
+    const rows = Math.floor((usableY + kerf) / (h + kerf))
+    const cols = Math.floor((usableX - colX + kerf) / (w + kerf))
+    const slots = []
+    for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) slots.push([c, r])
+    // Кладём ТОЛЬКО целыми парами слотов — если для второй половины уже
+    // непоместившейся пары места не хватает, не кладём и первую (иначе
+    // деталь-сирота остаётся на листе, а её родитель — не помеченным
+    // использованным, и общий перебор укладывает всю пару ещё раз поверх).
+    let parentIdx = 0
+    for (let s = 0; s + 1 < slots.length && parentIdx < leftoverComposites.length; s += 2) {
+      const parent = leftoverComposites[parentIdx++]
+      const variant = parent.src.variants[0]
+      for (const [c, r] of [slots[s], slots[s + 1]]) {
+        const x = colX + c * (w + kerf), y = r * (h + kerf)
+        const tx = x - bb0.minX, ty = y - bb0.minY
+        const polygon = translate(variant.polygon, tx, ty)
+        const absParts = variant.parts.map(p => translate(p, tx, ty))
+        sheet.push({ inst: parent.src, angle: variant.angle, x: tx, y: ty, polygon, absParts, bb: bboxOf(polygon) })
+      }
+      usedSingles.push(parent)
+    }
+  }
+  return { sheet, usedInstances: usedInstances.concat(usedSingles) }
+}
+
 export async function packNFP({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
   optimizeSeconds = 15,
@@ -390,9 +532,9 @@ export async function packNFP({
     const concave = polygonArea(variants[0].polygon) < 0.97 * singleInst.w * singleInst.h
     const pairCount = concave ? Math.floor(qty / 2) : 0
     if (pairCount > 0) {
-      const pairs = buildPairInstances(singleInst, pairCount, instances.length)
+      const pairs = buildPairInstances(singleInst, pairCount, instances.length, kerf / 2)
       if (pairs.length === pairCount) {
-        instances.push(...pairs)
+          instances.push(...pairs)
         for (let q = pairCount * 2; q < qty; q++) instances.push({ ...singleInst, id: instances.length })
         return
       }
@@ -405,26 +547,85 @@ export async function packNFP({
   const startTime = Date.now()
   const budgetMs = Math.max(0, Number(optimizeSeconds)||0) * 1000
 
-  const seedOrder = instances.slice().sort((a,b)=>(b.w*b.h)-(a.w*a.h))
-  let best = attemptPack(seedOrder, usableX, usableY)
+  // Сцепленные пары — сеткой, сразу как готовый первый лист (см. комментарий
+  // у buildPairGridSheet выше); всё остальное укладывается поверх обычным
+  // NFP-перебором, включая генетику.
+  const pairGroupsByType = new Map()
+  for (const inst of instances) {
+    if (!inst.isComposite) continue
+    if (!pairGroupsByType.has(inst.detailIndex)) pairGroupsByType.set(inst.detailIndex, [])
+    pairGroupsByType.get(inst.detailIndex).push(inst)
+  }
+  let gridSeed = null
+  for (const [detailIndex, group] of pairGroupsByType.entries()) {
+    const plans = group.length >= 2 ? planPairGrid(
+      group[0].variants.filter(v => v.angle === 0).find(v => v.h > v.w),
+      group[0].variants.filter(v => v.angle === 0).find(v => v.w > v.h),
+      kerf, usableX, usableY, group.length,
+    ) : []
+    const gridCap = plans.length ? Math.min(plans[0].cap, group.length) : 0
+    const leftoverComposites = group.slice(gridCap)
+    const built = buildPairGridSheet(group, kerf, usableX, usableY, leftoverComposites)
+    if (!built) continue
+    if (!gridSeed || built.sheet.length > gridSeed.sheet.length) gridSeed = { ...built, detailIndex }
+  }
+  // Виды деталей, для которых сетка НЕ строилась (проиграли по числу
+  // размещённых штук, или не вогнутые вовсе — сцепка для них не пробовалась)
+  // — докладываем сеткой же в оставшуюся полосу над победившей раскладкой,
+  // от крупных к мелким, вместо того чтобы отдавать их без подсказки общему
+  // перебору (см. fillStripWithSinglesNFP выше).
+  if (gridSeed) {
+    const usedIds = new Set(gridSeed.usedInstances.map(i => i.id))
+    const otherByType = new Map()
+    for (const inst of instances) {
+      if (usedIds.has(inst.id) || inst.detailIndex === gridSeed.detailIndex) continue
+      if (!otherByType.has(inst.detailIndex)) otherByType.set(inst.detailIndex, [])
+      otherByType.get(inst.detailIndex).push(inst)
+    }
+    const otherGroups = [...otherByType.values()].sort((a, b) => (b[0].w * b[0].h) - (a[0].w * a[0].h))
+    for (const g of otherGroups) {
+      const n = fillStripWithSinglesNFP(gridSeed.sheet, g, kerf, usableX, usableY)
+      if (n > 0) gridSeed.usedInstances = gridSeed.usedInstances.concat(g.slice(0, n))
+    }
+  }
+  let seedSheet = null, seedRest = instances
+  if (gridSeed) {
+    const usedIds = new Set(gridSeed.usedInstances.map(i => i.id))
+    seedRest = instances.filter(i => !usedIds.has(i.id))
+    seedSheet = gridSeed.sheet
+  }
+
+  const seedOrder = seedRest.slice().sort((a,b)=>(b.w*b.h)-(a.w*a.h))
+  let best = attemptPack(seedOrder, usableX, usableY, seedSheet)
   let bestStat = scoreSheets(best)
 
-  if (budgetMs > 0 && instances.length > 1) {
+  let __evalCount=0
+  if (budgetMs > 0 && seedRest.length > 1) {
     const POP_SIZE = instances.length > 40 ? 8 : 14
     const ELITE_COUNT = 2, TOURNAMENT_SIZE = 3, MUTATION_RATE = 0.4
+    // Отдельная подсказка для генетики: сначала все "стоячие" сцепки одного
+    // вида, потом все "лежачие" — если у формы есть обе ориентации сцепки,
+    // они образуют чистые колонки/ряды только когда однотипные идут подряд
+    // (вперемешку жадная укладка не группирует их сама).
+    const byOrientation = seedRest.slice().sort((a, b) => {
+      const wa = a.variants[0], wb = b.variants[0]
+      const oa = wa.w > wa.h ? 1 : 0, ob = wb.w > wb.h ? 1 : 0
+      return oa - ob || (b.w*b.h) - (a.w*a.h)
+    })
     let population = [
       seedOrder,
-      instances.slice().sort((a,b)=>Math.max(b.w,b.h)-Math.max(a.w,a.h)),
-      instances.slice().sort((a,b)=>Math.min(a.w,a.h)-Math.min(b.w,b.h)),
-      instances.slice().sort((a,b)=>(a.w*a.h)-(b.w*b.h)), // сначала мелкие
-      interleaveByAreaBand(instances), // чередование крупных и мелких — мелкие успевают занять то, что крупные ещё не "забронировали"
+      byOrientation,
+      seedRest.slice().sort((a,b)=>Math.max(b.w,b.h)-Math.max(a.w,a.h)),
+      seedRest.slice().sort((a,b)=>Math.min(a.w,a.h)-Math.min(b.w,b.h)),
+      seedRest.slice().sort((a,b)=>(a.w*a.h)-(b.w*b.h)), // сначала мелкие
+      interleaveByAreaBand(seedRest), // чередование крупных и мелких — мелкие успевают занять то, что крупные ещё не "забронировали"
     ]
-    while (population.length < POP_SIZE) population.push(shuffle(instances))
+    while (population.length < POP_SIZE) population.push(shuffle(seedRest))
 
     let evaluated = []
     for (const order of population) {
       if (Date.now()-startTime > budgetMs) break
-      const sheets = attemptPack(order, usableX, usableY)
+      const sheets = attemptPack(order, usableX, usableY, seedSheet)
       if (sheets) evaluated.push({ order, sheets, stat: scoreSheets(sheets) })
     }
     if (evaluated.length) {
@@ -441,7 +642,7 @@ export async function packNFP({
         const nextEval = []
         for (const order of nextGen) {
           if (Date.now()-startTime > budgetMs) break
-          const sheets = attemptPack(order, usableX, usableY)
+          const sheets = attemptPack(order, usableX, usableY, seedSheet)
           if (sheets) nextEval.push({ order, sheets, stat: scoreSheets(sheets) })
         }
         if (!nextEval.length) break
