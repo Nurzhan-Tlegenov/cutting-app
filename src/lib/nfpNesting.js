@@ -491,20 +491,25 @@ async function sweepForwardNFP(sheets, usableX, usableY, kerf, direction, deadli
 async function shakeNFP(sheets, usableX, usableY, kerf, direction, deadline, nfpCache = null) {
   let best = sheets.map(s => s.slice())
   let bestStat = scoreSheets(best)
-  let noImprove = 0, __iters=0
+  let noImprove = 0
   while (Date.now() < deadline && noImprove < 300) {
-    __iters++
     const flat = []
     best.forEach((sheet, si) => sheet.forEach(p => flat.push({ p, si })))
     if (flat.length < 4) break
     const lastSi = best.length - 1
-    const pool = shuffle(flat)
-    const k = 3 + Math.floor(Math.random() * 5)
-    const picked = []
-    for (const f of pool) {
-      if (picked.length >= k) break
-      if (f.si === lastSi || Math.random() < 0.35) picked.push(f)
-    }
+    // Раньше вынимали случайные детали С ЛЮБОГО листа (с шансом 35% —
+    // и с первого тоже). scoreSheets видит только число листов и остаток
+    // материала на ПОСЛЕДНЕМ — она не замечает, что при этом первый,
+    // уже хорошо уложенный лист, стал рыхлее (деталь воткнулась в первое
+    // же место с высоким контактом ЛОКАЛЬНО, а не туда, где стояла раньше,
+    // и могла заодно закрыть собой удобную нишу для будущей детали). Именно
+    // так на реальном заказе появлялись отдельные "оторванные" детали
+    // посреди пустого места. Теперь трогаем ТОЛЬКО последний лист — та же
+    // логика избегания риска, что и в sweepForwardNFP (переносить только
+    // вперёд, никогда не разбирать то, что уже хорошо стоит).
+    const pool = shuffle(flat.filter(f => f.si === lastSi))
+    const k = Math.min(pool.length, 3 + Math.floor(Math.random() * 5))
+    const picked = pool.slice(0, k)
     if (picked.length < 2) continue
     // Ключ — сам объект размещения (p), а НЕ p.inst: у обеих половин бывшей
     // сцепленной пары p.inst — ОДНА и та же ссылка (это две одинаковые
