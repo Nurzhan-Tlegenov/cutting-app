@@ -690,7 +690,7 @@ function buildPair(inst, kerf, usableX, usableY, dir = 'auto', deterministic = f
 // по геометрии) поступает эталонный раскрой конкурента — потому и уходит
 // 3 секунды, а не 13: там не перебор, а арифметика.
 function planGridTiling(tallWH, wideWH, kerf, usableX, usableY, need) {
-  let best = null
+  const plans = []
   const maxTall = tallWH ? Math.floor((usableX + kerf) / (tallWH.w + kerf)) : 0
   for (let nt = 0; nt <= maxTall; nt++) {
     if (nt === 0 && !wideWH) continue
@@ -707,15 +707,33 @@ function planGridTiling(tallWH, wideWH, kerf, usableX, usableY, need) {
     const cap = tallCap + wideCap
     if (cap <= 0) continue
     const waste = cap - Math.min(cap, need)
-    // Предпочитаем план, который закрывает нужное количество (или максимум,
-    // если целиком не влезает) с наименьшим остатком вместимости впустую —
-    // компактнее, оставляет больше места другим деталям на этом же листе.
-    if (!best || Math.min(cap, need) > Math.min(best.cap, need) ||
-        (Math.min(cap, need) === Math.min(best.cap, need) && waste < best.waste)) {
-      best = { nt, rowsTall, nw, rowsWide, cap, waste }
+    // Тот же план, но на 1 ряд короче в БОЛЕЕ высоком из двух блоков — жертвуем
+    // 1 парой ради заметно меньшей высоты (то, что не влезло в сетку,
+    // достаётся общему перебору отдельными деталями). Именно этого варианта
+    // не хватало: без него из двух блоков разной высоты всегда побеждает
+    // план с обоими блоками «под завязку», даже если чуть более скромный
+    // план оставляет куда больше места остальным деталям.
+    // Высота, которую реально займёт эта раскладка (максимум из высоты
+    // "стоя"- и "лёжа"-блока) — по ней дальше считаем, сколько места
+    // останется НАД пара́ми для других деталей (см. buildGridTilingSheet:
+    // там перебираются все планы и выбирается не просто самый плотный по
+    // самим парам, а тот, что оставляет место под всё остальное).
+    const usedH = Math.max(tallWH && nt > 0 ? rowsTall * (tallWH.h + kerf) - kerf : 0, wideWH && nw > 0 ? rowsWide * (wideWH.h + kerf) - kerf : 0)
+    plans.push({ nt, rowsTall, nw, rowsWide, cap, waste, usedH })
+    if (nt > 0 && nw > 0 && rowsTall !== rowsWide) {
+      const tallH2 = tallWH ? rowsTall * (tallWH.h + kerf) - kerf : 0
+      const wideH2 = wideWH ? rowsWide * (wideWH.h + kerf) - kerf : 0
+      if (tallH2 > wideH2 && rowsTall > 1) {
+        const cap2 = nt * (rowsTall - 1) + nw * rowsWide
+        if (cap2 > 0) plans.push({ nt, rowsTall: rowsTall - 1, nw, rowsWide, cap: cap2, waste: cap2 - Math.min(cap2, need), usedH: wideH2 })
+      } else if (wideH2 > tallH2 && rowsWide > 1) {
+        const cap2 = nt * rowsTall + nw * (rowsWide - 1)
+        if (cap2 > 0) plans.push({ nt, rowsTall, nw, rowsWide: rowsWide - 1, cap: cap2, waste: cap2 - Math.min(cap2, need), usedH: tallH2 })
+      }
     }
   }
-  return best
+  plans.sort((a, b) => Math.min(b.cap, need) - Math.min(a.cap, need) || a.waste - b.waste)
+  return plans
 }
 
 function placeGridTiling(sheet, pairInstances, kerf, tallWH, wideWH, plan) {
@@ -741,17 +759,54 @@ function placeGridTiling(sheet, pairInstances, kerf, tallWH, wideWH, plan) {
 
 // Строит один лист, заполненный сеткой пар (сколько влезло — остальные пары
 // возвращаются в pool нетронутыми, для обычной укладки следующим листом).
-function buildGridTilingSheet(pairInstances, kerf, usableX, usableY) {
+function buildGridTilingSheet(pairInstances, kerf, usableX, usableY, otherGroups = []) {
   if (pairInstances.length < 2) return null
   const shapes = pairInstances[0].variants.filter(v => v.angle === 0)
   const tallWH = shapes.find(v => v.h > v.w)
   const wideWH = shapes.find(v => v.w > v.h)
   if (!tallWH && !wideWH) return null
-  const plan = planGridTiling(tallWH, wideWH, kerf, usableX, usableY, pairInstances.length)
-  if (!plan || plan.cap < 2) return null
-  const sheet = newSheet(usableX, usableY)
-  placeGridTiling(sheet, pairInstances, kerf, tallWH, wideWH, plan)
-  return sheet
+  const plans = planGridTiling(tallWH, wideWH, kerf, usableX, usableY, pairInstances.length)
+  if (!plans.length || plans[0].cap < 2) return null
+  // Разные планы раскладки пар оставляют РАЗНЫЙ остаток места сверху — план,
+  // идеальный для самих пар (cap максимален, waste=0), может оставлять
+  // слишком низкую полосу для другого вида деталей (именно так это и
+  // ломалось: 5 мм разницы в отступе листа съедали ровно один ряд мелких
+  // деталей). Пробуем несколько планов и считаем ИТОГО деталей на листе
+  // (пары + всё остальное сеткой в остаток) — берём максимум, а не то, что
+  // выглядит компактнее только для одних пар.
+  let best = null, bestTotal = -1
+  for (const plan of plans.slice(0, 12)) {
+    const sheet = newSheet(usableX, usableY)
+    const used = Math.min(plan.cap, pairInstances.length)
+    placeGridTiling(sheet, pairInstances.slice(0, used), kerf, tallWH, wideWH, plan)
+    // used считаем в РЕАЛЬНЫХ деталях (пара = 2 детали), иначе план с
+    // меньшим числом пар, но освобождающий место под мелкие, всегда
+    // проигрывал бы «плотному по парам» плану, даже когда по факту кладёт
+    // на лист больше деталей суммарно.
+    // used считаем в РЕАЛЬНЫХ деталях (пара = 2 детали) и по факту того, что
+    // реально легло (включая только что доставленные выше) — иначе план с
+    // меньшим числом пар в чистой сетке, но освобождающий место под мелкие,
+    // всегда проигрывал бы «плотному по парам» плану, даже когда по факту
+    // кладёт на лист больше деталей суммарно.
+    let total = sheet.meta.length * 2
+    for (const g of otherGroups) total += estimateStripFit(sheet, g, kerf, usableX, usableY)
+    if (total > bestTotal) { bestTotal = total; best = sheet }
+  }
+  return best
+}
+
+// Сколько деталей группы влезет сеткой в полосу над уже уложенными парами —
+// без реальной укладки, только подсчёт (для сравнения планов в
+// buildGridTilingSheet выше).
+function estimateStripFit(sheet, group, kerf, usableX, usableY) {
+  if (!group.length) return 0
+  const bb0 = bboxOf(group[0].variants[0].polygon)
+  const w = bb0.maxX - bb0.minX, h = bb0.maxY - bb0.minY
+  const y0 = sheet.envY > 0 ? sheet.envY + kerf : 0
+  const rows = Math.floor((usableY - y0 + kerf) / (h + kerf))
+  const cols = Math.floor((usableX + kerf) / (w + kerf))
+  if (rows < 1 || cols < 1) return 0
+  return Math.min(group.length, rows * cols)
 }
 
 // После сетки пар (buildGridTilingSheet) наверху листа остаётся прямая
@@ -915,12 +970,22 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
   let seededOrders = [] // [{ order, seedSheets }] — гарантированные кандидаты с сеткой пар
   for (const group of pairGroups.values()) {
     if (group.length < 2) continue
-    const sheet = buildGridTilingSheet(group, kerf, usableX, usableY)
+    const groupIds = new Set(group.map(i => i.id))
+    // Остальные виды деталей — считаем группами заранее, чтобы
+    // buildGridTilingSheet мог сразу прикинуть, сколько из них поместится
+    // над разными вариантами раскладки пар (см. комментарий там).
+    const otherByType = new Map()
+    for (const inst of instances) {
+      if (groupIds.has(inst.id)) continue
+      if (!otherByType.has(inst.detailIndex)) otherByType.set(inst.detailIndex, [])
+      otherByType.get(inst.detailIndex).push(inst)
+    }
+    const otherGroups = [...otherByType.values()].sort((a, b) => (b[0].variants[0].w * b[0].variants[0].h) - (a[0].variants[0].w * a[0].variants[0].h))
+    const sheet = buildGridTilingSheet(group, kerf, usableX, usableY, otherGroups)
     if (!sheet) continue
     const placedIds = new Set(sheet.meta.map(m => m.inst.id))
-    // Полоса, оставшаяся сверху над сеткой пар — сразу же сеткой докладываем
-    // туда другие детали (не участвовавшие в сцепке: одиночные, другого
-    // вида), группами по detailIndex, от крупных к мелким.
+    // Реальная докладка мелких деталей сеткой в оставшуюся полосу (план уже
+    // выбран с учётом того, что она в них поместится).
     const remaining = instances.filter(i => !placedIds.has(i.id))
     const byType = new Map()
     for (const inst of remaining) { if (!byType.has(inst.detailIndex)) byType.set(inst.detailIndex, []); byType.get(inst.detailIndex).push(inst) }
