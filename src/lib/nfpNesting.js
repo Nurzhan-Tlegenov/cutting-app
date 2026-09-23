@@ -68,20 +68,22 @@ function edgesOfPoly(poly) {
   for (let i = 0; i < poly.length; i++) es.push([poly[i], poly[(i + 1) % poly.length]])
   return es
 }
-function segTouchLen(a, b, c, d, tol) {
-  const abx = b[0]-a[0], aby = b[1]-a[1]
-  const lenAB = Math.hypot(abx, aby)
-  if (lenAB < 1e-9) return 0
-  const ux = abx/lenAB, uy = aby/lenAB
-  const perp = (px, py) => Math.abs((px-a[0])*uy - (py-a[1])*ux)
-  if (perp(c[0],c[1]) > tol || perp(d[0],d[1]) > tol) return 0
-  const cdx = d[0]-c[0], cdy = d[1]-c[1], lenCD = Math.hypot(cdx, cdy)
-  if (lenCD < 1e-9) return 0
-  if (Math.abs((cdx*ux+cdy*uy)/lenCD) < 0.97) return 0 // не почти-параллельны
-  const proj = (px, py) => (px-a[0])*ux + (py-a[1])*uy
-  let t0 = proj(c[0],c[1]), t1 = proj(d[0],d[1])
-  if (t0 > t1) { const tmp = t0; t0 = t1; t1 = tmp }
-  return Math.max(0, Math.min(lenAB, t1) - Math.max(0, t0))
+// Расстояние от точки до отрезка — то, что реально нужно для касания по
+// КРИВОЙ границе: старая версия (segTouchLen, ниже) требовала, чтобы два
+// отрезка были почти ПАРАЛЛЕЛЬНЫ — это работает для прямых сторон, но
+// у изогнутого стыка (S-образный вырез) каждая маленькая хорда после
+// сэмплирования дуги идёт под своим небольшим углом, и параллельность почти
+// никогда не совпадает даже там, где детали реально соприкасаются по всей
+// длине кривой (проверено: на паре с гарантированным касанием 4мм по всей
+// длине кривой стыка старая формула насчитывала контакт в 10 раз меньше
+// реального). Правильный критерий — БЛИЗОСТЬ, а не направление.
+function pointToSegDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay
+  const len2 = dx * dx + dy * dy
+  let t = len2 > 1e-12 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0
+  t = Math.max(0, Math.min(1, t))
+  const cx = ax + t * dx, cy = ay + t * dy
+  return Math.hypot(px - cx, py - cy)
 }
 // tol должен пропускать ровно ширину реза (деталь на расстоянии kerf от
 // соседа — это КАСАНИЕ вплотную с учётом реза, не зазор) — иначе ни одна
@@ -89,12 +91,24 @@ function segTouchLen(a, b, c, d, tol) {
 function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, tol) {
   let total = 0
   for (const [a, b] of movingEdges) {
-    for (const [c, d] of boundaryEdges) total += segTouchLen(a, b, c, d, tol)
-  }
-  for (const { edges, bb } of neighborEdgesList) {
-    if (movingBB.minX > bb.maxX + tol || bb.minX > movingBB.maxX + tol ||
-        movingBB.minY > bb.maxY + tol || bb.minY > movingBB.maxY + tol) continue
-    for (const [a, b] of movingEdges) for (const [c, d] of edges) total += segTouchLen(a, b, c, d, tol)
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2
+    const elen = Math.hypot(b[0] - a[0], b[1] - a[1])
+    let minD = Infinity
+    for (const [c, d] of boundaryEdges) {
+      const dd = pointToSegDist(mx, my, c[0], c[1], d[0], d[1])
+      if (dd < minD) minD = dd
+    }
+    if (minD > tol) {
+      for (const { edges, bb } of neighborEdgesList) {
+        if (mx < bb.minX - tol || mx > bb.maxX + tol || my < bb.minY - tol || my > bb.maxY + tol) continue
+        for (const [c, d] of edges) {
+          const dd = pointToSegDist(mx, my, c[0], c[1], d[0], d[1])
+          if (dd < minD) minD = dd
+        }
+        if (minD <= tol) break
+      }
+    }
+    if (minD <= tol) total += elen
   }
   return total
 }
