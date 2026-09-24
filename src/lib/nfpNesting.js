@@ -727,6 +727,128 @@ function buildPairGridSheet(pairInstances, kerf, usableX, usableY, leftoverCompo
   return { sheet, usedInstances: usedInstances.concat(usedSingles), extraLooseSingle }
 }
 
+// ─── Строгая укладка вдоль выбранной стороны (Вдоль Y / Вдоль X) ───────────
+// Раньше направление было лишь слабой подсказкой внутри общего перебора —
+// оно не гарантировало отсутствия разрывов вдоль оси. Здесь — по-настоящему
+// строго: лист делится на столбцы (Y) или ряды (X); каждый заполняется
+// ВПЛОТНУЮ, новая деталь ищет максимальный контакт (по прямой И по дуге,
+// через настоящую NFP-геометрию, с проверкой обоих поворотов — 0° и 180°)
+// ТОЛЬКО с уже стоящими деталями этого же столбца/ряда; новый столбец/ряд
+// начинается, только когда текущий больше не может принять деталь.
+function packColumnsAlongY(order, usableX, usableY, kerf, nfpCache) {
+  const sheets = []
+  let pool = order.slice()
+  while (pool.length) {
+    const sheet = []
+    let colX = 0, colWidth = 0, colItems = []
+    const remaining = []
+    for (const inst of pool) {
+      let done = false
+      if (colX < usableX - 1e-6) {
+        const availW = usableX - colX
+        const localPlaced = colItems.map(p => ({
+          inst: p.inst, angle: p.angle, x: p.x - colX, y: p.y,
+          polygon: p.polygon.map(([x, y]) => [x - colX, y]),
+          absParts: p.absParts.map(part => part.map(([x, y]) => [x - colX, y])),
+          bb: { minX: p.bb.minX - colX, maxX: p.bb.maxX - colX, minY: p.bb.minY, maxY: p.bb.maxY },
+        }))
+        const res = placeOne(inst.variants, localPlaced, availW, usableY, kerf, 'auto', 'along_y', nfpCache)
+        if (res) {
+          const entry = {
+            inst, angle: res.angle, x: res.x + colX, y: res.y,
+            polygon: res.polygon.map(([x, y]) => [x + colX, y]),
+            absParts: res.absParts.map(part => part.map(([x, y]) => [x + colX, y])),
+            bb: { minX: res.bb.minX + colX, maxX: res.bb.maxX + colX, minY: res.bb.minY, maxY: res.bb.maxY },
+          }
+          commitInstance(sheet, inst, entry); colItems.push(entry)
+          colWidth = Math.max(colWidth, entry.bb.maxX - colX)
+          done = true
+        }
+      }
+      if (!done) {
+        const newColX = colX + colWidth + (colWidth > 0 ? kerf : 0)
+        if (newColX < usableX - 1e-6) {
+          const availW = usableX - newColX
+          const res = placeOne(inst.variants, [], availW, usableY, kerf, 'auto', 'along_y', nfpCache)
+          if (res) {
+            const entry = {
+              inst, angle: res.angle, x: res.x + newColX, y: res.y,
+              polygon: res.polygon.map(([x, y]) => [x + newColX, y]),
+              absParts: res.absParts.map(part => part.map(([x, y]) => [x + newColX, y])),
+              bb: { minX: res.bb.minX + newColX, maxX: res.bb.maxX + newColX, minY: res.bb.minY, maxY: res.bb.maxY },
+            }
+            commitInstance(sheet, inst, entry)
+            colX = newColX; colWidth = entry.bb.maxX - colX; colItems = [entry]
+            done = true
+          }
+        }
+      }
+      if (!done) remaining.push(inst)
+    }
+    if (!sheet.length) { remaining.length = 0; break } // ни одна деталь не влезла — не должно случаться
+    sheets.push(sheet)
+    pool = remaining
+  }
+  return sheets
+}
+
+function packRowsAlongX(order, usableX, usableY, kerf, nfpCache) {
+  const sheets = []
+  let pool = order.slice()
+  while (pool.length) {
+    const sheet = []
+    let rowY = 0, rowHeight = 0, rowItems = []
+    const remaining = []
+    for (const inst of pool) {
+      let done = false
+      if (rowY < usableY - 1e-6) {
+        const availH = usableY - rowY
+        const localPlaced = rowItems.map(p => ({
+          inst: p.inst, angle: p.angle, x: p.x, y: p.y - rowY,
+          polygon: p.polygon.map(([x, y]) => [x, y - rowY]),
+          absParts: p.absParts.map(part => part.map(([x, y]) => [x, y - rowY])),
+          bb: { minX: p.bb.minX, maxX: p.bb.maxX, minY: p.bb.minY - rowY, maxY: p.bb.maxY - rowY },
+        }))
+        const res = placeOne(inst.variants, localPlaced, usableX, availH, kerf, 'auto', 'along_x', nfpCache)
+        if (res) {
+          const entry = {
+            inst, angle: res.angle, x: res.x, y: res.y + rowY,
+            polygon: res.polygon.map(([x, y]) => [x, y + rowY]),
+            absParts: res.absParts.map(part => part.map(([x, y]) => [x, y + rowY])),
+            bb: { minX: res.bb.minX, maxX: res.bb.maxX, minY: res.bb.minY + rowY, maxY: res.bb.maxY + rowY },
+          }
+          commitInstance(sheet, inst, entry); rowItems.push(entry)
+          rowHeight = Math.max(rowHeight, entry.bb.maxY - rowY)
+          done = true
+        }
+      }
+      if (!done) {
+        const newRowY = rowY + rowHeight + (rowHeight > 0 ? kerf : 0)
+        if (newRowY < usableY - 1e-6) {
+          const availH = usableY - newRowY
+          const res = placeOne(inst.variants, [], usableX, availH, kerf, 'auto', 'along_x', nfpCache)
+          if (res) {
+            const entry = {
+              inst, angle: res.angle, x: res.x, y: res.y + newRowY,
+              polygon: res.polygon.map(([x, y]) => [x, y + newRowY]),
+              absParts: res.absParts.map(part => part.map(([x, y]) => [x, y + newRowY])),
+              bb: { minX: res.bb.minX, maxX: res.bb.maxX, minY: res.bb.minY + newRowY, maxY: res.bb.maxY + newRowY },
+            }
+            commitInstance(sheet, inst, entry)
+            rowY = newRowY; rowHeight = entry.bb.maxY - rowY; rowItems = [entry]
+            done = true
+          }
+        }
+      }
+      if (!done) remaining.push(inst)
+    }
+    if (!sheet.length) { remaining.length = 0; break }
+    sheets.push(sheet)
+    pool = remaining
+  }
+  return sheets
+}
+
 export async function packNFP({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
   optimizeSeconds = 15, direction = 'auto',
@@ -764,6 +886,62 @@ export async function packNFP({
 
   const startTime = Date.now()
   const budgetMs = Math.max(0, Number(optimizeSeconds)||0) * 1000
+
+  // «Вдоль Y» / «Вдоль X» — строгий режим (см. packColumnsAlongY/packRowsAlongX
+  // выше): без этого раньше направление было лишь слабой подсказкой внутри
+  // общего перебора и не гарантировало отсутствия разрывов вдоль оси. Здесь
+  // решение полностью детерминированное — не нужны ни генетика, ни сетка пар
+  // отдельно (сцепленные пары участвуют как есть, они уже настоящие плотные
+  // блоки), ни встряска.
+  const buildResult = sheets => ({
+    sheets: sheets.map((sheet, i) => ({
+      index: i,
+      freeRects: [],
+      placed: sheet.map(p => {
+        const times = ((p.angle % 360) + 360) % 360 / 90
+        let top = p.inst.edgeTop, right = p.inst.edgeRight, bottom = p.inst.edgeBottom, left = p.inst.edgeLeft
+        for (let k = 0; k < times; k++) { const nTop = left, nRight = top, nBottom = right, nLeft = bottom; top = nTop; right = nRight; bottom = nBottom; left = nLeft }
+        return {
+          detailIndex: p.inst.detailIndex, label: p.inst.label, prefix: p.inst.prefix,
+          x: p.x, y: p.y, w: p.bb.maxX - p.bb.minX, h: p.bb.maxY - p.bb.minY,
+          origX: p.bb.maxX - p.bb.minX, origY: p.bb.maxY - p.bb.minY,
+          rotated: p.angle === 90 || p.angle === 270, rotation: p.angle,
+          edgeTop: top, edgeRight: right, edgeBottom: bottom, edgeLeft: left,
+          polygon: p.polygon.map(([x, y]) => ({ x: x - p.x, y: y - p.y })),
+        }
+      }),
+    })),
+    usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
+  })
+
+  if (direction === 'along_y' || direction === 'along_x') {
+    const order = instances.slice().sort((a, b) => (b.w * b.h) - (a.w * a.h))
+    const nfpCache = new Map()
+    const sheets = direction === 'along_y'
+      ? packColumnsAlongY(order, usableX, usableY, kerf, nfpCache)
+      : packRowsAlongX(order, usableX, usableY, kerf, nfpCache)
+    return buildResult(sheets)
+  }
+
+  // «Авто» — растёт от угла (0,0), но заранее не знает, какая сторона листа
+  // выгоднее: колонками вверх (Y) или рядами вбок (X) — для одного набора
+  // деталей плотнее одно, для другого другое. Строгие Y/X-раскладчики выше
+  // быстрые и детерминированные — считаем оба варианта сразу и берём тот,
+  // что даёт меньше листов (при равенстве — меньше материала на последнем);
+  // сравниваем их дальше и со свободным перебором (сетка пар + генетика +
+  // встряска), который может расставить детали не только по строгой сетке
+  // столбцов/рядов, но и по диагонали — победитель определяется по факту.
+  let autoBest = null, autoBestStat = null
+  {
+    const orderForDir = instances.slice().sort((a, b) => (b.w * b.h) - (a.w * a.h))
+    const cacheY = new Map(), cacheX = new Map()
+    const sheetsY = packColumnsAlongY(orderForDir, usableX, usableY, kerf, cacheY)
+    const statY = scoreSheets(sheetsY)
+    autoBest = sheetsY; autoBestStat = statY
+    const sheetsX = packRowsAlongX(orderForDir, usableX, usableY, kerf, cacheX)
+    const statX = scoreSheets(sheetsX)
+    if (better(statX, autoBestStat)) { autoBest = sheetsX; autoBestStat = statX }
+  }
 
   // Сцепленные пары — сеткой, сразу как готовый первый лист (см. комментарий
   // у buildPairGridSheet выше); всё остальное укладывается поверх обычным
@@ -914,32 +1092,10 @@ const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, 
     if (better(shakenStat, bestStat)) { best = shaken; bestStat = shakenStat }
   }
 
-  return {
-    sheets: best.map((sheet, i) => ({
-      index: i,
-      freeRects: [],
-      placed: sheet.map(p => {
-        // Поворот кромки вслед за поворотом детали (той же логикой, что и в
-        // растровом алгоритме, trueShapeNesting.js) — раньше здесь кромка
-        // всегда отдавалась "как есть", без учёта угла поворота детали;
-        // для деталей со сцепкой (внутри пары обе копии повёрнуты по-разному)
-        // это стало бы заметной ошибкой, поэтому чиним для всех сразу.
-        const times = ((p.angle % 360) + 360) % 360 / 90
-        let top = p.inst.edgeTop, right = p.inst.edgeRight, bottom = p.inst.edgeBottom, left = p.inst.edgeLeft
-        for (let i = 0; i < times; i++) {
-          const nTop = left, nRight = top, nBottom = right, nLeft = bottom
-          top = nTop; right = nRight; bottom = nBottom; left = nLeft
-        }
-        return {
-          detailIndex: p.inst.detailIndex, label: p.inst.label, prefix: p.inst.prefix,
-          x: p.x, y: p.y, w: p.bb.maxX-p.bb.minX, h: p.bb.maxY-p.bb.minY,
-          origX: p.bb.maxX-p.bb.minX, origY: p.bb.maxY-p.bb.minY,
-          rotated: p.angle===90||p.angle===270, rotation: p.angle,
-          edgeTop: top, edgeRight: right, edgeBottom: bottom, edgeLeft: left,
-          polygon: p.polygon.map(([x,y])=>({x: x-p.x, y: y-p.y})),
-        }
-      }),
-    })),
-    usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
-  }
+  // Сравниваем итог свободного перебора со строгими Y/X, посчитанными в
+  // начале (см. выше) — берём то, что реально плотнее, а не то, что
+  // исторически шло первым.
+  if (better(autoBestStat, bestStat)) { best = autoBest; bestStat = autoBestStat }
+
+  return buildResult(best)
 }
