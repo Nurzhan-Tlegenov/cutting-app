@@ -17,6 +17,7 @@ import {
   nfpPairwiseIntersections, edgesAgainstAlignmentLines,
   polygonsOverlapRobust, bboxOf, translate,
 } from './nfpGeometry'
+import { gravityPolygons } from './gravity'
 
 function rotate90(polygon, w) { return polygon.map(([x, y]) => [y, w - x]) }
 function polygonArea(poly) { let a=0; for (let i=0;i<poly.length;i++){const q=poly[(i+1)%poly.length]; a+=poly[i][0]*q[1]-q[0]*poly[i][1]} return Math.abs(a)/2 }
@@ -1094,5 +1095,16 @@ const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, 
   // исторически шло первым.
   if (better(autoBestStat, bestStat)) { best = autoBest; bestStat = autoBestStat }
 
-  return buildResult(best)
+  // Стяжка к нулю — закрывает зазоры между деталями после укладки.
+  // Для прямоугольников это делает gravityRects в nesting.js; для NFP-деталей
+  // этот шаг отсутствовал, из-за чего между контурами оставались видимые
+  // промежутки даже там, где деталь могла встать вплотную к соседу.
+  // gravityPolygons скользит каждую деталь к нулю пока не упрётся в соседа
+  // или в границу листа — ровно с зазором kerf, не меньше.
+  const result = buildResult(best)
+  result.sheets = result.sheets.map(sheet => {
+    const compacted = gravityPolygons(sheet.placed, direction, kerf)
+    return (compacted && compacted !== sheet.placed) ? { ...sheet, placed: compacted } : sheet
+  })
+  return result
 }
