@@ -902,30 +902,44 @@ function packRowsAlongX(order, usableX, usableY, kerf, nfpCache) {
 }
 
 // ─── Жадная укладка по максимуму контакта ────────────────────────────────────
-// На каждом шаге выбирает деталь И позицию с наибольшим effectiveContact.
-// Это поведение "как в эталоне": L-деталь всегда идёт первой в угол (2 стены
-// = 2100 ед. против 900 у S), затем L2 интерлокируется с L1 (одна из лучших
-// позиций по контакту), S занимает образовавшийся нотч (3 стороны окружены).
-// Детерминирован и не требует долгой генетики — типично 1-3 секунды.
-// Тайбрейкер: при равном контакте предпочитаем более крупную деталь (L > S).
+// Правильный порядок: сначала ВСЕ составные пары (L+L composite) — они
+// устанавливают структуру интерлокинга; затем одиночные детали (S) заполняют
+// образовавшиеся нотчи. Без этого приоритета S выигрывает на шаге 2 (её
+// gScore выше за счёт interlockBonus), блокирует L(180°) и рушит интерлокинг.
+// Внутри каждой группы — жадный выбор по максимуму effectiveContact.
 function greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCache) {
   const sheets = [[]]
-  const remaining = instances.slice()  // порядок не важен — жадный сам выбирает
+
+  // Разбиваем на два прохода: составные пары → одиночные
+  const composites  = instances.filter(inst => inst.isComposite)
+    .sort((a, b) => (b.w * b.h) - (a.w * a.h))
+  const individuals = instances.filter(inst => !inst.isComposite)
+    .sort((a, b) => (b.w * b.h) - (a.w * a.h))
+
+  const remaining = [...composites, ...individuals]
 
   while (remaining.length > 0) {
     const sheet = sheets[sheets.length - 1]
     let bestIdx = -1, bestRes = null, bestGScore = -Infinity
 
-    for (let i = 0; i < remaining.length; i++) {
-      const inst = remaining[i]
-      const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
-      if (!res) continue
-      // effectiveContact = главное, размер детали = тайбрейкер (L > S)
-      const gScore = (res._ec || 0) * 1e4 + inst.w * inst.h * 1e-4
-      if (gScore > bestGScore) {
-        bestGScore = gScore
-        bestIdx = i
-        bestRes = res
+    // Composites идут первыми — пока они есть, не трогаем одиночные.
+    // Если ни один composite не влезает на текущий лист, разрешаем одиночные.
+    const compositeCount = remaining.filter(inst => inst.isComposite).length
+
+    for (let pass = 0; pass < 2 && bestIdx < 0; pass++) {
+      for (let i = 0; i < remaining.length; i++) {
+        const inst = remaining[i]
+        if (pass === 0 && compositeCount > 0 && !inst.isComposite) continue
+        if (pass === 1 && inst.isComposite) continue
+
+        const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
+        if (!res) continue
+        const gScore = (res._ec || 0) * 1e4 + inst.w * inst.h * 1e-4
+        if (gScore > bestGScore) {
+          bestGScore = gScore
+          bestIdx = i
+          bestRes = res
+        }
       }
     }
 
@@ -933,8 +947,7 @@ function greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCach
       sheet.push({ ...bestRes, inst: remaining[bestIdx] })
       remaining.splice(bestIdx, 1)
     } else {
-      // На текущем листе ничего не влезает — начинаем новый лист
-      // Первой на новый лист кладём самую крупную оставшуюся деталь
+      // На текущем листе ничего не влезает — новый лист с самой крупной деталью
       remaining.sort((a, b) => (b.w * b.h) - (a.w * a.h))
       const inst = remaining[0]
       const res = placeOne(inst.variants, [], usableX, usableY, kerf, 'auto', direction, nfpCache)
