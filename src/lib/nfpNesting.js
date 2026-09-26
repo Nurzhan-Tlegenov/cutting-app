@@ -918,31 +918,24 @@ export async function packNFP({
     usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
   })
 
-  if (direction === 'along_y' || direction === 'along_x') {
-    const order = instances.slice().sort((a, b) => (b.w * b.h) - (a.w * a.h))
-    const nfpCache = new Map()
-    const sheets = direction === 'along_y'
-      ? packColumnsAlongY(order, usableX, usableY, kerf, nfpCache)
-      : packRowsAlongX(order, usableX, usableY, kerf, nfpCache)
-    return buildResult(sheets)
-  }
+  // Единый NFP-кэш на весь packNFP: форма пары деталей не зависит от позиции,
+  // поэтому NFP вычисляется один раз и переиспользуется в строгих колонках,
+  // генетике и встряске — значительно ускоряет второй и последующие проходы.
+  const nfpCache = new Map()
 
-  // «Авто» — растёт от угла (0,0), но заранее не знает, какая сторона листа
-  // выгоднее: колонками вверх (Y) или рядами вбок (X) — для одного набора
-  // деталей плотнее одно, для другого другое. Строгие Y/X-раскладчики выше
-  // быстрые и детерминированные — считаем оба варианта сразу и берём тот,
-  // что даёт меньше листов (при равенстве — меньше материала на последнем);
-  // сравниваем их дальше и со свободным перебором (сетка пар + генетика +
-  // встряска), который может расставить детали не только по строгой сетке
-  // столбцов/рядов, но и по диагонали — победитель определяется по факту.
+  // Строгие колонки (Y) и строгие ряды (X) — быстрые детерминированные
+  // кандидаты. Раньше для along_y/along_x они были ЕДИНСТВЕННЫМ результатом
+  // (early return без генетики). Проблема: строгие колонки не находят
+  // интерлокинг (bbox двух деталей перекрывается, контуры нет) — а именно
+  // интерлокинг позволяет уложить 20 L/S-деталей в 1 лист вместо 2.
+  // Теперь они — стартовые кандидаты; генетика ниже ищет лучшее.
   let autoBest = null, autoBestStat = null
   {
     const orderForDir = instances.slice().sort((a, b) => (b.w * b.h) - (a.w * a.h))
-    const cacheY = new Map(), cacheX = new Map()
-    const sheetsY = packColumnsAlongY(orderForDir, usableX, usableY, kerf, cacheY)
+    const sheetsY = packColumnsAlongY(orderForDir, usableX, usableY, kerf, nfpCache)
     const statY = scoreSheets(sheetsY)
     autoBest = sheetsY; autoBestStat = statY
-    const sheetsX = packRowsAlongX(orderForDir, usableX, usableY, kerf, cacheX)
+    const sheetsX = packRowsAlongX(orderForDir, usableX, usableY, kerf, nfpCache)
     const statX = scoreSheets(sheetsX)
     if (better(statX, autoBestStat)) { autoBest = sheetsX; autoBestStat = statX }
   }
@@ -1013,7 +1006,7 @@ export async function packNFP({
   }
 
   const seedOrder = seedRest.slice().sort((a,b)=>(b.w*b.h)-(a.w*a.h))
-  const nfpCache = new Map()
+  // nfpCache уже определён выше — используем общий кэш для всего packNFP
   const __t0=Date.now()
   let best = attemptPack(seedOrder, usableX, usableY, kerf, direction, seedSheet, nfpCache)
   if(process.env.DBGS)console.log('first attemptPack',Date.now()-__t0,'ms')
