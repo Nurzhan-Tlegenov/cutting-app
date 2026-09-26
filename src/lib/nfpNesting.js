@@ -258,7 +258,23 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
           if (chk(sideE, boundaryEdges, neighborEdgesList) > 0) pocketSides++
         }
         const pocketBonus = contact > 0 ? contact * pocketSides * 0.25 : 0
-        const effectiveContact = contact + pocketBonus
+
+        // Бонус за интерлокинг: если bbox новой детали перекрывается с bbox
+        // уже уложенной (контуры не пересекаются — это проверено выше через NFP),
+        // значит деталь ВХОДИТ в выемку соседки. Это именно то что нужно:
+        // L вкладывается в нотч другой L, S вкладывается в нотч L.
+        // Без бонуса алгоритм предпочитал простую сетку (прямые грани = чёткий
+        // контакт) перед интерлокингом (дуги r=100 плохо считаются по midpoint).
+        // +1000мм на каждый перекрывающийся bbox гарантирует победу интерлокинга.
+        let interlockBonus = 0
+        for (const p of placed) {
+          if (movedBB.minX + 10 < p.bb.maxX && movedBB.maxX - 10 > p.bb.minX &&
+              movedBB.minY + 10 < p.bb.maxY && movedBB.maxY - 10 > p.bb.minY) {
+            interlockBonus += 1000
+          }
+        }
+
+        const effectiveContact = contact + pocketBonus + interlockBonus
         if (direction === 'along_y') {
           score = -effectiveContact * 1e7 + envMaxY * 1e3 + (ox + bb0.minX)
         } else if (direction === 'along_x') {
