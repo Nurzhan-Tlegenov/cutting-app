@@ -119,16 +119,12 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
   // уже стоящих деталей — нужны для метрики длины касания ниже.
   const tol = kerf * 1.2 // чуть больше реза — плавающая точка не обязана попасть ровно в 4.000
   // Какие стороны листа считаются "стеной", к которой деталь должна
-  // прилипать — раньше считались ВСЕ четыре стороны сразу, из-за чего
-  // выгодно было липнуть к любому краю листа (включая дальний), и внутри
-  // листа между деталями оставались большие пустые промежутки. Теперь:
-  // 'auto' — только левая и нижняя (классический рост от угла (0,0));
-  // 'along_y' — только нижняя и верхняя (укладка растёт вдоль оси Y);
-  // 'along_x' — только левая и правая (укладка растёт вдоль оси X).
-  const wallEdges =
-    direction === 'along_y' ? [[[0, 0], [usableX, 0]], [[usableX, usableY], [0, usableY]]]
-    : direction === 'along_x' ? [[[usableX, 0], [usableX, usableY]], [[0, usableY], [0, 0]]]
-    : [[[0, 0], [usableX, 0]], [[0, usableY], [0, 0]]]
+  // прилипать. Все режимы растут от угла (0,0): нижняя стена (y=0) +
+  // левая стена (x=0). Раньше along_y ошибочно тянуло к верхней стене,
+  // along_x — к правой и левой одновременно, из-за чего детали
+  // расползались по листу вместо стопок от нуля. Направление (столбцы/
+  // ряды) задаёт вторичный критерий в оценке кандидатов ниже, а не стены.
+  const wallEdges = [[[0, 0], [usableX, 0]], [[0, usableY], [0, 0]]]
   const boundaryEdges = wallEdges
   const neighborEdgesList = placed.map(p => ({ edges: edgesOfPoly(p.polygon), bb: p.bb }))
   for (const v of variants) {
@@ -230,12 +226,20 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         const movedEdges = movingEdgesLocal.map(([a, b]) => [[a[0]+ox, a[1]+oy], [b[0]+ox, b[1]+oy]])
         const movedBB = { minX: ox+bb0.minX, maxX: ox+bb0.maxX, minY: oy+bb0.minY, maxY: oy+bb0.maxY }
         const contact = contactLength(movedEdges, movedBB, neighborEdgesList, boundaryEdges, tol)
-        // Длина касания — основной ключ (больше — лучше, поэтому со знаком
-        // минус: ниже везде "меньше — лучше"); габарит — только для выбора
-        // среди равноценных по касанию (например, несколько углов с
-        // одинаковым контактом — предпочитаем тот, что ближе к уже занятой
-        // части листа).
-        score = -contact * 1e6 + envMaxX * envMaxY * 1e-3
+        // Первичный критерий — максимум касания (больше = лучше, минус инвертирует).
+        // Вторичный — позиция вдоль выбранной оси укладки:
+        //   along_y (столбцы ↑): предпочитаем низкий y — стопка растёт снизу вверх;
+        //   along_x (ряды →): предпочитаем низкий x — ряд заполняется слева направо;
+        //   auto: минимум занятой площади листа (как раньше).
+        // Масштаб 1e7 vs 1e3/1.0 гарантирует, что 1 мм контакта важнее
+        // 10 000 мм смещения по вторичной оси.
+        if (direction === 'along_y') {
+          score = -contact * 1e7 + (oy + bb0.minY) * 1e3 + (ox + bb0.minX)
+        } else if (direction === 'along_x') {
+          score = -contact * 1e7 + (ox + bb0.minX) * 1e3 + (oy + bb0.minY)
+        } else {
+          score = -contact * 1e6 + envMaxX * envMaxY * 1e-3
+        }
       }
       if (score < bestScore) {
         bestScore = score

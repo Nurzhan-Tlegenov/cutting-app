@@ -84,6 +84,28 @@ const BORDER_PENALTY = 2000000
 const ORIGIN_TIEBREAK = 5
 const EPS = 0.5 // мм, допуск на сравнение с границей (из-за kerf/округлений)
 
+// Суммарная длина касания прямоугольной детали (x,y,w,h) со стенами листа
+// и уже уложенными деталями — критерий «собрать пазл». Kerf уже включён в
+// p.w/p.h, поэтому два соседних прямоугольника касаются тогда, когда грани
+// совпадают с точностью tol ≈ 1 мм (запас на плавающую точку).
+function computeContactLength(x, y, w, h, placed, usableX, usableY, tol = 1.0) {
+  let contact = 0
+  const right = x + w, top = y + h
+  const ov = (a0, a1, b0, b1) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0))
+  if (x <= tol)               contact += h   // левая стена листа
+  if (y <= tol)               contact += w   // нижняя стена листа
+  if (right >= usableX - tol) contact += h   // правая стена листа
+  if (top   >= usableY - tol) contact += w   // верхняя стена листа
+  for (const p of placed) {
+    const pr = p.x + p.w, pt = p.y + p.h
+    if (Math.abs(pr - x)      <= tol) contact += ov(y, top, p.y, pt)   // сосед слева
+    if (Math.abs(p.x - right) <= tol) contact += ov(y, top, p.y, pt)   // сосед справа
+    if (Math.abs(pt - y)      <= tol) contact += ov(x, right, p.x, pr) // сосед снизу
+    if (Math.abs(p.y - top)   <= tol) contact += ov(x, right, p.x, pr) // сосед сверху
+  }
+  return contact
+}
+
 // Сколько попыток компакции гонять подряд — каждая новая попытка может
 // высвободить место, которого не было на предыдущей, поэтому есть смысл
 // повторить несколько раз, но не бесконечно.
@@ -407,8 +429,8 @@ function packAttempt(sortedPieces, mode, direction, usableX, usableY) {
 
   const place = (sheet, piece) => {
     const result = family === 'guillotine'
-      ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode)
-      : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode)
+      ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+      : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
     if (!result) return false
     sheet.placed.push(result)
     if (family === 'guillotine') { splitGuillotine(sheet, result); delete result._freeRectIdx }
@@ -522,31 +544,33 @@ function better(a, b) {
 }
 
 // ─── ЕДИНАЯ оценка позиции (меньше = лучше) ────────────────────────────────
-// Используется и при укладке, и при компакции, и в MaxRects, и в Guillotine —
-// поэтому точка привязки везде одна и та же.
+// Используется и при укладке, и при компакции, и в MaxRects, и в Guillotine.
 //
-//   auto     : score = fit                      (BSSF/BAF, как раньше)
-//   along_y  : привязка = вся сторона Y (линия x=0)  → главный ключ  = x
-//   along_x  : привязка = вся сторона X (линия y=0)  → главный ключ  = y
+//   auto     : score = fit (BSSF/BAF, как раньше)
+//   along_y  : 1) anchor = rect.x (колонка) → 2) контакт (максимум) → 3) rect.y (позиция в колонке)
+//   along_x  : 1) anchor = rect.y (ряд)     → 2) контакт (максимум) → 3) rect.x (позиция в ряду)
 //
-// Для along_* порядок ключей: [расстояние до стороны] → [fit по BSSF/BAF] → [другая ось].
-// Ключи упакованы в одно число строго лексикографически (масштабы считаются
-// от размера листа), так что мелкий ключ никогда не перебьёт крупный.
-function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall) {
+// contact=0 по умолчанию (компакция, fitFixed) — там направление уже
+// обеспечивается anchor, контакт не пересчитывается для скорости.
+function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall, contact = 0) {
   const short = Math.min(rect.w - w, rect.h - h)
   const long_ = Math.max(rect.w - w, rect.h - h)
   const fit = mode === 'baf' ? rect.w * rect.h - w * h : short * 1000 + long_
 
   const along = direction === 'along_y' || direction === 'along_x'
   const span = Math.max(usableX, usableY) + 1
-  const fitSpan = Math.max(span * 1001, usableX * usableY) + 1
 
   let score
   if (along) {
-    const anchor = Math.round(direction === 'along_y' ? rect.x : rect.y) // расстояние до выбранной стороны (мм)
-    const other  = direction === 'along_y' ? rect.y : rect.x
-    score = anchor * (fitSpan * span) + fit * span + other
-    const preferred = direction === 'along_y' ? h >= w : w >= h            // ориентация вдоль выбранной стороны
+    const anchor = Math.round(direction === 'along_y' ? rect.x : rect.y) // колонка / ряд
+    const other  = direction === 'along_y' ? rect.y : rect.x              // позиция внутри колонки/ряда
+    // Теоретический максимум касания: 4 стены по периметру листа
+    const maxContact = 2 * (usableX + usableY)
+    const contactScore = maxContact - contact  // меньше = больше касания = лучше
+    // Масштабы: anchor (колонка/ряд) >> contactScore >> other
+    // гарантируют строгий лексикографический порядок приоритетов.
+    score = anchor * (maxContact + 1) * (span + 1) + contactScore * (span + 1) + other
+    const preferred = direction === 'along_y' ? h >= w : w >= h
     if (!preferred) score += 0.5
   } else {
     score = fit
@@ -569,16 +593,20 @@ function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall) {
   return score
 }
 
-function chooseSpot(freeRects, piece, direction, usableX, usableY, mode) {
+function chooseSpot(freeRects, piece, direction, usableX, usableY, mode, placed = []) {
   let best = null, bestScore = Infinity
   const oris = [{ pw: piece.pw, ph: piece.ph, rotated: false }]
   if (piece.rotatable && piece.pw !== piece.ph)
     oris.push({ pw: piece.ph, ph: piece.pw, rotated: true })
+  const needContact = direction === 'along_y' || direction === 'along_x'
 
   for (const rect of freeRects) {
     for (const o of oris) {
       if (o.pw > rect.w || o.ph > rect.h) continue
-      const score = scoreSpot(rect, o.pw, o.ph, direction, mode, usableX, usableY, piece.isSmall)
+      const contact = needContact
+        ? computeContactLength(rect.x, rect.y, o.pw, o.ph, placed, usableX, usableY)
+        : 0
+      const score = scoreSpot(rect, o.pw, o.ph, direction, mode, usableX, usableY, piece.isSmall, contact)
 
       if (score < bestScore) {
         bestScore = score
@@ -621,16 +649,20 @@ function split(sheet, p) {
 // после вставки остаток режется РОВНО ОДНИМ разрезом на 2 части. Дешевле
 // считать (нет merge/prune), меньше фрагментация на узкие полосы.
 
-function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mode) {
+function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mode, placed = []) {
   let best = null, bestScore = Infinity
   const oris = [{ pw: piece.pw, ph: piece.ph, rotated: false }]
   if (piece.rotatable && piece.pw !== piece.ph)
     oris.push({ pw: piece.ph, ph: piece.pw, rotated: true })
+  const needContact = direction === 'along_y' || direction === 'along_x'
 
   freeRects.forEach((rect, idx) => {
     for (const o of oris) {
       if (o.pw > rect.w || o.ph > rect.h) continue
-      const score = scoreSpot(rect, o.pw, o.ph, direction, mode, usableX, usableY, piece.isSmall)
+      const contact = needContact
+        ? computeContactLength(rect.x, rect.y, o.pw, o.ph, placed, usableX, usableY)
+        : 0
+      const score = scoreSpot(rect, o.pw, o.ph, direction, mode, usableX, usableY, piece.isSmall, contact)
 
       if (score < bestScore) {
         bestScore = score
