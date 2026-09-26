@@ -114,7 +114,7 @@ function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, 
 }
 
 function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', direction = 'auto', nfpCache = null) {
-  let best = null, bestScore = Infinity
+  let best = null, bestScore = Infinity, bestEC = 0
   // Готовим один раз на вызов (не на каждого кандидата): рёбра листа и рёбра
   // уже стоящих деталей — нужны для метрики длины касания ниже.
   const tol = kerf * 1.2 // чуть больше реза — плавающая точка не обязана попасть ровно в 4.000
@@ -259,18 +259,6 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         }
         const pocketBonus = contact > 0 ? contact * pocketSides * 0.25 : 0
         const effectiveContact = contact + pocketBonus
-        // Первичный критерий — максимум касания (больше = лучше, минус инвертирует).
-        // Вторичный — минимум занятого пространства КЛАСТЕРА после укладки:
-        //   along_y: envMaxY (общая высота кластера) + ox (левые колонки первые)
-        //   along_x: envMaxX (общая ширина кластера) + oy (нижние ряды первые)
-        //   auto:    envMaxX × envMaxY (площадь кластера)
-        //
-        // Почему envMaxY вместо oy (нижняя точка детали):
-        //   При равном контакте notch-позиция (S в выемке L, y=350) и
-        //   стрип-позиция (S у стены, y=0) давали ничью по oy — стрип выигрывал.
-        //   С envMaxY: notch не увеличивает высоту кластера (L уже занимает y=0..700),
-        //   envMaxY = 700 в обоих случаях → ничья → ox решает → leftmost выигрывает.
-        //   Это нейтрализует неправильное предпочтение стрипа над notch.
         if (direction === 'along_y') {
           score = -effectiveContact * 1e7 + envMaxY * 1e3 + (ox + bb0.minX)
         } else if (direction === 'along_x') {
@@ -278,6 +266,7 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         } else {
           score = -effectiveContact * 1e6 + envMaxX * envMaxY * 1e-3
         }
+        if (score < bestScore) { bestEC = effectiveContact }
       }
       if (score < bestScore) {
         bestScore = score
@@ -285,6 +274,7 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
       }
     }
   }
+  if (best) best._ec = bestEC
   return best
 }
 // ─── Сцепка одинаковых деталей в пару ──────────────────────────────────────
@@ -891,6 +881,50 @@ function packRowsAlongX(order, usableX, usableY, kerf, nfpCache) {
   return sheets
 }
 
+// ─── Жадная укладка по максимуму контакта ────────────────────────────────────
+// На каждом шаге выбирает деталь И позицию с наибольшим effectiveContact.
+// Это поведение "как в эталоне": L-деталь всегда идёт первой в угол (2 стены
+// = 2100 ед. против 900 у S), затем L2 интерлокируется с L1 (одна из лучших
+// позиций по контакту), S занимает образовавшийся нотч (3 стороны окружены).
+// Детерминирован и не требует долгой генетики — типично 1-3 секунды.
+// Тайбрейкер: при равном контакте предпочитаем более крупную деталь (L > S).
+function greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCache) {
+  const sheets = [[]]
+  const remaining = instances.slice()  // порядок не важен — жадный сам выбирает
+
+  while (remaining.length > 0) {
+    const sheet = sheets[sheets.length - 1]
+    let bestIdx = -1, bestRes = null, bestGScore = -Infinity
+
+    for (let i = 0; i < remaining.length; i++) {
+      const inst = remaining[i]
+      const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
+      if (!res) continue
+      // effectiveContact = главное, размер детали = тайбрейкер (L > S)
+      const gScore = (res._ec || 0) * 1e4 + inst.w * inst.h * 1e-4
+      if (gScore > bestGScore) {
+        bestGScore = gScore
+        bestIdx = i
+        bestRes = res
+      }
+    }
+
+    if (bestIdx >= 0) {
+      sheet.push({ ...bestRes, inst: remaining[bestIdx] })
+      remaining.splice(bestIdx, 1)
+    } else {
+      // На текущем листе ничего не влезает — начинаем новый лист
+      // Первой на новый лист кладём самую крупную оставшуюся деталь
+      remaining.sort((a, b) => (b.w * b.h) - (a.w * a.h))
+      const inst = remaining[0]
+      const res = placeOne(inst.variants, [], usableX, usableY, kerf, 'auto', direction, nfpCache)
+      if (res) sheets.push([{ ...res, inst }])
+      remaining.splice(0, 1)
+    }
+  }
+  return sheets
+}
+
 export async function packNFP({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
   optimizeSeconds = 15, direction = 'auto',
@@ -961,26 +995,28 @@ export async function packNFP({
   // генетике и встряске — значительно ускоряет второй и последующие проходы.
   const nfpCache = new Map()
 
-  // Строгие колонки (Y) и строгие ряды (X) — быстрые детерминированные
-  // кандидаты. Используем ТОЛЬКО соответствующее направлению:
-  //   along_y → только packColumnsAlongY (ряды шли бы против направления)
-  //   along_x → только packRowsAlongX
-  //   auto    → оба, берём лучшее
-  // Раньше для любого режима брался лучший из обоих → для along_y мог
-  // победить packRowsAlongX, и детали заполняли лист РЯДАМИ вместо
-  // колонок — отсюда "детали у противоположной стены".
+  // Жадный алгоритм — ПЕРВЫЙ кандидат: детерминирован, быстр, всегда кладёт
+  // деталь с максимальным контактом. L-деталь гарантированно идёт в угол
+  // первой (effectiveContact=2100 > S=900). Выигрывает у генетики по скорости,
+  // обычно даёт хороший результат уже без дальнейшей оптимизации.
   let autoBest = null, autoBestStat = null
+  {
+    const greedySheets = greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCache)
+    autoBest = greedySheets; autoBestStat = scoreSheets(greedySheets)
+  }
+
+  // Строгие колонки / ряды — детерминированные кандидаты, дополняют жадного.
   {
     const orderForDir = instances.slice().sort((a, b) => (b.w * b.h) - (a.w * a.h))
     if (direction !== 'along_x') {
       const sheetsY = packColumnsAlongY(orderForDir, usableX, usableY, kerf, nfpCache)
       const statY = scoreSheets(sheetsY)
-      autoBest = sheetsY; autoBestStat = statY
+      if (better(statY, autoBestStat)) { autoBest = sheetsY; autoBestStat = statY }
     }
     if (direction !== 'along_y') {
       const sheetsX = packRowsAlongX(orderForDir, usableX, usableY, kerf, nfpCache)
       const statX = scoreSheets(sheetsX)
-      if (!autoBest || better(statX, autoBestStat)) { autoBest = sheetsX; autoBestStat = statX }
+      if (better(statX, autoBestStat)) { autoBest = sheetsX; autoBestStat = statX }
     }
   }
 
