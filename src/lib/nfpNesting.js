@@ -17,7 +17,6 @@ import {
   nfpPairwiseIntersections, edgesAgainstAlignmentLines,
   polygonsOverlapRobust, bboxOf, translate,
 } from './nfpGeometry'
-import { gravityPolygons } from './gravity'
 
 function rotate90(polygon, w) { return polygon.map(([x, y]) => [y, w - x]) }
 function polygonArea(poly) { let a=0; for (let i=0;i<poly.length;i++){const q=poly[(i+1)%poly.length]; a+=poly[i][0]*q[1]-q[0]*poly[i][1]} return Math.abs(a)/2 }
@@ -1026,13 +1025,28 @@ export async function packNFP({
       const oa = wa.w > wa.h ? 1 : 0, ob = wb.w > wb.h ? 1 : 0
       return oa - ob || (b.w*b.h) - (a.w*a.h)
     })
+    // Специальный seed: чередование L→S→L→S — S-деталь ищет нотч сразу
+    // после укладки L-детали, пока нотч ещё свободен.
+    function strictInterleave(arr) {
+      const large = arr.filter(x => x.w * x.h > 100000).sort((a,b)=>(b.w*b.h)-(a.w*a.h))
+      const small = arr.filter(x => x.w * x.h <= 100000).sort((a,b)=>(b.w*b.h)-(a.w*a.h))
+      const out = []
+      const n = Math.max(large.length, small.length)
+      for (let i = 0; i < n; i++) {
+        if (i < large.length) out.push(large[i])
+        if (i < small.length) out.push(small[i])
+      }
+      return out
+    }
     let population = [
       seedOrder,
       byOrientation,
       seedRest.slice().sort((a,b)=>Math.max(b.w,b.h)-Math.max(a.w,a.h)),
       seedRest.slice().sort((a,b)=>Math.min(a.w,a.h)-Math.min(b.w,b.h)),
-      seedRest.slice().sort((a,b)=>(a.w*a.h)-(b.w*b.h)), // сначала мелкие
-      interleaveByAreaBand(seedRest), // чередование крупных и мелких — мелкие успевают занять то, что крупные ещё не "забронировали"
+      seedRest.slice().sort((a,b)=>(a.w*a.h)-(b.w*b.h)),
+      interleaveByAreaBand(seedRest),
+      strictInterleave(seedRest),
+      [...strictInterleave(seedRest)].reverse(),
     ]
     while (population.length < POP_SIZE) population.push(shuffle(seedRest))
 
@@ -1095,16 +1109,5 @@ const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, 
   // исторически шло первым.
   if (better(autoBestStat, bestStat)) { best = autoBest; bestStat = autoBestStat }
 
-  // Стяжка к нулю — закрывает зазоры между деталями после укладки.
-  // Для прямоугольников это делает gravityRects в nesting.js; для NFP-деталей
-  // этот шаг отсутствовал, из-за чего между контурами оставались видимые
-  // промежутки даже там, где деталь могла встать вплотную к соседу.
-  // gravityPolygons скользит каждую деталь к нулю пока не упрётся в соседа
-  // или в границу листа — ровно с зазором kerf, не меньше.
-  const result = buildResult(best)
-  result.sheets = result.sheets.map(sheet => {
-    const compacted = gravityPolygons(sheet.placed, direction, kerf)
-    return (compacted && compacted !== sheet.placed) ? { ...sheet, placed: compacted } : sheet
-  })
-  return result
+  return buildResult(best)
 }
