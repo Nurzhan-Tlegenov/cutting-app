@@ -274,7 +274,31 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
           }
         }
 
-        const effectiveContact = contact + pocketBonus + interlockBonus
+        // notchBonus: бонус за создание S-дружественных карманов.
+        // Диагональный L+L интерлокинг (33% пустого места, 3 кармана 350x350)
+        // должен побеждать тесселяцию (0% пустого места, монолитный прямоугольник).
+        // emptyRatio = 1 - solid/bbox: у тесселяции 0%, у диагонали 33%.
+        let notchBonus = 0
+        if (interlockBonus > 0) {
+          const movingArea = polygonArea(v.polygon)
+          for (const p of placed) {
+            if (movedBB.minX + 10 < p.bb.maxX && movedBB.maxX - 10 > p.bb.minX &&
+                movedBB.minY + 10 < p.bb.maxY && movedBB.maxY - 10 > p.bb.minY) {
+              if (p.polygon && p.polygon.length > 2) {
+                const cMinX = Math.min(movedBB.minX, p.bb.minX), cMaxX = Math.max(movedBB.maxX, p.bb.maxX)
+                const cMinY = Math.min(movedBB.minY, p.bb.minY), cMaxY = Math.max(movedBB.maxY, p.bb.maxY)
+                const combinedBbox = (cMaxX - cMinX) * (cMaxY - cMinY)
+                if (combinedBbox > 0) {
+                  const placedArea = polygonArea(p.polygon)
+                  const emptyRatio = Math.max(0, 1 - (movingArea + placedArea) / combinedBbox)
+                  notchBonus += emptyRatio * 5000
+                }
+              }
+            }
+          }
+        }
+
+        const effectiveContact = contact + pocketBonus + interlockBonus + notchBonus
         if (direction === 'along_y') {
           score = -effectiveContact * 1e7 + envMaxY * 1e3 + (ox + bb0.minX)
         } else if (direction === 'along_x') {
@@ -905,36 +929,28 @@ function packRowsAlongX(order, usableX, usableY, kerf, nfpCache) {
 function greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCache) {
   const sheets = [[]]
 
-  // Разбиваем на два прохода: составные пары → одиночные
-  const composites  = instances.filter(inst => inst.isComposite)
-    .sort((a, b) => (b.w * b.h) - (a.w * a.h))
-  const individuals = instances.filter(inst => !inst.isComposite)
-    .sort((a, b) => (b.w * b.h) - (a.w * a.h))
-
-  const remaining = [...composites, ...individuals]
+  // Разворачиваем составные пары в отдельные экземпляры.
+  // Жадный алгоритм работает с одиночными деталями: это позволяет notchBonus
+  // (бонус за пустые карманы) правильно выбирать диагональный интерлокинг
+  // L(0°)+L(180°) со смещением (350,350), создающий 3 кармана 350x350 для S-деталей,
+  // вместо тесселяции (350,0) которая заполняет пространство без карманов.
+  const remaining = instances.flatMap(inst =>
+    inst.isComposite ? [inst.src, inst.src] : [inst]
+  ).slice()
 
   while (remaining.length > 0) {
     const sheet = sheets[sheets.length - 1]
     let bestIdx = -1, bestRes = null, bestGScore = -Infinity
 
-    // Composites идут первыми — пока они есть, не трогаем одиночные.
-    // Если ни один composite не влезает на текущий лист, разрешаем одиночные.
-    const compositeCount = remaining.filter(inst => inst.isComposite).length
-
-    for (let pass = 0; pass < 2 && bestIdx < 0; pass++) {
-      for (let i = 0; i < remaining.length; i++) {
-        const inst = remaining[i]
-        if (pass === 0 && compositeCount > 0 && !inst.isComposite) continue
-        if (pass === 1 && inst.isComposite) continue
-
-        const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
-        if (!res) continue
-        const gScore = (res._ec || 0) * 1e4 + inst.w * inst.h * 1e-4
-        if (gScore > bestGScore) {
-          bestGScore = gScore
-          bestIdx = i
-          bestRes = res
-        }
+    for (let i = 0; i < remaining.length; i++) {
+      const inst = remaining[i]
+      const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
+      if (!res) continue
+      const gScore = (res._ec || 0) * 1e4 + inst.w * inst.h * 1e-4
+      if (gScore > bestGScore) {
+        bestGScore = gScore
+        bestIdx = i
+        bestRes = res
       }
     }
 
@@ -942,7 +958,6 @@ function greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCach
       sheet.push({ ...bestRes, inst: remaining[bestIdx] })
       remaining.splice(bestIdx, 1)
     } else {
-      // На текущем листе ничего не влезает — новый лист с самой крупной деталью
       remaining.sort((a, b) => (b.w * b.h) - (a.w * a.h))
       const inst = remaining[0]
       const res = placeOne(inst.variants, [], usableX, usableY, kerf, 'auto', direction, nfpCache)
