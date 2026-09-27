@@ -282,13 +282,10 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         } else {
           score = -effectiveContact * 1e6 + envMaxX * envMaxY * 1e-3
         }
-        if (score < bestScore) {
-          bestScore = score
-          best = { angle: v.angle, x: ox, y: oy, polygon: translate(v.polygon, ox, oy), absParts, bb: bboxOf(translate(v.polygon, ox, oy)) }
-          bestEC = effectiveContact  // ← обновляем ВМЕСТЕ с best, после вычисления score
-        }
-      } else if (score < bestScore) {
-        // tall / wide — контакт не считается, просто сохраняем позицию
+        if (score < bestScore) { bestEC = effectiveContact }
+      }
+      // Обновляем best для ВСЕХ режимов (tall / wide / auto) в одном месте
+      if (score < bestScore) {
         bestScore = score
         best = { angle: v.angle, x: ox, y: oy, polygon: translate(v.polygon, ox, oy), absParts, bb: bboxOf(translate(v.polygon, ox, oy)) }
       }
