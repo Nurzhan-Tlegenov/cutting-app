@@ -12,6 +12,7 @@
  * заказов и сравнить оба результата.
  */
 import { parsePolygonFromDetail } from './trueShapeNesting'
+import { gravityPolygons } from './gravity'
 import {
   ensureCCW, reflectPoly, dilatedConvexParts, nfpFromParts,
   nfpPairwiseIntersections, edgesAgainstAlignmentLines,
@@ -92,34 +93,23 @@ function pointToSegDist(px, py, ax, ay, bx, by) {
 // tol должен пропускать ровно ширину реза (деталь на расстоянии kerf от
 // соседа — это КАСАНИЕ вплотную с учётом реза, не зазор) — иначе ни одна
 // настоящая, правильно расставленная пара не засчиталась бы как контакт.
-// Длина РЕАЛЬНОГО касания: сэмплируем каждое ребро в нескольких точках
-// и суммируем длину участков, где расстояние до соседних рёбер ≤ tol.
-// Старый вариант (только средняя точка ребра) давал ошибки:
-//   - длинное ребро считалось как "не касается" если середина далеко, хотя
-//     половина ребра могла быть вплотную к соседу;
-//   - короткий участок дуги (апроксим. сегментами) считался полностью
-//     заходящим в нотч даже если только кончик был близко.
-// STEPS=8: шаг ≈ elen/8 = 10–50мм для типичных рёбер L-детали. Достаточно
-// чтобы корректно измерить контакт по скруглениям (r=100мм) и прямым.
+// Длина РЕАЛЬНОГО касания по контуру: сэмплируем каждое ребро в 8 точках.
+// 8 точек на ребро: для дуги r=100 (сегменты ~10мм) = 2 точки/сегмент,
+// для прямого ребра 700мм = шаг 87.5мм. Баланс точность/скорость.
 function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, tol) {
   const STEPS = 8
   let total = 0
 
   for (const [a, b] of movingEdges) {
+    if (!a || !b) continue
     const elen = Math.hypot(b[0] - a[0], b[1] - a[1])
     if (elen < 0.5) continue
     const inv = 1 / STEPS
-    let contactLen = 0
 
     for (let k = 0; k < STEPS; k++) {
-      // Середина k-го отрезка
       const t = (k + 0.5) * inv
       const px = a[0] + t * (b[0] - a[0])
       const py = a[1] + t * (b[1] - a[1])
-
-      // Быстрый отсев по bbox всего ребра
-      const bxMin = Math.min(a[0], b[0]), bxMax = Math.max(a[0], b[0])
-      const byMin = Math.min(a[1], b[1]), byMax = Math.max(a[1], b[1])
 
       let minD = Infinity
       for (const [c, d] of boundaryEdges) {
@@ -141,9 +131,8 @@ function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, 
           if (minD <= tol) break
         }
       }
-      if (minD <= tol) contactLen += elen * inv
+      if (minD <= tol) total += elen * inv
     }
-    total += contactLen
   }
   return total
 }
