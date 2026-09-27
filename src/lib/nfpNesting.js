@@ -88,27 +88,56 @@ function pointToSegDist(px, py, ax, ay, bx, by) {
 // tol должен пропускать ровно ширину реза (деталь на расстоянии kerf от
 // соседа — это КАСАНИЕ вплотную с учётом реза, не зазор) — иначе ни одна
 // настоящая, правильно расставленная пара не засчиталась бы как контакт.
+// Длина РЕАЛЬНОГО касания: сэмплируем каждое ребро в нескольких точках
+// и суммируем длину участков, где расстояние до соседних рёбер ≤ tol.
+// Старый вариант (только средняя точка ребра) давал ошибки:
+//   - длинное ребро считалось как "не касается" если середина далеко, хотя
+//     половина ребра могла быть вплотную к соседу;
+//   - короткий участок дуги (апроксим. сегментами) считался полностью
+//     заходящим в нотч даже если только кончик был близко.
+// STEPS=8: шаг ≈ elen/8 = 10–50мм для типичных рёбер L-детали. Достаточно
+// чтобы корректно измерить контакт по скруглениям (r=100мм) и прямым.
 function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, tol) {
+  const STEPS = 8
   let total = 0
+
   for (const [a, b] of movingEdges) {
-    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2
     const elen = Math.hypot(b[0] - a[0], b[1] - a[1])
-    let minD = Infinity
-    for (const [c, d] of boundaryEdges) {
-      const dd = pointToSegDist(mx, my, c[0], c[1], d[0], d[1])
-      if (dd < minD) minD = dd
-    }
-    if (minD > tol) {
-      for (const { edges, bb } of neighborEdgesList) {
-        if (mx < bb.minX - tol || mx > bb.maxX + tol || my < bb.minY - tol || my > bb.maxY + tol) continue
-        for (const [c, d] of edges) {
-          const dd = pointToSegDist(mx, my, c[0], c[1], d[0], d[1])
-          if (dd < minD) minD = dd
-        }
-        if (minD <= tol) break
+    if (elen < 0.5) continue
+    const inv = 1 / STEPS
+    let contactLen = 0
+
+    for (let k = 0; k < STEPS; k++) {
+      // Середина k-го отрезка
+      const t = (k + 0.5) * inv
+      const px = a[0] + t * (b[0] - a[0])
+      const py = a[1] + t * (b[1] - a[1])
+
+      // Быстрый отсев по bbox всего ребра
+      const bxMin = Math.min(a[0], b[0]), bxMax = Math.max(a[0], b[0])
+      const byMin = Math.min(a[1], b[1]), byMax = Math.max(a[1], b[1])
+
+      let minD = Infinity
+      for (const [c, d] of boundaryEdges) {
+        if (px < Math.min(c[0],d[0]) - tol || px > Math.max(c[0],d[0]) + tol) continue
+        if (py < Math.min(c[1],d[1]) - tol || py > Math.max(c[1],d[1]) + tol) continue
+        const dd = pointToSegDist(px, py, c[0], c[1], d[0], d[1])
+        if (dd < minD) { minD = dd; if (minD <= tol) break }
       }
+      if (minD > tol) {
+        for (const { edges, bb } of neighborEdgesList) {
+          if (px < bb.minX - tol || px > bb.maxX + tol ||
+              py < bb.minY - tol || py > bb.maxY + tol) continue
+          for (const [c, d] of edges) {
+            const dd = pointToSegDist(px, py, c[0], c[1], d[0], d[1])
+            if (dd < minD) { minD = dd; if (minD <= tol) break }
+          }
+          if (minD <= tol) break
+        }
+      }
+      if (minD <= tol) contactLen += elen * inv
     }
-    if (minD <= tol) total += elen
+    total += contactLen
   }
   return total
 }
@@ -404,13 +433,8 @@ function buildPairSubs(inst, kerf) {
       const maxX = Math.max(firstPlaced.bb.maxX, res.bb.maxX), maxY = Math.max(firstPlaced.bb.maxY, res.bb.maxY)
       const W = maxX - minX, H = maxY - minY
       if (W > span * 2.2 || H > span * 2.2) continue // не настоящий контакт — отбрасываем
-      // Принимаем только диагональный интерлокинг (2.1 < ratio ≤ 3.0):
-      // ratio=1.5 → тесселяция (монолит, 0% карманов) → ОТКЛОНЯЕМ
-      // ratio=2.0 → просто рядом (нет bbox-перекрытия) → ОТКЛОНЯЕМ
-      // ratio=2.25 → диагональный (33% карманов для S) → ПРИНИМАЕМ ✓
-      // ratio>3.0 → слишком далеко, не настоящий интерлокинг → ОТКЛОНЯЕМ
-      const areaRatio = W * H / singleArea
-      if (areaRatio < 2.1 || areaRatio > 3.0) continue
+      // Отклоняем если детали просто встали рядом без вложения (площадь ~= 2× single)
+      if (W * H > singleArea * 1.85) continue
       if (out.some(o => Math.abs(o.W-W)<1 && Math.abs(o.H-H)<1)) continue
       const dx = -minX, dy = -minY
       out.push({
