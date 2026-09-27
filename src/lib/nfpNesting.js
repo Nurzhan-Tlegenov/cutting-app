@@ -193,6 +193,30 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         for (const pt of nfpPairwiseIntersections(nfpList[i].edges, nfpList[j].edges)) candidates.push(pt)
       }
     }
+    // Диагональные кандидаты для деталей одинакового размера.
+    // NFP через Minkowski sum пропускает позицию диагонального интерлокинга
+    // (например (350,352) для L+L) из-за аппроксимации скруглений.
+    // Добавляем явно — но только если уложено ≤4 деталей того же размера,
+    // чтобы не замедлять расчёт при большом количестве деталей.
+    {
+      const nw = bb0.maxX - bb0.minX, nh = bb0.maxY - bb0.minY
+      const sameSize = placed.filter(p =>
+        Math.abs((p.bb.maxX - p.bb.minX) - nw) < 20 &&
+        Math.abs((p.bb.maxY - p.bb.minY) - nh) < 20)
+      if (sameSize.length <= 4) {
+        const gap = kerf * 0.6
+        for (const p of sameSize) {
+          const pw = p.bb.maxX - p.bb.minX, ph = p.bb.maxY - p.bb.minY
+          for (const [dx, dy] of [[pw/2+gap,ph/2+gap],[-(pw/2+gap),ph/2+gap],
+                                    [pw/2+gap,-(ph/2+gap)],[-(pw/2+gap),-(ph/2+gap)]]) {
+            const cx = p.x + dx - bb0.minX, cy = p.y + dy - bb0.minY
+            if (cx >= minX-1 && cx <= maxX+1 && cy >= minY-1 && cy <= maxY+1)
+              candidates.push([Math.max(minX, Math.min(maxX, cx)),
+                               Math.max(minY, Math.min(maxY, cy))])
+          }
+        }
+      }
+    }
 
     if(process.env.DBGT2)console.log('  pairwise', Date.now()-__ta,'ms cands',candidates.length,'neighbors',placed.length)
     if(process.env.DBGT2){var __tb=Date.now()}
@@ -433,10 +457,12 @@ function buildPairInstances(inst, count, nextIdStart, halfKerf) {
 // одиночно уложенных деталей.
 function commitInstance(sheet, inst, res) {
   if (!inst.isComposite) { sheet.push({ inst, ...res }); return }
-  const variant = inst.variants.find(v => v.angle === res.angle)
+  const variant = inst.variants.find(v => v.angle === res.angle) || inst.variants[0]
+  if (!variant || !variant.subs) { sheet.push({ inst: inst.src || inst, ...res }); return }
   for (const sub of variant.subs) {
+    if (!sub || !sub.polygon || sub.polygon.length < 3) continue
     const absPolygon = translate(sub.polygon, res.x, res.y)
-    const absParts = sub.parts.map(p => translate(p, res.x, res.y))
+    const absParts = sub.parts ? sub.parts.map(p => translate(p, res.x, res.y)) : []
     sheet.push({ inst: inst.src, angle: sub.angle, x: res.x, y: res.y, polygon: absPolygon, absParts, bb: bboxOf(absPolygon) })
   }
 }
