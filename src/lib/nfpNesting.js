@@ -193,27 +193,7 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         for (const pt of nfpPairwiseIntersections(nfpList[i].edges, nfpList[j].edges)) candidates.push(pt)
       }
     }
-    // Явные диагональные кандидаты: если bbox уложенной детали совпадает с
-    // нашим по размеру — значит они одинаковой формы. Для L-деталей позиция
-    // со смещением (±W/2, ±H/2) создаёт диагональный интерлокинг с тремя
-    // нотч-карманами для S-деталей. NFP-алгоритм через convex Minkowski sum
-    // может пропустить эту вершину из-за аппроксимации дуг — добавляем явно.
-    // kerf*0.6 — минимальный зазор чтобы dilated parts не перекрывались.
-    for (const p of placed) {
-      const pw = p.bb.maxX - p.bb.minX, ph = p.bb.maxY - p.bb.minY
-      const nw = bb0.maxX - bb0.minX, nh = bb0.maxY - bb0.minY
-      if (Math.abs(pw - nw) < 20 && Math.abs(ph - nh) < 20) {
-        const gap = kerf * 0.6
-        const offsets = [[pw/2 + gap, ph/2 + gap], [-(pw/2 + gap), ph/2 + gap],
-                         [pw/2 + gap, -(ph/2 + gap)], [-(pw/2 + gap), -(ph/2 + gap)]]
-        for (const [dx, dy] of offsets) {
-          const cx = p.x + dx - bb0.minX, cy = p.y + dy - bb0.minY
-          if (cx >= minX - 1 && cx <= maxX + 1 && cy >= minY - 1 && cy <= maxY + 1) {
-            candidates.push([Math.max(minX, Math.min(maxX, cx)), Math.max(minY, Math.min(maxY, cy))])
-          }
-        }
-      }
-    }
+
     if(process.env.DBGT2)console.log('  pairwise', Date.now()-__ta,'ms cands',candidates.length,'neighbors',placed.length)
     if(process.env.DBGT2){var __tb=Date.now()}
     const xLines = new Set([minX, maxX]), yLines = new Set([minY, maxY])
@@ -324,31 +304,7 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
           }
         }
 
-        // notchBonus: бонус за создание S-дружественных карманов.
-        // Диагональный L+L интерлокинг (33% пустого места, 3 кармана 350x350)
-        // должен побеждать тесселяцию (0% пустого места, монолитный прямоугольник).
-        // emptyRatio = 1 - solid/bbox: у тесселяции 0%, у диагонали 33%.
-        let notchBonus = 0
-        if (interlockBonus > 0) {
-          const movingArea = polygonArea(v.polygon)
-          for (const p of placed) {
-            if (movedBB.minX + 10 < p.bb.maxX && movedBB.maxX - 10 > p.bb.minX &&
-                movedBB.minY + 10 < p.bb.maxY && movedBB.maxY - 10 > p.bb.minY) {
-              if (p.polygon && p.polygon.length > 2) {
-                const cMinX = Math.min(movedBB.minX, p.bb.minX), cMaxX = Math.max(movedBB.maxX, p.bb.maxX)
-                const cMinY = Math.min(movedBB.minY, p.bb.minY), cMaxY = Math.max(movedBB.maxY, p.bb.maxY)
-                const combinedBbox = (cMaxX - cMinX) * (cMaxY - cMinY)
-                if (combinedBbox > 0) {
-                  const placedArea = polygonArea(p.polygon)
-                  const emptyRatio = Math.max(0, 1 - (movingArea + placedArea) / combinedBbox)
-                  notchBonus += emptyRatio * 5000
-                }
-              }
-            }
-          }
-        }
-
-        const effectiveContact = contact + pocketBonus + interlockBonus + notchBonus
+        const effectiveContact = contact + pocketBonus + interlockBonus
         if (direction === 'along_y') {
           score = -effectiveContact * 1e7 + envMaxY * 1e3 + (ox + bb0.minX)
         } else if (direction === 'along_x') {
@@ -380,47 +336,6 @@ function rot90Poly(poly, w) { return poly.map(([x,y]) => [y, w-x]) }
 function rot90Parts(parts, w) { return parts.map(p => rot90Poly(p, w)) }
 
 
-// Вычисляет полигон объединения двух соприкасающихся L-форм.
-// Работает когда у полигонов ровно 2 общих вершины (диагональный интерлокинг,
-// например смещение (350,350)): обходим polyA до первой общей точки, переключаемся
-// на polyB в прямом направлении до второй, возвращаемся на polyA. Результат —
-// корректный 8-вершинный полигон, оставляющий три нотч-кармана открытыми для S.
-// При 3+ общих вершинах (тесселяция, 0% пустого места) или без общих — bbox.
-function computeUnionPolygon(polyA, polyB, tol) {
-  tol = tol === undefined ? 5.0 : tol
-  const shared = []
-  for (let ia = 0; ia < polyA.length; ia++) {
-    for (let ib = 0; ib < polyB.length; ib++) {
-      const dx = polyA[ia][0] - polyB[ib][0], dy = polyA[ia][1] - polyB[ib][1]
-      if (dx*dx + dy*dy <= tol*tol) shared.push({ ia, ib })
-    }
-  }
-  if (shared.length === 2) {
-    shared.sort((a, b) => a.ia - b.ia)
-    const s0 = shared[0], s1 = shared[1], nb = polyB.length
-    const union = []
-    // polyA от 0 до s0.ia включительно
-    for (let i = 0; i <= s0.ia; i++) union.push(polyA[i])
-    // polyB от s0.ib+1 до s1.ib включительно (в прямом направлении, с wrap-around)
-    let ib = (s0.ib + 1) % nb
-    while (ib !== s1.ib) { union.push(polyB[ib]); ib = (ib + 1) % nb }
-    union.push(polyB[s1.ib])
-    // polyA от s1.ia+1 до конца
-    for (let i = s1.ia + 1; i < polyA.length; i++) union.push(polyA[i])
-    // Убираем дубликаты соседних вершин
-    const clean = union.filter((v, i) => {
-      const n = union[(i + 1) % union.length]
-      return (v[0]-n[0])*(v[0]-n[0]) + (v[1]-n[1])*(v[1]-n[1]) > 1
-    })
-    if (clean.length >= 4) return clean
-  }
-  // Запасной вариант: bbox
-  const all = polyA.concat(polyB)
-  const xs = all.map(p => p[0]), ys = all.map(p => p[1])
-  const x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs)
-  const y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys)
-  return [[x0,y0],[x1,y0],[x1,y1],[x0,y1]]
-}
 
 // Пробуем несколько РАЗНЫХ (не совпадающих по итоговому габариту) способов
 // сцепить деталь саму с собой — аналог along_y/along_x в exactPack.js:
@@ -482,16 +397,7 @@ function buildCompositeVariants(baseSubs, W0, H0, rotatable, halfKerf) {
   // числа кусков: 22×22 против 1×1) — на реальном заказе именно это съедало
   // почти весь бюджет времени на одну-единственную раскладку. exactPack.js
   // для пар делает то же самое (там это тоже просто прямоугольник).
-  // Union polygon: реальный контур объединения двух L-форм вместо прямоугольника.
-  // Для диагонального интерлокинга (ratio ~2.25) — 8-вершинный полигон с тремя
-  // открытыми нотч-карманами (~350×350 каждый) куда входят S-детали.
-  // Для тесселяции (bbox == solid) — прямоугольник (computeUnionPolygon вернёт bbox).
-  const mk = (subs, w, h, angle) => {
-    const rawUnion = computeUnionPolygon(subs[0].polygon, subs[1].polygon)
-    const polygon = ensureCCW(rawUnion)
-    const parts = dilatedConvexParts(polygon, halfKerf)
-    return { angle, w, h, polygon, subs, parts }
-  }
+  const mk = (subs, w, h, angle) => ({ angle, w, h, polygon: [[0,0],[w,0],[w,h],[0,h]], subs, parts: dilatedConvexParts(ensureCCW([[0,0],[w,0],[w,h],[0,h]]), halfKerf) })
   const rot = (subs, w) => subs.map(s => ({ angle: (s.angle+90)%360, polygon: rot90Poly(s.polygon, w), parts: rot90Parts(s.parts, w) }))
   const subs90 = rot(baseSubs, W0)
   const subs180 = rot(subs90, H0)
@@ -1020,58 +926,6 @@ function packRowsAlongX(order, usableX, usableY, kerf, nfpCache) {
   return sheets
 }
 
-// ─── Жадная укладка по максимуму контакта ────────────────────────────────────
-// Правильный порядок: сначала ВСЕ составные пары (L+L composite) — они
-// устанавливают структуру интерлокинга; затем одиночные детали (S) заполняют
-// образовавшиеся нотчи. Без этого приоритета S выигрывает на шаге 2 (её
-// gScore выше за счёт interlockBonus), блокирует L(180°) и рушит интерлокинг.
-// Внутри каждой группы — жадный выбор по максимуму effectiveContact.
-function greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCache) {
-  const sheets = [[]]
-
-  // Разворачиваем составные пары в отдельные экземпляры.
-  // Жадный алгоритм работает с одиночными деталями: это позволяет notchBonus
-  // (бонус за пустые карманы) правильно выбирать диагональный интерлокинг
-  // L(0°)+L(180°) со смещением (350,350), создающий 3 кармана 350x350 для S-деталей,
-  // вместо тесселяции (350,0) которая заполняет пространство без карманов.
-  // Composites (L+L пары с union polygon) идут первыми: они создают структуру
-  // нотч-карманов. Затем S-детали заполняют эти карманы через NFP с union polygon.
-  const remaining = instances.slice()
-
-  while (remaining.length > 0) {
-    const sheet = sheets[sheets.length - 1]
-    let bestIdx = -1, bestRes = null, bestGScore = -Infinity
-
-    const compositeCount = remaining.filter(inst => inst.isComposite).length
-    for (let pass = 0; pass < 2 && bestIdx < 0; pass++) {
-      for (let i = 0; i < remaining.length; i++) {
-        const inst = remaining[i]
-        if (pass === 0 && compositeCount > 0 && !inst.isComposite) continue
-        if (pass === 1 && inst.isComposite) continue
-        const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
-        if (!res) continue
-        const gScore = (res._ec || 0) * 1e4 + inst.w * inst.h * 1e-4
-        if (gScore > bestGScore) {
-          bestGScore = gScore
-          bestIdx = i
-          bestRes = res
-        }
-      }
-    }
-
-    if (bestIdx >= 0) {
-      sheet.push({ ...bestRes, inst: remaining[bestIdx] })
-      remaining.splice(bestIdx, 1)
-    } else {
-      remaining.sort((a, b) => (b.w * b.h) - (a.w * a.h))
-      const inst = remaining[0]
-      const res = placeOne(inst.variants, [], usableX, usableY, kerf, 'auto', direction, nfpCache)
-      if (res) sheets.push([{ ...res, inst }])
-      remaining.splice(0, 1)
-    }
-  }
-  return sheets
-}
 
 export async function packNFP({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
@@ -1143,17 +997,8 @@ export async function packNFP({
   // генетике и встряске — значительно ускоряет второй и последующие проходы.
   const nfpCache = new Map()
 
-  // Жадный алгоритм — ПЕРВЫЙ кандидат: детерминирован, быстр, всегда кладёт
-  // деталь с максимальным контактом. L-деталь гарантированно идёт в угол
-  // первой (effectiveContact=2100 > S=900). Выигрывает у генетики по скорости,
-  // обычно даёт хороший результат уже без дальнейшей оптимизации.
+  // Строгие колонки / ряды — детерминированные кандидаты.
   let autoBest = null, autoBestStat = null
-  {
-    const greedySheets = greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCache)
-    autoBest = greedySheets; autoBestStat = scoreSheets(greedySheets)
-  }
-
-  // Строгие колонки / ряды — детерминированные кандидаты, дополняют жадного.
   {
     const orderForDir = instances.slice().sort((a, b) => (b.w * b.h) - (a.w * a.h))
     if (direction !== 'along_x') {
