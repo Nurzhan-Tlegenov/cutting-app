@@ -119,6 +119,7 @@ function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, 
 
       let minD = Infinity
       for (const [c, d] of boundaryEdges) {
+        if (!c || !d) continue
         if (px < Math.min(c[0],d[0]) - tol || px > Math.max(c[0],d[0]) + tol) continue
         if (py < Math.min(c[1],d[1]) - tol || py > Math.max(c[1],d[1]) + tol) continue
         const dd = pointToSegDist(px, py, c[0], c[1], d[0], d[1])
@@ -129,6 +130,7 @@ function contactLength(movingEdges, movingBB, neighborEdgesList, boundaryEdges, 
           if (px < bb.minX - tol || px > bb.maxX + tol ||
               py < bb.minY - tol || py > bb.maxY + tol) continue
           for (const [c, d] of edges) {
+            if (!c || !d) continue
             const dd = pointToSegDist(px, py, c[0], c[1], d[0], d[1])
             if (dd < minD) { minD = dd; if (minD <= tol) break }
           }
@@ -155,7 +157,9 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
   // ряды) задаёт вторичный критерий в оценке кандидатов ниже, а не стены.
   const wallEdges = [[[0, 0], [usableX, 0]], [[0, usableY], [0, 0]]]
   const boundaryEdges = wallEdges
-  const neighborEdgesList = placed.map(p => ({ edges: edgesOfPoly(p.polygon), bb: p.bb }))
+  const neighborEdgesList = placed
+    .filter(p => p.polygon && p.bb)
+    .map(p => ({ edges: edgesOfPoly(p.polygon).filter(([c,d]) => c != null && d != null), bb: p.bb }))
   for (const v of variants) {
     const bb0 = bboxOf(v.polygon)
     const minX = -bb0.minX, maxX = usableX - bb0.maxX
@@ -181,8 +185,9 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
       let local = inner.get(v)
       if (!local) { local = nfpFromParts(neighborVariant.parts, movingPartsReflected); inner.set(v, local) }
       return {
-        points: local.points.map(([x, y]) => [x + p.x, y + p.y]),
-        edges: local.edges.map(([a, b]) => [[a[0] + p.x, a[1] + p.y], [b[0] + p.x, b[1] + p.y]]),
+        points: local.points.filter(pt => pt != null).map(([x, y]) => [x + p.x, y + p.y]),
+        edges: local.edges.filter(([a, b]) => a != null && b != null)
+          .map(([a, b]) => [[a[0] + p.x, a[1] + p.y], [b[0] + p.x, b[1] + p.y]]),
       }
     })
     if(process.env.DBGT2)console.log('  nfpList(cached)', Date.now()-__tnfp,'ms')
