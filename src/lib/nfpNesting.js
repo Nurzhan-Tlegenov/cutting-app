@@ -340,12 +340,16 @@ function buildPairSubs(inst, kerf) {
       const maxX = Math.max(firstPlaced.bb.maxX, res.bb.maxX), maxY = Math.max(firstPlaced.bb.maxY, res.bb.maxY)
       const W = maxX - minX, H = maxY - minY
       if (W > span * 2.2 || H > span * 2.2) continue // не настоящий контакт — отбрасываем
-      // Детали просто встали рядом, без вложения одна в другую (площадь
-      // габарита пары ~= сумме двух отдельных габаритов) — это не сцепка,
-      // а то же самое, что генетика и без подсказки легко находит сама.
-      // Пропускаем: иначе такой "пустой" вариант чередуется с настоящим и
-      // портит половину сцепленных деталей.
-      if (W * H > singleArea * 1.85) continue
+      // Отклоняем два полярных случая:
+      // 1. Детали стали рядом без вложения (area ≈ 2× single) — не настоящий интерлокинг.
+      // 2. Детали идеально тесселируют прямоугольник (area ≈ 1.5× single, 0% пустого места)
+      //    — внутри пары нет места для S-деталей → S будут выталкиваться на лист.
+      //    Правильный интерлокинг (как в эталоне) имеет ~33% пустого пространства
+      //    в виде трёх карманов 350×350, куда как раз помещаются S-детали (300×300).
+      //    Это соответствует bbox ≈ 2.0–2.5× single (не 1.5× и не 2.0×).
+      const areaRatio = (W * H) / singleArea
+      if (areaRatio > 3.0) continue   // слишком крупное — просто рядом без контакта
+      if (areaRatio < 1.6) continue   // слишком плотное — прямоугольная тесселяция, S некуда
       if (out.some(o => Math.abs(o.W-W)<1 && Math.abs(o.H-H)<1)) continue
       const dx = -minX, dy = -minY
       out.push({
@@ -944,7 +948,10 @@ function greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCach
     }
 
     if (bestIdx >= 0) {
-      sheet.push({ ...bestRes, inst: remaining[bestIdx] })
+      // Для составных пар используем commitInstance — раскрываем в две отдельные
+      // L-детали с реальными контурами. Без этого S-детали видят прямоугольник
+      // пары вместо двух L-форм и не находят карманы между ними.
+      commitInstance(sheet, remaining[bestIdx], bestRes)
       remaining.splice(bestIdx, 1)
     } else {
       // На текущем листе ничего не влезает — новый лист с самой крупной деталью
