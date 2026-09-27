@@ -249,7 +249,8 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
     const aggMaxX = Math.max(...partBB.map(b => b.maxX)), aggMinX = Math.min(...partBB.map(b => b.minX))
     const aggMaxY = Math.max(...partBB.map(b => b.maxY)), aggMinY = Math.min(...partBB.map(b => b.minY))
     for (const [ox, oy] of candidates) {
-      if (ox < minX - 1e-6 || ox > maxX + 1e-6 || oy < minY - 1e-6 || oy > maxY + 1e-6) continue
+      if (ox == null || oy == null || ox < minX - 1e-6 || ox > maxX + 1e-6 || oy < minY - 1e-6 || oy > maxY + 1e-6) continue
+      try {
       let bad = false, absParts = null
       for (const p of placed) {
         if (p.bb.minX > ox + aggMaxX || p.bb.maxX < ox + aggMinX ||
@@ -355,6 +356,7 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         bestScore = score
         best = { angle: v.angle, x: ox, y: oy, polygon: translate(v.polygon, ox, oy), absParts, bb: bboxOf(translate(v.polygon, ox, oy)) }
       }
+      } catch(_e) { /* пропускаем повреждённого кандидата */ }
     }
   }
   if (best) best._ec = bestEC
@@ -529,7 +531,11 @@ function scoreSheets(sheets) {
   // сходиться к более плотным раскладкам.
   return [sheets.length, lastArea]
 }
-function better(a, b) { return a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]) }
+function better(a, b) {
+  if (a == null) return false
+  if (b == null) return true
+  return a[0] < b[0] || (a[0] === b[0] && a[1] < b[1])
+}
 
 function shuffle(arr) {
   const a = arr.slice()
