@@ -193,6 +193,27 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         for (const pt of nfpPairwiseIntersections(nfpList[i].edges, nfpList[j].edges)) candidates.push(pt)
       }
     }
+    // Явные диагональные кандидаты: если bbox уложенной детали совпадает с
+    // нашим по размеру — значит они одинаковой формы. Для L-деталей позиция
+    // со смещением (±W/2, ±H/2) создаёт диагональный интерлокинг с тремя
+    // нотч-карманами для S-деталей. NFP-алгоритм через convex Minkowski sum
+    // может пропустить эту вершину из-за аппроксимации дуг — добавляем явно.
+    // kerf*0.6 — минимальный зазор чтобы dilated parts не перекрывались.
+    for (const p of placed) {
+      const pw = p.bb.maxX - p.bb.minX, ph = p.bb.maxY - p.bb.minY
+      const nw = bb0.maxX - bb0.minX, nh = bb0.maxY - bb0.minY
+      if (Math.abs(pw - nw) < 20 && Math.abs(ph - nh) < 20) {
+        const gap = kerf * 0.6
+        const offsets = [[pw/2 + gap, ph/2 + gap], [-(pw/2 + gap), ph/2 + gap],
+                         [pw/2 + gap, -(ph/2 + gap)], [-(pw/2 + gap), -(ph/2 + gap)]]
+        for (const [dx, dy] of offsets) {
+          const cx = p.x + dx - bb0.minX, cy = p.y + dy - bb0.minY
+          if (cx >= minX - 1 && cx <= maxX + 1 && cy >= minY - 1 && cy <= maxY + 1) {
+            candidates.push([Math.max(minX, Math.min(maxX, cx)), Math.max(minY, Math.min(maxY, cy))])
+          }
+        }
+      }
+    }
     if(process.env.DBGT2)console.log('  pairwise', Date.now()-__ta,'ms cands',candidates.length,'neighbors',placed.length)
     if(process.env.DBGT2){var __tb=Date.now()}
     const xLines = new Set([minX, maxX]), yLines = new Set([minY, maxY])
