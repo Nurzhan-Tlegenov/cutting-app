@@ -329,6 +329,49 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
 function rot90Poly(poly, w) { return poly.map(([x,y]) => [y, w-x]) }
 function rot90Parts(parts, w) { return parts.map(p => rot90Poly(p, w)) }
 
+
+// Вычисляет полигон объединения двух соприкасающихся L-форм.
+// Работает когда у полигонов ровно 2 общих вершины (диагональный интерлокинг,
+// например смещение (350,350)): обходим polyA до первой общей точки, переключаемся
+// на polyB в прямом направлении до второй, возвращаемся на polyA. Результат —
+// корректный 8-вершинный полигон, оставляющий три нотч-кармана открытыми для S.
+// При 3+ общих вершинах (тесселяция, 0% пустого места) или без общих — bbox.
+function computeUnionPolygon(polyA, polyB, tol) {
+  tol = tol === undefined ? 5.0 : tol
+  const shared = []
+  for (let ia = 0; ia < polyA.length; ia++) {
+    for (let ib = 0; ib < polyB.length; ib++) {
+      const dx = polyA[ia][0] - polyB[ib][0], dy = polyA[ia][1] - polyB[ib][1]
+      if (dx*dx + dy*dy <= tol*tol) shared.push({ ia, ib })
+    }
+  }
+  if (shared.length === 2) {
+    shared.sort((a, b) => a.ia - b.ia)
+    const s0 = shared[0], s1 = shared[1], nb = polyB.length
+    const union = []
+    // polyA от 0 до s0.ia включительно
+    for (let i = 0; i <= s0.ia; i++) union.push(polyA[i])
+    // polyB от s0.ib+1 до s1.ib включительно (в прямом направлении, с wrap-around)
+    let ib = (s0.ib + 1) % nb
+    while (ib !== s1.ib) { union.push(polyB[ib]); ib = (ib + 1) % nb }
+    union.push(polyB[s1.ib])
+    // polyA от s1.ia+1 до конца
+    for (let i = s1.ia + 1; i < polyA.length; i++) union.push(polyA[i])
+    // Убираем дубликаты соседних вершин
+    const clean = union.filter((v, i) => {
+      const n = union[(i + 1) % union.length]
+      return (v[0]-n[0])*(v[0]-n[0]) + (v[1]-n[1])*(v[1]-n[1]) > 1
+    })
+    if (clean.length >= 4) return clean
+  }
+  // Запасной вариант: bbox
+  const all = polyA.concat(polyB)
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1])
+  const x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs)
+  const y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys)
+  return [[x0,y0],[x1,y0],[x1,y1],[x0,y1]]
+}
+
 // Пробуем несколько РАЗНЫХ (не совпадающих по итоговому габариту) способов
 // сцепить деталь саму с собой — аналог along_y/along_x в exactPack.js:
 // одна сцепка обычно выходит "высокой" (в столбец), другая "широкой".
@@ -361,10 +404,13 @@ function buildPairSubs(inst, kerf) {
       const maxX = Math.max(firstPlaced.bb.maxX, res.bb.maxX), maxY = Math.max(firstPlaced.bb.maxY, res.bb.maxY)
       const W = maxX - minX, H = maxY - minY
       if (W > span * 2.2 || H > span * 2.2) continue // не настоящий контакт — отбрасываем
-      // Детали просто встали рядом, без вложения одна в другую (площадь
-      // габарита пары ~= сумме двух отдельных габаритов) — это не сцепка,
-      // а то же самое, что генетика и без подсказки легко находит сама.
-      if (W * H > singleArea * 1.85) continue
+      // Принимаем только диагональный интерлокинг (2.1 < ratio ≤ 3.0):
+      // ratio=1.5 → тесселяция (монолит, 0% карманов) → ОТКЛОНЯЕМ
+      // ratio=2.0 → просто рядом (нет bbox-перекрытия) → ОТКЛОНЯЕМ
+      // ratio=2.25 → диагональный (33% карманов для S) → ПРИНИМАЕМ ✓
+      // ratio>3.0 → слишком далеко, не настоящий интерлокинг → ОТКЛОНЯЕМ
+      const areaRatio = W * H / singleArea
+      if (areaRatio < 2.1 || areaRatio > 3.0) continue
       if (out.some(o => Math.abs(o.W-W)<1 && Math.abs(o.H-H)<1)) continue
       const dx = -minX, dy = -minY
       out.push({
@@ -391,7 +437,16 @@ function buildCompositeVariants(baseSubs, W0, H0, rotatable, halfKerf) {
   // числа кусков: 22×22 против 1×1) — на реальном заказе именно это съедало
   // почти весь бюджет времени на одну-единственную раскладку. exactPack.js
   // для пар делает то же самое (там это тоже просто прямоугольник).
-  const mk = (subs, w, h, angle) => ({ angle, w, h, polygon: [[0,0],[w,0],[w,h],[0,h]], subs, parts: dilatedConvexParts(ensureCCW([[0,0],[w,0],[w,h],[0,h]]), halfKerf) })
+  // Union polygon: реальный контур объединения двух L-форм вместо прямоугольника.
+  // Для диагонального интерлокинга (ratio ~2.25) — 8-вершинный полигон с тремя
+  // открытыми нотч-карманами (~350×350 каждый) куда входят S-детали.
+  // Для тесселяции (bbox == solid) — прямоугольник (computeUnionPolygon вернёт bbox).
+  const mk = (subs, w, h, angle) => {
+    const rawUnion = computeUnionPolygon(subs[0].polygon, subs[1].polygon)
+    const polygon = ensureCCW(rawUnion)
+    const parts = dilatedConvexParts(polygon, halfKerf)
+    return { angle, w, h, polygon, subs, parts }
+  }
   const rot = (subs, w) => subs.map(s => ({ angle: (s.angle+90)%360, polygon: rot90Poly(s.polygon, w), parts: rot90Parts(s.parts, w) }))
   const subs90 = rot(baseSubs, W0)
   const subs180 = rot(subs90, H0)
@@ -934,23 +989,28 @@ function greedyContactPack(instances, usableX, usableY, kerf, direction, nfpCach
   // (бонус за пустые карманы) правильно выбирать диагональный интерлокинг
   // L(0°)+L(180°) со смещением (350,350), создающий 3 кармана 350x350 для S-деталей,
   // вместо тесселяции (350,0) которая заполняет пространство без карманов.
-  const remaining = instances.flatMap(inst =>
-    inst.isComposite ? [inst.src, inst.src] : [inst]
-  ).slice()
+  // Composites (L+L пары с union polygon) идут первыми: они создают структуру
+  // нотч-карманов. Затем S-детали заполняют эти карманы через NFP с union polygon.
+  const remaining = instances.slice()
 
   while (remaining.length > 0) {
     const sheet = sheets[sheets.length - 1]
     let bestIdx = -1, bestRes = null, bestGScore = -Infinity
 
-    for (let i = 0; i < remaining.length; i++) {
-      const inst = remaining[i]
-      const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
-      if (!res) continue
-      const gScore = (res._ec || 0) * 1e4 + inst.w * inst.h * 1e-4
-      if (gScore > bestGScore) {
-        bestGScore = gScore
-        bestIdx = i
-        bestRes = res
+    const compositeCount = remaining.filter(inst => inst.isComposite).length
+    for (let pass = 0; pass < 2 && bestIdx < 0; pass++) {
+      for (let i = 0; i < remaining.length; i++) {
+        const inst = remaining[i]
+        if (pass === 0 && compositeCount > 0 && !inst.isComposite) continue
+        if (pass === 1 && inst.isComposite) continue
+        const res = placeOne(inst.variants, sheet, usableX, usableY, kerf, 'auto', direction, nfpCache)
+        if (!res) continue
+        const gScore = (res._ec || 0) * 1e4 + inst.w * inst.h * 1e-4
+        if (gScore > bestGScore) {
+          bestGScore = gScore
+          bestIdx = i
+          bestRes = res
+        }
       }
     }
 
