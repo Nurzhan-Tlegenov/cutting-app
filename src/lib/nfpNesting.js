@@ -64,8 +64,12 @@ function buildPieceVariants(detail, kerf) {
 // резу) к уже стоящим деталям или краю листа. Деталь, забившаяся гранью в
 // нишу соседа, выигрывает у детали, просто задвинутой в угол.
 function edgesOfPoly(poly) {
+  if (!poly || poly.length < 2) return []
   const es = []
-  for (let i = 0; i < poly.length; i++) es.push([poly[i], poly[(i + 1) % poly.length]])
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length]
+    if (a != null && b != null) es.push([a, b])
+  }
   return es
 }
 // Расстояние от точки до отрезка — то, что реально нужно для касания по
@@ -282,7 +286,9 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
       if (scoreMode === 'tall') score = envMaxX * 1e6 + envMaxY
       else if (scoreMode === 'wide') score = envMaxY * 1e6 + envMaxX
       else {
-        const movedEdges = movingEdgesLocal.map(([a, b]) => [[a[0]+ox, a[1]+oy], [b[0]+ox, b[1]+oy]])
+        const movedEdges = movingEdgesLocal
+          .filter(([a, b]) => a != null && b != null)
+          .map(([a, b]) => [[a[0]+ox, a[1]+oy], [b[0]+ox, b[1]+oy]])
         const movedBB = { minX: ox+bb0.minX, maxX: ox+bb0.maxX, minY: oy+bb0.minY, maxY: oy+bb0.maxY }
         const contact = contactLength(movedEdges, movedBB, neighborEdgesList, boundaryEdges, tol)
 
@@ -296,11 +302,12 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         const chk = (edges, walls, nb) => {
           let c = 0
           for (const [a, b] of edges) {
+            if (!a || !b) continue
             const mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2
             const inWall = walls.some(([c,d])=>
-              pointToSegDist(mx,my,c[0],c[1],d[0],d[1]) <= tol)
+              c && d && pointToSegDist(mx,my,c[0],c[1],d[0],d[1]) <= tol)
             const inNb = !inWall && nb.some(({edges:ne})=>
-              ne.some(([c,d])=>pointToSegDist(mx,my,c[0],c[1],d[0],d[1]) <= tol))
+              ne.some(([c,d])=>c && d && pointToSegDist(mx,my,c[0],c[1],d[0],d[1]) <= tol))
             if (inWall || inNb) c++
           }
           return c
