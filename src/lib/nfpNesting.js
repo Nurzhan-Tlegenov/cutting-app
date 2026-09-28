@@ -192,6 +192,8 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
       }
     }
     // Диагональный кандидат W/2: NFP пропускает позицию интерлокинга из-за дуг r=100.
+    // Также добавляем вертикальные кандидаты: для S-кривых форм оптимальный
+    // интерлокинг — вертикальный (0° снизу + 180° сверху с dy~500мм).
     {
       const nw = bb0.maxX - bb0.minX, nh = bb0.maxY - bb0.minY
       const sameSize = placed.filter(p =>
@@ -201,11 +203,29 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
         const gap = kerf * 0.6
         for (const p of sameSize) {
           const pw = p.bb.maxX - p.bb.minX, ph = p.bb.maxY - p.bb.minY
+          // Диагональные кандидаты (L-форма стиль)
           for (const [dx, dy] of [[pw/2+gap,ph/2+gap],[-(pw/2+gap),ph/2+gap],
                                     [pw/2+gap,-(ph/2+gap)],[-(pw/2+gap),-(ph/2+gap)]]) {
             const cx = p.x + dx - bb0.minX, cy = p.y + dy - bb0.minY
             if (cx >= minX-1 && cx <= maxX+1 && cy >= minY-1 && cy <= maxY+1)
               candidates.push([Math.max(minX,Math.min(maxX,cx)), Math.max(minY,Math.min(maxY,cy))])
+          }
+          // Вертикальные кандидаты (S-кривая стиль): dy ≈ 0.7*H
+          // Для форм где нотч ~370мм из 700мм: минимальный вертикальный стек ~500мм
+          const notchFrac = 0.70  // 500/700 ≈ 0.71
+          for (const dyFrac of [notchFrac - 0.05, notchFrac, notchFrac + 0.05]) {
+            const dyAbs = ph * dyFrac + gap
+            for (const sign of [1, -1]) {
+              const cy = p.y + sign * dyAbs - bb0.minY
+              if (cy >= minY-1 && cy <= maxY+1) {
+                // dx=0 (прямо над/под) и с небольшим смещением
+                for (const dxSmall of [0, 15, -15]) {
+                  const cx = p.x + dxSmall - bb0.minX
+                  if (cx >= minX-1 && cx <= maxX+1)
+                    candidates.push([Math.max(minX,Math.min(maxX,cx)), Math.max(minY,Math.min(maxY,cy))])
+                }
+              }
+            }
           }
         }
       }
