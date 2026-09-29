@@ -3,7 +3,7 @@
 // не подвешивают интерфейс.
 //
 // Протокол:
-//   → { type: 'start', params, live }  — запуск (live — до «Стоп»)
+//   → { type: 'start', params, live, island, islands } — запуск (live — до «Стоп»; island — номер потока, от него роль у фигурных деталей)
 //   → { type: 'stop' }                  — «Стоп»: поиск заканчивается, лучший вариант доводится до финала
 //   → { type: 'migrant', genome }       — лучший вариант соседнего потока (параллельный поиск «островами»)
 //   ← { type: 'progress', res }         — промежуточное улучшение (для показа на экране)
@@ -26,6 +26,7 @@ self.onmessage = async e => {
   try {
     const res = await runLiveNesting(params, {
       live: !!msg.live,
+      island: msg.island || 0, islands: msg.islands || 1,
       shouldStop: () => stopRequested,
       takeMigrant: () => { const m = migrant; migrant = null; return m },
       onProgress: res => self.postMessage({ type: 'progress', res }),

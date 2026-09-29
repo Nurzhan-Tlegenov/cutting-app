@@ -45,7 +45,9 @@ function scoreOf(sheets, usableX, usableY) {
 }
 export function recordEvent(hist, res, island, kind) {
   const t = Date.now() - hist.startedAt
-  hist.events.push({ t, kind, island, iter: res.iter || 0, mode: res.genome?.mode || null, ...scoreOf(res.sheets, res.usableX, res.usableY), sheets: res.sheets })
+  // via — чем найден: черновик / гибрид (пары → прямоугольники) / точная укладка по контурам / прямоугольный поиск
+  const via = res.rough ? 'rough' : res.hybrid ? 'hybrid' : res.round !== undefined ? 'exact' : 'rect'
+  hist.events.push({ t, kind, island, via, iter: res.iter || 0, mode: res.genome?.mode || null, ...scoreOf(res.sheets, res.usableX, res.usableY), sheets: res.sheets })
   if (hist.events.length > HIST_MAX_EVENTS) {
     // прореживаем старшую половину через один (первый и последние снимки остаются)
     const half = Math.floor(hist.events.length / 2)

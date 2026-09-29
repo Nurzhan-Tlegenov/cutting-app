@@ -884,7 +884,7 @@ function fillStripWithSingles(sheet, group, kerf, usableX, usableY) {
 }
 
 // Заменяет пары одинаковых вогнутых деталей составными «деталями-парами».
-function tileIntoPairs(instances, kerf, usableX, usableY) {
+export function tileIntoPairs(instances, kerf, usableX, usableY) {
   const byDetail = new Map()
   for (const inst of instances) {
     if (!byDetail.has(inst.detailIndex)) byDetail.set(inst.detailIndex, [])

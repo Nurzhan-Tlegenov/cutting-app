@@ -48,7 +48,7 @@
  *     габаритов детали, не от её точного контура.
  */
 import { gravityPolygons } from './gravity'
-import { packExact, exactBetter, expandPlacement } from './exactPack'
+import { packExact, exactBetter, expandPlacement, tileIntoPairs } from './exactPack'
 
 
 const MIN_CELL_MM = 4
@@ -280,6 +280,106 @@ export function parsePolygonFromDetail(d) {
 // Есть ли среди деталей заказа хоть одна с реально нарисованным (не
 // прямоугольным) внешним контуром — только тогда имеет смысл включать
 // true-shape укладку вместо более быстрого/отточенного rectangle-алгоритма.
+// ─── Гибрид: пары фигурных деталей → прямоугольники ─────────────────────────
+// Сцепленная пара одинаковых вогнутых деталей (Г, ступенька) почти прямоугольна
+// (плотность 85–99%). Если заменить каждую пару прямоугольником её габарита,
+// весь заказ можно отдать быстрому прямоугольному поиску — он непрерывный,
+// перебирает тысячи вариантов в секунду и обменивается лучшим между потоками,
+// а точная укладка по контурам идёт раундами по несколько секунд. На заказах,
+// где фигурных деталей немного (260913_001: 4 Г-детали из 34), это главное.
+// Результат разворачивается обратно: пара → две детали с настоящими контурами.
+export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, marginR, marginB, marginL }) {
+  const usableX = sheetW - marginL - marginR
+  const usableY = sheetL - marginT - marginB
+  const cellSize = Math.min(MAX_CELL_MM, Math.max(MIN_CELL_MM, Math.sqrt((usableX * usableY) / TARGET_CELLS)))
+  const instances = []
+  details.forEach((d, di) => {
+    if (!d.contour) return
+    const variants = buildPieceKind(d, cellSize, kerf)
+    for (let q = 0; q < (Number(d.qty) || 1); q++) {
+      instances.push({
+        id: instances.length, detailIndex: di, cellSize, isSmall: false, variants,
+        label: d.display_name || d.name, prefix: d.prefix,
+        edgeTop: d.edge_top, edgeRight: d.edge_right, edgeBottom: d.edge_bottom, edgeLeft: d.edge_left,
+        area: variants[0].w * variants[0].h,
+      })
+    }
+  })
+  const tiled = tileIntoPairs(instances, kerf, usableX, usableY)
+  const pairKinds = new Map()   // kind → { tmpl, n }
+  const singles = new Map()     // detailIndex → n (фигурные детали без пары)
+  tiled.forEach(inst => {
+    if (inst.isComposite) {
+      if (!pairKinds.has(inst.kind)) pairKinds.set(inst.kind, { tmpl: inst, n: 0 })
+      pairKinds.get(inst.kind).n++
+    } else singles.set(inst.detailIndex, (singles.get(inst.detailIndex) || 0) + 1)
+  })
+  // Пар может и не быть — тогда гибрид = раскрой по габаритам (как черновик), но
+  // непрерывный и с обменом между потоками: всё равно полезен как соперник.
+  const hybridDetails = []
+  details.forEach((d, di) => {
+    if (!d.contour) { hybridDetails.push({ ...d, contour: null, _h: { single: di } }); return }
+    const n = singles.get(di) || 0
+    if (n > 0) hybridDetails.push({ ...d, qty: n, contour: null, _h: { single: di } })
+  })
+  for (const { tmpl, n } of pairKinds.values()) {
+    const v0 = tmpl.variants[0]
+    const v90 = tmpl.variants.find(v => v.angle === 90 && Math.abs(v.W - v0.W) < 0.01)
+    const src = details[tmpl.detailIndex]
+    hybridDetails.push({
+      name: src.name, display_name: src.display_name, prefix: src.prefix,
+      width: v0.w, length: v0.h, qty: n, rotatable: !!v90, contour: null,
+      _h: { pair: tmpl, v0, v90 },
+    })
+  }
+
+  const polyCache = {}
+  const toPlaced = (inst, v, x, y) => {
+    const times = v.angle / 90
+    let top = inst.edgeTop, right = inst.edgeRight, bottom = inst.edgeBottom, left = inst.edgeLeft
+    for (let i = 0; i < times; i++) { const nTop = left, nRight = top, nBottom = right, nLeft = bottom; top = nTop; right = nRight; bottom = nBottom; left = nLeft }
+    return {
+      detailIndex: inst.detailIndex, label: inst.label, prefix: inst.prefix,
+      x, y, w: v.w + kerf, h: v.h + kerf, origX: v.w, origY: v.h,
+      rotated: v.angle === 90 || v.angle === 270, rotation: v.angle, rotatable: inst.variants.length > 2, isSmall: false,
+      edgeTop: top, edgeRight: right, edgeBottom: bottom, edgeLeft: left,
+      polygon: v.polygon.map(([px, py]) => ({ x: px, y: py })),
+    }
+  }
+  // Результат прямоугольного поиска (по гибридным деталям) → настоящие детали
+  const expand = res => ({
+    ...res,
+    sheets: res.sheets.map((sh, si) => ({
+      ...sh, index: si, freeRects: [],
+      placed: sh.placed.flatMap(p => {
+        const h = hybridDetails[p.detailIndex]?._h
+        if (!h) return [p]
+        if (h.single !== undefined) {
+          const d = details[h.single]
+          const out = { ...p, detailIndex: h.single }
+          if (d.contour) {
+            if (!polyCache[h.single]) polyCache[h.single] = roughShapePolygons(d)
+            const r90 = isTurned(p, Number(d.width))
+            const poly = polyCache[h.single][r90 ? 90 : 0]
+            if (poly) { out.polygon = poly.map(([x, y]) => ({ x, y })); out.rotation = r90 ? 90 : 0 }
+          }
+          return [out]
+        }
+        const v = isTurned(p, h.v0.w) && h.v90 ? h.v90 : h.v0
+        return expandPlacement({ inst: h.pair, variant: v, x: p.x, y: p.y }).map(m => toPlaced(m.inst, m.variant, m.x, m.y))
+      }),
+    })),
+  })
+  return { hybridDetails: hybridDetails.map(({ _h, ...d }) => d), expand, hasPairs: pairKinds.size > 0 }
+}
+
+// Повёрнута ли деталь прямоугольного раскроя на 90° относительно исходной.
+// Флаг p.rotated для этого НЕ годится: при укладке «вдоль X/Y» детали
+// поворачиваются заранее (до выбора места), и флаг этот поворот не отражает.
+export function isTurned(p, width) {
+  return Math.abs((p.origX ?? (p.w - 0)) - width) > 0.5
+}
+
 // Контур детали в положениях 0° и 90° (локальные мм, Y вверх, [x, y]) —
 // для черновика онлайн-раскроя: детали раскладываются по габаритам обычным
 // прямоугольным раскроем (это мгновенно), а на экране рисуются настоящие
