@@ -49,9 +49,13 @@ export default function SheetsOverview({
   const totalW = cols * sheetW + (cols - 1) * GAP_MM
   const totalH = rows * (CAPTION_MM + sheetL) + (rows - 1) * GAP_MM
   const PADDING = 6
+  // Карта не выше ~половины экрана телефона — чтобы над ней оставались время
+  // оптимизации и кнопка «Стоп», а под ней переключатель листов
   const baseW = typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360
-  const canvasW = baseW * zoom
-  const sc = (canvasW - PADDING * 2) / totalW
+  const maxH = typeof window !== 'undefined' ? Math.max(220, window.innerHeight * 0.5) : 400
+  const fitSc = Math.min((baseW - PADDING * 2) / totalW, (maxH - PADDING * 2) / totalH)
+  const sc = fitSc * zoom
+  const canvasW = Math.round(totalW * sc) + PADDING * 2
   const canvasH = Math.round(totalH * sc) + PADDING * 2
   const DPR = pinching ? 1 : Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, Math.sqrt(12e6 / (canvasW * canvasH)))
 
@@ -267,7 +271,8 @@ export default function SheetsOverview({
   return (
     <div style={{ position: 'relative' }}>
       <div ref={wrapRef}
-        style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8 }}>
+        style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '60vh' : 'none', borderRadius: 8,
+          display: zoom > 1 ? 'block' : 'flex', justifyContent: 'center' }}>
         <canvas ref={canvasRef} onClick={onClick}
           width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
           style={{ width: canvasW, height: 'auto', aspectRatio: `${canvasW} / ${canvasH}`, maxWidth: zoom > 1 ? 'none' : '100%',
