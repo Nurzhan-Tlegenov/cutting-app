@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { computeOffcutAtPoint } from '../lib/nesting'
-import { runLiveNesting } from '../lib/liveNesting'
+import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
 import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
@@ -1063,6 +1063,7 @@ function newCfg(over = {}) {
     result: null, sheetsData: [], activeSheet: 0, saved: false,
     view: 'all',         // 'all' — все листы сразу · 'sheet' — один лист для правки
     improvements: 0, iter: 0, lastImproveAt: 0,
+    islands: 1,          // сколько потоков считает эту конфигурацию
     buffer: [],          // детали, снятые с листов (для переноса на другой лист)
     selPart: -1,         // выделенная деталь на активном листе (индекс в placed)
     selBuf: -1,          // выделенная деталь в буфере
@@ -1112,54 +1113,97 @@ function betterSummary(a, b) {
 // детали — идёт длинный раунд), берём последний показанный результат.
 const STOP_GRACE_MS = 2500
 let mainThreadQueue = Promise.resolve()
-function startNestingJob(params, { live = false, onProgress = null } = {}) {
-  let worker = null
+
+// Сколько потоков («островов») дать одной конфигурации: ядра телефона
+// минус одно под интерфейс, поровну между одновременно идущими конфигурациями.
+function islandsFor(concurrentJobs = 1) {
+  const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4
+  return Math.max(1, Math.min(6, Math.floor((cores - 1) / Math.max(1, concurrentJobs))))
+}
+
+// Параллельный поиск «островами»: несколько воркеров считают один и тот же
+// заказ независимо (у каждого свой случайный поиск), а лучший найденный вариант
+// сразу пересылается остальным — они продолжают искать от него. Так за то же
+// время перебирается в N раз больше вариантов укладки.
+function startNestingJob(params, { live = false, onProgress = null, islands = 1 } = {}) {
+  const workers = []
   let rejectFn = null, resolveFn = null
   let cancelled = false, finished = false, stopFlag = false
-  let lastProgress = null
-  const finish = res => { if (finished || cancelled) return; finished = true; worker?.terminate(); worker = null; resolveFn(res) }
-  const fail = err => { if (finished || cancelled) return; finished = true; worker?.terminate(); worker = null; rejectFn(err) }
+  let best = null, bestScore = null      // лучший промежуточный результат со всех островов
+  const finals = []                       // итоги островов
+  let expected = 0
+  const killAll = () => { workers.forEach(w => w.terminate()); workers.length = 0 }
+  const finish = res => { if (finished || cancelled) return; finished = true; killAll(); resolveFn(res) }
+  const fail = err => { if (finished || cancelled) return; finished = true; killAll(); rejectFn(err) }
+  const consider = (res, fromIdx) => {
+    const sc = liveScore(res.sheets)
+    if (!liveBetter(sc, bestScore)) return
+    best = res; bestScore = sc
+    if (!cancelled && !finished) onProgress?.(res)
+    if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome }) })
+  }
+  const pickBest = list => {
+    let top = null, topScore = null
+    list.forEach(r => { const sc = liveScore(r.sheets); if (liveBetter(sc, topScore)) { top = r; topScore = sc } })
+    return top
+  }
+  // Все живые острова отчитались — итог = лучший из их итогов
+  const checkDone = () => { if (expected > 0 && finals.length >= expected) finish(pickBest(finals)) }
+  const onFinal = res => { finals.push(res); checkDone() }
+  // Остров упал: если остались другие — считаем без него, если нет — ошибка
+  const onIslandFail = (msg, fallback) => {
+    if (cancelled || finished) return
+    expected--
+    if (expected > 0) { checkDone(); return }
+    if (finals.length) { finish(pickBest(finals)); return }
+    if (fallback) fallback()
+    else fail(new Error(msg || 'ошибка расчёта'))
+  }
   const promise = new Promise((resolve, reject) => {
     resolveFn = resolve; rejectFn = reject
     const fallback = () => {
+      killAll()
+      expected = 1
       mainThreadQueue = mainThreadQueue.catch(() => {}).then(async () => {
         if (cancelled) return
         await new Promise(r => setTimeout(r, 100)) // дать интерфейсу отрисовать состояние «считаю»
         return runLiveNesting(params, {
           live, shouldStop: () => stopFlag || cancelled,
-          onProgress: res => { lastProgress = res; if (!cancelled) onProgress?.(res) },
+          onProgress: res => consider(res, -1),
         })
       }).then(finish, fail)
     }
+    const n = Math.max(1, islands)
     try {
-      worker = new Worker(new URL('../lib/nestingWorker.js', import.meta.url), { type: 'module' })
+      for (let i = 0; i < n; i++) workers.push(new Worker(new URL('../lib/nestingWorker.js', import.meta.url), { type: 'module' }))
     } catch { fallback(); return }
-    worker.onmessage = e => {
-      const m = e.data || {}
-      if (m.type === 'progress') {
-        lastProgress = m.res
-        if (!cancelled && !finished) onProgress?.(m.res)
-      } else if (m.type === 'done') finish(m.res)
-      else fail(new Error(m.error || 'ошибка расчёта'))
-    }
-    worker.onerror = () => {
-      worker?.terminate(); worker = null
-      if (!cancelled && !finished) fallback()
-    }
-    worker.postMessage({ type: 'start', params, live })
+    expected = workers.length
+    workers.forEach((w, i) => {
+      w.onmessage = e => {
+        const m = e.data || {}
+        if (m.type === 'progress') consider(m.res, i)
+        else if (m.type === 'done') onFinal(m.res)
+        else onIslandFail(m.error, null)
+      }
+      // Воркер не поднялся (старый браузер) — последний упавший уводит расчёт в основной поток
+      w.onerror = () => { w.onerror = null; onIslandFail('', best ? null : fallback) }
+      w.postMessage({ type: 'start', params, live })
+    })
   })
   return {
     promise,
     stop: () => {
       stopFlag = true
-      worker?.postMessage({ type: 'stop' })
+      workers.forEach(w => w.postMessage({ type: 'stop' }))
       setTimeout(() => {
         if (finished || cancelled) return
-        if (lastProgress) finish(lastProgress)
+        // Итоги не успели — берём лучшее из того, что уже есть
+        const pool = best ? [...finals, best] : finals
+        if (pool.length) finish(pickBest(pool))
         else fail(new Error('stopped')) // ещё ничего не найдено — просто останавливаем
       }, STOP_GRACE_MS)
     },
-    cancel: () => { cancelled = true; worker?.terminate(); worker = null; rejectFn?.(new Error('cancelled')) },
+    cancel: () => { cancelled = true; killAll(); rejectFn?.(new Error('cancelled')) },
   }
 }
 
@@ -1182,6 +1226,7 @@ export default function NestingPage() {
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
   const jobsRef = useRef({})     // cfgId -> { cancel }
   const skipRef = useRef(new Set()) // конфигурации, снятые из очереди
+  const launchBatchRef = useRef(1)  // сколько конфигураций запускается одновременно (для деления ядер)
   const configsRef = useRef(configs)
   configsRef.current = configs
 
@@ -1283,8 +1328,13 @@ export default function NestingPage() {
       improvements: 0, iter: 0, lastImproveAt: 0, buffer: [], selPart: -1, selBuf: -1, note: '',
     })
     // Онлайн: каждое улучшение сразу на экран (детали плавно переезжают на новые места)
+    // Ядра телефона делятся между конфигурациями, которые считаются одновременно
+    const othersRunning = configsRef.current.filter(c => c.id !== cfg.id && (c.status === 'running' || c.status === 'stopping')).length
+    const islands = islandsFor(Math.max(launchBatchRef.current, 1 + othersRunning))
+    updateCfg(cfg.id, { islands })
     const job = startNestingJob(params, {
       live: cfg.live,
+      islands,
       onProgress: res => {
         if (jobsRef.current[cfg.id] !== job) return
         updateCfg(cfg.id, c => {
@@ -1334,7 +1384,9 @@ export default function NestingPage() {
     const list = configsRef.current.filter(c => c.status !== 'running' && c.status !== 'stopping')
     if (!list.length) return
     if (parallel) {
+      launchBatchRef.current = list.length // ядра делятся поровну между запущенными вместе
       list.forEach(c => launch(c))
+      launchBatchRef.current = 1
       return
     }
     list.forEach(c => updateCfg(c.id, { status: 'queued', error: '' }))
@@ -1623,8 +1675,8 @@ export default function NestingPage() {
     if (isQueued) statusLine = 'в очереди'
     else if (isStopping) statusLine = 'фиксирую лучший вариант…'
     else if (isRunning) statusLine = s
-      ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)} · улучшений ${cfg.improvements}`
-      : `считаю… ${secs} с`
+      ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)} · улучшений ${cfg.improvements}${cfg.islands > 1 ? ` · потоков ${cfg.islands}` : ''}`
+      : `считаю… ${secs} с${cfg.islands > 1 ? ` · потоков ${cfg.islands}` : ''}`
     else if (cfg.status === 'error') statusLine = 'ошибка расчёта'
     else if (s) statusLine = `${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${secs != null ? ` · ${secs} с` : ''}`
     else if (cfg.result) statusLine = 'результат загружен'
