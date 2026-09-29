@@ -656,6 +656,13 @@ async function polishLast(sheet, ctx, deadline) {
 // реальная пара Z-образных деталей 700×700 (мебельный реальный случай) даёт
 // 0.962–0.970 — при 0.97 пара не собиралась, и 2 детали не помещались на лист.
 const PAIR_MIN_DENSITY = 0.95
+// Порог для деталей с большим вырезом: одиночная деталь 750×750 со ступенчатым
+// вырезом занимает лишь 64% своего габарита, а сцепленная пара — 90%. При
+// жёстком пороге 0.95 такая пара отбраковывалась, и лист на 18 деталей
+// находился только случайно (104 с, заказ 260913_004). Пара принимается и
+// при меньшей плотности, если она заметно плотнее одиночной детали.
+const PAIR_MIN_DENSITY_SOFT = 0.85
+const PAIR_MIN_GAIN = 0.15
 
 // Кэш собранных пар (по форме детали): форма → найденные пары
 const PAIR_CACHE = new Map()
@@ -906,8 +913,10 @@ function tileIntoPairs(instances, kerf, usableX, usableY) {
       // натыкались на вторую, сетка пар теряла её.
       const dirs = ['auto', 'along_y', 'along_x']
       const found = []
+      const singleFill = polyArea(v0.polygon) / (v0.w * v0.h)
+      const minDensity = Math.min(PAIR_MIN_DENSITY, Math.max(PAIR_MIN_DENSITY_SOFT, singleFill + PAIR_MIN_GAIN))
       const add = p => {
-        if (!p || p.density < PAIR_MIN_DENSITY) return
+        if (!p || p.density < minDensity) return
         const same = found.findIndex(q => Math.abs(q.W - p.W) < 2 && Math.abs(q.H - p.H) < 2)
         if (same < 0) found.push(p)
         else if (p.density > found[same].density + 1e-4) found[same] = p
@@ -918,18 +927,26 @@ function tileIntoPairs(instances, kerf, usableX, usableY) {
       const cached = PAIR_CACHE.get(cacheKey)
       if (cached) found.push(...cached)
       else {
-        for (const A of first.variants) {
-          // 3 детерминированные попытки + 6 случайных (случайный выбор среди
+        // Положения первой детали: 0° и 180°. При разрешённом вращении пары от
+        // 90°/270° — те же пары, повёрнутые, а поворот пары на 90° и так
+        // добавляется ниже как вариант составной детали. Перебор всех 4-х
+        // положений на детали 750×750 с дугами занимал 7 с на первый раунд.
+        const firstSides = first.variants.filter(v => v.angle === 0 || v.angle === 180)
+        for (const A of (firstSides.length ? firstSides : first.variants)) {
+          // Пара не бывает больше двух деталей — собираем на участке 2×2
+          // детали, а не на всём листе: кандидатов места в разы меньше.
+          const boxX = Math.min(usableX, 2 * A.w + 4 * kerf), boxY = Math.min(usableY, 2 * A.h + 4 * kerf)
+          // 3 детерминированные попытки + 3 случайные (случайный выбор среди
           // равноценных мест находит вложения, которые детерминированный пропускает)
-          for (let attempt = 0; attempt < 9; attempt++) add(buildPair(first, kerf, usableX, usableY, dirs[attempt % 3], attempt < 3, A))
-          // Полоса по высоте детали (пара «лёжа») и по ширине («стоя») — на
-          // большом листе вторая деталь почти всегда ложится сверху, и пара
-          // «лёжа» находилась лишь случайно (ступенька 900×500: то 3 листа, то 5).
+          for (let attempt = 0; attempt < 6; attempt++) add(buildPair(first, kerf, usableX, usableY, dirs[attempt % 3], attempt < 3, A, boxX, boxY))
+          // Полоса по высоте детали (пара «лёжа») и по ширине («стоя») — иначе
+          // вторая деталь почти всегда ложится сверху, и пара «лёжа» находилась
+          // лишь случайно (ступенька 900×500: то 3 листа, то 5).
           // Полоса — с запасом на ступенчатое вложение (до 35% размера детали).
           for (const f of [0.02, 0.35]) {
-            const sy = Math.min(usableY, A.h + 2 * kerf + A.h * f), sx = Math.min(usableX, A.w + 2 * kerf + A.w * f)
-            add(buildPair(first, kerf, usableX, usableY, 'along_x', true, A, Math.min(usableX, 2 * A.w + 4 * kerf), sy))
-            add(buildPair(first, kerf, usableX, usableY, 'along_y', true, A, sx, Math.min(usableY, 2 * A.h + 4 * kerf)))
+            const sy = Math.min(boxY, A.h + 2 * kerf + A.h * f), sx = Math.min(boxX, A.w + 2 * kerf + A.w * f)
+            add(buildPair(first, kerf, usableX, usableY, 'along_x', true, A, boxX, sy))
+            add(buildPair(first, kerf, usableX, usableY, 'along_y', true, A, sx, boxY))
           }
         }
         PAIR_CACHE.set(cacheKey, found.slice())

@@ -280,6 +280,15 @@ export function parsePolygonFromDetail(d) {
 // Есть ли среди деталей заказа хоть одна с реально нарисованным (не
 // прямоугольным) внешним контуром — только тогда имеет смысл включать
 // true-shape укладку вместо более быстрого/отточенного rectangle-алгоритма.
+// Контур детали в положениях 0° и 90° (локальные мм, Y вверх, [x, y]) —
+// для черновика онлайн-раскроя: детали раскладываются по габаритам обычным
+// прямоугольным раскроем (это мгновенно), а на экране рисуются настоящие
+// контуры внутри габаритов. Пересечений в черновике нет по построению.
+export function roughShapePolygons(detail) {
+  const { polygon, w } = parsePolygonFromDetail(detail)
+  return { 0: polygon, 90: rotate90(polygon, w) }
+}
+
 export function needsTrueShape(details) {
   return (details || []).some(d => {
     try {

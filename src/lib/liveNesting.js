@@ -12,9 +12,32 @@
 // Обычный (не онлайн) режим тоже идёт через этот модуль: тот же поиск, но с
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
 import { runNesting } from './nesting'
-import { needsTrueShape } from './trueShapeNesting'
+import { needsTrueShape, roughShapePolygons } from './trueShapeNesting'
 
 const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажатия «Стоп»
+
+// Черновик для фигурных деталей: раскладка по габаритам обычным прямоугольным
+// раскроем без оптимизации (доли секунды), на экране — настоящие контуры
+// внутри габаритов. Габариты не пересекаются и держат зазор реза — значит, и
+// контуры тоже. Дальше точные раунды улучшают результат.
+async function roughLayout(params) {
+  try {
+    const plain = params.details.map(d => ({ ...d, contour: null }))
+    const res = await runNesting({ ...params, details: plain, optimizeSeconds: 0, algo: 'raster', cuttingMethod: 'nesting' })
+    const polys = {}
+    res.sheets.forEach(sh => sh.placed.forEach(p => {
+      const d = params.details[p.detailIndex]
+      if (!d?.contour) return
+      if (!polys[p.detailIndex]) polys[p.detailIndex] = roughShapePolygons(d)
+      const poly = polys[p.detailIndex][p.rotated ? 90 : 0]
+      if (!poly) return
+      p.polygon = poly.map(([x, y]) => ({ x, y }))
+      p.rotation = p.rotated ? 90 : 0
+    }))
+    res.rough = true
+    return res
+  } catch { return null }
+}
 const ROUND_SECONDS = [3, 6, 10, 15, 20, 30]
 
 function polyArea(pts) {
@@ -68,17 +91,29 @@ export async function runLiveNesting(params, { live = false, shouldStop = () => 
     })
   }
 
-  // Фигурные детали / NFP: обычный режим — один расчёт как раньше
+  // Фигурные детали / NFP. Первый точный раунд идёт секунды (на телефоне —
+  // до 10 с) — сначала сразу показываем черновик (см. roughLayout).
   const t0 = Date.now()
+  let rough = null
+  if (onProgress) {
+    rough = await roughLayout(params)
+    if (rough) {
+      const sc = liveScore(rough.sheets)
+      onStats?.({ t: Date.now() - t0, phase: 'rough', result: { count: sc.count, last: Math.round(sc.last) }, improved: true })
+      onProgress({ ...rough, iter: 0, round: 0 })
+    }
+  }
   if (!live) {
     const res = await runNesting(params)
     const sc = liveScore(res.sheets)
     onStats?.({ t: Date.now() - t0, phase: 'shape', round: 1, roundSeconds: params.optimizeSeconds, best: { count: sc.count, last: Math.round(sc.last) }, improved: true })
+    // итог не хуже уже показанного черновика
+    if (rough && liveBetter(liveScore(rough.sheets), sc)) return rough
     return res
   }
 
   // Онлайн — раунды до «Стоп»
-  let best = null, bestScore = null, round = 0
+  let best = rough, bestScore = rough ? liveScore(rough.sheets) : null, round = 0
   while (!shouldStop()) {
     const secs = ROUND_SECONDS[Math.min(round, ROUND_SECONDS.length - 1)]
     const res = await runNesting({ ...params, optimizeSeconds: secs })

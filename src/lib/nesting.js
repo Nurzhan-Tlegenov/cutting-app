@@ -249,6 +249,7 @@ export async function runNesting({
     const result = packAndEval(order, mode)
     iter++
     if (!best || better(result.stat, best.stat)) { best = { ...result, order, mode }; bestOrder = { order, mode }; dirty = true }
+    if (iter === 1) maybeReport(true) // первая картинка — сразу после первой попытки, а не после всех структурных
     if (!bestStatPerMode[mode] || better(result.stat, bestStatPerMode[mode])) {
       bestStatPerMode[mode] = result.stat
       bestPerMode[mode] = order
