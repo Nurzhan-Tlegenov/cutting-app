@@ -122,6 +122,7 @@ export async function runNesting({
   algo = 'raster',                // 'raster' (основной, проверенный) | 'nfp' (экспериментальный, точный по контуру — ТОЛЬКО для фрезера, см. ниже)
   onProgress = null,              // онлайн-раскрой: вызывается при каждом улучшении ({ sheets, iter }) — не чаще раза в ~300 мс
   shouldStop = null,              // онлайн-раскрой: () => true — пользователь нажал «Стоп», поиск заканчивается и результат доводится до финала
+  takeMigrant = null,             // параллельный поиск («острова»): () => { ids, mode } — лучший вариант соседнего потока, вливается в популяцию
 }) {
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
@@ -152,6 +153,7 @@ export async function runNesting({
   const smallPartsMaxArea = smallPartsMaxSquareSide > 0 ? smallPartsMaxSquareSide * smallPartsMaxSquareSide : 0
 
   const basePieces = buildPieces(details, kerf, direction)
+  const pieceById = new Map(basePieces.map(p => [p.id, p]))
 
   // Стяжка к нулю листа с зазором ровно kerf (не меняет входные листы)
   const gravityAll = list => list.map(sheet => {
@@ -159,6 +161,7 @@ export async function runNesting({
     if (placed === sheet.placed) return sheet
     const next = { ...sheet, placed, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
     placed.forEach(pp => { split(next, pp); prune(next) })
+    updateFreeBounds(next)
     return next
   })
 
@@ -185,9 +188,9 @@ export async function runNesting({
   // проигрывает по плотности. Для 'nesting' (ЧПУ-фрезер) такого ограничения нет —
   // фреза режет по любому контуру, обе семьи конкурируют на равных.
   const scoringModes = cuttingMethod === 'guillotine'
-    ? ['g-bssf', 'g-baf']
-    : ['bssf', 'baf', 'g-bssf', 'g-baf']
-  const RANDOM_ATTEMPTS = 150 // случайные перестановки порядка — время не критично, важна плотность
+    ? ['g-bssf', 'g-baf', 'g-blsf', 'g-bl']
+    : ['bssf', 'baf', 'blsf', 'bl', 'cp', 'g-bssf', 'g-baf', 'g-blsf']
+  const RANDOM_ATTEMPTS = 80 // случайные перестановки порядка (каждая — со всеми режимами), дальше работает генетический поиск
 
   let best = null
   let bestOrder = null
@@ -202,7 +205,9 @@ export async function runNesting({
     if (!force && now - lastReport < 300) return
     lastReport = now; dirty = false
     const sheets = cuttingMethod !== 'guillotine' ? gravityAll(best.sheets) : best.sheets
-    onProgress({ sheets, iter })
+    // genome — порядок деталей + режим: по нему соседние потоки воспроизводят вариант у себя
+    const genome = best.order ? { ids: best.order.map(p => p.id), mode: best.mode } : null
+    onProgress({ sheets, iter, genome })
   }
   const bestPerMode = {}     // лучший порядок ОТДЕЛЬНО по каждому режиму — не только глобальный лидер
   const bestStatPerMode = {}
@@ -217,7 +222,7 @@ export async function runNesting({
   const tryAttempt = (order, mode) => {
     const result = packAndEval(order, mode)
     iter++
-    if (!best || better(result.stat, best.stat)) { best = result; bestOrder = { order, mode }; dirty = true }
+    if (!best || better(result.stat, best.stat)) { best = { ...result, order, mode }; bestOrder = { order, mode }; dirty = true }
     if (!bestStatPerMode[mode] || better(result.stat, bestStatPerMode[mode])) {
       bestStatPerMode[mode] = result.stat
       bestPerMode[mode] = order
@@ -287,6 +292,14 @@ export async function runNesting({
       if (Math.random() < MODE_MUTATION_RATE) childMode = scoringModes[Math.floor(Math.random() * scoringModes.length)]
       nextGen.push({ order: childOrder, mode: childMode })
     }
+    // Мигрант из соседнего потока — заменяет худшую особь нового поколения
+    if (takeMigrant) {
+      const m = takeMigrant()
+      if (m && Array.isArray(m.ids) && m.ids.length === basePieces.length && scoringModes.includes(m.mode)) {
+        const order = m.ids.map(id => pieceById.get(id)).filter(Boolean)
+        if (order.length === basePieces.length) nextGen[nextGen.length - 1] = { order, mode: m.mode }
+      }
+    }
     evaluated = nextGen.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
     iter += evaluated.length
     evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
@@ -316,6 +329,7 @@ function cloneSheets(sheets) {
     index: s.index, family: s.family,
     placed: s.placed.map(p => ({ ...p })),
     freeRects: s.freeRects.map(r => ({ ...r })),
+    maxFreeW: s.maxFreeW, maxFreeH: s.maxFreeH,
   }))
 }
 
@@ -447,9 +461,10 @@ function rotatePiece(p) {
 // mode: 'bssf'/'baf' → семья MaxRects; 'g-bssf'/'g-baf' → семья Guillotine.
 function packAttempt(sortedPieces, mode, direction, usableX, usableY) {
   const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
-  const scoreMode = mode.includes('baf') ? 'baf' : 'bssf'
+  const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
 
   const place = (sheet, piece) => {
+    if (cannotFit(sheet, piece)) return false
     const result = family === 'guillotine'
       ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
       : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
@@ -457,6 +472,7 @@ function packAttempt(sortedPieces, mode, direction, usableX, usableY) {
     sheet.placed.push(result)
     if (family === 'guillotine') { splitGuillotine(sheet, result); delete result._freeRectIdx }
     else { split(sheet, result); prune(sheet) }
+    updateFreeBounds(sheet)
     return true
   }
 
@@ -489,7 +505,9 @@ function compactPass(sheets, direction, usableX, usableY) {
       outer:
       for (let j = 0; j < i; j++) {
         const target = sheets[j]
+        if (target.maxFreeW !== undefined && Math.min(piece.w, piece.h) > Math.max(target.maxFreeW, target.maxFreeH)) continue
         for (const o of orientations) {
+          if (target.maxFreeW !== undefined && (o.w > target.maxFreeW || o.h > target.maxFreeH)) continue
           const makePlaced = () => o.flip
             ? { ...piece, x: 0, y: 0, w: o.w, h: o.h, rotated: !piece.rotated,
                 edgeTop: piece.edgeLeft, edgeRight: piece.edgeTop, edgeBottom: piece.edgeRight, edgeLeft: piece.edgeBottom }
@@ -500,6 +518,7 @@ function compactPass(sheets, direction, usableX, usableY) {
             if (spot) {
               const placed = { ...makePlaced(), x: spot.x, y: spot.y, _freeRectIdx: spot.idx }
               target.placed.push(placed); splitGuillotine(target, placed); delete placed._freeRectIdx
+              updateFreeBounds(target)
               moved = true; break outer
             }
           } else {
@@ -507,6 +526,7 @@ function compactPass(sheets, direction, usableX, usableY) {
             if (spot) {
               const placed = { ...makePlaced(), x: spot.x, y: spot.y }
               target.placed.push(placed); split(target, placed); prune(target)
+              updateFreeBounds(target)
               moved = true; break outer
             }
           }
@@ -577,7 +597,16 @@ function better(a, b) {
 function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall, contact = 0) {
   const short = Math.min(rect.w - w, rect.h - h)
   const long_ = Math.max(rect.w - w, rect.h - h)
-  const fit = mode === 'baf' ? rect.w * rect.h - w * h : short * 1000 + long_
+  // Эвристики выбора места (гены «режима» в генетическом поиске):
+  //   bssf — лучшая короткая сторона остатка, baf — лучшая площадь остатка,
+  //   blsf — лучшая длинная сторона, bl — ниже-левее (Bottom-Left),
+  //   cp  — максимум касания с соседями и краями листа (Contact Point)
+  let fit
+  if (mode === 'baf') fit = rect.w * rect.h - w * h
+  else if (mode === 'blsf') fit = long_ * 100000 + short
+  else if (mode === 'bl') fit = rect.y * 100000 + rect.x
+  else if (mode === 'cp') fit = (2 * (usableX + usableY) - contact) * 100000 + short
+  else fit = short * 1000 + long_
 
   const along = direction === 'along_y' || direction === 'along_x'
   const span = Math.max(usableX, usableY) + 1
@@ -615,43 +644,61 @@ function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall, conta
   return score
 }
 
+function makePlacedFrom(piece, rect, rot, pw, ph) {
+  return {
+    id: piece.id, detailIndex: piece.detailIndex,
+    label: piece.label, prefix: piece.prefix,
+    x: rect.x, y: rect.y,
+    w: pw, h: ph,
+    origX: rot ? piece.origY : piece.origX,
+    origY: rot ? piece.origX : piece.origY,
+    rotated: rot,
+    isSmall: piece.isSmall,
+    rotatable: piece.rotatable,
+    edgeTop:    rot ? piece.edgeLeft   : piece.edgeTop,
+    edgeRight:  rot ? piece.edgeTop    : piece.edgeRight,
+    edgeBottom: rot ? piece.edgeRight  : piece.edgeBottom,
+    edgeLeft:   rot ? piece.edgeBottom : piece.edgeLeft,
+  }
+}
+
+// Быстрый отказ: деталь заведомо не влезает ни в один свободный прямоугольник
+// листа (по максимальным размерам свободных мест). Экономит перебор уже
+// забитых листов — на больших заказах это основная часть времени.
+function cannotFit(sheet, piece) {
+  const mw = sheet.maxFreeW, mh = sheet.maxFreeH
+  if (mw === undefined) return false
+  const a = piece.pw > mw || piece.ph > mh
+  if (!a) return false
+  if (!piece.rotatable || piece.pw === piece.ph) return true
+  return piece.ph > mw || piece.pw > mh
+}
+function updateFreeBounds(sheet) {
+  let mw = 0, mh = 0
+  const fr = sheet.freeRects
+  for (let i = 0; i < fr.length; i++) { if (fr[i].w > mw) mw = fr[i].w; if (fr[i].h > mh) mh = fr[i].h }
+  sheet.maxFreeW = mw; sheet.maxFreeH = mh
+}
+
 function chooseSpot(freeRects, piece, direction, usableX, usableY, mode, placed = []) {
-  let best = null, bestScore = Infinity
-  const oris = [{ pw: piece.pw, ph: piece.ph, rotated: false }]
-  if (piece.rotatable && piece.pw !== piece.ph)
-    oris.push({ pw: piece.ph, ph: piece.pw, rotated: true })
-  const needContact = direction === 'along_y' || direction === 'along_x'
+  let bestRect = null, bestRot = false, bestScore = Infinity
+  const canRot = piece.rotatable && piece.pw !== piece.ph
+  const needContact = direction === 'along_y' || direction === 'along_x' || mode === 'cp'
 
-  for (const rect of freeRects) {
-    for (const o of oris) {
-      if (o.pw > rect.w || o.ph > rect.h) continue
+  for (let i = 0; i < freeRects.length; i++) {
+    const rect = freeRects[i]
+    for (let k = 0; k < (canRot ? 2 : 1); k++) {
+      const pw = k ? piece.ph : piece.pw, ph = k ? piece.pw : piece.ph
+      if (pw > rect.w || ph > rect.h) continue
       const contact = needContact
-        ? computeContactLength(rect.x, rect.y, o.pw, o.ph, placed, usableX, usableY)
+        ? computeContactLength(rect.x, rect.y, pw, ph, placed, usableX, usableY)
         : 0
-      const score = scoreSpot(rect, o.pw, o.ph, direction, mode, usableX, usableY, piece.isSmall, contact)
-
-      if (score < bestScore) {
-        bestScore = score
-        const rot = o.rotated
-        best = {
-          id: piece.id, detailIndex: piece.detailIndex,
-          label: piece.label, prefix: piece.prefix,
-          x: rect.x, y: rect.y,
-          w: o.pw, h: o.ph,
-          origX: rot ? piece.origY : piece.origX,
-          origY: rot ? piece.origX : piece.origY,
-          rotated: rot,
-          isSmall: piece.isSmall,
-          rotatable: piece.rotatable,
-          edgeTop:    rot ? piece.edgeLeft   : piece.edgeTop,
-          edgeRight:  rot ? piece.edgeTop    : piece.edgeRight,
-          edgeBottom: rot ? piece.edgeRight  : piece.edgeBottom,
-          edgeLeft:   rot ? piece.edgeBottom : piece.edgeLeft,
-        }
-      }
+      const score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
+      if (score < bestScore) { bestScore = score; bestRect = rect; bestRot = k === 1 }
     }
   }
-  return best
+  if (!bestRect) return null
+  return makePlacedFrom(piece, bestRect, bestRot, bestRot ? piece.ph : piece.pw, bestRot ? piece.pw : piece.ph)
 }
 
 function split(sheet, p) {
@@ -672,42 +719,25 @@ function split(sheet, p) {
 // считать (нет merge/prune), меньше фрагментация на узкие полосы.
 
 function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mode, placed = []) {
-  let best = null, bestScore = Infinity
-  const oris = [{ pw: piece.pw, ph: piece.ph, rotated: false }]
-  if (piece.rotatable && piece.pw !== piece.ph)
-    oris.push({ pw: piece.ph, ph: piece.pw, rotated: true })
-  const needContact = direction === 'along_y' || direction === 'along_x'
+  let bestIdx = -1, bestRot = false, bestScore = Infinity
+  const canRot = piece.rotatable && piece.pw !== piece.ph
+  const needContact = direction === 'along_y' || direction === 'along_x' || mode === 'cp'
 
-  freeRects.forEach((rect, idx) => {
-    for (const o of oris) {
-      if (o.pw > rect.w || o.ph > rect.h) continue
+  for (let idx = 0; idx < freeRects.length; idx++) {
+    const rect = freeRects[idx]
+    for (let k = 0; k < (canRot ? 2 : 1); k++) {
+      const pw = k ? piece.ph : piece.pw, ph = k ? piece.pw : piece.ph
+      if (pw > rect.w || ph > rect.h) continue
       const contact = needContact
-        ? computeContactLength(rect.x, rect.y, o.pw, o.ph, placed, usableX, usableY)
+        ? computeContactLength(rect.x, rect.y, pw, ph, placed, usableX, usableY)
         : 0
-      const score = scoreSpot(rect, o.pw, o.ph, direction, mode, usableX, usableY, piece.isSmall, contact)
-
-      if (score < bestScore) {
-        bestScore = score
-        const rot = o.rotated
-        best = {
-          id: piece.id, detailIndex: piece.detailIndex,
-          label: piece.label, prefix: piece.prefix,
-          x: rect.x, y: rect.y,
-          w: o.pw, h: o.ph,
-          origX: rot ? piece.origY : piece.origX,
-          origY: rot ? piece.origX : piece.origY,
-          rotated: rot,
-          isSmall: piece.isSmall,
-          rotatable: piece.rotatable,
-          edgeTop:    rot ? piece.edgeLeft   : piece.edgeTop,
-          edgeRight:  rot ? piece.edgeTop    : piece.edgeRight,
-          edgeBottom: rot ? piece.edgeRight  : piece.edgeBottom,
-          edgeLeft:   rot ? piece.edgeBottom : piece.edgeLeft,
-          _freeRectIdx: idx,
-        }
-      }
+      const score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
+      if (score < bestScore) { bestScore = score; bestIdx = idx; bestRot = k === 1 }
     }
-  })
+  }
+  if (bestIdx < 0) return null
+  const best = makePlacedFrom(piece, freeRects[bestIdx], bestRot, bestRot ? piece.ph : piece.pw, bestRot ? piece.pw : piece.ph)
+  best._freeRectIdx = bestIdx
   return best
 }
 

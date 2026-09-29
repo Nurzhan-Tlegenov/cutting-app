@@ -50,7 +50,7 @@ function isRasterPath(p) {
  * shouldStop() — нажат ли «Стоп»; onProgress(res) — промежуточный результат
  * в том же формате, что и итог runNesting (+ iter, round).
  */
-export async function runLiveNesting(params, { live = false, shouldStop = () => false, onProgress = null } = {}) {
+export async function runLiveNesting(params, { live = false, shouldStop = () => false, onProgress = null, takeMigrant = null } = {}) {
   const meta = {
     usableX: params.sheetW - params.marginL - params.marginR,
     usableY: params.sheetL - params.marginT - params.marginB,
@@ -63,8 +63,8 @@ export async function runLiveNesting(params, { live = false, shouldStop = () => 
     return await runNesting({
       ...params,
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
-      shouldStop,
-      onProgress: onProgress ? ({ sheets, iter }) => onProgress({ ...meta, sheets, iter }) : null,
+      shouldStop, takeMigrant,
+      onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...meta, sheets, iter, genome }) : null,
     })
   }
 
