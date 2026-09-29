@@ -1,7 +1,9 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { runNesting, computeOffcutAtPoint } from '../lib/nesting'
+import { computeOffcutAtPoint } from '../lib/nesting'
+import { runLiveNesting } from '../lib/liveNesting'
+import SheetsOverview from '../components/SheetsOverview'
 import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
@@ -380,7 +382,54 @@ function rectsOverlap(a, b) {
          a.y < b.y + b.h - 1 && a.y + a.h - 1 > b.y
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts }) {
+// Поворот детали на 90° (с кромкой и контуром) — как двойной тап на карте
+function rotatePart(p) {
+  const newRotation = ((p.rotation ?? (p.rotated ? 90 : 0)) + 90) % 360
+  const edges = rotateEdgesTimes({ top: p.edgeTop, right: p.edgeRight, bottom: p.edgeBottom, left: p.edgeLeft }, 1)
+  return {
+    ...p, w: p.h, h: p.w,
+    origX: p.origY, origY: p.origX,
+    rotation: newRotation, rotated: newRotation === 90 || newRotation === 270,
+    edgeTop: edges.top, edgeRight: edges.right, edgeBottom: edges.bottom, edgeLeft: edges.left,
+    polygon: Array.isArray(p.polygon) ? p.polygon.map(pt => rotatePointTimes(pt.x, pt.y, p.origX, p.origY, 1)) : p.polygon,
+  }
+}
+
+// Данные раскроя (Y вверх от низа) ↔ экранные координаты (Y сверху вниз);
+// преобразование — инволюция, как flipY внутри SheetCanvas
+const flipPlaced = (list, usableY, kerf) => list.map(p => ({ ...p, y: usableY - p.y - (p.h - kerf) }))
+
+// ─── Буфер: найти свободное место на листе для детали из буфера ─────────────
+// Кандидаты — углы у краёв листа и у соседних деталей (x: 0 / правее соседа /
+// у правого края; y — аналогично). Берём место ниже всего и левее (как укладка —
+// от нижнего левого угла). Если деталь можно вращать и так не влезает —
+// пробуем повёрнутую. Возвращает деталь в координатах ДАННЫХ или null.
+function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
+  const items = flipPlaced(sheetPlaced, usableY, kerf) // экранные координаты
+  const variants = [part]
+  if (canRotate) variants.push(rotatePart(part))
+  for (const v of variants) {
+    const vw = v.w - kerf, vh = v.h - kerf
+    const xs = new Set([0, usableX - vw]), ys = new Set([0, usableY - vh])
+    items.forEach(o => {
+      xs.add(o.x + o.w); xs.add(o.x - v.w)
+      ys.add(o.y + o.h); ys.add(o.y - v.h)
+    })
+    let best = null
+    for (const y of ys) {
+      for (const x of xs) {
+        const cand = { ...v, x, y }
+        if (outOfSheet(cand, usableX, usableY, kerf)) continue
+        if (items.some(o => piecesConflict(cand, o, kerf))) continue
+        if (!best || y > best.y + 0.5 || (Math.abs(y - best.y) <= 0.5 && x < best.x)) best = cand
+      }
+    }
+    if (best) return flipPlaced([best], usableY, kerf)[0]
+  }
+  return null
+}
+
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   // Масштаб карты — щипком двух пальцев (как в редакторе контура), с
@@ -421,13 +470,14 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   const lastTap = useRef({ idx: -1, time: 0 })
   const lastTouchRef = useRef(0) // время последнего touch-события: браузер после касания шлёт ещё и эмулированные mouse-события
   const longPressRef = useRef(null)
+  const emptyTapRef = useRef(null) // касание пустого места — снять выделение детали
 
   // useLayoutEffect: при смене масштаба холст пересоздаётся — перерисовываем
   // до показа на экране, чтобы не мигал пустым
   useLayoutEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx])
 
   const PADDING = 8
   const canvasW = (typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360) * zoom
@@ -491,6 +541,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       const x = rx + toC(p.x), y = ry + toC(p.y)
       const w = toC(p.w) - toC(kerf), h = toC(p.h) - toC(kerf)
       const isDragging = i === dragIdx
+      const isSelected = i === selectedIdx
 
       // Проверяем коллизии (по полигону, если есть — bbox слишком грубый для
       // true-shape деталей, уложенных вплотную в паз соседней)
@@ -500,9 +551,9 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // рисуем именно его; иначе — прямоугольник, как раньше
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
       const baseFill = PART_FILL
-      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : baseFill)
-      ctx.strokeStyle = hasCollision ? '#E24B4A' : PART_STROKE
-      ctx.lineWidth = hasCollision ? 2.5 : 1.4
+      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : baseFill))
+      ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : PART_STROKE)
+      ctx.lineWidth = hasCollision ? 2.5 : (isSelected ? 2.5 : 1.4)
       if (hasShape) {
         ctx.beginPath()
         p.polygon.forEach((pt, vi) => {
@@ -737,6 +788,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     if (!interactive) return
     const { x, y } = getPointer(e)
     const idx = findPiece(x, y)
+    emptyTapRef.current = idx === -1 ? { x, y, time: Date.now() } : null
     if (idx === -1) {
       // Пустое место на листе: в режиме "Вручную" удержание пальца задаёт
       // деловой обрезок, растущий из этой точки до ближайших деталей/краёв.
@@ -816,7 +868,16 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   function onPointerUp(e) {
     clearLongPress()
     const drag = draggingRef.current
-    if (!drag) return
+    if (!drag) {
+      // Короткое касание пустого места — снять выделение детали
+      const et = emptyTapRef.current
+      emptyTapRef.current = null
+      if (et && onSelect && selectedIdx !== -1 && Date.now() - et.time < 400) {
+        const pt = getPointer(e)
+        if (Math.hypot(pt.x - et.x, pt.y - et.y) < 10) onSelect(-1)
+      }
+      return
+    }
     const { x, y } = getPointer(e)
     const dist = Math.hypot(x - drag.startX, y - drag.startY)
 
@@ -825,16 +886,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       const isDoubleTap = lastTap.current.idx === drag.idx && (now - lastTap.current.time) < 400
       lastTap.current = { idx: drag.idx, time: now }
       if (isDoubleTap) {
-        const p = placedRef.current[drag.idx]
-        const newRotation = ((p.rotation ?? (p.rotated ? 90 : 0)) + 90) % 360
-        const edges = rotateEdgesTimes({ top: p.edgeTop, right: p.edgeRight, bottom: p.edgeBottom, left: p.edgeLeft }, 1)
-        const rotated = {
-          ...p, w: p.h, h: p.w,
-          origX: p.origY, origY: p.origX,
-          rotation: newRotation, rotated: newRotation === 90 || newRotation === 270,
-          edgeTop: edges.top, edgeRight: edges.right, edgeBottom: edges.bottom, edgeLeft: edges.left,
-          polygon: Array.isArray(p.polygon) ? p.polygon.map(pt => rotatePointTimes(pt.x, pt.y, p.origX, p.origY, 1)) : p.polygon,
-        }
+        const rotated = rotatePart(placedRef.current[drag.idx])
         // Поворот разрешён всегда. Если после поворота деталь пересекается
         // с соседями или выходит за лист — она подсветится красным, и
         // пользователь сам сдвинет её.
@@ -845,6 +897,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         draggingRef.current = null
         return
       }
+      // Одиночный тап — выделить деталь (для переноса в буфер)
+      if (onSelect) onSelect(drag.idx)
     }
 
     // Это было касание/скольжение без удержания — деталь не двигаем
@@ -1003,9 +1057,16 @@ let CFG_SEQ = 0
 function newCfg(over = {}) {
   return {
     id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', side: '', secs: '12',
-    open: true, status: 'idle', // idle | queued | running | done | error
+    live: true,          // онлайн-раскрой: считать до «Стоп», показывая каждое улучшение
+    open: true, status: 'idle', // idle | queued | running | stopping | done | error
     startedAt: 0, doneAt: 0, error: '',
     result: null, sheetsData: [], activeSheet: 0, saved: false,
+    view: 'all',         // 'all' — все листы сразу · 'sheet' — один лист для правки
+    improvements: 0, iter: 0, lastImproveAt: 0,
+    buffer: [],          // детали, снятые с листов (для переноса на другой лист)
+    selPart: -1,         // выделенная деталь на активном листе (индекс в placed)
+    selBuf: -1,          // выделенная деталь в буфере
+    note: '',            // подсказка по буферу (например «нет места»)
     ...over,
   }
 }
@@ -1043,36 +1104,61 @@ function betterSummary(a, b) {
 // блокируют интерфейс. Если воркер не поднялся (старый браузер, ограничения
 // окружения) — считаем в основном потоке, по очереди (алгоритм хранит
 // направление в состоянии модуля, поэтому одновременно в одном потоке нельзя).
+//
+// live — онлайн-раскрой: поиск идёт до stop(); onProgress получает каждое
+// улучшение (показываем на экране). stop() — мягкая остановка: алгоритм
+// выходит из поиска и доводит лучший вариант до финала (стяжка), затем
+// промис завершается итогом. Если за STOP_GRACE_MS итог не пришёл (фигурные
+// детали — идёт длинный раунд), берём последний показанный результат.
+const STOP_GRACE_MS = 2500
 let mainThreadQueue = Promise.resolve()
-function startNestingJob(params) {
+function startNestingJob(params, { live = false, onProgress = null } = {}) {
   let worker = null
-  let rejectFn = null
-  let cancelled = false
+  let rejectFn = null, resolveFn = null
+  let cancelled = false, finished = false, stopFlag = false
+  let lastProgress = null
+  const finish = res => { if (finished || cancelled) return; finished = true; worker?.terminate(); worker = null; resolveFn(res) }
+  const fail = err => { if (finished || cancelled) return; finished = true; worker?.terminate(); worker = null; rejectFn(err) }
   const promise = new Promise((resolve, reject) => {
-    rejectFn = reject
+    resolveFn = resolve; rejectFn = reject
     const fallback = () => {
       mainThreadQueue = mainThreadQueue.catch(() => {}).then(async () => {
         if (cancelled) return
         await new Promise(r => setTimeout(r, 100)) // дать интерфейсу отрисовать состояние «считаю»
-        return runNesting(params)
-      }).then(res => { if (!cancelled) resolve(res) }, err => { if (!cancelled) reject(err) })
+        return runLiveNesting(params, {
+          live, shouldStop: () => stopFlag || cancelled,
+          onProgress: res => { lastProgress = res; if (!cancelled) onProgress?.(res) },
+        })
+      }).then(finish, fail)
     }
     try {
       worker = new Worker(new URL('../lib/nestingWorker.js', import.meta.url), { type: 'module' })
     } catch { fallback(); return }
     worker.onmessage = e => {
-      worker?.terminate(); worker = null
-      if (e.data?.ok) resolve(e.data.res)
-      else reject(new Error(e.data?.error || 'ошибка расчёта'))
+      const m = e.data || {}
+      if (m.type === 'progress') {
+        lastProgress = m.res
+        if (!cancelled && !finished) onProgress?.(m.res)
+      } else if (m.type === 'done') finish(m.res)
+      else fail(new Error(m.error || 'ошибка расчёта'))
     }
     worker.onerror = () => {
       worker?.terminate(); worker = null
-      if (!cancelled) fallback()
+      if (!cancelled && !finished) fallback()
     }
-    worker.postMessage({ params })
+    worker.postMessage({ type: 'start', params, live })
   })
   return {
     promise,
+    stop: () => {
+      stopFlag = true
+      worker?.postMessage({ type: 'stop' })
+      setTimeout(() => {
+        if (finished || cancelled) return
+        if (lastProgress) finish(lastProgress)
+        else fail(new Error('stopped')) // ещё ничего не найдено — просто останавливаем
+      }, STOP_GRACE_MS)
+    },
     cancel: () => { cancelled = true; worker?.terminate(); worker = null; rejectFn?.(new Error('cancelled')) },
   }
 }
@@ -1102,7 +1188,7 @@ export default function NestingPage() {
   const colorMap = {}
   details.forEach((d, i) => { colorMap[i] = COLORS[i % COLORS.length] })
 
-  const anyRunning = configs.some(c => c.status === 'running' || c.status === 'queued')
+  const anyRunning = configs.some(c => c.status === 'running' || c.status === 'queued' || c.status === 'stopping')
 
   useEffect(() => { fetchOrder() }, [id])
   useEffect(() => () => {
@@ -1141,7 +1227,7 @@ export default function NestingPage() {
         secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
         ...(saved ? {
           dir: saved.config?.dir || 'auto',
-          status: 'done', result: saved, sheetsData: saved.sheets || [],
+          status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i })),
           startedAt: 0, doneAt: 0, saved: true,
         } : {}),
       })
@@ -1186,22 +1272,48 @@ export default function NestingPage() {
       cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
     }
-    updateCfg(cfg.id, { status: 'running', startedAt: Date.now(), error: '' })
-    const job = startNestingJob(params)
+    const stamp = res => {
+      res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
+      res.algo = params.algo // 'nfp' | 'raster' — чтобы на карте было видно, чем реально посчитано
+      return res
+    }
+    const toSheets = res => res.sheets.map((sh, i) => ({ ...sh, index: i, freeRects: sh.freeRects || [] }))
+    updateCfg(cfg.id, {
+      status: 'running', startedAt: Date.now(), doneAt: 0, error: '', view: 'all',
+      improvements: 0, iter: 0, lastImproveAt: 0, buffer: [], selPart: -1, selBuf: -1, note: '',
+    })
+    // Онлайн: каждое улучшение сразу на экран (детали плавно переезжают на новые места)
+    const job = startNestingJob(params, {
+      live: cfg.live,
+      onProgress: res => {
+        if (jobsRef.current[cfg.id] !== job) return
+        updateCfg(cfg.id, c => {
+          const sheetsData = toSheets(res)
+          return {
+            result: stamp(res), sheetsData, saved: false,
+            improvements: c.improvements + 1, iter: res.iter || c.iter, lastImproveAt: Date.now(),
+            activeSheet: Math.min(c.activeSheet, sheetsData.length - 1),
+          }
+        })
+        setFocusId(f => (configsRef.current.some(c => c.id === f && c.result) ? f : cfg.id))
+      },
+    })
     jobsRef.current[cfg.id] = job
     return job.promise.then(res => {
-      if (jobsRef.current[cfg.id] !== job) return // остановлена или заменена
+      if (jobsRef.current[cfg.id] !== job) return // отменена или заменена
       delete jobsRef.current[cfg.id]
-      res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
-      res.algo = params.algo // 'nfp' | 'raster' — чтобы на карте было видно, чем реально посчитано (иначе не отличить от обычного результата)
-      updateCfg(cfg.id, {
-        status: 'done', doneAt: Date.now(), result: res, saved: false, activeSheet: 0,
-        sheetsData: res.sheets.map(s => ({ ...s, freeRects: s.freeRects || [] })),
+      updateCfg(cfg.id, c => {
+        const sheetsData = toSheets(res)
+        return {
+          status: 'done', doneAt: Date.now(), result: stamp(res), saved: false, sheetsData,
+          activeSheet: Math.min(c.activeSheet, sheetsData.length - 1),
+        }
       })
       setFocusId(f => (configsRef.current.some(c => c.id === f && c.result) ? f : cfg.id))
     }).catch(err => {
       if (jobsRef.current[cfg.id] !== job) return
       delete jobsRef.current[cfg.id]
+      if (err?.message === 'stopped') { updateCfg(cfg.id, { status: 'idle', doneAt: Date.now() }); return }
       console.error('Ошибка раскроя:', err)
       updateCfg(cfg.id, {
         status: 'error', doneAt: Date.now(),
@@ -1213,13 +1325,13 @@ export default function NestingPage() {
   function runCfg(cfgId) {
     const cfg = configsRef.current.find(c => c.id === cfgId)
     if (!cfg || !order || !details.length) return
-    if (cfg.status === 'running') return
+    if (cfg.status === 'running' || cfg.status === 'stopping') return
     launch(cfg)
   }
 
   async function runAll() {
     if (!order || !details.length) return
-    const list = configsRef.current.filter(c => c.status !== 'running')
+    const list = configsRef.current.filter(c => c.status !== 'running' && c.status !== 'stopping')
     if (!list.length) return
     if (parallel) {
       list.forEach(c => launch(c))
@@ -1234,18 +1346,73 @@ export default function NestingPage() {
     }
   }
 
+  // «Стоп»: идущий расчёт останавливается мягко — лучший найденный вариант
+  // доводится до финала и остаётся на экране. Из очереди — просто снимается.
   function stopCfg(cfgId) {
     const cur = configsRef.current.find(c => c.id === cfgId)
-    if (cur?.status === 'queued') skipRef.current.add(cfgId)
     const job = jobsRef.current[cfgId]
+    if (cur?.status === 'running' && job?.stop) {
+      job.stop()
+      updateCfg(cfgId, { status: 'stopping' })
+      return
+    }
+    if (cur?.status === 'queued') skipRef.current.add(cfgId)
     if (job) { delete jobsRef.current[cfgId]; job.cancel() }
     updateCfg(cfgId, { status: 'idle' })
   }
 
+  // ─── Буфер деталей ────────────────────────────────────────────────────────
+  // Деталь снимается с листа в буфер, затем кладётся на любой другой лист
+  // (в первое свободное место) или на новый лист.
+  function toBuffer(cfgId) {
+    setConfigs(cs => cs.map(c => {
+      if (c.id !== cfgId) return c
+      const si = c.activeSheet
+      const part = c.sheetsData[si]?.placed[c.selPart]
+      if (!part) return c
+      return {
+        ...c, saved: false, note: '', selPart: -1,
+        buffer: [...c.buffer, part], selBuf: c.buffer.length,
+        sheetsData: c.sheetsData.map((sh, i) => i === si ? { ...sh, placed: sh.placed.filter((_, j) => j !== c.selPart) } : sh),
+      }
+    }))
+  }
+
+  function fromBuffer(cfgId, toNewSheet) {
+    setConfigs(cs => cs.map(c => {
+      if (c.id !== cfgId || !c.result) return c
+      const part = c.buffer[c.selBuf]
+      if (!part) return c
+      const { usableX, usableY } = c.result
+      const kerf = order.kerf_width
+      let sheetsData = c.sheetsData
+      let si = c.activeSheet
+      if (toNewSheet || !sheetsData[si]) {
+        si = sheetsData.length
+        sheetsData = [...sheetsData, { index: si, placed: [], freeRects: [], manualOffcuts: [] }]
+      }
+      const canRotate = !!details[part.detailIndex]?.rotatable
+      const spot = findFreeSpot(sheetsData[si].placed, part, usableX, usableY, kerf, canRotate)
+      if (!spot) {
+        return { ...c, note: `На листе ${si + 1} нет места для «${part.label}» (${Math.round(part.origY)}×${Math.round(part.origX)}). Освободите место или положите на новый лист.` }
+      }
+      const placed = [...sheetsData[si].placed, spot]
+      const buffer = c.buffer.filter((_, j) => j !== c.selBuf)
+      return {
+        ...c, saved: false, note: '', buffer,
+        selBuf: buffer.length ? Math.min(c.selBuf, buffer.length - 1) : -1,
+        activeSheet: si, view: 'sheet', selPart: placed.length - 1,
+        sheetsData: sheetsData.map((sh, i) => i === si ? { ...sh, placed } : sh),
+      }
+    }))
+  }
+
   async function saveNesting(cfg) {
     if (!cfg?.result) return
+    // Пустые листы (все детали унесли в буфер/на другие листы) не сохраняем
+    const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
     const toSave = {
-      ...cfg.result, sheets: cfg.sheetsData,
+      ...cfg.result, sheets,
       config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, secs: cfg.secs },
     }
     await supabase.from('orders').update({ nesting_result: JSON.stringify(toSave) }).eq('id', id)
@@ -1433,9 +1600,10 @@ export default function NestingPage() {
   const focusIdx = focus ? configs.indexOf(focus) : -1
 
   // Сравнение конфигураций: «лучший» — меньше листов, затем меньше на последнем
-  const sums = configs.map(c => (c.status === 'done' && c.result) ? summarize(c.sheetsData, c.result.usableX, c.result.usableY) : null)
+  const sums = configs.map(c => c.result ? summarize(c.sheetsData, c.result.usableX, c.result.usableY) : null)
+  const doneSums = configs.map((c, i) => (c.status === 'done' ? sums[i] : null))
   let bestIdx = -1
-  if (sums.filter(Boolean).length >= 2) sums.forEach((s, i) => { if (s && (bestIdx < 0 || betterSummary(s, sums[bestIdx]))) bestIdx = i })
+  if (doneSums.filter(Boolean).length >= 2) doneSums.forEach((s, i) => { if (s && (bestIdx < 0 || betterSummary(s, doneSums[bestIdx]))) bestIdx = i })
 
   const badge = (text, bg, color) => (
     <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 500, padding: '1px 7px', borderRadius: 8, background: bg, color, verticalAlign: 'middle' }}>{text}</span>
@@ -1447,17 +1615,21 @@ export default function NestingPage() {
   void tick
 
   function renderConfig(cfg, idx) {
-    const isRunning = cfg.status === 'running', isQueued = cfg.status === 'queued'
+    const isStopping = cfg.status === 'stopping'
+    const isRunning = cfg.status === 'running' || isStopping, isQueued = cfg.status === 'queued'
     const s = sums[idx]
     const secs = cfgSecs(cfg)
     let statusLine = 'не считался'
     if (isQueued) statusLine = 'в очереди'
-    else if (isRunning) statusLine = `считаю… ${secs} с`
+    else if (isStopping) statusLine = 'фиксирую лучший вариант…'
+    else if (isRunning) statusLine = s
+      ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)} · улучшений ${cfg.improvements}`
+      : `считаю… ${secs} с`
     else if (cfg.status === 'error') statusLine = 'ошибка расчёта'
     else if (s) statusLine = `${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${secs != null ? ` · ${secs} с` : ''}`
     else if (cfg.result) statusLine = 'результат загружен'
 
-    const canvasSheet = cfg.sheetsData[cfg.activeSheet]
+    const canvasSheet = cfg.sheetsData[Math.max(0, Math.min(cfg.activeSheet, cfg.sheetsData.length - 1))]
     const persist = patch => saveSmallPartsSettings(patch)
 
     return (
@@ -1474,7 +1646,7 @@ export default function NestingPage() {
               {cfg.saved && badge('✓ в заказе', '#e6f4ea', '#1e7e34')}
             </div>
             <div style={{ fontSize: 10.5, color: cfg.status === 'error' ? '#dc3545' : 'var(--text-hint)', marginTop: 1 }}>
-              {cfg.secs === '' ? 12 : cfg.secs} с{cfg.small ? ' · мелкие в центр' : ''} · {statusLine}
+              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{cfg.small ? ' · мелкие в центр' : ''} · {statusLine}
             </div>
           </div>
           {(isRunning || isQueued) && (
@@ -1482,7 +1654,7 @@ export default function NestingPage() {
               border: '2px solid var(--text-hint)', borderTopColor: 'transparent', animation: 'nesting-spin 0.8s linear infinite' }} />
           )}
           <button onClick={e => { e.stopPropagation(); (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id) }}
-            disabled={!details.length}
+            disabled={!details.length || isStopping}
             style={{ flexShrink: 0, width: 28, height: 28, borderRadius: '50%', border: '0.5px solid var(--border-md)',
               background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
             {(isRunning || isQueued) ? '■' : cfg.result ? '🔄' : '▶'}
@@ -1511,14 +1683,23 @@ export default function NestingPage() {
                   style={{ width: 17, height: 17, flexShrink: 0 }} />
                 Мелкие — в центр
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flexShrink: 0 }}
-                title="Больше времени — плотнее укладка на первых листах. 0 — быстрый расчёт без доп. оптимизации">
-                Время, с
-                <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.secs} placeholder="12"
-                  onChange={e => updateCfg(cfg.id, { secs: e.target.value.replace(/[^0-9]/g, '') })}
-                  onBlur={e => persist({ optimize_seconds: e.target.value === '' ? 12 : Number(e.target.value) })}
-                  style={{ width: 52, fontSize: 14, padding: '3px 6px', boxSizing: 'border-box' }} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, flexShrink: 0 }}
+                title="Онлайн-раскрой: поиск идёт, пока не нажмёте «Стоп», каждое улучшение сразу видно на листах">
+                <input type="checkbox" checked={cfg.live} disabled={isRunning}
+                  onChange={e => updateCfg(cfg.id, { live: e.target.checked })}
+                  style={{ width: 17, height: 17, flexShrink: 0 }} />
+                До «Стоп»
               </label>
+              {!cfg.live && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flexShrink: 0 }}
+                  title="Больше времени — плотнее укладка на первых листах. 0 — быстрый расчёт без доп. оптимизации">
+                  с
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.secs} placeholder="12"
+                    onChange={e => updateCfg(cfg.id, { secs: e.target.value.replace(/[^0-9]/g, '') })}
+                    onBlur={e => persist({ optimize_seconds: e.target.value === '' ? 12 : Number(e.target.value) })}
+                    style={{ width: 48, fontSize: 14, padding: '3px 6px', boxSizing: 'border-box' }} />
+                </label>
+              )}
             </div>
             {cfg.small && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -1546,11 +1727,13 @@ export default function NestingPage() {
             )}
 
             <div style={{ display: 'flex', gap: 6, marginBottom: cfg.error || cfg.result ? 8 : 0 }}>
-              <button onClick={() => (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id)} disabled={!details.length}
-                style={{ flex: 1, padding: 8, background: (isRunning || isQueued) ? 'var(--bg2)' : 'var(--blue)',
-                  color: (isRunning || isQueued) ? 'var(--text-muted)' : 'white', border: 'none', borderRadius: 'var(--radius)',
-                  fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
-                {isRunning ? `■ Остановить (${secs} с)` : isQueued ? '■ Убрать из очереди' : cfg.result ? '🔄 Пересчитать' : '▶ Выполнить раскрой'}
+              <button onClick={() => (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id)} disabled={!details.length || isStopping}
+                style={{ flex: 1, padding: 8, background: isRunning && !isStopping ? '#dc3545' : (isQueued || isStopping) ? 'var(--bg2)' : 'var(--blue)',
+                  color: (isQueued || isStopping) ? 'var(--text-muted)' : 'white', border: 'none', borderRadius: 'var(--radius)',
+                  fontSize: 13, fontWeight: 500, cursor: isStopping ? 'default' : 'pointer' }}>
+                {isStopping ? 'Фиксирую лучший вариант…'
+                  : isRunning ? `■ Стоп — зафиксировать (${secs} с)`
+                  : isQueued ? '■ Убрать из очереди' : cfg.result ? '🔄 Пересчитать' : '▶ Выполнить раскрой'}
               </button>
               {configs.length > 1 && (
                 <button onClick={() => removeCfg(cfg.id)}
@@ -1567,7 +1750,18 @@ export default function NestingPage() {
             )}
 
             {/* Результат этой конфигурации */}
-            {cfg.result && canvasSheet && (
+            {cfg.result && cfg.sheetsData.length > 0 && canvasSheet && (() => {
+              const view = isRunning ? 'all' : cfg.view
+              const locked = isRunning || isQueued
+              const selPartObj = cfg.selPart >= 0 ? canvasSheet.placed[cfg.selPart] : null
+              const selBufObj = cfg.selBuf >= 0 ? cfg.buffer[cfg.selBuf] : null
+              const partName = p => `${(p.prefix ? p.prefix + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д')} ${Math.round(p.origY)}×${Math.round(p.origX)}`
+              const chip = (active, color) => ({
+                flexShrink: 0, padding: '4px 10px', borderRadius: 16, border: 'none', fontSize: 12, cursor: 'pointer',
+                background: active ? color : 'var(--bg2)', color: active ? 'white' : 'var(--text-muted)',
+              })
+              const openSheet = i => updateCfg(cfg.id, { activeSheet: i, view: 'sheet', selPart: -1, note: '' })
+              return (
               <div>
                 {cfg.result.algo === 'nfp' && (
                   <p style={{
@@ -1583,125 +1777,218 @@ export default function NestingPage() {
                   </p>
                 )}
                 <div style={{ background: 'transparent', borderRadius: 'var(--radius)', padding: 6, marginBottom: 6, border: '0.5px solid var(--border)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 500 }}>
-                      Лист {cfg.activeSheet + 1} из {cfg.sheetsData.length}
-                      {new URLSearchParams(window.location.search).get('nfp') === '1' && (
-                        <span style={{ marginLeft: 6, fontSize: 10, color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: 8 }}>
-                          NFP (эксперимент)
-                        </span>
-                      )}
-                    </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{canvasSheet.placed.length} дет.</span>
-                      <button onClick={() => downloadSheetDxf(cfg.activeSheet, cfg.sheetsData, `_k${idx + 1}`)}
-                        style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)',
-                          background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
-                        DXF
+                  {/* Переключатель вида: все листы / один лист для правки */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <div style={{ display: 'flex', background: 'var(--bg2)', borderRadius: 16, padding: 2 }}>
+                      <button onClick={() => updateCfg(cfg.id, { view: 'all', selPart: -1 })}
+                        style={{ ...chip(view === 'all', 'var(--blue)'), padding: '3px 10px' }}>
+                        Все листы · {cfg.sheetsData.length}
                       </button>
-                      <button onClick={() => setShowOffcuts(v => !v)}
-                        style={{ padding: '4px 10px', borderRadius: 20, border: `0.5px solid ${showOffcuts ? 'var(--teal)' : 'var(--border-md)'}`,
-                          background: showOffcuts ? 'var(--teal-light)' : 'transparent',
-                          color: showOffcuts ? 'var(--teal)' : 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
-                        {showOffcuts ? '✓ Обрезки' : 'Обрезки'}
+                      <button onClick={() => !locked && openSheet(cfg.activeSheet)} disabled={locked}
+                        style={{ ...chip(view === 'sheet', 'var(--blue)'), padding: '3px 10px', opacity: locked ? 0.5 : 1 }}>
+                        Лист {cfg.activeSheet + 1}
                       </button>
                     </div>
-                  </div>
-                  {showOffcuts && (
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                      <button onClick={() => setOffcutMode('cuts')}
-                        style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
-                          background: offcutMode === 'cuts' ? '#7B1FA2' : 'var(--bg2)',
-                          color: offcutMode === 'cuts' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
-                        Линии реза
-                      </button>
-                      <button onClick={() => setOffcutMode('manual')}
-                        style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
-                          background: offcutMode === 'manual' ? '#B85C00' : 'var(--bg2)',
-                          color: offcutMode === 'manual' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
-                        Вручную
-                      </button>
-                      {offcutMode === 'manual' && canvasSheet.manualOffcuts?.length > 0 && (
-                        <button onClick={() => onManualOffcutsCfg(cfg.id, cfg.activeSheet, [])}
-                          style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+                    <div style={{ flex: 1 }} />
+                    {view === 'sheet' && (
+                      <>
+                        <button onClick={() => downloadSheetDxf(cfg.activeSheet, cfg.sheetsData, `_k${idx + 1}`)}
+                          style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)',
                             background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
-                          Очистить ({canvasSheet.manualOffcuts.length})
+                          DXF
                         </button>
+                        <button onClick={() => setShowOffcuts(v => !v)}
+                          style={{ padding: '4px 10px', borderRadius: 20, border: `0.5px solid ${showOffcuts ? 'var(--teal)' : 'var(--border-md)'}`,
+                            background: showOffcuts ? 'var(--teal-light)' : 'transparent',
+                            color: showOffcuts ? 'var(--teal)' : 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
+                          {showOffcuts ? '✓ Обрезки' : 'Обрезки'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {view === 'all' ? (
+                    <>
+                      <SheetsOverview
+                        sheets={cfg.sheetsData}
+                        usableX={cfg.result.usableX} usableY={cfg.result.usableY}
+                        sheetL={order.sheet_length} sheetW={order.sheet_width}
+                        marginL={order.margin_left} marginT={order.margin_top} kerf={order.kerf_width}
+                        activeSheet={locked ? -1 : cfg.activeSheet}
+                        onPickSheet={locked ? null : openSheet}
+                        running={isRunning} bufferCount={cfg.buffer.length}
+                      />
+                      <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
+                        {isRunning
+                          ? 'Идёт поиск: при более плотной укладке детали переезжают на новые места · «Стоп» — зафиксировать лучший вариант'
+                          : 'Тап по листу — открыть для правки · щипок — масштаб'}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      {showOffcuts && (
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                          <button onClick={() => setOffcutMode('cuts')}
+                            style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
+                              background: offcutMode === 'cuts' ? '#7B1FA2' : 'var(--bg2)',
+                              color: offcutMode === 'cuts' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                            Линии реза
+                          </button>
+                          <button onClick={() => setOffcutMode('manual')}
+                            style={{ flex: 1, padding: '5px 4px', borderRadius: 'var(--radius)', border: 'none', fontSize: 11,
+                              background: offcutMode === 'manual' ? '#B85C00' : 'var(--bg2)',
+                              color: offcutMode === 'manual' ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>
+                            Вручную
+                          </button>
+                          {offcutMode === 'manual' && canvasSheet.manualOffcuts?.length > 0 && (
+                            <button onClick={() => onManualOffcutsCfg(cfg.id, cfg.activeSheet, [])}
+                              style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+                                background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
+                              Очистить ({canvasSheet.manualOffcuts.length})
+                            </button>
+                          )}
+                        </div>
                       )}
-                    </div>
+                      <SheetCanvas
+                        key={cfg.id}
+                        sheet={canvasSheet}
+                        usableX={cfg.result.usableX} usableY={cfg.result.usableY}
+                        sheetL={order.sheet_length} sheetW={order.sheet_width}
+                        marginL={order.margin_left} marginT={order.margin_top}
+                        kerf={order.kerf_width} colorMap={colorMap} details={details}
+                        onMove={(si, np) => onMoveCfg(cfg.id, si, np)} interactive={true} showOffcuts={showOffcuts}
+                        offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
+                        onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
+                        selectedIdx={cfg.selPart}
+                        onSelect={i => updateCfg(cfg.id, { selPart: i, note: '' })}
+                      />
+                      <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
+                        {showOffcuts && offcutMode === 'manual'
+                          ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
+                          : (showOffcuts && offcutMode === 'cuts'
+                            ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
+                            : 'Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · щипок — масштаб')}
+                      </p>
+                    </>
                   )}
-                  <SheetCanvas
-                    key={cfg.id}
-                    sheet={canvasSheet}
-                    usableX={cfg.result.usableX} usableY={cfg.result.usableY}
-                    sheetL={order.sheet_length} sheetW={order.sheet_width}
-                    marginL={order.margin_left} marginT={order.margin_top}
-                    kerf={order.kerf_width} colorMap={colorMap} details={details}
-                    onMove={(si, np) => onMoveCfg(cfg.id, si, np)} interactive={true} showOffcuts={showOffcuts}
-                    offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
-                    onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
-                  />
-                  <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
-                    {showOffcuts && offcutMode === 'manual'
-                      ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
-                      : (showOffcuts && offcutMode === 'cuts'
-                        ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                        : 'Двойной тап — поворот · удержи и тяни — перенос · щипок — масштаб')}
-                  </p>
                 </div>
 
                 {/* Переключатель листов — под картой, чтобы палец не закрывал карту */}
-                <div style={{ display: 'flex', gap: 5, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
-                  {cfg.sheetsData.map((sh, i) => (
-                    <button key={i} onClick={() => updateCfg(cfg.id, { activeSheet: i })}
-                      style={{ flexShrink: 0, padding: '4px 10px', borderRadius: 16, border: 'none',
-                        background: cfg.activeSheet === i ? 'var(--blue)' : 'var(--bg2)',
-                        color: cfg.activeSheet === i ? 'white' : 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
-                      Лист {i + 1} · {sh.placed.length}
-                    </button>
-                  ))}
-                </div>
+                {!locked && (
+                  <div style={{ display: 'flex', gap: 5, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                    {cfg.sheetsData.map((sh, i) => (
+                      <button key={i} onClick={() => openSheet(i)}
+                        style={chip(view === 'sheet' && cfg.activeSheet === i, 'var(--blue)')}>
+                        Лист {i + 1} · {sh.placed.length}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Буфер деталей — перенос деталей между листами */}
+                {!locked && (view === 'sheet' || cfg.buffer.length > 0) && (
+                  <div style={{ border: '1px dashed #B85C00', borderRadius: 'var(--radius)', padding: 8, marginBottom: 8, background: 'rgba(184,92,0,0.04)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: (cfg.buffer.length || selPartObj) ? 6 : 0 }}>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: '#B85C00' }}>Буфер · {cfg.buffer.length}</span>
+                      <div style={{ flex: 1 }} />
+                      {view === 'sheet' && selPartObj && (
+                        <button onClick={() => toBuffer(cfg.id)}
+                          style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: 'none', background: '#B85C00',
+                            color: 'white', fontSize: 12, fontWeight: 500, cursor: 'pointer', maxWidth: '70%',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          ⬇ В буфер: {partName(selPartObj)}
+                        </button>
+                      )}
+                    </div>
+                    {cfg.buffer.length > 0 && (
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: selBufObj ? 6 : 0 }}>
+                        {cfg.buffer.map((p, i) => (
+                          <button key={i} onClick={() => updateCfg(cfg.id, { selBuf: cfg.selBuf === i ? -1 : i, note: '' })}
+                            style={{ ...chip(cfg.selBuf === i, '#B85C00'), fontSize: 11, padding: '3px 9px' }}>
+                            {partName(p)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selBufObj && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => fromBuffer(cfg.id, false)} disabled={view !== 'sheet'}
+                          style={{ flex: 1, padding: 7, borderRadius: 'var(--radius)', border: 'none', fontSize: 12, fontWeight: 500,
+                            background: view === 'sheet' ? 'var(--blue)' : 'var(--bg2)', color: view === 'sheet' ? 'white' : 'var(--text-hint)',
+                            cursor: view === 'sheet' ? 'pointer' : 'default' }}>
+                          {view === 'sheet' ? `⬆ На лист ${cfg.activeSheet + 1}` : 'Откройте лист'}
+                        </button>
+                        <button onClick={() => fromBuffer(cfg.id, true)}
+                          style={{ flex: 1, padding: 7, borderRadius: 'var(--radius)', border: '0.5px solid var(--blue)', fontSize: 12,
+                            background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>
+                          + На новый лист
+                        </button>
+                      </div>
+                    )}
+                    {cfg.note && <p style={{ fontSize: 11, color: '#dc3545', margin: '6px 0 0' }}>{cfg.note}</p>}
+                    {!cfg.buffer.length && !selPartObj && (
+                      <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: 0 }}>
+                        Тап по детали на листе → «В буфер». Затем откройте другой лист и положите её туда.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Легенда — свёрнута, чтобы не растягивать страницу */}
-                <details style={{ marginBottom: 8 }}>
-                  <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 0' }}>
-                    Детали на листе {cfg.activeSheet + 1} ({canvasSheet.placed.length})
-                  </summary>
-                  {canvasSheet.placed.map((p, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '2px 0', borderBottom: '0.5px solid var(--border)' }}>
-                      <div style={{ width: 10, height: 10, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
-                      <span style={{ flex: 1 }}>{p.label}</span>
-                      <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
-                      {(p.rotation || p.rotated) && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻{p.rotation ?? 90}°</span>}
-                    </div>
-                  ))}
-                </details>
+                {view === 'sheet' && (
+                  <details style={{ marginBottom: 8 }}>
+                    <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 0' }}>
+                      Детали на листе {cfg.activeSheet + 1} ({canvasSheet.placed.length})
+                    </summary>
+                    {canvasSheet.placed.map((p, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '2px 0', borderBottom: '0.5px solid var(--border)' }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
+                        <span style={{ flex: 1 }}>{p.label}</span>
+                        <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
+                        {(p.rotation || p.rotated) && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻{p.rotation ?? 90}°</span>}
+                      </div>
+                    ))}
+                  </details>
+                )}
+
+                {cfg.buffer.length > 0 && (
+                  <p style={{ fontSize: 11, color: '#B85C00', margin: '0 0 6px' }}>
+                    В буфере {cfg.buffer.length} дет. — разложите их по листам, иначе сохранить раскрой нельзя.
+                  </p>
+                )}
 
                 {/* DXF · выбрать вариант · оформить — в одну строку */}
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => downloadNestingDxf(cfg.sheetsData, `_k${idx + 1}`)}
-                    title="Скачать DXF всех листов (для сверки)"
-                    style={{ flex: '0 0 auto', padding: '9px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
-                      background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
-                    ⬇ DXF
-                  </button>
-                  <button onClick={() => chooseCfg(cfg)} disabled={busyId === cfg.id || cfg.saved}
-                    title="Сохранить этот раскрой в заказ; остальные конфигурации остаются на экране"
-                    style={{ flex: 1, padding: 9, borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500,
-                      cursor: (busyId === cfg.id || cfg.saved) ? 'default' : 'pointer',
-                      border: '0.5px solid var(--teal)',
-                      background: cfg.saved ? '#e6f4ea' : 'var(--teal-light)', color: cfg.saved ? '#1e7e34' : 'var(--teal)' }}>
-                    {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение…' : 'Выбрать'}
-                  </button>
-                  <button onClick={() => submitOrder(cfg)} disabled={busyId === cfg.id}
-                    title="Сохранить раскрой и отправить заказ на производство"
-                    style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
-                      borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: busyId === cfg.id ? 'default' : 'pointer' }}>
-                    {busyId === cfg.id ? 'Отправка…' : '✓ Оформить'}
-                  </button>
-                </div>
+                {(() => {
+                  const blocked = locked || cfg.buffer.length > 0 || busyId === cfg.id
+                  return (
+                    <div style={{ display: 'flex', gap: 6, opacity: locked ? 0.5 : 1 }}>
+                      <button onClick={() => downloadNestingDxf(cfg.sheetsData.filter(sh => sh.placed.length), `_k${idx + 1}`)}
+                        disabled={locked}
+                        title="Скачать DXF всех листов (для сверки)"
+                        style={{ flex: '0 0 auto', padding: '9px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
+                          background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+                        ⬇ DXF
+                      </button>
+                      <button onClick={() => chooseCfg(cfg)} disabled={blocked || cfg.saved}
+                        title="Сохранить этот раскрой в заказ; остальные конфигурации остаются на экране"
+                        style={{ flex: 1, padding: 9, borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500,
+                          cursor: (blocked || cfg.saved) ? 'default' : 'pointer',
+                          border: '0.5px solid var(--teal)',
+                          background: cfg.saved ? '#e6f4ea' : 'var(--teal-light)', color: cfg.saved ? '#1e7e34' : 'var(--teal)' }}>
+                        {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение…' : 'Выбрать'}
+                      </button>
+                      <button onClick={() => submitOrder(cfg)} disabled={blocked}
+                        title="Сохранить раскрой и отправить заказ на производство"
+                        style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
+                          borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
+                        {busyId === cfg.id ? 'Отправка…' : '✓ Оформить'}
+                      </button>
+                    </div>
+                  )
+                })()}
               </div>
-            )}
+              )
+            })()}
           </div>
         )}
       </div>
