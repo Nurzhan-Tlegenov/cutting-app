@@ -347,13 +347,12 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
 
         const effectiveContact = contact + pocketBonus + interlockBonus
         if (direction === 'along_y') {
-          // Колонки слева направо (X=anchor), внутри колонки — контакт, тайбрейкер Y
-          const anchorX = ox + bb0.minX, posY = oy + bb0.minY
-          score = anchorX * 1e8 + (-effectiveContact) * 1e4 + posY
+          // along_y: детали прижимаются к низу (min Y) — gravity потом дожмёт
+          // envMaxX ограничивает разброс вправо (прижим к левому краю)
+          score = -effectiveContact * 1e7 + envMaxX * 1e4 + (oy + bb0.minY) * 1e3 + (ox + bb0.minX)
         } else if (direction === 'along_x') {
-          // Ряды снизу вверх (Y=anchor), внутри ряда — контакт, тайбрейкер X
-          const anchorY = oy + bb0.minY, posX = ox + bb0.minX
-          score = anchorY * 1e8 + (-effectiveContact) * 1e4 + posX
+          // along_x: детали прижимаются к левому краю (min X) — gravity дожмёт
+          score = -effectiveContact * 1e7 + envMaxY * 1e4 + (ox + bb0.minX) * 1e3 + (oy + bb0.minY)
         } else {
           score = -effectiveContact * 1e6 + envMaxX * envMaxY * 1e-3
         }
@@ -1257,6 +1256,8 @@ const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, 
   // Для интерлокированных деталей они упираются в соседа и не сдвигаются —
   // поэтому интерлокинг сохраняется, а зазоры между не-касающимися деталями закрываются.
   const rawResult = buildResult(best)
+  // Gravity: прижимаем детали к нулю выбранной стороны.
+  // gravityPolygons скользит каждую деталь до касания с соседом.
   rawResult.sheets = rawResult.sheets.map(sheet => {
     try {
       const compacted = gravityPolygons(sheet.placed, direction, kerf)
