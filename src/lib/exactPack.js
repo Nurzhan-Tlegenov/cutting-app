@@ -657,15 +657,43 @@ async function polishLast(sheet, ctx, deadline) {
 // 0.962–0.970 — при 0.97 пара не собиралась, и 2 детали не помещались на лист.
 const PAIR_MIN_DENSITY = 0.95
 
-function buildPair(inst, kerf, usableX, usableY, dir = 'auto', deterministic = false) {
-  const A = inst.variants[0]
+// Кэш собранных пар (по форме детали): форма → найденные пары
+const PAIR_CACHE = new Map()
+function pairCacheKey(inst, kerf, usableX, usableY) {
+  const v = inst.variants.map(x => x.angle + ':' + x.polygon.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(';')).join('|')
+  return `${kerf}|${usableX}|${usableY}|${v}`
+}
+
+// A — положение ПЕРВОЙ детали пары. Раньше всегда бралось 0°: у детали с
+// вырезом в левом нижнем углу (Г, ступенька) вторая деталь при этом должна
+// была бы заехать ниже края листа — пара не собиралась вовсе (выходило
+// «рядом», 71% заполнения), и 10 таких деталей искались минутами. Теперь
+// перебираются все допустимые положения первой детали (0°/180°, а при
+// разрешённом вращении и 90°/270°).
+// limX/limY — сборка на узкой «полосе»: по высоте детали (второй остаётся
+// встать только сбоку — пара «лёжа») или по ширине (только сверху — «стоя»).
+// Без этого на большом листе вторая деталь почти всегда ложилась сверху, и
+// пара «лёжа» находилась лишь случайно (ступенька 900×500: то 3 листа, то 5).
+function buildPair(inst, kerf, usableX, usableY, dir = 'auto', deterministic = false, A = inst.variants[0], limX = usableX, limY = usableY) {
   const areaA = polyArea(A.polygon)
-  const sheet = newSheet(usableX, usableY)
+  const sheet = newSheet(limX, limY)
   const spA = simplified(A)
   const eA = makeEntry(spA.poly.map(p => [p[0] + kerf, p[1] + kerf]), spA.pad)
   commit(sheet, inst, { entry: eA, variant: A, tx: kerf, ty: kerf })
-  const r = tryInsert(sheet, inst, usableX, usableY, kerf, dir, true, deterministic)
+  const r = tryInsert(sheet, inst, limX, limY, kerf, dir, true, deterministic)
   if (!r) return null
+  // Прижать пару к углу: первая деталь стояла с отступом kerf от угла (чтобы
+  // вторая могла заехать ей в вырез), вторая легла на «пол» — у лежачей пары
+  // выходил перекос по высоте на kerf (704 вместо 700). В сетке из 3 рядов это
+  // съедало 12 мм, и второй ряд мелких деталей сверху не помещался на 3 мм.
+  // Сдвигаем обе детали к нулю по обеим осям, сохраняя зазор kerf между ними.
+  const pairEntries = [eA, r.entry]
+  const a0 = [eA.dx || 0, eA.dy || 0], b0 = [r.entry.dx || 0, r.entry.dy || 0] // сдвиги до прижатия
+  for (let pass = 0; pass < 4; pass++) {
+    let moved = false
+    for (const e of pairEntries) for (const axis of ['y', 'x']) if (slideEntry(e, pairEntries, axis, kerf)) moved = true
+    if (!moved) break
+  }
   const minX = Math.min(eA.bb.minX, r.entry.bb.minX), minY = Math.min(eA.bb.minY, r.entry.bb.minY)
   const maxX = Math.max(eA.bb.maxX, r.entry.bb.maxX), maxY = Math.max(eA.bb.maxY, r.entry.bb.maxY)
   const W = maxX - minX, H = maxY - minY
@@ -674,8 +702,8 @@ function buildPair(inst, kerf, usableX, usableY, dir = 'auto', deterministic = f
   return {
     density, W, H, matArea: 2 * areaA,
     parts: [
-      { variant: A, ox: kerf - minX, oy: kerf - minY },
-      { variant: r.variant, ox: r.tx - minX, oy: r.ty - minY },
+      { variant: A, ox: kerf + (eA.dx || 0) - a0[0] - minX, oy: kerf + (eA.dy || 0) - a0[1] - minY },
+      { variant: r.variant, ox: r.tx + (r.entry.dx || 0) - b0[0] - minX, oy: r.ty + (r.entry.dy || 0) - b0[1] - minY },
     ],
   }
 }
@@ -694,7 +722,7 @@ function planGridTiling(tallWH, wideWH, kerf, usableX, usableY, need) {
   const maxTall = tallWH ? Math.floor((usableX + kerf) / (tallWH.w + kerf)) : 0
   for (let nt = 0; nt <= maxTall; nt++) {
     if (nt === 0 && !wideWH) continue
-    const usedW = nt * (tallWH.w + kerf)
+    const usedW = tallWH ? nt * (tallWH.w + kerf) : 0 // пары бывают только «лёжа» — тогда стоячих колонок нет
     const rowsTall = tallWH ? Math.floor((usableY + kerf) / (tallWH.h + kerf)) : 0
     const tallCap = nt * rowsTall
     let nw = 0, rowsWide = 0, wideCap = 0
@@ -761,12 +789,22 @@ function placeGridTiling(sheet, pairInstances, kerf, tallWH, wideWH, plan) {
 // возвращаются в pool нетронутыми, для обычной укладки следующим листом).
 function buildGridTilingSheet(pairInstances, kerf, usableX, usableY, otherGroups = []) {
   if (pairInstances.length < 2) return null
-  const shapes = pairInstances[0].variants.filter(v => v.angle === 0)
-  const tallWH = shapes.find(v => v.h > v.w)
-  const wideWH = shapes.find(v => v.w > v.h)
-  if (!tallWH && !wideWH) return null
-  const plans = planGridTiling(tallWH, wideWH, kerf, usableX, usableY, pairInstances.length)
-  if (!plans.length || plans[0].cap < 2) return null
+  // Размеры пар (без повторов). Раньше делились на «стоячую» (h > w) и
+  // «лежачую» (w > h) и брались первые попавшиеся — у ступеньки 900×500 обе
+  // пары шире своей высоты (904×754 и 1354×504), в сетку шла только одна, и
+  // если это была 904×754 — на лист ложилось 3 пары вместо 5. Теперь
+  // перебираются все сочетания: блок колонок из пар A + блок колонок из пар B
+  // (или один блок) — выбирается то, что кладёт на лист больше деталей.
+  const shapes = []
+  pairInstances[0].variants.filter(v => v.angle === 0).forEach(v => {
+    if (!shapes.some(q => Math.abs(q.w - v.w) < 1 && Math.abs(q.h - v.h) < 1)) shapes.push(v)
+  })
+  if (!shapes.length) return null
+  const combos = []
+  for (const a of shapes) {
+    combos.push([a, null])
+    for (const b of shapes) if (b !== a) combos.push([a, b])
+  }
   // Разные планы раскладки пар оставляют РАЗНЫЙ остаток места сверху — план,
   // идеальный для самих пар (cap максимален, waste=0), может оставлять
   // слишком низкую полосу для другого вида деталей (именно так это и
@@ -775,22 +813,20 @@ function buildGridTilingSheet(pairInstances, kerf, usableX, usableY, otherGroups
   // (пары + всё остальное сеткой в остаток) — берём максимум, а не то, что
   // выглядит компактнее только для одних пар.
   let best = null, bestTotal = -1
-  for (const plan of plans.slice(0, 12)) {
-    const sheet = newSheet(usableX, usableY)
-    const used = Math.min(plan.cap, pairInstances.length)
-    placeGridTiling(sheet, pairInstances.slice(0, used), kerf, tallWH, wideWH, plan)
-    // used считаем в РЕАЛЬНЫХ деталях (пара = 2 детали), иначе план с
-    // меньшим числом пар, но освобождающий место под мелкие, всегда
-    // проигрывал бы «плотному по парам» плану, даже когда по факту кладёт
-    // на лист больше деталей суммарно.
-    // used считаем в РЕАЛЬНЫХ деталях (пара = 2 детали) и по факту того, что
-    // реально легло (включая только что доставленные выше) — иначе план с
-    // меньшим числом пар в чистой сетке, но освобождающий место под мелкие,
-    // всегда проигрывал бы «плотному по парам» плану, даже когда по факту
-    // кладёт на лист больше деталей суммарно.
-    let total = sheet.meta.length * 2
-    for (const g of otherGroups) total += estimateStripFit(sheet, g, kerf, usableX, usableY)
-    if (total > bestTotal) { bestTotal = total; best = sheet }
+  for (const [tallWH, wideWH] of combos) {
+    const plans = planGridTiling(tallWH, wideWH, kerf, usableX, usableY, pairInstances.length)
+    if (!plans.length || plans[0].cap < 2) continue
+    for (const plan of plans.slice(0, 12)) {
+      const sheet = newSheet(usableX, usableY)
+      const used = Math.min(plan.cap, pairInstances.length)
+      placeGridTiling(sheet, pairInstances.slice(0, used), kerf, tallWH, wideWH, plan)
+      // used считаем в РЕАЛЬНЫХ деталях (пара = 2 детали) — иначе план с
+      // меньшим числом пар, но освобождающий место под мелкие, всегда
+      // проигрывал бы «плотному по парам» плану.
+      let total = sheet.meta.length * 2
+      for (const g of otherGroups) total += estimateStripFit(sheet, g, kerf, usableX, usableY)
+      if (total > bestTotal) { bestTotal = total; best = sheet }
+    }
   }
   return best
 }
@@ -864,13 +900,42 @@ function tileIntoPairs(instances, kerf, usableX, usableY) {
       // Выбор между «почти равноценными» кандидатами внутри tryInsert случайный
       // (нужен поиску порядка), а для пары нужны ОБЕ ориентации стабильно —
       // поэтому несколько детерминированных попыток и несколько случайных.
+      // Перебираем ВСЕ попытки (обе стороны первой детали) и оставляем две
+      // лучшие по плотности пары РАЗНЫХ размеров (обычно «стоя» и «лёжа»).
+      // Раньше брались первые две разные — и если случайные попытки не
+      // натыкались на вторую, сетка пар теряла её.
       const dirs = ['auto', 'along_y', 'along_x']
-      for (let attempt = 0; attempt < 12 && pairs.length < 2; attempt++) {
-        const p = buildPair(first, kerf, usableX, usableY, dirs[attempt % 3], attempt < 3)
-        if (!p || p.density < PAIR_MIN_DENSITY) continue
-        if (pairs.some(q => Math.abs(q.W - p.W) < 2 && Math.abs(q.H - p.H) < 2)) continue
-        pairs.push(p)
+      const found = []
+      const add = p => {
+        if (!p || p.density < PAIR_MIN_DENSITY) return
+        const same = found.findIndex(q => Math.abs(q.W - p.W) < 2 && Math.abs(q.H - p.H) < 2)
+        if (same < 0) found.push(p)
+        else if (p.density > found[same].density + 1e-4) found[same] = p
       }
+      // Результат зависит только от формы детали, реза и размера листа —
+      // запоминаем: в онлайн-раскрое раунды повторяются, пересчёт не нужен.
+      const cacheKey = pairCacheKey(first, kerf, usableX, usableY)
+      const cached = PAIR_CACHE.get(cacheKey)
+      if (cached) found.push(...cached)
+      else {
+        for (const A of first.variants) {
+          // 3 детерминированные попытки + 6 случайных (случайный выбор среди
+          // равноценных мест находит вложения, которые детерминированный пропускает)
+          for (let attempt = 0; attempt < 9; attempt++) add(buildPair(first, kerf, usableX, usableY, dirs[attempt % 3], attempt < 3, A))
+          // Полоса по высоте детали (пара «лёжа») и по ширине («стоя») — на
+          // большом листе вторая деталь почти всегда ложится сверху, и пара
+          // «лёжа» находилась лишь случайно (ступенька 900×500: то 3 листа, то 5).
+          // Полоса — с запасом на ступенчатое вложение (до 35% размера детали).
+          for (const f of [0.02, 0.35]) {
+            const sy = Math.min(usableY, A.h + 2 * kerf + A.h * f), sx = Math.min(usableX, A.w + 2 * kerf + A.w * f)
+            add(buildPair(first, kerf, usableX, usableY, 'along_x', true, A, Math.min(usableX, 2 * A.w + 4 * kerf), sy))
+            add(buildPair(first, kerf, usableX, usableY, 'along_y', true, A, sx, Math.min(usableY, 2 * A.h + 4 * kerf)))
+          }
+        }
+        PAIR_CACHE.set(cacheKey, found.slice())
+        if (PAIR_CACHE.size > 50) PAIR_CACHE.delete(PAIR_CACHE.keys().next().value)
+      }
+      found.sort((x, y) => y.density - x.density).slice(0, 2).forEach(p => pairs.push(p))
     }
     if (!pairs.length) { out.push(...group); continue }
     const rotatable = first.variants.length > 2
@@ -923,10 +988,16 @@ export function expandPlacement(m) {
  * sheets[i].meta[k] = { inst, variant, x, y } (x,y — сдвиг локального контура).
  */
 export async function packExact({ instances, kerf, usableX, usableY, direction, deadline }) {
+  // Сборка пар (один раз на форму детали, дальше из кэша) не должна съедать
+  // время самой укладки: на слабом телефоне первый раз она занимает секунды,
+  // и раньше укладка не успевала вернуть ничего. Сдвигаем срок на это время
+  // (не больше 3 с).
+  const tp0 = Date.now()
+  instances = tileIntoPairs(instances, kerf, usableX, usableY)
+  deadline += Math.min(3000, Date.now() - tp0)
   const t0 = Date.now()
   const T = Math.max(1, deadline - t0)
   const searchDeadline = t0 + T * 0.3 // остальное — «дожим» листов
-  instances = tileIntoPairs(instances, kerf, usableX, usableY)
   instances.forEach(i => { i.polyArea = i.matArea ?? polyArea(i.variants[0].polygon) })
   // «Плотность» детали = площадь контура / площадь габарита. Сплошные
   // прямоугольники укладываются почти без потерь, вогнутые (Г, Т, дуги) —
@@ -1006,9 +1077,16 @@ export async function packExact({ instances, kerf, usableX, usableY, direction, 
   let front = null, frontStat = null, frontOrder = null
   let laterIds = new Set()
   const consider = async (order, dl, stable = false, seedSheets = null) => {
+    // состав листа-заготовки — ДО укладки (packOrder дописывает детали прямо в него)
+    const seedInsts = seedSheets ? seedSheets.flatMap(sh => sh.meta.map(m => m.inst)) : null
     const sheets = await packOrder(order, usableX, usableY, kerf, direction, dl, stable, seedSheets)
     if (!sheets) return
     const st = stat(sheets)
+    // Порядок — ПОЛНЫЙ: у варианта с готовым листом из сетки пар order содержит
+    // только детали, не вошедшие в этот лист. Раньше он запоминался как
+    // лучший порядок, а дальше перемешивался и укладывался уже без готового
+    // листа — все детали с сеточного листа молча пропадали (26 деталей → 16).
+    if (seedInsts) order = seedInsts.concat(order)
     if (exactBetter(st, bestStat)) {
       best = sheets; bestStat = st; bestOrder = order
       laterIds = new Set(sheets.slice(1).flatMap(sh => sh.meta.map(m => m.inst.id)))

@@ -1083,7 +1083,11 @@ export async function packTrueShape({
       instances, kerf, usableX, usableY, direction,
       deadline: Date.now() + Math.max(2500, totalBudgetMs * 0.8),
     })
-    if (exact && exactBetter(exact.stat, baseStat)) {
+    // Страховка: точная укладка принимается, только если на листах ровно
+    // столько деталей, сколько в заказе — ни одна не потеряна и не задвоена.
+    const exactCount = exact ? exact.sheets.reduce((a, sh) => a + sh.meta.flatMap(expandPlacement).length, 0) : 0
+    if (exact && exactCount !== totalInstances) console.warn(`Точная укладка отброшена: деталей ${exactCount} из ${totalInstances}`)
+    if (exact && exactCount === totalInstances && exactBetter(exact.stat, baseStat)) {
       resultSheets = exact.sheets.map((sh, si) => ({
         index: si,
         freeRects: [],
