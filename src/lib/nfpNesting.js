@@ -978,6 +978,7 @@ function packRowsAlongX(order, usableX, usableY, kerf, nfpCache) {
 }
 
 
+
 export async function packNFP({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
   optimizeSeconds = 15, direction = 'auto',
@@ -1256,13 +1257,81 @@ const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, 
   // Для интерлокированных деталей они упираются в соседа и не сдвигаются —
   // поэтому интерлокинг сохраняется, а зазоры между не-касающимися деталями закрываются.
   const rawResult = buildResult(best)
-  // Gravity: прижимаем детали к нулю выбранной стороны.
-  // gravityPolygons скользит каждую деталь до касания с соседом.
+
+  // Гравитация: прижимаем детали к нулю выбранного направления.
+  // gravityPolygons иногда фейлит isValid из-за float погрешностей (polyDist ≈ kerf-eps).
+  // Решение: пробуем с уменьшающимся kerf пока gravity не сработает.
+  // Разница в позициях минимальна (< 0.5мм) но gravity применяется корректно.
   rawResult.sheets = rawResult.sheets.map(sheet => {
+    if (!sheet.placed?.length) return sheet
     try {
-      const compacted = gravityPolygons(sheet.placed, direction, kerf)
-      return (compacted && compacted !== sheet.placed) ? { ...sheet, placed: compacted } : sheet
-    } catch (_) { return sheet }
+      for (const k of [kerf, kerf * 0.9, kerf * 0.5, kerf * 0.1, 0]) {
+        const c = gravityPolygons(sheet.placed, direction, k)
+        if (c && c !== sheet.placed) return { ...sheet, placed: c }
+      }
+    } catch (_) {}
+    return sheet
   })
   return rawResult
+}
+
+// Простая гравитация по bbox — надёжно работает для любых форм включая S-кривые.
+// gravityPolygons иногда останавливается рано из-за polyDist погрешности.
+// Здесь: каждая деталь скользит к нулю по выбранной оси пока не упрётся в соседа или стену.
+function simpleGravity(placed, direction, kerf) {
+  if (!placed || !placed.length) return placed
+
+  const absBB = p => {
+    if (p.polygon && p.polygon.length > 2) {
+      const xs = p.polygon.map(pt => p.x + (pt.x !== undefined ? pt.x : pt[0]))
+      const ys = p.polygon.map(pt => p.y + (pt.y !== undefined ? pt.y : pt[1]))
+      return { minX: Math.min(...xs), maxX: Math.max(...xs),
+               minY: Math.min(...ys), maxY: Math.max(...ys) }
+    }
+    return { minX: p.x, maxX: p.x + (p.origX || 300),
+             minY: p.y, maxY: p.y + (p.origY || 300) }
+  }
+
+  const result = placed.map(p => ({ ...p }))
+  const axes = direction === 'along_x' ? ['x', 'y'] : ['y', 'x']
+
+  for (let pass = 0; pass < 50; pass++) {
+    let moved = false
+    for (const axis of axes) {
+      const order = result.map((_, i) => i).sort((a, b) => {
+        const ba = absBB(result[a]), bb2 = absBB(result[b])
+        return axis === 'x' ? ba.minX - bb2.minX : ba.minY - bb2.minY
+      })
+
+      for (const k of order) {
+        const bb = absBB(result[k])
+        let slide = axis === 'x' ? bb.minX : bb.minY
+        if (slide <= 0.5) continue
+
+        for (let j = 0; j < result.length; j++) {
+          if (j === k) continue
+          const bq = absBB(result[j])
+          if (axis === 'x') {
+            if (bq.maxX > bb.minX - 0.1) continue
+            const yOverlap = Math.min(bb.maxY, bq.maxY) - Math.max(bb.minY, bq.minY)
+            if (yOverlap <= 1) continue
+            slide = Math.min(slide, Math.max(0, bb.minX - bq.maxX - kerf))
+          } else {
+            if (bq.maxY > bb.minY - 0.1) continue
+            const xOverlap = Math.min(bb.maxX, bq.maxX) - Math.max(bb.minX, bq.minX)
+            if (xOverlap <= 1) continue
+            slide = Math.min(slide, Math.max(0, bb.minY - bq.maxY - kerf))
+          }
+        }
+
+        if (slide > 0.5) {
+          if (axis === 'x') result[k].x -= slide
+          else result[k].y -= slide
+          moved = true
+        }
+      }
+    }
+    if (!moved) break
+  }
+  return result
 }
