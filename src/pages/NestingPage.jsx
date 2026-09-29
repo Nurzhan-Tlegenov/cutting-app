@@ -1354,11 +1354,11 @@ export default function NestingPage() {
       onIslandProgress: (res, island, global) => { if (jobsRef.current[cfg.id] === job) recordIsland(hist, res, island, global) },
       onProgress: (res, island) => {
         if (jobsRef.current[cfg.id] !== job) return
-        recordEvent(hist, res, island, 'improve')
+        recordEvent(hist, res, island, res.rough ? 'rough' : 'improve')
         updateCfg(cfg.id, c => {
           const sheetsData = toSheets(res)
           return {
-            result: stamp(res), sheetsData, saved: false,
+            result: stamp(res), sheetsData, saved: false, rough: !!res.rough,
             improvements: c.improvements + 1, iter: res.iter || c.iter, lastImproveAt: Date.now(),
             activeSheet: Math.min(c.activeSheet, sheetsData.length - 1),
           }
@@ -1375,7 +1375,7 @@ export default function NestingPage() {
       updateCfg(cfg.id, c => {
         const sheetsData = toSheets(res)
         return {
-          status: 'done', doneAt: Date.now(), result: stamp(res), saved: false, sheetsData,
+          status: 'done', doneAt: Date.now(), result: stamp(res), saved: false, sheetsData, rough: false,
           activeSheet: Math.min(c.activeSheet, sheetsData.length - 1),
           history: hist, histPos: hist.events.length - 1,
         }
@@ -1736,7 +1736,7 @@ export default function NestingPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
           <span style={{ fontSize: 12, fontWeight: 500 }}>Хронология</span>
           <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>
-            {pos + 1} из {events.length} · {cur.kind === 'final' ? 'итог' : fmtT(cur.t)}
+            {pos + 1} из {events.length} · {cur.kind === 'final' ? 'итог' : cur.kind === 'rough' ? 'черновик' : fmtT(cur.t)}
           </span>
           <div style={{ flex: 1 }} />
           <button onClick={() => playing ? (stopPlay(), updateCfg(cfg.id, {})) : playHistory(cfg.id, pos, last)} style={btn}>
@@ -1781,9 +1781,16 @@ export default function NestingPage() {
     let statusLine = 'не считался'
     if (isQueued) statusLine = 'в очереди'
     else if (isStopping) statusLine = 'фиксирую лучший вариант…'
-    else if (isRunning) statusLine = s
-      ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)} · улучшений ${cfg.improvements}${cfg.islands > 1 ? ` · потоков ${cfg.islands}` : ''}`
-      : `считаю… ${secs} с${cfg.islands > 1 ? ` · потоков ${cfg.islands}` : ''}`
+    else if (isRunning) {
+      // Сколько уже нет улучшений — подсказка, что можно жать «Стоп» без потери качества
+      const idle = cfg.lastImproveAt ? Math.floor((Date.now() - cfg.lastImproveAt) / 1000) : 0
+      statusLine = s
+        ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}`
+          + (cfg.rough ? ' · черновик, уточняю' : ` · улучшений ${cfg.improvements}`)
+          + (!cfg.rough && idle >= 20 ? ` · без улучшений ${idle} с` : '')
+          + (cfg.islands > 1 ? ` · потоков ${cfg.islands}` : '')
+        : `считаю… ${secs} с${cfg.islands > 1 ? ` · потоков ${cfg.islands}` : ''}`
+    }
     else if (cfg.status === 'error') statusLine = 'ошибка расчёта'
     else if (s) statusLine = `${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${secs != null ? ` · ${secs} с` : ''}`
     else if (cfg.result) statusLine = 'результат загружен'
