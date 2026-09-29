@@ -120,6 +120,8 @@ export async function runNesting({
   optimizeSeconds = 12,           // сколько секунд гонять поиск плотной укладки — из настроек раскроя
   cuttingMethod = 'nesting',      // 'nesting' (фрезер, ЧПУ — свободная укладка) | 'guillotine' (форматно-раскроечный станок — только сквозные резы)
   algo = 'raster',                // 'raster' (основной, проверенный) | 'nfp' (экспериментальный, точный по контуру — ТОЛЬКО для фрезера, см. ниже)
+  onProgress = null,              // онлайн-раскрой: вызывается при каждом улучшении ({ sheets, iter }) — не чаще раза в ~300 мс
+  shouldStop = null,              // онлайн-раскрой: () => true — пользователь нажал «Стоп», поиск заканчивается и результат доводится до финала
 }) {
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
@@ -151,6 +153,15 @@ export async function runNesting({
 
   const basePieces = buildPieces(details, kerf, direction)
 
+  // Стяжка к нулю листа с зазором ровно kerf (не меняет входные листы)
+  const gravityAll = list => list.map(sheet => {
+    const placed = gravityRects(sheet.placed, direction)
+    if (placed === sheet.placed) return sheet
+    const next = { ...sheet, placed, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+    placed.forEach(pp => { split(next, pp); prune(next) })
+    return next
+  })
+
   basePieces.forEach(p => {
     const area = p.origX * p.origY
     const minSide = Math.min(p.origX, p.origY)
@@ -180,6 +191,19 @@ export async function runNesting({
 
   let best = null
   let bestOrder = null
+  // ─── Онлайн-показ: промежуточный лучший результат уходит на экран уже со
+  // стяжкой к нулю листа (как финальный), чтобы пользователь видел реальное
+  // сжатие укладки, а не сырую раскладку перед стяжкой.
+  let iter = 0, dirty = false, lastReport = 0
+  const stopNow = () => !!(shouldStop && shouldStop())
+  const maybeReport = (force = false) => {
+    if (!onProgress || !best || (!dirty && !force)) return
+    const now = Date.now()
+    if (!force && now - lastReport < 300) return
+    lastReport = now; dirty = false
+    const sheets = cuttingMethod !== 'guillotine' ? gravityAll(best.sheets) : best.sheets
+    onProgress({ sheets, iter })
+  }
   const bestPerMode = {}     // лучший порядок ОТДЕЛЬНО по каждому режиму — не только глобальный лидер
   const bestStatPerMode = {}
 
@@ -192,7 +216,8 @@ export async function runNesting({
 
   const tryAttempt = (order, mode) => {
     const result = packAndEval(order, mode)
-    if (!best || better(result.stat, best.stat)) { best = result; bestOrder = { order, mode } }
+    iter++
+    if (!best || better(result.stat, best.stat)) { best = result; bestOrder = { order, mode }; dirty = true }
     if (!bestStatPerMode[mode] || better(result.stat, bestStatPerMode[mode])) {
       bestStatPerMode[mode] = result.stat
       bestPerMode[mode] = order
@@ -206,8 +231,10 @@ export async function runNesting({
   for (let i = 0; i < RANDOM_ATTEMPTS; i++) {
     const shuffled = shuffle(basePieces.slice())
     for (const mode of scoringModes) tryAttempt(shuffled, mode)
-    if (i % 20 === 0) await new Promise(r => setTimeout(r, 0))
+    if (i % 20 === 0) { maybeReport(); await new Promise(r => setTimeout(r, 0)) }
+    if (stopNow()) break
   }
+  maybeReport(true)
 
   // Генетический алгоритм поверх ЕДИНОЙ популяции особей "порядок + режим".
   // Раньше время бюджета делилось ПОРОВНУ между 4 режимами (MaxRects/Guillotine
@@ -238,11 +265,13 @@ export async function runNesting({
 
   let evaluated = population.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
   evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
-  if (better(evaluated[0].stat, best.stat)) best = evaluated[0]
+  if (better(evaluated[0].stat, best.stat)) { best = evaluated[0]; dirty = true }
 
   const startTime = Date.now()
   let gen = 0
-  while (Date.now() - startTime < HILL_CLIMB_BUDGET_MS) {
+  // Онлайн-режим (shouldStop задан): бюджет времени задаёт вызывающий
+  // (обычно «бесконечный»), поиск идёт до нажатия «Стоп»
+  while (Date.now() - startTime < HILL_CLIMB_BUDGET_MS && !stopNow()) {
     gen++
     // Элитизм: лучшие особи переходят в следующее поколение без изменений (вместе со своим режимом).
     const nextGen = evaluated.slice(0, ELITE_COUNT).map(e => ({ order: e.order, mode: e.mode }))
@@ -259,10 +288,11 @@ export async function runNesting({
       nextGen.push({ order: childOrder, mode: childMode })
     }
     evaluated = nextGen.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
+    iter += evaluated.length
     evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
-    if (better(evaluated[0].stat, best.stat)) best = evaluated[0]
+    if (better(evaluated[0].stat, best.stat)) { best = evaluated[0]; dirty = true }
     // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт.
-    if (gen % YIELD_EVERY_GEN === 0) await new Promise(r => setTimeout(r, 0))
+    if (gen % YIELD_EVERY_GEN === 0) { maybeReport(); await new Promise(r => setTimeout(r, 0)) }
   }
 
   // Финальная "интенсификация": компакция выше по коду всегда обходит детали
@@ -276,15 +306,7 @@ export async function runNesting({
   // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
   // Для форматно-раскроечного станка не применяется: там раскладка обязана
   // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
-  if (cuttingMethod !== 'guillotine') {
-    best.sheets = best.sheets.map(sheet => {
-      const placed = gravityRects(sheet.placed, direction)
-      if (placed === sheet.placed) return sheet
-      const next = { ...sheet, placed, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
-      placed.forEach(pp => { split(next, pp); prune(next) })
-      return next
-    })
-  }
+  if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(best.sheets)
 
   return { sheets: best.sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }
