@@ -1248,5 +1248,16 @@ const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, 
   // исторически шло первым.
   if (better(autoBestStat, bestStat)) { best = autoBest; bestStat = autoBestStat }
 
-  return buildResult(best)
+  // Стяжка к нулю: прижимаем детали в выбранную сторону как в основном алгоритме.
+  // gravityPolygons скользит каждую деталь к нулю до касания с соседом (с зазором kerf).
+  // Для интерлокированных деталей они упираются в соседа и не сдвигаются —
+  // поэтому интерлокинг сохраняется, а зазоры между не-касающимися деталями закрываются.
+  const rawResult = buildResult(best)
+  rawResult.sheets = rawResult.sheets.map(sheet => {
+    try {
+      const compacted = gravityPolygons(sheet.placed, direction, kerf)
+      return (compacted && compacted !== sheet.placed) ? { ...sheet, placed: compacted } : sheet
+    } catch (_) { return sheet }
+  })
+  return rawResult
 }
