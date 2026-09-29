@@ -481,7 +481,11 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx])
 
   const PADDING = 8
-  const canvasW = (typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360) * zoom
+  // Лист не выше ~⅔ экрана — над ним остаются кнопки, под ним буфер и листы
+  const fitW = typeof window !== 'undefined'
+    ? Math.min(window.innerWidth - 32, 480, (Math.max(260, window.innerHeight * 0.64) - PADDING * 2) * sheetW / sheetL + PADDING * 2)
+    : 360
+  const canvasW = fitW * zoom
   const sc = (canvasW - PADDING * 2) / sheetW
   const canvasH = Math.round(sc * sheetL) + PADDING * 2
   // При увеличении холст большой — ограничиваем плотность пикселей, чтобы не упереться в лимит памяти телефона
@@ -1023,7 +1027,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   return (
     <div style={{ position: 'relative' }}>
       <div ref={wrapRef}
-        style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8 }}>
+        style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8,
+          display: zoom > 1 ? 'block' : 'flex', justifyContent: 'center' }}>
         <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
           style={{ width: canvasW, height: 'auto', aspectRatio: `${canvasW} / ${canvasH}`, maxWidth: zoom > 1 ? 'none' : '100%', borderRadius: 8, display: 'block', touchAction: interactive ? (zoom > 1 ? 'pan-x pan-y' : 'none') : 'auto' }}
           onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
@@ -1194,7 +1199,7 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
       }
       // Воркер не поднялся (старый браузер) — последний упавший уводит расчёт в основной поток
       w.onerror = () => { w.onerror = null; onIslandFail('', best ? null : fallback) }
-      w.postMessage({ type: 'start', params, live })
+      w.postMessage({ type: 'start', params, live, island: i, islands: workers.length })
     })
   })
   return {
@@ -1829,6 +1834,9 @@ export default function NestingPage() {
 
         {cfg.open && (
           <div style={{ padding: '8px 10px 10px', borderTop: '0.5px solid var(--border)' }}>
+            {/* Настройки — только когда не считаем (во время расчёта менять их нельзя),
+                так кнопка «Стоп», время и карта листов помещаются на экран */}
+            {!(isRunning || isQueued) && (<>
             {/* Направление укладки */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               {DIR_OPTIONS.map(([val, label]) => (
@@ -1891,6 +1899,7 @@ export default function NestingPage() {
                 Задайте хотя бы один порог — иначе мелких деталей не будет.
               </p>
             )}
+            </>)}
 
             <div style={{ display: 'flex', gap: 6, marginBottom: cfg.error || cfg.result ? 8 : 0 }}>
               <button onClick={() => (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id)} disabled={!details.length || isStopping}
