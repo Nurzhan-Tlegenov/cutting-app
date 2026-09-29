@@ -7,6 +7,7 @@
 //   → { type: 'stop' }                  — «Стоп»: поиск заканчивается, лучший вариант доводится до финала
 //   → { type: 'migrant', genome }       — лучший вариант соседнего потока (параллельный поиск «островами»)
 //   ← { type: 'progress', res }         — промежуточное улучшение (для показа на экране)
+//   ← { type: 'stats', stats }          — «пульс» поиска раз в ~1 с (для хронологии раскроя)
 //   ← { type: 'done', res }             — итог
 //   ← { type: 'error', error }
 import { runLiveNesting } from './liveNesting'
@@ -28,6 +29,7 @@ self.onmessage = async e => {
       shouldStop: () => stopRequested,
       takeMigrant: () => { const m = migrant; migrant = null; return m },
       onProgress: res => self.postMessage({ type: 'progress', res }),
+      onStats: stats => self.postMessage({ type: 'stats', stats }),
     })
     self.postMessage({ type: 'done', res })
   } catch (err) {

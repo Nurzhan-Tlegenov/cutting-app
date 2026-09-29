@@ -123,6 +123,7 @@ export async function runNesting({
   onProgress = null,              // онлайн-раскрой: вызывается при каждом улучшении ({ sheets, iter }) — не чаще раза в ~300 мс
   shouldStop = null,              // онлайн-раскрой: () => true — пользователь нажал «Стоп», поиск заканчивается и результат доводится до финала
   takeMigrant = null,             // параллельный поиск («острова»): () => { ids, mode } — лучший вариант соседнего потока, вливается в популяцию
+  onStats = null,                 // хронология раскроя: «пульс» поиска раз в ~1 с (итерации, поколение, режимы в популяции, разнообразие)
 }) {
   const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
   const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
@@ -198,6 +199,31 @@ export async function runNesting({
   // стяжкой к нулю листа (как финальный), чтобы пользователь видел реальное
   // сжатие укладки, а не сырую раскладку перед стяжкой.
   let iter = 0, dirty = false, lastReport = 0
+  // ─── Хронология: «пульс» поиска для разбора, где он буксует ───────────────
+  const runStart = Date.now()
+  let lastStats = 0, statsIter = 0, gen = 0, phase = 'start', migrantsIn = 0
+  let population = null   // объявлены здесь, чтобы «пульс» видел текущую популяцию
+  let evaluated = null
+  const maybeStats = (force = false) => {
+    if (!onStats) return
+    const now = Date.now()
+    if (!force && now - lastStats < 1000) return
+    const dt = Math.max(1, now - (lastStats || runStart))
+    const modes = {}
+    const distinct = new Set()
+    if (evaluated) evaluated.forEach(e => {
+      modes[e.mode] = (modes[e.mode] || 0) + 1
+      distinct.add(e.stat.sheetCount + ':' + Math.round(e.stat.lastSheetArea / 1000))
+    })
+    onStats({
+      t: now - runStart, phase, iter, gen,
+      ips: Math.round((iter - statsIter) * 1000 / dt), // вариантов в секунду
+      best: best ? { count: best.stat.sheetCount, last: Math.round(best.stat.lastSheetArea), util: +best.stat.utilization.toFixed(4), mode: best.mode } : null,
+      popBest: evaluated ? { count: evaluated[0].stat.sheetCount, last: Math.round(evaluated[0].stat.lastSheetArea) } : null,
+      modes, diversity: distinct.size, pop: evaluated ? evaluated.length : 0, migrantsIn,
+    })
+    lastStats = now; statsIter = iter
+  }
   const stopNow = () => !!(shouldStop && shouldStop())
   const maybeReport = (force = false) => {
     if (!onProgress || !best || (!dirty && !force)) return
@@ -236,10 +262,11 @@ export async function runNesting({
   for (let i = 0; i < RANDOM_ATTEMPTS; i++) {
     const shuffled = shuffle(basePieces.slice())
     for (const mode of scoringModes) tryAttempt(shuffled, mode)
-    if (i % 20 === 0) { maybeReport(); await new Promise(r => setTimeout(r, 0)) }
+    if (i % 20 === 0) { maybeReport(); maybeStats(); await new Promise(r => setTimeout(r, 0)) }
     if (stopNow()) break
   }
   maybeReport(true)
+  phase = 'ga'
 
   // Генетический алгоритм поверх ЕДИНОЙ популяции особей "порядок + режим".
   // Раньше время бюджета делилось ПОРОВНУ между 4 режимами (MaxRects/Guillotine
@@ -263,17 +290,16 @@ export async function runNesting({
   // Начальная популяция: лучший порядок для КАЖДОГО режима (из структурной/
   // случайной фазы) плюс случайные особи со случайным режимом — сразу
   // представлены все семьи, дальше отбор решает, кому остаться.
-  let population = scoringModes.map(mode => ({ order: (bestPerMode[mode] || shuffle(basePieces.slice())).slice(), mode }))
+  population = scoringModes.map(mode => ({ order: (bestPerMode[mode] || shuffle(basePieces.slice())).slice(), mode }))
   while (population.length < POP_SIZE) {
     population.push({ order: shuffle(basePieces.slice()), mode: scoringModes[Math.floor(Math.random() * scoringModes.length)] })
   }
 
-  let evaluated = population.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
+  evaluated = population.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
   evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
   if (better(evaluated[0].stat, best.stat)) { best = evaluated[0]; dirty = true }
 
   const startTime = Date.now()
-  let gen = 0
   // Онлайн-режим (shouldStop задан): бюджет времени задаёт вызывающий
   // (обычно «бесконечный»), поиск идёт до нажатия «Стоп»
   while (Date.now() - startTime < HILL_CLIMB_BUDGET_MS && !stopNow()) {
@@ -297,7 +323,7 @@ export async function runNesting({
       const m = takeMigrant()
       if (m && Array.isArray(m.ids) && m.ids.length === basePieces.length && scoringModes.includes(m.mode)) {
         const order = m.ids.map(id => pieceById.get(id)).filter(Boolean)
-        if (order.length === basePieces.length) nextGen[nextGen.length - 1] = { order, mode: m.mode }
+        if (order.length === basePieces.length) { nextGen[nextGen.length - 1] = { order, mode: m.mode }; migrantsIn++ }
       }
     }
     evaluated = nextGen.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
@@ -305,7 +331,7 @@ export async function runNesting({
     evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
     if (better(evaluated[0].stat, best.stat)) { best = evaluated[0]; dirty = true }
     // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт.
-    if (gen % YIELD_EVERY_GEN === 0) { maybeReport(); await new Promise(r => setTimeout(r, 0)) }
+    if (gen % YIELD_EVERY_GEN === 0) { maybeReport(); maybeStats(); await new Promise(r => setTimeout(r, 0)) }
   }
 
   // Финальная "интенсификация": компакция выше по коду всегда обходит детали
@@ -314,6 +340,8 @@ export async function runNesting({
   // Здесь пробуем много раз со случайным порядком обхода поверх УЖЕ лучшего
   // найденного решения — дёшево (компакция сама по себе быстрая операция),
   // но может дожать последний лист чуть плотнее.
+  phase = 'final'
+  maybeStats(true)
   best.sheets = await intensifyCompaction(best.sheets, direction, usableX, usableY)
 
   // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.

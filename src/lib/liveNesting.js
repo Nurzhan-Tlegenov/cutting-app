@@ -50,7 +50,7 @@ function isRasterPath(p) {
  * shouldStop() — нажат ли «Стоп»; onProgress(res) — промежуточный результат
  * в том же формате, что и итог runNesting (+ iter, round).
  */
-export async function runLiveNesting(params, { live = false, shouldStop = () => false, onProgress = null, takeMigrant = null } = {}) {
+export async function runLiveNesting(params, { live = false, shouldStop = () => false, onProgress = null, takeMigrant = null, onStats = null } = {}) {
   const meta = {
     usableX: params.sheetW - params.marginL - params.marginR,
     usableY: params.sheetL - params.marginT - params.marginB,
@@ -63,13 +63,19 @@ export async function runLiveNesting(params, { live = false, shouldStop = () => 
     return await runNesting({
       ...params,
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
-      shouldStop, takeMigrant,
+      shouldStop, takeMigrant, onStats,
       onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...meta, sheets, iter, genome }) : null,
     })
   }
 
   // Фигурные детали / NFP: обычный режим — один расчёт как раньше
-  if (!live) return await runNesting(params)
+  const t0 = Date.now()
+  if (!live) {
+    const res = await runNesting(params)
+    const sc = liveScore(res.sheets)
+    onStats?.({ t: Date.now() - t0, phase: 'shape', round: 1, roundSeconds: params.optimizeSeconds, best: { count: sc.count, last: Math.round(sc.last) }, improved: true })
+    return res
+  }
 
   // Онлайн — раунды до «Стоп»
   let best = null, bestScore = null, round = 0
@@ -78,7 +84,10 @@ export async function runLiveNesting(params, { live = false, shouldStop = () => 
     const res = await runNesting({ ...params, optimizeSeconds: secs })
     round++
     const sc = liveScore(res.sheets)
-    if (liveBetter(sc, bestScore)) {
+    const improved = liveBetter(sc, bestScore)
+    // «Пульс» по раундам: что дал каждый раунд, даже если он не лучше
+    onStats?.({ t: Date.now() - t0, phase: 'shape', round, roundSeconds: secs, result: { count: sc.count, last: Math.round(sc.last) }, improved })
+    if (improved) {
       best = res; bestScore = sc
       if (onProgress) onProgress({ ...res, iter: round, round })
     }
