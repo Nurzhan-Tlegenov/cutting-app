@@ -347,12 +347,12 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
 
         const effectiveContact = contact + pocketBonus + interlockBonus
         if (direction === 'along_y') {
-          // along_y: детали прижимаются к низу (min Y) — gravity потом дожмёт
-          // envMaxX ограничивает разброс вправо (прижим к левому краю)
-          score = -effectiveContact * 1e7 + envMaxX * 1e4 + (oy + bb0.minY) * 1e3 + (ox + bb0.minX)
+          // along_y: максимизируем контакт, минимизируем высоту кластера (envMaxY),
+          // тайбрейкер — X (левее). Gravity дожмёт детали к Y=0 после укладки.
+          score = -effectiveContact * 1e7 + envMaxY * 1e3 + (ox + bb0.minX)
         } else if (direction === 'along_x') {
-          // along_x: детали прижимаются к левому краю (min X) — gravity дожмёт
-          score = -effectiveContact * 1e7 + envMaxY * 1e4 + (ox + bb0.minX) * 1e3 + (oy + bb0.minY)
+          // along_x: аналогично по X. Gravity дожмёт к X=0.
+          score = -effectiveContact * 1e7 + envMaxX * 1e3 + (oy + bb0.minY)
         } else {
           score = -effectiveContact * 1e6 + envMaxX * envMaxY * 1e-3
         }
@@ -1269,8 +1269,10 @@ const sheets = attemptPack(order, usableX, usableY, kerf, direction, seedSheet, 
         const c = gravityPolygons(sheet.placed, direction, k)
         if (c && c !== sheet.placed) return { ...sheet, placed: c }
       }
-    } catch (_) {}
-    return sheet
+      // Fallback для листов где gravityPolygons не срабатывает (напр. только S-детали)
+      const c2 = simpleGravity(sheet.placed, direction, kerf)
+      return { ...sheet, placed: c2 }
+    } catch (_) { return sheet }
   })
   return rawResult
 }
