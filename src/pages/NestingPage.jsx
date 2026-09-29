@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { computeOffcutAtPoint } from '../lib/nesting'
 import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
+import { newHistory, recordEvent, recordIsland, recordStats, buildHistoryExport } from '../lib/nestingHistory'
 import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
@@ -1064,6 +1065,8 @@ function newCfg(over = {}) {
     view: 'all',         // 'all' — все листы сразу · 'sheet' — один лист для правки
     improvements: 0, iter: 0, lastImproveAt: 0,
     islands: 1,          // сколько потоков считает эту конфигурацию
+    history: null,       // хронология раскроя (после «Стоп»): улучшения + «пульс» поиска; очищается при «Оформить»
+    histPos: -1,         // какой момент хронологии показан (-1 или последний — текущий результат)
     buffer: [],          // детали, снятые с листов (для переноса на другой лист)
     selPart: -1,         // выделенная деталь на активном листе (индекс в placed)
     selBuf: -1,          // выделенная деталь в буфере
@@ -1125,7 +1128,7 @@ function islandsFor(concurrentJobs = 1) {
 // заказ независимо (у каждого свой случайный поиск), а лучший найденный вариант
 // сразу пересылается остальным — они продолжают искать от него. Так за то же
 // время перебирается в N раз больше вариантов укладки.
-function startNestingJob(params, { live = false, onProgress = null, islands = 1 } = {}) {
+function startNestingJob(params, { live = false, onProgress = null, onStats = null, onIslandProgress = null, islands = 1 } = {}) {
   const workers = []
   let rejectFn = null, resolveFn = null
   let cancelled = false, finished = false, stopFlag = false
@@ -1137,9 +1140,11 @@ function startNestingJob(params, { live = false, onProgress = null, islands = 1 
   const fail = err => { if (finished || cancelled) return; finished = true; killAll(); rejectFn(err) }
   const consider = (res, fromIdx) => {
     const sc = liveScore(res.sheets)
-    if (!liveBetter(sc, bestScore)) return
+    const global = liveBetter(sc, bestScore)
+    if (!cancelled && !finished) onIslandProgress?.(res, fromIdx, global)
+    if (!global) return
     best = res; bestScore = sc
-    if (!cancelled && !finished) onProgress?.(res)
+    if (!cancelled && !finished) onProgress?.(res, fromIdx)
     if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome }) })
   }
   const pickBest = list => {
@@ -1169,7 +1174,8 @@ function startNestingJob(params, { live = false, onProgress = null, islands = 1 
         await new Promise(r => setTimeout(r, 100)) // дать интерфейсу отрисовать состояние «считаю»
         return runLiveNesting(params, {
           live, shouldStop: () => stopFlag || cancelled,
-          onProgress: res => consider(res, -1),
+          onProgress: res => consider(res, 0),
+          onStats: st => { if (!cancelled && !finished) onStats?.(st, 0) },
         })
       }).then(finish, fail)
     }
@@ -1182,6 +1188,7 @@ function startNestingJob(params, { live = false, onProgress = null, islands = 1 
       w.onmessage = e => {
         const m = e.data || {}
         if (m.type === 'progress') consider(m.res, i)
+        else if (m.type === 'stats') { if (!cancelled && !finished) onStats?.(m.stats, i) }
         else if (m.type === 'done') onFinal(m.res)
         else onIslandFail(m.error, null)
       }
@@ -1227,6 +1234,8 @@ export default function NestingPage() {
   const jobsRef = useRef({})     // cfgId -> { cancel }
   const skipRef = useRef(new Set()) // конфигурации, снятые из очереди
   const launchBatchRef = useRef(1)  // сколько конфигураций запускается одновременно (для деления ядер)
+  const historyRef = useRef({})     // cfgId -> хронология раскроя (пишется во время расчёта)
+  const playRef = useRef(null)      // таймер проигрывания хронологии
   const configsRef = useRef(configs)
   configsRef.current = configs
 
@@ -1236,6 +1245,8 @@ export default function NestingPage() {
   const anyRunning = configs.some(c => c.status === 'running' || c.status === 'queued' || c.status === 'stopping')
 
   useEffect(() => { fetchOrder() }, [id])
+  // Остановить проигрывание хронологии при уходе со страницы
+  useEffect(() => () => { if (playRef.current) clearInterval(playRef.current) }, [])
   useEffect(() => () => {
     Object.values(jobsRef.current).forEach(j => j.cancel())
     jobsRef.current = {}
@@ -1331,12 +1342,19 @@ export default function NestingPage() {
     // Ядра телефона делятся между конфигурациями, которые считаются одновременно
     const othersRunning = configsRef.current.filter(c => c.id !== cfg.id && (c.status === 'running' || c.status === 'stopping')).length
     const islands = islandsFor(Math.max(launchBatchRef.current, 1 + othersRunning))
-    updateCfg(cfg.id, { islands })
+    updateCfg(cfg.id, { islands, history: null, histPos: -1 })
+    // Хронология раскроя пишется в ref (не в state — «пульс» идёт каждую секунду
+    // с каждого потока), в конфигурацию попадает после «Стоп» / окончания
+    const hist = newHistory(cfg, islands, params)
+    historyRef.current[cfg.id] = hist
     const job = startNestingJob(params, {
       live: cfg.live,
       islands,
-      onProgress: res => {
+      onStats: (st, island) => { if (jobsRef.current[cfg.id] === job) recordStats(hist, st, island) },
+      onIslandProgress: (res, island, global) => { if (jobsRef.current[cfg.id] === job) recordIsland(hist, res, island, global) },
+      onProgress: (res, island) => {
         if (jobsRef.current[cfg.id] !== job) return
+        recordEvent(hist, res, island, 'improve')
         updateCfg(cfg.id, c => {
           const sheetsData = toSheets(res)
           return {
@@ -1352,11 +1370,14 @@ export default function NestingPage() {
     return job.promise.then(res => {
       if (jobsRef.current[cfg.id] !== job) return // отменена или заменена
       delete jobsRef.current[cfg.id]
+      recordEvent(hist, res, -1, 'final')
+      hist.stoppedAt = Date.now()
       updateCfg(cfg.id, c => {
         const sheetsData = toSheets(res)
         return {
           status: 'done', doneAt: Date.now(), result: stamp(res), saved: false, sheetsData,
           activeSheet: Math.min(c.activeSheet, sheetsData.length - 1),
+          history: hist, histPos: hist.events.length - 1,
         }
       })
       setFocusId(f => (configsRef.current.some(c => c.id === f && c.result) ? f : cfg.id))
@@ -1481,6 +1502,9 @@ export default function NestingPage() {
 
   async function submitOrder(cfg) {
     setBusyId(cfg.id)
+    // Хронология нужна только на время раскроя — после оформления очищается
+    historyRef.current = {}
+    setConfigs(cs => cs.map(c => ({ ...c, history: null, histPos: -1 })))
     await saveNesting(cfg)
     await supabase.from('orders').update({ status: 'new', submitted_at: new Date().toISOString() }).eq('id', id)
     navigate(`/orders/${id}`)
@@ -1666,6 +1690,89 @@ export default function NestingPage() {
     : (c.doneAt && c.startedAt ? Math.round((c.doneAt - c.startedAt) / 1000) : null)
   void tick
 
+  // ─── Хронология раскроя: ползунок по времени, проигрывание, возврат, экспорт ──
+  function stopPlay() { if (playRef.current) { clearInterval(playRef.current); playRef.current = null } }
+  function playHistory(cfgId, from, last) {
+    stopPlay()
+    let pos = from >= last ? 0 : from
+    updateCfg(cfgId, { histPos: pos })
+    playRef.current = setInterval(() => {
+      pos++
+      updateCfg(cfgId, { histPos: pos })
+      if (pos >= last) stopPlay()
+    }, 700)
+  }
+  function restoreHistory(cfg, ev) {
+    stopPlay()
+    updateCfg(cfg.id, {
+      sheetsData: ev.sheets.map((sh, i) => ({ ...sh, index: i, freeRects: sh.freeRects || [] })),
+      saved: false, activeSheet: 0, selPart: -1, histPos: -1, note: '',
+    })
+  }
+
+  function exportHistory(cfg, idx) {
+    if (!cfg.history) return
+    const data = buildHistoryExport(cfg.history, { order, details, cfgIdx: idx })
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${order?.order_number || 'raskroy'}_k${idx + 1}_history.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function renderTimeline(cfg, idx, events, pos, last, ev) {
+    const cur = events[pos]
+    const fmtT = ms => ms < 60000 ? `${(ms / 1000).toFixed(1)} с` : `${Math.floor(ms / 60000)} мин ${Math.round((ms % 60000) / 1000)} с`
+    const pctv = v => Math.round(v * 100) + '%'
+    const playing = !!playRef.current
+    const btn = { padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+      background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }
+    return (
+      <div style={{ marginTop: 8, padding: 8, borderRadius: 'var(--radius)', background: 'var(--bg2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 500 }}>Хронология</span>
+          <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>
+            {pos + 1} из {events.length} · {cur.kind === 'final' ? 'итог' : fmtT(cur.t)}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => playing ? (stopPlay(), updateCfg(cfg.id, {})) : playHistory(cfg.id, pos, last)} style={btn}>
+            {playing ? '❚❚' : '▶'}
+          </button>
+        </div>
+        <input type="range" min={0} max={last} step={1} value={pos}
+          onChange={e => { stopPlay(); updateCfg(cfg.id, { histPos: Number(e.target.value) }) }}
+          style={{ width: '100%', margin: '2px 0' }} />
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          {cur.count} л. · загрузка {pctv(cur.util)} · на последнем {pctv(cur.lastFill)}
+          {cur.island >= 0 && cfg.history.islands > 1 ? ` · поток ${cur.island + 1}` : ''}
+          {cur.mode ? ` · режим ${cur.mode}` : ''}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          {ev && (
+            <button onClick={() => restoreHistory(cfg, ev)} disabled={cfg.buffer.length > 0}
+              title="Сделать этот момент текущим раскроем"
+              style={{ ...btn, flex: 1, border: '0.5px solid var(--blue)', color: 'var(--blue)' }}>
+              Взять этот вариант
+            </button>
+          )}
+          {ev && (
+            <button onClick={() => { stopPlay(); updateCfg(cfg.id, { histPos: -1 }) }} style={{ ...btn, flex: 1 }}>
+              К итогу
+            </button>
+          )}
+          <button onClick={() => exportHistory(cfg, idx)} title="Файл для разработчика: где поиск буксует, ошибки укладки"
+            style={{ ...btn, flex: ev ? '0 0 auto' : 1 }}>
+            ⬇ Экспорт истории
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   function renderConfig(cfg, idx) {
     const isStopping = cfg.status === 'stopping'
     const isRunning = cfg.status === 'running' || isStopping, isQueued = cfg.status === 'queued'
@@ -1813,6 +1920,13 @@ export default function NestingPage() {
                 background: active ? color : 'var(--bg2)', color: active ? 'white' : 'var(--text-muted)',
               })
               const openSheet = i => updateCfg(cfg.id, { activeSheet: i, view: 'sheet', selPart: -1, note: '' })
+              // Хронология: какой момент показан на обзоре листов
+              const hist = !isRunning ? cfg.history : null
+              const hEvents = hist?.events || []
+              const hLast = hEvents.length - 1
+              const hPos = hist && cfg.histPos >= 0 && cfg.histPos <= hLast ? cfg.histPos : hLast
+              const hEvent = hist && hPos < hLast ? hEvents[hPos] : null // null — показываем текущий результат
+              const overviewSheets = hEvent ? hEvent.sheets : cfg.sheetsData
               return (
               <div>
                 {cfg.result.algo === 'nfp' && (
@@ -1862,19 +1976,20 @@ export default function NestingPage() {
                   {view === 'all' ? (
                     <>
                       <SheetsOverview
-                        sheets={cfg.sheetsData}
+                        sheets={overviewSheets}
                         usableX={cfg.result.usableX} usableY={cfg.result.usableY}
                         sheetL={order.sheet_length} sheetW={order.sheet_width}
                         marginL={order.margin_left} marginT={order.margin_top} kerf={order.kerf_width}
-                        activeSheet={locked ? -1 : cfg.activeSheet}
-                        onPickSheet={locked ? null : openSheet}
+                        activeSheet={locked || hEvent ? -1 : cfg.activeSheet}
+                        onPickSheet={locked || hEvent ? null : openSheet}
                         running={isRunning} bufferCount={cfg.buffer.length}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {isRunning
                           ? 'Идёт поиск: при более плотной укладке детали переезжают на новые места · «Стоп» — зафиксировать лучший вариант'
-                          : 'Тап по листу — открыть для правки · щипок — масштаб'}
+                          : hEvent ? 'Просмотр хронологии — правка недоступна' : 'Тап по листу — открыть для правки · щипок — масштаб'}
                       </p>
+                      {hist && hEvents.length > 0 && renderTimeline(cfg, idx, hEvents, hPos, hLast, hEvent)}
                     </>
                   ) : (
                     <>
