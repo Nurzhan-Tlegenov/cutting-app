@@ -347,9 +347,13 @@ function placeOne(variants, placed, usableX, usableY, kerf, scoreMode = 'auto', 
 
         const effectiveContact = contact + pocketBonus + interlockBonus
         if (direction === 'along_y') {
-          score = -effectiveContact * 1e7 + envMaxY * 1e3 + (ox + bb0.minX)
+          // Колонки слева направо (X=anchor), внутри колонки — контакт, тайбрейкер Y
+          const anchorX = ox + bb0.minX, posY = oy + bb0.minY
+          score = anchorX * 1e8 + (-effectiveContact) * 1e4 + posY
         } else if (direction === 'along_x') {
-          score = -effectiveContact * 1e7 + envMaxX * 1e3 + (oy + bb0.minY)
+          // Ряды снизу вверх (Y=anchor), внутри ряда — контакт, тайбрейкер X
+          const anchorY = oy + bb0.minY, posX = ox + bb0.minX
+          score = anchorY * 1e8 + (-effectiveContact) * 1e4 + posX
         } else {
           score = -effectiveContact * 1e6 + envMaxX * envMaxY * 1e-3
         }
