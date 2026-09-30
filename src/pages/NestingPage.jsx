@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { computeOffcutAtPoint } from '../lib/nesting'
+import { computeOffcutAtPoint, smallAtEdge } from '../lib/nesting'
 import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
 import { newHistory, recordEvent, recordIsland, recordStats, buildHistoryExport } from '../lib/nestingHistory'
@@ -1066,7 +1066,7 @@ const DIR_SHORT = { auto: 'Авто', along_y: 'Вдоль Y', along_x: 'Вдо�
 let CFG_SEQ = 0
 function newCfg(over = {}) {
   return {
-    id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', side: '', secs: '12',
+    id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', area: '', side: '', secs: '12',
     live: true,          // онлайн-раскрой: считать до «Стоп», показывая каждое улучшение
     open: true, status: 'idle', // idle | queued | running | stopping | done | error
     startedAt: 0, doneAt: 0, error: '',
@@ -1149,7 +1149,7 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   const finish = res => { if (finished || cancelled) return; finished = true; killAll(); resolveFn(res) }
   const fail = err => { if (finished || cancelled) return; finished = true; killAll(); rejectFn(err) }
   const consider = (res, fromIdx) => {
-    const sc = liveScore(res.sheets)
+    const sc = liveScore(res.sheets, res.usableX, res.usableY)
     const global = liveBetter(sc, bestScore)
     if (!cancelled && !finished) onIslandProgress?.(res, fromIdx, global)
     if (!global) return
@@ -1159,7 +1159,7 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   }
   const pickBest = list => {
     let top = null, topScore = null
-    list.forEach(r => { const sc = liveScore(r.sheets); if (liveBetter(sc, topScore)) { top = r; topScore = sc } })
+    list.forEach(r => { const sc = liveScore(r.sheets, r.usableX, r.usableY); if (liveBetter(sc, topScore)) { top = r; topScore = sc } })
     return top
   }
   // Все живые острова отчитались — итог = лучший из их итогов
@@ -1222,6 +1222,26 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     },
     cancel: () => { cancelled = true; killAll(); rejectFn?.(new Error('cancelled')) },
   }
+}
+
+// «Мелкие — в центр»: порог по площади вводится в м², а хранится (в заказе и в
+// алгоритме) как сторона равновеликого квадрата в мм: 0,16 м² ⇔ 400 мм.
+function areaFromSide(sideMm) {
+  const n = Number(sideMm)
+  if (!n) return ''
+  return String(+(n * n / 1e6).toFixed(3)).replace('.', ',')
+}
+function sideFromArea(areaText) {
+  const a = parseFloat(String(areaText).replace(',', '.'))
+  return a > 0 ? String(Math.round(Math.sqrt(a) * 1000)) : ''
+}
+// Какие детали заказа попадают в «мелкие» при заданных порогах
+function smallDetailsOf(details, sq, side) {
+  const sqN = Number(sq) || 0, sideN = Number(side) || 0
+  return details.filter(d => {
+    const w = Number(d.width) || 0, l = Number(d.length) || 0
+    return (sqN > 0 && w * l <= sqN * sqN) || (sideN > 0 && Math.min(w, l) <= sideN)
+  })
 }
 
 export default function NestingPage() {
@@ -1289,6 +1309,7 @@ export default function NestingPage() {
       const first = newCfg({
         small: !!o.small_parts_to_center,
         sq: o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '',
+        area: areaFromSide(o.small_parts_max_square_side),
         side: o.small_parts_max_side ? String(o.small_parts_max_side) : '',
         secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
         ...(saved ? {
@@ -1311,7 +1332,7 @@ export default function NestingPage() {
     const last = configs[configs.length - 1]
     const used = new Set(configs.map(c => c.dir))
     const dir = ['auto', 'along_y', 'along_x'].find(d => !used.has(d)) || last.dir
-    const cfg = newCfg({ small: last.small, sq: last.sq, side: last.side, secs: last.secs, dir })
+    const cfg = newCfg({ small: last.small, sq: last.sq, area: last.area, side: last.side, secs: last.secs, dir })
     setConfigs(cs => [...cs.map(c => ({ ...c, open: false })), cfg])
   }
 
@@ -1805,6 +1826,10 @@ export default function NestingPage() {
     const isRunning = cfg.status === 'running' || isStopping, isQueued = cfg.status === 'queued'
     const s = sums[idx]
     const secs = cfgSecs(cfg)
+    // «Мелкие — в центр»: сколько мелких деталей всё же у края листа
+    const edgeN = cfg.small && cfg.result && cfg.sheetsData.length
+      ? smallAtEdge(cfg.sheetsData, cfg.result.usableX, cfg.result.usableY) : null
+    const smallTxt = edgeN === null ? '' : edgeN > 0 ? ` · мелкие у края: ${edgeN}` : ' · мелкие в центре ✓'
     let statusLine = 'не считался'
     if (isQueued) statusLine = 'в очереди'
     else if (isStopping) statusLine = 'фиксирую лучший вариант…'
@@ -1812,14 +1837,14 @@ export default function NestingPage() {
       // Сколько уже нет улучшений — подсказка, что можно жать «Стоп» без потери качества
       const idle = cfg.lastImproveAt ? Math.floor((Date.now() - cfg.lastImproveAt) / 1000) : 0
       statusLine = s
-        ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}`
+        ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${smallTxt}`
           + (cfg.rough ? ' · черновик, уточняю' : ` · улучшений ${cfg.improvements}`)
           + (!cfg.rough && idle >= 20 ? ` · без улучшений ${idle} с` : '')
           + (cfg.islands > 1 ? ` · потоков ${cfg.islands}` : '')
         : `считаю… ${secs} с${cfg.islands > 1 ? ` · потоков ${cfg.islands}` : ''}`
     }
     else if (cfg.status === 'error') statusLine = 'ошибка расчёта'
-    else if (s) statusLine = `${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${secs != null ? ` · ${secs} с` : ''}`
+    else if (s) statusLine = `${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${smallTxt}${secs != null ? ` · ${secs} с` : ''}`
     else if (cfg.result) statusLine = 'результат загружен'
 
     const canvasSheet = cfg.sheetsData[Math.max(0, Math.min(cfg.activeSheet, cfg.sheetsData.length - 1))]
@@ -1900,15 +1925,16 @@ export default function NestingPage() {
             {cfg.small && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                 <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
-                  title="Мелкая — деталь, которая по площади уместилась бы в такой квадрат">
-                  Квадрат до, мм
-                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.sq} placeholder="напр. 400"
-                    onChange={e => updateCfg(cfg.id, { sq: e.target.value.replace(/[^0-9]/g, '') })}
-                    onBlur={e => persist({ small_parts_max_square_side: e.target.value === '' ? 0 : Number(e.target.value) })}
+                  title="Мелкая — деталь площадью не больше этой. Например 0,16 м² — это 400×400 мм или 800×200 мм">
+                  Площадь до, м²
+                  <input type="text" inputMode="decimal" value={cfg.area} placeholder="напр. 0,16"
+                    onChange={e => { const v = e.target.value.replace(/[^0-9.,]/g, ''); updateCfg(cfg.id, { area: v, sq: sideFromArea(v) }) }}
+                    onBlur={e => { const sd = sideFromArea(e.target.value); persist({ small_parts_max_square_side: sd === '' ? 0 : Number(sd) }) }}
                     style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
                 </label>
-                <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}>
-                  Сторона до, мм
+                <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
+                  title="Мелкая — деталь, у которой узкая сторона не больше этой (узкие полосы)">
+                  Узкая сторона до, мм
                   <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.side} placeholder="напр. 350"
                     onChange={e => updateCfg(cfg.id, { side: e.target.value.replace(/[^0-9]/g, '') })}
                     onBlur={e => persist({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
@@ -1921,6 +1947,24 @@ export default function NestingPage() {
                 Задайте хотя бы один порог — иначе мелких деталей не будет.
               </p>
             )}
+            {/* Какие детали попадают в «мелкие» при этих порогах — видно сразу, до запуска */}
+            {cfg.small && (cfg.sq !== '' || cfg.side !== '') && (() => {
+              const list = smallDetailsOf(details, cfg.sq, cfg.side)
+              const n = list.reduce((a, d) => a + (Number(d.qty) || 1), 0)
+              const total = details.reduce((a, d) => a + (Number(d.qty) || 1), 0)
+              if (!list.length) return (
+                <p style={{ fontSize: 10.5, color: '#b45309', margin: '-4px 0 8px' }}>
+                  При таких порогах мелких деталей нет — увеличьте площадь или сторону.
+                </p>
+              )
+              return (
+                <p style={{ fontSize: 10.5, color: 'var(--text-muted)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
+                  Мелкие — {n} из {total} дет.: {list.slice(0, 5).map(d =>
+                    `${d.display_name || d.name} ${Math.round(d.length)}×${Math.round(d.width)}${Number(d.qty) > 1 ? ` (${d.qty})` : ''}`).join(', ')}
+                  {list.length > 5 ? ` и ещё ${list.length - 5} вид.` : ''}
+                </p>
+              )
+            })()}
             </>)}
 
             <div style={{ display: 'flex', gap: 6, marginBottom: cfg.error || cfg.result ? 8 : 0 }}>
@@ -2165,10 +2209,17 @@ export default function NestingPage() {
                 {/* Результат проверки раскроя (для текущей раскладки и станка) */}
                 {cfg.check && cfg.check.for === cfg.sheetsData && cfg.check.method === cuttingMethod && (
                   cfg.check.ok ? (
-                    <p style={{ fontSize: 11, color: '#1e7e34', margin: '0 0 6px' }}>
-                      ✓ Проверено: {cfg.check.stats.placed} из {cfg.check.stats.total} деталей на месте, пересечений нет,
-                      зазор на рез и отступы выдержаны{cuttingMethod === 'guillotine' ? ', все листы режутся насквозь' : ''}
-                    </p>
+                    <>
+                      <p style={{ fontSize: 11, color: '#1e7e34', margin: '0 0 6px' }}>
+                        ✓ Проверено: {cfg.check.stats.placed} из {cfg.check.stats.total} деталей на месте, пересечений нет,
+                        зазор на рез и отступы выдержаны{cuttingMethod === 'guillotine' ? ', все листы режутся насквозь' : ''}
+                      </p>
+                      {cfg.check.warnings?.length > 0 && (
+                        <p style={{ fontSize: 11, color: '#b45309', margin: '-2px 0 6px' }}>
+                          {cfg.check.warnings.join(' · ')}
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <div style={{ padding: 8, marginBottom: 8, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.08)', border: '1px solid rgba(220,53,69,0.4)' }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#dc3545', marginBottom: 4 }}>
