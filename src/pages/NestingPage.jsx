@@ -1041,12 +1041,15 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           onTouchCancel={() => { clearLongPress(); draggingRef.current = null }}
         />
       </div>
+      {/* Масштаб — под картой, справа: поверх карты он закрывал детали */}
       {zoom > 1.02 && (
-        <button type="button" onClick={() => { setZoom(1); if (wrapRef.current) { wrapRef.current.scrollLeft = 0; wrapRef.current.scrollTop = 0 } }}
-          style={{ position: 'absolute', top: 6, right: 6, fontSize: 10, padding: '3px 8px', border: '0.5px solid var(--border-md)',
-            borderRadius: 6, background: 'rgba(255,255,255,0.92)', color: 'var(--text-muted)', cursor: 'pointer' }}>
-          {Math.round(zoom * 100)}% · сброс
-        </button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+          <button type="button" onClick={() => { setZoom(1); if (wrapRef.current) { wrapRef.current.scrollLeft = 0; wrapRef.current.scrollTop = 0 } }}
+            style={{ fontSize: 10, padding: '3px 8px', border: '0.5px solid var(--border-md)',
+              borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
+            {Math.round(zoom * 100)}% · сброс
+          </button>
+        </div>
       )}
     </div>
   )
