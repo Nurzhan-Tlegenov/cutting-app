@@ -5,7 +5,7 @@
 // Протокол:
 //   → { type: 'start', params, live, island, islands } — запуск (live — до «Стоп»; island — номер потока, от него роль у фигурных деталей)
 //   → { type: 'stop' }                  — «Стоп»: поиск заканчивается, лучший вариант доводится до финала
-//   → { type: 'migrant', genome }       — лучший вариант соседнего потока (параллельный поиск «островами»)
+//   → { type: 'migrant', genome, sheets } — лучший вариант соседнего потока: порядок + раскладка
 //   ← { type: 'progress', res }         — промежуточное улучшение (для показа на экране)
 //   ← { type: 'stats', stats }          — «пульс» поиска раз в ~1 с (для хронологии раскроя)
 //   ← { type: 'done', res }             — итог
@@ -18,7 +18,8 @@ let migrant = null
 self.onmessage = async e => {
   const msg = e.data || {}
   if (msg.type === 'stop') { stopRequested = true; return }
-  if (msg.type === 'migrant') { migrant = msg.genome; return }
+  // лучший вариант соседа: порядок деталей (genome) + сама раскладка (sheets)
+  if (msg.type === 'migrant') { migrant = msg.sheets && msg.genome ? { ...msg.genome, sheets: msg.sheets } : msg.genome; return }
   // совместимость со старым форматом { params }
   const params = msg.params
   if (!params) return

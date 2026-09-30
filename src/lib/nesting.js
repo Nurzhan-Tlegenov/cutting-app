@@ -158,6 +158,15 @@ export async function runNesting({
 
   const basePieces = buildPieces(details, kerf, direction)
   const pieceById = new Map(basePieces.map(p => [p.id, p]))
+  // Раскладка соседа годится, только если в ней ровно наши детали (по id), по одной
+  const validLayout = sheets => {
+    const seen = new Set()
+    for (const sh of sheets) {
+      if (!sh || !Array.isArray(sh.placed) || !Array.isArray(sh.freeRects)) return false
+      for (const p of sh.placed) { if (!pieceById.has(p.id) || seen.has(p.id)) return false; seen.add(p.id) }
+    }
+    return seen.size === basePieces.length
+  }
 
   // Стяжка к нулю листа с зазором ровно kerf (не меняет входные листы)
   const gravityAll = list => list.map(sheet => {
@@ -287,7 +296,7 @@ export async function runNesting({
   // а не тратит его поровну вслепую.
   const HILL_CLIMB_BUDGET_MS = Math.max(0, Number(optimizeSeconds) || 0) * 1000 // из настроек раскроя, 0 = без доп. оптимизации
   const YIELD_EVERY_GEN = 2 // раз в столько поколений отдаём управление браузеру
-  const SQUEEZE_PER_GEN = 40 // попыток дожима последнего листа на поколение
+  const SQUEEZE_PER_GEN = 700 // попыток дожима последнего листа на поколение
   let sqCur = null, sqBase = null  // текущее состояние дожима и от какого лучшего оно пошло
   let lastGain = Date.now()         // когда последний раз улучшился лучший вариант
 
@@ -329,17 +338,28 @@ export async function runNesting({
       nextGen.push({ order: childOrder, mode: childMode })
     }
     // Мигрант из соседнего потока — заменяет худшую особь нового поколения
+    let migSheets = null
     if (takeMigrant) {
       const m = takeMigrant()
       if (m && Array.isArray(m.ids) && m.ids.length === basePieces.length && scoringModes.includes(m.mode)) {
         const order = m.ids.map(id => pieceById.get(id)).filter(Boolean)
         if (order.length === basePieces.length) { nextGen[nextGen.length - 1] = { order, mode: m.mode }; migrantsIn++ }
       }
+      // Вместе с порядком приходит и сама раскладка соседа — уже дожатая и
+      // «починенная» (эту работу порядком не передать). Раньше потоки получали
+      // только порядок и всё время дожимали свой, худший вариант.
+      if (m && Array.isArray(m.sheets) && validLayout(m.sheets)) migSheets = m.sheets
     }
     evaluated = nextGen.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
     iter += evaluated.length
     evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
     if (better(evaluated[0].stat, best.stat)) { best = evaluated[0]; dirty = true }
+    if (migSheets) {
+      const st = evaluate(migSheets, usableX, usableY)
+      // Раскладку соседа берём, если она лучше; продолжаем дожимать уже её.
+      // dirty не ставим — это не наша находка, обратно её слать незачем.
+      if (better(st, best.stat)) { best = { ...best, sheets: migSheets, stat: st }; sqBase = best; sqCur = migSheets; lastGain = Date.now() }
+    }
     // Дожим последнего листа у лучшего варианта (см. squeezeLast) — дёшево:
     // укладываются только два листа, а не весь заказ
     // Состояние дожима живёт между поколениями и может «гулять» по плато;
@@ -349,7 +369,7 @@ export async function runNesting({
       if (sqBase !== best) { sqCur = best.sheets; sqBase = best; lastGain = Date.now() }
       // Поиск встал (нет улучшений > 3 с) — почти всё время отдаём дожиму,
       // а раз в ~5 с без толку возвращаем «гуляющее» состояние к лучшему
-      const stalled = Date.now() - lastGain > 3000
+      const stalled = Date.now() - lastGain > 2000
       if (stalled && Date.now() - lastGain > 8000 && Math.random() < 0.05) sqCur = best.sheets
       // «мелкие — в центр» не выполнено — сначала чиним это (важнее последнего листа)
       if (best.stat.smallEdge > 0) {
@@ -359,7 +379,7 @@ export async function runNesting({
           if (better(st, best.stat)) { best = { ...best, sheets: fixed, stat: st }; sqBase = best; sqCur = fixed; dirty = true; lastGain = Date.now() }
         }
       }
-      sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 6 : SQUEEZE_PER_GEN, true)
+      sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 2 : SQUEEZE_PER_GEN, true)
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
     }
@@ -744,29 +764,41 @@ export const SMALL_EDGE_MIN = 150
 // p.w/p.h — с резом (справа и сверху), x,y — от низа-лева рабочей зоны.
 export function smallEdgeSides(p, placed, usableX, usableY, minGap = SMALL_EDGE_MIN) {
   const x0 = p.x, y0 = p.y, x1 = p.x + p.w, y1 = p.y + p.h
-  const sides = [
-    { gap: x0, axis: 'y', lo: y0, hi: y1, between: q => q.x + q.w <= x0 + 0.5 },          // слева
-    { gap: y0, axis: 'x', lo: x0, hi: x1, between: q => q.y + q.h <= y0 + 0.5 },          // снизу
-    { gap: usableX - x1, axis: 'y', lo: y0, hi: y1, between: q => q.x >= x1 - 0.5 },      // справа
-    { gap: usableY - y1, axis: 'x', lo: x0, hi: x1, between: q => q.y >= y1 - 0.5 },      // сверху
-  ]
+  const gL = x0, gB = y0, gR = usableX - x1, gT = usableY - y1
+  // Быстрый выход: далеко от всех краёв (так почти у всех кандидатов места)
+  if (gL >= minGap && gB >= minGap && gR >= minGap && gT >= minGap) return 0
   let n = 0
-  for (const sd of sides) {
-    if (sd.gap >= minGap) continue
+  // side: 0 слева, 1 снизу, 2 справа, 3 сверху
+  for (let side = 0; side < 4; side++) {
+    const gap = side === 0 ? gL : side === 1 ? gB : side === 2 ? gR : gT
+    if (gap >= minGap) continue
+    const vert = side === 0 || side === 2          // сторона вертикальная — длина по Y
+    const lo = vert ? y0 : x0, hi = vert ? y1 : x1
     // Прикрыта ли сторона: соседи между деталью и краем закрывают ≥ половины её длины
-    const iv = []
-    if (sd.gap > 1) {
-      for (const q of placed) {
-        if (q === p || !sd.between(q)) continue
-        const a = Math.max(sd.lo, sd.axis === 'y' ? q.y : q.x)
-        const b = Math.min(sd.hi, sd.axis === 'y' ? q.y + q.h : q.x + q.w)
-        if (b > a) iv.push([a, b])
+    let cov = 0
+    if (gap > 1) {
+      const iv = []
+      for (let k = 0; k < placed.length; k++) {
+        const q = placed[k]
+        if (q === p) continue
+        const between = side === 0 ? q.x + q.w <= x0 + 0.5
+          : side === 1 ? q.y + q.h <= y0 + 0.5
+          : side === 2 ? q.x >= x1 - 0.5
+          : q.y >= y1 - 0.5
+        if (!between) continue
+        const a = Math.max(lo, vert ? q.y : q.x)
+        const b = Math.min(hi, vert ? q.y + q.h : q.x + q.w)
+        if (b > a) iv.push(a, b)
+      }
+      if (iv.length) {
+        const pairs = []
+        for (let k = 0; k < iv.length; k += 2) pairs.push([iv[k], iv[k + 1]])
+        pairs.sort((u, v) => u[0] - v[0])
+        let ce = -Infinity
+        for (const [a, b] of pairs) { if (b <= ce) continue; cov += b - Math.max(a, ce); ce = b }
       }
     }
-    iv.sort((u, v) => u[0] - v[0])
-    let cov = 0, ce = -Infinity
-    for (const [a, b] of iv) { if (b <= ce) continue; cov += b - Math.max(a, ce); ce = b }
-    if (cov < (sd.hi - sd.lo) * 0.5) n++
+    if (cov < (hi - lo) * 0.5) n++
   }
   return n
 }
