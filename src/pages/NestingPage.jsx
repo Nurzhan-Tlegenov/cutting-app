@@ -5,6 +5,7 @@ import { computeOffcutAtPoint } from '../lib/nesting'
 import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
 import { newHistory, recordEvent, recordIsland, recordStats, buildHistoryExport } from '../lib/nestingHistory'
+import { validateNesting } from '../lib/validateNesting'
 import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
@@ -1076,6 +1077,7 @@ function newCfg(over = {}) {
     selPart: -1,         // выделенная деталь на активном листе (индекс в placed)
     selBuf: -1,          // выделенная деталь в буфере
     note: '',            // подсказка по буферу (например «нет места»)
+    check: null,         // результат проверки раскроя { ok, errors, stats, for: sheetsData, method }
     ...over,
   }
 }
@@ -1496,8 +1498,24 @@ export default function NestingPage() {
     await supabase.from('orders').update({ nesting_result: JSON.stringify(toSave) }).eq('id', id)
   }
 
+  // ─── Проверка раскроя перед сохранением / оформлением ──────────────────────
+  // Итоговая раскладка (с ручными правками) проверяется заново: все детали на
+  // месте, нет пересечений, выдержан зазор на рез и отступы от края листа,
+  // размеры и запрет поворота; для пилы — сквозные резы. Результат привязан к
+  // конкретной раскладке (check.for) — после любой правки проверка повторяется.
+  function checkCfg(cfg) {
+    const r = validateNesting({
+      sheets: cfg.sheetsData.filter(sh => sh.placed.length), details,
+      usableX: cfg.result.usableX, usableY: cfg.result.usableY,
+      kerf: Number(order.kerf_width) || 0, cuttingMethod,
+    })
+    updateCfg(cfg.id, { check: { ...r, for: cfg.sheetsData, method: cuttingMethod } })
+    return r.ok
+  }
+
   // «Выбрать вариант» — записать этот результат в заказ (остальные остаются на экране)
-  async function chooseCfg(cfg) {
+  async function chooseCfg(cfg, force = false) {
+    if (!force && !checkCfg(cfg)) return
     setBusyId(cfg.id)
     await saveNesting(cfg)
     setConfigs(cs => cs.map(c => ({ ...c, saved: c.id === cfg.id })))
@@ -1505,7 +1523,8 @@ export default function NestingPage() {
     setBusyId(null)
   }
 
-  async function submitOrder(cfg) {
+  async function submitOrder(cfg, force = false) {
+    if (!force && !checkCfg(cfg)) return
     setBusyId(cfg.id)
     // Хронология нужна только на время раскроя — после оформления очищается
     historyRef.current = {}
@@ -2138,6 +2157,35 @@ export default function NestingPage() {
                   <p style={{ fontSize: 11, color: '#B85C00', margin: '0 0 6px' }}>
                     В буфере {cfg.buffer.length} дет. — разложите их по листам, иначе сохранить раскрой нельзя.
                   </p>
+                )}
+
+                {/* Результат проверки раскроя (для текущей раскладки и станка) */}
+                {cfg.check && cfg.check.for === cfg.sheetsData && cfg.check.method === cuttingMethod && (
+                  cfg.check.ok ? (
+                    <p style={{ fontSize: 11, color: '#1e7e34', margin: '0 0 6px' }}>
+                      ✓ Проверено: {cfg.check.stats.placed} из {cfg.check.stats.total} деталей на месте, пересечений нет,
+                      зазор на рез и отступы выдержаны{cuttingMethod === 'guillotine' ? ', все листы режутся насквозь' : ''}
+                    </p>
+                  ) : (
+                    <div style={{ padding: 8, marginBottom: 8, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.08)', border: '1px solid rgba(220,53,69,0.4)' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#dc3545', marginBottom: 4 }}>
+                        ⚠ Раскрой с ошибками — проверьте перед отправкой в производство
+                      </div>
+                      {cfg.check.errors.map((e, i) => (
+                        <div key={i} style={{ fontSize: 11, color: '#a71d2a', padding: '1px 0' }}>• {e}</div>
+                      ))}
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                        <button onClick={() => chooseCfg(cfg, true)} disabled={busyId === cfg.id}
+                          style={{ flex: 1, padding: 6, borderRadius: 'var(--radius)', border: '0.5px solid #dc3545', background: 'transparent', color: '#dc3545', fontSize: 11, cursor: 'pointer' }}>
+                          Всё равно сохранить
+                        </button>
+                        <button onClick={() => submitOrder(cfg, true)} disabled={busyId === cfg.id}
+                          style={{ flex: 1, padding: 6, borderRadius: 'var(--radius)', border: 'none', background: '#dc3545', color: 'white', fontSize: 11, cursor: 'pointer' }}>
+                          Всё равно оформить
+                        </button>
+                      </div>
+                    </div>
+                  )
                 )}
 
                 {/* DXF · выбрать вариант · оформить — в одну строку */}
