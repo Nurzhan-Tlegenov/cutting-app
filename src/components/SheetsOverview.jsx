@@ -278,23 +278,23 @@ export default function SheetsOverview({
           style={{ width: canvasW, height: 'auto', aspectRatio: `${canvasW} / ${canvasH}`, maxWidth: zoom > 1 ? 'none' : '100%',
             display: 'block', touchAction: zoom > 1 ? 'pan-x pan-y' : 'pan-y', cursor: onPickSheet ? 'pointer' : 'default' }} />
       </div>
-      {zoom > 1.02 && (
-        <button type="button" onClick={() => { setZoom(1); if (wrapRef.current) { wrapRef.current.scrollLeft = 0; wrapRef.current.scrollTop = 0 } }}
-          style={{ position: 'absolute', top: 6, right: 6, fontSize: 10, padding: '3px 8px', border: '0.5px solid var(--border-md)',
-            borderRadius: 6, background: 'rgba(255,255,255,0.92)', color: 'var(--text-muted)', cursor: 'pointer' }}>
-          {Math.round(zoom * 100)}% · сброс
-        </button>
-      )}
-      {running && (
-        <div style={{ position: 'absolute', top: 6, left: 6, fontSize: 10, padding: '3px 8px', borderRadius: 6,
-          background: 'rgba(24,95,165,0.9)', color: 'white', pointerEvents: 'none' }}>
-          ● идёт оптимизация
-        </div>
-      )}
-      {bufferCount > 0 && !running && (
-        <div style={{ position: 'absolute', bottom: 6, left: 6, fontSize: 10, padding: '3px 8px', borderRadius: 6,
-          background: 'rgba(184,92,0,0.9)', color: 'white', pointerEvents: 'none' }}>
-          В буфере: {bufferCount}
+      {/* Под картой, а не поверх неё — чтобы ничего не закрывало укладку.
+          Значок «идёт оптимизация» убран: расчёт и так видно по счётчику секунд. */}
+      {(zoom > 1.02 || (bufferCount > 0 && !running)) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+          {bufferCount > 0 && !running && (
+            <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 6, background: 'rgba(184,92,0,0.12)', color: '#B85C00' }}>
+              В буфере: {bufferCount}
+            </span>
+          )}
+          <div style={{ flex: 1 }} />
+          {zoom > 1.02 && (
+            <button type="button" onClick={() => { setZoom(1); if (wrapRef.current) { wrapRef.current.scrollLeft = 0; wrapRef.current.scrollTop = 0 } }}
+              style={{ fontSize: 10, padding: '3px 8px', border: '0.5px solid var(--border-md)',
+                borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
+              {Math.round(zoom * 100)}% · сброс
+            </button>
+          )}
         </div>
       )}
     </div>
