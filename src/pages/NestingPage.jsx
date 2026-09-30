@@ -1161,7 +1161,8 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     if (!global) return
     best = res; bestScore = sc
     if (!cancelled && !finished) onProgress?.(res, fromIdx)
-    if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome }) })
+    // соседям — и порядок деталей, и саму раскладку (дожатую, «починенную»)
+    if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome, sheets: res.sheets }) })
   }
   const pickBest = list => {
     let top = null, topScore = null
