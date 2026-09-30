@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { smallEdgeSides } from '../lib/nesting'
 
 // ─── Обзор ВСЕХ листов раскроя на одном холсте ──────────────────────────────
 // Нужен для онлайн-раскроя: пока идёт поиск, пользователь видит, как укладка
@@ -70,6 +71,7 @@ export default function SheetsOverview({
     sheets.forEach((s, si) => {
       const o = origin(si)
       s.placed.forEach(p => {
+        const atEdge = !!p.isSmall && smallEdgeSides(p, s.placed, usableX, usableY) > 0
         const w = p.w - kerf, h = p.h - kerf
         out.push({
           di: p.detailIndex, sheet: si,
@@ -77,7 +79,7 @@ export default function SheetsOverview({
           y: o.y + marginT + (usableY - p.y - h),
           w, h, polygon: Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : null,
           label: (p.prefix ? p.prefix.slice(0, 3) + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д'),
-          alpha: 1,
+          alpha: 1, atEdge,
         })
       })
     })
@@ -121,9 +123,10 @@ export default function SheetsOverview({
     items.forEach(it => {
       const x = X(it.x), y = X(it.y), w = it.w * sc, h = it.h * sc
       ctx.globalAlpha = it.alpha
-      ctx.fillStyle = PART_FILL
-      ctx.strokeStyle = PART_STROKE
-      ctx.lineWidth = 1
+      // мелкая/узкая деталь у края листа («мелкие — в центр» не выполнено) — оранжевым
+      ctx.fillStyle = it.atEdge ? 'rgba(245,158,11,0.35)' : PART_FILL
+      ctx.strokeStyle = it.atEdge ? '#D97706' : PART_STROKE
+      ctx.lineWidth = it.atEdge ? 1.6 : 1
       if (it.polygon) {
         ctx.beginPath()
         it.polygon.forEach((pt, vi) => {
