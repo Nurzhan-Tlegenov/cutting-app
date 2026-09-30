@@ -203,7 +203,7 @@ export function offcutInstances(offcuts) {
 }
 
 
-async function fillOffcuts(params, offs, shaped, budget) {
+export async function fillOffcuts(params, offs, shaped, budget) {
   const kerf = Number(params.kerf) || 0
   const remaining = params.details.map(d => Math.max(0, Number(d.qty) || 0))
   const sheets = []
@@ -271,7 +271,9 @@ export async function runLiveNesting(params, opts = {}) {
   if (!offs.length) return await runCore(params, opts)
 
   const shaped = !isRasterPath(params)
-  const budget = Math.max(0.2, Math.min(1, 3 / offs.length))
+  // Время на обрезок: больше 0,15 с заполнение не улучшает (замер на 260906_009:
+  // 0,15 с — 93,9%, 1 с — 93,9%), а первая картинка из-за него появлялась на ~1 с позже
+  const budget = Math.min(0.15, 1 / offs.length)
   const { sheets: offSheets, remaining } = await fillOffcuts(params, offs, shaped, budget)
   if (!offSheets.length) return await runCore(params, opts)
 
