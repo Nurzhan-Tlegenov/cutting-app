@@ -891,8 +891,11 @@ function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall, conta
     if (Math.abs(rect.x + w - usableX) <= EPS) borderTouch++
     if (Math.abs(rect.y + h - usableY) <= EPS) borderTouch++
     if (along) {
-      // мелкие детали: край листа важнее привязки (как и раньше — не запрет, а сильный штраф)
-      score += borderTouch * (span * fitSpan * span)
+      // мелкие детали: край листа важнее привязки (не запрет, а сильный штраф).
+      // Штраф больше любой оценки места при укладке «вдоль»: anchor·(maxContact+1)·(span+1) + … < (span+1)²·(maxContact+2).
+      // (Раньше здесь стояла необъявленная переменная fitSpan — раскрой падал с ошибкой
+      // «fitSpan is not defined», как только мелкая деталь пробовала место у края.)
+      score += borderTouch * (span + 1) * (span + 1) * (2 * (usableX + usableY) + 2)
     } else {
       score += borderTouch * BORDER_PENALTY
       if (borderTouch > 0) score += (rect.x + rect.y) * ORIGIN_TIEBREAK
