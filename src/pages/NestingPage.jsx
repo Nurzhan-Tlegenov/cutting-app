@@ -1122,6 +1122,9 @@ const countTxt = s => `${s.count} л.${s.offcuts ? ` + ${s.offcuts} обр.` : '
 // Формат листа, рез и отступы живут в заказе (orders.*). Если выбрано
 // производство — берутся из него и не редактируются. Обрезки со склада —
 // orders.offcuts (JSON { margin, items: [{ length, width, qty }] }).
+// Производство задаёт только рез и отступы (это его станок); формат листа
+// пользователь меняет всегда — вдруг привезёт свой материал
+const PROD_LOCKED = ['kerf', 'ml', 'mr', 'mt', 'mb']
 const SHEET_FIELDS = [
   ['L', 'sheet_length'], ['W', 'sheet_width'], ['kerf', 'kerf_width'],
   ['ml', 'margin_left'], ['mr', 'margin_right'], ['mt', 'margin_top'], ['mb', 'margin_bottom'],
@@ -1404,7 +1407,7 @@ export default function NestingPage() {
     const pr = o?.production_id ? list.find(x => x.id === o.production_id) : null
     if (pr) {
       const patch = {}
-      SHEET_FIELDS.forEach(([, col]) => { if (pr[col] != null && Number(pr[col]) !== Number(o[col])) patch[col] = Number(pr[col]) })
+      SHEET_FIELDS.forEach(([k, col]) => { if (PROD_LOCKED.includes(k) && pr[col] != null && Number(pr[col]) !== Number(o[col])) patch[col] = Number(pr[col]) })
       if (Object.keys(patch).length) await saveOrderPatch(patch)
     }
   }
@@ -1439,7 +1442,7 @@ export default function NestingPage() {
     const pr = productions.find(x => x.id === pid)
     if (!pr) { saveOrderPatch({ production_id: null }); return }
     const patch = { production_id: pr.id }
-    SHEET_FIELDS.forEach(([, col]) => { if (pr[col] != null) patch[col] = Number(pr[col]) })
+    SHEET_FIELDS.forEach(([k, col]) => { if (PROD_LOCKED.includes(k) && pr[col] != null) patch[col] = Number(pr[col]) }) // формат листа не трогаем
     saveOrderPatch(patch)
   }
   function commitOffcuts(form = offForm) {
@@ -2458,17 +2461,17 @@ export default function NestingPage() {
       {/* Производство, лист, рез, отступы, обрезки — общие для всех конфигураций */}
       {(() => {
         const prod = order.production_id ? productions.find(x => x.id === order.production_id) : null
-        const locked = !!prod || anyRunning       // производство задаёт параметры листа
+        const isLocked = key => anyRunning || (!!prod && PROD_LOCKED.includes(key)) // производство задаёт рез и отступы
         const offLocked = anyRunning
         const inp = { width: '100%', fontSize: 14, padding: '4px 6px', boxSizing: 'border-box', display: 'block' }
         const lbl = { flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-muted)' }
         const field = (key, label, title) => (
           <label style={lbl} title={title}>
             {label}
-            <input type="text" inputMode="decimal" value={sheetForm[key]} disabled={locked}
+            <input type="text" inputMode="decimal" value={sheetForm[key]} disabled={isLocked(key)}
               onChange={e => { const v = e.target.value.replace(/[^0-9.,]/g, ''); setSheetForm(f => ({ ...f, [key]: v })) }}
               onBlur={() => commitSheetField(key)}
-              style={{ ...inp, opacity: locked ? 0.55 : 1 }} />
+              style={{ ...inp, opacity: isLocked(key) ? 0.55 : 1 }} />
           </label>
         )
         const ov = offcutsValue(offForm)
@@ -2501,7 +2504,7 @@ export default function NestingPage() {
                 )}
                 {prod && (
                   <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>
-                    Формат, рез и отступы задаёт производство «{prod.name}». Чтобы изменить — выберите «не выбрано».
+                    Рез и отступы задаёт производство «{prod.name}». Формат листа можно менять — например, под свой материал.
                   </p>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
