@@ -414,6 +414,9 @@ function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allow
     const mode = modes[Math.floor(Math.random() * modes.length)]
     const res = packAttempt(order, mode, direction, usableX, usableY)
     if (res.length > idx.length + 1) continue
+    // «Мелкие — в центр»: перекладка не должна добавлять мелких деталей у края
+    const oldSheets = idx.map(j => cur[j]).concat([cur[n]])
+    if (smallAtEdge(res, usableX, usableY) > smallAtEdge(oldSheets, usableX, usableY)) continue
     // Самый лёгкий из новых листов — последний, остальные встают на места взятых
     res.sort((x, y) => sheetArea(y) - sheetArea(x))
     const newLast = res.length === idx.length + 1 ? sheetArea(res[res.length - 1]) : 0
@@ -668,6 +671,17 @@ function fitFixed(freeRects, w, h, usableX, usableY, isSmall, direction) {
   return best
 }
 
+// Сколько мелких деталей («мелкие — в центр») касаются края рабочей зоны листа.
+// Это не пожелание, а критерий качества: см. better() — сразу после числа листов.
+export function smallAtEdge(sheets, usableX, usableY) {
+  let n = 0
+  for (const sh of sheets) for (const p of sh.placed) {
+    if (!p.isSmall) continue
+    if (p.x <= 0.5 || p.y <= 0.5 || p.x + p.w >= usableX - 0.5 || p.y + p.h >= usableY - 0.5) n++
+  }
+  return n
+}
+
 function evaluate(sheets, usableX, usableY) {
   const used = sheets.reduce((s, sh) => s + sh.placed.reduce((a, p) => a + p.w * p.h, 0), 0)
   const total = sheets.length * usableX * usableY
@@ -678,6 +692,7 @@ function evaluate(sheets, usableX, usableY) {
     utilization: total ? used / total : 0,
     lastSheetArea: lastUsed,     // сколько площади реально занято на последнем листе
     lastSheetParts: lastSheet ? lastSheet.placed.length : 0,
+    smallEdge: smallAtEdge(sheets, usableX, usableY), // мелкие детали у края листа (при «мелкие — в центр»)
   }
 }
 
@@ -689,6 +704,9 @@ function evaluate(sheets, usableX, usableY) {
 // часть материала уже "утрамбована" в предыдущие листы.
 function better(a, b) {
   if (a.sheetCount !== b.sheetCount) return a.sheetCount < b.sheetCount
+  // «Мелкие — в центр» — жёсткое требование: вариант, где меньше мелких деталей
+  // у края листа, лучше независимо от заполнения последнего листа
+  if ((a.smallEdge || 0) !== (b.smallEdge || 0)) return (a.smallEdge || 0) < (b.smallEdge || 0)
   if (Math.abs(a.lastSheetArea - b.lastSheetArea) > 1) return a.lastSheetArea < b.lastSheetArea
   return a.utilization > b.utilization
 }

@@ -137,7 +137,15 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
     if (!sh.placed.length) push(`${L} пустой`)
   })
 
+  // Предупреждение (не ошибка): «мелкие — в центр», но мелкая деталь у края листа
+  const warnings = []
+  let edge = 0
+  sheets.forEach(sh => sh.placed.forEach(p => {
+    if (p.isSmall && (p.x <= 0.5 || p.y <= 0.5 || p.x + p.w >= usableX - 0.5 || p.y + p.h >= usableY - 0.5)) edge++
+  }))
+  if (edge) warnings.push(`⚠ мелких деталей у края листа: ${edge} (просили «мелкие — в центр»)`)
+
   const total = details.reduce((a, d) => a + (Number(d.qty) || 1), 0)
   const placed = cnt.reduce((a, b) => a + b, 0)
-  return { ok: errors.length === 0, errors, stats: { total, placed, sheets: sheets.length } }
+  return { ok: errors.length === 0, errors, warnings, stats: { total, placed, sheets: sheets.length } }
 }

@@ -37,7 +37,7 @@ export function newHistory(cfg, islands, params) {
   }
 }
 function scoreOf(sheets, usableX, usableY) {
-  const sc = liveScore(sheets)
+  const sc = liveScore(sheets, usableX, usableY)
   const sheetArea = (usableX || 1) * (usableY || 1)
   let total = 0
   sheets.forEach(sh => sh.placed.forEach(p => { total += partAreaMm(p) }))
@@ -57,7 +57,7 @@ export function recordEvent(hist, res, island, kind) {
 }
 export function recordIsland(hist, res, island, global) {
   const t = Date.now() - hist.startedAt
-  const sc = liveScore(res.sheets)
+  const sc = liveScore(res.sheets, res.usableX, res.usableY)
   hist.islandEvents.push({ t, island, global, iter: res.iter || 0, mode: res.genome?.mode || null, count: sc.count, last: Math.round(sc.last) })
   if (hist.islandEvents.length > HIST_MAX_STATS) hist.islandEvents.splice(0, hist.islandEvents.length - HIST_MAX_STATS)
 }

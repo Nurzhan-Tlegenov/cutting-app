@@ -11,7 +11,7 @@
 //
 // Обычный (не онлайн) режим тоже идёт через этот модуль: тот же поиск, но с
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
-import { runNesting } from './nesting'
+import { runNesting, smallAtEdge } from './nesting'
 import { needsTrueShape, roughShapePolygons, isTurned, buildHybridPlan } from './trueShapeNesting'
 
 const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажатия «Стоп»
@@ -82,13 +82,19 @@ function polyArea(pts) {
 const partArea = p => (Array.isArray(p.polygon) && p.polygon.length > 2 ? polyArea(p.polygon) : (p.origX || 0) * (p.origY || 0))
 
 // Лучше — меньше листов; при равенстве — меньше материала на последнем листе
-export function liveScore(sheets) {
-  if (!sheets?.length) return { count: Infinity, last: Infinity }
-  return { count: sheets.length, last: sheets[sheets.length - 1].placed.reduce((a, p) => a + partArea(p), 0) }
+// Лучше — меньше листов; затем меньше мелких деталей у края листа («мелкие —
+// в центр», жёсткое требование); затем меньше материала на последнем листе.
+// usableX/usableY берутся из самого результата (res.usableX) или передаются.
+export function liveScore(sheets, usableX, usableY) {
+  if (!sheets?.length) return { count: Infinity, edge: Infinity, last: Infinity }
+  let edge = 0
+  if (usableX && usableY) edge = smallAtEdge(sheets, usableX, usableY)
+  return { count: sheets.length, edge, last: sheets[sheets.length - 1].placed.reduce((a, p) => a + partArea(p), 0) }
 }
 export function liveBetter(a, b) {
   if (!b) return true
   if (a.count !== b.count) return a.count < b.count
+  if ((a.edge || 0) !== (b.edge || 0)) return (a.edge || 0) < (b.edge || 0)
   return a.last < b.last - 1
 }
 
@@ -129,7 +135,7 @@ export async function runLiveNesting(params, { live = false, shouldStop = () => 
   if (onProgress) {
     rough = await roughLayout(params)
     if (rough) {
-      const sc = liveScore(rough.sheets)
+      const sc = liveScore(rough.sheets, meta.usableX, meta.usableY)
       onStats?.({ t: Date.now() - t0, phase: 'rough', result: { count: sc.count, last: Math.round(sc.last) }, improved: true })
       onProgress({ ...rough, iter: 0, round: 0 })
     }
@@ -141,24 +147,24 @@ export async function runLiveNesting(params, { live = false, shouldStop = () => 
   const hybridRole = hybridAllowed && islands > 1 && island % 2 === 1
   if (hybridRole) {
     const r = await runHybrid(params, meta, { live, shouldStop, onProgress, takeMigrant, onStats, t0 })
-    if (r) return rough && liveBetter(liveScore(rough.sheets), liveScore(r.sheets)) ? rough : r
+    if (r) return rough && liveBetter(liveScore(rough.sheets, meta.usableX, meta.usableY), liveScore(r.sheets, meta.usableX, meta.usableY)) ? rough : r
   }
   if (!live) {
     let res = await runNesting(params)
     if (islands <= 1 && hybridAllowed) {
       // один поток: дополнительно гибрид с тем же временем — берём лучший
       const hy = await runHybrid(params, meta, { live: false, shouldStop, onProgress: null, takeMigrant: null, onStats, t0 })
-      if (hy && liveBetter(liveScore(hy.sheets), liveScore(res.sheets))) res = hy
+      if (hy && liveBetter(liveScore(hy.sheets, meta.usableX, meta.usableY), liveScore(res.sheets, meta.usableX, meta.usableY))) res = hy
     }
-    const sc = liveScore(res.sheets)
+    const sc = liveScore(res.sheets, meta.usableX, meta.usableY)
     onStats?.({ t: Date.now() - t0, phase: 'shape', round: 1, roundSeconds: params.optimizeSeconds, best: { count: sc.count, last: Math.round(sc.last) }, improved: true })
     // итог не хуже уже показанного черновика
-    if (rough && liveBetter(liveScore(rough.sheets), sc)) return rough
+    if (rough && liveBetter(liveScore(rough.sheets, meta.usableX, meta.usableY), sc)) return rough
     return res
   }
 
   // Онлайн — раунды до «Стоп»
-  let best = rough, bestScore = rough ? liveScore(rough.sheets) : null, round = 0
+  let best = rough, bestScore = rough ? liveScore(rough.sheets, meta.usableX, meta.usableY) : null, round = 0
   while (!shouldStop()) {
     const secs = ROUND_SECONDS[Math.min(round, ROUND_SECONDS.length - 1)]
     // один поток — раунды чередуются: точная укладка / гибрид
@@ -166,7 +172,7 @@ export async function runLiveNesting(params, { live = false, shouldStop = () => 
     const res = (useHybrid && await runHybrid({ ...params, optimizeSeconds: secs }, meta, { live: false, shouldStop, onProgress: null, takeMigrant: null, onStats: null, t0 }))
       || await runNesting({ ...params, optimizeSeconds: secs })
     round++
-    const sc = liveScore(res.sheets)
+    const sc = liveScore(res.sheets, meta.usableX, meta.usableY)
     const improved = liveBetter(sc, bestScore)
     // «Пульс» по раундам: что дал каждый раунд, даже если он не лучше
     onStats?.({ t: Date.now() - t0, phase: 'shape', round, roundSeconds: secs, result: { count: sc.count, last: Math.round(sc.last) }, improved })
