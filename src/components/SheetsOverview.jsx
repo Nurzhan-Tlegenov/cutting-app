@@ -47,8 +47,18 @@ export default function SheetsOverview({
   const n = Math.max(1, sheets.length)
   const cols = n === 1 ? 1 : n <= 4 ? 2 : 3
   const rows = Math.ceil(n / cols)
-  const totalW = cols * sheetW + (cols - 1) * GAP_MM
-  const totalH = rows * (CAPTION_MM + sheetL) + (rows - 1) * GAP_MM
+  // Размеры каждого листа: у листа-обрезка — свои (sheet.sheetW/usableX…),
+  // у обычного — общие. Клетка сетки — по самому большому листу.
+  const dimOf = s => ({
+    sw: s?.sheetW ?? sheetW, sl: s?.sheetL ?? sheetL,
+    ml: s?.marginL ?? marginL, mt: s?.marginT ?? marginT,
+    ux: s?.usableX ?? usableX, uy: s?.usableY ?? usableY,
+    offcut: s?.stock === 'offcut',
+  })
+  const cellW = Math.max(sheetW, ...sheets.map(s => dimOf(s).sw))
+  const cellL = Math.max(sheetL, ...sheets.map(s => dimOf(s).sl))
+  const totalW = cols * cellW + (cols - 1) * GAP_MM
+  const totalH = rows * (CAPTION_MM + cellL) + (rows - 1) * GAP_MM
   const PADDING = 6
   // Карта не выше ~половины экрана телефона — чтобы над ней оставались время
   // оптимизации и кнопка «Стоп», а под ней переключатель листов
@@ -61,8 +71,8 @@ export default function SheetsOverview({
   const DPR = pinching ? 1 : Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, Math.sqrt(12e6 / (canvasW * canvasH)))
 
   const origin = si => ({
-    x: (si % cols) * (sheetW + GAP_MM),
-    y: Math.floor(si / cols) * (CAPTION_MM + sheetL + GAP_MM) + CAPTION_MM,
+    x: (si % cols) * (cellW + GAP_MM),
+    y: Math.floor(si / cols) * (CAPTION_MM + cellL + GAP_MM) + CAPTION_MM,
   })
 
   // Целевое положение каждой детали в общей раскладке (мм, Y сверху вниз)
@@ -70,13 +80,14 @@ export default function SheetsOverview({
     const out = []
     sheets.forEach((s, si) => {
       const o = origin(si)
+      const D = dimOf(s)
       s.placed.forEach(p => {
-        const atEdge = !!p.isSmall && smallEdgeSides(p, s.placed, usableX, usableY) > 0
+        const atEdge = !!p.isSmall && smallEdgeSides(p, s.placed, D.ux, D.uy) > 0
         const w = p.w - kerf, h = p.h - kerf
         out.push({
           di: p.detailIndex, sheet: si,
-          x: o.x + marginL + p.x,
-          y: o.y + marginT + (usableY - p.y - h),
+          x: o.x + D.ml + p.x,
+          y: o.y + D.mt + (D.uy - p.y - h),
           w, h, polygon: Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : null,
           label: (p.prefix ? p.prefix.slice(0, 3) + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д'),
           alpha: 1, atEdge,
@@ -97,26 +108,28 @@ export default function SheetsOverview({
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
     ctx.clearRect(0, 0, canvasW, canvasH)
     const X = v => PADDING + v * sc
-    const usableArea = usableX * usableY
-
     // Листы
     sheets.forEach((s, si) => {
       const o = origin(si)
-      ctx.fillStyle = '#F1EFE8'
-      ctx.fillRect(X(o.x), X(o.y), sheetW * sc, sheetL * sc)
+      const D = dimOf(s)
+      const usableArea = D.ux * D.uy
+      ctx.fillStyle = D.offcut ? '#E6DCC8' : '#F1EFE8'
+      ctx.fillRect(X(o.x), X(o.y), D.sw * sc, D.sl * sc)
       ctx.fillStyle = '#fff'
-      ctx.fillRect(X(o.x + marginL), X(o.y + marginT), usableX * sc, usableY * sc)
+      ctx.fillRect(X(o.x + D.ml), X(o.y + D.mt), D.ux * sc, D.uy * sc)
       const active = si === activeSheet
-      ctx.strokeStyle = active ? '#185FA5' : '#888780'
+      ctx.strokeStyle = active ? '#185FA5' : D.offcut ? '#A0782C' : '#888780'
       ctx.lineWidth = active ? 2 : 1
-      ctx.strokeRect(X(o.x), X(o.y), sheetW * sc, sheetL * sc)
+      if (D.offcut && !active) ctx.setLineDash([6, 3])
+      ctx.strokeRect(X(o.x), X(o.y), D.sw * sc, D.sl * sc)
+      ctx.setLineDash([])
       // Подпись над листом
       const fill = s.placed.reduce((a, p) => a + partArea(p), 0) / usableArea
       const fs = Math.max(9, Math.min(13, CAPTION_MM * sc * 0.62))
       ctx.font = `${active ? 'bold ' : ''}${fs}px sans-serif`
       ctx.fillStyle = active ? '#185FA5' : 'rgba(0,0,0,0.65)'
       ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'
-      ctx.fillText(`Лист ${si + 1} · ${s.placed.length} дет. · ${Math.round(fill * 100)}%`, X(o.x), X(o.y) - 2)
+      ctx.fillText(`${D.offcut ? 'Обр.' : 'Лист'} ${si + 1} · ${s.placed.length} дет. · ${Math.round(fill * 100)}%`, X(o.x), X(o.y) - 2)
     })
 
     // Детали
@@ -201,8 +214,8 @@ export default function SheetsOverview({
     const mx = ((e.clientX - rect.left) * k - PADDING) / sc
     const my = ((e.clientY - rect.top) * k - PADDING) / sc
     for (let si = 0; si < sheets.length; si++) {
-      const o = origin(si)
-      if (mx >= o.x && mx <= o.x + sheetW && my >= o.y - CAPTION_MM && my <= o.y + sheetL) { onPickSheet(si); return }
+      const o = origin(si), D = dimOf(sheets[si])
+      if (mx >= o.x && mx <= o.x + Math.max(D.sw, 300) && my >= o.y - CAPTION_MM && my <= o.y + D.sl) { onPickSheet(si); return }
     }
   }
 
