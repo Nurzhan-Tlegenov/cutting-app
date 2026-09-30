@@ -353,8 +353,6 @@ export default function NewOrderPage() {
   const [details, setDetails] = useState([newDetail()])
   const [showEdge, setShowEdge] = useState(true)
 
-  const [sheetLength, setSheetLength] = useState(2750)
-  const [sheetWidth, setSheetWidth] = useState(1830)
   const [saving, setSaving] = useState(false)
   const [keyboardOpen, setKeyboardOpen] = useState(false)
   const [error, setError] = useState('')
@@ -421,8 +419,9 @@ export default function NewOrderPage() {
         order_name: orderName || null,
         material_name: materialName || 'Без названия',
         material_thickness: Number(materialThickness) || 16,
-        sheet_length: Number(sheetLength) || SHEET_DEFAULTS.length,
-        sheet_width: Number(sheetWidth) || SHEET_DEFAULTS.width,
+        // формат листа, рез и отступы — по умолчанию; меняются на странице «Раскрой»
+        sheet_length: SHEET_DEFAULTS.length,
+        sheet_width: SHEET_DEFAULTS.width,
         margin_top: SHEET_DEFAULTS.margin_top,
         margin_right: SHEET_DEFAULTS.margin_right,
         margin_bottom: SHEET_DEFAULTS.margin_bottom,
@@ -516,32 +515,6 @@ export default function NewOrderPage() {
               <input type="number" placeholder="16" value={materialThickness}
                 onChange={e => setMaterialThickness(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Параметры листа */}
-      <div style={{ marginBottom: 14 }}>
-        <span className="section-title">Параметры листа</span>
-        <div className="card" style={{ padding: '8px 12px' }}>
-          {/* Формат листа — редактируемый */}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-            <label className="label" style={{ marginBottom: 0, minWidth: 70 }}>Формат листа</label>
-            <input type="text" inputMode="numeric" value={sheetLength}
-              onChange={e => { const v = e.target.value.replace(/[^0-9]/g,''); setSheetLength(v===''?'':Number(v)) }}
-              style={{ width: 70, padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
-            <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>×</span>
-            <input type="text" inputMode="numeric" value={sheetWidth}
-              onChange={e => { const v = e.target.value.replace(/[^0-9]/g,''); setSheetWidth(v===''?'':Number(v)) }}
-              style={{ width: 70, padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
-            <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>мм</span>
-          </div>
-          {/* Отступы — только просмотр */}
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-hint)', minWidth: 70 }}>Отступы/рез</span>
-            <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>
-              ↑{SHEET_DEFAULTS.margin_top} →{SHEET_DEFAULTS.margin_right} ↓{SHEET_DEFAULTS.margin_bottom} ←{SHEET_DEFAULTS.margin_left} · рез {SHEET_DEFAULTS.kerf} мм
-            </span>
           </div>
         </div>
       </div>

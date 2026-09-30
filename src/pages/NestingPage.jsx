@@ -1106,13 +1106,61 @@ function partAreaMm(p) {
 function summarize(sheets, usableX, usableY) {
   if (!sheets?.length || !usableX || !usableY) return null
   const areas = sheets.map(s => s.placed.reduce((a, p) => a + partAreaMm(p), 0))
-  const sheetArea = usableX * usableY
+  // у листа-обрезка своя рабочая зона
+  const cap = s => (s.usableX ?? usableX) * (s.usableY ?? usableY)
+  const caps = sheets.map(cap)
+  const offcuts = sheets.filter(s => s.stock === 'offcut').length
   return {
-    count: sheets.length,
-    util: areas.reduce((a, b) => a + b, 0) / (sheets.length * sheetArea),
-    lastFill: areas[areas.length - 1] / sheetArea,
+    count: sheets.length - offcuts, offcuts,
+    util: areas.reduce((a, b) => a + b, 0) / caps.reduce((a, b) => a + b, 0),
+    lastFill: areas[areas.length - 1] / caps[caps.length - 1],
   }
 }
+const countTxt = s => `${s.count} л.${s.offcuts ? ` + ${s.offcuts} обр.` : ''}`
+
+// ─── Параметры листа и обрезки ────────────────────────────────────────────────
+// Формат листа, рез и отступы живут в заказе (orders.*). Если выбрано
+// производство — берутся из него и не редактируются. Обрезки со склада —
+// orders.offcuts (JSON { margin, items: [{ length, width, qty }] }).
+const SHEET_FIELDS = [
+  ['L', 'sheet_length'], ['W', 'sheet_width'], ['kerf', 'kerf_width'],
+  ['ml', 'margin_left'], ['mr', 'margin_right'], ['mt', 'margin_top'], ['mb', 'margin_bottom'],
+]
+const sheetFormOf = src => Object.fromEntries(SHEET_FIELDS.map(([k, col]) => [k, src?.[col] != null ? String(src[col]) : '']))
+function parseOffcuts(raw) {
+  let o = raw
+  if (typeof raw === 'string') { try { o = JSON.parse(raw) } catch { o = null } }
+  const items = Array.isArray(o?.items)
+    ? o.items.map(it => ({ length: String(it.length ?? ''), width: String(it.width ?? ''), qty: String(it.qty ?? '1') }))
+    : []
+  return { margin: o?.margin != null ? String(o.margin) : '10', items }
+}
+function offcutsValue(form) {
+  const items = form.items
+    .map(it => ({ length: Number(it.length) || 0, width: Number(it.width) || 0, qty: Math.max(0, Math.floor(Number(it.qty) || 0)) }))
+    .filter(it => it.length > 0 && it.width > 0 && it.qty > 0)
+  return { margin: Math.max(0, Number(String(form.margin).replace(',', '.')) || 0), items }
+}
+// Геометрия листа для показа / DXF / проверки: у листа-обрезка — своя, у
+// обычного — из результата (с какими параметрами считали), иначе из заказа
+function geoOf(order, result, sh) {
+  const r = result || {}
+  const num = (...v) => { for (const x of v) if (x != null && x !== '' && !isNaN(Number(x))) return Number(x); return 0 }
+  const sheetL = num(sh?.sheetL, r.sheetL, order?.sheet_length)
+  const sheetW = num(sh?.sheetW, r.sheetW, order?.sheet_width)
+  const marginL = num(sh?.marginL, r.marginL, order?.margin_left)
+  const marginR = num(sh?.marginR, r.marginR, order?.margin_right)
+  const marginT = num(sh?.marginT, r.marginT, order?.margin_top)
+  const marginB = num(sh?.marginB, r.marginB, order?.margin_bottom)
+  const kerf = num(r.kerf, order?.kerf_width)
+  return {
+    sheetL, sheetW, marginL, marginR, marginT, marginB, kerf,
+    usableX: num(sh?.usableX, r.usableX, sheetW - marginL - marginR),
+    usableY: num(sh?.usableY, r.usableY, sheetL - marginT - marginB),
+  }
+}
+// Отпечаток параметров листа — чтобы подсказать «пересчитайте», если их поменяли после расчёта
+const paramsKey = p => JSON.stringify([+p.sheetL, +p.sheetW, +p.kerf, +p.marginT, +p.marginR, +p.marginB, +p.marginL, p.offcuts?.items?.length ? p.offcuts : null])
 // Лучше — меньше листов; при равенстве — меньше материала на последнем листе
 // (тот же критерий «фронтальной загрузки», что и в самом алгоритме)
 function betterSummary(a, b) {
@@ -1268,6 +1316,11 @@ export default function NestingPage() {
   const [cuttingMethod, setCuttingMethod] = useState('nesting')
   const [showOffcuts, setShowOffcuts] = useState(false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
+  const [productions, setProductions] = useState([])     // зарегистрированные производства (если есть)
+  const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
+  const [offForm, setOffForm] = useState(() => parseOffcuts(null))
+  const [sheetOpen, setSheetOpen] = useState(true)
+  const [paramsWarn, setParamsWarn] = useState('')
   const jobsRef = useRef({})     // cfgId -> { cancel }
   const skipRef = useRef(new Set()) // конфигурации, снятые из очереди
   const launchBatchRef = useRef(1)  // сколько конфигураций запускается одновременно (для деления ядер)
@@ -1309,6 +1362,10 @@ export default function NestingPage() {
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
     setOrder(o); setDetails(d || [])
     if (o) {
+      setSheetForm(sheetFormOf(o))
+      setOffForm(parseOffcuts(o.offcuts))
+      setSheetOpen(!o.nesting_result)
+      fetchProductions(o)
       setCuttingMethod(o.cutting_method || 'nesting')
       let saved = null
       if (o.nesting_result) { try { saved = JSON.parse(o.nesting_result) } catch { saved = null } }
@@ -1335,6 +1392,61 @@ export default function NestingPage() {
     await supabase.from('orders').update(patch).eq('id', id)
   }
 
+  // ─── Производство, формат листа, рез, отступы, обрезки ──────────────────────
+  async function fetchProductions(o) {
+    let list = []
+    try {
+      const { data, error } = await supabase.from('productions').select('*').order('name')
+      if (!error && Array.isArray(data)) list = data
+    } catch { list = [] }
+    setProductions(list)
+    // Выбрано производство — параметры листа всегда его (могли поменяться)
+    const pr = o?.production_id ? list.find(x => x.id === o.production_id) : null
+    if (pr) {
+      const patch = {}
+      SHEET_FIELDS.forEach(([, col]) => { if (pr[col] != null && Number(pr[col]) !== Number(o[col])) patch[col] = Number(pr[col]) })
+      if (Object.keys(patch).length) await saveOrderPatch(patch)
+    }
+  }
+  // Запись в заказ + сразу в состояние страницы. Нет колонки в базе (не
+  // выполнена миграция) — пишем без неё и показываем предупреждение.
+  async function saveOrderPatch(patch) {
+    setOrder(o => ({ ...o, ...patch }))
+    if (SHEET_FIELDS.some(([, col]) => col in patch)) {
+      setSheetForm(f => { const n = { ...f }; SHEET_FIELDS.forEach(([k, col]) => { if (col in patch) n[k] = String(patch[col]) }); return n })
+    }
+    const { error } = await supabase.from('orders').update(patch).eq('id', id)
+    if (!error) return true
+    const missing = ['production_id', 'offcuts'].filter(c => c in patch && String(error.message || '').includes(c))
+    if (missing.length) {
+      const rest = { ...patch }; missing.forEach(c => delete rest[c])
+      if (Object.keys(rest).length) await supabase.from('orders').update(rest).eq('id', id)
+      setParamsWarn('В базе нет колонок ' + missing.join(', ') + ' — выполните migration_productions_offcuts.sql в Supabase. Пока сохраняется только на этом экране.')
+      return false
+    }
+    setParamsWarn('Не удалось сохранить: ' + (error.message || 'ошибка базы'))
+    return false
+  }
+  function commitSheetField(key) {
+    const col = SHEET_FIELDS.find(([k]) => k === key)[1]
+    const v = Number(String(sheetForm[key]).replace(',', '.'))
+    const ok = sheetForm[key] !== '' && isFinite(v) && v >= 0 && !((key === 'L' || key === 'W') && v < 50)
+    if (!ok) { setSheetForm(f => ({ ...f, [key]: order[col] != null ? String(order[col]) : '' })); return }
+    if (Number(order[col]) === v) return
+    saveOrderPatch({ [col]: v })
+  }
+  function chooseProduction(pid) {
+    const pr = productions.find(x => x.id === pid)
+    if (!pr) { saveOrderPatch({ production_id: null }); return }
+    const patch = { production_id: pr.id }
+    SHEET_FIELDS.forEach(([, col]) => { if (pr[col] != null) patch[col] = Number(pr[col]) })
+    saveOrderPatch(patch)
+  }
+  function commitOffcuts(form = offForm) {
+    const v = offcutsValue(form)
+    saveOrderPatch({ offcuts: JSON.stringify(v) })
+  }
+
   function addCfg() {
     const last = configs[configs.length - 1]
     const used = new Set(configs.map(c => c.dir))
@@ -1359,6 +1471,7 @@ export default function NestingPage() {
       marginT: order.margin_top, marginR: order.margin_right,
       marginB: order.margin_bottom, marginL: order.margin_left,
       kerf: order.kerf_width,
+      offcuts: offcutsValue(offForm),
       smallPartsToCenter: cfg.small,
       smallPartsMaxSquareSide: cfg.sq === '' ? 0 : Number(cfg.sq),
       smallPartsMaxSide: cfg.side === '' ? 0 : Number(cfg.side),
@@ -1369,6 +1482,7 @@ export default function NestingPage() {
     const stamp = res => {
       res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
       res.algo = params.algo // 'nfp' | 'raster' — чтобы на карте было видно, чем реально посчитано
+      res.paramsKey = paramsKey(params) // с какими параметрами листа считали
       return res
     }
     const toSheets = res => res.sheets.map((sh, i) => ({ ...sh, index: i, freeRects: sh.freeRects || [] }))
@@ -1494,14 +1608,13 @@ export default function NestingPage() {
       if (c.id !== cfgId || !c.result) return c
       const part = c.buffer[c.selBuf]
       if (!part) return c
-      const { usableX, usableY } = c.result
-      const kerf = order.kerf_width
       let sheetsData = c.sheetsData
       let si = c.activeSheet
       if (toNewSheet || !sheetsData[si]) {
         si = sheetsData.length
         sheetsData = [...sheetsData, { index: si, placed: [], freeRects: [], manualOffcuts: [] }]
       }
+      const { usableX, usableY, kerf } = geoOf(order, c.result, sheetsData[si])
       const canRotate = !!details[part.detailIndex]?.rotatable
       const spot = findFreeSpot(sheetsData[si].placed, part, usableX, usableY, kerf, canRotate)
       if (!spot) {
@@ -1538,7 +1651,7 @@ export default function NestingPage() {
     const r = validateNesting({
       sheets: cfg.sheetsData.filter(sh => sh.placed.length), details,
       usableX: cfg.result.usableX, usableY: cfg.result.usableY,
-      kerf: Number(order.kerf_width) || 0, cuttingMethod,
+      kerf: geoOf(order, cfg.result).kerf, cuttingMethod,
     })
     updateCfg(cfg.id, { check: { ...r, for: cfg.sheetsData, method: cuttingMethod } })
     return r.ok
@@ -1630,7 +1743,8 @@ export default function NestingPage() {
   // подписи. Так пересечение/неплотная укладка видны глазами в любом
   // CAD-просмотрщике, а не только по цифрам.
   function downloadNestingDxf(sheets = sheetsData, suffix = '') {
-    const dxf = buildNestingDxf(sheets, order)
+    const g = geoOf(order, result)
+    const dxf = buildNestingDxf(sheets, { sheet_width: g.sheetW, sheet_length: g.sheetL, margin_left: g.marginL, margin_bottom: g.marginB })
     const blob = new Blob([dxf], { type: 'application/dxf' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -1657,7 +1771,8 @@ export default function NestingPage() {
   function buildSheetDxf(sheetIdx, sheets = sheetsData) {
     const sheet = sheets[sheetIdx]
     if (!sheet || !order) return ''
-    const sheetW = order.sheet_width, sheetL = order.sheet_length, kerf = order.kerf_width || 0
+    const G = geoOf(order, result, sheet)
+    const sheetW = G.sheetW, sheetL = G.sheetL, kerf = G.kerf
     let entities = polygonToDxfEntity([[0, 0], [sheetW, 0], [sheetW, sheetL], [0, sheetL]], 'sheet')
     sheet.placed.forEach(p => {
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
@@ -1665,7 +1780,7 @@ export default function NestingPage() {
       // рабочей зоны, контур polygon кладётся БЕЗ переворота; плюс отступы
       // листа (левый и нижний). Канвас переводит в экранные координаты сам
       // (см. flipY в SheetCanvas), поэтому экран и DXF показывают одно и то же.
-      const ox = Number(order.margin_left) || 0, oy = Number(order.margin_bottom) || 0
+      const ox = G.marginL, oy = G.marginB
       const poly = hasShape
         ? p.polygon.map(pt => [ox + p.x + pt.x, oy + p.y + pt.y])
         : (() => { const w = p.w - kerf, h = p.h - kerf; return [[ox + p.x, oy + p.y], [ox + p.x + w, oy + p.y], [ox + p.x + w, oy + p.y + h], [ox + p.x, oy + p.y + h]] })()
@@ -1725,9 +1840,14 @@ export default function NestingPage() {
     return acc
   }, {})
   const totalEdge = Object.values(edgeByType).reduce((s, v) => s + v, 0)
-  const sheetsCount = sheetsData.length
-  const usableArea = result ? ((result.usableX ?? result.usableW) / 1000) * ((result.usableY ?? result.usableH) / 1000) : 0
-  const totalArea = sheetsCount * usableArea
+  const offcutCount = sheetsData.filter(sh => sh.stock === 'offcut').length
+  const sheetsCount = sheetsData.length - offcutCount
+  const totalArea = result ? sheetsData.reduce((a, sh) => { const g = geoOf(order, result, sh); return a + g.usableX * g.usableY / 1e6 }, 0) : 0
+  const curParamsKey = paramsKey({
+    sheetL: order.sheet_length, sheetW: order.sheet_width, kerf: order.kerf_width,
+    marginT: order.margin_top, marginR: order.margin_right, marginB: order.margin_bottom, marginL: order.margin_left,
+    offcuts: offcutsValue(offForm),
+  })
   const focusIdx = focus ? configs.indexOf(focus) : -1
 
   // Сравнение конфигураций: «лучший» — меньше листов, затем меньше на последнем
@@ -1802,7 +1922,7 @@ export default function NestingPage() {
           onChange={e => { stopPlay(); updateCfg(cfg.id, { histPos: Number(e.target.value) }) }}
           style={{ width: '100%', margin: '2px 0' }} />
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          {cur.count} л. · загрузка {pctv(cur.util)} · на последнем {pctv(cur.lastFill)}
+          {cur.count - (cur.offcuts || 0)} л.{cur.offcuts ? ` + ${cur.offcuts} обр.` : ''} · загрузка {pctv(cur.util)} · на последнем {pctv(cur.lastFill)}
           {cur.island >= 0 && cfg.history.islands > 1 ? ` · поток ${cur.island + 1}` : ''}
           {cur.mode ? ` · режим ${cur.mode}` : ''}
         </div>
@@ -1844,14 +1964,14 @@ export default function NestingPage() {
       // Сколько уже нет улучшений — подсказка, что можно жать «Стоп» без потери качества
       const idle = cfg.lastImproveAt ? Math.floor((Date.now() - cfg.lastImproveAt) / 1000) : 0
       statusLine = s
-        ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${smallTxt}`
+        ? `${cfg.live ? 'оптимизирую' : 'считаю'}… ${secs} с · ${countTxt(s)} · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${smallTxt}`
           + (cfg.rough ? ' · черновик, уточняю' : ` · улучшений ${cfg.improvements}`)
           + (!cfg.rough && idle >= 20 ? ` · без улучшений ${idle} с` : '')
           + (cfg.islands > 1 ? ` · потоков ${cfg.islands}` : '')
         : `считаю… ${secs} с${cfg.islands > 1 ? ` · потоков ${cfg.islands}` : ''}`
     }
     else if (cfg.status === 'error') statusLine = 'ошибка расчёта'
-    else if (s) statusLine = `${s.count} л. · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${smallTxt}${secs != null ? ` · ${secs} с` : ''}`
+    else if (s) statusLine = `${countTxt(s)} · загрузка ${pct(s.util)} · на последнем ${pct(s.lastFill)}${smallTxt}${secs != null ? ` · ${secs} с` : ''}`
     else if (cfg.result) statusLine = 'результат загружен'
 
     const canvasSheet = cfg.sheetsData[Math.max(0, Math.min(cfg.activeSheet, cfg.sheetsData.length - 1))]
@@ -2018,8 +2138,17 @@ export default function NestingPage() {
               const hPos = hist && cfg.histPos >= 0 && cfg.histPos <= hLast ? cfg.histPos : hLast
               const hEvent = hist && hPos < hLast ? hEvents[hPos] : null // null — показываем текущий результат
               const overviewSheets = hEvent ? hEvent.sheets : cfg.sheetsData
+              const geo = geoOf(order, cfg.result)                 // обычный лист
+              const cgeo = geoOf(order, cfg.result, canvasSheet)   // открытый лист (может быть обрезком)
+              const stale = cfg.result.paramsKey && cfg.result.paramsKey !== curParamsKey && !isRunning
               return (
               <div>
+                {stale && (
+                  <p style={{ fontSize: 11, color: '#9a5b00', background: '#fff3d6', border: '1px solid #f0c674',
+                    borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>
+                    Параметры листа или обрезки изменились после расчёта — пересчитайте раскрой
+                  </p>
+                )}
                 {cfg.result.algo === 'nfp' && (
                   <p style={{
                     fontSize: 11, fontWeight: 600, color: '#9a5b00', background: '#fff3d6',
@@ -2043,7 +2172,7 @@ export default function NestingPage() {
                       </button>
                       <button onClick={() => !locked && openSheet(cfg.activeSheet)} disabled={locked}
                         style={{ ...chip(view === 'sheet', 'var(--blue)'), padding: '3px 10px', opacity: locked ? 0.5 : 1 }}>
-                        Лист {cfg.activeSheet + 1}
+                        {canvasSheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} {cfg.activeSheet + 1}
                       </button>
                     </div>
                     <div style={{ flex: 1 }} />
@@ -2068,9 +2197,9 @@ export default function NestingPage() {
                     <>
                       <SheetsOverview
                         sheets={overviewSheets}
-                        usableX={cfg.result.usableX} usableY={cfg.result.usableY}
-                        sheetL={order.sheet_length} sheetW={order.sheet_width}
-                        marginL={order.margin_left} marginT={order.margin_top} kerf={order.kerf_width}
+                        usableX={geo.usableX} usableY={geo.usableY}
+                        sheetL={geo.sheetL} sheetW={geo.sheetW}
+                        marginL={geo.marginL} marginT={geo.marginT} kerf={geo.kerf}
                         activeSheet={locked || hEvent ? -1 : cfg.activeSheet}
                         onPickSheet={locked || hEvent ? null : openSheet}
                         running={isRunning} bufferCount={cfg.buffer.length}
@@ -2110,10 +2239,10 @@ export default function NestingPage() {
                       <SheetCanvas
                         key={cfg.id}
                         sheet={canvasSheet}
-                        usableX={cfg.result.usableX} usableY={cfg.result.usableY}
-                        sheetL={order.sheet_length} sheetW={order.sheet_width}
-                        marginL={order.margin_left} marginT={order.margin_top}
-                        kerf={order.kerf_width} colorMap={colorMap} details={details}
+                        usableX={cgeo.usableX} usableY={cgeo.usableY}
+                        sheetL={cgeo.sheetL} sheetW={cgeo.sheetW}
+                        marginL={cgeo.marginL} marginT={cgeo.marginT}
+                        kerf={cgeo.kerf} colorMap={colorMap} details={details}
                         onMove={(si, np) => onMoveCfg(cfg.id, si, np)} interactive={true} showOffcuts={showOffcuts}
                         offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
                         onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
@@ -2137,7 +2266,7 @@ export default function NestingPage() {
                     {cfg.sheetsData.map((sh, i) => (
                       <button key={i} onClick={() => openSheet(i)}
                         style={chip(view === 'sheet' && cfg.activeSheet === i, 'var(--blue)')}>
-                        Лист {i + 1} · {sh.placed.length}
+                        {sh.stock === 'offcut' ? 'Обр.' : 'Лист'} {i + 1} · {sh.placed.length}
                       </button>
                     ))}
                   </div>
@@ -2302,7 +2431,7 @@ export default function NestingPage() {
 
       {/* Статистика */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: focus && configs.length > 1 ? 3 : 8 }}>
-        {[['Листов', sheetsCount || '—'],['Деталей', totalQty],['Кромка, м', totalEdge.toFixed(1)],['Площадь, м²', totalArea ? totalArea.toFixed(2) : '—']].map(([label, val]) => (
+        {[[offcutCount ? 'Листов + обр.' : 'Листов', sheetsData.length ? (offcutCount ? `${sheetsCount}+${offcutCount}` : sheetsCount) : '—'],['Деталей', totalQty],['Кромка, м', totalEdge.toFixed(1)],['Площадь, м²', totalArea ? totalArea.toFixed(2) : '—']].map(([label, val]) => (
           <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '5px 8px' }}>
             <div style={{ fontSize: 10, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{label}</div>
             <div style={{ fontSize: 16, fontWeight: 500, lineHeight: 1.2 }}>{val}</div>
@@ -2325,6 +2454,120 @@ export default function NestingPage() {
           ))}
         </div>
       )}
+
+      {/* Производство, лист, рез, отступы, обрезки — общие для всех конфигураций */}
+      {(() => {
+        const prod = order.production_id ? productions.find(x => x.id === order.production_id) : null
+        const locked = !!prod || anyRunning       // производство задаёт параметры листа
+        const offLocked = anyRunning
+        const inp = { width: '100%', fontSize: 14, padding: '4px 6px', boxSizing: 'border-box', display: 'block' }
+        const lbl = { flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-muted)' }
+        const field = (key, label, title) => (
+          <label style={lbl} title={title}>
+            {label}
+            <input type="text" inputMode="decimal" value={sheetForm[key]} disabled={locked}
+              onChange={e => { const v = e.target.value.replace(/[^0-9.,]/g, ''); setSheetForm(f => ({ ...f, [key]: v })) }}
+              onBlur={() => commitSheetField(key)}
+              style={{ ...inp, opacity: locked ? 0.55 : 1 }} />
+          </label>
+        )
+        const ov = offcutsValue(offForm)
+        const offN = ov.items.reduce((a, it) => a + it.qty, 0)
+        const setItem = (i, k, v) => setOffForm(f => ({ ...f, items: f.items.map((it, j) => j === i ? { ...it, [k]: v } : it) }))
+        const summary = `${order.sheet_length}×${order.sheet_width} · рез ${order.kerf_width} · отступы ${order.margin_left}/${order.margin_right}/${order.margin_top}/${order.margin_bottom}`
+          + (offN ? ` · обрезков ${offN}` : '') + (prod ? ` · ${prod.name}` : '')
+        return (
+          <div className="card" style={{ marginBottom: 8, padding: 0, overflow: 'hidden' }}>
+            <div onClick={() => setSheetOpen(v => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', cursor: 'pointer' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-hint)', width: 12 }}>{sheetOpen ? '▼' : '▶'}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>Лист и обрезки</div>
+                {!sheetOpen && <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 1 }}>{summary}</div>}
+              </div>
+            </div>
+            {sheetOpen && (
+              <div style={{ padding: '8px 10px 10px', borderTop: '0.5px solid var(--border)' }}>
+                {productions.length > 0 && (
+                  <label style={{ ...lbl, display: 'block', marginBottom: 8 }}>
+                    Производство
+                    <select value={prod ? prod.id : ''} disabled={anyRunning}
+                      onChange={e => chooseProduction(e.target.value)}
+                      style={{ ...inp, padding: '5px 6px' }}>
+                      <option value="">— не выбрано (свои параметры) —</option>
+                      {productions.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                {prod && (
+                  <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>
+                    Формат, рез и отступы задаёт производство «{prod.name}». Чтобы изменить — выберите «не выбрано».
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  {field('L', 'Длина листа, мм', 'Вертикаль на карте')}
+                  {field('W', 'Ширина листа, мм', 'Горизонталь на карте')}
+                  {field('kerf', 'Рез, мм', 'Ширина реза (диаметр фрезы / толщина пилы) — зазор между деталями')}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Отступы от края листа, мм</div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                  {field('ml', '← слева')}
+                  {field('mr', '→ справа')}
+                  {field('mt', '↑ сверху')}
+                  {field('mb', '↓ снизу')}
+                </div>
+
+                <div style={{ borderTop: '0.5px dashed var(--border-md)', paddingTop: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 2 }}>Обрезки со склада</div>
+                  <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>
+                    Раскраиваются первыми (крупные — раньше), как отдельные листы. На целые листы идёт то, что не поместилось.
+                  </p>
+                  {offForm.items.map((it, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-end', marginBottom: 6 }}>
+                      {[['length', 'Длина, мм'], ['width', 'Ширина, мм'], ['qty', 'Шт.']].map(([k, t]) => (
+                        <label key={k} style={{ ...lbl, flex: k === 'qty' ? '0 0 52px' : 1 }}>
+                          {i === 0 ? t : ''}
+                          <input type="text" inputMode="numeric" value={it[k]} disabled={offLocked}
+                            onChange={e => setItem(i, k, e.target.value.replace(/[^0-9]/g, ''))}
+                            onBlur={() => commitOffcuts()}
+                            style={inp} />
+                        </label>
+                      ))}
+                      <button disabled={offLocked}
+                        onClick={() => { const f = { ...offForm, items: offForm.items.filter((_, j) => j !== i) }; setOffForm(f); commitOffcuts(f) }}
+                        style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+                          background: 'transparent', color: 'var(--text-hint)', fontSize: 13, cursor: 'pointer', padding: 0 }}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                    <button disabled={offLocked}
+                      onClick={() => setOffForm(f => ({ ...f, items: [...f.items, { length: '', width: '', qty: '1' }] }))}
+                      style={{ flex: 1, padding: 7, borderRadius: 'var(--radius)', border: '0.5px dashed var(--border-md)',
+                        background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
+                      + Добавить обрезок
+                    </button>
+                    {offForm.items.length > 0 && (
+                      <label style={{ ...lbl, flex: '0 0 120px' }} title="Отступ от края обрезка (со всех сторон)">
+                        Отступ от края, мм
+                        <input type="text" inputMode="decimal" value={offForm.margin} disabled={offLocked}
+                          onChange={e => { const v = e.target.value.replace(/[^0-9.,]/g, ''); setOffForm(f => ({ ...f, margin: v })) }}
+                          onBlur={() => commitOffcuts()}
+                          style={inp} />
+                      </label>
+                    )}
+                  </div>
+                  {offForm.items.some(it => it.length !== '' && it.width !== '' && (Number(it.length) <= 2 * ov.margin || Number(it.width) <= 2 * ov.margin)) && (
+                    <p style={{ fontSize: 10.5, color: '#b45309', margin: '6px 0 0' }}>Обрезок меньше двух отступов — он не будет использован.</p>
+                  )}
+                </div>
+                {paramsWarn && (
+                  <p style={{ fontSize: 10.5, color: '#b45309', margin: '8px 0 0' }}>{paramsWarn}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Тип станка — общий для всех конфигураций */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
