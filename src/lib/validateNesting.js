@@ -11,6 +11,8 @@
 // Координаты — как во всех данных раскроя: мм, Y вверх от низа рабочей зоны;
 // p.w/p.h включают ширину реза (справа и сверху), контур polygon — локальный.
 
+import { smallAtEdge, SMALL_EDGE_MIN } from './nesting'
+
 const EPS = 0.5 // мм — допуск на округления
 
 function polyOf(p, kerf) {
@@ -138,12 +140,10 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
   })
 
   // Предупреждение (не ошибка): «мелкие — в центр», но мелкая деталь у края листа
+  // (у края = ближе SMALL_EDGE_MIN мм к краю листа через отход, см. nesting.smallEdgeSides)
   const warnings = []
-  let edge = 0
-  sheets.forEach(sh => sh.placed.forEach(p => {
-    if (p.isSmall && (p.x <= 0.5 || p.y <= 0.5 || p.x + p.w >= usableX - 0.5 || p.y + p.h >= usableY - 0.5)) edge++
-  }))
-  if (edge) warnings.push(`⚠ мелких деталей у края листа: ${edge} (просили «мелкие — в центр»)`)
+  const edge = smallAtEdge(sheets, usableX, usableY)
+  if (edge) warnings.push(`⚠ мелких/узких деталей у края листа: ${edge} (ближе ${SMALL_EDGE_MIN} мм через отход)`)
 
   const total = details.reduce((a, d) => a + (Number(d.qty) || 1), 0)
   const placed = cnt.reduce((a, b) => a + b, 0)

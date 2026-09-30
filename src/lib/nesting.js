@@ -81,6 +81,9 @@ import { packNFP } from './nfpNesting'
 import { gravityRects } from './gravity'
 
 const BORDER_PENALTY = 2000000
+// Мелкая деталь ближе SMALL_EDGE_MIN к краю через отход (см. smallEdgeSides) —
+// штраф за каждую такую сторону при выборе места; перекрывает любые выгоды плотности
+const SMALL_NEAR_PENALTY = 1e13
 const ORIGIN_TIEBREAK = 5
 const EPS = 0.5 // мм, допуск на сравнение с границей (из-за kerf/округлений)
 
@@ -160,6 +163,9 @@ export async function runNesting({
   const gravityAll = list => list.map(sheet => {
     const placed = gravityRects(sheet.placed, direction)
     if (placed === sheet.placed) return sheet
+    // Стяжка двигает всё, кроме мелких деталей — соседи могут «уехать» и
+    // открыть мелкую деталь краю листа. Такую стяжку не применяем.
+    if (smallAtEdge([{ placed }], usableX, usableY) > smallAtEdge([sheet], usableX, usableY)) return sheet
     const next = { ...sheet, placed, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
     placed.forEach(pp => { split(next, pp); prune(next) })
     updateFreeBounds(next)
@@ -345,6 +351,14 @@ export async function runNesting({
       // а раз в ~5 с без толку возвращаем «гуляющее» состояние к лучшему
       const stalled = Date.now() - lastGain > 3000
       if (stalled && Date.now() - lastGain > 8000 && Math.random() < 0.05) sqCur = best.sheets
+      // «мелкие — в центр» не выполнено — сначала чиним это (важнее последнего листа)
+      if (best.stat.smallEdge > 0) {
+        const fixed = repairSmall(best.sheets, scoringModes, direction, usableX, usableY, stalled ? 60 : 15)
+        if (fixed !== best.sheets) {
+          const st = evaluate(fixed, usableX, usableY)
+          if (better(st, best.stat)) { best = { ...best, sheets: fixed, stat: st }; sqBase = best; sqCur = fixed; dirty = true; lastGain = Date.now() }
+        }
+      }
       sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 6 : SQUEEZE_PER_GEN, true)
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
@@ -433,6 +447,45 @@ function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allow
     }
   }
   return improved ? cur : sheets
+}
+
+// ─── Починка «мелкие у края» ────────────────────────────────────────────────
+// Лист, где мелкая/узкая деталь стоит у края, вместе с ещё 0–2 листами
+// раскладывается заново (мелкие — после крупных). Принимается, если мелких у
+// края стало меньше, а листов не больше (последний лист при этом может стать
+// полнее — требование важнее заполнения последнего листа, см. better()).
+function repairSmall(sheets, modes, direction, usableX, usableY, attempts) {
+  let cur = sheets
+  let curStat = evaluate(cur, usableX, usableY)
+  for (let a = 0; a < attempts && curStat.smallEdge > 0; a++) {
+    const bad = []
+    cur.forEach((sh, i) => { if (smallAtEdge([sh], usableX, usableY) > 0) bad.push(i) })
+    if (!bad.length) break
+    const idx = [bad[Math.floor(Math.random() * bad.length)]]
+    const extra = Math.random() < 0.3 ? 0 : Math.random() < 0.7 ? 1 : 2
+    for (let g = 0; idx.length < 1 + extra && g < 10 && cur.length > idx.length; g++) {
+      const j = Math.floor(Math.random() * cur.length)
+      if (!idx.includes(j)) idx.push(j)
+    }
+    const pool = idx.flatMap(j => cur[j].placed).map(placedToPiece)
+    const r = Math.random()
+    const order = r < 0.35 ? pool.sort((x, y) => y.pw * y.ph - x.pw * x.ph)
+      : r < 0.75 ? perturbOrder(pool.sort((x, y) => y.pw * y.ph - x.pw * x.ph), Math.random() < 0.5)
+      : shuffle(pool)
+    const mode = modes[Math.floor(Math.random() * modes.length)]
+    const res = packAttempt(order, mode, direction, usableX, usableY)
+    if (res.length > idx.length) continue
+    // тяжёлые листы — на места взятых по порядку, лёгкий — туда, где был самый лёгкий
+    const taken = idx.slice().sort((x, y) => x - y)
+    res.sort((x, y) => sheetArea(y) - sheetArea(x))
+    const next = cur.slice()
+    taken.forEach((j, t) => { next[j] = res[t] ? { ...res[t], index: cur[j].index } : null })
+    // листы взаимозаменяемы: самый лёгкий — последним (он и есть «остаток»)
+    const compact = next.filter(Boolean).sort((x, y) => sheetArea(y) - sheetArea(x)).map((sh, i) => ({ ...sh, index: i }))
+    const st = evaluate(compact, usableX, usableY)
+    if (better(st, curStat)) { cur = compact; curStat = st }
+  }
+  return cur
 }
 
 function cloneSheets(sheets) {
@@ -588,6 +641,10 @@ function packAttempt(sortedPieces, mode, direction, usableX, usableY) {
   }
 
   const sheets = []
+  // «Мелкие — в центр»: мелкие детали ставятся ПОСЛЕ крупных (в том же
+  // относительном порядке) — тогда видно, какие места уже прикрыты крупными
+  // деталями от края листа, и мелкая встаёт между ними, а не к краю.
+  if (sortedPieces.some(p => p.isSmall)) sortedPieces = sortedPieces.filter(p => !p.isSmall).concat(sortedPieces.filter(p => p.isSmall))
   for (const piece of sortedPieces) {
     let placed = false
     for (const sheet of sheets) { if (place(sheet, piece)) { placed = true; break } }
@@ -626,6 +683,7 @@ function compactPass(sheets, direction, usableX, usableY) {
 
           if (target.family === 'guillotine') {
             const spot = fitFixedGuillotine(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall, direction)
+            if (spot && piece.isSmall && smallEdgeSides({ x: spot.x, y: spot.y, w: o.w, h: o.h }, target.placed, usableX, usableY) > 0) continue
             if (spot) {
               const placed = { ...makePlaced(), x: spot.x, y: spot.y, _freeRectIdx: spot.idx }
               target.placed.push(placed); splitGuillotine(target, placed); delete placed._freeRectIdx
@@ -634,6 +692,8 @@ function compactPass(sheets, direction, usableX, usableY) {
             }
           } else {
             const spot = fitFixed(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall, direction)
+            // мелкую деталь не переносим туда, где она окажется у края листа
+            if (spot && piece.isSmall && smallEdgeSides({ x: spot.x, y: spot.y, w: o.w, h: o.h }, target.placed, usableX, usableY) > 0) continue
             if (spot) {
               const placed = { ...makePlaced(), x: spot.x, y: spot.y }
               target.placed.push(placed); split(target, placed); prune(target)
@@ -671,13 +731,52 @@ function fitFixed(freeRects, w, h, usableX, usableY, isSmall, direction) {
   return best
 }
 
-// Сколько мелких деталей («мелкие — в центр») касаются края рабочей зоны листа.
-// Это не пожелание, а критерий качества: см. better() — сразу после числа листов.
+// ─── «Мелкие — в центр» ──────────────────────────────────────────────────────
+// Мелкая или узкая деталь «у края», если от неё до края рабочей зоны меньше
+// SMALL_EDGE_MIN мм и этот промежуток не прикрыт другой деталью (там отход).
+// Раньше считалось только касание края — и алгоритм отодвигал деталь на
+// 6–60 мм: формально «не у края», а на деле её держит тонкая полоска отхода
+// (260906_009: 24 из 31 мелких/узких деталей в 6–60 мм от края).
+// Деталь, между которой и краем стоит другая деталь, прикрыта — это нормально.
+export const SMALL_EDGE_MIN = 150
+
+// Сколько сторон мелкой детали p смотрят на край листа через отход.
+// p.w/p.h — с резом (справа и сверху), x,y — от низа-лева рабочей зоны.
+export function smallEdgeSides(p, placed, usableX, usableY, minGap = SMALL_EDGE_MIN) {
+  const x0 = p.x, y0 = p.y, x1 = p.x + p.w, y1 = p.y + p.h
+  const sides = [
+    { gap: x0, axis: 'y', lo: y0, hi: y1, between: q => q.x + q.w <= x0 + 0.5 },          // слева
+    { gap: y0, axis: 'x', lo: x0, hi: x1, between: q => q.y + q.h <= y0 + 0.5 },          // снизу
+    { gap: usableX - x1, axis: 'y', lo: y0, hi: y1, between: q => q.x >= x1 - 0.5 },      // справа
+    { gap: usableY - y1, axis: 'x', lo: x0, hi: x1, between: q => q.y >= y1 - 0.5 },      // сверху
+  ]
+  let n = 0
+  for (const sd of sides) {
+    if (sd.gap >= minGap) continue
+    // Прикрыта ли сторона: соседи между деталью и краем закрывают ≥ половины её длины
+    const iv = []
+    if (sd.gap > 1) {
+      for (const q of placed) {
+        if (q === p || !sd.between(q)) continue
+        const a = Math.max(sd.lo, sd.axis === 'y' ? q.y : q.x)
+        const b = Math.min(sd.hi, sd.axis === 'y' ? q.y + q.h : q.x + q.w)
+        if (b > a) iv.push([a, b])
+      }
+    }
+    iv.sort((u, v) => u[0] - v[0])
+    let cov = 0, ce = -Infinity
+    for (const [a, b] of iv) { if (b <= ce) continue; cov += b - Math.max(a, ce); ce = b }
+    if (cov < (sd.hi - sd.lo) * 0.5) n++
+  }
+  return n
+}
+
+// Сколько мелких деталей стоят у края листа (см. выше). Это не пожелание, а
+// критерий качества: см. better() — сразу после числа листов.
 export function smallAtEdge(sheets, usableX, usableY) {
   let n = 0
   for (const sh of sheets) for (const p of sh.placed) {
-    if (!p.isSmall) continue
-    if (p.x <= 0.5 || p.y <= 0.5 || p.x + p.w >= usableX - 0.5 || p.y + p.h >= usableY - 0.5) n++
+    if (p.isSmall && smallEdgeSides(p, sh.placed, usableX, usableY) > 0) n++
   }
   return n
 }
@@ -819,7 +918,8 @@ function chooseSpot(freeRects, piece, direction, usableX, usableY, mode, placed 
       const contact = needContact
         ? computeContactLength(rect.x, rect.y, pw, ph, placed, usableX, usableY)
         : 0
-      const score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
+      let score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
+      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph }, placed, usableX, usableY) * SMALL_NEAR_PENALTY
       if (score < bestScore) { bestScore = score; bestRect = rect; bestRot = k === 1 }
     }
   }
@@ -857,7 +957,8 @@ function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mod
       const contact = needContact
         ? computeContactLength(rect.x, rect.y, pw, ph, placed, usableX, usableY)
         : 0
-      const score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
+      let score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
+      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph }, placed, usableX, usableY) * SMALL_NEAR_PENALTY
       if (score < bestScore) { bestScore = score; bestIdx = idx; bestRot = k === 1 }
     }
   }
