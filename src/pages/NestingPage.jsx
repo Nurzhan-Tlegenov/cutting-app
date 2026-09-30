@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { computeOffcutAtPoint, smallAtEdge } from '../lib/nesting'
+import { computeOffcutAtPoint, smallAtEdge, smallEdgeSides } from '../lib/nesting'
 import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
 import { newHistory, recordEvent, recordIsland, recordStats, buildHistoryExport } from '../lib/nestingHistory'
@@ -542,6 +542,11 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     // нарисованной раньше — раньше это было незаметно, пока детали не
     // начали по-настоящему стыковаться вплотную.
     const conflicts = conflictSet(items, kerf, usableX, usableY)
+    // «Мелкие — в центр»: мелкие/узкие детали у края листа (через отход) — оранжевым.
+    // Считаем в координатах данных (flipY — обратимое преобразование).
+    const dataItems = flipY(items)
+    const edgeSmall = new Set()
+    dataItems.forEach((p, i) => { if (p.isSmall && smallEdgeSides(p, dataItems, usableX, usableY) > 0) edgeSmall.add(i) })
     items.forEach((p, i) => {
       // p.x,p.w = X-координаты; p.y,p.h = Y-координаты
       const x = rx + toC(p.x), y = ry + toC(p.y)
@@ -557,9 +562,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // рисуем именно его; иначе — прямоугольник, как раньше
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
       const baseFill = PART_FILL
-      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : baseFill))
-      ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : PART_STROKE)
-      ctx.lineWidth = hasCollision ? 2.5 : (isSelected ? 2.5 : 1.4)
+      const atEdge = edgeSmall.has(i)
+      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : atEdge ? 'rgba(245,158,11,0.28)' : baseFill))
+      ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : atEdge ? '#D97706' : PART_STROKE)
+      ctx.lineWidth = hasCollision ? 2.5 : (isSelected ? 2.5 : atEdge ? 2 : 1.4)
       if (hasShape) {
         ctx.beginPath()
         p.polygon.forEach((pt, vi) => {
@@ -1962,6 +1968,8 @@ export default function NestingPage() {
                   Мелкие — {n} из {total} дет.: {list.slice(0, 5).map(d =>
                     `${d.display_name || d.name} ${Math.round(d.length)}×${Math.round(d.width)}${Number(d.qty) > 1 ? ` (${d.qty})` : ''}`).join(', ')}
                   {list.length > 5 ? ` и ещё ${list.length - 5} вид.` : ''}
+                  <br />Их не ставим ближе 150 мм к краю листа, если между ними и краем нет другой детали.
+                  Оставшиеся у края подсвечиваются на карте оранжевым.
                 </p>
               )
             })()}
