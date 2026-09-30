@@ -29,6 +29,7 @@ export function newHistory(cfg, islands, params) {
       sheetL: params.sheetL, sheetW: params.sheetW, kerf: params.kerf,
       marginT: params.marginT, marginR: params.marginR, marginB: params.marginB, marginL: params.marginL,
       cuttingMethod: params.cuttingMethod, algo: params.algo,
+      offcuts: params.offcuts || null,
     },
     events: [],        // улучшения лучшего результата (что видел пользователь) + финал
     islandEvents: [],  // улучшения внутри каждого потока (в т.ч. не ставшие общим лучшим)
@@ -39,9 +40,13 @@ export function newHistory(cfg, islands, params) {
 function scoreOf(sheets, usableX, usableY) {
   const sc = liveScore(sheets, usableX, usableY)
   const sheetArea = (usableX || 1) * (usableY || 1)
-  let total = 0
-  sheets.forEach(sh => sh.placed.forEach(p => { total += partAreaMm(p) }))
-  return { count: sc.count, last: Math.round(sc.last), util: +(total / (sheets.length * sheetArea)).toFixed(4), lastFill: +(sc.last / sheetArea).toFixed(4) }
+  // у листа-обрезка своя площадь
+  const cap = sh => (sh.usableX ?? usableX ?? 1) * (sh.usableY ?? usableY ?? 1)
+  let total = 0, capAll = 0
+  sheets.forEach(sh => { capAll += cap(sh); sh.placed.forEach(p => { total += partAreaMm(p) }) })
+  const lastCap = sheets.length ? cap(sheets[sheets.length - 1]) : sheetArea
+  const offcuts = sheets.filter(sh => sh.stock === 'offcut').length
+  return { count: sc.count, offcuts, last: Math.round(sc.last), util: +(total / (capAll || 1)).toFixed(4), lastFill: +(sc.last / lastCap).toFixed(4) }
 }
 export function recordEvent(hist, res, island, kind) {
   const t = Date.now() - hist.startedAt

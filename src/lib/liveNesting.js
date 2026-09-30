@@ -110,7 +110,7 @@ function isRasterPath(p) {
  * shouldStop() — нажат ли «Стоп»; onProgress(res) — промежуточный результат
  * в том же формате, что и итог runNesting (+ iter, round).
  */
-export async function runLiveNesting(params, { live = false, shouldStop = () => false, onProgress = null, takeMigrant = null, onStats = null, island = 0, islands = 1 } = {}) {
+async function runCore(params, { live = false, shouldStop = () => false, onProgress = null, takeMigrant = null, onStats = null, island = 0, islands = 1 } = {}) {
   const meta = {
     usableX: params.sheetW - params.marginL - params.marginR,
     usableY: params.sheetL - params.marginT - params.marginB,
@@ -182,4 +182,142 @@ export async function runLiveNesting(params, { live = false, shouldStop = () => 
     }
   }
   return best || await runNesting({ ...params, optimizeSeconds: 0 })
+}
+
+// ─── Обрезки ──────────────────────────────────────────────────────────────────
+// params.offcuts = { margin, items: [{ length, width, qty }] } — остатки листов
+// со склада. Раскрой сначала заполняет их (крупные — первыми), и только то, что
+// не вошло, раскладывается на целые листы. Лист-обрезок в результате — обычный
+// лист со своими размерами: sheetL/sheetW/usableX/usableY/отступы + stock: 'offcut'.
+
+export function offcutInstances(offcuts) {
+  const items = Array.isArray(offcuts?.items) ? offcuts.items : []
+  const margin = Math.max(0, Number(offcuts?.margin) || 0)
+  const out = []
+  items.forEach((it, ii) => {
+    const L = Number(it.length) || 0, W = Number(it.width) || 0, q = Math.max(0, Math.floor(Number(it.qty) || 0))
+    if (L <= 2 * margin || W <= 2 * margin) return
+    for (let k = 0; k < q; k++) out.push({ length: L, width: W, margin, item: ii })
+  })
+  return out.sort((a, b) => b.length * b.width - a.length * a.width)
+}
+
+
+async function fillOffcuts(params, offs, shaped, budget) {
+  const kerf = Number(params.kerf) || 0
+  const remaining = params.details.map(d => Math.max(0, Number(d.qty) || 0))
+  const sheets = []
+  for (let k = 0; k < offs.length; k++) {
+    const off = offs[k], m = off.margin
+    const ux = off.width - 2 * m, uy = off.length - 2 * m
+    const idx = [], det = []
+    params.details.forEach((d, di) => {
+      if (!remaining[di]) return
+      const w = Number(d.width) + kerf, l = Number(d.length) + kerf
+      const fits = (w <= ux && l <= uy) || (d.rotatable && l <= ux && w <= uy)
+      if (!fits) return
+      idx.push(di); det.push({ ...d, qty: remaining[di], contour: null })
+    })
+    if (!det.length) continue
+    let res
+    try {
+      res = await runNesting({
+        ...params, details: det, sheetL: off.length, sheetW: off.width,
+        marginT: m, marginR: m, marginB: m, marginL: m,
+        optimizeSeconds: budget, algo: 'raster', direction: 'auto',
+        onProgress: null, shouldStop: null, takeMigrant: null, onStats: null,
+      })
+    } catch { continue }
+    // берём самый заполненный лист — его и режем из обрезка
+    let best = null, bestA = 0
+    for (const sh of res.sheets || []) {
+      const a = sh.placed.reduce((s, p) => s + (p.origX || 0) * (p.origY || 0), 0)
+      if (a > bestA) { best = sh; bestA = a }
+    }
+    if (!best) continue
+    const polys = {}
+    const placed = best.placed.map(p => {
+      const di = idx[p.detailIndex]
+      const q = { ...p, detailIndex: di, id: `off${k}_${p.id}` }
+      delete q.polygon
+      const d = params.details[di]
+      if (shaped && d?.contour) {
+        if (!polys[di]) polys[di] = roughShapePolygons(d)
+        const r90 = isTurned(q, Number(d.width))
+        const poly = polys[di][r90 ? 90 : 0]
+        if (poly) { q.polygon = poly.map(([x, y]) => ({ x, y })); q.rotation = r90 ? 90 : 0 }
+      }
+      remaining[di]--
+      return q
+    })
+    sheets.push({
+      ...best, index: k, placed,
+      stock: 'offcut', offcutItem: off.item,
+      sheetL: off.length, sheetW: off.width, usableX: ux, usableY: uy,
+      marginT: m, marginR: m, marginB: m, marginL: m,
+    })
+  }
+  return { sheets, remaining }
+}
+
+/**
+ * params — как у runNesting (+ offcuts); live — до «Стоп» (иначе лимит optimizeSeconds);
+ * shouldStop() — нажат ли «Стоп»; onProgress(res) — промежуточный результат
+ * в том же формате, что и итог runNesting (+ iter, round). Листы-обрезки
+ * (если есть) идут в начале res.sheets, их число — res.offcutSheets.
+ */
+export async function runLiveNesting(params, opts = {}) {
+  const offs = offcutInstances(params.offcuts)
+  if (!offs.length) return await runCore(params, opts)
+
+  const shaped = !isRasterPath(params)
+  const budget = Math.max(0.2, Math.min(1, 3 / offs.length))
+  const { sheets: offSheets, remaining } = await fillOffcuts(params, offs, shaped, budget)
+  if (!offSheets.length) return await runCore(params, opts)
+
+  const meta = {
+    usableX: params.sheetW - params.marginL - params.marginR,
+    usableY: params.sheetL - params.marginT - params.marginB,
+    sheetL: params.sheetL, sheetW: params.sheetW,
+    marginT: params.marginT, marginR: params.marginR, marginB: params.marginB, marginL: params.marginL,
+    kerf: params.kerf,
+  }
+  // Остаток заказа — отдельная задача: только недоложенные детали
+  const subToOrig = [], subDetails = []
+  params.details.forEach((d, di) => { if (remaining[di] > 0) { subToOrig.push(di); subDetails.push({ ...d, qty: remaining[di] }) } })
+  const origToSub = new Map(subToOrig.map((o, s) => [o, s]))
+  const nOff = offSheets.length
+  // Потоки могли заполнить обрезки по-разному — обмениваться раскладкой можно
+  // только при одинаковом остатке заказа
+  const subKey = JSON.stringify(subToOrig.map((o, s) => [o, subDetails[s].qty]))
+
+  const toFull = res => {
+    if (!res) return res
+    const main = (res.sheets || []).map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p, detailIndex: subToOrig[p.detailIndex] })) }))
+    return {
+      ...meta, ...res, sheets: [...offSheets, ...main], offcutSheets: nOff,
+      genome: res.genome ? { ...res.genome, subKey, offcutSheets: nOff } : res.genome,
+    }
+  }
+
+  if (!subDetails.length) {
+    const res = toFull({ ...meta, sheets: [] })
+    opts.onProgress?.({ ...res, iter: 0 })
+    return res
+  }
+  const takeMigrant = opts.takeMigrant ? () => {
+    const m = opts.takeMigrant()
+    if (!m || m.subKey !== subKey) return null
+    const n = m.offcutSheets || 0
+    const sheets = Array.isArray(m.sheets)
+      ? m.sheets.slice(n).map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p, detailIndex: origToSub.get(p.detailIndex) ?? -1 })) }))
+      : undefined
+    return { ...m, sheets }
+  } : null
+
+  const res = await runCore({ ...params, details: subDetails }, {
+    ...opts, takeMigrant,
+    onProgress: opts.onProgress ? r => opts.onProgress(toFull(r)) : null,
+  })
+  return toFull(res)
 }

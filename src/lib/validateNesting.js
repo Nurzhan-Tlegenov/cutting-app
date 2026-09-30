@@ -91,7 +91,9 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
   if (unknown) push(`На листах ${unknown} дет., которых нет в заказе`)
 
   sheets.forEach((sh, si) => {
-    const L = `Лист ${si + 1}`
+    const L = sh.stock === 'offcut' ? `Лист ${si + 1} (обрезок)` : `Лист ${si + 1}`
+    // у листа-обрезка своя рабочая зона
+    const uX = sh.usableX ?? usableX, uY = sh.usableY ?? usableY
     const polys = sh.placed.map(p => polyOf(p, kerf))
     sh.placed.forEach((p, i) => {
       const d = details[p.detailIndex]
@@ -99,7 +101,7 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
       const P = polys[i]
       const minX = Math.min(...P.map(q => q.x)), maxX = Math.max(...P.map(q => q.x))
       const minY = Math.min(...P.map(q => q.y)), maxY = Math.max(...P.map(q => q.y))
-      if (minX < -EPS || minY < -EPS || maxX > usableX + EPS || maxY > usableY + EPS) {
+      if (minX < -EPS || minY < -EPS || maxX > uX + EPS || maxY > uY + EPS) {
         push(`${L}: «${name(p)}» заходит на отступ от края листа`)
       }
       // 4. Размеры и поворот

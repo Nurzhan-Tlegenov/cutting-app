@@ -808,7 +808,8 @@ export function smallEdgeSides(p, placed, usableX, usableY, minGap = SMALL_EDGE_
 export function smallAtEdge(sheets, usableX, usableY) {
   let n = 0
   for (const sh of sheets) for (const p of sh.placed) {
-    if (p.isSmall && smallEdgeSides(p, sh.placed, usableX, usableY) > 0) n++
+    // у листа-обрезка свои размеры рабочей зоны (sh.usableX/usableY)
+    if (p.isSmall && smallEdgeSides(p, sh.placed, sh.usableX ?? usableX, sh.usableY ?? usableY) > 0) n++
   }
   return n
 }

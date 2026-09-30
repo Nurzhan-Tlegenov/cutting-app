@@ -38,14 +38,19 @@ function piecePolygonLocal(p) {
 }
 
 export function buildNestingDxf(sheetsData, order) {
-  const sheetW = Number(order.sheet_width) || 0
-  const sheetL = Number(order.sheet_length) || 0
-  const marginL = Number(order.margin_left) || 0
-  const marginB = Number(order.margin_bottom) || 0
+  const sheetWAll = Number(order.sheet_width) || 0
+  const sheetLAll = Number(order.sheet_length) || 0
+  const marginLAll = Number(order.margin_left) || 0
+  const marginBAll = Number(order.margin_bottom) || 0
 
   let body = ''
+  let offsetX = 0
   sheetsData.forEach((sheet, si) => {
-    const offsetX = si * (sheetW + GAP_BETWEEN_SHEETS)
+    if (si > 0) offsetX += (Number(sheetsData[si - 1].sheetW) || sheetW) + GAP_BETWEEN_SHEETS
+    // лист-обрезок — со своими размерами и отступом
+    const offcut = sheet.stock === 'offcut'
+    const sheetW = Number(sheet.sheetW) || sheetWAll, sheetL = Number(sheet.sheetL) || sheetLAll
+    const marginL = sheet.marginL ?? marginLAll, marginB = sheet.marginB ?? marginBAll
 
     // Контур листа целиком (не только рабочая зона — так виднее, где отступы)
     body += line(offsetX, 0, offsetX + sheetW, 0, 'sheet')
@@ -54,7 +59,7 @@ export function buildNestingDxf(sheetsData, order) {
     body += line(offsetX, sheetL, offsetX, 0, 'sheet')
 
     // Номер листа над ним
-    body += text(offsetX, sheetL + 60, `Лист ${si + 1} (${sheet.placed.length} дет.)`, 'label', 50)
+    body += text(offsetX, sheetL + 60, `${offcut ? `Обрезок ${sheetL}x${sheetW}, лист` : 'Лист'} ${si + 1} (${sheet.placed.length} дет.)`, 'label', 50)
 
     sheet.placed.forEach(p => {
       const baseX = offsetX + marginL + p.x
