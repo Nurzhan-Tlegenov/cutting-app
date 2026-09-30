@@ -281,6 +281,9 @@ export async function runNesting({
   // а не тратит его поровну вслепую.
   const HILL_CLIMB_BUDGET_MS = Math.max(0, Number(optimizeSeconds) || 0) * 1000 // из настроек раскроя, 0 = без доп. оптимизации
   const YIELD_EVERY_GEN = 2 // раз в столько поколений отдаём управление браузеру
+  const SQUEEZE_PER_GEN = 40 // попыток дожима последнего листа на поколение
+  let sqCur = null, sqBase = null  // текущее состояние дожима и от какого лучшего оно пошло
+  let lastGain = Date.now()         // когда последний раз улучшился лучший вариант
 
   const POP_SIZE = 40
   const ELITE_COUNT = 4
@@ -331,6 +334,21 @@ export async function runNesting({
     iter += evaluated.length
     evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
     if (better(evaluated[0].stat, best.stat)) { best = evaluated[0]; dirty = true }
+    // Дожим последнего листа у лучшего варианта (см. squeezeLast) — дёшево:
+    // укладываются только два листа, а не весь заказ
+    // Состояние дожима живёт между поколениями и может «гулять» по плато;
+    // в лучший вариант попадает только настоящее улучшение. Если генетический
+    // поиск нашёл новый лучший — дожим продолжает уже с него.
+    if (best.sheets.length >= 2) {
+      if (sqBase !== best) { sqCur = best.sheets; sqBase = best; lastGain = Date.now() }
+      // Поиск встал (нет улучшений > 3 с) — почти всё время отдаём дожиму,
+      // а раз в ~5 с без толку возвращаем «гуляющее» состояние к лучшему
+      const stalled = Date.now() - lastGain > 3000
+      if (stalled && Date.now() - lastGain > 8000 && Math.random() < 0.05) sqCur = best.sheets
+      sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 6 : SQUEEZE_PER_GEN, true)
+      const stat = evaluate(sqCur, usableX, usableY)
+      if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
+    }
     // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт.
     if (gen % YIELD_EVERY_GEN === 0) { maybeReport(); maybeStats(); await new Promise(r => setTimeout(r, 0)) }
   }
@@ -351,6 +369,67 @@ export async function runNesting({
   if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(best.sheets)
 
   return { sheets: best.sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+}
+
+// ─── Дожим последнего листа ─────────────────────────────────────────────────
+// Генетический поиск перебирает ПОРЯДОК всех деталей заказа и улучшает
+// последний лист лишь косвенно — поэтому результат от запуска к запуску
+// гуляет (260906_009: 18% в удачный раз, 21–26% обычно). Дожим работает прямо
+// с раскладкой: берём один из заполненных листов и последний, детали обоих
+// заново укладываем в два листа так, чтобы первый был забит до предела, а на
+// последний ушло как можно меньше. Число листов и детали не меняются —
+// последний лист только худеет (или исчезает совсем).
+function placedToPiece(p) {
+  return {
+    id: p.id, detailIndex: p.detailIndex, pw: p.w, ph: p.h, origX: p.origX, origY: p.origY,
+    rotatable: p.rotatable, label: p.label, prefix: p.prefix, isSmall: p.isSmall,
+    edgeTop: p.edgeTop, edgeRight: p.edgeRight, edgeBottom: p.edgeBottom, edgeLeft: p.edgeLeft,
+  }
+}
+const sheetArea = sh => sh.placed.reduce((a, p) => a + p.w * p.h, 0)
+function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allowEqual = false) {
+  let cur = sheets
+  let improved = false
+  for (let a = 0; a < attempts && cur.length >= 2; a++) {
+    const n = cur.length - 1
+    // 1 или 2 заполненных листа + последний. Чаще берём листы, где свободнее
+    // (туда проще «впихнуть» детали с последнего).
+    const rk = Math.random()
+    const k = Math.min(n, rk < 0.4 ? 1 : rk < 0.8 ? 2 : 3)
+    const pick = () => {
+      let j = Math.floor(Math.random() * n)
+      if (Math.random() < 0.5) {
+        const j2 = Math.floor(Math.random() * n)
+        if (sheetArea(cur[j2]) < sheetArea(cur[j])) j = j2
+      }
+      return j
+    }
+    const idx = [pick()]
+    for (let g = 0; idx.length < k && g < 12; g++) { const j = pick(); if (!idx.includes(j)) idx.push(j) }
+    const pool = idx.flatMap(j => cur[j].placed).concat(cur[n].placed).map(placedToPiece)
+    const r = Math.random()
+    const order = r < 0.3 ? pool.sort((x, y) => y.pw * y.ph - x.pw * x.ph)
+      : r < 0.75 ? perturbOrder(pool.sort((x, y) => y.pw * y.ph - x.pw * x.ph), Math.random() < 0.5)
+      : shuffle(pool)
+    const mode = modes[Math.floor(Math.random() * modes.length)]
+    const res = packAttempt(order, mode, direction, usableX, usableY)
+    if (res.length > idx.length + 1) continue
+    // Самый лёгкий из новых листов — последний, остальные встают на места взятых
+    res.sort((x, y) => sheetArea(y) - sheetArea(x))
+    const newLast = res.length === idx.length + 1 ? sheetArea(res[res.length - 1]) : 0
+    // allowEqual — «боковой» ход: последний лист не меньше, но состав
+    // заполненных листов другой — это открывает новые возможности следующим
+    // попыткам (иначе дожим застревает на плато)
+    if (newLast < sheetArea(cur[n]) - 1 || (allowEqual && res.length === idx.length + 1 && newLast <= sheetArea(cur[n]) + 1)) {
+      const next = cur.slice()
+      idx.forEach((j, t) => { next[j] = { ...res[t], index: cur[j].index } })
+      if (res.length === idx.length + 1) next[n] = { ...res[res.length - 1], index: cur[n].index }
+      else next.splice(n, 1)
+      cur = next
+      improved = true
+    }
+  }
+  return improved ? cur : sheets
 }
 
 function cloneSheets(sheets) {
