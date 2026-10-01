@@ -9,6 +9,7 @@ import { validateNesting } from '../lib/validateNesting'
 import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
+import { placedHoles } from '../lib/partHoles'
 import BottomNav from '../components/BottomNav'
 
 const COLORS = [
@@ -578,6 +579,23 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       } else {
         ctx.fillRect(x, y, w, h)
         ctx.strokeRect(x, y, w, h)
+      }
+      // Внутренние вырезы (прямоугольные, с дугами, круглые) — «дырой» в детали
+      const holes = details ? placedHoles(p, details[p.detailIndex]) : []
+      if (holes.length) {
+        ctx.save()
+        ctx.fillStyle = '#fff'
+        ctx.strokeStyle = '#C0392B'
+        ctx.lineWidth = 1.2
+        holes.forEach(poly => {
+          ctx.beginPath()
+          poly.forEach((pt, vi) => {
+            const sx = x + pt.x * sc, sy = y + h - pt.y * sc
+            if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy)
+          })
+          ctx.closePath(); ctx.fill(); ctx.stroke()
+        })
+        ctx.restore()
       }
 
       // Кромка — рисуется НЕ по самому контуру, а с небольшим отступом внутрь,
@@ -1635,6 +1653,19 @@ export default function NestingPage() {
     }))
   }
 
+  // Пустой лист (все детали унесли в буфер / на другие листы) — убрать
+  function deleteEmptySheet(cfgId, si) {
+    setConfigs(cs => cs.map(c => {
+      if (c.id !== cfgId || !c.sheetsData[si] || c.sheetsData[si].placed.length) return c
+      const sheetsData = c.sheetsData.filter((_, i) => i !== si).map((sh, i) => ({ ...sh, index: i }))
+      return {
+        ...c, sheetsData, saved: false, note: '', selPart: -1,
+        activeSheet: Math.max(0, Math.min(si, sheetsData.length - 1)),
+        view: sheetsData.length ? c.view : 'all',
+      }
+    }))
+  }
+
   async function saveNesting(cfg) {
     if (!cfg?.result) return
     // Пустые листы (все детали унесли в буфер/на другие листы) не сохраняем
@@ -1748,7 +1779,7 @@ export default function NestingPage() {
   // CAD-просмотрщике, а не только по цифрам.
   function downloadNestingDxf(sheets = sheetsData, suffix = '') {
     const g = geoOf(order, result)
-    const dxf = buildNestingDxf(sheets, { sheet_width: g.sheetW, sheet_length: g.sheetL, margin_left: g.marginL, margin_bottom: g.marginB })
+    const dxf = buildNestingDxf(sheets, { sheet_width: g.sheetW, sheet_length: g.sheetL, margin_left: g.marginL, margin_bottom: g.marginB }, details)
     const blob = new Blob([dxf], { type: 'application/dxf' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -1757,7 +1788,7 @@ export default function NestingPage() {
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 30000) // не сразу: на телефоне загрузка может не успеть начаться
   }
 
   // ─── Экспорт РЕЗУЛЬТАТА раскроя в DXF — не пересчитанная заново геометрия,
@@ -1789,6 +1820,10 @@ export default function NestingPage() {
         ? p.polygon.map(pt => [ox + p.x + pt.x, oy + p.y + pt.y])
         : (() => { const w = p.w - kerf, h = p.h - kerf; return [[ox + p.x, oy + p.y], [ox + p.x + w, oy + p.y], [ox + p.x + w, oy + p.y + h], [ox + p.x, oy + p.y + h]] })()
       entities += polygonToDxfEntity(poly, 'detal')
+      // внутренние вырезы — отдельным слоем
+      placedHoles(p, details[p.detailIndex]).forEach(hp => {
+        entities += polygonToDxfEntity(hp.map(pt => [ox + p.x + pt.x, oy + p.y + pt.y]), 'vyrez')
+      })
 
       // Подпись — та же логика, что и на карте (по контуру детали, не по
       // центру габарита, чтобы не попасть в пустой паз у криволинейной детали)
@@ -1825,7 +1860,7 @@ export default function NestingPage() {
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 30000) // не сразу: на телефоне загрузка может не успеть начаться
   }
 
 
@@ -1900,7 +1935,7 @@ export default function NestingPage() {
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 30000) // не сразу: на телефоне загрузка может не успеть начаться
   }
 
   function renderTimeline(cfg, idx, events, pos, last, ev) {
@@ -2180,6 +2215,13 @@ export default function NestingPage() {
                       </button>
                     </div>
                     <div style={{ flex: 1 }} />
+                    {view === 'sheet' && canvasSheet.placed.length === 0 && cfg.sheetsData.length > 1 && (
+                      <button onClick={() => deleteEmptySheet(cfg.id, cfg.activeSheet)}
+                        style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid #dc3545',
+                          background: 'transparent', color: '#dc3545', fontSize: 11, cursor: 'pointer' }}>
+                        🗑 Удалить пустой лист
+                      </button>
+                    )}
                     {view === 'sheet' && (
                       <>
                         <button onClick={() => downloadSheetDxf(cfg.activeSheet, cfg.sheetsData, `_k${idx + 1}`)}
@@ -2207,6 +2249,7 @@ export default function NestingPage() {
                         activeSheet={locked || hEvent ? -1 : cfg.activeSheet}
                         onPickSheet={locked || hEvent ? null : openSheet}
                         running={isRunning} bufferCount={cfg.buffer.length}
+                        details={details}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {isRunning
@@ -2270,7 +2313,7 @@ export default function NestingPage() {
                     {cfg.sheetsData.map((sh, i) => (
                       <button key={i} onClick={() => openSheet(i)}
                         style={chip(view === 'sheet' && cfg.activeSheet === i, 'var(--blue)')}>
-                        {sh.stock === 'offcut' ? 'Обр.' : 'Лист'} {i + 1} · {sh.placed.length}
+                        {sh.stock === 'offcut' ? 'Обр.' : 'Лист'} {i + 1} · {sh.placed.length ? sh.placed.length : 'пусто'}
                       </button>
                     ))}
                   </div>
