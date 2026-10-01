@@ -780,7 +780,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       }
       return best
     }
-    const cx = [0, usableX - pw], cy = [0, usableY - ph]
+    // рез у края зоны не нужен — деталь встаёт вплотную к краю (pw/ph включают рез)
+    const cx = [0, usableX + kerf - pw], cy = [0, usableY + kerf - ph]
     for (let i = 0; i < items.length; i++) {
       if (i === idx) continue
       const o = items[i]
@@ -865,13 +866,13 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     const { idx, startX, startY, origX, origY } = drag0
     const p = placedRef.current[idx]
     const dx = fromC(x - startX), dy = fromC(y - startY)
-    let nx = Math.max(0, Math.min(usableX - p.w, origX + dx))
-    let ny = Math.max(0, Math.min(usableY - p.h, origY + dy))
+    let nx = Math.max(0, Math.min(usableX + kerf - p.w, origX + dx))
+    let ny = Math.max(0, Math.min(usableY + kerf - p.h, origY + dy))
     const snapped = applyMagnet(nx, ny, p.w, p.h, idx, placedRef.current)
     // Точный магнит по контуру для фигурных деталей: зазор ровно kerf, в том числе внутри Г-образной
     const refined = snapPolygonGap(p, snapped.x, snapped.y, placedRef.current, idx, kerf, 50)
-    nx = Math.max(0, Math.min(usableX - p.w, refined.x))
-    ny = Math.max(0, Math.min(usableY - p.h, refined.y))
+    nx = Math.max(0, Math.min(usableX + kerf - p.w, refined.x))
+    ny = Math.max(0, Math.min(usableY + kerf - p.h, refined.y))
     const updated = placedRef.current.map((item, i) => i === idx ? { ...item, x: nx, y: ny } : item)
     placedRef.current = updated
     redraw(updated, idx)
