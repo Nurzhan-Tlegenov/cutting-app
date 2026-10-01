@@ -49,7 +49,8 @@ export default function SheetsOverview({
   const colsRef = useRef(cols)
   colsRef.current = cols
   const [boxW, setBoxW] = useState(() => (typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 900) : 360))
-  const [scrollTop, setScrollTop] = useState(0)
+  const drawRef = useRef(null)     // последняя draw (для прокрутки без перерисовки React)
+  const scrollRaf = useRef(0)
 
   const rows = Math.ceil(n / cols)
   // Размеры каждого листа: у листа-обрезка — свои (sheet.sheetW/usableX…),
@@ -118,7 +119,7 @@ export default function SheetsOverview({
   function draw(items) {
     const canvas = canvasRef.current
     if (!canvas) return
-    const top = scrollRef.current ? scrollRef.current.scrollTop : scrollTop
+    const top = scrollRef.current ? scrollRef.current.scrollTop : 0
     if (canvas.width !== Math.round(canvasW * DPR) || canvas.height !== Math.round(viewH * DPR)) {
       canvas.width = Math.round(canvasW * DPR)
       canvas.height = Math.round(viewH * DPR)
@@ -264,19 +265,24 @@ export default function SheetsOverview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cols, boxW])
 
-  // Перерисовка при прокрутке/масштабе/выборе листа (без анимации)
-  useLayoutEffect(() => { draw(curRef.current) })
+  // Перерисовка при масштабе/выборе листа (без анимации)
+  useLayoutEffect(() => { drawRef.current = draw; draw(curRef.current) })
 
   useEffect(() => () => { if (animRef.current) cancelAnimationFrame(animRef.current) }, [])
 
   // Смена числа листов в ряд с сохранением того листа, что был под пальцем
   const anchorRef = useRef(null)
-  function changeCols(next, anchorSheet = null, anchorY = 0) {
+  function changeCols(next, anchorSheet = null, anchorY = 0, pinch = null) {
     const c = Math.max(1, Math.min(MAX_COLS, next, n))
-    if (c === colsRef.current) return
+    const cv = canvasRef.current
+    if (c === colsRef.current) {
+      // число листов в ряд то же — просто вернуть масштаб пальцев к 1
+      if (cv && pinch) { cv.style.transition = 'transform 180ms ease-out'; cv.style.transform = 'scale(1)' }
+      return
+    }
     const el = scrollRef.current
     const si = anchorSheet ?? (el ? Math.min(n - 1, Math.floor(((el.scrollTop - PADDING) / sc) / rowMM) * colsRef.current) : 0)
-    anchorRef.current = { si, y: anchorY }
+    anchorRef.current = { si, y: anchorY, ...(pinch ? { k: pinch.k, step: colsRef.current / c, ox: pinch.ox, oy: pinch.oy } : {}) }
     setColsSet(c)
   }
   useLayoutEffect(() => {
@@ -285,7 +291,21 @@ export default function SheetsOverview({
     anchorRef.current = null
     const rowTop = Math.floor(a.si / cols) * rowMM * sc + PADDING
     el.scrollTop = Math.max(0, rowTop - a.y)
-    setScrollTop(el.scrollTop)
+    draw(curRef.current)
+    // Плавный «доезд»: холст был растянут пальцами (k), новая сетка крупнее/мельче
+    // в cols-кратном шаге — остаток масштаба плавно уходит в 1
+    const cv = canvasRef.current
+    if (cv && a.k) {
+      const rest = a.k / a.step
+      cv.style.transition = 'none'
+      cv.style.transformOrigin = `${a.ox}px ${a.oy}px`
+      cv.style.transform = `scale(${rest})`
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        cv.style.transition = 'transform 180ms ease-out'
+        cv.style.transform = 'scale(1)'
+      }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cols])
 
   function sheetAt(clientX, clientY) {
@@ -312,25 +332,40 @@ export default function SheetsOverview({
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const st = { active: false, dist: 0, si: 0, y: 0 }
+    // Как в галерее телефона: пока пальцы на экране — холст плавно тянется
+    // (CSS-масштаб, без перерисовки), отпустили — сетка встаёт на ближайшее
+    // число листов в ряд, остаток масштаба плавно доезжает.
+    const st = { active: false, dist: 0, si: 0, y: 0, k: 1, ox: 0, oy: 0 }
     const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     const onStart = e => {
       if (e.touches.length !== 2) return
-      st.active = true; st.dist = dist(e.touches)
+      st.active = true; st.dist = dist(e.touches); st.k = 1
       const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2, my = (e.touches[0].clientY + e.touches[1].clientY) / 2
       st.si = Math.max(0, sheetAtRef.current(mx, my))
-      st.y = my - el.getBoundingClientRect().top
+      const r = el.getBoundingClientRect()
+      st.y = my - r.top
+      st.ox = mx - r.left; st.oy = my - r.top
+      const cv = canvasRef.current
+      if (cv) { cv.style.transition = 'none'; cv.style.transformOrigin = `${st.ox}px ${st.oy}px` }
     }
     const onMove = e => {
       if (!st.active || e.touches.length !== 2) return
       if (e.cancelable) e.preventDefault()
-      const d = dist(e.touches)
       if (st.dist <= 0) return
-      const k = d / st.dist
-      if (k > 1.3) { changeColsRef.current(colsRef.current - 1, st.si, st.y); st.dist = d }
-      else if (k < 0.77) { changeColsRef.current(colsRef.current + 1, st.si, st.y); st.dist = d }
+      const c = colsRef.current
+      // пределы: не крупнее 1 листа в ряд и не мельче MAX_COLS (с небольшим «пружинящим» запасом)
+      const kMax = c * 1.15, kMin = c / Math.min(MAX_COLS, nRef.current) * 0.87
+      st.k = Math.max(kMin, Math.min(kMax, dist(e.touches) / st.dist))
+      const cv = canvasRef.current
+      if (cv) cv.style.transform = `scale(${st.k})`
     }
-    const onEnd = e => { if (e.touches.length < 2) st.active = false }
+    const onEnd = e => {
+      if (!st.active || e.touches.length >= 2) return
+      st.active = false
+      const c = colsRef.current
+      const next = Math.round(c / st.k)
+      changeColsRef.current(next, st.si, st.y, { k: st.k, ox: st.ox, oy: st.oy })
+    }
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
@@ -343,20 +378,25 @@ export default function SheetsOverview({
     }
   }, [])
   const sheetAtRef = useRef(sheetAt); sheetAtRef.current = sheetAt
+  const nRef = useRef(n); nRef.current = n
   const changeColsRef = useRef(changeCols); changeColsRef.current = changeCols
 
   const btn = { fontSize: 13, width: 30, height: 26, padding: 0, border: '0.5px solid var(--border-md)',
     borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }
   return (
     <div style={{ position: 'relative' }}>
-      <div ref={scrollRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
+      <div ref={scrollRef} onScroll={() => {
+        // прокрутка — перерисовка раз в кадр, без React
+        if (scrollRaf.current) return
+        scrollRaf.current = requestAnimationFrame(() => { scrollRaf.current = 0; drawRef.current?.(curRef.current) })
+      }}
         style={{ height: viewH, overflowY: contentH > viewH ? 'auto' : 'hidden', overflowX: 'hidden', borderRadius: 8,
           touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ height: contentH, position: 'relative' }}>
           <canvas ref={canvasRef} onClick={onClick}
             width={Math.round(canvasW * DPR)} height={Math.round(viewH * DPR)}
             style={{ position: 'sticky', top: 0, width: canvasW, height: viewH, display: 'block',
-              cursor: onPickSheet ? 'pointer' : 'default' }} />
+              cursor: onPickSheet ? 'pointer' : 'default', willChange: 'transform' }} />
         </div>
       </div>
       {/* Под картой, а не поверх неё — чтобы ничего не закрывало укладку */}
