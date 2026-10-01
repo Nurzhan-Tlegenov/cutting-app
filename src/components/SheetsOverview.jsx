@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { placedHoles } from '../lib/partHoles'
-import { smallEdgeSides } from '../lib/nesting'
+import { smallEdgeReal } from '../lib/nesting'
 
 // ─── Обзор ВСЕХ листов раскроя на одном холсте ──────────────────────────────
 // Нужен для онлайн-раскроя: пока идёт поиск, пользователь видит, как укладка
@@ -100,7 +100,7 @@ export default function SheetsOverview({
       const o = origin(si)
       const D = dimOf(s)
       s.placed.forEach(p => {
-        const atEdge = !!p.isSmall && smallEdgeSides(p, s.placed, D.ux, D.uy) > 0
+        const atEdge = !!p.isSmall && smallEdgeReal(p, s.placed, D.ux, D.uy) > 0
         const w = p.w - kerf, h = p.h - kerf
         out.push({
           di: p.detailIndex, sheet: si,
