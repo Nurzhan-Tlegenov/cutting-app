@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { placedHoles } from '../lib/partHoles'
 import { smallEdgeSides } from '../lib/nesting'
 
 // ─── Обзор ВСЕХ листов раскроя на одном холсте ──────────────────────────────
@@ -31,7 +32,7 @@ const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 
 export default function SheetsOverview({
   sheets, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf,
-  activeSheet = -1, onPickSheet, running = false, bufferCount = 0,
+  activeSheet = -1, onPickSheet, running = false, bufferCount = 0, details = null,
 }) {
   const canvasRef = useRef(null)
   const wrapRef = useRef(null)
@@ -89,6 +90,7 @@ export default function SheetsOverview({
           x: o.x + D.ml + p.x,
           y: o.y + D.mt + (D.uy - p.y - h),
           w, h, polygon: Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : null,
+          holes: details ? placedHoles(p, details[p.detailIndex]) : [],
           label: (p.prefix ? p.prefix.slice(0, 3) + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д'),
           alpha: 1, atEdge,
         })
@@ -150,6 +152,20 @@ export default function SheetsOverview({
       } else {
         ctx.fillRect(x, y, w, h)
         ctx.strokeRect(x, y, w, h)
+      }
+      // внутренние вырезы
+      if (it.holes?.length) {
+        ctx.fillStyle = '#fff'
+        ctx.strokeStyle = '#C0392B'
+        ctx.lineWidth = 0.8
+        it.holes.forEach(poly => {
+          ctx.beginPath()
+          poly.forEach((pt, vi) => {
+            const sx = x + pt.x * sc, sy = y + h - pt.y * sc
+            if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy)
+          })
+          ctx.closePath(); ctx.fill(); ctx.stroke()
+        })
       }
       // Подпись — только если деталь на экране достаточно крупная
       if (w > 26 && h > 12) {
