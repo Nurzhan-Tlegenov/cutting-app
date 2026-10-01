@@ -85,17 +85,33 @@ const partArea = p => (Array.isArray(p.polygon) && p.polygon.length > 2 ? polyAr
 // Лучше — меньше листов; затем меньше мелких деталей у края листа («мелкие —
 // в центр», жёсткое требование); затем меньше материала на последнем листе.
 // usableX/usableY берутся из самого результата (res.usableX) или передаются.
+// При равенстве всего этого — меньше «занятый угол» (env): сумма по листам
+// площади прямоугольника от нуля листа до дальней детали. Остальное — цельный
+// деловой остаток. Пример 260921_001: 10 листов — минимум (на лист входят
+// только 2 детали 1200×900), и раньше улучшения раскладки (сцепленные пары,
+// большой свободный остаток) не показывались вовсе — появлялись только после «Стоп».
+function envelope(sheets) {
+  let env = 0
+  for (const sh of sheets) {
+    let mx = 0, my = 0
+    for (const p of sh.placed) { if (p.x + p.w > mx) mx = p.x + p.w; if (p.y + p.h > my) my = p.y + p.h }
+    env += mx * my
+  }
+  return env
+}
 export function liveScore(sheets, usableX, usableY) {
-  if (!sheets?.length) return { count: Infinity, edge: Infinity, last: Infinity }
+  if (!sheets?.length) return { count: Infinity, edge: Infinity, last: Infinity, env: Infinity }
   let edge = 0
   if (usableX && usableY) edge = smallAtEdge(sheets, usableX, usableY)
-  return { count: sheets.length, edge, last: sheets[sheets.length - 1].placed.reduce((a, p) => a + partArea(p), 0) }
+  return { count: sheets.length, edge, last: sheets[sheets.length - 1].placed.reduce((a, p) => a + partArea(p), 0), env: envelope(sheets) }
 }
 export function liveBetter(a, b) {
   if (!b) return true
   if (a.count !== b.count) return a.count < b.count
   if ((a.edge || 0) !== (b.edge || 0)) return (a.edge || 0) < (b.edge || 0)
-  return a.last < b.last - 1
+  if (Math.abs(a.last - b.last) > 1) return a.last < b.last
+  // последний лист тот же — компактнее ли раскладка (на 1% и больше)
+  return a.env != null && b.env != null && a.env < b.env * 0.99
 }
 
 function isRasterPath(p) {

@@ -128,8 +128,15 @@ export async function runNesting({
   takeMigrant = null,             // параллельный поиск («острова»): () => { ids, mode } — лучший вариант соседнего потока, вливается в популяцию
   onStats = null,                 // хронология раскроя: «пульс» поиска раз в ~1 с (итерации, поколение, режимы в популяции, разнообразие)
 }) {
-  const usableX = sheetW - marginL - marginR  // горизонталь = 1830 - отступы
-  const usableY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
+  const realX = sheetW - marginL - marginR  // рабочая зона: горизонталь = 1830 - отступы
+  const realY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
+  // Габарит детали здесь включает рез справа и сверху (p.w = ширина + kerf). У
+  // края рабочей зоны этот рез не нужен — за ним уже отступ листа. Поэтому
+  // укладываем в зону, расширенную на kerf: деталь встаёт вплотную к краю зоны,
+  // а не на kerf раньше. Пример 260921_001: 900 + 6,5 + 900 = 1806,5 ≤ 1810 —
+  // две детали 900 мм встают в ряд, а раньше требовалось 1813 и шла одна.
+  const usableX = realX + (Number(kerf) || 0)
+  const usableY = realY + (Number(kerf) || 0)
 
   // ВАЖНО: NFP умеет укладывать только свободно (для фрезера) — понятия
   // "сквозной рез" там нет вообще. Раньше эта проверка стояла ДО проверки
@@ -402,7 +409,7 @@ export async function runNesting({
   // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
   if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(best.sheets)
 
-  return { sheets: best.sheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+  return { sheets: best.sheets, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }
 
 // ─── Дожим последнего листа ─────────────────────────────────────────────────
