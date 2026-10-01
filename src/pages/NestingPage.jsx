@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { computeOffcutAtPoint, smallAtEdge, smallEdgeSides } from '../lib/nesting'
+import { computeOffcutAtPoint, smallAtEdge, smallEdgeReal } from '../lib/nesting'
 import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
 import { newHistory, recordEvent, recordIsland, recordStats, buildHistoryExport } from '../lib/nestingHistory'
@@ -547,7 +547,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     // Считаем в координатах данных (flipY — обратимое преобразование).
     const dataItems = flipY(items)
     const edgeSmall = new Set()
-    dataItems.forEach((p, i) => { if (p.isSmall && smallEdgeSides(p, dataItems, usableX, usableY) > 0) edgeSmall.add(i) })
+    dataItems.forEach((p, i) => { if (p.isSmall && smallEdgeReal(p, dataItems, usableX, usableY) > 0) edgeSmall.add(i) })
     items.forEach((p, i) => {
       // p.x,p.w = X-координаты; p.y,p.h = Y-координаты
       const x = rx + toC(p.x), y = ry + toC(p.y)
@@ -1091,7 +1091,7 @@ const DIR_SHORT = { auto: 'Авто', along_y: 'Вдоль Y', along_x: 'Вдо�
 let CFG_SEQ = 0
 function newCfg(over = {}) {
   return {
-    id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', area: '', side: '', secs: '12',
+    id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', area: '', side: '', edge: '150', secs: '12',
     live: true,          // онлайн-раскрой: считать до «Стоп», показывая каждое улучшение
     open: true, status: 'idle', // idle | queued | running | stopping | done | error
     startedAt: 0, doneAt: 0, error: '',
@@ -1397,6 +1397,7 @@ export default function NestingPage() {
         sq: o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '',
         area: areaFromSide(o.small_parts_max_square_side),
         side: o.small_parts_max_side ? String(o.small_parts_max_side) : '',
+        edge: o.small_parts_edge_gap ? String(o.small_parts_edge_gap) : '150',
         secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
         ...(saved ? {
           dir: saved.config?.dir || 'auto',
@@ -1473,7 +1474,7 @@ export default function NestingPage() {
     const last = configs[configs.length - 1]
     const used = new Set(configs.map(c => c.dir))
     const dir = ['auto', 'along_y', 'along_x'].find(d => !used.has(d)) || last.dir
-    const cfg = newCfg({ small: last.small, sq: last.sq, area: last.area, side: last.side, secs: last.secs, dir })
+    const cfg = newCfg({ small: last.small, sq: last.sq, area: last.area, side: last.side, edge: last.edge, secs: last.secs, dir })
     setConfigs(cs => [...cs.map(c => ({ ...c, open: false })), cfg])
   }
 
@@ -1497,6 +1498,7 @@ export default function NestingPage() {
       smallPartsToCenter: cfg.small,
       smallPartsMaxSquareSide: cfg.sq === '' ? 0 : Number(cfg.sq),
       smallPartsMaxSide: cfg.side === '' ? 0 : Number(cfg.side),
+      smallPartsEdgeGap: cfg.edge === '' ? 150 : Number(cfg.edge),
       optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
       cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
@@ -1672,7 +1674,7 @@ export default function NestingPage() {
     const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
     const toSave = {
       ...cfg.result, sheets,
-      config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, secs: cfg.secs },
+      config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, secs: cfg.secs },
     }
     await supabase.from('orders').update({ nesting_result: JSON.stringify(toSave) }).eq('id', id)
   }
@@ -1994,7 +1996,7 @@ export default function NestingPage() {
     const secs = cfgSecs(cfg)
     // «Мелкие — в центр»: сколько мелких деталей всё же у края листа
     const edgeN = cfg.small && cfg.result && cfg.sheetsData.length
-      ? smallAtEdge(cfg.sheetsData, cfg.result.usableX, cfg.result.usableY) : null
+      ? smallAtEdge(cfg.sheetsData, cfg.result.usableX, cfg.result.usableY, true) : null
     const smallTxt = edgeN === null ? '' : edgeN > 0 ? ` · мелкие у края: ${edgeN}` : ' · мелкие в центре ✓'
     let statusLine = 'не считался'
     if (isQueued) statusLine = 'в очереди'
@@ -2106,6 +2108,14 @@ export default function NestingPage() {
                     onBlur={e => persist({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
                     style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
                 </label>
+                <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
+                  title="Мелкая деталь не ближе этого к краю листа (если между ней и краем нет другой детали)">
+                  До края, мм
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.edge} placeholder="150"
+                    onChange={e => updateCfg(cfg.id, { edge: e.target.value.replace(/[^0-9]/g, '') })}
+                    onBlur={e => persist({ small_parts_edge_gap: e.target.value === '' ? 150 : Number(e.target.value) })}
+                    style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
+                </label>
               </div>
             )}
             {cfg.small && cfg.sq === '' && cfg.side === '' && (
@@ -2128,7 +2138,7 @@ export default function NestingPage() {
                   Мелкие — {n} из {total} дет.: {list.slice(0, 5).map(d =>
                     `${d.display_name || d.name} ${Math.round(d.length)}×${Math.round(d.width)}${Number(d.qty) > 1 ? ` (${d.qty})` : ''}`).join(', ')}
                   {list.length > 5 ? ` и ещё ${list.length - 5} вид.` : ''}
-                  <br />Их не ставим ближе 150 мм к краю листа, если между ними и краем нет другой детали.
+                  <br />Их не ставим ближе {cfg.edge || 150} мм к краю листа, если между ними и краем нет другой детали.
                   Узкую деталь — можно только торцом (стороной не длиннее «узкой стороны»), в угол листа — никогда.
                   Оставшиеся у края подсвечиваются на карте оранжевым.
                 </p>
