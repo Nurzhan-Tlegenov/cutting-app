@@ -128,7 +128,7 @@ function envelope(sheets) {
 export function liveScore(sheets, usableX, usableY) {
   if (!sheets?.length) return { count: Infinity, edge: Infinity, last: Infinity, env: Infinity }
   let edge = 0
-  if (usableX && usableY) edge = smallAtEdge(sheets, usableX, usableY)
+  if (usableX && usableY) edge = smallAtEdge(sheets, usableX, usableY, true)
   return { count: sheets.length, edge, last: sheets[sheets.length - 1].placed.reduce((a, p) => a + partArea(p), 0), env: envelope(sheets) }
 }
 export function liveBetter(a, b) {

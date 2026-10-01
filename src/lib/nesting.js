@@ -120,6 +120,7 @@ export async function runNesting({
   smallPartsToCenter = false,     // галочка "мелкие детали в середину" из настроек раскроя
   smallPartsMaxSquareSide = 0,    // сторона квадрата (мм); деталь мелкая, если её площадь <= side*side. 0 = критерий выключен
   smallPartsMaxSide = 0,          // порог меньшей стороны детали (мм). 0 = критерий выключен
+  smallPartsEdgeGap = 0,          // «у края» — ближе этого к краю листа (мм); 0 — по умолчанию SMALL_EDGE_MIN
   optimizeSeconds = 12,           // сколько секунд гонять поиск плотной укладки — из настроек раскроя
   cuttingMethod = 'nesting',      // 'nesting' (фрезер, ЧПУ — свободная укладка) | 'guillotine' (форматно-раскроечный станок — только сквозные резы)
   algo = 'raster',                // 'raster' (основной, проверенный) | 'nfp' (экспериментальный, точный по контуру — ТОЛЬКО для фрезера, см. ниже)
@@ -199,6 +200,9 @@ export async function runNesting({
     // 90 мм у детали 400×90): длинные стороны тогда поджаты соседями. Сторона
     // «короткая», если она не длиннее порога «Узкая сторона до» (+ рез).
     p.edgeOkMax = p.isSmall && smallPartsMaxSide > 0 ? smallPartsMaxSide + (Number(kerf) || 0) + 0.5 : 0
+    // свой порог «у края» (задаёт пользователь) и рез — для проверки по реальной рабочей зоне вне укладки
+    p.edgeMin = Number(smallPartsEdgeGap) > 0 ? Number(smallPartsEdgeGap) : 0
+    p.kf = Number(kerf) || 0
   })
 
   const sortStrategies = [
@@ -290,6 +294,25 @@ export async function runNesting({
   for (const sortFn of sortStrategies) {
     const sorted = basePieces.slice().sort(sortFn)
     for (const mode of scoringModes) tryAttempt(sorted, mode)
+  }
+  // Большой заказ из повторяющихся деталей — сначала раскрой «шаблонами»
+  // (ЛП + генерация столбцов, см. colgenPack): на 1175 деталях 119 листов за
+  // ~15 с, генетическому поиску на это нужно ~10 минут. Дальше дожим работает
+  // уже от этого решения.
+  let pool = null, pooledBest = null, poolSolvedAt = Date.now(), poolSizeAtSolve = 0
+  if (BIG_ORDER && cuttingMethod !== 'guillotine' && !stopNow()) {
+    const kinds = new Set(basePieces.map(p => p.detailIndex)).size
+    if (kinds <= 150 && basePieces.length / kinds >= 3) {
+      try {
+        const cgMs = basePieces.length > 600 ? 15000 : 8000
+        const cg = await colgenPack(basePieces, scoringModes.filter(m => !m.startsWith('g-')), direction, usableX, usableY, cgMs, Math.random, stopNow)
+        pool = cg.pool
+        if (cg && validLayout(cg.sheets)) {
+          const st = evaluate(cg.sheets, usableX, usableY)
+          if (better(st, best.stat)) { best = { ...best, sheets: cg.sheets, stat: st }; dirty = true; maybeReport(true) }
+        }
+      } catch (e) { console.warn('Раскрой шаблонами не удался:', e) }
+    }
   }
   // Случайные перестановки — не дольше RANDOM_PHASE_MS: на 1175 деталях одна
   // укладка ~0,14 с, и 80×8 попыток съедали первые ~90 с (а случайный порядок
@@ -421,6 +444,22 @@ export async function runNesting({
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
     }
+    // Пул шаблонов: листы каждой новой лучшей раскладки — в пул; раз в ~6 с
+    // (если пул пополнился) — ЛП по пулу и целое решение. Перекомбинация лучших
+    // листов разных раскладок часто даёт лист меньше, чем дожим одной раскладки.
+    if (pool) {
+      if (pooledBest !== best.sheets) { pooledBest = best.sheets; best.sheets.forEach(sh => pool.add(stripEdgeSmall(sh, usableX, usableY))) }
+      if (Date.now() - poolSolvedAt > 6000 && pool.size > poolSizeAtSolve) {
+        poolSolvedAt = Date.now(); poolSizeAtSolve = pool.size
+        try {
+          const sol = pool.solve(300)
+          if (sol && validLayout(sol)) {
+            const st = evaluate(sol, usableX, usableY)
+            if (better(st, best.stat)) { best = { ...best, sheets: sol, stat: st }; sqBase = best; sqCur = sol; dirty = true; lastGain = Date.now() }
+          }
+        } catch (e) { console.warn('ЛП по пулу шаблонов не удалась:', e) }
+      }
+    }
     // Отдаём управление браузеру, чтобы страница не "подвисала" на весь расчёт.
     if (gen % YIELD_EVERY_GEN === 0) { maybeReport(); maybeStats(); await new Promise(r => setTimeout(r, 0)) }
   }
@@ -456,7 +495,7 @@ export async function runNesting({
 function placedToPiece(p) {
   return {
     id: p.id, detailIndex: p.detailIndex, pw: p.w, ph: p.h, origX: p.origX, origY: p.origY,
-    rotatable: p.rotatable, label: p.label, prefix: p.prefix, isSmall: p.isSmall, edgeOkMax: p.edgeOkMax || 0,
+    rotatable: p.rotatable, label: p.label, prefix: p.prefix, isSmall: p.isSmall, edgeOkMax: p.edgeOkMax || 0, edgeMin: p.edgeMin || 0, kf: p.kf || 0,
     edgeTop: p.edgeTop, edgeRight: p.edgeRight, edgeBottom: p.edgeBottom, edgeLeft: p.edgeLeft,
   }
 }
@@ -856,7 +895,7 @@ function compactPass(sheets, direction, usableX, usableY) {
 
           if (target.family === 'guillotine') {
             const spot = fitFixedGuillotine(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall, direction)
-            if (spot && piece.isSmall && smallEdgeSides({ x: spot.x, y: spot.y, w: o.w, h: o.h }, target.placed, usableX, usableY) > 0) continue
+            if (spot && piece.isSmall && smallEdgeSides({ x: spot.x, y: spot.y, w: o.w, h: o.h, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, target.placed, usableX, usableY) > 0) continue
             if (spot) {
               const placed = { ...makePlaced(), x: spot.x, y: spot.y, _freeRectIdx: spot.idx }
               target.placed.push(placed); splitGuillotine(target, placed); delete placed._freeRectIdx
@@ -866,7 +905,7 @@ function compactPass(sheets, direction, usableX, usableY) {
           } else {
             const spot = fitFixed(target.freeRects, o.w, o.h, usableX, usableY, piece.isSmall, direction)
             // мелкую деталь не переносим туда, где она окажется у края листа
-            if (spot && piece.isSmall && smallEdgeSides({ x: spot.x, y: spot.y, w: o.w, h: o.h }, target.placed, usableX, usableY) > 0) continue
+            if (spot && piece.isSmall && smallEdgeSides({ x: spot.x, y: spot.y, w: o.w, h: o.h, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, target.placed, usableX, usableY) > 0) continue
             if (spot) {
               const placed = { ...makePlaced(), x: spot.x, y: spot.y }
               target.placed.push(placed); split(target, placed); prune(target)
@@ -915,7 +954,7 @@ export const SMALL_EDGE_MIN = 150
 
 // Сколько сторон мелкой детали p смотрят на край листа через отход.
 // p.w/p.h — с резом (справа и сверху), x,y — от низа-лева рабочей зоны.
-export function smallEdgeSides(p, placed, usableX, usableY, minGap = SMALL_EDGE_MIN) {
+export function smallEdgeSides(p, placed, usableX, usableY, minGap = p.edgeMin || SMALL_EDGE_MIN) {
   const x0 = p.x, y0 = p.y, x1 = p.x + p.w, y1 = p.y + p.h
   const gL = x0, gB = y0, gR = usableX - x1, gT = usableY - y1
   // Быстрый выход: далеко от всех краёв (так почти у всех кандидатов места)
@@ -966,13 +1005,25 @@ export function smallEdgeSides(p, placed, usableX, usableY, minGap = SMALL_EDGE_
 
 // Сколько мелких деталей стоят у края листа (см. выше). Это не пожелание, а
 // критерий качества: см. better() — сразу после числа листов.
-export function smallAtEdge(sheets, usableX, usableY) {
+// real — usableX/usableY настоящей рабочей зоны (снаружи укладки: экран,
+// проверка, сравнение вариантов). Внутри runNesting зона расширена на рез
+// (деталь с резом p.w встаёт вплотную к краю), поэтому снаружи к зоне
+// прибавляется рез детали — иначе у правого/верхнего края зазор считался бы
+// на ширину реза меньше настоящего.
+export function smallAtEdge(sheets, usableX, usableY, real = false) {
   let n = 0
   for (const sh of sheets) for (const p of sh.placed) {
     // у листа-обрезка свои размеры рабочей зоны (sh.usableX/usableY)
-    if (p.isSmall && smallEdgeSides(p, sh.placed, sh.usableX ?? usableX, sh.usableY ?? usableY) > 0) n++
+    if (!p.isSmall) continue
+    const k = real ? (p.kf || 0) : 0
+    if (smallEdgeSides(p, sh.placed, (sh.usableX ?? usableX) + k, (sh.usableY ?? usableY) + k) > 0) n++
   }
   return n
+}
+// То же для одной детали — по настоящей рабочей зоне (см. smallAtEdge, real)
+export function smallEdgeReal(p, placed, usableX, usableY) {
+  const k = p.kf || 0
+  return smallEdgeSides(p, placed, usableX + k, usableY + k)
 }
 
 function evaluate(sheets, usableX, usableY) {
@@ -1077,6 +1128,8 @@ function makePlacedFrom(piece, rect, rot, pw, ph) {
     rotated: rot,
     isSmall: piece.isSmall,
     edgeOkMax: piece.edgeOkMax || 0,
+    edgeMin: piece.edgeMin || 0,
+    kf: piece.kf || 0,
     rotatable: piece.rotatable,
     edgeTop:    rot ? piece.edgeLeft   : piece.edgeTop,
     edgeRight:  rot ? piece.edgeTop    : piece.edgeRight,
@@ -1117,7 +1170,7 @@ function chooseSpot(freeRects, piece, direction, usableX, usableY, mode, placed 
         ? computeContactLength(rect.x, rect.y, pw, ph, placed, usableX, usableY)
         : 0
       let score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
-      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph }, placed, usableX, usableY) * SMALL_NEAR_PENALTY
+      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, placed, usableX, usableY) * SMALL_NEAR_PENALTY
       if (score < bestScore) { bestScore = score; bestRect = rect; bestRot = k === 1 }
     }
   }
@@ -1156,7 +1209,7 @@ function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mod
         ? computeContactLength(rect.x, rect.y, pw, ph, placed, usableX, usableY)
         : 0
       let score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
-      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph }, placed, usableX, usableY) * SMALL_NEAR_PENALTY
+      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, placed, usableX, usableY) * SMALL_NEAR_PENALTY
       if (score < bestScore) { bestScore = score; bestIdx = idx; bestRot = k === 1 }
     }
   }
@@ -1297,3 +1350,320 @@ export function computeOffcutAtPoint(px, py, placed, usableX, usableY) {
 }
 
 
+
+// ─── Раскрой «шаблонами» (последовательная коррекция ценности) ───────────────
+// Для заказов с большим числом одинаковых деталей (сотни деталей, десятки видов)
+// это классическая задача раскроя: выгоднее искать не порядок всех деталей, а
+// хорошие «шаблоны» листа и повторять их. Лист строится так, чтобы максимизировать
+// сумму «ценностей» деталей на нём; найденный шаблон повторяется, пока хватает
+// деталей. После каждого полного решения ценность вида растёт, если его детали
+// попадали на неплотные листы (их трудно уложить — пусть идут раньше и в лучшие
+// шаблоны). Метод SVC (Мухачёва и др.).
+export function svcPack(pieces, modes, direction, usableX, usableY, budgetMs, onSolution = null, rand = Math.random, onPattern = null) {
+  const S = usableX * usableY
+  const types = new Map()
+  for (const p of pieces) {
+    if (!types.has(p.detailIndex)) types.set(p.detailIndex, { list: [], area: p.pw * p.ph, y: p.pw * p.ph, n: 0, acc: 0 })
+    types.get(p.detailIndex).list.push(p)
+  }
+  const T = [...types.entries()]
+  const t0 = Date.now()
+  let best = null, bestStat = null, it = 0
+  const packOne = (order, mode) => {
+    const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
+    const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
+    const sheet = { index: 0, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }], family }
+    // мелкие — после крупных (как в packAttempt): видно, где их прикроют от края
+    if (order.some(p => p.isSmall)) order = order.filter(p => !p.isSmall).concat(order.filter(p => p.isSmall))
+    for (const piece of order) {
+      if (cannotFit(sheet, piece)) continue
+      const r = family === 'guillotine'
+        ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+        : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+      if (!r) continue
+      sheet.placed.push(r)
+      if (family === 'guillotine') { splitGuillotine(sheet, r); delete r._freeRectIdx } else { split(sheet, r); prune(sheet) }
+      updateFreeBounds(sheet)
+    }
+    return stripEdgeSmall(sheet, usableX, usableY)
+  }
+  while (Date.now() - t0 < budgetMs) {
+    it++
+    const rem = new Map(T.map(([k, t]) => [k, t.list.slice()]))
+    const sheets = []
+    let left = pieces.length
+    while (left > 0) {
+      let bestSheet = null, bestVal = -1
+      const tries = 12
+      for (let tr = 0; tr < tries; tr++) {
+        const noise = tr === 0 ? 0 : 0.6 * rand()
+        const live = T.filter(([k]) => rem.get(k).length)
+        live.sort((a, b) => b[1].y * (1 + noise * (rand() - 0.5)) - a[1].y * (1 + noise * (rand() - 0.5)))
+        const order = []
+        for (const [k, t] of live) {
+          const r = rem.get(k)
+          const cap = Math.min(r.length, Math.floor(S / t.area))
+          for (let i = 0; i < cap; i++) order.push(r[r.length - 1 - i])
+        }
+        const sh = packOne(order, modes[Math.floor(rand() * modes.length)])
+        let val = 0
+        for (const p of sh.placed) val += types.get(p.detailIndex).y
+        if (val > bestVal) { bestVal = val; bestSheet = sh }
+      }
+      if (!bestSheet || !bestSheet.placed.length) {
+        // страховка: ни одна деталь не теряется — остаток обычной укладкой
+        const restPieces = [...rem.values()].flat()
+        packAttempt(restPieces, modes[0], direction, usableX, usableY).forEach(sh => sheets.push({ ...sh, index: sheets.length }))
+        left = 0
+        break
+      }
+      onPattern?.(bestSheet)
+      // повтор шаблона, пока хватает деталей каждого вида
+      const cnt = new Map()
+      for (const p of bestSheet.placed) cnt.set(p.detailIndex, (cnt.get(p.detailIndex) || 0) + 1)
+      let reps = Infinity
+      for (const [k, c] of cnt) reps = Math.min(reps, Math.floor(rem.get(k).length / c))
+      reps = Math.max(1, reps)
+      for (let r = 0; r < reps; r++) {
+        const placed = bestSheet.placed.map(p => {
+          const inst = rem.get(p.detailIndex).pop()
+          return { ...p, id: inst.id }
+        })
+        sheets.push({ index: sheets.length, family: bestSheet.family, placed, freeRects: bestSheet.freeRects.map(f => ({ ...f })), maxFreeW: bestSheet.maxFreeW, maxFreeH: bestSheet.maxFreeH })
+        left -= placed.length
+      }
+    }
+    // последний лист — самый лёгкий
+    sheets.sort((a, b) => sheetArea(b) - sheetArea(a)).forEach((sh, i) => { sh.index = i })
+    const stat = evaluate(sheets, usableX, usableY)
+    if (!bestStat || better(stat, bestStat)) { best = sheets; bestStat = stat; onSolution?.(sheets, stat, it) }
+    // коррекция ценностей: деталь на неплотном листе дорожает
+    for (const sh of sheets) {
+      const f = Math.max(0.05, sheetArea(sh) / S)
+      for (const p of sh.placed) { const t = types.get(p.detailIndex); t.acc += t.area / f; t.n++ }
+    }
+    for (const [, t] of T) if (t.n) { t.y = (t.y * it + t.acc / t.n) / (it + 1); t.acc = 0; t.n = 0 }
+  }
+  return best
+}
+
+// Шаблон листа без мелких деталей у края: такие мелкие убираются из шаблона
+// (уйдут в другие листы, где их прикроют). Убрать одну — может открыть другую,
+// поэтому повторяем. freeRects пересобираются.
+function stripEdgeSmall(sheet, usableX, usableY) {
+  if (!sheet.placed.some(p => p.isSmall)) return sheet
+  let placed = sheet.placed
+  for (let g = 0; g < 20; g++) {
+    const bad = placed.filter(p => p.isSmall && smallEdgeSides(p, placed, usableX, usableY) > 0)
+    if (!bad.length) break
+    placed = placed.filter(p => !bad.includes(p))
+  }
+  if (placed === sheet.placed || !placed.length) return sheet // одни мелкие — оставляем как есть
+  const next = { ...sheet, placed, family: 'maxrects', freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+  placed.forEach(pp => { split(next, pp); prune(next) })
+  updateFreeBounds(next)
+  return next
+}
+
+// ─── ЛП «покрытие спроса шаблонами» (симплекс с большим M) ──────────────────
+// min Σx_p  при  Σ_p a[t][p]·x_p ≥ d[t],  x ≥ 0. Строк — видов деталей (десятки),
+// столбцов — шаблонов (сотни): плотная таблица маленькая. Возвращает x и
+// двойственные цены π (ценность детали каждого вида в «листах»).
+function lpCover(cols, d) {
+  const R = d.length, m = cols.length, M = 1e5
+  const W = m + 2 * R // x, surplus, artificial
+  const T = Array.from({ length: R }, (_, i) => {
+    const row = new Float64Array(W + 1)
+    for (let j = 0; j < m; j++) row[j] = cols[j][i]
+    row[m + i] = -1
+    row[m + R + i] = 1
+    row[W] = d[i]
+    return row
+  })
+  const cost = j => (j < m ? 1 : j < m + R ? 0 : M)
+  const basis = Array.from({ length: R }, (_, i) => m + R + i)
+  for (let iter = 0; iter < 5000; iter++) {
+    // приведённые стоимости
+    let enter = -1, best = -1e-9
+    for (let j = 0; j < W; j++) {
+      let z = 0
+      for (let i = 0; i < R; i++) z += cost(basis[i]) * T[i][j]
+      const rc = cost(j) - z
+      if (rc < best) { best = rc; enter = j }
+    }
+    if (enter < 0) break
+    let leave = -1, ratio = Infinity
+    for (let i = 0; i < R; i++) {
+      const a = T[i][enter]
+      if (a > 1e-9) { const q = T[i][W] / a; if (q < ratio - 1e-12) { ratio = q; leave = i } }
+    }
+    if (leave < 0) break // неограничена — не бывает
+    const pr = T[leave], pv = pr[enter]
+    for (let j = 0; j <= W; j++) pr[j] /= pv
+    for (let i = 0; i < R; i++) {
+      if (i === leave) continue
+      const f = T[i][enter]
+      if (Math.abs(f) < 1e-12) continue
+      const row = T[i]
+      for (let j = 0; j <= W; j++) row[j] -= f * pr[j]
+    }
+    basis[leave] = enter
+  }
+  const x = new Float64Array(m)
+  basis.forEach((b, i) => { if (b < m) x[b] = T[i][W] })
+  const pi = new Float64Array(R)
+  for (let t = 0; t < R; t++) { let v = 0; for (let i = 0; i < R; i++) v += cost(basis[i]) * T[i][m + R + t]; pi[t] = v }
+  let obj = 0; for (let j = 0; j < m; j++) obj += x[j]
+  return { x, pi, obj }
+}
+
+// ─── Пул шаблонов + ЛП (генерация столбцов) → целое решение ─────────────────
+// Для больших заказов с повторяющимися деталями. Шаблон — раскладка одного
+// листа (сколько деталей каждого вида и где). Пул пополняется:
+//  • «ценовыми» шаблонами (генерация столбцов): лист собирается так, чтобы
+//    максимизировать сумму двойственных цен π деталей; пока такой лист «дороже»
+//    одного листа — он улучшает ЛП;
+//  • листами лучших раскладок генетического поиска и дожима — они плотнее всего
+//    (260906_009 ×1175: шаблоны из истории дают ЛП 116,8 листа против 119 у одних
+//    «ценовых»).
+// Решение: ЛП min Σx при покрытии спроса; целое — последовательным округлением
+// (остаток — снова ЛП), хвост — быстрым SVC. Мелкие у края из шаблонов убираются.
+export function makePatternPool(pieces, modes, direction, usableX, usableY, rand = Math.random) {
+  const S = usableX * usableY
+  const kinds = [...new Set(pieces.map(p => p.detailIndex))]
+  const kIdx = new Map(kinds.map((k, i) => [k, i]))
+  const R = kinds.length
+  const byKind = kinds.map(() => [])
+  pieces.forEach(p => byKind[kIdx.get(p.detailIndex)].push(p))
+  const d = byKind.map(l => l.length)
+  const area = byKind.map(l => l[0].pw * l[0].ph)
+  const packOne = (order, mode) => {
+    const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
+    const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
+    const sheet = { index: 0, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }], family }
+    // мелкие — после крупных (как в packAttempt): видно, где их прикроют от края
+    if (order.some(p => p.isSmall)) order = order.filter(p => !p.isSmall).concat(order.filter(p => p.isSmall))
+    for (const piece of order) {
+      if (cannotFit(sheet, piece)) continue
+      const r = family === 'guillotine'
+        ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+        : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+      if (!r) continue
+      sheet.placed.push(r)
+      if (family === 'guillotine') { splitGuillotine(sheet, r); delete r._freeRectIdx } else { split(sheet, r); prune(sheet) }
+      updateFreeBounds(sheet)
+    }
+    return stripEdgeSmall(sheet, usableX, usableY)
+  }
+  const countOf = sh => { const c = new Array(R).fill(0); sh.placed.forEach(p => { const t = kIdx.get(p.detailIndex); if (t !== undefined) c[t]++ }); return c }
+  const pats = [], seen = new Set()
+  const addPat = sh => {
+    if (!sh || !sh.placed.length) return false
+    const c = countOf(sh); const key = c.join(',')
+    if (seen.has(key)) return false
+    seen.add(key); pats.push({ c, sheet: { placed: sh.placed.map(p => ({ ...p })) } }); return true
+  }
+  // стартовые шаблоны: по одному виду (гарантируют допустимость ЛП)
+  for (let t = 0; t < R; t++) addPat(packOne(byKind[t].slice(0, Math.min(d[t], Math.ceil(S / area[t]) + 2)), modes[0]))
+  const genPatterns = (val, tries) => {
+    const out = []
+    for (let tr = 0; tr < tries; tr++) {
+      const noise = tr === 0 ? 0 : 0.8 * rand()
+      const byDensity = tr % 2 === 0
+      const drop = tr > 0 && rand() < 0.35 ? 0.3 : 0 // иногда без части видов — другие сочетания
+      const ord = kinds.map((_, t) => t).filter(t => val[t] > 1e-9 && !(drop && rand() < drop))
+        .map(t => ({ t, k: (byDensity ? val[t] / area[t] : val[t]) * (1 + noise * (rand() - 0.5)) }))
+        .sort((a, b) => b.k - a.k)
+      const order = []
+      for (const { t } of ord) { const cap = Math.min(d[t], Math.floor(S / area[t])); for (let i = 0; i < cap; i++) order.push(byKind[t][i]) }
+      const sh = packOne(order, modes[Math.floor(rand() * modes.length)])
+      let v = 0; sh.placed.forEach(p => { v += val[kIdx.get(p.detailIndex)] })
+      out.push({ sh, v })
+    }
+    return out.sort((a, b) => b.v - a.v)
+  }
+  let lastLp = null
+
+  // Генерация столбцов (с затравкой SVC)
+  async function colgen(budgetMs, shouldStop = () => false) {
+    const t0 = Date.now()
+    genPatterns(area.map(a => a / S), 40).slice(0, 10).forEach(o => addPat(o.sh))
+    svcPack(pieces, modes, direction, usableX, usableY, Math.min(3000, budgetMs * 0.2), null, rand, sh => addPat(sh))
+    let fails = 0
+    for (let round = 0; round < 2000 && Date.now() - t0 < budgetMs && !shouldStop(); round++) {
+      lastLp = lpCover(pats.map(p => p.c), d)
+      const cand = genPatterns(Array.from(lastLp.pi), 30 * (1 + fails))
+      let added = 0
+      for (const o of cand) { if (o.v > 1 + 1e-6 && addPat(o.sh)) { if (++added >= 4) break } }
+      if (!added) { if (++fails > 5) break } else fails = 0
+      if (round % 3 === 2) await new Promise(r => setTimeout(r, 0))
+    }
+  }
+
+  // Целое решение из пула
+  function solve(tailMs = 300) {
+    const lp = lpCover(pats.map(p => p.c), d)
+    lastLp = lp
+    const order = Array.from(lp.x.keys()).filter(j => lp.x[j] > 1e-9).sort((a, b) => lp.x[b] - lp.x[a])
+    // для последовательного округления — только «полезные» шаблоны: из решения ЛП и самые плотные
+    const fillOf = p => p.c.reduce((a, v, t) => a + v * area[t], 0)
+    const useful = new Set(order)
+    pats.map((p, j) => [fillOf(p), j]).sort((a, b) => b[0] - a[0]).slice(0, 250).forEach(([, j]) => useful.add(j))
+    let best = null, bestStat = null
+    for (const theta of [-1, 1.01, 0.5]) {
+      const rem = byKind.map(l => l.slice())
+      const sheets = []
+      const instantiate = pat => {
+        const placed = []
+        for (const p of pat.sheet.placed) {
+          const l = rem[kIdx.get(p.detailIndex)]
+          if (!l.length) continue
+          placed.push({ ...p, id: l.pop().id })
+        }
+        if (!placed.length) return
+        const sh = { index: sheets.length, family: 'maxrects', placed, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+        placed.forEach(pp => { split(sh, pp); prune(sh) })
+        updateFreeBounds(sh)
+        sheets.push(sh)
+      }
+      for (const j of order) {
+        const x = lp.x[j], fl = Math.floor(x + 1e-6)
+        const n = theta > 0 && x - fl >= theta ? fl + 1 : fl
+        for (let r = 0; r < n; r++) instantiate(pats[j])
+      }
+      if (theta < 0) {
+        // остаток — снова ЛП по тем же шаблонам, берём шаблон с наибольшим x
+        for (let g = 0; g < 60; g++) {
+          const dr = rem.map(l => l.length)
+          if (!dr.some(v => v > 0)) break
+          const cols = [], map = []
+          useful.forEach(j => { const p = pats[j]; if (p.c.some((v, t) => v > 0 && dr[t] > 0)) { cols.push(p.c.map((v, t) => Math.min(v, dr[t]))); map.push(j) } })
+          if (!cols.length) break
+          const r = lpCover(cols, dr)
+          let bj = -1, bx = 0
+          r.x.forEach((v, k) => { if (v > bx) { bx = v; bj = k } })
+          if (bj < 0) break
+          instantiate(pats[map[bj]])
+        }
+      }
+      const left = rem.flat()
+      if (left.length) {
+        const tail = svcPack(left, modes, direction, usableX, usableY, tailMs, null, rand)
+        if (tail) tail.forEach(sh => sheets.push(sh))
+      }
+      sheets.sort((a, b) => sheetArea(b) - sheetArea(a)).forEach((sh, i) => { sh.index = i })
+      const st = evaluate(sheets, usableX, usableY)
+      if (!bestStat || better(st, bestStat)) { best = sheets; bestStat = st }
+    }
+    return best
+  }
+  return { add: addPat, colgen, solve, get size() { return pats.length }, get lowerBound() { return lastLp ? lastLp.obj : Infinity } }
+}
+
+export async function colgenPack(pieces, modes, direction, usableX, usableY, budgetMs, rand = Math.random, shouldStop = () => false) {
+  const pool = makePatternPool(pieces, modes, direction, usableX, usableY, rand)
+  await pool.colgen(budgetMs * 0.8, shouldStop)
+  const sheets = pool.solve(Math.max(150, Math.min(1500, budgetMs * 0.05)))
+  return { sheets, lowerBound: pool.lowerBound, patterns: pool.size, pool }
+}
+export { buildPieces as _buildPieces }

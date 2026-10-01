@@ -144,8 +144,9 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
   // Предупреждение (не ошибка): «мелкие — в центр», но мелкая деталь у края листа
   // (у края = ближе SMALL_EDGE_MIN мм к краю листа через отход, см. nesting.smallEdgeSides)
   const warnings = []
-  const edge = smallAtEdge(sheets, usableX, usableY)
-  if (edge) warnings.push(`⚠ мелких/узких деталей у края листа: ${edge} (ближе ${SMALL_EDGE_MIN} мм через отход)`)
+  const edge = smallAtEdge(sheets, usableX, usableY, true)
+  const gap = sheets.flatMap(sh => sh.placed).find(p => p.isSmall)?.edgeMin || SMALL_EDGE_MIN
+  if (edge) warnings.push(`⚠ мелких/узких деталей у края листа: ${edge} (ближе ${gap} мм через отход)`)
 
   const total = details.reduce((a, d) => a + (Number(d.qty) || 1), 0)
   const placed = cnt.reduce((a, b) => a + b, 0)
