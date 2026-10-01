@@ -330,6 +330,7 @@ export async function runNesting({
   // (обычно «бесконечный»), поиск идёт до нажатия «Стоп»
   while (Date.now() - startTime < HILL_CLIMB_BUDGET_MS && !stopNow()) {
     gen++
+    const genStart = Date.now()
     // Элитизм: лучшие особи переходят в следующее поколение без изменений (вместе со своим режимом).
     const nextGen = evaluated.slice(0, ELITE_COUNT).map(e => ({ order: e.order, mode: e.mode }))
     while (nextGen.length < POP_SIZE) {
@@ -386,7 +387,13 @@ export async function runNesting({
           if (better(st, best.stat)) { best = { ...best, sheets: fixed, stat: st }; sqBase = best; sqCur = fixed; dirty = true; lastGain = Date.now() }
         }
       }
-      sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 2 : SQUEEZE_PER_GEN, true)
+      // Время дожиму — не меньше, чем ушло на поколение (на застое — вчетверо
+      // больше). На больших заказах (800 деталей, 75 листов) поколение идёт
+      // ~1 с, а 700 попыток дожима — доли секунды: лишний лист снимается именно
+      // дожимом (260906_009: 76 → 75 л. только на 750-й с), а ему доставалось ~30% времени.
+      const genMs = Date.now() - genStart
+      const sqDeadline = Date.now() + Math.min(8000, genMs * (stalled ? 4 : 1))
+      sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 2 : SQUEEZE_PER_GEN, true, sqDeadline)
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
     }
@@ -428,10 +435,11 @@ function placedToPiece(p) {
   }
 }
 const sheetArea = sh => sh.placed.reduce((a, p) => a + p.w * p.h, 0)
-function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allowEqual = false) {
+function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allowEqual = false, deadline = 0) {
   let cur = sheets
   let improved = false
-  for (let a = 0; a < attempts && cur.length >= 2; a++) {
+  // не меньше attempts попыток, а если задан deadline — и дальше, до него
+  for (let a = 0; (a < attempts || (a % 25 !== 0 || Date.now() < deadline)) && cur.length >= 2; a++) {
     const n = cur.length - 1
     // 1 или 2 заполненных листа + последний. Чаще берём листы, где свободнее
     // (туда проще «впихнуть» детали с последнего).
@@ -1141,3 +1149,4 @@ export function computeOffcutAtPoint(px, py, placed, usableX, usableY) {
   if (x1 - x0 < 5 || y1 - y0 < 5) return null
   return { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) }
 }
+
