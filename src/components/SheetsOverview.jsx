@@ -6,8 +6,11 @@ import { smallEdgeSides } from '../lib/nesting'
 // Нужен для онлайн-раскроя: пока идёт поиск, пользователь видит, как укладка
 // уплотняется. При каждом новом результате детали не «перескакивают», а плавно
 // переезжают на новые места (в том числе с листа на лист) — видно само сжатие.
-// Щипок двумя пальцами — масштаб; тап по листу — открыть этот лист для
-// просмотра и редактирования (onPickSheet).
+// Просмотр — как галерея фото в телефоне: листы идут сеткой во всю ширину,
+// щипок «раздвинуть» — меньше листов в ряд (крупнее, до 1 листа на всю ширину),
+// «свести» — больше в ряд (до 10). Сетка прокручивается вниз; рисуется только
+// видимая часть (75 листов — без тяжёлого холста на всю длину).
+// Тап по листу — открыть этот лист для просмотра и редактирования (onPickSheet).
 //
 // Координаты данных — как везде в раскрое: Y вверх от низа рабочей зоны, контур
 // polygon — Y вверх. На холсте Y идёт сверху вниз (тот же переворот, что и в
@@ -18,6 +21,7 @@ const PART_STROKE = 'rgba(20,20,20,0.75)'
 const GAP_MM = 120      // промежуток между листами, мм (в масштабе листа)
 const CAPTION_MM = 190  // место под подпись над листом, мм
 const ANIM_MS = 600
+const MAX_COLS = 10    // больше листов в ряд — уже не разглядеть
 
 function polyArea(pts) {
   let a = 0
@@ -35,18 +39,18 @@ export default function SheetsOverview({
   activeSheet = -1, onPickSheet, running = false, bufferCount = 0, details = null,
 }) {
   const canvasRef = useRef(null)
-  const wrapRef = useRef(null)
-  const [zoom, setZoom] = useState(1)
-  const [pinching, setPinching] = useState(false)
-  const zoomRef = useRef(1)
-  zoomRef.current = zoom
-  const anchorRef = useRef(null)
-  const pinchRef = useRef({ active: false, dist: 0, zoom: 1 })
+  const scrollRef = useRef(null)
   const curRef = useRef([])     // что сейчас нарисовано (с учётом анимации), мм общей раскладки
   const animRef = useRef(null)  // requestAnimationFrame id
-
   const n = Math.max(1, sheets.length)
-  const cols = n === 1 ? 1 : n <= 4 ? 2 : 3
+  const defaultCols = n === 1 ? 1 : n <= 4 ? 2 : n <= 12 ? 3 : 4
+  const [colsSet, setColsSet] = useState(null) // выбор пользователя (щипок / кнопки); null — по умолчанию
+  const cols = Math.max(1, Math.min(MAX_COLS, colsSet ?? defaultCols, n))
+  const colsRef = useRef(cols)
+  colsRef.current = cols
+  const [boxW, setBoxW] = useState(() => (typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 900) : 360))
+  const [scrollTop, setScrollTop] = useState(0)
+
   const rows = Math.ceil(n / cols)
   // Размеры каждого листа: у листа-обрезка — свои (sheet.sheetW/usableX…),
   // у обычного — общие. Клетка сетки — по самому большому листу.
@@ -59,22 +63,34 @@ export default function SheetsOverview({
   const cellW = Math.max(sheetW, ...sheets.map(s => dimOf(s).sw))
   const cellL = Math.max(sheetL, ...sheets.map(s => dimOf(s).sl))
   const totalW = cols * cellW + (cols - 1) * GAP_MM
-  const totalH = rows * (CAPTION_MM + cellL) + (rows - 1) * GAP_MM
+  const rowMM = CAPTION_MM + cellL + GAP_MM
+  const totalH = rows * rowMM - GAP_MM
   const PADDING = 6
-  // Карта не выше ~половины экрана телефона — чтобы над ней оставались время
-  // оптимизации и кнопка «Стоп», а под ней переключатель листов
-  const baseW = typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 480) : 360
-  const maxH = typeof window !== 'undefined' ? Math.max(220, window.innerHeight * 0.5) : 400
-  const fitSc = Math.min((baseW - PADDING * 2) / totalW, (maxH - PADDING * 2) / totalH)
-  const sc = fitSc * zoom
-  const canvasW = Math.round(totalW * sc) + PADDING * 2
-  const canvasH = Math.round(totalH * sc) + PADDING * 2
-  const DPR = pinching ? 1 : Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, Math.sqrt(12e6 / (canvasW * canvasH)))
+  // Во всю ширину блока — сколько листов в ряд, столько и делят ширину
+  const sc = Math.max(0.001, (boxW - PADDING * 2) / totalW)
+  const contentH = Math.round(totalH * sc) + PADDING * 2
+  // Окно просмотра — не выше ~60% экрана: над ним время и «Стоп», под ним переключатель листов
+  const maxViewH = typeof window !== 'undefined' ? Math.max(260, Math.round(window.innerHeight * 0.6)) : 480
+  const viewH = Math.min(contentH, maxViewH)
+  const canvasW = boxW
+  const DPR = Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, 2.5)
 
   const origin = si => ({
     x: (si % cols) * (cellW + GAP_MM),
-    y: Math.floor(si / cols) * (CAPTION_MM + cellL + GAP_MM) + CAPTION_MM,
+    y: Math.floor(si / cols) * rowMM + CAPTION_MM,
   })
+
+  // Ширина блока — по факту (поворот экрана, разная ширина телефонов)
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const upd = () => { const w = el.clientWidth; if (w > 0) setBoxW(w) }
+    upd()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(upd)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   // Целевое положение каждой детали в общей раскладке (мм, Y сверху вниз)
   function targets() {
@@ -102,46 +118,60 @@ export default function SheetsOverview({
   function draw(items) {
     const canvas = canvasRef.current
     if (!canvas) return
-    if (canvas.width !== Math.round(canvasW * DPR) || canvas.height !== Math.round(canvasH * DPR)) {
+    const top = scrollRef.current ? scrollRef.current.scrollTop : scrollTop
+    if (canvas.width !== Math.round(canvasW * DPR) || canvas.height !== Math.round(viewH * DPR)) {
       canvas.width = Math.round(canvasW * DPR)
-      canvas.height = Math.round(canvasH * DPR)
+      canvas.height = Math.round(viewH * DPR)
     }
     const ctx = canvas.getContext('2d')
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
-    ctx.clearRect(0, 0, canvasW, canvasH)
+    ctx.clearRect(0, 0, canvasW, viewH)
     const X = v => PADDING + v * sc
+    const Y = v => PADDING + v * sc - top
+    // видимые ряды (с запасом в один ряд — для переезжающих деталей)
+    const visTop = (top - PADDING) / sc - rowMM, visBot = (top + viewH) / sc + rowMM
     // Листы
+    const badges = []
     sheets.forEach((s, si) => {
       const o = origin(si)
+      if (o.y + cellL < visTop || o.y - CAPTION_MM > visBot) return
       const D = dimOf(s)
       const usableArea = D.ux * D.uy
       ctx.fillStyle = D.offcut ? '#E6DCC8' : '#F1EFE8'
-      ctx.fillRect(X(o.x), X(o.y), D.sw * sc, D.sl * sc)
+      ctx.fillRect(X(o.x), Y(o.y), D.sw * sc, D.sl * sc)
       ctx.fillStyle = '#fff'
-      ctx.fillRect(X(o.x + D.ml), X(o.y + D.mt), D.ux * sc, D.uy * sc)
+      ctx.fillRect(X(o.x + D.ml), Y(o.y + D.mt), D.ux * sc, D.uy * sc)
       const active = si === activeSheet
       ctx.strokeStyle = active ? '#185FA5' : D.offcut ? '#A0782C' : '#888780'
       ctx.lineWidth = active ? 2 : 1
       if (D.offcut && !active) ctx.setLineDash([6, 3])
-      ctx.strokeRect(X(o.x), X(o.y), D.sw * sc, D.sl * sc)
+      ctx.strokeRect(X(o.x), Y(o.y), D.sw * sc, D.sl * sc)
       ctx.setLineDash([])
-      // Подпись над листом
+      // Подпись над листом — короче, когда листы мелкие
       const fill = s.placed.reduce((a, p) => a + partArea(p), 0) / usableArea
-      const fs = Math.max(9, Math.min(13, CAPTION_MM * sc * 0.62))
+      const fs = Math.max(8, Math.min(13, CAPTION_MM * sc * 0.62))
       ctx.font = `${active ? 'bold ' : ''}${fs}px sans-serif`
       ctx.fillStyle = active ? '#185FA5' : 'rgba(0,0,0,0.65)'
       ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'
-      ctx.fillText(`${D.offcut ? 'Обр.' : 'Лист'} ${si + 1} · ${s.placed.length} дет. · ${Math.round(fill * 100)}%`, X(o.x), X(o.y) - 2)
+      const cellPx = cellW * sc
+      const name = `${D.offcut ? 'Обр.' : 'Лист'} ${si + 1}`
+      if (cellPx > 150) {
+        ctx.fillText(`${name} · ${s.placed.length} дет. · ${Math.round(fill * 100)}%`, X(o.x), Y(o.y) - 2)
+      } else {
+        // мелкие листы — номер «бейджем» внутри листа, иначе непонятно, к какому листу подпись
+        badges.push({ t: cellPx > 80 ? `${si + 1} · ${Math.round(fill * 100)}%` : `${si + 1}`, x: X(o.x), y: Y(o.y), active, fs: Math.max(8, Math.min(11, cellPx / 6)) })
+      }
     })
 
     // Детали
     items.forEach(it => {
-      const x = X(it.x), y = X(it.y), w = it.w * sc, h = it.h * sc
+      if (it.y + it.h < visTop || it.y > visBot) return
+      const x = X(it.x), y = Y(it.y), w = it.w * sc, h = it.h * sc
       ctx.globalAlpha = it.alpha
       // мелкая/узкая деталь у края листа («мелкие — в центр» не выполнено) — оранжевым
       ctx.fillStyle = it.atEdge ? 'rgba(245,158,11,0.35)' : PART_FILL
       ctx.strokeStyle = it.atEdge ? '#D97706' : PART_STROKE
-      ctx.lineWidth = it.atEdge ? 1.6 : 1
+      ctx.lineWidth = it.atEdge ? 1.6 : (w < 6 ? 0.5 : 1)
       if (it.polygon) {
         ctx.beginPath()
         it.polygon.forEach((pt, vi) => {
@@ -170,11 +200,21 @@ export default function SheetsOverview({
       // Подпись — только если деталь на экране достаточно крупная
       if (w > 26 && h > 12) {
         ctx.fillStyle = 'rgba(0,0,0,0.6)'
-        ctx.font = `${Math.max(7, Math.min(11, w / 7))}px sans-serif`
+        ctx.font = `${Math.max(7, Math.min(13, w / 7))}px sans-serif`
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.fillText(it.label, x + w / 2, y + h / 2)
       }
       ctx.globalAlpha = 1
+    })
+    // номера мелких листов — поверх деталей
+    badges.forEach(b => {
+      ctx.font = `${b.active ? 'bold ' : ''}${b.fs}px sans-serif`
+      const tw = ctx.measureText(b.t).width
+      ctx.fillStyle = b.active ? 'rgba(24,95,165,0.92)' : 'rgba(255,255,255,0.9)'
+      ctx.fillRect(b.x + 1, b.y + 1, tw + 6, b.fs + 4)
+      ctx.fillStyle = b.active ? '#fff' : 'rgba(0,0,0,0.85)'
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top'
+      ctx.fillText(b.t, b.x + 4, b.y + 3)
     })
   }
 
@@ -217,70 +257,80 @@ export default function SheetsOverview({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheets])
 
-  // Перерисовка при масштабе/выборе листа (без анимации)
+  // Сменилось число листов в ряд — детали сразу на новых местах (без анимации)
+  useLayoutEffect(() => {
+    if (animRef.current) { cancelAnimationFrame(animRef.current); animRef.current = null }
+    curRef.current = targets()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cols, boxW])
+
+  // Перерисовка при прокрутке/масштабе/выборе листа (без анимации)
   useLayoutEffect(() => { draw(curRef.current) })
 
   useEffect(() => () => { if (animRef.current) cancelAnimationFrame(animRef.current) }, [])
 
+  // Смена числа листов в ряд с сохранением того листа, что был под пальцем
+  const anchorRef = useRef(null)
+  function changeCols(next, anchorSheet = null, anchorY = 0) {
+    const c = Math.max(1, Math.min(MAX_COLS, next, n))
+    if (c === colsRef.current) return
+    const el = scrollRef.current
+    const si = anchorSheet ?? (el ? Math.min(n - 1, Math.floor(((el.scrollTop - PADDING) / sc) / rowMM) * colsRef.current) : 0)
+    anchorRef.current = { si, y: anchorY }
+    setColsSet(c)
+  }
+  useLayoutEffect(() => {
+    const a = anchorRef.current, el = scrollRef.current
+    if (!a || !el) return
+    anchorRef.current = null
+    const rowTop = Math.floor(a.si / cols) * rowMM * sc + PADDING
+    el.scrollTop = Math.max(0, rowTop - a.y)
+    setScrollTop(el.scrollTop)
+  }, [cols])
+
+  function sheetAt(clientX, clientY) {
+    const el = scrollRef.current
+    if (!el) return -1
+    const r = el.getBoundingClientRect()
+    const mx = (clientX - r.left - PADDING) / sc
+    const my = (clientY - r.top + el.scrollTop - PADDING) / sc
+    for (let si = 0; si < sheets.length; si++) {
+      const o = origin(si), D = dimOf(sheets[si])
+      if (mx >= o.x && mx <= o.x + Math.max(D.sw, cellW) && my >= o.y - CAPTION_MM && my <= o.y + D.sl + GAP_MM / 2) return si
+    }
+    return -1
+  }
+
   // Тап по листу — открыть его
   function onClick(e) {
     if (!onPickSheet) return
-    const rect = canvasRef.current.getBoundingClientRect()
-    const k = rect.width ? canvasW / rect.width : 1
-    const mx = ((e.clientX - rect.left) * k - PADDING) / sc
-    const my = ((e.clientY - rect.top) * k - PADDING) / sc
-    for (let si = 0; si < sheets.length; si++) {
-      const o = origin(si), D = dimOf(sheets[si])
-      if (mx >= o.x && mx <= o.x + Math.max(D.sw, 300) && my >= o.y - CAPTION_MM && my <= o.y + D.sl) { onPickSheet(si); return }
-    }
+    const si = sheetAt(e.clientX, e.clientY)
+    if (si >= 0) onPickSheet(si)
   }
 
-  // Щипок двумя пальцами — масштаб (как на карте листа)
+  // Щипок двумя пальцами — как в галерее: раздвинуть — меньше листов в ряд, свести — больше
   useEffect(() => {
-    const el = wrapRef.current
+    const el = scrollRef.current
     if (!el) return
-    const st = pinchRef.current
+    const st = { active: false, dist: 0, si: 0, y: 0 }
     const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
-    const setAnchor = (t, fresh) => {
-      const cv = canvasRef.current
-      if (!cv) return
-      const wr = el.getBoundingClientRect()
-      const midX = (t[0].clientX + t[1].clientX) / 2 - wr.left
-      const midY = (t[0].clientY + t[1].clientY) / 2 - wr.top
-      if (fresh || !anchorRef.current) {
-        anchorRef.current = {
-          fracX: (el.scrollLeft + midX) / (cv.offsetWidth || 1),
-          fracY: (el.scrollTop + midY) / (cv.offsetHeight || 1), midX, midY,
-        }
-      } else { anchorRef.current.midX = midX; anchorRef.current.midY = midY }
-    }
-    const applyAnchor = () => {
-      const a = anchorRef.current, cv = canvasRef.current
-      if (!a || !cv) return
-      el.scrollLeft = Math.max(0, a.fracX * cv.offsetWidth - a.midX)
-      el.scrollTop = Math.max(0, a.fracY * cv.offsetHeight - a.midY)
-    }
     const onStart = e => {
       if (e.touches.length !== 2) return
-      st.active = true; st.dist = dist(e.touches); st.zoom = zoomRef.current
-      setPinching(true); setAnchor(e.touches, true)
+      st.active = true; st.dist = dist(e.touches)
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2, my = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      st.si = Math.max(0, sheetAtRef.current(mx, my))
+      st.y = my - el.getBoundingClientRect().top
     }
     const onMove = e => {
       if (!st.active || e.touches.length !== 2) return
       if (e.cancelable) e.preventDefault()
+      const d = dist(e.touches)
       if (st.dist <= 0) return
-      let nz = Math.max(1, Math.min(5, st.zoom * dist(e.touches) / st.dist))
-      if (nz < 1.04) nz = 1
-      setAnchor(e.touches, false)
-      if (Math.abs(nz - zoomRef.current) < 0.001) applyAnchor()
-      else setZoom(nz)
+      const k = d / st.dist
+      if (k > 1.3) { changeColsRef.current(colsRef.current - 1, st.si, st.y); st.dist = d }
+      else if (k < 0.77) { changeColsRef.current(colsRef.current + 1, st.si, st.y); st.dist = d }
     }
-    const onEnd = e => {
-      if (e.touches.length < 2 && st.active) {
-        st.active = false; setPinching(false)
-        setTimeout(() => { anchorRef.current = null }, 150)
-      }
-    }
+    const onEnd = e => { if (e.touches.length < 2) st.active = false }
     el.addEventListener('touchstart', onStart, { passive: true })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
@@ -292,43 +342,37 @@ export default function SheetsOverview({
       el.removeEventListener('touchcancel', onEnd)
     }
   }, [])
+  const sheetAtRef = useRef(sheetAt); sheetAtRef.current = sheetAt
+  const changeColsRef = useRef(changeCols); changeColsRef.current = changeCols
 
-  useLayoutEffect(() => {
-    const a = anchorRef.current, el = wrapRef.current, cv = canvasRef.current
-    if (!a || !el || !cv) return
-    el.scrollLeft = Math.max(0, a.fracX * cv.offsetWidth - a.midX)
-    el.scrollTop = Math.max(0, a.fracY * cv.offsetHeight - a.midY)
-  }, [zoom])
-
+  const btn = { fontSize: 13, width: 30, height: 26, padding: 0, border: '0.5px solid var(--border-md)',
+    borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }
   return (
     <div style={{ position: 'relative' }}>
-      <div ref={wrapRef}
-        style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '60vh' : 'none', borderRadius: 8,
-          display: zoom > 1 ? 'block' : 'flex', justifyContent: 'center' }}>
-        <canvas ref={canvasRef} onClick={onClick}
-          width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
-          style={{ width: canvasW, height: 'auto', aspectRatio: `${canvasW} / ${canvasH}`, maxWidth: zoom > 1 ? 'none' : '100%',
-            display: 'block', touchAction: zoom > 1 ? 'pan-x pan-y' : 'pan-y', cursor: onPickSheet ? 'pointer' : 'default' }} />
-      </div>
-      {/* Под картой, а не поверх неё — чтобы ничего не закрывало укладку.
-          Значок «идёт оптимизация» убран: расчёт и так видно по счётчику секунд. */}
-      {(zoom > 1.02 || (bufferCount > 0 && !running)) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-          {bufferCount > 0 && !running && (
-            <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 6, background: 'rgba(184,92,0,0.12)', color: '#B85C00' }}>
-              В буфере: {bufferCount}
-            </span>
-          )}
-          <div style={{ flex: 1 }} />
-          {zoom > 1.02 && (
-            <button type="button" onClick={() => { setZoom(1); if (wrapRef.current) { wrapRef.current.scrollLeft = 0; wrapRef.current.scrollTop = 0 } }}
-              style={{ fontSize: 10, padding: '3px 8px', border: '0.5px solid var(--border-md)',
-                borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
-              {Math.round(zoom * 100)}% · сброс
-            </button>
-          )}
+      <div ref={scrollRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
+        style={{ height: viewH, overflowY: contentH > viewH ? 'auto' : 'hidden', overflowX: 'hidden', borderRadius: 8,
+          touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ height: contentH, position: 'relative' }}>
+          <canvas ref={canvasRef} onClick={onClick}
+            width={Math.round(canvasW * DPR)} height={Math.round(viewH * DPR)}
+            style={{ position: 'sticky', top: 0, width: canvasW, height: viewH, display: 'block',
+              cursor: onPickSheet ? 'pointer' : 'default' }} />
         </div>
-      )}
+      </div>
+      {/* Под картой, а не поверх неё — чтобы ничего не закрывало укладку */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+        {bufferCount > 0 && !running && (
+          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 6, background: 'rgba(184,92,0,0.12)', color: '#B85C00' }}>
+            В буфере: {bufferCount}
+          </span>
+        )}
+        <div style={{ flex: 1 }} />
+        {n > 1 && (<>
+          <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>в ряд: {cols}</span>
+          <button type="button" style={btn} disabled={cols >= Math.min(MAX_COLS, n)} onClick={() => changeCols(cols + 1)} title="Мельче — больше листов в ряд">−</button>
+          <button type="button" style={btn} disabled={cols <= 1} onClick={() => changeCols(cols - 1)} title="Крупнее — меньше листов в ряд">+</button>
+        </>)}
+      </div>
     </div>
   )
 }
