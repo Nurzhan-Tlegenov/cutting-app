@@ -195,6 +195,10 @@ export async function runNesting({
       (smallPartsMaxArea > 0 && area <= smallPartsMaxArea) ||
       (smallPartsMaxSide > 0 && minSide <= smallPartsMaxSide)
     )
+    // Узкой деталью можно встать к краю листа только КОРОТКОЙ стороной (торцом
+    // 90 мм у детали 400×90): длинные стороны тогда поджаты соседями. Сторона
+    // «короткая», если она не длиннее порога «Узкая сторона до» (+ рез).
+    p.edgeOkMax = p.isSmall && smallPartsMaxSide > 0 ? smallPartsMaxSide + (Number(kerf) || 0) + 0.5 : 0
   })
 
   const sortStrategies = [
@@ -214,6 +218,11 @@ export async function runNesting({
     ? ['g-bssf', 'g-baf', 'g-blsf', 'g-bl']
     : ['bssf', 'baf', 'blsf', 'bl', 'cp', 'g-bssf', 'g-baf', 'g-blsf']
   const RANDOM_ATTEMPTS = 80 // случайные перестановки порядка (каждая — со всеми режимами), дальше работает генетический поиск
+  const RANDOM_PHASE_MS = 3000
+  // Большой заказ (сотни деталей, десятки листов): переупаковка всего заказа
+  // дорогая (0,1–0,2 с), а лишний лист снимается дожимом последнего листа —
+  // популяция меньше, дожиму больше времени
+  const BIG_ORDER = basePieces.length > 300
 
   let best = null
   let bestOrder = null
@@ -282,11 +291,15 @@ export async function runNesting({
     const sorted = basePieces.slice().sort(sortFn)
     for (const mode of scoringModes) tryAttempt(sorted, mode)
   }
+  // Случайные перестановки — не дольше RANDOM_PHASE_MS: на 1175 деталях одна
+  // укладка ~0,14 с, и 80×8 попыток съедали первые ~90 с (а случайный порядок
+  // почти никогда не лучше сортировок и генетического поиска)
+  const randomStart = Date.now()
   for (let i = 0; i < RANDOM_ATTEMPTS; i++) {
     const shuffled = shuffle(basePieces.slice())
     for (const mode of scoringModes) tryAttempt(shuffled, mode)
-    if (i % 20 === 0) { maybeReport(); maybeStats(); await new Promise(r => setTimeout(r, 0)) }
-    if (stopNow()) break
+    if (i % 20 === 0 || BIG_ORDER) { maybeReport(); maybeStats(); await new Promise(r => setTimeout(r, 0)) }
+    if (stopNow() || Date.now() - randomStart > RANDOM_PHASE_MS) break
   }
   maybeReport(true)
   phase = 'ga'
@@ -307,8 +320,8 @@ export async function runNesting({
   let sqCur = null, sqBase = null  // текущее состояние дожима и от какого лучшего оно пошло
   let lastGain = Date.now()         // когда последний раз улучшился лучший вариант
 
-  const POP_SIZE = 40
-  const ELITE_COUNT = 4
+  const POP_SIZE = BIG_ORDER ? 16 : 40
+  const ELITE_COUNT = BIG_ORDER ? 2 : 4
   const TOURNAMENT_SIZE = 4
   const MUTATION_RATE = 0.35
   const MODE_MUTATION_RATE = 0.1 // шанс сменить семью целиком при мутации — поддерживает разнообразие семей в популяции
@@ -381,6 +394,15 @@ export async function runNesting({
       if (stalled && Date.now() - lastGain > 8000 && Math.random() < 0.05) sqCur = best.sheets
       // «мелкие — в центр» не выполнено — сначала чиним это (важнее последнего листа)
       if (best.stat.smallEdge > 0) {
+        // сначала дешёвая перестановка в рядах (мелкую — внутрь, соседа — к краю)
+        // (для пилы — нет: перестановка в ряду может сломать сквозные резы)
+        const swapped = cuttingMethod === 'guillotine' ? best.sheets : rowSwapAll(best.sheets, usableX, usableY)
+        if (swapped !== best.sheets) {
+          const st = evaluate(swapped, usableX, usableY)
+          if (better(st, best.stat)) { best = { ...best, sheets: swapped, stat: st }; sqBase = best; sqCur = swapped; dirty = true; lastGain = Date.now() }
+        }
+      }
+      if (best.stat.smallEdge > 0) {
         const fixed = repairSmall(best.sheets, scoringModes, direction, usableX, usableY, stalled ? 60 : 15)
         if (fixed !== best.sheets) {
           const st = evaluate(fixed, usableX, usableY)
@@ -392,7 +414,9 @@ export async function runNesting({
       // ~1 с, а 700 попыток дожима — доли секунды: лишний лист снимается именно
       // дожимом (260906_009: 76 → 75 л. только на 750-й с), а ему доставалось ~30% времени.
       const genMs = Date.now() - genStart
-      const sqDeadline = Date.now() + Math.min(8000, genMs * (stalled ? 4 : 1))
+      const sqDeadline = Date.now() + (BIG_ORDER
+        ? Math.min(15000, genMs * (stalled ? 6 : 2))
+        : Math.min(8000, genMs * (stalled ? 4 : 1)))
       sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 2 : SQUEEZE_PER_GEN, true, sqDeadline)
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
@@ -415,6 +439,8 @@ export async function runNesting({
   // Для форматно-раскроечного станка не применяется: там раскладка обязана
   // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
   if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(best.sheets)
+  // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
+  if (cuttingMethod !== 'guillotine') best.sheets = rowSwapAll(best.sheets, usableX, usableY)
 
   return { sheets: best.sheets, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }
@@ -430,7 +456,7 @@ export async function runNesting({
 function placedToPiece(p) {
   return {
     id: p.id, detailIndex: p.detailIndex, pw: p.w, ph: p.h, origX: p.origX, origY: p.origY,
-    rotatable: p.rotatable, label: p.label, prefix: p.prefix, isSmall: p.isSmall,
+    rotatable: p.rotatable, label: p.label, prefix: p.prefix, isSmall: p.isSmall, edgeOkMax: p.edgeOkMax || 0,
     edgeTop: p.edgeTop, edgeRight: p.edgeRight, edgeBottom: p.edgeBottom, edgeLeft: p.edgeLeft,
   }
 }
@@ -482,6 +508,117 @@ function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allow
     }
   }
   return improved ? cur : sheets
+}
+
+// ─── Перестановка в ряду: мелкую деталь — внутрь, соседа — к краю ───────────
+// Частый случай: у края листа стоит узкая полоса, а рядом с ней — деталь того
+// же размера по другой оси (ряд одинаковой высоты/ширины). Поменять их местами
+// — и мелкая уже не у края. Перекладка листа целиком (repairSmall) находит это
+// лишь случайно. Здесь ряд деталей одинаковой высоты (или ширины), стоящих
+// вплотную, переставляется: мелкая встаёт на каждое место в ряду, берётся
+// вариант, где у края меньше всего мелких. Ряд занимает ту же площадь, что и
+// раньше, поэтому свободные места листа (freeRects) не меняются.
+function rowSwapRepair(sheet, usableX, usableY) {
+  if (!sheet.placed.some(p => p.isSmall)) return sheet
+  const placed = sheet.placed.map(p => ({ ...p }))
+  const viol = () => {
+    let n = 0
+    for (const p of placed) if (p.isSmall && smallEdgeSides(p, placed, usableX, usableY) > 0) n++
+    return n
+  }
+  let cur = viol()
+  if (!cur) return sheet
+  let changed = false
+  for (let iter = 0; iter < 30 && cur > 0; iter++) {
+    let moved = false
+    for (const S of placed) {
+      if (!S.isSmall || smallEdgeSides(S, placed, usableX, usableY) === 0) continue
+      for (const axis of ['x', 'y']) {
+        const pos = q => (axis === 'x' ? q.x : q.y)
+        const len = q => (axis === 'x' ? q.w : q.h)
+        const set = (q, v) => { if (axis === 'x') q.x = v; else q.y = v }
+        const same = q => (axis === 'x'
+          ? Math.abs(q.y - S.y) < 0.5 && Math.abs(q.h - S.h) < 0.5
+          : Math.abs(q.x - S.x) < 0.5 && Math.abs(q.w - S.w) < 0.5)
+        const run = [S]
+        for (let edge = pos(S); ;) {
+          const q = placed.find(o => !run.includes(o) && same(o) && Math.abs(pos(o) + len(o) - edge) < 0.5)
+          if (!q) break
+          run.unshift(q); edge = pos(q)
+        }
+        for (let end = pos(S) + len(S); ;) {
+          const q = placed.find(o => !run.includes(o) && same(o) && Math.abs(pos(o) - end) < 0.5)
+          if (!q) break
+          run.push(q); end = pos(q) + len(q)
+        }
+        if (run.length < 2) continue
+        const start = pos(run[0])
+        const saved = run.map(pos)
+        const others = run.filter(q => q !== S)
+        let bestOrder = null, bestV = cur
+        for (let i = 0; i <= others.length; i++) {
+          const order = others.slice(0, i).concat([S], others.slice(i))
+          let c = start
+          order.forEach(q => { set(q, c); c += len(q) })
+          const v = viol()
+          if (v < bestV) { bestV = v; bestOrder = order }
+        }
+        if (bestOrder) {
+          let c = start
+          bestOrder.forEach(q => { set(q, c); c += len(q) })
+          cur = bestV; moved = changed = true
+          break
+        }
+        run.forEach((q, k) => set(q, saved[k]))
+      }
+      if (moved) break
+      // Сосед вплотную, но другого размера (мелкая полоса у края, рядом деталь
+      // крупнее): меняем их местами вдоль оси — крупная встаёт к краю (своим
+      // краем туда, где был край мелкой), мелкая — на место крупной. Каждая
+      // сохраняет свою вторую координату. Берём, если обе влезают, ни с кем не
+      // пересекаются и мелких у края стало меньше.
+      const overlapsOthers = (q, skip) => placed.some(o => o !== q && !skip.includes(o) &&
+        o.x < q.x + q.w - 0.01 && q.x < o.x + o.w - 0.01 && o.y < q.y + q.h - 0.01 && q.y < o.y + o.h - 0.01)
+      for (const B of placed) {
+        if (B === S) continue
+        let done = false
+        for (const axis of ['x', 'y']) {
+          const P = q => (axis === 'x' ? q.x : q.y), L = q => (axis === 'x' ? q.w : q.h)
+          const setP = (q, v) => { if (axis === 'x') q.x = v; else q.y = v }
+          // перекрываются ли по другой оси (иначе это не соседи в ряду)
+          const o1 = axis === 'x' ? Math.min(S.y + S.h, B.y + B.h) - Math.max(S.y, B.y) : Math.min(S.x + S.w, B.x + B.w) - Math.max(S.x, B.x)
+          if (o1 <= 0.5) continue
+          const touchLeft = Math.abs(P(B) + L(B) - P(S)) < 0.5   // B перед S
+          const touchRight = Math.abs(P(S) + L(S) - P(B)) < 0.5  // B после S
+          if (!touchLeft && !touchRight) continue
+          const sv = [S.x, S.y, B.x, B.y]
+          const lo = Math.min(P(S), P(B)), hi = Math.max(P(S) + L(S), P(B) + L(B))
+          if (touchLeft) { setP(S, lo); setP(B, hi - L(B)) } else { setP(B, lo); setP(S, hi - L(S)) }
+          const lim = axis === 'x' ? usableX : usableY
+          const ok = P(S) >= -0.01 && P(B) >= -0.01 && P(S) + L(S) <= lim + 0.01 && P(B) + L(B) <= lim + 0.01 &&
+            !overlapsOthers(S, [B]) && !overlapsOthers(B, [S]) &&
+            !(S.x < B.x + B.w - 0.01 && B.x < S.x + S.w - 0.01 && S.y < B.y + B.h - 0.01 && B.y < S.y + S.h - 0.01)
+          const v = ok ? viol() : Infinity
+          if (v < cur) { cur = v; moved = changed = true; done = true; break }
+          S.x = sv[0]; S.y = sv[1]; B.x = sv[2]; B.y = sv[3]
+        }
+        if (done) break
+      }
+      if (moved) break
+    }
+    if (!moved) break
+  }
+  if (!changed) return sheet
+  // свободные места заново: перестановка соседей разного размера меняет занятую площадь
+  const next = { ...sheet, placed, family: 'maxrects', freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+  placed.forEach(pp => { split(next, pp); prune(next) })
+  updateFreeBounds(next)
+  return next
+}
+const rowSwapAll = (sheets, usableX, usableY) => {
+  let changed = false
+  const out = sheets.map(sh => { const r = rowSwapRepair(sh, usableX, usableY); if (r !== sh) changed = true; return r })
+  return changed ? out : sheets
 }
 
 // ─── Починка «мелкие у края» ────────────────────────────────────────────────
@@ -783,7 +920,7 @@ export function smallEdgeSides(p, placed, usableX, usableY, minGap = SMALL_EDGE_
   const gL = x0, gB = y0, gR = usableX - x1, gT = usableY - y1
   // Быстрый выход: далеко от всех краёв (так почти у всех кандидатов места)
   if (gL >= minGap && gB >= minGap && gR >= minGap && gT >= minGap) return 0
-  let n = 0
+  let n = 0, nLong = 0, hx = false, hy = false
   // side: 0 слева, 1 снизу, 2 справа, 3 сверху
   for (let side = 0; side < 4; side++) {
     const gap = side === 0 ? gL : side === 1 ? gB : side === 2 ? gR : gT
@@ -814,9 +951,17 @@ export function smallEdgeSides(p, placed, usableX, usableY, minGap = SMALL_EDGE_
         for (const [a, b] of pairs) { if (b <= ce) continue; cov += b - Math.max(a, ce); ce = b }
       }
     }
-    if (cov < (hi - lo) * 0.5) n++
+    if (cov < (hi - lo) * 0.5) {
+      n++
+      if (vert) hx = true; else hy = true
+      // короткая сторона узкой детали у края — допустимо (см. edgeOkMax)
+      if (!(p.edgeOkMax > 0 && hi - lo <= p.edgeOkMax)) nLong++
+    }
   }
-  return n
+  // Угол листа (у края с двух соседних сторон) — всегда брак, даже торцами.
+  // Длинная полоса, упёртая обоими торцами в противоположные края, — не угол.
+  if (hx && hy) return n
+  return nLong
 }
 
 // Сколько мелких деталей стоят у края листа (см. выше). Это не пожелание, а
@@ -931,6 +1076,7 @@ function makePlacedFrom(piece, rect, rot, pw, ph) {
     origY: rot ? piece.origX : piece.origY,
     rotated: rot,
     isSmall: piece.isSmall,
+    edgeOkMax: piece.edgeOkMax || 0,
     rotatable: piece.rotatable,
     edgeTop:    rot ? piece.edgeLeft   : piece.edgeTop,
     edgeRight:  rot ? piece.edgeTop    : piece.edgeRight,
@@ -1149,4 +1295,5 @@ export function computeOffcutAtPoint(px, py, placed, usableX, usableY) {
   if (x1 - x0 < 5 || y1 - y0 < 5) return null
   return { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) }
 }
+
 
