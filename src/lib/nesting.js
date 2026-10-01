@@ -620,6 +620,7 @@ function buildPieces(details, kerf, direction) {
         origX: d.width,
         origY: d.length,
         rotatable: d.rotatable,
+        freeTurn: !!d.freeTurn, // гибридная пара со второй сцепкой «на боку» — направление укладки её не поворачивает
         label: d.display_name || d.name,
         prefix: d.prefix,
         edgeTop: d.edge_top,
@@ -631,7 +632,7 @@ function buildPieces(details, kerf, direction) {
   })
 
   pieces.forEach(p => {
-    if (!p.rotatable) return
+    if (!p.rotatable || p.freeTurn) return
     if (direction === 'along_y') {
       if (p.pw > p.ph) rotatePiece(p)
     } else if (direction === 'along_x') {

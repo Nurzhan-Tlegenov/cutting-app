@@ -47,12 +47,38 @@ const ROUND_SECONDS = [3, 6, 10, 15, 20, 30]
 // обменом между потоками), результат разворачивается в настоящие контуры.
 // См. buildHybridPlan в trueShapeNesting.js.
 const HYBRID_PLANS = new Map()
+// У вогнутой детали несколько форм сцепленной пары («стоя», «лёжа»). Какая
+// лучше ляжет на лист, заранее не сказать — пробуем каждое сочетание быстрым
+// раскроем без оптимизации (доли секунды) и берём лучшее по liveBetter.
+async function chooseHybridPlan(params, meta) {
+  const base = buildHybridPlan(params)
+  if (!base) return null
+  let combos = [{}]
+  for (const [kind, n] of base.pairShapes || []) {
+    if (n < 2) continue
+    const next = []
+    for (const c of combos) for (let i = 0; i < Math.min(n, 3); i++) next.push({ ...c, [kind]: i })
+    combos = next.slice(0, 9)
+  }
+  if (combos.length < 2) return base
+  let best = null, bestScore = null
+  for (const c of combos) {
+    const plan = Object.values(c).some(Boolean) ? buildHybridPlan(params, c) : base
+    if (!plan) continue
+    try {
+      const r = await runNesting({ ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting', optimizeSeconds: 0, onProgress: null, shouldStop: null, takeMigrant: null, onStats: null })
+      const sc = liveScore(plan.expand({ ...meta, ...r }).sheets, meta.usableX, meta.usableY)
+      if (liveBetter(sc, bestScore)) { best = plan; bestScore = sc }
+    } catch { /* пробуем следующее сочетание */ }
+  }
+  return best || base
+}
 async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigrant, onStats, t0 }) {
   try {
     const key = JSON.stringify([params.details.map(d => [d.width, d.length, d.qty, d.rotatable, d.contour]), params.kerf, params.sheetL, params.sheetW, params.marginT, params.marginR, params.marginB, params.marginL])
     let plan = HYBRID_PLANS.get(key)
     if (!plan) {
-      plan = buildHybridPlan(params)
+      plan = await chooseHybridPlan(params, meta)
       HYBRID_PLANS.clear()
       HYBRID_PLANS.set(key, plan)
     }

@@ -153,7 +153,7 @@ function sampleArc3(sp, mid, ep, segments = 16) {
 // детали в этом месте оказывается ближе к соседней детали, чем показывает
 // прямая — соседнюю деталь можно легально поставить туда, где на самом деле
 // уже есть материал, и в реальности они пересекутся.
-function verticesToPolygon(vertices) {
+export function verticesToPolygon(vertices) {
   const n = vertices.length
   const poly = []
   let i = 0
@@ -288,7 +288,12 @@ export function parsePolygonFromDetail(d) {
 // а точная укладка по контурам идёт раундами по несколько секунд. На заказах,
 // где фигурных деталей немного (260913_001: 4 Г-детали из 34), это главное.
 // Результат разворачивается обратно: пара → две детали с настоящими контурами.
-export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, marginR, marginB, marginL }) {
+// choice — какую форму пары брать для каждого вида (kind → номер формы): у
+// вогнутой детали обычно 2 сцепки — «стоя» и «лёжа» (260921_001, деталь 1200×900:
+// 964×1690 и 1380×1200). Раньше бралась только первая (самая плотная), а листу
+// подходила вторая: 2 пары «лёжа» на лист = 4 детали, «стоя» — только 2 (10 листов
+// вместо 6). Какая лучше — решает runHybrid быстрым пробным раскроем (pairShapes).
+export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, marginR, marginB, marginL }, choice = {}) {
   const usableX = sheetW - marginL - marginR
   const usableY = sheetL - marginT - marginB
   const cellSize = Math.min(MAX_CELL_MM, Math.max(MIN_CELL_MM, Math.sqrt((usableX * usableY) / TARGET_CELLS)))
@@ -322,14 +327,27 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
     const n = singles.get(di) || 0
     if (n > 0) hybridDetails.push({ ...d, qty: n, contour: null, _h: { single: di } })
   })
-  for (const { tmpl, n } of pairKinds.values()) {
-    const v0 = tmpl.variants[0]
-    const v90 = tmpl.variants.find(v => v.angle === 90 && Math.abs(v.W - v0.W) < 0.01)
+  const pairShapes = []
+  for (const [kind, { tmpl, n }] of pairKinds.entries()) {
+    const shapes0 = tmpl.variants.filter(v => v.angle === 0)
+    pairShapes.push([kind, shapes0.length])
+    const v0 = shapes0[choice[kind] || 0] || shapes0[0] || tmpl.variants[0]
+    let v90 = tmpl.variants.find(v => v.angle === 90 && Math.abs(v.W - v0.W) < 0.01 && Math.abs(v.w - v0.h) < 0.01)
+    // Вращать деталь нельзя, но у пары есть вторая сцепка почти тех же размеров,
+    // только «на боку» (700×1038 и 1039×700) — для прямоугольного поиска это одна
+    // и та же пара, которую можно «повернуть»: повёрнутое место занимает вторая
+    // сцепка (детали в ней по-прежнему 0°/180°). Габарит — с запасом на обе.
+    let bw = v0.w, bh = v0.h
+    if (!v90) {
+      const alt = shapes0.find(v => v !== v0 && Math.abs(v.w - v0.h) <= 3 && Math.abs(v.h - v0.w) <= 3)
+      if (alt) { v90 = alt; bw = Math.max(v0.w, alt.h); bh = Math.max(v0.h, alt.w) }
+    }
     const src = details[tmpl.detailIndex]
     hybridDetails.push({
       name: src.name, display_name: src.display_name, prefix: src.prefix,
-      width: v0.w, length: v0.h, qty: n, rotatable: !!v90, contour: null,
-      _h: { pair: tmpl, v0, v90 },
+      width: bw, length: bh, qty: n, rotatable: !!v90, contour: null,
+      freeTurn: !!v90 && v90.angle === 0, // «поворот» = другая сцепка, а не поворот деталей
+      _h: { pair: tmpl, v0, v90, bw },
     })
   }
 
@@ -365,12 +383,12 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
           }
           return [out]
         }
-        const v = isTurned(p, h.v0.w) && h.v90 ? h.v90 : h.v0
+        const v = isTurned(p, h.bw ?? h.v0.w) && h.v90 ? h.v90 : h.v0
         return expandPlacement({ inst: h.pair, variant: v, x: p.x, y: p.y }).map(m => toPlaced(m.inst, m.variant, m.x, m.y))
       }),
     })),
   })
-  return { hybridDetails: hybridDetails.map(({ _h, ...d }) => d), expand, hasPairs: pairKinds.size > 0 }
+  return { hybridDetails: hybridDetails.map(({ _h, ...d }) => d), expand, hasPairs: pairKinds.size > 0, pairShapes }
 }
 
 // Повёрнута ли деталь прямоугольного раскроя на 90° относительно исходной.

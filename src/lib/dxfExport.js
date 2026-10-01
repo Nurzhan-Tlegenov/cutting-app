@@ -14,6 +14,8 @@
  * по origX/origY), 'label' — подписи.
  */
 
+import { placedHoles } from './partHoles'
+
 const GAP_BETWEEN_SHEETS = 200 // мм, зазор между листами на чертеже
 
 function line(x1, y1, x2, y2, layer) {
@@ -37,7 +39,7 @@ function piecePolygonLocal(p) {
   return [[0, 0], [w, 0], [w, h], [0, h]]
 }
 
-export function buildNestingDxf(sheetsData, order) {
+export function buildNestingDxf(sheetsData, order, details = []) {
   const sheetWAll = Number(order.sheet_width) || 0
   const sheetLAll = Number(order.sheet_length) || 0
   const marginLAll = Number(order.margin_left) || 0
@@ -46,7 +48,9 @@ export function buildNestingDxf(sheetsData, order) {
   let body = ''
   let offsetX = 0
   sheetsData.forEach((sheet, si) => {
-    if (si > 0) offsetX += (Number(sheetsData[si - 1].sheetW) || sheetW) + GAP_BETWEEN_SHEETS
+    // ВАЖНО: тут только sheetWAll — sheetW ниже объявлен через const, обращение к нему
+    // до объявления падало (ReferenceError) и DXF со 2-м листом не скачивался (v2.0–2.2)
+    if (si > 0) offsetX += (Number(sheetsData[si - 1].sheetW) || sheetWAll) + GAP_BETWEEN_SHEETS
     // лист-обрезок — со своими размерами и отступом
     const offcut = sheet.stock === 'offcut'
     const sheetW = Number(sheet.sheetW) || sheetWAll, sheetL = Number(sheet.sheetL) || sheetLAll
@@ -70,6 +74,13 @@ export function buildNestingDxf(sheetsData, order) {
         const [x2, y2] = poly[(i + 1) % poly.length]
         body += line(baseX + x1, baseY + y1, baseX + x2, baseY + y2, 'detal')
       }
+      // внутренние вырезы детали — отдельным слоем
+      placedHoles(p, details[p.detailIndex]).forEach(hp => {
+        for (let i = 0; i < hp.length; i++) {
+          const a = hp[i], b = hp[(i + 1) % hp.length]
+          body += line(baseX + a.x, baseY + a.y, baseX + b.x, baseY + b.y, 'vyrez')
+        }
+      })
       const label = (p.prefix ? p.prefix + ' ' : '') + (p.label || '') + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`
       body += text(baseX + poly[0][0] + 10, baseY + poly[0][1] + 10, label, 'Solid Edge 2D NestingPartName', 25)
     })
