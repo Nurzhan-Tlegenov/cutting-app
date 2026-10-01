@@ -2254,7 +2254,7 @@ export default function NestingPage() {
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {isRunning
                           ? 'Идёт поиск: при более плотной укладке детали переезжают на новые места · «Стоп» — зафиксировать лучший вариант'
-                          : hEvent ? 'Просмотр хронологии — правка недоступна' : 'Тап по листу — открыть для правки · щипок — масштаб'}
+                          : hEvent ? 'Просмотр хронологии — правка недоступна' : 'Тап по листу — открыть для правки · щипок или −/+ — больше/меньше листов в ряд'}
                       </p>
                       {hist && hEvents.length > 0 && renderTimeline(cfg, idx, hEvents, hPos, hLast, hEvent)}
                     </>
