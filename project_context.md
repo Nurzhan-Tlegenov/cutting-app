@@ -244,6 +244,9 @@ src/
   colgen 8–15 с в начале, дальше листы лучших раскладок — в пул, ЛП по пулу раз в 6 с. Порог «до края» —
   smallPartsEdgeGap → p.edgeMin (orders.small_parts_edge_gap, migration_small_edge_gap.sql); p.kf — рез;
   smallAtEdge(…, real) / smallEdgeReal — проверка по настоящей зоне (+рез) снаружи укладки
+- v2.7: packPatternSheet → packBlockSheet (мелкие блоком внутри, не ближе порога к краям, крупные вокруг) /
+  packOneSheet; в генерации столбцов каждая 3-я попытка — packAttempt+compactUntilStable на ~3 листа; squeezeLast
+  (onAccept) отдаёт удачные перекладки в пул
 - Буфер: тап по детали → «В буфер» → открыть лист → «На лист N» (первое свободное место,
   поворот только если rotatable) или «На новый лист». С непустым буфером сохранить нельзя;
   пустые листы при сохранении выкидываются
