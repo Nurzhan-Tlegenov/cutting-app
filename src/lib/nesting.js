@@ -440,7 +440,8 @@ export async function runNesting({
       const sqDeadline = Date.now() + (BIG_ORDER
         ? Math.min(15000, genMs * (stalled ? 6 : 2))
         : Math.min(8000, genMs * (stalled ? 4 : 1)))
-      sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 2 : SQUEEZE_PER_GEN, true, sqDeadline)
+      sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 2 : SQUEEZE_PER_GEN, true, sqDeadline,
+        pool ? res => res.forEach(sh => pool.add(stripEdgeSmall(sh, usableX, usableY))) : null)
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
     }
@@ -500,7 +501,7 @@ function placedToPiece(p) {
   }
 }
 const sheetArea = sh => sh.placed.reduce((a, p) => a + p.w * p.h, 0)
-function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allowEqual = false, deadline = 0) {
+function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allowEqual = false, deadline = 0, onAccept = null) {
   let cur = sheets
   let improved = false
   // не меньше attempts попыток, а если задан deadline — и дальше, до него
@@ -544,6 +545,7 @@ function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allow
       else next.splice(n, 1)
       cur = next
       improved = true
+      onAccept?.(res)
     }
   }
   return improved ? cur : sheets
@@ -1351,6 +1353,83 @@ export function computeOffcutAtPoint(px, py, placed, usableX, usableY) {
 
 
 
+// ─── Один лист-шаблон ────────────────────────────────────────────────────────
+function packOneSheet(order, mode, direction, usableX, usableY) {
+  const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
+  const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
+  const sheet = { index: 0, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }], family }
+  // мелкие — после крупных (как в packAttempt): видно, где их прикроют от края
+  if (order.some(p => p.isSmall)) order = order.filter(p => !p.isSmall).concat(order.filter(p => p.isSmall))
+  for (const piece of order) {
+    if (cannotFit(sheet, piece)) continue
+    const r = family === 'guillotine'
+      ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+      : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+    if (!r) continue
+    sheet.placed.push(r)
+    if (family === 'guillotine') { splitGuillotine(sheet, r); delete r._freeRectIdx } else { split(sheet, r); prune(sheet) }
+    updateFreeBounds(sheet)
+  }
+  return stripEdgeSmall(sheet, usableX, usableY)
+}
+
+// Лист с «островом» мелких деталей: мелкие сначала плотно собираются в блок,
+// блок ставится внутрь листа не ближе порога к краям, крупные раскладываются
+// вокруг. Так мелкие гарантированно не у края — и лист остаётся плотным.
+// Обычная укладка (мелкие — после крупных) оставляет им только щели у края, и
+// шаблон теряет все мелкие (260906_009, 320 мелких из 1175: ЛП 123 листа против 117,7 без них).
+function packBlockSheet(order, mode, direction, usableX, usableY, rand) {
+  const smalls = order.filter(p => p.isSmall), bigs = order.filter(p => !p.isSmall)
+  if (!smalls.length) return packOneSheet(order, mode, direction, usableX, usableY)
+  const gap = smalls[0].edgeMin || SMALL_EDGE_MIN
+  const innerW = usableX - 2 * gap, innerH = usableY - 2 * gap
+  if (innerW < 100 || innerH < 100) return packOneSheet(order, mode, direction, usableX, usableY)
+  // блок мелких: случайный размер «окна»
+  const bwMax = innerW * (0.3 + 0.7 * rand()), bhMax = innerH * (0.15 + 0.85 * rand())
+  const blk = { index: 0, placed: [], freeRects: [{ x: 0, y: 0, w: bwMax, h: bhMax }], family: 'maxrects' }
+  for (const piece of smalls) {
+    const q = { ...piece, isSmall: false } // внутри блока правило края не действует
+    if (cannotFit(blk, q)) continue
+    const r = chooseSpot(blk.freeRects, q, direction, bwMax, bhMax, mode.startsWith('g-') ? mode.slice(2) : mode, blk.placed)
+    if (!r) continue
+    blk.placed.push(r); split(blk, r); prune(blk); updateFreeBounds(blk)
+  }
+  if (!blk.placed.length) return packOneSheet(order, mode, direction, usableX, usableY)
+  let bw = 0, bh = 0
+  blk.placed.forEach(p => { bw = Math.max(bw, p.x + p.w); bh = Math.max(bh, p.y + p.h) })
+  // положение блока: отступ слева/снизу — по размерам крупных деталей (полоса из
+  // них), но не меньше порога; справа/сверху тоже должно остаться ≥ порога
+  const dims = [...new Set(bigs.flatMap(p => [p.pw, p.ph]))].filter(v => v >= gap - 0.5)
+  const pickOff = (lim, size) => {
+    const c = dims.filter(v => v + size + gap <= lim + 0.5)
+    if (c.length && rand() < 0.75) return c[Math.floor(rand() * c.length)]
+    const lo = gap, hi = lim - size - gap
+    return hi > lo ? lo + rand() * (hi - lo) : lo
+  }
+  const x0 = pickOff(usableX, bw), y0 = pickOff(usableY, bh)
+  if (x0 + bw > usableX - gap + 0.5 || y0 + bh > usableY - gap + 0.5) return packOneSheet(order, mode, direction, usableX, usableY)
+  const sheet = { index: 0, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }], family: 'maxrects' }
+  const smallById = new Map(smalls.map(p => [p.id, p]))
+  for (const r of blk.placed) {
+    const placed = { ...r, x: r.x + x0, y: r.y + y0, isSmall: true, edgeOkMax: smallById.get(r.id)?.edgeOkMax || 0, edgeMin: smallById.get(r.id)?.edgeMin || 0 }
+    sheet.placed.push(placed); split(sheet, placed); prune(sheet)
+  }
+  updateFreeBounds(sheet)
+  const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
+  for (const piece of bigs) {
+    if (cannotFit(sheet, piece)) continue
+    const r = chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+    if (!r) continue
+    sheet.placed.push(r); split(sheet, r); prune(sheet); updateFreeBounds(sheet)
+  }
+  return stripEdgeSmall(sheet, usableX, usableY)
+}
+
+function packPatternSheet(order, mode, direction, usableX, usableY, rand = Math.random) {
+  if (order.some(p => p.isSmall) && rand() < 0.6) return packBlockSheet(order, mode, direction, usableX, usableY, rand)
+  return packOneSheet(order, mode, direction, usableX, usableY)
+}
+
 // ─── Раскрой «шаблонами» (последовательная коррекция ценности) ───────────────
 // Для заказов с большим числом одинаковых деталей (сотни деталей, десятки видов)
 // это классическая задача раскроя: выгоднее искать не порядок всех деталей, а
@@ -1369,24 +1448,7 @@ export function svcPack(pieces, modes, direction, usableX, usableY, budgetMs, on
   const T = [...types.entries()]
   const t0 = Date.now()
   let best = null, bestStat = null, it = 0
-  const packOne = (order, mode) => {
-    const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
-    const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
-    const sheet = { index: 0, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }], family }
-    // мелкие — после крупных (как в packAttempt): видно, где их прикроют от края
-    if (order.some(p => p.isSmall)) order = order.filter(p => !p.isSmall).concat(order.filter(p => p.isSmall))
-    for (const piece of order) {
-      if (cannotFit(sheet, piece)) continue
-      const r = family === 'guillotine'
-        ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
-        : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
-      if (!r) continue
-      sheet.placed.push(r)
-      if (family === 'guillotine') { splitGuillotine(sheet, r); delete r._freeRectIdx } else { split(sheet, r); prune(sheet) }
-      updateFreeBounds(sheet)
-    }
-    return stripEdgeSmall(sheet, usableX, usableY)
-  }
+  const packOne = (order, mode) => packPatternSheet(order, mode, direction, usableX, usableY, rand)
   while (Date.now() - t0 < budgetMs) {
     it++
     const rem = new Map(T.map(([k, t]) => [k, t.list.slice()]))
@@ -1537,24 +1599,7 @@ export function makePatternPool(pieces, modes, direction, usableX, usableY, rand
   pieces.forEach(p => byKind[kIdx.get(p.detailIndex)].push(p))
   const d = byKind.map(l => l.length)
   const area = byKind.map(l => l[0].pw * l[0].ph)
-  const packOne = (order, mode) => {
-    const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
-    const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
-    const sheet = { index: 0, placed: [], freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }], family }
-    // мелкие — после крупных (как в packAttempt): видно, где их прикроют от края
-    if (order.some(p => p.isSmall)) order = order.filter(p => !p.isSmall).concat(order.filter(p => p.isSmall))
-    for (const piece of order) {
-      if (cannotFit(sheet, piece)) continue
-      const r = family === 'guillotine'
-        ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
-        : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
-      if (!r) continue
-      sheet.placed.push(r)
-      if (family === 'guillotine') { splitGuillotine(sheet, r); delete r._freeRectIdx } else { split(sheet, r); prune(sheet) }
-      updateFreeBounds(sheet)
-    }
-    return stripEdgeSmall(sheet, usableX, usableY)
-  }
+  const packOne = (order, mode) => packPatternSheet(order, mode, direction, usableX, usableY, rand)
   const countOf = sh => { const c = new Array(R).fill(0); sh.placed.forEach(p => { const t = kIdx.get(p.detailIndex); if (t !== undefined) c[t]++ }); return c }
   const pats = [], seen = new Set()
   const addPat = sh => {
@@ -1574,11 +1619,18 @@ export function makePatternPool(pieces, modes, direction, usableX, usableY, rand
       const ord = kinds.map((_, t) => t).filter(t => val[t] > 1e-9 && !(drop && rand() < drop))
         .map(t => ({ t, k: (byDensity ? val[t] / area[t] : val[t]) * (1 + noise * (rand() - 0.5)) }))
         .sort((a, b) => b.k - a.k)
+      // каждая третья попытка — как в генетическом поиске: несколько листов
+      // обычной укладкой (мелкие встают внутрь следующих листов, прикрытые
+      // крупными), шаблоны — все листы, кроме последнего (он недобор)
+      const multi = tr % 3 === 2
       const order = []
-      for (const { t } of ord) { const cap = Math.min(d[t], Math.floor(S / area[t])); for (let i = 0; i < cap; i++) order.push(byKind[t][i]) }
-      const sh = packOne(order, modes[Math.floor(rand() * modes.length)])
-      let v = 0; sh.placed.forEach(p => { v += val[kIdx.get(p.detailIndex)] })
-      out.push({ sh, v })
+      for (const { t } of ord) { const cap = Math.min(d[t], Math.floor((multi ? 3 : 1) * S / area[t])); for (let i = 0; i < cap; i++) order.push(byKind[t][i]) }
+      const mode = modes[Math.floor(rand() * modes.length)]
+      const shs = multi ? compactUntilStable(packAttempt(order, mode, direction, usableX, usableY), direction, usableX, usableY).slice(0, -1).map(sh => stripEdgeSmall(sh, usableX, usableY)) : [packOne(order, mode)]
+      for (const sh of shs) {
+        let v = 0; sh.placed.forEach(p => { v += val[kIdx.get(p.detailIndex)] })
+        out.push({ sh, v })
+      }
     }
     return out.sort((a, b) => b.v - a.v)
   }
