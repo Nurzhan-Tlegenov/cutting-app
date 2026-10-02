@@ -24,7 +24,7 @@ const HIST_MAX_STATS = 6000    // строк «пульса» (≈ 25 мин п�
 export function newHistory(cfg, islands, params) {
   return {
     startedAt: Date.now(), stoppedAt: 0, islands,
-    config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, live: cfg.live, secs: cfg.secs },
+    config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, live: cfg.live, secs: cfg.secs },
     params: {
       sheetL: params.sheetL, sheetW: params.sheetW, kerf: params.kerf,
       marginT: params.marginT, marginR: params.marginR, marginB: params.marginB, marginL: params.marginL,

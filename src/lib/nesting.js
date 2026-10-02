@@ -121,6 +121,7 @@ export async function runNesting({
   smallPartsMaxSquareSide = 0,    // сторона квадрата (мм); деталь мелкая, если её площадь <= side*side. 0 = критерий выключен
   smallPartsMaxSide = 0,          // порог меньшей стороны детали (мм). 0 = критерий выключен
   smallPartsEdgeGap = 0,          // «у края» — ближе этого к краю листа (мм); 0 — по умолчанию SMALL_EDGE_MIN
+  smallPartsEndSide = null,       // «торцом к краю можно»: сторона не длиннее этого (мм); null — как smallPartsMaxSide, 0 — нельзя
   optimizeSeconds = 12,           // сколько секунд гонять поиск плотной укладки — из настроек раскроя
   cuttingMethod = 'nesting',      // 'nesting' (фрезер, ЧПУ — свободная укладка) | 'guillotine' (форматно-раскроечный станок — только сквозные резы)
   algo = 'raster',                // 'raster' (основной, проверенный) | 'nfp' (экспериментальный, точный по контуру — ТОЛЬКО для фрезера, см. ниже)
@@ -199,7 +200,8 @@ export async function runNesting({
     // Узкой деталью можно встать к краю листа только КОРОТКОЙ стороной (торцом
     // 90 мм у детали 400×90): длинные стороны тогда поджаты соседями. Сторона
     // «короткая», если она не длиннее порога «Узкая сторона до» (+ рез).
-    p.edgeOkMax = p.isSmall && smallPartsMaxSide > 0 ? smallPartsMaxSide + (Number(kerf) || 0) + 0.5 : 0
+    const endSide = smallPartsEndSide == null ? smallPartsMaxSide : Number(smallPartsEndSide) || 0
+    p.edgeOkMax = p.isSmall && endSide > 0 ? endSide + (Number(kerf) || 0) + 0.5 : 0
     // свой порог «у края» (задаёт пользователь) и рез — для проверки по реальной рабочей зоне вне укладки
     p.edgeMin = Number(smallPartsEdgeGap) > 0 ? Number(smallPartsEdgeGap) : 0
     p.kf = Number(kerf) || 0
@@ -481,6 +483,15 @@ export async function runNesting({
   if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(best.sheets)
   // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
   if (cuttingMethod !== 'guillotine') best.sheets = stripPermuteAll(rowSwapAll(best.sheets, usableX, usableY), usableX, usableY)
+  // Страховка: признаки «мелкая» и её пороги — заново из исходных деталей (по id),
+  // чтобы ни один шаг укладки не мог их потерять (на них держатся проверка и подсветка)
+  best.sheets = best.sheets.map(sh => ({
+    ...sh,
+    placed: sh.placed.map(p => {
+      const src = pieceById.get(p.id)
+      return src ? { ...p, isSmall: src.isSmall, edgeOkMax: src.edgeOkMax || 0, edgeMin: src.edgeMin || 0, kf: src.kf || 0 } : p
+    }),
+  }))
 
   return { sheets: best.sheets, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }
@@ -1634,9 +1645,13 @@ function packBlockSheet(order, mode, direction, usableX, usableY, rand) {
 // Без правила «мелкие — в центр»: самый плотный лист, потом мелкие — внутрь
 // перестановкой полос (stripEdgeSmall → stripPermuteRepair), что не вышло — убирается
 function packDenseThenFix(order, mode, direction, usableX, usableY) {
-  const plain = order.map(p => (p.isSmall ? { ...p, isSmall: false, _small: true } : p))
+  // ВАЖНО: флаг «мелкая» возвращается по id детали. В v2.8 он возвращался по
+  // временной метке, которая при укладке терялась, — мелкие оставались без
+  // флага: правило для них не проверялось, на карте они не подсвечивались.
+  const smallIds = new Set(order.filter(p => p.isSmall).map(p => p.id))
+  const plain = order.map(p => (p.isSmall ? { ...p, isSmall: false } : p))
   const sh = packOneSheet(plain, mode, direction, usableX, usableY)
-  sh.placed = sh.placed.map(p => (p._small ? { ...p, isSmall: true, _small: undefined } : p))
+  sh.placed = sh.placed.map(p => (smallIds.has(p.id) ? { ...p, isSmall: true } : p))
   return stripEdgeSmall(sh, usableX, usableY)
 }
 function packPatternSheet(order, mode, direction, usableX, usableY, rand = Math.random) {
