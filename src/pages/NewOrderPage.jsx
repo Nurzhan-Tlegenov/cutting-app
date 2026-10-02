@@ -8,6 +8,7 @@ import BottomNav from '../components/BottomNav'
 import { useLeaveGuard } from '../hooks/useLeaveGuard'
 import LeaveConfirmModal from '../components/LeaveConfirmModal'
 import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
+import ImportDetails from '../components/ImportDetails'
 
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
@@ -136,6 +137,12 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
           ✕
         </button>
       </div>
+
+      {detail.name && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 36, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {detail.name}
+        </div>
+      )}
 
       {/* Кромка — галочки */}
       {showEdge && (
@@ -407,6 +414,28 @@ export default function NewOrderPage() {
     updateDetail(targetUid, patch)
   }
 
+  // Импорт деталей из таблицы (Excel / Базис-Мебельщик / PRO100)
+  const handleImport = ({ items, mode, material, thickness }) => {
+    const imported = items.map(it => ({
+      ...newDetail(),
+      w: it.w, h: it.h, qty: it.qty,
+      name: it.name || null,
+      prefix: it.prefix || activePrefix || null,
+      edges: { ...it.edges },
+    }))
+    const isFilled = d => Number(d.w) > 0 || Number(d.h) > 0 || Number(d.qty) > 0
+    setLastAddedUid(null)
+    setDetails(prev => [...(mode === 'replace' ? [] : prev.filter(isFilled)), ...imported])
+    const newPrefixes = [...new Set(imported.map(d => d.prefix).filter(Boolean))]
+    if (newPrefixes.length) setPrefixes(prev => [...new Set([...prev, ...newPrefixes])])
+    const newEdges = [...new Set(imported.flatMap(d => Object.values(d.edges)).filter(v => v && v !== 'default'))]
+    if (newEdges.length) setEdgeNames(prev => [...new Set([...prev, ...newEdges])])
+    if (material && (!materialName.trim() || mode === 'replace')) {
+      setMaterialName(material)
+      if (thickness) setMaterialThickness(thickness)
+    } else if (thickness && !materialName.trim()) setMaterialThickness(thickness)
+  }
+
   async function handleSave() {
     const valid = details.filter(d => d.w > 0 && d.h > 0)
     if (!valid.length) { setError('Добавьте хотя бы одну деталь с размерами'); return }
@@ -438,7 +467,7 @@ export default function NewOrderPage() {
 
       const rows = details.map((d, i) => {
         const pfx = d.prefix || null
-        const name = `Деталь ${i + 1}`
+        const name = d.name || `Деталь ${i + 1}`
         return {
           order_id: order.id,
           prefix: pfx,
@@ -561,20 +590,9 @@ export default function NewOrderPage() {
       </div>
 
       {/* Импорт */}
-      <div style={{ marginBottom: 14 }}>
-        <p className="section-title">Импорт деталей</p>
-        <div className="card" style={{ background: 'var(--bg2)' }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" disabled style={{ flex: 1, padding: '10px 6px', border: '0.5px dashed var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--text-hint)', fontSize: 13, cursor: 'not-allowed', textAlign: 'center' }}>
-              📊 Excel / CSV
-            </button>
-            <button type="button" disabled style={{ flex: 1, padding: '10px 6px', border: '0.5px dashed var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--text-hint)', fontSize: 13, cursor: 'not-allowed', textAlign: 'center' }}>
-              📐 OBJ / DXF
-            </button>
-          </div>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 8, textAlign: 'center' }}>Импорт будет доступен в следующем обновлении</p>
-        </div>
-      </div>
+      <ImportDetails
+        hasDetails={details.some(d => Number(d.w) > 0 || Number(d.h) > 0)}
+        onImport={handleImport} />
 
       {/* Детали */}
       <div style={{ marginBottom: 14 }}>

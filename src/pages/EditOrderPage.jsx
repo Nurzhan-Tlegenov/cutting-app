@@ -7,6 +7,7 @@ import BottomNav from '../components/BottomNav'
 import { useLeaveGuard } from '../hooks/useLeaveGuard'
 import LeaveConfirmModal from '../components/LeaveConfirmModal'
 import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
+import ImportDetails from '../components/ImportDetails'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -112,6 +113,12 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
         <button type="button" onClick={onRemove}
           style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1, flexShrink: 0 }}>✕</button>
       </div>
+      {detail.name && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 36, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {detail.name}
+        </div>
+      )}
+
       {showEdge && (
         <div style={{ display: 'flex', gap: 4, marginTop: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-hint)', minWidth: 44 }}>Кромка:</span>
@@ -246,6 +253,8 @@ function makeDetail(d) {
     uid, dbId: d?.id || null,
     w: d?.length || '', h: d?.width || '', qty: d?.qty || '',
     prefix: d?.prefix || null,
+    // своё название (из импорта); автоматические «Деталь N» не храним — они пересчитываются
+    name: d?.name && !/^Деталь \d+$/.test(d.name) ? d.name : null,
     edges: { top: d?.edge_top || null, right: d?.edge_right || null, bottom: d?.edge_bottom || null, left: d?.edge_left || null },
     rotatable: d?.rotatable || false,
     contour: d?.contour ? JSON.parse(d.contour) : null
@@ -330,6 +339,27 @@ export default function EditOrderPage() {
     if (copyEdges) patch.edges = { ...mirroredEdges }
     updateDetail(targetUid, patch)
   }
+  // Импорт деталей из таблицы (Excel / Базис-Мебельщик / PRO100)
+  const handleImport = ({ items, mode, material, thickness }) => {
+    const imported = items.map(it => ({
+      ...makeDetail(null),
+      w: it.w, h: it.h, qty: it.qty,
+      name: it.name || null,
+      prefix: it.prefix || activePrefix || null,
+      edges: { ...it.edges },
+    }))
+    const isFilled = d => Number(d.w) > 0 || Number(d.h) > 0 || Number(d.qty) > 0
+    setLastAddedUid(null)
+    setDetails(prev => [...(mode === 'replace' ? [] : prev.filter(isFilled)), ...imported])
+    const newPrefixes = [...new Set(imported.map(d => d.prefix).filter(Boolean))]
+    if (newPrefixes.length) setPrefixes(prev => [...new Set([...prev, ...newPrefixes])])
+    const newEdges = [...new Set(imported.flatMap(d => Object.values(d.edges)).filter(v => v && v !== 'default'))]
+    if (newEdges.length) setEdgeNames(prev => [...new Set([...prev, ...newEdges])])
+    if (material && (!materialName.trim() || mode === 'replace')) {
+      setMaterialName(material)
+      if (thickness) setMaterialThickness(thickness)
+    }
+  }
   const grouped = details.reduce((acc, d) => {
     const key = d.prefix || ''
     if (!acc[key]) acc[key] = []
@@ -376,7 +406,7 @@ export default function EditOrderPage() {
       let sortIdx = 0
       const rows = valid.map((d) => {
         const pfx = d.prefix || null
-        const name = `Деталь ${sortIdx + 1}`
+        const name = d.name || `Деталь ${sortIdx + 1}`
         sortIdx++
         return {
           order_id: id, prefix: pfx, name,
@@ -432,6 +462,9 @@ export default function EditOrderPage() {
           <EdgeManager edgeNames={edgeNames} activeEdge={activeEdge} onChange={setEdgeNames} onSetActive={setActiveEdge} />
         </div>
       </div>
+      <ImportDetails
+        hasDetails={details.some(d => Number(d.w) > 0 || Number(d.h) > 0)}
+        onImport={handleImport} />
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
