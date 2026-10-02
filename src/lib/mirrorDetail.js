@@ -77,3 +77,31 @@ export function mirrorEdges(edges) {
   if (!edges) return edges
   return { ...edges, left: edges.right ?? null, right: edges.left ?? null }
 }
+
+// Перевернуть деталь другой пластью вверх: контур, вырезы, пазы, присадка и
+// кромки зеркалятся лево↔право, а лицо и изнанка меняются местами.
+// detail — { w (длина), h (ширина), contour, edges }, thickness — толщина материала.
+const swapFace = f => (f === 'front' ? 'back' : f === 'back' ? 'front' : f)
+export function flipDetail(detail, thickness) {
+  const T = Number(thickness) || 16
+  const W = Number(detail.h) || 0
+  const c = mirrorContour(detail.contour || {}, W) || {}
+  const drillings = (c.drillings || []).map(dr => {
+    const d = { ...dr }
+    if (d.kind === 'edge') {
+      d.offsetFace = Math.round((T - (d.offsetFace ?? T / 2)) * 10) / 10
+      if (d.pairFace) d.pairFace = swapFace(d.pairFace)
+    } else {
+      const through = (d.depth ?? 0) >= T - 0.05           // сквозное — видно с обеих сторон
+      if (!through) d.face = swapFace(d.face || 'front')
+      if (d.pairFace) d.pairFace = swapFace(d.pairFace)
+    }
+    if (Array.isArray(d.extraHoles)) d.extraHoles = d.extraHoles.map(eh => (eh.kind === 'face' ? { ...eh, face: swapFace(eh.face || 'front') } : eh))
+    return d
+  })
+  const grooves = (c.grooves || []).map(g => ({ ...g, face: swapFace(g.face || 'front') }))
+  const holes = (c.holes || []).map(hh => (hh.type === 'pocket' ? { ...hh, face: swapFace(hh.face || 'front') } : hh))
+  const contour = { ...c, drillings, grooves, holes }
+  if (c.meta) contour.meta = { ...c.meta, flipped: !c.meta.flipped }
+  return { ...detail, contour, edges: mirrorEdges(detail.edges) }
+}

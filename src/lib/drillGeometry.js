@@ -311,11 +311,13 @@ export function getDrillPoints(dr, panelW, panelH, layout) {
 
 // ─── Все точки присадки детали разом, в её "родной" ориентации (X=ширина,
 // Y=длина, 0,0 внизу-слева) — то, что нужно карте раскроя ─────────────────
-export function getAllDrillPoints(contour, panelW, panelH) {
+// frontOnly — без отверстий с изнанки (на карте раскроя они не нужны: станок их не сверлит)
+export function getAllDrillPoints(contour, panelW, panelH, frontOnly = false) {
   if (!contour?.drillings?.length) return []
   const pts = []
   contour.drillings.forEach(dr => {
     if (dr.installed === false) return // не сверлить — предпросмотр, на карту не выводим
+    if (frontOnly && dr.kind !== 'edge' && dr.face === 'back') return
     const d = dr.d || 8
     getDrillPoints(dr, panelW, panelH, contour.layout).forEach(p => {
       pts.push({ x: p.x, y: p.y, d })

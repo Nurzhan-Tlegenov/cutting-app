@@ -256,7 +256,7 @@ const drillId = () => 'b' + Date.now().toString(36) + (drillSeq++).toString(36)
 
 // ---------- Панель -> деталь ----------
 
-function convertPanel(panel, holes) {
+function convertPanel(panel, holes, faceRule) {
   const o = panel.obj
   const T = val(o, 'Thick', 16)
   const elems = contourElems(val(o, 'Contour'))
@@ -288,9 +288,10 @@ function convertPanel(panel, holes) {
       if (ov < 0.3) continue
       if (q[0] < x0 - EPS || q[0] > x0 + dx + EPS || q[1] < y0 - EPS || q[1] > y0 + dy + EPS) continue
       if (outerLocal && outerLocal.length > 4 && !pointInPoly(q, outerLocal)) continue
-      const top = zb >= T - EPS, bottom = za <= EPS
+      // крепёж в модели стоит не идеально: отверстие может начинаться на десятые доли мм в глубине
+      const top = zb >= T - 0.5, bottom = za <= 0.5
       if (!top && !bottom) continue
-      face.push({ x: q[0], y: q[1], d: 2 * h.r, depth: Math.min(ov, T), through: top && bottom, top, name: h.name })
+      face.push({ x: q[0], y: q[1], d: 2 * h.r, depth: top && bottom ? T : top ? T - Math.max(za, 0) : Math.min(zb, T), through: top && bottom, top, name: h.name })
     } else if (Math.abs(d[2]) < 0.01 && q[2] > 0.5 && q[2] < T - 0.5) {
       edge.push({ q, d, z: q[2], dia: 2 * h.r, depth: h.depth, name: h.name })
     }
@@ -317,9 +318,14 @@ function convertPanel(panel, holes) {
   }
 
   // --- какая пласть «лицевая» (смотрит вверх на станке): та, где больше глухой обработки ---
-  const blindTop = face.filter(f => !f.through && f.top).length + cutsRaw.filter(c => c.top).length
-  const blindBottom = face.filter(f => !f.through && !f.top).length + cutsRaw.filter(c => !c.top).length
-  const flip = blindBottom > blindTop
+  const holesTop = face.filter(f => !f.through && f.top).length, holesBottom = face.filter(f => !f.through && !f.top).length
+  const cutsTop = cutsRaw.filter(c => c.top).length, cutsBottom = cutsRaw.filter(c => !c.top).length
+  // Правило выбирает пользователь при импорте (FACE_RULES)
+  let flip = false
+  if (faceRule === 'holes') flip = holesBottom !== holesTop ? holesBottom > holesTop : cutsBottom > cutsTop
+  else if (faceRule === 'groove') flip = cutsBottom !== cutsTop ? cutsBottom > cutsTop : holesBottom > holesTop
+  else if (faceRule === 'sum') flip = holesBottom + cutsBottom > holesTop + cutsTop
+  // 'model' — как в модели Базиса, не переворачиваем
 
   const tf = (p) => {
     const u = p[0] - x0, v = p[1] - y0
@@ -502,7 +508,8 @@ function convertPanel(panel, holes) {
     w: r1(L), h: r1(W), qty: 1, edges, material, thickness: T,
     rotatable: texDir === 0, contour,
     groupKey: `${material}|${T}`,
-    info: { shaped: !isRect, cutouts: cutouts.length, holes: holeCount, grooves: grooves.length },
+    info: { shaped: !isRect, cutouts: cutouts.length, holes: holeCount, grooves: grooves.length,
+      back: drillings.filter(d => d.kind === 'face' && d.face === 'back').length + grooves.filter(g => g.face === 'back').length },
     warn,
   }
 }
@@ -513,7 +520,16 @@ export function isBasisFile(u8) {
   return u8.length > 9 && u8[0] === 0x42 && u8[1] === 0x5A && u8[2] === 0x38 && u8[3] === 0x35   // 'BZ85'
 }
 
-export function parseBasis(u8) {
+// Какую пласть считать лицевой (она смотрит вверх на станке)
+export const FACE_RULES = [
+  ['holes', 'Где больше глухих отверстий, затем — где паз'],
+  ['groove', 'Где паз, затем — где больше глухих отверстий'],
+  ['sum', 'Где больше обработки всего (отверстия + пазы)'],
+  ['model', 'Как в модели Базиса (не переворачивать)'],
+]
+
+export function parseBasis(u8, opts = {}) {
+  const faceRule = FACE_RULES.some(r => r[0] === opts.faceRule) ? opts.faceRule : 'holes'
   if (u8.length < 4 || u8[0] !== 0x42 || u8[1] !== 0x5A) throw new Error('Это не файл модели Базис-Мебельщик')
   if (!isBasisFile(u8)) throw new Error('Эта версия файла Базис пока не поддерживается (нужен формат BZ85 — пересохраните модель в свежей версии Базиса)')
   const skip = new Set(['Undo', 'TriData', 'Thumbnail'])
@@ -565,7 +581,7 @@ export function parseBasis(u8) {
   const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' ? undefined : v))
   const map = new Map()
   for (const p of panels) {
-    const it = convertPanel(p, holes)
+    const it = convertPanel(p, holes, faceRule)
     if (!it) continue
     const key = [it.prefix, it.name, it.w, it.h, it.groupKey, JSON.stringify(it.edges), strip(it.contour)].join('§')
     const prev = map.get(key)
@@ -590,8 +606,8 @@ export function parseBasis(u8) {
   }
 }
 
-export async function readBasisFile(file) {
-  const res = parseBasis(new Uint8Array(await file.arrayBuffer()))
+export async function readBasisFile(file, opts) {
+  const res = parseBasis(new Uint8Array(await file.arrayBuffer()), opts)
   for (const it of res.items) it.contour.meta.file = file.name
   return res
 }

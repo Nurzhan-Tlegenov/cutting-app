@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { flipDetail } from '../lib/mirrorDetail'
 
 // ─── База фурнитуры (конфирматы, шканты, полкодержатели, минификсы...) ───────
 // Единая для присадки по плоскости и по торцу. Хранится в Supabase, привязана
@@ -2924,6 +2925,16 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
             ↺ Сбросить форму
           </button>
         </div>
+      )}
+
+      {tab==='contour' && (
+        <button type="button"
+          title="Перевернуть деталь другой пластью вверх: контур и кромки зеркалятся, лицо и изнанка меняются местами"
+          onClick={() => { setHistory([]); setActiveIdx(null); onUpdate(flipDetail({ ...detail, contour }, defaultThickness)) }}
+          style={{ width:'100%', padding:'8px', marginBottom:8, border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
+            background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
+          ⇄ Перевернуть деталь (лицо ↔ изнанка)
+        </button>
       )}
 
       {/* ВЫРЕЗЫ */}

@@ -14,6 +14,9 @@ import { partLabel, LABEL_MODES } from '../lib/partLabel'
 import { useLabelMode, rememberOrderDefaults } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
+import ContourEditor from '../components/ContourEditor'
+import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
+import { detailHoles } from '../lib/partHoles'
 
 const COLORS = [
   '#B5D4F4','#9FE1CB','#F5C4B3','#CECBF6','#FAC775',
@@ -30,6 +33,7 @@ const LONG_PRESS_MS = 550
 // Удержание пальца на детали, после которого её можно двигать (короткое
 // касание/скольжение деталь не двигает; двойной тап — поворот)
 const DRAG_HOLD_MS = 250
+const EDIT_HOLD_MS = 1100   // держим палец на детали не двигая — открыть редактор контура
 
 // ─── Проверка пересечения двух полигонов (для true-shape деталей) — обычная
 // bbox-проверка слишком грубая: деталь, аккуратно уложенная в паз соседней,
@@ -435,7 +439,7 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   // Масштаб карты — щипком двух пальцев (как в редакторе контура), с
@@ -623,7 +627,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         if (contour) {
           const panelW = Number(detail.width) || 0   // X, "родная" ориентация
           const panelH = Number(detail.length) || 0  // Y, "родная" ориентация
-          const pts = getAllDrillPoints(contour, panelW, panelH)
+          const pts = getAllDrillPoints(contour, panelW, panelH, true)
           if (pts.length) {
             const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
             ctx.fillStyle = '#6A4A17'
@@ -867,6 +871,18 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         drag.active = true
         if (navigator.vibrate) navigator.vibrate(15)
         redraw(placedRef.current, idx) // подсветить: деталь "взята"
+        // Долгое удержание на месте (деталь так и не сдвинули) — редактор контура этой детали
+        if (onEditPart) longPressRef.current = setTimeout(() => {
+          longPressRef.current = null
+          if (draggingRef.current !== drag || drag.dragged) return
+          draggingRef.current = null
+          const cur = placedRef.current[idx]
+          const back = placedRef.current.map((item, i) => i === idx ? { ...item, x: drag.origX, y: drag.origY } : item)
+          placedRef.current = back
+          redraw(back)
+          if (navigator.vibrate) navigator.vibrate([10, 40, 10])
+          onEditPart(cur.detailIndex)
+        }, EDIT_HOLD_MS - DRAG_HOLD_MS)
       }
     }, DRAG_HOLD_MS)
   }
@@ -885,6 +901,11 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       return
     }
     const { idx, startX, startY, origX, origY } = drag0
+    // деталь поехала — это перетаскивание, редактор открывать не нужно
+    if (!drag0.dragged) {
+      if (Math.hypot(x - startX, y - startY) <= 10) return
+      drag0.dragged = true; clearLongPress()
+    }
     const p = placedRef.current[idx]
     const dx = fromC(x - startX), dy = fromC(y - startY)
     let nx = Math.max(0, Math.min(usableX + kerf - p.w, origX + dx))
@@ -1330,6 +1351,7 @@ export default function NestingPage() {
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
   const { user } = useAuth()
+  const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
   const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
   const [configs, setConfigs] = useState(() => [newCfg()])
   const [focusId, setFocusId] = useState(null)   // конфигурация, по которой считается шапка со статистикой
@@ -1415,6 +1437,62 @@ export default function NestingPage() {
       setConfigs([first])
       setFocusId(first.id)
     }
+  }
+
+  // ─── Редактор контура детали прямо с карты (долгое удержание на детали) ─────
+  function openPartEditor(di) {
+    const d = details[di]
+    if (!d) return
+    let c
+    try { c = d.contour ? JSON.parse(d.contour) : null } catch { c = null }
+    setEditPart({ index: di, draft: {
+      w: d.length, h: d.width, contour: c,
+      edges: { top: d.edge_top || null, right: d.edge_right || null, bottom: d.edge_bottom || null, left: d.edge_left || null },
+    } })
+  }
+  // Силуэт детали (контур + вырезы): изменился — готовый раскрой больше не верен
+  function shapeKey(d) {
+    const norm = pts => pts.map(p => `${Math.round((p.x ?? p[0]) * 10)},${Math.round((p.y ?? p[1]) * 10)}`).sort().join(';')
+    let poly
+    try { poly = parsePolygonFromDetail(d) } catch { poly = null }
+    return `${d.width}x${d.length}|${poly?.polygon ? norm(poly.polygon) : 'rect'}|${detailHoles(d).map(norm).sort().join('/')}`
+  }
+  async function closePartEditor() {
+    const ep = editPart
+    setEditPart(null)
+    if (!ep) return
+    const d = details[ep.index], dr = ep.draft
+    const patch = {
+      contour: dr.contour ? JSON.stringify(dr.contour) : null,
+      edge_top: dr.edges.top || null, edge_right: dr.edges.right || null,
+      edge_bottom: dr.edges.bottom || null, edge_left: dr.edges.left || null,
+    }
+    if (Object.keys(patch).every(k => (patch[k] || null) === (d[k] || null))) return   // ничего не меняли
+    const nd = { ...d, ...patch }
+    const shapeChanged = shapeKey(d) !== shapeKey(nd)
+    if (shapeChanged && !window.confirm('Форма детали изменилась — готовый раскрой станет неверным и будет сброшен. Сохранить изменения?')) return
+    const { error } = await supabase.from('order_details').update(patch).eq('id', d.id)
+    if (error) { window.alert('Не удалось сохранить деталь: ' + error.message); return }
+    setDetails(ds => ds.map((x, i) => (i === ep.index ? nd : x)))
+    if (shapeChanged) {
+      await supabase.from('orders').update({ nesting_result: null }).eq('id', id)
+      setOrder(o => ({ ...o, nesting_result: null }))
+      setConfigs(cs => cs.map(c => newCfg({ dir: c.dir, small: c.small, sq: c.sq, area: c.area, side: c.side, edge: c.edge, end: c.end, secs: c.secs })))
+      setFocusId(null)
+      return
+    }
+    // форма та же — на уложенных деталях обновляем только кромку (с учётом их поворота на листе)
+    const fix = p => {
+      if (p.detailIndex !== ep.index) return p
+      const e = rotateEdgesTimes({ top: patch.edge_top, right: patch.edge_right, bottom: patch.edge_bottom, left: patch.edge_left },
+        Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90))
+      return { ...p, edgeTop: e.top, edgeRight: e.right, edgeBottom: e.bottom, edgeLeft: e.left }
+    }
+    setConfigs(cs => cs.map(c => ({
+      ...c,
+      sheetsData: c.sheetsData.map(sh => ({ ...sh, placed: sh.placed.map(fix) })),
+      buffer: (c.buffer || []).map(fix),
+    })))
   }
 
   // Общие настройки заказа запоминаем по последней правке любой конфигурации
@@ -2244,10 +2322,6 @@ export default function NestingPage() {
                       </button>
                     </div>
                     <div style={{ flex: 1 }} />
-                    <select value={labelMode} onChange={e => setLabelMode(e.target.value)} title="Что писать на деталях"
-                      style={{ width: 'auto', maxWidth: 118, padding: '3px 4px', fontSize: 11, borderRadius: 20, color: 'var(--text-hint)' }}>
-                      {LABEL_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
                     {view === 'sheet' && canvasSheet.placed.length === 0 && cfg.sheetsData.length > 1 && (
                       <button onClick={() => deleteEmptySheet(cfg.id, cfg.activeSheet)}
                         style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid #dc3545',
@@ -2270,6 +2344,14 @@ export default function NestingPage() {
                         </button>
                       </>
                     )}
+                  </div>
+                  {/* Что писать на деталях — отдельной строкой, чтобы не закрывать кнопки */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6, fontSize: 11, color: 'var(--text-hint)' }}>
+                    Подпись на деталях:
+                    <select value={labelMode} onChange={e => setLabelMode(e.target.value)}
+                      style={{ width: 'auto', padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      {LABEL_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
                   </div>
 
                   {view === 'all' ? (
@@ -2328,13 +2410,14 @@ export default function NestingPage() {
                         onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
                         selectedIdx={cfg.selPart}
                         onSelect={i => updateCfg(cfg.id, { selPart: i, note: '' })}
+                        onEditPart={locked ? null : openPartEditor}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {showOffcuts && offcutMode === 'manual'
                           ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                           : (showOffcuts && offcutMode === 'cuts'
                             ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                            : 'Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · щипок — масштаб')}
+                            : 'Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб')}
                       </p>
                     </>
                   )}
@@ -2746,6 +2829,15 @@ export default function NestingPage() {
         </div>
       )}
       <BottomNav />
+      {editPart && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'var(--bg2)', overflowY: 'auto' }}>
+          <ContourEditor
+            detail={editPart.draft}
+            onUpdate={u => setEditPart(ep => (ep ? { ...ep, draft: { ...ep.draft, contour: u.contour, edges: u.edges || ep.draft.edges } } : ep))}
+            onClose={closePartEditor}
+            materialThickness={order.material_thickness || 16} />
+        </div>
+      )}
     </div>
   )
 }

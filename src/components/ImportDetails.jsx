@@ -1,5 +1,15 @@
 import { useState, useRef, useMemo } from 'react'
 import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importDetails'
+import { useAuth } from '../context/AuthContext'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
+
+// Какую пласть считать лицевой при импорте из Базиса (копия списка из basisB3d — он грузится по требованию)
+const FACE_RULES = [
+  ['holes', 'Где больше глухих отверстий, затем — где паз'],
+  ['groove', 'Где паз, затем — где больше глухих отверстий'],
+  ['sum', 'Где больше обработки всего (отверстия + пазы)'],
+  ['model', 'Как в модели Базиса (не переворачивать)'],
+]
 
 // Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, PRO100.
 // Базис-Мебельщик читается и напрямую из файла модели .b3d — с контуром,
@@ -23,6 +33,10 @@ const groupLabel = g => `${g.material || 'Без материала'}${g.thickne
 
 export default function ImportDetails({ hasDetails, onImport }) {
   const fileRef = useRef(null)
+  const auth = useAuth()
+  const user = auth?.user || null
+  const basisFileRef = useRef(null)              // выбранный .b3d — чтобы пересчитать при смене правила
+  const [faceRule, setFaceRule] = useState(() => getUserSettings(user).basisFaceRule || 'holes')
   const [source, setSource] = useState(SOURCES[0])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -63,7 +77,10 @@ export default function ImportDetails({ hasDetails, onImport }) {
       const lower = file.name.toLowerCase()
       if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
         const { readBasisFile } = await import('../lib/basisB3d')
-        const res = await readBasisFile(file)
+        const rule = getUserSettings(user).basisFaceRule || faceRule
+        setFaceRule(rule)
+        basisFileRef.current = file
+        const res = await readBasisFile(file, { faceRule: rule })
         if (!res.items.length) throw new Error('в модели нет панелей')
         setFileName(file.name); setSource(SOURCES[1]); setMode('add')
         setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
@@ -101,6 +118,20 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const hasDims = !!basis || (roles.includes('length') && roles.includes('width')) || roles.includes('size')
   const sumInfo = k => chosen.reduce((s, it) => s + (it.info?.[k] || 0) * (k === 'shaped' ? 1 : it.qty), 0)
   const sumWarn = k => chosen.reduce((s, it) => s + (it.warn?.[k] || 0), 0)
+
+  // Другое правило лицевой стороны — пересчитываем детали и запоминаем выбор за аккаунтом
+  const changeFaceRule = async (rule) => {
+    setFaceRule(rule)
+    saveUserSettings({ basisFaceRule: rule }, user)
+    if (!basisFileRef.current) return
+    setBusy(true)
+    try {
+      const { readBasisFile } = await import('../lib/basisB3d')
+      setBasis(await readBasisFile(basisFileRef.current, { faceRule: rule }))
+    } catch (err) {
+      setError('Не удалось прочитать файл: ' + (err?.message || err))
+    } finally { setBusy(false) }
+  }
 
   const setRole = (ci, role) => setRoles(prev => prev.map((r, i) => (i === ci ? role : (role && r === role ? '' : r))))
 
@@ -258,6 +289,20 @@ export default function ImportDetails({ hasDetails, onImport }) {
               </div>
             )}
 
+            {/* Лицевая сторона */}
+            {basis && (
+              <div style={{ marginBottom: 12 }}>
+                <label className="label">Лицевая сторона детали (смотрит вверх на станке)</label>
+                <select value={faceRule} disabled={busy} onChange={e => changeFaceRule(e.target.value)} style={{ padding: '7px 8px', fontSize: 13 }}>
+                  {FACE_RULES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+                  Обработка с изнанки не теряется: она остаётся в детали и видна в редакторе контура, там же деталь можно перевернуть.
+                  {chosen.length > 0 && ` Деталей с обработкой с двух сторон: ${chosen.filter(it => it.info?.back > 0).length}.`}
+                </p>
+              </div>
+            )}
+
             {/* Что получится */}
             {basis && chosen.length > 0 && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
@@ -283,6 +328,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
                   const extra = inf ? [
                     inf.shaped && 'контур', inf.cutouts > 0 && `вырезов ${inf.cutouts}`,
                     inf.holes > 0 && `отв. ${inf.holes}`, inf.grooves > 0 && `паз ${inf.grooves}`,
+                    inf.back > 0 && 'с двух сторон',
                   ].filter(Boolean).join(' · ') : ''
                   return (
                     <div key={i} style={{ padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>

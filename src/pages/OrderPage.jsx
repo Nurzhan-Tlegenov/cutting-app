@@ -4,11 +4,14 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
+import { sortDetails, SORT_MODES } from '../lib/sortDetails'
+import { detailMeta } from '../lib/partLabel'
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { profile } = useAuth()
+  const [sortMode, setSortMode] = useState('')   // сортировка списка деталей (только показ)
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
@@ -90,8 +93,13 @@ export default function OrderPage() {
         </div>
       </div>
       <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
+          <select value={sortMode} onChange={e => setSortMode(e.target.value)}
+            style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--text-muted)', borderRadius: 20 }}>
+            <option value="">Как в заказе</option>
+            {SORT_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
           {isDraft && (
             <button onClick={() => navigate(`/orders/${id}/edit`)}
               style={{ fontSize: 13, color: 'var(--blue)', background: 'none', border: 'none' }}>
@@ -110,11 +118,11 @@ export default function OrderPage() {
               </tr>
             </thead>
             <tbody>
-              {details.map((d) => (
+              {(sortMode ? sortDetails(details, sortMode) : details).map((d) => (
                 <tr key={d.id} style={{ borderTop: '0.5px solid var(--border)' }}>
                   <td style={{ padding: '8px 10px' }}>
                     {d.prefix && <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 500 }}>{d.prefix}</div>}
-                    <div>{d.name}</div>
+                    <div>{detailMeta(d)?.des ? <span style={{ color: 'var(--text-hint)', marginRight: 5 }}>{detailMeta(d).des}</span> : null}{d.name}</div>
                   </td>
                   <td style={{ padding: '8px 6px', textAlign: 'center', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{d.length}×{d.width}</td>
                   <td style={{ padding: '8px 6px', textAlign: 'center' }}>{d.qty}</td>

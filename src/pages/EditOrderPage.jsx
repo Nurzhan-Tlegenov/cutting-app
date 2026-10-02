@@ -8,6 +8,7 @@ import { useLeaveGuard } from '../hooks/useLeaveGuard'
 import LeaveConfirmModal from '../components/LeaveConfirmModal'
 import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
 import ImportDetails from '../components/ImportDetails'
+import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -382,7 +383,7 @@ export default function EditOrderPage() {
       <>
         <ContourEditor
           detail={{ w: editingDetail.w, h: editingDetail.h, contour: editingDetail.contour, edges: editingDetail.edges }}
-          onUpdate={(updated) => updateDetail(editingContourUid, { ...editingDetail, contour: updated.contour })}
+          onUpdate={(updated) => updateDetail(editingContourUid, { ...editingDetail, contour: updated.contour, edges: updated.edges || editingDetail.edges })}
           onClose={() => setEditingContourUid(null)}
           materialThickness={materialThickness}
         />
@@ -469,8 +470,13 @@ export default function EditOrderPage() {
         hasDetails={details.some(d => Number(d.w) > 0 || Number(d.h) > 0)}
         onImport={handleImport} />
       <div style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
+          <select value="" onChange={e => { const m = e.target.value; if (m) setDetails(d => sortDetails(d, m)) }}
+            style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--blue)', borderColor: 'var(--blue-mid)', borderRadius: 20 }}>
+            <option value="">Сортировать…</option>
+            {SORT_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
           <button type="button" onClick={() => setShowEdge(v => !v)}
             style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px', cursor: 'pointer' }}>
             {showEdge ? 'Скрыть кромку' : 'Показать кромку'}
