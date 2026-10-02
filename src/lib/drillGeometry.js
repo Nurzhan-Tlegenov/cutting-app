@@ -330,3 +330,23 @@ export function getAllDrillPoints(contour, panelW, panelH, frontOnly = false) {
   })
   return pts
 }
+
+// Пазы детали — прямоугольники (4 угла) в «родной» ориентации; frontOnly — только с лицевой стороны
+export function getGrooveRects(contour, panelW, panelH, frontOnly = false) {
+  const out = []
+  ;(contour?.grooves || []).forEach(g => {
+    if (frontOnly && g.face === 'back') return
+    const hor = g.dir === 'horizontal'
+    const gw = hor ? (g.length || 100) : (g.width || 8), gh = hor ? (g.width || 8) : (g.length || 100)
+    const sides = g.sides || [], o = g.offsets || {}
+    let x = (panelW - gw) / 2, y = (panelH - gh) / 2, w = gw, h = gh
+    if (sides.includes('left') && sides.includes('right')) { x = o.left ?? 0; w = panelW - (o.left ?? 0) - (o.right ?? 0) }
+    else if (sides.includes('left')) x = o.left ?? 0
+    else if (sides.includes('right')) x = panelW - gw - (o.right ?? 0)
+    if (sides.includes('top') && sides.includes('bottom')) { y = o.bottom ?? 0; h = panelH - (o.bottom ?? 0) - (o.top ?? 0) }
+    else if (sides.includes('bottom')) y = o.bottom ?? 0
+    else if (sides.includes('top')) y = panelH - gh - (o.top ?? 0)
+    out.push({ pts: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], back: g.face === 'back' })
+  })
+  return out
+}

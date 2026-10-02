@@ -7,7 +7,7 @@ import SheetsOverview from '../components/SheetsOverview'
 import { newHistory, recordEvent, recordIsland, recordStats, buildHistoryExport } from '../lib/nestingHistory'
 import { validateNesting } from '../lib/validateNesting'
 import { NESTING_VERSION } from '../lib/version'
-import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
+import { getAllDrillPoints, getGrooveRects, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
@@ -664,6 +664,24 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
               })
             }
             ctx.restore()
+          }
+          // пазы лицевой стороны — полупрозрачная заливка с контуром, как в редакторе
+          {
+            const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
+            const rects = getGrooveRects(contour, panelW, panelH, true)
+            if (rects.length) {
+              ctx.save()
+              ctx.fillStyle = 'rgba(250,199,117,0.75)'; ctx.strokeStyle = '#BA7517'; ctx.lineWidth = 1
+              rects.forEach(r => {
+                ctx.beginPath()
+                r.pts.forEach(([px, py], k) => {
+                  const f = rotatePointTimes(px, py, panelW, panelH, times)
+                  if (k) ctx.lineTo(x + f.x * sc, y + h - f.y * sc); else ctx.moveTo(x + f.x * sc, y + h - f.y * sc)
+                })
+                ctx.closePath(); ctx.fill(); ctx.stroke()
+              })
+              ctx.restore()
+            }
           }
           // только то, что сверлится с лицевой стороны (она смотрит вверх на станке); обработка с изнанки
           // остаётся в детали и появится здесь, если деталь перевернуть в редакторе
