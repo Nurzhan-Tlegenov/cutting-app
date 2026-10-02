@@ -12,7 +12,7 @@
 //   0 объект, 1 false, 2 true, 3 u8, 4 i32, 5 double, 6 строка UTF-16
 //   (u32 число символов), 7 блоб (u32 длина), 8 пусто, 9 дата (double).
 //   Контур — блоб: u32 n, элементы: 0x10 отрезок (x1 y1 x2 y2),
-//   0x11 окружность (cx cy r), 0x12 дуга (центр, начало, конец, u8 ccw).
+//   0x11 и 0x14 окружность (cx cy r), 0x12 дуга (центр, начало, конец, u8 ccw).
 import { inflateSync, gzipSync, gunzipSync, strToU8, strFromU8 } from 'fflate'
 
 const EPS = 0.05
@@ -122,7 +122,7 @@ function contourElems(b) {
   for (let i = 0; i < n; i++) {
     const t = b[p]; p += 1
     if (t === 0x10) out.push({ t: 'L', a: [f(), f()], b: [f(), f()] })
-    else if (t === 0x11) out.push({ t: 'C', c: [f(), f()], r: f() })
+    else if (t === 0x11 || t === 0x14) out.push({ t: 'C', c: [f(), f()], r: f() })   // 0x14 — тоже окружность (центр, радиус)
     else if (t === 0x12) { out.push({ t: 'A', c: [f(), f()], a: [f(), f()], b: [f(), f()], ccw: b[p] === 1 }); p += 1 }
     else throw new Error('Неизвестный элемент контура')
   }
@@ -588,8 +588,10 @@ export function parseBasis(u8, opts = {}) {
   // одинаковые детали одного изделия — в одну строку с количеством
   const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' || k === 'inst' ? undefined : v))
   const map = new Map()
+  let skipped = 0
   for (const p of panels) {
-    const it = convertPanel(p, holes, faceRule)
+    let it
+    try { it = convertPanel(p, holes, faceRule) } catch { skipped++; continue }   // одна непонятная панель не должна срывать весь импорт
     if (!it) continue
     const key = [it.prefix, it.name, it.w, it.h, it.groupKey, JSON.stringify(it.edges), strip(it.contour)].join('§')
     const prev = map.get(key)
@@ -642,6 +644,7 @@ export function parseBasis(u8, opts = {}) {
   return {
     orderName,
     scene,
+    skipped,
     items,
     groups: [...groups.values()].sort((a, b) => b.pieces - a.pieces),
   }

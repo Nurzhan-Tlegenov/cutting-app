@@ -320,7 +320,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 {sumWarn('open') > 0 && <div>· незамкнутый контур: {sumWarn('open')}</div>}
                 {sumWarn('edges') > 0 && <div>· кромка на фигурном крае: {sumWarn('edges')}</div>}
                 {sumWarn('edgeHoles') > 0 && <div>· торцевые отверстия не на прямой стороне: {sumWarn('edgeHoles')}</div>}
-                {sumWarn('cuts') > 0 && <div>· пазы/профили сложной формы: {sumWarn('cuts')}</div>}
+                {sumWarn('cuts') > 0 && <div>· фрезеровка профиля (скругление кромки, V-паз, выемка): {sumWarn('cuts')} — не переносится</div>}
               </div>
             )}
             {chosen.length > 0 && (
