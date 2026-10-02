@@ -7,7 +7,7 @@
 //   записанные архивом MFC (CArchive), без подписей полей и длин:
 //     строка 'dbvr', u32 версия, миниатюра JPEG (счётчик + байты),
 //     CDocProp, CRoom, список материалов CMaterial, список крепежа CGeomFix*,
-//     дерево изделий CArticle (детали CPartPanel / CPartBent, вложенные изделия),
+//     дерево изделий CArticle (детали CPartPanel / CPartBent / CPartArt, вложенные изделия),
 //     дальше — чертежи CDraft (не читаем).
 //   Указатель на объект: u16 тег. 0 — пусто; 0xFFFF — новый класс (u16 версия,
 //   u16 длина имени, имя) и сразу объект; 0x8000|n — объект уже известного класса n;
@@ -19,6 +19,14 @@
 //   (CFurniture: расстояние от начала или конца стороны, тип крепежа).
 //   Отверстия получаем так же, как сама Астра: по параметрам крепежа, в торце
 //   своей детали и в пласти той детали, к которой этот торец прилегает.
+//   Правила сверены с XML-экспортом самой Астры по четырём проектам:
+//     шкант        — в торец b[6], в пласть ответной e[0] − b[6];
+//     конфирмат,   — если торец прилегает к пласти: ответная насквозь, в торец длина
+//     саморез        винта − толщина ответной + 2; иначе (стык торец в торец) по b[6] в каждый торец;
+//     минификс     — шток в торец, эксцентрик в своей пласти на b[6] от края, Ø5 в ответной;
+//     полкодерж.   — эксцентрик в своей пласти, штифт в ответной на e[3] от пласти полки;
+//     петля        — чашка и два самореза в двери, два отверстия планки на боковине в e[5] от её кромки.
+//   Детали считаются состыкованными только при плотном прилегании (зазор до 0,1 мм).
 import { cfbStream, isCfb } from './cfb.js'
 import { buildItem, groupItems, applyP, applyV, inverse, pointInPoly } from './basisB3d.js'
 
@@ -37,7 +45,6 @@ class Ar {
     this.dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength)
     this.p = 0
     this.map = [null]
-    this.montage = false
   }
   need(n) { if (this.p + n > this.u8.length) throw new Stop('неожиданный конец файла') }
   u8v() { this.need(1); return this.u8[this.p++] }
@@ -112,26 +119,22 @@ function partBase(s, o) {
 }
 function panel(s, o) {
   partBase(s, o)
-  s.skip(4)
+  o.grain = s.u32()                               // 1 — у детали есть направление текстуры (на раскрое не поворачивать)
   o.ang = s.obj('CAngled')
   o.mats = s.list()
-  s.skip(2)
+  s.obj()                                         // вспомогательная «монтажная» деталь (у съёмной полки), нам не нужна
   s.obj('CPositionObject')
   s.skip(2 + 3); s.str(); s.str()
   s.u32()
   s.list(); s.list()
   o.mortises = s.list()
   s.list()
-  o.mont = s.obj()
-  if (o.mont) s.montage = true
+  s.obj()                                         // монтаж ящика или фасада
   if (o._ === 'CPartMontage') s.skip(16)
 }
 function montage(s, o) {
   s.str(); V(s); s.u32()
   if (o._ === 'CMontageBox') s.f64()
-  const n = s.u32(); s.skip(4 * n)
-  o.arts = s.list('CArticle')
-  s.montage = false
 }
 
 // Разбор каждого класса: поля идут подряд, порядок восстановлен по файлу
@@ -150,7 +153,7 @@ const H = {
   },
   CGeomFixShkant(s, o) { fixBase(s, o); o.e = s.dd(1) },
   CGeomFixConf(s, o) { fixBase(s, o); o.e = s.dd(2); s.skip(3) },
-  CGeomFixHenge(s, o) { fixBase(s, o); o.e = s.dd(7); s.skip(5); o.e2 = s.dd(2) },
+  CGeomFixHenge(s, o) { fixBase(s, o); o.e = s.dd(7); s.skip(1); o.across = s.u8v() === 1; s.skip(3); o.e2 = s.dd(2) },   // across — отверстия планки в ряд поперёк кромки
   CGeomHole(s, o) { o.d = s.dd(2) },
   CGeomFixBore(s, o) { fixBase(s, o); o.holes = s.list('CGeomHole') },
   CGeomFixMini(s, o) { fixBase(s, o); o.e = s.dd(5); s.skip(1) },
@@ -216,15 +219,24 @@ const H = {
     s.obj('CPositionObject')
     s.skip(2 + 3); s.str(); s.str(); s.skip(8)
   },
+  // покупное изделие сеткой треугольников (ножка, ручка): вершины уже в мировых координатах
+  CFacePlane(s, o) { s.u32(); o.i = [s.u32(), s.u32(), s.u32()]; s.skip(3 + 8) },
+  CGeomMesh(s, o) { o.v = s.list('CVertex').map(q => q.v); s.skip(2); s.list('CVector'); o.f = s.list('CFacePlane').map(q => q.i) },
+  CPartArt(s, o) {
+    o.pos = s.str(); o.name = s.str()
+    o.mesh = s.list('CGeomMesh')
+    s.skip(18)
+    o.mats = s.list()
+    s.skip(6)
+    s.obj('CPositionObject')
+    s.skip(2 + 3); s.str(); s.str(); s.skip(8)
+  },
   CArticle(s, o) {
     o.name = s.str(); s.str(); s.u32()
     const n = s.u32(); s.skip(8 * n)
-    s.montage = false
     o.parts = s.list()
-    // если последняя деталь несёт «монтаж» (ящик, навес) — вложенные изделия записаны в нём
-    o.subs = []
-    if (!s.montage) { const k = s.u32(); s.skip(4 * k); o.subs = s.list('CArticle') }
-    s.montage = false
+    const k = s.u32(); s.skip(4 * k)
+    o.subs = s.list('CArticle')
     s.f64(); s.obj('CGeomCoordSys'); s.skip(3); s.u32()
     o.extra = s.obj()
     s.obj('CPositionObject')
@@ -306,7 +318,7 @@ function loopsOf(part) {
 
 // Отверстия от крепежа на торцах одной детали — в мировых координатах.
 // Крепёж стоит на стороне контура: pos — от начала (mode 1) или от конца (mode 2) стороны.
-function furnitureHoles(part, T, M, out, plates) {
+function furnitureHoles(part, T, M, out, plates, faceAt) {
   for (const lp of loopsOf(part)) {
     for (const e of lp.src) {
       const furn = e.end?.furn
@@ -322,22 +334,31 @@ function furnitureHoles(part, T, M, out, plates) {
         if (!fx || !fx.b) continue
         const at = f.mode === 2 ? [b[0] - dir[0] * f.pos, b[1] - dir[1] * f.pos] : [a[0] + dir[0] * f.pos, a[1] + dir[1] * f.pos]
         const name = fixName(fx)
-        const push = (p, d, dia, depth) => {
+        const push = (p, d, dia, depth, extra) => {
           if (!(dia > 0) || !(depth > 0)) return
-          out.push({ P: applyP(M, p), D: applyV(M, d), r: dia / 2, depth, name, from: part })
+          out.push({ P: applyP(M, p), D: applyV(M, d), r: dia / 2, depth, name, from: part, ...extra })
         }
         const mid = T / 2
-        const endIn = (dia, depth) => push([at[0], at[1], mid], [nin[0], nin[1], 0], dia, depth)
-        const mate = (dia, depth, z = mid) => push([at[0], at[1], z], [-nin[0], -nin[1], 0], dia, depth)
+        const endIn = (dia, depth) => push([at[0], at[1], mid], [nin[0], nin[1], 0], dia, depth, { only: 'edge' })
+        const mate = (dia, depth, z = mid) => push([at[0], at[1], z], [-nin[0], -nin[1], 0], dia, depth, { only: 'face' })
         // пласть: u = 1 — та, что в файле на Z = −T (у нас z = 0), u = 2 — на Z = 0 (у нас z = T)
         const faceZ = f.u === 1 ? 0 : T, faceD = f.u === 1 ? 1 : -1
-        const own = (inset, dia, depth, along = 0) => push([at[0] + nin[0] * inset + dir[0] * along, at[1] + nin[1] * inset + dir[1] * along, faceZ], [0, 0, faceD], dia, depth)
-        const [, , , , , dMate, dEnd, dAlt] = fx.b
+        const own = (inset, dia, depth, along = 0) => push([at[0] + nin[0] * inset + dir[0] * along, at[1] + nin[1] * inset + dir[1] * along, faceZ], [0, 0, faceD], dia, depth, { only: 'face' })
+        const [, , , , , dMate, dEnd] = fx.b
         switch (fx._) {
-          case 'CGeomFixShkant':          // шкант: в торец и в пласть ответной детали
-            endIn(dMate, dEnd); mate(dMate, dAlt); break
-          case 'CGeomFixConf':            // конфирмат, саморез: в торец — под резьбу, ответная деталь — насквозь
-            endIn(fx.e[0], dEnd); mate(dMate, Math.max(fx.e[1] - dEnd, 1)); break
+          case 'CGeomFixShkant':          // шкант: в торец и в пласть ответной детали (fx.e[0] — общая глубина сверления)
+            endIn(dMate, dEnd); mate(dMate, fx.e[0] - dEnd); break
+          case 'CGeomFixConf': {          // конфирмат, саморез, соединитель
+            // торец прилегает к пласти: ответная деталь — насквозь, в торец — длина винта минус её толщина, плюс 2 мм запаса
+            const Tm = faceAt(applyP(M, [at[0], at[1], mid]), applyV(M, [-nin[0], -nin[1], 0]))
+            if (Tm) { endIn(fx.e[0], fx.e[1] - Tm + 2); mate(dMate, Tm) }
+            else {
+              // пласти рядом нет (стык торец в торец или пусто): в каждый торец — на свою глубину
+              endIn(fx.e[0], dEnd)
+              push([at[0], at[1], mid], [-nin[0], -nin[1], 0], fx.e[0], dEnd, { only: 'edge', entry: true })
+            }
+            break
+          }
           case 'CGeomFixMini':            // минификс: шток в ответную деталь, эксцентрик в пласти своей
             endIn(fx.e[0], dEnd); mate(dMate, fx.e[3])
             if (f.u === 1 || f.u === 2) own(dEnd, fx.e[1], fx.e[2])
@@ -349,11 +370,12 @@ function furnitureHoles(part, T, M, out, plates) {
             break
           case 'CGeomFixHenge':           // петля: чашка в двери, ответная планка — на боковине
             if (f.u === 1 || f.u === 2) {
-              own(dEnd, fx.e[0], fx.e[2])
+              own(dEnd, fx.e[0], fx.e[2])                                    // чашка
+              for (const k of [-0.5, 0.5]) own(dEnd + fx.e[3], dMate, fx.e[1], fx.e[4] * k)      // два самореза чашки
               plates.push({
                 P: applyP(M, [at[0], at[1], faceZ]), N: applyV(M, [0, 0, -faceD]),      // точка на внутренней пласти двери и направление внутрь корпуса
                 E: applyV(M, [-nin[0], -nin[1], 0]), A: applyV(M, [dir[0], dir[1], 0]),   // к торцу двери (к боковине) и вдоль торца
-                back: fx.e[5] - 1, step: fx.e[6], dia: fx.e2[0], depth: fx.e2[1], name,   // на чертежах Астры линия планки на 1 мм ближе к кромке
+                back: fx.e[5], step: fx.e[6], across: !!fx.across, dia: fx.e2[0], depth: fx.e2[1], name,
               })
             }
             break
@@ -361,7 +383,8 @@ function furnitureHoles(part, T, M, out, plates) {
             const h = fx.holes?.[0]?.d
             if (!h) break
             const z = [[T, 1], [0, -1]]
-            for (const [zz, dz] of (f.u === 2 ? [z[0]] : f.u === 1 ? [z[1]] : z)) push([at[0] + nin[0] * f.d, at[1] + nin[1] * f.d, zz], [0, 0, dz], h[0], h[1] || 0)
+            // глубина 0 — сквозное отверстие в ответной панели
+            for (const [zz, dz] of (f.u === 2 ? [z[0]] : f.u === 1 ? [z[1]] : z)) push([at[0] + nin[0] * f.d, at[1] + nin[1] * f.d, zz], [0, 0, dz], h[0], h[1] > 0 ? h[1] : 22, { only: 'face' })
             break
           }
           default:
@@ -396,18 +419,18 @@ export function parseAstra(u8, opts = {}) {
   const faceRule = opts.faceRule || 'holes'
 
   // --- обход дерева изделий ---
-  const panels = [], bents = []
+  const panels = [], bents = [], arts = []
   const walk = (art, path) => {
     const here = art === root ? [] : [...path, art.name.trim()]
     const take = p => {
       if (!p) return
       if (p._ === 'CPartBent') bents.push({ p, path: here })
+      else if (p._ === 'CPartArt') arts.push(p)
       else panels.push({ p, path: here })
     }
     art.parts.forEach(take)
     take(art.extra)
     art.subs.forEach(a => walk(a, here))
-    for (const p of art.parts) for (const a of (p.mont?.arts || [])) walk(a, here)
   }
   walk(root, [])
 
@@ -416,18 +439,31 @@ export function parseAstra(u8, opts = {}) {
   const geo = new Map()
   for (const { p } of [...panels, ...bents]) {
     const T = p.dim.t
-    if (!(T > 0)) continue
-    const M = matrixOf(p.cs, T)
-    geo.set(p, { T, M })
-    furnitureHoles(p, T, M, holes, plates)
+    if (T > 0) geo.set(p, { T, M: matrixOf(p.cs, T) })
   }
-  // ответные планки петель: ищем боковину, в которую упирается торец двери
+  // панели как тела: по ним ищем, к чьей пласти прилегает торец с крепежом
   const solid = []
   for (const { p } of panels) {
     const g = geo.get(p)
     if (!g || !p.mats?.[0]) continue
     solid.push({ ...g, Mi: inverse(g.M), poly: polyOf(p.el.flatMap(expand)), part: p })
   }
+  const TOUCH = 0.1                                // Астра считает детали состыкованными только при плотном прилегании
+  const faceAt = (P, D) => {
+    for (const sp of solid) {
+      const d = applyV(sp.Mi, D)
+      if (Math.abs(d[2]) < 0.99) continue
+      const q = applyP(sp.Mi, P)
+      if (Math.abs(q[2] - (d[2] > 0 ? 0 : sp.T)) > TOUCH) continue
+      if (pointInPoly(q, sp.poly)) return sp.T
+    }
+    return 0
+  }
+  for (const { p } of [...panels, ...bents]) {
+    const g = geo.get(p)
+    if (g) furnitureHoles(p, g.T, g.M, holes, plates, faceAt)
+  }
+  // ответные планки петель: ищем боковину, в которую упирается торец двери
   for (const pl of plates) {
     let best = null
     for (const sp of solid) {
@@ -436,22 +472,48 @@ export function parseAstra(u8, opts = {}) {
       // внутренняя пласть боковины — та, что обращена к двери (навстречу E)
       const zf = e[2] > 0 ? 0 : sp.T
       const dist = (zf - q[2]) / e[2]                                      // от торца двери вдоль E до этой пласти: накладная дверь — меньше нуля
-      if (dist < -60 || dist > 40) continue
+      if (dist < -40 || dist > 6) continue                                 // боковина под дверью (накладная) или сразу за её торцом (вкладная)
       // передняя кромка боковины: идём от двери вглубь корпуса до входа в контур
       const l = Math.hypot(n[0], n[1]) || 1
       const nn = [n[0] / l, n[1] / l]
+      const inside = t => pointInPoly([q[0] + nn[0] * t, q[1] + nn[1] * t], sp.poly)
       let t0 = null
-      for (let t = -30; t <= 60; t += 0.5) if (pointInPoly([q[0] + nn[0] * t, q[1] + nn[1] * t], sp.poly)) { t0 = t; break }
-      if (t0 == null) continue
+      for (let t = -30; t <= 60; t += 0.5) if (inside(t)) { t0 = t; break }
+      if (t0 == null || t0 > 25) continue
+      if (t0 > -30) { let lo = t0 - 0.5, hi = t0; for (let i = 0; i < 12; i++) { const m = (lo + hi) / 2; if (inside(m)) hi = m; else lo = m } t0 = hi }
       // накладная дверь закрывает торец боковины (dist <= 0) — такая боковина важнее соседней панели рядом с дверью
       const rank = dist <= 0.01 ? -dist : 1000 + dist
       if (!best || rank < best.rank) best = { sp, q, nn, al, zf, rank, t0, dz: e[2] > 0 ? 1 : -1 }
     }
-    if (!best) continue
+    if (!best) {
+      // «смежный» бок: панель параллельна двери и дверь накрывает её край — планка стоит на пласти этой панели
+      for (const sp of solid) {
+        const q = applyP(sp.Mi, pl.P), n = applyV(sp.Mi, pl.N), e = applyV(sp.Mi, pl.E), al = applyV(sp.Mi, pl.A)
+        if (Math.abs(n[2]) < 0.99) continue
+        const zf = n[2] > 0 ? 0 : sp.T                                     // пласть, обращённая к двери
+        if (Math.abs(q[2] - zf) > 2) continue
+        const inside = t => pointInPoly([q[0] + e[0] * t, q[1] + e[1] * t], sp.poly)
+        if (!inside(0.5)) continue                                         // панель должна продолжаться за край двери
+        let te = null
+        for (let t = 0; t >= -60; t -= 0.5) if (!inside(t)) { te = t; break }
+        if (te == null) continue
+        let lo = te, hi = te + 0.5
+        for (let i = 0; i < 12; i++) { const m = (lo + hi) / 2; if (inside(m)) hi = m; else lo = m }
+        for (const k of [-0.5, 0.5]) {
+          const back = pl.across ? pl.back + pl.step * (k + 0.5) : pl.back, side = pl.across ? 0 : pl.step * k
+          const x = q[0] + e[0] * (hi + back) + al[0] * side, y = q[1] + e[1] * (hi + back) + al[1] * side
+          holes.push({ P: applyP(sp.M, [x, y, zf]), D: applyV(sp.M, [0, 0, n[2] > 0 ? 1 : -1]), r: pl.dia / 2, depth: pl.depth, name: pl.name, only: 'face' })
+        }
+        break
+      }
+      continue
+    }
     const { sp, q, nn, al, zf, dz, t0 } = best
     for (const k of [-0.5, 0.5]) {
-      const x = q[0] + nn[0] * (t0 + pl.back) + al[0] * pl.step * k, y = q[1] + nn[1] * (t0 + pl.back) + al[1] * pl.step * k
-      holes.push({ P: applyP(sp.M, [x, y, zf]), D: applyV(sp.M, [0, 0, dz]), r: pl.dia / 2, depth: pl.depth, name: pl.name })
+      // обычно два отверстия вдоль кромки; у петель для узкого профиля — в ряд вглубь корпуса
+      const back = pl.across ? pl.back + pl.step * (k + 0.5) : pl.back, side = pl.across ? 0 : pl.step * k
+      const x = q[0] + nn[0] * (t0 + back) + al[0] * side, y = q[1] + nn[1] * (t0 + back) + al[1] * side
+      holes.push({ P: applyP(sp.M, [x, y, zf]), D: applyV(sp.M, [0, 0, dz]), r: pl.dia / 2, depth: pl.depth, name: pl.name, only: 'face' })
     }
   }
 
@@ -498,10 +560,9 @@ export function parseAstra(u8, opts = {}) {
       const product = path[path.length - 1] || ''
       const pos = (p.pos || '').trim(), name = (p.name || '').trim()
       const material = matName(mat)
-      const wood = !/однотон/i.test(mat.s[2] || '') && !!(mat.s[2] || '').trim()
       return buildItem({
-        T, elems, texDir: 1, M, butts, cutsRaw, decorRaw: [], warnCuts,
-        name, prefix: product, material, rotatable: !wood, anim: null,
+        T, elems, texDir: 1, M, butts, cutsRaw, decorRaw: [], warnCuts, tol: TOUCH, strict: true,
+        name, prefix: product, material, rotatable: p.grain === 0, anim: null,
         meta: {
           src: 'astra',
           ids: [p._i],
@@ -532,13 +593,24 @@ export function parseAstra(u8, opts = {}) {
     })
   }
 
+  // покупные изделия сеткой — как «фурнитура» (координаты — целые десятые мм)
+  const meshes = {}, hardware = []
+  const I = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+  for (const a of arts) {
+    const pos = []
+    for (const m of a.mesh || []) for (const f of m.f) for (const i of f) { const q = m.v[i]; if (!q) continue; const w = up(q); pos.push(Math.round(w[0] * 10), Math.round(w[1] * 10), Math.round(w[2] * 10)) }
+    if (pos.length < 9) continue
+    meshes[a._i] = { name: (a.name || '').trim(), groups: [{ mat: matName(a.mats?.[0]), pos }] }
+    hardware.push({ f: a._i, m: I })
+  }
+
   const orderName = ''
   for (const it of items) { it.contour.meta.order = orderName; it.contour.meta.model = '' }
   const scene = {
     v: 1, order: orderName,
     // «FREE» в Астре — материал не назначен (вспомогательные плоскости под перфорацию): в общий вид не берём
     parts: items.filter(it => !/^free$/i.test(it.material)).map(it => ({ name: it.name, w: it.w, h: it.h, contour: it.contour })),
-    extras, meshes: {}, hardware: [], colors,
+    extras, meshes, hardware, colors,
   }
   return { orderName, scene, skipped, items, groups, ...(opts.debug ? { debug: { holes, plates, solid } } : {}) }
 }

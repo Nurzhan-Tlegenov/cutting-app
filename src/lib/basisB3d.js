@@ -368,20 +368,24 @@ export function buildItem(src, holes, faceRule) {
   const Mi = inverse(src.M)
   const face = [], edge = []
   const outerLocal = outer.circle ? null : outer.pts.map(v => v.p)
+  const tol = src.tol ?? 0.5        // насколько отверстие может не доходить до пласти и всё же считаться её отверстием
   for (const h of holes) {
     const q = applyP(Mi, h.P), d = applyV(Mi, h.D)
     if (Math.abs(d[2]) > 0.99) {
+      if (h.only === 'edge') continue
+      // strict — отверстие должно начинаться прямо на пласти (детали прилегают вплотную)
+      if (src.strict && Math.min(Math.abs(q[2]), Math.abs(q[2] - T)) > tol) continue
       const za = Math.min(q[2], q[2] + d[2] * h.depth), zb = Math.max(q[2], q[2] + d[2] * h.depth)
       const ov = Math.min(zb, T) - Math.max(za, 0)
       if (ov < 0.3) continue
       if (q[0] < x0 - EPS || q[0] > x0 + dx + EPS || q[1] < y0 - EPS || q[1] > y0 + dy + EPS) continue
       if (outerLocal && outerLocal.length > 4 && !pointInPoly(q, outerLocal)) continue
       // крепёж в модели стоит не идеально: отверстие может начинаться на десятые доли мм в глубине
-      const top = zb >= T - 0.5, bottom = za <= 0.5
+      const top = zb >= T - tol, bottom = za <= tol
       if (!top && !bottom) continue
       face.push({ x: q[0], y: q[1], d: 2 * h.r, depth: top && bottom ? T : top ? T - Math.max(za, 0) : Math.min(zb, T), through: top && bottom, top, name: h.name })
-    } else if (Math.abs(d[2]) < 0.01 && q[2] > 0.5 && q[2] < T - 0.5) {
-      edge.push({ q, d, z: q[2], dia: 2 * h.r, depth: h.depth, name: h.name })
+    } else if (Math.abs(d[2]) < 0.01 && q[2] > 0.5 && q[2] < T - 0.5 && h.only !== 'face') {
+      edge.push({ q, d, z: q[2], dia: 2 * h.r, depth: h.depth, name: h.name, entry: !!h.entry })
     }
   }
 
@@ -539,10 +543,12 @@ export function buildItem(src, holes, faceRule) {
     }
     ts.sort((m, n) => m - n)
     const at = t => (horiz ? [P[0] + sgn * t, P[1]] : [P[0], P[1] + sgn * t])
-    const tIn = ts.find(t => t >= -0.5 && t < e.depth - 0.5 && pointInPoly(at(t + 0.3), poly) && !pointInPoly(at(t - 0.3), poly))
+    // entry — глубина считается от входа в эту деталь (отверстие начато у соседней, через зазор)
+    const tIn = ts.find(t => t >= (src.strict && !e.entry ? -tol : -0.5) && (!src.strict || e.entry || t <= tol) && t < (e.entry ? 10 : e.depth - 0.5) && pointInPoly(at(t + 0.3), poly) && !pointInPoly(at(t - 0.3), poly))
     if (tIn === undefined) continue          // отверстие не входит в эту деталь через торец
+    if (e.entry && tIn < 0.05) continue      // своё отверстие в этом торце уже учтено
     const tOut = ts.find(t => t > tIn + 0.3)
-    const depth = Math.min(e.depth, tOut ?? e.depth) - Math.max(tIn, 0)
+    const depth = e.entry ? Math.min(e.depth, (tOut ?? Infinity) - tIn) : Math.min(e.depth, tOut ?? e.depth) - Math.max(tIn, 0)
     if (depth < 0.5) continue
     const [X, Y] = at(tIn)
     const side = horiz ? (sgn > 0 ? 'left' : 'right') : (sgn > 0 ? 'bottom' : 'top')
