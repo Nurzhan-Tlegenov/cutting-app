@@ -1091,7 +1091,7 @@ const DIR_SHORT = { auto: 'Авто', along_y: 'Вдоль Y', along_x: 'Вдо�
 let CFG_SEQ = 0
 function newCfg(over = {}) {
   return {
-    id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', area: '', side: '', edge: '150', end: '', secs: '12',
+    id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', area: '', side: '', edge: '100', end: '', secs: '12',
     live: true,          // онлайн-раскрой: считать до «Стоп», показывая каждое улучшение
     open: true, status: 'idle', // idle | queued | running | stopping | done | error
     startedAt: 0, doneAt: 0, error: '',
@@ -1397,7 +1397,7 @@ export default function NestingPage() {
         sq: o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '',
         area: areaFromSide(o.small_parts_max_square_side),
         side: o.small_parts_max_side ? String(o.small_parts_max_side) : '',
-        edge: o.small_parts_edge_gap ? String(o.small_parts_edge_gap) : '150',
+        edge: o.small_parts_edge_gap ? String(o.small_parts_edge_gap) : '100',
         // «торцом к краю»: пусто — как «узкая сторона»
         end: o.small_parts_end_side != null ? String(o.small_parts_end_side) : '',
         secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
@@ -1500,7 +1500,7 @@ export default function NestingPage() {
       smallPartsToCenter: cfg.small,
       smallPartsMaxSquareSide: cfg.sq === '' ? 0 : Number(cfg.sq),
       smallPartsMaxSide: cfg.side === '' ? 0 : Number(cfg.side),
-      smallPartsEdgeGap: cfg.edge === '' ? 150 : Number(cfg.edge),
+      smallPartsEdgeGap: cfg.edge === '' ? 100 : Number(cfg.edge),
       optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
       cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
@@ -2070,7 +2070,16 @@ export default function NestingPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1, fontSize: 13 }}>
                 <input type="checkbox" checked={cfg.small}
-                  onChange={e => { const v = e.target.checked; updateCfg(cfg.id, { small: v }); persist({ small_parts_to_center: v }) }}
+                  onChange={e => {
+                    const v = e.target.checked
+                    // первые значения-подсказки, если пороги ещё не заданы: 0,12 м² · полоса 200 мм · до края 100 мм
+                    if (v && cfg.sq === '' && cfg.side === '') {
+                      const sq = sideFromArea('0,12')
+                      updateCfg(cfg.id, { small: v, area: '0,12', sq, side: '200', edge: '100' })
+                      persist({ small_parts_to_center: v, small_parts_max_square_side: Number(sq) || 0, small_parts_max_side: 200 })
+                      persist({ small_parts_edge_gap: 100 })
+                    } else { updateCfg(cfg.id, { small: v }); persist({ small_parts_to_center: v }) }
+                  }}
                   style={{ width: 17, height: 17, flexShrink: 0 }} />
                 Мелкие — в центр
               </label>
@@ -2097,7 +2106,7 @@ export default function NestingPage() {
                 <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
                   title="Мелкая — деталь площадью не больше этой. Например 0,16 м² — это 400×400 мм или 800×200 мм">
                   Площадь до, м²
-                  <input type="text" inputMode="decimal" value={cfg.area} placeholder="напр. 0,16"
+                  <input type="text" inputMode="decimal" value={cfg.area} placeholder="0,12"
                     onChange={e => { const v = e.target.value.replace(/[^0-9.,]/g, ''); updateCfg(cfg.id, { area: v, sq: sideFromArea(v) }) }}
                     onBlur={e => { const sd = sideFromArea(e.target.value); persist({ small_parts_max_square_side: sd === '' ? 0 : Number(sd) }) }}
                     style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
@@ -2105,7 +2114,7 @@ export default function NestingPage() {
                 <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
                   title="Узкая полоса — деталь, у которой меньшая сторона не больше этой (включительно). Её гоним в середину листа: длинной стороной к краю не ставим">
                   Узкая полоса до, мм
-                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.side} placeholder="напр. 350"
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.side} placeholder="200"
                     onChange={e => updateCfg(cfg.id, { side: e.target.value.replace(/[^0-9]/g, '') })}
                     onBlur={e => persist({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
                     style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
@@ -2113,9 +2122,9 @@ export default function NestingPage() {
                 <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
                   title="Мелкая деталь не ближе этого к краю листа (если между ней и краем нет другой детали)">
                   До края, мм
-                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.edge} placeholder="150"
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.edge} placeholder="100"
                     onChange={e => updateCfg(cfg.id, { edge: e.target.value.replace(/[^0-9]/g, '') })}
-                    onBlur={e => persist({ small_parts_edge_gap: e.target.value === '' ? 150 : Number(e.target.value) })}
+                    onBlur={e => persist({ small_parts_edge_gap: e.target.value === '' ? 100 : Number(e.target.value) })}
                     style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
                 </label>
               </div>
@@ -2140,7 +2149,7 @@ export default function NestingPage() {
                   Мелкие — {n} из {total} дет.: {list.slice(0, 5).map(d =>
                     `${d.display_name || d.name} ${Math.round(d.length)}×${Math.round(d.width)}${Number(d.qty) > 1 ? ` (${d.qty})` : ''}`).join(', ')}
                   {list.length > 5 ? ` и ещё ${list.length - 5} вид.` : ''}
-                  <br />Их не ставим ближе {cfg.edge || 150} мм к краю листа, если между ними и краем нет другой детали.
+                  <br />Их не ставим ближе {cfg.edge || 100} мм к краю листа, если между ними и краем нет другой детали.
                   {cfg.side !== '' ? `Узкие полосы (сторона до ${cfg.side} мм включительно) — в середину листа: длинной стороной к краю не ставим, в угол — никогда.` : 'В угол листа — никогда.'}
                   Оставшиеся у края подсвечиваются на карте оранжевым.
                 </p>
