@@ -168,7 +168,9 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       if (p.outline.length < 3) continue
       const shape = new THREE.Shape(p.outline.map(([x, y]) => new THREE.Vector2(x, y)))
       for (const h of p.holes) if (h.length > 2) shape.holes.push(new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, y))))
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: p.t, bevelEnabled: false, curveSegments: 1 })
+      // у фасада с объёмной фрезеровкой основа тоньше, а лицевая пласть — рельеф
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: p.carve ? p.t - p.carve.maxD : p.t, bevelEnabled: false, curveSegments: 1 })
+      if (p.carve && !p.carve.top) geo.translate(0, 0, p.carve.maxD)
       const mat4 = mat4Of(p.m)
       const mesh = new THREE.Mesh(geo, matFor(p.material, p.texDir))
       mesh.applyMatrix4(mat4)
@@ -177,6 +179,22 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       edge.applyMatrix4(mat4)
       reg(mesh, 'panel', !p.inOrder, p.anim); reg(edge, 'edge', !p.inOrder, p.anim)
       meshes.push(mesh); lines.push(edge)
+      if (p.carve) {
+        const sg = new THREE.BufferGeometry()
+        sg.setAttribute('position', new THREE.BufferAttribute(p.carve.pos, 3))
+        // UV как у основы — в мм по плоскости панели, чтобы текстура шла без шва
+        const uv = new Float32Array((p.carve.pos.length / 3) * 2)
+        for (let k = 0, q = 0; k < p.carve.pos.length; k += 3, q += 2) { uv[q] = p.carve.pos[k]; uv[q + 1] = p.carve.pos[k + 1] }
+        sg.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+        sg.computeVertexNormals()
+        const skin = new THREE.Mesh(sg, mesh.material)
+        skin.applyMatrix4(mat4)
+        skin.userData = p
+        const se = new THREE.LineSegments(new THREE.EdgesGeometry(sg, 12), lineMat)
+        se.applyMatrix4(mat4)
+        reg(skin, 'panel', !p.inOrder, p.anim); reg(se, 'edge', !p.inOrder, p.anim)
+        meshes.push(skin); lines.push(se)
+      }
       // отверстия: тёмный цилиндр, чуть выступающий из поверхности — виден и снаружи, и «на просвет»
       for (const d of p.drills) {
         const dir = new THREE.Vector3(d.d[0], d.d[1], d.d[2]).normalize()

@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { flipDetail } from '../lib/mirrorDetail'
 import { contourSegments, segmentSide } from '../lib/edgeLength'
+const Model3D = lazy(() => import('./Model3D'))
 
 // ─── База фурнитуры (конфирматы, шканты, полкодержатели, минификсы...) ───────
 // Единая для присадки по плоскости и по торцу. Хранится в Supabase, привязана
@@ -1841,6 +1842,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
   }
 
   const [tab, setTab] = useState('contour')
+  const [show3d, setShow3d] = useState(false)   // 3D-вид этой детали
   const [edgeName, setEdgeName] = useState('')   // название кромки для участков контура и вырезов
   const [activeIdx, setActiveIdx] = useState(null)
   const [activeHoleIdx, setActiveHoleIdx] = useState(null) // индекс редактируемого выреза
@@ -3002,6 +3004,27 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
             background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer' }}>
           ⇄ Перевернуть деталь (лицо ↔ изнанка)
         </button>
+      )}
+      {tab==='contour' && (
+        <button type="button" onClick={() => setShow3d(true)}
+          style={{ width:'100%', padding:'8px', marginBottom:8, border:'0.5px solid var(--blue-mid)', borderRadius:'var(--radius)',
+            background:'transparent', fontSize:12, color:'var(--blue)', cursor:'pointer' }}>
+          3D-вид детали
+        </button>
+      )}
+      {show3d && (
+        <Suspense fallback={null}>
+          <Model3D title={detail.name || 'Деталь'} onClose={() => setShow3d(false)}
+            details={[{
+              name: detail.name || contour.meta?.name || 'Деталь', w: h, h: w,
+              // деталь лежит лицом вверх: X — ширина, Y — длина, толщина — вверх
+              contour: { ...contour, meta: {
+                des: contour.meta?.des || '', material: contour.meta?.material || '', product: '',
+                thickness: defaultThickness, texDir: 2, turned: false, flipped: false,
+                local: { x0: 0, y0: 0, dx: w, dy: h }, inst: [[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]], ids: [0], anims: [null],
+              } },
+            }]} />
+        </Suspense>
       )}
 
       {/* ВЫРЕЗЫ */}

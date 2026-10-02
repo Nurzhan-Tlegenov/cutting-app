@@ -12,10 +12,13 @@ import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
 import { detailEdgeList, contourSegments, segmentSide } from '../lib/edgeLength'
+import { isTwoSided } from '../lib/partInfo'
 import { useLabelMode, rememberOrderDefaults } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import ContourEditor from '../components/ContourEditor'
+import Model3DButton from '../components/Model3DButton'
+import { loadOrderModel } from '../lib/orderModel'
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 
@@ -619,6 +622,17 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
       // Присадка — реальные точки сверления детали, повёрнутые вместе с ней
       const detail = details && details[p.detailIndex]
+      // Обработка с двух сторон — фиолетовая пунктирная рамка: деталь придётся переворачивать
+      if (detail && isTwoSided(detail)) {
+        ctx.save()
+        ctx.strokeStyle = '#7B1FA2'; ctx.lineWidth = 1.6; ctx.setLineDash([5, 3])
+        if (hasShape) {
+          ctx.beginPath()
+          p.polygon.forEach((pt, vi) => { const sx = x + pt.x * sc, sy = y + h - pt.y * sc; if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy) })
+          ctx.closePath(); ctx.stroke()
+        } else ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3)
+        ctx.restore()
+      }
       if (detail && detail.contour) {
         let contour = detail._parsedContour
         if (contour === undefined) {
@@ -657,7 +671,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
             }
             ctx.restore()
           }
-          const pts = getAllDrillPoints(contour, panelW, panelH, true)
+          const pts = getAllDrillPoints(contour, panelW, panelH)
           if (pts.length) {
             const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
             ctx.fillStyle = '#6A4A17'
@@ -667,7 +681,9 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
               const sx = x + fx * sc
               const sy = y + h - fy * sc
               const r = Math.max(1.3, (pt.d || 8) * sc / 2)
-              ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill()
+              ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2)
+              // с лица — закрашенный кружок (станок сверлит), с изнанки — пустой (только для сведения)
+              if (pt.back) { ctx.strokeStyle = '#7B1FA2'; ctx.lineWidth = 0.9; ctx.stroke() } else ctx.fill()
             })
           }
         }
@@ -2442,7 +2458,7 @@ export default function NestingPage() {
                           ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                           : (showOffcuts && offcutMode === 'cuts'
                             ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                            : 'Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб')}
+                            : 'Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый пунктир — обработка с двух сторон (пустые кружки — отверстия с изнанки)')}
                       </p>
                     </>
                   )}
@@ -2615,6 +2631,8 @@ export default function NestingPage() {
           <div style={{ fontWeight: 500 }}>Раскрой</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)', fontFamily: 'monospace' }}>{order.order_number}</div>
         </div>
+        {/* 3D открывается поверх страницы — раскрой при этом не сбрасывается */}
+        <Model3DButton details={details} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} />
       </div>
 
       {/* Статистика */}

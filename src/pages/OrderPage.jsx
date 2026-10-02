@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -6,21 +6,15 @@ import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { detailMeta } from '../lib/partLabel'
-import { hasModel } from '../lib/model3d'
+import Model3DButton from '../components/Model3DButton'
 import { detailEdgeList } from '../lib/edgeLength'
+import { isTwoSided } from '../lib/partInfo'
 import { loadOrderModel } from '../lib/orderModel'
-const Model3D = lazy(() => import('../components/Model3D'))
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { profile } = useAuth()
-  const [show3d, setShow3d] = useState(false)
-  const [scene3d, setScene3d] = useState(undefined)   // undefined — ещё не загружали
-  const open3d = async () => {
-    if (scene3d === undefined) setScene3d(await loadOrderModel(id))
-    setShow3d(true)
-  }
   const [sortMode, setSortMode] = useState('')   // сортировка списка деталей (только показ)
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
   const [order, setOrder] = useState(null)
@@ -103,12 +97,7 @@ export default function OrderPage() {
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
-          {hasModel(details) && (
-            <button onClick={open3d}
-              style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px' }}>
-              3D-модель
-            </button>
-          )}
+          <Model3DButton details={details} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} />
           <select value={sortMode} onChange={e => setSortMode(e.target.value)}
             style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--text-muted)', borderRadius: 20 }}>
             <option value="">Как в заказе</option>
@@ -136,7 +125,7 @@ export default function OrderPage() {
                 <tr key={d.id} style={{ borderTop: '0.5px solid var(--border)' }}>
                   <td style={{ padding: '8px 10px' }}>
                     {d.prefix && <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 500 }}>{d.prefix}</div>}
-                    <div>{detailMeta(d)?.des ? <span style={{ color: 'var(--text-hint)', marginRight: 5 }}>{detailMeta(d).des}</span> : null}{d.name}</div>
+                    <div>{detailMeta(d)?.des ? <span style={{ color: 'var(--text-hint)', marginRight: 5 }}>{detailMeta(d).des}</span> : null}{d.name}{isTwoSided(d, order.material_thickness) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇅ 2 стороны</span>}</div>
                   </td>
                   <td style={{ padding: '8px 6px', textAlign: 'center', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{d.length}×{d.width}</td>
                   <td style={{ padding: '8px 6px', textAlign: 'center' }}>{d.qty}</td>
@@ -164,11 +153,6 @@ export default function OrderPage() {
         🗑 Удалить заказ
       </button>
       <BottomNav />
-      {show3d && (
-        <Suspense fallback={null}>
-          <Model3D details={details} scene={scene3d || null} title={order.order_name || order.order_number} onClose={() => setShow3d(false)} />
-        </Suspense>
-      )}
     </div>
   )
 }

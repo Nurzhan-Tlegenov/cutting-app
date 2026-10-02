@@ -158,7 +158,8 @@ function buildLoops(elems) {
     used[i] = true
     const pts = [{ p: segs[i].a }]
     const ext = []
-    if (segs[i].mid) { pts.push({ p: segs[i].mid, arc: true }); ext.push(...segs[i].ext) }
+    const fine = []                       // подробная ломаная по петле (дуги — по точкам), в порядке обхода
+    if (segs[i].mid) { pts.push({ p: segs[i].mid, arc: true }); ext.push(...segs[i].ext); fine.push(...segs[i].ext.slice(0, -1)) } else fine.push(segs[i].a)
     const startP = segs[i].a
     let cur = segs[i].b, closed = false
     for (let guard = 0; guard <= segs.length; guard++) {
@@ -172,10 +173,14 @@ function buildLoops(elems) {
       if (found < 0) break
       used[found] = true
       pts.push({ p: cur })
-      if (segs[found].mid) { pts.push({ p: segs[found].mid, arc: true }); ext.push(...segs[found].ext) }
+      if (segs[found].mid) {
+        pts.push({ p: segs[found].mid, arc: true }); ext.push(...segs[found].ext)
+        const ex = rev ? [...segs[found].ext].reverse() : segs[found].ext
+        fine.push(...ex.slice(0, -1))
+      } else fine.push(cur)
       cur = rev ? segs[found].a : segs[found].b
     }
-    if (closed && pts.length >= 2) loops.push({ pts, ext })
+    if (closed && pts.length >= 2) loops.push({ pts, ext, fine })
     else open++
   }
   return { loops, open }
@@ -338,7 +343,14 @@ function convertPanel(panel, holes, faceRule) {
     const round = prof.some(e => e.t === 'A')
     const polys = round ? [] : lines.map(l => band(l.a, l.b, u0, u1)).filter(Boolean)
       .map(bd => [[bd.a[0] + bd.n[0] * u0, bd.a[1] + bd.n[1] * u0], [bd.b[0] + bd.n[0] * u0, bd.b[1] + bd.n[1] * u0], bd.q, [bd.a[0] + bd.n[0] * u1, bd.a[1] + bd.n[1] * u1]])
-    decorRaw.push({ kind: round ? 'round' : 'mill', name, sign, depth: Math.max(0, z1 - z0), top: top || !bottom, polys })
+    const isTop = top || !bottom
+    // профиль фрезы: [смещение от траектории влево, глубина от пласти]
+    const pl = buildLoops(prof).loops.find(lp => !lp.circle)
+    const profile = pl ? pl.fine.map(q => [r2(q[0]), r2(Math.max(0, isTop ? T - q[1] : q[1]))]) : null
+    // траектория: замкнутая петля или один отрезок
+    const tl = buildLoops(traj).loops.find(lp => !lp.circle)
+    const path = tl ? tl.fine : (lines.length === 1 ? [lines[0].a, lines[0].b] : null)
+    decorRaw.push({ kind: round ? 'round' : 'mill', name, sign, depth: Math.max(0, z1 - z0), top: isTop, polys, profile, path, closed: !!tl })
   }
 
   // --- какая пласть «лицевая» (смотрит вверх на станке): та, где больше глухой обработки ---
@@ -535,6 +547,11 @@ function convertPanel(panel, holes, faceRule) {
   const decor = decorRaw.map(dc => ({
     kind: dc.kind, name: dc.name, sign: dc.sign, depth: r1(dc.depth), face: dc.top !== flip ? 'front' : 'back',
     polys: dc.polys.map(pl => pl.map(q => { const t = tf(q); return [r1(t[0]), r1(t[1])] })),
+    // для объёмного показа: профиль фрезы и траектория (левая сторона траектории — та же, что в Базисе)
+    ...(dc.profile && dc.path ? {
+      profile: dc.profile, closed: dc.closed,
+      path: (flip ? [...dc.path].reverse() : dc.path).map(q => { const t = tf(q); return [r1(t[0]), r1(t[1])] }),
+    } : {}),
   }))
 
   // Свойства детали из Базиса — целиком, для бирки и подписи на карте раскроя

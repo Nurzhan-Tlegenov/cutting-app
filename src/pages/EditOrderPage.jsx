@@ -9,7 +9,9 @@ import LeaveConfirmModal from '../components/LeaveConfirmModal'
 import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
 import ImportDetails from '../components/ImportDetails'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
-import { saveOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
+import { isTwoSided } from '../lib/partInfo'
+import { saveOrderModel, loadOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
+import Model3DButton from '../components/Model3DButton'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -115,9 +117,10 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
         <button type="button" onClick={onRemove}
           style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1, flexShrink: 0 }}>✕</button>
       </div>
-      {detail.name && (
+      {(detail.name || isTwoSided(detail)) && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 36, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {detail.contour?.meta?.des ? `${detail.contour.meta.des} · ` : ''}{detail.name}
+          {isTwoSided(detail) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2' }}>⇅ 2 стороны</span>}
         </div>
       )}
 
@@ -478,6 +481,7 @@ export default function EditOrderPage() {
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
+          <Model3DButton details={details} title={orderName} getScene={async () => (model3d ? (await import('../lib/basisB3d')).unpackScene(model3d) : loadOrderModel(id))} />
           <select value="" onChange={e => { const m = e.target.value; if (m) setDetails(d => sortDetails(d, m)) }}
             style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--blue)', borderColor: 'var(--blue-mid)', borderRadius: 20 }}>
             <option value="">Сортировать…</option>

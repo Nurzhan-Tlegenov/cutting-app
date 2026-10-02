@@ -142,6 +142,14 @@ export default function ImportDetails({ hasDetails, onImport }) {
     if (basis?.scene) {
       try { const { packScene } = await import('../lib/basisB3d'); model3d = packScene(basis.scene) } catch { model3d = null }
     }
+    if (basis) {
+      // типы фасадных фрез из модели — в каталог пользователя (Профиль → Фасадные фрезы)
+      try {
+        const { millsFromItems, mergeMills } = await import('../lib/facadeCarve')
+        const found = millsFromItems(basis.items)
+        if (found.length) saveUserSettings({ facadeMills: mergeMills(getUserSettings(user).facadeMills, found) }, user)
+      } catch { /* каталог — не главное */ }
+    }
     const g = activeKey === ALL
       ? (result.groups.length === 1 ? result.groups[0] : null)
       : result.groups.find(x => x.key === activeKey)
@@ -317,7 +325,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
             )}
             {basis && sumInfo('decor') > 0 && (
               <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
-                Фрезеровка фасадов (скругление кромки, V-паз, выемка): {sumInfo('decor')} — переносится только для вида в 3D, на раскрой и присадку не влияет.
+                Фрезеровка фасадов (скругление кромки, V-паз, выемка): {sumInfo('decor')} — показывается объёмно в 3D, на раскрой и присадку не влияет. Типы фрез добавятся в Профиль → Фасадные фрезы.
               </div>
             )}
             {basis && (sumWarn('open') + sumWarn('edges') + sumWarn('edgeHoles') + sumWarn('cuts') > 0) && (

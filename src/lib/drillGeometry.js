@@ -320,7 +320,7 @@ export function getAllDrillPoints(contour, panelW, panelH, frontOnly = false) {
     if (frontOnly && dr.kind !== 'edge' && dr.face === 'back') return
     const d = dr.d || 8
     getDrillPoints(dr, panelW, panelH, contour.layout).forEach(p => {
-      pts.push({ x: p.x, y: p.y, d })
+      pts.push({ x: p.x, y: p.y, d, back: dr.kind !== 'edge' && dr.face === 'back' })
     })
   })
   return pts

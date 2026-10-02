@@ -1,12 +1,33 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav'
+import { getUserSettings, saveUserSettings, fetchUserSettings } from '../lib/userSettings'
+
+const KIND = { mill: 'Фреза по траектории', round: 'Скругление кромки', pocket: 'Выемка' }
+
+// Рисунок профиля фрезы: поверхность пласти сверху, материал снизу
+function MillIcon({ profile, depth }) {
+  if (!profile || profile.length < 3) return <div style={{ width: 64, height: 40, borderRadius: 6, background: 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--text-hint)' }}>{depth ? `↧ ${depth}` : ''}</div>
+  const us = profile.map(p => p[0]), ds = profile.map(p => p[1])
+  const u0 = Math.min(...us), u1 = Math.max(...us), d1 = Math.max(...ds, 1)
+  const pad = Math.max(2, (u1 - u0) * 0.25), w = u1 - u0 + pad * 2, h = d1 * 1.6
+  const pts = profile.map(p => `${(p[0] - u0 + pad).toFixed(2)},${p[1].toFixed(2)}`).join(' ')
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width={64} height={40} preserveAspectRatio="xMidYMin meet" style={{ borderRadius: 6, background: 'var(--bg2)', flexShrink: 0 }}>
+      <rect x={0} y={0} width={w} height={h} fill="#cbb89a" />
+      <polygon points={pts} fill="#ffffff" stroke="#185FA5" strokeWidth={Math.max(w, h) / 60} />
+    </svg>
+  )
+}
 
 export default function ProfilePage() {
   const { profile, user, signOut } = useAuth()
   const navigate = useNavigate()
   const [loggingOut, setLoggingOut] = useState(false)
+  const [mills, setMills] = useState(() => getUserSettings(user).facadeMills || [])
+  useEffect(() => { let alive = true; fetchUserSettings(user).then(s => { if (alive) setMills(s.facadeMills || []) }); return () => { alive = false } }, [user])
+  const removeMill = key => { const next = mills.filter(m => m.key !== key); setMills(next); saveUserSettings({ facadeMills: next }, user) }
 
   async function handleSignOut() {
     setLoggingOut(true)
@@ -60,6 +81,27 @@ export default function ProfilePage() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>Фасадные фрезы</div>
+        <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: mills.length ? 8 : 0 }}>
+          Типы фрезеровки фасадов. Добавляются сами при импорте модели из Базиса; по ним фасады показываются объёмно в 3D.
+          {!mills.length && ' Пока пусто — импортируйте модель с фрезерованными фасадами.'}
+        </p>
+        {mills.map(m => (
+          <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
+            <MillIcon profile={m.profile} depth={m.depth} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name || 'Без названия'}{m.sign ? ` · ${m.sign}` : ''}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
+                {KIND[m.kind] || m.kind}{m.depth ? ` · глубина ${m.depth} мм` : ''}{m.width ? ` · ширина ${m.width} мм` : ''}
+              </div>
+            </div>
+            <button onClick={() => removeMill(m.key)} title="Убрать из каталога"
+              style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 16, cursor: 'pointer' }}>✕</button>
+          </div>
+        ))}
       </div>
 
       <button

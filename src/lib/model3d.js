@@ -5,6 +5,7 @@
 import { verticesToPolygon } from './trueShapeNesting.js'
 import { detailHoles } from './partHoles.js'
 import { getDrillPoints } from './drillGeometry.js'
+import { buildRelief } from './facadeCarve.js'
 
 const num = v => Number(v) || 0
 
@@ -80,8 +81,32 @@ function partsOfDetail(d, inOrder, skipIds) {
       z: front ? frontZ : T - frontZ, depth: Math.min(num(g.depth) || 0, T),
     }
   }).filter(g => g.depth > 0)
-  // фрезеровка «для вида» (выемка, V-паз) — тоже вставкой в пласть
-  for (const dc of c.decor || []) {
+  // Фрезеровка фасада: если деталь прямоугольная — настоящий рельеф пласти по профилю фрезы
+  let carve = null
+  const plainRect = holes.length === 0 && verts.length === 4 && verts.every(v => !v.type && !(v.r > 0) &&
+    (Math.abs(v.x) < 0.1 || Math.abs(v.x - W) < 0.1) && (Math.abs(v.y) < 0.1 || Math.abs(v.y - L) < 0.1))
+  const relief = plainRect ? buildRelief(c.decor, W, L, T) : null
+  if (relief) {
+    const { xs, ys, depth, maxD } = relief
+    const zFace = relief.face === 'front' ? frontZ : T - frontZ
+    const zAt = dd => (zFace > T / 2 ? T - dd : dd)
+    const nx = xs.length, ny = ys.length
+    const P = (i, j) => { const q = toLocal([xs[i], ys[j]]); return [q[0], q[1], zAt(depth[j * nx + i])] }
+    const B = (i, j) => { const q = toLocal([xs[i], ys[j]]); return [q[0], q[1], zAt(maxD)] }
+    const pos = []
+    const tri = (a, b, cc) => pos.push(a[0], a[1], a[2], b[0], b[1], b[2], cc[0], cc[1], cc[2])
+    for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const a = P(i, j), b = P(i + 1, j), cc = P(i + 1, j + 1), dd = P(i, j + 1)
+      tri(a, b, cc); tri(a, cc, dd)
+    }
+    // юбка по периметру — от рельефа вниз до основы, чтобы не было щелей
+    const skirt = (i0, j0, i1, j1) => { const a = P(i0, j0), b = P(i1, j1), a2 = B(i0, j0), b2 = B(i1, j1); tri(a, b, b2); tri(a, b2, a2) }
+    for (let i = 0; i < nx - 1; i++) { skirt(i, 0, i + 1, 0); skirt(i, ny - 1, i + 1, ny - 1) }
+    for (let j = 0; j < ny - 1; j++) { skirt(0, j, 0, j + 1); skirt(nx - 1, j, nx - 1, j + 1) }
+    carve = { pos: new Float32Array(pos), maxD, top: zFace > T / 2 }
+  }
+  // иначе фрезеровка «для вида» (выемка, V-паз) — тёмной вставкой в пласть
+  for (const dc of (carve ? [] : c.decor || [])) {
     const front = dc.face !== 'back'
     for (const pl of dc.polys || []) {
       if (pl.length < 3) continue
@@ -94,7 +119,7 @@ function partsOfDetail(d, inOrder, skipIds) {
   meta.inst.forEach((m, i) => {
     const id = meta.ids?.[i]
     if (skipIds && id != null && skipIds.has(id)) return
-    out.push({ outline, holes, drills, grooves, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', size })
+    out.push({ outline, holes, drills, grooves, carve, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', size })
   })
   return out
 }
