@@ -364,12 +364,14 @@ export default function EditOrderPage() {
       if (thickness) setMaterialThickness(thickness)
     }
   }
-  const grouped = details.reduce((acc, d) => {
+  // Группы по префиксу — в том порядке, в каком идут детали (объект переставил бы числовые названия вперёд)
+  const grouped = []
+  const groupAt = new Map()
+  details.forEach(d => {
     const key = d.prefix || ''
-    if (!acc[key]) acc[key] = []
-    acc[key].push(d)
-    return acc
-  }, {})
+    if (!groupAt.has(key)) { groupAt.set(key, grouped.length); grouped.push([key, []]) }
+    grouped[groupAt.get(key)][1].push(d)
+  })
 
   // Есть ли несохранённые изменения относительно исходно загруженных данных
   const currentSnapshot = JSON.stringify({ orderName, materialName, materialThickness: Number(materialThickness)||16, details })
@@ -493,7 +495,7 @@ export default function EditOrderPage() {
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>
           <div style={{ width: 60, fontSize: 11, color: 'var(--text-hint)' }}>Кол-во</div>
         </div>
-        {Object.entries(grouped).map(([pfx, dets]) => (
+        {grouped.map(([pfx, dets]) => (
           <div key={pfx}>
             {pfx && <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--blue)', marginBottom: 4, marginTop: 8, padding: '4px 8px', background: 'var(--blue-light)', borderRadius: 'var(--radius)', display: 'inline-block' }}>{pfx}</div>}
             {dets.map((d) => {

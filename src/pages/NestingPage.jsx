@@ -1468,7 +1468,7 @@ export default function NestingPage() {
       edge_bottom: dr.edges.bottom || null, edge_left: dr.edges.left || null,
     }
     if (Object.keys(patch).every(k => (patch[k] || null) === (d[k] || null))) return   // ничего не меняли
-    const nd = { ...d, ...patch }
+    const nd = { ...d, ...patch, _parsedContour: undefined }   // сбросить кэш разобранного контура — иначе карта рисует старую присадку
     const shapeChanged = shapeKey(d) !== shapeKey(nd)
     if (shapeChanged && !window.confirm('Форма детали изменилась — готовый раскрой станет неверным и будет сброшен. Сохранить изменения?')) return
     const { error } = await supabase.from('order_details').update(patch).eq('id', d.id)

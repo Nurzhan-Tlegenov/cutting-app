@@ -496,6 +496,9 @@ function convertPanel(panel, holes, faceRule) {
     thickness: T, texDir,
     edges: edgeInfo,
     flipped: flip, turned: rot,                // как деталь повёрнута относительно модели
+    // для 3D-просмотра: габарит контура в системе панели и положение каждой штуки в модели
+    local: { x0: r2(x0), y0: r2(y0), dx: r2(dx), dy: r2(dy) },
+    inst: [panel.M.map((v, i) => (i < 9 ? Math.round(v * 1e6) / 1e6 : r2(v)))],
   }
   const contour = {
     vertices: isRect ? [{ x: 0, y: 0, r: 0 }, { x: r1(W), y: 0, r: 0 }, { x: r1(W), y: r1(L), r: 0 }, { x: 0, y: r1(L), r: 0 }] : vertices,
@@ -578,14 +581,14 @@ export function parseBasis(u8, opts = {}) {
   }
 
   // одинаковые детали одного изделия — в одну строку с количеством
-  const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' ? undefined : v))
+  const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' || k === 'inst' ? undefined : v))
   const map = new Map()
   for (const p of panels) {
     const it = convertPanel(p, holes, faceRule)
     if (!it) continue
     const key = [it.prefix, it.name, it.w, it.h, it.groupKey, JSON.stringify(it.edges), strip(it.contour)].join('§')
     const prev = map.get(key)
-    if (prev) { prev.qty++; prev.contour.meta.ids.push(...it.contour.meta.ids); for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
+    if (prev) { prev.qty++; prev.contour.meta.ids.push(...it.contour.meta.ids); prev.contour.meta.inst.push(...it.contour.meta.inst); for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
     else map.set(key, it)
   }
   const items = [...map.values()]

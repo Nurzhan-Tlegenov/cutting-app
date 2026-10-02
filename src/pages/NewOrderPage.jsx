@@ -519,12 +519,14 @@ export default function NewOrderPage() {
   const { showLeaveConfirm, stayOnPage, leavePage } = useLeaveGuard(hasUnsavedContent && !saving)
 
   // Группируем детали по префиксу для отображения
-  const grouped = details.reduce((acc, d) => {
+  // Группы по префиксу — в том порядке, в каком идут детали (объект переставил бы числовые названия вперёд)
+  const grouped = []
+  const groupAt = new Map()
+  details.forEach(d => {
     const key = d.prefix || ''
-    if (!acc[key]) acc[key] = []
-    acc[key].push(d)
-    return acc
-  }, {})
+    if (!groupAt.has(key)) { groupAt.set(key, grouped.length); grouped.push([key, []]) }
+    grouped[groupAt.get(key)][1].push(d)
+  })
 
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
@@ -641,7 +643,7 @@ export default function NewOrderPage() {
         </div>
 
         {/* Детали сгруппированные */}
-        {Object.entries(grouped).map(([pfx, dets]) => (
+        {grouped.map(([pfx, dets]) => (
           <div key={pfx}>
             {pfx && (
               <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--blue)', marginBottom: 4, marginTop: 8,
