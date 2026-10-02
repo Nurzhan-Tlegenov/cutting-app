@@ -267,7 +267,7 @@ export async function runNesting({
     const now = Date.now()
     if (!force && now - lastReport < 300) return
     lastReport = now; dirty = false
-    const sheets = cuttingMethod !== 'guillotine' ? gravityAll(best.sheets) : best.sheets
+    const sheets = cuttingMethod !== 'guillotine' ? wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY) : best.sheets
     // genome — порядок деталей + режим: по нему соседние потоки воспроизводят вариант у себя
     const genome = best.order ? { ids: best.order.map(p => p.id), mode: best.mode } : null
     onProgress({ sheets, iter, genome })
@@ -480,7 +480,7 @@ export async function runNesting({
   // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
   // Для форматно-раскроечного станка не применяется: там раскладка обязана
   // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
-  if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(best.sheets)
+  if (cuttingMethod !== 'guillotine') best.sheets = wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY)
   // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
   if (cuttingMethod !== 'guillotine') best.sheets = stripPermuteAll(rowSwapAll(best.sheets, usableX, usableY), usableX, usableY)
   // Страховка: признаки «мелкая» и её пороги — заново из исходных деталей (по id),
@@ -722,6 +722,62 @@ function permutations(arr, limit = 120) {
   const rec = (rest, acc) => { if (out.length >= limit) return; if (!rest.length) { out.push(acc); return } rest.forEach((x, i) => rec(rest.slice(0, i).concat(rest.slice(i + 1)), acc.concat([x]))) }
   rec(arr, [])
   return out
+}
+// ─── Порядок полос для фрезера: широкая → узкая ← широкая ───────────────────
+// На ЧПУ-фрезере лист держится вакуумом, и узкие полосы у края листа срывает.
+// Поэтому полосы раскладки (колонки и ряды, на каждом уровне дерева резов)
+// встают так: самые широкие — по краям, самые узкие — в середине. Состав листа
+// и плотность не меняются (полосы только меняются местами), пустое место
+// остаётся в конце — цельным остатком. Работает по обеим осям.
+// Если включено «мелкие — в центр», перестановка не должна добавлять мелких у края.
+function wideNarrowWide(sheet, usableX, usableY) {
+  if (sheet.placed.length < 3) return sheet
+  const placed = sheet.placed.map(p => ({ ...p }))
+  const root = buildCutTree(placed, 0, 0, usableX, usableY)
+  if (!root.kids) return sheet
+  const hasSmall = placed.some(p => p.isSmall)
+  const viol = () => { let n = 0; for (const p of placed) if (p.isSmall && smallEdgeSides(p, placed, usableX, usableY) > 0) n++; return n }
+  let changed = false
+  const visit = node => {
+    if (!node.kids) return
+    const thick = k => (node.dir === 'v' ? k.x1 - k.x0 : k.y1 - k.y0)
+    const full = node.kids.filter(k => k.parts.length), empty = node.kids.filter(k => !k.parts.length)
+    if (full.length >= 3) {
+      const sorted = full.slice().sort((a, b) => thick(b) - thick(a))
+      const left = [], right = []
+      sorted.forEach((k, i) => { if (i % 2 === 0) left.push(k); else right.unshift(k) })
+      const order = left.concat(right, empty)
+      if (order.some((k, i) => k !== node.kids[i])) {
+        const orig = node.kids.slice()
+        const before = hasSmall ? viol() : 0
+        layoutKids(node, order)
+        if (hasSmall && viol() > before) layoutKids(node, orig)
+        else changed = true
+      }
+    }
+    node.kids.forEach(visit)
+  }
+  visit(root)
+  if (!changed) return sheet
+  const next = { ...sheet, placed, family: 'maxrects', freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+  placed.forEach(pp => { split(next, pp); prune(next) })
+  updateFreeBounds(next)
+  return next
+}
+const wideNarrowWideAll = (sheets, usableX, usableY) => sheets.map(sh => wideNarrowWide(sh, usableX, usableY))
+// Насколько лист «узкими полосами к краю»: для каждой детали у края листа —
+// длина её стороны вдоль края × насколько она тонкая поперёк (тоньше NARROW_T мм).
+// 0 — у краёв только широкие детали. Меньше — лучше (для фрезера).
+const NARROW_T = 300
+function narrowEdgeScore(sheet, usableX, usableY) {
+  let sc = 0
+  for (const p of sheet.placed) {
+    const tx = Math.max(0, 1 - p.w / NARROW_T), ty = Math.max(0, 1 - p.h / NARROW_T)
+    // «у края» — и вплотную, и через полоску отхода до 80 мм (она деталь не держит)
+    if (tx > 0 && (p.x < 80 || p.x + p.w > usableX - 80)) sc += p.h * tx
+    if (ty > 0 && (p.y < 80 || p.y + p.h > usableY - 80)) sc += p.w * ty
+  }
+  return sc
 }
 function stripPermuteRepair(sheet, usableX, usableY, rand = Math.random) {
   if (!sheet.placed.some(p => p.isSmall)) return sheet
@@ -1836,12 +1892,20 @@ export function makePatternPool(pieces, modes, direction, usableX, usableY, rand
   const area = byKind.map(l => l[0].pw * l[0].ph)
   const packOne = (order, mode) => packPatternSheet(order, mode, direction, usableX, usableY, rand)
   const countOf = sh => { const c = new Array(R).fill(0); sh.placed.forEach(p => { const t = kIdx.get(p.detailIndex); if (t !== undefined) c[t]++ }); return c }
-  const pats = [], seen = new Set()
+  const pats = [], seen = new Map()
   const addPat = sh => {
     if (!sh || !sh.placed.length) return false
     const c = countOf(sh); const key = c.join(',')
-    if (seen.has(key)) return false
-    seen.add(key); pats.push({ c, sheet: { placed: sh.placed.map(p => ({ ...p })) } }); return true
+    // Полосы — «широкая → узкая ← широкая»; из двух раскладок одного состава
+    // остаётся та, где у краёв листа меньше узких деталей (плотность та же)
+    sh = wideNarrowWide(sh, usableX, usableY)
+    const score = narrowEdgeScore(sh, usableX, usableY)
+    const at = seen.get(key)
+    if (at !== undefined) {
+      if (score < pats[at].score - 1) { pats[at].sheet = { placed: sh.placed.map(p => ({ ...p })) }; pats[at].score = score }
+      return false
+    }
+    seen.set(key, pats.length); pats.push({ c, score, sheet: { placed: sh.placed.map(p => ({ ...p })) } }); return true
   }
   // стартовые шаблоны: по одному виду (гарантируют допустимость ЛП)
   for (let t = 0; t < R; t++) addPat(packOne(byKind[t].slice(0, Math.min(d[t], Math.ceil(S / area[t]) + 2)), modes[0]))
