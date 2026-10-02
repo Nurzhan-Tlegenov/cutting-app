@@ -10,6 +10,7 @@ import LeaveConfirmModal from '../components/LeaveConfirmModal'
 import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
 import ImportDetails from '../components/ImportDetails'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
+import { saveOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import { fetchUserSettings, ORDER_DEFAULT_COLS } from '../lib/userSettings'
 
 const SHEET_DEFAULTS = {
@@ -363,6 +364,7 @@ export default function NewOrderPage() {
   const [showEdge, setShowEdge] = useState(true)
 
   const [saving, setSaving] = useState(false)
+  const [model3d, setModel3d] = useState(null)   // 3D-модель из Базиса — сохраняется вместе с заказом
   const [keyboardOpen, setKeyboardOpen] = useState(false)
   const [error, setError] = useState('')
   const [lastAddedUid, setLastAddedUid] = useState(null)
@@ -417,7 +419,8 @@ export default function NewOrderPage() {
   }
 
   // Импорт деталей из таблицы (Excel / Базис-Мебельщик / PRO100)
-  const handleImport = ({ items, mode, material, thickness, orderName: importedName }) => {
+  const handleImport = ({ items, mode, material, thickness, orderName: importedName, model3d: importedModel }) => {
+    if (importedModel) setModel3d(importedModel)
     const imported = items.map(it => ({
       ...newDetail(),
       w: it.w, h: it.h, qty: it.qty,
@@ -501,6 +504,7 @@ export default function NewOrderPage() {
       })
       const { error: dErr } = await supabase.from('order_details').insert(rows)
       if (dErr) throw dErr
+      if (model3d) { const r = await saveOrderModel(order.id, model3d); if (!r.ok) window.alert(r.missing ? MODEL_TABLE_HINT : 'Заказ сохранён, но 3D-модель сохранить не удалось: ' + r.message) }
       navigate(`/orders/${order.id}`)
     } catch (err) {
       setError(err.message)

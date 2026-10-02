@@ -7,6 +7,7 @@ import BottomNav from '../components/BottomNav'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { detailMeta } from '../lib/partLabel'
 import { hasModel } from '../lib/model3d'
+import { loadOrderModel } from '../lib/orderModel'
 const Model3D = lazy(() => import('../components/Model3D'))
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
@@ -14,6 +15,11 @@ export default function OrderPage() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const [show3d, setShow3d] = useState(false)
+  const [scene3d, setScene3d] = useState(undefined)   // undefined — ещё не загружали
+  const open3d = async () => {
+    if (scene3d === undefined) setScene3d(await loadOrderModel(id))
+    setShow3d(true)
+  }
   const [sortMode, setSortMode] = useState('')   // сортировка списка деталей (только показ)
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
   const [order, setOrder] = useState(null)
@@ -99,7 +105,7 @@ export default function OrderPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
           {hasModel(details) && (
-            <button onClick={() => setShow3d(true)}
+            <button onClick={open3d}
               style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px' }}>
               3D-модель
             </button>
@@ -161,7 +167,7 @@ export default function OrderPage() {
       <BottomNav />
       {show3d && (
         <Suspense fallback={null}>
-          <Model3D details={details} title={order.order_name || order.order_number} onClose={() => setShow3d(false)} />
+          <Model3D details={details} scene={scene3d || null} title={order.order_name || order.order_number} onClose={() => setShow3d(false)} />
         </Suspense>
       )}
     </div>

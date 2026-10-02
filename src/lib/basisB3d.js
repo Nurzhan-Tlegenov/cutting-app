@@ -13,11 +13,12 @@
 //   (u32 число символов), 7 блоб (u32 длина), 8 пусто, 9 дата (double).
 //   Контур — блоб: u32 n, элементы: 0x10 отрезок (x1 y1 x2 y2),
 //   0x11 окружность (cx cy r), 0x12 дуга (центр, начало, конец, u8 ccw).
-import { inflateSync } from 'fflate'
+import { inflateSync, gzipSync, gunzipSync, strToU8, strFromU8 } from 'fflate'
 
 const EPS = 0.05
 const TYPE_PANEL = 4002
 const TYPE_FASTENER = 3001
+const TYPE_PROFILE = 2004     // профиль/погонаж: сечение (Contour), вытянутое на длину (Thickness)
 
 // ---------- Дерево ----------
 
@@ -551,12 +552,16 @@ export function parseBasis(u8, opts = {}) {
   for (const f of (kid(doc, 'FurnList')?.c || [])) furn.set(val(f, 'FastID'), f)
 
   const panels = [], holes = []
+  const profiles = [], hardware = []          // для 3D-просмотра всей модели
+  const roundM = M => M.map((v, i) => (i < 9 ? Math.round(v * 1e6) / 1e6 : r2(v)))
   const walk = (obj, M, ctx) => {
     const type = val(obj, 'Type')
     const Mo = mul(M, transOf(obj))
     if (type === TYPE_PANEL) panels.push({ obj, M: Mo, ctx })
+    else if (type === TYPE_PROFILE) profiles.push({ obj, M: Mo })
     else if (type === TYPE_FASTENER) {
       const f = furn.get(val(obj, 'FastID'))
+      if (f && val(f, 'TriData')) hardware.push({ f: val(obj, 'FastID'), m: roundM(Mo) })
       for (const h of (kid(f, 'Holes')?.c || [])) {
         const r = val(h, 'Radius', 0), depth = val(h, 'Depth', 0)
         if (!(r > 0) || !(depth > 0)) continue
@@ -602,11 +607,78 @@ export function parseBasis(u8, opts = {}) {
   const article = kid(kid(header, 'Header') || header, 'Article')
   const orderName = cleanName(val(article, 'OrderName')) || cleanName(val(article, 'Name'))
   for (const it of items) { it.contour.meta.order = orderName; it.contour.meta.model = cleanName(val(article, 'Name')) }
+  // --- вся модель для 3D: все панели (любой материал), профили и фурнитура с формой ---
+  const extras = []
+  for (const pr of profiles) {
+    let elems
+    try { elems = contourElems(val(pr.obj, 'Contour')) } catch { continue }
+    const { loops } = buildLoops(elems)
+    const polys = loops.map(lp => (lp.circle
+      ? Array.from({ length: 12 }, (_, i) => [r1(lp.circle.c[0] + lp.circle.r * Math.cos(i * Math.PI / 6)), r1(lp.circle.c[1] + lp.circle.r * Math.sin(i * Math.PI / 6))])
+      : lp.pts.map(v => [r1(v.p[0]), r1(v.p[1])])))
+      .filter(pl => pl.length > 2)
+    if (!polys.length) continue
+    const area = pl => { const xs = pl.map(q => q[0]), ys = pl.map(q => q[1]); return (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys)) }
+    polys.sort((a, b) => area(b) - area(a))
+    // несколько отдельных контуров (прутки сушки) — отдельные тела; иначе меньшие контуры — отверстия
+    const inside = polys.slice(1).every(pl => pointInPoly(pl[0], polys[0]))
+    const t = val(pr.obj, 'Thickness', 0)
+    if (!(t > 0)) continue
+    const base = { t: r1(t), m: roundM(pr.M), material: cleanName(val(pr.obj, 'Mat')), name: cleanName(val(pr.obj, 'Name')) }
+    if (inside) extras.push({ ...base, outline: polys[0], holes: polys.slice(1) })
+    else polys.forEach(pl => extras.push({ ...base, outline: pl, holes: [] }))
+  }
+  const meshes = {}
+  for (const hw of hardware) {
+    if (meshes[hw.f]) continue
+    try { meshes[hw.f] = { name: cleanName(val(furn.get(hw.f), 'Name')), groups: triData(val(furn.get(hw.f), 'TriData')) } } catch { meshes[hw.f] = { name: '', groups: [] } }
+  }
+  const scene = {
+    v: 1, order: orderName,
+    parts: items.map(it => ({ name: it.name, w: it.w, h: it.h, contour: it.contour })),
+    extras, meshes, hardware,
+  }
+
   return {
     orderName,
+    scene,
     items,
     groups: [...groups.values()].sort((a, b) => b.pieces - a.pieces),
   }
+}
+
+// Форма фурнитуры: группы [материал, матрица 4×4 (double), байт, число треугольников,
+// треугольники по 112 байт — первые 9 float32 это три вершины]. Координаты -> целые десятые мм.
+function triData(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength)
+  const n = dv.getUint32(0, true)
+  let p = 4
+  const groups = []
+  for (let g = 0; g < n; g++) {
+    const l = dv.getUint32(p, true); p += 4
+    const mat = cleanName(utf16.decode(b.subarray(p, p + 2 * l))); p += 2 * l
+    p += 128 + 1
+    const cnt = dv.getUint32(p, true); p += 4
+    const pos = new Array(cnt * 9)
+    for (let i = 0; i < cnt; i++) for (let k = 0; k < 9; k++) pos[i * 9 + k] = Math.round(dv.getFloat32(p + i * 112 + k * 4, true) * 10)
+    p += cnt * 112
+    groups.push({ mat, pos })
+  }
+  return groups
+}
+
+// Модель для хранения: JSON -> gzip -> base64 (в базе лежит текстом)
+export function packScene(scene) {
+  const z = gzipSync(strToU8(JSON.stringify(scene)), { level: 9 })
+  let bin = ''
+  for (let i = 0; i < z.length; i += 0x8000) bin += String.fromCharCode.apply(null, z.subarray(i, i + 0x8000))
+  return btoa(bin)
+}
+export function unpackScene(text) {
+  const bin = atob(text)
+  const z = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) z[i] = bin.charCodeAt(i)
+  return JSON.parse(strFromU8(gunzipSync(z)))
 }
 
 export async function readBasisFile(file, opts) {

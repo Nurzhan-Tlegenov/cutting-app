@@ -137,7 +137,11 @@ export default function ImportDetails({ hasDetails, onImport }) {
 
   const close = () => { setSheets(null); setBasis(null) }
 
-  const doImport = () => {
+  const doImport = async () => {
+    let model3d = null
+    if (basis?.scene) {
+      try { const { packScene } = await import('../lib/basisB3d'); model3d = packScene(basis.scene) } catch { model3d = null }
+    }
     const g = activeKey === ALL
       ? (result.groups.length === 1 ? result.groups[0] : null)
       : result.groups.find(x => x.key === activeKey)
@@ -150,6 +154,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
       material: g?.material || '',
       thickness: g?.thickness || null,
       orderName: basis?.orderName || '',
+      model3d,                                   // вся модель Базиса для 3D-просмотра (упакована)
     })
     close()
   }
