@@ -2,13 +2,15 @@ import { useState, useRef, useMemo } from 'react'
 import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importDetails'
 
 // Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, PRO100.
-// onImport({ items, mode: 'add' | 'replace', material, thickness })
+// Базис-Мебельщик читается и напрямую из файла модели .b3d — с контуром,
+// кромкой, пазами и присадкой.
+// onImport({ items, mode: 'add' | 'replace', material, thickness, orderName })
 
 const SOURCES = [
   { id: 'excel', icon: '📊', label: 'Excel / CSV',
     hint: 'Таблица .xlsx, .xls или .csv. Обязательны колонки Длина и Ширина, остальное — по желанию.' },
   { id: 'basis', icon: '📐', label: 'Базис-Мебельщик',
-    hint: 'В Базисе выгрузите список деталей (спецификацию) в Excel или CSV и выберите этот файл.' },
+    hint: 'Выберите файл модели Базиса (.b3d) — возьмём детали с контуром, кромкой, пазами и присадкой. Подойдёт и таблица деталей из Базиса в Excel/CSV.' },
   { id: 'pro100', icon: '🪑', label: 'PRO100',
     hint: 'В PRO100 откройте отчёт со списком деталей, сохраните его в Excel или CSV и выберите этот файл.' },
 ]
@@ -32,6 +34,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const [roles, setRoles] = useState([])
   const [groupKey, setGroupKey] = useState(ALL)
   const [mode, setMode] = useState('add')
+  const [basis, setBasis] = useState(null)       // разобранная модель .b3d (вместо таблицы)
 
   const rows = useMemo(() => (sheets ? sheets[sheetIdx].rows : []), [sheets, sheetIdx])
 
@@ -42,7 +45,13 @@ export default function ImportDetails({ hasDetails, onImport }) {
     setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
   }
 
-  const pick = (src) => { setSource(src); setError(''); fileRef.current?.click() }
+  const pick = (src) => {
+    setSource(src); setError('')
+    if (!fileRef.current) return
+    // у .b3d нет своего типа — с фильтром телефон может не дать выбрать файл
+    fileRef.current.accept = src.id === 'basis' ? '' : ACCEPT
+    fileRef.current.click()
+  }
 
   const onFile = async (e) => {
     const file = e.target.files?.[0]
@@ -50,6 +59,20 @@ export default function ImportDetails({ hasDetails, onImport }) {
     if (!file) return
     setBusy(true); setError('')
     try {
+      const head = new Uint8Array(await file.slice(0, 4).arrayBuffer())
+      const lower = file.name.toLowerCase()
+      if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
+        const { readBasisFile } = await import('../lib/basisB3d')
+        const res = await readBasisFile(file)
+        if (!res.items.length) throw new Error('в модели нет панелей')
+        setFileName(file.name); setSource(SOURCES[1]); setMode('add')
+        setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
+        setSheets(null); setBasis(res)
+        return
+      }
+      if (lower.endsWith('.sto')) {
+        throw new Error('файл проекта PRO100 (.sto) закрытого формата. Сохраните в PRO100 отчёт со списком деталей в Excel или CSV и выберите его.')
+      }
       const { sheets: sh } = await readTableFile(file)
       // берём лист, на котором распознано больше всего деталей
       let bestIdx = 0, bestCount = -1
@@ -58,7 +81,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
         const n = buildDetails(s.rows, a.headerRow, a.roles).items.length
         if (n > bestCount) { bestCount = n; bestIdx = i }
       })
-      setFileName(file.name); setSheets(sh); setMode('add')
+      setFileName(file.name); setBasis(null); setSheets(sh); setMode('add')
       applySheet(sh, bestIdx)
     } catch (err) {
       setError('Не удалось прочитать файл: ' + (err?.message || err))
@@ -68,27 +91,34 @@ export default function ImportDetails({ hasDetails, onImport }) {
   }
 
   const result = useMemo(
-    () => (sheets ? buildDetails(rows, headerRow, roles) : { items: [], skipped: 0, groups: [] }),
-    [sheets, rows, headerRow, roles]
+    () => (basis ? { items: basis.items, skipped: 0, groups: basis.groups }
+      : sheets ? buildDetails(rows, headerRow, roles) : { items: [], skipped: 0, groups: [] }),
+    [basis, sheets, rows, headerRow, roles]
   )
   const activeKey = groupKey === ALL || result.groups.some(g => g.key === groupKey) ? groupKey : ALL
   const chosen = activeKey === ALL ? result.items : result.items.filter(it => it.groupKey === activeKey)
   const pieces = chosen.reduce((s, it) => s + it.qty, 0)
-  const hasDims = (roles.includes('length') && roles.includes('width')) || roles.includes('size')
+  const hasDims = !!basis || (roles.includes('length') && roles.includes('width')) || roles.includes('size')
+  const sumInfo = k => chosen.reduce((s, it) => s + (it.info?.[k] || 0) * (k === 'shaped' ? 1 : it.qty), 0)
+  const sumWarn = k => chosen.reduce((s, it) => s + (it.warn?.[k] || 0), 0)
 
   const setRole = (ci, role) => setRoles(prev => prev.map((r, i) => (i === ci ? role : (role && r === role ? '' : r))))
 
-  const close = () => setSheets(null)
+  const close = () => { setSheets(null); setBasis(null) }
 
   const doImport = () => {
     const g = activeKey === ALL
       ? (result.groups.length === 1 ? result.groups[0] : null)
       : result.groups.find(x => x.key === activeKey)
     onImport({
-      items: chosen.map(it => ({ name: it.name, w: it.w, h: it.h, qty: it.qty, edges: it.edges, prefix: it.prefix })),
+      items: chosen.map(it => ({
+        name: it.name, w: it.w, h: it.h, qty: it.qty, edges: it.edges, prefix: it.prefix,
+        contour: it.contour || null, rotatable: !!it.rotatable,
+      })),
       mode: hasDetails ? mode : 'replace',
       material: g?.material || '',
       thickness: g?.thickness || null,
+      orderName: basis?.orderName || '',
     })
     close()
   }
@@ -120,7 +150,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
         {error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
       </div>
 
-      {sheets && (
+      {(sheets || basis) && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'var(--bg2)', display: 'flex', flexDirection: 'column' }}>
           {/* Шапка */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
@@ -135,7 +165,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
           <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
             <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 12 }}>{source.hint}</p>
 
-            {sheets.length > 1 && (
+            {sheets && sheets.length > 1 && (
               <div style={{ marginBottom: 12 }}>
                 <label className="label">Лист</label>
                 <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
@@ -147,6 +177,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
             )}
 
             {/* Колонки */}
+            {sheets && <>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
               <label className="label" style={{ marginBottom: 0 }}>Колонки — проверьте, что распознано верно</label>
               <select value={headerRow} onChange={e => applySheet(sheets, sheetIdx, Number(e.target.value))}
@@ -192,6 +223,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 </tbody>
               </table>
             </div>
+            </>}
 
             {!hasDims && (
               <p className="error-text" style={{ marginBottom: 12 }}>
@@ -227,23 +259,49 @@ export default function ImportDetails({ hasDetails, onImport }) {
             )}
 
             {/* Что получится */}
+            {basis && chosen.length > 0 && (
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+                Присадка: {sumInfo('holes')} отв. · пазов: {sumInfo('grooves')} · фигурных деталей: {sumInfo('shaped')} · вырезов: {sumInfo('cutouts')}
+              </p>
+            )}
+            {basis && (sumWarn('open') + sumWarn('edges') + sumWarn('edgeHoles') + sumWarn('cuts') > 0) && (
+              <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
+                Не всё удалось перенести — проверьте эти детали в редакторе контура:
+                {sumWarn('open') > 0 && <div>· незамкнутый контур: {sumWarn('open')}</div>}
+                {sumWarn('edges') > 0 && <div>· кромка на фигурном крае: {sumWarn('edges')}</div>}
+                {sumWarn('edgeHoles') > 0 && <div>· торцевые отверстия не на прямой стороне: {sumWarn('edgeHoles')}</div>}
+                {sumWarn('cuts') > 0 && <div>· пазы/профили сложной формы: {sumWarn('cuts')}</div>}
+              </div>
+            )}
             {chosen.length > 0 && (
               <div style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '8px 10px', fontSize: 12 }}>
-                {chosen.slice(0, 5).map((it, i) => {
+                {chosen.slice(0, basis ? 300 : 5).map((it, i) => {
                   const e = it.edges
                   const edgeTxt = [['left', 'Дл'], ['right', 'Дп'], ['top', 'Шв'], ['bottom', 'Шн']]
-                    .filter(([k]) => e[k]).map(([k, s]) => (e[k] === 'default' ? s : `${s}:${e[k]}`)).join(' ')
+                    .filter(([k]) => e[k]).map(([k, s]) => (basis || e[k] === 'default' ? s : `${s}:${e[k]}`)).join(' ')
+                  const inf = it.info
+                  const extra = inf ? [
+                    inf.shaped && 'контур', inf.cutouts > 0 && `вырезов ${inf.cutouts}`,
+                    inf.holes > 0 && `отв. ${inf.holes}`, inf.grooves > 0 && `паз ${inf.grooves}`,
+                  ].filter(Boolean).join(' · ') : ''
                   return (
-                    <div key={i} style={{ display: 'flex', gap: 8, padding: '3px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
-                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
-                        {it.prefix ? `${it.prefix} · ` : ''}{it.name || `Деталь ${i + 1}`}
-                      </span>
-                      <span style={{ whiteSpace: 'nowrap' }}>{it.w}×{it.h} — {it.qty} шт.</span>
-                      {edgeTxt && <span style={{ color: 'var(--blue)', whiteSpace: 'nowrap' }}>{edgeTxt}</span>}
+                    <div key={i} style={{ padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+                          {it.prefix ? `${it.prefix} · ` : ''}{it.name || `Деталь ${i + 1}`}
+                        </span>
+                        <span style={{ whiteSpace: 'nowrap' }}>{it.w}×{it.h} — {it.qty} шт.</span>
+                      </div>
+                      {(edgeTxt || extra) && (
+                        <div style={{ display: 'flex', gap: 8, fontSize: 11 }}>
+                          {edgeTxt && <span style={{ color: 'var(--blue)', whiteSpace: 'nowrap' }}>{edgeTxt}</span>}
+                          {extra && <span style={{ color: 'var(--teal)' }}>{extra}</span>}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
-                {chosen.length > 5 && <div style={{ color: 'var(--text-hint)', paddingTop: 4 }}>…и ещё {chosen.length - 5}</div>}
+                {chosen.length > (basis ? 300 : 5) && <div style={{ color: 'var(--text-hint)', paddingTop: 4 }}>…и ещё {chosen.length - (basis ? 300 : 5)}</div>}
               </div>
             )}
           </div>

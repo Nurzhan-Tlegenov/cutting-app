@@ -340,14 +340,17 @@ export default function EditOrderPage() {
     updateDetail(targetUid, patch)
   }
   // Импорт деталей из таблицы (Excel / Базис-Мебельщик / PRO100)
-  const handleImport = ({ items, mode, material, thickness }) => {
+  const handleImport = ({ items, mode, material, thickness, orderName: importedName }) => {
     const imported = items.map(it => ({
       ...makeDetail(null),
       w: it.w, h: it.h, qty: it.qty,
       name: it.name || null,
       prefix: it.prefix || activePrefix || null,
       edges: { ...it.edges },
+      rotatable: !!it.rotatable,
+      ...(it.contour ? { contour: it.contour } : {}),
     }))
+    if (importedName && !orderName.trim()) setOrderName(importedName)
     const isFilled = d => Number(d.w) > 0 || Number(d.h) > 0 || Number(d.qty) > 0
     setLastAddedUid(null)
     setDetails(prev => [...(mode === 'replace' ? [] : prev.filter(isFilled)), ...imported])
