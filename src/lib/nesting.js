@@ -419,7 +419,7 @@ export async function runNesting({
       if (best.stat.smallEdge > 0) {
         // сначала дешёвая перестановка в рядах (мелкую — внутрь, соседа — к краю)
         // (для пилы — нет: перестановка в ряду может сломать сквозные резы)
-        const swapped = cuttingMethod === 'guillotine' ? best.sheets : rowSwapAll(best.sheets, usableX, usableY)
+        const swapped = cuttingMethod === 'guillotine' ? best.sheets : stripPermuteAll(rowSwapAll(best.sheets, usableX, usableY), usableX, usableY)
         if (swapped !== best.sheets) {
           const st = evaluate(swapped, usableX, usableY)
           if (better(st, best.stat)) { best = { ...best, sheets: swapped, stat: st }; sqBase = best; sqCur = swapped; dirty = true; lastGain = Date.now() }
@@ -480,7 +480,7 @@ export async function runNesting({
   // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
   if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(best.sheets)
   // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
-  if (cuttingMethod !== 'guillotine') best.sheets = rowSwapAll(best.sheets, usableX, usableY)
+  if (cuttingMethod !== 'guillotine') best.sheets = stripPermuteAll(rowSwapAll(best.sheets, usableX, usableY), usableX, usableY)
 
   return { sheets: best.sheets, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }
@@ -659,6 +659,212 @@ function rowSwapRepair(sheet, usableX, usableY) {
 const rowSwapAll = (sheets, usableX, usableY) => {
   let changed = false
   const out = sheets.map(sh => { const r = rowSwapRepair(sh, usableX, usableY); if (r !== sh) changed = true; return r })
+  return changed ? out : sheets
+}
+
+// ─── Перестановка полос листа: мелкие — внутрь без перекладки ───────────────
+// Плотная раскладка почти всегда режется на полосы (колонки/ряды, внутри —
+// снова полосы). Если переставить полосы местами (и зеркально отразить), лист
+// остаётся тем же по составу и плотности, детали не пересекаются, а мелкие
+// уходят от края: полоса с мелкими — в середину, пустое место и полосы из
+// крупных — к краям. Так можно сначала раскроить без правила «мелкие — в
+// центр» (плотнее и быстрее), а потом довести мелкие до середины.
+function buildCutTree(parts, x0, y0, x1, y1, depth = 0) {
+  const node = { x0, y0, x1, y1, parts, kids: null, dir: null }
+  if (parts.length <= 1 || depth > 12) return node
+  for (const dir of ['v', 'h']) {
+    const lo = p => (dir === 'v' ? p.x : p.y), hi = p => (dir === 'v' ? p.x + p.w : p.y + p.h)
+    const a0 = dir === 'v' ? x0 : y0, a1 = dir === 'v' ? x1 : y1
+    // разрезы: позиции, которые не пересекает ни одна деталь
+    const cand = [...new Set(parts.flatMap(p => [lo(p), hi(p)]))].filter(c => c > a0 + 0.01 && c < a1 - 0.01).sort((a, b) => a - b)
+    const cuts = cand.filter(c => parts.every(p => hi(p) <= c + 0.01 || lo(p) >= c - 0.01))
+    if (!cuts.length) continue
+    const bounds = [a0, ...cuts, a1]
+    const kids = []
+    for (let i = 0; i + 1 < bounds.length; i++) {
+      const b0 = bounds[i], b1 = bounds[i + 1]
+      const ps = parts.filter(p => lo(p) >= b0 - 0.01 && hi(p) <= b1 + 0.01)
+      kids.push(dir === 'v' ? buildCutTree(ps, b0, y0, b1, y1, depth + 1) : buildCutTree(ps, x0, b0, x1, b1, depth + 1))
+    }
+    node.kids = kids; node.dir = dir
+    return node
+  }
+  return node
+}
+// Сдвинуть поддерево на (dx, dy) и/или отразить внутри своего прямоугольника
+function moveTree(node, dx, dy) {
+  node.x0 += dx; node.x1 += dx; node.y0 += dy; node.y1 += dy
+  if (node.kids) node.kids.forEach(k => moveTree(k, dx, dy))
+  else node.parts.forEach(p => { p.x += dx; p.y += dy })
+}
+function layoutKids(node, order) {
+  let c = node.dir === 'v' ? node.x0 : node.y0
+  for (const k of order) {
+    const len = node.dir === 'v' ? k.x1 - k.x0 : k.y1 - k.y0
+    if (node.dir === 'v') moveTree(k, c - k.x0, 0); else moveTree(k, 0, c - k.y0)
+    c += len
+  }
+  node.kids = order
+}
+function permutations(arr, limit = 120) {
+  const out = []
+  const rec = (rest, acc) => { if (out.length >= limit) return; if (!rest.length) { out.push(acc); return } rest.forEach((x, i) => rec(rest.slice(0, i).concat(rest.slice(i + 1)), acc.concat([x]))) }
+  rec(arr, [])
+  return out
+}
+function stripPermuteRepair(sheet, usableX, usableY, rand = Math.random) {
+  if (!sheet.placed.some(p => p.isSmall)) return sheet
+  const placed = sheet.placed.map(p => ({ ...p }))
+  const viol = () => { let n = 0; for (const p of placed) if (p.isSmall && smallEdgeSides(p, placed, usableX, usableY) > 0) n++; return n }
+  let cur = viol()
+  if (!cur) return sheet
+  const root = buildCutTree(placed, 0, 0, usableX, usableY)
+  const nodes = []
+  const walk = n => { if (n.kids) { nodes.push(n); n.kids.forEach(walk) } }
+  walk(root)
+  if (!nodes.length) return sheet
+  for (let pass = 0; pass < 3 && cur > 0; pass++) {
+    let improved = false
+    for (const node of nodes) {
+      const orig = node.kids.slice()
+      let perms = orig.length <= 5 ? permutations(orig) : null
+      if (!perms) {
+        perms = [orig.slice().reverse()]
+        for (let r = 0; r < 40; r++) { const a = orig.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] } perms.push(a) }
+      }
+      let bestOrder = null
+      for (const ord of perms) {
+        layoutKids(node, ord)
+        const v = viol()
+        if (v < cur) { cur = v; bestOrder = ord }
+      }
+      layoutKids(node, bestOrder || orig)
+      if (bestOrder) improved = true
+      if (!cur) break
+    }
+    if (!improved) break
+  }
+  const next = { ...sheet, placed, family: 'maxrects', freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+  placed.forEach(pp => { split(next, pp); prune(next) })
+  updateFreeBounds(next)
+  return next
+}
+// Обмен одинаковыми по размеру блоками между листами: блок (полоса/группа)
+// с мелкими у края на листе A меняется местами с таким же по размеру блоком
+// без мелких на листе B, если там мелкие окажутся внутри. Листы сами по себе
+// не перекладываются — состав и плотность те же, меняется только, где какая
+// группа деталей стоит. Так мелкие «расходятся» по листам: на листе, где их
+// целая сетка (400×400 ×12), часть уезжает внутрь других листов.
+function blockSwapRepair(sheets, usableX, usableY, maxSwaps = 200) {
+  const S = sheets.map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p })) }))
+  const violOf = list => { let n = 0; for (const p of list) if (p.isSmall && smallEdgeSides(p, list, usableX, usableY) > 0) n++; return n }
+  const v = S.map(sh => violOf(sh.placed))
+  let swaps = 0, changed = new Set()
+  const key = n => Math.round((n.x1 - n.x0) * 2) + 'x' + Math.round((n.y1 - n.y0) * 2)
+  for (let round = 0; round < 6 && swaps < maxSwaps; round++) {
+    // все блоки всех листов
+    const byKey = new Map()
+    const trees = S.map((sh, si) => {
+      const root = buildCutTree(sh.placed, 0, 0, usableX, usableY)
+      const walk = n => {
+        if (n !== root && n.parts.length) { const k = key(n); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push({ si, n }) }
+        if (n.kids) n.kids.forEach(walk)
+      }
+      walk(root)
+      return root
+    })
+    let any = false
+    for (let si = 0; si < S.length && swaps < maxSwaps; si++) {
+      if (!v[si]) continue
+      // блоки листа si, где есть мелкая у края
+      const bad = []
+      const walk = n => { if (n !== trees[si] && n.parts.some(p => p.isSmall && smallEdgeSides(p, S[si].placed, usableX, usableY) > 0)) bad.push(n); if (n.kids) n.kids.forEach(walk) }
+      walk(trees[si])
+      bad.sort((a, b) => (a.x1 - a.x0) * (a.y1 - a.y0) - (b.x1 - b.x0) * (b.y1 - b.y0)) // сначала мелкие блоки
+      let done = false
+      for (const X of bad) {
+        const cands = byKey.get(key(X)) || []
+        for (const { si: sj, n: Y } of cands) {
+          if (sj === si || Y.parts.length === 0) continue
+          if (Y.parts === X.parts) continue
+          const dx = Y.x0 - X.x0, dy = Y.y0 - X.y0
+          const xIds = new Set(X.parts.map(p => p.id)), yIds = new Set(Y.parts.map(p => p.id))
+          const A2 = S[si].placed.filter(p => !xIds.has(p.id)).concat(Y.parts.map(p => ({ ...p, x: p.x - dx, y: p.y - dy })))
+          const B2 = S[sj].placed.filter(p => !yIds.has(p.id)).concat(X.parts.map(p => ({ ...p, x: p.x + dx, y: p.y + dy })))
+          const va = violOf(A2), vb = violOf(B2)
+          if (va + vb < v[si] + v[sj]) {
+            S[si].placed = A2; S[sj].placed = B2; v[si] = va; v[sj] = vb
+            changed.add(si); changed.add(sj); swaps++; any = true; done = true
+            break
+          }
+        }
+        if (done) break
+      }
+    }
+    if (!any) break
+  }
+  if (!changed.size) return sheets
+  return S.map((sh, i) => {
+    if (!changed.has(i)) return sheets[i]
+    const next = { ...sh, family: 'maxrects', freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+    next.placed.forEach(pp => { split(next, pp); prune(next) })
+    updateFreeBounds(next)
+    return next
+  })
+}
+// Починка «островами»: лист с мелкими у края + 1–2 соседних листа
+// раскладываются заново — в каждом листе мелкие собираются в блок внутри,
+// крупные вокруг (packBlockSheet), мелкие делятся между листами поровну.
+// Берётся, если листов столько же, а мелких у края меньше.
+function repairSmallBlocks(sheets, modes, direction, usableX, usableY, attempts, rand = Math.random) {
+  let cur = sheets
+  const violOf = sh => smallAtEdge([sh], usableX, usableY)
+  for (let a = 0; a < attempts; a++) {
+    const bad = []
+    cur.forEach((sh, i) => { if (violOf(sh) > 0) bad.push(i) })
+    if (!bad.length) break
+    const idx = [bad[Math.floor(rand() * bad.length)]]
+    const extra = rand() < 0.4 ? 1 : 2
+    for (let g = 0; idx.length < 1 + extra && g < 20; g++) {
+      const j = Math.floor(rand() * cur.length)
+      if (!idx.includes(j)) idx.push(j)
+    }
+    const k = idx.length
+    const before = idx.reduce((t, j) => t + violOf(cur[j]), 0)
+    const pool = idx.flatMap(j => cur[j].placed).map(placedToPiece)
+    const smalls = shuffle(pool.filter(p => p.isSmall)), bigs = pool.filter(p => !p.isSmall)
+    let rest = bigs.sort((x, y) => y.pw * y.ph - x.pw * x.ph)
+    if (rand() < 0.5) rest = perturbOrder(rest, rand() < 0.5)
+    let smallLeft = smalls.slice()
+    const out = []
+    for (let i = 0; i < k; i++) {
+      const share = Math.ceil(smallLeft.length / (k - i))
+      const mySmalls = smallLeft.slice(0, share)
+      const mode = modes[Math.floor(rand() * modes.length)]
+      const sh = (mySmalls.length ? packBlockSheet : packOneSheet)(rest.concat(mySmalls), mode, direction, usableX, usableY, rand)
+      const ids = new Set(sh.placed.map(p => p.id))
+      rest = rest.filter(p => !ids.has(p.id))
+      smallLeft = smallLeft.filter(p => !ids.has(p.id))
+      out.push(sh)
+    }
+    if (rest.length || smallLeft.length) continue // не влезло в те же листы
+    const after = out.reduce((t, sh) => t + violOf(sh), 0)
+    if (after >= before) continue
+    const next = cur.slice()
+    idx.forEach((j, t) => { next[j] = { ...out[t], index: cur[j].index } })
+    cur = next
+  }
+  return cur
+}
+const stripPermuteAll = (sheets, usableX, usableY) => {
+  let changed = false
+  const out = sheets.map(sh => {
+    const before = smallAtEdge([sh], usableX, usableY)
+    if (!before) return sh
+    const r = stripPermuteRepair(sh, usableX, usableY)
+    if (r !== sh && smallAtEdge([r], usableX, usableY) < before) { changed = true; return r }
+    return sh
+  })
   return changed ? out : sheets
 }
 
@@ -1425,8 +1631,20 @@ function packBlockSheet(order, mode, direction, usableX, usableY, rand) {
   return stripEdgeSmall(sheet, usableX, usableY)
 }
 
+// Без правила «мелкие — в центр»: самый плотный лист, потом мелкие — внутрь
+// перестановкой полос (stripEdgeSmall → stripPermuteRepair), что не вышло — убирается
+function packDenseThenFix(order, mode, direction, usableX, usableY) {
+  const plain = order.map(p => (p.isSmall ? { ...p, isSmall: false, _small: true } : p))
+  const sh = packOneSheet(plain, mode, direction, usableX, usableY)
+  sh.placed = sh.placed.map(p => (p._small ? { ...p, isSmall: true, _small: undefined } : p))
+  return stripEdgeSmall(sh, usableX, usableY)
+}
 function packPatternSheet(order, mode, direction, usableX, usableY, rand = Math.random) {
-  if (order.some(p => p.isSmall) && rand() < 0.6) return packBlockSheet(order, mode, direction, usableX, usableY, rand)
+  if (order.some(p => p.isSmall)) {
+    const r = rand()
+    if (r < 0.7) return packDenseThenFix(order, mode, direction, usableX, usableY)
+    if (r < 0.75) return packBlockSheet(order, mode, direction, usableX, usableY, rand)
+  }
   return packOneSheet(order, mode, direction, usableX, usableY)
 }
 
@@ -1514,6 +1732,8 @@ export function svcPack(pieces, modes, direction, usableX, usableY, budgetMs, on
 // поэтому повторяем. freeRects пересобираются.
 function stripEdgeSmall(sheet, usableX, usableY) {
   if (!sheet.placed.some(p => p.isSmall)) return sheet
+  // сначала — перестановкой полос (детали остаются на листе)
+  if (smallAtEdge([sheet], usableX, usableY) > 0) sheet = stripPermuteRepair(sheet, usableX, usableY)
   let placed = sheet.placed
   for (let g = 0; g < 20; g++) {
     const bad = placed.filter(p => p.isSmall && smallEdgeSides(p, placed, usableX, usableY) > 0)
@@ -1719,3 +1939,140 @@ export async function colgenPack(pieces, modes, direction, usableX, usableY, bud
   return { sheets, lowerBound: pool.lowerBound, patterns: pool.size, pool }
 }
 export { buildPieces as _buildPieces }
+
+// ─── Доводка: мелкие — внутрь, число листов не меняется ─────────────────────
+// Для раскладки, найденной без учёта мелких (так ищется плотнее всего), — потом
+// мелкие у края переставляются внутрь: перестановка с соседом, перекладка
+// листа вместе с 0–2 другими (мелкие — после крупных). Листов больше не станет:
+// перекладка принимается, только если листов не больше, а мелких у края меньше.
+export async function fixSmallEdges(sheets, modes, direction, usableX, usableY, budgetMs, shouldStop = () => false) {
+  const t0 = Date.now()
+  let cur = rowSwapAll(sheets, usableX, usableY)
+  let st = evaluate(cur, usableX, usableY)
+  while (st.smallEdge > 0 && Date.now() - t0 < budgetMs && !shouldStop()) {
+    const next = repairSmall(cur, modes, direction, usableX, usableY, 40)
+    if (next !== cur) {
+      const s2 = evaluate(next, usableX, usableY)
+      if (s2.sheetCount <= st.sheetCount && s2.smallEdge < st.smallEdge) { cur = rowSwapAll(next, usableX, usableY); st = evaluate(cur, usableX, usableY) }
+    }
+    await new Promise(r => setTimeout(r, 0))
+  }
+  return cur
+}
+export { buildPieces as _buildPieces2 }
+
+// ─── Починка «мелкие у края» окном ───────────────────────────────────────────
+// Мелкая деталь у края + несколько ближайших соседей: их общий габарит («окно»,
+// в которое не заходят другие детали) раскладывается заново — крупные первыми,
+// мелкие последними, с запретом «у края». Остальной лист не трогается, листов
+// не прибавляется. Так плотная раскладка без требования «мелкие в центр»
+// доводится до требования, почти не теряя плотности: мелкая уходит вглубь, а к
+// краю встаёт сосед покрупнее.
+function windowRepairSheet(sheet, modes, direction, usableX, usableY, attempts, rand = Math.random) {
+  let placed = sheet.placed
+  const viol = list => list.reduce((n, p) => n + (p.isSmall && smallEdgeSides(p, list, usableX, usableY) > 0 ? 1 : 0), 0)
+  let cur = viol(placed)
+  if (!cur) return sheet
+  let changed = false
+  const inter = (a, b) => a.x < b.x + b.w - 0.01 && b.x < a.x + a.w - 0.01 && a.y < b.y + b.h - 0.01 && b.y < a.y + a.h - 0.01
+  for (let a = 0; a < attempts && cur > 0; a++) {
+    const bad = placed.filter(p => p.isSmall && smallEdgeSides(p, placed, usableX, usableY) > 0)
+    const S = bad[Math.floor(rand() * bad.length)]
+    const cx = S.x + S.w / 2, cy = S.y + S.h / 2
+    const k = 2 + Math.floor(rand() * 7)
+    const near = placed.filter(p => p !== S).map(p => ({ p, d: Math.hypot(p.x + p.w / 2 - cx, p.y + p.h / 2 - cy) }))
+      .sort((u, v) => u.d - v.d).slice(0, k).map(o => o.p)
+    let set = new Set([S, ...near])
+    // окно — габарит набора; детали, задевающие окно, тоже в набор (до замыкания)
+    let win = null
+    for (let g = 0; g < 10; g++) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+      set.forEach(p => { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.h) })
+      win = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+      const extra = placed.filter(p => !set.has(p) && inter(p, win))
+      if (!extra.length) break
+      extra.forEach(p => set.add(p))
+      win = null
+    }
+    if (!win || set.size > 16) continue
+    const outside = placed.filter(p => !set.has(p))
+    const pool = [...set].map(placedToPiece)
+    const bigs = pool.filter(p => !p.isSmall), smalls = pool.filter(p => p.isSmall)
+    const r = rand()
+    const sortA = list => list.sort((x, y) => y.pw * y.ph - x.pw * x.ph)
+    const order = (r < 0.4 || bigs.length < 2 ? sortA(bigs) : r < 0.8 ? perturbOrder(sortA(bigs), rand() < 0.5) : shuffle(bigs))
+      .concat(rand() < 0.5 ? sortA(smalls) : shuffle(smalls))
+    const mode = modes[Math.floor(rand() * modes.length)]
+    const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
+    const tmp = { placed: outside.slice(), freeRects: [{ ...win }], family: 'maxrects' }
+    let ok = true
+    for (const piece of order) {
+      const res = chooseSpot(tmp.freeRects, piece, direction, usableX, usableY, scoreMode, tmp.placed)
+      if (!res) { ok = false; break }
+      tmp.placed.push(res); split(tmp, res); prune(tmp)
+    }
+    if (!ok) continue
+    const v = viol(tmp.placed)
+    if (v < cur) { placed = tmp.placed; cur = v; changed = true }
+  }
+  if (!changed) return sheet
+  const next = { ...sheet, placed, family: 'maxrects', freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+  placed.forEach(pp => { split(next, pp); prune(next) })
+  updateFreeBounds(next)
+  return next
+}
+export function windowRepairAll(sheets, modes, direction, usableX, usableY, attemptsPerSheet = 40, rand = Math.random) {
+  let changed = false
+  const out = sheets.map(sh => {
+    if (!sh.placed.some(p => p.isSmall)) return sh
+    const r = windowRepairSheet(sh, modes, direction, usableX, usableY, attemptsPerSheet, rand)
+    if (r !== sh) changed = true
+    return r
+  })
+  return changed ? out : sheets
+}
+
+// ─── «Мелкие в центр — по возможности» ───────────────────────────────────────
+// Раскладка ищется без требования (плотно, как без галочки), а потом мелкие,
+// оказавшиеся у края, переставляются с соседями вглубь — сколько получится,
+// не добавляя листов (перестановка в ряду, перекладка «окна» вокруг мелкой,
+// перекладка листа). Оставшиеся у края подсвечиваются оранжевым.
+// sheets — в координатах укладки с НАСТОЯЩЕЙ рабочей зоной (как в результате runNesting).
+export function repairSmallSoft(sheets, { details, kerf, usableX, usableY, smallPartsMaxSquareSide = 0, smallPartsMaxSide = 0, smallPartsEdgeGap = 0, direction = 'auto', budgetMs = 300 }) {
+  const k = Number(kerf) || 0
+  const ux = usableX + k, uy = usableY + k // зона укладки (с резом у края, см. runNesting)
+  const maxArea = smallPartsMaxSquareSide > 0 ? smallPartsMaxSquareSide * smallPartsMaxSquareSide : 0
+  const isSmallDetail = details.map(d => {
+    const W = Number(d.width) || 0, L = Number(d.length) || 0
+    return (maxArea > 0 && W * L <= maxArea) || (smallPartsMaxSide > 0 && Math.min(W, L) <= smallPartsMaxSide)
+  })
+  const okMax = smallPartsMaxSide > 0 ? smallPartsMaxSide + k + 0.5 : 0
+  const gap = Number(smallPartsEdgeGap) > 0 ? Number(smallPartsEdgeGap) : 0
+  let cur = sheets.map(sh => {
+    if (sh.stock === 'offcut') return sh // обрезки не трогаем
+    const placed = sh.placed.map(p => {
+      const small = !!isSmallDetail[p.detailIndex]
+      return { ...p, isSmall: small, edgeOkMax: small ? okMax : 0, edgeMin: gap, kf: k }
+    })
+    const next = { ...sh, placed, family: 'maxrects', freeRects: [{ x: 0, y: 0, w: ux, h: uy }] }
+    placed.forEach(pp => { split(next, pp); prune(next) })
+    updateFreeBounds(next)
+    return next
+  })
+  if (!isSmallDetail.some(Boolean) || budgetMs <= 0) return cur
+  const modes = ['bssf', 'baf', 'blsf', 'bl', 'cp']
+  const t0 = Date.now()
+  let st = evaluate(cur, ux, uy)
+  cur = rowSwapAll(cur, ux, uy)
+  for (let pass = 0; Date.now() - t0 < budgetMs && evaluate(cur, ux, uy).smallEdge > 0; pass++) {
+    cur = windowRepairAll(cur, modes, direction, ux, uy, 20)
+    cur = rowSwapAll(cur, ux, uy)
+    if (pass % 3 === 2) {
+      // перекладка листа целиком (с 0–2 соседними) — листов не больше
+      const r = repairSmall(cur, modes, direction, ux, uy, 20)
+      const s2 = evaluate(r, ux, uy)
+      if (s2.sheetCount <= st.sheetCount) cur = r
+    }
+  }
+  return cur
+}
