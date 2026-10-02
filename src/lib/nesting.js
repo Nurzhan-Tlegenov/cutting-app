@@ -480,6 +480,8 @@ export async function runNesting({
   // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
   // Для форматно-раскроечного станка не применяется: там раскладка обязана
   // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
+  // узкие детали — от края: переукладка каждого листа (тот же состав, тот же лист)
+  if (cuttingMethod !== 'guillotine') best.sheets = best.sheets.map((sh, i, all) => relayoutForEdges(sh, scoringModes.filter(m => !m.startsWith('g-')), direction, usableX, usableY, BIG_ORDER ? 40 : 300, i === all.length - 1))
   if (cuttingMethod !== 'guillotine') best.sheets = wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY)
   // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
   if (cuttingMethod !== 'guillotine') best.sheets = stripPermuteAll(rowSwapAll(best.sheets, usableX, usableY), usableX, usableY)
@@ -778,6 +780,38 @@ function narrowEdgeScore(sheet, usableX, usableY) {
     if (ty > 0 && (p.y < 80 || p.y + p.h > usableY - 80)) sc += p.w * ty
   }
   return sc
+}
+// ─── Переукладка листа «узкие — не к краю» ──────────────────────────────────
+// Те же детали того же листа раскладываются заново несколько раз (разный
+// порядок и режимы); берётся раскладка, где у краёв меньше узких деталей
+// (narrowEdgeScore после перестановки полос). Лист остаётся одним листом —
+// плотность и число листов не меняются. Мелких у края не прибавляется, занятая
+// часть листа не растёт (цельный остаток не дробится). Работает на любых
+// заказах, в конце расчёта.
+function relayoutForEdges(sheet, modes, direction, usableX, usableY, tries = 40, keepEnv = false) {
+  if (sheet.placed.length < 3) return sheet
+  const env = sh => { let mx = 0, my = 0; for (const p of sh.placed) { mx = Math.max(mx, p.x + p.w); my = Math.max(my, p.y + p.h) } return mx * my }
+  let best = wideNarrowWide(sheet, usableX, usableY)
+  let bestScore = narrowEdgeScore(best, usableX, usableY)
+  if (bestScore < 1) return best
+  const small0 = smallAtEdge([best], usableX, usableY), env0 = env(best) * 1.02
+  const base = sheet.placed.map(placedToPiece)
+  for (let t = 0; t < tries && bestScore >= 1; t++) {
+    const r = Math.random()
+    const sorted = base.slice().sort((x, y) => y.pw * y.ph - x.pw * x.ph)
+    const order = t === 0 ? sorted
+      : r < 0.35 ? base.slice().sort((x, y) => Math.min(y.pw, y.ph) - Math.min(x.pw, x.ph)) // широкие вперёд
+      : r < 0.75 ? perturbOrder(sorted, Math.random() < 0.5)
+      : shuffle(base.slice())
+    const res = packAttempt(order, modes[t % modes.length], direction, usableX, usableY)
+    if (res.length !== 1) continue
+    const cand = wideNarrowWide(res[0], usableX, usableY)
+    const sc = narrowEdgeScore(cand, usableX, usableY)
+    if (sc >= bestScore - 1) continue
+    if (smallAtEdge([cand], usableX, usableY) > small0 || (keepEnv && env(cand) > env0)) continue
+    best = { ...cand, index: sheet.index }; bestScore = sc
+  }
+  return best
 }
 function stripPermuteRepair(sheet, usableX, usableY, rand = Math.random) {
   if (!sheet.placed.some(p => p.isSmall)) return sheet
