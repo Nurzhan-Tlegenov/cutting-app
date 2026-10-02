@@ -45,7 +45,7 @@ function partsOfDetail(d, inOrder, skipIds) {
     const front = face !== 'back'
     const z = front ? frontZ : T - frontZ
     const [x, y] = toLocal([X, Y])
-    out.push({ p: [x, y, z], d: [0, 0, z > T / 2 ? -1 : 1], r: d0 / 2, len: Math.min(depth, T) })
+    out.push({ p: [x, y, z], d: [0, 0, z > T / 2 ? -1 : 1], r: d0 / 2, len: Math.min(depth, T), side: front ? 'front' : 'back' })
   }
 
   const verts = Array.isArray(c.vertices) && c.vertices.length > 2 ? c.vertices : [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: L }, { x: 0, y: L }]

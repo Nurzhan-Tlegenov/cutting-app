@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { buildModel } from '../lib/model3d'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -66,9 +69,11 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const stateRef = useRef(null)
   const [mode, setMode] = useState('solid')
   // настройки вида идут за аккаунтом: прозрачность, подсветка кромки в каркасе
-  const [view, setViewState] = useState(() => ({ xray: 0.28, bandOn: true, bandColor: '#ff6a00', bandOp: 0.7, ...(getUserSettings(user).view3d || {}) }))
+  const [view, setViewState] = useState(() => ({ xray: 0.28, bandOn: true, bandColor: '#ff6a00', bandOp: 0.7, wireColor: '#185fa5', wireW: 1, wireOp: 1, ...(getUserSettings(user).view3d || {}) }))
   const setView = patch => setViewState(v => { const n = { ...v, ...patch }; saveUserSettings({ view3d: n }, user); return n })
   const [hidden, setHidden] = useState(() => new Set())   // скрытые материалы
+  const [showSet, setShowSet] = useState(false)           // выпадающая панель настроек вида
+  const [hl, setHl] = useState('')                        // подсветка присадки: '' | 'front' (лицевая) | 'back' (изнанка)
   const [picked, setPicked] = useState(null)
   const [error, setError] = useState('')
   const model = useMemo(() => buildModel(details, savedScene), [details, savedScene])
@@ -100,7 +105,10 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     scene.add(root)
     const materials = new Map()
     const meshes = [], lines = []
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x3a3a36 })
+    // линии каркаса — «толстые» (обычные линии в WebGL всегда в 1 пиксель)
+    const lineMat = new LineMaterial({ color: 0x3a3a36, linewidth: 1, transparent: true, opacity: 1 })
+    const fatEdges = (geo, angle) => { const g = new LineSegmentsGeometry(); const e = new THREE.EdgesGeometry(geo, angle); g.setPositions(e.attributes.position.array); e.dispose(); return new LineSegments2(g, lineMat) }
+    const hlMat = new THREE.MeshBasicMaterial({ color: 0x00a651 })
     // стены/пол комнаты — светлые и полупрозрачные, чтобы не заслоняли мебель
     const roomMat = new THREE.MeshStandardMaterial({ color: 0xe6e3da, roughness: 1, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })
     let paletteAt = 0
@@ -183,7 +191,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       const mesh = new THREE.Mesh(geo, matFor(p.material, p.texDir))
       mesh.applyMatrix4(mat4)
       mesh.userData = p
-      const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), lineMat)
+      const edge = fatEdges(geo, 20)
       edge.applyMatrix4(mat4)
       reg(mesh, 'panel', !p.inOrder, p.anim, p.material); reg(edge, 'edge', !p.inOrder, p.anim, p.material)
       meshes.push(mesh); lines.push(edge)
@@ -210,7 +218,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         const skin = new THREE.Mesh(sg, mesh.material)
         skin.applyMatrix4(mat4)
         skin.userData = p
-        const se = new THREE.LineSegments(new THREE.EdgesGeometry(sg, 12), lineMat)
+        const se = fatEdges(sg, 12)
         se.applyMatrix4(mat4)
         reg(skin, 'panel', !p.inOrder, p.anim, p.material); reg(se, 'edge', !p.inOrder, p.anim, p.material)
         meshes.push(skin); lines.push(se)
@@ -223,8 +231,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
           start.clone().addScaledVector(dir, d.len / 2 - 0.2),
           new THREE.Quaternion().setFromUnitVectors(yAxis, dir),
           new THREE.Vector3(d.r, d.len + 0.4, d.r))
-        const key = `${p.anim ? p.anim.g : 0}|${p.inOrder ? 1 : 0}|${p.material}`
-        if (!drillLists.has(key)) drillLists.set(key, { list: [], anim: p.anim, ctx: !p.inOrder, mat: p.material })
+        const key = `${p.anim ? p.anim.g : 0}|${p.inOrder ? 1 : 0}|${p.material}|${d.side || ''}`
+        if (!drillLists.has(key)) drillLists.set(key, { list: [], anim: p.anim, ctx: !p.inOrder, mat: p.material, side: d.side || '' })
         drillLists.get(key).list.push(mat4.clone().multiply(local))
       }
       // пазы и фрезеровка: тёмная вставка в пласть
@@ -239,12 +247,12 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     }
     const cyl = new THREE.CylinderGeometry(1, 1, 1, 14)
     extraGeos.push(cyl)
-    for (const { list, anim, ctx, mat } of drillLists.values()) {
+    for (const { list, anim, ctx, mat, side } of drillLists.values()) {
       const inst = new THREE.InstancedMesh(cyl, darkMat, list.length)
       list.forEach((mx, i) => inst.setMatrixAt(i, mx))
       inst.instanceMatrix.needsUpdate = true
       inst.frustumCulled = false
-      reg(inst, 'drill', ctx, anim, mat)
+      reg(inst, 'drill', ctx, anim, mat).__side = side
     }
     // фурнитура, у которой в модели есть форма (петли, ручки, опоры, навесы…)
     for (const hw of model.hardware) {
@@ -287,6 +295,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       renderer.domElement.style.height = '100%'
       camera.aspect = w / h
       camera.updateProjectionMatrix()
+      lineMat.resolution.set(w, h)
     }
     resize()
     resetView()
@@ -358,7 +367,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     renderer.domElement.addEventListener('pointerup', onUp)
 
     stateRef.current = {
-      materials, meshes, lines, lineMat, hwMat, bandMat, roomMat, all, resetView, sel: null, selMat: null,
+      materials, meshes, lines, lineMat, hwMat, bandMat, roomMat, darkMat, hlMat, all, resetView, sel: null, selMat: null,
       openAll: (open) => anims.forEach(st => { st.target = open ? 1 : 0 }),
       reskin: () => materials.forEach(skin),
     }
@@ -370,7 +379,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       lines.forEach(x => x.geometry.dispose())
       materials.forEach(x => { x.map?.dispose(); x.dispose() })
       extraGeos.forEach(x => x.dispose())
-      darkMat.dispose(); grooveMat.dispose(); decorMat.dispose(); hwMat.dispose(); bandMat.dispose(); roomMat.dispose(); lineMat.dispose()
+      darkMat.dispose(); grooveMat.dispose(); decorMat.dispose(); hwMat.dispose(); bandMat.dispose(); roomMat.dispose(); lineMat.dispose(); hlMat.dispose()
       renderer.dispose()
       renderer.domElement.remove()
       stateRef.current = null
@@ -393,8 +402,14 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       o.visible = (scope === 'all' || !o.__ctx) && !(wire && o.__kind === 'panel') && !(o.__mat && hidden.has(o.__mat))
         && (o.__kind !== 'band' || (wire && view.bandOn))
     })
-    st.lineMat.color.set(wire ? 0x185fa5 : 0x3a3a36)
-  }, [mode, scope, model, view, hidden])
+    st.lineMat.color.set(wire ? view.wireColor : 0x3a3a36)
+    st.lineMat.linewidth = wire ? view.wireW : 1
+    st.lineMat.opacity = wire ? view.wireOp : 1
+    st.lineMat.needsUpdate = true
+    // подсветка присадки: лицевая — зелёным, изнанка — фиолетовым (одновременно только одна)
+    st.hlMat.color.set(hl === 'back' ? 0x9c27b0 : 0x00a651)
+    st.all.forEach(o => { if (o.__kind === 'drill') o.material = hl && o.__side === hl ? st.hlMat : st.darkMat })
+  }, [mode, scope, model, view, hidden, hl])
 
   const [opened, setOpened] = useState(false)
 
@@ -414,6 +429,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const allMats = useMemo(() => { const m = new Map(); parts.forEach(p => { if (p.material) m.set(p.material, (m.get(p.material) || 0) + 1) }); return [...m.entries()] }, [parts])
   const matNames = useMemo(() => allMats.map(m => m[0]), [allMats])
   const hasBands = useMemo(() => parts.some(p => p.bands?.length), [parts])
+  const hasSides = useMemo(() => parts.some(p => p.drills?.some(d => d.side)), [parts])
   const toggleMat = name => setHidden(h => { const n = new Set(h); if (n.has(name)) n.delete(name); else n.add(name); return n })
   const applyTex = (name, t) => {
     const next = { ...texRef.current }
@@ -473,28 +489,9 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       </div>
       <div style={{ display: 'flex', gap: 6, padding: '8px 14px', background: 'var(--bg)' }}>
         {MODES.map(([id, label]) => <button key={id} type="button" style={chip(mode === id)} onClick={() => setMode(id)}>{label}</button>)}
+        <button type="button" title="Настройки вида" onClick={() => setShowSet(v => !v)}
+          style={{ ...chip(showSet), flex: 'none', padding: '7px 12px' }}>⚙ {showSet ? '▴' : '▾'}</button>
       </div>
-      {mode === 'xray' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px 8px', background: 'var(--bg)', fontSize: 12, color: 'var(--text-muted)' }}>
-          <span style={{ flexShrink: 0 }}>Прозрачность</span>
-          <input type="range" min="5" max="90" step="1" value={Math.round((1 - view.xray) * 100)} style={{ flex: 1 }}
-            onChange={e => setView({ xray: 1 - Number(e.target.value) / 100 })} />
-          <span style={{ width: 34, textAlign: 'right' }}>{Math.round((1 - view.xray) * 100)}%</span>
-        </div>
-      )}
-      {mode === 'wire' && hasBands && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px 8px', background: 'var(--bg)', fontSize: 12, color: 'var(--text-muted)' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, margin: 0 }}>
-            <input type="checkbox" checked={view.bandOn} onChange={e => setView({ bandOn: e.target.checked })} style={{ width: 'auto' }} />
-            Кромка
-          </label>
-          <input type="color" value={view.bandColor} disabled={!view.bandOn} onChange={e => setView({ bandColor: e.target.value })}
-            style={{ width: 34, height: 26, padding: 0, border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'none', flexShrink: 0 }} />
-          <input type="range" min="10" max="100" step="1" value={Math.round(view.bandOp * 100)} disabled={!view.bandOn} style={{ flex: 1 }}
-            onChange={e => setView({ bandOp: Number(e.target.value) / 100 })} />
-          <span style={{ width: 34, textAlign: 'right' }}>{Math.round(view.bandOp * 100)}%</span>
-        </div>
-      )}
       {model.hasContext && (
         <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)' }}>
           {[['all', 'Вся модель'], ['order', 'Только детали заказа']].map(([id, label]) => (
@@ -504,6 +501,61 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       )}
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {error && <p className="error-text" style={{ padding: 20 }}>{error}</p>}
+        {showSet && (
+          <div style={{ position: 'absolute', left: 0, right: 0, top: 0, zIndex: 2, maxHeight: '70%', overflowY: 'auto', background: 'var(--bg)', borderBottom: '0.5px solid var(--border-md)', padding: '10px 14px 6px', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Полупрозрачный</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              <span style={{ width: 96, flexShrink: 0 }}>Прозрачность</span>
+              <input type="range" min="5" max="90" step="1" value={Math.round((1 - view.xray) * 100)} style={{ flex: 1 }}
+                onChange={e => setView({ xray: 1 - Number(e.target.value) / 100 })} />
+              <span style={{ width: 38, textAlign: 'right' }}>{Math.round((1 - view.xray) * 100)}%</span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 4px' }}>Каркас</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              <span style={{ width: 96, flexShrink: 0 }}>Цвет линий</span>
+              <input type="color" value={view.wireColor} onChange={e => setView({ wireColor: e.target.value })}
+                style={{ width: 40, height: 26, padding: 0, border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'none' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              <span style={{ width: 96, flexShrink: 0 }}>Толщина</span>
+              <input type="range" min="0.5" max="6" step="0.5" value={view.wireW} style={{ flex: 1 }} onChange={e => setView({ wireW: Number(e.target.value) })} />
+              <span style={{ width: 38, textAlign: 'right' }}>{view.wireW}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+              <span style={{ width: 96, flexShrink: 0 }}>Прозрачность</span>
+              <input type="range" min="0" max="90" step="1" value={Math.round((1 - view.wireOp) * 100)} style={{ flex: 1 }} onChange={e => setView({ wireOp: 1 - Number(e.target.value) / 100 })} />
+              <span style={{ width: 38, textAlign: 'right' }}>{Math.round((1 - view.wireOp) * 100)}%</span>
+            </div>
+            {hasBands && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, width: 96, flexShrink: 0, margin: 0 }}>
+                  <input type="checkbox" checked={view.bandOn} onChange={e => setView({ bandOn: e.target.checked })} style={{ width: 'auto' }} />
+                  Кромка
+                </label>
+                <input type="color" value={view.bandColor} disabled={!view.bandOn} onChange={e => setView({ bandColor: e.target.value })}
+                  style={{ width: 40, height: 26, padding: 0, border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'none', flexShrink: 0 }} />
+                <input type="range" min="0" max="90" step="1" value={Math.round((1 - view.bandOp) * 100)} disabled={!view.bandOn} style={{ flex: 1 }}
+                  onChange={e => setView({ bandOp: 1 - Number(e.target.value) / 100 })} />
+                <span style={{ width: 38, textAlign: 'right' }}>{Math.round((1 - view.bandOp) * 100)}%</span>
+              </div>
+            )}
+            {hasSides && (
+              <>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 4px' }}>Присадка — с какой стороны она сейчас</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
+                    <input type="checkbox" checked={hl === 'front'} onChange={e => setHl(e.target.checked ? 'front' : '')} style={{ width: 'auto' }} />
+                    <span style={{ color: '#00a651' }}>●</span> Подсветить лицевую
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
+                    <input type="checkbox" checked={hl === 'back'} onChange={e => setHl(e.target.checked ? 'back' : '')} style={{ width: 'auto' }} />
+                    <span style={{ color: '#9c27b0' }}>●</span> Подсветить нелицевую
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {showMats && (
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '62%', overflowY: 'auto', background: 'var(--bg)', borderTop: '0.5px solid var(--border-md)', padding: '10px 14px', boxShadow: '0 -4px 16px rgba(0,0,0,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
