@@ -10,6 +10,7 @@ import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles } from '../lib/partHoles'
+import { partLabel, useLabelMode, LABEL_MODES } from '../lib/partLabel'
 import BottomNav from '../components/BottomNav'
 
 const COLORS = [
@@ -432,7 +433,7 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   // Масштаб карты — щипком двух пальцев (как в редакторе контура), с
@@ -480,7 +481,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   useLayoutEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode])
 
   const PADDING = 8
   // Лист не выше ~⅔ экрана — над ним остаются кнопки, под ним буфер и листы
@@ -671,8 +672,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // Название детали — в центре
       ctx.fillStyle = 'rgba(0,0,0,0.6)'
       ctx.font = `${Math.max(7, Math.min(10, w / 7))}px sans-serif`
-      const lbl = (p.prefix ? p.prefix.slice(0,3) + ' ' : '') + p.label.replace(/Деталь\s*/, 'Д')
-      if (h > 14) ctx.fillText(lbl, lx, ly - (p.rotation ? 5 : 0))
+      const lbl = partLabel(p, details, labelMode, true)
+      if (h > 14 && lbl) ctx.fillText(lbl, lx, ly - (p.rotation ? 5 : 0))
       // Угол поворота — под названием, внутри контура детали
       if (p.rotation && h > 26) {
         ctx.fillStyle = 'rgba(0,0,0,0.45)'
@@ -1326,6 +1327,7 @@ export default function NestingPage() {
   const navigate = useNavigate()
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
+  const [labelMode, setLabelMode] = useLabelMode()   // что писать на деталях карты
   const [configs, setConfigs] = useState(() => [newCfg()])
   const [focusId, setFocusId] = useState(null)   // конфигурация, по которой считается шапка со статистикой
   const [parallel, setParallel] = useState(true) // считать конфигурации одновременно или по очереди
@@ -1783,7 +1785,7 @@ export default function NestingPage() {
   // CAD-просмотрщике, а не только по цифрам.
   function downloadNestingDxf(sheets = sheetsData, suffix = '') {
     const g = geoOf(order, result)
-    const dxf = buildNestingDxf(sheets, { sheet_width: g.sheetW, sheet_length: g.sheetL, margin_left: g.marginL, margin_bottom: g.marginB }, details)
+    const dxf = buildNestingDxf(sheets, { sheet_width: g.sheetW, sheet_length: g.sheetL, margin_left: g.marginL, margin_bottom: g.marginB }, details, labelMode)
     const blob = new Blob([dxf], { type: 'application/dxf' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -1843,7 +1845,7 @@ export default function NestingPage() {
           if (seg) { labelLX = (seg[0] + seg[1]) / 2; labelLY = scanY }
         }
       }
-      const label = ((p.prefix ? p.prefix + ' ' : '') + (p.label || '').replace(/Деталь\s*/, 'Д') + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`).trim()
+      const label = (partLabel(p, details, labelMode) + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`).trim()
       const textHeight = Math.max(15, Math.min(40, Math.min(p.origX, p.origY) / 8))
       // Тот же переворот по Y, что и у контура выше — иначе подпись у
       // контурных деталей уедет не туда (для прямоугольных labelLY=origY/2,
@@ -2237,6 +2239,10 @@ export default function NestingPage() {
                       </button>
                     </div>
                     <div style={{ flex: 1 }} />
+                    <select value={labelMode} onChange={e => setLabelMode(e.target.value)} title="Что писать на деталях"
+                      style={{ width: 'auto', maxWidth: 118, padding: '3px 4px', fontSize: 11, borderRadius: 20, color: 'var(--text-hint)' }}>
+                      {LABEL_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
                     {view === 'sheet' && canvasSheet.placed.length === 0 && cfg.sheetsData.length > 1 && (
                       <button onClick={() => deleteEmptySheet(cfg.id, cfg.activeSheet)}
                         style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid #dc3545',
@@ -2271,7 +2277,7 @@ export default function NestingPage() {
                         activeSheet={locked || hEvent ? -1 : cfg.activeSheet}
                         onPickSheet={locked || hEvent ? null : openSheet}
                         running={isRunning} bufferCount={cfg.buffer.length}
-                        details={details}
+                        details={details} labelMode={labelMode}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {isRunning
@@ -2311,7 +2317,7 @@ export default function NestingPage() {
                         usableX={cgeo.usableX} usableY={cgeo.usableY}
                         sheetL={cgeo.sheetL} sheetW={cgeo.sheetW}
                         marginL={cgeo.marginL} marginT={cgeo.marginT}
-                        kerf={cgeo.kerf} colorMap={colorMap} details={details}
+                        kerf={cgeo.kerf} colorMap={colorMap} details={details} labelMode={labelMode}
                         onMove={(si, np) => onMoveCfg(cfg.id, si, np)} interactive={true} showOffcuts={showOffcuts}
                         offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
                         onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
@@ -2399,7 +2405,7 @@ export default function NestingPage() {
                     {canvasSheet.placed.map((p, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '2px 0', borderBottom: '0.5px solid var(--border)' }}>
                         <div style={{ width: 10, height: 10, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
-                        <span style={{ flex: 1 }}>{p.label}</span>
+                        <span style={{ flex: 1 }}>{labelMode === 'name' || labelMode === 'none' ? p.label : `${partLabel(p, details, labelMode)}${labelMode === 'des_name' ? '' : ' · ' + p.label}`}</span>
                         <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
                         {(p.rotation || p.rotated) && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻{p.rotation ?? 90}°</span>}
                       </div>

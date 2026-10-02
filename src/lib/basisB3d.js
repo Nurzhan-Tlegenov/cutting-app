@@ -292,17 +292,7 @@ function convertPanel(panel, holes) {
       if (!top && !bottom) continue
       face.push({ x: q[0], y: q[1], d: 2 * h.r, depth: Math.min(ov, T), through: top && bottom, top, name: h.name })
     } else if (Math.abs(d[2]) < 0.01 && q[2] > 0.5 && q[2] < T - 0.5) {
-      let t0 = 0, t1 = h.depth, ok = true
-      for (const [ax, lo, hi] of [[0, x0, x0 + dx], [1, y0, y0 + dy]]) {
-        if (Math.abs(d[ax]) < 1e-9) { if (q[ax] < lo || q[ax] > hi) ok = false }
-        else {
-          let ta = (lo - q[ax]) / d[ax], tb = (hi - q[ax]) / d[ax]
-          if (ta > tb) [ta, tb] = [tb, ta]
-          t0 = Math.max(t0, ta); t1 = Math.min(t1, tb)
-        }
-      }
-      if (!ok || t1 - t0 < 0.5) continue
-      edge.push({ x: q[0] + d[0] * t0, y: q[1] + d[1] * t0, dx: d[0], dy: d[1], z: q[2], d: 2 * h.r, depth: t1 - t0, name: h.name })
+      edge.push({ q, d, z: q[2], dia: 2 * h.r, depth: h.depth, name: h.name })
     }
   }
 
@@ -386,6 +376,7 @@ function convertPanel(panel, holes) {
 
   // --- кромка: Elem — номер элемента контура ---
   const edges = { top: null, right: null, bottom: null, left: null }
+  const edgeInfo = {}
   for (const butt of (kid(o, 'Butts')?.c || [])) {
     const e = elems[val(butt, 'Elem', -1)]
     const name = cleanName(val(butt, 'Mat')) || cleanName(val(butt, 'Sign')) || 'default'
@@ -398,6 +389,7 @@ function convertPanel(panel, holes) {
     else if (Math.abs(a[1] - L) <= EPS && Math.abs(b[1] - L) <= EPS) side = 'top'
     if (!side) { warn.edges++; continue }
     edges[side] = name
+    edgeInfo[side] = { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width') }
   }
 
   // --- присадка ---
@@ -422,39 +414,49 @@ function convertPanel(panel, holes) {
     const d = drillings[i]
     if (d.depth < T - EPS && through.has(JSON.stringify([d.sides, d.offsets, d.d]))) drillings.splice(i, 1)
   }
-  // торцевое отверстие должно входить в настоящий край детали, а не в пустоту выреза
-  const onSide = (side, along) => {
-    const vs = vertices
-    for (let i = 0; i < vs.length; i++) {
-      const a = vs[i], b = vs[(i + 1) % vs.length]
-      if (a.type === 'arc' || b.type === 'arc') continue
-      const vert = side === 'left' || side === 'right'
-      const fixed = side === 'left' ? 0 : side === 'right' ? W : side === 'bottom' ? 0 : L
-      const fa = vert ? a.x : a.y, fb = vert ? b.x : b.y
-      if (Math.abs(fa - fixed) > 0.5 || Math.abs(fb - fixed) > 0.5) continue
-      const lo = Math.min(vert ? a.y : a.x, vert ? b.y : b.x), hi = Math.max(vert ? a.y : a.x, vert ? b.y : b.x)
-      if (along >= lo - 0.5 && along <= hi + 0.5) return true
-    }
-    return false
-  }
   groupRows(drillings, W, L)
+
+  // Торцевые: ищем, где ось отверстия входит в материал через прямой край контура.
+  // Край может быть и внутри габарита (вырез, ступенька) — тогда edgeInset > 0.
+  const poly = vertices.map(v => [v.x, v.y])
   const seenEdge = new Set()
-  for (const e of edge) {
-    const [X, Y] = tf([e.x, e.y]), [vx, vy] = tfv(e.dx, e.dy)
-    let side = null
-    if (vx > 0.99 && Math.abs(X) <= 0.5) side = 'left'
-    else if (vx < -0.99 && Math.abs(X - W) <= 0.5) side = 'right'
-    else if (vy > 0.99 && Math.abs(Y) <= 0.5) side = 'bottom'
-    else if (vy < -0.99 && Math.abs(Y - L) <= 0.5) side = 'top'
-    if (!side) { warn.edgeHoles++; continue }
-    const along = side === 'left' || side === 'right' ? Y : X
-    if (!onSide(side, along)) continue
-    const key = `${side}|${Math.round(along * 10)}|${Math.round(e.d * 10)}|${Math.round(e.z * 10)}`
+  for (const e of (outer.circle ? [] : edge)) {
+    const P = tf([e.q[0], e.q[1]]), [vx, vy] = tfv(e.d[0], e.d[1])
+    const horiz = Math.abs(vx) > 0.99, vert = Math.abs(vy) > 0.99
+    if (!horiz && !vert) { warn.edgeHoles++; continue }
+    const sgn = horiz ? Math.sign(vx) : Math.sign(vy)
+    const ts = []
+    for (let i = 0; i < vertices.length; i++) {
+      const a = vertices[i], b = vertices[(i + 1) % vertices.length]
+      if (a.type === 'arc' || b.type === 'arc') continue
+      if (horiz) {
+        if (Math.abs(a.x - b.x) > EPS) continue
+        if (P[1] < Math.min(a.y, b.y) - 0.01 || P[1] > Math.max(a.y, b.y) + 0.01) continue
+        ts.push((a.x - P[0]) * sgn)
+      } else {
+        if (Math.abs(a.y - b.y) > EPS) continue
+        if (P[0] < Math.min(a.x, b.x) - 0.01 || P[0] > Math.max(a.x, b.x) + 0.01) continue
+        ts.push((a.y - P[1]) * sgn)
+      }
+    }
+    ts.sort((m, n) => m - n)
+    const at = t => (horiz ? [P[0] + sgn * t, P[1]] : [P[0], P[1] + sgn * t])
+    const tIn = ts.find(t => t >= -0.5 && t < e.depth - 0.5 && pointInPoly(at(t + 0.3), poly) && !pointInPoly(at(t - 0.3), poly))
+    if (tIn === undefined) continue          // отверстие не входит в эту деталь через торец
+    const tOut = ts.find(t => t > tIn + 0.3)
+    const depth = Math.min(e.depth, tOut ?? e.depth) - Math.max(tIn, 0)
+    if (depth < 0.5) continue
+    const [X, Y] = at(tIn)
+    const side = horiz ? (sgn > 0 ? 'left' : 'right') : (sgn > 0 ? 'bottom' : 'top')
+    const inset = side === 'left' ? X : side === 'right' ? W - X : side === 'bottom' ? Y : L - Y
+    const along = horiz ? Y : X
+    const key = `${side}|${Math.round(inset * 10)}|${Math.round(along * 10)}|${Math.round(e.dia * 10)}|${Math.round(e.z * 10)}`
     if (seenEdge.has(key)) continue
     seenEdge.add(key)
     drillings.push({
       id: drillId(), installed: true, kind: 'edge', edgeSide: side, alongFrom: 'start',
-      offsetAlong: r1(along), offsetFace: r1(flip ? e.z : T - e.z), d: r1(e.d), depth: r1(e.depth),
+      offsetAlong: r1(along), offsetFace: r1(flip ? e.z : T - e.z), d: r1(e.dia), depth: r1(depth),
+      ...(inset > 0.05 ? { edgeInset: r1(inset) } : {}),
       row: false, rowStep: 32, rowCount: 2, note: cleanName(e.name),
     })
   }
@@ -474,15 +476,29 @@ function convertPanel(panel, holes) {
     }
   })
 
-  const hasExtra = !isRect || cutouts.length || drillings.length || grooves.length
-  const contour = hasExtra
-    ? { vertices: isRect ? [{ x: 0, y: 0, r: 0 }, { x: r1(W), y: 0, r: 0 }, { x: r1(W), y: r1(L), r: 0 }, { x: 0, y: r1(L), r: 0 }] : vertices,
-        holes: cutouts, grooves, drillings, layout: [] }
-    : null
+  // Свойства детали из Базиса — целиком, для бирки и подписи на карте раскроя
+  const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
+  const meta = {
+    src: 'basis',
+    ids: [val(o, 'ID')],                       // ID панелей в модели (по одному на каждую штуку)
+    des: cleanName(val(o, 'Des')),             // обозначение, напр. 01.02
+    pos: cleanName(val(o, 'ArtPos')),          // позиция
+    name: cleanName(val(o, 'Name')),
+    product: panel.ctx.product, productDes: panel.ctx.productDes, productPos: panel.ctx.productPos,
+    path: panel.ctx.path,                      // блоки, в которые вложена деталь
+    material: matFull[0] || '', materialCode: matFull.slice(1).join(' / '),
+    thickness: T, texDir,
+    edges: edgeInfo,
+    flipped: flip, turned: rot,                // как деталь повёрнута относительно модели
+  }
+  const contour = {
+    vertices: isRect ? [{ x: 0, y: 0, r: 0 }, { x: r1(W), y: 0, r: 0 }, { x: r1(W), y: r1(L), r: 0 }, { x: 0, y: r1(L), r: 0 }] : vertices,
+    holes: cutouts, grooves, drillings, layout: [], meta,
+  }
 
   const material = cleanName(val(o, 'Mat'))
   return {
-    name: cleanName(val(o, 'Name')), prefix: panel.prefix || '',
+    name: cleanName(val(o, 'Name')), prefix: panel.ctx.product || '',
     w: r1(L), h: r1(W), qty: 1, edges, material, thickness: T,
     rotatable: texDir === 0, contour,
     groupKey: `${material}|${T}`,
@@ -516,10 +532,10 @@ export function parseBasis(u8) {
   for (const f of (kid(doc, 'FurnList')?.c || [])) furn.set(val(f, 'FastID'), f)
 
   const panels = [], holes = []
-  const walk = (obj, M, prefix) => {
+  const walk = (obj, M, ctx) => {
     const type = val(obj, 'Type')
     const Mo = mul(M, transOf(obj))
-    if (type === TYPE_PANEL) panels.push({ obj, M: Mo, prefix })
+    if (type === TYPE_PANEL) panels.push({ obj, M: Mo, ctx })
     else if (type === TYPE_FASTENER) {
       const f = furn.get(val(obj, 'FastID'))
       for (const h of (kid(f, 'Holes')?.c || [])) {
@@ -535,24 +551,25 @@ export function parseBasis(u8) {
     for (const c of (obj.c || [])) {
       if (!c.c) continue
       const list = c.k === 'Obj' ? [c] : c.c
-      for (const cc of list) if (cc.c && cc.k === 'Obj' && kid(cc, 'Type')) walk(cc, Mo, prefix)
+      const sub = type === 1005 && ctx.depth > 0 ? { ...ctx, path: [...ctx.path, cleanName(val(obj, 'Name'))], depth: ctx.depth + 1 } : { ...ctx, depth: ctx.depth + 1 }
+      for (const cc of list) if (cc.c && cc.k === 'Obj' && kid(cc, 'Type')) walk(cc, Mo, sub)
     }
   }
   const I = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
   for (const top of model.c) {
     if (top.k !== 'Obj' || !top.c) continue
-    walk(top, I, cleanName(val(top, 'Name')))
+    walk(top, I, { product: cleanName(val(top, 'Name')), productDes: cleanName(val(top, 'Des')), productPos: cleanName(val(top, 'ArtPos')), path: [], depth: 0 })
   }
 
   // одинаковые детали одного изделия — в одну строку с количеством
-  const strip = c => (c ? JSON.stringify(c, (k, v) => (k === 'id' ? undefined : v)) : '')
+  const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' ? undefined : v))
   const map = new Map()
   for (const p of panels) {
     const it = convertPanel(p, holes)
     if (!it) continue
     const key = [it.prefix, it.name, it.w, it.h, it.groupKey, JSON.stringify(it.edges), strip(it.contour)].join('§')
     const prev = map.get(key)
-    if (prev) { prev.qty++; for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
+    if (prev) { prev.qty++; prev.contour.meta.ids.push(...it.contour.meta.ids); for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
     else map.set(key, it)
   }
   const items = [...map.values()]
@@ -564,13 +581,17 @@ export function parseBasis(u8) {
     groups.set(it.groupKey, g)
   }
   const article = kid(kid(header, 'Header') || header, 'Article')
+  const orderName = cleanName(val(article, 'OrderName')) || cleanName(val(article, 'Name'))
+  for (const it of items) { it.contour.meta.order = orderName; it.contour.meta.model = cleanName(val(article, 'Name')) }
   return {
-    orderName: cleanName(val(article, 'OrderName')) || cleanName(val(article, 'Name')),
+    orderName,
     items,
     groups: [...groups.values()].sort((a, b) => b.pieces - a.pieces),
   }
 }
 
 export async function readBasisFile(file) {
-  return parseBasis(new Uint8Array(await file.arrayBuffer()))
+  const res = parseBasis(new Uint8Array(await file.arrayBuffer()))
+  for (const it of res.items) it.contour.meta.file = file.name
+  return res
 }

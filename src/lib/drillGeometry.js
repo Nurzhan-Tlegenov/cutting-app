@@ -199,10 +199,12 @@ function baseEdgeDrillPoints(dr, panelW, panelH) {
     const rawA = axisAlong ? axisAlong.base : (along + (offsetStart + k) * step)
     const center = fromEnd ? (total - rawA) : rawA
     let x, y
-    if (edge === 'bottom') { y = 0; x = center }
-    else if (edge === 'top') { y = panelH; x = center }
-    else if (edge === 'left') { x = 0; y = center }
-    else { x = panelW; y = center }
+    // edgeInset — торец не на краю детали, а в вырезе/ступеньке: на сколько он утоплен от стороны
+    const inset = Number(dr.edgeInset) || 0
+    if (edge === 'bottom') { y = inset; x = center }
+    else if (edge === 'top') { y = panelH - inset; x = center }
+    else if (edge === 'left') { x = inset; y = center }
+    else { x = panelW - inset; y = center }
     pts.push({ x, y, dx: dir.dx, dy: dir.dy, rowIdx: k })
   }
   return { pts, axisAlong, alongIsX, fromEnd }

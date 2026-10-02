@@ -115,7 +115,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
       </div>
       {detail.name && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 36, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {detail.name}
+          {detail.contour?.meta?.des ? `${detail.contour.meta.des} · ` : ''}{detail.name}
         </div>
       )}
 

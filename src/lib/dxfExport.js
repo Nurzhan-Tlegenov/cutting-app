@@ -14,6 +14,7 @@
  * по origX/origY), 'label' — подписи.
  */
 
+import { partLabel } from './partLabel'
 import { placedHoles } from './partHoles'
 
 const GAP_BETWEEN_SHEETS = 200 // мм, зазор между листами на чертеже
@@ -39,7 +40,7 @@ function piecePolygonLocal(p) {
   return [[0, 0], [w, 0], [w, h], [0, h]]
 }
 
-export function buildNestingDxf(sheetsData, order, details = []) {
+export function buildNestingDxf(sheetsData, order, details = [], labelMode = 'name') {
   const sheetWAll = Number(order.sheet_width) || 0
   const sheetLAll = Number(order.sheet_length) || 0
   const marginLAll = Number(order.margin_left) || 0
@@ -81,7 +82,7 @@ export function buildNestingDxf(sheetsData, order, details = []) {
           body += line(baseX + a.x, baseY + a.y, baseX + b.x, baseY + b.y, 'vyrez')
         }
       })
-      const label = (p.prefix ? p.prefix + ' ' : '') + (p.label || '') + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`
+      const label = (partLabel(p, details, labelMode) + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`).trim()
       body += text(baseX + poly[0][0] + 10, baseY + poly[0][1] + 10, label, 'Solid Edge 2D NestingPartName', 25)
     })
   })

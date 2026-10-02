@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { placedHoles } from '../lib/partHoles'
+import { partLabel } from '../lib/partLabel'
 import { smallEdgeReal } from '../lib/nesting'
 
 // ─── Обзор ВСЕХ листов раскроя на одном холсте ──────────────────────────────
@@ -36,7 +37,7 @@ const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 
 export default function SheetsOverview({
   sheets, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf,
-  activeSheet = -1, onPickSheet, running = false, bufferCount = 0, details = null,
+  activeSheet = -1, onPickSheet, running = false, bufferCount = 0, details = null, labelMode = 'name',
 }) {
   const canvasRef = useRef(null)
   const scrollRef = useRef(null)
@@ -108,7 +109,7 @@ export default function SheetsOverview({
           y: o.y + D.mt + (D.uy - p.y - h),
           w, h, polygon: Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : null,
           holes: details ? placedHoles(p, details[p.detailIndex]) : [],
-          label: (p.prefix ? p.prefix.slice(0, 3) + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д'),
+          label: partLabel(p, details, labelMode, true),
           alpha: 1, atEdge,
         })
       })
@@ -256,7 +257,7 @@ export default function SheetsOverview({
     }
     animRef.current = requestAnimationFrame(step)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheets])
+  }, [sheets, labelMode])
 
   // Сменилось число листов в ряд — детали сразу на новых местах (без анимации)
   useLayoutEffect(() => {

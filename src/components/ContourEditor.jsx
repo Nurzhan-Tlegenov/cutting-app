@@ -446,10 +446,12 @@ function baseEdgeDrillPoints(dr, panelW, panelH) {
     const rawA = axisAlong ? axisAlong.base : (along + (offsetStart + k) * step) // расстояние до центра k-го отверстия
     const center = fromEnd ? (total - rawA) : rawA
     let x, y
-    if (edge === 'bottom') { y = 0; x = center }
-    else if (edge === 'top') { y = panelH; x = center }
-    else if (edge === 'left') { x = 0; y = center }
-    else { x = panelW; y = center } // right
+    // edgeInset — торец не на краю детали, а в вырезе/ступеньке: на сколько он утоплен от стороны
+    const inset = Number(dr.edgeInset) || 0
+    if (edge === 'bottom') { y = inset; x = center }
+    else if (edge === 'top') { y = panelH - inset; x = center }
+    else if (edge === 'left') { x = inset; y = center }
+    else { x = panelW - inset; y = center } // right
     pts.push({ x, y, dx: dir.dx, dy: dir.dy, rowIdx: k })
   }
   return { pts, axisAlong, alongIsX, fromEnd }
@@ -1816,6 +1818,8 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     grooves:   rawContour.grooves   || [],
     drillings: rawContour.drillings || [],
     layout:    rawContour.layout    || [],
+    // свойства детали (обозначение, ID из Базиса и т.д.) — не терять при правке контура
+    ...(rawContour.meta ? { meta: rawContour.meta } : {}),
   }
 
   const [tab, setTab] = useState('contour')
@@ -3643,6 +3647,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:4, marginBottom:5 }}>
                     <NumField label="Вдоль торца" value={dr.offsetAlong??50} onChange={v=>updDrilling(i,{offsetAlong:v})} />
                     <NumField label="От пласти" value={dr.offsetFace??(defaultThickness/2)} onChange={v=>updDrilling(i,{offsetFace:v})} />
+                    <NumField label="Торец в вырезе: отступ от края" value={dr.edgeInset??0} onChange={v=>updDrilling(i,{edgeInset:v})} />
                   </div>
 
                   <label style={{ fontSize:11, color:'var(--text-hint)', display:'block', margin:'0 0 4px' }}>Размножить (зеркало)</label>
