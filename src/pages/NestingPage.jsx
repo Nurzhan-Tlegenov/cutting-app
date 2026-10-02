@@ -11,7 +11,7 @@ import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/dr
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
-import { detailEdgeList } from '../lib/edgeLength'
+import { detailEdgeList, contourSegments, segmentSide } from '../lib/edgeLength'
 import { useLabelMode, rememberOrderDefaults } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
@@ -628,6 +628,35 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
         if (contour) {
           const panelW = Number(detail.width) || 0   // X, "родная" ориентация
           const panelH = Number(detail.length) || 0  // Y, "родная" ориентация
+          // Кромка на фигурных участках контура и на вырезах — по самой линии контура
+          {
+            const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
+            const native = { left: detail.edge_left, right: detail.edge_right, top: detail.edge_top, bottom: detail.edge_bottom }
+            ctx.save()
+            ctx.strokeStyle = EDGE_COLOR; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+            contourSegments(contour.vertices).forEach(seg => {
+              if (!seg.edge) return
+              const side = segmentSide(seg, panelW, panelH)
+              if (side && native[side]) return     // вся сторона уже нарисована выше
+              ctx.beginPath()
+              seg.pts.forEach(([px, py], k) => {
+                const { x: fx, y: fy } = rotatePointTimes(px, py, panelW, panelH, times)
+                const sx = x + fx * sc, sy = y + h - fy * sc
+                if (k) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy)
+              })
+              ctx.stroke()
+            })
+            const edged = (contour.holes || []).map(hh => !!hh.edge)
+            if (edged.some(Boolean) && edged.length === holes.length) {
+              holes.forEach((poly, hi) => {
+                if (!edged[hi]) return
+                ctx.beginPath()
+                poly.forEach((pt, vi) => { const sx = x + pt.x * sc, sy = y + h - pt.y * sc; if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy) })
+                ctx.closePath(); ctx.stroke()
+              })
+            }
+            ctx.restore()
+          }
           const pts = getAllDrillPoints(contour, panelW, panelH, true)
           if (pts.length) {
             const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)

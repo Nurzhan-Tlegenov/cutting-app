@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { buildModel } from '../lib/model3d'
+import { useAuth } from '../context/AuthContext'
+import { loadTextures, saveTexture, deleteTexture, fileToTexture, textureKey } from '../lib/materialTextures'
 
 // Просмотр 3D-модели заказа (детали, импортированные из Базиса).
 // Вращение — пальцем, масштаб — щипком, сдвиг — двумя пальцами,
@@ -9,7 +11,8 @@ import { buildModel } from '../lib/model3d'
 const MODES = [['solid', 'Сплошной'], ['xray', 'Полупрозрачный'], ['wire', 'Каркас']]
 const PALETTE = ['#cbb89a', '#a9b7c4', '#d9d4c7', '#b9c8a8', '#d2b3a2', '#bdb5d6']
 
-// Картинок текстур в файле Базиса нет — цвет и рисунок подбираем по названию материала.
+// Картинок текстур в файле Базиса нет. Если пользователь загрузил свою картинку для материала —
+// берём её; иначе цвет и рисунок подбираем по названию материала.
 // [шаблон, цвет, вид]: wood — древесный рисунок вдоль текстуры, metal, glass, stone
 const NAME_LOOKS = [
   [/вотан/i, '#b98f5e', 'wood'], [/сонома/i, '#cdb894', 'wood'], [/венге/i, '#45302a', 'wood'], [/орех/i, '#7d563a', 'wood'],
@@ -50,6 +53,15 @@ function woodTexture(hex) {
 
 export default function Model3D({ details, scene: savedScene = null, title, onClose }) {
   const hostRef = useRef(null)
+  const auth = useAuth()
+  const user = auth?.user || null
+  const texRef = useRef({})                      // свои текстуры: ключ материала -> { name, data, size, rot }
+  const [tex, setTex] = useState({})
+  const [texCloud, setTexCloud] = useState(true) // false — таблицы в базе нет, картинки только на этом устройстве
+  const [showMats, setShowMats] = useState(false)
+  const [texBusy, setTexBusy] = useState('')
+  const fileRef = useRef(null)
+  const pickFor = useRef('')
   const stateRef = useRef(null)
   const [mode, setMode] = useState('solid')
   const [picked, setPicked] = useState(null)
@@ -81,29 +93,49 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
 
     const root = new THREE.Group()
     scene.add(root)
-    const materials = new Map(), textures = []
+    const materials = new Map()
     const meshes = [], lines = []
     const lineMat = new THREE.LineBasicMaterial({ color: 0x3a3a36 })
     // стены/пол комнаты — светлые и полупрозрачные, чтобы не заслоняли мебель
     const roomMat = new THREE.MeshStandardMaterial({ color: 0xe6e3da, roughness: 1, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })
     let paletteAt = 0
+    const loader = new THREE.TextureLoader()
+    // «одеть» материал: своя картинка пользователя, иначе рисунок/цвет по названию
+    const skin = (m) => {
+      const { name, texDir, kind, color } = m.userData
+      if (m.map) { m.map.dispose(); m.map = null }
+      const custom = texRef.current[textureKey(name)]
+      if (custom?.data) {
+        const size = Number(custom.size) > 0 ? Number(custom.size) : 600      // сколько мм занимает картинка по ширине
+        const tex = loader.load(custom.data, t => {
+          const iw = t.image?.width || 1, ih = t.image?.height || 1
+          t.repeat.set(1 / size, 1 / (size * ih / iw))
+        })
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+        tex.colorSpace = THREE.SRGBColorSpace
+        tex.repeat.set(1 / size, 1 / size)
+        tex.rotation = ((texDir === 2 ? 1 : 0) + (custom.rot ? 1 : 0)) % 2 ? Math.PI / 2 : 0
+        m.map = tex; m.color.set('#ffffff')
+      } else if (kind === 'wood') {
+        const tex = woodTexture(color)
+        if (texDir === 2) tex.rotation = Math.PI / 2            // текстура вдоль Y панели
+        m.map = tex; m.color.set('#ffffff')
+      } else m.color.set(color)
+      m.needsUpdate = true
+    }
     const matFor = (name, texDir) => {
       if (/^(стена|стены|пол|потолок)/i.test(name || '')) return roomMat
       const look = NAME_LOOKS.find(l => l[0].test(name || ''))
       const kind = look?.[2] || ''
-      const key = name + '|' + (kind === 'wood' ? texDir : 0)
+      const key = name + '|' + (texDir === 2 ? 2 : 1)
       if (!materials.has(key)) {
         const color = look ? look[1] : PALETTE[paletteAt++ % PALETTE.length]
         const m = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, side: THREE.DoubleSide })
-        if (kind === 'wood') {
-          const tex = woodTexture(color)
-          if (texDir === 2) { tex.rotation = Math.PI / 2 }      // текстура вдоль Y панели
-          textures.push(tex)
-          m.map = tex; m.color.set('#ffffff')
-        } else if (kind === 'metal') { m.metalness = 0.55; m.roughness = 0.4 }
+        if (kind === 'metal') { m.metalness = 0.55; m.roughness = 0.4 }
         else if (kind === 'stone') { m.roughness = 0.6 }
-        m.userData.baseOpacity = kind === 'glass' ? 0.45 : 1
+        m.userData = { name, texDir, kind, color, baseOpacity: kind === 'glass' ? 0.45 : 1 }
         if (kind === 'glass') { m.transparent = true; m.opacity = 0.45; m.depthWrite = false }
+        skin(m)
         materials.set(key, m)
       }
       return materials.get(key)
@@ -290,6 +322,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     stateRef.current = {
       materials, meshes, lines, lineMat, hwMat, all, resetView, sel: null, selMat: null,
       openAll: (open) => anims.forEach(st => { st.target = open ? 1 : 0 }),
+      reskin: () => materials.forEach(skin),
     }
     return () => {
       cancelAnimationFrame(raf)
@@ -297,8 +330,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       controls.dispose()
       meshes.forEach(x => { if (x.__kind === 'panel') x.geometry.dispose() })
       lines.forEach(x => x.geometry.dispose())
-      materials.forEach(x => x.dispose())
-      textures.forEach(x => x.dispose())
+      materials.forEach(x => { x.map?.dispose(); x.dispose() })
       extraGeos.forEach(x => x.dispose())
       darkMat.dispose(); grooveMat.dispose(); decorMat.dispose(); hwMat.dispose(); roomMat.dispose(); lineMat.dispose()
       renderer.dispose()
@@ -323,6 +355,50 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   }, [mode, scope, model])
 
   const [opened, setOpened] = useState(false)
+
+  // свои текстуры материалов
+  const uid = user?.id || null
+  useEffect(() => {
+    let alive = true
+    loadTextures(user).then(({ map, cloud }) => {
+      if (!alive) return
+      texRef.current = map; setTex(map); setTexCloud(cloud)
+      stateRef.current?.reskin()
+    })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid])
+  const matNames = useMemo(() => [...new Set(parts.map(p => p.material).filter(n => n && !/^(стена|стены|пол|потолок)/i.test(n)))], [parts])
+  const applyTex = (name, t) => {
+    const next = { ...texRef.current }
+    if (t) next[textureKey(name)] = { name, ...t }; else delete next[textureKey(name)]
+    texRef.current = next; setTex(next)
+    stateRef.current?.reskin()
+  }
+  const onTexFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    const name = pickFor.current
+    if (!file || !name) return
+    setTexBusy(name)
+    try {
+      const data = await fileToTexture(file)
+      const prev = texRef.current[textureKey(name)]
+      const t = { data, size: prev?.size || 600, rot: !!prev?.rot }
+      applyTex(name, t)
+      const r = await saveTexture(user, name, t)
+      setTexCloud(r.cloud)
+    } catch (err) { setError(String(err?.message || err)) } finally { setTexBusy('') }
+  }
+  const changeTex = async (name, patch) => {
+    const prev = texRef.current[textureKey(name)]
+    if (!prev) return
+    const t = { data: prev.data, size: prev.size, rot: prev.rot, ...patch }
+    applyTex(name, t)
+    const r = await saveTexture(user, name, t)
+    setTexCloud(r.cloud)
+  }
+  const removeTex = async (name) => { applyTex(name, null); await deleteTexture(user, name) }
   const chip = active => ({
     flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, cursor: 'pointer',
     background: active ? 'var(--blue)' : 'var(--bg2)', color: active ? 'white' : 'var(--text-muted)',
@@ -346,6 +422,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
             {opened ? 'Закрыть всё' : 'Открыть всё'}
           </button>
         )}
+        {matNames.length > 0 && <button type="button" style={smallBtn} onClick={() => setShowMats(v => !v)}>Материалы</button>}
         <button type="button" style={smallBtn} onClick={() => stateRef.current?.resetView()}>⟲ Вид</button>
       </div>
       <div style={{ display: 'flex', gap: 6, padding: '8px 14px', background: 'var(--bg)' }}>
@@ -360,6 +437,47 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       )}
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {error && <p className="error-text" style={{ padding: 20 }}>{error}</p>}
+        {showMats && (
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '62%', overflowY: 'auto', background: 'var(--bg)', borderTop: '0.5px solid var(--border-md)', padding: '10px 14px', boxShadow: '0 -4px 16px rgba(0,0,0,0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>Текстуры материалов</div>
+              <button type="button" onClick={() => setShowMats(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--text-hint)' }}>✕</button>
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8 }}>
+              Загрузите фото или картинку декора — она ляжет на все детали из этого материала и запомнится по его названию для следующих заказов.
+            </p>
+            {!texCloud && (
+              <p style={{ fontSize: 11, color: 'var(--amber)', background: 'var(--amber-light)', borderRadius: 'var(--radius)', padding: '6px 8px', marginBottom: 8 }}>
+                Картинки пока сохраняются только на этом устройстве. Чтобы они шли за аккаунтом, выполните migration_material_textures.sql в Supabase.
+              </p>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" onChange={onTexFile} style={{ display: 'none' }} />
+            {matNames.map(name => {
+              const t = tex[textureKey(name)]
+              return (
+                <div key={name} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 6, flexShrink: 0, border: '0.5px solid var(--border-md)', background: t?.data ? `url(${t.data}) center/cover` : 'var(--bg2)' }} />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+                    <button type="button" style={smallBtn} disabled={texBusy === name}
+                      onClick={() => { pickFor.current = name; fileRef.current?.click() }}>
+                      {texBusy === name ? '…' : t ? 'Заменить' : 'Загрузить'}
+                    </button>
+                  </div>
+                  {t && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                      <span style={{ flexShrink: 0 }}>Ширина картинки, мм</span>
+                      <input type="text" inputMode="numeric" defaultValue={t.size} style={{ width: 70, padding: '4px 6px', fontSize: 12 }}
+                        onBlur={e => { const v = Number(e.target.value.replace(/[^0-9]/g, '')); if (v > 0 && v !== t.size) changeTex(name, { size: v }) }} />
+                      <button type="button" style={smallBtn} onClick={() => changeTex(name, { rot: !t.rot })}>⟳ 90°</button>
+                      <button type="button" style={{ ...smallBtn, color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => removeTex(name)}>Убрать</button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
       <div style={{ padding: '8px 14px calc(8px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '0.5px solid var(--border)', fontSize: 12, minHeight: 38 }}>
         {picked
