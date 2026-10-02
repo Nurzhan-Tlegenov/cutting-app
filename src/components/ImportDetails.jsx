@@ -312,15 +312,21 @@ export default function ImportDetails({ hasDetails, onImport }) {
             {basis && chosen.length > 0 && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
                 Присадка: {sumInfo('holes')} отв. · пазов: {sumInfo('grooves')} · фигурных деталей: {sumInfo('shaped')} · вырезов: {sumInfo('cutouts')}
+                {sumInfo('shapedEdges') > 0 && ` · кромка на фигурных участках: ${sumInfo('shapedEdges')}`}
               </p>
+            )}
+            {basis && sumInfo('decor') > 0 && (
+              <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
+                Фрезеровка фасадов (скругление кромки, V-паз, выемка): {sumInfo('decor')} — переносится только для вида в 3D, на раскрой и присадку не влияет.
+              </div>
             )}
             {basis && (sumWarn('open') + sumWarn('edges') + sumWarn('edgeHoles') + sumWarn('cuts') > 0) && (
               <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
                 Не всё удалось перенести — проверьте эти детали в редакторе контура:
                 {sumWarn('open') > 0 && <div>· незамкнутый контур: {sumWarn('open')}</div>}
-                {sumWarn('edges') > 0 && <div>· кромка на фигурном крае: {sumWarn('edges')}</div>}
+                {sumWarn('edges') > 0 && <div>· кромка, для которой не нашёлся участок контура: {sumWarn('edges')}</div>}
                 {sumWarn('edgeHoles') > 0 && <div>· торцевые отверстия не на прямой стороне: {sumWarn('edgeHoles')}</div>}
-                {sumWarn('cuts') > 0 && <div>· фрезеровка профиля (скругление кромки, V-паз, выемка): {sumWarn('cuts')} — не переносится</div>}
+                {sumWarn('cuts') > 0 && <div>· обработка, которую не удалось прочитать: {sumWarn('cuts')}</div>}
               </div>
             )}
             {chosen.length > 0 && (

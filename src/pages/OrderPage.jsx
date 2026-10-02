@@ -7,6 +7,7 @@ import BottomNav from '../components/BottomNav'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { detailMeta } from '../lib/partLabel'
 import { hasModel } from '../lib/model3d'
+import { detailEdgeList } from '../lib/edgeLength'
 import { loadOrderModel } from '../lib/orderModel'
 const Model3D = lazy(() => import('../components/Model3D'))
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
@@ -54,10 +55,8 @@ export default function OrderPage() {
   validDetails.forEach(d => {
     totalPartArea += ((d.length + kerf) / 1000) * ((d.width + kerf) / 1000) * d.qty
     totalQty += d.qty
-    if (d.edge_top) totalEdge += (d.length / 1000) * d.qty
-    if (d.edge_bottom) totalEdge += (d.length / 1000) * d.qty
-    if (d.edge_left) totalEdge += (d.width / 1000) * d.qty
-    if (d.edge_right) totalEdge += (d.width / 1000) * d.qty
+    // стороны (Дл/Дп — по длине, Шв/Шн — по ширине) + кромка на фигурных участках и вырезах
+    detailEdgeList(d).forEach(e => { totalEdge += (e.mm / 1000) * d.qty })
   })
   const sheetsNeeded = usableArea > 0 ? Math.ceil(totalPartArea / (usableArea * 0.85)) : 0
   const isDraft = order.status === 'draft'

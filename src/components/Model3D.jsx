@@ -4,20 +4,61 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { buildModel } from '../lib/model3d'
 
 // Просмотр 3D-модели заказа (детали, импортированные из Базиса).
-// Вращение — пальцем, масштаб — щипком, сдвиг — двумя пальцами.
+// Вращение — пальцем, масштаб — щипком, сдвиг — двумя пальцами,
+// двойной тап по двери или ящику — открыть/закрыть (анимация из модели Базиса).
 const MODES = [['solid', 'Сплошной'], ['xray', 'Полупрозрачный'], ['wire', 'Каркас']]
 const PALETTE = ['#cbb89a', '#a9b7c4', '#d9d4c7', '#b9c8a8', '#d2b3a2', '#bdb5d6']
 
-export default function Model3D({ details, scene = null, title, onClose }) {
+// Картинок текстур в файле Базиса нет — цвет и рисунок подбираем по названию материала.
+// [шаблон, цвет, вид]: wood — древесный рисунок вдоль текстуры, metal, glass, stone
+const NAME_LOOKS = [
+  [/вотан/i, '#b98f5e', 'wood'], [/сонома/i, '#cdb894', 'wood'], [/венге/i, '#45302a', 'wood'], [/орех/i, '#7d563a', 'wood'],
+  [/ясень/i, '#d8c7a6', 'wood'], [/бук/i, '#d6a977', 'wood'], [/вишн/i, '#9a4f33', 'wood'], [/ольха/i, '#c08a55', 'wood'],
+  [/сосна/i, '#e0c48f', 'wood'], [/кл[её]н/i, '#e3cfa5', 'wood'], [/крафт/i, '#c69a5e', 'wood'], [/дуб/i, '#c8a777', 'wood'],
+  [/дерев|шпон|массив/i, '#c2a077', 'wood'],
+  [/стекл|зеркал/i, '#bcd4de', 'glass'],
+  [/хром|никел|нерж|алюм|сталь|металл(?!ик)/i, '#b9bdc2', 'metal'],
+  [/камень|мрамор|гранит|бетон/i, '#a9a59c', 'stone'],
+  [/графит|антрацит/i, '#55585c'], [/ч[её]рн/i, '#2e2e30'], [/бел/i, '#f1f0ea'], [/сер|грэй|грей|gray|grey|титан/i, '#93969a'],
+  [/оранж/i, '#e8862e'], [/красн|бордо/i, '#b53a2e'], [/син|голуб/i, '#4a6fa5'], [/зел[её]н|олив/i, '#6a8f62'],
+  [/ж[её]лт/i, '#e2c444'], [/беж|крем|ваниль|слонов/i, '#e5d8bf'], [/коричн|шоколад/i, '#6b4a36'],
+]
+
+function woodTexture(hex) {
+  const cv = document.createElement('canvas')
+  cv.width = cv.height = 256
+  const g = cv.getContext('2d')
+  g.fillStyle = hex
+  g.fillRect(0, 0, 256, 256)
+  // волокна вдоль X: тёмные и светлые волнистые штрихи (псевдослучайно, но одинаково при каждом запуске)
+  let seed = 7
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 }
+  for (let i = 0; i < 90; i++) {
+    const y = rnd() * 256, amp = 1 + rnd() * 3, ph = rnd() * 6.28, dark = rnd() < 0.7
+    g.strokeStyle = dark ? `rgba(60,35,10,${0.05 + rnd() * 0.13})` : `rgba(255,245,225,${0.05 + rnd() * 0.1})`
+    g.lineWidth = 0.6 + rnd() * 1.8
+    g.beginPath()
+    for (let x = 0; x <= 256; x += 16) { const yy = y + Math.sin(ph + (x / 256) * Math.PI * 2) * amp; if (x) g.lineTo(x, yy); else g.moveTo(x, yy) }
+    g.stroke()
+  }
+  const tex = new THREE.CanvasTexture(cv)
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.repeat.set(1 / 700, 1 / 350)      // UV панели — в мм
+  return tex
+}
+
+export default function Model3D({ details, scene: savedScene = null, title, onClose }) {
   const hostRef = useRef(null)
   const stateRef = useRef(null)
   const [mode, setMode] = useState('solid')
   const [picked, setPicked] = useState(null)
   const [error, setError] = useState('')
-  const model = useMemo(() => buildModel(details, scene), [details, scene])
+  const model = useMemo(() => buildModel(details, savedScene), [details, savedScene])
   const parts = model.parts
   const [scope, setScope] = useState('all')      // 'all' — вся модель · 'order' — только детали заказа
   const count = parts.filter(p => scope === 'all' || p.inOrder).length
+  const hasAnim = parts.some(p => p.anim) || model.hardware.some(h => h.inst.some(i => i.anim))
 
   useEffect(() => {
     const host = hostRef.current
@@ -38,29 +79,57 @@ export default function Model3D({ details, scene = null, title, onClose }) {
     const sun = new THREE.DirectionalLight(0xffffff, 1.9)
     scene.add(sun)
 
-    const group = new THREE.Group()
-    scene.add(group)
-    const materials = new Map()
+    const root = new THREE.Group()
+    scene.add(root)
+    const materials = new Map(), textures = []
     const meshes = [], lines = []
     const lineMat = new THREE.LineBasicMaterial({ color: 0x3a3a36 })
     // стены/пол комнаты — светлые и полупрозрачные, чтобы не заслоняли мебель
     const roomMat = new THREE.MeshStandardMaterial({ color: 0xe6e3da, roughness: 1, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })
-    const matFor = name => {
+    let paletteAt = 0
+    const matFor = (name, texDir) => {
       if (/^(стена|стены|пол|потолок)/i.test(name || '')) return roomMat
-      if (!materials.has(name)) {
-        materials.set(name, new THREE.MeshStandardMaterial({
-          color: PALETTE[materials.size % PALETTE.length], roughness: 0.85, metalness: 0, side: THREE.DoubleSide,
-        }))
+      const look = NAME_LOOKS.find(l => l[0].test(name || ''))
+      const kind = look?.[2] || ''
+      const key = name + '|' + (kind === 'wood' ? texDir : 0)
+      if (!materials.has(key)) {
+        const color = look ? look[1] : PALETTE[paletteAt++ % PALETTE.length]
+        const m = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, side: THREE.DoubleSide })
+        if (kind === 'wood') {
+          const tex = woodTexture(color)
+          if (texDir === 2) { tex.rotation = Math.PI / 2 }      // текстура вдоль Y панели
+          textures.push(tex)
+          m.map = tex; m.color.set('#ffffff')
+        } else if (kind === 'metal') { m.metalness = 0.55; m.roughness = 0.4 }
+        else if (kind === 'stone') { m.roughness = 0.6 }
+        m.userData.baseOpacity = kind === 'glass' ? 0.45 : 1
+        if (kind === 'glass') { m.transparent = true; m.opacity = 0.45; m.depthWrite = false }
+        materials.set(key, m)
       }
-      return materials.get(name)
+      return materials.get(key)
     }
     const darkMat = new THREE.MeshBasicMaterial({ color: 0x2b2a28 })
     const grooveMat = new THREE.MeshBasicMaterial({ color: 0x5a4630 })
+    const decorMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false })
     const hwMat = new THREE.MeshStandardMaterial({ color: 0xa9adb3, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide })
     const extraGeos = []                       // геометрия пазов и фурнитуры — для освобождения
     const all = []                             // все объекты сцены с пометками: kind и ctx (не входит в заказ)
-    const reg = (o, kind, ctx) => { o.__kind = kind; o.__ctx = ctx; all.push(o); group.add(o); return o }
-    const drillOrder = [], drillCtx = []       // матрицы отверстий
+
+    // Анимация из Базиса: всё, что входит в блок с анимацией, двигается одной группой
+    const anims = new Map()                    // g -> { group, a, t (0..1), target }
+    const parentOf = a => {
+      if (!a) return root
+      if (!anims.has(a.g)) {
+        const g = new THREE.Group()
+        g.matrixAutoUpdate = false
+        root.add(g)
+        anims.set(a.g, { group: g, a, t: 0, target: 0 })
+      }
+      return anims.get(a.g).group
+    }
+    const reg = (o, kind, ctx, anim) => { o.__kind = kind; o.__ctx = ctx; o.__anim = anim ? anim.g : 0; all.push(o); parentOf(anim).add(o); return o }
+
+    const drillLists = new Map()               // «группа анимации|в заказе» -> матрицы отверстий
     const yAxis = new THREE.Vector3(0, 1, 0)
     const mat4Of = m => new THREE.Matrix4().set(m[0], m[1], m[2], m[9], m[3], m[4], m[5], m[10], m[6], m[7], m[8], m[11], 0, 0, 0, 1)
     for (const p of parts) {
@@ -69,43 +138,43 @@ export default function Model3D({ details, scene = null, title, onClose }) {
       for (const h of p.holes) if (h.length > 2) shape.holes.push(new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, y))))
       const geo = new THREE.ExtrudeGeometry(shape, { depth: p.t, bevelEnabled: false, curveSegments: 1 })
       const mat4 = mat4Of(p.m)
-      const mesh = new THREE.Mesh(geo, matFor(p.material))
+      const mesh = new THREE.Mesh(geo, matFor(p.material, p.texDir))
       mesh.applyMatrix4(mat4)
       mesh.userData = p
       const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), lineMat)
       edge.applyMatrix4(mat4)
-      reg(mesh, 'panel', !p.inOrder); reg(edge, 'edge', !p.inOrder)
+      reg(mesh, 'panel', !p.inOrder, p.anim); reg(edge, 'edge', !p.inOrder, p.anim)
       meshes.push(mesh); lines.push(edge)
       // отверстия: тёмный цилиндр, чуть выступающий из поверхности — виден и снаружи, и «на просвет»
       for (const d of p.drills) {
         const dir = new THREE.Vector3(d.d[0], d.d[1], d.d[2]).normalize()
         const start = new THREE.Vector3(d.p[0], d.p[1], d.p[2])
-        const len = d.len + 0.4
         const local = new THREE.Matrix4().compose(
           start.clone().addScaledVector(dir, d.len / 2 - 0.2),
           new THREE.Quaternion().setFromUnitVectors(yAxis, dir),
-          new THREE.Vector3(d.r, len, d.r))
-        ;(p.inOrder ? drillOrder : drillCtx).push(mat4.clone().multiply(local))
+          new THREE.Vector3(d.r, d.len + 0.4, d.r))
+        const key = `${p.anim ? p.anim.g : 0}|${p.inOrder ? 1 : 0}`
+        if (!drillLists.has(key)) drillLists.set(key, { list: [], anim: p.anim, ctx: !p.inOrder })
+        drillLists.get(key).list.push(mat4.clone().multiply(local))
       }
-      // пазы: тёмная вставка в пласть
+      // пазы и фрезеровка: тёмная вставка в пласть
       for (const g of p.grooves) {
         const gs = new THREE.Shape(g.poly.map(([x, y]) => new THREE.Vector2(x, y)))
         const gg = new THREE.ExtrudeGeometry(gs, { depth: g.depth + 0.4, bevelEnabled: false })
         gg.translate(0, 0, g.z > p.t / 2 ? p.t - g.depth : -0.4)
-        const gm = new THREE.Mesh(gg, grooveMat)
+        const gm = new THREE.Mesh(gg, g.decor ? decorMat : grooveMat)
         gm.applyMatrix4(mat4)
-        reg(gm, 'groove', !p.inOrder); extraGeos.push(gg)
+        reg(gm, 'groove', !p.inOrder, p.anim); extraGeos.push(gg)
       }
     }
     const cyl = new THREE.CylinderGeometry(1, 1, 1, 14)
     extraGeos.push(cyl)
-    for (const [list, isCtx] of [[drillOrder, false], [drillCtx, true]]) {
-      if (!list.length) continue
+    for (const { list, anim, ctx } of drillLists.values()) {
       const inst = new THREE.InstancedMesh(cyl, darkMat, list.length)
       list.forEach((mx, i) => inst.setMatrixAt(i, mx))
       inst.instanceMatrix.needsUpdate = true
       inst.frustumCulled = false
-      reg(inst, 'drill', isCtx)
+      reg(inst, 'drill', ctx, anim)
     }
     // фурнитура, у которой в модели есть форма (петли, ручки, опоры, навесы…)
     for (const hw of model.hardware) {
@@ -116,16 +185,16 @@ export default function Model3D({ details, scene = null, title, onClose }) {
       hg.setAttribute('position', new THREE.BufferAttribute(pos, 3))
       hg.computeVertexNormals()
       extraGeos.push(hg)
-      for (const m of hw.inst) {
+      for (const it of hw.inst) {
         const hm = new THREE.Mesh(hg, hwMat)
-        hm.applyMatrix4(mat4Of(m))
-        hm.userData = { name: hw.name, des: '', size: '', t: null, product: '', hardware: true }
-        reg(hm, 'hw', true); meshes.push(hm)
+        hm.applyMatrix4(mat4Of(it.m))
+        hm.userData = { name: hw.name, des: '', size: '', t: null, product: '', hardware: true, anim: it.anim }
+        reg(hm, 'hw', true, it.anim); meshes.push(hm)
       }
     }
 
     // камера по габариту модели
-    const box = new THREE.Box3().setFromObject(group)
+    const box = new THREE.Box3().setFromObject(root)
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3())
     const radius = box.isEmpty() ? 1000 : Math.max(box.getSize(new THREE.Vector3()).length() / 2, 100)
     const camera = new THREE.PerspectiveCamera(35, 1, radius / 50, radius * 40)
@@ -154,47 +223,84 @@ export default function Model3D({ details, scene = null, title, onClose }) {
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null
     ro?.observe(host)
 
-    let raf = 0
-    const tick = () => {
+    // положение группы анимации при доле открытия e (0 — закрыто, 1 — открыто)
+    const va = new THREE.Vector3(), vb = new THREE.Vector3(), mA = new THREE.Matrix4(), mB = new THREE.Matrix4(), mR = new THREE.Matrix4()
+    const applyAnim = (st) => {
+      const { a } = st
+      const e = st.t * st.t * (3 - 2 * st.t)                  // плавный разгон и остановка
+      va.set(a.a[0], a.a[1], a.a[2]); vb.set(a.b[0], a.b[1], a.b[2])
+      if (a.t === 2) st.group.matrix.makeTranslation((vb.x - va.x) * e, (vb.y - va.y) * e, (vb.z - va.z) * e)
+      else {
+        const axis = vb.clone().sub(va)
+        if (axis.lengthSq() < 1e-9) { st.group.matrix.identity(); return }
+        mR.makeRotationAxis(axis.normalize(), ((a.lim || 90) * Math.PI / 180) * e)
+        mA.makeTranslation(va.x, va.y, va.z); mB.makeTranslation(-va.x, -va.y, -va.z)
+        st.group.matrix.copy(mA).multiply(mR).multiply(mB)
+      }
+      st.group.matrixWorldNeedsUpdate = true
+    }
+
+    let raf = 0, last = performance.now()
+    const tick = (now) => {
+      const dt = Math.min(0.1, (now - last) / 1000) || 0
+      last = now
+      anims.forEach(st => {
+        if (st.t === st.target) return
+        const step = dt / 0.7
+        st.t = st.target > st.t ? Math.min(st.target, st.t + step) : Math.max(st.target, st.t - step)
+        applyAnim(st)
+      })
       controls.update()
       sun.position.copy(camera.position)     // свет «от зрителя» — грани читаются с любой стороны
       renderer.render(scene, camera)
       raf = requestAnimationFrame(tick)
     }
-    tick()
+    raf = requestAnimationFrame(tick)
 
-    // тап по детали — показать, что это
+    // тап по детали — показать, что это; двойной тап по двери/ящику — открыть или закрыть
     const ray = new THREE.Raycaster()
-    let down = null
+    let down = null, lastTap = { g: 0, t: 0 }
     const onDown = e => { down = { x: e.clientX, y: e.clientY, t: Date.now() } }
     const onUp = e => {
-      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6 || Date.now() - down.t > 400) return
+      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8 || Date.now() - down.t > 400) return
       const r = renderer.domElement.getBoundingClientRect()
       ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera)
       const hit = ray.intersectObjects(meshes.filter(x => x.visible), false)[0]
       const st = stateRef.current
+      const g = hit ? hit.object.__anim : 0
+      const now = Date.now()
+      if (g && lastTap.g === g && now - lastTap.t < 500) {
+        const an = anims.get(g)
+        an.target = an.target ? 0 : 1
+        lastTap = { g: 0, t: 0 }
+        return
+      }
+      lastTap = { g, t: now }
       if (st.sel) { st.sel.material = st.selMat; st.sel = null }
       if (hit) {
         st.sel = hit.object; st.selMat = hit.object.material
-        const hi = hit.object.material.clone(); hi.color.set('#185FA5'); hi.emissive?.set('#0C447C')
+        const hi = hit.object.material.clone(); hi.map = null; hi.color.set('#185FA5'); hi.emissive?.set('#0C447C')
         hit.object.material = hi
-        setPicked(hit.object.userData)
+        setPicked({ ...hit.object.userData, canOpen: !!g })
       } else setPicked(null)
     }
     renderer.domElement.addEventListener('pointerdown', onDown)
     renderer.domElement.addEventListener('pointerup', onUp)
 
-    stateRef.current = { materials, meshes, lines, lineMat, hwMat, all, resetView, sel: null, selMat: null }
+    stateRef.current = {
+      materials, meshes, lines, lineMat, hwMat, all, resetView, sel: null, selMat: null,
+      openAll: (open) => anims.forEach(st => { st.target = open ? 1 : 0 }),
+    }
     return () => {
       cancelAnimationFrame(raf)
       ro?.disconnect()
       controls.dispose()
-      meshes.forEach(x => x.geometry.dispose())
+      meshes.forEach(x => { if (x.__kind === 'panel') x.geometry.dispose() })
       lines.forEach(x => x.geometry.dispose())
       materials.forEach(x => x.dispose())
+      textures.forEach(x => x.dispose())
       extraGeos.forEach(x => x.dispose())
-      darkMat.dispose(); grooveMat.dispose(); hwMat.dispose(); roomMat.dispose()
-      lineMat.dispose()
+      darkMat.dispose(); grooveMat.dispose(); decorMat.dispose(); hwMat.dispose(); roomMat.dispose(); lineMat.dispose()
       renderer.dispose()
       renderer.domElement.remove()
       stateRef.current = null
@@ -206,21 +312,26 @@ export default function Model3D({ details, scene = null, title, onClose }) {
     const st = stateRef.current
     if (!st) return
     const xray = mode === 'xray', wire = mode === 'wire'
-    st.materials.forEach(m => { m.transparent = xray; m.opacity = xray ? 0.28 : 1; m.depthWrite = !xray; m.needsUpdate = true })
+    st.materials.forEach(m => {
+      const base = m.userData.baseOpacity ?? 1
+      m.transparent = xray || base < 1; m.opacity = xray ? 0.28 : base; m.depthWrite = !(xray || base < 1); m.needsUpdate = true
+    })
     st.hwMat.wireframe = wire
     if (st.sel) { st.sel.material.transparent = xray; st.sel.material.opacity = xray ? 0.5 : 1; st.sel.material.depthWrite = !xray; st.sel.material.needsUpdate = true }
     st.all.forEach(o => { o.visible = (scope === 'all' || !o.__ctx) && !(wire && o.__kind === 'panel') })
     st.lineMat.color.set(wire ? 0x185fa5 : 0x3a3a36)
   }, [mode, scope, model])
 
+  const [opened, setOpened] = useState(false)
   const chip = active => ({
     flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, cursor: 'pointer',
     background: active ? 'var(--blue)' : 'var(--bg2)', color: active ? 'white' : 'var(--text-muted)',
   })
+  const smallBtn = { padding: '5px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 960, background: 'var(--bg2)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
         <button type="button" onClick={onClose}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1 }}>←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -229,10 +340,13 @@ export default function Model3D({ details, scene = null, title, onClose }) {
             {title ? `${title} · ` : ''}{count} дет.
           </div>
         </div>
-        <button type="button" onClick={() => stateRef.current?.resetView()}
-          style={{ padding: '5px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12 }}>
-          ⟲ Вид
-        </button>
+        {hasAnim && (
+          <button type="button" style={smallBtn}
+            onClick={() => { const o = !opened; setOpened(o); stateRef.current?.openAll(o) }}>
+            {opened ? 'Закрыть всё' : 'Открыть всё'}
+          </button>
+        )}
+        <button type="button" style={smallBtn} onClick={() => stateRef.current?.resetView()}>⟲ Вид</button>
       </div>
       <div style={{ display: 'flex', gap: 6, padding: '8px 14px', background: 'var(--bg)' }}>
         {MODES.map(([id, label]) => <button key={id} type="button" style={chip(mode === id)} onClick={() => setMode(id)}>{label}</button>)}
@@ -249,8 +363,8 @@ export default function Model3D({ details, scene = null, title, onClose }) {
       </div>
       <div style={{ padding: '8px 14px calc(8px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '0.5px solid var(--border)', fontSize: 12, minHeight: 38 }}>
         {picked
-          ? <span><b>{picked.des ? `${picked.des} · ` : ''}{picked.name}</b>{picked.size ? ` — ${picked.size}` : ''}{picked.t ? ` · ${picked.t} мм` : ''}{picked.material && !picked.hardware ? ` · ${picked.material}` : ''}{picked.product ? ` · ${picked.product}` : ''}</span>
-          : <span style={{ color: 'var(--text-hint)' }}>Палец — вращать · щипок — масштаб · два пальца — сдвиг · тап по детали — что это</span>}
+          ? <span><b>{picked.des ? `${picked.des} · ` : ''}{picked.name}</b>{picked.size ? ` — ${picked.size}` : ''}{picked.t ? ` · ${picked.t} мм` : ''}{picked.material && !picked.hardware ? ` · ${picked.material}` : ''}{picked.product ? ` · ${picked.product}` : ''}{picked.canOpen ? ' · двойной тап — открыть/закрыть' : ''}</span>
+          : <span style={{ color: 'var(--text-hint)' }}>Палец — вращать · щипок — масштаб · два пальца — сдвиг · тап по детали — что это{hasAnim ? ' · двойной тап по двери или ящику — открыть' : ''}</span>}
       </div>
     </div>
   )

@@ -11,6 +11,7 @@ import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/dr
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
+import { detailEdgeList } from '../lib/edgeLength'
 import { useLabelMode, rememberOrderDefaults } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
@@ -1958,13 +1959,8 @@ export default function NestingPage() {
   const totalQty = details.reduce((s, d) => s + (Number(d.qty) || 1), 0)
   const edgeByType = details.reduce((acc, d) => {
     const qty = Number(d.qty) || 1
-    const add = (name, len) => {
-      if (!name || name === 'false') return
-      const k = name === 'default' ? 'Кромка' : name
-      acc[k] = (acc[k] || 0) + len * qty
-    }
-    add(d.edge_top, d.length / 1000); add(d.edge_bottom, d.length / 1000)
-    add(d.edge_left, d.width / 1000); add(d.edge_right, d.width / 1000)
+    // стороны (Дл/Дп — по длине, Шв/Шн — по ширине) + кромка на фигурных участках и вырезах
+    detailEdgeList(d).forEach(e => { acc[e.name] = (acc[e.name] || 0) + (e.mm / 1000) * qty })
     return acc
   }, {})
   const totalEdge = Object.values(edgeByType).reduce((s, v) => s + v, 0)

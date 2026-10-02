@@ -102,6 +102,7 @@ export function flipDetail(detail, thickness) {
   const grooves = (c.grooves || []).map(g => ({ ...g, face: swapFace(g.face || 'front') }))
   const holes = (c.holes || []).map(hh => (hh.type === 'pocket' ? { ...hh, face: swapFace(hh.face || 'front') } : hh))
   const contour = { ...c, drillings, grooves, holes }
+  if (Array.isArray(c.decor)) contour.decor = c.decor.map(dc => ({ ...dc, face: swapFace(dc.face || 'front'), polys: (dc.polys || []).map(pl => pl.map(([x, y]) => [Math.round((W - x) * 10) / 10, y])) }))
   if (c.meta) contour.meta = { ...c.meta, flipped: !c.meta.flipped }
   return { ...detail, contour, edges: mirrorEdges(detail.edges) }
 }

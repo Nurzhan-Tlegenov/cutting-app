@@ -298,24 +298,47 @@ function convertPanel(panel, holes, faceRule) {
     }
   }
 
-  // --- пазы (Cuts с прямоугольным профилем) ---
-  const cutsRaw = []
+  // --- пазы (Cuts с прямоугольным профилем по прямой) и фрезеровка «для вида» ---
+  const cutsRaw = [], decorRaw = []
   for (const cut of (kid(o, 'Cuts')?.c || [])) {
-    const prof = contourElems(val(cut, 'Contour')), traj = contourElems(val(cut, 'Trajectory'))
-    if (traj.length !== 1 || traj[0].t !== 'L' || prof.length !== 4 || prof.some(e => e.t !== 'L')) { warn.cuts++; continue }
-    const us = prof.flatMap(e => [e.a[0], e.b[0]]), zs = prof.flatMap(e => [e.a[1], e.b[1]])
-    const u0 = Math.min(...us), u1 = Math.max(...us), z0 = Math.min(...zs), z1 = Math.max(...zs)
+    let prof, traj
+    try { prof = contourElems(val(cut, 'Contour')); traj = contourElems(val(cut, 'Trajectory')) } catch { warn.cuts++; continue }
+    const name = cleanName(val(cut, 'Name')), sign = cleanName(val(cut, 'Sign'))
+    if (!traj.length) {
+      // выемка: контур — область на пласти, глубина — в названии (G=10)
+      const { loops: pl } = buildLoops(prof)
+      const gm = /G\s*=\s*([\d.,]+)/i.exec(name)
+      const depth = Math.min(gm ? parseFloat(gm[1].replace(',', '.')) : Math.abs(val(cut, 'Thickness', 0)), T)
+      const polys = pl.map(lp => (lp.circle
+        ? Array.from({ length: 24 }, (_, i) => [lp.circle.c[0] + lp.circle.r * Math.cos(i * Math.PI / 12), lp.circle.c[1] + lp.circle.r * Math.sin(i * Math.PI / 12)])
+        : lp.pts.map(v => v.p))).filter(pp => pp.length > 2)
+      if (polys.length && depth > 0) decorRaw.push({ kind: 'pocket', name, sign, depth, top: val(cut, 'Front', true) !== false, polys })
+      else warn.cuts++
+      continue
+    }
+    const pp = prof.flatMap(e => (e.t === 'C' ? [] : [e.a, e.b]))
+    if (!pp.length) { warn.cuts++; continue }
+    const us = pp.map(q => q[0]), zs = pp.map(q => q[1])
+    const u0 = Math.min(...us), u1 = Math.max(...us), z0 = Math.max(0, Math.min(...zs)), z1 = Math.min(T, Math.max(...zs))
     const top = z1 >= T - EPS, bottom = z0 <= EPS
-    if (top === bottom) { warn.cuts++; continue }       // сквозной или «внутренний» — не паз
-    const { a, b } = traj[0]
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1])
-    if (len < 0.5) { warn.cuts++; continue }
-    const n = [-(b[1] - a[1]) / len, (b[0] - a[0]) / len]     // левая нормаль к траектории
-    if (Math.abs(n[0]) > 0.01 && Math.abs(n[1]) > 0.01) { warn.cuts++; continue }  // наклонный паз
-    cutsRaw.push({
-      p: [a[0] + n[0] * u0, a[1] + n[1] * u0], q: [b[0] + n[0] * u1, b[1] + n[1] * u1],
-      depth: z1 - z0, top, name: cleanName(val(cut, 'Name')),
-    })
+    const lines = traj.filter(e => e.t !== 'C').map(e => ({ a: e.a, b: e.b }))
+    const band = (a, b, lo, hi) => {
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1])
+      if (len < 0.5) return null
+      const n = [-(b[1] - a[1]) / len, (b[0] - a[0]) / len]     // левая нормаль к траектории
+      return { n, p: [a[0] + n[0] * lo, a[1] + n[1] * lo], q: [b[0] + n[0] * hi, b[1] + n[1] * hi], a, b }
+    }
+    const rectProfile = prof.length === 4 && prof.every(e => e.t === 'L')
+    const one = traj.length === 1 && traj[0].t === 'L' ? band(traj[0].a, traj[0].b, u0, u1) : null
+    if (rectProfile && one && top !== bottom && !(Math.abs(one.n[0]) > 0.01 && Math.abs(one.n[1]) > 0.01)) {
+      cutsRaw.push({ p: one.p, q: one.q, depth: z1 - z0, top, name })
+      continue
+    }
+    // всё остальное (V-паз по контуру, скругление кромки, наклонный паз) — только для показа
+    const round = prof.some(e => e.t === 'A')
+    const polys = round ? [] : lines.map(l => band(l.a, l.b, u0, u1)).filter(Boolean)
+      .map(bd => [[bd.a[0] + bd.n[0] * u0, bd.a[1] + bd.n[1] * u0], [bd.b[0] + bd.n[0] * u0, bd.b[1] + bd.n[1] * u0], bd.q, [bd.a[0] + bd.n[0] * u1, bd.a[1] + bd.n[1] * u1]])
+    decorRaw.push({ kind: round ? 'round' : 'mill', name, sign, depth: Math.max(0, z1 - z0), top: top || !bottom, polys })
   }
 
   // --- какая пласть «лицевая» (смотрит вверх на станке): та, где больше глухой обработки ---
@@ -367,36 +390,61 @@ function convertPanel(panel, holes, faceRule) {
     (Math.abs(v.x) <= EPS || Math.abs(v.x - W) <= EPS) && (Math.abs(v.y) <= EPS || Math.abs(v.y - L) <= EPS))
 
   // --- вырезы ---
-  const cutouts = []
+  const cutouts = [], cutoutSrc = []
   for (const lp of loops) {
     if (lp === outer) continue
     if (lp.circle) {
       const c = tf(lp.circle.c), r = lp.circle.r
       cutouts.push({ type: 'circle', d: r1(2 * r), ...sideOffsets(c[0] - r, c[1] - r, W, L, 2 * r, 2 * r) })
+      cutoutSrc.push(lp)
     } else {
       const vs = toVerts(lp)
       const xs = vs.map(v => v.x), ys = vs.map(v => v.y)
       const hx = Math.min(...xs), hy = Math.min(...ys), hw = Math.max(...xs) - hx, hh = Math.max(...ys) - hy
       cutouts.push({ type: 'rect', hw: r1(hw), hh: r1(hh), ...sideOffsets(hx, hy, W, L, hw, hh), vertices: vs, _verticesEdited: true })
+      cutoutSrc.push(lp)
     }
   }
 
   // --- кромка: Elem — номер элемента контура ---
   const edges = { top: null, right: null, bottom: null, left: null }
   const edgeInfo = {}
+  // участок контура между двумя точками (в координатах редактора): вершина, с которой он начинается
+  const findSeg = (vs, A, B) => {
+    for (let i = 0; i < vs.length; i++) {
+      if (vs[i].type === 'arc') continue
+      let j = (i + 1) % vs.length
+      if (vs[j].type === 'arc') j = (j + 1) % vs.length
+      const P = [vs[i].x, vs[i].y], Q = [vs[j].x, vs[j].y]
+      if ((near(A, P) && near(B, Q)) || (near(A, Q) && near(B, P))) return i
+    }
+    return -1
+  }
   for (const butt of (kid(o, 'Butts')?.c || [])) {
     const e = elems[val(butt, 'Elem', -1)]
     const name = cleanName(val(butt, 'Mat')) || cleanName(val(butt, 'Sign')) || 'default'
-    if (!e || e.t !== 'L') { warn.edges++; continue }
+    const info = { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width') }
+    if (!e) { warn.edges++; continue }
+    if (e.t === 'C') {                                   // кромка по круглому вырезу
+      const k = cutoutSrc.findIndex(lp => lp.circle && near(lp.circle.c, e.c))
+      if (k >= 0) { cutouts[k].edge = name; edgeInfo['hole' + k] = info } else warn.edges++
+      continue
+    }
     const a = tf(e.a), b = tf(e.b)
     let side = null
-    if (Math.abs(a[0]) <= EPS && Math.abs(b[0]) <= EPS) side = 'left'
-    else if (Math.abs(a[0] - W) <= EPS && Math.abs(b[0] - W) <= EPS) side = 'right'
-    else if (Math.abs(a[1]) <= EPS && Math.abs(b[1]) <= EPS) side = 'bottom'
-    else if (Math.abs(a[1] - L) <= EPS && Math.abs(b[1] - L) <= EPS) side = 'top'
-    if (!side) { warn.edges++; continue }
-    edges[side] = name
-    edgeInfo[side] = { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width') }
+    if (e.t === 'L') {
+      if (Math.abs(a[0]) <= EPS && Math.abs(b[0]) <= EPS) side = 'left'
+      else if (Math.abs(a[0] - W) <= EPS && Math.abs(b[0] - W) <= EPS) side = 'right'
+      else if (Math.abs(a[1]) <= EPS && Math.abs(b[1]) <= EPS) side = 'bottom'
+      else if (Math.abs(a[1] - L) <= EPS && Math.abs(b[1] - L) <= EPS) side = 'top'
+    }
+    if (side) { edges[side] = name; edgeInfo[side] = info; continue }
+    // фигурный участок: дуга, скос, ступенька — кромка на участке контура
+    const vi = outer.circle ? -1 : findSeg(vertices, a, b)
+    if (vi >= 0) { vertices[vi].edge = name; edgeInfo['seg' + vi] = info; continue }
+    const k = cutouts.findIndex(h => h.vertices && findSeg(h.vertices, a, b) >= 0)
+    if (k >= 0) { cutouts[k].edge = name; edgeInfo['hole' + k] = info; continue }
+    warn.edges++
   }
 
   // --- присадка ---
@@ -483,6 +531,12 @@ function convertPanel(panel, holes, faceRule) {
     }
   })
 
+  // фрезеровка для вида (на раскрой и присадку не влияет)
+  const decor = decorRaw.map(dc => ({
+    kind: dc.kind, name: dc.name, sign: dc.sign, depth: r1(dc.depth), face: dc.top !== flip ? 'front' : 'back',
+    polys: dc.polys.map(pl => pl.map(q => { const t = tf(q); return [r1(t[0]), r1(t[1])] })),
+  }))
+
   // Свойства детали из Базиса — целиком, для бирки и подписи на карте раскроя
   const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
   const meta = {
@@ -500,11 +554,14 @@ function convertPanel(panel, holes, faceRule) {
     // для 3D-просмотра: габарит контура в системе панели и положение каждой штуки в модели
     local: { x0: r2(x0), y0: r2(y0), dx: r2(dx), dy: r2(dy) },
     inst: [panel.M.map((v, i) => (i < 9 ? Math.round(v * 1e6) / 1e6 : r2(v)))],
+    anims: [panel.ctx.anim || null],          // анимация (дверь, ящик) для каждой штуки
+    ...(val(o, 'Color') != null ? { color: val(o, 'Color') } : {}),
   }
   const contour = {
     vertices: isRect ? [{ x: 0, y: 0, r: 0 }, { x: r1(W), y: 0, r: 0 }, { x: r1(W), y: r1(L), r: 0 }, { x: 0, y: r1(L), r: 0 }] : vertices,
     holes: cutouts, grooves, drillings, layout: [], meta,
   }
+  if (decor.length) contour.decor = decor
 
   const material = cleanName(val(o, 'Mat'))
   return {
@@ -513,6 +570,7 @@ function convertPanel(panel, holes, faceRule) {
     rotatable: texDir === 0, contour,
     groupKey: `${material}|${T}`,
     info: { shaped: !isRect, cutouts: cutouts.length, holes: holeCount, grooves: grooves.length,
+      decor: decor.length, shapedEdges: vertices.filter(v => v.edge).length + cutouts.filter(h => h.edge).length,
       back: drillings.filter(d => d.kind === 'face' && d.face === 'back').length + grooves.filter(g => g.face === 'back').length },
     warn,
   }
@@ -553,15 +611,16 @@ export function parseBasis(u8, opts = {}) {
 
   const panels = [], holes = []
   const profiles = [], hardware = []          // для 3D-просмотра всей модели
+  let animSeq = 0
   const roundM = M => M.map((v, i) => (i < 9 ? Math.round(v * 1e6) / 1e6 : r2(v)))
   const walk = (obj, M, ctx) => {
     const type = val(obj, 'Type')
     const Mo = mul(M, transOf(obj))
     if (type === TYPE_PANEL) panels.push({ obj, M: Mo, ctx })
-    else if (type === TYPE_PROFILE) profiles.push({ obj, M: Mo })
+    else if (type === TYPE_PROFILE) profiles.push({ obj, M: Mo, anim: ctx.anim || null })
     else if (type === TYPE_FASTENER) {
       const f = furn.get(val(obj, 'FastID'))
-      if (f && val(f, 'TriData')) hardware.push({ f: val(obj, 'FastID'), m: roundM(Mo) })
+      if (f && val(f, 'TriData')) hardware.push({ f: val(obj, 'FastID'), m: roundM(Mo), ...(ctx.anim ? { anim: ctx.anim } : {}) })
       for (const h of (kid(f, 'Holes')?.c || [])) {
         const r = val(h, 'Radius', 0), depth = val(h, 'Depth', 0)
         if (!(r > 0) || !(depth > 0)) continue
@@ -572,10 +631,18 @@ export function parseBasis(u8, opts = {}) {
         })
       }
     }
+    // анимация блока: 1 — поворот вокруг оси (дверь, Limit — угол), 2 — сдвиг вдоль оси (ящик)
+    let anim = null
+    const an = kid(obj, 'Anim'), at = val(an, 'AnimType')
+    if (an && (at === 1 || at === 2)) {
+      const pt = k => { const q = kid(an, k); return applyP(Mo, [val(q, 'x', 0), val(q, 'y', 0), val(q, 'z', 0)]).map(r1) }
+      anim = { g: ++animSeq, t: at, a: pt('AxisStart'), b: pt('AxisEnd'), lim: val(an, 'Limit', at === 1 ? 90 : 0) }
+    }
     for (const c of (obj.c || [])) {
       if (!c.c) continue
       const list = c.k === 'Obj' ? [c] : c.c
       const sub = type === 1005 && ctx.depth > 0 ? { ...ctx, path: [...ctx.path, cleanName(val(obj, 'Name'))], depth: ctx.depth + 1 } : { ...ctx, depth: ctx.depth + 1 }
+      if (anim) sub.anim = anim
       for (const cc of list) if (cc.c && cc.k === 'Obj' && kid(cc, 'Type')) walk(cc, Mo, sub)
     }
   }
@@ -586,7 +653,7 @@ export function parseBasis(u8, opts = {}) {
   }
 
   // одинаковые детали одного изделия — в одну строку с количеством
-  const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' || k === 'inst' ? undefined : v))
+  const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' || k === 'inst' || k === 'anims' ? undefined : v))
   const map = new Map()
   let skipped = 0
   for (const p of panels) {
@@ -595,7 +662,7 @@ export function parseBasis(u8, opts = {}) {
     if (!it) continue
     const key = [it.prefix, it.name, it.w, it.h, it.groupKey, JSON.stringify(it.edges), strip(it.contour)].join('§')
     const prev = map.get(key)
-    if (prev) { prev.qty++; prev.contour.meta.ids.push(...it.contour.meta.ids); prev.contour.meta.inst.push(...it.contour.meta.inst); for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
+    if (prev) { prev.qty++; prev.contour.meta.ids.push(...it.contour.meta.ids); prev.contour.meta.inst.push(...it.contour.meta.inst); prev.contour.meta.anims.push(...it.contour.meta.anims); for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
     else map.set(key, it)
   }
   const items = [...map.values()]
@@ -626,7 +693,7 @@ export function parseBasis(u8, opts = {}) {
     const inside = polys.slice(1).every(pl => pointInPoly(pl[0], polys[0]))
     const t = val(pr.obj, 'Thickness', 0)
     if (!(t > 0)) continue
-    const base = { t: r1(t), m: roundM(pr.M), material: cleanName(val(pr.obj, 'Mat')), name: cleanName(val(pr.obj, 'Name')) }
+    const base = { t: r1(t), m: roundM(pr.M), material: cleanName(val(pr.obj, 'Mat')), name: cleanName(val(pr.obj, 'Name')), ...(pr.anim ? { anim: pr.anim } : {}), ...(val(pr.obj, 'Color') != null ? { color: val(pr.obj, 'Color') } : {}) }
     if (inside) extras.push({ ...base, outline: polys[0], holes: polys.slice(1) })
     else polys.forEach(pl => extras.push({ ...base, outline: pl, holes: [] }))
   }

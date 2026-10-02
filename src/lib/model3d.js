@@ -80,13 +80,21 @@ function partsOfDetail(d, inOrder, skipIds) {
       z: front ? frontZ : T - frontZ, depth: Math.min(num(g.depth) || 0, T),
     }
   }).filter(g => g.depth > 0)
+  // фрезеровка «для вида» (выемка, V-паз) — тоже вставкой в пласть
+  for (const dc of c.decor || []) {
+    const front = dc.face !== 'back'
+    for (const pl of dc.polys || []) {
+      if (pl.length < 3) continue
+      grooves.push({ poly: pl.map(toLocal), z: front ? frontZ : T - frontZ, depth: Math.max(0.6, Math.min(num(dc.depth) || 1, T - 0.5)), decor: true })
+    }
+  }
 
   const size = `${Math.round(num(d.w ?? d.length) * 10) / 10}×${Math.round(num(d.h ?? d.width) * 10) / 10}`
   const out = []
   meta.inst.forEach((m, i) => {
     const id = meta.ids?.[i]
     if (skipIds && id != null && skipIds.has(id)) return
-    out.push({ outline, holes, drills, grooves, t: T, m, inOrder, des: meta.des || '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', size })
+    out.push({ outline, holes, drills, grooves, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', size })
   })
   return out
 }
@@ -110,7 +118,7 @@ export function buildModel(details, scene) {
   if (scene) {
     for (const sp of scene.parts || []) parts.push(...partsOfDetail(sp, false, orderIds))
     for (const ex of scene.extras || []) {
-      parts.push({ outline: ex.outline, holes: ex.holes || [], drills: [], grooves: [], t: ex.t, m: ex.m, inOrder: false, des: '', name: ex.name || '', material: ex.material || '', product: '', size: '' })
+      parts.push({ outline: ex.outline, holes: ex.holes || [], drills: [], grooves: [], t: ex.t, m: ex.m, inOrder: false, anim: ex.anim || null, texDir: 0, des: '', name: ex.name || '', material: ex.material || '', product: '', size: '' })
     }
     const byId = new Map()
     for (const hw of scene.hardware || []) {
@@ -120,7 +128,7 @@ export function buildModel(details, scene) {
         byId.set(hw.f, { name: mesh.name || '', groups: mesh.groups.map(g => ({ mat: g.mat, pos: Float32Array.from(g.pos, v => v / 10) })), inst: [] })
         hardware.push(byId.get(hw.f))
       }
-      byId.get(hw.f).inst.push(hw.m)
+      byId.get(hw.f).inst.push({ m: hw.m, anim: hw.anim || null })
     }
     hasContext = parts.some(p => !p.inOrder) || hardware.length > 0
   }
