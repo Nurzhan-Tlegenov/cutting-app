@@ -759,7 +759,7 @@ export function parseBasis(u8, opts = {}) {
   }
   const scene = {
     v: 1, order: orderName,
-    parts: items.map(it => ({ name: it.name, w: it.w, h: it.h, contour: it.contour })),
+    parts: items.map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
     extras, meshes, hardware,
   }
 

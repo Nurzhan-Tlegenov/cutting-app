@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
+import MaterialFilter from '../components/MaterialFilter'
+import { detailMatKey } from '../lib/detailMaterial'
 import { detailMeta } from '../lib/partLabel'
 import Model3DButton from '../components/Model3DButton'
 import { detailEdgeList } from '../lib/edgeLength'
@@ -16,6 +18,7 @@ export default function OrderPage() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const [sortMode, setSortMode] = useState('')   // сортировка списка деталей (только показ)
+  const [matFilter, setMatFilter] = useState('') // какой материал показывать в списке
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
@@ -40,6 +43,8 @@ export default function OrderPage() {
   }
   if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40 }}>Загрузка...</p></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
+  const matKeys = new Set(details.map(d => detailMatKey(d, order)))
+  const shownDetails = matFilter && matKeys.has(matFilter) ? details.filter(d => detailMatKey(d, order) === matFilter) : details
   const validDetails = details.filter(d => d.length > 0 && d.width > 0)
   const kerf = order.kerf_width || 4
   const usableL = order.sheet_length - (order.margin_left || 0) - (order.margin_right || 0)
@@ -110,6 +115,7 @@ export default function OrderPage() {
             </button>
           )}
         </div>
+        <MaterialFilter details={details} order={order} value={matFilter} onChange={setMatFilter} />
         <div style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -121,7 +127,7 @@ export default function OrderPage() {
               </tr>
             </thead>
             <tbody>
-              {(sortMode ? sortDetails(details, sortMode) : details).map((d) => (
+              {(sortMode ? sortDetails(shownDetails, sortMode) : shownDetails).map((d) => (
                 <tr key={d.id} style={{ borderTop: '0.5px solid var(--border)' }}>
                   <td style={{ padding: '8px 10px' }}>
                     {d.prefix && <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 500 }}>{d.prefix}</div>}

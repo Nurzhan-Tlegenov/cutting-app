@@ -6,6 +6,7 @@ import { verticesToPolygon } from './trueShapeNesting.js'
 import { detailHoles } from './partHoles.js'
 import { getDrillPoints } from './drillGeometry.js'
 import { buildRelief } from './facadeCarve.js'
+import { contourSegments, segmentSide } from './edgeLength.js'
 
 const num = v => Number(v) || 0
 
@@ -51,6 +52,16 @@ function partsOfDetail(d, inOrder, skipIds) {
   const outline = verticesToPolygon(verts).map(toLocal)
   const holes = detailHoles({ width: W, length: L, contour: JSON.stringify({ holes: c.holes || [] }) })
     .map(poly => poly.map(p => toLocal([p.x, p.y])))
+
+  // торцы с кромкой: ломаные по контуру (для подсветки в 3D)
+  const sides = d.edges || { top: d.edge_top, right: d.edge_right, bottom: d.edge_bottom, left: d.edge_left }
+  const on = v => !!v && v !== 'false'
+  const bands = []
+  for (const seg of contourSegments(verts)) {
+    const side = segmentSide(seg, W, L)
+    if ((side && on(sides[side])) || seg.edge) bands.push(seg.pts.map(toLocal))
+  }
+  ;(c.holes || []).forEach((h, i) => { if (h.edge && holes[i]?.length > 2) bands.push([...holes[i], holes[i][0]]) })
 
   const drills = []
   for (const dr of c.drillings || []) {
@@ -119,7 +130,7 @@ function partsOfDetail(d, inOrder, skipIds) {
   meta.inst.forEach((m, i) => {
     const id = meta.ids?.[i]
     if (skipIds && id != null && skipIds.has(id)) return
-    out.push({ outline, holes, drills, grooves, carve, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', size })
+    out.push({ outline, holes, drills, grooves, carve, bands, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', size })
   })
   return out
 }

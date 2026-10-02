@@ -320,6 +320,11 @@ export function getAllDrillPoints(contour, panelW, panelH, frontOnly = false) {
     if (frontOnly && dr.kind !== 'edge' && dr.face === 'back') return
     const d = dr.d || 8
     getDrillPoints(dr, panelW, panelH, contour.layout).forEach(p => {
+      // отверстие в торец: направление вглубь детали и глубина — карта рисует его на всю длину
+      if (dr.kind === 'edge' && !p.isFaceType && (p.dx || p.dy)) {
+        pts.push({ x: p.x, y: p.y, d: p.ehD ?? d, back: false, edge: true, dx: p.dx, dy: p.dy, depth: p.ehDepth ?? dr.depth ?? 0 })
+        return
+      }
       pts.push({ x: p.x, y: p.y, d, back: dr.kind !== 'edge' && dr.face === 'back' })
     })
   })

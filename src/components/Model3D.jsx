@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { buildModel } from '../lib/model3d'
 import { useAuth } from '../context/AuthContext'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { loadTextures, saveTexture, deleteTexture, fileToTexture, textureKey } from '../lib/materialTextures'
 
 // Просмотр 3D-модели заказа (детали, импортированные из Базиса или Астры).
@@ -64,6 +65,10 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const pickFor = useRef('')
   const stateRef = useRef(null)
   const [mode, setMode] = useState('solid')
+  // настройки вида идут за аккаунтом: прозрачность, подсветка кромки в каркасе
+  const [view, setViewState] = useState(() => ({ xray: 0.28, bandOn: true, bandColor: '#ff6a00', bandOp: 0.7, ...(getUserSettings(user).view3d || {}) }))
+  const setView = patch => setViewState(v => { const n = { ...v, ...patch }; saveUserSettings({ view3d: n }, user); return n })
+  const [hidden, setHidden] = useState(() => new Set())   // скрытые материалы
   const [picked, setPicked] = useState(null)
   const [error, setError] = useState('')
   const model = useMemo(() => buildModel(details, savedScene), [details, savedScene])
@@ -145,6 +150,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     const grooveMat = new THREE.MeshBasicMaterial({ color: 0x5a4630 })
     const decorMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false })
     const hwMat = new THREE.MeshStandardMaterial({ color: 0xa9adb3, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide })
+    // торцы с кромкой — цветные ленты по контуру (видны в каркасе)
+    const bandMat = new THREE.MeshBasicMaterial({ color: 0xff6a00, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false })
     const extraGeos = []                       // геометрия пазов и фурнитуры — для освобождения
     const all = []                             // все объекты сцены с пометками: kind и ctx (не входит в заказ)
 
@@ -160,7 +167,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       }
       return anims.get(a.g).group
     }
-    const reg = (o, kind, ctx, anim) => { o.__kind = kind; o.__ctx = ctx; o.__anim = anim ? anim.g : 0; all.push(o); parentOf(anim).add(o); return o }
+    const reg = (o, kind, ctx, anim, mat = '') => { o.__kind = kind; o.__ctx = ctx; o.__mat = mat; o.__anim = anim ? anim.g : 0; all.push(o); parentOf(anim).add(o); return o }
 
     const drillLists = new Map()               // «группа анимации|в заказе» -> матрицы отверстий
     const yAxis = new THREE.Vector3(0, 1, 0)
@@ -178,8 +185,20 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       mesh.userData = p
       const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), lineMat)
       edge.applyMatrix4(mat4)
-      reg(mesh, 'panel', !p.inOrder, p.anim); reg(edge, 'edge', !p.inOrder, p.anim)
+      reg(mesh, 'panel', !p.inOrder, p.anim, p.material); reg(edge, 'edge', !p.inOrder, p.anim, p.material)
       meshes.push(mesh); lines.push(edge)
+      if (p.bands?.length) {
+        const pos = []
+        for (const line of p.bands) for (let k = 1; k < line.length; k++) {
+          const [ax, ay] = line[k - 1], [bx, by] = line[k]
+          pos.push(ax, ay, 0, bx, by, 0, bx, by, p.t, ax, ay, 0, bx, by, p.t, ax, ay, p.t)
+        }
+        const bg = new THREE.BufferGeometry()
+        bg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
+        const bm = new THREE.Mesh(bg, bandMat)
+        bm.applyMatrix4(mat4)
+        reg(bm, 'band', !p.inOrder, p.anim, p.material); extraGeos.push(bg)
+      }
       if (p.carve) {
         const sg = new THREE.BufferGeometry()
         sg.setAttribute('position', new THREE.BufferAttribute(p.carve.pos, 3))
@@ -193,7 +212,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         skin.userData = p
         const se = new THREE.LineSegments(new THREE.EdgesGeometry(sg, 12), lineMat)
         se.applyMatrix4(mat4)
-        reg(skin, 'panel', !p.inOrder, p.anim); reg(se, 'edge', !p.inOrder, p.anim)
+        reg(skin, 'panel', !p.inOrder, p.anim, p.material); reg(se, 'edge', !p.inOrder, p.anim, p.material)
         meshes.push(skin); lines.push(se)
       }
       // отверстия: тёмный цилиндр, чуть выступающий из поверхности — виден и снаружи, и «на просвет»
@@ -204,8 +223,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
           start.clone().addScaledVector(dir, d.len / 2 - 0.2),
           new THREE.Quaternion().setFromUnitVectors(yAxis, dir),
           new THREE.Vector3(d.r, d.len + 0.4, d.r))
-        const key = `${p.anim ? p.anim.g : 0}|${p.inOrder ? 1 : 0}`
-        if (!drillLists.has(key)) drillLists.set(key, { list: [], anim: p.anim, ctx: !p.inOrder })
+        const key = `${p.anim ? p.anim.g : 0}|${p.inOrder ? 1 : 0}|${p.material}`
+        if (!drillLists.has(key)) drillLists.set(key, { list: [], anim: p.anim, ctx: !p.inOrder, mat: p.material })
         drillLists.get(key).list.push(mat4.clone().multiply(local))
       }
       // пазы и фрезеровка: тёмная вставка в пласть
@@ -215,17 +234,17 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         gg.translate(0, 0, g.z > p.t / 2 ? p.t - g.depth : -0.4)
         const gm = new THREE.Mesh(gg, g.decor ? decorMat : grooveMat)
         gm.applyMatrix4(mat4)
-        reg(gm, 'groove', !p.inOrder, p.anim); extraGeos.push(gg)
+        reg(gm, 'groove', !p.inOrder, p.anim, p.material); extraGeos.push(gg)
       }
     }
     const cyl = new THREE.CylinderGeometry(1, 1, 1, 14)
     extraGeos.push(cyl)
-    for (const { list, anim, ctx } of drillLists.values()) {
+    for (const { list, anim, ctx, mat } of drillLists.values()) {
       const inst = new THREE.InstancedMesh(cyl, darkMat, list.length)
       list.forEach((mx, i) => inst.setMatrixAt(i, mx))
       inst.instanceMatrix.needsUpdate = true
       inst.frustumCulled = false
-      reg(inst, 'drill', ctx, anim)
+      reg(inst, 'drill', ctx, anim, mat)
     }
     // фурнитура, у которой в модели есть форма (петли, ручки, опоры, навесы…)
     for (const hw of model.hardware) {
@@ -339,7 +358,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     renderer.domElement.addEventListener('pointerup', onUp)
 
     stateRef.current = {
-      materials, meshes, lines, lineMat, hwMat, all, resetView, sel: null, selMat: null,
+      materials, meshes, lines, lineMat, hwMat, bandMat, roomMat, all, resetView, sel: null, selMat: null,
       openAll: (open) => anims.forEach(st => { st.target = open ? 1 : 0 }),
       reskin: () => materials.forEach(skin),
     }
@@ -351,7 +370,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       lines.forEach(x => x.geometry.dispose())
       materials.forEach(x => { x.map?.dispose(); x.dispose() })
       extraGeos.forEach(x => x.dispose())
-      darkMat.dispose(); grooveMat.dispose(); decorMat.dispose(); hwMat.dispose(); roomMat.dispose(); lineMat.dispose()
+      darkMat.dispose(); grooveMat.dispose(); decorMat.dispose(); hwMat.dispose(); bandMat.dispose(); roomMat.dispose(); lineMat.dispose()
       renderer.dispose()
       renderer.domElement.remove()
       stateRef.current = null
@@ -365,13 +384,17 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     const xray = mode === 'xray', wire = mode === 'wire'
     st.materials.forEach(m => {
       const base = m.userData.baseOpacity ?? 1
-      m.transparent = xray || base < 1; m.opacity = xray ? 0.28 : base; m.depthWrite = !(xray || base < 1); m.needsUpdate = true
+      m.transparent = xray || base < 1; m.opacity = xray ? Math.min(base, view.xray) : base; m.depthWrite = !(xray || base < 1); m.needsUpdate = true
     })
+    st.bandMat.color.set(view.bandColor); st.bandMat.opacity = view.bandOp
     st.hwMat.wireframe = wire
     if (st.sel) { st.sel.material.transparent = xray; st.sel.material.opacity = xray ? 0.5 : 1; st.sel.material.depthWrite = !xray; st.sel.material.needsUpdate = true }
-    st.all.forEach(o => { o.visible = (scope === 'all' || !o.__ctx) && !(wire && o.__kind === 'panel') })
+    st.all.forEach(o => {
+      o.visible = (scope === 'all' || !o.__ctx) && !(wire && o.__kind === 'panel') && !(o.__mat && hidden.has(o.__mat))
+        && (o.__kind !== 'band' || (wire && view.bandOn))
+    })
     st.lineMat.color.set(wire ? 0x185fa5 : 0x3a3a36)
-  }, [mode, scope, model])
+  }, [mode, scope, model, view, hidden])
 
   const [opened, setOpened] = useState(false)
 
@@ -387,7 +410,11 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid])
-  const matNames = useMemo(() => [...new Set(parts.map(p => p.material).filter(n => n && !/^(стена|стены|пол|потолок)/i.test(n)))], [parts])
+  const isRoom = n => /^(стена|стены|пол|потолок)/i.test(n)
+  const allMats = useMemo(() => { const m = new Map(); parts.forEach(p => { if (p.material) m.set(p.material, (m.get(p.material) || 0) + 1) }); return [...m.entries()] }, [parts])
+  const matNames = useMemo(() => allMats.map(m => m[0]), [allMats])
+  const hasBands = useMemo(() => parts.some(p => p.bands?.length), [parts])
+  const toggleMat = name => setHidden(h => { const n = new Set(h); if (n.has(name)) n.delete(name); else n.add(name); return n })
   const applyTex = (name, t) => {
     const next = { ...texRef.current }
     if (t) next[textureKey(name)] = { name, ...t }; else delete next[textureKey(name)]
@@ -441,12 +468,33 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
             {opened ? 'Закрыть всё' : 'Открыть всё'}
           </button>
         )}
-        {matNames.length > 0 && <button type="button" style={smallBtn} onClick={() => setShowMats(v => !v)}>Материалы</button>}
+        {matNames.length > 0 && <button type="button" style={{ ...smallBtn, ...(hidden.size ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowMats(v => !v)}>Материалы{hidden.size ? ` · скрыто ${hidden.size}` : ''}</button>}
         <button type="button" style={smallBtn} onClick={() => stateRef.current?.resetView()}>⟲ Вид</button>
       </div>
       <div style={{ display: 'flex', gap: 6, padding: '8px 14px', background: 'var(--bg)' }}>
         {MODES.map(([id, label]) => <button key={id} type="button" style={chip(mode === id)} onClick={() => setMode(id)}>{label}</button>)}
       </div>
+      {mode === 'xray' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px 8px', background: 'var(--bg)', fontSize: 12, color: 'var(--text-muted)' }}>
+          <span style={{ flexShrink: 0 }}>Прозрачность</span>
+          <input type="range" min="5" max="90" step="1" value={Math.round((1 - view.xray) * 100)} style={{ flex: 1 }}
+            onChange={e => setView({ xray: 1 - Number(e.target.value) / 100 })} />
+          <span style={{ width: 34, textAlign: 'right' }}>{Math.round((1 - view.xray) * 100)}%</span>
+        </div>
+      )}
+      {mode === 'wire' && hasBands && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px 8px', background: 'var(--bg)', fontSize: 12, color: 'var(--text-muted)' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, margin: 0 }}>
+            <input type="checkbox" checked={view.bandOn} onChange={e => setView({ bandOn: e.target.checked })} style={{ width: 'auto' }} />
+            Кромка
+          </label>
+          <input type="color" value={view.bandColor} disabled={!view.bandOn} onChange={e => setView({ bandColor: e.target.value })}
+            style={{ width: 34, height: 26, padding: 0, border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'none', flexShrink: 0 }} />
+          <input type="range" min="10" max="100" step="1" value={Math.round(view.bandOp * 100)} disabled={!view.bandOn} style={{ flex: 1 }}
+            onChange={e => setView({ bandOp: Number(e.target.value) / 100 })} />
+          <span style={{ width: 34, textAlign: 'right' }}>{Math.round(view.bandOp * 100)}%</span>
+        </div>
+      )}
       {model.hasContext && (
         <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)' }}>
           {[['all', 'Вся модель'], ['order', 'Только детали заказа']].map(([id, label]) => (
@@ -459,29 +507,37 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         {showMats && (
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '62%', overflowY: 'auto', background: 'var(--bg)', borderTop: '0.5px solid var(--border-md)', padding: '10px 14px', boxShadow: '0 -4px 16px rgba(0,0,0,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-              <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>Текстуры материалов</div>
+              <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>Материалы</div>
               <button type="button" onClick={() => setShowMats(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--text-hint)' }}>✕</button>
             </div>
             <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8 }}>
-              Загрузите фото или картинку декора — она ляжет на все детали из этого материала и запомнится по его названию для следующих заказов.
+              Галочка — показывать детали из этого материала в модели. Снимите её, чтобы «потушить» материал и рассмотреть остальное.
+              Картинка декора ляжет на все детали материала и запомнится по его названию.
             </p>
+            {allMats.length > 1 && (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <button type="button" style={smallBtn} onClick={() => setHidden(new Set())}>Показать все</button>
+                <button type="button" style={smallBtn} onClick={() => setHidden(new Set(matNames))}>Скрыть все</button>
+              </div>
+            )}
             {!texCloud && (
               <p style={{ fontSize: 11, color: 'var(--amber)', background: 'var(--amber-light)', borderRadius: 'var(--radius)', padding: '6px 8px', marginBottom: 8 }}>
                 Картинки пока сохраняются только на этом устройстве. Чтобы они шли за аккаунтом, выполните migration_material_textures.sql в Supabase.
               </p>
             )}
             <input ref={fileRef} type="file" accept="image/*" onChange={onTexFile} style={{ display: 'none' }} />
-            {matNames.map(name => {
+            {allMats.map(([name, cnt]) => {
               const t = tex[textureKey(name)]
               return (
-                <div key={name} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
+                <div key={name} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)', opacity: hidden.has(name) ? 0.55 : 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={!hidden.has(name)} onChange={() => toggleMat(name)} style={{ width: 20, height: 20, flexShrink: 0 }} />
                     <div style={{ width: 40, height: 40, borderRadius: 6, flexShrink: 0, border: '0.5px solid var(--border-md)', background: t?.data ? `url(${t.data}) center/cover` : 'var(--bg2)' }} />
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-                    <button type="button" style={smallBtn} disabled={texBusy === name}
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name} <span style={{ color: 'var(--text-hint)' }}>· {cnt}</span></div>
+                    {!isRoom(name) && <button type="button" style={smallBtn} disabled={texBusy === name}
                       onClick={() => { pickFor.current = name; fileRef.current?.click() }}>
                       {texBusy === name ? '…' : t ? 'Заменить' : 'Загрузить'}
-                    </button>
+                    </button>}
                   </div>
                   {t && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>

@@ -609,7 +609,7 @@ export function parseAstra(u8, opts = {}) {
   const scene = {
     v: 1, order: orderName,
     // «FREE» в Астре — материал не назначен (вспомогательные плоскости под перфорацию): в общий вид не берём
-    parts: items.filter(it => !/^free$/i.test(it.material)).map(it => ({ name: it.name, w: it.w, h: it.h, contour: it.contour })),
+    parts: items.filter(it => !/^free$/i.test(it.material)).map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
     extras, meshes, hardware, colors,
   }
   return { orderName, scene, skipped, items, groups, ...(opts.debug ? { debug: { holes, plates, solid } } : {}) }

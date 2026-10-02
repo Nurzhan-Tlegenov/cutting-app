@@ -13,7 +13,7 @@ import { placedHoles } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
 import { detailEdgeList, contourSegments, segmentSide } from '../lib/edgeLength'
 import { isTwoSided } from '../lib/partInfo'
-import { useLabelMode, rememberOrderDefaults } from '../lib/userSettings'
+import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import ContourEditor from '../components/ContourEditor'
@@ -444,7 +444,7 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   // Масштаб карты — щипком двух пальцев (как в редакторе контура), с
@@ -492,7 +492,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   useLayoutEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges])
 
   const PADDING = 8
   // Лист не выше ~⅔ экрана — над ним остаются кнопки, под ним буфер и листы
@@ -618,10 +618,12 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       ctx.strokeStyle = EDGE_COLOR
       ctx.lineWidth = 2
       const g = EDGE_GAP
-      if (p.edgeTop) { ctx.beginPath(); ctx.moveTo(x + g, y + g); ctx.lineTo(x + w - g, y + g); ctx.stroke() }
-      if (p.edgeBottom) { ctx.beginPath(); ctx.moveTo(x + g, y + h - g); ctx.lineTo(x + w - g, y + h - g); ctx.stroke() }
-      if (p.edgeLeft) { ctx.beginPath(); ctx.moveTo(x + g, y + g); ctx.lineTo(x + g, y + h - g); ctx.stroke() }
-      if (p.edgeRight) { ctx.beginPath(); ctx.moveTo(x + w - g, y + g); ctx.lineTo(x + w - g, y + h - g); ctx.stroke() }
+      if (showEdges) {
+        if (p.edgeTop) { ctx.beginPath(); ctx.moveTo(x + g, y + g); ctx.lineTo(x + w - g, y + g); ctx.stroke() }
+        if (p.edgeBottom) { ctx.beginPath(); ctx.moveTo(x + g, y + h - g); ctx.lineTo(x + w - g, y + h - g); ctx.stroke() }
+        if (p.edgeLeft) { ctx.beginPath(); ctx.moveTo(x + g, y + g); ctx.lineTo(x + g, y + h - g); ctx.stroke() }
+        if (p.edgeRight) { ctx.beginPath(); ctx.moveTo(x + w - g, y + g); ctx.lineTo(x + w - g, y + h - g); ctx.stroke() }
+      }
 
       // Присадка — реальные точки сверления детали, повёрнутые вместе с ней
       const detail = details && details[p.detailIndex]
@@ -635,7 +637,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           const panelW = Number(detail.width) || 0   // X, "родная" ориентация
           const panelH = Number(detail.length) || 0  // Y, "родная" ориентация
           // Кромка на фигурных участках контура и на вырезах — по самой линии контура
-          {
+          if (showEdges) {
             const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
             const native = { left: detail.edge_left, right: detail.edge_right, top: detail.edge_top, bottom: detail.edge_bottom }
             ctx.save()
@@ -672,6 +674,16 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
               const { x: fx, y: fy } = rotatePointTimes(pt.x, pt.y, panelW, panelH, times)
               const sx = x + fx * sc
               const sy = y + h - fy * sc
+              // отверстие в торец — на всю глубину: полоса шириной в диаметр от кромки вглубь детали
+              if (pt.edge && pt.depth > 0) {
+                const e2 = rotatePointTimes(pt.x + pt.dx * pt.depth, pt.y + pt.dy * pt.depth, panelW, panelH, times)
+                ctx.save()
+                ctx.strokeStyle = 'rgba(106,74,23,0.8)'; ctx.lineCap = 'butt'
+                ctx.lineWidth = Math.max(1.6, (pt.d || 8) * sc)
+                ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(x + e2.x * sc, y + h - e2.y * sc); ctx.stroke()
+                ctx.restore()
+                return
+              }
               const r = Math.max(1.3, (pt.d || 8) * sc / 2)
               ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2)
               // с лица — закрашенный кружок (станок сверлит), с изнанки — пустой (только для сведения)
@@ -1398,6 +1410,9 @@ export default function NestingPage() {
   const { user } = useAuth()
   const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
   const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
+  // показывать ли кромку на картах (без неё карта читается легче) — тоже за аккаунтом
+  const [showEdges, setShowEdges] = useState(() => getUserSettings(user).nestShowEdges !== false)
+  const toggleEdges = v => { setShowEdges(v); saveUserSettings({ nestShowEdges: v }, user) }
   const [configs, setConfigs] = useState(() => [newCfg()])
   const [focusId, setFocusId] = useState(null)   // конфигурация, по которой считается шапка со статистикой
   const [parallel, setParallel] = useState(true) // считать конфигурации одновременно или по очереди
@@ -2428,6 +2443,10 @@ export default function NestingPage() {
                       style={{ width: 'auto', padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)' }}>
                       {LABEL_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '0 0 0 6px', fontSize: 11, color: 'var(--text-hint)' }}>
+                      <input type="checkbox" checked={showEdges} onChange={e => toggleEdges(e.target.checked)} style={{ width: 'auto' }} />
+                      Кромка
+                    </label>
                   </div>
 
                   {view === 'all' ? (
@@ -2480,7 +2499,7 @@ export default function NestingPage() {
                         usableX={cgeo.usableX} usableY={cgeo.usableY}
                         sheetL={cgeo.sheetL} sheetW={cgeo.sheetW}
                         marginL={cgeo.marginL} marginT={cgeo.marginT}
-                        kerf={cgeo.kerf} colorMap={colorMap} details={details} labelMode={labelMode}
+                        kerf={cgeo.kerf} colorMap={colorMap} details={details} labelMode={labelMode} showEdges={showEdges}
                         onMove={(si, np) => onMoveCfg(cfg.id, si, np)} interactive={true} showOffcuts={showOffcuts}
                         offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
                         onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}

@@ -8,6 +8,8 @@ import { useLeaveGuard } from '../hooks/useLeaveGuard'
 import LeaveConfirmModal from '../components/LeaveConfirmModal'
 import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
 import ImportDetails from '../components/ImportDetails'
+import MaterialFilter from '../components/MaterialFilter'
+import { detailMatKey } from '../lib/detailMaterial'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided } from '../lib/partInfo'
 import { saveOrderModel, loadOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
@@ -271,6 +273,7 @@ export default function EditOrderPage() {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [matFilter, setMatFilter] = useState('')   // какой материал показывать в списке деталей
   const [model3d, setModel3d] = useState(null)   // 3D-модель из Базиса — сохраняется вместе с заказом
   const [error, setError] = useState('')
   const [orderName, setOrderName] = useState('')
@@ -371,9 +374,13 @@ export default function EditOrderPage() {
     }
   }
   // Группы по префиксу — в том порядке, в каком идут детали (объект переставил бы числовые названия вперёд)
+  // Материал для показа списка: '' — все (детали при этом не удаляются, фильтруется только список)
+  const matOrder = { material_name: materialName, material_thickness: Number(materialThickness) || '' }
+  const matKeys = new Set(details.map(d => detailMatKey(d, matOrder)))
+  const shownDetails = matFilter && matKeys.has(matFilter) ? details.filter(d => detailMatKey(d, matOrder) === matFilter) : details
   const grouped = []
   const groupAt = new Map()
-  details.forEach(d => {
+  shownDetails.forEach(d => {
     const key = d.prefix || ''
     if (!groupAt.has(key)) { groupAt.set(key, grouped.length); grouped.push([key, []]) }
     grouped[groupAt.get(key)][1].push(d)
@@ -503,6 +510,7 @@ export default function EditOrderPage() {
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>
           <div style={{ width: 60, fontSize: 11, color: 'var(--text-hint)' }}>Кол-во</div>
         </div>
+        <MaterialFilter details={details} order={matOrder} value={matFilter} onChange={setMatFilter} />
         {grouped.map(([pfx, dets]) => (
           <div key={pfx}>
             {pfx && <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--blue)', marginBottom: 4, marginTop: 8, padding: '4px 8px', background: 'var(--blue-light)', borderRadius: 'var(--radius)', display: 'inline-block' }}>{pfx}</div>}
