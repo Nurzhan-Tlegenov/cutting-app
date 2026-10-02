@@ -1,8 +1,6 @@
 // Что писать на детали на карте раскроя и в DXF — выбирает пользователь.
 // Свойства детали (обозначение, позиция, ID из Базиса и т.д.) лежат в
 // contour.meta — они же пригодятся для бирки.
-import { useState, useCallback } from 'react'
-
 export const LABEL_MODES = [
   ['name', 'Наименование'],
   ['des', 'Обозначение'],
@@ -35,16 +33,4 @@ export function partLabel(p, details, mode, short = false) {
   if (mode === 'des_name') return m?.des ? `${m.des} ${name}` : base
   if (mode === 'pos') return m?.pos ? String(m.pos) : base
   return base
-}
-
-const KEY = 'nestLabelMode'
-export function useLabelMode() {
-  const [mode, setMode] = useState(() => {
-    try { return localStorage.getItem(KEY) || 'name' } catch { return 'name' }
-  })
-  const set = useCallback(v => {
-    setMode(v)
-    try { localStorage.setItem(KEY, v) } catch { /* без сохранения */ }
-  }, [])
-  return [mode, set]
 }

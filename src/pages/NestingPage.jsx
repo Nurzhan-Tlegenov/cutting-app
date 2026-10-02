@@ -10,7 +10,9 @@ import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles } from '../lib/partHoles'
-import { partLabel, useLabelMode, LABEL_MODES } from '../lib/partLabel'
+import { partLabel, LABEL_MODES } from '../lib/partLabel'
+import { useLabelMode, rememberOrderDefaults } from '../lib/userSettings'
+import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 
 const COLORS = [
@@ -1327,7 +1329,8 @@ export default function NestingPage() {
   const navigate = useNavigate()
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
-  const [labelMode, setLabelMode] = useLabelMode()   // что писать на деталях карты
+  const { user } = useAuth()
+  const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
   const [configs, setConfigs] = useState(() => [newCfg()])
   const [focusId, setFocusId] = useState(null)   // конфигурация, по которой считается шапка со статистикой
   const [parallel, setParallel] = useState(true) // считать конфигурации одновременно или по очереди
@@ -1416,6 +1419,7 @@ export default function NestingPage() {
 
   // Общие настройки заказа запоминаем по последней правке любой конфигурации
   async function saveSmallPartsSettings(patch) {
+    rememberOrderDefaults(patch, user)   // и как «мои настройки» для следующих заказов
     await supabase.from('orders').update(patch).eq('id', id)
   }
 
@@ -1432,12 +1436,13 @@ export default function NestingPage() {
     if (pr) {
       const patch = {}
       SHEET_FIELDS.forEach(([k, col]) => { if (PROD_LOCKED.includes(k) && pr[col] != null && Number(pr[col]) !== Number(o[col])) patch[col] = Number(pr[col]) })
-      if (Object.keys(patch).length) await saveOrderPatch(patch)
+      if (Object.keys(patch).length) await saveOrderPatch(patch, false)
     }
   }
   // Запись в заказ + сразу в состояние страницы. Нет колонки в базе (не
   // выполнена миграция) — пишем без неё и показываем предупреждение.
-  async function saveOrderPatch(patch) {
+  async function saveOrderPatch(patch, remember = true) {
+    if (remember) rememberOrderDefaults(patch, user)   // формат листа, фреза, отступы — запоминаем за аккаунтом
     setOrder(o => ({ ...o, ...patch }))
     if (SHEET_FIELDS.some(([, col]) => col in patch)) {
       setSheetForm(f => { const n = { ...f }; SHEET_FIELDS.forEach(([k, col]) => { if (col in patch) n[k] = String(patch[col]) }); return n })

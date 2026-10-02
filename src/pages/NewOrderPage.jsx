@@ -9,6 +9,7 @@ import { useLeaveGuard } from '../hooks/useLeaveGuard'
 import LeaveConfirmModal from '../components/LeaveConfirmModal'
 import { mirrorContour, mirrorEdges } from '../lib/mirrorDetail'
 import ImportDetails from '../components/ImportDetails'
+import { fetchUserSettings, ORDER_DEFAULT_COLS } from '../lib/userSettings'
 
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
@@ -445,7 +446,11 @@ export default function NewOrderPage() {
     setSaving(true); setError('')
     try {
       const orderNumber = await getNextOrderNumber(supabase)
-      const { data: order, error: oErr } = await supabase.from('orders').insert({
+      // «Мои настройки» раскроя из прошлых заказов (лист, фреза, отступы, мелкие детали…)
+      const mine = (await fetchUserSettings(user)).orderDefaults || {}
+      const remembered = {}
+      ORDER_DEFAULT_COLS.forEach(col => { if (mine[col] !== undefined && mine[col] !== null) remembered[col] = mine[col] })
+      const baseOrder = {
         user_id: user.id,
         order_number: orderNumber,
         order_name: orderName || null,
@@ -465,7 +470,12 @@ export default function NewOrderPage() {
         optimize_seconds: SHEET_DEFAULTS.optimizeSeconds,
         cutting_method: SHEET_DEFAULTS.cuttingMethod,
         status: 'draft'
-      }).select().single()
+      }
+      let { data: order, error: oErr } = await supabase.from('orders').insert({ ...baseOrder, ...remembered }).select().single()
+      // в базе может не быть какой-то из запомненных колонок — тогда создаём заказ с обычными значениями
+      if (oErr && Object.keys(remembered).length) {
+        ({ data: order, error: oErr } = await supabase.from('orders').insert(baseOrder).select().single())
+      }
       if (oErr) throw oErr
 
       const rows = details.map((d, i) => {
