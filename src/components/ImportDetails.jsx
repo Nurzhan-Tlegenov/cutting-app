@@ -22,7 +22,7 @@ const SOURCES = [
   { id: 'basis', icon: '📐', label: 'Базис-Мебельщик',
     hint: 'Выберите файл модели Базиса (.b3d) — возьмём детали с контуром, кромкой, пазами и присадкой. Подойдёт и таблица деталей из Базиса в Excel/CSV.' },
   { id: 'astra', icon: '🧩', label: 'Астра',
-    hint: 'Выберите файл проекта «Астра Конструктор Мебели» (.add) — возьмём детали с контуром, кромкой, пазами и присадкой.' },
+    hint: 'Выберите файл проекта «Астра Конструктор Мебели» (.add) — возьмём детали с контуром, кромкой, пазами, присадкой и 3D-моделью. Если проект не читается — подойдёт XML из Астры (Файл → Экспорт XML), но без 3D.' },
   { id: 'pro100', icon: '🪑', label: 'PRO100',
     hint: 'В PRO100 откройте отчёт со списком деталей, сохраните его в Excel или CSV и выберите этот файл.' },
 ]
@@ -42,6 +42,14 @@ async function readModelFile(file, faceRule) {
   if (lower.endsWith('.add') || (ole && !/\.xls$/.test(lower))) {
     const { readAstraFile } = await import('../lib/astraAdd')
     return { src: 'astra', res: await readAstraFile(file, { faceRule }) }
+  }
+  // XML-экспорт Астры
+  const h = new TextDecoder('latin1').decode(head)
+  if (lower.endsWith('.xml') || h.trimStart().startsWith('<')) {
+    const { readAstraXmlFile, looksLikeAstraXml } = await import('../lib/astraXml')
+    const probe = new TextDecoder('latin1').decode(new Uint8Array(await file.slice(0, 4000).arrayBuffer()))
+    if (!looksLikeAstraXml(probe) && !/<data_order|<list_materials/.test(probe)) throw new Error('это не XML-экспорт Астры (нужен файл из «Файл → Экспорт XML»)')
+    return { src: 'astra', res: await readAstraXmlFile(file, { faceRule }) }
   }
   return null
 }
@@ -343,6 +351,17 @@ export default function ImportDetails({ hasDetails, onImport }) {
             {basis && sumInfo('decor') > 0 && (
               <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
                 Фрезеровка фасадов (скругление кромки, V-паз, выемка): {sumInfo('decor')} — показывается объёмно в 3D, на раскрой и присадку не влияет. Типы фрез добавятся в Профиль → Фасадные фрезы.
+              </div>
+            )}
+            {basis && !basis.scene && (
+              <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                В XML нет положения деталей в изделии — 3D-модели по этому файлу не будет. Для 3D импортируйте файл проекта (.add).
+              </div>
+            )}
+            {basis && sumWarn('ends') > 0 && (
+              <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
+                Торцевые отверстия на длинных сторонах: у {chosen.filter(it => it.warn?.ends > 0).length} дет. в XML не видно, от какого конца стороны они отсчитаны ({sumWarn('ends')} отв.).
+                Проверьте эти детали в редакторе контура или импортируйте файл проекта (.add) — там это однозначно.
               </div>
             )}
             {basis && (sumWarn('open') + sumWarn('edges') + sumWarn('edgeHoles') + sumWarn('cuts') > 0) && (

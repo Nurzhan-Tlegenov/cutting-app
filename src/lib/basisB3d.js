@@ -633,7 +633,12 @@ export function groupItems(makers) {
     if (!it) continue
     const key = [it.prefix, it.name, it.w, it.h, it.groupKey, JSON.stringify(it.edges), strip(it.contour)].join('§')
     const prev = map.get(key)
-    if (prev) { prev.qty++; prev.contour.meta.ids.push(...it.contour.meta.ids); prev.contour.meta.inst.push(...it.contour.meta.inst); prev.contour.meta.anims.push(...it.contour.meta.anims); for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
+    if (prev) {
+      const pm = prev.contour.meta, im = it.contour.meta
+      prev.qty += it.qty
+      pm.ids?.push(...(im.ids || [])); pm.inst?.push(...(im.inst || [])); pm.anims?.push(...(im.anims || []))
+      for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k]
+    }
     else map.set(key, it)
   }
   const items = [...map.values()]

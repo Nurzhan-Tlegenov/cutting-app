@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { computeOffcutAtPoint, smallAtEdge, smallEdgeReal } from '../lib/nesting'
@@ -21,6 +21,7 @@ import Model3DButton from '../components/Model3DButton'
 import { loadOrderModel } from '../lib/orderModel'
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
+import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 
 const COLORS = [
   '#B5D4F4','#9FE1CB','#F5C4B3','#CECBF6','#FAC775',
@@ -573,7 +574,9 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // Деталь — если есть реальный контур (true-shape нестинг для фрезера),
       // рисуем именно его; иначе — прямоугольник, как раньше
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
-      const baseFill = PART_FILL
+      // Обработка с двух сторон — полупрозрачный фиолетовый фон: деталь придётся переворачивать
+      const twoSided = !!(details && details[p.detailIndex] && isTwoSided(details[p.detailIndex]))
+      const baseFill = twoSided ? 'rgba(123,31,162,0.22)' : PART_FILL
       const atEdge = edgeSmall.has(i)
       ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : atEdge ? 'rgba(245,158,11,0.28)' : baseFill))
       ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : atEdge ? '#D97706' : PART_STROKE)
@@ -622,17 +625,6 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
       // Присадка — реальные точки сверления детали, повёрнутые вместе с ней
       const detail = details && details[p.detailIndex]
-      // Обработка с двух сторон — фиолетовая пунктирная рамка: деталь придётся переворачивать
-      if (detail && isTwoSided(detail)) {
-        ctx.save()
-        ctx.strokeStyle = '#7B1FA2'; ctx.lineWidth = 1.6; ctx.setLineDash([5, 3])
-        if (hasShape) {
-          ctx.beginPath()
-          p.polygon.forEach((pt, vi) => { const sx = x + pt.x * sc, sy = y + h - pt.y * sc; if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy) })
-          ctx.closePath(); ctx.stroke()
-        } else ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3)
-        ctx.restore()
-      }
       if (detail && detail.contour) {
         let contour = detail._parsedContour
         if (contour === undefined) {
@@ -1395,7 +1387,14 @@ export default function NestingPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [order, setOrder] = useState(null)
-  const [details, setDetails] = useState([])
+  // В заказе могут быть детали из разных листовых материалов (модель импортирована целиком).
+  // Раскраиваем по одному материалу: details — детали выбранного, allDetails — все.
+  const [allDetails, setAllDetails] = useState([])
+  const [matKey, setMatKey] = useState('')
+  const [savedByMat, setSavedByMat] = useState({})   // сохранённые раскрои: ключ материала -> результат
+  const materials = useMemo(() => materialsOf(allDetails, order), [allDetails, order])
+  const multiMat = materials.length > 1
+  const details = useMemo(() => (multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails), [allDetails, multiMat, matKey, order])
   const { user } = useAuth()
   const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
   const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
@@ -1455,34 +1454,61 @@ export default function NestingPage() {
   async function fetchOrder() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
-    setOrder(o); setDetails(d || [])
+    setOrder(o); setAllDetails(d || [])
     if (o) {
       setSheetForm(sheetFormOf(o))
       setOffForm(parseOffcuts(o.offcuts))
       setSheetOpen(!o.nesting_result)
       fetchProductions(o)
       setCuttingMethod(o.cutting_method || 'nesting')
-      let saved = null
-      if (o.nesting_result) { try { saved = JSON.parse(o.nesting_result) } catch { saved = null } }
+      let store = null
+      if (o.nesting_result) { try { store = JSON.parse(o.nesting_result) } catch { store = null } }
+      // несколько материалов — раскрой хранится по каждому отдельно: { multi: true, byMat: { ключ: результат } }
+      const mats = materialsOf(d || [], o)
+      const byMat = store?.multi ? (store.byMat || {}) : {}
+      const key = mats.length > 1 ? (mats.find(m => byMat[m.key]) || mats[0]).key : ''
+      const saved = mats.length > 1 ? (byMat[key] || null) : (store && !store.multi ? store : null)
+      setSavedByMat(byMat); setMatKey(key)
       // Первая конфигурация — настройки заказа (и уже сохранённый раскрой, если он есть)
-      const first = newCfg({
-        small: !!o.small_parts_to_center,
-        sq: o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '',
-        area: areaFromSide(o.small_parts_max_square_side),
-        side: o.small_parts_max_side ? String(o.small_parts_max_side) : '',
-        edge: o.small_parts_edge_gap ? String(o.small_parts_edge_gap) : '100',
-        // «торцом к краю»: пусто — как «узкая сторона»
-        end: o.small_parts_end_side != null ? String(o.small_parts_end_side) : '',
-        secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
-        ...(saved ? {
-          dir: saved.config?.dir || 'auto',
-          status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i })),
-          startedAt: 0, doneAt: 0, saved: true,
-        } : {}),
-      })
+      const first = cfgFromOrder(o, saved)
       setConfigs([first])
       setFocusId(first.id)
     }
+  }
+
+  function cfgFromOrder(o, saved) {
+    return newCfg({
+      small: !!o.small_parts_to_center,
+      sq: o.small_parts_max_square_side ? String(o.small_parts_max_square_side) : '',
+      area: areaFromSide(o.small_parts_max_square_side),
+      side: o.small_parts_max_side ? String(o.small_parts_max_side) : '',
+      edge: o.small_parts_edge_gap ? String(o.small_parts_edge_gap) : '100',
+      // «торцом к краю»: пусто — как «узкая сторона»
+      end: o.small_parts_end_side != null ? String(o.small_parts_end_side) : '',
+      secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
+      ...(saved ? {
+        dir: saved.config?.dir || 'auto',
+        status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i })),
+        startedAt: 0, doneAt: 0, saved: true,
+      } : {}),
+    })
+  }
+
+  // Другой материал: показываем его детали и его сохранённый раскрой (если уже выбирали вариант)
+  function chooseMaterial(key) {
+    if (key === matKey || anyRunning) return
+    historyRef.current = {}
+    setMatKey(key)
+    const first = cfgFromOrder(order, savedByMat[key] || null)
+    setConfigs([first]); setFocusId(first.id)
+    setSheetOpen(!savedByMat[key])
+  }
+
+  // Что записать в заказ: один материал — сам результат, несколько — по ключам материалов
+  async function writeSaved(byMat, single) {
+    const value = multiMat ? (Object.keys(byMat).length ? JSON.stringify({ multi: true, byMat }) : null) : (single ? JSON.stringify(single) : null)
+    await supabase.from('orders').update({ nesting_result: value }).eq('id', id)
+    setOrder(o => ({ ...o, nesting_result: value }))
   }
 
   // ─── Редактор контура детали прямо с карты (долгое удержание на детали) ─────
@@ -1519,10 +1545,12 @@ export default function NestingPage() {
     if (shapeChanged && !window.confirm('Форма детали изменилась — готовый раскрой станет неверным и будет сброшен. Сохранить изменения?')) return
     const { error } = await supabase.from('order_details').update(patch).eq('id', d.id)
     if (error) { window.alert('Не удалось сохранить деталь: ' + error.message); return }
-    setDetails(ds => ds.map((x, i) => (i === ep.index ? nd : x)))
+    setAllDetails(ds => ds.map(x => (x.id === d.id ? nd : x)))
     if (shapeChanged) {
-      await supabase.from('orders').update({ nesting_result: null }).eq('id', id)
-      setOrder(o => ({ ...o, nesting_result: null }))
+      // сбрасываем раскрой только этого материала
+      const rest = { ...savedByMat }; delete rest[matKey]
+      setSavedByMat(rest)
+      await writeSaved(rest, null)
       setConfigs(cs => cs.map(c => newCfg({ dir: c.dir, small: c.small, sq: c.sq, area: c.area, side: c.side, edge: c.edge, end: c.end, secs: c.secs })))
       setFocusId(null)
       return
@@ -1809,7 +1837,10 @@ export default function NestingPage() {
       ...cfg.result, sheets,
       config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
     }
-    await supabase.from('orders').update({ nesting_result: JSON.stringify(toSave) }).eq('id', id)
+    const next = multiMat ? { ...savedByMat, [matKey]: toSave } : {}
+    if (multiMat) setSavedByMat(next)
+    await writeSaved(next, toSave)
+    return next
   }
 
   // ─── Проверка раскроя перед сохранением / оформлением ──────────────────────
@@ -1839,6 +1870,10 @@ export default function NestingPage() {
 
   async function submitOrder(cfg, force = false) {
     if (!force && !checkCfg(cfg)) return
+    if (multiMat) {
+      const missing = materials.filter(m => m.key !== matKey && !savedByMat[m.key])
+      if (missing.length && !window.confirm(`Раскрой ещё не выбран для материалов:\n${missing.map(m => '· ' + m.label).join('\n')}\n\nВсё равно оформить заказ?`)) return
+    }
     setBusyId(cfg.id)
     // Хронология нужна только на время раскроя — после оформления очищается
     historyRef.current = {}
@@ -2458,7 +2493,7 @@ export default function NestingPage() {
                           ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                           : (showOffcuts && offcutMode === 'cuts'
                             ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                            : 'Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый пунктир — обработка с двух сторон (пустые кружки — отверстия с изнанки)')}
+                            : 'Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (пустые кружки — отверстия с изнанки)')}
                       </p>
                     </>
                   )}
@@ -2632,8 +2667,24 @@ export default function NestingPage() {
           <div style={{ fontSize: 12, color: 'var(--text-hint)', fontFamily: 'monospace' }}>{order.order_number}</div>
         </div>
         {/* 3D открывается поверх страницы — раскрой при этом не сбрасывается */}
-        <Model3DButton details={details} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} />
+        <Model3DButton details={allDetails} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} />
       </div>
+
+      {/* Материал: в заказе несколько листовых материалов — раскраиваем по одному */}
+      {multiMat && (
+        <div style={{ marginBottom: 8 }}>
+          <label className="label" style={{ marginBottom: 3 }}>Материал</label>
+          <select value={matKey} disabled={anyRunning} onChange={e => chooseMaterial(e.target.value)}
+            style={{ width: '100%', padding: '8px 8px', fontSize: 14 }}>
+            {materials.map(m => (
+              <option key={m.key} value={m.key}>{savedByMat[m.key] ? '✓ ' : ''}{m.label} — {m.pieces} шт.</option>
+            ))}
+          </select>
+          <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '3px 0 0' }}>
+            Раскрой считается и сохраняется отдельно для каждого материала. Выбрано: {materials.filter(m => savedByMat[m.key]).length} из {materials.length}.
+          </p>
+        </div>
+      )}
 
       {/* Статистика */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: focus && configs.length > 1 ? 3 : 8 }}>
