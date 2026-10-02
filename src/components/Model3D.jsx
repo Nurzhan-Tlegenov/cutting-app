@@ -5,7 +5,7 @@ import { buildModel } from '../lib/model3d'
 import { useAuth } from '../context/AuthContext'
 import { loadTextures, saveTexture, deleteTexture, fileToTexture, textureKey } from '../lib/materialTextures'
 
-// Просмотр 3D-модели заказа (детали, импортированные из Базиса).
+// Просмотр 3D-модели заказа (детали, импортированные из Базиса или Астры).
 // Вращение — пальцем, масштаб — щипком, сдвиг — двумя пальцами,
 // двойной тап по двери или ящику — открыть/закрыть (анимация из модели Базиса).
 const MODES = [['solid', 'Сплошной'], ['xray', 'Полупрозрачный'], ['wire', 'Каркас']]
@@ -129,7 +129,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       const kind = look?.[2] || ''
       const key = name + '|' + (texDir === 2 ? 2 : 1)
       if (!materials.has(key)) {
-        const color = look ? look[1] : PALETTE[paletteAt++ % PALETTE.length]
+        // цвет материала из самой модели (в файле Астры он есть), иначе — по названию
+        const color = model.colors?.[name] || (look ? look[1] : PALETTE[paletteAt++ % PALETTE.length])
         const m = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0, side: THREE.DoubleSide })
         if (kind === 'metal') { m.metalness = 0.55; m.roughness = 0.4 }
         else if (kind === 'stone') { m.roughness = 0.6 }

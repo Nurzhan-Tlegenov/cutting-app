@@ -1,4 +1,4 @@
-// 3D-модель заказа, импортированного из Базиса.
+// 3D-модель заказа, импортированного из Базиса или Астры.
 // Детали заказа строятся из их текущего контура (contour.meta.local / inst) —
 // правки в редакторе видны и в 3D. Остальное (панели других материалов,
 // профили, фурнитура) берётся из сохранённой при импорте модели (scene).
@@ -157,7 +157,7 @@ export function buildModel(details, scene) {
     }
     hasContext = parts.some(p => !p.inOrder) || hardware.length > 0
   }
-  return { parts, hardware, hasContext }
+  return { parts, hardware, hasContext, colors: scene?.colors || {} }
 }
 
 export const hasModel = details => (details || []).some(d => {

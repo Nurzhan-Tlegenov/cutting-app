@@ -3,17 +3,17 @@ import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importD
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 
-// Какую пласть считать лицевой при импорте из Базиса (копия списка из basisB3d — он грузится по требованию)
+// Какую пласть считать лицевой при импорте модели (копия списка из basisB3d — он грузится по требованию)
 const FACE_RULES = [
   ['holes', 'Где больше глухих отверстий, затем — где паз'],
   ['groove', 'Где паз, затем — где больше глухих отверстий'],
   ['sum', 'Где больше обработки всего (отверстия + пазы)'],
-  ['model', 'Как в модели Базиса (не переворачивать)'],
+  ['model', 'Как в модели (не переворачивать)'],
 ]
 
-// Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, PRO100.
-// Базис-Мебельщик читается и напрямую из файла модели .b3d — с контуром,
-// кромкой, пазами и присадкой.
+// Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, Астра, PRO100.
+// Базис-Мебельщик (.b3d) и Астра Конструктор Мебели (.add) читаются напрямую
+// из файла модели — с контуром, кромкой, пазами и присадкой.
 // onImport({ items, mode: 'add' | 'replace', material, thickness, orderName })
 
 const SOURCES = [
@@ -21,12 +21,30 @@ const SOURCES = [
     hint: 'Таблица .xlsx, .xls или .csv. Обязательны колонки Длина и Ширина, остальное — по желанию.' },
   { id: 'basis', icon: '📐', label: 'Базис-Мебельщик',
     hint: 'Выберите файл модели Базиса (.b3d) — возьмём детали с контуром, кромкой, пазами и присадкой. Подойдёт и таблица деталей из Базиса в Excel/CSV.' },
+  { id: 'astra', icon: '🧩', label: 'Астра',
+    hint: 'Выберите файл проекта «Астра Конструктор Мебели» (.add) — возьмём детали с контуром, кромкой, пазами и присадкой.' },
   { id: 'pro100', icon: '🪑', label: 'PRO100',
     hint: 'В PRO100 откройте отчёт со списком деталей, сохраните его в Excel или CSV и выберите этот файл.' },
 ]
 
 const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain'
 const ALL = '__all__'
+
+// Файл модели: Базис (.b3d, 'BZ…') или Астра (.add, составной файл OLE2). Иначе — null (это таблица).
+async function readModelFile(file, faceRule) {
+  const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
+  const lower = file.name.toLowerCase()
+  if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
+    const { readBasisFile } = await import('../lib/basisB3d')
+    return { src: 'basis', res: await readBasisFile(file, { faceRule }) }
+  }
+  const ole = head[0] === 0xD0 && head[1] === 0xCF && head[2] === 0x11 && head[3] === 0xE0
+  if (lower.endsWith('.add') || (ole && !/\.xls$/.test(lower))) {
+    const { readAstraFile } = await import('../lib/astraAdd')
+    return { src: 'astra', res: await readAstraFile(file, { faceRule }) }
+  }
+  return null
+}
 
 const cellText = v => (v == null ? '' : String(v))
 const groupLabel = g => `${g.material || 'Без материала'}${g.thickness ? ` · ${g.thickness} мм` : ''}`
@@ -35,7 +53,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const fileRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
-  const basisFileRef = useRef(null)              // выбранный .b3d — чтобы пересчитать при смене правила
+  const basisFileRef = useRef(null)              // выбранный файл модели — чтобы пересчитать при смене правила
   const [faceRule, setFaceRule] = useState(() => getUserSettings(user).basisFaceRule || 'holes')
   const [source, setSource] = useState(SOURCES[0])
   const [busy, setBusy] = useState(false)
@@ -48,7 +66,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const [roles, setRoles] = useState([])
   const [groupKey, setGroupKey] = useState(ALL)
   const [mode, setMode] = useState('add')
-  const [basis, setBasis] = useState(null)       // разобранная модель .b3d (вместо таблицы)
+  const [basis, setBasis] = useState(null)       // разобранная модель Базиса или Астры (вместо таблицы)
 
   const rows = useMemo(() => (sheets ? sheets[sheetIdx].rows : []), [sheets, sheetIdx])
 
@@ -62,8 +80,8 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const pick = (src) => {
     setSource(src); setError('')
     if (!fileRef.current) return
-    // у .b3d нет своего типа — с фильтром телефон может не дать выбрать файл
-    fileRef.current.accept = src.id === 'basis' ? '' : ACCEPT
+    // у .b3d и .add нет своего типа — с фильтром телефон может не дать выбрать файл
+    fileRef.current.accept = src.id === 'basis' || src.id === 'astra' ? '' : ACCEPT
     fileRef.current.click()
   }
 
@@ -73,16 +91,15 @@ export default function ImportDetails({ hasDetails, onImport }) {
     if (!file) return
     setBusy(true); setError('')
     try {
-      const head = new Uint8Array(await file.slice(0, 4).arrayBuffer())
       const lower = file.name.toLowerCase()
-      if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
-        const { readBasisFile } = await import('../lib/basisB3d')
-        const rule = getUserSettings(user).basisFaceRule || faceRule
+      const rule = getUserSettings(user).basisFaceRule || faceRule
+      const model = await readModelFile(file, rule)
+      if (model) {
+        const { res } = model
         setFaceRule(rule)
         basisFileRef.current = file
-        const res = await readBasisFile(file, { faceRule: rule })
         if (!res.items.length) throw new Error('в модели нет панелей')
-        setFileName(file.name); setSource(SOURCES[1]); setMode('add')
+        setFileName(file.name); setSource(SOURCES.find(x => x.id === model.src)); setMode('add')
         setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
         setSheets(null); setBasis(res)
         return
@@ -126,8 +143,8 @@ export default function ImportDetails({ hasDetails, onImport }) {
     if (!basisFileRef.current) return
     setBusy(true)
     try {
-      const { readBasisFile } = await import('../lib/basisB3d')
-      setBasis(await readBasisFile(basisFileRef.current, { faceRule: rule }))
+      const model = await readModelFile(basisFileRef.current, rule)
+      if (model) setBasis(model.res)
     } catch (err) {
       setError('Не удалось прочитать файл: ' + (err?.message || err))
     } finally { setBusy(false) }
@@ -162,7 +179,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
       material: g?.material || '',
       thickness: g?.thickness || null,
       orderName: basis?.orderName || '',
-      model3d,                                   // вся модель Базиса для 3D-просмотра (упакована)
+      model3d,                                   // вся модель для 3D-просмотра (упакована)
     })
     close()
   }

@@ -262,52 +262,17 @@ const drillId = () => 'b' + Date.now().toString(36) + (drillSeq++).toString(36)
 
 // ---------- Панель -> деталь ----------
 
-function convertPanel(panel, holes, faceRule) {
+// Панель Базиса -> нейтральное описание для buildItem
+function basisSrc(panel) {
   const o = panel.obj
   const T = val(o, 'Thick', 16)
   const elems = contourElems(val(o, 'Contour'))
-  const { loops, open } = buildLoops(elems)
-  if (!loops.length) return null
-  // внешний контур — петля с наибольшим габаритом
-  let outer = null, outerBox = null
-  for (const lp of loops) {
-    const b = loopBox(lp)
-    if (!outer || (b.x1 - b.x0) * (b.y1 - b.y0) > (outerBox.x1 - outerBox.x0) * (outerBox.y1 - outerBox.y0)) { outer = lp; outerBox = b }
-  }
-  const { x0, y0 } = outerBox
-  const dx = outerBox.x1 - x0, dy = outerBox.y1 - y0
-  if (!(dx > 0.5) || !(dy > 0.5)) return null
-  const texDir = val(o, 'TexDir', 0)
-  const rot = texDir === 1          // текстура вдоль X детали -> это её длина
-  const W = rot ? dy : dx, L = rot ? dx : dy
-  const warn = { open, edgeHoles: 0, edges: 0, cuts: 0 }
-
-  // --- отверстия крепежа в системе панели (до выбора лицевой стороны) ---
-  const Mi = inverse(panel.M)
-  const face = [], edge = []
-  const outerLocal = outer.circle ? null : outer.pts.map(v => v.p)
-  for (const h of holes) {
-    const q = applyP(Mi, h.P), d = applyV(Mi, h.D)
-    if (Math.abs(d[2]) > 0.99) {
-      const za = Math.min(q[2], q[2] + d[2] * h.depth), zb = Math.max(q[2], q[2] + d[2] * h.depth)
-      const ov = Math.min(zb, T) - Math.max(za, 0)
-      if (ov < 0.3) continue
-      if (q[0] < x0 - EPS || q[0] > x0 + dx + EPS || q[1] < y0 - EPS || q[1] > y0 + dy + EPS) continue
-      if (outerLocal && outerLocal.length > 4 && !pointInPoly(q, outerLocal)) continue
-      // крепёж в модели стоит не идеально: отверстие может начинаться на десятые доли мм в глубине
-      const top = zb >= T - 0.5, bottom = za <= 0.5
-      if (!top && !bottom) continue
-      face.push({ x: q[0], y: q[1], d: 2 * h.r, depth: top && bottom ? T : top ? T - Math.max(za, 0) : Math.min(zb, T), through: top && bottom, top, name: h.name })
-    } else if (Math.abs(d[2]) < 0.01 && q[2] > 0.5 && q[2] < T - 0.5) {
-      edge.push({ q, d, z: q[2], dia: 2 * h.r, depth: h.depth, name: h.name })
-    }
-  }
-
+  let warnCuts = 0
   // --- пазы (Cuts с прямоугольным профилем по прямой) и фрезеровка «для вида» ---
   const cutsRaw = [], decorRaw = []
   for (const cut of (kid(o, 'Cuts')?.c || [])) {
     let prof, traj
-    try { prof = contourElems(val(cut, 'Contour')); traj = contourElems(val(cut, 'Trajectory')) } catch { warn.cuts++; continue }
+    try { prof = contourElems(val(cut, 'Contour')); traj = contourElems(val(cut, 'Trajectory')) } catch { warnCuts++; continue }
     const name = cleanName(val(cut, 'Name')), sign = cleanName(val(cut, 'Sign'))
     if (!traj.length) {
       // выемка: контур — область на пласти, глубина — в названии (G=10)
@@ -318,11 +283,11 @@ function convertPanel(panel, holes, faceRule) {
         ? Array.from({ length: 24 }, (_, i) => [lp.circle.c[0] + lp.circle.r * Math.cos(i * Math.PI / 12), lp.circle.c[1] + lp.circle.r * Math.sin(i * Math.PI / 12)])
         : lp.pts.map(v => v.p))).filter(pp => pp.length > 2)
       if (polys.length && depth > 0) decorRaw.push({ kind: 'pocket', name, sign, depth, top: val(cut, 'Front', true) !== false, polys })
-      else warn.cuts++
+      else warnCuts++
       continue
     }
     const pp = prof.flatMap(e => (e.t === 'C' ? [] : [e.a, e.b]))
-    if (!pp.length) { warn.cuts++; continue }
+    if (!pp.length) { warnCuts++; continue }
     const us = pp.map(q => q[0]), zs = pp.map(q => q[1])
     const u0 = Math.min(...us), u1 = Math.max(...us), z0 = Math.max(0, Math.min(...zs)), z1 = Math.min(T, Math.max(...zs))
     const top = z1 >= T - EPS, bottom = z0 <= EPS
@@ -352,6 +317,75 @@ function convertPanel(panel, holes, faceRule) {
     const path = tl ? tl.fine : (lines.length === 1 ? [lines[0].a, lines[0].b] : null)
     decorRaw.push({ kind: round ? 'round' : 'mill', name, sign, depth: Math.max(0, z1 - z0), top: isTop, polys, profile, path, closed: !!tl })
   }
+
+  const butts = (kid(o, 'Butts')?.c || []).map(butt => ({
+    e: elems[val(butt, 'Elem', -1)] || null,
+    name: cleanName(val(butt, 'Mat')) || cleanName(val(butt, 'Sign')) || 'default',
+    info: { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width') },
+  }))
+  const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
+  const texDir = val(o, 'TexDir', 0)
+  return {
+    T, elems, texDir, M: panel.M, butts, cutsRaw, decorRaw, warnCuts,
+    name: cleanName(val(o, 'Name')), prefix: panel.ctx.product || '', material: cleanName(val(o, 'Mat')),
+    rotatable: texDir === 0, anim: panel.ctx.anim || null,
+    meta: {
+      src: 'basis',
+      ids: [val(o, 'ID')],                       // ID панелей в модели (по одному на каждую штуку)
+      des: cleanName(val(o, 'Des')),             // обозначение, напр. 01.02
+      pos: cleanName(val(o, 'ArtPos')),          // позиция
+      name: cleanName(val(o, 'Name')),
+      product: panel.ctx.product, productDes: panel.ctx.productDes, productPos: panel.ctx.productPos,
+      path: panel.ctx.path,                      // блоки, в которые вложена деталь
+      material: matFull[0] || '', materialCode: matFull.slice(1).join(' / '),
+      ...(val(o, 'Color') != null ? { color: val(o, 'Color') } : {}),
+    },
+  }
+}
+
+// Нейтральное описание панели (src) -> деталь заказа. Общая часть для Базиса и Астры.
+// src: { T, elems, texDir, M, butts: [{ e, name, info }], cutsRaw, decorRaw, warnCuts,
+//        name, prefix, material, rotatable, meta, anim }
+export function buildItem(src, holes, faceRule) {
+  const { T, elems } = src
+  const { loops, open } = buildLoops(elems)
+  if (!loops.length) return null
+  // внешний контур — петля с наибольшим габаритом
+  let outer = null, outerBox = null
+  for (const lp of loops) {
+    const b = loopBox(lp)
+    if (!outer || (b.x1 - b.x0) * (b.y1 - b.y0) > (outerBox.x1 - outerBox.x0) * (outerBox.y1 - outerBox.y0)) { outer = lp; outerBox = b }
+  }
+  const { x0, y0 } = outerBox
+  const dx = outerBox.x1 - x0, dy = outerBox.y1 - y0
+  if (!(dx > 0.5) || !(dy > 0.5)) return null
+  const texDir = src.texDir || 0
+  const rot = texDir === 1          // текстура вдоль X детали -> это её длина
+  const W = rot ? dy : dx, L = rot ? dx : dy
+  const warn = { open, edgeHoles: 0, edges: 0, cuts: src.warnCuts || 0 }
+
+  // --- отверстия крепежа в системе панели (до выбора лицевой стороны) ---
+  const Mi = inverse(src.M)
+  const face = [], edge = []
+  const outerLocal = outer.circle ? null : outer.pts.map(v => v.p)
+  for (const h of holes) {
+    const q = applyP(Mi, h.P), d = applyV(Mi, h.D)
+    if (Math.abs(d[2]) > 0.99) {
+      const za = Math.min(q[2], q[2] + d[2] * h.depth), zb = Math.max(q[2], q[2] + d[2] * h.depth)
+      const ov = Math.min(zb, T) - Math.max(za, 0)
+      if (ov < 0.3) continue
+      if (q[0] < x0 - EPS || q[0] > x0 + dx + EPS || q[1] < y0 - EPS || q[1] > y0 + dy + EPS) continue
+      if (outerLocal && outerLocal.length > 4 && !pointInPoly(q, outerLocal)) continue
+      // крепёж в модели стоит не идеально: отверстие может начинаться на десятые доли мм в глубине
+      const top = zb >= T - 0.5, bottom = za <= 0.5
+      if (!top && !bottom) continue
+      face.push({ x: q[0], y: q[1], d: 2 * h.r, depth: top && bottom ? T : top ? T - Math.max(za, 0) : Math.min(zb, T), through: top && bottom, top, name: h.name })
+    } else if (Math.abs(d[2]) < 0.01 && q[2] > 0.5 && q[2] < T - 0.5) {
+      edge.push({ q, d, z: q[2], dia: 2 * h.r, depth: h.depth, name: h.name })
+    }
+  }
+
+  const cutsRaw = src.cutsRaw || [], decorRaw = src.decorRaw || []
 
   // --- какая пласть «лицевая» (смотрит вверх на станке): та, где больше глухой обработки ---
   const holesTop = face.filter(f => !f.through && f.top).length, holesBottom = face.filter(f => !f.through && !f.top).length
@@ -432,10 +466,7 @@ function convertPanel(panel, holes, faceRule) {
     }
     return -1
   }
-  for (const butt of (kid(o, 'Butts')?.c || [])) {
-    const e = elems[val(butt, 'Elem', -1)]
-    const name = cleanName(val(butt, 'Mat')) || cleanName(val(butt, 'Sign')) || 'default'
-    const info = { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width') }
+  for (const { e, name, info } of (src.butts || [])) {
     if (!e) { warn.edges++; continue }
     if (e.t === 'C') {                                   // кромка по круглому вырезу
       const k = cutoutSrc.findIndex(lp => lp.circle && near(lp.circle.c, e.c))
@@ -554,25 +585,16 @@ function convertPanel(panel, holes, faceRule) {
     } : {}),
   }))
 
-  // Свойства детали из Базиса — целиком, для бирки и подписи на карте раскроя
-  const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
+  // Свойства детали из исходной модели — целиком, для бирки и подписи на карте раскроя
   const meta = {
-    src: 'basis',
-    ids: [val(o, 'ID')],                       // ID панелей в модели (по одному на каждую штуку)
-    des: cleanName(val(o, 'Des')),             // обозначение, напр. 01.02
-    pos: cleanName(val(o, 'ArtPos')),          // позиция
-    name: cleanName(val(o, 'Name')),
-    product: panel.ctx.product, productDes: panel.ctx.productDes, productPos: panel.ctx.productPos,
-    path: panel.ctx.path,                      // блоки, в которые вложена деталь
-    material: matFull[0] || '', materialCode: matFull.slice(1).join(' / '),
+    ...src.meta,
     thickness: T, texDir,
     edges: edgeInfo,
     flipped: flip, turned: rot,                // как деталь повёрнута относительно модели
     // для 3D-просмотра: габарит контура в системе панели и положение каждой штуки в модели
     local: { x0: r2(x0), y0: r2(y0), dx: r2(dx), dy: r2(dy) },
-    inst: [panel.M.map((v, i) => (i < 9 ? Math.round(v * 1e6) / 1e6 : r2(v)))],
-    anims: [panel.ctx.anim || null],          // анимация (дверь, ящик) для каждой штуки
-    ...(val(o, 'Color') != null ? { color: val(o, 'Color') } : {}),
+    inst: [src.M.map((v, i) => (i < 9 ? Math.round(v * 1e6) / 1e6 : r2(v)))],
+    anims: [src.anim || null],                 // анимация (дверь, ящик) для каждой штуки
   }
   const contour = {
     vertices: isRect ? [{ x: 0, y: 0, r: 0 }, { x: r1(W), y: 0, r: 0 }, { x: r1(W), y: r1(L), r: 0 }, { x: 0, y: r1(L), r: 0 }] : vertices,
@@ -580,17 +602,42 @@ function convertPanel(panel, holes, faceRule) {
   }
   if (decor.length) contour.decor = decor
 
-  const material = cleanName(val(o, 'Mat'))
+  const material = src.material
   return {
-    name: cleanName(val(o, 'Name')), prefix: panel.ctx.product || '',
+    name: src.name, prefix: src.prefix || '',
     w: r1(L), h: r1(W), qty: 1, edges, material, thickness: T,
-    rotatable: texDir === 0, contour,
+    rotatable: src.rotatable ?? texDir === 0, contour,
     groupKey: `${material}|${T}`,
     info: { shaped: !isRect, cutouts: cutouts.length, holes: holeCount, grooves: grooves.length,
       decor: decor.length, shapedEdges: vertices.filter(v => v.edge).length + cutouts.filter(h => h.edge).length,
       back: drillings.filter(d => d.kind === 'face' && d.face === 'back').length + grooves.filter(g => g.face === 'back').length },
     warn,
   }
+}
+
+// Одинаковые детали одного изделия — в одну строку с количеством; материалы — в группы.
+// makers — функции, каждая возвращает деталь (или null) либо бросает исключение.
+export function groupItems(makers) {
+  const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' || k === 'inst' || k === 'anims' ? undefined : v))
+  const map = new Map()
+  let skipped = 0
+  for (const make of makers) {
+    let it
+    try { it = make() } catch { skipped++; continue }   // одна непонятная панель не должна срывать весь импорт
+    if (!it) continue
+    const key = [it.prefix, it.name, it.w, it.h, it.groupKey, JSON.stringify(it.edges), strip(it.contour)].join('§')
+    const prev = map.get(key)
+    if (prev) { prev.qty++; prev.contour.meta.ids.push(...it.contour.meta.ids); prev.contour.meta.inst.push(...it.contour.meta.inst); prev.contour.meta.anims.push(...it.contour.meta.anims); for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
+    else map.set(key, it)
+  }
+  const items = [...map.values()]
+  const groups = new Map()
+  for (const it of items) {
+    const g = groups.get(it.groupKey) || { key: it.groupKey, material: it.material, thickness: it.thickness, count: 0, pieces: 0 }
+    g.count++; g.pieces += it.qty
+    groups.set(it.groupKey, g)
+  }
+  return { items, groups: [...groups.values()].sort((a, b) => b.pieces - a.pieces), skipped }
 }
 
 // ---------- Файл -> детали ----------
@@ -669,27 +716,7 @@ export function parseBasis(u8, opts = {}) {
     walk(top, I, { product: cleanName(val(top, 'Name')), productDes: cleanName(val(top, 'Des')), productPos: cleanName(val(top, 'ArtPos')), path: [], depth: 0 })
   }
 
-  // одинаковые детали одного изделия — в одну строку с количеством
-  const strip = c => JSON.stringify(c, (k, v) => (k === 'id' || k === 'ids' || k === 'inst' || k === 'anims' ? undefined : v))
-  const map = new Map()
-  let skipped = 0
-  for (const p of panels) {
-    let it
-    try { it = convertPanel(p, holes, faceRule) } catch { skipped++; continue }   // одна непонятная панель не должна срывать весь импорт
-    if (!it) continue
-    const key = [it.prefix, it.name, it.w, it.h, it.groupKey, JSON.stringify(it.edges), strip(it.contour)].join('§')
-    const prev = map.get(key)
-    if (prev) { prev.qty++; prev.contour.meta.ids.push(...it.contour.meta.ids); prev.contour.meta.inst.push(...it.contour.meta.inst); prev.contour.meta.anims.push(...it.contour.meta.anims); for (const k of Object.keys(it.warn)) prev.warn[k] += it.warn[k] }
-    else map.set(key, it)
-  }
-  const items = [...map.values()]
-
-  const groups = new Map()
-  for (const it of items) {
-    const g = groups.get(it.groupKey) || { key: it.groupKey, material: it.material, thickness: it.thickness, count: 0, pieces: 0 }
-    g.count++; g.pieces += it.qty
-    groups.set(it.groupKey, g)
-  }
+  const { items, groups, skipped } = groupItems(panels.map(p => () => buildItem(basisSrc(p), holes, faceRule)))
   const article = kid(kid(header, 'Header') || header, 'Article')
   const orderName = cleanName(val(article, 'OrderName')) || cleanName(val(article, 'Name'))
   for (const it of items) { it.contour.meta.order = orderName; it.contour.meta.model = cleanName(val(article, 'Name')) }
@@ -730,7 +757,7 @@ export function parseBasis(u8, opts = {}) {
     scene,
     skipped,
     items,
-    groups: [...groups.values()].sort((a, b) => b.pieces - a.pieces),
+    groups,
   }
 }
 
@@ -773,3 +800,6 @@ export async function readBasisFile(file, opts) {
   for (const it of res.items) it.contour.meta.file = file.name
   return res
 }
+
+// для других форматов моделей (Астра)
+export { mul, applyP, applyV, inverse, buildLoops, pointInPoly }
