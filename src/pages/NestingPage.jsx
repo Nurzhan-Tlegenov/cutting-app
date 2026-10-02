@@ -1501,7 +1501,6 @@ export default function NestingPage() {
       smallPartsMaxSquareSide: cfg.sq === '' ? 0 : Number(cfg.sq),
       smallPartsMaxSide: cfg.side === '' ? 0 : Number(cfg.side),
       smallPartsEdgeGap: cfg.edge === '' ? 150 : Number(cfg.edge),
-      smallPartsEndSide: cfg.end === '' ? null : Number(cfg.end),
       optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
       cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
@@ -2094,7 +2093,7 @@ export default function NestingPage() {
               )}
             </div>
             {cfg.small && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8, alignItems: 'end' }}>
                 <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
                   title="Мелкая — деталь площадью не больше этой. Например 0,16 м² — это 400×400 мм или 800×200 мм">
                   Площадь до, м²
@@ -2104,8 +2103,8 @@ export default function NestingPage() {
                     style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
                 </label>
                 <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
-                  title="Мелкая — деталь, у которой узкая сторона не больше этой (узкие полосы)">
-                  Узкая сторона до, мм
+                  title="Узкая полоса — деталь, у которой меньшая сторона не больше этой (включительно). Её гоним в середину листа: длинной стороной к краю не ставим">
+                  Узкая полоса до, мм
                   <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.side} placeholder="напр. 350"
                     onChange={e => updateCfg(cfg.id, { side: e.target.value.replace(/[^0-9]/g, '') })}
                     onBlur={e => persist({ small_parts_max_side: e.target.value === '' ? 0 : Number(e.target.value) })}
@@ -2117,14 +2116,6 @@ export default function NestingPage() {
                   <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.edge} placeholder="150"
                     onChange={e => updateCfg(cfg.id, { edge: e.target.value.replace(/[^0-9]/g, '') })}
                     onBlur={e => persist({ small_parts_edge_gap: e.target.value === '' ? 150 : Number(e.target.value) })}
-                    style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
-                </label>
-                <label style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}
-                  title="Мелкую деталь можно прижать к краю листа торцом — стороной не длиннее этой (длинные стороны тогда держат соседи). 0 — нельзя никакой. Пусто — как «Узкая сторона до»">
-                  Торцом к краю до, мм
-                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={cfg.end} placeholder={cfg.side || '0'}
-                    onChange={e => updateCfg(cfg.id, { end: e.target.value.replace(/[^0-9]/g, '') })}
-                    onBlur={e => persist({ small_parts_end_side: e.target.value === '' ? null : Number(e.target.value) })}
                     style={{ width: '100%', fontSize: 14, padding: '3px 6px', boxSizing: 'border-box', display: 'block' }} />
                 </label>
               </div>
@@ -2150,7 +2141,7 @@ export default function NestingPage() {
                     `${d.display_name || d.name} ${Math.round(d.length)}×${Math.round(d.width)}${Number(d.qty) > 1 ? ` (${d.qty})` : ''}`).join(', ')}
                   {list.length > 5 ? ` и ещё ${list.length - 5} вид.` : ''}
                   <br />Их не ставим ближе {cfg.edge || 150} мм к краю листа, если между ними и краем нет другой детали.
-                  Торцом к краю можно стороной до {cfg.end !== '' ? cfg.end : (cfg.side || 0)} мм, в угол листа — никогда.
+                  {cfg.side !== '' ? `Узкие полосы (сторона до ${cfg.side} мм включительно) — в середину листа: длинной стороной к краю не ставим, в угол — никогда.` : 'В угол листа — никогда.'}
                   Оставшиеся у края подсвечиваются на карте оранжевым.
                 </p>
               )
