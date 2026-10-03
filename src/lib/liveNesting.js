@@ -12,7 +12,7 @@
 // Обычный (не онлайн) режим тоже идёт через этот модуль: тот же поиск, но с
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
 import { runNesting, smallAtEdge } from './nesting'
-import { needsTrueShape, roughShapePolygons, isTurned, buildHybridPlan } from './trueShapeNesting'
+import { needsTrueShape, roughShapePolygons, placedRotation, buildHybridPlan } from './trueShapeNesting'
 
 const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажатия «Стоп»
 
@@ -30,11 +30,11 @@ async function roughLayout(params) {
       if (!d?.contour) return
       if (!polys[p.detailIndex]) polys[p.detailIndex] = roughShapePolygons(d)
       // поворот — по фактическим размерам (флаг rotated не учитывает поворот при укладке «вдоль X/Y»)
-      const r90 = isTurned(p, Number(d.width))
-      const poly = polys[p.detailIndex][r90 ? 90 : 0]
+      const rot = placedRotation(p, Number(d.width))
+      const poly = polys[p.detailIndex][rot]
       if (!poly) return
       p.polygon = poly.map(([x, y]) => ({ x, y }))
-      p.rotation = r90 ? 90 : 0
+      p.rotation = rot
     }))
     res.rough = true
     return res
@@ -285,9 +285,9 @@ export async function fillOffcuts(params, offs, shaped, budget) {
       const d = params.details[di]
       if (shaped && d?.contour) {
         if (!polys[di]) polys[di] = roughShapePolygons(d)
-        const r90 = isTurned(q, Number(d.width))
-        const poly = polys[di][r90 ? 90 : 0]
-        if (poly) { q.polygon = poly.map(([x, y]) => ({ x, y })); q.rotation = r90 ? 90 : 0 }
+        const rot = placedRotation(q, Number(d.width))
+        const poly = polys[di][rot]
+        if (poly) { q.polygon = poly.map(([x, y]) => ({ x, y })); q.rotation = rot }
       }
       remaining[di]--
       return q

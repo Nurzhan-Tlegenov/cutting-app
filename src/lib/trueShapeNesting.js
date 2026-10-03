@@ -377,9 +377,9 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
           const out = { ...p, detailIndex: h.single }
           if (d.contour) {
             if (!polyCache[h.single]) polyCache[h.single] = roughShapePolygons(d)
-            const r90 = isTurned(p, Number(d.width))
-            const poly = polyCache[h.single][r90 ? 90 : 0]
-            if (poly) { out.polygon = poly.map(([x, y]) => ({ x, y })); out.rotation = r90 ? 90 : 0 }
+            const rot = placedRotation(p, Number(d.width))
+            const poly = polyCache[h.single][rot]
+            if (poly) { out.polygon = poly.map(([x, y]) => ({ x, y })); out.rotation = rot }
           }
           return [out]
         }
@@ -397,14 +397,21 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
 export function isTurned(p, width) {
   return Math.abs((p.origX ?? (p.w - 0)) - width) > 0.5
 }
+// Полный поворот уложенной детали (0/90/180/270): раскрой пишет его в p.rotation;
+// у старых результатов поля нет — тогда по габариту (0 или 90).
+export function placedRotation(p, width) {
+  if (p.rotation != null) return ((Math.round(Number(p.rotation) / 90) % 4) + 4) % 4 * 90
+  return isTurned(p, width) ? 90 : 0
+}
 
 // Контур детали в положениях 0° и 90° (локальные мм, Y вверх, [x, y]) —
 // для черновика онлайн-раскроя: детали раскладываются по габаритам обычным
 // прямоугольным раскроем (это мгновенно), а на экране рисуются настоящие
 // контуры внутри габаритов. Пересечений в черновике нет по построению.
 export function roughShapePolygons(detail) {
-  const { polygon, w } = parsePolygonFromDetail(detail)
-  return { 0: polygon, 90: rotate90(polygon, w) }
+  const { polygon, w, h } = parsePolygonFromDetail(detail)
+  const p90 = rotate90(polygon, w), p180 = rotate90(p90, h)
+  return { 0: polygon, 90: p90, 180: p180, 270: rotate90(p180, w) }
 }
 
 export function needsTrueShape(details) {

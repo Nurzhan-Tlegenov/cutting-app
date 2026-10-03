@@ -9,7 +9,7 @@ import { validateNesting } from '../lib/validateNesting'
 import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
-import { placedHoles } from '../lib/partHoles'
+import { placedHoles, placedTurns } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
 import { detailEdgeList, contourSegments, segmentSide } from '../lib/edgeLength'
 import { isTwoSided } from '../lib/partInfo'
@@ -638,7 +638,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           const panelH = Number(detail.length) || 0  // Y, "родная" ориентация
           // Кромка на фигурных участках контура и на вырезах — по самой линии контура
           if (showEdges) {
-            const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
+            const times = placedTurns(p, detail)
             const native = { left: detail.edge_left, right: detail.edge_right, top: detail.edge_top, bottom: detail.edge_bottom }
             ctx.save()
             ctx.strokeStyle = EDGE_COLOR; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
@@ -667,7 +667,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           }
           // пазы лицевой стороны — полупрозрачная заливка с контуром, как в редакторе
           {
-            const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
+            const times = placedTurns(p, detail)
             const rects = getGrooveRects(contour, panelW, panelH, true)
             if (rects.length) {
               ctx.save()
@@ -687,7 +687,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           // остаётся в детали и появится здесь, если деталь перевернуть в редакторе
           const pts = getAllDrillPoints(contour, panelW, panelH, true)
           if (pts.length) {
-            const times = Math.round((p.rotation ?? (p.rotated ? 90 : 0)) / 90)
+            const times = placedTurns(p, detail)
             ctx.fillStyle = '#6A4A17'
             pts.forEach(pt => {
               // Точка в "родной" ориентации детали → в текущей (с учётом поворота на листе, 0/90/180/270)

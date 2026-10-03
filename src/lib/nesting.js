@@ -508,7 +508,7 @@ export async function runNesting({
 // последний лист только худеет (или исчезает совсем).
 function placedToPiece(p) {
   return {
-    id: p.id, detailIndex: p.detailIndex, pw: p.w, ph: p.h, origX: p.origX, origY: p.origY,
+    id: p.id, detailIndex: p.detailIndex, pw: p.w, ph: p.h, origX: p.origX, origY: p.origY, rot0: p.rotation ?? (p.rotated ? 90 : 0),
     rotatable: p.rotatable, label: p.label, prefix: p.prefix, isSmall: p.isSmall, edgeOkMax: p.edgeOkMax || 0, edgeMin: p.edgeMin || 0, kf: p.kf || 0,
     edgeTop: p.edgeTop, edgeRight: p.edgeRight, edgeBottom: p.edgeBottom, edgeLeft: p.edgeLeft,
   }
@@ -1112,6 +1112,7 @@ function buildPieces(details, kerf, direction) {
         ph: d.length + kerf,
         origX: d.width,
         origY: d.length,
+        rot0: 0,   // поворот относительно исходной детали, градусы (накапливается: предварительный + при укладке)
         rotatable: d.rotatable,
         freeTurn: !!d.freeTurn, // гибридная пара со второй сцепкой «на боку» — направление укладки её не поворачивает
         label: d.display_name || d.name,
@@ -1139,6 +1140,7 @@ function buildPieces(details, kerf, direction) {
 function rotatePiece(p) {
   ;[p.pw, p.ph] = [p.ph, p.pw]
   ;[p.origX, p.origY] = [p.origY, p.origX]
+  p.rot0 = ((p.rot0 || 0) + 90) % 360
   ;[p.edgeTop, p.edgeRight, p.edgeBottom, p.edgeLeft] = [p.edgeLeft, p.edgeTop, p.edgeRight, p.edgeBottom]
 }
 
@@ -1198,7 +1200,7 @@ function compactPass(sheets, direction, usableX, usableY) {
         for (const o of orientations) {
           if (target.maxFreeW !== undefined && (o.w > target.maxFreeW || o.h > target.maxFreeH)) continue
           const makePlaced = () => o.flip
-            ? { ...piece, x: 0, y: 0, w: o.w, h: o.h, rotated: !piece.rotated,
+            ? { ...piece, x: 0, y: 0, w: o.w, h: o.h, rotated: !piece.rotated, rotation: ((piece.rotation ?? (piece.rotated ? 90 : 0)) + 90) % 360,
                 edgeTop: piece.edgeLeft, edgeRight: piece.edgeTop, edgeBottom: piece.edgeRight, edgeLeft: piece.edgeBottom }
             : { ...piece, x: 0, y: 0 }
 
@@ -1435,6 +1437,7 @@ function makePlacedFrom(piece, rect, rot, pw, ph) {
     origX: rot ? piece.origY : piece.origX,
     origY: rot ? piece.origX : piece.origY,
     rotated: rot,
+    rotation: ((piece.rot0 || 0) + (rot ? 90 : 0)) % 360,   // полный поворот от исходной детали — по нему рисуются присадка, пазы, вырезы
     isSmall: piece.isSmall,
     edgeOkMax: piece.edgeOkMax || 0,
     edgeMin: piece.edgeMin || 0,
