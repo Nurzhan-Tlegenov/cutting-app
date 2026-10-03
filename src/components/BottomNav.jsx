@@ -27,8 +27,7 @@ const IconAdmin = () => (
 )
 
 export default function BottomNav() {
-  const { profile } = useAuth()
-  const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
+  const { user } = useAuth()
 
   return (
     <nav className="bottom-nav">
@@ -38,8 +37,8 @@ export default function BottomNav() {
       <NavLink to="/orders/new" className={({ isActive }) => isActive ? 'active' : ''}>
         <IconNew /> Новый
       </NavLink>
-      {isOperator && (
-        <NavLink to="/admin" className={({ isActive }) => isActive ? 'active' : ''}>
+      {user && (
+        <NavLink to="/production" className={({ isActive }) => isActive ? 'active' : ''}>
           <IconAdmin /> Производство
         </NavLink>
       )}

@@ -1,0 +1,32 @@
+// Кабинет производства (см. migration_production_cabinet.sql): своё производство, заявки, статусы.
+import { supabase } from './supabase'
+
+const isMissing = e => /PGRST202|42883|schema cache|Could not find the function/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
+export const PROD_SQL_HINT = 'База ещё не обновлена: выполните migration_security_all.sql в Supabase (SQL Editor) — один раз.'
+
+async function call(fn, args) {
+  try {
+    const { data, error } = await supabase.rpc(fn, args)
+    if (error) return { error: isMissing(error) ? PROD_SQL_HINT : error.message, missing: isMissing(error) }
+    return { data }
+  } catch (e) { return { error: String(e?.message || e) } }
+}
+
+/** Моё производство; null — его нет; undefined — в базе ещё нет кабинета производства (миграция не выполнена) */
+export async function myProduction(userId) {
+  if (!userId) return null
+  try {
+    const { data, error } = await supabase.from('productions').select('*').eq('owner_id', userId).maybeSingle()
+    return error ? undefined : data || null
+  } catch { return undefined }
+}
+/** Зарегистрировать или обновить своё производство. sheet — { kerf, ml, mr, mt, mb } (необязательно). -> { id } | { error } */
+export async function registerProduction({ name, phone, city }, sheet = {}) {
+  const num = v => (v === '' || v == null || !isFinite(Number(v)) ? null : Number(v))
+  const r = await call('register_production', { p_name: name || '', p_phone: phone || '', p_city: city || '', p_kerf: num(sheet.kerf), p_ml: num(sheet.ml), p_mr: num(sheet.mr), p_mt: num(sheet.mt), p_mb: num(sheet.mb) })
+  if (r.error) return { error: /bad name/.test(r.error) ? 'Введите название производства' : r.error }
+  return { id: r.data }
+}
+export const productionOrders = () => call('production_orders')
+export const orderClient = orderId => call('order_client', { p_order: orderId })
+export const productionSetStatus = (orderId, status) => call('production_set_status', { p_order: orderId, p_status: status })

@@ -1,0 +1,150 @@
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
+import BottomNav from '../components/BottomNav'
+import ProductionForm from '../components/ProductionForm'
+import { myProduction, productionOrders, productionSetStatus } from '../lib/productionApi'
+import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
+
+// Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
+const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
+const digits = v => String(v || '').replace(/\D/g, '')
+const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['done', 'Исполнены'], ['all', 'Все']]
+const MARGINS = [['kerf_width', 'Рез / фреза'], ['margin_left', 'Отступ ←'], ['margin_right', 'Отступ →'], ['margin_top', 'Отступ ↑'], ['margin_bottom', 'Отступ ↓']]
+
+export default function ProductionPage() {
+  const navigate = useNavigate()
+  const { user, refreshProfile } = useAuth()
+  const [prod, setProd] = useState(undefined)       // undefined — загрузка, null — производства нет
+  const [orders, setOrders] = useState([])
+  const [error, setError] = useState('')
+  const [filter, setFilter] = useState('new')
+  const [edit, setEdit] = useState(false)
+  const [busy, setBusy] = useState('')
+  const [sheet, setSheet] = useState({})
+
+  const load = async () => {
+    const p = (await myProduction(user?.id)) ?? null
+    setProd(p)
+    if (p) {
+      setSheet(Object.fromEntries(MARGINS.map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
+      const r = await productionOrders()
+      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []) }
+    }
+  }
+  useEffect(() => { Promise.resolve().then(load) }, [user?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setStatus = async (o, status) => {
+    setBusy(o.id)
+    const r = await productionSetStatus(o.id, status)
+    setBusy('')
+    if (r.error) { setError(r.error); return }
+    setOrders(list => list.map(x => (x.id === o.id ? { ...x, status } : x)))
+  }
+  const saveSheet = async key => {
+    const v = sheet[key] === '' ? null : Number(String(sheet[key]).replace(',', '.'))
+    if (v != null && (!isFinite(v) || v < 0)) return
+    if ((prod[key] ?? null) === v) return
+    const { error: e } = await supabase.from('productions').update({ [key]: v }).eq('id', prod.id)
+    if (e) setError(e.message); else setProd(p => ({ ...p, [key]: v }))
+  }
+
+  const count = { new: orders.filter(o => o.status === 'new').length, work: orders.filter(o => o.status === 'discussion' || o.status === 'inwork').length, done: orders.filter(o => o.status === 'done').length, all: orders.length }
+  const shown = orders.filter(o => filter === 'all' || (filter === 'new' ? o.status === 'new' : filter === 'done' ? o.status === 'done' : o.status === 'discussion' || o.status === 'inwork'))
+  const btn = kind => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : 'var(--text-muted)' })
+
+  return (
+    <div className="page" style={{ paddingBottom: 100 }}>
+      <h1 style={{ fontSize: 18, fontWeight: 500, marginBottom: 16, paddingTop: 8 }}>Производство</h1>
+      {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
+      {prod === undefined ? <p style={{ color: 'var(--text-hint)' }}>Загрузка…</p> : !prod ? (
+        <div className="card">
+          <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>У вас есть своё производство?</div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+            Зарегистрируйте его — и заказы, которые вы или ваши заказчики оформят на ваше производство, будут приходить сюда заявками. Вы принимаете заявку — заказчик видит, что заказ принят. Если производства нет, просто выбирайте чужое при оформлении заказа.
+          </p>
+          <ProductionForm onDone={async () => { await refreshProfile?.(); load() }} />
+        </div>
+      ) : (
+        <>
+          <div className="card" style={{ marginBottom: 12 }}>
+            {edit ? (
+              <ProductionForm initial={prod} submitLabel="Сохранить" onCancel={() => setEdit(false)} onDone={() => { setEdit(false); load() }} />
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500, fontSize: 16 }}>{prod.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{[prod.city, prod.phone].filter(Boolean).join(' · ') || 'Телефон и город не указаны'}</div>
+                  </div>
+                  <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10 }}>
+                  {[['Заявок', count.all], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', count.done]].map(([l, v]) => (
+                    <div key={l} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{l}</div>
+                      <div style={{ fontSize: 20, fontWeight: 500 }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <details style={{ marginTop: 10 }}>
+                  <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Параметры станка (рез и отступы листа)</summary>
+                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство.</p>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {MARGINS.map(([k, l]) => (
+                      <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
+                        <input type="text" inputMode="decimal" value={sheet[k] ?? ''} onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              </>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            {FILTERS.map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setFilter(id)} style={{ flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, background: filter === id ? 'var(--blue)' : 'var(--bg2)', color: filter === id ? 'white' : 'var(--text-muted)' }}>
+                {label}{count[id] ? ` · ${count[id]}` : ''}
+              </button>
+            ))}
+          </div>
+          {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {shown.map(o => {
+              const tel = digits(o.client_phone), wa = digits(o.client_whatsapp) || tel
+              return (
+                <div key={o.id} className="card" style={{ padding: '10px 12px' }}>
+                  <div onClick={() => navigate(`/orders/${o.id}`)} style={{ cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontWeight: 500, fontSize: 15, fontFamily: 'monospace' }}>{o.order_number}</span>
+                      <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || o.status}</span>
+                    </div>
+                    {o.order_name && <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2 }}>{o.order_name}</div>}
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[o.material_name, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
+                  </div>
+                  <div style={{ fontSize: 13, marginTop: 6 }}>
+                    {o.own ? <span style={{ color: 'var(--text-hint)' }}>Ваш собственный заказ</span> : <>
+                      <span>{o.client_name || 'Заказчик'}</span>
+                      {tel && <a href={`tel:+${tel}`} style={{ color: 'var(--blue)', marginLeft: 8 }}>{o.client_phone}</a>}
+                      {wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 8, fontSize: 12 }}>WhatsApp</a>}
+                    </>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                    {o.status !== 'inwork' && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять</button>}
+                    {o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
+                    {o.status === 'inwork' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'done')}>Исполнен</button>}
+                    {o.status === 'done' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'inwork')}>Вернуть в работу</button>}
+                    <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+      <BottomNav />
+    </div>
+  )
+}

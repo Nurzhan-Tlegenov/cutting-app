@@ -14,11 +14,13 @@ import { isTwoSided } from '../lib/partInfo'
 import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
+import { orderClient, productionSetStatus } from '../lib/productionApi'
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
+  const [client, setClient] = useState(null)   // заказчик и производство этого заказа
   const [sortMode, setSortMode] = useState('')   // сортировка списка деталей (только показ)
   const [matFilter, setMatFilter] = useState('') // какой материал показывать в списке
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
@@ -39,9 +41,13 @@ export default function OrderPage() {
     setOrder(o)
     setDetails(d || [])
     setLoading(false)
+    orderClient(id).then(r => { if (!r.error) setClient(r.data || null) })
   }
   async function setStatus(status) {
-    await supabase.from('orders').update({ status }).eq('id', id)
+    // статус меняет производство (или администратор) — через функцию базы; в старой базе — напрямую
+    let r = await productionSetStatus(id, status)
+    if (r.missing) { const { error } = await supabase.from('orders').update({ status }).eq('id', id); r = error ? { error: error.message } : {} }
+    if (r.error) { window.alert('Не удалось изменить статус: ' + r.error); return }
     setOrder(o => ({ ...o, status }))
   }
   async function deleteOrder() {
@@ -67,7 +73,9 @@ export default function OrderPage() {
     detailEdgeList(d).forEach(e => { totalEdge += (e.mm / 1000) * d.qty })
   })
   const sheetsNeeded = usableArea > 0 ? Math.ceil(totalPartArea / (usableArea * 0.85)) : 0
-  const isDraft = order.status === 'draft'
+  const isMine = order.user_id === user?.id
+  const isDraft = order.status === 'draft' && (isMine || profile?.role === 'admin')
+  const canStatus = order.status !== 'draft' && (profile?.role === 'admin' || (isOperator && !!order.production_id))
   const edgeNames = { edge_top:'В', edge_right:'П', edge_bottom:'Н', edge_left:'Л' }
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
@@ -81,7 +89,15 @@ export default function OrderPage() {
           {STATUS_LABELS[order.status] || order.status}
         </span>
       </div>
-      {isOperator && (
+      {client && (client.production || (!isMine && client.full_name)) && (
+        <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
+          {!isMine && (client.full_name || client.phone) && (
+            <div>Заказчик: <b>{client.full_name || '—'}</b>{client.phone ? <a href={`tel:+${String(client.phone).replace(/\D/g, '')}`} style={{ color: 'var(--blue)', marginLeft: 8 }}>{client.phone}</a> : null}</div>
+          )}
+          {client.production && <div style={{ color: 'var(--text-muted)' }}>Производство: {client.production}</div>}
+        </div>
+      )}
+      {canStatus && (
         <div className="card" style={{ marginBottom: 12 }}>
           <p className="section-title">Изменить статус</p>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -169,11 +185,11 @@ export default function OrderPage() {
           </button>
         </div>
       )}
-      <button onClick={deleteOrder}
+      {(isMine || profile?.role === 'admin') && <button onClick={deleteOrder}
         style={{ width: '100%', padding: 10, background: 'transparent', color: 'var(--danger)',
           border: '1px solid var(--danger)', borderRadius: 'var(--radius)', fontSize: 14, cursor: 'pointer', marginBottom: 16 }}>
         🗑 Удалить заказ
-      </button>
+      </button>}
       <BottomNav />
     </div>
   )

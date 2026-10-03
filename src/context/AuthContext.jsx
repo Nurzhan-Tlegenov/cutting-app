@@ -55,7 +55,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, refreshProfile: () => (user ? fetchProfile(user.id) : null) }}>
       {children}
     </AuthContext.Provider>
   )

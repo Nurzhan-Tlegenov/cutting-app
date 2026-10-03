@@ -18,6 +18,8 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import ContourEditor from '../components/ContourEditor'
 import Model3DButton from '../components/Model3DButton'
+import ProductionForm from '../components/ProductionForm'
+import { myProduction } from '../lib/productionApi'
 import { loadOrderModel } from '../lib/orderModel'
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
@@ -1427,7 +1429,7 @@ export default function NestingPage() {
   const materials = useMemo(() => materialsOf(allDetails, order), [allDetails, order])
   const multiMat = materials.length > 1
   const details = useMemo(() => (multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails), [allDetails, multiMat, matKey, order])
-  const { user } = useAuth()
+  const { user, refreshProfile } = useAuth()
   const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
   const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
   // показывать ли кромку на картах (без неё карта читается легче) — тоже за аккаунтом
@@ -1446,6 +1448,7 @@ export default function NestingPage() {
   const [showOffcuts, setShowOffcuts] = useState(false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
   const [productions, setProductions] = useState([])     // зарегистрированные производства (если есть)
+  const [needProd, setNeedProd] = useState(null)         // «Оформить» без производства: { cfg, force, pick, own }
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
   const [offForm, setOffForm] = useState(() => parseOffcuts(null))
   const [sheetOpen, setSheetOpen] = useState(true)
@@ -1903,8 +1906,18 @@ export default function NestingPage() {
     setBusyId(null)
   }
 
-  async function submitOrder(cfg, force = false) {
+  // Заказ оформляется на производство. Если оно не выбрано: у кого есть своё производство — заказ идёт туда;
+  // остальным предлагаем выбрать производство или зарегистрировать своё.
+  async function submitOrder(cfg, force = false, prodId = null) {
     if (!force && !checkCfg(cfg)) return
+    if (prodId) await saveOrderPatch({ production_id: prodId }, false)     // раскрой уже посчитан — параметры листа не трогаем
+    else if (!order.production_id) {
+      const mine = await myProduction(user?.id)
+      if (mine) await saveOrderPatch({ production_id: mine.id }, false)
+      else if (mine === null) { setNeedProd({ cfg, force, pick: productions[0]?.id || '', own: productions.length === 0 }); return }
+      // mine === undefined — в базе ещё нет кабинета производства: оформляем как раньше
+    }
+    setNeedProd(null)
     if (multiMat) {
       const missing = materials.filter(m => m.key !== matKey && !savedByMat[m.key])
       if (missing.length && !window.confirm(`Раскрой ещё не выбран для материалов:\n${missing.map(m => '· ' + m.label).join('\n')}\n\nВсё равно оформить заказ?`)) return
@@ -2962,6 +2975,38 @@ export default function NestingPage() {
         </div>
       )}
       <BottomNav />
+      {needProd && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 955, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setNeedProd(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', overflowY: 'auto', background: 'var(--bg)', borderRadius: '16px 16px 0 0', padding: '16px 16px calc(16px + env(safe-area-inset-bottom))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ flex: 1, fontSize: 16, fontWeight: 500 }}>На какое производство оформить?</div>
+              <button type="button" onClick={() => setNeedProd(null)} style={{ background: 'none', border: 'none', fontSize: 20, color: 'var(--text-hint)' }}>✕</button>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>Заказ уходит заявкой на производство. Выберите производство из списка или зарегистрируйте своё — тогда заявки будут приходить вам, в раздел «Производство».</p>
+            {!needProd.own ? (
+              <>
+                <label className="label">Производство</label>
+                <select value={needProd.pick} onChange={e => setNeedProd(n => ({ ...n, pick: e.target.value }))} style={{ marginBottom: 10 }}>
+                  {productions.map(pr => <option key={pr.id} value={pr.id}>{pr.name}{pr.city ? ` · ${pr.city}` : ''}</option>)}
+                </select>
+                <button type="button" className="btn-primary" disabled={!needProd.pick} onClick={() => submitOrder(needProd.cfg, needProd.force, needProd.pick)}>✓ Оформить на это производство</button>
+                <button type="button" onClick={() => setNeedProd(n => ({ ...n, own: true }))}
+                  style={{ width: '100%', marginTop: 10, padding: 10, border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--blue)', fontSize: 14 }}>
+                  У меня своё производство — зарегистрировать
+                </button>
+              </>
+            ) : (
+              <>
+                {productions.length === 0 && <p style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', borderRadius: 'var(--radius)', padding: '6px 8px', marginBottom: 10 }}>Пока ни одно производство не зарегистрировано. Зарегистрируйте своё — заказ оформится на него.</p>}
+                <ProductionForm submitLabel="Зарегистрировать и оформить"
+                  sheet={{ kerf: order.kerf_width, ml: order.margin_left, mr: order.margin_right, mt: order.margin_top, mb: order.margin_bottom }}
+                  onCancel={productions.length ? () => setNeedProd(n => ({ ...n, own: false })) : () => setNeedProd(null)}
+                  onDone={async pid => { await refreshProfile?.(); submitOrder(needProd.cfg, needProd.force, pid) }} />
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {editPart && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'var(--bg2)', overflowY: 'auto' }}>
           <ContourEditor

@@ -35,9 +35,9 @@ export async function getNextOrderNumber(supabase) {
 }
 
 export const STATUS_LABELS = {
-  new: 'Не просмотрен',
+  new: 'Отправлен, ждёт ответа',
   discussion: 'В обсуждении',
-  inwork: 'В работе',
+  inwork: 'Принят в работу',
   done: 'Исполнен'
 }
 

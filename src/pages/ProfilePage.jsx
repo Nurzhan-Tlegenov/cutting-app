@@ -61,7 +61,7 @@ export default function ProfilePage() {
               {profile?.full_name || 'Пользователь'}
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-hint)' }}>
-              {isOperator ? 'Оператор производства' : 'Клиент'}
+              {profile?.role === 'admin' ? 'Администратор' : isOperator ? 'Производство' : 'Клиент'}
             </div>
           </div>
         </div>
@@ -70,7 +70,7 @@ export default function ProfilePage() {
           {[
             ['Телефон', profile?.phone],
             ['WhatsApp', profile?.whatsapp],
-            ['Роль', profile?.role === 'admin' ? 'Администратор' : isOperator ? 'Оператор' : 'Клиент'],
+            ['Статус', profile?.role === 'admin' ? 'Администратор' : isOperator ? 'Производство' : 'Клиент'],
           ].filter(([, val]) => val).map(([label, val]) => (
             <div key={label} style={{
               display: 'flex', justifyContent: 'space-between',

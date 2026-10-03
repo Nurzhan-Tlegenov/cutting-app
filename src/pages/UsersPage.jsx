@@ -5,7 +5,7 @@ import BottomNav from '../components/BottomNav'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen } from '../lib/adminApi'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
-const ROLES = [['client', 'Клиент'], ['operator', 'Оператор'], ['admin', 'Администратор']]
+const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—')
 const digits = v => String(v || '').replace(/\D/g, '')
 
@@ -20,6 +20,7 @@ export default function UsersPage() {
   const [phone, setPhone] = useState('')
   const [name, setName] = useState('')
   const [find, setFind] = useState('')
+  const [kind, setKind] = useState('all')      // все / клиенты / производства
   const [ready, setReady] = useState(false)   // база ответила: функции на месте и вы администратор
 
   const load = async () => {
@@ -43,7 +44,8 @@ export default function UsersPage() {
   const fresh = reqs.filter(r => r.status === 'new')
   const rest = reqs.filter(r => r.status !== 'new')
   const q = find.trim().toLowerCase()
-  const shown = (users || []).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
+  const prodCount = (users || []).filter(u => u.production_id).length
+  const shown = (users || []).filter(u => kind === 'all' || (kind === 'prod' ? !!u.production_id : !u.production_id)).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
   const btn = (kind) => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', border: kind === 'main' ? 'none' : `0.5px solid ${kind === 'danger' ? 'var(--danger)' : 'var(--border-md)'}`, background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : kind === 'danger' ? 'var(--danger)' : 'var(--text-muted)', whiteSpace: 'nowrap' })
   const statusLabel = r => (r.registered ? 'зарегистрирован' : r.status === 'approved' ? 'одобрена — ждём регистрации' : 'отклонена')
 
@@ -113,6 +115,11 @@ export default function UsersPage() {
           </div>
 
           <p className="section-title">Зарегистрированы ({users.length})</p>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            {[['all', `Все · ${users.length}`], ['client', `Клиенты · ${users.length - prodCount}`], ['prod', `Производства · ${prodCount}`]].map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setKind(id)} style={{ flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, background: kind === id ? 'var(--blue)' : 'var(--bg2)', color: kind === id ? 'white' : 'var(--text-muted)' }}>{label}</button>
+            ))}
+          </div>
           {users.length > 6 && <input type="text" placeholder="Поиск: имя или телефон" value={find} onChange={e => setFind(e.target.value)} style={{ marginBottom: 8 }} />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {shown.map(u => {
@@ -133,8 +140,13 @@ export default function UsersPage() {
                       {ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </div>
+                  {u.production_id && (
+                    <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', background: 'var(--amber-light)', borderRadius: 'var(--radius)', color: 'var(--amber)' }}>
+                      Производство «{u.production_name}»{u.production_city ? `, ${u.production_city}` : ''}: заявок получено <b>{u.received}</b> · принято <b>{u.accepted}</b> · исполнено <b>{u.done}</b>
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-                    Регистрация {date(u.created_at)} · последний вход {date(u.last_sign_in_at)} · заказов {u.orders}{u.last_order_at ? ` (последний ${date(u.last_order_at)})` : ''}
+                    Регистрация {date(u.created_at)} · последний вход {date(u.last_sign_in_at)} · заказов создано {u.orders}{u.submitted != null ? `, оформлено ${u.submitted}` : ''}{u.last_order_at ? ` (последний ${date(u.last_order_at)})` : ''}
                   </div>
                 </div>
               )
