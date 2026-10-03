@@ -14,7 +14,7 @@ export default function OrdersPage() {
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState(new Set())
   const [deleting, setDeleting] = useState(false)
-  const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
+  const isOperator = profile?.role === 'admin'   // чужие заказы видит только администратор (так же настроена база)
   const holdTimers = useRef({})
   const [shares, setShares] = useState(() => new Map())
   useEffect(() => onShareChange(() => setShares(prev => {

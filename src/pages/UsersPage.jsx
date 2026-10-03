@@ -11,7 +11,7 @@ const digits = v => String(v || '').replace(/\D/g, '')
 
 export default function UsersPage() {
   const navigate = useNavigate()
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
   const [users, setUsers] = useState(null)
   const [reqs, setReqs] = useState([])
   const [open, setOpen] = useState(true)
@@ -20,11 +20,12 @@ export default function UsersPage() {
   const [phone, setPhone] = useState('')
   const [name, setName] = useState('')
   const [find, setFind] = useState('')
+  const [ready, setReady] = useState(false)   // база ответила: функции на месте и вы администратор
 
   const load = async () => {
     const [u, r, o] = await Promise.all([adminUsers(), adminRequests(), signupOpen()])
-    if (u.error) { setError(u.error); setUsers([]); return }
-    setError(''); setUsers(u.data || []); setReqs(r.data || []); setOpen(o)
+    if (u.error) { setError(u.error); setReady(false); setUsers([]); return }
+    setError(''); setReady(true); setUsers(u.data || []); setReqs(r.data || []); setOpen(o)
   }
   useEffect(() => { Promise.resolve().then(load) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -53,7 +54,12 @@ export default function UsersPage() {
         <h1 style={{ fontSize: 18, fontWeight: 500 }}>Пользователи</h1>
       </div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
-      {users === null ? <p style={{ color: 'var(--text-hint)' }}>Загрузка…</p> : profile?.role !== 'admin' && !users.length ? null : (
+      {users === null ? <p style={{ color: 'var(--text-hint)' }}>Загрузка…</p> : !ready ? (
+        <div className="card">
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>Список пользователей и переключатель регистрации появятся, когда база будет обновлена: откройте Supabase → SQL Editor, вставьте содержимое файла <b>migration_security_all.sql</b> и нажмите Run.</p>
+          <button type="button" onClick={load} style={btn('main')}>Проверить ещё раз</button>
+        </div>
+      ) : (
         <>
           <div className="card" style={{ marginBottom: 12, border: open ? undefined : '1px solid var(--amber)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

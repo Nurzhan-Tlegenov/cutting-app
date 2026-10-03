@@ -3,7 +3,7 @@
 import { supabase } from './supabase'
 
 const isMissing = e => /PGRST202|42883|schema cache|Could not find the function/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
-export const ADMIN_SQL_HINT = 'Выполните migration_users_admin.sql в Supabase (SQL Editor) — один раз.'
+export const ADMIN_SQL_HINT = 'База ещё не обновлена: выполните migration_security_all.sql в Supabase (SQL Editor) — один раз.'
 
 async function call(fn, args) {
   try {

@@ -14,6 +14,13 @@ export async function getNextOrderNumber(supabase) {
   const dd = String(today.getDate()).padStart(2, '0')
   const prefix = `${yy}${mm}${dd}_`
 
+  // Номер должен быть уникален среди заказов ВСЕХ пользователей, а чужие заказы пользователю не видны —
+  // поэтому номер выдаёт функция базы (migration_access_lockdown.sql). Нет функции — считаем по-старому.
+  try {
+    const { data: next, error } = await supabase.rpc('next_order_number', { p_prefix: prefix })
+    if (!error && typeof next === 'string' && next.startsWith(prefix)) return next
+  } catch { /* ниже — прежний способ */ }
+
   const { data } = await supabase
     .from('orders')
     .select('order_number')
