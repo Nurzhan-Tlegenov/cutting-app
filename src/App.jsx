@@ -25,6 +25,7 @@ import ProfilePage from './pages/ProfilePage'
 import NestingPage from './pages/NestingPage'
 import EditOrderPage from './pages/EditOrderPage'
 import SharedModelPage from './pages/SharedModelPage'
+import UsersPage from './pages/UsersPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -47,6 +48,7 @@ function AppRoutes() {
       <Route path="/orders/:id/nesting" element={<ProtectedRoute><NestingPage /></ProtectedRoute>} />
       <Route path="/orders/:id/edit" element={<ProtectedRoute><EditOrderPage /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+      <Route path="/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to={user ? '/orders' : '/auth'} />} />
     </Routes>
   )

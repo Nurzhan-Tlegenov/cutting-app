@@ -70,7 +70,7 @@ export default function ProfilePage() {
           {[
             ['Телефон', profile?.phone],
             ['WhatsApp', profile?.whatsapp],
-            ['Роль', isOperator ? 'Оператор' : 'Клиент'],
+            ['Роль', profile?.role === 'admin' ? 'Администратор' : isOperator ? 'Оператор' : 'Клиент'],
           ].filter(([, val]) => val).map(([label, val]) => (
             <div key={label} style={{
               display: 'flex', justifyContent: 'space-between',
@@ -82,6 +82,17 @@ export default function ProfilePage() {
           ))}
         </div>
       </div>
+
+      {profile?.role === 'admin' && (
+        <button onClick={() => navigate('/users')} className="card"
+          style={{ width: '100%', marginBottom: 12, textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>Пользователи и регистрация</div>
+            <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Кто зарегистрирован, заявки, закрыть или открыть регистрацию</div>
+          </div>
+          <span style={{ color: 'var(--blue)', fontSize: 18 }}>→</span>
+        </button>
+      )}
 
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>Фасадные фрезы</div>
