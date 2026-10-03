@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
+import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 
 export default function OrdersPage() {
   const { user, profile } = useAuth()
@@ -15,6 +16,12 @@ export default function OrdersPage() {
   const [deleting, setDeleting] = useState(false)
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
   const holdTimers = useRef({})
+  const [shares, setShares] = useState(() => new Map())
+  useEffect(() => onShareChange(() => setShares(prev => {
+    const next = new Map(prev)
+    for (const o of orders) { const t = cachedShare(o.id); if (t) next.set(o.id, t); else if (t === null) next.delete(o.id) }
+    return next
+  })), [orders])
 
   useEffect(() => { fetchOrders() }, [user])
 
@@ -24,6 +31,7 @@ export default function OrdersPage() {
     const { data } = await query
     setOrders(data || [])
     setLoading(false)
+    listShares().then(setShares)      // у каких заказов открыта ссылка на 3D-модель
   }
 
   function startHold(id) {
@@ -155,6 +163,12 @@ export default function OrdersPage() {
                   </div>
                   {order.order_name && <div style={{ fontSize: 14, fontWeight: 500 }}>{order.order_name}</div>}
                   <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{order.material_name}</div>
+                  {shares.has(order.id) && (
+                    <div title="По ссылке 3D-модель этого заказа открыта для просмотра. Закрыть доступ можно в заказе."
+                      style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px' }}>
+                      🔗 открыта ссылка на 3D-модель
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                     {new Date(order.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}
                   </div>

@@ -2706,7 +2706,7 @@ export default function NestingPage() {
           <div style={{ fontSize: 12, color: 'var(--text-hint)', fontFamily: 'monospace' }}>{order.order_number}</div>
         </div>
         {/* 3D открывается поверх страницы — раскрой при этом не сбрасывается */}
-        <Model3DButton details={allDetails} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} />
+        <Model3DButton details={allDetails} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} orderId={id} />
       </div>
 
       {/* Материал: в заказе несколько листовых материалов — раскраиваем по одному */}

@@ -38,15 +38,30 @@ function mirrorHoleLike(item, panelWidthX) {
   return next
 }
 
-function mirrorDrilling(dr, panelWidthX) {
+// Зеркало лево↔право для присадки. Кроме сторон и отступов зеркалится всё, что отсчитывается вдоль X:
+// парное и дополнительные отверстия (шаг от основного меняет знак), отсчёт вдоль верхнего/нижнего торца
+// (от начала ↔ от конца) и зазор от стойки разметки.
+function mirrorDrilling(dr, panelWidthX, layout) {
   const next = { ...dr }
   if (dr.sides) {
     next.sides = swapLeftRightSides(dr.sides)
     next.offsets = swapLeftRightOffsets(dr.offsets)
   }
+  const neg = v => -(v ?? 32)
   if (dr.kind === 'edge') {
     if (dr.edgeSide === 'left') next.edgeSide = 'right'
     else if (dr.edgeSide === 'right') next.edgeSide = 'left'
+    else {
+      // торец вдоль X (верх/низ): отсчёт идёт с другого конца, пара — в другую сторону
+      next.alongFrom = dr.alongFrom === 'end' ? 'start' : 'end'
+      if (dr.pairEnabled && dr.pairKind !== 'face') next.pairGap = neg(dr.pairGap)
+      if (Array.isArray(dr.extraHoles)) next.extraHoles = dr.extraHoles.map(eh => (eh.kind === 'edge' ? { ...eh, edgeGap: neg(eh.edgeGap) } : eh))
+    }
+  } else {
+    if (dr.pairEnabled && (dr.pairAxis || 'x') !== 'y') next.pairGap = neg(dr.pairGap)
+    if (Array.isArray(dr.extraHoles)) next.extraHoles = dr.extraHoles.map(eh => (eh.kind === 'face' && eh.axis !== 'y' ? { ...eh, gap: neg(eh.gap) } : eh))
+    // присадка привязана к стойке разметки со смещением от её середины — смещение тоже зеркалится
+    if (dr.gap && (dr.attachTo || []).some(id => (layout || []).find(g => g.id === id)?.kind === 'upright')) next.gapDir = dr.gapDir === 'neg' ? 'pos' : 'neg'
   }
   return next
 }
@@ -67,7 +82,7 @@ export function mirrorContour(contour, panelWidthX) {
     vertices: mirrorVertices(contour.vertices, panelWidthX),
     holes: (contour.holes || []).map(h => mirrorHoleLike(h, panelWidthX)),
     grooves: (contour.grooves || []).map(g => mirrorHoleLike(g, panelWidthX)),
-    drillings: (contour.drillings || []).map(dr => mirrorDrilling(dr, panelWidthX)),
+    drillings: (contour.drillings || []).map(dr => mirrorDrilling(dr, panelWidthX, contour.layout)),
     layout: (contour.layout || []).map(g => mirrorLayoutGuide(g, panelWidthX)),
   }
 }

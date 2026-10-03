@@ -12,6 +12,8 @@ import Model3DButton from '../components/Model3DButton'
 import { detailEdgeList } from '../lib/edgeLength'
 import { isTwoSided } from '../lib/partInfo'
 import { loadOrderModel } from '../lib/orderModel'
+import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
+import ShareLinkBox from '../components/ShareLinkBox'
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
@@ -24,6 +26,13 @@ export default function OrderPage() {
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
   useEffect(() => { fetchOrder() }, [id])
+  // открыта ли ссылка для просмотра 3D-модели (её могли создать в самой модели)
+  const [shared, setShared] = useState(() => !!cachedShare(id))
+  useEffect(() => {
+    const off = onShareChange(() => setShared(!!cachedShare(id)))
+    getShare(id)
+    return off
+  }, [id])
   async function fetchOrder() {
     const { data: o, error: oErr } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
@@ -86,6 +95,12 @@ export default function OrderPage() {
           </div>
         </div>
       )}
+      {shared && (
+        <div className="card" style={{ marginBottom: 12, border: '1px solid var(--teal)' }}>
+          <p className="section-title" style={{ color: 'var(--teal)' }}>🔗 Открыта ссылка на 3D-модель</p>
+          <ShareLinkBox orderId={id} />
+        </div>
+      )}
       <div style={{ marginBottom: 12 }}>
         <p className="section-title">Статистика</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -102,7 +117,8 @@ export default function OrderPage() {
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
-          <Model3DButton details={details} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} />
+          <Model3DButton details={details} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)}
+            orderId={id} editPath={isDraft ? `/orders/${id}/edit` : ''} />
           <select value={sortMode} onChange={e => setSortMode(e.target.value)}
             style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--text-muted)', borderRadius: 20 }}>
             <option value="">Как в заказе</option>

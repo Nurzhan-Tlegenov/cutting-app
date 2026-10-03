@@ -24,6 +24,7 @@ import NewOrderPage from './pages/NewOrderPage'
 import ProfilePage from './pages/ProfilePage'
 import NestingPage from './pages/NestingPage'
 import EditOrderPage from './pages/EditOrderPage'
+import SharedModelPage from './pages/SharedModelPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -37,6 +38,8 @@ function AppRoutes() {
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>...</div>
   return (
     <Routes>
+      {/* 3D-модель по ссылке для клиента — без входа */}
+      <Route path="/view/:token" element={<SharedModelPage />} />
       <Route path="/auth" element={user ? <Navigate to="/orders" /> : <AuthPage />} />
       <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
       <Route path="/orders/new" element={<ProtectedRoute><NewOrderPage /></ProtectedRoute>} />

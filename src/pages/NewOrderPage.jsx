@@ -630,7 +630,9 @@ export default function NewOrderPage() {
           <p className="section-title" style={{ marginBottom: 0 }}>
             Детали ({details.length}) {validCount > 0 && `· ${validCount} заполнено`}
           </p>
-          <Model3DButton details={details} title={orderName} getScene={async () => (model3d ? (await import('../lib/basisB3d')).unpackScene(model3d) : null)} />
+          <Model3DButton details={details} title={orderName} getScene={async () => (model3d ? (await import('../lib/basisB3d')).unpackScene(model3d) : null)}
+            edgeNames={edgeNames} materialThickness={materialThickness}
+            onDetailsChange={list => setDetails(list.map(d => (d.uid ? d : { ...d, uid: ++uid })))} />
           <select value="" onChange={e => { const m = e.target.value; if (m) setDetails(d => sortDetails(d, m)) }}
             style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--blue)', borderColor: 'var(--blue-mid)', borderRadius: 20 }}>
             <option value="">Сортировать…</option>

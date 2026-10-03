@@ -1,13 +1,24 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { hasModel } from '../lib/model3d'
+import { cachedShare, getShare, onShareChange } from '../lib/modelShare'
 
 const Model3D = lazy(() => import('./Model3D'))
 
 // Кнопка «3D-модель»: открывает просмотр поверх текущей страницы (страница не закрывается
 // и ничего не теряет). getScene — откуда взять всю модель Базиса (может вернуть null).
-export default function Model3DButton({ details, title, getScene, label = '3D-модель', style }) {
+// onDetailsChange — если передан, модель можно править прямо в 3D (кромка, присадка, деталь).
+// orderId — заказ уже сохранён: можно дать клиенту ссылку; значок 🔗 на кнопке — ссылка открыта.
+export default function Model3DButton({ details, title, getScene, label = '3D-модель', style, onDetailsChange, edgeNames, orderId, editPath, materialThickness }) {
   const [open, setOpen] = useState(false)
   const [scene, setScene] = useState(undefined)   // undefined — ещё не загружали
+  const [shared, setShared] = useState(() => !!(orderId && cachedShare(orderId)))
+  useEffect(() => {
+    if (!orderId) return
+    const sync = () => setShared(!!cachedShare(orderId))
+    const off = onShareChange(sync)
+    if (cachedShare(orderId) === undefined) getShare(orderId)
+    return off
+  }, [orderId])
   if (!hasModel(details)) return null
   const show = async () => {
     if (scene === undefined) {
@@ -19,13 +30,14 @@ export default function Model3DButton({ details, title, getScene, label = '3D-м
   }
   return (
     <>
-      <button type="button" onClick={show}
+      <button type="button" onClick={show} title={shared ? 'Открыта ссылка для просмотра модели' : undefined}
         style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px', whiteSpace: 'nowrap', cursor: 'pointer', ...style }}>
-        {label}
+        {label}{shared ? ' 🔗' : ''}
       </button>
       {open && (
         <Suspense fallback={null}>
-          <Model3D details={details} scene={scene || null} title={title} onClose={() => setOpen(false)} />
+          <Model3D details={details} scene={scene || null} title={title} onClose={() => setOpen(false)}
+            onDetailsChange={onDetailsChange} edgeNames={edgeNames} orderId={orderId ?? null} editPath={editPath} materialThickness={materialThickness} />
         </Suspense>
       )}
     </>

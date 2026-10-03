@@ -21,9 +21,23 @@ function resolvePos(sides, offsets, panelW, panelH, itemW, itemH) {
   return { x, y, w, h }
 }
 
+// Постоянное имя каждой штуки в модели (pid): по нему 3D помнит, что скрыто и выбрано,
+// даже когда строки заказа делятся или склеиваются после правки. Порядок обхода — как в buildModel.
+export function makePidGen() {
+  const seen = new Map()
+  return (meta, i, di) => {
+    const id = meta?.ids?.[i]
+    const k = id != null ? `${meta.file || ''}#${id}` : `r${di}_${i}`
+    const n = seen.get(k) || 0
+    seen.set(k, n + 1)
+    return n ? `${k}~${n}` : k
+  }
+}
+
 // Одна строка заказа -> панели в модели (по одной на каждую штуку).
 // skipIds — ID панелей, которые уже показаны (чтобы не рисовать дважды).
-function partsOfDetail(d, inOrder, skipIds) {
+// di — номер строки в заказе, pidOf — выдаёт постоянное имя штуки.
+function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
   let c = d.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const meta = c?.meta
@@ -126,11 +140,14 @@ function partsOfDetail(d, inOrder, skipIds) {
   }
 
   const size = `${Math.round(num(d.w ?? d.length) * 10) / 10}×${Math.round(num(d.h ?? d.width) * 10) / 10}`
+  // блок, в который входит деталь (изделие и вложенные блоки из Базиса / Астры)
+  const block = [meta.product, ...(Array.isArray(meta.path) ? meta.path : [])].filter(Boolean).join(' / ')
   const out = []
   meta.inst.forEach((m, i) => {
     const id = meta.ids?.[i]
+    const pid = pidOf ? pidOf(meta, i, di) : ''
     if (skipIds && id != null && skipIds.has(id)) return
-    out.push({ outline, holes, drills, grooves, carve, bands, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', size })
+    out.push({ outline, holes, drills, grooves, carve, bands, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', pos: meta.pos ? String(meta.pos) : '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', block, size, pid, di, ii: i })
   })
   return out
 }
@@ -142,19 +159,21 @@ function partsOfDetail(d, inOrder, skipIds) {
 export function buildModel(details, scene) {
   const parts = []
   const orderIds = new Set()
-  for (const d of details || []) {
-    const ps = partsOfDetail(d, true, null)
+  const pidOf = makePidGen()
+  ;(details || []).forEach((d, di) => {
+    const ps = partsOfDetail(d, true, null, di, pidOf)
     parts.push(...ps)
     let c = d.contour
     if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
     ;(c?.meta?.ids || []).forEach(id => orderIds.add(id))
-  }
+  })
   const hardware = []
   let hasContext = false
   if (scene) {
-    for (const sp of scene.parts || []) parts.push(...partsOfDetail(sp, false, orderIds))
+    let sn = 0
+    for (const sp of scene.parts || []) for (const p of partsOfDetail(sp, false, orderIds)) { p.pid = 's' + sn++; parts.push(p) }
     for (const ex of scene.extras || []) {
-      parts.push({ outline: ex.outline, holes: ex.holes || [], drills: [], grooves: [], t: ex.t, m: ex.m, inOrder: false, anim: ex.anim || null, texDir: 0, des: '', name: ex.name || '', material: ex.material || '', product: '', size: '' })
+      parts.push({ outline: ex.outline, holes: ex.holes || [], drills: [], grooves: [], t: ex.t, m: ex.m, inOrder: false, anim: ex.anim || null, texDir: 0, des: '', pos: '', name: ex.name || '', material: ex.material || '', product: '', block: '', size: '', pid: 'x' + sn++, di: -1, ii: 0 })
     }
     const byId = new Map()
     for (const hw of scene.hardware || []) {
