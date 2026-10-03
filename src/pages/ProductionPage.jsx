@@ -27,7 +27,7 @@ export default function ProductionPage() {
   const load = async () => {
     const p = (await myProduction(user?.id)) ?? null
     setProd(p)
-    if (p) {
+    if (p && (p.status ?? 'approved') === 'approved') {
       setSheet(Object.fromEntries(MARGINS.map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
       if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []) }
@@ -62,9 +62,22 @@ export default function ProductionPage() {
         <div className="card">
           <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>У вас есть своё производство?</div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-            Зарегистрируйте его — и заказы, которые вы или ваши заказчики оформят на ваше производство, будут приходить сюда заявками. Вы принимаете заявку — заказчик видит, что заказ принят. Если производства нет, просто выбирайте чужое при оформлении заказа.
+            Зарегистрируйте его — и заказы, которые вы или ваши заказчики оформят на ваше производство, будут приходить сюда заявками. Вы принимаете заявку — заказчик видит, что заказ принят. Если производства нет, просто выбирайте чужое при оформлении заказа. Пока регистрация идёт по запросу, новое производство начинает работать после подтверждения администратором.
           </p>
           <ProductionForm onDone={async () => { await refreshProfile?.(); load() }} />
+        </div>
+      ) : (prod.status ?? 'approved') !== 'approved' ? (
+        <div className="card" style={{ border: '1px solid var(--amber)' }}>
+          <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>{prod.name}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 8 }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ')}</div>
+          {prod.status === 'rejected' ? (
+            <>
+              <p style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 10 }}>Заявка на регистрацию производства отклонена. Можно поправить данные и подать её заново.</p>
+              <ProductionForm initial={prod} submitLabel="Подать заявку заново" onDone={load} />
+            </>
+          ) : (
+            <p style={{ fontSize: 13, color: 'var(--amber)' }}>Заявка на регистрацию производства отправлена и ждёт подтверждения администратора. После подтверждения производство появится в списке у заказчиков, а заявки начнут приходить сюда.</p>
+          )}
         </div>
       ) : (
         <>
@@ -76,7 +89,7 @@ export default function ProductionPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 500, fontSize: 16 }}>{prod.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{[prod.city, prod.phone].filter(Boolean).join(' · ') || 'Телефон и город не указаны'}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
                   </div>
                   <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
                 </div>

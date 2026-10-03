@@ -317,7 +317,20 @@ create table if not exists public.productions (
 alter table public.productions add column if not exists owner_id uuid references auth.users(id) on delete set null;
 alter table public.productions add column if not exists phone text;
 alter table public.productions add column if not exists city text;
+alter table public.productions add column if not exists country text;
 alter table public.productions add column if not exists created_at timestamptz default now();
+-- Статус производства: 'pending' (ждёт подтверждения администратора) → 'approved' | 'rejected'.
+-- Пока регистрация закрыта («только по запросу»), новое производство регистрируется как 'pending':
+-- его видит только владелец и администратор, в списке у заказчиков его нет, заявки на него не идут.
+-- Когда регистрация открыта для всех — производство подтверждается сразу.
+-- Производства, которые уже есть в базе на момент первого запуска, считаются подтверждёнными.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'productions' and column_name = 'status') then
+    alter table public.productions add column status text not null default 'approved';
+    alter table public.productions alter column status set default 'pending';
+  end if;
+end $$;
 create unique index if not exists productions_owner_uq on public.productions (owner_id) where owner_id is not null;
 alter table public.orders add column if not exists production_id uuid;
 alter table public.orders add column if not exists submitted_at timestamptz;
@@ -330,29 +343,38 @@ language sql security definer set search_path = public stable as $$
 $$;
 create or replace function public.is_my_production(p_id uuid) returns boolean
 language sql security definer set search_path = public stable as $$
-  select p_id is not null and exists (select 1 from productions where id = p_id and owner_id = auth.uid())
+  select p_id is not null and exists (select 1 from productions where id = p_id and owner_id = auth.uid() and status = 'approved')
 $$;
 grant execute on function public.is_admin(), public.is_my_production(uuid) to authenticated, anon;
 
 -- Зарегистрировать (или обновить) своё производство. Рез и отступы — параметры станка (можно не указывать).
+drop function if exists public.register_production(text, text, text, numeric, numeric, numeric, numeric, numeric);
 create or replace function public.register_production(p_name text, p_phone text default '', p_city text default '',
-  p_kerf numeric default null, p_ml numeric default null, p_mr numeric default null, p_mt numeric default null, p_mb numeric default null)
+  p_kerf numeric default null, p_ml numeric default null, p_mr numeric default null, p_mt numeric default null, p_mb numeric default null,
+  p_country text default '')
 returns uuid language plpgsql security definer set search_path = public as $$
 declare pid uuid;
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   if length(trim(coalesce(p_name, ''))) < 2 then raise exception 'bad name'; end if;
+  if length(trim(coalesce(p_country, ''))) < 2 then raise exception 'bad country'; end if;       -- страна обязательна
   select id into pid from productions where owner_id = auth.uid();
   if pid is null then
-    insert into productions (name, owner_id, phone, city, kerf_width, margin_left, margin_right, margin_top, margin_bottom)
-      values (left(trim(p_name), 80), auth.uid(), left(trim(coalesce(p_phone, '')), 40), left(trim(coalesce(p_city, '')), 80), p_kerf, p_ml, p_mr, p_mt, p_mb)
+    insert into productions (name, owner_id, country, phone, city, kerf_width, margin_left, margin_right, margin_top, margin_bottom, status)
+      values (left(trim(p_name), 80), auth.uid(), left(trim(p_country), 60), left(trim(coalesce(p_phone, '')), 40), left(trim(coalesce(p_city, '')), 80), p_kerf, p_ml, p_mr, p_mt, p_mb,
+        case when is_admin() or signup_open() then 'approved' else 'pending' end)
       returning id into pid;
   else
-    update productions set name = left(trim(p_name), 80), phone = left(trim(coalesce(p_phone, '')), 40), city = left(trim(coalesce(p_city, '')), 80),
+    update productions set name = left(trim(p_name), 80), country = left(trim(p_country), 60), phone = left(trim(coalesce(p_phone, '')), 40), city = left(trim(coalesce(p_city, '')), 80),
       kerf_width = coalesce(p_kerf, kerf_width), margin_left = coalesce(p_ml, margin_left), margin_right = coalesce(p_mr, margin_right),
-      margin_top = coalesce(p_mt, margin_top), margin_bottom = coalesce(p_mb, margin_bottom) where id = pid;
+      margin_top = coalesce(p_mt, margin_top), margin_bottom = coalesce(p_mb, margin_bottom),
+      status = case when status = 'rejected' then (case when is_admin() or signup_open() then 'approved' else 'pending' end) else status end   -- отклонённую заявку можно подать заново
+      where id = pid;
   end if;
-  update profiles set role = 'operator' where id = auth.uid() and role = 'client';     -- администратор остаётся администратором
+  -- статус «Производство» в профиле — только у подтверждённого (администратор остаётся администратором)
+  if exists (select 1 from productions where id = pid and status = 'approved') then
+    update profiles set role = 'operator' where id = auth.uid() and role = 'client';
+  end if;
   return pid;
 end $$;
 
@@ -367,7 +389,7 @@ begin
       c.full_name as client_name, c.phone as client_phone, c.whatsapp as client_whatsapp,
       (select coalesce(sum(d.qty), 0) from order_details d where d.order_id = o.id) as parts
     from orders o join productions p on p.id = o.production_id left join profiles c on c.id = o.user_id
-    where p.owner_id = auth.uid() and o.status <> 'draft') x);
+    where p.owner_id = auth.uid() and p.status = 'approved' and o.status <> 'draft') x);
 end $$;
 
 -- Заказчик одного заказа — для производства, которому заказ оформлен, и для администратора
@@ -395,7 +417,7 @@ end $$;
 drop policy if exists "productions: читать" on public.productions;
 drop policy if exists "productions: менять — админ" on public.productions;
 drop policy if exists "productions: владелец правит" on public.productions;
-create policy "productions: читать" on public.productions for select to authenticated using (true);
+create policy "productions: читать" on public.productions for select to authenticated using (status = 'approved' or owner_id = auth.uid() or public.is_admin());
 create policy "productions: менять — админ" on public.productions for all using (public.is_admin()) with check (public.is_admin());
 create policy "productions: владелец правит" on public.productions for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
@@ -433,15 +455,44 @@ begin
       (select count(*) from orders o where o.user_id = u.id) as orders,
       (select count(*) from orders o where o.user_id = u.id and o.status <> 'draft') as submitted,
       (select max(o.created_at) from orders o where o.user_id = u.id) as last_order_at,
-      pr.id as production_id, pr.name as production_name, pr.city as production_city,
+      pr.id as production_id, pr.name as production_name, pr.city as production_city, pr.country as production_country, pr.created_at as production_created_at, pr.phone as production_phone, pr.status as production_status,
       (select count(*) from orders o where o.production_id = pr.id and o.status <> 'draft') as received,
       (select count(*) from orders o where o.production_id = pr.id and o.status in ('inwork', 'done')) as accepted,
       (select count(*) from orders o where o.production_id = pr.id and o.status = 'done') as done
     from auth.users u left join profiles p on p.id = u.id left join productions pr on pr.owner_id = u.id) x);
 end $$;
 
-revoke all on function public.register_production(text, text, text, numeric, numeric, numeric, numeric, numeric), public.production_orders(), public.order_client(uuid), public.production_set_status(uuid, text) from public;
-grant execute on function public.register_production(text, text, text, numeric, numeric, numeric, numeric, numeric), public.production_orders(), public.order_client(uuid), public.production_set_status(uuid, text) to authenticated;
+-- Подтвердить или отклонить производство — только администратор. p_status: 'approved' | 'rejected' | 'pending'
+create or replace function public.admin_set_production(p_id uuid, p_status text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'not admin'; end if;
+  if p_status not in ('approved', 'rejected', 'pending') then raise exception 'bad status'; end if;
+  update productions set status = p_status where id = p_id;
+  -- статус в профиле владельца: подтверждено — «Производство», иначе — снова «Клиент»
+  if p_status = 'approved' then
+    update profiles set role = 'operator' where role = 'client' and id = (select owner_id from productions where id = p_id);
+  else
+    update profiles set role = 'client' where role = 'operator' and id = (select owner_id from productions where id = p_id);
+  end if;
+end $$;
+revoke all on function public.admin_set_production(uuid, text) from public;
+grant execute on function public.admin_set_production(uuid, text) to authenticated;
+
+-- владелец правит название, телефон, параметры станка — но не статус подтверждения и не владельца
+create or replace function public.protect_production() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if current_user in ('anon', 'authenticated') and not is_admin() then
+    new.status := old.status; new.owner_id := old.owner_id; new.id := old.id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists protect_production on public.productions;
+create trigger protect_production before update on public.productions for each row execute function public.protect_production();
+
+revoke all on function public.register_production(text, text, text, numeric, numeric, numeric, numeric, numeric, text), public.production_orders(), public.order_client(uuid), public.production_set_status(uuid, text) from public;
+grant execute on function public.register_production(text, text, text, numeric, numeric, numeric, numeric, numeric, text), public.production_orders(), public.order_client(uuid), public.production_set_status(uuid, text) to authenticated;
 
 -- Статус «в обсуждении / принят / исполнен» ставит только производство или администратор —
 -- заказчик не может сам «принять» свой заказ (иначе статистика ничего не значит).

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
+import { adminSetProduction } from '../lib/productionApi'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen } from '../lib/adminApi'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
@@ -44,8 +45,9 @@ export default function UsersPage() {
   const fresh = reqs.filter(r => r.status === 'new')
   const rest = reqs.filter(r => r.status !== 'new')
   const q = find.trim().toLowerCase()
-  const prodCount = (users || []).filter(u => u.production_id).length
-  const shown = (users || []).filter(u => kind === 'all' || (kind === 'prod' ? !!u.production_id : !u.production_id)).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
+  const isProd = u => !!u.production_id && (u.production_status ?? 'approved') === 'approved'
+  const prodCount = (users || []).filter(isProd).length
+  const shown = (users || []).filter(u => kind === 'all' || (kind === 'prod' ? isProd(u) : !isProd(u))).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
   const btn = (kind) => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', border: kind === 'main' ? 'none' : `0.5px solid ${kind === 'danger' ? 'var(--danger)' : 'var(--border-md)'}`, background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : kind === 'danger' ? 'var(--danger)' : 'var(--text-muted)', whiteSpace: 'nowrap' })
   const statusLabel = r => (r.registered ? 'зарегистрирован' : r.status === 'approved' ? 'одобрена — ждём регистрации' : 'отклонена')
 
@@ -114,6 +116,24 @@ export default function UsersPage() {
             )}
           </div>
 
+          {users.some(u => u.production_status === 'pending') && (
+            <>
+              <p className="section-title">Производства ждут подтверждения · {users.filter(u => u.production_status === 'pending').length}</p>
+              <div className="card" style={{ marginBottom: 12, border: '1px solid var(--amber)' }}>
+                {users.filter(u => u.production_status === 'pending').map(u => (
+                  <div key={u.production_id} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{u.production_name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[u.production_country, u.production_city, u.production_phone].filter(Boolean).join(' · ') || 'страна не указана'}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Владелец: {u.full_name || 'без имени'}{u.phone ? ` · ${u.phone}` : ''}</div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                      <button type="button" disabled={busy} style={btn('main')} onClick={() => act(() => adminSetProduction(u.production_id, 'approved'))}>Подтвердить</button>
+                      <button type="button" disabled={busy} style={btn('danger')} onClick={() => act(() => adminSetProduction(u.production_id, 'rejected'))}>Отклонить</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           <p className="section-title">Зарегистрированы ({users.length})</p>
           <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
             {[['all', `Все · ${users.length}`], ['client', `Клиенты · ${users.length - prodCount}`], ['prod', `Производства · ${prodCount}`]].map(([id, label]) => (
@@ -140,9 +160,15 @@ export default function UsersPage() {
                       {ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </div>
-                  {u.production_id && (
+                  {u.production_id && !isProd(u) && (
+                    <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-hint)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ flex: 1 }}>Производство «{u.production_name}» — {u.production_status === 'rejected' ? 'отклонено' : 'ждёт подтверждения'}</span>
+                      {u.production_status === 'rejected' && <button type="button" disabled={busy} style={btn()} onClick={() => act(() => adminSetProduction(u.production_id, 'approved'))}>Подтвердить</button>}
+                    </div>
+                  )}
+                  {isProd(u) && (
                     <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', background: 'var(--amber-light)', borderRadius: 'var(--radius)', color: 'var(--amber)' }}>
-                      Производство «{u.production_name}»{u.production_city ? `, ${u.production_city}` : ''}: заявок получено <b>{u.received}</b> · принято <b>{u.accepted}</b> · исполнено <b>{u.done}</b>
+                      Производство «{u.production_name}»{[u.production_country, u.production_city].filter(Boolean).length ? `, ${[u.production_country, u.production_city].filter(Boolean).join(', ')}` : ''}: заявок получено <b>{u.received}</b> · принято <b>{u.accepted}</b> · исполнено <b>{u.done}</b>
                     </div>
                   )}
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>

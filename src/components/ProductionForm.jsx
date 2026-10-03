@@ -3,12 +3,13 @@ import { registerProduction } from '../lib/productionApi'
 
 // Форма «Моё производство»: название, телефон, город. sheet — рез и отступы станка (берутся из текущего заказа).
 export default function ProductionForm({ initial = null, sheet = null, submitLabel = 'Зарегистрировать производство', onDone, onCancel }) {
-  const [form, setForm] = useState({ name: initial?.name || '', phone: initial?.phone || '', city: initial?.city || '' })
+  const [form, setForm] = useState({ name: initial?.name || '', phone: initial?.phone || '', city: initial?.city || '', country: initial?.country || '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const save = async () => {
     if (form.name.trim().length < 2) { setError('Введите название производства'); return }
+    if (form.country.trim().length < 2) { setError('Укажите страну'); return }
     setBusy(true); setError('')
     const r = await registerProduction(form, sheet || {})
     setBusy(false)
@@ -19,8 +20,12 @@ export default function ProductionForm({ initial = null, sheet = null, submitLab
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div><label className="label">Название производства *</label><input type="text" placeholder="Мебельный цех «…»" value={form.name} onChange={e => set('name', e.target.value)} maxLength={80} /></div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <div style={{ flex: 1.2, minWidth: 0 }}><label className="label">Телефон для заказчиков</label><input type="tel" placeholder="+7 700 000 00 00" value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}><label className="label">Страна *</label><input type="text" list="countries" placeholder="Казахстан" value={form.country} onChange={e => set('country', e.target.value)} maxLength={60} />
+          <datalist id="countries">{['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан'].map(c => <option key={c} value={c} />)}</datalist></div>
         <div style={{ flex: 1, minWidth: 0 }}><label className="label">Город</label><input type="text" value={form.city} onChange={e => set('city', e.target.value)} maxLength={80} /></div>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}><label className="label">Телефон для заказчиков</label><input type="tel" placeholder="+7 700 000 00 00" value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
       </div>
       {sheet && <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Рез и отступы листа возьмём из этого заказа — потом их можно поменять в кабинете производства.</p>}
       {error && <p className="error-text">{error}</p>}

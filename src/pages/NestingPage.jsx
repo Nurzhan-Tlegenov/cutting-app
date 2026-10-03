@@ -1913,8 +1913,13 @@ export default function NestingPage() {
     if (prodId) await saveOrderPatch({ production_id: prodId }, false)     // раскрой уже посчитан — параметры листа не трогаем
     else if (!order.production_id) {
       const mine = await myProduction(user?.id)
-      if (mine) await saveOrderPatch({ production_id: mine.id }, false)
-      else if (mine === null) { setNeedProd({ cfg, force, pick: productions[0]?.id || '', own: productions.length === 0 }); return }
+      const ready = mine && (mine.status ?? 'approved') === 'approved'
+      if (ready) await saveOrderPatch({ production_id: mine.id }, false)
+      else if (mine !== undefined) {
+        const list = productions.filter(pr => (pr.status ?? 'approved') === 'approved')
+        setNeedProd({ cfg, force, pick: list[0]?.id || '', own: !mine && list.length === 0, pending: mine ? (mine.status || 'pending') : '' })
+        return
+      }
       // mine === undefined — в базе ещё нет кабинета производства: оформляем как раньше
     }
     setNeedProd(null)
@@ -2804,7 +2809,7 @@ export default function NestingPage() {
                       onChange={e => chooseProduction(e.target.value)}
                       style={{ ...inp, padding: '5px 6px' }}>
                       <option value="">— не выбрано (свои параметры) —</option>
-                      {productions.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                      {productions.filter(pr => (pr.status ?? 'approved') === 'approved' || pr.id === order.production_id).map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
                     </select>
                   </label>
                 )}
@@ -2983,17 +2988,30 @@ export default function NestingPage() {
               <button type="button" onClick={() => setNeedProd(null)} style={{ background: 'none', border: 'none', fontSize: 20, color: 'var(--text-hint)' }}>✕</button>
             </div>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>Заказ уходит заявкой на производство. Выберите производство из списка или зарегистрируйте своё — тогда заявки будут приходить вам, в раздел «Производство».</p>
+            {needProd.pending && (
+              <p style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', borderRadius: 'var(--radius)', padding: '6px 8px', marginBottom: 10 }}>
+                {needProd.pending === 'rejected' ? 'Заявка на регистрацию вашего производства отклонена — её можно подать заново в разделе «Производство».' : 'Ваше производство ждёт подтверждения администратора. Заказ сохранён; оформить его на своё производство можно будет после подтверждения.'}
+                {' '}Сейчас заказ можно оформить на другое производство.
+              </p>
+            )}
             {!needProd.own ? (
               <>
-                <label className="label">Производство</label>
-                <select value={needProd.pick} onChange={e => setNeedProd(n => ({ ...n, pick: e.target.value }))} style={{ marginBottom: 10 }}>
-                  {productions.map(pr => <option key={pr.id} value={pr.id}>{pr.name}{pr.city ? ` · ${pr.city}` : ''}</option>)}
-                </select>
-                <button type="button" className="btn-primary" disabled={!needProd.pick} onClick={() => submitOrder(needProd.cfg, needProd.force, needProd.pick)}>✓ Оформить на это производство</button>
-                <button type="button" onClick={() => setNeedProd(n => ({ ...n, own: true }))}
+                {(() => {
+                  const list = productions.filter(pr => (pr.status ?? 'approved') === 'approved')
+                  return list.length ? (
+                    <>
+                      <label className="label">Производство</label>
+                      <select value={needProd.pick} onChange={e => setNeedProd(n => ({ ...n, pick: e.target.value }))} style={{ marginBottom: 10 }}>
+                        {list.map(pr => <option key={pr.id} value={pr.id}>{pr.name}{[pr.country, pr.city].filter(Boolean).length ? ` · ${[pr.country, pr.city].filter(Boolean).join(', ')}` : ''}</option>)}
+                      </select>
+                      <button type="button" className="btn-primary" disabled={!needProd.pick} onClick={() => submitOrder(needProd.cfg, needProd.force, needProd.pick)}>✓ Оформить на это производство</button>
+                    </>
+                  ) : <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Подтверждённых производств пока нет.</p>
+                })()}
+                {!needProd.pending && <button type="button" onClick={() => setNeedProd(n => ({ ...n, own: true }))}
                   style={{ width: '100%', marginTop: 10, padding: 10, border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--blue)', fontSize: 14 }}>
                   У меня своё производство — зарегистрировать
-                </button>
+                </button>}
               </>
             ) : (
               <>
@@ -3001,7 +3019,13 @@ export default function NestingPage() {
                 <ProductionForm submitLabel="Зарегистрировать и оформить"
                   sheet={{ kerf: order.kerf_width, ml: order.margin_left, mr: order.margin_right, mt: order.margin_top, mb: order.margin_bottom }}
                   onCancel={productions.length ? () => setNeedProd(n => ({ ...n, own: false })) : () => setNeedProd(null)}
-                  onDone={async pid => { await refreshProfile?.(); submitOrder(needProd.cfg, needProd.force, pid) }} />
+                  onDone={async pid => {
+                    await refreshProfile?.()
+                    const mine = await myProduction(user?.id)
+                    if (mine && (mine.status ?? 'approved') === 'approved') { submitOrder(needProd.cfg, needProd.force, pid); return }
+                    // регистрация по запросу: производство ждёт подтверждения — заказ пока не оформляем
+                    setNeedProd(n => ({ ...n, own: false, pending: 'pending' }))
+                  }} />
               </>
             )}
           </div>
