@@ -331,6 +331,17 @@ begin
     alter table public.productions alter column status set default 'pending';
   end if;
 end $$;
+-- В старой таблице productions рез и отступы могли быть обязательными (NOT NULL): при регистрации производства
+-- их ещё нет, поэтому обязательность снимаем со всех колонок, кроме id и названия.
+do $$
+declare c record;
+begin
+  for c in select column_name from information_schema.columns
+           where table_schema = 'public' and table_name = 'productions' and is_nullable = 'NO' and column_default is null
+             and column_name not in ('id', 'name', 'status') loop
+    execute format('alter table public.productions alter column %I drop not null', c.column_name);
+  end loop;
+end $$;
 create unique index if not exists productions_owner_uq on public.productions (owner_id) where owner_id is not null;
 alter table public.orders add column if not exists production_id uuid;
 alter table public.orders add column if not exists submitted_at timestamptz;
@@ -361,7 +372,7 @@ begin
   select id into pid from productions where owner_id = auth.uid();
   if pid is null then
     insert into productions (name, owner_id, country, phone, city, kerf_width, margin_left, margin_right, margin_top, margin_bottom, status)
-      values (left(trim(p_name), 80), auth.uid(), left(trim(p_country), 60), left(trim(coalesce(p_phone, '')), 40), left(trim(coalesce(p_city, '')), 80), p_kerf, p_ml, p_mr, p_mt, p_mb,
+      values (left(trim(p_name), 80), auth.uid(), left(trim(p_country), 60), left(trim(coalesce(p_phone, '')), 40), left(trim(coalesce(p_city, '')), 80), coalesce(p_kerf, 4), coalesce(p_ml, 10), coalesce(p_mr, 10), coalesce(p_mt, 10), coalesce(p_mb, 10),    -- станок не указан — обычные значения, их можно поменять в кабинете
         case when is_admin() or signup_open() then 'approved' else 'pending' end)
       returning id into pid;
   else
