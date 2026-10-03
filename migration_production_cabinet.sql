@@ -200,3 +200,6 @@ begin
 end $$;
 drop trigger if exists protect_order_status on public.orders;
 create trigger protect_order_status before update on public.orders for each row execute function public.protect_order_status();
+
+-- обновить список функций и таблиц для приложения сразу, не дожидаясь автоматического обновления
+notify pgrst, 'reload schema';
