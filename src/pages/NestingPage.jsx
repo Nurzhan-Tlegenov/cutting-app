@@ -1984,7 +1984,7 @@ export default function NestingPage() {
   // CAD-просмотрщике, а не только по цифрам.
   function downloadNestingDxf(sheets = sheetsData, suffix = '') {
     const g = geoOf(order, result)
-    const dxf = buildNestingDxf(sheets, { sheet_width: g.sheetW, sheet_length: g.sheetL, margin_left: g.marginL, margin_bottom: g.marginB }, details, labelMode)
+    const dxf = buildNestingDxf(sheets, { sheet_width: g.sheetW, sheet_length: g.sheetL, margin_left: g.marginL, margin_bottom: g.marginB, material_thickness: order.material_thickness }, details, labelMode)
     const blob = new Blob([dxf], { type: 'application/dxf' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

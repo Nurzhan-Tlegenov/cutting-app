@@ -322,10 +322,13 @@ export function getAllDrillPoints(contour, panelW, panelH, frontOnly = false) {
     getDrillPoints(dr, panelW, panelH, contour.layout).forEach(p => {
       // отверстие в торец: направление вглубь детали и глубина — карта рисует его на всю длину
       if (dr.kind === 'edge' && !p.isFaceType && (p.dx || p.dy)) {
-        pts.push({ x: p.x, y: p.y, d: p.ehD ?? d, back: false, edge: true, dx: p.dx, dy: p.dy, depth: p.ehDepth ?? dr.depth ?? 0 })
+        pts.push({ x: p.x, y: p.y, d: p.ehD ?? (p.isPair ? (dr.pairD ?? d) : d), back: false, edge: true, dx: p.dx, dy: p.dy,
+          depth: p.ehDepth ?? (p.isPair ? (dr.pairDepth ?? dr.depth ?? 0) : (dr.depth ?? 0)) })
         return
       }
-      pts.push({ x: p.x, y: p.y, d, back: dr.kind !== 'edge' && dr.face === 'back' })
+      // диаметр и глубина именно этого отверстия (у парного и дополнительного — свои)
+      pts.push({ x: p.x, y: p.y, d: p.ehD ?? (p.isPair ? (dr.pairD ?? d) : d), back: dr.kind !== 'edge' && dr.face === 'back',
+        depth: p.ehDepth ?? (p.isPair ? (dr.pairDepth ?? 13) : (dr.depth ?? 13)) })
     })
   })
   return pts
@@ -346,7 +349,7 @@ export function getGrooveRects(contour, panelW, panelH, frontOnly = false) {
     if (sides.includes('top') && sides.includes('bottom')) { y = o.bottom ?? 0; h = panelH - (o.bottom ?? 0) - (o.top ?? 0) }
     else if (sides.includes('bottom')) y = o.bottom ?? 0
     else if (sides.includes('top')) y = panelH - gh - (o.top ?? 0)
-    out.push({ pts: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], back: g.face === 'back' })
+    out.push({ pts: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]], back: g.face === 'back', width: g.width || 8, depth: g.depth || 0 })
   })
   return out
 }
