@@ -24,13 +24,13 @@ const SOURCES = [
   { id: 'astra', icon: '🧩', label: 'Астра',
     hint: 'Выберите файл проекта «Астра Конструктор Мебели» (.add) — возьмём детали с контуром, кромкой, пазами, присадкой и 3D-моделью. Если проект не читается — подойдёт XML из Астры (Файл → Экспорт XML), но без 3D.' },
   { id: 'pro100', icon: '🪑', label: 'PRO100',
-    hint: 'В PRO100 откройте отчёт со списком деталей, сохраните его в Excel или CSV и выберите этот файл.' },
+    hint: 'Выберите модель, сохранённую из PRO100 в формате OBJ (Файл → Экспорт) — возьмём панели с размерами и 3D-модель; названия, кромку и присадку нужно будет добавить в приложении. Подойдёт и отчёт со списком деталей в Excel или CSV.' },
 ]
 
 const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain'
 const ALL = '__all__'
 
-// Файл модели: Базис (.b3d, 'BZ…') или Астра (.add, составной файл OLE2). Иначе — null (это таблица).
+// Файл модели: Базис (.b3d, 'BZ…'), Астра (.add, составной файл OLE2), PRO100 (.obj). Иначе — null (это таблица).
 async function readModelFile(file, faceRule) {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
   const lower = file.name.toLowerCase()
@@ -50,6 +50,11 @@ async function readModelFile(file, faceRule) {
     const probe = new TextDecoder('latin1').decode(new Uint8Array(await file.slice(0, 4000).arrayBuffer()))
     if (!looksLikeAstraXml(probe) && !/<data_order|<list_materials/.test(probe)) throw new Error('это не XML-экспорт Астры (нужен файл из «Файл → Экспорт XML»)')
     return { src: 'astra', res: await readAstraXmlFile(file, { faceRule }) }
+  }
+  // модель PRO100, сохранённая в OBJ
+  if (lower.endsWith('.obj')) {
+    const { readPro100Obj } = await import('../lib/pro100Obj')
+    return { src: 'pro100', res: await readPro100Obj(file, { faceRule }) }
   }
   return null
 }
@@ -89,7 +94,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     setSource(src); setError('')
     if (!fileRef.current) return
     // у .b3d и .add нет своего типа — с фильтром телефон может не дать выбрать файл
-    fileRef.current.accept = src.id === 'basis' || src.id === 'astra' ? '' : ACCEPT
+    fileRef.current.accept = src.id === 'excel' ? ACCEPT : ''
     fileRef.current.click()
   }
 
@@ -328,7 +333,13 @@ export default function ImportDetails({ hasDetails, onImport }) {
             )}
 
             {/* Лицевая сторона */}
-            {basis && (
+            {basis?.bare && (
+              <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                В OBJ есть только размеры и положение панелей. Названия подставлены по положению в модели (полка / стойка / планка), длиной считается большая сторона.
+                Материал, кромку и присадку добавьте в заказе.{basis.other > 0 && ` Прочие объекты (не панели): ${basis.other} — только в 3D.`}
+              </div>
+            )}
+            {basis && !basis.bare && (
               <div style={{ marginBottom: 12 }}>
                 <label className="label">Лицевая сторона детали (смотрит вверх на станке)</label>
                 <select value={faceRule} disabled={busy} onChange={e => changeFaceRule(e.target.value)} style={{ padding: '7px 8px', fontSize: 13 }}>
@@ -342,7 +353,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
             )}
 
             {/* Что получится */}
-            {basis && chosen.length > 0 && (
+            {basis && !basis.bare && chosen.length > 0 && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
                 Присадка: {sumInfo('holes')} отв. · пазов: {sumInfo('grooves')} · фигурных деталей: {sumInfo('shaped')} · вырезов: {sumInfo('cutouts')}
                 {sumInfo('shapedEdges') > 0 && ` · кромка на фигурных участках: ${sumInfo('shapedEdges')}`}
