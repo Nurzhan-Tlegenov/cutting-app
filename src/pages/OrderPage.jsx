@@ -15,6 +15,10 @@ import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
 import { orderClient, productionSetStatus } from '../lib/productionApi'
+import SheetsOverview from '../components/SheetsOverview'
+import { savedNestings, sheetGeo } from '../lib/savedNesting'
+import { materialsOf } from '../lib/detailMaterial'
+import { useLabelMode } from '../lib/userSettings'
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
@@ -27,6 +31,8 @@ export default function OrderPage() {
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
+  const [labelMode] = useLabelMode(user)
+  const [mapMat, setMapMat] = useState('')        // материал, чьи карты раскроя показаны
   useEffect(() => { fetchOrder() }, [id])
   // открыта ли ссылка для просмотра 3D-модели (её могли создать в самой модели)
   const [shared, setShared] = useState(() => !!cachedShare(id))
@@ -77,6 +83,14 @@ export default function OrderPage() {
   const isDraft = order.status === 'draft' && (isMine || profile?.role === 'admin')
   const canStatus = order.status !== 'draft' && (profile?.role === 'admin' || (isOperator && !!order.production_id))
   const edgeNames = { edge_top:'В', edge_right:'П', edge_bottom:'Н', edge_left:'Л' }
+  // принятые карты раскроя — показываются над списком деталей
+  const nestings = savedNestings(order, details)
+  const nest = nestings.find(n => n.key === mapMat) || nestings[0] || null
+  const nestGeo = nest ? sheetGeo(order, nest.result) : null
+  const materials = materialsOf(details, order)
+  const canProduce = order.status !== 'draft' && isOperator
+  const actBtn = main => ({ flex: 1, padding: '10px 8px', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: 'pointer',
+    border: main ? 'none' : '0.5px solid var(--blue)', background: main ? 'var(--blue)' : 'var(--bg)', color: main ? 'white' : 'var(--blue)' })
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
@@ -130,6 +144,38 @@ export default function OrderPage() {
           ))}
         </div>
       </div>
+      <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
+        <p className="section-title">Материал</p>
+        {materials.map(m => (
+          <div key={m.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <b style={{ fontWeight: 500 }}>{m.label}</b><span style={{ color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{m.pieces} дет.</span>
+          </div>
+        ))}
+        <div style={{ color: 'var(--text-hint)', fontSize: 12, marginTop: 2 }}>Лист {order.sheet_length}×{order.sheet_width} мм</div>
+      </div>
+      {nest && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6 }}>
+            <p className="section-title" style={{ marginBottom: 0 }}>Карты раскроя · листов {nest.sheets.length}</p>
+            {nestings.length > 1 && (
+              <select value={nest.key} onChange={e => setMapMat(e.target.value)} style={{ width: 'auto', maxWidth: '60%', padding: '3px 6px', fontSize: 12, borderRadius: 20 }}>
+                {nestings.map(n => <option key={n.key} value={n.key}>{n.label}</option>)}
+              </select>
+            )}
+          </div>
+          <SheetsOverview sheets={nest.sheets} details={nest.details} labelMode={labelMode}
+            usableX={nestGeo.usableX} usableY={nestGeo.usableY} sheetL={nestGeo.sheetL} sheetW={nestGeo.sheetW}
+            marginL={nestGeo.marginL} marginT={nestGeo.marginT} kerf={nestGeo.kerf}
+            onPickSheet={() => navigate(`/orders/${id}/nesting`)} />
+          {order.status !== 'draft' && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button onClick={() => navigate(`/orders/${id}/nesting`)} style={actBtn(false)}>{canProduce ? 'Открыть / перекроить' : 'Открыть раскрой'}</button>
+              {canProduce && <button onClick={() => navigate(`/orders/${id}/cnc`)} style={actBtn(true)}>ЧПУ</button>}
+              {canProduce && <button onClick={() => navigate(`/orders/${id}/labels`)} style={actBtn(false)}>Бирки</button>}
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>

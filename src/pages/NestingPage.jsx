@@ -15,6 +15,7 @@ import { detailEdgeList, contourSegments, segmentSide } from '../lib/edgeLength'
 import { isTwoSided } from '../lib/partInfo'
 import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
+import { productionSaveNesting } from '../lib/productionApi'
 import BottomNav from '../components/BottomNav'
 import ContourEditor from '../components/ContourEditor'
 import Model3DButton from '../components/Model3DButton'
@@ -1429,7 +1430,8 @@ export default function NestingPage() {
   const materials = useMemo(() => materialsOf(allDetails, order), [allDetails, order])
   const multiMat = materials.length > 1
   const details = useMemo(() => (multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails), [allDetails, multiMat, matKey, order])
-  const { user, refreshProfile } = useAuth()
+  const { user, profile, refreshProfile } = useAuth()
+  const canProduce = profile?.role === 'admin' || profile?.role === 'operator'   // производство: ЧПУ и бирки по принятому раскрою
   const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
   const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
   // показывать ли кромку на картах (без неё карта читается легче) — тоже за аккаунтом
@@ -1545,8 +1547,13 @@ export default function NestingPage() {
   // Что записать в заказ: один материал — сам результат, несколько — по ключам материалов
   async function writeSaved(byMat, single) {
     const value = multiMat ? (Object.keys(byMat).length ? JSON.stringify({ multi: true, byMat }) : null) : (single ? JSON.stringify(single) : null)
-    await supabase.from('orders').update({ nesting_result: value }).eq('id', id)
+    // чужой заказ (его перекраивает производство) пишется через функцию базы — напрямую заказ меняет только хозяин
+    if (order?.user_id && order.user_id !== user?.id && profile?.role !== 'admin') {
+      const r = await productionSaveNesting(id, value)
+      if (r.error) { setParamsWarn(r.missing ? 'Раскрой не сохранён: выполните migration_production_nesting.sql в Supabase (SQL Editor) — один раз.' : 'Не удалось сохранить раскрой: ' + r.error); return false }
+    } else await supabase.from('orders').update({ nesting_result: value }).eq('id', id)
     setOrder(o => ({ ...o, nesting_result: value }))
+    return true
   }
 
   // ─── Редактор контура детали прямо с карты (долгое удержание на детали) ─────
@@ -1897,6 +1904,17 @@ export default function NestingPage() {
   }
 
   // «Выбрать вариант» — записать этот результат в заказ (остальные остаются на экране)
+  // ЧПУ и бирки работают по сохранённому раскрою: несохранённый вариант сначала сохраняем
+  async function goProduce(cfg, where) {
+    if (!cfg.saved) {
+      if (!checkCfg(cfg) && !window.confirm('В раскрое есть замечания (см. проверку). Всё равно сохранить его и продолжить?')) return
+      setBusyId(cfg.id)
+      await saveNesting(cfg)
+      setConfigs(cs => cs.map(c => ({ ...c, saved: c.id === cfg.id })))
+      setBusyId(null)
+    }
+    navigate(`/orders/${id}/${where}`)
+  }
   async function chooseCfg(cfg, force = false) {
     if (!force && !checkCfg(cfg)) return
     setBusyId(cfg.id)
@@ -2696,12 +2714,22 @@ export default function NestingPage() {
                           background: cfg.saved ? '#e6f4ea' : 'var(--teal-light)', color: cfg.saved ? '#1e7e34' : 'var(--teal)' }}>
                         {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение…' : 'Выбрать'}
                       </button>
+                      {order.status !== 'draft' ? (canProduce && <>
+                        <button onClick={() => goProduce(cfg, 'cnc')} disabled={blocked} title="Управляющие программы для станка с ЧПУ"
+                          style={{ flex: 1, padding: 9, background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
+                          ЧПУ
+                        </button>
+                        <button onClick={() => goProduce(cfg, 'labels')} disabled={blocked} title="Бирки деталей"
+                          style={{ flex: 1, padding: 9, background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue)', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
+                          Бирки
+                        </button>
+                      </>) :
                       <button onClick={() => submitOrder(cfg)} disabled={blocked}
                         title="Сохранить раскрой и отправить заказ на производство"
                         style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
                           borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
                         {busyId === cfg.id ? 'Отправка…' : '✓ Оформить'}
-                      </button>
+                      </button>}
                     </div>
                   )
                 })()}

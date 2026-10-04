@@ -32,3 +32,5 @@ export const orderClient = orderId => call('order_client', { p_order: orderId })
 /** Администратор: подтвердить / отклонить производство ('approved' | 'rejected' | 'pending') */
 export const adminSetProduction = (id, status) => call('admin_set_production', { p_id: id, p_status: status })
 export const productionSetStatus = (orderId, status) => call('production_set_status', { p_order: orderId, p_status: status })
+/** Производство (или администратор) сохраняет свой вариант раскроя в оформленный на него заказ. -> {} | { error } */
+export const productionSaveNesting = (orderId, value) => call('production_save_nesting', { p_order: orderId, p_value: value })

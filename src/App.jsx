@@ -27,6 +27,8 @@ import EditOrderPage from './pages/EditOrderPage'
 import SharedModelPage from './pages/SharedModelPage'
 import UsersPage from './pages/UsersPage'
 import ProductionPage from './pages/ProductionPage'
+import CncPage from './pages/CncPage'
+import LabelsPage from './pages/LabelsPage'
 import Watermark from './components/Watermark'
 
 function ProtectedRoute({ children }) {
@@ -50,6 +52,8 @@ function AppRoutes() {
       <Route path="/orders/:id" element={<ProtectedRoute><OrderPage /></ProtectedRoute>} />
       <Route path="/orders/:id/nesting" element={<ProtectedRoute><NestingPage /></ProtectedRoute>} />
       <Route path="/orders/:id/edit" element={<ProtectedRoute><EditOrderPage /></ProtectedRoute>} />
+      <Route path="/orders/:id/cnc" element={<ProtectedRoute><CncPage /></ProtectedRoute>} />
+      <Route path="/orders/:id/labels" element={<ProtectedRoute><LabelsPage /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
       <Route path="/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
       <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
