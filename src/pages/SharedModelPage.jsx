@@ -7,12 +7,13 @@ const Model3D = lazy(() => import('../components/Model3D'))
 
 // 3D-модель заказа по ссылке — для клиента: только просмотр, вход не нужен.
 export default function SharedModelPage() {
-  const { token } = useParams()
+  const { token: longToken, code } = useParams()
+  const token = code || longToken     // /v/короткий-код или старая /view/длинный-токен
   const [state, setState] = useState({ loading: true })
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token || '')
+      const ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token || '') || /^[A-Za-z0-9]{6,16}$/.test(token || '')
       const data = ok ? await fetchSharedModel(token) : null
       if (!alive) return
       if (!data) { setState({ closed: true }); return }

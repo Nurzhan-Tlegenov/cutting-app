@@ -43,6 +43,7 @@ function AppRoutes() {
     <Routes>
       {/* 3D-модель по ссылке для клиента — без входа */}
       <Route path="/view/:token" element={<SharedModelPage />} />
+      <Route path="/v/:code" element={<SharedModelPage />} />
       <Route path="/auth" element={user ? <Navigate to="/orders" /> : <AuthPage />} />
       <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
       <Route path="/orders/new" element={<ProtectedRoute><NewOrderPage /></ProtectedRoute>} />
