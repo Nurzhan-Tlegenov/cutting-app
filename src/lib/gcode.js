@@ -330,25 +330,27 @@ function cutLoop(out, passes, top, tool, op, safeZ) {
 }
 
 /**
- * Контур детали в нужном направлении, начатый так, чтобы ПОСЛЕДНИМ резался отрезок, обращённый внутрь листа
- * (дальше всех от края листа): начало — в углу со стороны середины листа, и последний рез отделяет деталь
- * от основной части листа — до этого момента она держится за лист и не сдвигается.
+ * Контур детали в нужном направлении, начатый с угла, который ближе всех к ЦЕНТРУ листа: рез начинается
+ * изнутри листа, и последний отрезок (он приходит в этот же угол) отделяет деталь от основной части листа.
  */
 function orientFromInside(L, dir, rect) {
   const P = L.slice()
   if ((signedArea(P) > 0) !== (dir !== 'cw')) P.reverse()
-  const n = P.length, len = i => Math.hypot(P[(i + 1) % n][0] - P[i][0], P[(i + 1) % n][1] - P[i][1])
-  let longest = 0
-  for (let i = 0; i < n; i++) longest = Math.max(longest, len(i))
-  let best = 0, bs = -Infinity, bl = 0
-  for (let i = 0; i < n; i++) {
-    const l = len(i)
-    if (l < Math.min(30, longest * 0.25)) continue        // мелкие отрезки дуг — не «сторона»
-    const mx = (P[i][0] + P[(i + 1) % n][0]) / 2, my = (P[i][1] + P[(i + 1) % n][1]) / 2
-    const sc = Math.min(mx - rect.x0, rect.x1 - mx, my - rect.y0, rect.y1 - my)
-    if (sc > bs + 0.5 || (sc > bs - 0.5 && l > bl)) { bs = Math.max(bs, sc); bl = l; best = i }
+  const n = P.length, cx = (rect.x0 + rect.x1) / 2, cy = (rect.y0 + rect.y1) / 2
+  const isCorner = i => {                                  // настоящий угол, а не точка на дуге
+    const a = P[(i - 1 + n) % n], b = P[i], c = P[(i + 1) % n]
+    const u = [b[0] - a[0], b[1] - a[1]], v = [c[0] - b[0], c[1] - b[1]], lu = Math.hypot(u[0], u[1]), lv = Math.hypot(v[0], v[1])
+    return lu > 1e-6 && lv > 1e-6 && (u[0] * v[0] + u[1] * v[1]) / (lu * lv) < 0.94
   }
-  const st = (best + 1) % n
+  let st = -1, bd = Infinity
+  for (const cornersOnly of [true, false]) {
+    for (let i = 0; i < n; i++) {
+      if (cornersOnly && !isCorner(i)) continue
+      const d = Math.hypot(P[i][0] - cx, P[i][1] - cy)
+      if (d < bd) { bd = d; st = i }
+    }
+    if (st >= 0) break
+  }
   return [...P.slice(st), ...P.slice(0, st)]
 }
 
@@ -378,6 +380,24 @@ function nearestOrder(items, from = [0, 0]) {
     out.push(it); cur = it.at
   }
   return out
+}
+// Сокращение холостых переездов: разворот участков маршрута (2-opt), пока суммарный путь уменьшается.
+// from — откуда приезжает фреза; fixed — сколько первых операций остаются на своих местах.
+function shortenTravel(items, from, fixed = 0) {
+  const n = items.length
+  if (n - fixed < 3) return items
+  const R = items.slice(), pt = i => (i < 0 ? from : R[i].at), d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1])
+  for (let round = 0, better = true; better && round < 60; round++) {
+    better = false
+    for (let i = fixed; i < n - 1; i++) for (let j = i + 1; j < n; j++) {
+      const a = pt(i - 1), b = pt(i), c = pt(j), e = j + 1 < n ? pt(j + 1) : null
+      if (d(a, c) + (e ? d(b, e) : 0) < d(a, b) + (e ? d(c, e) : 0) - 1e-6) {
+        for (let l = i, r = j; l < r; l++, r--) { const t = R[l]; R[l] = R[r]; R[r] = t }
+        better = true
+      }
+    }
+  }
+  return R
 }
 
 /**
@@ -503,7 +523,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const toolRank = t => (t.type === 'drill' ? 0 : t === lastTool ? 2 : 1) * 1000 + n0(t.t)
   const seq = []
   let cur = [0, 0]
-  const add = list => { const o = nearestOrder(list, cur); seq.push(...o); if (o.length) cur = o[o.length - 1].at }
+  const add = list => { const o = shortenTravel(nearestOrder(list, cur), cur); seq.push(...o); if (o.length) cur = o[o.length - 1].at }
   const stage0 = jobs.filter(j => j.stage === 0)
   ;[...new Set(stage0.map(j => j.tool))].sort((a, b) => toolRank(a) - toolRank(b)).forEach(t => {
     [0, 1, 2, 3].forEach(rank => add(stage0.filter(j => j.tool === t && j.rank === rank)))
@@ -512,20 +532,36 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const prevTool = seq[seq.length - 1]?.tool
   const cutTools = [...new Set(stage1.map(j => j.tool))].sort((a, b) => (b === prevTool) - (a === prevTool))
   cutTools.forEach(t => add(stage1.filter(j => j.tool === t && j.rank === 4)))
-  // контуры деталей: сначала мелкие — от края листа внутрь (первой та, что у самого края), затем остальные
+  // Контуры деталей. Обработка всегда начинается с детали у края листа.
+  // Мелкие — первыми, от края листа внутрь (сначала все, что у самого края, затем следующий ряд).
+  // Остальные — по кратчайшему маршруту, без переездов из конца в конец станка.
+  const EDGE_BAND = 3                                    // мм: детали на таком же расстоянии от края — «один ряд»
+  const atEdgeFirst = list => {                          // ближайшая к фрезе деталь из тех, что у самого края
+    if (!list.length) return list
+    const me = Math.min(...list.map(j => j.edgeDist))
+    let bi = 0, bd = Infinity
+    list.forEach((j, i) => { if (j.edgeDist > me + EDGE_BAND) return; const d = Math.hypot(j.at[0] - cur[0], j.at[1] - cur[1]); if (d < bd) { bd = d; bi = i } })
+    return [list[bi], ...list.filter((_, i) => i !== bi)]
+  }
   const fromEdge = list => {
-    const left = list.slice()
+    let left = list.slice()
     while (left.length) {
       const me = Math.min(...left.map(j => j.edgeDist))
-      let bi = -1, bd = Infinity
-      left.forEach((j, i) => { if (j.edgeDist > me + 1) return; const d = Math.hypot(j.at[0] - cur[0], j.at[1] - cur[1]); if (d < bd) { bd = d; bi = i } })
-      const j = left.splice(bi, 1)[0]
-      seq.push(j); cur = j.at
+      const band = left.filter(j => j.edgeDist <= me + EDGE_BAND)
+      left = left.filter(j => !band.includes(j))
+      add(band)
     }
   }
   cutTools.forEach(t => {
     const outer = stage1.filter(j => j.tool === t && j.rank === 5)
-    fromEdge(outer.filter(j => j.small)); add(outer.filter(j => !j.small))
+    fromEdge(outer.filter(j => j.small))
+    const big = atEdgeFirst(outer.filter(j => !j.small))
+    if (big.length) {
+      const startsHere = !seq.some(j => j.rank === 5)      // мелких не было — начинаем с детали у края
+      const o = startsHere ? [big[0], ...nearestOrder(big.slice(1), big[0].at)] : nearestOrder(big, cur)
+      const r = shortenTravel(o, cur, startsHere ? 1 : 0)
+      seq.push(...r); cur = r[r.length - 1].at
+    }
   })
 
   const out = new Out()

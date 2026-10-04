@@ -205,16 +205,12 @@ export default function CncPage() {
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} />}
 
       {sim && (
-        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 200, overflowY: 'auto', padding: 12 }}>
-          <div style={{ maxWidth: 900, margin: '0 auto' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 200, padding: 10, boxSizing: 'border-box', height: '100dvh' }}>
+          <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<p style={{ color: 'var(--text-hint)', padding: 20 }}>Загрузка симулятора…</p>}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000}
-                toolDia={toolDia} onClose={() => setSim(null)} sheet={simView?.sheet} outlines={simView?.outlines} />
+                toolDia={toolDia} onClose={() => setSim(null)} onDownload={() => download(sim.name, sim.text)} sheet={simView?.sheet} outlines={simView?.outlines} />
             </Suspense>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button className="btn-secondary" onClick={() => download(sim.name, sim.text)}>⬇ Скачать</button>
-              <button className="btn-secondary" onClick={() => setSim(null)}>Закрыть</button>
-            </div>
           </div>
         </div>
       )}
