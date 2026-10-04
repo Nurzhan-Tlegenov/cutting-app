@@ -25,6 +25,7 @@ import ProfilePage from './pages/ProfilePage'
 import NestingPage from './pages/NestingPage'
 import EditOrderPage from './pages/EditOrderPage'
 import SharedModelPage from './pages/SharedModelPage'
+import SharedSimPage from './pages/SharedSimPage'
 import UsersPage from './pages/UsersPage'
 import ProductionPage from './pages/ProductionPage'
 import CncPage from './pages/CncPage'
@@ -46,6 +47,8 @@ function AppRoutes() {
       {/* 3D-модель по ссылке для клиента — без входа */}
       <Route path="/view/:token" element={<SharedModelPage />} />
       <Route path="/v/:code" element={<SharedModelPage />} />
+      {/* симуляция обработки листа по ссылке — без входа */}
+      <Route path="/s/:code" element={<SharedSimPage />} />
       <Route path="/auth" element={user ? <Navigate to="/orders" /> : <AuthPage />} />
       <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
       <Route path="/orders/new" element={<ProtectedRoute><NewOrderPage /></ProtectedRoute>} />

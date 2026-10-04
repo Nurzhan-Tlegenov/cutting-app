@@ -41,7 +41,7 @@ function groupOf(m, kind) {
   return kind === 'cutout' ? 'cutout' : 'outer'
 }
 
-export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, toolDia, thickness = 16, rapid = 20000, title = '', onClose, onDownload }) {
+export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, toolDia, thickness = 16, rapid = 20000, title = '', onClose, onDownload, onShare }) {
   const prog = useMemo(() => parseGcode(text, { rapid }), [text, rapid])
   const data = useMemo(() => {
     const groups = {}, firstByLine = new Map()
@@ -384,7 +384,8 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flex: '0 0 auto' }}>
         <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title || 'Симулятор'}</div>
         <span style={{ fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{fmtTime(t)} / {fmtTime(prog.time)}</span>
-        {onDownload && <button type="button" onClick={onDownload} style={{ ...viewBtn, color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Скачать</button>}
+        {onShare && <button type="button" onClick={onShare} style={{ ...viewBtn, color: 'var(--blue)', borderColor: 'var(--blue)' }}>🔗 Ссылка</button>}
+        {onDownload && <button type="button" onClick={onDownload} style={{ ...viewBtn, color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇</button>}
         {onClose && <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--text-muted)', padding: '0 4px' }}>×</button>}
       </div>
       <div ref={wrapRef} style={{ position: 'relative', flex: '0 0 auto', height: viewH, background: 'var(--bg3)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>

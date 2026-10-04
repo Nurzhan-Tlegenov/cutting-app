@@ -8,6 +8,7 @@ import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { getCnc, fetchCnc, saveCnc, activePost } from '../lib/cncSettings'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey } from '../lib/gcode'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
+import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from '../lib/simShare'
 
 // ЧПУ: листы принятого раскроя → управляющая программа (G-код) + симулятор.
 // Настройки (постпроцессор, инструменты, обработка контуров, команды) идут за аккаунтом.
@@ -103,6 +104,29 @@ export default function CncPage() {
     return { sheet: { x: ox, y: oy, w: geo.sheetW, l: geo.sheetL }, outlines }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sim])
+  // ссылка на симуляцию: снимок программы этого листа, открывается без входа
+  const [share, setShare] = useState(null)          // null — окно закрыто; { busy, code, error, copied }
+  const openShare = async () => {
+    setShare({ busy: true })
+    const r = await getSimShare(id, sim.name)
+    setShare({ code: r.code || '', error: r.error || '' })
+  }
+  const makeShare = async () => {
+    setShare(x => ({ ...x, busy: true, error: '' }))
+    const tools = Object.fromEntries((cnc.tools || []).map(x => [num(x.t), num(x.d)]))
+    const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(post.rapid) || 20000, tools })
+    const r = await saveSimShare(id, sim.name, user.id, payload)
+    setShare(x => ({ ...x, busy: false, code: r.code || x.code, error: r.error || '', fresh: !r.error }))
+  }
+  const closeShare = async () => {
+    if (!window.confirm('Закрыть доступ? Ссылка перестанет открываться.')) return
+    const r = await deleteSimShare(share.code)
+    setShare(x => (r.error ? { ...x, error: r.error } : { code: '', error: '' }))
+  }
+  const copyShare = async () => {
+    const url = simShareUrl(share.code)
+    try { await navigator.clipboard.writeText(url); setShare(x => ({ ...x, copied: true })) } catch { window.prompt('Скопируйте ссылку', url) }
+  }
   const toolDia = useMemo(() => { const m = new Map((cnc.tools || []).map(x => [num(x.t), num(x.d)])); return t => m.get(t) || 0 }, [cnc])
 
   if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40 }}>Загрузка...</p></div>
@@ -209,8 +233,35 @@ export default function CncPage() {
           <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<p style={{ color: 'var(--text-hint)', padding: 20 }}>Загрузка симулятора…</p>}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000}
-                toolDia={toolDia} onClose={() => setSim(null)} onDownload={() => download(sim.name, sim.text)} sheet={simView?.sheet} outlines={simView?.outlines} />
+                toolDia={toolDia} onClose={() => setSim(null)} onDownload={() => download(sim.name, sim.text)} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
             </Suspense>
+          </div>
+        </div>
+      )}
+      {sim && share && (
+        <div onClick={() => setShare(null)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 480, borderRadius: '16px 16px 0 0', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ flex: 1, fontWeight: 500 }}>Ссылка на симуляцию</div>
+              <button type="button" onClick={() => setShare(null)} style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--text-muted)', padding: 0 }}>×</button>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>По ссылке симуляция этого листа открывается без входа в приложение — только просмотр. Ссылка хранит снимок программы: после изменения настроек или раскроя обновите её.</p>
+            {share.error && <p className="error-text" style={{ marginBottom: 8 }}>{share.error}</p>}
+            {share.busy && !share.code ? <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Подождите…</p> : share.code ? (
+              <>
+                <input readOnly value={simShareUrl(share.code)} onFocus={e => e.target.select()} style={{ fontSize: 13, marginBottom: 8 }} />
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn-primary" style={{ flex: 1, padding: 10, fontSize: 14 }} onClick={copyShare}>{share.copied ? '✓ Скопировано' : 'Копировать'}</button>
+                  {navigator.share && <button type="button" className="btn-secondary" style={{ flex: 1, padding: 10, fontSize: 14 }} onClick={() => navigator.share({ title: sim.name, url: simShareUrl(share.code) }).catch(() => {})}>Поделиться</button>}
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button type="button" className="btn-secondary" style={{ flex: 1, padding: 9, fontSize: 13 }} disabled={share.busy} onClick={makeShare}>{share.busy ? 'Обновление…' : share.fresh ? '✓ Снимок обновлён' : '↻ Обновить снимок'}</button>
+                  <button type="button" onClick={closeShare} style={{ flex: 1, padding: 9, fontSize: 13, background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 'var(--radius)' }}>Закрыть доступ</button>
+                </div>
+              </>
+            ) : (
+              <button type="button" className="btn-primary" disabled={share.busy} onClick={makeShare}>{share.busy ? 'Создание…' : '🔗 Создать ссылку'}</button>
+            )}
           </div>
         </div>
       )}
