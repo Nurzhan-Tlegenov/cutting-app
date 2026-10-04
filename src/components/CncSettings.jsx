@@ -229,7 +229,7 @@ export function CncOps({ cnc, onChange, layers }) {
   const set = (k, patch) => onChange({ ...cnc, ops: { ...ops, [k]: { ...ops[k], ...patch } } })
   const setMap = (k, key, patch) => onChange({ ...cnc, ops: { ...ops, [k]: { ...ops[k], [key]: { ...ops[k]?.[key], ...patch } } } })
   const hasTool = id => (cnc.tools || []).some(t => t.id === id)
-  const Contour = ({ k, title, note }) => (
+  const Contour = ({ k, title, note, extra }) => (
     <div className="card" style={{ marginBottom: 10 }}>
       <Title>{title}</Title>
       <label className="label">Инструмент</label>
@@ -248,12 +248,37 @@ export function CncOps({ cnc, onChange, layers }) {
           </div>
         )}
       </div>
+      {extra}
     </div>
+  )
+  const o = ops.outer, twoPass = (Number(o.passes) || 1) > 1
+  const outerExtra = (
+    <>
+      <div className="divider" />
+      <Num label="Мелкая деталь — площадь до" unit="м²" value={o.smallArea} onChange={v => set('outer', { smallArea: v })}
+        hint="Мелкие детали режутся первыми, начиная с той, что у края листа. Рез начинается с угла со стороны середины листа — последним режется отрезок, отделяющий деталь от основной части листа, и деталь не сдвигается." />
+      <div style={{ marginTop: 8 }}>
+        <Num label="Количество проходов" value={o.passes} onChange={v => set('outer', { passes: Math.max(1, Math.min(6, Math.round(Number(v) || 1))) })} />
+      </div>
+      {twoPass && (
+        <>
+          <div className="row2" style={{ marginTop: 8 }}>
+            <Num label="Припуск по контуру" unit="мм" value={o.sideAllow} onChange={v => set('outer', { sideAllow: v })} />
+            <Num label="Остаток по глубине" unit="мм" value={o.leftover} onChange={v => set('outer', { leftover: v })} />
+          </div>
+          <Hint>Первые проходы идут с припуском и не дорезают материал на «остаток» — на основной подаче. Последний проход режет начисто и насквозь — по настройкам фрезы (подача входа, разгон, торможение на выходе).</Hint>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-muted)', marginTop: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!o.smallOnly} onChange={e => set('outer', { smallOnly: e.target.checked })} style={{ width: 18, height: 18 }} />
+            Несколько проходов — только для мелких деталей
+          </label>
+        </>
+      )}
+    </>
   )
   return (
     <>
       {!(cnc.tools || []).length && <p style={{ fontSize: 13, color: 'var(--amber)', marginBottom: 10 }}>Сначала создайте инструменты на вкладке «Инструменты».</p>}
-      {Contour({ k: 'outer', title: '1. Контур детали', note: 'Фреза идёт снаружи контура.' })}
+      {Contour({ k: 'outer', title: '1. Контур детали', note: 'Фреза идёт снаружи контура.', extra: outerExtra })}
       {Contour({ k: 'cutout', title: '2. Контур выреза', note: 'Фреза всегда идёт внутри контура.' })}
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>3. Пазы{layers ? <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-hint)' }}> · в заказе {layers.grooves} шт.</span> : null}</Title>

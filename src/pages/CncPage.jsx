@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { zipSync, strToU8 } from 'fflate'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
-import GcodeSimulator from '../components/GcodeSimulator'
 import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettings'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { getCnc, fetchCnc, saveCnc, activePost } from '../lib/cncSettings'
@@ -13,6 +11,7 @@ import { parseGcode, fmtTime } from '../lib/gcodeSim'
 
 // ЧПУ: листы принятого раскроя → управляющая программа (G-код) + симулятор.
 // Настройки (постпроцессор, инструменты, обработка контуров, команды) идут за аккаунтом.
+const GcodeSimulator = lazy(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 const safeName = s => String(s || '').replace(/[^\wа-яё.-]+/gi, '_').replace(/^_+|_+$/g, '')
@@ -77,26 +76,34 @@ export default function CncPage() {
     const files = sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc })
-      return { si, name: fileName(si), text: r.text, lines: r.lines, warnings: r.warnings, empty: r.empty, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000 }).time }
+      return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000 }).time }
     })
-    setBuilt({ files })
+    setBuilt({ files }); setSaved('')
   }
-  const downloadAll = () => {
+  const [saved, setSaved] = useState('')
+  // все файлы — отдельными файлами (не архивом): в выбранную папку, а где браузер этого не умеет — загрузками по одному
+  const saveAll = async () => {
     const files = built.files.filter(f => !f.empty)
-    if (files.length === 1) { download(files[0].name, files[0].text); return }
-    const zip = zipSync(Object.fromEntries(files.map(f => [f.name, strToU8(f.text)])))
-    download(`${safeName(order.order_number)}_gcode.zip`, zip, 'application/zip')
+    if (files.length > 1 && window.showDirectoryPicker) {
+      try {
+        const dir = await window.showDirectoryPicker({ mode: 'readwrite' })
+        for (const f of files) { const h = await dir.getFileHandle(f.name, { create: true }); const w = await h.createWritable(); await w.write(f.text); await w.close() }
+        setSaved(`Сохранено файлов: ${files.length} — в папку «${dir.name}»`)
+        return
+      } catch (e) { if (e?.name === 'AbortError') return }
+    }
+    for (const f of files) { download(f.name, f.text); await new Promise(r => setTimeout(r, 400)) }
+    setSaved(`Отправлено на сохранение файлов: ${files.length}`)
   }
-  const simProps = f => {
-    const sheet = mat.sheets[f.si], geo = sheetGeo(order, mat.result, sheet)
+  const simView = useMemo(() => {
+    if (!sim || !mat) return null
+    const sheet = mat.sheets[sim.si], geo = sheetGeo(order, mat.result, sheet)
     const ox = num(post.originX), oy = num(post.originY)
-    const outlines = []
-    sheet.placed.forEach(p => {
-      const ft = partFeatures(p, mat.details[p.detailIndex], mat.thickness)
-      outlines.push(ft.outline.map(([x, y]) => [ox + geo.marginL + p.x + x, oy + geo.marginB + p.y + y]))
-    })
+    const outlines = sheet.placed.map(p => partFeatures(p, mat.details[p.detailIndex], mat.thickness).outline.map(([x, y]) => [ox + geo.marginL + p.x + x, oy + geo.marginB + p.y + y]))
     return { sheet: { x: ox, y: oy, w: geo.sheetW, l: geo.sheetL }, outlines }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sim])
+  const toolDia = useMemo(() => { const m = new Map((cnc.tools || []).map(x => [num(x.t), num(x.d)])); return t => m.get(t) || 0 }, [cnc])
 
   if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40 }}>Загрузка...</p></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
@@ -186,11 +193,10 @@ export default function CncPage() {
             </div>
           )}
           <button className="btn-primary" disabled={!sel.length} onClick={build}>{built ? '↻ Создать G-код заново' : 'Создать G-код'}</button>
-          {built && built.files.some(f => !f.empty) && (
-            <button className="btn-secondary" style={{ marginTop: 8 }} onClick={downloadAll}>
-              ⬇ {built.files.filter(f => !f.empty).length > 1 ? `Скачать все (${built.files.filter(f => !f.empty).length} файлов, zip)` : 'Скачать файл'}
-            </button>
+          {built && built.files.filter(f => !f.empty).length > 1 && (
+            <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({built.files.filter(f => !f.empty).length})</button>
           )}
+          {saved && built && <p style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6, textAlign: 'center' }}>{saved}</p>}
         </>
       ))}
       {tab === 'ops' && <CncOps cnc={cnc} onChange={change} layers={layers} />}
@@ -201,8 +207,10 @@ export default function CncPage() {
       {sim && (
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 200, overflowY: 'auto', padding: 12 }}>
           <div style={{ maxWidth: 900, margin: '0 auto' }}>
-            <GcodeSimulator text={sim.text} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000}
-              toolDia={t => num((cnc.tools || []).find(x => num(x.t) === t)?.d)} onClose={() => setSim(null)} {...simProps(sim)} />
+            <Suspense fallback={<p style={{ color: 'var(--text-hint)', padding: 20 }}>Загрузка симулятора…</p>}>
+              <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000}
+                toolDia={toolDia} onClose={() => setSim(null)} sheet={simView?.sheet} outlines={simView?.outlines} />
+            </Suspense>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <button className="btn-secondary" onClick={() => download(sim.name, sim.text)}>⬇ Скачать</button>
               <button className="btn-secondary" onClick={() => setSim(null)}>Закрыть</button>

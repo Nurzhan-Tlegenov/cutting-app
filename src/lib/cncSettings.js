@@ -28,7 +28,9 @@ export const DEFAULT_MILL = () => ({
 export const DEFAULT_DRILL = () => ({ id: uid(), type: 'drill', name: 'Сверло 8 мм', t: 2, d: 8, rpm: 3500, feed: 2500 })
 
 export const DEFAULT_OPS = () => ({
-  outer: { tool: '', dir: 'ccw', entry: 'ramp', angle: 45 },   // контур детали
+  // контур детали: smallArea — мелкая деталь (м²), режется первой; passes — число проходов;
+  // sideAllow / leftover — припуск первого прохода по контуру и остаток по глубине; smallOnly — проходы только для мелких
+  outer: { tool: '', dir: 'ccw', entry: 'ramp', angle: 45, smallArea: 0.12, passes: 1, sideAllow: 0, leftover: 0.5, smallOnly: false },
   cutout: { tool: '', dir: 'cw', entry: 'ramp', angle: 45 },   // контур выреза (фреза идёт внутри)
   groove: { tool: '' },                                        // пазы
   pockets: {},                                                 // выемки: слой -> { tool }

@@ -17,7 +17,6 @@ import { detailHoles, placedTurns } from './partHoles'
 
 const EPS = 0.05
 const ROUGH_ALLOWANCE = 2        // черновые проходы выборки не доходят до контура на 2 мм — их подчищает обход по периметру
-const SMALL_PART_M2 = 0.12       // такие детали вырезаются первыми
 const num = v => String(Math.round((Number(v) || 0) * 10) / 10)
 const n0 = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 
@@ -235,15 +234,16 @@ export function rectPaths(x0, y0, x1, y1, open, r, step) {
 // ─── вывод ──────────────────────────────────────────────────────────────────
 const fmt = v => { let r = Math.round(v * 1000) / 1000; if (Object.is(r, -0)) r = 0; return Number.isInteger(r) ? r + '.0' : String(r) }
 class Out {
-  constructor() { this.lines = []; this.f = null; this.pos = [null, null, null] }
-  raw(text) { String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).forEach(s => this.lines.push(s)); this.f = null }
+  constructor() { this.lines = []; this.kinds = []; this.opIds = []; this.tag = null; this.f = null; this.pos = [null, null, null] }
+  push(line) { this.lines.push(line); this.kinds.push(this.tag ? this.tag[0] : null); this.opIds.push(this.tag ? this.tag[1] : 0) }
+  raw(text) { String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).forEach(s => this.push(s)); this.f = null }
   move(g, x, y, z, feed) {
     let s = g
     if (x != null && y != null && (x !== this.pos[0] || y !== this.pos[1])) { s += ` X${fmt(x)} Y${fmt(y)}`; this.pos[0] = x; this.pos[1] = y }
     if (z != null && z !== this.pos[2]) { s += ` Z${fmt(z)}`; this.pos[2] = z }
     if (s === g) return
     if (feed && Math.round(feed) !== this.f) { s += ` F${Math.round(feed)}`; this.f = Math.round(feed) }
-    this.lines.push(s)
+    this.push(s)
   }
   g0(x, y, z) { this.move('G0', x, y, z) }
   g1(x, y, z, feed) { this.move('G1', x, y, z, feed) }
@@ -254,61 +254,102 @@ function levels(top, bottom, maxPass) {
 }
 const tpl = (s, tool) => String(s || '').replace(/\{T\}/gi, String(Math.round(n0(tool.t)))).replace(/\{S\}/gi, String(Math.round(n0(tool.rpm))))
 
-/**
- * Обход замкнутого контура loop (уже в координатах станка) на глубины zs.
- * Вход под наклоном: фреза опускается, двигаясь по самому контуру; после полного круга этот участок
- * проходится ещё раз на полной глубине. Подача: вход — inFeed, затем плавный разгон до основной на
- * длине inLen; на последнем проходе перед выходом — плавное снижение до outFeed на длине outLen.
- */
-function cutLoop(out, loop, zs, top, tool, op, safeZ) {
-  const feed = n0(tool.feed) || 1000, inFeed = n0(tool.inFeed) || feed, outFeed = n0(tool.outFeed) || feed
+function loopMetric(loop) {
   const n = loop.length, seg = [], cum = [0]
   for (let i = 0; i < n; i++) { seg.push(Math.hypot(loop[(i + 1) % n][0] - loop[i][0], loop[(i + 1) % n][1] - loop[i][1])); cum.push(cum[i] + seg[i]) }
   const per = cum[n]
-  if (!(per > 0)) return
-  const ramp = op.entry !== 'straight'
-  const tan = Math.tan(Math.max(1, Math.min(89, n0(op.angle) || 45)) * Math.PI / 180)
-  const at = d => {                                     // точка контура на расстоянии d от начала (с заходом на второй круг)
-    const dd = ((d % per) + per) % per
+  const at = d => {                                     // точка контура на расстоянии d от его начала
+    const dd = Math.max(0, Math.min(per, d))
     let i = 0
     while (i < n - 1 && cum[i + 1] <= dd) i++
     const t = seg[i] ? (dd - cum[i]) / seg[i] : 0, a = loop[i], b = loop[(i + 1) % n]
     return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
   }
-  out.g0(loop[0][0], loop[0][1], safeZ)
-  let zPrev = top + 1
-  out.g1(null, null, zPrev, inFeed)
-  zs.forEach((z, k) => {
-    const last = k === zs.length - 1
-    const L = ramp ? Math.min(per, (zPrev - z) / tan) : 0
-    if (!ramp) out.g1(null, null, z, inFeed)
-    const D = per + (last ? L : 0)                       // последний проход — с повтором участка захода
-    let inLen = Math.max(0, n0(tool.inLen)), outLen = last ? Math.max(0, n0(tool.outLen)) : 0
-    const free = D - L
-    if (inLen + outLen > free) { const s = free / (inLen + outLen); inLen *= s; outLen *= s }
+  return { n, cum, per, at }
+}
+
+/**
+ * Обход замкнутых контуров (уже в координатах станка). passes: [{ loop, z }] — проходы сверху вниз;
+ * у проходов может быть свой контур (первый проход с припуском).
+ * Контур начинается и ЗАКАНЧИВАЕТСЯ в своей первой точке (угол) — за угол фреза не заходит, ни один отрезок
+ * дважды не проходится. Вход под наклоном: фреза встаёт на первом отрезке на длину захода от угла и
+ * опускается, двигаясь к углу; оттуда идёт полный обход. Следующий проход по тому же контуру — заход
+ * «туда-обратно» по первому отрезку.
+ * Подача: вход — подача входа. Промежуточные проходы — основная подача. Последний проход — по настройкам фрезы:
+ * плавный разгон от подачи входа до основной на длине разгона и плавное снижение до подачи выхода перед концом.
+ */
+function cutLoop(out, passes, top, tool, op, safeZ) {
+  const feed = n0(tool.feed) || 1000, inFeed = n0(tool.inFeed) || feed, outFeed = n0(tool.outFeed) || feed
+  const ramp = op.entry !== 'straight'
+  const tan = Math.tan(Math.max(1, Math.min(89, n0(op.angle) || 45)) * Math.PI / 180)
+  let cur = null, M = null, zPrev = 0
+  passes.forEach((ps, k) => {
+    const last = k === passes.length - 1, z = ps.z
+    if (ps.loop !== cur) {
+      const m = loopMetric(ps.loop)
+      if (!(m.per > 0)) return
+      if (cur) out.g0(null, null, safeZ)
+      cur = ps.loop; M = m
+      zPrev = top + 1
+      const L = ramp ? Math.min(M.per / 2, (zPrev - z) / tan) : 0
+      const s = M.at(L)
+      out.g0(s[0], s[1], safeZ)
+      out.g1(null, null, zPrev, inFeed)
+      if (L > 0) [...M.cum.filter(d => d > 1e-6 && d < L - 1e-6).reverse(), 0].forEach(d => { const q = M.at(d); out.g1(q[0], q[1], z + (zPrev - z) * d / L, inFeed) })
+      else out.g1(null, null, z, inFeed)
+    } else if (ramp) {
+      const h = Math.min(M.per / 2, (zPrev - z) / tan / 2), zm = (zPrev + z) / 2
+      const ds = M.cum.filter(d => d > 1e-6 && d < h - 1e-6)
+      ;[...ds, h].forEach(d => { const q = M.at(d); out.g1(q[0], q[1], zPrev + (zm - zPrev) * d / h, inFeed) })
+      ;[...ds.slice().reverse(), 0].forEach(d => { const q = M.at(d); out.g1(q[0], q[1], z + (zm - z) * d / h, inFeed) })
+    } else out.g1(null, null, z, inFeed)
+    // полный обход от угла до угла
+    const D = M.per
+    let inLen = last ? Math.max(0, n0(tool.inLen)) : 0, outLen = last ? Math.max(0, n0(tool.outLen)) : 0
+    if (inLen + outLen > D) { const sc = D / (inLen + outLen); inLen *= sc; outLen *= sc }
     const kIn = inFeed !== feed && inLen > 0 ? Math.max(2, Math.min(8, Math.round(inLen / 6))) : 0
     const kOut = outFeed !== feed && outLen > 0 ? Math.max(2, Math.min(8, Math.round(outLen / 6))) : 0
     const stops = new Set([D])
-    for (let lap = 0; lap < 2; lap++) for (let i = 1; i <= n; i++) { const d = cum[i] + lap * per; if (d < D - 1e-6) stops.add(d) }
-    if (L > 0) stops.add(Math.min(L, D))
-    for (let i = 1; i <= kIn; i++) stops.add(L + inLen * i / kIn)
+    for (let i = 1; i < M.n; i++) stops.add(M.cum[i])
+    for (let i = 1; i <= kIn; i++) stops.add(inLen * i / kIn)
     for (let i = 0; i < kOut; i++) stops.add(D - outLen + outLen * i / kOut)
-    const list = [...stops].filter(d => d > 1e-6).sort((a, b) => a - b)
     let prev = 0
-    for (const d of list) {
+    for (const d of [...stops].filter(d => d > 1e-6).sort((a, b) => a - b)) {
       if (d - prev < 1e-6) continue
       const mid = (d + prev) / 2
       let f = feed
-      if (mid < L) f = inFeed
-      else if (kIn && mid < L + inLen) f = inFeed + (feed - inFeed) * (Math.floor((mid - L) / (inLen / kIn)) + 1) / (kIn + 1)
+      if (kIn && mid < inLen) f = inFeed + (feed - inFeed) * (Math.floor(mid / (inLen / kIn)) + 1) / (kIn + 1)
       else if (kOut && mid > D - outLen) f = feed + (outFeed - feed) * (Math.floor((mid - (D - outLen)) / (outLen / kOut)) + 1) / kOut
-      const q = at(d)
-      out.g1(q[0], q[1], L > 0 && d < L ? zPrev + (z - zPrev) * d / L : z, f)
+      const q = M.at(d)
+      out.g1(q[0], q[1], z, f)
       prev = d
     }
     zPrev = z
   })
   out.g0(null, null, safeZ)
+}
+
+/**
+ * Контур детали в нужном направлении, начатый так, чтобы ПОСЛЕДНИМ резался отрезок, обращённый внутрь листа
+ * (дальше всех от края листа): начало — в углу со стороны середины листа, и последний рез отделяет деталь
+ * от основной части листа — до этого момента она держится за лист и не сдвигается.
+ */
+function orientFromInside(L, dir, rect) {
+  const P = L.slice()
+  if ((signedArea(P) > 0) !== (dir !== 'cw')) P.reverse()
+  const n = P.length, len = i => Math.hypot(P[(i + 1) % n][0] - P[i][0], P[(i + 1) % n][1] - P[i][1])
+  let longest = 0
+  for (let i = 0; i < n; i++) longest = Math.max(longest, len(i))
+  let best = 0, bs = -Infinity, bl = 0
+  for (let i = 0; i < n; i++) {
+    const l = len(i)
+    if (l < Math.min(30, longest * 0.25)) continue        // мелкие отрезки дуг — не «сторона»
+    const mx = (P[i][0] + P[(i + 1) % n][0]) / 2, my = (P[i][1] + P[(i + 1) % n][1]) / 2
+    const sc = Math.min(mx - rect.x0, rect.x1 - mx, my - rect.y0, rect.y1 - my)
+    if (sc > bs + 0.5 || (sc > bs - 0.5 && l > bl)) { bs = Math.max(bs, sc); bl = l; best = i }
+  }
+  const st = (best + 1) % n
+  return [...P.slice(st), ...P.slice(0, st)]
 }
 
 /** Прямоугольная выборка / паз на глубины zs */
@@ -355,6 +396,8 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   if (n0(post.fieldY) && n0(post.originY) + geo.sheetL > n0(post.fieldY) + EPS) warn.add(`Лист по Y (${num(n0(post.originY) + geo.sheetL)} мм) выходит за рабочее поле станка ${num(post.fieldY)} мм.`)
   const millOver = Math.max(0, n0(post.millOver)), drillOver = Math.max(0, n0(post.drillOver))
   const ops = cnc.ops
+  const smallArea = n0(ops.outer?.smallArea) > 0 ? n0(ops.outer.smallArea) : 0.12      // мельче — «мелкая деталь», режется первой
+  const sheetRect = { x0: n0(post.originX), y0: n0(post.originY), x1: n0(post.originX) + geo.sheetW, y1: n0(post.originY) + geo.sheetL }
   const tool = id => toolById(cnc, id)
   const jobs = []                    // { stage, rank, tool, at: [x, y], area, run(out) }
   const miss = {}                    // на что не назначен инструмент -> сколько раз
@@ -421,20 +464,31 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
       if (!loop) { warn.add(`Фреза Ø${num(t.d)} не проходит в вырез — он пропущен.`); continue }
       const L = orientLoop(loop.map(G), ops.cutout.dir)
       const zs = levels(T, -millOver, n0(t.maxPass))
-      jobs.push({ stage: 1, rank: 4, tool: t, at: L[0], run: out => cutLoop(out, L, zs, T, t, ops.cutout, safeZ) })
+      jobs.push({ stage: 1, rank: 4, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.cutout, safeZ) })
     }
     // контур детали — фреза идёт снаружи
     {
-      const t = tool(ops.outer?.tool)
+      const t = tool(ops.outer?.tool), o = ops.outer
       if (!t) noTool('контур детали')
       else if (t.type !== 'mill') warn.add('На контур детали назначено сверло — нужна фреза.')
       else {
-        const loop = offsetLoop(f.outline, n0(t.d) / 2)
-        if (!loop) warn.add('Не удалось построить обход контура одной из деталей — она пропущена.')
+        const r = n0(t.d) / 2, base = offsetLoop(f.outline, r)
+        if (!base) warn.add('Не удалось построить обход контура одной из деталей — она пропущена.')
         else {
-          const L = orientLoop(loop.map(G), ops.outer.dir)
-          const zs = levels(T, -millOver, n0(t.maxPass))
-          jobs.push({ stage: 1, rank: 5, tool: t, at: L[0], area: Math.abs(signedArea(f.outline)) / 1e6, run: out => cutLoop(out, L, zs, T, t, ops.outer, safeZ) })
+          const L = orientFromInside(base.map(G), o.dir, sheetRect)
+          const area = Math.abs(signedArea(f.outline)) / 1e6, small = area <= smallArea
+          const N = Math.max(1, Math.round(n0(o.passes) || 1))
+          let passes
+          if (N > 1 && (!o.smallOnly || small)) {
+            // первые проходы — с припуском по контуру и остатком по глубине, последний — начисто
+            const allow = Math.max(0, n0(o.sideAllow)), left = Math.max(0, Math.min(T - 0.5, n0(o.leftover)))
+            const rough = allow > 0 ? offsetLoop(f.outline, r + allow) : null
+            const Lr = rough ? orientFromInside(rough.map(G), o.dir, sheetRect) : L
+            passes = [...levels(T, left, Math.min(n0(t.maxPass) || 1e9, (T - left) / (N - 1) + 1e-6)).map(z => ({ loop: Lr, z })), { loop: L, z: -millOver }]
+          } else passes = levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: L, z }))
+          const bb = bboxOf(f.outline)
+          const edgeDist = Math.min(geo.marginL + p.x + bb.x0, geo.sheetW - (geo.marginL + p.x + bb.x1), geo.marginB + p.y + bb.y0, geo.sheetL - (geo.marginB + p.y + bb.y1))
+          jobs.push({ stage: 1, rank: 5, tool: t, at: L[0], small, edgeDist, run: out => cutLoop(out, passes, T, t, o, safeZ) })
         }
       }
     }
@@ -458,14 +512,26 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const prevTool = seq[seq.length - 1]?.tool
   const cutTools = [...new Set(stage1.map(j => j.tool))].sort((a, b) => (b === prevTool) - (a === prevTool))
   cutTools.forEach(t => add(stage1.filter(j => j.tool === t && j.rank === 4)))
+  // контуры деталей: сначала мелкие — от края листа внутрь (первой та, что у самого края), затем остальные
+  const fromEdge = list => {
+    const left = list.slice()
+    while (left.length) {
+      const me = Math.min(...left.map(j => j.edgeDist))
+      let bi = -1, bd = Infinity
+      left.forEach((j, i) => { if (j.edgeDist > me + 1) return; const d = Math.hypot(j.at[0] - cur[0], j.at[1] - cur[1]); if (d < bd) { bd = d; bi = i } })
+      const j = left.splice(bi, 1)[0]
+      seq.push(j); cur = j.at
+    }
+  }
   cutTools.forEach(t => {
     const outer = stage1.filter(j => j.tool === t && j.rank === 5)
-    add(outer.filter(j => j.area < SMALL_PART_M2)); add(outer.filter(j => !(j.area < SMALL_PART_M2)))
+    fromEdge(outer.filter(j => j.small)); add(outer.filter(j => !j.small))
   })
 
   const out = new Out()
   out.raw(post.cmdStart)
-  let active = null
+  let active = null, opId = 0
+  const KIND = ['hole', 'hole', 'groove', 'pocket', 'cutout', 'outer']
   const used = []
   for (const j of seq) {
     if (j.tool !== active) {
@@ -474,9 +540,11 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
       active = j.tool
       if (!used.includes(j.tool)) used.push(j.tool)
     }
+    out.tag = [KIND[j.rank], ++opId]
     j.run(out)
+    out.tag = null
   }
   out.raw(post.cmdEnd)
   if (!seq.length) warn.add('На листе нечего обрабатывать: не назначены инструменты.')
-  return { text: out.lines.join('\n') + '\n', lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length }
+  return { text: out.lines.join('\n') + '\n', lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds }
 }
