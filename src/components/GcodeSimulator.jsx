@@ -64,6 +64,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(20)
   const [vis, setVis] = useState(() => Object.fromEntries(LAYERS.map(l => [l.id, true])))
+  const [follow, setFollow] = useState(false)   // камера следит за шпинделем
   const [sel, setSel] = useState(-1)       // выделенное перемещение
   const [scrollTop, setScrollTop] = useState(0)
   const [viewH, setViewH] = useState(() => Math.round(Math.max(200, Math.min(window.innerHeight * 0.42, 620))))   // высота 3D-окна — двигается границей
@@ -122,49 +123,64 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     const sideMat = keep(new THREE.MeshBasicMaterial({ color: 0xB69364 })), noMat = keep(new THREE.MeshBasicMaterial({ visible: false }))
     const body = new THREE.Mesh(keep(new THREE.BoxGeometry(S.w, S.l, T)), [sideMat, sideMat, sideMat, sideMat, noMat, noMat])
     body.position.set(cx, cy, T / 2); scene.add(body)
-    const maxTex = Math.min(renderer.capabilities.maxTextureSize || 2048, 3072)
+    // Рисунок листа разбит на плитки: при резе обновляются только те плитки, по которым прошла фреза —
+    // шпиндель движется плавно, без рывков на перезаливке всей картинки.
+    const maxTex = Math.min(renderer.capabilities.maxTextureSize || 2048, 4096)
     const k = Math.min(maxTex / big, 2)
-    const mkCanvas = () => { const c = document.createElement('canvas'); c.width = Math.max(2, Math.round(S.w * k)); c.height = Math.max(2, Math.round(S.l * k)); return c }
-    const cvA = mkCanvas(), cvB = mkCanvas()            // A — всё, что срезано сверху; B — только прорезанное насквозь
-    const cA = cvA.getContext('2d'), cB = cvB.getContext('2d')
-    const mkTex = c => { const t = keep(new THREE.CanvasTexture(c)); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t }
-    const texA = mkTex(cvA), texB = mkTex(cvB)
-    const planeGeo = keep(new THREE.PlaneGeometry(S.w, S.l))
-    const SLICES = 8
-    for (let i = 1; i <= SLICES; i++) {
-      const topLayer = i === SLICES, f = i / SLICES
-      const shade = 0.55 + 0.4 * f                                                    // глубже — темнее
-      const color = topLayer ? new THREE.Color(1, 1, 1) : new THREE.Color(0.78 * shade, 0.62 * shade, 0.42 * shade)
-      const mat = keep(new THREE.MeshBasicMaterial({ map: f > 0.5 ? texA : texB, color, transparent: true, depthWrite: false }))
-      const pl = new THREE.Mesh(planeGeo, mat)
-      pl.position.set(cx, cy, T * f); pl.renderOrder = i; scene.add(pl)
+    const Wp = Math.max(2, Math.round(S.w * k)), Hp = Math.max(2, Math.round(S.l * k)), TILE = 512, SLICES = 8
+    const tiles = []
+    const mkLayer = (w, h) => {
+      const c = document.createElement('canvas'); c.width = w; c.height = h
+      const tex = keep(new THREE.CanvasTexture(c)); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy()
+      return { ctx: c.getContext('2d'), tex, dirty: true }
+    }
+    for (let y0 = 0; y0 < Hp; y0 += TILE) for (let x0 = 0; x0 < Wp; x0 += TILE) {
+      const w = Math.min(TILE, Wp - x0), h = Math.min(TILE, Hp - y0)
+      const tl = { x0, y0, x1: x0 + w, y1: y0 + h, A: mkLayer(w, h), B: mkLayer(w, h) }   // A — всё, что срезано сверху; B — только прорезанное насквозь
+      const geo = keep(new THREE.PlaneGeometry(w / k, h / k))
+      for (let i = 1; i <= SLICES; i++) {
+        const f = i / SLICES, shade = 0.55 + 0.4 * f                                      // глубже — темнее
+        const color = i === SLICES ? new THREE.Color(1, 1, 1) : new THREE.Color(0.78 * shade, 0.62 * shade, 0.42 * shade)
+        const mat = keep(new THREE.MeshBasicMaterial({ map: f > 0.5 ? tl.A.tex : tl.B.tex, color, transparent: true, depthWrite: false }))
+        const pl = new THREE.Mesh(geo, mat)
+        pl.position.set(S.x + (x0 + w / 2) / k, S.y + S.l - (y0 + h / 2) / k, T * f); pl.renderOrder = i; scene.add(pl)
+      }
+      tiles.push(tl)
     }
     const PX = x => (x - S.x) * k, PY = y => (S.l - (y - S.y)) * k
-    const base = () => {
-      for (const c of [cA, cB]) { c.globalCompositeOperation = 'source-over'; c.lineCap = 'round'; c.lineJoin = 'round' }
-      cB.fillStyle = '#FFFFFF'; cB.fillRect(0, 0, cvB.width, cvB.height)
-      cA.fillStyle = '#FAF8F2'; cA.fillRect(0, 0, cvA.width, cvA.height)
+    const each = (fn, box) => tiles.forEach(tl => {            // fn(слой A, слой B) — в общих пиксельных координатах листа
+      if (box && (box[0] > tl.x1 || box[2] < tl.x0 || box[1] > tl.y1 || box[3] < tl.y0)) return
+      for (const L of [tl.A, tl.B]) L.ctx.setTransform(1, 0, 0, 1, -tl.x0, -tl.y0)
+      fn(tl.A, tl.B)
+    })
+    const base = () => each((A, B) => {
+      for (const L of [A, B]) { L.ctx.globalCompositeOperation = 'source-over'; L.ctx.lineCap = 'round'; L.ctx.lineJoin = 'round'; L.dirty = true }
+      const cA = A.ctx, cB = B.ctx
+      cB.fillStyle = '#FFFFFF'; cB.fillRect(0, 0, Wp, Hp)
+      cA.fillStyle = '#FAF8F2'; cA.fillRect(0, 0, Wp, Hp)
       cA.fillStyle = '#F1EEE6'; cA.strokeStyle = 'rgba(40,40,40,0.28)'; cA.lineWidth = Math.max(1, k)
       ;(outlines || []).forEach(pts => {
         cA.beginPath()
         pts.forEach(([x, y], i) => (i ? cA.lineTo(PX(x), PY(y)) : cA.moveTo(PX(x), PY(y))))
         cA.closePath(); cA.fill(); cA.stroke()
       })
-      for (const c of [cA, cB]) c.globalCompositeOperation = 'destination-out'
-      st.dirtyA = st.dirtyB = true
-    }
-    const erase = (c, m, x1, y1, d) => {
-      if (Math.abs(m.x0 - x1) < 1e-6 && Math.abs(m.y0 - y1) < 1e-6) { c.beginPath(); c.arc(PX(x1), PY(y1), d / 2, 0, Math.PI * 2); c.fill(); return }
+      for (const L of [A, B]) L.ctx.globalCompositeOperation = 'destination-out'
+    })
+    const erase = (c, ax, ay, bx, by, d) => {
+      if (Math.abs(ax - bx) < 1e-6 && Math.abs(ay - by) < 1e-6) { c.beginPath(); c.arc(bx, by, d / 2, 0, Math.PI * 2); c.fill(); return }
       c.lineWidth = d
-      c.beginPath(); c.moveTo(PX(m.x0), PY(m.y0)); c.lineTo(PX(x1), PY(y1)); c.stroke()
+      c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke()
     }
     const kerf = (m, x1, y1, z1) => {
       if (m.rapid) return
       const zLow = Math.min(m.z0, z1)
       if (zLow >= T - 0.001) return
       const d = Math.max(1.5, (diaRef.current?.(m.tool) || 3) * k)
-      erase(cA, m, x1, y1, d); st.dirtyA = true
-      if (zLow <= T * 0.5) { erase(cB, m, x1, y1, d); st.dirtyB = true }
+      const ax = PX(m.x0), ay = PY(m.y0), bx = PX(x1), by = PY(y1), through = zLow <= T * 0.5
+      each((A, B) => {
+        erase(A.ctx, ax, ay, bx, by, d); A.dirty = true
+        if (through) { erase(B.ctx, ax, ay, bx, by, d); B.dirty = true }
+      }, [Math.min(ax, bx) - d, Math.min(ay, by) - d, Math.max(ax, bx) + d, Math.max(ay, by) + d])
     }
 
     // траектории — по видам; при проигрывании показывается только пройденная часть
@@ -207,12 +223,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       while (lo < hi) { const mid = (lo + hi) >> 1; if (m[mid].t1 < time) lo = mid + 1; else hi = mid }
       return lo
     }
-    const flush = () => {
-      st.timer = 0; st.lastUp = performance.now()
-      if (st.dirtyA) { texA.needsUpdate = true; st.dirtyA = false }
-      if (st.dirtyB) { texB.needsUpdate = true; st.dirtyB = false }
-      render()
-    }
+    const flush = () => { for (const tl of tiles) for (const L of [tl.A, tl.B]) if (L.dirty) { L.tex.needsUpdate = true; L.dirty = false } }
     const countBefore = (idx, cur) => { let lo = 0, hi = idx.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (idx[mid] < cur) lo = mid + 1; else hi = mid } return lo }
     const showLines = () => {
       Object.entries(lines).forEach(([g, o]) => {
@@ -245,8 +256,11 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       const d = diaRef.current?.(m.tool) || 3
       tool.position.set(x, y, z); cutter.scale.set(d, d, 1)
       showLines()
-      if (st.dirtyA || st.dirtyB) {                        // рисунок реза обновляем не чаще ~12 раз в секунду — движение остаётся плавным
-        if (performance.now() - st.lastUp > 80) flush(); else if (!st.timer) st.timer = setTimeout(flush, 90)
+      flush()
+      if (st.follow) {                                     // камера едет за шпинделем, сохраняя выбранные пальцами расстояние и угол
+        const dx = x - controls.target.x, dy = y - controls.target.y
+        camera.position.x += dx; camera.position.y += dy
+        controls.target.set(x, y, 0); controls.update()
       }
       render()
     }
@@ -309,10 +323,11 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     ro?.observe(wrap)
 
     base(); setView('iso'); setTime(tRef.current, tRef.current > 0)
-    api.current = { setTime, select, setVisible, setView }
+    const setFollow = on => { st.follow = !!on; if (on) { const p = tool.position; camera.position.x += p.x - controls.target.x; camera.position.y += p.y - controls.target.y; controls.target.set(p.x, p.y, 0); controls.update(); render() } }
+    api.current = { setTime, select, setVisible, setView, setFollow }
     return () => {
       api.current = null
-      ro?.disconnect(); cancelAnimationFrame(raf); clearTimeout(st.timer)
+      ro?.disconnect(); cancelAnimationFrame(raf)
       if (liveObj) liveObj.geometry.dispose()
       el.removeEventListener('pointerdown', onDown); el.removeEventListener('pointerup', onUp)
       controls.dispose()
@@ -322,19 +337,23 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     }
   }, [prog, data, opIds, sheet, outlines, thickness])
 
-  useEffect(() => { api.current?.setTime(t, playing || t > 0) }, [t, playing, prog, data, sheet, outlines, thickness, opIds])
+  useEffect(() => { api.current?.setTime(tRef.current, playing || tRef.current > 0) }, [t, playing, prog, data, sheet, outlines, thickness, opIds])
   useEffect(() => { api.current?.setVisible(vis) }, [vis, prog, data, sheet, outlines, thickness, opIds])
   useEffect(() => { api.current?.select(sel) }, [sel, prog, data, sheet, outlines, thickness, opIds])
+  useEffect(() => { api.current?.setFollow(follow) }, [follow, prog, data, sheet, outlines, thickness, opIds])
 
   // проигрывание
   useEffect(() => {
     if (!playing) return
     let last = 0, id = 0
+    let shown = 0
     const step = ts => {
-      if (last) tRef.current = Math.min(prog.time, tRef.current + (ts - last) / 1000 * speedRef.current)
+      if (last) tRef.current = Math.min(prog.time, tRef.current + Math.min(ts - last, 100) / 1000 * speedRef.current)
       last = ts
-      setT(tRef.current)
-      if (tRef.current >= prog.time) { setPlaying(false); return }
+      const end = tRef.current >= prog.time
+      api.current?.setTime(tRef.current, true)             // сцена — каждый кадр
+      if (end || ts - shown > 120) { shown = ts; setT(tRef.current) }   // подписи и список кода — реже, чтобы не тормозить движение
+      if (end) { setPlaying(false); return }
       id = requestAnimationFrame(step)
     }
     id = requestAnimationFrame(step)
@@ -371,6 +390,8 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       <div ref={wrapRef} style={{ position: 'relative', flex: '0 0 auto', height: viewH, background: 'var(--bg3)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
         <div ref={mountRef} />
         <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
+          <button type="button" onClick={() => setFollow(f => !f)} title="Камера едет за шпинделем; расстояние и угол выбираются пальцами и сохраняются"
+            style={{ ...viewBtn, ...(follow ? { background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' } : null) }}>◎ Следить</button>
           <button type="button" style={viewBtn} onClick={() => api.current?.setView('iso')}>3D</button>
           <button type="button" style={viewBtn} onClick={() => api.current?.setView('top')}>Сверху</button>
         </div>
