@@ -30,7 +30,7 @@ function Label({ tpl, order, mat, si, pi }) {
     const { w, h } = labelPx(tpl)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[si]
-    drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi })
+    drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
   }, [tpl, order, mat, si, pi])
   return <canvas ref={ref} />
 }

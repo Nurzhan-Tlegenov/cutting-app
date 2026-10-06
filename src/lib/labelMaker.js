@@ -11,8 +11,9 @@ import { zipSync, strToU8 } from 'fflate'
 import { getUserSettings, saveUserSettings } from './userSettings'
 import { detailMeta } from './partLabel'
 import { isTwoSided } from './partInfo'
-import { placedTurns } from './partHoles'
-import { rotatePointTimes } from './drillGeometry'
+import { placedTurns, placedHoles } from './partHoles'
+import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
+import { contourSegments, segmentSide, holeEdgeSegments } from './edgeLength'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
 
@@ -28,11 +29,12 @@ export const LABEL_FIELDS = [
   ['edges', 'Кромка по сторонам'],
   ['curved', 'Криволинейная кромка'],
   ['holes', 'Отверстия, пазы, обработка с двух сторон'],
+  ['part', 'Чертёж детали: контур, вырезы, отверстия, пазы, кромка'],
   ['sheet', 'Номер карты'],
   ['qr', 'QR-код'],
   ['map', 'Карта раскроя — деталь выделена чёрным'],
 ]
-const ON = ['order', 'num', 'material', 'name', 'des', 'size', 'edges', 'curved', 'holes', 'sheet', 'qr', 'map']
+const ON = ['part', 'order', 'num', 'material', 'name', 'des', 'size', 'edges', 'curved', 'holes', 'sheet', 'qr', 'map']
 export const DEFAULT_LABEL = () => ({ enabled: false, w: 85, h: 59, fields: Object.fromEntries(LABEL_FIELDS.map(([k]) => [k, ON.includes(k)])) })
 export function normalizeLabel(raw) {
   const d = DEFAULT_LABEL(), t = raw && typeof raw === 'object' ? raw : {}
@@ -80,6 +82,70 @@ export function labelInfo(order, mat, si, pi) {
     work, twoSided: isTwoSided(d, mat.thickness),
     qr: [order.order_number, `L${si + 1}`, `N${pi + 1}`, m.des || d.name || '', `${d.length}x${d.width}x${mat.thickness || ''}`].join(';'),
   }
+}
+
+/**
+ * Чертёж детали в прямоугольнике (x, y, w, h) — так, как она лежит на карте раскроя (тот же поворот, Y вверх):
+ * контур, вырезы, выемки и пазы лицевой стороны, отверстия в пласть (кружки) и в торец (полоса на глубину),
+ * кромка — жирной линией по своим сторонам и участкам. Обработка с изнанки не показывается.
+ */
+export function drawPart(ctx, x, y, w, h, p, d, line = 1) {
+  let c = d?.contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  const DW = Number(d?.width) || 0, DL = Number(d?.length) || 0, turns = placedTurns(p, d || {})
+  const outline = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon.map(q => [q.x, q.y]) : [[0, 0], [p.origX, 0], [p.origX, p.origY], [0, p.origY]]
+  const bw = Number(p.origX) || Math.max(...outline.map(q => q[0])), bh = Number(p.origY) || Math.max(...outline.map(q => q[1]))
+  const k = Math.min(w / bw, h / bh), ox = x + (w - bw * k) / 2, oy = y + (h - bh * k) / 2
+  const S = (px, py) => [ox + px * k, oy + (bh - py) * k]
+  const R = (px, py) => { const q = rotatePointTimes(px, py, DW, DL, turns); return S(q.x, q.y) }      // из «родных» координат детали
+  const poly = (pts, close = true) => { ctx.beginPath(); pts.forEach((q, i) => { if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]) }); if (close) ctx.closePath() }
+  ctx.save()
+  ctx.strokeStyle = '#000'; ctx.fillStyle = '#000'; ctx.lineJoin = 'round'; ctx.lineCap = 'butt'
+  ctx.lineWidth = line * 1.5
+  poly(outline.map(q => S(q[0], q[1]))); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); ctx.fillStyle = '#000'
+  if (c) {
+    // вырезы — сплошной линией с крестом (сквозные), выемки — штриховой
+    const holes = placedHoles(p, d), src = c.holes || []
+    holes.forEach((hp, i) => {
+      const hole = src.length === holes.length ? src[i] : null
+      if (hole?.type === 'pocket' && hole.face === 'back') return
+      const pts = hp.map(q => S(q.x, q.y))
+      ctx.lineWidth = line; ctx.setLineDash(hole?.type === 'pocket' ? [4 * line, 3 * line] : [])
+      poly(pts); ctx.stroke(); ctx.setLineDash([])
+      if (hole && hole.type !== 'pocket' && hole.type !== 'circle' && pts.length === 4) { ctx.lineWidth = line * 0.6; ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...pts[2]); ctx.moveTo(...pts[1]); ctx.lineTo(...pts[3]); ctx.stroke() }
+    })
+    // пазы лицевой стороны — контур со штриховкой
+    getGrooveRects(c, DW, DL, true).forEach(r => {
+      const pts = r.pts.map(([px, py]) => R(px, py))
+      ctx.lineWidth = line; poly(pts); ctx.stroke()
+      ctx.save(); poly(pts); ctx.clip(); ctx.lineWidth = line * 0.6
+      const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
+      ctx.beginPath(); for (let t = x0 - (y1 - y0); t < x1; t += 5 * line) { ctx.moveTo(t, y1); ctx.lineTo(t + (y1 - y0), y0) } ctx.stroke()
+      ctx.restore()
+    })
+    // отверстия: в пласть — кружок по диаметру, в торец — полоса от кромки на глубину
+    getAllDrillPoints(c, DW, DL, true).forEach(pt => {
+      const a = R(pt.x, pt.y)
+      if (pt.edge) {
+        const dep = pt.depth > 0 ? pt.depth : 20, b = R(pt.x + pt.dx * dep, pt.y + pt.dy * dep)
+        ctx.lineWidth = Math.max(2 * line, (pt.d || 8) * k); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
+        return
+      }
+      ctx.beginPath(); ctx.arc(a[0], a[1], Math.max(1.6 * line, (pt.d || 8) * k / 2), 0, Math.PI * 2); ctx.fill()
+    })
+    // кромка — жирной линией: по сторонам и по отдельным участкам контура и вырезов
+    const native = { left: d.edge_left, right: d.edge_right, top: d.edge_top, bottom: d.edge_bottom }, has = v => v && v !== 'false'
+    ctx.lineWidth = line * 4; ctx.lineCap = 'round'
+    const segs = Array.isArray(c.vertices) && c.vertices.length > 2 ? contourSegments(c.vertices) : []
+    segs.forEach(seg => { const side = segmentSide(seg, DW, DL); if ((side && has(native[side])) || seg.edge) { poly(seg.pts.map(([px, py]) => R(px, py)), false); ctx.stroke() } })
+    if (!segs.length) [['left', 0, 0, 0, DL], ['right', DW, 0, DW, DL], ['bottom', 0, 0, DW, 0], ['top', 0, DL, DW, DL]].forEach(([sd, x0, y0, x1, y1]) => { if (has(native[sd])) { poly([R(x0, y0), R(x1, y1)], false); ctx.stroke() } })
+    ;(c.holes || []).forEach(hh => holeEdgeSegments(hh).forEach(seg => { poly(seg.pts.map(([px, py]) => R(px, py)), false); ctx.stroke() }))
+  } else {
+    const has = v => v && v !== 'false'
+    ctx.lineWidth = line * 4; ctx.lineCap = 'round'
+    ;[['left', 0, 0, 0, DL], ['right', DW, 0, DW, DL], ['bottom', 0, 0, DW, 0], ['top', 0, DL, DW, DL]].forEach(([sd, x0, y0, x1, y1]) => { if (has(d?.['edge_' + sd])) { poly([R(x0, y0), R(x1, y1)], false); ctx.stroke() } })
+  }
+  ctx.restore()
 }
 
 /** Контуры деталей листа в координатах листа (мм, Y вверх) */
@@ -173,15 +239,21 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
     const t = fitText(ctx, text, tw, size * u, weight)
     ctx.fillText(t, tx, y); y += size * u * gap
   }
-  if (f.order) line(`Заказ ${info.order}`, 25)
-  if (f.material) line(info.material, 20)
-  if (f.prefix) line(info.prefix, 20)
+  const sm = f.part ? 0.8 : 1                             // с чертежом текст компактнее
+  if (f.order) line(`Заказ ${info.order}`, 25 * sm)
+  if (f.material) line(info.material, 20 * sm)
+  if (f.prefix) line(info.prefix, 20 * sm)
   const title = [f.des && info.des, f.name && info.name].filter(Boolean).join(' ')
-  line(title, 22, 'bold')
+  line(title, 22 * sm, 'bold')
   if (f.pos && info.pos) line(`Поз. ${info.pos}`, 20)
-  if (f.size) { y += 10 * u; line(`${r1(info.length)} x ${r1(info.width)} x ${info.qty} шт`, 28, 'bold', 1.5) }
+  if (f.size) { y += (f.part ? 2 : 10) * u; line(`${r1(info.length)} x ${r1(info.width)} x ${info.qty} шт`, 28 * sm, 'bold', f.part ? 1.3 : 1.5) }
   if (f.curved && info.curved.length) info.curved.forEach(t => line(`Крив. кромка: ${t}`, 17))
   if (f.holes) { line(info.work.join(', '), 17); if (info.twoSided) line('⇅ обработка с двух сторон', 17, 'bold') }
+  // чертёж детали — под текстом, на всё оставшееся место
+  if (f.part && sheetCtx) {
+    const p = sheetCtx.sheet.placed[sheetCtx.index], top = y - 6 * u, bot = H - pad - (f.sheet ? 30 * u : 6 * u)
+    if (p && bot - top > 40 * u && tw > 40 * u) drawPart(ctx, tx, top, tw, bot - top, p, sheetCtx.detail, Math.max(1, 1.4 * u))
+  }
   if (f.sheet) { ctx.font = `${Math.round(22 * u)}px Arial, Helvetica, sans-serif`; ctx.textAlign = 'left'; ctx.fillText(`Карта  ${info.sheet}`, tx, H - pad / 2 - 2 * u) }
   return canvas
 }
@@ -223,7 +295,7 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
     const cycles = []
     sheet.placed.forEach((p, pi) => {
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h
-      drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi })
+      drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[p.detailIndex] })
       const bmp = `${stem}_${String(pi + 1).padStart(4, '0')}.bmp`
       files.push({ name: bmp, data: canvasToBmp(cv) })
       // точка наклейки — центр детали; узкая деталь — бирка поворачивается вдоль неё

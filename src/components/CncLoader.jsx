@@ -1,8 +1,5 @@
-import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SHEET, makeLayout, pathOf, pointAt } from '../lib/loaderLayout'
-
-// 3D-сцена (станок режет лист, камера идёт за шпинделем) подгружается отдельно; пока её нет или нет WebGL — плоская картинка
-const Scene3D = lazy(() => import('./CncLoader3D').catch(() => ({ default: ({ fallback }) => fallback })))
 
 // Экран ожидания вместо «Загрузка…»: маленький станок с ЧПУ режет лист.
 // Раскладка каждый раз новая; фреза идёт от края листа к центру — как в настоящей программе.
@@ -14,7 +11,6 @@ const HINTS = [
   'Мелкие детали — в середину листа',
   'Заход в материал — под наклоном',
   'Нажмите на лист — возьмём новый',
-  'Камера идёт за шпинделем',
 ]
 
 function Flat({ label, compact }) {
@@ -56,10 +52,9 @@ function Flat({ label, compact }) {
     return () => cancelAnimationFrame(raf)
   }, [parts])
 
-  const size = compact ? 150 : 230
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width={size} height={size * H / W} onClick={() => setSeed(x => (x * 17 + 3) >>> 0)}
-        style={{ cursor: 'pointer', overflow: 'visible', WebkitTapHighlightColor: 'transparent' }} role="img" aria-label={label}>
+    <svg viewBox={`0 0 ${W} ${H}`} onClick={() => setSeed(x => (x * 17 + 3) >>> 0)}
+        style={{ width: compact ? 150 : 'min(92vw, 440px)', height: 'auto', cursor: 'pointer', overflow: 'visible', WebkitTapHighlightColor: 'transparent' }} role="img" aria-label={label}>
         <rect x="1" y="1" width={W - 2} height={H - 2} rx="3" fill="#FBF8F1" stroke="var(--gray-mid)" strokeWidth="1" />
         {parts.map((r, i) => (
           <g key={seed + '_' + i}>
@@ -86,11 +81,11 @@ export default function CncLoader({ label = 'Загрузка…', full = false,
   useEffect(() => { const t = setInterval(() => setHint(h => (h + 1) % HINTS.length), 4000); return () => clearInterval(t) }, [])
   const flat = <Flat label={label} compact={compact} />
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: compact ? 12 : 24,
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: compact ? 12 : '24px 0',
       ...(full ? { minHeight: '100vh' } : { minHeight: compact ? 0 : '55vh' }), ...style }}>
-      {compact ? flat : <Suspense fallback={flat}><Scene3D fallback={flat} /></Suspense>}
-      <div style={{ fontSize: compact ? 12 : 14, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</div>
-      {!compact && <div style={{ fontSize: 11, color: 'var(--text-hint)', minHeight: 14, textAlign: 'center' }}>{HINTS[hint]}</div>}
+      {flat}
+      <div style={{ fontSize: compact ? 12 : 16, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</div>
+      {!compact && <div style={{ fontSize: 12.5, color: 'var(--text-hint)', minHeight: 16, textAlign: 'center' }}>{HINTS[hint]}</div>}
     </div>
   )
 }
