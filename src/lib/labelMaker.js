@@ -17,29 +17,71 @@ import { contourSegments, segmentSide, holeEdgeSegments } from './edgeLength'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
 
-export const LABEL_FIELDS = [
-  ['order', 'Заказ'],
-  ['num', 'Номер детали на листе'],
-  ['material', 'Материал'],
-  ['name', 'Наименование'],
-  ['des', 'Обозначение'],
-  ['pos', 'Позиция'],
-  ['prefix', 'Изделие (префикс)'],
-  ['size', 'Размер и количество'],
-  ['edges', 'Кромка по сторонам'],
-  ['curved', 'Криволинейная кромка'],
-  ['holes', 'Отверстия, пазы, обработка с двух сторон'],
-  ['part', 'Чертёж детали: контур, вырезы, отверстия, пазы, кромка'],
-  ['sheet', 'Номер карты'],
-  ['qr', 'QR-код'],
-  ['map', 'Карта раскроя — деталь выделена чёрным'],
+// Бирка собирается из элементов: каждый можно поставить в любое место бирки и задать ему размер.
+// Элемент шаблона: { id, type, x, y, w, h (мм), size (высота шрифта, мм), bold }.
+export const LABEL_ITEMS = [
+  ['order', 'Заказ', 'text'],
+  ['material', 'Материал', 'text'],
+  ['title', 'Обозначение + наименование', 'text'],
+  ['name', 'Наименование', 'text'],
+  ['des', 'Обозначение', 'text'],
+  ['pos', 'Позиция', 'text'],
+  ['prefix', 'Изделие (префикс)', 'text'],
+  ['size', 'Размер и количество', 'text'],
+  ['curved', 'Криволинейная кромка', 'text'],
+  ['work', 'Отверстия, пазы — текстом', 'text'],
+  ['sheet', 'Номер карты', 'text'],
+  ['num', 'Номер детали на листе', 'text'],
+  ['part', 'Чертёж детали', 'pic'],
+  ['map', 'Карта раскроя — деталь чёрным', 'pic'],
+  ['qr', 'QR-код', 'pic'],
 ]
-const ON = ['part', 'order', 'num', 'material', 'name', 'des', 'size', 'edges', 'curved', 'holes', 'sheet', 'qr', 'map']
-export const DEFAULT_LABEL = () => ({ enabled: false, w: 85, h: 59, fields: Object.fromEntries(LABEL_FIELDS.map(([k]) => [k, ON.includes(k)])) })
+export const itemKind = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
+export const itemTitle = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[1] || type
+// раскладка по умолчанию — как на образце бирки (85 × 59 мм)
+const BASE = { w: 85, h: 59 }
+const DEFAULT_ITEMS = [
+  { type: 'order', x: 6.5, y: 6.5, w: 48, size: 3.1 },
+  { type: 'material', x: 6.5, y: 10.6, w: 48, size: 2.5 },
+  { type: 'title', x: 6.5, y: 14, w: 48, size: 2.8, bold: true },
+  { type: 'size', x: 6.5, y: 18, w: 48, size: 3.6, bold: true },
+  { type: 'part', x: 6.5, y: 23.5, w: 38, h: 25.5 },
+  { type: 'sheet', x: 6.5, y: 50, w: 24, size: 2.8 },
+  { type: 'num', x: 70, y: 1.2, w: 9, size: 3.2, bold: true, align: 'right' },
+  { type: 'qr', x: 58, y: 6.5, w: 21, h: 21 },
+  { type: 'map', x: 46.5, y: 30, w: 32.5, h: 22 },
+]
+// место нового элемента — там же, где он стоит в раскладке по умолчанию, иначе — посередине
+export function newLabelItem(type, tpl) {
+  const d = DEFAULT_ITEMS.find(i => i.type === type), kx = tpl.w / BASE.w, ky = tpl.h / BASE.h
+  const it = d ? { ...d, x: d.x * kx, y: d.y * ky, w: d.w * kx, ...(d.h ? { h: d.h * ky } : {}), ...(d.size ? { size: d.size * Math.min(kx, ky) } : {}) }
+    : itemKind(type) === 'pic' ? { type, x: tpl.w * 0.3, y: tpl.h * 0.3, w: tpl.w * 0.3, h: tpl.h * 0.3 } : { type, x: tpl.w * 0.1, y: tpl.h * 0.45, w: tpl.w * 0.5, size: 2.6 * Math.min(kx, ky) }
+  return { ...it, id: type + '_' + Math.random().toString(36).slice(2, 7) }
+}
+export const DEFAULT_LABEL = () => { const t = { enabled: false, w: BASE.w, h: BASE.h, edges: true, rot: true }; return { ...t, items: DEFAULT_ITEMS.map(i => newLabelItem(i.type, t)) } }
 export function normalizeLabel(raw) {
   const d = DEFAULT_LABEL(), t = raw && typeof raw === 'object' ? raw : {}
   const n = (v, def, lo, hi) => { const x = Number(v); return isFinite(x) && x > 0 ? Math.max(lo, Math.min(hi, x)) : def }
-  return { enabled: !!t.enabled, w: n(t.w, d.w, 20, 200), h: n(t.h, d.h, 15, 200), fields: { ...d.fields, ...t.fields } }
+  const w = n(t.w, d.w, 20, 200), h = n(t.h, d.h, 15, 200)
+  let items = Array.isArray(t.items) ? t.items.filter(i => i && LABEL_ITEMS.some(x => x[0] === i.type)) : null
+  if (!items) {                                            // шаблон прежнего вида (галочки) — раскладка по умолчанию с теми же полями
+    const f = t.fields, base = { w, h }
+    items = DEFAULT_ITEMS.filter(i => !f || (i.type === 'title' ? f.name !== false || f.des !== false : f[i.type] !== false)).map(i => newLabelItem(i.type, base))
+  }
+  items = items.map(i => {
+    const pic = itemKind(i.type) === 'pic', iw = Math.max(3, Math.min(w, Number(i.w) || 20))
+    const o = { id: i.id || i.type + '_' + Math.random().toString(36).slice(2, 7), type: i.type, w: iw, bold: !!i.bold, align: i.align === 'right' ? 'right' : 'left' }
+    if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 20)); else o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
+    const ih = pic ? o.h : o.size * 1.25
+    o.x = Math.max(0, Math.min(w - iw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - ih, Number(i.y) || 0))
+    return o
+  })
+  return { enabled: !!t.enabled, w, h, edges: t.edges ?? (t.fields ? t.fields.edges !== false : true), rot: t.rot !== false, items }
+}
+/** Новый размер бирки — элементы растягиваются вместе с ней */
+export function resizeLabel(tpl, w, h) {
+  const kx = w / tpl.w, ky = h / tpl.h, k = Math.min(kx, ky)
+  return normalizeLabel({ ...tpl, w, h, items: tpl.items.map(i => ({ ...i, x: i.x * kx, y: i.y * ky, w: i.w * kx, ...(i.h ? { h: i.h * ky } : {}), ...(i.size ? { size: i.size * k } : {}) })) })
 }
 export const getLabelTpl = user => normalizeLabel(getUserSettings(user).labelTpl)
 export const saveLabelTpl = (tpl, user) => saveUserSettings({ labelTpl: tpl }, user)
@@ -78,7 +120,7 @@ export function labelInfo(order, mat, si, pi) {
     name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
     material: [mat.name, mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · '),
     length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: Number(d.qty) || 1,
-    sides, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
+    sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
     qr: [order.order_number, `L${si + 1}`, `N${pi + 1}`, m.des || d.name || '', `${d.length}x${d.width}x${mat.thickness || ''}`].join(';'),
   }
@@ -89,14 +131,17 @@ export function labelInfo(order, mat, si, pi) {
  * контур, вырезы, выемки и пазы лицевой стороны, отверстия в пласть (кружки) и в торец (полоса на глубину),
  * кромка — жирной линией по своим сторонам и участкам. Обработка с изнанки не показывается.
  */
-export function drawPart(ctx, x, y, w, h, p, d, line = 1) {
+export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false) {
+  const m = 8 * line, x = x0 + m, y = y0 + m, w = Math.max(4, w0 - 2 * m), h = Math.max(4, h0 - 2 * m)      // поле под стрелки торцевых отверстий
   let c = d?.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const DW = Number(d?.width) || 0, DL = Number(d?.length) || 0, turns = placedTurns(p, d || {})
   const outline = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon.map(q => [q.x, q.y]) : [[0, 0], [p.origX, 0], [p.origX, p.origY], [0, p.origY]]
   const bw = Number(p.origX) || Math.max(...outline.map(q => q[0])), bh = Number(p.origY) || Math.max(...outline.map(q => q[1]))
-  const k = Math.min(w / bw, h / bh), ox = x + (w - bw * k) / 2, oy = y + (h - bh * k) / 2
-  const S = (px, py) => [ox + px * k, oy + (bh - py) * k]
+  // rot — лист на бирке лежит горизонтально (длина листа — слева направо): деталь поворачивается вместе с картой
+  const vw = rot ? bh : bw, vh = rot ? bw : bh
+  const k = Math.min(w / vw, h / vh), ox = x + (w - vw * k) / 2, oy = y + (h - vh * k) / 2
+  const S = (px, py) => (rot ? [ox + py * k, oy + px * k] : [ox + px * k, oy + (bh - py) * k])
   const R = (px, py) => { const q = rotatePointTimes(px, py, DW, DL, turns); return S(q.x, q.y) }      // из «родных» координат детали
   const poly = (pts, close = true) => { ctx.beginPath(); pts.forEach((q, i) => { if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]) }); if (close) ctx.closePath() }
   ctx.save()
@@ -129,6 +174,10 @@ export function drawPart(ctx, x, y, w, h, p, d, line = 1) {
       if (pt.edge) {
         const dep = pt.depth > 0 ? pt.depth : 20, b = R(pt.x + pt.dx * dep, pt.y + pt.dy * dep)
         ctx.lineWidth = Math.max(2 * line, (pt.d || 8) * k); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
+        // стрелка снаружи детали — в торец, где сверлится отверстие
+        const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, L = 7 * line, hw = 3.2 * line
+        ctx.beginPath(); ctx.moveTo(a[0] - ux * line, a[1] - uy * line)
+        ctx.lineTo(a[0] - ux * L - uy * hw, a[1] - uy * L + ux * hw); ctx.lineTo(a[0] - ux * L + uy * hw, a[1] - uy * L - ux * hw); ctx.closePath(); ctx.fill()
         return
       }
       ctx.beginPath(); ctx.arc(a[0], a[1], Math.max(1.6 * line, (pt.d || 8) * k / 2), 0, Math.PI * 2); ctx.fill()
@@ -157,8 +206,8 @@ export function sheetOutlines(sheet, geo) {
 }
 
 /** Карта листа в прямоугольнике (x, y, w, h): контуры деталей, деталь hi — чёрная. Лежачий прямоугольник — лист кладётся длиной по горизонтали. */
-export function drawSheetMap(ctx, x, y, w, h, sheet, geo, hi = -1, line = 1) {
-  const rot = false                                       // карта всегда как на экране раскроя: X — вправо, Y — вверх
+export function drawSheetMap(ctx, x, y, w, h, sheet, geo, hi = -1, line = 1, rot = false) {
+  // rot — лист лежит горизонтально: длина листа (Y) — слева направо, начало листа — слева
   const SW = rot ? geo.sheetL : geo.sheetW, SH = rot ? geo.sheetW : geo.sheetL
   const k = Math.min(w / SW, h / SH), ox = x + (w - SW * k) / 2, oy = y + (h - SH * k) / 2
   const T = ([px, py]) => (rot ? [ox + py * k, oy + px * k] : [ox + px * k, oy + (SH - py) * k])
@@ -185,76 +234,74 @@ function fitText(ctx, text, maxW, size, weight = '') {
   return t
 }
 
+/** Текст элемента бирки */
+export function labelText(type, info) {
+  switch (type) {
+    case 'order': return `Заказ ${info.order}`
+    case 'material': return info.material
+    case 'title': return [info.des, info.name].filter(Boolean).join(' ')
+    case 'name': return info.name
+    case 'des': return info.des
+    case 'pos': return info.pos ? `Поз. ${info.pos}` : ''
+    case 'prefix': return info.prefix
+    case 'size': return `${r1(info.length)} x ${r1(info.width)} x ${info.qty} шт`
+    case 'curved': return info.curved.length ? `Крив. кромка: ${info.curved.join('; ')}` : ''
+    case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
+    case 'sheet': return `Карта  ${info.sheet}`
+    case 'num': return String(info.num)
+    default: return ''
+  }
+}
+
 /**
- * Нарисовать бирку. canvas — уже нужного размера (мм × LABEL_PX_MM); info — labelInfo(); sheetCtx — { sheet, geo, index } для карты.
+ * Нарисовать бирку. canvas — уже нужного размера (мм × LABEL_PX_MM); info — labelInfo();
+ * sheetCtx — { sheet, geo, index, detail } для карты и чертежа детали.
  */
 export function drawLabel(canvas, tpl, info, sheetCtx = null) {
-  const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height, f = tpl.fields || {}
-  const u = Math.min(H / 472, W / 684)                    // единица вёрстки — как на образце 684 × 472
+  const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height
+  const mm = W / tpl.w, line = Math.max(1, mm * 0.17), rot = tpl.rot !== false
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
-  const pad = Math.round((f.edges ? 44 : 14) * u)
 
-  // кромка — по четырём сторонам бирки, как деталь лежит на листе
-  if (f.edges) {
-    const side = (text, cx, cy, ang, maxW) => {
-      if (!text) return
+  // кромка — по сторонам бирки: там же, где она у детали на карте (карта и деталь на бирке повёрнуты одинаково)
+  if (tpl.edges) {
+    const pad = 5.5 * mm, sides = rot ? info.sidesCw : info.sides, lenH = rot ? info.sizeY : info.sizeX, lenV = rot ? info.sizeX : info.sizeY
+    const side = (name, len, cx, cy, ang, maxW) => {
+      if (!name) return
       ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang)
-      const t = fitText(ctx, text, maxW, 19 * u, 'bold')
+      const t = fitText(ctx, `${name} · ${r1(len)}`, maxW, 2.4 * mm, 'bold')
       ctx.textAlign = 'center'; ctx.fillText(t, 0, 0)
       const tw = ctx.measureText(t).width
-      ctx.fillRect(-tw / 2, 11 * u, tw, Math.max(1, 2 * u))
+      ctx.fillRect(-tw / 2, 1.4 * mm, tw, Math.max(1, 0.25 * mm))
       ctx.restore()
     }
-    const along = (name, mm) => (name ? `${name} · ${r1(mm)}` : '')     // кромка и длина стороны, на которой она стоит
-    side(along(info.sides.top, info.sizeX), W / 2, pad / 2, 0, W - pad * 2 - 90 * u)
-    side(along(info.sides.bottom, info.sizeX), W / 2, H - pad / 2 - 2 * u, 0, W * 0.5)
-    side(along(info.sides.right, info.sizeY), W - pad / 2, H / 2, Math.PI / 2, H - pad * 2)
-    side(along(info.sides.left, info.sizeY), pad / 2, H / 2, -Math.PI / 2, H - pad * 2)
+    side(sides.top, lenH, W / 2, pad / 2, 0, W - pad * 2 - 12 * mm)
+    side(sides.bottom, lenH, W / 2, H - pad / 2 - 0.3 * mm, 0, W * 0.5)
+    side(sides.right, lenV, W - pad / 2, H / 2, Math.PI / 2, H - pad * 2)
+    side(sides.left, lenV, pad / 2, H / 2, -Math.PI / 2, H - pad * 2)
   }
-  if (f.num) { ctx.font = `bold ${Math.round(24 * u)}px Arial, Helvetica, sans-serif`; ctx.textAlign = 'right'; ctx.fillText(String(info.num), W - pad - 4 * u, pad / 2 + 4 * u) }
-
-  // правая колонка: QR и карта
-  const colW = f.qr || f.map ? Math.round(Math.min(W * 0.36, H * 0.62)) : 0
-  const colX = W - pad - colW
-  let colY = pad + 8 * u
-  const bottom = H - pad - 6 * u
-  if (f.qr && info.qr) {
-    const size = Math.min(colW * 0.68, (bottom - colY) * (f.map ? 0.46 : 0.9))
-    try {
-      const qr = qrcode(0, 'M'); qr.addData(unescape(encodeURIComponent(info.qr))); qr.make()
-      const n = qr.getModuleCount(), cell = Math.max(1, Math.floor(size / n)), qx = Math.round(colX + colW - cell * n)
-      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect(qx + c * cell, Math.round(colY) + r * cell, cell, cell)
-      colY += cell * n + 14 * u
-    } catch { /* слишком длинная строка — без QR */ }
+  for (const it of tpl.items || []) {
+    const x = it.x * mm, y = it.y * mm, w = it.w * mm
+    if (it.type === 'qr') {
+      if (!info.qr) continue
+      try {
+        const qr = qrcode(0, 'M'); qr.addData(unescape(encodeURIComponent(info.qr))); qr.make()
+        const n = qr.getModuleCount(), cell = Math.max(1, Math.floor(Math.min(w, it.h * mm) / n))
+        for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect(Math.round(x) + c * cell, Math.round(y) + r * cell, cell, cell)
+      } catch { /* слишком длинная строка — без QR */ }
+    } else if (it.type === 'map') {
+      if (sheetCtx) drawSheetMap(ctx, x, y, w, it.h * mm, sheetCtx.sheet, sheetCtx.geo, sheetCtx.index, line, rot)
+    } else if (it.type === 'part') {
+      const p = sheetCtx?.sheet.placed[sheetCtx.index]
+      if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot)
+    } else {
+      const text = labelText(it.type, info)
+      if (!text) continue
+      const t = fitText(ctx, text, w, it.size * mm, it.bold ? 'bold' : '')
+      ctx.textAlign = it.align === 'right' ? 'right' : 'left'
+      ctx.fillText(t, it.align === 'right' ? x + w : x, y + it.size * mm * 0.62)
+    }
   }
-  if (f.map && sheetCtx && bottom - colY > 30 * u) drawSheetMap(ctx, colX, colY, colW, bottom - colY, sheetCtx.sheet, sheetCtx.geo, sheetCtx.index, Math.max(1, 1.4 * u))
-
-  // текст — слева
-  const tx = pad + 8 * u, tw = (colW ? colX - 12 * u : W - pad) - tx
-  let y = pad + 26 * u
-  ctx.textAlign = 'left'
-  const line = (text, size, weight = '', gap = 1.35) => {
-    if (!text) return
-    const t = fitText(ctx, text, tw, size * u, weight)
-    ctx.fillText(t, tx, y); y += size * u * gap
-  }
-  const sm = f.part ? 0.8 : 1                             // с чертежом текст компактнее
-  if (f.order) line(`Заказ ${info.order}`, 25 * sm)
-  if (f.material) line(info.material, 20 * sm)
-  if (f.prefix) line(info.prefix, 20 * sm)
-  const title = [f.des && info.des, f.name && info.name].filter(Boolean).join(' ')
-  line(title, 22 * sm, 'bold')
-  if (f.pos && info.pos) line(`Поз. ${info.pos}`, 20)
-  if (f.size) { y += (f.part ? 2 : 10) * u; line(`${r1(info.length)} x ${r1(info.width)} x ${info.qty} шт`, 28 * sm, 'bold', f.part ? 1.3 : 1.5) }
-  if (f.curved && info.curved.length) info.curved.forEach(t => line(`Крив. кромка: ${t}`, 17))
-  if (f.holes) { line(info.work.join(', '), 17); if (info.twoSided) line('⇅ обработка с двух сторон', 17, 'bold') }
-  // чертёж детали — под текстом, на всё оставшееся место
-  if (f.part && sheetCtx) {
-    const p = sheetCtx.sheet.placed[sheetCtx.index], top = y - 6 * u, bot = H - pad - (f.sheet ? 30 * u : 6 * u)
-    if (p && bot - top > 40 * u && tw > 40 * u) drawPart(ctx, tx, top, tw, bot - top, p, sheetCtx.detail, Math.max(1, 1.4 * u))
-  }
-  if (f.sheet) { ctx.font = `${Math.round(22 * u)}px Arial, Helvetica, sans-serif`; ctx.textAlign = 'left'; ctx.fillText(`Карта  ${info.sheet}`, tx, H - pad / 2 - 2 * u) }
   return canvas
 }
 
@@ -298,11 +345,9 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
       drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[p.detailIndex] })
       const bmp = `${stem}_${String(pi + 1).padStart(4, '0')}.bmp`
       files.push({ name: bmp, data: canvasToBmp(cv) })
-      // точка наклейки — центр детали; узкая деталь — бирка поворачивается вдоль неё
+      // точка наклейки — центр детали; бирки клеятся в одном положении (R = 0), как в образцах
       const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
-      const xs = pts.map(q => q.x), ys = pts.map(q => q.y)
-      const bw = Math.max(...xs) - Math.min(...xs), bh = Math.max(...ys) - Math.min(...ys)
-      const R = bw < tpl.w && bh >= tpl.w ? 90 : 0
+      const xs = pts.map(q => q.x), ys = pts.map(q => q.y), R = 0
       cycles.push(['Cycle_Label', [['LabelName', bmp], ['X', r1(ox + geo.marginL + p.x + (Math.min(...xs) + Math.max(...xs)) / 2)], ['Y', r1(oy + geo.marginB + p.y + (Math.min(...ys) + Math.max(...ys)) / 2)], ['R', R]]])
     })
     files.push({ name: cyc, data: strToU8(xml(cycles)) })
