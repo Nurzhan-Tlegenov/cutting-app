@@ -24,7 +24,7 @@ export async function loadTextures(user) {
       const { data, error } = await supabase.from('material_textures').select('name,data,size_mm,rot').eq('user_id', uid)
       if (!error && Array.isArray(data)) {
         cloud = true
-        for (const r of data) map[key(r.name)] = { name: r.name, data: r.data, size: Number(r.size_mm) || 600, rot: !!r.rot }
+        for (const r of data) if (!String(r.name).startsWith(LABEL_PREFIX)) map[key(r.name)] = { name: r.name, data: r.data, size: Number(r.size_mm) || 600, rot: !!r.rot }
       }
     } catch { cloud = false }
   }
@@ -55,6 +55,30 @@ export async function deleteTexture(user, name) {
 }
 
 export const textureKey = key
+
+// ─── Картинки шаблона бирки — в той же таблице (имя с приставкой), чтобы шли за аккаунтом и не раздували настройки ───
+const LABEL_PREFIX = '__label__'
+const lsLabel = uid => 'labelImages:' + (uid || 'anon')
+/** -> { id: строка data: } */
+export async function loadLabelImages(user) {
+  const uid = user?.id || null
+  let map = {}
+  try { map = JSON.parse(localStorage.getItem(lsLabel(uid)) || '{}') || {} } catch { map = {} }
+  if (uid) {
+    try {
+      const { data, error } = await supabase.from('material_textures').select('name,data').eq('user_id', uid).like('name', LABEL_PREFIX + '%')
+      if (!error && Array.isArray(data)) for (const r of data) map[r.name.slice(LABEL_PREFIX.length)] = r.data
+    } catch { /* таблицы нет — только с устройства */ }
+  }
+  return map
+}
+export async function saveLabelImage(user, id, data) {
+  const r = await saveTexture(user, LABEL_PREFIX + id, { data, size: 0, rot: false })
+  if (r.cloud) { const all = readLocal(user?.id || null); if (all[key(LABEL_PREFIX + id)]) { delete all[key(LABEL_PREFIX + id)]; writeLocal(user?.id || null, all) } return r }
+  // таблицы нет — на устройство, отдельно от текстур
+  const all = readLocal(user?.id || null); delete all[key(LABEL_PREFIX + id)]; writeLocal(user?.id || null, all)
+  try { const m = JSON.parse(localStorage.getItem(lsLabel(user?.id)) || '{}') || {}; m[id] = data; localStorage.setItem(lsLabel(user?.id), JSON.stringify(m)); return { ok: true, cloud: false } } catch { return { ok: false, cloud: false } }
+}
 
 /** Картинка с телефона -> JPEG не больше max px по большей стороне (data URL) */
 export function fileToTexture(file, max = 512) {

@@ -9,6 +9,7 @@
 import qrcode from 'qrcode-generator'
 import { zipSync, strToU8 } from 'fflate'
 import { getUserSettings, saveUserSettings } from './userSettings'
+import { loadLabelImages, saveLabelImage } from './materialTextures'
 import { detailMeta } from './partLabel'
 import { isTwoSided } from './partInfo'
 import { placedTurns, placedHoles } from './partHoles'
@@ -89,27 +90,62 @@ export function metaItems(details) {
 }
 /** Элемент рисуется прямоугольником с высотой (картинка), а не строкой текста */
 export const isBox = it => itemKind(it.type) === 'pic' || !!it.img || it.type === 'image'
-// картинки шаблона: строка data: -> Image
+// Картинки шаблона. В шаблоне — ссылка «ref:<id>», сама картинка хранится отдельно (за аккаунтом) в хорошем качестве.
 const IMAGES = new Map()
-export function preloadLabelImages(tpl) {
-  return Promise.all((tpl.items || []).filter(i => i.img && !IMAGES.get(i.img)?.complete).map(i => new Promise(res => {
-    const im = new Image(); im.onload = im.onerror = () => res(); im.src = i.img; IMAGES.set(i.img, im)
+let imgUser = null, imgStore = null, imgStoreUid
+const imageStore = () => { const uid = imgUser?.id || null; if (!imgStore || imgStoreUid !== uid) { imgStoreUid = uid; imgStore = loadLabelImages(imgUser) } return imgStore }
+export async function preloadLabelImages(tpl) {
+  const need = (tpl.items || []).filter(i => i.img && !IMAGES.get(i.img)?.complete)
+  if (!need.length) return
+  const store = need.some(i => i.img.startsWith('ref:')) ? await imageStore() : {}
+  await Promise.all(need.map(i => new Promise(res => {
+    const src = i.img.startsWith('ref:') ? store[i.img.slice(4)] : i.img
+    if (!src) { res(); return }
+    const im = new Image(); im.onload = im.onerror = () => res(); im.src = src; IMAGES.set(i.img, im)
   })))
 }
-/** Файл или адрес картинки -> маленькая чёрно-белая картинка (строка data:), которая хранится в шаблоне */
+/**
+ * Файл (PNG, JPG, BMP, SVG…) или адрес картинки -> ссылка «ref:<id>» для шаблона. Картинка сохраняется как есть,
+ * до 1400 точек по большей стороне — это больше, чем принтер бирок может напечатать на всю ширину бирки.
+ */
 export async function imageToLabel(src) {
   const blob = typeof src === 'string' ? await (await fetch(src)).blob() : src
   const url = URL.createObjectURL(blob)
   try {
     const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Не удалось прочитать картинку')); i.src = url })
-    const k = Math.min(1, 160 / Math.max(im.width, im.height)), cv = document.createElement('canvas')
-    cv.width = Math.max(1, Math.round(im.width * k)); cv.height = Math.max(1, Math.round(im.height * k))
+    const iw = im.naturalWidth || 600, ih = im.naturalHeight || 600                 // у SVG размеров может не быть
+    const k = Math.min(1, 1400 / Math.max(iw, ih)), cv = document.createElement('canvas')
+    cv.width = Math.max(1, Math.round(iw * k)); cv.height = Math.max(1, Math.round(ih * k))
     const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(im, 0, 0, cv.width, cv.height)
-    const px = g.getImageData(0, 0, cv.width, cv.height)
-    for (let i = 0; i < px.data.length; i += 4) { const v = (px.data[i] * 3 + px.data[i + 1] * 6 + px.data[i + 2]) / 10 < 150 ? 0 : 255; px.data[i] = px.data[i + 1] = px.data[i + 2] = v; px.data[i + 3] = 255 }
-    g.putImageData(px, 0, 0)
-    return cv.toDataURL('image/png')
+    let data = cv.toDataURL('image/png')
+    if (data.length > 700000) data = cv.toDataURL('image/jpeg', 0.92)
+    const id = Math.random().toString(36).slice(2, 10)
+    const r = await saveLabelImage(imgUser, id, data)
+    if (!r.ok) throw new Error('Не удалось сохранить картинку')
+    ;(await imageStore())[id] = data
+    return 'ref:' + id
   } finally { URL.revokeObjectURL(url) }
+}
+// Картинка в размере печати, переведённая в чёрные и белые точки с рассеиванием (полутона — как в газете):
+// принтер бирок печатает только чёрным, так фотографии и серые логотипы выходят узнаваемо, а чёткие значки — чётко.
+const PRINTS = new Map()
+function printImage(key, im, w, h) {
+  const id = `${key}|${w}|${h}`
+  if (PRINTS.has(id)) return PRINTS.get(id)
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+  const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0, w, h)
+  const px = g.getImageData(0, 0, w, h), d = px.data, L = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) L[i] = (d[i * 4] * 3 + d[i * 4 + 1] * 6 + d[i * 4 + 2]) / 10
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x, v = L[i] < 128 ? 0 : 255, e = L[i] - v
+    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255
+    if (x + 1 < w) L[i + 1] += e * 7 / 16
+    if (y + 1 < h) { if (x > 0) L[i + w - 1] += e * 3 / 16; L[i + w] += e * 5 / 16; if (x + 1 < w) L[i + w + 1] += e / 16 }
+  }
+  g.putImageData(px, 0, 0)
+  if (PRINTS.size > 40) PRINTS.delete(PRINTS.keys().next().value)
+  PRINTS.set(id, cv)
+  return cv
 }
 // раскладка по умолчанию — как на образце бирки (85 × 59 мм)
 const BASE = { w: 85, h: 59 }
@@ -144,14 +180,14 @@ export function normalizeLabel(raw) {
   items = items.map(i => {
     const pic = isBox(i), iw = Math.max(3, Math.min(w, Number(i.w) || 20))
     const o = { id: i.id || i.type + '_' + Math.random().toString(36).slice(2, 7), type: i.type, w: iw, bold: !!i.bold, align: i.align === 'right' ? 'right' : 'left' }
-    if (typeof i.img === 'string' && i.img.startsWith('data:image/') && i.img.length < 40000) o.img = i.img
+    if (typeof i.img === 'string' && (i.img.startsWith('ref:') || (i.img.startsWith('data:image/') && i.img.length < 40000))) o.img = i.img
     if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 10))
     if (itemKind(i.type) !== 'pic') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
     const ih = pic ? o.h : o.size * 1.25
     o.x = Math.max(0, Math.min(w - iw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - ih, Number(i.y) || 0))
     return o
   })
-  return { enabled: !!t.enabled, w, h, edges: t.edges ?? (t.fields ? t.fields.edges !== false : true), rot: t.rot !== false, items,
+  return { enabled: !!t.enabled, w, h, edges: t.edges ?? (t.fields ? t.fields.edges !== false : true), rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
     qr: { parts: Array.isArray(t.qr?.parts) ? t.qr.parts.filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
@@ -159,10 +195,11 @@ export function resizeLabel(tpl, w, h) {
   const kx = w / tpl.w, ky = h / tpl.h, k = Math.min(kx, ky)
   return normalizeLabel({ ...tpl, w, h, items: tpl.items.map(i => ({ ...i, x: i.x * kx, y: i.y * ky, w: i.w * kx, ...(i.h ? { h: i.h * ky } : {}), ...(i.size ? { size: i.size * k } : {}) })) })
 }
-export const getLabelTpl = user => normalizeLabel(getUserSettings(user).labelTpl)
+export const getLabelTpl = user => { imgUser = user || imgUser; return normalizeLabel(getUserSettings(user).labelTpl) }
 export const saveLabelTpl = (tpl, user) => saveUserSettings({ labelTpl: tpl }, user)
 
-export const LABEL_PX_MM = 8                               // точек на мм (≈ 203 dpi — термопринтер)
+export const LABEL_PX_MM = 8                               // точек на мм при 203 dpi (обычный термопринтер)
+const pxMm = tpl => ({ 300: 12, 600: 24 })[tpl?.dpi] || LABEL_PX_MM
 const edgeName = v => (!v || v === 'false' ? '' : v === 'default' || v === true ? 'Кромка' : String(v))
 const r1 = v => String(Math.round((Number(v) || 0) * 10) / 10)
 
@@ -377,8 +414,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
         const im = IMAGES.get(it.img)
         if (im?.complete && im.naturalWidth) {
           const bh = it.h * mm, k = Math.min(w / im.naturalWidth, bh / im.naturalHeight)
-          ctx.imageSmoothingEnabled = false
-          ctx.drawImage(im, x, y, im.naturalWidth * k, im.naturalHeight * k)
+          ctx.drawImage(printImage(it.img, im, Math.max(1, Math.round(im.naturalWidth * k)), Math.max(1, Math.round(im.naturalHeight * k))), Math.round(x), Math.round(y))
         }
         continue
       }
@@ -390,17 +426,18 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
   return canvas
 }
 
-export const labelPx = tpl => ({ w: Math.round(tpl.w * LABEL_PX_MM / 4) * 4, h: Math.round(tpl.h * LABEL_PX_MM) })
+/** Размер картинки бирки в точках; preview — для экрана (без лишнего разрешения) */
+export const labelPx = (tpl, preview = false) => { const k = preview ? LABEL_PX_MM : pxMm(tpl); return { w: Math.round(tpl.w * k / 4) * 4, h: Math.round(tpl.h * k) } }
 
 /** canvas -> BMP, 1 бит на точку (чёрно-белая — как печатает термопринтер; файл в 20 раз меньше полноцветного) */
-export function canvasToBmp(canvas) {
+export function canvasToBmp(canvas, dpi = 203) {
   const w = canvas.width, h = canvas.height, px = canvas.getContext('2d').getImageData(0, 0, w, h).data
   const row = Math.ceil(w / 32) * 4, off = 62, size = off + row * h
   const out = new Uint8Array(size), dv = new DataView(out.buffer)
   out[0] = 0x42; out[1] = 0x4D
   dv.setUint32(2, size, true); dv.setUint32(10, off, true); dv.setUint32(14, 40, true)
   dv.setInt32(18, w, true); dv.setInt32(22, h, true); dv.setUint16(26, 1, true); dv.setUint16(28, 1, true)
-  dv.setUint32(34, row * h, true); dv.setInt32(38, 7992, true); dv.setInt32(42, 7992, true)      // 203 dpi
+  dv.setUint32(34, row * h, true); dv.setInt32(38, Math.round(dpi * 39.37), true); dv.setInt32(42, Math.round(dpi * 39.37), true)
   dv.setUint32(46, 2, true); dv.setUint32(50, 2, true)
   dv.setUint32(54, 0x00000000, true); dv.setUint32(58, 0x00FFFFFF, true)                          // палитра: 0 — чёрный, 1 — белый
   for (let y = 0; y < h; y++) {
@@ -430,7 +467,7 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h
       drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[p.detailIndex] })
       const bmp = `${stem}_${String(pi + 1).padStart(4, '0')}.bmp`
-      files.push({ name: bmp, data: canvasToBmp(cv) })
+      files.push({ name: bmp, data: canvasToBmp(cv, tpl.dpi) })
       // точка наклейки — центр детали; бирки клеятся в одном положении (R = 0), как в образцах
       const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
       const xs = pts.map(q => q.x), ys = pts.map(q => q.y), R = 0

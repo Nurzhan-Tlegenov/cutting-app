@@ -27,7 +27,7 @@ function Label({ tpl, order, mat, si, pi }) {
   useEffect(() => {
     const cv = ref.current
     if (!cv) return
-    const { w, h } = labelPx(tpl)
+    const { w, h } = labelPx(tpl, true)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[si]
     const draw = () => drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
@@ -52,7 +52,7 @@ function LabelEditor({ tpl, onChange, order, mat }) {
   useEffect(() => {
     const cv = cvRef.current
     if (!cv || !mat) return
-    const { w, h } = labelPx(t)
+    const { w, h } = labelPx(t, true)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[0]
     const draw = () => drawLabel(cv, t, labelInfo(order, mat, 0, 0), { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] })
@@ -63,7 +63,7 @@ function LabelEditor({ tpl, onChange, order, mat }) {
   const [imgErr, setImgErr] = useState('')
   const setImage = async src => {
     setImgErr('')
-    try { const img = await imageToLabel(src); if (img.length > 39000) throw new Error('Картинка слишком сложная — возьмите попроще (значок, контур)'); edit({ img, h: cur?.h || 9, w: cur?.img ? cur.w : 9 }) }
+    try { const img = await imageToLabel(src); edit({ img, h: cur?.h || 9, w: cur?.img ? cur.w : 9 }) }
     catch (e) { setImgErr(typeof src === 'string' ? 'С этого адреса картинку взять не получилось (сайт не разрешает). Сохраните её на телефон и выберите файлом.' : String(e?.message || e)) }
   }
   const down = (e, it, mode) => {
@@ -240,6 +240,14 @@ export default function LabelsPage() {
                 {label}
               </label>
             ))}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Разрешение печати
+              <select value={tpl.dpi} onChange={e => change({ dpi: Number(e.target.value) })} style={{ width: 'auto', padding: '5px 8px', fontSize: 13 }}>
+                <option value={203}>203 dpi (обычный принтер бирок)</option>
+                <option value={300}>300 dpi</option>
+                <option value={600}>600 dpi</option>
+              </select>
+            </label>
             <button type="button" onClick={() => { if (window.confirm('Вернуть раскладку по образцу?')) change(resizeLabel({ ...DEFAULT_LABEL(), rot: tpl.rot, edges: tpl.edges }, tpl.w, tpl.h)) }}
               style={{ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ Раскладка по образцу</button>
             <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
