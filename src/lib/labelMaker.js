@@ -167,7 +167,7 @@ export function newLabelItem(type, tpl) {
     : itemKind(type) === 'pic' || type === 'image' ? { type, x: tpl.w * 0.3, y: tpl.h * 0.3, w: tpl.w * 0.3, h: tpl.h * 0.3 } : { type, x: tpl.w * 0.1, y: tpl.h * 0.45, w: tpl.w * 0.5, size: 2.6 * Math.min(kx, ky) }
   return { ...it, id: type + '_' + Math.random().toString(36).slice(2, 7) }
 }
-export const DEFAULT_LABEL = () => { const t = { enabled: false, w: BASE.w, h: BASE.h, edges: true, rot: true, qr: { ...QR_DEFAULT } }; return { ...t, items: DEFAULT_ITEMS.map(i => newLabelItem(i.type, t)) } }
+export const DEFAULT_LABEL = () => { const t = { enabled: false, w: BASE.w, h: BASE.h, edges: true, rot: true, qr: { ...QR_DEFAULT }, order: { prefix: 'Заказ', number: true, name: true }, part: { dims: false, dimSize: 2 } }; return { ...t, items: DEFAULT_ITEMS.map(i => newLabelItem(i.type, t)) } }
 export function normalizeLabel(raw) {
   const d = DEFAULT_LABEL(), t = raw && typeof raw === 'object' ? raw : {}
   const n = (v, def, lo, hi) => { const x = Number(v); return isFinite(x) && x > 0 ? Math.max(lo, Math.min(hi, x)) : def }
@@ -188,6 +188,10 @@ export function normalizeLabel(raw) {
     return o
   })
   return { enabled: !!t.enabled, w, h, edges: t.edges ?? (t.fields ? t.fields.edges !== false : true), rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
+    // строка «Заказ»: своя подпись, номер от приложения и название заказа включаются отдельно
+    order: { prefix: typeof t.order?.prefix === 'string' ? t.order.prefix.slice(0, 30) : 'Заказ', number: t.order?.number !== false, name: t.order?.name !== false },
+    // чертёж детали: размеры торцевых отверстий от края и высота их цифр (мм)
+    part: { dims: !!t.part?.dims, dimSize: Math.max(1, Math.min(6, Number(t.part?.dimSize) || 2)) },
     qr: { parts: Array.isArray(t.qr?.parts) ? t.qr.parts.filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
@@ -245,7 +249,7 @@ export function labelInfo(order, mat, si, pi) {
  * контур, вырезы, выемки и пазы лицевой стороны, отверстия в пласть (кружки) и в торец (полоса на глубину),
  * Кромка на чертеже не показывается. Обработка с изнанки не показывается.
  */
-export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false) {
+export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx = 0) {
   const m = 2 * line, x = x0 + m, y = y0 + m, w = Math.max(4, w0 - 2 * m), h = Math.max(4, h0 - 2 * m)
   let c = d?.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
@@ -282,16 +286,38 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false) {
       ctx.beginPath(); for (let t = x0 - (y1 - y0); t < x1; t += 5 * line) { ctx.moveTo(t, y1); ctx.lineTo(t + (y1 - y0), y0) } ctx.stroke()
       ctx.restore()
     })
+    const dims = []                                        // размеры торцевых отверстий: расстояние от ближнего края детали до оси отверстия
     // отверстия: в пласть — кружок по диаметру, в торец — полоса от кромки на глубину
     getAllDrillPoints(c, DW, DL, true).forEach(pt => {
       const a = R(pt.x, pt.y)
       if (pt.edge) {
         const dep = pt.depth > 0 ? pt.depth : 20, b = R(pt.x + pt.dx * dep, pt.y + pt.dy * dep)
         ctx.lineWidth = Math.max(2 * line, (pt.d || 8) * k); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
+        if (dimPx > 0) dims.push({ a, b, edge: pt.dx ? (pt.dx > 0 ? 'l' : 'r') : (pt.dy > 0 ? 'b' : 't'), v: pt.dx ? Math.min(pt.y, DL - pt.y) : Math.min(pt.x, DW - pt.x), s: pt.dx ? pt.y : pt.x })
         return
       }
       ctx.beginPath(); ctx.arc(a[0], a[1], Math.max(1.6 * line, (pt.d || 8) * k / 2), 0, Math.PI * 2); ctx.fill()
     })
+    if (dims.length) {
+      // цифра — внутри детали, сразу за концом отверстия; у соседних отверстий одного торца — в два ряда, чтобы не слипались
+      ctx.font = `bold ${Math.max(6, Math.round(dimPx))}px Arial, Helvetica, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const placed = []                                    // занятые места — цифры не наезжают друг на друга
+      const hit = r => placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3])
+      dims.sort((p1, p2) => p1.s - p2.s).forEach(q => {
+        const dx = q.b[0] - q.a[0], dy = q.b[1] - q.a[1], l = Math.hypot(dx, dy) || 1, text = r1(q.v)
+        const tw = ctx.measureText(text).width, horiz = Math.abs(dx) > Math.abs(dy)
+        let off = (horiz ? tw / 2 : dimPx / 2) + dimPx * 0.35, cx, cy, box
+        for (let n = 0; n < 6; n++, off += horiz ? tw + dimPx * 0.4 : dimPx * 1.15) {
+          cx = q.b[0] + dx / l * off; cy = q.b[1] + dy / l * off
+          box = [cx - tw / 2 - 1, cy - dimPx * 0.55, cx + tw / 2 + 1, cy + dimPx * 0.55]
+          if (!hit(box)) break
+        }
+        placed.push(box)
+        ctx.fillStyle = '#fff'; ctx.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1])
+        ctx.fillStyle = '#000'; ctx.fillText(text, cx, cy)
+      })
+      ctx.textBaseline = 'alphabetic'
+    }
   }
   ctx.restore()
 }
@@ -334,9 +360,9 @@ function fitText(ctx, text, maxW, size, weight = '') {
 }
 
 /** Текст элемента бирки */
-export function labelText(type, info) {
+export function labelText(type, info, tpl = null) {
   switch (type) {
-    case 'order': return `Заказ ${info.order}`
+    case 'order': { const o = tpl?.order || { prefix: 'Заказ', number: true, name: true }; return [o.prefix, o.number && info.orderNumber, o.name && info.orderName].filter(Boolean).join(' ') }
     case 'material': return info.material
     case 'title': return [info.des, info.name].filter(Boolean).join(' ')
     case 'name': return info.name
@@ -406,9 +432,9 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       if (sheetCtx) drawSheetMap(ctx, x, y, w, it.h * mm, sheetCtx.sheet, sheetCtx.geo, sheetCtx.index, line, rot)
     } else if (it.type === 'part') {
       const p = sheetCtx?.sheet.placed[sheetCtx.index]
-      if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot)
+      if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0)
     } else {
-      const text = labelText(it.type, info)
+      const text = labelText(it.type, info, tpl)
       if (!text) continue                                   // параметра у детали нет — ни текста, ни картинки
       if (it.img || it.type === 'image') {
         const im = IMAGES.get(it.img)
@@ -427,7 +453,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
 }
 
 /** Размер картинки бирки в точках; preview — для экрана (без лишнего разрешения) */
-export const labelPx = (tpl, preview = false) => { const k = preview ? LABEL_PX_MM : pxMm(tpl); return { w: Math.round(tpl.w * k / 4) * 4, h: Math.round(tpl.h * k) } }
+export const labelPx = (tpl, preview = false) => { const k = preview ? 12 : pxMm(tpl); return { w: Math.round(tpl.w * k / 4) * 4, h: Math.round(tpl.h * k) } }
 
 /** canvas -> BMP, 1 бит на точку (чёрно-белая — как печатает термопринтер; файл в 20 раз меньше полноцветного) */
 export function canvasToBmp(canvas, dpi = 203) {

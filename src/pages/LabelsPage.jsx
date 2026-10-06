@@ -115,6 +115,26 @@ function LabelEditor({ tpl, onChange, order, mat }) {
               <button type="button" style={chip(cur.align === 'right')} onClick={() => edit({ align: cur.align === 'right' ? 'left' : 'right' })}>{cur.align === 'right' ? 'По правому краю' : 'По левому краю'}</button>
             </>
           )}
+          {cur.type === 'order' && !cur.img && (
+            <div style={{ flex: '1 1 100%', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Подпись
+                <input type="text" key={'op' + tpl.order.prefix} defaultValue={tpl.order.prefix} placeholder="без подписи" onBlur={e => { if (e.target.value !== tpl.order.prefix) onChange({ ...tpl, order: { ...tpl.order, prefix: e.target.value.trim() } }) }} style={{ width: 120, marginLeft: 6, padding: '6px 8px' }} /></label>
+              <button type="button" style={chip(tpl.order.number)} onClick={() => onChange({ ...tpl, order: { ...tpl.order, number: !tpl.order.number } })}>{tpl.order.number ? '✓ ' : ''}Номер от приложения</button>
+              <button type="button" style={chip(tpl.order.name)} onClick={() => onChange({ ...tpl, order: { ...tpl.order, name: !tpl.order.name } })}>{tpl.order.name ? '✓ ' : ''}Название заказа</button>
+            </div>
+          )}
+          {cur.type === 'part' && (
+            <div style={{ flex: '1 1 100%', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type="button" style={chip(tpl.part.dims)} onClick={() => onChange({ ...tpl, part: { ...tpl.part, dims: !tpl.part.dims } })}>{tpl.part.dims ? '✓ ' : ''}Размеры торцевых отверстий от края</button>
+              {tpl.part.dims && (
+                <>
+                  <button type="button" style={chip(false)} onClick={() => onChange({ ...tpl, part: { ...tpl.part, dimSize: tpl.part.dimSize - 0.2 } })}>A−</button>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>цифры {tpl.part.dimSize.toFixed(1)} мм</span>
+                  <button type="button" style={chip(false)} onClick={() => onChange({ ...tpl, part: { ...tpl.part, dimSize: tpl.part.dimSize + 0.2 } })}>A+</button>
+                </>
+              )}
+            </div>
+          )}
           {itemKind(cur.type) === 'text' && (
             <>
               <button type="button" style={chip(!!cur.img)} onClick={() => fileRef.current?.click()}>🖼 {cur.img ? 'Другая картинка' : 'Картинка вместо текста'}</button>
