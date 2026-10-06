@@ -49,12 +49,17 @@ export const QR_PARTS = [
   ['sheet', 'Номер карты'],
   ['num', 'Номер детали на листе'],
 ]
-const QR_DEFAULT = { parts: ['number', 'sheet', 'num', 'des', 'size'], sep: ';', text: '' }
+const QR_DEFAULT = { parts: ['number', 'sheet', 'num', 'des', 'size'], sep: ';', text: '', latin: false }
+// кириллица -> латиница (как в именах файлов образца: «Белый» -> «Belij»)
+const LAT = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'j', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'i', ь: '', э: 'e', ю: 'yu', я: 'ya',
+  ә: 'a', ғ: 'g', қ: 'k', ң: 'n', ө: 'o', ұ: 'u', ү: 'u', һ: 'h', і: 'i' }
+export const toLatin = str => String(str || '').replace(/[а-яёәғқңөұүһі]/gi, ch => { const l = LAT[ch.toLowerCase()] ?? ch; return ch === ch.toLowerCase() ? l : l.charAt(0).toUpperCase() + l.slice(1) })
 export function labelQr(tpl, info) {
   const q = tpl.qr || QR_DEFAULT
   const val = { text: q.text, number: info.orderNumber, order: info.orderName, des: info.des, name: info.name, pos: info.pos, prefix: info.prefix, material: info.materialName,
     size: `${r1(info.length)}x${r1(info.width)}x${info.thickness || ''}`, sheet: `L${info.sheet}`, num: `N${info.num}` }
-  return QR_PARTS.filter(([k]) => q.parts.includes(k)).map(([k]) => String(val[k] ?? '').trim()).filter(Boolean).join(q.sep)
+  const out = QR_PARTS.filter(([k]) => q.parts.includes(k)).map(([k]) => String(val[k] ?? '').trim()).filter(Boolean).join(q.sep)
+  return (q.latin ? toLatin(out) : out).replace(/\s+/g, '_')        // пробелов в коде нет — вместо них прочерк
 }
 export const itemKind = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
 export const itemTitle = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[1] || type
@@ -97,7 +102,7 @@ export function normalizeLabel(raw) {
     return o
   })
   return { enabled: !!t.enabled, w, h, edges: t.edges ?? (t.fields ? t.fields.edges !== false : true), rot: t.rot !== false, items,
-    qr: { parts: Array.isArray(t.qr?.parts) ? t.qr.parts.filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60) } }
+    qr: { parts: Array.isArray(t.qr?.parts) ? t.qr.parts.filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
 export function resizeLabel(tpl, w, h) {

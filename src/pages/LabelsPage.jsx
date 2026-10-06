@@ -127,6 +127,11 @@ function LabelEditor({ tpl, onChange, order, mat }) {
             <label style={{ flex: '0 0 96px', fontSize: 12, color: 'var(--text-muted)' }}>Разделитель
               <input type="text" key={'s' + tpl.qr.sep} defaultValue={tpl.qr.sep} maxLength={3} onBlur={e => { if (e.target.value !== tpl.qr.sep) onChange({ ...tpl, qr: { ...tpl.qr, sep: e.target.value } }) }} style={{ marginTop: 3, padding: '7px 9px', textAlign: 'center' }} /></label>
           </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, cursor: 'pointer', marginTop: 8 }}>
+            <input type="checkbox" checked={!!tpl.qr.latin} onChange={e => onChange({ ...tpl, qr: { ...tpl.qr, latin: e.target.checked } })} style={{ width: 17, height: 17 }} />
+            Перевести в латиницу
+          </label>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Пробелы в коде всегда заменяются прочерком «_».</div>
           <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>
             Сейчас в коде: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{mat ? labelQr(tpl, labelInfo(order, mat, 0, 0)) || '— пусто —' : '—'}</span>
           </div>
