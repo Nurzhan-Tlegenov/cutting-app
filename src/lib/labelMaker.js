@@ -17,7 +17,9 @@ import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
 
 // Бирка собирается из элементов: каждый можно поставить в любое место бирки и задать ему размер.
-// Элемент шаблона: { id, type, x, y, w, h (мм), size (высота шрифта, мм), bold }.
+// Элемент шаблона: { id, type, x, y, w, h (мм), size (высота шрифта, мм), bold, img }.
+// img — своя картинка вместо текста: печатается, только когда у детали этот параметр есть
+// (например, значок сверла вместо слов «нижняя присадка»).
 export const LABEL_ITEMS = [
   ['order', 'Заказ', 'text'],
   ['material', 'Материал', 'text'],
@@ -28,7 +30,20 @@ export const LABEL_ITEMS = [
   ['prefix', 'Изделие (префикс)', 'text'],
   ['size', 'Размер и количество', 'text'],
   ['curved', 'Криволинейная кромка', 'text'],
-  ['work', 'Отверстия, пазы — текстом', 'text'],
+  ['work', 'Вся обработка одной строкой', 'text'],
+  ['faceHoles', 'Отверстия в пласть — с лица', 'text'],
+  ['backHoles', 'Отверстия с изнанки (нижняя присадка)', 'text'],
+  ['endHoles', 'Отверстия в торец', 'text'],
+  ['grooves', 'Пазы', 'text'],
+  ['pockets', 'Выемки', 'text'],
+  ['cutouts', 'Вырезы', 'text'],
+  ['twoSided', 'Обработка с двух сторон', 'text'],
+  ['edgeList', 'Кромка — списком', 'text'],
+  ['length', 'Длина', 'text'],
+  ['width', 'Ширина', 'text'],
+  ['thickness', 'Толщина', 'text'],
+  ['qty', 'Количество', 'text'],
+  ['image', 'Своя картинка (логотип)', 'text'],
   ['sheet', 'Номер карты', 'text'],
   ['num', 'Номер детали на листе', 'text'],
   ['part', 'Чертёж детали', 'pic'],
@@ -62,7 +77,40 @@ export function labelQr(tpl, info) {
   return (q.latin ? toLatin(out) : out).replace(/\s+/g, '_')        // пробелов в коде нет — вместо них прочерк
 }
 export const itemKind = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
-export const itemTitle = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[1] || type
+// свойства детали из импорта (contour.meta) — элементы вида «meta:<имя>»
+const META_NAMES = { des: 'Обозначение', pos: 'Позиция', material: 'Материал детали', product: 'Изделие', block: 'Блок', thickness: 'Толщина детали', id: 'ID детали', texDir: 'Направление текстуры', comment: 'Комментарий', note: 'Примечание' }
+export const itemTitle = type => (type.startsWith('meta:') ? `Свойство: ${META_NAMES[type.slice(5)] || type.slice(5)}` : (LABEL_ITEMS.find(x => x[0] === type) || [])[1] || type)
+const knownType = type => typeof type === 'string' && (type.startsWith('meta:') || LABEL_ITEMS.some(x => x[0] === type))
+/** Свойства, вшитые в детали заказа, — их тоже можно вывести на бирку: [[тип, название]] */
+export function metaItems(details) {
+  const keys = new Set()
+  for (const d of details || []) { const m = detailMeta(d); if (m) for (const [k, v] of Object.entries(m)) if ((typeof v === 'string' && v.trim()) || typeof v === 'number') keys.add(k) }
+  return [...keys].filter(k => !['des', 'pos'].includes(k)).map(k => ['meta:' + k, itemTitle('meta:' + k)])
+}
+/** Элемент рисуется прямоугольником с высотой (картинка), а не строкой текста */
+export const isBox = it => itemKind(it.type) === 'pic' || !!it.img || it.type === 'image'
+// картинки шаблона: строка data: -> Image
+const IMAGES = new Map()
+export function preloadLabelImages(tpl) {
+  return Promise.all((tpl.items || []).filter(i => i.img && !IMAGES.get(i.img)?.complete).map(i => new Promise(res => {
+    const im = new Image(); im.onload = im.onerror = () => res(); im.src = i.img; IMAGES.set(i.img, im)
+  })))
+}
+/** Файл или адрес картинки -> маленькая чёрно-белая картинка (строка data:), которая хранится в шаблоне */
+export async function imageToLabel(src) {
+  const blob = typeof src === 'string' ? await (await fetch(src)).blob() : src
+  const url = URL.createObjectURL(blob)
+  try {
+    const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Не удалось прочитать картинку')); i.src = url })
+    const k = Math.min(1, 160 / Math.max(im.width, im.height)), cv = document.createElement('canvas')
+    cv.width = Math.max(1, Math.round(im.width * k)); cv.height = Math.max(1, Math.round(im.height * k))
+    const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(im, 0, 0, cv.width, cv.height)
+    const px = g.getImageData(0, 0, cv.width, cv.height)
+    for (let i = 0; i < px.data.length; i += 4) { const v = (px.data[i] * 3 + px.data[i + 1] * 6 + px.data[i + 2]) / 10 < 150 ? 0 : 255; px.data[i] = px.data[i + 1] = px.data[i + 2] = v; px.data[i + 3] = 255 }
+    g.putImageData(px, 0, 0)
+    return cv.toDataURL('image/png')
+  } finally { URL.revokeObjectURL(url) }
+}
 // раскладка по умолчанию — как на образце бирки (85 × 59 мм)
 const BASE = { w: 85, h: 59 }
 const DEFAULT_ITEMS = [
@@ -80,7 +128,7 @@ const DEFAULT_ITEMS = [
 export function newLabelItem(type, tpl) {
   const d = DEFAULT_ITEMS.find(i => i.type === type), kx = tpl.w / BASE.w, ky = tpl.h / BASE.h
   const it = d ? { ...d, x: d.x * kx, y: d.y * ky, w: d.w * kx, ...(d.h ? { h: d.h * ky } : {}), ...(d.size ? { size: d.size * Math.min(kx, ky) } : {}) }
-    : itemKind(type) === 'pic' ? { type, x: tpl.w * 0.3, y: tpl.h * 0.3, w: tpl.w * 0.3, h: tpl.h * 0.3 } : { type, x: tpl.w * 0.1, y: tpl.h * 0.45, w: tpl.w * 0.5, size: 2.6 * Math.min(kx, ky) }
+    : itemKind(type) === 'pic' || type === 'image' ? { type, x: tpl.w * 0.3, y: tpl.h * 0.3, w: tpl.w * 0.3, h: tpl.h * 0.3 } : { type, x: tpl.w * 0.1, y: tpl.h * 0.45, w: tpl.w * 0.5, size: 2.6 * Math.min(kx, ky) }
   return { ...it, id: type + '_' + Math.random().toString(36).slice(2, 7) }
 }
 export const DEFAULT_LABEL = () => { const t = { enabled: false, w: BASE.w, h: BASE.h, edges: true, rot: true, qr: { ...QR_DEFAULT } }; return { ...t, items: DEFAULT_ITEMS.map(i => newLabelItem(i.type, t)) } }
@@ -88,15 +136,17 @@ export function normalizeLabel(raw) {
   const d = DEFAULT_LABEL(), t = raw && typeof raw === 'object' ? raw : {}
   const n = (v, def, lo, hi) => { const x = Number(v); return isFinite(x) && x > 0 ? Math.max(lo, Math.min(hi, x)) : def }
   const w = n(t.w, d.w, 20, 200), h = n(t.h, d.h, 15, 200)
-  let items = Array.isArray(t.items) ? t.items.filter(i => i && LABEL_ITEMS.some(x => x[0] === i.type)) : null
+  let items = Array.isArray(t.items) ? t.items.filter(i => i && knownType(i.type)) : null
   if (!items) {                                            // шаблон прежнего вида (галочки) — раскладка по умолчанию с теми же полями
     const f = t.fields, base = { w, h }
     items = DEFAULT_ITEMS.filter(i => !f || (i.type === 'title' ? f.name !== false || f.des !== false : f[i.type] !== false)).map(i => newLabelItem(i.type, base))
   }
   items = items.map(i => {
-    const pic = itemKind(i.type) === 'pic', iw = Math.max(3, Math.min(w, Number(i.w) || 20))
+    const pic = isBox(i), iw = Math.max(3, Math.min(w, Number(i.w) || 20))
     const o = { id: i.id || i.type + '_' + Math.random().toString(36).slice(2, 7), type: i.type, w: iw, bold: !!i.bold, align: i.align === 'right' ? 'right' : 'left' }
-    if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 20)); else o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
+    if (typeof i.img === 'string' && i.img.startsWith('data:image/') && i.img.length < 40000) o.img = i.img
+    if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 10))
+    if (itemKind(i.type) !== 'pic') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
     const ih = pic ? o.h : o.size * 1.25
     o.x = Math.max(0, Math.min(w - iw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - ih, Number(i.y) || 0))
     return o
@@ -135,17 +185,19 @@ export function labelInfo(order, mat, si, pi) {
   const even = turns % 2 === 0
   const curved = {}
   detailEdgeList(d).filter(e => e.curved).forEach(e => { curved[e.name] = (curved[e.name] || 0) + e.mm })
-  const drills = (c?.drillings || []).filter(x => x.installed !== false)
-  const face = drills.filter(x => x.kind !== 'edge').length, end = drills.filter(x => x.kind === 'edge').length
+  const holePts = c ? getAllDrillPoints(c, DW, DL, false) : []
+  const face = holePts.filter(q => !q.edge && !q.back).length, back = holePts.filter(q => !q.edge && q.back).length, end = holePts.filter(q => q.edge).length
   const grooves = (c?.grooves || []).length, pockets = (c?.holes || []).filter(h => h.type === 'pocket').length
   const cutouts = (c?.holes || []).filter(h => h.type !== 'pocket').length
-  const work = [face && `отв. в пласть ${face}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
+  const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
     order: [order.order_number, order.order_name].filter(Boolean).join(' '), orderNumber: order.order_number || '', orderName: order.order_name || '', materialName: mat.name || '',
     num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
     name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
     material: [mat.name, mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · '),
     length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: Number(d.qty) || 1,
+    faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m,
+    edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
   }
@@ -259,7 +311,20 @@ export function labelText(type, info) {
     case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
     case 'sheet': return `Карта  ${info.sheet}`
     case 'num': return String(info.num)
-    default: return ''
+    case 'faceHoles': return info.faceHoles ? `Отв. в пласть: ${info.faceHoles}` : ''
+    case 'backHoles': return info.backHoles ? `Нижняя присадка: ${info.backHoles}` : ''
+    case 'endHoles': return info.endHoles ? `Отв. в торец: ${info.endHoles}` : ''
+    case 'grooves': return info.grooves ? `Пазов: ${info.grooves}` : ''
+    case 'pockets': return info.pockets ? `Выемок: ${info.pockets}` : ''
+    case 'cutouts': return info.cutouts ? `Вырезов: ${info.cutouts}` : ''
+    case 'twoSided': return info.twoSided ? '⇅ обработка с двух сторон' : ''
+    case 'edgeList': return info.edgeList.length ? `Кромка: ${info.edgeList.join(', ')}` : ''
+    case 'length': return r1(info.length)
+    case 'width': return r1(info.width)
+    case 'thickness': return info.thickness ? `${r1(info.thickness)} мм` : ''
+    case 'qty': return `${info.qty} шт`
+    case 'image': return ' '
+    default: { const v = type.startsWith('meta:') ? info.meta?.[type.slice(5)] : ''; return v == null ? '' : String(v) }
   }
 }
 
@@ -307,7 +372,16 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot)
     } else {
       const text = labelText(it.type, info)
-      if (!text) continue
+      if (!text) continue                                   // параметра у детали нет — ни текста, ни картинки
+      if (it.img || it.type === 'image') {
+        const im = IMAGES.get(it.img)
+        if (im?.complete && im.naturalWidth) {
+          const bh = it.h * mm, k = Math.min(w / im.naturalWidth, bh / im.naturalHeight)
+          ctx.imageSmoothingEnabled = false
+          ctx.drawImage(im, x, y, im.naturalWidth * k, im.naturalHeight * k)
+        }
+        continue
+      }
       const t = fitText(ctx, text, w, it.size * mm, it.bold ? 'bold' : '')
       ctx.textAlign = it.align === 'right' ? 'right' : 'left'
       ctx.fillText(t, it.align === 'right' ? x + w : x, y + it.size * mm * 0.62)
@@ -346,6 +420,7 @@ const xml = (cycles) => '﻿' + ['<?xml version="1.0" encoding="UTF-8"?>', '<Cyc
  */
 export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
   const files = [], list = [], { w, h } = labelPx(tpl)
+  await preloadLabelImages(tpl)
   const ox = Number(post?.originX) || 0, oy = Number(post?.originY) || 0
   for (const { si, nc } of sheets) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet), stem = `${si + 1}_${base}`

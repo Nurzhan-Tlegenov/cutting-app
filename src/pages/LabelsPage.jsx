@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles, zipFiles } from '../lib/labelMaker'
+import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles, zipFiles } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 
@@ -30,7 +30,8 @@ function Label({ tpl, order, mat, si, pi }) {
     const { w, h } = labelPx(tpl)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[si]
-    drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
+    const draw = () => drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
+    draw(); if (tpl.items.some(i => i.img)) preloadLabelImages(tpl).then(draw)
   }, [tpl, order, mat, si, pi])
   return <canvas ref={ref} />
 }
@@ -54,9 +55,17 @@ function LabelEditor({ tpl, onChange, order, mat }) {
     const { w, h } = labelPx(t)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[0]
-    drawLabel(cv, t, labelInfo(order, mat, 0, 0), { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] })
+    const draw = () => drawLabel(cv, t, labelInfo(order, mat, 0, 0), { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] })
+    draw(); if (t.items.some(i => i.img)) preloadLabelImages(t).then(draw)
   }, [t, order, mat])
-  const boxH = it => (itemKind(it.type) === 'pic' ? it.h : it.size * 1.25)
+  const boxH = it => (isBox(it) ? it.h : it.size * 1.25)
+  const fileRef = useRef(null)
+  const [imgErr, setImgErr] = useState('')
+  const setImage = async src => {
+    setImgErr('')
+    try { const img = await imageToLabel(src); if (img.length > 39000) throw new Error('Картинка слишком сложная — возьмите попроще (значок, контур)'); edit({ img, h: cur?.h || 9, w: cur?.img ? cur.w : 9 }) }
+    catch (e) { setImgErr(typeof src === 'string' ? 'С этого адреса картинку взять не получилось (сайт не разрешает). Сохраните её на телефон и выберите файлом.' : String(e?.message || e)) }
+  }
   const down = (e, it, mode) => {
     e.stopPropagation(); e.preventDefault()
     e.currentTarget.setPointerCapture?.(e.pointerId)
@@ -66,7 +75,7 @@ function LabelEditor({ tpl, onChange, order, mat }) {
   const move = e => {
     const d = drag.current
     if (!d) return
-    const dx = (e.clientX - d.x) / scale, dy = (e.clientY - d.y) / scale, o = d.it, pic = itemKind(o.type) === 'pic'
+    const dx = (e.clientX - d.x) / scale, dy = (e.clientY - d.y) / scale, o = d.it, pic = isBox(o)
     const patch = d.mode === 'move' ? { x: o.x + dx, y: o.y + dy }
       : pic ? { w: Math.max(4, o.w + dx), h: Math.max(4, o.h + dy) } : { w: Math.max(4, o.w + dx), size: Math.max(1.2, o.size + dy / 1.25) }
     setLive(normalizeLabel({ ...tpl, items: tpl.items.map(i => (i.id === d.id ? { ...i, ...patch } : i)) }))
@@ -97,7 +106,7 @@ function LabelEditor({ tpl, onChange, order, mat }) {
       {cur && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
           <div style={{ flex: '1 1 100%', fontSize: 13, fontWeight: 500 }}>{itemTitle(cur.type)}</div>
-          {itemKind(cur.type) === 'text' && (
+          {!isBox(cur) && (
             <>
               <button type="button" style={chip(false)} onClick={() => edit({ size: cur.size - 0.3 })}>A−</button>
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{cur.size.toFixed(1)} мм</span>
@@ -106,6 +115,16 @@ function LabelEditor({ tpl, onChange, order, mat }) {
               <button type="button" style={chip(cur.align === 'right')} onClick={() => edit({ align: cur.align === 'right' ? 'left' : 'right' })}>{cur.align === 'right' ? 'По правому краю' : 'По левому краю'}</button>
             </>
           )}
+          {itemKind(cur.type) === 'text' && (
+            <>
+              <button type="button" style={chip(!!cur.img)} onClick={() => fileRef.current?.click()}>🖼 {cur.img ? 'Другая картинка' : 'Картинка вместо текста'}</button>
+              <button type="button" style={chip(false)} onClick={() => { const u = window.prompt('Адрес картинки в интернете (https://…)'); if (u) setImage(u.trim()) }}>🔗 По ссылке</button>
+              {cur.img && cur.type !== 'image' && <button type="button" style={chip(false)} onClick={() => edit({ img: undefined })}>Вернуть текст</button>}
+              <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setImage(f) }} />
+            </>
+          )}
+          {imgErr && <div style={{ flex: '1 1 100%', fontSize: 11, color: 'var(--danger)' }}>{imgErr}</div>}
+          {cur.img && cur.type !== 'image' && <div style={{ flex: '1 1 100%', fontSize: 11, color: 'var(--text-hint)' }}>Картинка печатается только на бирках тех деталей, у которых этот параметр есть.</div>}
           <button type="button" style={{ ...chip(false), color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }}
             onClick={() => { onChange({ ...tpl, items: tpl.items.filter(i => i.id !== sel) }); setSel(null) }}>Убрать</button>
         </div>
@@ -139,10 +158,9 @@ function LabelEditor({ tpl, onChange, order, mat }) {
       )}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на бирку</div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-        {LABEL_ITEMS.filter(([k]) => !used.has(k)).map(([k, label]) => (
+        {[...LABEL_ITEMS, ...metaItems(mat?.details)].filter(([k]) => !used.has(k) || k === 'image').map(([k, label]) => (
           <button key={k} type="button" style={chip(false)} onClick={() => { const it = newLabelItem(k, tpl); onChange({ ...tpl, items: [...tpl.items, it] }); setSel(it.id) }}>+ {label}</button>
         ))}
-        {LABEL_ITEMS.every(([k]) => used.has(k)) && <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>Все элементы уже на бирке.</span>}
       </div>
     </div>
   )
