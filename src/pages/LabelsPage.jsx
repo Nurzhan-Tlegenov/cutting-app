@@ -197,6 +197,7 @@ export default function LabelsPage() {
   const [tpl, setTpl] = useState(() => getLabelTpl(user))
   const [setup, setSetup] = useState(() => !getLabelTpl(user).enabled)
   const [busy, setBusy] = useState(false)
+  const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -211,8 +212,10 @@ export default function LabelsPage() {
   if (loading) return <div className="page"><CncLoader label="Готовим бирки…" /></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
   const total = mat ? mat.sheets.reduce((a, s) => a + s.placed.length, 0) : 0
-  const change = patch => { const t = normalizeLabel({ ...tpl, ...patch, enabled: true }); setTpl(t); saveLabelTpl(t, user) }
-  const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { const t = { ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }; setTpl(t); saveLabelTpl(t, user) } }
+  const apply = t => { setHist(h => [...h.slice(-39), tpl]); setTpl(t); saveLabelTpl(t, user) }
+  const change = patch => apply(normalizeLabel({ ...tpl, ...patch, enabled: true }))
+  const undo = () => { const prev = hist[hist.length - 1]; if (!prev) return; setHist(h => h.slice(0, -1)); setTpl(prev); saveLabelTpl(prev, user) }
+  const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { apply({ ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }) } }
   // файлы стола бирковки — тем же набором, что делает ЧПУ вместе с G-кодом
   const exportFiles = async () => {
     setBusy(true)
@@ -252,6 +255,10 @@ export default function LabelsPage() {
                 <input type="text" inputMode="decimal" key={'h' + tpl.h} defaultValue={tpl.h} onBlur={e => size('h', e.target.value)} style={{ marginTop: 3, padding: '8px 10px' }} /></label>
             </div>
             <div style={{ height: 10 }} />
+            <button type="button" disabled={!hist.length} onClick={undo}
+              style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, marginBottom: 8, border: '0.5px solid ' + (hist.length ? 'var(--blue)' : 'var(--border-md)'), background: 'transparent', color: hist.length ? 'var(--blue)' : 'var(--text-hint)' }}>
+              ↶ Отменить{hist.length ? ` (${hist.length})` : ''}
+            </button>
             {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} />
               : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
             {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же'], ['edges', 'Кромка — по сторонам бирки, там же, где она у детали']].map(([k, label]) => (
