@@ -12,7 +12,7 @@ import { getUserSettings, saveUserSettings } from './userSettings'
 import { detailMeta } from './partLabel'
 import { isTwoSided } from './partInfo'
 import { placedTurns } from './partHoles'
-import { rotateEdgesTimes } from './drillGeometry'
+import { rotatePointTimes } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
 
@@ -52,7 +52,17 @@ export function labelInfo(order, mat, si, pi) {
   let c = d.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   // стороны бирки — как деталь лежит на листе
-  const sides = rotateEdgesTimes({ top: edgeName(d.edge_top), right: edgeName(d.edge_right), bottom: edgeName(d.edge_bottom), left: edgeName(d.edge_left) }, placedTurns(p, d))
+  // (тем же поворотом, что и контур детали на карте): сторона бирки = сторона детали на карте раскроя
+  const DW = Number(d.width) || 0, DL = Number(d.length) || 0, turns = placedTurns(p, d)
+  const sides = { top: '', right: '', bottom: '', left: '' }
+  ;[['left', 0, DL / 2, d.edge_left], ['right', DW, DL / 2, d.edge_right], ['bottom', DW / 2, 0, d.edge_bottom], ['top', DW / 2, DL, d.edge_top]].forEach(([, x, y, v]) => {
+    const q = rotatePointTimes(x, y, DW, DL, turns), bw = Number(p.origX) || DW, bh = Number(p.origY) || DL
+    const dist = { left: q.x, right: bw - q.x, bottom: q.y, top: bh - q.y }
+    const on = Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]
+    if (edgeName(v)) sides[on] = edgeName(v)
+  })
+  // размер — как деталь лежит на карте: по горизонтали (X листа) × по вертикали (Y листа)
+  const even = turns % 2 === 0
   const curved = {}
   detailEdgeList(d).filter(e => e.curved).forEach(e => { curved[e.name] = (curved[e.name] || 0) + e.mm })
   const drills = (c?.drillings || []).filter(x => x.installed !== false)
@@ -65,7 +75,7 @@ export function labelInfo(order, mat, si, pi) {
     num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
     name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
     material: [mat.name, mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · '),
-    length: Number(d.length) || 0, width: Number(d.width) || 0, thickness: mat.thickness, qty: Number(d.qty) || 1,
+    length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: Number(d.qty) || 1,
     sides, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
     qr: [order.order_number, `L${si + 1}`, `N${pi + 1}`, m.des || d.name || '', `${d.length}x${d.width}x${mat.thickness || ''}`].join(';'),
@@ -82,7 +92,7 @@ export function sheetOutlines(sheet, geo) {
 
 /** Карта листа в прямоугольнике (x, y, w, h): контуры деталей, деталь hi — чёрная. Лежачий прямоугольник — лист кладётся длиной по горизонтали. */
 export function drawSheetMap(ctx, x, y, w, h, sheet, geo, hi = -1, line = 1) {
-  const rot = w > h && geo.sheetL > geo.sheetW
+  const rot = false                                       // карта всегда как на экране раскроя: X — вправо, Y — вверх
   const SW = rot ? geo.sheetL : geo.sheetW, SH = rot ? geo.sheetW : geo.sheetL
   const k = Math.min(w / SW, h / SH), ox = x + (w - SW * k) / 2, oy = y + (h - SH * k) / 2
   const T = ([px, py]) => (rot ? [ox + py * k, oy + px * k] : [ox + px * k, oy + (SH - py) * k])
@@ -130,10 +140,11 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       ctx.fillRect(-tw / 2, 11 * u, tw, Math.max(1, 2 * u))
       ctx.restore()
     }
-    side(info.sides.top, W / 2, pad / 2, 0, W - pad * 2 - 90 * u)
-    side(info.sides.bottom, W / 2, H - pad / 2 - 2 * u, 0, W * 0.5)
-    side(info.sides.right, W - pad / 2, H / 2, Math.PI / 2, H - pad * 2)
-    side(info.sides.left, pad / 2, H / 2, -Math.PI / 2, H - pad * 2)
+    const along = (name, mm) => (name ? `${name} · ${r1(mm)}` : '')     // кромка и длина стороны, на которой она стоит
+    side(along(info.sides.top, info.sizeX), W / 2, pad / 2, 0, W - pad * 2 - 90 * u)
+    side(along(info.sides.bottom, info.sizeX), W / 2, H - pad / 2 - 2 * u, 0, W * 0.5)
+    side(along(info.sides.right, info.sizeY), W - pad / 2, H / 2, Math.PI / 2, H - pad * 2)
+    side(along(info.sides.left, info.sizeY), pad / 2, H / 2, -Math.PI / 2, H - pad * 2)
   }
   if (f.num) { ctx.font = `bold ${Math.round(24 * u)}px Arial, Helvetica, sans-serif`; ctx.textAlign = 'right'; ctx.fillText(String(info.num), W - pad - 4 * u, pad / 2 + 4 * u) }
 

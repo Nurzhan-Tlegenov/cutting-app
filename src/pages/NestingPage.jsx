@@ -2820,7 +2820,7 @@ export default function NestingPage() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
           {Object.entries(edgeByType).map(([name, len]) => (
             <span key={name} style={{ fontSize: 11, background: 'var(--bg2)', borderRadius: 10, padding: '2px 9px', color: 'var(--text-muted)' }}>
-              {name} · <span style={{ fontWeight: 500 }}>{len.toFixed(1)} м</span>
+              {name} · <span style={{ fontWeight: 500 }}>{len.total.toFixed(1)} м</span>{len.curved > 0.005 ? ` (крив. ${len.curved.toFixed(1)})` : ''}
             </span>
           ))}
         </div>
