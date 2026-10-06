@@ -267,6 +267,21 @@ export default function LabelsPage() {
                 {label}
               </label>
             ))}
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
+              <input type="checkbox" checked={!!tpl.part.dims} onChange={e => change({ part: { ...tpl.part, dims: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
+              Чертёж детали: показывать размеры торцевых отверстий от края
+            </label>
+            {tpl.part.dims && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px 24px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                Высота цифр
+                {[['A−', -0.2], ['A+', 0.2]].map(([t, d], i) => (
+                  <button key={t} type="button" onClick={() => change({ part: { ...tpl.part, dimSize: tpl.part.dimSize + d } })}
+                    style={{ order: i ? 3 : 1, padding: '5px 12px', borderRadius: 20, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>{t}</button>
+                ))}
+                <span style={{ order: 2 }}>{tpl.part.dimSize.toFixed(1)} мм</span>
+              </div>
+            )}
+            {!tpl.items.some(i => i.type === 'part') && tpl.part.dims && <p style={{ fontSize: 11, color: 'var(--amber)', margin: '0 0 8px 24px' }}>Чертежа детали на бирке сейчас нет — добавьте его кнопкой «+ Чертёж детали».</p>}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
               Разрешение печати
               <select value={tpl.dpi} onChange={e => change({ dpi: Number(e.target.value) })} style={{ width: 'auto', padding: '5px 8px', fontSize: 13 }}>
