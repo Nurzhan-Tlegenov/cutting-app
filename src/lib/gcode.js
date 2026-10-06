@@ -568,7 +568,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const prevTool = seq[seq.length - 1]?.tool
   const cutTools = [...new Set(stage1.map(j => j.tool))].sort((a, b) => (b === prevTool) - (a === prevTool))
   cutTools.forEach(t => add(stage1.filter(j => j.tool === t && j.rank === 4)))
-  // Контуры деталей: от края листа по спирали к центру, центральная деталь — последней.
+  // Контуры деталей: сначала мелкие, затем остальные — от края листа по спирали к центру, центральная деталь — последней.
   // Кольца: 0 — детали у края листа, 1 — их соседи внутрь листа и т.д. Внутри кольца — по кругу в одну сторону,
   // начиная с ближайшей к фрезе детали: переезды короткие и идут вдоль уже вырезанного ряда.
   const spiralOrder = list => {
@@ -600,9 +600,12 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
     }
     return res
   }
+  // Мелкие детали (если не отключено) — первыми, пока лист держит вакуум; затем остальные. И те и другие — по спирали от края.
+  const smallFirst = ops.outer?.smallFirst !== false
   cutTools.forEach(t => {
-    const r = spiralOrder(stage1.filter(j => j.tool === t && j.rank === 5))
-    if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
+    const outer = stage1.filter(j => j.tool === t && j.rank === 5)
+    const groups = smallFirst ? [outer.filter(j => j.small), outer.filter(j => !j.small)] : [outer]
+    groups.forEach(g => { const r = spiralOrder(g); if (r.length) { seq.push(...r); cur = r[r.length - 1].at } })
   })
 
   const out = new Out(zTop ? T : 0)
