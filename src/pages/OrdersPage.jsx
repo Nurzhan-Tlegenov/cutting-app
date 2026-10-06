@@ -9,7 +9,7 @@ import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 
 export default function OrdersPage() {
-  const { user, profile } = useAuth()
+  const { user, profile, cabinet } = useAuth()
   const navigate = useNavigate()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
@@ -62,7 +62,7 @@ export default function OrdersPage() {
     if (selectMode) {
       toggleSelect(id)
     } else {
-      navigate(`/orders/${id}`)
+      navigate(cabinet === 'client' ? `/orders/${id}/nesting` : `/orders/${id}`)   // в кабинете клиента — сразу в раскрой
     }
   }
 

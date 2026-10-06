@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { LABEL_ITEMS, itemKind, itemTitle, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles, zipFiles } from '../lib/labelMaker'
+import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles, zipFiles } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 
@@ -108,6 +108,28 @@ function LabelEditor({ tpl, onChange, order, mat }) {
           )}
           <button type="button" style={{ ...chip(false), color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }}
             onClick={() => { onChange({ ...tpl, items: tpl.items.filter(i => i.id !== sel) }); setSel(null) }}>Убрать</button>
+        </div>
+      )}
+      {used.has('qr') && (
+        <div style={{ marginBottom: 10, padding: '8px 10px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)' }}>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Что зашито в QR-код</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {QR_PARTS.map(([k, label]) => {
+              const on = tpl.qr.parts.includes(k)
+              return <button key={k} type="button" style={chip(on)} onClick={() => onChange({ ...tpl, qr: { ...tpl.qr, parts: on ? tpl.qr.parts.filter(x => x !== k) : [...tpl.qr.parts, k] } })}>{on ? '✓ ' : ''}{label}</button>
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            {tpl.qr.parts.includes('text') && (
+              <label style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Свой текст
+                <input type="text" key={'t' + tpl.qr.text} defaultValue={tpl.qr.text} onBlur={e => { if (e.target.value !== tpl.qr.text) onChange({ ...tpl, qr: { ...tpl.qr, text: e.target.value } }) }} style={{ marginTop: 3, padding: '7px 9px' }} /></label>
+            )}
+            <label style={{ flex: '0 0 96px', fontSize: 12, color: 'var(--text-muted)' }}>Разделитель
+              <input type="text" key={'s' + tpl.qr.sep} defaultValue={tpl.qr.sep} maxLength={3} onBlur={e => { if (e.target.value !== tpl.qr.sep) onChange({ ...tpl, qr: { ...tpl.qr, sep: e.target.value } }) }} style={{ marginTop: 3, padding: '7px 9px', textAlign: 'center' }} /></label>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>
+            Сейчас в коде: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{mat ? labelQr(tpl, labelInfo(order, mat, 0, 0)) || '— пусто —' : '—'}</span>
+          </div>
         </div>
       )}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на бирку</div>

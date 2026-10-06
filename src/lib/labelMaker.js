@@ -13,7 +13,6 @@ import { detailMeta } from './partLabel'
 import { isTwoSided } from './partInfo'
 import { placedTurns, placedHoles } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
-import { contourSegments, segmentSide, holeEdgeSegments } from './edgeLength'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
 
@@ -36,6 +35,27 @@ export const LABEL_ITEMS = [
   ['map', 'Карта раскроя — деталь чёрным', 'pic'],
   ['qr', 'QR-код', 'pic'],
 ]
+// Из чего собирается строка QR-кода — выбирает пользователь; порядок — как в этом списке
+export const QR_PARTS = [
+  ['text', 'Свой текст'],
+  ['number', 'Номер заказа (присвоен приложением)'],
+  ['order', 'Название заказа'],
+  ['des', 'Обозначение детали'],
+  ['name', 'Наименование детали'],
+  ['pos', 'Позиция'],
+  ['prefix', 'Изделие (префикс)'],
+  ['material', 'Материал'],
+  ['size', 'Размер'],
+  ['sheet', 'Номер карты'],
+  ['num', 'Номер детали на листе'],
+]
+const QR_DEFAULT = { parts: ['number', 'sheet', 'num', 'des', 'size'], sep: ';', text: '' }
+export function labelQr(tpl, info) {
+  const q = tpl.qr || QR_DEFAULT
+  const val = { text: q.text, number: info.orderNumber, order: info.orderName, des: info.des, name: info.name, pos: info.pos, prefix: info.prefix, material: info.materialName,
+    size: `${r1(info.length)}x${r1(info.width)}x${info.thickness || ''}`, sheet: `L${info.sheet}`, num: `N${info.num}` }
+  return QR_PARTS.filter(([k]) => q.parts.includes(k)).map(([k]) => String(val[k] ?? '').trim()).filter(Boolean).join(q.sep)
+}
 export const itemKind = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
 export const itemTitle = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[1] || type
 // раскладка по умолчанию — как на образце бирки (85 × 59 мм)
@@ -58,7 +78,7 @@ export function newLabelItem(type, tpl) {
     : itemKind(type) === 'pic' ? { type, x: tpl.w * 0.3, y: tpl.h * 0.3, w: tpl.w * 0.3, h: tpl.h * 0.3 } : { type, x: tpl.w * 0.1, y: tpl.h * 0.45, w: tpl.w * 0.5, size: 2.6 * Math.min(kx, ky) }
   return { ...it, id: type + '_' + Math.random().toString(36).slice(2, 7) }
 }
-export const DEFAULT_LABEL = () => { const t = { enabled: false, w: BASE.w, h: BASE.h, edges: true, rot: true }; return { ...t, items: DEFAULT_ITEMS.map(i => newLabelItem(i.type, t)) } }
+export const DEFAULT_LABEL = () => { const t = { enabled: false, w: BASE.w, h: BASE.h, edges: true, rot: true, qr: { ...QR_DEFAULT } }; return { ...t, items: DEFAULT_ITEMS.map(i => newLabelItem(i.type, t)) } }
 export function normalizeLabel(raw) {
   const d = DEFAULT_LABEL(), t = raw && typeof raw === 'object' ? raw : {}
   const n = (v, def, lo, hi) => { const x = Number(v); return isFinite(x) && x > 0 ? Math.max(lo, Math.min(hi, x)) : def }
@@ -76,7 +96,8 @@ export function normalizeLabel(raw) {
     o.x = Math.max(0, Math.min(w - iw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - ih, Number(i.y) || 0))
     return o
   })
-  return { enabled: !!t.enabled, w, h, edges: t.edges ?? (t.fields ? t.fields.edges !== false : true), rot: t.rot !== false, items }
+  return { enabled: !!t.enabled, w, h, edges: t.edges ?? (t.fields ? t.fields.edges !== false : true), rot: t.rot !== false, items,
+    qr: { parts: Array.isArray(t.qr?.parts) ? t.qr.parts.filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60) } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
 export function resizeLabel(tpl, w, h) {
@@ -115,24 +136,23 @@ export function labelInfo(order, mat, si, pi) {
   const cutouts = (c?.holes || []).filter(h => h.type !== 'pocket').length
   const work = [face && `отв. в пласть ${face}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
-    order: [order.order_number, order.order_name].filter(Boolean).join(' '), orderNumber: order.order_number || '',
+    order: [order.order_number, order.order_name].filter(Boolean).join(' '), orderNumber: order.order_number || '', orderName: order.order_name || '', materialName: mat.name || '',
     num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
     name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
     material: [mat.name, mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · '),
     length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: Number(d.qty) || 1,
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
-    qr: [order.order_number, `L${si + 1}`, `N${pi + 1}`, m.des || d.name || '', `${d.length}x${d.width}x${mat.thickness || ''}`].join(';'),
   }
 }
 
 /**
  * Чертёж детали в прямоугольнике (x, y, w, h) — так, как она лежит на карте раскроя (тот же поворот, Y вверх):
  * контур, вырезы, выемки и пазы лицевой стороны, отверстия в пласть (кружки) и в торец (полоса на глубину),
- * кромка — жирной линией по своим сторонам и участкам. Обработка с изнанки не показывается.
+ * Кромка на чертеже не показывается. Обработка с изнанки не показывается.
  */
 export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false) {
-  const m = 8 * line, x = x0 + m, y = y0 + m, w = Math.max(4, w0 - 2 * m), h = Math.max(4, h0 - 2 * m)      // поле под стрелки торцевых отверстий
+  const m = 2 * line, x = x0 + m, y = y0 + m, w = Math.max(4, w0 - 2 * m), h = Math.max(4, h0 - 2 * m)
   let c = d?.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const DW = Number(d?.width) || 0, DL = Number(d?.length) || 0, turns = placedTurns(p, d || {})
@@ -174,25 +194,10 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false) {
       if (pt.edge) {
         const dep = pt.depth > 0 ? pt.depth : 20, b = R(pt.x + pt.dx * dep, pt.y + pt.dy * dep)
         ctx.lineWidth = Math.max(2 * line, (pt.d || 8) * k); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
-        // стрелка снаружи детали — в торец, где сверлится отверстие
-        const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, L = 7 * line, hw = 3.2 * line
-        ctx.beginPath(); ctx.moveTo(a[0] - ux * line, a[1] - uy * line)
-        ctx.lineTo(a[0] - ux * L - uy * hw, a[1] - uy * L + ux * hw); ctx.lineTo(a[0] - ux * L + uy * hw, a[1] - uy * L - ux * hw); ctx.closePath(); ctx.fill()
         return
       }
       ctx.beginPath(); ctx.arc(a[0], a[1], Math.max(1.6 * line, (pt.d || 8) * k / 2), 0, Math.PI * 2); ctx.fill()
     })
-    // кромка — жирной линией: по сторонам и по отдельным участкам контура и вырезов
-    const native = { left: d.edge_left, right: d.edge_right, top: d.edge_top, bottom: d.edge_bottom }, has = v => v && v !== 'false'
-    ctx.lineWidth = line * 4; ctx.lineCap = 'round'
-    const segs = Array.isArray(c.vertices) && c.vertices.length > 2 ? contourSegments(c.vertices) : []
-    segs.forEach(seg => { const side = segmentSide(seg, DW, DL); if ((side && has(native[side])) || seg.edge) { poly(seg.pts.map(([px, py]) => R(px, py)), false); ctx.stroke() } })
-    if (!segs.length) [['left', 0, 0, 0, DL], ['right', DW, 0, DW, DL], ['bottom', 0, 0, DW, 0], ['top', 0, DL, DW, DL]].forEach(([sd, x0, y0, x1, y1]) => { if (has(native[sd])) { poly([R(x0, y0), R(x1, y1)], false); ctx.stroke() } })
-    ;(c.holes || []).forEach(hh => holeEdgeSegments(hh).forEach(seg => { poly(seg.pts.map(([px, py]) => R(px, py)), false); ctx.stroke() }))
-  } else {
-    const has = v => v && v !== 'false'
-    ctx.lineWidth = line * 4; ctx.lineCap = 'round'
-    ;[['left', 0, 0, 0, DL], ['right', DW, 0, DW, DL], ['bottom', 0, 0, DW, 0], ['top', 0, DL, DW, DL]].forEach(([sd, x0, y0, x1, y1]) => { if (has(d?.['edge_' + sd])) { poly([R(x0, y0), R(x1, y1)], false); ctx.stroke() } })
   }
   ctx.restore()
 }
@@ -283,9 +288,10 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
   for (const it of tpl.items || []) {
     const x = it.x * mm, y = it.y * mm, w = it.w * mm
     if (it.type === 'qr') {
-      if (!info.qr) continue
+      const text = labelQr(tpl, info)
+      if (!text) continue
       try {
-        const qr = qrcode(0, 'M'); qr.addData(unescape(encodeURIComponent(info.qr))); qr.make()
+        const qr = qrcode(0, 'M'); qr.addData(unescape(encodeURIComponent(text))); qr.make()
         const n = qr.getModuleCount(), cell = Math.max(1, Math.floor(Math.min(w, it.h * mm) / n))
         for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect(Math.round(x) + c * cell, Math.round(y) + r * cell, cell, cell)
       } catch { /* слишком длинная строка — без QR */ }
