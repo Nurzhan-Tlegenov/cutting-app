@@ -250,7 +250,6 @@ export function labelInfo(order, mat, si, pi) {
  * Кромка на чертеже не показывается. Обработка с изнанки не показывается.
  */
 export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx = 0) {
-  const m = 2 * line, x = x0 + m, y = y0 + m, w = Math.max(4, w0 - 2 * m), h = Math.max(4, h0 - 2 * m)
   let c = d?.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const DW = Number(d?.width) || 0, DL = Number(d?.length) || 0, turns = placedTurns(p, d || {})
@@ -258,7 +257,40 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
   const bw = Number(p.origX) || Math.max(...outline.map(q => q[0])), bh = Number(p.origY) || Math.max(...outline.map(q => q[1]))
   // rot — лист на бирке лежит горизонтально (длина листа — слева направо): деталь поворачивается вместе с картой
   const vw = rot ? bh : bw, vh = rot ? bw : bh
-  const k = Math.min(w / vw, h / vh), ox = x + (w - vw * k) / 2, oy = y + (h - vh * k) / 2
+  const holePts = c ? getAllDrillPoints(c, DW, DL, true) : []
+  // Размеры торцевых отверстий — как на чертеже: снаружи детали, выносные линии и размерная цепочка вдоль торца
+  // (край → отверстие → отверстие → край). Торцы: l, r, b, t — в «родных» координатах детали.
+  const dimFont = `${Math.max(6, Math.round(dimPx))}px Arial, Helvetica, sans-serif`
+  const groups = []
+  if (dimPx > 0) {
+    const NORM = { l: [-1, 0], r: [1, 0], b: [0, -1], t: [0, 1] }
+    const dirOf = v => {                                   // направление на бирке для вектора в координатах детали
+      const o = rotatePointTimes(DW / 2, DL / 2, DW, DL, turns), q = rotatePointTimes(DW / 2 + v[0], DL / 2 + v[1], DW, DL, turns)
+      return rot ? [Math.round(q.y - o.y), Math.round(q.x - o.x)] : [Math.round(q.x - o.x), -Math.round(q.y - o.y)]
+    }
+    ctx.save(); ctx.font = dimFont
+    for (const e of ['l', 'r', 'b', 't']) {
+      const vert = e === 'l' || e === 'r', total = vert ? DL : DW
+      const at = [...new Set(holePts.filter(q => q.edge && (q.dx ? (q.dx > 0 ? 'l' : 'r') : (q.dy > 0 ? 'b' : 't')) === e).map(q => Math.round((vert ? q.y : q.x) * 10) / 10))].filter(v => v > 0.05 && v < total - 0.05).sort((u, v) => u - v)
+      if (!at.length) continue
+      const nodes = [0, ...at, total], texts = nodes.slice(1).map((v, i) => r1(v - nodes[i]))
+      groups.push({ e, vert, nodes, texts, n: dirOf(NORM[e]), tw: Math.max(...texts.map(t => ctx.measureText(t).width)) })
+    }
+    ctx.restore()
+  }
+  const O1 = dimPx * 0.7, GAP = dimPx * 0.3              // размерная линия — на таком расстоянии от детали; зазор до цифр
+  let k, ox, oy
+  const fit = levels => {                                 // место под размеры — только с тех сторон, где они есть
+    const m = { l: 2 * line, r: 2 * line, t: 2 * line, b: 2 * line }
+    for (const g of groups) { const side = g.n[0] < 0 ? 'l' : g.n[0] > 0 ? 'r' : g.n[1] < 0 ? 't' : 'b'; m[side] = Math.max(m[side], O1 + (GAP + g.tw) * levels + line) }
+    const w = Math.max(4, w0 - m.l - m.r), h = Math.max(4, h0 - m.t - m.b)
+    k = Math.min(w / vw, h / vh); ox = x0 + m.l + (w - vw * k) / 2; oy = y0 + m.t + (h - vh * k) / 2
+  }
+  fit(1)
+  // тесные участки (отверстия рядом): цифры ставятся в два ряда
+  const tight = g => g.nodes.slice(1).some((v, i) => (v - g.nodes[i]) * k < dimPx * 1.15 && i + 1 < g.nodes.length - 1 && (g.nodes[i + 2] - v) * k < dimPx * 1.15)
+  const two = groups.some(tight)
+  if (two) fit(2)
   const S = (px, py) => (rot ? [ox + py * k, oy + px * k] : [ox + px * k, oy + (bh - py) * k])
   const R = (px, py) => { const q = rotatePointTimes(px, py, DW, DL, turns); return S(q.x, q.y) }      // из «родных» координат детали
   const poly = (pts, close = true) => { ctx.beginPath(); pts.forEach((q, i) => { if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]) }); if (close) ctx.closePath() }
@@ -286,37 +318,35 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
       ctx.beginPath(); for (let t = x0 - (y1 - y0); t < x1; t += 5 * line) { ctx.moveTo(t, y1); ctx.lineTo(t + (y1 - y0), y0) } ctx.stroke()
       ctx.restore()
     })
-    const dims = []                                        // размеры торцевых отверстий: расстояние от ближнего края детали до оси отверстия
     // отверстия: в пласть — кружок по диаметру, в торец — полоса от кромки на глубину
-    getAllDrillPoints(c, DW, DL, true).forEach(pt => {
+    holePts.forEach(pt => {
       const a = R(pt.x, pt.y)
       if (pt.edge) {
         const dep = pt.depth > 0 ? pt.depth : 20, b = R(pt.x + pt.dx * dep, pt.y + pt.dy * dep)
         ctx.lineWidth = Math.max(2 * line, (pt.d || 8) * k); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
-        if (dimPx > 0) dims.push({ a, b, edge: pt.dx ? (pt.dx > 0 ? 'l' : 'r') : (pt.dy > 0 ? 'b' : 't'), v: pt.dx ? Math.min(pt.y, DL - pt.y) : Math.min(pt.x, DW - pt.x), s: pt.dx ? pt.y : pt.x })
         return
       }
       ctx.beginPath(); ctx.arc(a[0], a[1], Math.max(1.6 * line, (pt.d || 8) * k / 2), 0, Math.PI * 2); ctx.fill()
     })
-    if (dims.length) {
-      // цифра — внутри детали, сразу за концом отверстия; у соседних отверстий одного торца — в два ряда, чтобы не слипались
-      ctx.font = `bold ${Math.max(6, Math.round(dimPx))}px Arial, Helvetica, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      const placed = []                                    // занятые места — цифры не наезжают друг на друга
-      const hit = r => placed.some(q => r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3])
-      dims.sort((p1, p2) => p1.s - p2.s).forEach(q => {
-        const dx = q.b[0] - q.a[0], dy = q.b[1] - q.a[1], l = Math.hypot(dx, dy) || 1, text = r1(q.v)
-        const tw = ctx.measureText(text).width, horiz = Math.abs(dx) > Math.abs(dy)
-        let off = (horiz ? tw / 2 : dimPx / 2) + dimPx * 0.35, cx, cy, box
-        for (let n = 0; n < 6; n++, off += horiz ? tw + dimPx * 0.4 : dimPx * 1.15) {
-          cx = q.b[0] + dx / l * off; cy = q.b[1] + dy / l * off
-          box = [cx - tw / 2 - 1, cy - dimPx * 0.55, cx + tw / 2 + 1, cy + dimPx * 0.55]
-          if (!hit(box)) break
-        }
-        placed.push(box)
-        ctx.fillStyle = '#fff'; ctx.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1])
-        ctx.fillStyle = '#000'; ctx.fillText(text, cx, cy)
+  }
+  // размеры — тонкими линиями по целым точкам (без размытия), цифры без подложки
+  if (groups.length) {
+    const thin = Math.max(1, Math.round(line * 0.55)), snap = v => Math.round(v) + (thin % 2 ? 0.5 : 0)
+    ctx.lineWidth = thin; ctx.lineCap = 'butt'; ctx.font = dimFont; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000'
+    const seg = (ax, ay, bx, by) => { ctx.beginPath(); ctx.moveTo(snap(ax), snap(ay)); ctx.lineTo(snap(bx), snap(by)); ctx.stroke() }
+    for (const g of groups) {
+      const [nx, ny] = g.n, P = g.nodes.map(v => (g.e === 'l' ? R(0, v) : g.e === 'r' ? R(DW, v) : g.e === 'b' ? R(v, 0) : R(v, DL)))
+      const D = P.map(q => [q[0] + nx * O1, q[1] + ny * O1]), tk = Math.max(2, dimPx * 0.22)
+      P.forEach((q, i) => { seg(q[0] + nx * line, q[1] + ny * line, D[i][0] + nx * tk, D[i][1] + ny * tk); seg(D[i][0] - tk, D[i][1] + tk, D[i][0] + tk, D[i][1] - tk) })   // выносная линия и засечка
+      seg(D[0][0], D[0][1], D[D.length - 1][0], D[D.length - 1][1])                                                       // размерная линия
+      let ang = Math.atan2(ny, nx); if (ang >= Math.PI / 2 - 1e-6) ang -= Math.PI; else if (ang < -Math.PI / 2 - 1e-6) ang += Math.PI
+      let odd = 0
+      g.texts.forEach((t, i) => {
+        const len = Math.hypot(D[i + 1][0] - D[i][0], D[i + 1][1] - D[i][1])
+        const lvl = two && len < dimPx * 1.15 ? (odd++ % 2) : (odd = 0)
+        const off = GAP + g.tw / 2 + lvl * (g.tw + GAP), cx = (D[i][0] + D[i + 1][0]) / 2 + nx * off, cy = (D[i][1] + D[i + 1][1]) / 2 + ny * off
+        ctx.save(); ctx.translate(Math.round(cx), Math.round(cy)); ctx.rotate(ang); ctx.fillText(t, 0, 0); ctx.restore()
       })
-      ctx.textBaseline = 'alphabetic'
     }
   }
   ctx.restore()
