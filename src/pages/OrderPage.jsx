@@ -15,6 +15,7 @@ import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
 import { orderClient, productionSetStatus } from '../lib/productionApi'
+import SimLinksBox from '../components/SimLinksBox'
 import SheetsOverview from '../components/SheetsOverview'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
@@ -131,6 +132,7 @@ export default function OrderPage() {
           <ShareLinkBox orderId={id} />
         </div>
       )}
+      <SimLinksBox orderId={id} style={{ marginBottom: 12 }} />
       <div style={{ marginBottom: 12 }}>
         <p className="section-title">Статистика</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

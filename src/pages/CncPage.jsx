@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
@@ -8,6 +8,7 @@ import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { getCnc, fetchCnc, saveCnc, activePost } from '../lib/cncSettings'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey } from '../lib/gcode'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
+import SimLinksBox from '../components/SimLinksBox'
 import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from '../lib/simShare'
 
 // ЧПУ: листы принятого раскроя → управляющая программа (G-код) + симулятор.
@@ -37,7 +38,12 @@ export default function CncPage() {
   const [picked, setPicked] = useState(null)        // выбранные листы (индексы); null — все
   const [cnc, setCnc] = useState(() => getCnc(user))
   const [built, setBuilt] = useState(null)          // { for: cnc, files: [{ si, name, text, lines, time, warnings, empty }] }
-  const [sim, setSim] = useState(null)              // файл в симуляторе
+  const [search] = useSearchParams()
+  const simSi = search.get('sim')                   // лист в симуляторе — в адресе: кнопка «назад» телефона закрывает симулятор, а не страницу
+  const [cncReady, setCncReady] = useState(false)
+  const [pendingBuild, setPendingBuild] = useState(false)
+  const restored = useRef(false)
+  const [linksTick, setLinksTick] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -47,7 +53,7 @@ export default function CncPage() {
       if (!alive) return
       setOrder(o || null); setDetails(d || []); setLoading(false)
     })()
-    fetchCnc(user).then(c => { if (alive) setCnc(c) })
+    fetchCnc(user).then(c => { if (alive) { setCnc(c); setCncReady(true) } })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user?.id])
@@ -81,6 +87,34 @@ export default function CncPage() {
     })
     setBuilt({ files }); setSaved('')
   }
+  // Созданные программы не теряются при выходе из заказа и приложения: запоминаем, какие листы были созданы,
+  // и при возвращении создаём их заново теми же настройками (программа однозначно получается из раскроя и настроек).
+  const memKey = `cnc:${user?.id || ''}:${id}`
+  useEffect(() => {
+    if (restored.current || loading || !cncReady) return
+    restored.current = true
+    let m = null
+    try { m = JSON.parse(localStorage.getItem(memKey) || 'null') } catch { m = null }
+    if (!m) return
+    if (m.matKey) setMatKey(m.matKey)
+    if (Array.isArray(m.picked)) setPicked(m.picked)
+    if (m.built) setPendingBuild(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, cncReady])
+  useEffect(() => {
+    if (!pendingBuild || !mat) return
+    setPendingBuild(false)
+    if (sel.length && sel.every(i => i < mat.sheets.length)) build()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingBuild, mat, picked])
+  useEffect(() => {
+    if (!restored.current || pendingBuild) return
+    try { localStorage.setItem(memKey, JSON.stringify({ matKey, picked, built: !!built })) } catch { /* без памяти */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [built, picked, matKey, pendingBuild])
+  const sim = (simSi != null && built?.files.find(f => String(f.si) === simSi && !f.empty)) || null
+  const openSim = f => navigate(`?sim=${f.si}`)
+  const closeSim = () => navigate(-1)
   const [saved, setSaved] = useState('')
   // все файлы — отдельными файлами (не архивом): в выбранную папку, а где браузер этого не умеет — загрузками по одному
   const saveAll = async () => {
@@ -106,6 +140,7 @@ export default function CncPage() {
   }, [sim])
   // ссылка на симуляцию: снимок программы этого листа, открывается без входа
   const [share, setShare] = useState(null)          // null — окно закрыто; { busy, code, error, copied }
+  useEffect(() => { setShare(null) }, [simSi])
   const openShare = async () => {
     setShare({ busy: true })
     const r = await getSimShare(id, sim.name)
@@ -117,11 +152,13 @@ export default function CncPage() {
     const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(post.rapid) || 20000, tools })
     const r = await saveSimShare(id, sim.name, user.id, payload)
     setShare(x => ({ ...x, busy: false, code: r.code || x.code, error: r.error || '', fresh: !r.error }))
+    setLinksTick(t => t + 1)
   }
   const closeShare = async () => {
     if (!window.confirm('Закрыть доступ? Ссылка перестанет открываться.')) return
     const r = await deleteSimShare(share.code)
     setShare(x => (r.error ? { ...x, error: r.error } : { code: '', error: '' }))
+    setLinksTick(t => t + 1)
   }
   const copyShare = async () => {
     const url = simShareUrl(share.code)
@@ -170,6 +207,7 @@ export default function CncPage() {
               <button type="button" style={small} onClick={() => setTab('basic')}>Настроить</button>
             </div>
           </div>
+          <SimLinksBox orderId={id} refresh={linksTick} style={{ marginBottom: 10, padding: '10px 12px' }} />
           {pre.length > 0 && (
             <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)', background: 'var(--amber-light)', padding: '10px 12px' }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--amber)', marginBottom: 4 }}>⚠ Не назначен инструмент</div>
@@ -200,7 +238,7 @@ export default function CncPage() {
                       <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>{f.empty ? 'пусто — нет назначенных инструментов' : `${f.lines} строк · ≈ ${fmtTime(f.time)}`}</div>
                       {!f.empty && (
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button type="button" onClick={() => setSim(f)} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>▶ Симулятор</button>
+                          <button type="button" onClick={() => openSim(f)} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>▶ Симулятор</button>
                           <button type="button" onClick={() => download(f.name, f.text)} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Скачать</button>
                         </div>
                       )}
@@ -233,7 +271,7 @@ export default function CncPage() {
           <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<p style={{ color: 'var(--text-hint)', padding: 20 }}>Загрузка симулятора…</p>}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000}
-                toolDia={toolDia} onClose={() => setSim(null)} onDownload={() => download(sim.name, sim.text)} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
+                toolDia={toolDia} onClose={closeSim} onDownload={() => download(sim.name, sim.text)} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
             </Suspense>
           </div>
         </div>

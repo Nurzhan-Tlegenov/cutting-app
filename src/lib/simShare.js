@@ -56,3 +56,19 @@ export async function fetchSharedSim(code) {
     return { name: data.name, ...unpackSim(data.data) }
   } catch (e) { return { error: String(e?.message || e) } }
 }
+/** Все ссылки на симуляцию по заказу: [{ code, name, updated_at }] */
+export async function listSimShares(orderId) {
+  try {
+    const { data, error } = await supabase.from('sim_shares').select('code,name,updated_at').eq('order_id', orderId).order('name')
+    return error ? [] : data || []
+  } catch { return [] }
+}
+/** Заказы, у которых открыты ссылки на симуляцию: Map id заказа -> сколько ссылок */
+export async function simShareOrders() {
+  try {
+    const { data, error } = await supabase.from('sim_shares').select('order_id')
+    const map = new Map()
+    if (!error) for (const r of data || []) map.set(r.order_id, (map.get(r.order_id) || 0) + 1)
+    return map
+  } catch { return new Map() }
+}

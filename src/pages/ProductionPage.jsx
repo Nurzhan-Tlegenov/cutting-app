@@ -6,6 +6,7 @@ import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
 import { myProduction, productionOrders, productionSetStatus } from '../lib/productionApi'
 import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
+import { simShareOrders } from '../lib/simShare'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -23,6 +24,7 @@ export default function ProductionPage() {
   const [edit, setEdit] = useState(false)
   const [busy, setBusy] = useState('')
   const [sheet, setSheet] = useState({})
+  const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
 
   const load = async () => {
     const p = (await myProduction(user?.id)) ?? null
@@ -31,6 +33,7 @@ export default function ProductionPage() {
       setSheet(Object.fromEntries(MARGINS.map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
       if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []) }
+      simShareOrders().then(setSimShares)
     }
   }
   useEffect(() => { Promise.resolve().then(load) }, [user?.id])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -136,6 +139,12 @@ export default function ProductionPage() {
                     </div>
                     {o.order_name && <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2 }}>{o.order_name}</div>}
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[o.material_name, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
+                  {simShares.has(o.id) && (
+                    <div title="По ссылке открыта симуляция обработки этого заказа. Закрыть доступ можно в заказе."
+                      style={{ display: 'inline-block', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px', marginTop: 2 }}>
+                      🔗 открыта ссылка на симуляцию{simShares.get(o.id) > 1 ? ` · ${simShares.get(o.id)}` : ''}
+                    </div>
+                  )}
                   </div>
                   <div style={{ fontSize: 13, marginTop: 6 }}>
                     {o.own ? <span style={{ color: 'var(--text-hint)' }}>Ваш собственный заказ</span> : <>

@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
+import { simShareOrders } from '../lib/simShare'
 
 export default function OrdersPage() {
   const { user, profile } = useAuth()
@@ -17,6 +18,7 @@ export default function OrdersPage() {
   const isOperator = profile?.role === 'admin'   // чужие заказы видит только администратор (так же настроена база)
   const holdTimers = useRef({})
   const [shares, setShares] = useState(() => new Map())
+  const [simShares, setSimShares] = useState(() => new Map())   // у каких заказов открыты ссылки на симуляцию
   useEffect(() => onShareChange(() => setShares(prev => {
     const next = new Map(prev)
     for (const o of orders) { const t = cachedShare(o.id); if (t) next.set(o.id, t); else if (t === null) next.delete(o.id) }
@@ -32,6 +34,7 @@ export default function OrdersPage() {
     setOrders(data || [])
     setLoading(false)
     listShares().then(setShares)      // у каких заказов открыта ссылка на 3D-модель
+    simShareOrders().then(setSimShares)
   }
 
   function startHold(id) {
@@ -167,6 +170,12 @@ export default function OrdersPage() {
                     <div title="По ссылке 3D-модель этого заказа открыта для просмотра. Закрыть доступ можно в заказе."
                       style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px' }}>
                       🔗 открыта ссылка на 3D-модель
+                    </div>
+                  )}
+                  {simShares.has(order.id) && (
+                    <div title="По ссылке открыта симуляция обработки этого заказа. Закрыть доступ можно в заказе."
+                      style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px', marginTop: 2 }}>
+                      🔗 открыта ссылка на симуляцию{simShares.get(order.id) > 1 ? ` · ${simShares.get(order.id)}` : ''}
                     </div>
                   )}
                   <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
