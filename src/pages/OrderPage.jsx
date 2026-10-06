@@ -9,7 +9,8 @@ import MaterialFilter from '../components/MaterialFilter'
 import { detailMatKey } from '../lib/detailMaterial'
 import { detailMeta } from '../lib/partLabel'
 import Model3DButton from '../components/Model3DButton'
-import { detailEdgeList } from '../lib/edgeLength'
+import { edgeTotals } from '../lib/edgeLength'
+import CncLoader from '../components/CncLoader'
 import { isTwoSided } from '../lib/partInfo'
 import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
@@ -24,7 +25,8 @@ const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { profile, user } = useAuth()
+  const { profile, user, cabinet } = useAuth()
+  const inProduction = cabinet === 'production'      // кабинет производства: статусы, ЧПУ, бирки
   const [client, setClient] = useState(null)   // заказчик и производство этого заказа
   const [sortMode, setSortMode] = useState('')   // сортировка списка деталей (только показ)
   const [matFilter, setMatFilter] = useState('') // какой материал показывать в списке
@@ -63,7 +65,7 @@ export default function OrderPage() {
     await supabase.from('orders').delete().eq('id', id)
     navigate('/orders')
   }
-  if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40 }}>Загрузка...</p></div>
+  if (loading) return <div className="page"><CncLoader label="Открываем заказ…" /></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
   const matKeys = new Set(details.map(d => detailMatKey(d, order)))
   const shownDetails = matFilter && matKeys.has(matFilter) ? details.filter(d => detailMatKey(d, order) === matFilter) : details
@@ -72,30 +74,31 @@ export default function OrderPage() {
   const usableL = order.sheet_length - (order.margin_left || 0) - (order.margin_right || 0)
   const usableW = order.sheet_width - (order.margin_top || 0) - (order.margin_bottom || 0)
   const usableArea = (usableL / 1000) * (usableW / 1000)
-  let totalPartArea = 0, totalEdge = 0, totalQty = 0
+  let totalPartArea = 0, totalQty = 0
   validDetails.forEach(d => {
     totalPartArea += ((d.length + kerf) / 1000) * ((d.width + kerf) / 1000) * d.qty
     totalQty += d.qty
-    // стороны (Дл/Дп — по длине, Шв/Шн — по ширине) + кромка на фигурных участках и вырезах
-    detailEdgeList(d).forEach(e => { totalEdge += (e.mm / 1000) * d.qty })
   })
+  // кромка: стороны + фигурные участки и вырезы; прямая и криволинейная — отдельно
+  const edgeSum = edgeTotals(validDetails)
+  const totalEdge = edgeSum.total
   const sheetsNeeded = usableArea > 0 ? Math.ceil(totalPartArea / (usableArea * 0.85)) : 0
   const isMine = order.user_id === user?.id
   const isDraft = order.status === 'draft' && (isMine || profile?.role === 'admin')
-  const canStatus = order.status !== 'draft' && (profile?.role === 'admin' || (isOperator && !!order.production_id))
+  const canStatus = inProduction && order.status !== 'draft' && (profile?.role === 'admin' || (isOperator && !!order.production_id))
   const edgeNames = { edge_top:'В', edge_right:'П', edge_bottom:'Н', edge_left:'Л' }
   // принятые карты раскроя — показываются над списком деталей
   const nestings = savedNestings(order, details)
   const nest = nestings.find(n => n.key === mapMat) || nestings[0] || null
   const nestGeo = nest ? sheetGeo(order, nest.result) : null
   const materials = materialsOf(details, order)
-  const canProduce = order.status !== 'draft' && isOperator
+  const canProduce = inProduction && order.status !== 'draft' && isOperator
   const actBtn = main => ({ flex: 1, padding: '10px 8px', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: 'pointer',
     border: main ? 'none' : '0.5px solid var(--blue)', background: main ? 'var(--blue)' : 'var(--bg)', color: main ? 'white' : 'var(--blue)' })
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
-        <button onClick={() => navigate('/orders')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
+        <button onClick={() => navigate(inProduction ? '/production' : '/orders')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
         <div style={{ flex: 1 }}>
           <div style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 16 }}>{order.order_number}</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{order.material_name}</div>
@@ -145,6 +148,11 @@ export default function OrderPage() {
             </div>
           ))}
         </div>
+        {totalEdge > 0 && (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+            Кромка: прямая <b>{edgeSum.straight.toFixed(1)} м</b> · криволинейная <b>{edgeSum.curved.toFixed(1)} м</b>
+          </div>
+        )}
       </div>
       <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
         <p className="section-title">Материал</p>

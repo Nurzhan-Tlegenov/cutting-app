@@ -6,7 +6,7 @@ import { verticesToPolygon } from './trueShapeNesting.js'
 import { detailHoles } from './partHoles.js'
 import { getDrillPoints } from './drillGeometry.js'
 import { buildRelief } from './facadeCarve.js'
-import { contourSegments, segmentSide } from './edgeLength.js'
+import { contourSegments, segmentSide, holeEdgeSegments } from './edgeLength.js'
 
 const num = v => Number(v) || 0
 
@@ -76,6 +76,7 @@ function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
     if ((side && on(sides[side])) || seg.edge) bands.push(seg.pts.map(toLocal))
   }
   ;(c.holes || []).forEach((h, i) => { if (h.edge && holes[i]?.length > 2) bands.push([...holes[i], holes[i][0]]) })
+  ;(c.holes || []).forEach(h => holeEdgeSegments(h).forEach(seg => bands.push(seg.pts.map(toLocal))))   // кромка на отдельных участках выреза
 
   const drills = []
   for (const dr of c.drillings || []) {

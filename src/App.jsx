@@ -30,18 +30,21 @@ import UsersPage from './pages/UsersPage'
 import ProductionPage from './pages/ProductionPage'
 import CncPage from './pages/CncPage'
 import LabelsPage from './pages/LabelsPage'
+import MessagesPage from './pages/MessagesPage'
+import CncLoader from './components/CncLoader'
 import Watermark from './components/Watermark'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-hint)' }}>Загрузка...</div>
+  if (loading) return <CncLoader full label="Открываем приложение…" />
   if (!user) return <Navigate to="/auth" replace />
   return children
 }
 
 function AppRoutes() {
-  const { user, loading } = useAuth()
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>...</div>
+  const { user, loading, cabinet } = useAuth()
+  if (loading) return <CncLoader full label="Открываем приложение…" />
+  const home = cabinet === 'production' ? '/production' : '/orders'   // с чего начинается кабинет
   return (
     <Routes>
       {/* 3D-модель по ссылке для клиента — без входа */}
@@ -49,7 +52,7 @@ function AppRoutes() {
       <Route path="/v/:code" element={<SharedModelPage />} />
       {/* симуляция обработки листа по ссылке — без входа */}
       <Route path="/s/:code" element={<SharedSimPage />} />
-      <Route path="/auth" element={user ? <Navigate to="/orders" /> : <AuthPage />} />
+      <Route path="/auth" element={user ? <Navigate to={home} /> : <AuthPage />} />
       <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
       <Route path="/orders/new" element={<ProtectedRoute><NewOrderPage /></ProtectedRoute>} />
       <Route path="/orders/:id" element={<ProtectedRoute><OrderPage /></ProtectedRoute>} />
@@ -60,7 +63,8 @@ function AppRoutes() {
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
       <Route path="/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
       <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
-      <Route path="*" element={<Navigate to={user ? '/orders' : '/auth'} />} />
+      <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
+      <Route path="*" element={<Navigate to={user ? home : '/auth'} />} />
     </Routes>
   )
 }

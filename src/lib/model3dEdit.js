@@ -91,7 +91,7 @@ export function orderParts(details) {
       const a = s.pts[0], b = s.pts[s.pts.length - 1]
       const ex = b[0] - a[0], ey = b[1] - a[1], l = Math.hypot(ex, ey) || 1
       const side = segmentSide(s, f0.W, f0.L)
-      return { i: s.i, a, b, pts: s.pts, side, arc: s.arc, len: s.len, n: ccw ? [ey / l, -ex / l] : [-ey / l, ex / l], on: (side && edgeOn(sides[side])) || !!s.edge }
+      return { i: s.key, a, b, pts: s.pts, side, arc: s.arc, len: s.len, n: ccw ? [ey / l, -ex / l] : [-ey / l, ex / l], on: (side && edgeOn(sides[side])) || !!s.edge }
     })
     meta.inst.forEach((_, ii) => {
       const pid = pidOf(meta, ii, di)
@@ -130,7 +130,7 @@ export function edgeTargetAt(detail, ii, local) {
   let best = null
   for (const s of contourSegments(vertsOf(c, f.W, f.L))) {
     const dd = dist(s.pts)
-    if (!best || dd < best.d) best = { d: dd, seg: s.i }
+    if (!best || dd < best.d) best = { d: dd, seg: s.key }
   }
   ;(c.holes || []).forEach((h, k) => {
     let pts
@@ -272,13 +272,13 @@ export function applyEdgeOps(details, ops) {
       for (const op of list) {
         const val = op.value || null
         if (op.hole != null) { if (c.holes?.[op.hole]) { if (val) c.holes[op.hole].edge = val; else delete c.holes[op.hole].edge } continue }
-        const s = segs.find(x => x.i === op.seg)
+        const s = segs.find(x => x.key === op.seg)
         if (!s) continue
         const side = segmentSide(s, f.W, f.L)
         if (side) {
           edges[side] = val
-          if (explicit && !val) delete c.vertices[s.i].edge
-        } else if (explicit) { if (val) c.vertices[s.i].edge = val; else delete c.vertices[s.i].edge }
+          if (explicit && !val) delete c.vertices[s.i][s.prop]
+        } else if (explicit) { if (val) c.vertices[s.i][s.prop] = val; else delete c.vertices[s.i][s.prop] }
       }
       d = withEdges({ ...d, contour: c }, edges)
       singles.set(pid, d)

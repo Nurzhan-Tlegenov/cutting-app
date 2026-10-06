@@ -22,7 +22,7 @@ function MillIcon({ profile, depth }) {
 }
 
 export default function ProfilePage() {
-  const { profile, user, signOut } = useAuth()
+  const { profile, user, signOut, cabinet, setCabinet, isMaster } = useAuth()
   const navigate = useNavigate()
   const [loggingOut, setLoggingOut] = useState(false)
   const [mills, setMills] = useState(() => getUserSettings(user).facadeMills || [])
@@ -36,6 +36,11 @@ export default function ProfilePage() {
   }
 
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
+  const pickCabinet = mode => { setCabinet(mode); navigate(mode === 'production' ? '/production' : '/orders') }
+  const CABINETS = [
+    ['client', 'Клиент', 'Заказы: ввод и импорт деталей, контуры, кромка, раскрой до готовых карт'],
+    ['production', 'Производство', 'Заявки: принятые карты раскроя, статусы, ЧПУ и бирки'],
+  ]
   const initials = profile?.full_name
     ? profile.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : (user?.email?.[0] || '?').toUpperCase()
@@ -61,7 +66,7 @@ export default function ProfilePage() {
               {profile?.full_name || 'Пользователь'}
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-hint)' }}>
-              {profile?.role === 'admin' ? 'Администратор' : isOperator ? 'Производство' : 'Клиент'}
+              {isMaster ? 'Мастер-аккаунт' : cabinet === 'production' ? 'Кабинет производства' : 'Кабинет клиента'}
             </div>
           </div>
         </div>
@@ -70,7 +75,6 @@ export default function ProfilePage() {
           {[
             ['Телефон', profile?.phone],
             ['WhatsApp', profile?.whatsapp],
-            ['Статус', profile?.role === 'admin' ? 'Администратор' : isOperator ? 'Производство' : 'Клиент'],
           ].filter(([, val]) => val).map(([label, val]) => (
             <div key={label} style={{
               display: 'flex', justifyContent: 'space-between',
@@ -83,18 +87,50 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {profile?.role === 'admin' && (
+      {/* Кабинеты: клиент и производство — переключаются здесь */}
+      <p className="section-title">Кабинет</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+        {CABINETS.map(([id, label, note]) => {
+          const on = cabinet === id
+          return (
+            <button key={id} type="button" onClick={() => pickCabinet(id)} className="card"
+              style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',
+                border: on ? '1.5px solid var(--blue)' : '0.5px solid var(--border)', background: on ? 'var(--blue-light)' : 'var(--bg)' }}>
+              <span style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0, border: on ? '5px solid var(--blue)' : '1.5px solid var(--border-md)', background: 'var(--bg)' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 15, color: on ? 'var(--blue-dark)' : 'var(--text)' }}>{label}{on ? ' · сейчас' : ''}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{note}</div>
+              </div>
+              <span style={{ color: 'var(--blue)', fontSize: 18 }}>→</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {isMaster && <p className="section-title">Мастер-аккаунт</p>}
+      {isMaster && (
         <button onClick={() => navigate('/users')} className="card"
           style={{ width: '100%', marginBottom: 12, textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>Пользователи и регистрация</div>
-            <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Кто зарегистрирован, заявки, закрыть или открыть регистрацию</div>
+            <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Кто зарегистрирован и как работает, заявки, закрыть или открыть регистрацию</div>
           </div>
           <span style={{ color: 'var(--blue)', fontSize: 18 }}>→</span>
         </button>
       )}
 
-      <div className="card" style={{ marginBottom: 12 }}>
+      {isMaster && (
+        <button onClick={() => navigate('/messages')} className="card"
+          style={{ width: '100%', marginBottom: 12, textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>Обращения и файлы для отладки</div>
+            <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Что пишут пользователи, присланные ими файлы, новости для всех</div>
+          </div>
+          <span style={{ color: 'var(--blue)', fontSize: 18 }}>→</span>
+        </button>
+      )}
+
+      {cabinet === 'client' && <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>Фасадные фрезы</div>
         <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: mills.length ? 8 : 0 }}>
           Типы фрезеровки фасадов. Добавляются сами при импорте модели из Базиса; по ним фасады показываются объёмно в 3D.
@@ -113,7 +149,7 @@ export default function ProfilePage() {
               style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 16, cursor: 'pointer' }}>✕</button>
           </div>
         ))}
-      </div>
+      </div>}
 
       <button
         onClick={handleSignOut}

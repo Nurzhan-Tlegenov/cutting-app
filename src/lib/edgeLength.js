@@ -1,46 +1,73 @@
-// Кромка на фигурных деталях.
-// Кроме четырёх сторон (edge_left/right/top/bottom в карточке детали) кромку
-// можно назначить на любой участок контура и на вырез:
-//   vertex.edge = 'название' — участок от этой вершины до следующей (если
-//     следующая вершина — дуговая ('arc'), участок — вся дуга до вершины за ней);
-//   hole.edge = 'название'   — весь периметр выреза.
+// Кромка на деталях — прямая и криволинейная.
+// Кроме четырёх сторон (edge_left/right/top/bottom в карточке детали) кромку можно назначить
+// на любой участок контура и на вырез:
+//   vertex.edge  = 'название' — участок, который ВЫХОДИТ из этой вершины (прямой отрезок или дуга через точки);
+//   vertex.edgeR = 'название' — скругление в самой вершине (радиус R или fillet-дуга);
+//   hole.edge    = 'название' — весь периметр выреза; у выреза с вершинами — те же edge / edgeR на его вершинах.
 // Координаты — мм, X — ширина, Y — длина, (0,0) — левый нижний угол.
+// Геометрия участков — та же, что у контура на карте раскроя и в G-коде (см. verticesToPolygon).
+import { roundCorner, sampleFillet, sampleArc3 } from './trueShapeNesting.js'
 
 const num = v => Number(v) || 0
+const P = v => ({ x: num(v.x), y: num(v.y) })
+const polyLen = pts => { let l = 0; for (let k = 1; k < pts.length; k++) l += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); return l }
 
-function circumcenter(a, b, c) {
-  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
-  if (Math.abs(d) < 1e-9) return null
-  const a2 = a.x * a.x + a.y * a.y, b2 = b.x * b.x + b.y * b.y, c2 = c.x * c.x + c.y * c.y
-  return { x: (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d, y: (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d }
-}
-function arcPoints(sp, mid, ep, n = 20) {
-  const C = circumcenter(sp, mid, ep)
-  if (!C) return [[sp.x, sp.y], [ep.x, ep.y]]
-  const R = Math.hypot(sp.x - C.x, sp.y - C.y)
-  const sa = Math.atan2(sp.y - C.y, sp.x - C.x)
-  let dm = Math.atan2(mid.y - C.y, mid.x - C.x) - sa; while (dm < 0) dm += Math.PI * 2
-  let de = Math.atan2(ep.y - C.y, ep.x - C.x) - sa; while (de < 0) de += Math.PI * 2
-  const sweep = dm > de ? -(Math.PI * 2 - de) : de
-  return Array.from({ length: n + 1 }, (_, i) => [C.x + R * Math.cos(sa + sweep * i / n), C.y + R * Math.sin(sa + sweep * i / n)])
-}
-
-/** Участки контура: [{ i (номер начальной вершины), j (конечной), pts: [[x,y]...], len, arc, edge }] */
+/**
+ * Участки контура по порядку обхода:
+ * [{ key, i, j, prop, pts: [[x,y]...], len, arc, round, edge }]
+ *   key   — имя участка (номер вершины для отрезка/дуги, 'r<номер>' для скругления);
+ *   i     — вершина, в которой хранится кромка, prop — в каком её поле ('edge' | 'edgeR');
+ *   arc   — участок криволинейный (дуга или скругление), round — это скругление угла.
+ */
 export function contourSegments(vertices) {
   const vs = vertices || []
   const n = vs.length
   const out = []
   if (n < 2) return out
+  const isArc = v => v?.type === 'arc'
+  const isFillet = v => v?.type === 'fillet' && v.fcx != null && v.fcy != null && v.fr != null
+  const nodes = new Array(n)
+  const node = i => {
+    if (nodes[i]) return nodes[i]
+    const v = vs[i]
+    let pts = null
+    if (isFillet(v)) {
+      pts = sampleFillet(v, 24)
+      const prev = P(vs[(i - 1 + n) % n])      // по ходу контура дуга начинается у предыдущей вершины
+      const d0 = Math.hypot(pts[0][0] - prev.x, pts[0][1] - prev.y), d1 = Math.hypot(pts[pts.length - 1][0] - prev.x, pts[pts.length - 1][1] - prev.y)
+      if (d1 < d0) pts = pts.slice().reverse()
+    } else if (num(v.r) > 0 && (!v.type || v.type === 'point')) {
+      const r = roundCorner(P(vs[(i - 1 + n) % n]), P(v), P(vs[(i + 1) % n]), num(v.r), 24)
+      if (r.length > 1) pts = r
+    }
+    return (nodes[i] = pts ? { pts, round: true } : { pts: [[num(v.x), num(v.y)]], round: false })
+  }
   for (let i = 0; i < n; i++) {
     const a = vs[i]
-    if (a.type === 'arc') continue
-    let j = (i + 1) % n, mid = null
-    if (vs[j].type === 'arc') { mid = vs[j]; j = (j + 1) % n }
-    const b = vs[j]
-    const pts = mid ? arcPoints(a, mid, b) : [[num(a.x), num(a.y)], [num(b.x), num(b.y)]]
-    let len = 0
-    for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1])
-    out.push({ i, j, pts, len, arc: !!mid, edge: a.edge || null })
+    if (isArc(a)) continue
+    const na = node(i)
+    if (na.round) {
+      const len = polyLen(na.pts)
+      if (len > 0.01) out.push({ key: 'r' + i, i, j: i, prop: 'edgeR', pts: na.pts, len, arc: true, round: true, edge: a.edgeR || (isFillet(a) ? a.edge : null) || null })
+    }
+    const group = []
+    let j = (i + 1) % n, guard = 0
+    while (isArc(vs[j]) && guard++ < n) { group.push(vs[j]); j = (j + 1) % n }
+    if (isArc(vs[j])) break                    // одни дуговые точки — участков нет
+    const start = na.pts[na.pts.length - 1], end = node(j).pts[0]
+    let pts
+    if (!group.length) pts = [start, end]
+    else {
+      const sp = P(a), ep = P(vs[j]), g = group.map(P)
+      if (g.length === 1) pts = sampleArc3(sp, g[0], ep, 24)
+      else {
+        pts = []
+        for (let k = 0; k + 1 < g.length; k++) pts.push(...sampleArc3(k === 0 ? sp : g[k - 1], g[k], k === g.length - 2 ? ep : g[k + 2], 24))
+      }
+    }
+    const len = polyLen(pts)
+    if (len > 0.01) out.push({ key: i, i, j, prop: 'edge', pts, len, arc: group.length > 0, round: false, edge: (isFillet(a) ? null : a.edge) || null })
+    if (n === 2 && i === 0) break              // две точки — один отрезок, обратный не нужен
   }
   return out
 }
@@ -56,33 +83,75 @@ export function segmentSide(seg, W, L, tol = 0.5) {
   return null
 }
 
-function holePerimeter(hole) {
-  if (hole.type === 'circle') return Math.PI * (num(hole.d) || 100)
-  if (Array.isArray(hole.vertices) && hole.vertices.length > 2) return contourSegments(hole.vertices).reduce((s, g) => s + g.len, 0)
-  return 2 * ((num(hole.hw) || 200) + (num(hole.hh) || 100))
+/** Расстояние от точки до ломаной */
+export function distToPolyline(x, y, pts) {
+  let best = Infinity
+  for (let k = 1; k < pts.length; k++) {
+    const [ax, ay] = pts[k - 1], [bx, by] = pts[k]
+    const ex = bx - ax, ey = by - ay, l2 = ex * ex + ey * ey
+    const t = l2 ? Math.max(0, Math.min(1, ((x - ax) * ex + (y - ay) * ey) / l2)) : 0
+    best = Math.min(best, Math.hypot(x - ax - ex * t, y - ay - ey * t))
+  }
+  return best
 }
 
+/** Участки выреза с кромкой, назначенной по отдельным участкам (вырез с вершинами) */
+export function holeEdgeSegments(hole) {
+  if (!hole || hole.edge || !Array.isArray(hole.vertices) || hole.vertices.length < 3) return []
+  return contourSegments(hole.vertices).filter(s => s.edge)
+}
+
+const sideLen = (side, W, L) => (side === 'left' || side === 'right' ? L : W)
+const SIDES = ['left', 'right', 'top', 'bottom']
+
 /**
- * Вся кромка детали: [{ name, mm }] — стороны + фигурные участки + вырезы.
+ * Вся кромка детали: [{ name, mm, curved }] — стороны + фигурные участки + вырезы.
+ * Длина считается по настоящей длине отрезка или дуги: у стороны со скруглённым углом прямая часть короче габарита.
  * d — строка order_details ({ length, width, edge_*, contour }) или деталь формы ({ w, h, edges, contour }).
  */
 export function detailEdgeList(d) {
   const L = num(d.length ?? d.w), W = num(d.width ?? d.h)
   const sides = d.edges || { top: d.edge_top, right: d.edge_right, bottom: d.edge_bottom, left: d.edge_left }
   const out = []
-  const add = (name, mm) => { if (name && name !== 'false' && mm > 0) out.push({ name: name === 'default' ? 'Кромка' : String(name), mm }) }
-  add(sides.left, L); add(sides.right, L)      // Дл / Дп — вдоль длины
-  add(sides.top, W); add(sides.bottom, W)      // Шв / Шн — вдоль ширины
+  const on = v => v && v !== 'false'
+  const add = (name, mm, curved = false) => { if (on(name) && mm > 0) out.push({ name: name === 'default' || name === true ? 'Кромка' : String(name), mm, curved: !!curved }) }
   let c = d.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
-  if (c) {
-    for (const seg of contourSegments(c.vertices)) {
-      if (!seg.edge) continue
+  const verts = c?.vertices
+  if (!Array.isArray(verts) || verts.length < 3) SIDES.forEach(s => add(sides[s], sideLen(s, W, L)))
+  else {
+    const got = { left: 0, right: 0, top: 0, bottom: 0 }
+    for (const seg of contourSegments(verts)) {
       const side = segmentSide(seg, W, L)
-      if (side && sides[side]) continue        // уже посчитано стороной
-      add(seg.edge, seg.len)
+      if (side && on(sides[side])) { got[side] += seg.len; add(sides[side], seg.len); continue }
+      if (seg.edge) add(seg.edge, seg.len, seg.arc)
     }
-    for (const h of c.holes || []) if (h.edge) add(h.edge, holePerimeter(h))
+    // сторона назначена, а прямых участков контура на ней нет (контур не совпал с габаритом) — по габариту
+    SIDES.forEach(s => { if (on(sides[s]) && got[s] < 0.5) add(sides[s], sideLen(s, W, L)) })
+  }
+  for (const h of c?.holes || []) {
+    if (h.edge) {
+      if (h.type === 'circle') add(h.edge, Math.PI * (num(h.d) || 100), true)
+      else if (Array.isArray(h.vertices) && h.vertices.length > 2) contourSegments(h.vertices).forEach(s => add(h.edge, s.len, s.arc))
+      else add(h.edge, 2 * ((num(h.hw) || 200) + (num(h.hh) || 100)))
+    } else holeEdgeSegments(h).forEach(s => add(s.edge, s.len, s.arc))
   }
   return out
+}
+
+/**
+ * Итог по кромке для списка деталей (метры, с учётом количества):
+ * { total, straight, curved, byName: { название: { total, straight, curved } } }
+ */
+export function edgeTotals(details) {
+  const t = { total: 0, straight: 0, curved: 0, byName: {} }
+  for (const d of details || []) {
+    const qty = num(d.qty) || 1
+    for (const e of detailEdgeList(d)) {
+      const m = e.mm / 1000 * qty, k = e.curved ? 'curved' : 'straight'
+      const b = t.byName[e.name] || (t.byName[e.name] = { total: 0, straight: 0, curved: 0 })
+      t.total += m; t[k] += m; b.total += m; b[k] += m
+    }
+  }
+  return t
 }

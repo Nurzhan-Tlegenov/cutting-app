@@ -34,6 +34,9 @@ function contourOf(detail) {
 
 export const holeKey = (d, depth, T) => `D${num(d)}_Z${num(Math.min(depth > 0 ? depth : T, T))}`
 export const pocketKey = depth => `Z${num(depth)}`
+export const grooveKey = (width, depth) => `W${num(width)}_Z${num(depth)}`
+/** Настройка слоя пазов: своя, а если не задана — общая для всех пазов */
+export const grooveOpFor = (ops, key) => ({ ...ops?.groove, ...Object.fromEntries(Object.entries(ops?.grooves?.[key] || {}).filter(([, v]) => v !== '' && v != null)) })
 
 function bboxOf(pts) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
@@ -71,7 +74,7 @@ export function partFeatures(p, detail, T) {
   ;(contour.grooves || []).forEach(g => { if (g.face === 'back') f.skipped.back++ })
   getGrooveRects(contour, W, H, true).forEach(r => {
     const bb = bboxOf(r.pts.map(([x, y]) => at(x, y)))
-    f.grooves.push({ ...bb, open: open(bb), depth: r.depth || 0, width: r.width })
+    f.grooves.push({ ...bb, open: open(bb), depth: r.depth || 0, width: r.width || Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) })
   })
   ;(contour.drillings || []).forEach(dr => { if (dr.installed !== false && dr.kind !== 'edge' && dr.face === 'back') f.skipped.back++ })
   getAllDrillPoints(contour, W, H, true).forEach(pt => {
@@ -84,8 +87,8 @@ export function partFeatures(p, detail, T) {
 
 /** Слои обработки, которые есть на листах — для вкладки «Обработка контуров» */
 export function collectLayers(sheets, details, T) {
-  const holes = new Map(), pockets = new Map()
-  const out = { holes: [], pockets: [], grooves: 0, cutouts: 0, parts: 0, edgeHoles: 0, backOps: 0, oddPockets: 0 }
+  const holes = new Map(), pockets = new Map(), grooves = new Map()
+  const out = { holes: [], pockets: [], grooveLayers: [], grooves: 0, cutouts: 0, parts: 0, edgeHoles: 0, backOps: 0, oddPockets: 0 }
   for (const sh of sheets || []) for (const p of sh.placed || []) {
     const f = partFeatures(p, details?.[p.detailIndex], T)
     out.parts++; out.cutouts += f.cutouts.length; out.grooves += f.grooves.length
@@ -93,6 +96,11 @@ export function collectLayers(sheets, details, T) {
     for (const h of f.holes) {
       const cur = holes.get(h.key) || { key: h.key, d: h.d, depth: Math.min(h.depth, T), through: h.depth >= T - EPS, count: 0 }
       cur.count++; holes.set(h.key, cur)
+    }
+    for (const g of f.grooves) {
+      const key = grooveKey(g.width, g.depth || T)
+      const cur = grooves.get(key) || { key, width: g.width, depth: g.depth || T, count: 0 }
+      cur.count++; grooves.set(key, cur)
     }
     for (const k of f.pockets) {
       const key = pocketKey(k.depth)
@@ -102,6 +110,7 @@ export function collectLayers(sheets, details, T) {
   }
   out.holes = [...holes.values()].sort((a, b) => a.d - b.d || a.depth - b.depth)
   out.pockets = [...pockets.values()].sort((a, b) => a.depth - b.depth)
+  out.grooveLayers = [...grooves.values()].sort((a, b) => a.width - b.width || a.depth - b.depth)
   return out
 }
 
@@ -110,8 +119,8 @@ const toolById = (cnc, id) => (cnc.tools || []).find(t => t.id === id) || null
 export function holeToolFor(layer, cnc) {
   const o = cnc.ops?.holes?.[layer.key]
   if (o?.tool === 'none') return null
-  if (o?.tool) return toolById(cnc, o.tool)
   const d = n0(o?.d) || layer.d
+  if (o?.tool) { const t = toolById(cnc, o.tool); return t && n0(t.d) > d + EPS ? null : t }   // инструмент больше отверстия — не годится
   return (cnc.tools || []).find(t => t.type === 'drill' && Math.abs(n0(t.d) - d) < EPS) || null
 }
 
@@ -202,7 +211,7 @@ function orientLoop(L, dir) {
  * open — стороны, лежащие на краю детали: там центр фрезы выходит на саму линию контура.
  * -> { point } | { line: [a, b] } | { rough: ломаная | null, finish: замкнутый контур по часовой } | null (фреза шире)
  */
-export function rectPaths(x0, y0, x1, y1, open, r, step) {
+export function rectPaths(x0, y0, x1, y1, open, r, step, spiral = null) {
   let cx0 = open.l ? x0 : x0 + r, cx1 = open.r ? x1 : x1 - r, cy0 = open.b ? y0 : y0 + r, cy1 = open.t ? y1 : y1 - r
   if (cx0 > cx1 + 0.3 || cy0 > cy1 + 0.3) return null
   if (cx0 > cx1 - 0.3) cx0 = cx1 = (cx0 + cx1) / 2
@@ -211,6 +220,20 @@ export function rectPaths(x0, y0, x1, y1, open, r, step) {
   if (w === 0 && h === 0) return { point: [cx0, cy0] }
   if (w === 0 || h === 0) return { line: [[cx0, cy0], [cx1, cy1]] }
   const finish = [[cx0, cy0], [cx0, cy1], [cx1, cy1], [cx1, cy0]]         // по часовой
+  if (spiral) {
+    // от центра выборки к контуру: вложенные прямоугольники, каждый следующий — на шаг шире; последний — сам контур
+    const st = Math.max(0.5, Math.min(step > 0 ? step : r, 2 * r * 0.7))
+    const half = Math.min(w, h) / 2, N = Math.max(1, Math.ceil(half / st - 1e-9))
+    const ring = ins => [[cx0 + ins, cy0 + ins], [cx0 + ins, cy1 - ins], [cx1 - ins, cy1 - ins], [cx1 - ins, cy0 + ins]]
+    const pts = w >= h ? [[cx0 + half, cy0 + half], [cx1 - half, cy0 + half]] : [[cx0 + half, cy0 + half], [cx0 + half, cy1 - half]]
+    if (Math.abs(w - h) < 1e-6) pts.pop()
+    for (let i = N - 1; i >= 0; i--) {
+      let R = ring(half * i / N)
+      if (spiral === 'ccw') R = [R[0], R[3], R[2], R[1]]
+      pts.push(...R, R[0])
+    }
+    return { spiral: pts }
+  }
   const alongX = (x1 - x0) >= (y1 - y0)                                    // черновые проходы — вдоль длинной стороны
   // черновая зона: от закрытых сторон — припуск внутрь
   const rx0 = open.l ? cx0 : cx0 + ROUGH_ALLOWANCE, rx1 = open.r ? cx1 : cx1 - ROUGH_ALLOWANCE
@@ -234,13 +257,13 @@ export function rectPaths(x0, y0, x1, y1, open, r, step) {
 // ─── вывод ──────────────────────────────────────────────────────────────────
 const fmt = v => { let r = Math.round(v * 1000) / 1000; if (Object.is(r, -0)) r = 0; return Number.isInteger(r) ? r + '.0' : String(r) }
 class Out {
-  constructor() { this.lines = []; this.kinds = []; this.opIds = []; this.tag = null; this.f = null; this.pos = [null, null, null] }
+  constructor(zOff = 0) { this.zOff = zOff; this.lines = []; this.kinds = []; this.opIds = []; this.tag = null; this.f = null; this.pos = [null, null, null] }
   push(line) { this.lines.push(line); this.kinds.push(this.tag ? this.tag[0] : null); this.opIds.push(this.tag ? this.tag[1] : 0) }
   raw(text) { String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).forEach(s => this.push(s)); this.f = null }
   move(g, x, y, z, feed) {
     let s = g
     if (x != null && y != null && (x !== this.pos[0] || y !== this.pos[1])) { s += ` X${fmt(x)} Y${fmt(y)}`; this.pos[0] = x; this.pos[1] = y }
-    if (z != null && z !== this.pos[2]) { s += ` Z${fmt(z)}`; this.pos[2] = z }
+    if (z != null && z !== this.pos[2]) { s += ` Z${fmt(z - this.zOff)}`; this.pos[2] = z }
     if (s === g) return
     if (feed && Math.round(feed) !== this.f) { s += ` F${Math.round(feed)}`; this.f = Math.round(feed) }
     this.push(s)
@@ -354,17 +377,29 @@ function orientFromInside(L, dir, rect) {
   return [...P.slice(st), ...P.slice(0, st)]
 }
 
-/** Прямоугольная выборка / паз на глубины zs */
-function cutRect(out, paths, zs, tool, safeZ) {
+/**
+ * Прямоугольная выборка / паз на глубины zs. op.entry === 'ramp' — вход под углом op.angle:
+ * фреза опускается, двигаясь «туда-обратно» по первому отрезку своей траектории.
+ */
+function cutRect(out, paths, zs, tool, safeZ, top, op = {}) {
   const feed = n0(tool.feed) || 1000, inFeed = n0(tool.inFeed) || feed
-  const start = paths.point || paths.line?.[0] || paths.rough?.[0] || paths.finish[0]
+  const path = paths.point ? [paths.point] : paths.line ? paths.line : paths.spiral ? paths.spiral
+    : [...(paths.rough || []), ...paths.finish, paths.finish[0]]
+  const start = path[0], next = path.find(q => Math.hypot(q[0] - start[0], q[1] - start[1]) > 0.5) || null
+  const ramp = op.entry === 'ramp' && next
+  const tan = Math.tan(Math.max(1, Math.min(89, n0(op.angle) || 45)) * Math.PI / 180)
   out.g0(start[0], start[1], safeZ)
+  let zPrev = top + 1
   zs.forEach((z, k) => {
     if (k) out.g1(start[0], start[1], null, feed)
-    out.g1(null, null, z, inFeed)
-    if (paths.line) out.g1(paths.line[1][0], paths.line[1][1], null, feed)
-    if (paths.rough) paths.rough.forEach(q => out.g1(q[0], q[1], null, feed))
-    if (paths.finish) [...paths.finish, paths.finish[0]].forEach(q => out.g1(q[0], q[1], null, feed))
+    if (ramp) {
+      out.g1(null, null, zPrev, inFeed)
+      const len = Math.hypot(next[0] - start[0], next[1] - start[1]), h = Math.min(len, (zPrev - z) / tan / 2), t = h / len
+      out.g1(start[0] + (next[0] - start[0]) * t, start[1] + (next[1] - start[1]) * t, (zPrev + z) / 2, inFeed)
+      out.g1(start[0], start[1], z, inFeed)
+    } else out.g1(null, null, z, inFeed)
+    path.slice(1).forEach(q => out.g1(q[0], q[1], null, feed))
+    zPrev = z
   })
   out.g0(null, null, safeZ)
 }
@@ -410,7 +445,8 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const T = Number(thickness) || 16
   const warn = new Set()
   const ox = n0(post.originX) + (geo.marginL || 0), oy = n0(post.originY) + (geo.marginB || 0)
-  let safeZ = n0(post.safeZ) || 25
+  const zTop = post.zRef === 'top'                       // ноль Z — верхняя пласть листа (иначе — стол)
+  let safeZ = (n0(post.safeZ) || 25) + (zTop ? T : 0)
   if (safeZ < T + 5) { warn.add(`Высота безопасности Z${num(safeZ)} ниже верха материала ${num(T)} мм + 5 мм — в программе поднята до Z${num(T + 5)}.`); safeZ = T + 5 }
   if (n0(post.fieldX) && n0(post.originX) + geo.sheetW > n0(post.fieldX) + EPS) warn.add(`Лист по X (${num(n0(post.originX) + geo.sheetW)} мм) выходит за рабочее поле станка ${num(post.fieldX)} мм.`)
   if (n0(post.fieldY) && n0(post.originY) + geo.sheetL > n0(post.fieldY) + EPS) warn.add(`Лист по Y (${num(n0(post.originY) + geo.sheetL)} мм) выходит за рабочее поле станка ${num(post.fieldY)} мм.`)
@@ -464,15 +500,15 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
       }
     }
     // пазы и выборки
-    const rects = [...f.grooves.map(g => ({ ...g, t: tool(ops.groove?.tool), rank: 2, label: 'пазы' })),
-      ...f.pockets.map(k => ({ ...k, t: tool(ops.pockets?.[pocketKey(k.depth)]?.tool), rank: 3, label: `выемки глубиной ${num(k.depth)}` }))]
+    const rects = [...f.grooves.map(g => { const d = g.depth || T, op = grooveOpFor(ops, grooveKey(g.width, d)); return { ...g, depth: d, op, t: tool(op.tool), rank: 2, label: `пазы ${num(g.width)} × ${num(d)}` } }),
+      ...f.pockets.map(k => { const op = ops.pockets?.[pocketKey(k.depth)] || {}; return { ...k, op, spiral: op.mode === 'spiral' ? (op.dir === 'ccw' ? 'ccw' : 'cw') : null, t: tool(op.tool), rank: 3, label: `выемки глубиной ${num(k.depth)}` } })]
     for (const k of rects) {
       if (!k.t) { noTool(k.label); continue }
       if (k.t.type !== 'mill') { warn.add(`На ${k.label} назначено сверло — нужна фреза.`); continue }
-      const paths = rectPaths(bx + k.x0, by + k.y0, bx + k.x1, by + k.y1, k.open, n0(k.t.d) / 2, n0(k.t.step))
+      const paths = rectPaths(bx + k.x0, by + k.y0, bx + k.x1, by + k.y1, k.open, n0(k.t.d) / 2, n0(k.t.step), k.spiral)
       if (!paths) { warn.add(`Фреза Ø${num(k.t.d)} шире, чем ${k.label} (${num(Math.min(k.x1 - k.x0, k.y1 - k.y0))} мм) — пропущено.`); continue }
       const zs = levels(T, k.depth >= T - EPS ? -millOver : T - k.depth, n0(k.t.maxPass))
-      jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: [bx + k.x0, by + k.y0], run: out => cutRect(out, paths, zs, k.t, safeZ) })
+      jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: [bx + k.x0, by + k.y0], run: out => cutRect(out, paths, zs, k.t, safeZ, T, k.op) })
     }
     // вырезы — фреза идёт внутри контура
     for (const c of f.cutouts) {
@@ -508,7 +544,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
           } else passes = levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: L, z }))
           const bb = bboxOf(f.outline)
           const edgeDist = Math.min(geo.marginL + p.x + bb.x0, geo.sheetW - (geo.marginL + p.x + bb.x1), geo.marginB + p.y + bb.y0, geo.sheetL - (geo.marginB + p.y + bb.y1))
-          jobs.push({ stage: 1, rank: 5, tool: t, at: L[0], small, edgeDist, run: out => cutLoop(out, passes, T, t, o, safeZ) })
+          jobs.push({ stage: 1, rank: 5, tool: t, at: L[0], small, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1], run: out => cutLoop(out, passes, T, t, o, safeZ) })
         }
       }
     }
@@ -532,39 +568,44 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const prevTool = seq[seq.length - 1]?.tool
   const cutTools = [...new Set(stage1.map(j => j.tool))].sort((a, b) => (b === prevTool) - (a === prevTool))
   cutTools.forEach(t => add(stage1.filter(j => j.tool === t && j.rank === 4)))
-  // Контуры деталей. Обработка всегда начинается с детали у края листа.
-  // Мелкие — первыми, от края листа внутрь (сначала все, что у самого края, затем следующий ряд).
-  // Остальные — по кратчайшему маршруту, без переездов из конца в конец станка.
-  const EDGE_BAND = 3                                    // мм: детали на таком же расстоянии от края — «один ряд»
-  const atEdgeFirst = list => {                          // ближайшая к фрезе деталь из тех, что у самого края
-    if (!list.length) return list
+  // Контуры деталей: от края листа по спирали к центру, центральная деталь — последней.
+  // Кольца: 0 — детали у края листа, 1 — их соседи внутрь листа и т.д. Внутри кольца — по кругу в одну сторону,
+  // начиная с ближайшей к фрезе детали: переезды короткие и идут вдоль уже вырезанного ряда.
+  const spiralOrder = list => {
+    if (list.length < 2) return list
+    const NEAR = 40                                      // мм: зазор, при котором детали — соседи
+    const gap = (a, b) => Math.max(a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], 0)
     const me = Math.min(...list.map(j => j.edgeDist))
-    let bi = 0, bd = Infinity
-    list.forEach((j, i) => { if (j.edgeDist > me + EDGE_BAND) return; const d = Math.hypot(j.at[0] - cur[0], j.at[1] - cur[1]); if (d < bd) { bd = d; bi = i } })
-    return [list[bi], ...list.filter((_, i) => i !== bi)]
-  }
-  const fromEdge = list => {
-    let left = list.slice()
-    while (left.length) {
-      const me = Math.min(...left.map(j => j.edgeDist))
-      const band = left.filter(j => j.edgeDist <= me + EDGE_BAND)
-      left = left.filter(j => !band.includes(j))
-      add(band)
+    const ring = new Map(list.filter(j => j.edgeDist <= me + NEAR).map(j => [j, 0]))
+    for (let k = 0, grew = true; grew && ring.size < list.length; k++) {
+      grew = false
+      const front = list.filter(j => ring.get(j) === k)
+      for (const j of list) if (!ring.has(j) && front.some(q => gap(j, q) <= NEAR)) { ring.set(j, k + 1); grew = true }
     }
+    const maxRing = Math.max(...ring.values())
+    list.forEach(j => { if (!ring.has(j)) ring.set(j, maxRing + 1) })     // отдельно стоящие — в конце
+    const cx = (sheetRect.x0 + sheetRect.x1) / 2, cy = (sheetRect.y0 + sheetRect.y1) / 2
+    const ang = j => Math.atan2(j.mid[1] - cy, j.mid[0] - cx)
+    const res = []
+    let pos = cur, sign = 0
+    for (let k = 0; k <= maxRing + 1; k++) {
+      const R = list.filter(j => ring.get(j) === k).sort((a, b) => ang(a) - ang(b))
+      if (!R.length) continue
+      let st = 0, bd = Infinity
+      R.forEach((j, i) => { const d = Math.hypot(j.at[0] - pos[0], j.at[1] - pos[1]); if (d < bd) { bd = d; st = i } })
+      const n = R.length, D = (a, b) => Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1])
+      if (!sign) sign = n > 2 && D(R[st], R[(st - 1 + n) % n]) < D(R[st], R[(st + 1) % n]) ? -1 : 1   // сторона обхода — одна на весь лист
+      for (let i = 0; i < n; i++) res.push(R[((st + sign * i) % n + n) % n])
+      pos = res[res.length - 1].at
+    }
+    return res
   }
   cutTools.forEach(t => {
-    const outer = stage1.filter(j => j.tool === t && j.rank === 5)
-    fromEdge(outer.filter(j => j.small))
-    const big = atEdgeFirst(outer.filter(j => !j.small))
-    if (big.length) {
-      const startsHere = !seq.some(j => j.rank === 5)      // мелких не было — начинаем с детали у края
-      const o = startsHere ? [big[0], ...nearestOrder(big.slice(1), big[0].at)] : nearestOrder(big, cur)
-      const r = shortenTravel(o, cur, startsHere ? 1 : 0)
-      seq.push(...r); cur = r[r.length - 1].at
-    }
+    const r = spiralOrder(stage1.filter(j => j.tool === t && j.rank === 5))
+    if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
 
-  const out = new Out()
+  const out = new Out(zTop ? T : 0)
   out.raw(post.cmdStart)
   let active = null, opId = 0
   const KIND = ['hole', 'hole', 'groove', 'pocket', 'cutout', 'outer']
@@ -580,7 +621,9 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
     j.run(out)
     out.tag = null
   }
+  // конечное положение: шпиндель уходит в точку парковки на безопасной высоте
+  if (seq.length && post.endX !== '' && post.endY !== '' && post.endX != null && post.endY != null) { out.g0(null, null, safeZ); out.g0(n0(post.endX), n0(post.endY), null) }
   out.raw(post.cmdEnd)
   if (!seq.length) warn.add('На листе нечего обрабатывать: не назначены инструменты.')
-  return { text: out.lines.join('\n') + '\n', lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds }
+  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds }
 }

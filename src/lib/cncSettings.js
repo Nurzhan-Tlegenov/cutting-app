@@ -9,6 +9,8 @@ export const DEFAULT_POST = () => ({
   // А. Основные
   fieldX: 2100, fieldY: 3000,     // рабочее поле станка
   originX: 0, originY: 0,         // начало обработки (смещение нуля листа)
+  endX: 0, endY: 0,               // конечное положение: куда уходит шпиндель в конце программы
+  zRef: 'bottom',                 // от какой пласти считается Z: 'bottom' — от стола (нижняя), 'top' — от верхней
   safeZ: 25,                      // высота безопасности от жертвенного стола
   rapid: 20000,                   // холостые перемещения, мм/мин (для расчёта времени)
   millOver: 0.15,                 // заглубление фрезы в жертвенный стол при сквозном резе
@@ -32,24 +34,29 @@ export const DEFAULT_OPS = () => ({
   // sideAllow / leftover — припуск первого прохода по контуру и остаток по глубине; smallOnly — проходы только для мелких
   outer: { tool: '', dir: 'ccw', entry: 'ramp', angle: 45, smallArea: 0.12, passes: 1, sideAllow: 0, leftover: 0.5, smallOnly: false },
   cutout: { tool: '', dir: 'cw', entry: 'ramp', angle: 45 },   // контур выреза (фреза идёт внутри)
-  groove: { tool: '' },                                        // пазы
-  pockets: {},                                                 // выемки: слой -> { tool }
+  groove: { tool: '', entry: 'straight', angle: 45 },          // пазы: общий инструмент и вход фрезы
+  grooves: {},                                                 // пазы по слоям (ширина × глубина): слой -> { tool }
+  pockets: {},                                                 // выемки: слой -> { tool, mode: 'zigzag' | 'spiral', dir: 'cw' | 'ccw', entry, angle }
   holes: {},                                                   // отверстия: слой -> { tool, d, depth }
 })
 
-export function normalizeCnc(raw) {
+// shared — общие постпроцессоры (мастер-аккаунт отметил «для всех»): видны каждому, в настройках пользователя не хранятся
+export function normalizeCnc(raw, shared = []) {
   const c = raw && typeof raw === 'object' ? raw : {}
-  const posts = Array.isArray(c.posts) && c.posts.length ? c.posts.map(p => ({ ...DEFAULT_POST(), ...p })) : [DEFAULT_POST()]
+  const own = (Array.isArray(c.posts) ? c.posts : []).filter(p => p && !p.shared).map(p => ({ ...DEFAULT_POST(), ...p }))
+  const mine = own.length ? own : (shared.length ? [] : [DEFAULT_POST()])
+  const posts = [...mine, ...shared.filter(p => !mine.some(q => q.id === p.id)).map(p => ({ ...DEFAULT_POST(), ...p, shared: true }))]
   const tools = Array.isArray(c.tools) ? c.tools : []
   const d = DEFAULT_OPS(), o = c.ops || {}
   return {
     posts, post: posts.some(p => p.id === c.post) ? c.post : posts[0].id, tools,
-    ops: { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, pockets: { ...o.pockets }, holes: { ...o.holes } },
+    ops: { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes } },
   }
 }
 
 export const getCnc = user => normalizeCnc(getUserSettings(user).cnc)
 export const fetchCnc = async user => normalizeCnc((await fetchUserSettings(user)).cnc)
-export const saveCnc = (cnc, user) => saveUserSettings({ cnc }, user)
+export const withShared = (cnc, shared) => normalizeCnc(cnc, shared)
+export const saveCnc = (cnc, user) => saveUserSettings({ cnc: { ...cnc, posts: cnc.posts.filter(p => !p.shared) } }, user)
 export const activePost = cnc => cnc.posts.find(p => p.id === cnc.post) || cnc.posts[0]
 export const newId = uid

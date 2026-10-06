@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen } from '../lib/adminApi'
+import CncLoader from '../components/CncLoader'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
@@ -58,7 +59,7 @@ export default function UsersPage() {
         <h1 style={{ fontSize: 18, fontWeight: 500 }}>Пользователи</h1>
       </div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
-      {users === null ? <p style={{ color: 'var(--text-hint)' }}>Загрузка…</p> : !ready ? (
+      {users === null ? <CncLoader label="Собираем список…" /> : !ready ? (
         <div className="card">
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>Список пользователей и переключатель регистрации появятся, когда база будет обновлена: откройте Supabase → SQL Editor, вставьте содержимое файла <b>migration_security_all.sql</b> и нажмите Run.</p>
           <button type="button" onClick={load} style={btn('main')}>Проверить ещё раз</button>

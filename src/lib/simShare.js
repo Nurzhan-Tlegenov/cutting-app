@@ -12,15 +12,15 @@ const KIND_BACK = Object.fromEntries(Object.entries(KIND).map(([k, v]) => [v, k]
 const r1 = v => Math.round(v * 10) / 10
 
 /** Снимок симуляции -> строка для базы */
-export function packSim({ text, kinds, opIds, sheet, outlines, thickness, rapid, tools }) {
+export function packSim({ text, kinds, opIds, sheet, outlines, thickness, rapid, tools, zShift = 0 }) {
   return JSON.stringify({
     v: 1, text, k: (kinds || []).map(x => KIND[x] || '-').join(''), o: opIds || [],
-    sheet, outlines: (outlines || []).map(pts => pts.map(([x, y]) => [r1(x), r1(y)])), thickness, rapid, tools,
+    sheet, outlines: (outlines || []).map(pts => pts.map(([x, y]) => [r1(x), r1(y)])), thickness, rapid, tools, z: zShift || 0,
   })
 }
 export function unpackSim(str) {
   const d = typeof str === 'string' ? JSON.parse(str) : str
-  return { text: d.text || '', kinds: [...(d.k || '')].map(ch => KIND_BACK[ch] || null), opIds: d.o || [], sheet: d.sheet || null, outlines: d.outlines || [], thickness: d.thickness || 16, rapid: d.rapid || 20000, tools: d.tools || {} }
+  return { text: d.text || '', kinds: [...(d.k || '')].map(ch => KIND_BACK[ch] || null), opIds: d.o || [], sheet: d.sheet || null, outlines: d.outlines || [], thickness: d.thickness || 16, rapid: d.rapid || 20000, tools: d.tools || {}, zShift: d.z || 0 }
 }
 
 /** Код ссылки, если она уже есть. -> { code } | { code: null } | { error, missing } */

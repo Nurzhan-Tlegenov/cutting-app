@@ -93,7 +93,7 @@ function woodTexture(hex) {
   return tex
 }
 
-export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16 }) {
+export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16, actions = null }) {
   const hostRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
@@ -916,6 +916,17 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)' }}>
           {[['all', 'Вся модель'], ['order', 'Только детали заказа']].map(([id, label]) => (
             <button key={id} type="button" style={chip(scope === id)} onClick={() => setScope(id)}>{label}</button>
+          ))}
+        </div>
+      )}
+      {actions?.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)' }}>
+          {actions.map(a => (
+            <button key={a.label} type="button" onClick={a.onClick}
+              style={{ flex: 1, padding: '9px 6px', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                border: a.primary ? 'none' : '0.5px solid var(--blue-mid)', background: a.primary ? 'var(--blue)' : 'transparent', color: a.primary ? 'white' : 'var(--blue)' }}>
+              {a.label}
+            </button>
           ))}
         </div>
       )}

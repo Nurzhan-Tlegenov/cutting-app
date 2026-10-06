@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { fetchSharedModel } from '../lib/modelShare'
 import { textureKey } from '../lib/materialTextures'
+import CncLoader from '../components/CncLoader'
 
 const Model3D = lazy(() => import('../components/Model3D'))
 
@@ -31,7 +32,7 @@ export default function SharedModelPage() {
   useEffect(() => { if (state.title) document.title = `${state.title} — 3D-модель` }, [state.title])
 
   const box = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 24, textAlign: 'center', gap: 8 }
-  if (state.loading) return <div style={{ ...box, color: 'var(--text-hint)' }}>Загрузка модели…</div>
+  if (state.loading) return <CncLoader full label="Строим 3D-модель…" />
   if (state.closed) return (
     <div style={box}>
       <div style={{ fontSize: 17, fontWeight: 500 }}>Ссылка не работает</div>
@@ -41,7 +42,7 @@ export default function SharedModelPage() {
   if (state.error) return <div style={box}><div style={{ fontSize: 15 }}>Не удалось открыть модель</div><div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{state.error}</div></div>
   if (!state.details.some(d => String(d.contour || '').includes('"inst"'))) return <div style={box}><div style={{ fontSize: 15 }}>В этом заказе нет 3D-модели</div></div>
   return (
-    <Suspense fallback={<div style={{ ...box, color: 'var(--text-hint)' }}>Загрузка модели…</div>}>
+    <Suspense fallback={<CncLoader full label="Строим 3D-модель…" />}>
       <Model3D details={state.details} scene={state.scene} title={state.title} readOnly sharedTextures={state.textures} />
     </Suspense>
   )

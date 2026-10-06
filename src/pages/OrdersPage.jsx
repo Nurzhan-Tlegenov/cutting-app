@@ -6,6 +6,7 @@ import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 import { simShareOrders } from '../lib/simShare'
+import CncLoader from '../components/CncLoader'
 
 export default function OrdersPage() {
   const { user, profile } = useAuth()
@@ -84,7 +85,7 @@ export default function OrdersPage() {
 
   if (loading) return (
     <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <p style={{ color: 'var(--text-hint)' }}>Загрузка...</p>
+      <CncLoader label="Загружаем заказы…" />
     </div>
   )
 

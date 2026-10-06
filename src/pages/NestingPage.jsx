@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { computeOffcutAtPoint, smallAtEdge, smallEdgeReal } from '../lib/nesting'
@@ -11,7 +11,7 @@ import { getAllDrillPoints, getGrooveRects, rotatePointTimes, rotateEdgesTimes }
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles, placedTurns } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
-import { detailEdgeList, contourSegments, segmentSide } from '../lib/edgeLength'
+import { edgeTotals, contourSegments, segmentSide, holeEdgeSegments } from '../lib/edgeLength'
 import { isTwoSided } from '../lib/partInfo'
 import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
@@ -25,6 +25,12 @@ import { loadOrderModel } from '../lib/orderModel'
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
+import { flipDetail } from '../lib/mirrorDetail'
+import { detailMeta } from '../lib/partLabel'
+import { sortDetails, SORT_MODES } from '../lib/sortDetails'
+import CncLoader from '../components/CncLoader'
+import SendToMaster from '../components/SendToMaster'
+const Model3D = lazy(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
 const COLORS = [
   '#B5D4F4','#9FE1CB','#F5C4B3','#CECBF6','#FAC775',
@@ -41,7 +47,7 @@ const LONG_PRESS_MS = 550
 // Удержание пальца на детали, после которого её можно двигать (короткое
 // касание/скольжение деталь не двигает; двойной тап — поворот)
 const DRAG_HOLD_MS = 250
-const EDIT_HOLD_MS = 1100   // держим палец на детали не двигая — открыть редактор контура
+const EDIT_HOLD_MS = 1100   // держим палец на детали не двигая — открыть 3D-вид этой детали (лицом к нам)
 
 // ─── Проверка пересечения двух полигонов (для true-shape деталей) — обычная
 // bbox-проверка слишком грубая: деталь, аккуратно уложенная в паз соседней,
@@ -657,6 +663,16 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
               })
               ctx.stroke()
             })
+            // кромка на отдельных участках вырезов
+            ;(contour.holes || []).forEach(hh => holeEdgeSegments(hh).forEach(seg => {
+              ctx.beginPath()
+              seg.pts.forEach(([px, py], k) => {
+                const { x: fx, y: fy } = rotatePointTimes(px, py, panelW, panelH, times)
+                const sx = x + fx * sc, sy = y + h - fy * sc
+                if (k) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy)
+              })
+              ctx.stroke()
+            }))
             const edged = (contour.holes || []).map(hh => !!hh.edge)
             if (edged.some(Boolean) && edged.length === holes.length) {
               holes.forEach((poly, hi) => {
@@ -1430,8 +1446,13 @@ export default function NestingPage() {
   const materials = useMemo(() => materialsOf(allDetails, order), [allDetails, order])
   const multiMat = materials.length > 1
   const details = useMemo(() => (multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails), [allDetails, multiMat, matKey, order])
-  const { user, profile, refreshProfile } = useAuth()
-  const canProduce = profile?.role === 'admin' || profile?.role === 'operator'   // производство: ЧПУ и бирки по принятому раскрою
+  const { user, profile, refreshProfile, cabinet, isMaster } = useAuth()
+  // кабинет производства: ЧПУ и бирки по принятому раскрою
+  const canProduce = cabinet === 'production' && (profile?.role === 'admin' || profile?.role === 'operator')
+  const [part3d, setPart3d] = useState(null)       // { index, draft } — деталь в 3D-виде (долгое удержание на карте)
+  const [sendJob, setSendJob] = useState(null)     // файл для отладки, который уходит мастер-аккаунту
+  const [partsOpen, setPartsOpen] = useState(false)   // список деталей под картами — свёрнут
+  const [partsSort, setPartsSort] = useState('')
   const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
   const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
   // показывать ли кромку на картах (без неё карта читается легче) — тоже за аккаунтом
@@ -1453,7 +1474,7 @@ export default function NestingPage() {
   const [needProd, setNeedProd] = useState(null)         // «Оформить» без производства: { cfg, force, pick, own }
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
   const [offForm, setOffForm] = useState(() => parseOffcuts(null))
-  const [sheetOpen, setSheetOpen] = useState(true)
+  const [sheetOpen, setSheetOpen] = useState(false)   // «Лист и обрезки» по умолчанию свёрнут
   const [paramsWarn, setParamsWarn] = useState('')
   const jobsRef = useRef({})     // cfgId -> { cancel }
   const skipRef = useRef(new Set()) // конфигурации, снятые из очереди
@@ -1498,7 +1519,6 @@ export default function NestingPage() {
     if (o) {
       setSheetForm(sheetFormOf(o))
       setOffForm(parseOffcuts(o.offcuts))
-      setSheetOpen(!o.nesting_result)
       fetchProductions(o)
       setCuttingMethod(o.cutting_method || 'nesting')
       let store = null
@@ -1541,7 +1561,6 @@ export default function NestingPage() {
     setMatKey(key)
     const first = cfgFromOrder(order, savedByMat[key] || null)
     setConfigs([first]); setFocusId(first.id)
-    setSheetOpen(!savedByMat[key])
   }
 
   // Что записать в заказ: один материал — сам результат, несколько — по ключам материалов
@@ -1556,16 +1575,36 @@ export default function NestingPage() {
     return true
   }
 
-  // ─── Редактор контура детали прямо с карты (долгое удержание на детали) ─────
-  function openPartEditor(di) {
+  // ─── Деталь с карты (долгое удержание): 3D-вид лицевой стороной к нам; там же — «Сменить лицевую сторону»
+  // и «Редактор контура». Правки сохраняются при закрытии.
+  function partDraft(di) {
     const d = details[di]
-    if (!d) return
+    if (!d) return null
     let c
     try { c = d.contour ? JSON.parse(d.contour) : null } catch { c = null }
-    setEditPart({ index: di, draft: {
-      w: d.length, h: d.width, contour: c,
+    return { index: di, draft: {
+      name: d.name || '', w: d.length, h: d.width, contour: c,
       edges: { top: d.edge_top || null, right: d.edge_right || null, bottom: d.edge_bottom || null, left: d.edge_left || null },
-    } })
+    } }
+  }
+  function openPart3d(di) { const pd = partDraft(di); if (pd) setPart3d(pd) }
+  const thicknessOf = di => Number(detailMeta(details[di])?.thickness) || Number(order?.material_thickness) || 16
+  function flipPart3d() {
+    setPart3d(pd => (pd ? { ...pd, changed: true, draft: flipDetail({ ...pd.draft, contour: pd.draft.contour || {} }, thicknessOf(pd.index)) } : pd))
+  }
+  function closePart3d() { const pd = part3d; setPart3d(null); if (pd?.changed) savePartDraft(pd) }
+  function part3dToEditor() { const pd = part3d; setPart3d(null); if (pd) setEditPart({ index: pd.index, draft: pd.draft }) }
+  // деталь для 3D-вида: стоит лицевой пластью к зрителю (X — ширина, Y — длина, толщина — на нас)
+  function part3dDetails(pd) {
+    const dr = pd.draft, W = Number(dr.h) || 0, L = Number(dr.w) || 0, c = dr.contour || {}
+    return [{
+      name: dr.name || 'Деталь', w: L, h: W, edges: dr.edges,
+      contour: { ...c, meta: {
+        des: c.meta?.des || '', material: c.meta?.material || '', product: '',
+        thickness: thicknessOf(pd.index), texDir: 2, turned: false, flipped: false,
+        local: { x0: 0, y0: 0, dx: W, dy: L }, inst: [[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]], ids: [0], anims: [null],
+      } },
+    }]
   }
   // Силуэт детали (контур + вырезы): изменился — готовый раскрой больше не верен
   function shapeKey(d) {
@@ -1577,7 +1616,9 @@ export default function NestingPage() {
   async function closePartEditor() {
     const ep = editPart
     setEditPart(null)
-    if (!ep) return
+    if (ep) savePartDraft(ep)
+  }
+  async function savePartDraft(ep) {
     const d = details[ep.index], dr = ep.draft
     const patch = {
       contour: dr.contour ? JSON.stringify(dr.contour) : null,
@@ -2105,16 +2146,13 @@ export default function NestingPage() {
   }
 
 
-  if (!order) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
+  if (!order) return <div className="page"><CncLoader label="Открываем раскрой…" /></div>
 
   const totalQty = details.reduce((s, d) => s + (Number(d.qty) || 1), 0)
-  const edgeByType = details.reduce((acc, d) => {
-    const qty = Number(d.qty) || 1
-    // стороны (Дл/Дп — по длине, Шв/Шн — по ширине) + кромка на фигурных участках и вырезах
-    detailEdgeList(d).forEach(e => { acc[e.name] = (acc[e.name] || 0) + (e.mm / 1000) * qty })
-    return acc
-  }, {})
-  const totalEdge = Object.values(edgeByType).reduce((s, v) => s + v, 0)
+  // кромка: стороны (Дл/Дп — по длине, Шв/Шн — по ширине) + фигурные участки и вырезы; прямая и криволинейная — отдельно
+  const edgeSum = edgeTotals(details)
+  const edgeByType = edgeSum.byName
+  const totalEdge = edgeSum.total
   const offcutCount = sheetsData.filter(sh => sh.stock === 'offcut').length
   const sheetsCount = sheetsData.length - offcutCount
   const totalArea = result ? sheetsData.reduce((a, sh) => { const g = geoOf(order, result, sh); return a + g.usableX * g.usableY / 1e6 }, 0) : 0
@@ -2160,8 +2198,15 @@ export default function NestingPage() {
     })
   }
 
+  // Файлы для отладки: мастер-аккаунт скачивает, остальные — отправляют мастер-аккаунту с описанием проблемы
+  const debugName = suffix => `${order?.order_number || 'raskroy'}${suffix}`
   function exportHistory(cfg, idx) {
     if (!cfg.history) return
+    if (!isMaster) {
+      setSendJob({ title: `история раскроя, конфигурация ${idx + 1}`, fileName: debugName(`_k${idx + 1}_history.json`), orderId: id,
+        getPayload: () => JSON.stringify(buildHistoryExport(cfg.history, { order, details, cfgIdx: idx })) })
+      return
+    }
     const data = buildHistoryExport(cfg.history, { order, details, cfgIdx: idx })
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -2216,7 +2261,7 @@ export default function NestingPage() {
           )}
           <button onClick={() => exportHistory(cfg, idx)} title="Файл для разработчика: где поиск буксует, ошибки укладки"
             style={{ ...btn, flex: ev ? '0 0 auto' : 1 }}>
-            ⬇ Экспорт истории
+            {isMaster ? '⬇ Экспорт истории' : '✉ История — разработчику'}
           </button>
         </div>
       </div>
@@ -2478,11 +2523,11 @@ export default function NestingPage() {
                     )}
                     {view === 'sheet' && (
                       <>
-                        <button onClick={() => downloadSheetDxf(cfg.activeSheet, cfg.sheetsData, `_k${idx + 1}`)}
+                        {isMaster && <button onClick={() => downloadSheetDxf(cfg.activeSheet, cfg.sheetsData, `_k${idx + 1}`)}
                           style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)',
                             background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
                           DXF
-                        </button>
+                        </button>}
                         <button onClick={() => setShowOffcuts(v => !v)}
                           style={{ padding: '4px 10px', borderRadius: 20, border: `0.5px solid ${showOffcuts ? 'var(--teal)' : 'var(--border-md)'}`,
                             background: showOffcuts ? 'var(--teal-light)' : 'transparent',
@@ -2561,7 +2606,7 @@ export default function NestingPage() {
                         onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
                         selectedIdx={cfg.selPart}
                         onSelect={i => updateCfg(cfg.id, { selPart: i, note: '' })}
-                        onEditPart={locked ? null : openPartEditor}
+                        onEditPart={locked ? null : openPart3d}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {showOffcuts && offcutMode === 'manual'
@@ -2694,18 +2739,18 @@ export default function NestingPage() {
                   )
                 )}
 
-                {/* DXF · выбрать вариант · оформить — в одну строку */}
+                {/* DXF (мастер-аккаунт) · выбрать вариант · оформить — в одну строку */}
                 {(() => {
                   const blocked = locked || cfg.buffer.length > 0 || busyId === cfg.id
                   return (
                     <div style={{ display: 'flex', gap: 6, opacity: locked ? 0.5 : 1 }}>
-                      <button onClick={() => downloadNestingDxf(cfg.sheetsData.filter(sh => sh.placed.length), `_k${idx + 1}`)}
+                      {isMaster && <button onClick={() => downloadNestingDxf(cfg.sheetsData.filter(sh => sh.placed.length), `_k${idx + 1}`)}
                         disabled={locked}
-                        title="Скачать DXF всех листов (для сверки)"
+                        title="Скачать DXF всех листов (для сверки) — только мастер-аккаунт"
                         style={{ flex: '0 0 auto', padding: '9px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
                           background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
                         ⬇ DXF
-                      </button>
+                      </button>}
                       <button onClick={() => chooseCfg(cfg)} disabled={blocked || cfg.saved}
                         title="Сохранить этот раскрой в заказ; остальные конфигурации остаются на экране"
                         style={{ flex: 1, padding: 9, borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500,
@@ -2754,22 +2799,6 @@ export default function NestingPage() {
         {/* 3D открывается поверх страницы — раскрой при этом не сбрасывается */}
         <Model3DButton details={allDetails} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} orderId={id} />
       </div>
-
-      {/* Материал: в заказе несколько листовых материалов — раскраиваем по одному */}
-      {multiMat && (
-        <div style={{ marginBottom: 8 }}>
-          <label className="label" style={{ marginBottom: 3 }}>Материал</label>
-          <select value={matKey} disabled={anyRunning} onChange={e => chooseMaterial(e.target.value)}
-            style={{ width: '100%', padding: '8px 8px', fontSize: 14 }}>
-            {materials.map(m => (
-              <option key={m.key} value={m.key}>{savedByMat[m.key] ? '✓ ' : ''}{m.label} — {m.pieces} шт.</option>
-            ))}
-          </select>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '3px 0 0' }}>
-            Раскрой считается и сохраняется отдельно для каждого материала. Выбрано: {materials.filter(m => savedByMat[m.key]).length} из {materials.length}.
-          </p>
-        </div>
-      )}
 
       {/* Статистика */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: focus && configs.length > 1 ? 3 : 8 }}>
@@ -2911,6 +2940,22 @@ export default function NestingPage() {
         )
       })()}
 
+      {/* Материал: в заказе несколько листовых материалов — раскраиваем по одному */}
+      {multiMat && (
+        <div style={{ marginBottom: 8 }}>
+          <label className="label" style={{ marginBottom: 3 }}>Материал</label>
+          <select value={matKey} disabled={anyRunning} onChange={e => chooseMaterial(e.target.value)}
+            style={{ width: '100%', padding: '8px 8px', fontSize: 14 }}>
+            {materials.map(m => (
+              <option key={m.key} value={m.key}>{savedByMat[m.key] ? '✓ ' : ''}{m.label} — {m.pieces} шт.</option>
+            ))}
+          </select>
+          <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '3px 0 0' }}>
+            Раскрой считается и сохраняется отдельно для каждого материала. Выбрано: {materials.filter(m => savedByMat[m.key]).length} из {materials.length}.
+          </p>
+        </div>
+      )}
+
       {/* Тип станка — общий для всех конфигураций */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)']].map(([val, label]) => (
@@ -2956,15 +3001,51 @@ export default function NestingPage() {
       </div>
       <style>{`@keyframes nesting-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
 
+      {/* Список деталей — под картами, свёрнут */}
+      {details.length > 0 && (
+        <div className="card" style={{ marginBottom: 12, padding: 0, overflow: 'hidden' }}>
+          <div onClick={() => setPartsOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', cursor: 'pointer' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-hint)', width: 12 }}>{partsOpen ? '▼' : '▶'}</span>
+            <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>Список деталей</div>
+            <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{details.length} поз. · {totalQty} шт.</span>
+          </div>
+          {partsOpen && (
+            <div style={{ borderTop: '0.5px solid var(--border)', padding: '8px 10px 4px' }}>
+              <select value={partsSort} onChange={e => setPartsSort(e.target.value)} style={{ width: '100%', padding: '6px 8px', fontSize: 13, marginBottom: 6 }}>
+                <option value="">Как в заказе</option>
+                {SORT_MODES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+              </select>
+              {sortDetails(details.map((d, i) => ({ ...d, __i: i })), partsSort).map(d => {
+                const m = detailMeta(d), ed = edgeTotals([{ ...d, qty: 1 }])
+                return (
+                  <div key={d.__i} onClick={anyRunning ? undefined : () => openPart3d(d.__i)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '0.5px solid var(--border)', cursor: anyRunning ? 'default' : 'pointer' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {m?.des ? <span style={{ fontFamily: 'monospace', color: 'var(--text-hint)', marginRight: 6 }}>{m.des}</span> : null}{d.name || 'Деталь'}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
+                        {d.length}×{d.width}{ed.total > 0 ? ` · кромка ${ed.total.toFixed(2)} м${ed.curved > 0 ? ` (крив. ${ed.curved.toFixed(2)})` : ''}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{d.qty} шт.</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Экспорт контуров для отладки — скопировать точные координаты детали разработчику */}
       {details.some(d => d.contour) && (
         <div style={{ marginBottom: 12 }}>
-          <button onClick={() => setShowDebugExport(v => !v)}
+          <button onClick={() => isMaster ? setShowDebugExport(v => !v) : setSendJob({ title: 'Контуры деталей', fileName: `contours_${order.order_number}.json`, getPayload: () => debugExportText, orderId: id })}
             style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
               background: 'transparent', color: 'var(--text-hint)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
-            {showDebugExport ? '▼' : '▶'} Экспорт контуров деталей (для отладки)
+            {isMaster ? (showDebugExport ? '▼ ' : '▶ ') : '✉ '}Экспорт контуров деталей (для отладки)
           </button>
-          {showDebugExport && (
+          {isMaster && showDebugExport && (
             <div style={{ marginTop: 6 }}>
               <textarea readOnly value={debugExportText}
                 style={{ width: '100%', height: 160, fontSize: 11, fontFamily: 'monospace', padding: 6, boxSizing: 'border-box' }}
@@ -2985,12 +3066,12 @@ export default function NestingPage() {
       {/* Экспорт РЕЗУЛЬТАТА укладки (по конфигурации, выбранной для шапки) */}
       {result && (
         <div style={{ marginBottom: 12 }}>
-          <button onClick={() => setShowResultExport(v => !v)}
+          <button onClick={() => isMaster ? setShowResultExport(v => !v) : setSendJob({ title: 'Результат раскроя', fileName: `nesting_${order.order_number}.json`, getPayload: () => resultExportText, orderId: id })}
             style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
               background: 'transparent', color: 'var(--text-hint)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
-            {showResultExport ? '▼' : '▶'} Экспорт результата раскроя (для отладки){configs.length > 1 ? ` — конфигурация ${focusIdx + 1}` : ''}
+            {isMaster ? (showResultExport ? '▼ ' : '▶ ') : '✉ '}Экспорт результата раскроя (для отладки){configs.length > 1 ? ` — конфигурация ${focusIdx + 1}` : ''}
           </button>
-          {showResultExport && (
+          {isMaster && showResultExport && (
             <div style={{ marginTop: 6 }}>
               <textarea readOnly value={resultExportText}
                 style={{ width: '100%', height: 160, fontSize: 11, fontFamily: 'monospace', padding: 6, boxSizing: 'border-box' }}
@@ -3068,6 +3149,14 @@ export default function NestingPage() {
             materialThickness={order.material_thickness || 16} />
         </div>
       )}
+      {part3d && (
+        <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 960, background: 'var(--bg2)' }}><CncLoader label="Строим 3D-модель…" /></div>}>
+          <Model3D key={part3d.index} details={part3dDetails(part3d)} title={part3d.draft.name || 'Деталь'} onClose={closePart3d} readOnly
+            materialThickness={thicknessOf(part3d.index)}
+            actions={[{ label: '⇄ Сменить лицевую сторону', onClick: flipPart3d }, { label: '✎ Редактор контура', onClick: part3dToEditor, primary: true }]} />
+        </Suspense>
+      )}
+      <SendToMaster job={sendJob} onClose={() => setSendJob(null)} />
     </div>
   )
 }

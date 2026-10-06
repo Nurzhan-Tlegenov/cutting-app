@@ -4,7 +4,8 @@
 
 const word = (s, ch) => { const m = s.match(new RegExp(ch + '\\s*(-?\\d*\\.?\\d+)', 'i')); return m ? Number(m[1]) : null }
 
-export function parseGcode(text, { rapid = 20000 } = {}) {
+// zShift — если ноль Z в программе на верхней пласти листа: толщина материала (симулятор считает от стола)
+export function parseGcode(text, { rapid = 20000, zShift = 0 } = {}) {
   const lines = String(text || '').split(/\r?\n/)
   const moves = []
   let x = 0, y = 0, z = null, zTop = 0, mode = 0, feed = 1000, tool = 0, t = 0
@@ -28,7 +29,7 @@ export function parseGcode(text, { rapid = 20000 } = {}) {
     const gs = [...s.matchAll(/G\s*(\d+(?:\.\d+)?)/g)].map(m => Number(m[1]))
     if (gs.includes(53)) { if (/Z/.test(s) && z != null) push(x, y, Math.max(zTop, z), true, li); return }
     for (const g of gs) if (g >= 0 && g <= 3) mode = g
-    const nx = word(s, 'X'), ny = word(s, 'Y'), nz = word(s, 'Z')
+    const nx = word(s, 'X'), ny = word(s, 'Y'), zw = word(s, 'Z'), nz = zw == null ? null : zw + zShift
     if (nx == null && ny == null && nz == null) return
     if (!gs.length && !/^[XYZ]/.test(s)) return
     const tx = nx ?? x, ty = ny ?? y, tz = nz ?? z ?? 0

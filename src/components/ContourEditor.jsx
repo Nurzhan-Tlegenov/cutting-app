@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { flipDetail } from '../lib/mirrorDetail'
-import { contourSegments, segmentSide } from '../lib/edgeLength'
+import { contourSegments, segmentSide, distToPolyline, holeEdgeSegments, detailEdgeList } from '../lib/edgeLength'
 const Model3D = lazy(() => import('./Model3D'))
 
 // ─── База фурнитуры (конфирматы, шканты, полкодержатели, минификсы...) ───────
@@ -745,7 +745,7 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
-function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, showDrillDims=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0, materialThickness=16 }) {
+function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, showDrillDims=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0, materialThickness=16, edgeMode=false, onEdgeTap=null }) {
   const ref = useRef(null)
   const wrapRef = useRef(null)
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
@@ -910,43 +910,50 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     ctx.fillStyle = '#E6F1FB'; ctx.fill()
     ctx.strokeStyle = '#185FA5'; ctx.lineWidth = 1.5; ctx.stroke()
 
-    // Кромка — показываем, на каких сторонах она назначена в карточке детали
+    // Кромка: стороны из карточки детали и отдельные участки контура — отрезки, дуги через точки, скругления.
+    // Рисуется по настоящей линии участка (у стороны со скруглённым углом кромка короче габарита).
     const edges = detail.edges || {}
-    if (edges.top || edges.bottom || edges.left || edges.right) {
-      ctx.save()
-      ctx.strokeStyle = '#2FA84F'; ctx.lineWidth = 4; ctx.lineCap = 'round'
-      const mk = (val) => val && val !== 'default' ? val : 'кромка'
-      if (edges.bottom) {
-        ctx.beginPath(); ctx.moveTo(ox+2, oy+dh); ctx.lineTo(ox+dw-2, oy+dh); ctx.stroke()
-        allLabels.push({ x: ox+dw/2, y: oy+dh+10, text: mk(edges.bottom), color: '#1F7A38', bold: true })
-      }
-      if (edges.top) {
-        ctx.beginPath(); ctx.moveTo(ox+2, oy); ctx.lineTo(ox+dw-2, oy); ctx.stroke()
-        allLabels.push({ x: ox+dw/2, y: oy-10, text: mk(edges.top), color: '#1F7A38', bold: true })
-      }
-      if (edges.left) {
-        ctx.beginPath(); ctx.moveTo(ox, oy+2); ctx.lineTo(ox, oy+dh-2); ctx.stroke()
-        allLabels.push({ x: ox-10, y: oy+dh/2, text: mk(edges.left), color: '#1F7A38', bold: true, angle: -Math.PI/2 })
-      }
-      if (edges.right) {
-        ctx.beginPath(); ctx.moveTo(ox+dw, oy+2); ctx.lineTo(ox+dw, oy+dh-2); ctx.stroke()
-        allLabels.push({ x: ox+dw+10, y: oy+dh/2, text: mk(edges.right), color: '#1F7A38', bold: true, angle: -Math.PI/2 })
-      }
-      ctx.restore()
-    }
-
-    // Кромка на отдельных участках контура (фигурные края, ступеньки, дуги)
-    contourSegments(verts).forEach(seg => {
-      if (!seg.edge) return
-      const side = segmentSide(seg, w, h)
-      if (side && edges[side]) return            // эта сторона уже показана выше
-      ctx.save()
-      ctx.strokeStyle = '#2FA84F'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+    const strokeSeg = (seg) => {
       ctx.beginPath()
       seg.pts.forEach(([px, py], k) => { const cx = ox + px * sc, cy = oy + dh - py * sc; if (k) ctx.lineTo(cx, cy); else ctx.moveTo(cx, cy) })
       ctx.stroke()
+    }
+    const outerSegs = contourSegments(verts)
+    if (edgeMode) {
+      // режим «Кромить»: все участки подсвечены — по ним можно нажимать; точки — границы участков
+      ctx.save()
+      ctx.strokeStyle = 'rgba(24,95,165,0.22)'; ctx.lineWidth = 11; ctx.lineCap = 'butt'; ctx.lineJoin = 'round'
+      outerSegs.forEach(strokeSeg)
+      ;(contour.holes || []).forEach(hole => { if (Array.isArray(hole.vertices) && hole.vertices.length > 2) contourSegments(hole.vertices).forEach(strokeSeg) })
       ctx.restore()
-    })
+    }
+    {
+      ctx.save()
+      ctx.strokeStyle = '#2FA84F'; ctx.lineWidth = edgeMode ? 6 : 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+      const mk = (val) => val && val !== 'default' ? val : 'кромка'
+      const sideDrawn = {}
+      outerSegs.forEach(seg => {
+        const side = segmentSide(seg, w, h)
+        const bySide = !!(side && edges[side])
+        if (bySide) sideDrawn[side] = true
+        if (bySide || seg.edge) strokeSeg(seg)
+      })
+      // сторона назначена, а участков контура на ней нет — по габариту
+      if (edges.bottom && !sideDrawn.bottom) { ctx.beginPath(); ctx.moveTo(ox+2, oy+dh); ctx.lineTo(ox+dw-2, oy+dh); ctx.stroke() }
+      if (edges.top && !sideDrawn.top) { ctx.beginPath(); ctx.moveTo(ox+2, oy); ctx.lineTo(ox+dw-2, oy); ctx.stroke() }
+      if (edges.left && !sideDrawn.left) { ctx.beginPath(); ctx.moveTo(ox, oy+2); ctx.lineTo(ox, oy+dh-2); ctx.stroke() }
+      if (edges.right && !sideDrawn.right) { ctx.beginPath(); ctx.moveTo(ox+dw, oy+2); ctx.lineTo(ox+dw, oy+dh-2); ctx.stroke() }
+      if (edges.bottom) allLabels.push({ x: ox+dw/2, y: oy+dh+10, text: mk(edges.bottom), color: '#1F7A38', bold: true })
+      if (edges.top) allLabels.push({ x: ox+dw/2, y: oy-10, text: mk(edges.top), color: '#1F7A38', bold: true })
+      if (edges.left) allLabels.push({ x: ox-10, y: oy+dh/2, text: mk(edges.left), color: '#1F7A38', bold: true, angle: -Math.PI/2 })
+      if (edges.right) allLabels.push({ x: ox+dw+10, y: oy+dh/2, text: mk(edges.right), color: '#1F7A38', bold: true, angle: -Math.PI/2 })
+      ctx.restore()
+    }
+    if (edgeMode) {
+      ctx.save(); ctx.fillStyle = '#185FA5'
+      outerSegs.forEach(seg => { const [px, py] = seg.pts[0]; ctx.beginPath(); ctx.arc(ox + px * sc, oy + dh - py * sc, 2.5, 0, Math.PI * 2); ctx.fill() })
+      ctx.restore()
+    }
 
     // Holes
     ;(contour.holes || []).forEach((hole, hi) => {
@@ -971,6 +978,11 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
           buildPath(ctx, holeVerts, sc, ox, oy, dh)
           ctx.fill(); ctx.stroke()
           if (hole.edge) { ctx.strokeStyle = '#2FA84F'; ctx.lineWidth = 4; ctx.stroke() }
+          else {
+            // кромка на отдельных участках выреза
+            const hs = holeEdgeSegments({ ...hole, vertices: holeVerts })
+            if (hs.length) { ctx.save(); ctx.strokeStyle = '#2FA84F'; ctx.lineWidth = edgeMode ? 6 : 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; hs.forEach(strokeSeg); ctx.restore() }
+          }
         }
       }
     })
@@ -1449,7 +1461,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
 
     ctx.restore() // закрываем поворот сцены
 
-  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, showDrillDims, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges, rotation])
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, showDrillDims, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges, rotation, edgeMode])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -1479,6 +1491,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const sc = (CSS_W - PAD*2) / fitW
     const dw = w * sc, dh = h * sc
     const ox = (CSS_W - dw) / 2, oy = (CSS_H - dh) / 2
+
+    // Режим «Кромить» — нажатие выбирает участок контура (отрезок, дугу, скругление) или вырез
+    if (edgeMode && onEdgeTap) {
+      onEdgeTap((cx - ox) / sc, (dh - (cy - oy)) / sc, 26 / sc)
+      return
+    }
 
     // Режим размещения присадки нажатием — координаты точки на детали
     if (placeMode && onPlaceTap) {
@@ -1541,7 +1559,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       <canvas ref={ref}
         onClick={handleTap}
         style={{ display:'block', cursor:'pointer', touchAction:'manipulation',
-          outline: placeMode ? '2px solid #0E8A6D' : 'none' }} />
+          outline: placeMode ? '2px solid #0E8A6D' : edgeMode ? '2px solid #2FA84F' : 'none' }} />
     </div>
   )
 }
@@ -1844,6 +1862,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
   const [tab, setTab] = useState('contour')
   const [show3d, setShow3d] = useState(false)   // 3D-вид этой детали
   const [edgeName, setEdgeName] = useState('')   // название кромки для участков контура и вырезов
+  const [edgeMode, setEdgeMode] = useState(false) // режим «Кромить»: нажатие на превью ставит / снимает кромку на участке
   const [activeIdx, setActiveIdx] = useState(null)
   const [activeHoleIdx, setActiveHoleIdx] = useState(null) // индекс редактируемого выреза
   const [previewVerts, setPreviewVerts] = useState(null)
@@ -2077,11 +2096,18 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     onUpdate({ ...detail, contour: { ...contour, ...patch } })
   }
 
+  // Правка, которая меняет и контур, и кромку сторон из карточки детали (режим «Кромить»)
+  const updWithEdges = (patch, edges) => {
+    setHistory(h => [...h.slice(-19), { __snap: true, contour, edges: detail.edges || null }])
+    onUpdate({ ...detail, contour: { ...contour, ...patch }, edges })
+  }
+
   const undo = () => {
     if (history.length === 0) return
     const prev = history[history.length - 1]
     setHistory(h => h.slice(0, -1))
-    onUpdate({ ...detail, contour: prev })
+    if (prev.__snap) onUpdate({ ...detail, contour: prev.contour, edges: prev.edges || detail.edges })
+    else onUpdate({ ...detail, contour: prev })
     setActiveIdx(null)
     setMenuSelType(null)
     setPreviewVerts(null)
@@ -2094,6 +2120,75 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     const holes = [...contour.holes]
     holes[holeIdx] = { ...holes[holeIdx], vertices: verts, _verticesEdited: true }
     upd({ holes })
+  }
+
+  // ─── Режим «Кромить» ────────────────────────────────────────────────────────
+  const sideEdgesNow = detail.edges || {}
+  const usedEdgeNames = [...new Set([...Object.values(sideEdgesNow), ...contour.vertices.flatMap(v => [v.edge, v.edgeR]), ...contour.holes.flatMap(hh => [hh.edge, ...(hh.vertices || []).flatMap(v => [v.edge, v.edgeR])])].filter(v => v && v !== 'default' && v !== true))]
+  const edgeNameNow = () => (edgeName || '').trim() || usedEdgeNames[0] || 'default'
+  // Поставить / снять кромку на участке внешнего контура
+  const toggleOuterEdge = (seg) => {
+    const name = edgeNameNow()
+    const segs = contourSegments(contour.vertices)
+    const side = segmentSide(seg, w, h)
+    const edges = { top: null, right: null, bottom: null, left: null, ...sideEdgesNow }
+    const verts = contour.vertices.map(v => ({ ...v }))
+    const set = (sg, val) => { if (val) verts[sg.i][sg.prop] = val; else delete verts[sg.i][sg.prop] }
+    const bySide = !!(side && edges[side])
+    if (bySide) {
+      // кромка стояла на всей стороне: снимаем её с этого участка, остальные участки стороны остаются с кромкой
+      const val = edges[side]
+      segs.forEach(sg => { if (sg.key !== seg.key && segmentSide(sg, w, h) === side && !sg.edge) set(sg, val) })
+      edges[side] = null
+      set(seg, null)
+    } else if (seg.edge) set(seg, null)
+    else {
+      const full = side && Math.abs(seg.len - (side === 'left' || side === 'right' ? h : w)) < 0.5
+      if (full) edges[side] = name            // участок — вся сторона детали: то же, что галочка в карточке
+      else set(seg, name)
+    }
+    updWithEdges({ vertices: verts }, edges)
+  }
+  const toggleHoleEdge = (hi, seg) => {
+    const name = edgeNameNow()
+    const holes = contour.holes.map(x => ({ ...x }))
+    const hole = holes[hi]
+    if (!seg) { if (hole.edge) delete hole.edge; else hole.edge = name; upd({ holes }); return }   // круглый вырез — целиком
+    const hv = (hole.vertices || []).map(v => ({ ...v }))
+    if (hole.edge) {
+      // кромка стояла на всём вырезе: оставляем на остальных участках
+      const val = hole.edge
+      contourSegments(hv).forEach(sg => { if (sg.key !== seg.key) hv[sg.i][sg.prop] = val; else delete hv[sg.i][sg.prop] })
+      delete hole.edge
+    } else if (seg.edge) delete hv[seg.i][seg.prop]
+    else hv[seg.i][seg.prop] = name
+    hole.vertices = hv
+    upd({ holes })
+  }
+  const handleEdgeTap = (x, y, tol) => {
+    let best = null
+    contourSegments(contour.vertices).forEach(seg => { const d = distToPolyline(x, y, seg.pts); if (!best || d < best.d) best = { d, seg } })
+    contour.holes.forEach((hole, hi) => {
+      if (hole.type === 'circle') {
+        const dd = hole.d || 100
+        const pos = resolvePos(hole.sides || [], hole.offsets || {}, w, h, dd, dd)
+        const d = Math.abs(Math.hypot(x - (pos.x + dd / 2), y - (pos.y + dd / 2)) - dd / 2)
+        if (!best || d < best.d) best = { d, hi, seg: null }
+        return
+      }
+      const hv = hole.vertices || holeToVertices(hole, w, h)
+      if (!hv) return
+      contourSegments(hv).forEach(seg => { const d = distToPolyline(x, y, seg.pts); if (!best || d < best.d) best = { d, hi, seg, noVerts: !hole.vertices } })
+    })
+    if (!best || best.d > tol) return
+    if (best.hi == null) toggleOuterEdge(best.seg)
+    else if (best.noVerts) toggleHoleEdge(best.hi, null)
+    else toggleHoleEdge(best.hi, best.seg)
+  }
+  const toggleEdgeMode = () => {
+    const on = !edgeMode
+    setEdgeMode(on)
+    if (on) { setActiveIdx(null); setMenuSelType(null); setPreviewVerts(null); setArcMode(false); setArcPoints([]); setPlaceDrillIdx(null); setPlaceLayoutIdx(null) }
   }
 
   const handleTap = (idx, holeIdx = null) => {
@@ -2338,7 +2433,12 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
       const h = Number(detail.w) || 0
       // Сохраняем пользовательские точки если они были отредактированы вручную
       if (!updated._verticesEdited) {
+        const old = holes[i].vertices
         updated.vertices = holeToVertices(updated, w, h)
+        // кромка, назначенная на участки выреза, остаётся при изменении его размеров
+        if (Array.isArray(old) && updated.vertices && old.length === updated.vertices.length) {
+          updated.vertices = updated.vertices.map((v, k) => ({ ...v, ...(old[k].edge ? { edge: old[k].edge } : {}), ...(old[k].edgeR ? { edgeR: old[k].edgeR } : {}) }))
+        }
       }
     }
     holes[i] = updated
@@ -2600,6 +2700,12 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
           {/* Подсказка pinch-zoom — масштабируется только сама деталь в превью, щипком двух пальцев */}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6, gap:6 }}>
             <span style={{ fontSize:10, color:'var(--text-hint)', flex:1 }}>🤏 Щипком двух пальцев — масштаб детали</span>
+            <button type="button" onClick={toggleEdgeMode}
+              title="Кромить: нажимайте на отрезки, дуги и скругления контура прямо на детали"
+              style={{ fontSize:12, fontWeight:500, padding:'5px 12px', border: edgeMode ? '1.5px solid #2FA84F' : '0.5px solid #2FA84F',
+                borderRadius:16, background: edgeMode ? '#2FA84F' : '#E1F5EE', color: edgeMode ? 'white' : '#1F7A38', cursor:'pointer', flexShrink:0 }}>
+              {edgeMode ? '✓ Кромить' : 'Кромить'}
+            </button>
             <button type="button" onClick={() => setRotation(r => (r + 90) % 360)}
               title="Повернуть превью на 90°"
               style={{ fontSize:11, padding:'4px 9px', border: rotation ? '1px solid var(--blue)' : '0.5px solid var(--border-md)',
@@ -2615,6 +2721,27 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               </button>
             )}
           </div>
+          {edgeMode && (() => {
+            const list = detailEdgeList({ ...detail, contour })
+            const sum = k => list.filter(e => (k === 'c') === !!e.curved).reduce((a, e) => a + e.mm, 0)
+            const st = sum('s'), cu = sum('c')
+            return (
+              <div style={{ background:'#E1F5EE', border:'0.5px solid #2FA84F', borderRadius:'var(--radius)', padding:'7px 9px', marginBottom:6 }}>
+                <div style={{ fontSize:12, color:'#1F7A38', fontWeight:500, marginBottom:5 }}>
+                  👆 Нажимайте на участки контура: отрезок, дугу, скругление, вырез — кромка ставится и снимается
+                </div>
+                <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                  <span style={{ fontSize:11, color:'var(--text-muted)', flexShrink:0 }}>Кромка:</span>
+                  <input type="text" list="contour-edge-names" value={edgeName} placeholder={usedEdgeNames[0] || 'название (необязательно)'}
+                    onChange={e => setEdgeName(e.target.value)} style={{ padding:'5px 6px', fontSize:12 }} />
+                  <datalist id="contour-edge-names">{usedEdgeNames.map(u => <option key={u} value={u} />)}</datalist>
+                </div>
+                <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:5 }}>
+                  На детали: <b>{((st + cu) / 1000).toFixed(2)} м</b> · прямая {(st / 1000).toFixed(2)} м · криволинейная {(cu / 1000).toFixed(2)} м
+                </div>
+              </div>
+            )
+          })()}
         <div style={{ display:'flex', gap:4, marginBottom:8, alignItems:'flex-start' }}>
 
           {/* Список точек слева */}
@@ -2679,7 +2806,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               showMarkers={showMarkers} showLengths={showLengths} showAngles={showAngles} showDrillDims={showDrillDims}
               materialThickness={defaultThickness}
               zoom={zoom} onZoomChange={setZoom} onLayoutTap={handleLayoutBandTap} highlightLayoutIdx={highlightLayoutIdx}
-              rotation={rotation} />
+              rotation={rotation} edgeMode={edgeMode} onEdgeTap={handleEdgeTap} />
           </div>
 
           {/* Правая колонка — всегда toggles + кнопки типа если точка выбрана */}
@@ -2948,18 +3075,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
       )}
 
       {tab==='contour' && (() => {
-        // Кромка по участкам контура — для фигурных деталей (у прямоугольной стороны задаются в карточке заказа)
+        // Кромка по участкам контура — списком (то же, что нажатия на превью в режиме «Кромить»)
         const segs = contourSegments(contour.vertices)
-        const sideEdges = detail.edges || {}
-        const used = [...new Set([...Object.values(sideEdges), ...contour.vertices.map(v => v.edge), ...contour.holes.map(hh => hh.edge)].filter(v => v && v !== 'default'))]
-        const name = (edgeName || '').trim() || used[0] || 'default'
-        const setSeg = (i, on) => setVertices(contour.vertices.map((v, k) => {
-          if (k !== i) return v
-          const nv = { ...v }
-          if (on) nv.edge = name; else delete nv.edge
-          return nv
-        }))
-        const isOn = seg => !!seg.edge || !!(segmentSide(seg, w, h) && sideEdges[segmentSide(seg, w, h)])
+        const isOn = seg => !!seg.edge || !!(segmentSide(seg, w, h) && sideEdgesNow[segmentSide(seg, w, h)])
         const banded = segs.filter(isOn).length
         return (
           <details style={{ marginBottom:8, border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)', padding:'6px 8px' }}>
@@ -2968,29 +3086,26 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
             </summary>
             <div style={{ display:'flex', gap:6, alignItems:'center', margin:'8px 0' }}>
               <span style={{ fontSize:11, color:'var(--text-hint)', flexShrink:0 }}>Кромка:</span>
-              <input type="text" list="contour-edge-names" value={edgeName} placeholder={used[0] || 'название (необязательно)'}
+              <input type="text" list="contour-edge-names-2" value={edgeName} placeholder={usedEdgeNames[0] || 'название (необязательно)'}
                 onChange={e => setEdgeName(e.target.value)} style={{ padding:'5px 6px', fontSize:12 }} />
-              <datalist id="contour-edge-names">{used.map(u => <option key={u} value={u} />)}</datalist>
+              <datalist id="contour-edge-names-2">{usedEdgeNames.map(u => <option key={u} value={u} />)}</datalist>
             </div>
             <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
               {segs.map(seg => {
-                const side = segmentSide(seg, w, h)
-                const bySide = !!(side && sideEdges[side])
-                const on = !!seg.edge || bySide
+                const on = isOn(seg)
                 return (
-                  <button key={seg.i} type="button" disabled={bySide && !seg.edge}
-                    title={bySide ? 'Кромка задана на всю сторону в карточке заказа' : (seg.edge || '')}
-                    onClick={() => setSeg(seg.i, !seg.edge)}
+                  <button key={seg.key} type="button" title={seg.edge || ''}
+                    onClick={() => toggleOuterEdge(seg)}
                     style={{ padding:'5px 8px', borderRadius:16, fontSize:11, cursor:'pointer',
                       border: on ? '1.5px solid #2FA84F' : '0.5px solid var(--border-md)',
                       background: on ? '#E1F5EE' : 'transparent', color: on ? '#1F7A38' : 'var(--text-muted)' }}>
-                    {seg.i + 1}–{seg.j + 1}{seg.arc ? ' ⌒' : ''} · {Math.round(seg.len)}
+                    {seg.round ? `R в точке ${seg.i + 1}` : `${seg.i + 1}–${seg.j + 1}`}{seg.arc ? ' ⌒' : ''} · {Math.round(seg.len)}
                   </button>
                 )
               })}
             </div>
             <p style={{ fontSize:10, color:'var(--text-hint)', margin:'6px 0 0' }}>
-              Номера — как у точек контура слева от чертежа. Кромка на вырезах включается во вкладке «Вырезы».
+              Проще — кнопкой «Кромить» над чертежом: участки выбираются нажатием прямо на детали. ⌒ — криволинейный участок.
             </p>
           </details>
         )
@@ -3080,7 +3195,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               {hole.type !== 'pocket' && (
                 <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-muted)', marginBottom:10, cursor:'pointer' }}>
                   <input type="checkbox" checked={!!hole.edge} style={{ width:16, height:16 }}
-                    onChange={e => { const hs = [...contour.holes]; const nh = { ...hs[i] }; if (e.target.checked) nh.edge = (edgeName || '').trim() || 'default'; else delete nh.edge; hs[i] = nh; upd({ holes: hs }) }} />
+                    onChange={e => { const hs = [...contour.holes]; const nh = { ...hs[i] }; if (e.target.checked) nh.edge = edgeNameNow(); else delete nh.edge; hs[i] = nh; upd({ holes: hs }) }} />
                   Кромка по вырезу{hole.edge && hole.edge !== 'default' ? ` · ${hole.edge}` : ''}
                 </label>
               )}

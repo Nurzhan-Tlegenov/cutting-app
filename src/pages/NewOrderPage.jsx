@@ -511,7 +511,7 @@ export default function NewOrderPage() {
       const { error: dErr } = await supabase.from('order_details').insert(rows)
       if (dErr) throw dErr
       if (model3d) { const r = await saveOrderModel(order.id, model3d); if (!r.ok) window.alert(r.missing ? MODEL_TABLE_HINT : 'Заказ сохранён, но 3D-модель сохранить не удалось: ' + r.message) }
-      navigate(`/orders/${order.id}`)
+      navigate(`/orders/${order.id}/nesting`)   // сразу к делу: статистика и детали есть и в раскрое
     } catch (err) {
       setError(err.message)
     } finally {

@@ -66,7 +66,7 @@ const MAX_COMPACT_PASSES = 3
 // угол паза скруглён, но радиус игнорировался, туда легально ставили соседнюю
 // деталь вплотную к ТЕОРЕТИЧЕСКОЙ острой точке, а настоящий (скруглённый)
 // материал там на самом деле чуть выступает дальше в паз.
-function roundCorner(prev, curr, next, r, segments = 16) {
+export function roundCorner(prev, curr, next, r, segments = 16) {
   const dx0 = prev.x - curr.x, dy0 = prev.y - curr.y
   const dx1 = next.x - curr.x, dy1 = next.y - curr.y
   const d0 = Math.hypot(dx0, dy0), d1 = Math.hypot(dx1, dy1)
@@ -102,7 +102,7 @@ function roundCorner(prev, curr, next, r, segments = 16) {
 
 // Явный fillet (дуга на стыке прямой и дуги через 3+ точек) — параметры уже
 // посчитаны в ContourEditor и сохранены в самой вершине, просто сэмплируем.
-function sampleFillet(v, segments = 16) {
+export function sampleFillet(v, segments = 16) {
   const ccw = !!v.fccw
   let a0 = v.fa0, a1 = v.fa1
   let diff = a1 - a0
@@ -125,7 +125,7 @@ function circumcenter(a, b, c) {
 
 // Дуга через 3 точки (circumcircle) — та же логика направления обхода, что и
 // drawArc3 в ContourEditor.jsx: идём от sp к ep так, чтобы пройти через mid.
-function sampleArc3(sp, mid, ep, segments = 16) {
+export function sampleArc3(sp, mid, ep, segments = 16) {
   const C = circumcenter(sp, mid, ep)
   if (!C) return [[sp.x, sp.y], [ep.x, ep.y]] // почти на одной прямой — сэмплировать нечего
   const R = Math.hypot(sp.x - C.x, sp.y - C.y)

@@ -14,6 +14,7 @@ import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided } from '../lib/partInfo'
 import { saveOrderModel, loadOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import Model3DButton from '../components/Model3DButton'
+import CncLoader from '../components/CncLoader'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -440,7 +441,7 @@ export default function EditOrderPage() {
       const { error: iErr } = await supabase.from('order_details').insert(rows)
       if (iErr) throw new Error('Ошибка сохранения деталей: ' + iErr.message)
       if (model3d) { const r = await saveOrderModel(id, model3d); if (!r.ok) window.alert(r.missing ? MODEL_TABLE_HINT : 'Заказ сохранён, но 3D-модель сохранить не удалось: ' + r.message) }
-      navigate(`/orders/${id}`)
+      navigate(`/orders/${id}/nesting`)   // сразу к делу: статистика и детали есть и в раскрое
     } catch (err) {
       setError(err.message)
     } finally {
@@ -448,7 +449,7 @@ export default function EditOrderPage() {
     }
   }
   const validCount = details.filter(d => d.w > 0 && d.h > 0).length
-  if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40, textAlign: 'center' }}>Загрузка...</p></div>
+  if (loading) return <div className="page"><CncLoader label="Открываем заказ…" /></div>
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingTop: 8 }}>

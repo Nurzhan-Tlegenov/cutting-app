@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { fetchSharedSim } from '../lib/simShare'
+import CncLoader from '../components/CncLoader'
 
 const GcodeSimulator = lazy(() => import('../components/GcodeSimulator'))
 
@@ -21,7 +22,7 @@ export default function SharedSimPage() {
   const toolDia = useMemo(() => { const m = state.sim?.tools || {}; return t => Number(m[t]) || 0 }, [state.sim])
 
   const box = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 24, textAlign: 'center', gap: 8 }
-  if (state.loading) return <div style={{ ...box, color: 'var(--text-hint)' }}>Загрузка симуляции…</div>
+  if (state.loading) return <CncLoader full label="Запускаем симулятор…" />
   if (state.closed) return (
     <div style={box}>
       <div style={{ fontSize: 17, fontWeight: 500 }}>Ссылка не работает</div>
@@ -33,8 +34,8 @@ export default function SharedSimPage() {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', padding: 10, boxSizing: 'border-box', height: '100dvh' }}>
       <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
-        <Suspense fallback={<div style={{ ...box, color: 'var(--text-hint)' }}>Загрузка симуляции…</div>}>
-          <GcodeSimulator text={s.text} kinds={s.kinds} opIds={s.opIds} title={s.name} thickness={s.thickness} rapid={s.rapid} toolDia={toolDia} sheet={s.sheet} outlines={s.outlines} />
+        <Suspense fallback={<CncLoader full label="Запускаем симулятор…" />}>
+          <GcodeSimulator text={s.text} kinds={s.kinds} opIds={s.opIds} title={s.name} thickness={s.thickness} rapid={s.rapid} zShift={s.zShift} toolDia={toolDia} sheet={s.sheet} outlines={s.outlines} />
         </Suspense>
       </div>
     </div>

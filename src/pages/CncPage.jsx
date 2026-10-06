@@ -5,8 +5,11 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettings'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { getCnc, fetchCnc, saveCnc, activePost } from '../lib/cncSettings'
-import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey } from '../lib/gcode'
+import { getCnc, fetchCnc, saveCnc, activePost, withShared } from '../lib/cncSettings'
+import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor } from '../lib/gcode'
+import { listSharedPosts, saveSharedPost, removeSharedPost, sendNews } from '../lib/messages'
+import { getLabelTpl, buildLabelFiles, zipFiles } from '../lib/labelMaker'
+import CncLoader from '../components/CncLoader'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
 import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from '../lib/simShare'
@@ -29,7 +32,10 @@ function download(name, data, type = 'text/plain') {
 export default function CncPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, profile, isMaster } = useAuth()
+  const labelTpl = useMemo(() => getLabelTpl(user), [user])
+  const [withLabels, setWithLabels] = useState(true)   // вместе с G-кодом — программа для стола бирковки
+  const [labelBusy, setLabelBusy] = useState(false)
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
@@ -53,7 +59,8 @@ export default function CncPage() {
       if (!alive) return
       setOrder(o || null); setDetails(d || []); setLoading(false)
     })()
-    fetchCnc(user).then(c => { if (alive) { setCnc(c); setCncReady(true) } })
+    // свои настройки + общие постпроцессоры (мастер-аккаунт отметил «для всех»)
+    Promise.all([fetchCnc(user), listSharedPosts()]).then(([c, sh]) => { if (alive) { setCnc(withShared(c, sh.data || [])); setCncReady(true) } })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user?.id])
@@ -62,7 +69,20 @@ export default function CncPage() {
   const mat = mats.find(m => m.key === matKey) || mats[0] || null
   const layers = useMemo(() => (mat ? collectLayers(mat.sheets, mat.details, mat.thickness) : null), [mat])
   const post = activePost(cnc)
-  const change = next => { setCnc(next); saveCnc(next, user); setBuilt(null) }
+  const change = next => {
+    const prev = cnc
+    setCnc(next); saveCnc(next, user); setBuilt(null)
+    if (!isMaster) return
+    // «для всех»: общий постпроцессор хранится отдельно и виден каждому пользователю
+    for (const p of next.posts) {
+      const was = prev.posts.find(q => q.id === p.id)
+      if (p.forAll && p !== was) {
+        saveSharedPost(p, user)
+        if (!was?.forAll && !was?.shared) sendNews(user, profile, 'Новый постпроцессор', `Добавлен постпроцессор «${p.name}». Он уже доступен в разделе ЧПУ → Основные.`)
+      } else if (!p.forAll && (was?.forAll || was?.shared)) removeSharedPost(p.id)
+    }
+    prev.posts.forEach(q => { if ((q.forAll || q.shared) && !next.posts.some(p => p.id === q.id)) removeSharedPost(q.id) })
+  }
   const sel = mat ? (picked ?? mat.sheets.map((_, i) => i)) : []
   const toggle = i => { setPicked(sel.includes(i) ? sel.filter(x => x !== i) : [...sel, i].sort((a, b) => a - b)); setBuilt(null) }
 
@@ -72,20 +92,30 @@ export default function CncPage() {
     const w = [], has = t => (cnc.tools || []).some(x => x.id === t)
     if (!has(cnc.ops.outer.tool)) w.push('контур детали')
     if (layers.cutouts && !has(cnc.ops.cutout.tool)) w.push(`контур выреза (${layers.cutouts} шт.)`)
-    if (layers.grooves && !has(cnc.ops.groove.tool)) w.push(`пазы (${layers.grooves} шт.)`)
+    layers.grooveLayers.forEach(l => { if (!has(grooveOpFor(cnc.ops, l.key).tool)) w.push(`пазы ${l.width} × ${l.depth} (${l.count} шт.)`) })
     layers.pockets.forEach(l => { if (!has(cnc.ops.pockets?.[pocketKey(l.depth)]?.tool)) w.push(`выемки глубиной ${l.depth} (${l.count} шт.)`) })
     layers.holes.forEach(l => { if (!holeToolFor(l, cnc)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
     return w
   }, [layers, cnc])
 
-  const fileName = si => `${si + 1}_${safeName(order.order_number)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}.${post.ext || 'nc'}`
+  const baseName = () => `${safeName(order.order_number)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}`
+  const fileName = si => `${si + 1}_${baseName()}.${post.ext || 'nc'}`
   const build = () => {
     const files = sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc })
-      return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000 }).time }
+      return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
     })
     setBuilt({ files }); setSaved('')
+    // бирковка: файлы стола бирковки для тех же листов (на линии сначала бирки, потом раскрой)
+    const ok = files.filter(f => !f.empty)
+    if (labelTpl.enabled && withLabels && ok.length) {
+      setLabelBusy(true)
+      buildLabelFiles({ order, mat, base: baseName(), post, tpl: labelTpl, sheets: ok.map(f => ({ si: f.si, nc: f.name })) })
+        .then(labels => setBuilt(b => (b && b.files === files ? { ...b, labels } : b)))
+        .catch(() => {})
+        .finally(() => setLabelBusy(false))
+    }
   }
   // Созданные программы не теряются при выходе из заказа и приложения: запоминаем, какие листы были созданы,
   // и при возвращении создаём их заново теми же настройками (программа однозначно получается из раскроя и настроек).
@@ -118,7 +148,7 @@ export default function CncPage() {
   const [saved, setSaved] = useState('')
   // все файлы — отдельными файлами (не архивом): в выбранную папку, а где браузер этого не умеет — загрузками по одному
   const saveAll = async () => {
-    const files = built.files.filter(f => !f.empty)
+    const files = [...(built.labels || []).map(f => ({ name: f.name, text: f.data })), ...built.files.filter(f => !f.empty)]   // сначала бирковка, потом раскрой
     if (files.length > 1 && window.showDirectoryPicker) {
       try {
         const dir = await window.showDirectoryPicker({ mode: 'readwrite' })
@@ -127,8 +157,10 @@ export default function CncPage() {
         return
       } catch (e) { if (e?.name === 'AbortError') return }
     }
-    for (const f of files) { download(f.name, f.text); await new Promise(r => setTimeout(r, 400)) }
-    setSaved(`Отправлено на сохранение файлов: ${files.length}`)
+    if (built.labels?.length) download(`Birki_${baseName()}.zip`, zipFiles(built.labels), 'application/zip')
+    const nc = built.files.filter(f => !f.empty)
+    for (const f of nc) { await new Promise(r => setTimeout(r, 400)); download(f.name, f.text) }
+    setSaved(`Отправлено на сохранение: программ ${nc.length}${built.labels?.length ? ' + архив бирковки' : ''}`)
   }
   const simView = useMemo(() => {
     if (!sim || !mat) return null
@@ -149,7 +181,7 @@ export default function CncPage() {
   const makeShare = async () => {
     setShare(x => ({ ...x, busy: true, error: '' }))
     const tools = Object.fromEntries((cnc.tools || []).map(x => [num(x.t), num(x.d)]))
-    const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(post.rapid) || 20000, tools })
+    const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(post.rapid) || 20000, tools, zShift: sim.zShift })
     const r = await saveSimShare(id, sim.name, user.id, payload)
     setShare(x => ({ ...x, busy: false, code: r.code || x.code, error: r.error || '', fresh: !r.error }))
     setLinksTick(t => t + 1)
@@ -166,7 +198,7 @@ export default function CncPage() {
   }
   const toolDia = useMemo(() => { const m = new Map((cnc.tools || []).map(x => [num(x.t), num(x.d)])); return t => m.get(t) || 0 }, [cnc])
 
-  if (loading) return <div className="page"><p style={{ color: 'var(--text-hint)', paddingTop: 40 }}>Загрузка...</p></div>
+  if (loading) return <div className="page"><CncLoader label="Открываем ЧПУ…" /></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
   const warnings = built ? [...new Set(built.files.flatMap(f => f.warnings))] : []
   const chip = on => ({ flex: '0 0 auto', padding: '7px 12px', borderRadius: 20, border: 'none', fontSize: 13, background: on ? 'var(--blue)' : 'var(--bg)', color: on ? 'white' : 'var(--text-muted)' })
@@ -254,23 +286,43 @@ export default function CncPage() {
               {warnings.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
             </div>
           )}
+          {labelTpl.enabled ? (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={withLabels} onChange={e => { setWithLabels(e.target.checked); setBuilt(null) }} style={{ width: 18, height: 18 }} />
+              <span>Программа для стола бирковки <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· бирка {labelTpl.w}×{labelTpl.h} мм</span></span>
+            </label>
+          ) : (
+            <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 10 }}>
+              Бирки вместе с G-кодом: настройте шаблон в разделе <span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => navigate(`/orders/${id}/labels`)}>«Бирки»</span> — здесь появится галочка.
+            </p>
+          )}
           <button className="btn-primary" disabled={!sel.length} onClick={build}>{built ? '↻ Создать G-код заново' : 'Создать G-код'}</button>
-          {built && built.files.filter(f => !f.empty).length > 1 && (
-            <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({built.files.filter(f => !f.empty).length})</button>
+          {labelBusy && <CncLoader compact label="Рисуем бирки…" />}
+          {built?.labels?.length > 0 && (
+            <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>Стол бирковки</div>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
+                Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт бирковка, затем раскрой.
+              </div>
+              <button type="button" onClick={() => download(`Birki_${baseName()}.zip`, zipFiles(built.labels), 'application/zip')} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Скачать архивом</button>
+            </div>
+          )}
+          {built && (built.files.filter(f => !f.empty).length > 1 || built.labels?.length > 0) && (
+            <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({built.files.filter(f => !f.empty).length + (built.labels?.length || 0)})</button>
           )}
           {saved && built && <p style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6, textAlign: 'center' }}>{saved}</p>}
         </>
       ))}
       {tab === 'ops' && <CncOps cnc={cnc} onChange={change} layers={layers} />}
       {tab === 'tools' && <CncTools cnc={cnc} onChange={change} />}
-      {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} />}
-      {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} />}
+      {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
+      {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
 
       {sim && (
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 200, padding: 10, boxSizing: 'border-box', height: '100dvh' }}>
           <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
-            <Suspense fallback={<p style={{ color: 'var(--text-hint)', padding: 20 }}>Загрузка симулятора…</p>}>
-              <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000}
+            <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
+              <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000} zShift={sim.zShift}
                 toolDia={toolDia} onClose={closeSim} onDownload={() => download(sim.name, sim.text)} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
             </Suspense>
           </div>

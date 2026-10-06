@@ -41,8 +41,8 @@ function groupOf(m, kind) {
   return kind === 'cutout' ? 'cutout' : 'outer'
 }
 
-export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, toolDia, thickness = 16, rapid = 20000, title = '', onClose, onDownload, onShare }) {
-  const prog = useMemo(() => parseGcode(text, { rapid }), [text, rapid])
+export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, toolDia, thickness = 16, rapid = 20000, zShift = 0, title = '', onClose, onDownload, onShare }) {
+  const prog = useMemo(() => parseGcode(text, { rapid, zShift }), [text, rapid, zShift])
   const data = useMemo(() => {
     const groups = {}, firstByLine = new Map()
     const grp = prog.moves.map((m, i) => {

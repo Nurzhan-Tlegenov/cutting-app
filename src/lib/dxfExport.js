@@ -22,7 +22,7 @@
 import { partLabel } from './partLabel'
 import { placedHoles, placedTurns } from './partHoles'
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeometry'
-import { contourSegments, segmentSide } from './edgeLength'
+import { contourSegments, segmentSide, holeEdgeSegments } from './edgeLength'
 
 const GAP_BETWEEN_SHEETS = 200 // мм, зазор между листами на чертеже
 const EDGE_INSET = 3           // мм, линия кромки — с отступом внутрь, чтобы не лежала на контуре
@@ -131,6 +131,10 @@ export function buildNestingDxf(sheetsData, order, details = [], labelMode = 'na
           if (side && native[side]) return
           for (let k = 0; k + 1 < seg.pts.length; k++) { const a = at(seg.pts[k][0], seg.pts[k][1]), b = at(seg.pts[k + 1][0], seg.pts[k + 1][1]); put('kromka', line(a[0], a[1], b[0], b[1], 'kromka')) }
         })
+        // кромка на отдельных участках вырезов
+        ;(contour.holes || []).forEach(hh => holeEdgeSegments(hh).forEach(seg => {
+          for (let k = 0; k + 1 < seg.pts.length; k++) { const a = at(seg.pts[k][0], seg.pts[k][1]), b = at(seg.pts[k + 1][0], seg.pts[k + 1][1]); put('kromka', line(a[0], a[1], b[0], b[1], 'kromka')) }
+        }))
 
         // пазы лицевой стороны
         getGrooveRects(contour, panelW, panelH, true).forEach(r => {

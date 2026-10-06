@@ -7,6 +7,7 @@ import ProductionForm from '../components/ProductionForm'
 import { myProduction, productionOrders, productionSetStatus } from '../lib/productionApi'
 import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
+import CncLoader from '../components/CncLoader'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -61,7 +62,7 @@ export default function ProductionPage() {
     <div className="page" style={{ paddingBottom: 100 }}>
       <h1 style={{ fontSize: 18, fontWeight: 500, marginBottom: 16, paddingTop: 8 }}>Производство</h1>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
-      {prod === undefined ? <p style={{ color: 'var(--text-hint)' }}>Загрузка…</p> : !prod ? (
+      {prod === undefined ? <CncLoader label="Открываем производство…" /> : !prod ? (
         <div className="card">
           <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>У вас есть своё производство?</div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
