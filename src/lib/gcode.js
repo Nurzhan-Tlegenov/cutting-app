@@ -352,17 +352,47 @@ function cutLoop(out, passes, top, tool, op, safeZ) {
   out.g0(null, null, safeZ)
 }
 
-/** Незамкнутый рез по ломаной (сторона обрезка): проход за проходом туда и обратно, без холостых перебегов */
-function cutOpen(out, pts, zs, tool, safeZ) {
+/**
+ * Незамкнутый рез по ломаной (сторона обрезка): проход за проходом туда и обратно, без холостых перебегов.
+ * Вход — как у контура детали (op.entry / op.angle): наклонный по линии реза или прямой.
+ */
+function cutOpen(out, pts, zs, tool, safeZ, top, op = {}) {
   const feed = n0(tool.feed) || 1000, inFeed = n0(tool.inFeed) || feed
-  out.g0(pts[0][0], pts[0][1], safeZ)
-  let fwd = true
-  for (const z of zs) {
-    out.g1(null, null, z, inFeed)
-    const seq = fwd ? pts : [...pts].reverse()
-    seq.slice(1).forEach(q => out.g1(q[0], q[1], null, feed))
-    fwd = !fwd
+  const ramp = op.entry !== 'straight'
+  const tan = Math.tan(Math.max(1, Math.min(89, n0(op.angle) || 45)) * Math.PI / 180)
+  // точка на ломаной seq на расстоянии d от её начала и вершины, лежащие ближе d
+  const walk = seq => {
+    const cum = [0]
+    for (let i = 1; i < seq.length; i++) cum.push(cum[i - 1] + Math.hypot(seq[i][0] - seq[i - 1][0], seq[i][1] - seq[i - 1][1]))
+    const at = d => {
+      let i = 1
+      while (i < seq.length - 1 && cum[i] < d) i++
+      const l = cum[i] - cum[i - 1] || 1, k = Math.max(0, Math.min(1, (d - cum[i - 1]) / l))
+      return [seq[i - 1][0] + (seq[i][0] - seq[i - 1][0]) * k, seq[i - 1][1] + (seq[i][1] - seq[i - 1][1]) * k]
+    }
+    return { len: cum[cum.length - 1], at, inner: d => cum.filter(c => c > 1e-6 && c < d - 1e-6) }
   }
+  let fwd = true, zPrev = top + 1
+  zs.forEach((z, k) => {
+    const seq = fwd ? pts : [...pts].reverse(), W = walk(seq)
+    if (!(W.len > 0)) return
+    if (k === 0) {
+      // первый вход: опускаемся над линией реза и по наклонной возвращаемся в начало
+      const L = ramp ? Math.min(W.len, (zPrev - z) / tan) : 0, s = W.at(L)
+      out.g0(s[0], s[1], safeZ)
+      out.g1(null, null, zPrev, inFeed)
+      if (L > 0) [...W.inner(L).reverse(), 0].forEach(d => { const q = W.at(d); out.g1(q[0], q[1], z + (zPrev - z) * d / L, inFeed) })
+      else out.g1(null, null, z, inFeed)
+    } else if (ramp) {
+      // следующие проходы: наклонно вперёд до половины заглубления и обратно — до полной глубины
+      const h = Math.min(W.len, (zPrev - z) / tan / 2), zm = (zPrev + z) / 2, ds = W.inner(h)
+      ;[...ds, h].forEach(d => { const q = W.at(d); out.g1(q[0], q[1], zPrev + (zm - zPrev) * d / h, inFeed) })
+      ;[...ds.slice().reverse(), 0].forEach(d => { const q = W.at(d); out.g1(q[0], q[1], z + (zm - z) * d / h, inFeed) })
+    } else out.g1(null, null, z, inFeed)
+    seq.slice(1).forEach(q => out.g1(q[0], q[1], z, feed))
+    zPrev = z
+    fwd = !fwd
+  })
   out.g0(null, null, safeZ)
 }
 
@@ -641,7 +671,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
     for (let k = 0; k < 4; k++) {
       const s = sides[(start + k) % 4]
       if (s.skip) { chain = null; continue }
-      if (!chain) { chain = [clamp(s.a)]; const pts = chain; jobs.push({ stage: 2, rank: 6, tool: t, at: pts[0], run: out => cutOpen(out, pts, zs, t, safeZ) }) }
+      if (!chain) { chain = [clamp(s.a)]; const pts = chain; jobs.push({ stage: 2, rank: 6, tool: t, at: pts[0], run: out => cutOpen(out, pts, zs, t, safeZ, T, ops.outer) }) }
       chain.push(clamp(s.b))
     }
   }
