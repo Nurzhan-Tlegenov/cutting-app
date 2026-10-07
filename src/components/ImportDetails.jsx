@@ -148,6 +148,9 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const hasDims = !!basis || (roles.includes('length') && roles.includes('width')) || roles.includes('size')
   const sumInfo = k => chosen.reduce((s, it) => s + (it.info?.[k] || 0) * (k === 'shaped' ? 1 : it.qty), 0)
   const sumWarn = k => chosen.reduce((s, it) => s + (it.warn?.[k] || 0), 0)
+  // детали, которые в модели входят друг в друга (хотя бы одна из пары — в выбранном материале)
+  const clashes = (basis?.clashes || []).filter(c => activeKey === ALL || c.a.groupKey === activeKey || c.b.groupKey === activeKey)
+  const clashName = sd => [sd.des, sd.name].filter(Boolean).join(' ') || 'деталь'
 
   // Другое правило лицевой стороны — пересчитываем детали и запоминаем выбор за аккаунтом
   const changeFaceRule = async (rule) => {
@@ -339,6 +342,21 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 Материал, кромку и присадку добавьте в заказе.{basis.other > 0 && ` Прочие объекты (не панели): ${basis.other} — только в 3D.`}
               </div>
             )}
+            {(clashes.length > 0 || sumWarn('foreign') > 0) && (
+              <div style={{ background: 'var(--danger-light)', border: '0.5px solid var(--danger)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--danger)' }}>
+                <b>Ошибка в модели: детали входят друг в друга{clashes.length > 0 && ` (${clashes.length})`}</b>
+                {clashes.slice(0, 30).map((c, i) => (
+                  <div key={i}>· {clashName(c.a)} ↔ {clashName(c.b)} — на {c.depth} мм{c.a.material !== c.b.material && ` (${c.b.material})`}</div>
+                ))}
+                {clashes.length > 30 && <div>…и ещё {clashes.length - 30}</div>}
+                {sumWarn('foreign') > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    Чужие отверстия на эти детали не перенесены: {sumWarn('foreign')} отв. — у каждой детали осталась только её собственная присадка.
+                  </div>
+                )}
+                <div style={{ marginTop: 4 }}>Размеры деталей взяты как в модели. Исправьте модель у конструктора или проверьте эти детали перед раскроем.</div>
+              </div>
+            )}
             {basis && !basis.bare && (
               <div style={{ marginBottom: 12 }}>
                 <label className="label">Лицевая сторона детали (смотрит вверх на станке)</label>
@@ -396,12 +414,14 @@ export default function ImportDetails({ hasDetails, onImport }) {
                     inf.holes > 0 && `отв. ${inf.holes}`, inf.grooves > 0 && `паз ${inf.grooves}`,
                     inf.back > 0 && 'с двух сторон',
                   ].filter(Boolean).join(' · ') : ''
+                  const clash = it.warn?.clash > 0 || it.warn?.foreign > 0
                   return (
                     <div key={i} style={{ padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
                           {it.prefix ? `${it.prefix} · ` : ''}{it.name || `Деталь ${i + 1}`}
                         </span>
+                        {clash && <span style={{ color: 'var(--danger)', whiteSpace: 'nowrap' }}>пересечение</span>}
                         <span style={{ whiteSpace: 'nowrap' }}>{it.w}×{it.h} — {it.qty} шт.</span>
                       </div>
                       {(edgeTxt || extra) && (
@@ -422,6 +442,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
           <div style={{ padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '0.5px solid var(--border)' }}>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, textAlign: 'center' }}>
               Найдено: {chosen.length} поз. · {pieces} шт.
+              {clashes.length > 0 && <span style={{ color: 'var(--danger)' }}> · пересечений деталей: {clashes.length}</span>}
               {result.skipped > 0 && <span style={{ color: 'var(--text-hint)' }}> · строк без размеров пропущено: {result.skipped}</span>}
             </p>
             <button type="button" className="btn-primary" disabled={!chosen.length} onClick={doImport}>

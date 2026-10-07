@@ -362,7 +362,7 @@ export function buildItem(src, holes, faceRule) {
   const texDir = src.texDir || 0
   const rot = texDir === 1          // текстура вдоль X детали -> это её длина
   const W = rot ? dy : dx, L = rot ? dx : dy
-  const warn = { open, edgeHoles: 0, edges: 0, cuts: src.warnCuts || 0 }
+  const warn = { open, edgeHoles: 0, edges: 0, cuts: src.warnCuts || 0, foreign: 0, clash: 0 }
 
   // --- отверстия крепежа в системе панели (до выбора лицевой стороны) ---
   const Mi = inverse(src.M)
@@ -383,6 +383,9 @@ export function buildItem(src, holes, faceRule) {
       // крепёж в модели стоит не идеально: отверстие может начинаться на десятые доли мм в глубине
       const top = zb >= T - tol, bottom = za <= tol
       if (!top && !bottom) continue
+      // Сверлят с пласти. Если отверстие начинается в толще детали — это отверстие соседней детали,
+      // которая в модели врезана в эту (ошибка конструктора): сюда его не переносим.
+      if (!src.strict && (d[2] > 0 ? q[2] : T - q[2]) > Math.max(tol, 1)) { warn.foreign++; continue }
       face.push({ x: q[0], y: q[1], d: 2 * h.r, depth: top && bottom ? T : top ? T - Math.max(za, 0) : Math.min(zb, T), through: top && bottom, top, name: h.name })
     } else if (Math.abs(d[2]) < 0.01 && q[2] > 0.5 && q[2] < T - 0.5 && h.only !== 'face') {
       edge.push({ q, d, z: q[2], dia: 2 * h.r, depth: h.depth, name: h.name, entry: !!h.entry })
@@ -651,6 +654,83 @@ export function groupItems(makers) {
   return { items, groups: [...groups.values()].sort((a, b) => b.pieces - a.pieces), skipped }
 }
 
+// ---------- Пересечения деталей ----------
+
+// Детали, которые в модели входят друг в друга (ошибка конструктора): из-за этого отверстия одной
+// детали попадают в другую. srcs — описания панелей (как для buildItem). Пазы, выемки и вырезы
+// материалом не считаются (задняя стенка в пазу — не пересечение).
+// Возвращает [{ a, b, depth }]: a, b — { id, des, name, material }, depth — на сколько мм входят.
+export function findClashes(srcs, minDepth = 0.3) {
+  const solids = []
+  for (const s of srcs) {
+    let loops
+    try { loops = buildLoops(s.elems).loops } catch { continue }
+    let outer = null, box = null
+    for (const lp of loops) {
+      const b = loopBox(lp)
+      if (!outer || (b.x1 - b.x0) * (b.y1 - b.y0) > (box.x1 - box.x0) * (box.y1 - box.y0)) { outer = lp; box = b }
+    }
+    if (!outer || !(s.T > 0)) continue
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    for (const x of [box.x0, box.x1]) for (const y of [box.y0, box.y1]) for (const z of [0, s.T]) {
+      const q = applyP(s.M, [x, y, z])
+      for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]) }
+    }
+    solids.push({ s, T: s.T, box, outer, cut: loops.filter(l => l !== outer), Mi: inverse(s.M), lo, hi })
+  }
+  const inLoop = (lp, x, y) => (lp.circle ? Math.hypot(x - lp.circle.c[0], y - lp.circle.c[1]) < lp.circle.r : pointInPoly([x, y], lp.fine))
+  const m = 0.05
+  const inSolid = (S, q) => {
+    if (q[2] < m || q[2] > S.T - m) return false
+    if (!inLoop(S.outer, q[0], q[1])) return false
+    for (const lp of S.cut) if (inLoop(lp, q[0], q[1])) return false
+    for (const c of (S.s.cutsRaw || [])) {
+      if (q[0] >= Math.min(c.p[0], c.q[0]) && q[0] <= Math.max(c.p[0], c.q[0]) && q[1] >= Math.min(c.p[1], c.q[1]) && q[1] <= Math.max(c.p[1], c.q[1]) &&
+        (c.top ? q[2] >= S.T - c.depth : q[2] <= c.depth)) return false
+    }
+    for (const dc of (S.s.decorRaw || [])) {
+      if (dc.kind === 'pocket' && (dc.top ? q[2] >= S.T - dc.depth : q[2] <= dc.depth) && dc.polys.some(pl => pointInPoly([q[0], q[1]], pl))) return false
+    }
+    return true
+  }
+  const side = S => ({ id: S.s.meta?.ids?.[0], des: S.s.meta?.des || '', name: S.s.name || '', material: S.s.material || '', thickness: S.T })
+  const N = [20, 20, 6]
+  const out = []
+  for (let i = 0; i < solids.length; i++) {
+    const A = solids[i]
+    for (let j = i + 1; j < solids.length; j++) {
+      const B = solids[j]
+      if (A.lo[0] > B.hi[0] - minDepth || B.lo[0] > A.hi[0] - minDepth || A.lo[1] > B.hi[1] - minDepth || B.lo[1] > A.hi[1] - minDepth ||
+        A.lo[2] > B.hi[2] - minDepth || B.lo[2] > A.hi[2] - minDepth) continue
+      // габарит B в системе A и общая с габаритом A область
+      const R = mul(A.Mi, B.s.M), Ri = inverse(R)
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+      for (const x of [B.box.x0, B.box.x1]) for (const y of [B.box.y0, B.box.y1]) for (const z of [0, B.T]) {
+        const q = applyP(R, [x, y, z])
+        for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]) }
+      }
+      const a0 = [A.box.x0, A.box.y0, 0], a1 = [A.box.x1, A.box.y1, A.T]
+      const o0 = lo.map((v, k) => Math.max(v, a0[k])), o1 = hi.map((v, k) => Math.min(v, a1[k]))
+      if (o0.some((v, k) => o1[k] - v < minDepth)) continue
+      // проверяем точками: материал обеих деталей в одном месте
+      let hit = 0
+      const mn = [N[0], N[1], N[2]], mx = [-1, -1, -1]
+      for (let a = 0; a < N[0]; a++) for (let b = 0; b < N[1]; b++) for (let c = 0; c < N[2]; c++) {
+        const q = [o0[0] + (o1[0] - o0[0]) * (a + 0.5) / N[0], o0[1] + (o1[1] - o0[1]) * (b + 0.5) / N[1], o0[2] + (o1[2] - o0[2]) * (c + 0.5) / N[2]]
+        if (!inSolid(A, q) || !inSolid(B, applyP(Ri, q))) continue
+        hit++
+        const idx = [a, b, c]
+        for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], idx[k]); mx[k] = Math.max(mx[k], idx[k]) }
+      }
+      if (!hit) continue
+      const depth = Math.min(...[0, 1, 2].map(k => (mx[k] - mn[k] + 1) * (o1[k] - o0[k]) / N[k]))
+      if (depth < minDepth) continue
+      out.push({ a: side(A), b: side(B), depth: r1(depth) })
+    }
+  }
+  return out
+}
+
 // ---------- Файл -> детали ----------
 
 export function isBasisFile(u8) {
@@ -727,7 +807,20 @@ export function parseBasis(u8, opts = {}) {
     walk(top, I, { product: cleanName(val(top, 'Name')), productDes: cleanName(val(top, 'Des')), productPos: cleanName(val(top, 'ArtPos')), path: [], depth: 0 })
   }
 
-  const { items, groups, skipped } = groupItems(panels.map(p => () => buildItem(basisSrc(p), holes, faceRule)))
+  const srcs = panels.map(p => { try { return basisSrc(p) } catch { return null } })
+  const { items, groups, skipped } = groupItems(srcs.map(s => () => {
+    if (!s) throw new Error('панель не прочитана')
+    return buildItem(s, holes, faceRule)
+  }))
+  // детали, входящие друг в друга: отмечаем у обеих и отдаём списком для предупреждения
+  let clashes
+  try { clashes = findClashes(srcs.filter(Boolean)) } catch { clashes = [] }
+  const byId = new Map()
+  for (const it of items) for (const id of (it.contour.meta.ids || [])) byId.set(id, it)
+  for (const c of clashes) for (const sd of [c.a, c.b]) {
+    const it = byId.get(sd.id)
+    if (it) { it.warn.clash++; sd.groupKey = it.groupKey }
+  }
   const article = kid(kid(header, 'Header') || header, 'Article')
   const orderName = cleanName(val(article, 'OrderName')) || cleanName(val(article, 'Name'))
   for (const it of items) { it.contour.meta.order = orderName; it.contour.meta.model = cleanName(val(article, 'Name')) }
@@ -769,6 +862,7 @@ export function parseBasis(u8, opts = {}) {
     skipped,
     items,
     groups,
+    clashes,
   }
 }
 
