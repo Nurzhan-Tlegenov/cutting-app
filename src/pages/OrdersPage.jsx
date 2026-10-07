@@ -42,7 +42,7 @@ export default function OrdersPage() {
     holdTimers.current[id] = setTimeout(() => {
       setSelectMode(true)
       setSelected(new Set([id]))
-    }, 600)
+    }, 1000)        // секунда удержания: при пролистывании списка заказ случайно не выделяется
   }
 
   function cancelHold(id) {
@@ -144,6 +144,8 @@ export default function OrdersPage() {
                   onMouseLeave={() => cancelHold(order.id)}
                   onTouchStart={() => startHold(order.id)}
                   onTouchEnd={() => cancelHold(order.id)}
+                  onTouchMove={() => cancelHold(order.id)}
+                  onTouchCancel={() => cancelHold(order.id)}
                   className="card"
                   style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6,
                     border: isSelected ? '2px solid var(--danger)' : undefined,

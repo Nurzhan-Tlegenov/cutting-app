@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-// Экран ожидания вместо «Загрузка…»: живой раскрой по форме (нестинг). 36 карт; сначала все детали лежат кучей
-// в середине и разлетаются по картам, затем — пока идёт загрузка — перелетают с карты на карту.
-// Ничего не считается: только сдвиг (transform), поэтому плавно и на слабом телефоне. Нажатие — всё заново.
+// Экран ожидания вместо «Загрузка…»: живой раскрой по форме (нестинг). 36 карт, уже уложенных деталями
+// мебельных контуров; пока идёт загрузка, детали перелетают с карты на карту.
+// Ничего не считается: только сдвиг (transform), поэтому плавно и на слабом телефоне. Нажатие — другая раскладка.
 const PW = 132, PH = 200, PAD = 4, GAP = 3            // карта (в условных единицах), поле и зазор между деталями
 const KINDS = 3                                       // сколько разных раскладок карт
 const HINTS = [
-  'Детали расходятся по картам раскроя',
+  'Детали перекладываются с карты на карту',
   'Раскрой по форме: детали любого контура',
-  'Нажмите — разложим заново',
+  'Нажмите — возьмём другую раскладку',
 ]
 const rnd = seed => { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296 } }
 
@@ -65,12 +65,7 @@ function LiveSheets({ label, compact }) {
   const fresh = () => layouts.map((slots, L) => slots.map(() => sheetsOf[L].slice()))
   const [at, setAt] = useState(fresh)
   const [moving, setMoving] = useState(() => new Set())
-  const [spread, setSpread] = useState(false)          // false — детали ещё лежат кучей в середине
-  useEffect(() => {                                    // новая раскладка: куча -> по картам
-    setAt(fresh()); setMoving(new Set()); setSpread(false)                  // eslint-disable-line react-hooks/set-state-in-effect
-    const t = setTimeout(() => setSpread(true), 90)
-    return () => clearTimeout(t)
-  }, [layouts, sheetsOf])                              // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setAt(fresh()); setMoving(new Set()) }, [layouts, sheetsOf])   // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
   useEffect(() => {
     const fit = () => setWidth(boxRef.current?.clientWidth || 0)
     fit(); window.addEventListener('resize', fit)
@@ -78,7 +73,6 @@ function LiveSheets({ label, compact }) {
   }, [])
   // загрузка затянулась — детали одного размера меняются местами между картами
   useEffect(() => {
-    if (!spread) return
     let n = 0, clear = 0
     const run = () => {
       const r = rnd((seed + ++n * 2654435761) >>> 0), mv = new Set()
@@ -96,11 +90,10 @@ function LiveSheets({ label, compact }) {
       setMoving(mv)
       clearTimeout(clear); clear = setTimeout(() => setMoving(new Set()), 1000)
     }
-    const first = setTimeout(run, 1500), t = setInterval(run, 1350)          // сначала детали долетают из кучи
+    const first = setTimeout(run, 350), t = setInterval(run, 1250)
     return () => { clearTimeout(first); clearInterval(t); clearTimeout(clear) }
-  }, [seed, spread, compact])
+  }, [seed, compact])
   const TW = cols * PW + (cols - 1) * SG, TH = rows * PH + (rows - 1) * SG, k = width / TW
-  let order = 0
   return (
     <div ref={boxRef} onClick={() => setSeed(x => (x * 17 + 3) >>> 0)} role="img" aria-label={label}
       style={{ position: 'relative', width: compact ? 170 : 'min(90vw, 420px, 54vh)', aspectRatio: `${TW} / ${TH}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
@@ -109,14 +102,12 @@ function LiveSheets({ label, compact }) {
           background: '#fff', border: '1px solid var(--gray-mid)', borderRadius: 3, boxSizing: 'border-box' }} />
       ))}
       {width > 0 && at.map((slots, L) => slots.map((row, i) => row.map((sheet, part) => {
-        const key = `${L}:${i}:${part}`, p = place(L, i, sheet), fly = moving.has(key), s = layouts[L][i], n = order++
-        // куча: все детали в середине, слегка вразброс; затем каждая летит на своё место (с небольшой очередью)
-        const r = rnd(seed + n * 7919), px = (TW / 2 - p.w / 2 + (r() - 0.5) * PW * 1.1) * k, py = (TH / 2 - p.h / 2 + (r() - 0.5) * PH * 0.7) * k
-        const tf = spread ? `translate3d(${p.x * k}px, ${p.y * k}px, 0) scale(${fly ? 1.5 : 1})` : `translate3d(${px}px, ${py}px, 0) scale(0.9) rotate(${Math.round((r() - 0.5) * 80)}deg)`
+        const key = `${L}:${i}:${part}`, p = place(L, i, sheet), fly = moving.has(key), s = layouts[L][i]
+        const tf = `translate3d(${p.x * k}px, ${p.y * k}px, 0) scale(${fly ? 1.5 : 1})`
         return (
           <svg key={seed + key} viewBox="-2 -2 104 104" preserveAspectRatio="none" width={p.w * k} height={p.h * k}
             style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', transform: tf, zIndex: fly ? 3 : 1, willChange: 'transform',
-              transition: spread ? `transform ${fly || moving.size ? 0.95 : 0.9}s cubic-bezier(0.3, 0.1, 0.2, 1) ${moving.size ? 0 : Math.round(r() * 520)}ms` : 'none' }}>
+              transition: 'transform 0.95s cubic-bezier(0.3, 0.1, 0.2, 1)' }}>
             <path d={SHAPES[s.shape]} fillRule="evenodd" transform={`rotate(${s.turn * 90} 50 50)`} vectorEffect="non-scaling-stroke"
               style={{ fill: fly ? '#9CC4EE' : '#E6E6E6', stroke: 'rgba(20,20,20,0.8)', strokeWidth: 1, transition: 'fill 0.3s' }} />
           </svg>
