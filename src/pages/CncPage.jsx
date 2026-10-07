@@ -11,7 +11,7 @@ import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, g
 import { listSharedPosts, saveSharedPost, removeSharedPost, sendNews } from '../lib/messages'
 import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
-import { orderTitle, orderFileName } from '../lib/orderUtils'
+import { orderTitle, orderFileName, toLatin } from '../lib/orderUtils'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
@@ -23,7 +23,8 @@ import { lazyRetry } from '../lib/lazyRetry'
 const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
-const safeName = s => String(s || '').replace(/[^\wа-яё.-]+/gi, '_').replace(/^_+|_+$/g, '')
+// имена программ и папок — строго латиницей: станки и флешки кириллицу читают не везде
+const safeName = s => toLatin(String(s || '')).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '')
 
 function download(name, data, type = 'text/plain') {
   const url = URL.createObjectURL(new Blob([data], { type }))
@@ -344,7 +345,8 @@ export default function CncPage() {
           </div>
         </div>
       )}
-      {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={setSaved} />}
+      {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={setSaved}
+        folders={[orderFileName(order), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
       <BottomNav />
     </div>
   )

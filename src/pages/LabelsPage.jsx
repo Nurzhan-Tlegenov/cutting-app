@@ -13,7 +13,7 @@ import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
-import { orderTitle, orderFileName } from '../lib/orderUtils'
+import { orderTitle, orderFileName, toLatin } from '../lib/orderUtils'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 
 // Бирки деталей по принятому раскрою. Бирку собирает пользователь: размер и какие параметры детали на ней есть.
@@ -29,7 +29,7 @@ const CSS = `
   .lbl-grid { display: block; }
   .lbl-grid canvas { width: var(--lbl-w); height: var(--lbl-h); border: none; border-radius: 0; break-after: page; }
 }`
-const safeName = s => String(s || '').replace(/[^\wа-яё.-]+/gi, '_').replace(/^_+|_+$/g, '')
+const safeName = s => toLatin(String(s || '')).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '')   // имена файлов и папок — латиницей
 
 function Label({ tpl, order, mat, si, pi, n, onOpen }) {
   const ref = useRef(null)
@@ -606,7 +606,8 @@ export default function LabelsPage() {
             local: { x0: 0, y0: 0, dx: W, dy: L }, inst: [[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]], ids: [0], anims: [null] } } }]
         return <Suspense fallback={wait}><Model3D key={view} details={one} title={name} onClose={closeView} readOnly materialThickness={T} /></Suspense>
       })()}
-      {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} />}
+      {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)}
+        folders={[orderFileName(order), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
     </div>
   )
 }
