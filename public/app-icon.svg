@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 1180">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 897">
   <polygon points="519,0 1040,897 0,897" fill="#fff"/>
   <polygon points="519,0 1040,897 0,897 70,777 830,777 519,240 290,637 150,637" fill="#009BDE"/>
   <text x="108" y="760" font-family="Arial Black, Arial, Helvetica, sans-serif" font-weight="900" font-size="146" fill="#009BDE" textLength="266" lengthAdjust="spacingAndGlyphs">MD</text>
-  <text x="520" y="1120" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="190" fill="#009BDE" textLength="1010" lengthAdjust="spacingAndGlyphs">RaskroyPro</text>
 </svg>
