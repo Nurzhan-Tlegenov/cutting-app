@@ -124,7 +124,8 @@ export function detailEdgeList(d) {
     for (const seg of contourSegments(verts)) {
       const side = segmentSide(seg, W, L)
       if (side && on(sides[side])) { got[side] += seg.len; add(sides[side], seg.len); continue }
-      if (seg.edge) add(seg.edge, seg.len, seg.arc)
+      // участок не на стороне габарита (дуга, скос, внутренний угол фигурной детали) — криволинейная кромка
+      if (seg.edge) add(seg.edge, seg.len, true)
     }
     // сторона назначена, а прямых участков контура на ней нет (контур не совпал с габаритом) — по габариту
     SIDES.forEach(s => { if (on(sides[s]) && got[s] < 0.5) add(sides[s], sideLen(s, W, L)) })
@@ -132,9 +133,9 @@ export function detailEdgeList(d) {
   for (const h of c?.holes || []) {
     if (h.edge) {
       if (h.type === 'circle') add(h.edge, Math.PI * (num(h.d) || 100), true)
-      else if (Array.isArray(h.vertices) && h.vertices.length > 2) contourSegments(h.vertices).forEach(s => add(h.edge, s.len, s.arc))
-      else add(h.edge, 2 * ((num(h.hw) || 200) + (num(h.hh) || 100)))
-    } else holeEdgeSegments(h).forEach(s => add(s.edge, s.len, s.arc))
+      else if (Array.isArray(h.vertices) && h.vertices.length > 2) contourSegments(h.vertices).forEach(s => add(h.edge, s.len, true))
+      else add(h.edge, 2 * ((num(h.hw) || 200) + (num(h.hh) || 100)), true)
+    } else holeEdgeSegments(h).forEach(s => add(s.edge, s.len, true))        // любой закромленный вырез, даже прямоугольный, — криволинейная кромка
   }
   return out
 }

@@ -79,17 +79,20 @@ export default function OrderPage() {
     totalPartArea += ((d.length + kerf) / 1000) * ((d.width + kerf) / 1000) * d.qty
     totalQty += d.qty
   })
+  // принятые карты раскроя — показываются над списком деталей
+  const nestings = savedNestings(order, details)
+  const nest = nestings.find(n => n.key === mapMat) || nestings[0] || null
+  // Есть принятый раскрой — статистика только по его материалу (тому, чьи карты сейчас показаны), листы — по факту
+  const statDetails = nest ? nest.details.filter(d => d.length > 0 && d.width > 0) : validDetails
+  if (nest) totalQty = statDetails.reduce((a, d) => a + (Number(d.qty) || 0), 0)
   // кромка: стороны + фигурные участки и вырезы; прямая и криволинейная — отдельно
-  const edgeSum = edgeTotals(validDetails)
+  const edgeSum = edgeTotals(statDetails)
   const totalEdge = edgeSum.total
-  const sheetsNeeded = usableArea > 0 ? Math.ceil(totalPartArea / (usableArea * 0.85)) : 0
+  const sheetsNeeded = nest ? nest.sheets.length : usableArea > 0 ? Math.ceil(totalPartArea / (usableArea * 0.85)) : 0
   const isMine = order.user_id === user?.id
   const isDraft = order.status === 'draft' && (isMine || profile?.role === 'admin')
   const canStatus = inProduction && order.status !== 'draft' && (profile?.role === 'admin' || (isOperator && !!order.production_id))
   const edgeNames = { edge_top:'В', edge_right:'П', edge_bottom:'Н', edge_left:'Л' }
-  // принятые карты раскроя — показываются над списком деталей
-  const nestings = savedNestings(order, details)
-  const nest = nestings.find(n => n.key === mapMat) || nestings[0] || null
   const nestGeo = nest ? sheetGeo(order, nest.result) : null
   const materials = materialsOf(details, order)
   const canProduce = inProduction && order.status !== 'draft' && isOperator
@@ -137,9 +140,9 @@ export default function OrderPage() {
       )}
       <SimLinksBox orderId={id} style={{ marginBottom: 12 }} />
       <div style={{ marginBottom: 12 }}>
-        <p className="section-title">Статистика</p>
+        <p className="section-title">Статистика{nest ? <span style={{ textTransform: 'none', color: 'var(--text)', fontWeight: 600 }}> · {nest.label}</span> : null}</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {[['Листов нужно', sheetsNeeded],['Деталей всего', totalQty],
+          {[[nest ? 'Листов в раскрое' : 'Листов нужно', sheetsNeeded],[nest ? 'Деталей' : 'Деталей всего', totalQty],
             ['Кромка (п.м.)', totalEdge.toFixed(1)],['Площадь листов (м²)', (sheetsNeeded * usableArea).toFixed(2)]
           ].map(([label, val]) => (
             <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '12px' }}>
@@ -156,17 +159,23 @@ export default function OrderPage() {
       </div>
       <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
         <p className="section-title">Материал</p>
-        {materials.map(m => (
-          <div key={m.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-            <b style={{ fontWeight: 500 }}>{m.label}</b><span style={{ color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{m.pieces} дет.</span>
-          </div>
-        ))}
+        {materials.map(m => {
+          const cur = nest && m.key === nest.key, has = nestings.some(n => n.key === m.key)
+          return (
+            <div key={m.key} onClick={has ? () => setMapMat(m.key) : undefined}
+              style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: cur ? '4px 6px' : '1px 6px', margin: '0 -6px', borderRadius: 6, cursor: has ? 'pointer' : 'default',
+                background: cur ? 'var(--blue-light)' : 'transparent', color: !nest || cur ? 'var(--text)' : 'var(--text-muted)' }}>
+              <b style={{ fontWeight: cur ? 600 : 500 }}>{cur ? '▸ ' : ''}{m.label}</b>
+              <span style={{ color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{m.pieces} дет.{nest ? (cur ? ' · карты ниже' : has ? ' · раскроен' : ' · без раскроя') : ''}</span>
+            </div>
+          )
+        })}
         <div style={{ color: 'var(--text-hint)', fontSize: 12, marginTop: 2 }}>Лист {order.sheet_length}×{order.sheet_width} мм</div>
       </div>
       {nest && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6 }}>
-            <p className="section-title" style={{ marginBottom: 0 }}>Карты раскроя · листов {nest.sheets.length}</p>
+            <p className="section-title" style={{ marginBottom: 0 }}>Карты раскроя · листов {nest.sheets.length}<span style={{ display: 'block', textTransform: 'none', fontSize: 14, fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>{nest.label}</span></p>
             {nestings.length > 1 && (
               <select value={nest.key} onChange={e => setMapMat(e.target.value)} style={{ width: 'auto', maxWidth: '60%', padding: '3px 6px', fontSize: 12, borderRadius: 20 }}>
                 {nestings.map(n => <option key={n.key} value={n.key}>{n.label}</option>)}
