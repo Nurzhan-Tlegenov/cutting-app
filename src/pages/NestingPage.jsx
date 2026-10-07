@@ -11,7 +11,7 @@ import { getAllDrillPoints, getGrooveRects, rotatePointTimes, rotateEdgesTimes }
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles, placedTurns } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
-import { edgeTotals, contourSegments, segmentSide, holeEdgeSegments } from '../lib/edgeLength'
+import { edgeTotals, detailEdgeList, contourSegments, segmentSide, holeEdgeSegments } from '../lib/edgeLength'
 import { isTwoSided } from '../lib/partInfo'
 import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
@@ -2208,6 +2208,47 @@ export default function NestingPage() {
 
   // Файлы для отладки: мастер-аккаунт скачивает, остальные — отправляют мастер-аккаунту с описанием проблемы
   const debugName = suffix => `${orderFileName(order)}${suffix}`
+  // Детали со всеми свойствами (только мастер-аккаунт): размеры готовой детали и заготовки, кромка по сторонам
+  // и её длина, настройки видов кромки, контур с присадкой — всё, что нужно, чтобы проверить расчёты.
+  function partsExportData() {
+    const parse = v => { if (typeof v !== 'string') return v ?? null; try { return JSON.parse(v) } catch { return v } }
+    const raws = details.map(rawDetail)
+    const pick = (o, keys) => Object.fromEntries(keys.filter(k => o?.[k] !== undefined).map(k => [k, o[k]]))
+    return {
+      exportedAt: new Date().toISOString(), app: 'RaskroyPro', what: 'детали со свойствами',
+      order: { ...pick(order, ['id', 'order_number', 'order_name', 'status', 'material_name', 'material_thickness', 'sheet_length', 'sheet_width', 'kerf_width',
+        'margin_top', 'margin_right', 'margin_bottom', 'margin_left', 'cutting_method']), edge_types: parseEdgeTypes(order?.edge_types) },
+      material: multiMat ? matKey : null,
+      totals: { positions: details.length, pieces: totalQty, edgeByFinished_m: edgeTotals(raws), edgeByBlank_m: edgeSum },
+      parts: details.map((d, i) => {
+        const raw = raws[i]
+        return {
+          index: i, ...pick(raw, ['id', 'name', 'display_name', 'prefix', 'qty', 'rotatable', 'sort_order']),
+          length: raw.length, width: raw.width,
+          blank: d._cut ? { length: d.length, width: d.width, lessBySide: d._cut } : null,       // размер в раскрой (подрезка / прифуговка)
+          edges: { left_Дл: raw.edge_left || null, right_Дп: raw.edge_right || null, top_Шв: raw.edge_top || null, bottom_Шн: raw.edge_bottom || null },
+          edgeByFinished_mm: detailEdgeList(raw), edgeByBlank_mm: d._cut ? detailEdgeList(d) : null,
+          edgePerPieceShown_m: edgeTotals([{ ...d, qty: 1 }]).total,
+          contour: parse(raw.contour), contourBlank: d._cut ? parse(d.contour) : null,
+        }
+      }),
+    }
+  }
+  function downloadParts() {
+    const blob = new Blob([JSON.stringify(partsExportData(), null, 1)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = debugName('_parts.json')
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+  async function copyParts() {
+    try { await navigator.clipboard.writeText(JSON.stringify(partsExportData())); window.alert('Детали скопированы — вставьте в сообщение') }
+    catch { window.alert('Скопировать не удалось — скачайте файлом') }
+  }
   function exportHistory(cfg, idx) {
     if (!cfg.history) return
     if (!isMaster) {
@@ -3031,6 +3072,12 @@ export default function NestingPage() {
           </div>
           {partsOpen && (
             <div style={{ borderTop: '0.5px solid var(--border)', padding: '8px 10px 4px' }}>
+              {isMaster && (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                  <button type="button" onClick={downloadParts} style={{ flex: 1, padding: '6px 8px', fontSize: 12, borderRadius: 'var(--radius)', background: 'transparent', border: '0.5px solid var(--blue-mid)', color: 'var(--blue)', cursor: 'pointer' }}>⬇ Экспорт деталей со свойствами</button>
+                  <button type="button" onClick={copyParts} style={{ padding: '6px 10px', fontSize: 12, borderRadius: 'var(--radius)', background: 'transparent', border: '0.5px solid var(--border-md)', color: 'var(--text-muted)', cursor: 'pointer' }}>Копировать</button>
+                </div>
+              )}
               <select value={partsSort} onChange={e => setPartsSort(e.target.value)} style={{ width: '100%', padding: '6px 8px', fontSize: 13, marginBottom: 6 }}>
                 <option value="">Как в заказе</option>
                 {SORT_MODES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
