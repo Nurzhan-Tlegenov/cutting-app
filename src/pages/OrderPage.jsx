@@ -144,7 +144,7 @@ export default function OrderPage() {
         <p className="section-title">Статистика{nest ? <span style={{ textTransform: 'none', color: 'var(--text)', fontWeight: 600 }}> · {nest.label}</span> : null}</p>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           {[[nest ? 'Листов в раскрое' : 'Листов нужно', sheetsNeeded],[nest ? 'Деталей' : 'Деталей всего', totalQty],
-            ['Кромка (п.м.)', totalEdge.toFixed(1)],['Площадь листов (м²)', (sheetsNeeded * usableArea).toFixed(2)]
+            ['Кромка (п.м.)', totalEdge.toFixed(2)],['Площадь листов (м²)', (sheetsNeeded * usableArea).toFixed(2)]
           ].map(([label, val]) => (
             <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '12px' }}>
               <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{label}</div>
@@ -154,7 +154,7 @@ export default function OrderPage() {
         </div>
         {totalEdge > 0 && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-            Кромка: прямая <b>{edgeSum.straight.toFixed(1)} м</b> · криволинейная <b>{edgeSum.curved.toFixed(1)} м</b>
+            Кромка: прямая <b>{edgeSum.straight.toFixed(2)} м</b> · криволинейная <b>{edgeSum.curved.toFixed(2)} м</b>
             {(() => { const ov = overOf(parseEdgeTypes(order?.edge_types)); return ov.on && ov.mm > 0 ? ` · со свесами +${ov.mm} мм на сторону` : ' · без свесов' })()}
           </div>
         )}

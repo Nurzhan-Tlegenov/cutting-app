@@ -143,6 +143,21 @@ export default function SheetsOverview({
       ctx.fillRect(X(o.x), Y(o.y), D.sw * sc, D.sl * sc)
       ctx.fillStyle = '#fff'
       ctx.fillRect(X(o.x + D.ml), Y(o.y + D.mt), D.ux * sc, D.uy * sc)
+      // деловые обрезки, которые заказчик отметил оставить (хранятся в листе, Y — от низа рабочей зоны)
+      ;(s.manualOffcuts || []).forEach(of => {
+        const x = X(o.x + D.ml + of.x), y = Y(o.y + D.mt + (D.uy - of.y - of.h)), w = of.w * sc, h = of.h * sc
+        ctx.fillStyle = 'rgba(230,126,34,0.16)'
+        ctx.fillRect(x, y, w, h)
+        ctx.strokeStyle = '#B85C00'; ctx.lineWidth = 1.2; ctx.setLineDash([5, 3])
+        ctx.strokeRect(x, y, w, h)
+        ctx.setLineDash([])
+        const fs = Math.max(7, Math.min(11, w / 7))
+        if (w > 34 && h > fs * 2.4) {
+          ctx.fillStyle = '#B85C00'; ctx.font = `bold ${fs}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+          ctx.fillText('обрезок', x + w / 2, y + h / 2 - fs * 0.6)
+          ctx.fillText(`${Math.round(of.h)}×${Math.round(of.w)}`, x + w / 2, y + h / 2 + fs * 0.6)
+        }
+      })
       const active = si === activeSheet
       ctx.strokeStyle = active ? '#185FA5' : D.offcut ? '#A0782C' : '#888780'
       ctx.lineWidth = active ? 2 : 1

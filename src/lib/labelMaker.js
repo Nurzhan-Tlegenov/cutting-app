@@ -207,7 +207,7 @@ export function normalizeLabel(raw) {
     o.x = Math.max(0, Math.min(w - bw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - bh, Number(i.y) || 0))
     return o
   })
-  return { enabled: !!t.enabled, w, h, edges: false, rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
+  return { enabled: !!t.enabled, w, h, edges: false, offcuts: !!t.offcuts, rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
     // строка «Заказ»: своя подпись, номер от приложения и название заказа включаются отдельно
     order: { prefix: typeof t.order?.prefix === 'string' ? t.order.prefix.slice(0, 30) : 'Заказ', number: t.order?.number !== false, name: t.order?.name !== false },
     // чертёж детали: размеры торцевых отверстий от края и высота их цифр (мм)
@@ -512,6 +512,31 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
   return canvas
 }
 
+/** Деловые обрезки листа, отмеченные в раскрое: [{ w, h }] — ширина (X) и длина (Y), мм */
+export const sheetOffcuts = sheet => (sheet?.manualOffcuts || []).map(o => ({ w: Math.round(o.w), h: Math.round(o.h) })).filter(o => o.w > 0 && o.h > 0)
+
+/** Бирка на обрезок — самая простая: заказ, материал и размер обрезка. info: { order, mat, si, o: { w, h } } */
+export function drawOffcutLabel(canvas, tpl, info) {
+  const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+  const pad = W * 0.05
+  const line = (text, y, size, bold) => {
+    let fs = size
+    ctx.font = `${bold ? 'bold ' : ''}${fs}px sans-serif`
+    const w = ctx.measureText(text).width
+    if (w > W - 2 * pad) { fs = Math.max(6, fs * (W - 2 * pad) / w); ctx.font = `${bold ? 'bold ' : ''}${fs}px sans-serif` }
+    ctx.fillText(text, W / 2, y)
+  }
+  const mat = [info.mat?.name || info.mat?.label || info.order?.material_name || '', info.mat?.thickness ? `${info.mat.thickness} мм` : ''].filter(Boolean).join(' · ')
+  line('ОБРЕЗОК', H * 0.13, H * 0.13, true)
+  line(`Заказ ${orderTitle(info.order)}`, H * 0.31, H * 0.11, false)
+  line(mat, H * 0.47, H * 0.11, false)
+  line(`${info.o.h} × ${info.o.w}`, H * 0.72, H * 0.24, true)
+  line(`мм · лист ${info.si + 1}`, H * 0.91, H * 0.08, false)
+  return canvas
+}
+
 /** Размер картинки бирки в точках; preview — для экрана (без лишнего разрешения) */
 export const labelPx = (tpl, preview = false) => { const k = preview ? 12 : pxMm(tpl); return { w: Math.round(tpl.w * k / 4) * 4, h: Math.round(tpl.h * k) } }
 
@@ -610,7 +635,7 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress }) {
   if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)
   const k = Math.max(12, pxMm(tpl)), W = Math.round(tpl.w * k), H = Math.round(tpl.h * k)
   const pw = (tpl.w * 72 / 25.4).toFixed(2), ph = (tpl.h * 72 / 25.4).toFixed(2)
-  const total = mat.sheets.reduce((a, sh) => a + sh.placed.length, 0)
+  const total = mat.sheets.reduce((a, sh) => a + sh.placed.length + (tpl.offcuts ? sheetOffcuts(sh).length : 0), 0)
   const chunks = [], offsets = []
   let size = 0
   const put = d => { const b = typeof d === 'string' ? strToU8(d) : d; chunks.push(b); size += b.length }
@@ -621,8 +646,11 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress }) {
   let n = 3, done = 0
   for (let si = 0; si < mat.sheets.length; si++) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
-    for (const pi of labelOrder(sheet, geo, 'manual')) {            // страницы — в порядке ручной наклейки
-      drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
+    // страницы — в порядке ручной наклейки; после деталей листа — бирки на его обрезки (если включено)
+    const pages = [...labelOrder(sheet, geo, 'manual').map(pi => ({ pi })), ...(tpl.offcuts ? sheetOffcuts(sheet).map(o => ({ o })) : [])]
+    for (const { pi, o } of pages) {
+      if (o) drawOffcutLabel(cv, tpl, { order, mat, si, o })
+      else drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
       const px = cv.getContext('2d').getImageData(0, 0, W, H).data, bits = new Uint8Array(row * H)
       for (let y = 0; y < H; y++) for (let x = 0, i = y * W * 4; x < W; x++, i += 4) if ((px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10 >= 140) bits[y * row + (x >> 3)] |= 0x80 >> (x & 7)
       const img = zlibSync(bits, { level: 6 }), content = `q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`

@@ -352,6 +352,20 @@ function cutLoop(out, passes, top, tool, op, safeZ) {
   out.g0(null, null, safeZ)
 }
 
+/** Незамкнутый рез по ломаной (сторона обрезка): проход за проходом туда и обратно, без холостых перебегов */
+function cutOpen(out, pts, zs, tool, safeZ) {
+  const feed = n0(tool.feed) || 1000, inFeed = n0(tool.inFeed) || feed
+  out.g0(pts[0][0], pts[0][1], safeZ)
+  let fwd = true
+  for (const z of zs) {
+    out.g1(null, null, z, inFeed)
+    const seq = fwd ? pts : [...pts].reverse()
+    seq.slice(1).forEach(q => out.g1(q[0], q[1], null, feed))
+    fwd = !fwd
+  }
+  out.g0(null, null, safeZ)
+}
+
 /**
  * Контур детали в нужном направлении, начатый с угла, который ближе всех к ЦЕНТРУ листа: рез начинается
  * изнутри листа, и последний отрезок (он приходит в этот же угол) отделяет деталь от основной части листа.
@@ -599,6 +613,38 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
       }
     }
   }
+  // Деловые обрезки, отмеченные в раскрое: режутся прямоугольником, фреза идёт снаружи. По краю листа инструмент
+  // не идёт — только по сторонам внутри листа; обрезок, окружённый деталями, обходится по всему периметру.
+  for (const of of sheet.manualOffcuts || []) {
+    const t = tool(ops.outer?.tool)
+    if (!t) { noTool('контур обрезка'); continue }
+    if (t.type !== 'mill') { warn.add('На контур детали назначено сверло — обрезки не отрезаются.'); continue }
+    const r = n0(t.d) / 2, e = 0.5
+    const x0 = ox + of.x, y0 = oy + of.y, x1 = x0 + of.w, y1 = y0 + of.h
+    const X0 = x0 - r, X1 = x1 + r, Y0 = y0 - r, Y1 = y1 + r
+    // стороны по кругу: низ, право, верх, лево; skip — сторона лежит на краю листа
+    const sides = [
+      { a: [X0, Y0], b: [X1, Y0], skip: y0 <= sheetRect.y0 + e }, { a: [X1, Y0], b: [X1, Y1], skip: x1 >= sheetRect.x1 - e },
+      { a: [X1, Y1], b: [X0, Y1], skip: y1 >= sheetRect.y1 - e }, { a: [X0, Y1], b: [X0, Y0], skip: x0 <= sheetRect.x0 + e },
+    ]
+    const zs = levels(T, -millOver, n0(t.maxPass))
+    if (sides.every(s => s.skip)) continue                         // обрезок — весь лист: резать нечего
+    if (!sides.some(s => s.skip)) {
+      const L = orientFromInside(sides.map(s => s.a), ops.outer.dir, sheetRect)
+      jobs.push({ stage: 2, rank: 6, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.outer, safeZ) })
+      continue
+    }
+    // незамкнутые цепочки из идущих подряд сторон; концы у края листа прижимаются к самому краю
+    const clamp = q => [Math.max(sheetRect.x0, Math.min(sheetRect.x1, q[0])), Math.max(sheetRect.y0, Math.min(sheetRect.y1, q[1]))]
+    const start = sides.findIndex((s, i) => !s.skip && sides[(i + 3) % 4].skip)
+    let chain = null
+    for (let k = 0; k < 4; k++) {
+      const s = sides[(start + k) % 4]
+      if (s.skip) { chain = null; continue }
+      if (!chain) { chain = [clamp(s.a)]; const pts = chain; jobs.push({ stage: 2, rank: 6, tool: t, at: pts[0], run: out => cutOpen(out, pts, zs, t, safeZ) }) }
+      chain.push(clamp(s.b))
+    }
+  }
   Object.entries(miss).forEach(([what, cnt]) => warn.add(`Не назначен инструмент: ${what} (${cnt} шт.) — в программу не попали.`))
   if (edge) warn.add(`Отверстия в торец (${edge} шт.) на этом станке не сверлятся — в программу не попали.`)
   if (back) warn.add(`Обработка с изнанки (${back} шт.) в программу не попала — деталь нужно перевернуть.`)
@@ -625,10 +671,14 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
     if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
 
+  // обрезки отрезаются последними — когда все детали уже вырезаны
+  cutTools.forEach(t => add(jobs.filter(j => j.stage === 2 && j.tool === t)))
+  add(jobs.filter(j => j.stage === 2 && !cutTools.includes(j.tool)))
+
   const out = new Out(zTop ? T : 0)
   out.raw(post.cmdStart)
   let active = null, opId = 0
-  const KIND = ['hole', 'hole', 'groove', 'pocket', 'cutout', 'outer']
+  const KIND = ['hole', 'hole', 'groove', 'pocket', 'cutout', 'outer', 'outer']
   const used = []
   for (const j of seq) {
     if (j.tool !== active) {

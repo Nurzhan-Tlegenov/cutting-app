@@ -2872,7 +2872,7 @@ export default function NestingPage() {
 
       {/* Статистика */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: focus && configs.length > 1 ? 3 : 8 }}>
-        {[[offcutCount ? 'Листов + обр.' : 'Листов', sheetsData.length ? (offcutCount ? `${sheetsCount}+${offcutCount}` : sheetsCount) : '—'],['Деталей', totalQty],['Кромка, м', totalEdge.toFixed(1)],['Площадь, м²', totalArea ? totalArea.toFixed(2) : '—']].map(([label, val]) => (
+        {[[offcutCount ? 'Листов + обр.' : 'Листов', sheetsData.length ? (offcutCount ? `${sheetsCount}+${offcutCount}` : sheetsCount) : '—'],['Деталей', totalQty],['Кромка, м', totalEdge.toFixed(2)],['Площадь, м²', totalArea ? totalArea.toFixed(2) : '—']].map(([label, val]) => (
           <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '5px 8px' }}>
             <div style={{ fontSize: 10, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{label}</div>
             <div style={{ fontSize: 16, fontWeight: 500, lineHeight: 1.2 }}>{val}</div>
@@ -2890,7 +2890,7 @@ export default function NestingPage() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
           {Object.entries(edgeByType).map(([name, len]) => (
             <span key={name} style={{ fontSize: 11, background: 'var(--bg2)', borderRadius: 10, padding: '2px 9px', color: 'var(--text-muted)' }}>
-              {name} · <span style={{ fontWeight: 500 }}>{len.total.toFixed(1)} м</span>{len.curved > 0.005 ? ` (крив. ${len.curved.toFixed(1)})` : ''}
+              {name} · <span style={{ fontWeight: 500 }}>{len.total.toFixed(2)} м</span>{len.curved > 0.005 ? ` (крив. ${len.curved.toFixed(2)})` : ''}
             </span>
           ))}
           <label title="Запас к длине кромки на каждую закромленную сторону. Если кромка своя — отключите."

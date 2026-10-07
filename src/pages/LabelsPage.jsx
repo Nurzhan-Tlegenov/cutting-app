@@ -10,7 +10,7 @@ const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D дет�
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName } from '../lib/orderUtils'
@@ -43,6 +43,19 @@ function Label({ tpl, order, mat, si, pi, n, onOpen }) {
     draw(); if (tpl.items.some(i => i.img)) preloadLabelImages(tpl).then(draw)
   }, [tpl, order, mat, si, pi])
   return <canvas ref={ref} data-lbl={n} onClick={onOpen} style={{ cursor: 'zoom-in' }} />
+}
+
+// Бирка на деловой обрезок листа: заказ, материал, размер
+function OffcutLabel({ tpl, order, mat, si, o }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const { w, h } = labelPx(tpl, true)
+    cv.width = w; cv.height = h
+    drawOffcutLabel(cv, tpl, { order, mat, si, o })
+  }, [tpl, order, mat, si, o.w, o.h])
+  return <canvas ref={ref} />
 }
 
 // Просмотр бирки во весь экран — как фотография в галерее: щипок увеличивает, палец двигает, двойное касание —
@@ -521,6 +534,15 @@ export default function LabelsPage() {
           {mats.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
         </select>
       )}
+      {mat && (() => {
+        const n = mat.sheets.reduce((x, sh) => x + sheetOffcuts(sh).length, 0)
+        return (
+          <label className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer', color: n ? 'var(--text)' : 'var(--text-hint)' }}>
+            <input type="checkbox" checked={!!tpl.offcuts} onChange={e => apply({ ...tpl, offcuts: e.target.checked })} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
+            Печатать бирки на обрезки{n ? ` · ${n} шт.` : ' (в раскрое обрезки не отмечены)'}
+          </label>
+        )
+      })()}
       {mat && (
         <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <span style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Щипок двумя пальцами — крупнее или мельче, как в галерее</span>
@@ -537,6 +559,7 @@ export default function LabelsPage() {
             <p className="section-title no-print">{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
             <div className="lbl-grid">
               {allLabels.filter(q => q.si === si).map(q => <Label key={q.pi} tpl={tpl} order={order} mat={mat} si={si} pi={q.pi} n={q.n} onOpen={() => setView(q.n)} />)}
+              {tpl.offcuts && sheetOffcuts(sh).map((o, k) => <OffcutLabel key={'o' + k} tpl={tpl} order={order} mat={mat} si={si} o={o} />)}
             </div>
           </div>
         ))}
