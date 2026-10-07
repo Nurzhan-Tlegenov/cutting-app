@@ -17,6 +17,7 @@ import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeom
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
 import { orderTitle, toLatin } from './orderUtils'
+import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
 
 // Бирка собирается из элементов: каждый можно поставить в любое место бирки и задать ему размер.
@@ -59,6 +60,7 @@ export const LABEL_ITEMS = [
 ]
 // Из чего собирается строка QR-кода — выбирает пользователь; порядок — как в этом списке
 export const QR_PARTS = [
+  ['link', 'Ссылка на 3D-модель детали'],
   ['text', 'Свой текст'],
   ['order', 'Название заказа'],
   ['des', 'Обозначение детали'],
@@ -73,6 +75,9 @@ export const QR_PARTS = [
 const QR_DEFAULT = { parts: ['order', 'sheet', 'num', 'des', 'size'], sep: ';', text: '', latin: false }
 export function labelQr(tpl, info) {
   const q = tpl.qr || QR_DEFAULT
+  // ссылка на 3D: по коду открывается модель заказа сразу на этой детали. Работает, пока у заказа открыта ссылка
+  // на 3D-модель; в коде тогда только адрес (иначе телефон не распознает его как ссылку). Ссылки нет — обычный текст.
+  if (q.parts.includes('link') && info.share) return `${shareUrl(info.share)}?n=${info.di}${info.des ? '&des=' + encodeURIComponent(info.des) : ''}`
   const val = { text: q.text, order: info.order, des: info.des, name: info.name, pos: info.pos, prefix: info.prefix, material: info.materialName,
     size: `${r1(info.length)}x${r1(info.width)}x${info.thickness || ''}`, sheet: `L${info.sheet}`, num: `N${info.num}` }
   const out = QR_PARTS.filter(([k]) => q.parts.includes(k)).map(([k]) => String(val[k] ?? '').trim()).filter(Boolean).join(q.sep)
@@ -249,7 +254,7 @@ export function labelInfo(order, mat, si, pi) {
   const cutouts = (c?.holes || []).filter(h => h.type !== 'pocket').length
   const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
-    order: orderTitle(order), materialName: mat.name || '',
+    order: orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
     num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
     name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
     material: [mat.name, mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · '),
@@ -565,6 +570,7 @@ export function labelOrder(sheet, geo, mode = 'manual') {
 export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
   const files = [], list = [], { w, h } = labelPx(tpl)
   await preloadLabelImages(tpl)
+  if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)   // для QR со ссылкой на 3D
   const ox = Number(post?.originX) || 0, oy = Number(post?.originY) || 0
   for (const { si, nc } of sheets) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet), stem = `${si + 1}_${base}`
@@ -601,6 +607,7 @@ export const zipFiles = files => zipSync(Object.fromEntries(files.map(f => [f.na
  */
 export async function buildLabelsPdf({ order, mat, tpl, onProgress }) {
   await preloadLabelImages(tpl)
+  if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)
   const k = Math.max(12, pxMm(tpl)), W = Math.round(tpl.w * k), H = Math.round(tpl.h * k)
   const pw = (tpl.w * 72 / 25.4).toFixed(2), ph = (tpl.h * 72 / 25.4).toFixed(2)
   const total = mat.sheets.reduce((a, sh) => a + sh.placed.length, 0)

@@ -94,7 +94,7 @@ function woodTexture(hex) {
   return tex
 }
 
-export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16, actions = null }) {
+export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16, actions = null, focus = null }) {
   const hostRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
@@ -733,6 +733,33 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     setMenu(null); setMulti(false); setSel(new Set()); setPicked(null)
   }
   const showAll = () => { fitNext.current = true; setHiddenPids(new Set()); setMenu(null) }
+  // ─── Деталь в модели (focus = { di, des }): сначала видна только она, затем — вверх по структуре:
+  // блок → изделие → вся модель. Сама деталь всё время подсвечена, чтобы её было видно среди остальных.
+  const focusPids = useMemo(() => {
+    if (!focus) return []
+    const mine = parts.filter(p => p.inOrder)
+    const byDes = focus.des ? mine.filter(p => p.des === focus.des) : []
+    return (byDes.length ? byDes : mine.filter(p => focus.di != null && p.di === Number(focus.di))).map(p => p.pid)
+  }, [parts, focus?.di, focus?.des])                             // eslint-disable-line react-hooks/exhaustive-deps
+  const levels = useMemo(() => {
+    if (!focusPids.length) return []
+    const p = parts.find(q => q.pid === focusPids[0]), out = [{ label: 'Деталь', pids: focusPids }]
+    const add = (label, pids) => { if (pids.length > out[out.length - 1].pids.length) out.push({ label, pids }) }
+    if (p.block) add(`Блок «${p.block}»`, parts.filter(q => q.block === p.block || String(q.block || '').startsWith(p.block + ' / ')).map(q => q.pid))
+    if (p.product) add(`Изделие «${p.product}»`, parts.filter(q => q.product === p.product).map(q => q.pid))
+    out.push({ label: 'Вся модель', pids: null })
+    return out
+  }, [parts, focusPids])
+  const [level, setLevel] = useState(0)
+  const goLevel = i => {
+    const L = levels[i]
+    if (!L) return
+    const all = everyPid().length ? everyPid() : parts.map(q => q.pid)
+    const keep = L.pids ? new Set(L.pids) : null
+    fitNext.current = true
+    setLevel(i); setHiddenPids(new Set(keep ? all.filter(q => !keep.has(q)) : [])); setSel(new Set(focusPids)); setMenu(null); setMulti(false)
+  }
+  useEffect(() => { if (levels.length) goLevel(0) }, [focusPids.join('|')])   // eslint-disable-line react-hooks/exhaustive-deps
   const hidePids = pids => { setHiddenPids(h => new Set([...h, ...pids])); setSel(new Set()); setPicked(null); setMenu(null); setMulti(false) }
   const shownCount = everyPid().filter(q => !hiddenPids.has(q)).length
   const lookFrom = dir => { stateRef.current?.fit(dir); setShowViews(false) }
@@ -928,6 +955,19 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
                 border: a.primary ? 'none' : '0.5px solid var(--blue-mid)', background: a.primary ? 'var(--blue)' : 'transparent', color: a.primary ? 'white' : 'var(--blue)' }}>
               {a.label}
             </button>
+          ))}
+        </div>
+      )}
+      {levels.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)', alignItems: 'center', overflowX: 'auto' }}>
+          {level < levels.length - 1 && (
+            <button type="button" onClick={() => goLevel(level + 1)}
+              style={{ flex: 'none', padding: '8px 12px', borderRadius: 'var(--radius)', border: 'none', background: 'var(--blue)', color: 'white', fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>⬆ Вверх по структуре</button>
+          )}
+          {levels.map((L, i) => (
+            <button key={i} type="button" onClick={() => goLevel(i)}
+              style={{ flex: 'none', padding: '7px 10px', borderRadius: 20, fontSize: 12, whiteSpace: 'nowrap', border: '0.5px solid ' + (i === level ? 'var(--blue)' : 'var(--border-md)'),
+                background: i === level ? 'var(--blue-light)' : 'transparent', color: i === level ? 'var(--blue-dark)' : 'var(--text-muted)' }}>{L.label}</button>
           ))}
         </div>
       )}

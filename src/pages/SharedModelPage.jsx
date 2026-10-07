@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { fetchSharedModel } from '../lib/modelShare'
 import { textureKey } from '../lib/materialTextures'
 import CncLoader from '../components/CncLoader'
@@ -10,6 +10,9 @@ const Model3D = lazyRetry(() => import('../components/Model3D'))
 // 3D-модель заказа по ссылке — для клиента: только просмотр, вход не нужен.
 export default function SharedModelPage() {
   const { token: longToken, code } = useParams()
+  const [search] = useSearchParams()
+  // по QR-коду с бирки: сразу показать эту деталь (n — номер детали в заказе, des — обозначение)
+  const focus = search.get('n') != null || search.get('des') ? { di: search.get('n') != null ? Number(search.get('n')) : null, des: search.get('des') || '' } : null
   const token = code || longToken     // /v/короткий-код или старая /view/длинный-токен
   const [state, setState] = useState({ loading: true })
   useEffect(() => {
@@ -44,7 +47,7 @@ export default function SharedModelPage() {
   if (!state.details.some(d => String(d.contour || '').includes('"inst"'))) return <div style={box}><div style={{ fontSize: 15 }}>В этом заказе нет 3D-модели</div></div>
   return (
     <Suspense fallback={<CncLoader full label="Строим 3D-модель…" />}>
-      <Model3D details={state.details} scene={state.scene} title={state.title} readOnly sharedTextures={state.textures} />
+      <Model3D details={state.details} scene={state.scene} title={state.title} readOnly sharedTextures={state.textures} focus={focus} />
     </Suspense>
   )
 }

@@ -22,6 +22,7 @@ import Model3DButton from '../components/Model3DButton'
 import ProductionForm from '../components/ProductionForm'
 import { myProduction } from '../lib/productionApi'
 import { loadOrderModel } from '../lib/orderModel'
+import { hasModel } from '../lib/model3d'
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
@@ -1452,6 +1453,7 @@ export default function NestingPage() {
   // кабинет производства: ЧПУ и бирки по принятому раскрою
   const canProduce = cabinet === 'production' && (profile?.role === 'admin' || profile?.role === 'operator')
   const [part3d, setPart3d] = useState(null)       // { index, draft } — деталь в 3D-виде (долгое удержание на карте)
+  const [inModel, setInModel] = useState(null)     // деталь в общей 3D-модели заказа: { focus, scene }
   const [sendJob, setSendJob] = useState(null)     // файл для отладки, который уходит мастер-аккаунту
   const [partsOpen, setPartsOpen] = useState(false)   // список деталей под картами — свёрнут
   const [partsSort, setPartsSort] = useState('')
@@ -3155,9 +3157,19 @@ export default function NestingPage() {
         <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 960, background: 'var(--bg2)' }}><CncLoader label="Строим 3D-модель…" /></div>}>
           <Model3D key={part3d.index} details={part3dDetails(part3d)} title={part3d.draft.name || 'Деталь'} onClose={closePart3d} readOnly
             materialThickness={thicknessOf(part3d.index)}
-            actions={[{ label: '⇄ Сменить лицевую сторону', onClick: flipPart3d }, { label: '✎ Редактор контура', onClick: part3dToEditor, primary: true }]} />
+            actions={[{ label: '⇄ Сменить лицевую сторону', onClick: flipPart3d }, { label: '✎ Редактор контура', onClick: part3dToEditor, primary: true },
+              ...(hasModel(allDetails) ? [{ label: '⬆ В модели', onClick: () => { const d = details[part3d.index]; const focus = { di: allDetails.indexOf(d), des: detailMeta(d)?.des || '' }; setInModel({ focus, scene: undefined }); loadOrderModel(id).then(sc => setInModel(m => (m ? { ...m, scene: sc || null } : m))).catch(() => setInModel(m => (m ? { ...m, scene: null } : m))) } }] : [])]} />
         </Suspense>
       )}
+      {inModel && (inModel.scene === undefined
+        ? <div style={{ position: 'fixed', inset: 0, zIndex: 970, background: 'var(--bg2)' }}><CncLoader label="Открываем модель…" /></div>
+        : (
+          <Suspense fallback={null}>
+            <div style={{ position: 'relative', zIndex: 970 }}>
+              <Model3D details={allDetails} scene={inModel.scene} title={orderTitle(order)} onClose={() => setInModel(null)} readOnly orderId={null} focus={inModel.focus} />
+            </div>
+          </Suspense>
+        ))}
       <SendToMaster job={sendJob} onClose={() => setSendJob(null)} />
     </div>
   )

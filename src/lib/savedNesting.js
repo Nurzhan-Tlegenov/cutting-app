@@ -40,6 +40,7 @@ export function savedNestings(order, allDetails) {
       key: m?.key || '', label: m?.label || order.material_name || 'Материал',
       name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16,
       result, sheets, details,
+      all: allDetails || [],        // все детали заказа — чтобы найти деталь в общей 3D-модели
     })
   }
   if (store.multi) {

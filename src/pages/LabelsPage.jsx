@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { lazyRetry } from '../lib/lazyRetry'
+import { hasModel } from '../lib/model3d'
+import { loadOrderModel } from '../lib/orderModel'
+import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D детали — из просмотра бирки
 import { supabase } from '../lib/supabase'
@@ -139,7 +142,7 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d }) {
 
 // Конструктор бирки: элементы перетаскиваются по бирке пальцем, за уголок — меняется размер.
 // Показана бирка первой детали первого листа — на настоящих данных заказа.
-function LabelEditor({ tpl, onChange, order, mat }) {
+function LabelEditor({ tpl, onChange, order, mat, shared }) {
   const wrapRef = useRef(null), cvRef = useRef(null), drag = useRef(null)
   const [live, setLive] = useState(null)            // шаблон во время перетаскивания
   const [sel, setSel] = useState(null)
@@ -252,6 +255,12 @@ function LabelEditor({ tpl, onChange, order, mat }) {
       {used.has('qr') && (
         <div style={{ marginBottom: 10, padding: '8px 10px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)' }}>
           <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Что зашито в QR-код</div>
+          {tpl.qr.parts.includes('link') && (
+            <p style={{ fontSize: 11, margin: '0 0 6px', color: shared ? 'var(--teal)' : 'var(--amber)' }}>
+              {shared ? '✓ У заказа открыта ссылка на 3D-модель: по QR-коду откроется эта деталь, дальше — вверх по структуре (блок, изделие, вся модель). В коде только ссылка, остальные части не добавляются.'
+                : 'Ссылка на 3D-модель у этого заказа не открыта — в код пойдут обычные части ниже. Откройте ссылку в заказе: «3D-модель» → «Ссылка».'}
+            </p>
+          )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {QR_PARTS.map(([k, label]) => {
               const on = tpl.qr.parts.includes(k)
@@ -297,6 +306,10 @@ export default function LabelsPage() {
   const [tpl, setTpl] = useState(() => getLabelTpl(user))
   const [setup, setSetup] = useState(() => !getLabelTpl(user).enabled)
   const [busy, setBusy] = useState(false)
+  // ссылка на 3D-модель заказа (для QR) и сама модель (для кнопки «3D» в просмотре бирки)
+  const [shared, setShared] = useState(() => !!cachedShare(id))
+  useEffect(() => { const sync = () => setShared(!!cachedShare(id)); const off = onShareChange(sync); getShare(id).then(sync); return off }, [id])
+  const [scene, setScene] = useState(undefined)
   const [pdf, setPdf] = useState('')                 // ход сборки PDF
   // Бирка во весь экран и 3D её детали — в адресе страницы (?lbl=…&d3=1): кнопка «назад» телефона
   // закрывает 3D, затем просмотр бирки, а не уводит со страницы бирок.
@@ -447,7 +460,7 @@ export default function LabelsPage() {
               style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, marginBottom: 8, border: '0.5px solid ' + (hist.length ? 'var(--blue)' : 'var(--border-md)'), background: 'transparent', color: hist.length ? 'var(--blue)' : 'var(--text-hint)' }}>
               ↶ Отменить{hist.length ? ` (${hist.length})` : ''}
             </button>
-            {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} />
+            {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} />
               : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
             {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же']].map(([k, label]) => (
               <label key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
@@ -527,22 +540,30 @@ export default function LabelsPage() {
           </div>
         ))}
       </div>
-      {view != null && allLabels[view] && <LabelViewer tpl={tpl} order={order} mat={mat} list={allLabels} index={view} onIndex={setView} onClose={closeView} on3d={() => navigate(`?lbl=${view}&d3=1`)} />}
+      {view != null && allLabels[view] && <LabelViewer tpl={tpl} order={order} mat={mat} list={allLabels} index={view} onIndex={setView} onClose={closeView} on3d={() => { if (scene === undefined && hasModel(details)) loadOrderModel(id).then(sc => setScene(sc || null)).catch(() => setScene(null)); navigate(`?lbl=${view}&d3=1`) }} />}
       {view != null && show3d && allLabels[view] && (() => {
-        // деталь этой бирки — отдельной 3D-моделью, лицевой пластью к зрителю
         const q = allLabels[view], d = mat.details[mat.sheets[q.si].placed[q.pi].detailIndex] || {}
         let c = d.contour
         if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
         c = c || {}
+        const wait = <div style={{ position: 'fixed', inset: 0, zIndex: 960, background: 'var(--bg2)' }}><CncLoader label="Строим 3D-модель…" /></div>
+        const name = [c.meta?.des, d.name].filter(Boolean).join(' ') || 'Деталь'
+        // У заказа есть 3D-модель: деталь показывается в ней — сначала одна, затем «вверх по структуре» (блок, изделие, вся модель)
+        if (hasModel(details)) {
+          if (scene === undefined) return wait
+          return (
+            <Suspense fallback={wait}>
+              <Model3D key={view} details={details} scene={scene || null} title={name} onClose={closeView} readOnly orderId={null}
+                materialThickness={mat.thickness} focus={{ di: details.indexOf(d), des: c.meta?.des || '' }} />
+            </Suspense>
+          )
+        }
+        // модели нет — одна деталь, лицевой пластью к зрителю
         const W = Number(d.width) || 0, L = Number(d.length) || 0, T = Number(c.meta?.thickness) || mat.thickness || 16
         const one = [{ name: d.name || 'Деталь', w: L, h: W, edges: { top: d.edge_top || null, right: d.edge_right || null, bottom: d.edge_bottom || null, left: d.edge_left || null },
           contour: { ...c, meta: { des: c.meta?.des || '', material: c.meta?.material || mat.name || '', product: '', thickness: T, texDir: 2, turned: false, flipped: false,
             local: { x0: 0, y0: 0, dx: W, dy: L }, inst: [[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]], ids: [0], anims: [null] } } }]
-        return (
-          <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 960, background: 'var(--bg2)' }}><CncLoader label="Строим 3D-модель…" /></div>}>
-            <Model3D key={view} details={one} title={[c.meta?.des, d.name].filter(Boolean).join(' ') || 'Деталь'} onClose={closeView} readOnly materialThickness={T} />
-          </Suspense>
-        )
+        return <Suspense fallback={wait}><Model3D key={view} details={one} title={name} onClose={closeView} readOnly materialThickness={T} /></Suspense>
       })()}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} />}
     </div>
