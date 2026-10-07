@@ -17,8 +17,8 @@ import { smallEdgeReal } from '../lib/nesting'
 // polygon — Y вверх. На холсте Y идёт сверху вниз (тот же переворот, что и в
 // SheetCanvas).
 
-const PART_FILL = '#F9DCC8'            // светло-оранжевые детали на светло-сером листе — как на карте раскроя
-const PART_STROKE = 'rgba(120,60,30,0.9)'
+const PART_FILL = '#E6E6E6'
+const PART_STROKE = 'rgba(20,20,20,0.75)'
 const GAP_MM = 120      // промежуток между листами, мм (в масштабе листа)
 const CAPTION_MM = 190  // место под подпись над листом, мм
 const ANIM_MS = 600
@@ -141,7 +141,7 @@ export default function SheetsOverview({
       const usableArea = D.ux * D.uy
       ctx.fillStyle = D.offcut ? '#E6DCC8' : '#F1EFE8'
       ctx.fillRect(X(o.x), Y(o.y), D.sw * sc, D.sl * sc)
-      ctx.fillStyle = '#F5F4F0'
+      ctx.fillStyle = '#fff'
       ctx.fillRect(X(o.x + D.ml), Y(o.y + D.mt), D.ux * sc, D.uy * sc)
       const active = si === activeSheet
       ctx.strokeStyle = active ? '#185FA5' : D.offcut ? '#A0782C' : '#888780'
@@ -171,7 +171,7 @@ export default function SheetsOverview({
       const x = X(it.x), y = Y(it.y), w = it.w * sc, h = it.h * sc
       ctx.globalAlpha = it.alpha
       // мелкая/узкая деталь у края листа («мелкие — в центр» не выполнено) — оранжевым
-      ctx.fillStyle = it.atEdge ? 'rgba(245,158,11,0.6)' : PART_FILL
+      ctx.fillStyle = it.atEdge ? 'rgba(245,158,11,0.35)' : PART_FILL
       ctx.strokeStyle = it.atEdge ? '#D97706' : PART_STROKE
       ctx.lineWidth = it.atEdge ? 1.6 : (w < 6 ? 0.5 : 1)
       if (it.polygon) {
@@ -187,7 +187,7 @@ export default function SheetsOverview({
       }
       // внутренние вырезы
       if (it.holes?.length) {
-        ctx.fillStyle = '#F5F4F0'
+        ctx.fillStyle = '#fff'
         ctx.strokeStyle = '#C0392B'
         ctx.lineWidth = 0.8
         it.holes.forEach(poly => {

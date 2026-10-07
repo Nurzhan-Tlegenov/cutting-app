@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 // Экран ожидания вместо «Загрузка…»: живые карты раскроя. Несколько листов, плотно уложенных деталями;
 // детали всё время перелетают с листа на лист. Ничего не считается — только плавное движение
 // (сдвиг через transform, без перерисовки), поэтому не тормозит и на слабом телефоне.
-// Нажатие — другая раскладка. Цвета — как на картах раскроя: светло-оранжевые детали на светло-сером листе.
+// Нажатие — другая раскладка. Детали — фигурные (круги, овалы, скругления, четверти и половины круга):
+// видно, что это раскрой по форме (нестинг), а не только прямоугольники. Цвета — как на картах раскроя.
 const PW = 132, PH = 200, PAD = 4, GAP = 2.4          // лист (в условных единицах), поле и зазор между деталями
 const HINTS = [
   'Детали перекладываются с карты на карту',
@@ -28,12 +29,15 @@ function makeSlots(seed) {
   return out
 }
 
+// форма детали по номеру места: вперемешку круглые и скруглённые (значение border-radius)
+const SHAPES = ['50%', '50%', '999px', '30%', '100% 0 0 0', '0 100% 0 0', '999px 999px 0 0', '0 0 999px 999px', '40% 10%', '12% 45% 12% 45%', '999px 0 0 999px', '0 60% 0 60%', '18%', '0']
 function LiveSheets({ label, compact }) {
   const boxRef = useRef(null)
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1e9))   // eslint-disable-line react-hooks/purity
   const [width, setWidth] = useState(0)
   const cols = compact ? 3 : 6, rows = compact ? 2 : 6, N = cols * rows, SG = 10        // листов в ряд, рядов (36 карт), зазор между листами
   const slots = useMemo(() => makeSlots(seed), [seed])
+  const shape = i => SHAPES[(seed + i * 5 + (i * i) % 7) % SHAPES.length]
   // у каждого листа раскладка та же, но отражённая — листы выглядят разными, а места одного номера одинаковые по размеру
   const place = (sheet, i) => {
     const s = slots[i], fx = (sheet % cols) % 2 === 1, fy = Math.floor(sheet / cols) % 2 === 1
@@ -74,14 +78,14 @@ function LiveSheets({ label, compact }) {
       style={{ position: 'relative', width: compact ? 170 : 'min(90vw, 420px, 54vh)', aspectRatio: `${TW} / ${TH}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
       {Array.from({ length: N }, (_, s) => (
         <div key={s} style={{ position: 'absolute', left: (s % cols) * (PW + SG) * k, top: Math.floor(s / cols) * (PH + SG) * k, width: PW * k, height: PH * k,
-          background: '#F5F4F0', border: '1px solid var(--gray-mid)', borderRadius: 3, boxSizing: 'border-box' }} />
+          background: '#fff', border: '1px solid var(--gray-mid)', borderRadius: 3, boxSizing: 'border-box' }} />
       ))}
       {width > 0 && at.map((row, i) => row.map((sheet, part) => {
         const p = place(sheet, i), fly = moving.has(i + ':' + part)
         return (
           <div key={i + ':' + part} style={{ position: 'absolute', left: 0, top: 0, width: p.w * k, height: p.h * k, boxSizing: 'border-box',
             transform: `translate3d(${p.x * k}px, ${p.y * k}px, 0)`, transition: 'transform 0.7s cubic-bezier(0.45, 0.05, 0.3, 1), background-color 0.3s',
-            background: fly ? '#F2B694' : '#F9DCC8', border: '1px solid rgba(120,60,30,0.9)', zIndex: fly ? 2 : 1, willChange: 'transform' }} />
+            background: fly ? '#B5D4F4' : '#E6E6E6', border: '1px solid rgba(20,20,20,0.75)', borderRadius: shape(i), zIndex: fly ? 2 : 1, willChange: 'transform' }} />
         )
       }))}
     </div>
