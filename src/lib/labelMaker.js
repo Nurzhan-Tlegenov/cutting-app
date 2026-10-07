@@ -209,7 +209,9 @@ export function normalizeLabel(raw) {
     // строка «Заказ»: своя подпись, номер от приложения и название заказа включаются отдельно
     order: { prefix: typeof t.order?.prefix === 'string' ? t.order.prefix.slice(0, 30) : 'Заказ', number: t.order?.number !== false, name: t.order?.name !== false },
     // чертёж детали: размеры торцевых отверстий от края и высота их цифр (мм)
-    part: { dims: !!t.part?.dims, dimSize: Math.max(1, Math.min(6, Number(t.part?.dimSize) || 2)) },
+    // contour — толщина линии контура, мм; hole — наименьший размер точки отверстия, мм; ring — отверстия кружком, без заливки
+    part: { dims: !!t.part?.dims, dimSize: Math.max(1, Math.min(6, Number(t.part?.dimSize) || 2)),
+      contour: Math.max(0.08, Math.min(0.8, Number(t.part?.contour) || 0.18)), hole: Math.max(0.15, Math.min(2, Number(t.part?.hole) || 0.35)), ring: !!t.part?.ring },
     qr: { parts: Array.isArray(t.qr?.parts) ? t.qr.parts.filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
@@ -267,7 +269,9 @@ export function labelInfo(order, mat, si, pi) {
  * контур, вырезы, выемки и пазы лицевой стороны, отверстия в пласть (кружки) и в торец (полоса на глубину),
  * Кромка на чертеже не показывается. Обработка с изнанки не показывается.
  */
-export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx = 0) {
+export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx = 0, st = {}) {
+  // толщины, точек: контур детали, внутренние линии (вырезы, пазы), наименьшая точка отверстия
+  const cw = Math.max(1, st.contour ?? line * 1.5), iw = Math.max(1, st.inner ?? line), hmin = Math.max(1, st.holeMin ?? line * 3.2)
   let c = d?.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const DW = Number(d?.width) || 0, DL = Number(d?.length) || 0, turns = placedTurns(p, d || {})
@@ -315,7 +319,7 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
   const poly = (pts, close = true) => { ctx.beginPath(); pts.forEach((q, i) => { if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]) }); if (close) ctx.closePath() }
   ctx.save()
   ctx.strokeStyle = '#000'; ctx.fillStyle = '#000'; ctx.lineJoin = 'round'; ctx.lineCap = 'butt'
-  ctx.lineWidth = line * 1.5
+  ctx.lineWidth = cw
   poly(outline.map(q => S(q[0], q[1]))); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); ctx.fillStyle = '#000'
   if (c) {
     // вырезы — сплошной линией с крестом (сквозные), выемки — штриховой
@@ -324,15 +328,15 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
       const hole = src.length === holes.length ? src[i] : null
       if (hole?.type === 'pocket' && hole.face === 'back') return
       const pts = hp.map(q => S(q.x, q.y))
-      ctx.lineWidth = line; ctx.setLineDash(hole?.type === 'pocket' ? [4 * line, 3 * line] : [])
+      ctx.lineWidth = iw; ctx.setLineDash(hole?.type === 'pocket' ? [4 * line, 3 * line] : [])
       poly(pts); ctx.stroke(); ctx.setLineDash([])
-      if (hole && hole.type !== 'pocket' && hole.type !== 'circle' && pts.length === 4) { ctx.lineWidth = line * 0.6; ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...pts[2]); ctx.moveTo(...pts[1]); ctx.lineTo(...pts[3]); ctx.stroke() }
+      if (hole && hole.type !== 'pocket' && hole.type !== 'circle' && pts.length === 4) { ctx.lineWidth = Math.max(1, iw * 0.6); ctx.beginPath(); ctx.moveTo(...pts[0]); ctx.lineTo(...pts[2]); ctx.moveTo(...pts[1]); ctx.lineTo(...pts[3]); ctx.stroke() }
     })
     // пазы лицевой стороны — контур со штриховкой
     getGrooveRects(c, DW, DL, true).forEach(r => {
       const pts = r.pts.map(([px, py]) => R(px, py))
-      ctx.lineWidth = line; poly(pts); ctx.stroke()
-      ctx.save(); poly(pts); ctx.clip(); ctx.lineWidth = line * 0.6
+      ctx.lineWidth = iw; poly(pts); ctx.stroke()
+      ctx.save(); poly(pts); ctx.clip(); ctx.lineWidth = Math.max(1, iw * 0.6)
       const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
       ctx.beginPath(); for (let t = x0 - (y1 - y0); t < x1; t += 5 * line) { ctx.moveTo(t, y1); ctx.lineTo(t + (y1 - y0), y0) } ctx.stroke()
       ctx.restore()
@@ -342,10 +346,12 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
       const a = R(pt.x, pt.y)
       if (pt.edge) {
         const dep = pt.depth > 0 ? pt.depth : 20, b = R(pt.x + pt.dx * dep, pt.y + pt.dy * dep)
-        ctx.lineWidth = Math.max(2 * line, (pt.d || 8) * k); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
+        ctx.lineWidth = Math.max(1, hmin * 0.6, (pt.d || 8) * k); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke()
         return
       }
-      ctx.beginPath(); ctx.arc(a[0], a[1], Math.max(1.6 * line, (pt.d || 8) * k / 2), 0, Math.PI * 2); ctx.fill()
+      const r = Math.max(hmin / 2, (pt.d || 8) * k / 2)
+      ctx.beginPath(); ctx.arc(a[0], a[1], r, 0, Math.PI * 2)
+      if (st.ring && r >= 1.5) { ctx.lineWidth = Math.max(1, iw * 0.7); ctx.stroke() } else ctx.fill()
     })
   }
   // размеры — тонкими линиями по целым точкам (без размытия), цифры без подложки
@@ -477,7 +483,8 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       if (sheetCtx) drawSheetMap(ctx, x, y, w, it.h * mm, sheetCtx.sheet, sheetCtx.geo, sheetCtx.index, line, rot)
     } else if (it.type === 'part') {
       const p = sheetCtx?.sheet.placed[sheetCtx.index]
-      if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0)
+      if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0,
+        tpl.part ? { contour: tpl.part.contour * mm, inner: tpl.part.contour * mm * 0.7, holeMin: tpl.part.hole * mm, ring: tpl.part.ring } : {})
     } else {
       const text = labelText(it.type, info, tpl)
       if (!text) continue                                   // параметра у детали нет — ни текста, ни картинки
