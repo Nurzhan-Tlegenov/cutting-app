@@ -24,7 +24,7 @@ const CSS = `
 }`
 const safeName = s => String(s || '').replace(/[^\wа-яё.-]+/gi, '_').replace(/^_+|_+$/g, '')
 
-function Label({ tpl, order, mat, si, pi }) {
+function Label({ tpl, order, mat, si, pi, onOpen }) {
   const ref = useRef(null)
   useEffect(() => {
     const cv = ref.current
@@ -35,7 +35,102 @@ function Label({ tpl, order, mat, si, pi }) {
     const draw = () => drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
     draw(); if (tpl.items.some(i => i.img)) preloadLabelImages(tpl).then(draw)
   }, [tpl, order, mat, si, pi])
-  return <canvas ref={ref} />
+  return <canvas ref={ref} onClick={onOpen} style={{ cursor: 'zoom-in' }} />
+}
+
+// Просмотр бирки во весь экран — как фотография в галерее: щипок увеличивает, палец двигает, двойное касание —
+// крупнее / целиком, смахивание в стороны — соседняя бирка. Бирка перерисована крупно, поэтому при увеличении чёткая.
+function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose }) {
+  const cvRef = useRef(null), boxRef = useRef(null)
+  const v = useRef({ s: 1, x: 0, y: 0 })                 // масштаб и сдвиг
+  const g = useRef({ pts: new Map(), start: null, tap: 0, moved: false })
+  const { si, pi } = list[index]
+  const apply = (anim = false) => {
+    const cv = cvRef.current, box = boxRef.current
+    if (!cv || !box) return
+    const st = v.current
+    st.s = Math.max(1, Math.min(10, st.s))
+    // картинка не уходит за края экрана
+    const mx = Math.max(0, (cv.offsetWidth * st.s - box.clientWidth) / 2), my = Math.max(0, (cv.offsetHeight * st.s - box.clientHeight) / 2)
+    st.x = Math.max(-mx, Math.min(mx, st.x)); st.y = Math.max(-my, Math.min(my, st.y))
+    cv.style.transition = anim ? 'transform 0.18s ease-out' : 'none'
+    cv.style.transform = `translate(${st.x}px, ${st.y}px) scale(${st.s})`
+  }
+  useEffect(() => {
+    const cv = cvRef.current
+    if (!cv) return
+    const k = Math.min(32, Math.floor(4096 / Math.max(tpl.w, tpl.h)))       // точек на мм — с запасом под увеличение
+    cv.width = Math.round(tpl.w * k); cv.height = Math.round(tpl.h * k)
+    const sheet = mat.sheets[si]
+    const draw = () => drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
+    draw(); if (tpl.items.some(i => i.img)) preloadLabelImages(tpl).then(draw)
+    v.current = { s: 1, x: 0, y: 0 }; apply()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tpl, order, mat, si, pi])
+  const zoomAt = (cx, cy, ns, anim) => {                 // увеличение вокруг точки экрана
+    const box = boxRef.current.getBoundingClientRect(), st = v.current
+    const px = cx - box.left - box.width / 2, py = cy - box.top - box.height / 2
+    const k = Math.max(1, Math.min(10, ns)) / st.s
+    st.x = px - (px - st.x) * k; st.y = py - (py - st.y) * k; st.s *= k
+    apply(anim)
+  }
+  const down = e => {
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    const G = g.current
+    G.pts.set(e.pointerId, [e.clientX, e.clientY]); G.moved = false
+    const P = [...G.pts.values()]
+    G.start = P.length === 2 ? { d: Math.hypot(P[0][0] - P[1][0], P[0][1] - P[1][1]), s: v.current.s } : { x: e.clientX, y: e.clientY, vx: v.current.x, vy: v.current.y }
+  }
+  const move = e => {
+    const G = g.current
+    if (!G.pts.has(e.pointerId)) return
+    G.pts.set(e.pointerId, [e.clientX, e.clientY])
+    const P = [...G.pts.values()]
+    if (P.length === 2 && G.start?.d) {
+      G.moved = true
+      zoomAt((P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2, G.start.s * Math.hypot(P[0][0] - P[1][0], P[0][1] - P[1][1]) / G.start.d)
+    } else if (P.length === 1 && G.start && G.start.d == null) {
+      const dx = e.clientX - G.start.x, dy = e.clientY - G.start.y
+      if (Math.hypot(dx, dy) > 6) G.moved = true
+      if (v.current.s > 1.01) { v.current.x = G.start.vx + dx; v.current.y = G.start.vy + dy; apply() }
+      else { v.current.x = dx; v.current.y = 0; const cv = cvRef.current; cv.style.transition = 'none'; cv.style.transform = `translate(${dx}px, 0px) scale(1)` }
+    }
+  }
+  const up = e => {
+    const G = g.current, had = G.pts.size
+    G.pts.delete(e.pointerId)
+    if (had === 1 && G.start && G.start.d == null) {
+      const dx = e.clientX - G.start.x
+      if (v.current.s <= 1.01) {
+        if (Math.abs(dx) > 70) { const n = index + (dx < 0 ? 1 : -1); if (n >= 0 && n < list.length) { onIndex(n); return } }
+        v.current.x = 0; apply(true)
+      }
+      if (!G.moved) {                                    // двойное касание
+        const now = Date.now()
+        if (now - G.tap < 320) { zoomAt(e.clientX, e.clientY, v.current.s > 1.5 ? 1 : 3, true); if (v.current.s <= 1.01) { v.current.x = 0; v.current.y = 0; apply(true) } G.tap = 0 } else G.tap = now
+      }
+    }
+    const P = [...G.pts.values()]
+    G.start = P.length === 1 ? { x: P[0][0], y: P[0][1], vx: v.current.x, vy: v.current.y } : null
+  }
+  const nav = { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: 40, height: 56, border: 'none', borderRadius: 10, background: 'rgba(255,255,255,0.14)', color: '#fff', fontSize: 22 }
+  return (
+    <div className="no-print" style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#1b1b1a', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', color: '#fff' }}>
+        <div style={{ flex: 1, fontSize: 14 }}>Лист {si + 1} · бирка {index + 1} из {list.length}</div>
+        <button type="button" onClick={() => { v.current = { s: 1, x: 0, y: 0 }; apply(true) }} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.4)', color: '#fff', borderRadius: 20, padding: '5px 12px', fontSize: 12 }}>Целиком</button>
+        <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 26, lineHeight: 1, padding: '0 4px' }}>×</button>
+      </div>
+      <div ref={boxRef} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+        onWheel={e => zoomAt(e.clientX, e.clientY, v.current.s * (e.deltaY < 0 ? 1.2 : 1 / 1.2))}
+        style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', touchAction: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none' }}>
+        <canvas ref={cvRef} style={{ maxWidth: '100%', maxHeight: '100%', background: '#fff', transformOrigin: 'center center', willChange: 'transform' }} />
+        {index > 0 && <button type="button" onPointerDown={e => e.stopPropagation()} onClick={() => onIndex(index - 1)} style={{ ...nav, left: 6 }}>‹</button>}
+        {index < list.length - 1 && <button type="button" onPointerDown={e => e.stopPropagation()} onClick={() => onIndex(index + 1)} style={{ ...nav, right: 6 }}>›</button>}
+      </div>
+      <div style={{ padding: '8px 14px calc(8px + env(safe-area-inset-bottom))', color: 'rgba(255,255,255,0.6)', fontSize: 11, textAlign: 'center' }}>Щипок — увеличить · двойное касание — крупнее / целиком · смахните в сторону — следующая бирка</div>
+    </div>
+  )
 }
 
 // Конструктор бирки: элементы перетаскиваются по бирке пальцем, за уголок — меняется размер.
@@ -199,6 +294,7 @@ export default function LabelsPage() {
   const [setup, setSetup] = useState(() => !getLabelTpl(user).enabled)
   const [busy, setBusy] = useState(false)
   const [pdf, setPdf] = useState('')                 // ход сборки PDF
+  const [view, setView] = useState(null)             // бирка во весь экран: номер в общем списке
   const [saveAsk, setSaveAsk] = useState(null)       // файлы маркировочного стола: вопрос «по отдельности или архивом»
   const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
   useEffect(() => {
@@ -215,6 +311,7 @@ export default function LabelsPage() {
   if (loading) return <div className="page"><CncLoader label="Готовим бирки…" /></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
   const total = mat ? mat.sheets.reduce((a, s) => a + s.placed.length, 0) : 0
+  const allLabels = mat ? mat.sheets.flatMap((sh, si) => labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual').map(pi => ({ si, pi }))).map((q, n) => ({ ...q, n })) : []
   const apply = t => { setHist(h => [...h.slice(-39), tpl]); setTpl(t); saveLabelTpl(t, user) }
   const change = patch => apply(normalizeLabel({ ...tpl, ...patch, enabled: true }))
   const undo = () => { const prev = hist[hist.length - 1]; if (!prev) return; setHist(h => h.slice(0, -1)); setTpl(prev); saveLabelTpl(prev, user) }
@@ -336,10 +433,11 @@ export default function LabelsPage() {
         <div key={si} style={{ marginBottom: 14 }}>
           <p className="section-title no-print">{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
           <div className="lbl-grid">
-            {labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual').map(pi => <Label key={pi} tpl={tpl} order={order} mat={mat} si={si} pi={pi} />)}
+            {allLabels.filter(q => q.si === si).map(q => <Label key={q.pi} tpl={tpl} order={order} mat={mat} si={si} pi={q.pi} onOpen={() => setView(q.n)} />)}
           </div>
         </div>
       ))}
+      {view != null && allLabels[view] && <LabelViewer tpl={tpl} order={order} mat={mat} list={allLabels} index={view} onIndex={setView} onClose={() => setView(null)} />}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} />}
     </div>
   )
