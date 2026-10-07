@@ -758,6 +758,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     const keep = L.pids ? new Set(L.pids) : null
     fitNext.current = true
     setLevel(i); setHiddenPids(new Set(keep ? all.filter(q => !keep.has(q)) : [])); setSel(new Set(focusPids)); setMenu(null); setMulti(false)
+    // поднялись от детали к блоку — детали чуть раздвинуты (взрыв 20 %), чтобы было видно соединения; сама деталь — без взрыва
+    if (i === 0) setExplode(0); else if (level === 0) setExplode(0.2)
   }
   useEffect(() => { if (levels.length) goLevel(0) }, [focusPids.join('|')])   // eslint-disable-line react-hooks/exhaustive-deps
   const hidePids = pids => { setHiddenPids(h => new Set([...h, ...pids])); setSel(new Set()); setPicked(null); setMenu(null); setMulti(false) }
@@ -902,8 +904,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, cursor: 'pointer',
     background: active ? 'var(--blue)' : 'var(--bg2)', color: active ? 'white' : 'var(--text-muted)',
   })
-  const smallBtn = { padding: '5px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }
-  const toolChip = active => ({ ...chip(active), flex: 'none', padding: '6px 11px', whiteSpace: 'nowrap' })
+  const smallBtn = { padding: '4px 9px', flex: 'none', borderRadius: 20, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }
+  const toolChip = active => ({ ...chip(active), flex: 'none', padding: '4px 10px', whiteSpace: 'nowrap' })
   const wideBtn = primary => ({ flex: 1, padding: '9px 8px', borderRadius: 'var(--radius)', fontSize: 13, cursor: 'pointer', border: primary ? 'none' : '0.5px solid var(--border-md)', background: primary ? 'var(--blue)' : 'transparent', color: primary ? 'white' : 'var(--text-muted)' })
   const sheet = { position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3, background: 'var(--bg)', borderTop: '0.5px solid var(--border-md)', padding: '10px 14px', boxShadow: '0 -4px 16px rgba(0,0,0,0.08)' }
   const dock = { background: 'var(--bg)', borderTop: '0.5px solid var(--border-md)', padding: '10px 14px' }      // панель инструмента под моделью
@@ -917,14 +919,12 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 960, background: 'var(--bg2)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
+      {/* шапка и панели — в сжатом виде: на телефоне модели нужно как можно больше экрана */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', background: 'var(--bg)' }}>
         {onClose && <button type="button" onClick={onClose}
-          style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1 }}>←</button>}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 500 }}>3D-модель</div>
-          <div style={{ fontSize: 11, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {title ? `${title} · ` : ''}{count} дет.
-          </div>
+          style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: '0 4px 0 0', lineHeight: 1 }}>←</button>}
+        <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {title || '3D-модель'} <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--text-hint)' }}>· {count} дет.</span>
         </div>
         {hasAnim && (
           <button type="button" style={smallBtn}
@@ -935,23 +935,17 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         {matNames.length > 0 && <button type="button" style={{ ...smallBtn, ...(hidden.size ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowMats(v => !v)}>Материалы{hidden.size ? ` · скрыто ${hidden.size}` : ''}</button>}
         <button type="button" style={smallBtn} onClick={() => stateRef.current?.resetView()}>⟲ Вид</button>
       </div>
-      <div style={{ display: 'flex', gap: 6, padding: '8px 14px', background: 'var(--bg)' }}>
-        {MODES.map(([id, label]) => <button key={id} type="button" style={chip(mode === id)} onClick={() => setMode(id)}>{label}</button>)}
-        <button type="button" title="Настройки вида" onClick={() => setShowSet(v => !v)}
-          style={{ ...chip(showSet), flex: 'none', padding: '7px 12px' }}>⚙ {showSet ? '▴' : '▾'}</button>
+      <div style={{ display: 'flex', gap: 5, padding: '0 10px 5px', background: 'var(--bg)', overflowX: 'auto', alignItems: 'center' }}>
+        {MODES.map(([id, label]) => <button key={id} type="button" style={toolChip(mode === id)} onClick={() => setMode(id)}>{label}</button>)}
+        <button type="button" title="Настройки вида" onClick={() => setShowSet(v => !v)} style={toolChip(showSet)}>⚙ {showSet ? '▴' : '▾'}</button>
+        {/* вся модель или только детали заказа — одной кнопкой */}
+        {model.hasContext && <button type="button" style={toolChip(scope === 'order')} onClick={() => setScope(scope === 'order' ? 'all' : 'order')}>Только детали заказа</button>}
       </div>
-      {model.hasContext && (
-        <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)' }}>
-          {[['all', 'Вся модель'], ['order', 'Только детали заказа']].map(([id, label]) => (
-            <button key={id} type="button" style={chip(scope === id)} onClick={() => setScope(id)}>{label}</button>
-          ))}
-        </div>
-      )}
       {actions?.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)' }}>
+        <div style={{ display: 'flex', gap: 5, padding: '0 10px 5px', background: 'var(--bg)' }}>
           {actions.map(a => (
             <button key={a.label} type="button" onClick={a.onClick}
-              style={{ flex: 1, padding: '9px 6px', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+              style={{ flex: 1, padding: '6px 4px', borderRadius: 'var(--radius)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
                 border: a.primary ? 'none' : '0.5px solid var(--blue-mid)', background: a.primary ? 'var(--blue)' : 'transparent', color: a.primary ? 'white' : 'var(--blue)' }}>
               {a.label}
             </button>
@@ -959,23 +953,23 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         </div>
       )}
       {levels.length > 1 && (
-        <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)', alignItems: 'center', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 5, padding: '0 10px 5px', background: 'var(--bg)', alignItems: 'center', overflowX: 'auto' }}>
           {level < levels.length - 1 && (
             <button type="button" onClick={() => goLevel(level + 1)}
-              style={{ flex: 'none', padding: '8px 12px', borderRadius: 'var(--radius)', border: 'none', background: 'var(--blue)', color: 'white', fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>⬆ Вверх по структуре</button>
+              style={{ flex: 'none', padding: '5px 11px', borderRadius: 20, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap' }}>⬆ Вверх по структуре</button>
           )}
           {levels.map((L, i) => (
             <button key={i} type="button" onClick={() => goLevel(i)}
-              style={{ flex: 'none', padding: '7px 10px', borderRadius: 20, fontSize: 12, whiteSpace: 'nowrap', border: '0.5px solid ' + (i === level ? 'var(--blue)' : 'var(--border-md)'),
+              style={{ flex: 'none', padding: '4px 10px', borderRadius: 20, fontSize: 12, whiteSpace: 'nowrap', border: '0.5px solid ' + (i === level ? 'var(--blue)' : 'var(--border-md)'),
                 background: i === level ? 'var(--blue-light)' : 'transparent', color: i === level ? 'var(--blue-dark)' : 'var(--text-muted)' }}>{L.label}</button>
           ))}
         </div>
       )}
       {/* инструменты: виды, подписи, взрыв-схема, правка, ссылка */}
-      <div style={{ display: 'flex', gap: 6, padding: '0 14px 8px', background: 'var(--bg)', overflowX: 'auto', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 5, padding: '0 10px 6px', background: 'var(--bg)', overflowX: 'auto', alignItems: 'center', borderBottom: '0.5px solid var(--border)' }}>
         <button type="button" style={toolChip(showViews)} onClick={() => setShowViews(v => !v)}>Виды {showViews ? '▴' : '▾'}</button>
         <select value={view.label || 'none'} onChange={e => setView({ label: e.target.value })} title="Что писать на деталях"
-          style={{ width: 'auto', flex: 'none', padding: '5px 8px', fontSize: 12, borderRadius: 20, color: view.label && view.label !== 'none' ? 'var(--blue)' : 'var(--text-muted)', borderColor: view.label && view.label !== 'none' ? 'var(--blue)' : 'var(--border-md)' }}>
+          style={{ width: 'auto', flex: 'none', padding: '3px 8px', fontSize: 12, borderRadius: 20, color: view.label && view.label !== 'none' ? 'var(--blue)' : 'var(--text-muted)', borderColor: view.label && view.label !== 'none' ? 'var(--blue)' : 'var(--border-md)' }}>
           {LABELS.map(([id, label]) => <option key={id} value={id}>{id === 'none' ? 'Подписи: нет' : `Подписи: ${label.toLowerCase()}`}</option>)}
         </select>
         <button type="button" style={toolChip(showExplode || explode > 0)} onClick={() => { if (tool) setTool(tool); setShowExplode(v => !v) }}>Взрыв</button>
