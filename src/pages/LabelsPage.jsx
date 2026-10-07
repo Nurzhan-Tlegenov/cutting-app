@@ -13,7 +13,7 @@ import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
-import { orderTitle, orderFileName, toLatin } from '../lib/orderUtils'
+import { orderTitle, orderFileName, toLatin, programName } from '../lib/orderUtils'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 
 // Бирки деталей по принятому раскрою. Бирку собирает пользователь: размер и какие параметры детали на ней есть.
@@ -436,8 +436,8 @@ export default function LabelsPage() {
   const exportFiles = async () => {
     setBusy(true)
     try {
-      const post = activePost(getCnc(user)), base = `${orderFileName(order)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}`
-      const files = await buildLabelFiles({ order, mat, base, post, tpl, sheets: mat.sheets.map((_, si) => ({ si, nc: `${si + 1}_${base}.${post.ext || 'nc'}` })) })
+      const post = activePost(getCnc(user)), base = programName(post.nameTpl, { n: null, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness })   // как у программ ЧПУ
+      const files = await buildLabelFiles({ order, mat, base, post, tpl, sheets: mat.sheets.map((_, si) => ({ si, nc: `${programName(post.nameTpl, { n: si + 1, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness })}.${post.ext || 'nc'}` })) })
       setSaveAsk({ files, zipName: `Birki_${base}.zip` })
     } finally { setBusy(false) }
   }

@@ -11,7 +11,7 @@ import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, g
 import { listSharedPosts, saveSharedPost, removeSharedPost, sendNews } from '../lib/messages'
 import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
-import { orderTitle, orderFileName, toLatin } from '../lib/orderUtils'
+import { orderTitle, orderFileName, toLatin, programName } from '../lib/orderUtils'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 import { saveNestingPdf } from '../lib/nestingPdf'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
@@ -103,8 +103,10 @@ export default function CncPage() {
     return w
   }, [layers, cnc])
 
-  const baseName = () => `${orderFileName(order)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}`
-  const fileName = si => `${si + 1}_${baseName()}.${post.ext || 'nc'}`
+  // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
+  const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness })
+  const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для архива, бирок, PDF
+  const fileName = si => `${programName(post.nameTpl, nameCtx(si + 1))}.${post.ext || 'nc'}`
   const build = () => {
     const files = sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)

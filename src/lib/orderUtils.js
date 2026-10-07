@@ -58,3 +58,22 @@ const LAT = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж:
 export const toLatin = str => String(str || '').replace(/[а-яёәғқңөұүһі]/gi, ch => { const l = LAT[ch.toLowerCase()] ?? ch; return ch === ch.toLowerCase() ? l : l.charAt(0).toUpperCase() + l.slice(1) })
 /** Название заказа для имён файлов: латиницей, без пробелов и знаков, которые не любят станки */
 export const orderFileName = order => toLatin(orderTitle(order)).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'zakaz'
+
+// ─── Название управляющей программы: пользователь собирает его сам из частей ─────────────────────
+// Части в фигурных скобках подставляются, остальное — свой текст. Итог — строго латиницей.
+export const NAME_PARTS = [['{N}', 'номер листа'], ['{ZAKAZ}', 'название заказа'], ['{NOMER}', 'номер заказа'], ['{MAT}', 'материал'], ['{T}', 'толщина'], ['{DATA}', 'дата'], ['{LISTOV}', 'всего листов']]
+export const NAME_TPL_DEFAULT = '{N}_{ZAKAZ}_{MAT}'
+const latinName = s => toLatin(String(s ?? '')).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^[_.-]+|[_.-]+$/g, '')
+/**
+ * tpl — шаблон; ctx — { n (номер листа; null — общая часть имени без номера), total, order, material, thickness }.
+ * Номер листа обязателен (иначе программы листов затрут друг друга): если его нет в шаблоне, он ставится в начало.
+ */
+export function programName(tpl, ctx) {
+  let t = String(tpl || '').trim() || NAME_TPL_DEFAULT
+  if (!/\{N\}/i.test(t)) t = '{N}_' + t
+  const d = new Date(), date = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')
+  const val = { N: ctx.n == null ? '' : String(ctx.n), ZAKAZ: String(ctx.order?.order_name || '').trim() || ctx.order?.order_number || '', NOMER: ctx.order?.order_number || '',
+    MAT: ctx.material || '', T: ctx.thickness ? String(ctx.thickness).replace('.', '_') : '', DATA: date, LISTOV: ctx.total ? String(ctx.total) : '' }
+  const out = latinName(t.replace(/\{([A-Z]+)\}/gi, (m, k) => (k.toUpperCase() in val ? val[k.toUpperCase()] : '')))
+  return out || (ctx.n == null ? 'zakaz' : String(ctx.n))
+}

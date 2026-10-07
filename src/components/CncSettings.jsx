@@ -1,3 +1,4 @@
+import { NAME_PARTS, NAME_TPL_DEFAULT, programName } from '../lib/orderUtils'
 import { useState } from 'react'
 import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, activePost, newId } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
@@ -120,6 +121,25 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         <div className="row2" style={{ marginTop: 8 }}>
           <Num label="Заглубление фрезы в стол" unit="мм" value={post.millOver} onChange={v => set({ millOver: v })} />
           <Num label="Заглубление сверла в стол" unit="мм" value={post.drillOver} onChange={v => set({ drillOver: v })} />
+        </div>
+        {/* название управляющей программы — собирается из частей */}
+        <div style={{ marginTop: 10 }}>
+          <label className="label">Название управляющей программы</label>
+          <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || NAME_TPL_DEFAULT} id={'nameTpl' + post.id}
+            onBlur={e => { const v = e.target.value.trim() || NAME_TPL_DEFAULT; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
+            {NAME_PARTS.map(([code, label]) => (
+              <button key={code} type="button" title={`Добавить в название: ${label}`}
+                onClick={() => { const cur = (post.nameTpl || NAME_TPL_DEFAULT).replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
+                style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
+            ))}
+            <button type="button" onClick={() => set({ nameTpl: NAME_TPL_DEFAULT })} style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ как было</button>
+          </div>
+          <Hint>
+            Части в фигурных скобках подставляются сами, между ними можно писать свой текст. Получится, например:{' '}
+            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16 })}.{post.ext || 'nc'}</b>.
+            Название всегда латиницей; номер листа обязателен — если его убрать, он встанет в начало.
+          </Hint>
         </div>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
           <label className="label">Расширение файла</label>
