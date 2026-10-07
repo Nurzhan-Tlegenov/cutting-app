@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -13,7 +13,7 @@ import SaveFilesDialog from '../components/SaveFilesDialog'
 // На бирке — карта раскроя, где эта деталь закрашена чёрным. Шаблон идёт за аккаунтом; с ним же ЧПУ делает
 // файлы для маркировочного стола.
 const CSS = `
-.lbl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.lbl-grid { display: grid; grid-template-columns: repeat(var(--lbl-cols, 2), minmax(0, 1fr)); gap: 6px; }
 .lbl-grid canvas { width: 100%; height: auto; border: 1px solid #2C2C2A; border-radius: 3px; background: #fff; display: block; }
 @media print {
   .no-print, .bottom-nav { display: none !important; }
@@ -24,7 +24,7 @@ const CSS = `
 }`
 const safeName = s => String(s || '').replace(/[^\wа-яё.-]+/gi, '_').replace(/^_+|_+$/g, '')
 
-function Label({ tpl, order, mat, si, pi, onOpen }) {
+function Label({ tpl, order, mat, si, pi, n, onOpen }) {
   const ref = useRef(null)
   useEffect(() => {
     const cv = ref.current
@@ -35,7 +35,7 @@ function Label({ tpl, order, mat, si, pi, onOpen }) {
     const draw = () => drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
     draw(); if (tpl.items.some(i => i.img)) preloadLabelImages(tpl).then(draw)
   }, [tpl, order, mat, si, pi])
-  return <canvas ref={ref} onClick={onOpen} style={{ cursor: 'zoom-in' }} />
+  return <canvas ref={ref} data-lbl={n} onClick={onOpen} style={{ cursor: 'zoom-in' }} />
 }
 
 // Просмотр бирки во весь экран — как фотография в галерее: щипок увеличивает, палец двигает, двойное касание —
@@ -295,6 +295,74 @@ export default function LabelsPage() {
   const [busy, setBusy] = useState(false)
   const [pdf, setPdf] = useState('')                 // ход сборки PDF
   const [view, setView] = useState(null)             // бирка во весь экран: номер в общем списке
+  // Сколько бирок в ряд — как в галерее телефона и на картах раскроя: щипок раздвигает (крупнее, меньше в ряд)
+  // или сводит (мельче, больше в ряд), сетка встаёт на ближайшее число колонок. Бирка под пальцами остаётся на месте.
+  const MAX_COLS = 10
+  const [cols, setColsRaw] = useState(() => { try { return Math.max(1, Math.min(MAX_COLS, Number(localStorage.getItem('lblCols')) || 2)) } catch { return 2 } })
+  const colsRef = useRef(cols)
+  colsRef.current = cols
+  const anchor = useRef(null)                        // { n, y, k, step, ox, oy } — что было под пальцами
+  const [gridEl, setGridEl] = useState(null)
+  const setCols = (next, a = null) => {
+    const c = Math.max(1, Math.min(MAX_COLS, Math.round(next)))
+    if (c === colsRef.current) { if (gridEl) { gridEl.style.transition = 'transform 180ms ease-out'; gridEl.style.transform = 'scale(1)' } return }
+    if (!a && gridEl) {                              // кнопки: держим на месте первую видимую бирку
+      const first = [...gridEl.querySelectorAll('[data-lbl]')].find(el => el.getBoundingClientRect().bottom > 60)
+      if (first) a = { n: first.dataset.lbl, y: first.getBoundingClientRect().top }
+    }
+    anchor.current = a ? { ...a, step: colsRef.current / c } : null
+    try { localStorage.setItem('lblCols', String(c)) } catch { /* без памяти */ }
+    setColsRaw(c)
+  }
+  const setColsRef = useRef(setCols)
+  setColsRef.current = setCols
+  useLayoutEffect(() => {
+    const a = anchor.current
+    anchor.current = null
+    if (!a || !gridEl) return
+    const el = gridEl.querySelector(`[data-lbl="${a.n}"]`)
+    if (el) window.scrollBy(0, el.getBoundingClientRect().top - a.y)
+    if (a.k) {                                       // остаток растяжения пальцами плавно уходит в 1
+      gridEl.style.transition = 'none'; gridEl.style.transform = `scale(${a.k / a.step})`
+      requestAnimationFrame(() => requestAnimationFrame(() => { gridEl.style.transition = 'transform 180ms ease-out'; gridEl.style.transform = 'scale(1)' }))
+    }
+  }, [cols, gridEl])
+  useEffect(() => {
+    const el = gridEl
+    if (!el) return
+    const st = { on: false, d: 0, k: 1, n: null, y: 0 }
+    const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const start = e => {
+      if (e.touches.length !== 2) return
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2, my = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      const r = el.getBoundingClientRect()
+      // бирка под пальцами (или ближайшая к ним по высоте)
+      const all = [...el.querySelectorAll('[data-lbl]')]
+      const hit = all.find(c => { const b = c.getBoundingClientRect(); return mx >= b.left && mx <= b.right && my >= b.top && my <= b.bottom })
+        || all.reduce((best, c) => { const b = c.getBoundingClientRect(), d = Math.abs((b.top + b.bottom) / 2 - my) + Math.abs((b.left + b.right) / 2 - mx); return !best || d < best.d ? { c, d } : best }, null)?.c
+      st.on = true; st.d = dist(e.touches); st.k = 1
+      st.n = hit ? hit.dataset.lbl : null; st.y = hit ? hit.getBoundingClientRect().top : my
+      el.style.transition = 'none'; el.style.transformOrigin = `${mx - r.left}px ${my - r.top}px`
+    }
+    const move = e => {
+      if (!st.on || e.touches.length !== 2) return
+      if (e.cancelable) e.preventDefault()
+      if (st.d <= 0) return
+      const c = colsRef.current
+      st.k = Math.max(c / MAX_COLS * 0.87, Math.min(c * 1.15, dist(e.touches) / st.d))      // от 10 в ряд до 1, с небольшой «пружиной»
+      el.style.transform = `scale(${st.k})`
+    }
+    const end = e => {
+      if (!st.on || e.touches.length >= 2) return
+      st.on = false
+      setColsRef.current(colsRef.current / st.k, st.n != null ? { n: st.n, y: st.y, k: st.k } : null)
+    }
+    el.addEventListener('touchstart', start, { passive: true })
+    el.addEventListener('touchmove', move, { passive: false })
+    el.addEventListener('touchend', end, { passive: true })
+    el.addEventListener('touchcancel', end, { passive: true })
+    return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); el.removeEventListener('touchcancel', end) }
+  }, [gridEl])
   const [saveAsk, setSaveAsk] = useState(null)       // файлы маркировочного стола: вопрос «по отдельности или архивом»
   const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
   useEffect(() => {
@@ -429,14 +497,26 @@ export default function LabelsPage() {
           {mats.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
         </select>
       )}
-      {mat && mat.sheets.map((sh, si) => (
-        <div key={si} style={{ marginBottom: 14 }}>
-          <p className="section-title no-print">{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
-          <div className="lbl-grid">
-            {allLabels.filter(q => q.si === si).map(q => <Label key={q.pi} tpl={tpl} order={order} mat={mat} si={si} pi={q.pi} onOpen={() => setView(q.n)} />)}
-          </div>
+      {mat && (
+        <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <span style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Щипок двумя пальцами — крупнее или мельче, как в галерее</span>
+          <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>в ряд: {cols}</span>
+          {[['−', 1, cols >= MAX_COLS, 'Мельче — больше бирок в ряд'], ['+', -1, cols <= 1, 'Крупнее — меньше бирок в ряд']].map(([t, d, off, title]) => (
+            <button key={t} type="button" disabled={off} title={title} onClick={() => setCols(cols + d)}
+              style={{ width: 32, height: 30, borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: off ? 'var(--text-hint)' : 'var(--text)', fontSize: 16, padding: 0 }}>{t}</button>
+          ))}
         </div>
-      ))}
+      )}
+      <div ref={setGridEl} style={{ '--lbl-cols': cols, touchAction: 'pan-y', willChange: 'transform' }}>
+        {mat && mat.sheets.map((sh, si) => (
+          <div key={si} style={{ marginBottom: 14 }}>
+            <p className="section-title no-print">{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
+            <div className="lbl-grid">
+              {allLabels.filter(q => q.si === si).map(q => <Label key={q.pi} tpl={tpl} order={order} mat={mat} si={si} pi={q.pi} n={q.n} onOpen={() => setView(q.n)} />)}
+            </div>
+          </div>
+        ))}
+      </div>
       {view != null && allLabels[view] && <LabelViewer tpl={tpl} order={order} mat={mat} list={allLabels} index={view} onIndex={setView} onClose={() => setView(null)} />}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} />}
     </div>
