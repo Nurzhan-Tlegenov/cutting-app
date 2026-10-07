@@ -207,7 +207,10 @@ export function normalizeLabel(raw) {
     o.x = Math.max(0, Math.min(w - bw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - bh, Number(i.y) || 0))
     return o
   })
-  return { enabled: !!t.enabled, w, h, edges: false, offcuts: !!t.offcuts, rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
+  return { enabled: !!t.enabled, w, h, edges: false, offcuts: !!t.offcuts,
+    // бирка на обрезок: в каком углу обрезка клеить и на сколько отступить от его сторон, мм
+    offcut: { corner: ['bl', 'br', 'tl', 'tr', 'center'].includes(t.offcut?.corner) ? t.offcut.corner : 'bl', dx: Math.max(0, Math.min(1000, Number(t.offcut?.dx ?? 100) || 0)), dy: Math.max(0, Math.min(1000, Number(t.offcut?.dy ?? 100) || 0)) },
+    rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
     // строка «Заказ»: своя подпись, номер от приложения и название заказа включаются отдельно
     order: { prefix: typeof t.order?.prefix === 'string' ? t.order.prefix.slice(0, 30) : 'Заказ', number: t.order?.number !== false, name: t.order?.name !== false },
     // чертёж детали: размеры торцевых отверстий от края и высота их цифр (мм)
@@ -568,24 +571,48 @@ const xml = (cycles) => '﻿' + ['<?xml version="1.0" encoding="UTF-8"?>', '<Cyc
  *  'table'  — маркировочный стол: от X0 Y0 «змейкой» — ряд по возрастанию X, следующий ряд (выше по Y) по убыванию X
  *             и так до конца листа, без холостых переездов.
  */
-export function labelOrder(sheet, geo, mode = 'manual') {
+/** Где клеить бирку на обрезок: угол и отступ от его сторон; обрезок меньше двух отступов — по середине. -> [x, y] от угла листа */
+export const OFFCUT_CORNERS = [['bl', 'левый нижний угол'], ['br', 'правый нижний угол'], ['tl', 'левый верхний угол'], ['tr', 'правый верхний угол'], ['center', 'середина обрезка']]
+export function offcutPoint(o, geo, tpl) {
+  const st = tpl?.offcut || {}, corner = st.corner || 'bl'
+  const x0 = Math.max(0, geo.marginL + o.x), y0 = Math.max(0, geo.marginB + o.y)
+  const x1 = Math.min(geo.sheetW, geo.marginL + o.x + o.w), y1 = Math.min(geo.sheetL, geo.marginB + o.y + o.h)
+  const at = (lo, hi, off, fromHi) => (corner === 'center' || hi - lo < 2 * off ? (lo + hi) / 2 : fromHi ? hi - off : lo + off)
+  return [at(x0, x1, Number(st.dx) || 0, corner === 'br' || corner === 'tr'), at(y0, y1, Number(st.dy) || 0, corner === 'tl' || corner === 'tr')]
+}
+
+/**
+ * Порядок бирок листа: детали и (если включено в шаблоне) обрезки — одним обходом, как движется стол или человек.
+ * -> [{ pi } | { oi, o: { w, h }, at: [x, y] }]; at — точка наклейки от угла листа.
+ */
+export function labelSeq(sheet, geo, mode = 'manual', tpl = null) {
   const items = (sheet.placed || []).map((p, pi) => {
     const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
     const xs = pts.map(q => q.x), ys = pts.map(q => q.y)
     return { pi, cx: geo.marginL + p.x + (Math.min(...xs) + Math.max(...xs)) / 2, cy: geo.marginB + p.y + (Math.min(...ys) + Math.max(...ys)) / 2, h: Math.max(...ys) - Math.min(...ys) }
   })
+  if (tpl?.offcuts) (sheet.manualOffcuts || []).forEach((o, oi) => {
+    if (!(o.w > 0 && o.h > 0)) return
+    const at = offcutPoint(o, geo, tpl)
+    items.push({ oi, o: { w: Math.round(o.w), h: Math.round(o.h) }, at, cx: at[0], cy: at[1], h: 0 })
+  })
+  let out
   if (mode === 'table') {
-    const left = items.slice().sort((a, b) => a.cy - b.cy || a.cx - b.cx), out = []
+    const left = items.slice().sort((a, b) => a.cy - b.cy || a.cx - b.cx)
+    out = []
     for (let r = 0; left.length; r++) {
       const band = left[0].cy + Math.max(150, left[0].h * 0.5)        // ряд: детали, центры которых примерно на одной высоте
       const row = left.filter(q => q.cy <= band).sort((a, b) => (r % 2 ? b.cx - a.cx : a.cx - b.cx))
       out.push(...row); row.forEach(q => left.splice(left.indexOf(q), 1))
     }
-    return out.map(q => q.pi)
+  } else {
+    const half = geo.sheetW / 2
+    out = items.sort((a, b) => (a.cx >= half) - (b.cx >= half) || a.cy - b.cy || a.cx - b.cx)
   }
-  const half = geo.sheetW / 2
-  return items.sort((a, b) => (a.cx >= half) - (b.cx >= half) || a.cy - b.cy || a.cx - b.cx).map(q => q.pi)
+  return out.map(q => (q.pi != null ? { pi: q.pi } : { oi: q.oi, o: q.o, at: q.at }))
 }
+/** То же, только детали: номера уложенных деталей по порядку наклейки */
+export const labelOrder = (sheet, geo, mode = 'manual') => labelSeq(sheet, geo, mode, null).map(q => q.pi)
 
 /**
  * Файлы маркировочного стола для выбранных листов.
@@ -601,11 +628,17 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet), stem = `${si + 1}_${base}`
     const cyc = `Label_${stem}.cyc`, jpg = `${stem}.jpg`
     const cycles = []
-    labelOrder(sheet, geo, 'table').forEach((pi, seq) => {            // файлы и точки наклейки — в порядке обхода стола
-      const p = sheet.placed[pi]
+    labelSeq(sheet, geo, 'table', tpl).forEach(({ pi, o, at }, seq) => {   // файлы и точки наклейки — в порядке обхода стола; обрезки — тем же обходом
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h
-      drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[p.detailIndex] })
       const bmp = `${stem}_${String(seq + 1).padStart(4, '0')}.bmp`
+      if (o) {                                                             // бирка на обрезок: в углу обрезка с отступом (настройка шаблона)
+        drawOffcutLabel(cv, tpl, { order, mat, si, o })
+        files.push({ name: bmp, data: canvasToBmp(cv, tpl.dpi) })
+        cycles.push(['Cycle_Label', [['LabelName', bmp], ['X', r1(ox + at[0])], ['Y', r1(oy + at[1])], ['R', 0]]])
+        return
+      }
+      const p = sheet.placed[pi]
+      drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[p.detailIndex] })
       files.push({ name: bmp, data: canvasToBmp(cv, tpl.dpi) })
       // точка наклейки — центр детали; бирки клеятся в одном положении (R = 0), как в образцах
       const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
@@ -647,7 +680,7 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress }) {
   for (let si = 0; si < mat.sheets.length; si++) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
     // страницы — в порядке ручной наклейки; после деталей листа — бирки на его обрезки (если включено)
-    const pages = [...labelOrder(sheet, geo, 'manual').map(pi => ({ pi })), ...(tpl.offcuts ? sheetOffcuts(sheet).map(o => ({ o })) : [])]
+    const pages = labelSeq(sheet, geo, 'manual', tpl)
     for (const { pi, o } of pages) {
       if (o) drawOffcutLabel(cv, tpl, { order, mat, si, o })
       else drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })

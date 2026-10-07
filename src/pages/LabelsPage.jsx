@@ -10,7 +10,7 @@ const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D дет�
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { sheetOffcuts, drawOffcutLabel, QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName } from '../lib/orderUtils'
@@ -541,6 +541,23 @@ export default function LabelsPage() {
             <input type="checkbox" checked={!!tpl.offcuts} onChange={e => apply({ ...tpl, offcuts: e.target.checked })} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
             Печатать бирки на обрезки{n ? ` · ${n} шт.` : ' (в раскрое обрезки не отмечены)'}
           </label>
+        )
+      })()}
+      {mat && tpl.offcuts && (() => {
+        const st = tpl.offcut, num = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x >= 0) apply({ ...tpl, offcut: { ...st, [k]: x } }) }
+        const inp = { width: 64, padding: '5px 6px', fontSize: 13, textAlign: 'center', marginLeft: 4 }
+        return (
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12.5, color: 'var(--text-muted)', margin: '-2px 0 10px 26px' }}>
+            <span>Клеить на обрезок:</span>
+            <select value={st.corner} onChange={e => apply({ ...tpl, offcut: { ...st, corner: e.target.value } })} style={{ width: 'auto', padding: '5px 8px', fontSize: 13 }}>
+              {OFFCUT_CORNERS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+            {st.corner !== 'center' && <>
+              <label style={{ margin: 0 }}>отступ по X<input type="text" inputMode="decimal" key={'dx' + st.dx} defaultValue={st.dx} onBlur={e => num('dx', e.target.value)} style={inp} /></label>
+              <label style={{ margin: 0 }}>по Y<input type="text" inputMode="decimal" key={'dy' + st.dy} defaultValue={st.dy} onBlur={e => num('dy', e.target.value)} style={inp} /></label>
+              <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>мм от сторон обрезка — для маркировочного стола</span>
+            </>}
+          </div>
         )
       })()}
       {mat && (
