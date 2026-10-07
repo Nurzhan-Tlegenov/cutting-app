@@ -200,7 +200,8 @@ export default function OrderPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
           <Model3DButton details={details} title={orderTitle(order)} getScene={() => loadOrderModel(id)}
-            orderId={id} editPath={isDraft ? `/orders/${id}/edit` : ''} />
+            orderId={id} editPath={isDraft ? `/orders/${id}/edit` : ''}
+            saveToOrder={isDraft} order={order} materialThickness={Number(order?.material_thickness) || 16} onSaved={() => window.location.reload()} />
           <select value={sortMode} onChange={e => setSortMode(e.target.value)}
             style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--text-muted)', borderRadius: 20 }}>
             <option value="">Как в заказе</option>

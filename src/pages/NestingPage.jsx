@@ -2805,7 +2805,8 @@ export default function NestingPage() {
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{orderTitle(order)}</div>
         </div>
         {/* 3D открывается поверх страницы — раскрой при этом не сбрасывается */}
-        <Model3DButton details={allDetails} title={orderTitle(order)} getScene={() => loadOrderModel(id)} orderId={id} />
+        <Model3DButton details={allDetails} title={orderTitle(order)} getScene={() => loadOrderModel(id)} orderId={id}
+          saveToOrder={order?.status === 'draft'} order={order} materialThickness={Number(order?.material_thickness) || 16} onSaved={() => window.location.reload()} />
       </div>
 
       {/* Статистика */}
