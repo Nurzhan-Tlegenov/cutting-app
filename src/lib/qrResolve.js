@@ -59,6 +59,22 @@ export async function resolveQr(text) {
       if (d) { di = list.indexOf(d); des = detailMeta(d)?.des || ''; break }
     }
   }
+  // 2а) части кода записаны слитно (без разделителя) или в обозначении есть скобки и другие знаки — «51805(V5)»:
+  // ищем обозначение как кусок остатка кода; точное совпадение со всем остатком важнее, дальше — самое длинное
+  if (di < 0) {
+    const tail = rest.trim()
+    let score = 0
+    list.forEach((d, i) => {
+      const v = detailMeta(d)?.des
+      if (!v) return
+      for (const f of forms(v)) {
+        const at = tail.indexOf(f), edge = c => !c || !/[\p{L}\p{N}]/u.test(c)
+        // кусок должен стоять в начале/конце остатка или быть отделён знаком — иначе «5» найдётся внутри «15»
+        const sc = tail === f ? 1e6 : at >= 0 && (edge(tail[at - 1]) || at === 0) && (edge(tail[at + f.length]) || at + f.length === tail.length) ? f.length : 0
+        if (sc > score) { score = sc; di = i; des = String(v) }
+      }
+    })
+  }
   // 3) по наименованию детали
   if (di < 0) list.forEach((d, i) => { if (di < 0 && d.name && forms(d.name).some(f => f.length > 2 && tokens.includes(f))) di = i })
   return { order, details: list, di, des }
