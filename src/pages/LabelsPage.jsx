@@ -1,5 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { lazyRetry } from '../lib/lazyRetry'
+
+const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D детали — из просмотра бирки
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
@@ -40,7 +43,7 @@ function Label({ tpl, order, mat, si, pi, n, onOpen }) {
 
 // Просмотр бирки во весь экран — как фотография в галерее: щипок увеличивает, палец двигает, двойное касание —
 // крупнее / целиком, смахивание в стороны — соседняя бирка. Бирка перерисована крупно, поэтому при увеличении чёткая.
-function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose }) {
+function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d }) {
   const cvRef = useRef(null), boxRef = useRef(null)
   const v = useRef({ s: 1, x: 0, y: 0 })                 // масштаб и сдвиг
   const g = useRef({ pts: new Map(), start: null, tap: 0, moved: false })
@@ -118,6 +121,7 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose }) {
     <div className="no-print" style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#1b1b1a', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', color: '#fff' }}>
         <div style={{ flex: 1, fontSize: 14 }}>Лист {si + 1} · бирка {index + 1} из {list.length}</div>
+        <button type="button" onClick={on3d} style={{ background: '#185FA5', border: 'none', color: '#fff', borderRadius: 20, padding: '6px 14px', fontSize: 13, fontWeight: 500 }}>3D</button>
         <button type="button" onClick={() => { v.current = { s: 1, x: 0, y: 0 }; apply(true) }} style={{ background: 'none', border: '0.5px solid rgba(255,255,255,0.4)', color: '#fff', borderRadius: 20, padding: '5px 12px', fontSize: 12 }}>Целиком</button>
         <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 26, lineHeight: 1, padding: '0 4px' }}>×</button>
       </div>
@@ -294,7 +298,13 @@ export default function LabelsPage() {
   const [setup, setSetup] = useState(() => !getLabelTpl(user).enabled)
   const [busy, setBusy] = useState(false)
   const [pdf, setPdf] = useState('')                 // ход сборки PDF
-  const [view, setView] = useState(null)             // бирка во весь экран: номер в общем списке
+  // Бирка во весь экран и 3D её детали — в адресе страницы (?lbl=…&d3=1): кнопка «назад» телефона
+  // закрывает 3D, затем просмотр бирки, а не уводит со страницы бирок.
+  const [search] = useSearchParams()
+  const view = search.get('lbl') != null ? Number(search.get('lbl')) : null
+  const show3d = search.get('d3') === '1'
+  const setView = n => navigate(`?lbl=${n}`, { replace: view != null })
+  const closeView = () => navigate(-1)
   // Сколько бирок в ряд — как в галерее телефона и на картах раскроя: щипок раздвигает (крупнее, меньше в ряд)
   // или сводит (мельче, больше в ряд), сетка встаёт на ближайшее число колонок. Бирка под пальцами остаётся на месте.
   const MAX_COLS = 10
@@ -517,7 +527,23 @@ export default function LabelsPage() {
           </div>
         ))}
       </div>
-      {view != null && allLabels[view] && <LabelViewer tpl={tpl} order={order} mat={mat} list={allLabels} index={view} onIndex={setView} onClose={() => setView(null)} />}
+      {view != null && allLabels[view] && <LabelViewer tpl={tpl} order={order} mat={mat} list={allLabels} index={view} onIndex={setView} onClose={closeView} on3d={() => navigate(`?lbl=${view}&d3=1`)} />}
+      {view != null && show3d && allLabels[view] && (() => {
+        // деталь этой бирки — отдельной 3D-моделью, лицевой пластью к зрителю
+        const q = allLabels[view], d = mat.details[mat.sheets[q.si].placed[q.pi].detailIndex] || {}
+        let c = d.contour
+        if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+        c = c || {}
+        const W = Number(d.width) || 0, L = Number(d.length) || 0, T = Number(c.meta?.thickness) || mat.thickness || 16
+        const one = [{ name: d.name || 'Деталь', w: L, h: W, edges: { top: d.edge_top || null, right: d.edge_right || null, bottom: d.edge_bottom || null, left: d.edge_left || null },
+          contour: { ...c, meta: { des: c.meta?.des || '', material: c.meta?.material || mat.name || '', product: '', thickness: T, texDir: 2, turned: false, flipped: false,
+            local: { x0: 0, y0: 0, dx: W, dy: L }, inst: [[1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]], ids: [0], anims: [null] } } }]
+        return (
+          <Suspense fallback={<div style={{ position: 'fixed', inset: 0, zIndex: 960, background: 'var(--bg2)' }}><CncLoader label="Строим 3D-модель…" /></div>}>
+            <Model3D key={view} details={one} title={[c.meta?.des, d.name].filter(Boolean).join(' ') || 'Деталь'} onClose={closeView} readOnly materialThickness={T} />
+          </Suspense>
+        )
+      })()}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} />}
     </div>
   )
