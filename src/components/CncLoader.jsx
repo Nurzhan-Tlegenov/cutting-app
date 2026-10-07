@@ -1,117 +1,88 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-// Экран ожидания вместо «Загрузка…»: живой раскрой на четырёх листах. Детали перекладываются —
-// от рыхлой раскладки к плотной, как в онлайн-раскрое приложения; затем берётся новый набор деталей.
-// Нажатие по листу — новый набор. Движение — только сдвигом и поворотом (без перестройки страницы), поэтому плавное.
-const W = 120, H = 160, PAD = 2, GAP = 1.5
+// Экран ожидания вместо «Загрузка…»: живые карты раскроя. Несколько листов, плотно уложенных деталями;
+// детали всё время перелетают с листа на лист. Ничего не считается — только плавное движение
+// (сдвиг через transform, без перерисовки), поэтому не тормозит и на слабом телефоне.
+// Нажатие — другая раскладка. Цвета — как на картах раскроя: светло-оранжевые детали на светло-сером листе.
+const PW = 132, PH = 200, PAD = 4, GAP = 2.4          // лист (в условных единицах), поле и зазор между деталями
 const HINTS = [
-  'Детали перекладываются, пока не лягут плотнее',
+  'Детали перекладываются с карты на карту',
   'Плотнее раскладка — больше деловой обрезок',
-  'Мелкие детали — в середину листа',
-  'Нажмите на лист — возьмём другие детали',
+  'Нажмите — возьмём другую раскладку',
 ]
 const rnd = seed => { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296 } }
 
-function makeParts(r, share) {
-  const out = []
-  let area = 0
-  const target = (W - PAD * 2) * (H - PAD * 2) * share
-  while (area < target && out.length < 22) {
-    const big = r() < 0.38, w = Math.round(big ? 34 + r() * 30 : 12 + r() * 22), h = Math.round(big ? 26 + r() * 26 : 10 + r() * 18)
-    out.push({ w, h }); area += w * h
+// раскладка листа: прямоугольники без пустот (лист делится пополам, половины — ещё раз и т.д.)
+function makeSlots(seed) {
+  const r = rnd(seed), out = []
+  const split = (x, y, w, h, depth) => {
+    if (depth < 4 && (w > 60 || h > 70) && (depth < 2 || r() < 0.75)) {
+      const k = 0.36 + r() * 0.28
+      if (w / h > 1.1 || (w / h > 0.75 && r() < 0.5)) { split(x, y, w * k, h, depth + 1); split(x + w * k, y, w * (1 - k), h, depth + 1) }
+      else { split(x, y, w, h * k, depth + 1); split(x, y + h * k, w, h * (1 - k), depth + 1) }
+      return
+    }
+    out.push({ x: x + GAP / 2, y: y + GAP / 2, w: w - GAP, h: h - GAP })
   }
+  split(PAD, PAD, PW - PAD * 2, PH - PAD * 2, 0)
   return out
 }
-// Укладка «по горизонту»: каждая деталь встаёт туда, где окажется выше всего (ближе к началу листа), в лучшем из двух
-// поворотов. -> { pos: [{ x, y, w, h, rot }], used } | null (не поместилось)
-function pack(parts, order, turn) {
-  const n = Math.floor(W - PAD * 2), sky = new Float32Array(n).fill(PAD), pos = new Array(parts.length)
-  let used = PAD
-  for (const i of order) {
-    let best = null
-    for (const rot of turn ? [false, true] : [false]) {
-      const w = rot ? parts[i].h : parts[i].w, h = rot ? parts[i].w : parts[i].h, span = Math.ceil(w + GAP)
-      if (w > n) continue
-      for (let x = 0; x + Math.ceil(w) <= n; x++) {
-        let y = 0
-        for (let k = x; k < Math.min(n, x + span); k++) if (sky[k] > y) y = sky[k]
-        if (y + h > H - PAD) continue
-        if (!best || y + h < best.y + best.h - 0.01 || (Math.abs(y + h - best.y - best.h) < 0.01 && x < best.x)) best = { x, y, w, h, rot }
-      }
-    }
-    if (!best) return null
-    for (let k = best.x; k < Math.min(n, best.x + Math.ceil(best.w + GAP)); k++) sky[k] = best.y + best.h + GAP
-    pos[i] = { ...best, x: best.x + PAD }
-    used = Math.max(used, best.y + best.h)
-  }
-  return { pos, used }
-}
-// три раскладки одного набора: рыхлая -> плотнее -> плотная
-function makeStages(seed) {
-  const r = rnd(seed)
-  for (const share of [0.74, 0.68, 0.6, 0.5]) {
-    const parts = makeParts(r, share), idx = parts.map((_, i) => i), found = []
-    for (let k = 0; k < 10; k++) { const p = pack(parts, idx.slice().sort(() => r() - 0.5), k % 2 === 1); if (p) found.push(p) }
-    const best = pack(parts, idx.slice().sort((a, b) => Math.max(parts[b].w, parts[b].h) - Math.max(parts[a].w, parts[a].h) || parts[b].w * parts[b].h - parts[a].w * parts[a].h), true)
-    if (!best || !found.length) continue
-    found.sort((a, b) => b.used - a.used)
-    const stages = [found[0], found[found.length - 1], best].filter((s, i, a) => !i || s.used < a[i - 1].used - 0.5 || i === a.length - 1)
-    const area = parts.reduce((a, p) => a + p.w * p.h, 0)
-    return { parts, stages: stages.map(s => ({ ...s, fill: Math.min(99, Math.round(area / ((W - PAD * 2) * (s.used - PAD)) * 100)) })) }
-  }
-  return null
-}
 
-function Sheet({ start, delay, u, small }) {
-  const [seed, setSeed] = useState(start)
-  const [step, setStep] = useState(0)
-  const data = useMemo(() => makeStages(seed), [seed])
+function LiveSheets({ label, compact }) {
+  const boxRef = useRef(null)
+  const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1e9))   // eslint-disable-line react-hooks/purity
+  const [width, setWidth] = useState(0)
+  const cols = 2, rows = compact ? 1 : 2, N = cols * rows, SG = 8                      // листов в ряд, рядов, зазор между листами
+  const slots = useMemo(() => makeSlots(seed), [seed])
+  // у каждого листа раскладка та же, но отражённая — листы выглядят разными, а места одного номера одинаковые по размеру
+  const place = (sheet, i) => {
+    const s = slots[i], fx = sheet % 2 === 1, fy = sheet >= 2 ? true : false
+    return { x: (sheet % cols) * (PW + SG) + (fx ? PW - s.x - s.w : s.x), y: Math.floor(sheet / cols) * (PH + SG) + (fy ? PH - s.y - s.h : s.y), w: s.w, h: s.h }
+  }
+  // где сейчас лежит каждая деталь: at[i][k] — номер листа для k-й детали места i
+  const [at, setAt] = useState(() => slots.map(() => Array.from({ length: N }, (_, k) => k)))
+  const [moving, setMoving] = useState(() => new Set())
+  useEffect(() => { setAt(slots.map(() => Array.from({ length: N }, (_, k) => k))); setMoving(new Set()) }, [slots, N])   // eslint-disable-line react-hooks/set-state-in-effect
   useEffect(() => {
-    if (!data) return
-    const last = step >= data.stages.length - 1
-    const t = setTimeout(() => { if (last) { setStep(0); setSeed(x => (x * 31 + 7) >>> 0) } else setStep(s => s + 1) }, (step === 0 ? 500 : last ? 1500 : 900) + (step === 0 ? delay : 0))
-    return () => clearTimeout(t)
-  }, [step, data, delay])
-  if (!data) return null
-  const st = data.stages[Math.min(step, data.stages.length - 1)]
-  return (
-    <div onClick={() => { setStep(0); setSeed(x => (x * 17 + 3) >>> 0) }}
-      style={{ position: 'relative', width: W * u, height: H * u, background: '#fff', border: '1px solid var(--gray-mid)', borderRadius: 3, cursor: 'pointer', overflow: 'hidden', WebkitTapHighlightColor: 'transparent', contain: 'strict' }}>
-      {/* деловой обрезок — свободная часть листа под раскладкой */}
-      <div style={{ position: 'absolute', left: PAD * u, right: PAD * u, top: 0, height: (H - PAD) * u, transformOrigin: '0 100%', transform: `scaleY(${Math.max(0, (H - PAD - st.used - GAP) / (H - PAD))})`,
-        background: 'rgba(29,158,117,0.13)', transition: 'transform 0.7s cubic-bezier(.4,0,.2,1)', willChange: 'transform' }} />
-      {data.parts.map((p, i) => {
-        const q = st.pos[i]
-        // деталь не меняет размер: поворот — вокруг своего центра, место — сдвигом
-        const cx = (q.x + q.w / 2 - p.w / 2) * u, cy = (q.y + q.h / 2 - p.h / 2) * u
-        return <div key={seed + '_' + i} style={{ position: 'absolute', left: 0, top: 0, width: p.w * u, height: p.h * u, boxSizing: 'border-box', background: '#E6E6E6', border: '1px solid rgba(20,20,20,0.8)',
-          transform: `translate3d(${cx}px, ${cy}px, 0) rotate(${q.rot ? 90 : 0}deg)`, transition: `transform 0.7s cubic-bezier(.4,0,.2,1) ${i * 14}ms`, willChange: 'transform' }} />
-      })}
-      {!small && <div style={{ position: 'absolute', right: 4, bottom: 3, fontSize: 10, fontWeight: 500, color: 'var(--teal)', background: 'rgba(255,255,255,0.88)', borderRadius: 8, padding: '0 6px' }}>{st.fill}%</div>}
-    </div>
-  )
-}
-
-function Sheets({ label, compact }) {
-  const ref = useRef(null)
-  const [u, setU] = useState(0)                      // точек экрана на единицу листа
-  const [base] = useState(() => Math.floor(Math.random() * 1e9))
-  const n = compact ? 1 : 4, gap = 8
-  useLayoutEffect(() => {
-    const fit = () => {
-      const el = ref.current
-      if (!el) return
-      if (compact) { setU(110 / W); return }
-      // четыре листа 2 × 2 — на большую часть экрана телефона
-      const maxW = Math.min(el.parentElement?.clientWidth || window.innerWidth, 560) - 8, maxH = window.innerHeight * 0.66
-      setU(Math.max(0.5, Math.min((maxW - gap) / 2 / W, (maxH - gap) / 2 / H)))
-    }
+    const fit = () => setWidth(boxRef.current?.clientWidth || 0)
     fit(); window.addEventListener('resize', fit)
     return () => window.removeEventListener('resize', fit)
-  }, [compact])
+  }, [])
+  useEffect(() => {
+    let n = 0
+    const t = setInterval(() => {
+      const r = rnd((seed + ++n * 2654435761) >>> 0)
+      // два-три места: их детали сдвигаются по кругу на соседние листы
+      const pick = new Set()
+      const want = Math.min(slots.length, 2 + (r() < 0.5 ? 1 : 0))
+      while (pick.size < want) pick.add(Math.floor(r() * slots.length))
+      const mv = new Set()
+      setAt(prev => prev.map((row, i) => {
+        if (!pick.has(i)) return row
+        const shift = 1 + Math.floor(r() * (N - 1))
+        row.forEach((_, k) => mv.add(i + ':' + k))
+        return row.map(s => (s + shift) % N)
+      }))
+      setMoving(mv)
+    }, 760)
+    return () => clearInterval(t)
+  }, [seed, slots.length, N])
+  const TW = cols * PW + (cols - 1) * SG, TH = rows * PH + (rows - 1) * SG, k = width / TW
   return (
-    <div ref={ref} role="img" aria-label={label} style={{ display: 'grid', gridTemplateColumns: `repeat(${compact ? 1 : 2}, max-content)`, gap, justifyContent: 'center', minHeight: u ? undefined : 120 }}>
-      {u > 0 && Array.from({ length: n }, (_, i) => <Sheet key={i} start={(base + i * 977) >>> 0} delay={i * 230} u={u} small={compact} />)}
+    <div ref={boxRef} onClick={() => setSeed(x => (x * 17 + 3) >>> 0)} role="img" aria-label={label}
+      style={{ position: 'relative', width: compact ? 170 : 'min(86vw, 400px, 52vh)', aspectRatio: `${TW} / ${TH}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
+      {Array.from({ length: N }, (_, s) => (
+        <div key={s} style={{ position: 'absolute', left: (s % cols) * (PW + SG) * k, top: Math.floor(s / cols) * (PH + SG) * k, width: PW * k, height: PH * k,
+          background: '#F5F4F0', border: '1px solid var(--gray-mid)', borderRadius: 3, boxSizing: 'border-box' }} />
+      ))}
+      {width > 0 && at.map((row, i) => row.map((sheet, part) => {
+        const p = place(sheet, i), fly = moving.has(i + ':' + part)
+        return (
+          <div key={i + ':' + part} style={{ position: 'absolute', left: 0, top: 0, width: p.w * k, height: p.h * k, boxSizing: 'border-box',
+            transform: `translate3d(${p.x * k}px, ${p.y * k}px, 0)`, transition: 'transform 0.62s cubic-bezier(0.45, 0.05, 0.3, 1), background-color 0.3s',
+            background: fly ? '#F2B694' : '#F9DCC8', border: '1px solid rgba(120,60,30,0.9)', zIndex: fly ? 2 : 1, willChange: 'transform' }} />
+        )
+      }))}
     </div>
   )
 }
@@ -120,9 +91,9 @@ export default function CncLoader({ label = 'Загрузка…', full = false,
   const [hint, setHint] = useState(0)
   useEffect(() => { const t = setInterval(() => setHint(h => (h + 1) % HINTS.length), 4000); return () => clearInterval(t) }, [])
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: compact ? 12 : '12px 0', width: '100%',
-      ...(full ? { minHeight: '100vh' } : { minHeight: compact ? 0 : '55vh' }), ...style }}>
-      <Sheets label={label} compact={compact} />
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: compact ? 12 : '16px 0',
+      ...(full ? { minHeight: '100vh' } : { minHeight: compact ? 0 : '70vh' }), ...style }}>
+      <LiveSheets label={label} compact={compact} />
       <div style={{ fontSize: compact ? 12 : 16, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</div>
       {!compact && <div style={{ fontSize: 12.5, color: 'var(--text-hint)', minHeight: 16, textAlign: 'center' }}>{HINTS[hint]}</div>}
     </div>

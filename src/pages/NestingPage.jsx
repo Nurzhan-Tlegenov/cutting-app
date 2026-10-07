@@ -40,10 +40,11 @@ const COLORS = [
   '#C0DD97','#F4C0D1','#B4B2A9','#85B7EB','#5DCAA5',
 ]
 
-const PART_STROKE = 'rgba(20,20,20,0.8)'
-// Заливка деталей на карте раскроя — единый светло-серый (границы деталей
-// видны по тёмному контуру)
-const PART_FILL = '#E6E6E6'
+const PART_STROKE = 'rgba(120,60,30,0.9)'
+// Заливка деталей на карте раскроя — единая светло-оранжевая на светло-сером листе
+// (границы деталей видны по тёмному контуру)
+const PART_FILL = '#F9DCC8'
+const SHEET_FILL = '#F5F4F0'
 const EDGE_COLOR = '#185FA5'
 const EDGE_GAP = 3                 // отступ линии кромки от контура детали, px
 const LONG_PRESS_MS = 550
@@ -538,7 +539,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     // Рабочая зона: X=usableX (горизонталь), Y=usableY (вертикаль)
     const rx = PADDING + toC(marginL), ry = PADDING + toC(marginT)
     const rw = toC(usableX), rh = toC(usableY)
-    ctx.fillStyle = '#fff'
+    ctx.fillStyle = SHEET_FILL
     ctx.fillRect(rx, ry, rw, rh)
 
     // Обрезки, выбранные вручную (удержанием пальца) — деловые обрезки,
@@ -590,7 +591,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       const twoSided = !!(details && details[p.detailIndex] && isTwoSided(details[p.detailIndex]))
       const baseFill = twoSided ? 'rgba(123,31,162,0.22)' : PART_FILL
       const atEdge = edgeSmall.has(i)
-      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : atEdge ? 'rgba(245,158,11,0.28)' : baseFill))
+      ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(217,119,6,0.5)' : atEdge ? 'rgba(245,158,11,0.6)' : baseFill))
       ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : atEdge ? '#D97706' : PART_STROKE)
       ctx.lineWidth = hasCollision ? 2.5 : (isSelected ? 2.5 : atEdge ? 2 : 1.4)
       if (hasShape) {
@@ -610,7 +611,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       const holes = details ? placedHoles(p, details[p.detailIndex]) : []
       if (holes.length) {
         ctx.save()
-        ctx.fillStyle = '#fff'
+        ctx.fillStyle = SHEET_FILL
         ctx.strokeStyle = '#C0392B'
         ctx.lineWidth = 1.2
         holes.forEach(poly => {
