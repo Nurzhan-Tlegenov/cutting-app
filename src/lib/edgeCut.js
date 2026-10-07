@@ -138,9 +138,24 @@ export function typesFromItems(items) {
   return out
 }
 
+// ─── Свесы: запас к длине кромки на каждую закромленную сторону ────────────────────────────────
+// Хранится вместе с видами кромки заказа под служебным ключом. По умолчанию включено, 30 мм (по 15 с каждого конца).
+// Клиент со своей кромкой отключает галочку в раскрое — метраж сразу пересчитывается без свесов.
+export const OVER_KEY = '__over'
+export const OVER_DEFAULT = 30
+export function overOf(types) {
+  const o = types?.[OVER_KEY]
+  const mm = o && o.mm !== undefined && o.mm !== null && o.mm !== '' ? num(String(o.mm).replace(',', '.')) : OVER_DEFAULT
+  return { on: o ? o.on !== false : true, mm }
+}
+/** Сколько мм добавлять к длине кромки на каждую закромленную сторону (0 — свесы отключены) */
+export const overMm = types => { const o = overOf(types); return o.on ? o.mm : 0 }
+
 /** Что сохранять в заказ: только те виды кромки, что в нём есть, с числами */
 export function typesToSave(types, names) {
   const out = {}
+  const ov = overOf(types)
+  if (!ov.on || ov.mm !== OVER_DEFAULT) out[OVER_KEY] = ov          // обычные свесы (включены, 30 мм) не записываем
   for (const n of ['default', ...(names || [])]) {
     const v = types?.[n]
     if (!v) continue

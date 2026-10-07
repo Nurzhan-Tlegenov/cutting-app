@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { blankType } from '../lib/edgeCut'
+import { blankType, OVER_KEY, overOf } from '../lib/edgeCut'
 
 // Виды кромки заказа. У каждого вида: толщина (обязательна), «подрезка» — деталь идёт в раскрой меньше
 // на толщину кромки с каждой закромленной стороны, «прифуговка» — припуск в мм, который снимает станок
@@ -61,6 +61,21 @@ export default function EdgeTypes({ edgeNames, edgeTypes, activeEdge, onNames, o
       </div>
       {edgeNames.map(n => row(n, n))}
       {row('default', 'Без названия')}
+      {/* свесы: запас к длине кромки на каждую закромленную сторону */}
+      {(() => {
+        const ov = overOf(edgeTypes), raw = edgeTypes[OVER_KEY]
+        const setOv = p => onTypes({ ...edgeTypes, [OVER_KEY]: { on: ov.on, mm: raw?.mm ?? ov.mm, ...p } })
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderTop: '0.5px solid var(--border)', fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
+              <input type="checkbox" checked={ov.on} onChange={e => setOv({ on: e.target.checked })} style={{ width: 'auto' }} />
+              Свесы: добавлять к длине кромки
+            </label>
+            <input type="text" inputMode="decimal" disabled={!ov.on} value={raw?.mm ?? ov.mm} onChange={e => setOv({ mm: e.target.value })} style={small} />
+            <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>мм на каждую закромленную сторону</span>
+          </div>
+        )
+      })()}
       <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6 }}>
         Подрезка: деталь идёт в раскрой меньше на толщину кромки с каждой закромленной стороны. Прифуговка: припуск, который снимает станок, — на столько деталь в раскрое больше.
         Ничего не отмечено — деталь идёт в раскрой как записана.

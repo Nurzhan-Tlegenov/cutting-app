@@ -17,7 +17,7 @@ import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
 import { orderClient, productionSetStatus } from '../lib/productionApi'
 import SimLinksBox from '../components/SimLinksBox'
-import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
+import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
@@ -87,7 +87,7 @@ export default function OrderPage() {
   const statDetails = nest ? nest.details.filter(d => d.length > 0 && d.width > 0) : validDetails
   if (nest) totalQty = statDetails.reduce((a, d) => a + (Number(d.qty) || 0), 0)
   // кромка: стороны + фигурные участки и вырезы; прямая и криволинейная — отдельно
-  const edgeSum = edgeTotals(statDetails)
+  const edgeSum = edgeTotals(statDetails.map(rawDetail), overMm(parseEdgeTypes(order?.edge_types)))   // по готовой детали, со свесами
   const totalEdge = edgeSum.total
   const sheetsNeeded = nest ? nest.sheets.length : usableArea > 0 ? Math.ceil(totalPartArea / (usableArea * 0.85)) : 0
   const isMine = order.user_id === user?.id
@@ -155,6 +155,7 @@ export default function OrderPage() {
         {totalEdge > 0 && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
             Кромка: прямая <b>{edgeSum.straight.toFixed(1)} м</b> · криволинейная <b>{edgeSum.curved.toFixed(1)} м</b>
+            {(() => { const ov = overOf(parseEdgeTypes(order?.edge_types)); return ov.on && ov.mm > 0 ? ` · со свесами +${ov.mm} мм на сторону` : ' · без свесов' })()}
           </div>
         )}
       </div>

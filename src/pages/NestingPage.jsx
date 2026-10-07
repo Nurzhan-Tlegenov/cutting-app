@@ -25,7 +25,7 @@ import { loadOrderModel } from '../lib/orderModel'
 import { hasModel } from '../lib/model3d'
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
-import { cutDetails, rawDetail, parseEdgeTypes } from '../lib/edgeCut'
+import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY } from '../lib/edgeCut'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
@@ -2158,7 +2158,16 @@ export default function NestingPage() {
 
   const totalQty = details.reduce((s, d) => s + (Number(d.qty) || 1), 0)
   // кромка: стороны (Дл/Дп — по длине, Шв/Шн — по ширине) + фигурные участки и вырезы; прямая и криволинейная — отдельно
-  const edgeSum = edgeTotals(details)
+  // длина — по готовой детали; свесы (запас на каждую закромленную сторону) — из настроек кромки заказа
+  const edgeOver = overOf(parseEdgeTypes(order?.edge_types))
+  const overNow = edgeOver.on ? edgeOver.mm : 0
+  const edgeSum = edgeTotals(details.map(rawDetail), overNow)
+  // галочка «свесы» в раскрое: клиент со своей кромкой отключает её — метраж пересчитывается сразу
+  async function setEdgeOver(on) {
+    const types = { ...parseEdgeTypes(order?.edge_types), [OVER_KEY]: { on, mm: edgeOver.mm } }
+    setOrder(o => (o ? { ...o, edge_types: types } : o))
+    try { await supabase.from('orders').update({ edge_types: types }).eq('id', id) } catch { /* не записалось — галочка действует до закрытия страницы */ }
+  }
   const edgeByType = edgeSum.byName
   const totalEdge = edgeSum.total
   const offcutCount = sheetsData.filter(sh => sh.stock === 'offcut').length
@@ -2219,7 +2228,7 @@ export default function NestingPage() {
       order: { ...pick(order, ['id', 'order_number', 'order_name', 'status', 'material_name', 'material_thickness', 'sheet_length', 'sheet_width', 'kerf_width',
         'margin_top', 'margin_right', 'margin_bottom', 'margin_left', 'cutting_method']), edge_types: parseEdgeTypes(order?.edge_types) },
       material: multiMat ? matKey : null,
-      totals: { positions: details.length, pieces: totalQty, edgeByFinished_m: edgeTotals(raws), edgeByBlank_m: edgeSum },
+      totals: { positions: details.length, pieces: totalQty, overhang: edgeOver, edgeNet_m: edgeTotals(raws), edgeWithOverhang_m: edgeSum, edgeByBlank_m: edgeTotals(details) },
       parts: details.map((d, i) => {
         const raw = raws[i]
         return {
@@ -2228,7 +2237,7 @@ export default function NestingPage() {
           blank: d._cut ? { length: d.length, width: d.width, lessBySide: d._cut } : null,       // размер в раскрой (подрезка / прифуговка)
           edges: { left_Дл: raw.edge_left || null, right_Дп: raw.edge_right || null, top_Шв: raw.edge_top || null, bottom_Шн: raw.edge_bottom || null },
           edgeByFinished_mm: detailEdgeList(raw), edgeByBlank_mm: d._cut ? detailEdgeList(d) : null,
-          edgePerPieceShown_m: edgeTotals([{ ...d, qty: 1 }]).total,
+          edgePerPieceShown_m: edgeTotals([{ ...raw, qty: 1 }], overNow).total,
           contour: parse(raw.contour), contourBlank: d._cut ? parse(d.contour) : null,
         }
       }),
@@ -2884,6 +2893,11 @@ export default function NestingPage() {
               {name} · <span style={{ fontWeight: 500 }}>{len.total.toFixed(1)} м</span>{len.curved > 0.005 ? ` (крив. ${len.curved.toFixed(1)})` : ''}
             </span>
           ))}
+          <label title="Запас к длине кромки на каждую закромленную сторону. Если кромка своя — отключите."
+            style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0, fontSize: 11, color: edgeOver.on ? 'var(--blue)' : 'var(--text-hint)', border: '0.5px solid ' + (edgeOver.on ? 'var(--blue-mid)' : 'var(--border-md)'), borderRadius: 10, padding: '2px 9px', cursor: 'pointer' }}>
+            <input type="checkbox" checked={edgeOver.on} onChange={e => setEdgeOver(e.target.checked)} style={{ width: 'auto', margin: 0 }} />
+            свесы +{edgeOver.mm} мм на сторону
+          </label>
         </div>
       )}
 
@@ -3083,7 +3097,7 @@ export default function NestingPage() {
                 {SORT_MODES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
               </select>
               {sortDetails(details.map((d, i) => ({ ...d, __i: i })), partsSort).map(d => {
-                const m = detailMeta(d), ed = edgeTotals([{ ...d, qty: 1 }])
+                const m = detailMeta(d), ed = edgeTotals([{ ...rawDetail(d), qty: 1 }], overNow)
                 return (
                   <div key={d.__i} onClick={anyRunning ? undefined : () => openPart3d(d.__i)}
                     style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '0.5px solid var(--border)', cursor: anyRunning ? 'default' : 'pointer' }}>

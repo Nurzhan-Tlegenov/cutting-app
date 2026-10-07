@@ -143,13 +143,14 @@ export function detailEdgeList(d) {
 /**
  * Итог по кромке для списка деталей (метры, с учётом количества):
  * { total, straight, curved, byName: { название: { total, straight, curved } } }
+ * over — свес, мм: добавляется к каждой закромленной стороне (участку) каждой детали.
  */
-export function edgeTotals(details) {
+export function edgeTotals(details, over = 0) {
   const t = { total: 0, straight: 0, curved: 0, byName: {} }
   for (const d of details || []) {
     const qty = num(d.qty) || 1
     for (const e of detailEdgeList(d)) {
-      const m = e.mm / 1000 * qty, k = e.curved ? 'curved' : 'straight'
+      const m = (e.mm + (Number(over) || 0)) / 1000 * qty, k = e.curved ? 'curved' : 'straight'
       const b = t.byName[e.name] || (t.byName[e.name] = { total: 0, straight: 0, curved: 0 })
       t.total += m; t[k] += m; b.total += m; b[k] += m
     }
