@@ -260,7 +260,8 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
   const holePts = c ? getAllDrillPoints(c, DW, DL, true) : []
   // Размеры торцевых отверстий — как на чертеже: снаружи детали, выносные линии и размерная цепочка вдоль торца
   // (край → отверстие → отверстие → край). Торцы: l, r, b, t — в «родных» координатах детали.
-  const dimFont = `${Math.max(6, Math.round(dimPx))}px Arial, Helvetica, sans-serif`
+  const fontOf = px => `${Math.max(6, Math.round(px))}px Arial, Helvetica, sans-serif`
+  const dimFont = fontOf(dimPx)
   const groups = []
   if (dimPx > 0) {
     const NORM = { l: [-1, 0], r: [1, 0], b: [0, -1], t: [0, 1] }
@@ -278,19 +279,19 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
     }
     ctx.restore()
   }
-  const O1 = dimPx * 0.7, GAP = dimPx * 0.3              // размерная линия — на таком расстоянии от детали; зазор до цифр
-  let k, ox, oy
-  const fit = levels => {                                 // место под размеры — только с тех сторон, где они есть
+  // Место под размеры — только с тех сторон, где они есть. Если размеры съедают больше половины блока,
+  // цифры уменьшаются (до 60 %), чтобы сама деталь оставалась читаемой.
+  let k, ox, oy, dpx = dimPx, O1 = 0, GAP = 0
+  for (let pass = 0; pass < 4; pass++) {
+    const sc = dpx / (dimPx || 1)
+    O1 = dpx * 0.7; GAP = dpx * 0.3                        // размерная линия — на таком расстоянии от детали; зазор до цифр
     const m = { l: 2 * line, r: 2 * line, t: 2 * line, b: 2 * line }
-    for (const g of groups) { const side = g.n[0] < 0 ? 'l' : g.n[0] > 0 ? 'r' : g.n[1] < 0 ? 't' : 'b'; m[side] = Math.max(m[side], O1 + (GAP + g.tw) * levels + line) }
+    for (const g of groups) { const side = g.n[0] < 0 ? 'l' : g.n[0] > 0 ? 'r' : g.n[1] < 0 ? 't' : 'b'; m[side] = Math.max(m[side], O1 + GAP + dpx * 0.5 + g.tw * sc + line) }
     const w = Math.max(4, w0 - m.l - m.r), h = Math.max(4, h0 - m.t - m.b)
     k = Math.min(w / vw, h / vh); ox = x0 + m.l + (w - vw * k) / 2; oy = y0 + m.t + (h - vh * k) / 2
+    if (!groups.length || pass === 3 || (m.l + m.r <= w0 * 0.5 && m.t + m.b <= h0 * 0.5)) break
+    dpx *= 0.84
   }
-  fit(1)
-  // тесные участки (отверстия рядом): цифры ставятся в два ряда
-  const tight = g => g.nodes.slice(1).some((v, i) => (v - g.nodes[i]) * k < dimPx * 1.15 && i + 1 < g.nodes.length - 1 && (g.nodes[i + 2] - v) * k < dimPx * 1.15)
-  const two = groups.some(tight)
-  if (two) fit(2)
   const S = (px, py) => (rot ? [ox + py * k, oy + px * k] : [ox + px * k, oy + (bh - py) * k])
   const R = (px, py) => { const q = rotatePointTimes(px, py, DW, DL, turns); return S(q.x, q.y) }      // из «родных» координат детали
   const poly = (pts, close = true) => { ctx.beginPath(); pts.forEach((q, i) => { if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]) }); if (close) ctx.closePath() }
@@ -332,19 +333,26 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
   // размеры — тонкими линиями по целым точкам (без размытия), цифры без подложки
   if (groups.length) {
     const thin = Math.max(1, Math.round(line * 0.55)), snap = v => Math.round(v) + (thin % 2 ? 0.5 : 0)
-    ctx.lineWidth = thin; ctx.lineCap = 'butt'; ctx.font = dimFont; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000'
+    ctx.lineWidth = thin; ctx.lineCap = 'butt'; ctx.font = fontOf(dpx); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000'
     const seg = (ax, ay, bx, by) => { ctx.beginPath(); ctx.moveTo(snap(ax), snap(ay)); ctx.lineTo(snap(bx), snap(by)); ctx.stroke() }
     for (const g of groups) {
       const [nx, ny] = g.n, P = g.nodes.map(v => (g.e === 'l' ? R(0, v) : g.e === 'r' ? R(DW, v) : g.e === 'b' ? R(v, 0) : R(v, DL)))
-      const D = P.map(q => [q[0] + nx * O1, q[1] + ny * O1]), tk = Math.max(2, dimPx * 0.22)
+      const D = P.map(q => [q[0] + nx * O1, q[1] + ny * O1]), tk = Math.max(2, dpx * 0.22), last = D.length - 1
       P.forEach((q, i) => { seg(q[0] + nx * line, q[1] + ny * line, D[i][0] + nx * tk, D[i][1] + ny * tk); seg(D[i][0] - tk, D[i][1] + tk, D[i][0] + tk, D[i][1] - tk) })   // выносная линия и засечка
-      seg(D[0][0], D[0][1], D[D.length - 1][0], D[D.length - 1][1])                                                       // размерная линия
+      seg(D[0][0], D[0][1], D[last][0], D[last][1])                                                                       // размерная линия
       let ang = Math.atan2(ny, nx); if (ang >= Math.PI / 2 - 1e-6) ang -= Math.PI; else if (ang < -Math.PI / 2 - 1e-6) ang += Math.PI
-      let odd = 0
+      // Цифры стоят поперёк размерной линии — каждой нужен шаг в высоту шрифта. Если отверстия ближе —
+      // цифры раздвигаются вдоль линии (порядок сохраняется), от участка к цифре идёт короткая выноска.
+      const L = Math.hypot(D[last][0] - D[0][0], D[last][1] - D[0][1]) || 1, ux = (D[last][0] - D[0][0]) / L, uy = (D[last][1] - D[0][1]) / L
+      const mid = g.texts.map((_, i) => (((D[i][0] + D[i + 1][0]) / 2 - D[0][0]) * ux + ((D[i][1] + D[i + 1][1]) / 2 - D[0][1]) * uy))
+      const pos = mid.slice(), pitch = dpx * 1.08
+      for (let i = 1; i < pos.length; i++) if (pos[i] < pos[i - 1] + pitch) pos[i] = pos[i - 1] + pitch
+      const shift = (mid.reduce((u, v) => u + v, 0) - pos.reduce((u, v) => u + v, 0)) / (pos.length || 1)
       g.texts.forEach((t, i) => {
-        const len = Math.hypot(D[i + 1][0] - D[i][0], D[i + 1][1] - D[i][1])
-        const lvl = two && len < dimPx * 1.15 ? (odd++ % 2) : (odd = 0)
-        const off = GAP + g.tw / 2 + lvl * (g.tw + GAP), cx = (D[i][0] + D[i + 1][0]) / 2 + nx * off, cy = (D[i][1] + D[i + 1][1]) / 2 + ny * off
+        const u = pos[i] + shift, moved = Math.abs(u - mid[i]) > 1.5
+        const bx = D[0][0] + ux * u + nx * (GAP + (moved ? dpx * 0.5 : 0)), by = D[0][1] + uy * u + ny * (GAP + (moved ? dpx * 0.5 : 0))
+        if (moved) seg(D[0][0] + ux * mid[i], D[0][1] + uy * mid[i], bx, by)
+        const tw = ctx.measureText(t).width, cx = bx + nx * (tw / 2 + 1), cy = by + ny * (tw / 2 + 1)
         ctx.save(); ctx.translate(Math.round(cx), Math.round(cy)); ctx.rotate(ang); ctx.fillText(t, 0, 0); ctx.restore()
       })
     }
