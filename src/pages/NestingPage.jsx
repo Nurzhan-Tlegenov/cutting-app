@@ -26,6 +26,7 @@ import { hasModel } from '../lib/model3d'
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY } from '../lib/edgeCut'
+import { saveNestingPdf } from '../lib/nestingPdf'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
@@ -1952,6 +1953,18 @@ export default function NestingPage() {
     return r.ok
   }
 
+  // Карты раскроя этого варианта в PDF: лист на страницу, список деталей листа, кромка, процент использования
+  const [pdfBusy, setPdfBusy] = useState(null)
+  async function pdfCfg(cfg, idx) {
+    setPdfBusy(cfg.id)
+    try {
+      const m = materials.find(x => x.key === matKey) || materials[0] || {}
+      const [name, thick] = String(m.key || '|').split('|')
+      await saveNestingPdf({ order, fileName: `Karty_${orderFileName(order)}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`,
+        mat: { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details } })
+    } catch (e) { window.alert('Не удалось собрать PDF: ' + (e?.message || e)) } finally { setPdfBusy(null) }
+  }
+
   // «Выбрать вариант» — записать этот результат в заказ (остальные остаются на экране)
   // ЧПУ и бирки работают по сохранённому раскрою: несохранённый вариант сначала сохраняем
   async function goProduce(cfg, where) {
@@ -2816,6 +2829,10 @@ export default function NestingPage() {
                           border: '0.5px solid var(--teal)',
                           background: cfg.saved ? '#e6f4ea' : 'var(--teal-light)', color: cfg.saved ? '#1e7e34' : 'var(--teal)' }}>
                         {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение…' : 'Выбрать'}
+                      </button>
+                      <button onClick={() => pdfCfg(cfg, idx)} disabled={!!pdfBusy} title="Карты раскроя в PDF: листы с деталями, размерами, кромкой и процентом использования материала"
+                        style={{ flex: 'none', padding: '9px 12px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: pdfBusy ? 'default' : 'pointer' }}>
+                        {pdfBusy === cfg.id ? '…' : 'PDF'}
                       </button>
                       {order.status !== 'draft' ? (canProduce && <>
                         <button onClick={() => goProduce(cfg, 'cnc')} disabled={blocked} title="Управляющие программы для станка с ЧПУ"

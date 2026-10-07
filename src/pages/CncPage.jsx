@@ -13,6 +13,7 @@ import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName, toLatin } from '../lib/orderUtils'
 import SaveFilesDialog from '../components/SaveFilesDialog'
+import { saveNestingPdf } from '../lib/nestingPdf'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
 import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from '../lib/simShare'
@@ -153,6 +154,7 @@ export default function CncPage() {
   // все файлы — отдельными файлами (не архивом): в выбранную папку, а где браузер этого не умеет — загрузками по одному
   // сохранение нескольких файлов — через вопрос «по отдельности или архивом»; сначала маркировка, потом раскрой
   const [saveAsk, setSaveAsk] = useState(null)      // { files, zipName }
+  const [pdfBusy, setPdfBusy] = useState('')         // идёт сборка PDF карт раскроя
   const labelFiles = () => (built.labels || []).map(f => ({ name: f.name, data: f.data }))
   const saveAll = () => setSaveAsk({ files: [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))], zipName: `${baseName()}.zip` })
   const simView = useMemo(() => {
@@ -243,6 +245,10 @@ export default function CncPage() {
           )}
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
             <p className="section-title" style={{ marginBottom: 0, flex: 1 }}>Листы ({sel.length} из {mat.sheets.length})</p>
+            <button type="button" style={{ ...small, marginRight: 6 }} disabled={!!pdfBusy} title="Карты раскроя: листы с деталями, размерами, кромкой и процентом использования материала"
+              onClick={async () => { setPdfBusy('…'); try { await saveNestingPdf({ order, mat, fileName: `Karty_${baseName()}.pdf`, onProgress: (a, b) => setPdfBusy(`${a}/${b}`) }) } catch (e) { window.alert('Не удалось собрать PDF: ' + (e?.message || e)) } finally { setPdfBusy('') } }}>
+              {pdfBusy ? `PDF ${pdfBusy}` : '⬇ PDF карт'}
+            </button>
             <button type="button" style={small} onClick={() => { setPicked(sel.length === mat.sheets.length ? [] : null); setBuilt(null) }}>{sel.length === mat.sheets.length ? 'Снять все' : 'Выбрать все'}</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
