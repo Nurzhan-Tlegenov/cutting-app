@@ -148,7 +148,7 @@ function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
     const id = meta.ids?.[i]
     const pid = pidOf ? pidOf(meta, i, di) : ''
     if (skipIds && id != null && skipIds.has(id)) return
-    out.push({ outline, holes, drills, grooves, carve, bands, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', pos: meta.pos ? String(meta.pos) : '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', block, size, pid, di, ii: i })
+    out.push({ outline, holes, drills, grooves, carve, bands, t: T, m, inOrder, anim: meta.anims?.[i] || null, texDir: meta.texDir || 0, des: meta.des || '', pos: meta.pos ? String(meta.pos) : '', name: d.name || meta.name || '', material: meta.material || '', product: meta.product || '', block, size, pid, di, ii: i, id: id ?? null })
   })
   return out
 }
@@ -172,19 +172,21 @@ export function buildModel(details, scene) {
   let hasContext = false
   if (scene) {
     let sn = 0
-    for (const sp of scene.parts || []) for (const p of partsOfDetail(sp, false, orderIds)) { p.pid = 's' + sn++; parts.push(p) }
-    for (const ex of scene.extras || []) {
-      parts.push({ outline: ex.outline, holes: ex.holes || [], drills: [], grooves: [], t: ex.t, m: ex.m, inOrder: false, anim: ex.anim || null, texDir: 0, des: '', pos: '', name: ex.name || '', material: ex.material || '', product: '', block: '', size: '', pid: 'x' + sn++, di: -1, ii: 0 })
-    }
+    // si / xi / hi — место объекта в сохранённой модели (нужно, чтобы двигать блоки)
+    ;(scene.parts || []).forEach((sp, si) => { for (const p of partsOfDetail(sp, false, orderIds)) { p.pid = 's' + sn++; p.si = si; parts.push(p) } })
+    ;(scene.extras || []).forEach((ex, xi) => {
+      const block = ex.b || ''
+      parts.push({ outline: ex.outline, holes: ex.holes || [], drills: [], grooves: [], t: ex.t, m: ex.m, inOrder: false, anim: ex.anim || null, texDir: 0, des: '', pos: '', name: ex.name || '', material: ex.material || '', product: block.split(' / ')[0], block, size: '', pid: 'x' + sn++, di: -1, ii: 0, xi })
+    })
     const byId = new Map()
-    for (const hw of scene.hardware || []) {
+    for (const [hi, hw] of (scene.hardware || []).entries()) {
       const mesh = scene.meshes?.[hw.f]
       if (!mesh?.groups?.length) continue
       if (!byId.has(hw.f)) {
         byId.set(hw.f, { name: mesh.name || '', groups: mesh.groups.map(g => ({ mat: g.mat, pos: Float32Array.from(g.pos, v => v / 10) })), inst: [] })
         hardware.push(byId.get(hw.f))
       }
-      byId.get(hw.f).inst.push({ m: hw.m, anim: hw.anim || null })
+      byId.get(hw.f).inst.push({ m: hw.m, anim: hw.anim || null, hi, b: hw.b ?? null })
     }
     hasContext = parts.some(p => !p.inOrder) || hardware.length > 0
   }

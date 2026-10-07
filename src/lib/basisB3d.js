@@ -771,11 +771,13 @@ export function parseBasis(u8, opts = {}) {
   const walk = (obj, M, ctx) => {
     const type = val(obj, 'Type')
     const Mo = mul(M, transOf(obj))
+    // блок, в котором лежит объект — чтобы в 3D профили и фурнитура двигались вместе со своим блоком
+    const blockOf = () => [ctx.product, ...ctx.path].filter(Boolean).join(' / ')
     if (type === TYPE_PANEL) panels.push({ obj, M: Mo, ctx })
-    else if (type === TYPE_PROFILE) profiles.push({ obj, M: Mo, anim: ctx.anim || null })
+    else if (type === TYPE_PROFILE) profiles.push({ obj, M: Mo, anim: ctx.anim || null, b: blockOf() })
     else if (type === TYPE_FASTENER) {
       const f = furn.get(val(obj, 'FastID'))
-      if (f && val(f, 'TriData')) hardware.push({ f: val(obj, 'FastID'), m: roundM(Mo), ...(ctx.anim ? { anim: ctx.anim } : {}) })
+      if (f && val(f, 'TriData')) hardware.push({ f: val(obj, 'FastID'), m: roundM(Mo), b: blockOf(), ...(ctx.anim ? { anim: ctx.anim } : {}) })
       for (const h of (kid(f, 'Holes')?.c || [])) {
         const r = val(h, 'Radius', 0), depth = val(h, 'Depth', 0)
         if (!(r > 0) || !(depth > 0)) continue
@@ -841,7 +843,7 @@ export function parseBasis(u8, opts = {}) {
     const inside = polys.slice(1).every(pl => pointInPoly(pl[0], polys[0]))
     const t = val(pr.obj, 'Thickness', 0)
     if (!(t > 0)) continue
-    const base = { t: r1(t), m: roundM(pr.M), material: cleanName(val(pr.obj, 'Mat')), name: cleanName(val(pr.obj, 'Name')), ...(pr.anim ? { anim: pr.anim } : {}), ...(val(pr.obj, 'Color') != null ? { color: val(pr.obj, 'Color') } : {}) }
+    const base = { t: r1(t), m: roundM(pr.M), material: cleanName(val(pr.obj, 'Mat')), name: cleanName(val(pr.obj, 'Name')), b: pr.b, ...(pr.anim ? { anim: pr.anim } : {}), ...(val(pr.obj, 'Color') != null ? { color: val(pr.obj, 'Color') } : {}) }
     if (inside) extras.push({ ...base, outline: polys[0], holes: polys.slice(1) })
     else polys.forEach(pl => extras.push({ ...base, outline: pl, holes: [] }))
   }

@@ -11,6 +11,7 @@ import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { loadTextures, saveTexture, deleteTexture, fileToTexture, textureKey } from '../lib/materialTextures'
 import { orderParts, segFace, edgeTargetAt, applyEdgeOps, findJoints, partGroups, applyJoints, clearJoints, jointsDone, contourOf, BUILTIN_SCHEMES, schemeFace, schemeEdge } from '../lib/model3dEdit'
 import { loadHardwarePresets } from '../lib/hardwarePresets'
+import { blockTree, partBox, hardwareLinks, movingSet, sweepLimits, clampMove, moveModel } from '../lib/model3dMove'
 import ShareLinkBox from './ShareLinkBox'
 import { lazyRetry } from '../lib/lazyRetry'
 const ContourEditor = lazyRetry(() => import('./ContourEditor'))
@@ -22,7 +23,11 @@ const ContourEditor = lazyRetry(() => import('./ContourEditor'))
 // Если передан onDetailsChange — модель можно править: кромка по видимым торцам, присадка по стыкам.
 const VIEWS = [['front', 'Спереди', [0, 0, 1]], ['back', 'Сзади', [0, 0, -1]], ['left', 'Слева', [-1, 0, 0]], ['right', 'Справа', [1, 0, 0]],
   ['top', 'Сверху', [0, 1, 0.0001]], ['bottom', 'Снизу', [0, -1, 0.0001]], ['iso', 'Изометрия', [0.75, 0.5, 1]]]
-const LABELS = [['none', 'Без подписей'], ['pos', 'Позиция'], ['des', 'Обозначение'], ['name', 'Наименование']]
+const LABELS = [['none', 'Без подписей'], ['pos', 'Позиция'], ['des', 'Обозначение'], ['name', 'Наименование'], ['block', 'Блоки']]
+// куб видов: грань -> откуда смотреть
+const CUBE = [['Перед', [0, 0, 1], ''], ['Зад', [0, 0, -1], 'rotateY(180deg)'], ['Право', [1, 0, 0], 'rotateY(90deg)'], ['Лево', [-1, 0, 0], 'rotateY(-90deg)'],
+  ['Верх', [0, 1, 0.0001], 'rotateX(90deg)'], ['Низ', [0, -1, 0.0001], 'rotateX(-90deg)']]
+const AXES = [['← → Влево-вправо', 'X'], ['↑ ↓ Вверх-вниз', 'Y'], ['Вперёд-назад', 'Z']]
 const HOLD_MS = 550
 const labelText = (p, mode) => {
   if (mode === 'name') return p.name || ''
@@ -94,7 +99,7 @@ function woodTexture(hex) {
   return tex
 }
 
-export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16, actions = null, focus = null }) {
+export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16, actions = null, focus = null, onSceneChange = null }) {
   const hostRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
@@ -134,6 +139,12 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const [toast, setToast] = useState('')
   const [editing, setEditing] = useState(null)                   // правка детали в редакторе контура: { di, draft }
   const [undoN, setUndoN] = useState(0)
+  const [showTree, setShowTree] = useState(false)                // структура модели (блоки и детали) — панель слева
+  const [openNodes, setOpenNodes] = useState(() => new Set())
+  const [moveAxis, setMoveAxis] = useState(0)                    // перемещение: свободная ось (0 — X, 1 — Y, 2 — Z), остальные закреплены
+  const [moveVec, setMoveVec] = useState([0, 0, 0])              // ещё не применённый сдвиг выбранного, мм
+  const cubeRef = useRef(null)
+  const dragRef = useRef(null)
   const historyRef = useRef([])
   const camRef = useRef(null)                                    // положение камеры — чтобы не сбрасывалось после правки
   const liveRef = useRef({})
@@ -346,7 +357,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         const m4 = mat4Of(it.m)
         hm.applyMatrix4(m4)
         const pid = 'h' + hwN++
-        hm.userData = { name: hw.name, des: '', size: '', t: null, product: '', hardware: true, anim: it.anim, pid, di: -1 }
+        hm.userData = { name: hw.name, des: '', size: '', t: null, product: (it.b || '').split(' / ')[0], block: it.b || '', hardware: true, anim: it.anim, pid, di: -1 }
         hm.__mat0 = hwMat
         reg(hm, 'hw', true, it.anim, '', pid); meshes.push(hm)
         recs.set(pid, { p: hm.userData, center: hg.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(m4) })
@@ -357,8 +368,12 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     const box = new THREE.Box3().setFromObject(root)
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3())
     const radius = box.isEmpty() ? 1000 : Math.max(box.getSize(new THREE.Vector3()).length() / 2, 100)
-    const camera = new THREE.PerspectiveCamera(35, 1, radius / 50, radius * 40)
-    const st0 = { viewH: 300 }                 // то, что нужно ещё до готовности stateRef
+    // две камеры: перспектива и аксонометрия (параллельная проекция)
+    const persp = new THREE.PerspectiveCamera(35, 1, radius / 50, radius * 40)
+    const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -radius * 40, radius * 40)
+    let camera = persp
+    const tanHalf = Math.tan((persp.fov * Math.PI) / 360)
+    const st0 = { viewH: 300, camera: persp }  // то, что нужно ещё до готовности stateRef
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.target.copy(center)
     controls.enableDamping = true
@@ -372,9 +387,16 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       const d = dir ? new THREE.Vector3(dir[0], dir[1], dir[2]) : camera.position.clone().sub(controls.target)
       if (d.lengthSq() < 1e-9) d.set(0.75, 0.5, 1)
       // на узком экране ограничивает ширина, а не высота
-      const half = (camera.fov * Math.PI) / 360
-      const halfMin = Math.min(half, Math.atan(Math.tan(half) * camera.aspect))
-      camera.position.copy(c).add(d.normalize().multiplyScalar(r / Math.sin(halfMin) * 1.02))
+      if (camera === ortho) {
+        ortho.top = (r * 1.02) / Math.min(1, persp.aspect); ortho.bottom = -ortho.top
+        ortho.left = -ortho.top * persp.aspect; ortho.right = ortho.top * persp.aspect
+        ortho.zoom = 1; ortho.updateProjectionMatrix()
+        camera.position.copy(c).add(d.normalize().multiplyScalar(r * 3))
+      } else {
+        const half = (persp.fov * Math.PI) / 360
+        const halfMin = Math.min(half, Math.atan(Math.tan(half) * persp.aspect))
+        camera.position.copy(c).add(d.normalize().multiplyScalar(r / Math.sin(halfMin) * 1.02))
+      }
       controls.target.copy(c)
       controls.update()
     }
@@ -384,15 +406,35 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       renderer.setSize(w, h, false)
       renderer.domElement.style.width = '100%'
       renderer.domElement.style.height = '100%'
-      camera.aspect = w / h
-      camera.updateProjectionMatrix()
+      persp.aspect = w / h
+      persp.updateProjectionMatrix()
+      ortho.left = -ortho.top * persp.aspect; ortho.right = ortho.top * persp.aspect
+      ortho.updateProjectionMatrix()
       lineMat.resolution.set(w, h)
       st0.viewH = h
       st0.sizeLabels?.()
     }
     resize()
+    // перспектива <-> аксонометрия: тот же вид, тот же масштаб у точки, вокруг которой вращаем
+    const setProj = kind => {
+      const next = kind === 'ortho' ? ortho : persp
+      if (next === camera) return
+      const dir = camera.position.clone().sub(controls.target)
+      const dist = dir.length() || 1
+      if (next === ortho) {
+        ortho.top = dist * tanHalf; ortho.bottom = -ortho.top; ortho.zoom = 1
+        ortho.position.copy(camera.position)
+      } else persp.position.copy(controls.target).add(dir.multiplyScalar((ortho.top / ortho.zoom / tanHalf) / dist))
+      next.quaternion.copy(camera.quaternion)
+      camera = next; st0.camera = next; controls.object = next
+      resize(); controls.update()
+    }
     // после правки модель собирается заново — камера остаётся там, где была
-    if (camRef.current) { camera.position.copy(camRef.current.pos); controls.target.copy(camRef.current.target); controls.update() }
+    if (camRef.current) {
+      const cr = camRef.current
+      if (cr.ortho) { camera = ortho; st0.camera = ortho; controls.object = ortho; ortho.top = cr.top; ortho.bottom = -cr.top; ortho.zoom = cr.zoom; resize() }
+      camera.position.copy(cr.pos); controls.target.copy(cr.target); controls.update()
+    }
     else resetView()
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null
     ro?.observe(host)
@@ -414,7 +456,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       st.group.matrixWorldNeedsUpdate = true
     }
 
-    let raf = 0, last = performance.now()
+    let raf = 0, last = performance.now(), lastZoom = 0, cubeTr = ''
     const tick = (now) => {
       const dt = Math.min(0.1, (now - last) / 1000) || 0
       last = now
@@ -426,6 +468,14 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       })
       controls.update()
       sun.position.copy(camera.position)     // свет «от зрителя» — грани читаются с любой стороны
+      if (camera === ortho && ortho.zoom !== lastZoom) { lastZoom = ortho.zoom; st0.sizeLabels?.() }
+      // куб видов повёрнут так же, как модель (у CSS ось Y смотрит вниз)
+      const cube = cubeRef.current
+      if (cube) {
+        const e = camera.matrixWorldInverse.elements, f = v => Math.round(v * 1e4) / 1e4
+        const tr = `matrix3d(${f(e[0])},${f(-e[1])},${f(e[2])},0,${f(-e[4])},${f(e[5])},${f(-e[6])},0,${f(e[8])},${f(-e[9])},${f(e[10])},0,0,0,0,1)`
+        if (tr !== cubeTr) { cubeTr = tr; cube.style.transform = tr }
+      }
       renderer.render(scene, camera)
       raf = requestAnimationFrame(tick)
     }
@@ -441,10 +491,29 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       return ray.intersectObjects(list || meshes.filter(x => x.__shown), false)[0] || null
     }
     let down = null, lastTap = { g: 0, t: 0 }, holdTimer = 0, pointers = 0
+    // перемещение блока: тянем выбранное пальцем — оно едет только вдоль свободной оси
+    let drag = null
+    const endDrag = () => { if (!drag) return; drag = null; controls.enabled = true; liveRef.current.moveEnd?.() }
     const onDown = e => {
       pointers++
       clearTimeout(holdTimer)
-      if (pointers > 1) { down = null; return }
+      if (pointers > 1) { down = null; endDrag(); return }
+      if (liveRef.current.moveSet) {
+        const hit = hitAt(e)
+        if (hit && liveRef.current.moveSet.has(hit.object.__pid)) {
+          const mb = liveRef.current.moveBegin()
+          // сколько пикселей на экране занимает сдвиг на 100 мм вдоль оси
+          const r = renderer.domElement.getBoundingClientRect()
+          const p0 = hit.point.clone().project(camera)
+          const p1 = hit.point.clone().add(new THREE.Vector3(mb.axis === 0 ? 100 : 0, mb.axis === 1 ? 100 : 0, mb.axis === 2 ? 100 : 0)).project(camera)
+          const vx = (p1.x - p0.x) * r.width / 2, vy = -(p1.y - p0.y) * r.height / 2
+          if (vx * vx + vy * vy < 16) { liveRef.current.say?.('С этого вида ось движения смотрит на вас — поверните модель или выберите другой вид'); return }
+          drag = { x: e.clientX, y: e.clientY, vx, vy, len2: vx * vx + vy * vy }
+          controls.enabled = false
+          down = null
+          return
+        }
+      }
       down = { x: e.clientX, y: e.clientY, t: Date.now(), held: false }
       const d0 = down
       holdTimer = setTimeout(() => {
@@ -455,11 +524,15 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         liveRef.current.onHold?.(hit)
       }, HOLD_MS)
     }
-    const onMove = e => { if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) { clearTimeout(holdTimer); down = null } }
-    const onCancel = () => { pointers = Math.max(0, pointers - 1); clearTimeout(holdTimer); down = null }
+    const onMove = e => {
+      if (drag) { liveRef.current.moveTo?.((((e.clientX - drag.x) * drag.vx + (e.clientY - drag.y) * drag.vy) / drag.len2) * 100); return }
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 8) { clearTimeout(holdTimer); down = null }
+    }
+    const onCancel = () => { pointers = Math.max(0, pointers - 1); clearTimeout(holdTimer); down = null; endDrag() }
     const onUp = e => {
       pointers = Math.max(0, pointers - 1)
       clearTimeout(holdTimer)
+      if (drag) { endDrag(); return }
       const d0 = down
       down = null
       if (!d0 || d0.held || Math.hypot(e.clientX - d0.x, e.clientY - d0.y) > 8 || Date.now() - d0.t > 400) return
@@ -506,13 +579,13 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     }
 
     stateRef.current = Object.assign(st0, {
-      materials, meshes, lines, lineMat, hwMat, bandMat, roomMat, darkMat, hlMat, selMat, all, resetView, fit, recs, root, camera, faceVisible,
+      materials, meshes, lines, lineMat, hwMat, bandMat, roomMat, darkMat, hlMat, selMat, all, resetView, fit, recs, root, faceVisible, setProj,
       labels: [], jointMeshes: [], jointGroup: null,
       openAll: (open) => anims.forEach(st => { st.target = open ? 1 : 0 }),
       reskin: () => materials.forEach(skin),
     })
     return () => {
-      camRef.current = { pos: camera.position.clone(), target: controls.target.clone() }
+      camRef.current = { pos: camera.position.clone(), target: controls.target.clone(), ortho: camera === ortho, top: ortho.top, zoom: ortho.zoom }
       clearTimeout(holdTimer)
       cancelAnimationFrame(raf)
       ro?.disconnect()
@@ -530,8 +603,15 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     }
   }, [model, parts])
 
+  useEffect(() => { stateRef.current?.setProj(view.proj === 'ortho' ? 'ortho' : 'persp') }, [view.proj, model])
+
   // ─── Данные для правки и выбора ───────────────────────────────────────────
   const byPid = useMemo(() => new Map(parts.map(p => [p.pid, p])), [parts])
+  const tree = useMemo(() => blockTree(parts), [parts])
+  const hwLinks = useMemo(() => hardwareLinks(model), [model])
+  // что едет при перемещении: выбранные детали и фурнитура их блоков
+  const moveSet = useMemo(() => (tool === 'move' && sel.size ? movingSet(sel, parts, hwLinks) : null), [tool, sel, parts, hwLinks])
+  const boxes = useMemo(() => (tool === 'move' ? parts.filter(p => p.outline.length > 2).map(p => ({ pid: p.pid, p, ...partBox(p) })) : []), [tool, parts])
   const editParts = useMemo(() => orderParts(details), [details])           // детали заказа по штукам
   const editByPid = useMemo(() => new Map(editParts.map(p => [p.pid, p])), [editParts])
   const joints = useMemo(() => (tool === 'drill' ? findJoints(editParts) : []), [tool, editParts])
@@ -589,10 +669,31 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     st.labels.forEach(sp => { sp.parent?.remove(sp); sp.material.map?.dispose(); sp.material.dispose() })
     st.labels = []
     st.sizeLabels = () => {
-      const k = (22 * 2 * Math.tan((st.camera.fov * Math.PI) / 360)) / (st.viewH || 300)     // 22 px высотой на экране
+      const cam = st.camera                                                                 // 22 px высотой на экране
+      const k = cam.isOrthographicCamera ? (22 * (cam.top - cam.bottom)) / cam.zoom / (st.viewH || 300) : (22 * 2 * Math.tan((cam.fov * Math.PI) / 360)) / (st.viewH || 300)
       st.labels.forEach(sp => sp.scale.set(k * sp.__aspect, k, 1))
     }
-    if (view.label && view.label !== 'none') {
+    if (view.label === 'block') {
+      // подписи блоков (изделий): одна на блок, в середине его деталей
+      const groups = new Map()
+      for (const [pid, rec] of st.recs) {
+        const name = rec.p.hardware ? '' : rec.p.product || String(rec.p.block || '').split(' / ')[0]
+        if (!name) continue
+        if (!groups.has(name)) groups.set(name, { box: new THREE.Box3(), pids: [] })
+        const g = groups.get(name)
+        g.box.expandByPoint(rec.center); g.pids.push(pid)
+      }
+      for (const [name, g] of groups) {
+        const { tex, aspect } = labelTexture(name)
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, sizeAttenuation: false, transparent: true }))
+        sp.position.copy(g.box.getCenter(new THREE.Vector3()))
+        sp.renderOrder = 20
+        sp.__aspect = aspect; sp.__pids = g.pids; sp.__kind = 'label'; sp.__shown = true
+        st.root.add(sp)
+        st.labels.push(sp)
+      }
+      st.sizeLabels()
+    } else if (view.label && view.label !== 'none') {
       const cache = new Map()
       for (const [pid, rec] of st.recs) {
         if (rec.p.hardware) continue
@@ -624,7 +725,11 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   useEffect(() => {
     const st = stateRef.current
     if (!st) return
-    st.labels.forEach(o => { o.visible = o.__shown = (scope === 'all' || !o.__ctx) && !(o.__mat && hidden.has(o.__mat)) && !hiddenPids.has(o.__pid) })
+    st.labels.forEach(o => {
+      o.visible = o.__shown = o.__pids
+        ? o.__pids.some(q => { const p = st.recs.get(q)?.p; return !hiddenPids.has(q) && !(p?.material && hidden.has(p.material)) && (scope === 'all' || p?.inOrder) })
+        : (scope === 'all' || !o.__ctx) && !(o.__mat && hidden.has(o.__mat)) && !hiddenPids.has(o.__pid)
+    })
   }, [view.label, model, scope, hidden, hiddenPids])
 
   // взрыв-схема: каждая деталь отъезжает от центра показанного на долю своего расстояния до него.
@@ -641,12 +746,13 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       if (!rec || !o.__base) return
       o.position.copy(o.__base)
       if (k > 0) o.position.addScaledVector(rec.center.clone().sub(c), k)
+      if (moveSet?.has(o.__pid)) { o.position.x += moveVec[0]; o.position.y += moveVec[1]; o.position.z += moveVec[2] }
     }
     st.all.forEach(move)
     st.labels.forEach(move)
     // раздвинутая модель должна оставаться в кадре
     if (explodeRef.current !== explode) { explodeRef.current = explode; st.fit() }
-  }, [explode, model, hiddenPids, hidden, scope, view.label])
+  }, [explode, model, hiddenPids, hidden, scope, view.label, moveSet, moveVec])
 
   // пятна стыков (режим «Присадка»): оранжевые — будет присадка, серые — выключены, зелёные — уже стоит
   useEffect(() => {
@@ -767,21 +873,27 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const lookFrom = dir => { stateRef.current?.fit(dir); setShowViews(false) }
 
   // ─── Правка заказа из 3D ──────────────────────────────────────────────────
-  const change = next => {
-    historyRef.current.push(details)
+  const change = (next, nextScene) => {
+    historyRef.current.push({ details, scene: savedScene })
     if (historyRef.current.length > 30) historyRef.current.shift()
     setUndoN(historyRef.current.length)
+    if (nextScene !== undefined && nextScene !== savedScene) onSceneChange?.(nextScene)
     onDetailsChange(next)
   }
   const undo = () => {
     const prev = historyRef.current.pop()
     setUndoN(historyRef.current.length)
-    if (prev) onDetailsChange(prev)
+    if (!prev) return
+    if (prev.scene !== savedScene) onSceneChange?.(prev.scene)
+    onDetailsChange(prev.details)
   }
   const modeBefore = useRef('')
   const setTool = t => {
     const next = tool === t ? '' : t
-    if (next) { setExplode(0); setShowExplode(false); setMulti(false); setShowViews(false); setShowShare(false); setSel(new Set()); setPicked(null); setMenu(null) }
+    if (next) { setExplode(0); setShowExplode(false); setMulti(false); setShowViews(false); setShowShare(false); if (next !== 'move') setSel(new Set()); setPicked(null); setMenu(null) }
+    // двигаем при закрытых дверях и ящиках; несохранённый сдвиг при выходе сбрасывается
+    if (next === 'move') { stateRef.current?.openAll(false); setOpened(false) }
+    setMoveVec([0, 0, 0])
     // стыки и отверстия внутри корпуса видны только «на просвет»
     if (next === 'drill' && mode === 'solid') { modeBefore.current = 'solid'; setMode('xray') }
     if (tool === 'drill' && next !== 'drill' && modeBefore.current) { setMode(modeBefore.current); modeBefore.current = '' }
@@ -870,11 +982,65 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     change(details.map((x, i) => (i === ed.di ? { ...x, contour: ed.draft.contour, edges: ed.draft.edges } : x)))
   }
 
+  // ─── Структура и перемещение блоков ───────────────────────────────────────
+  const toggleSel = pids => { setPicked(null); setSel(prev => { const n = new Set(prev); if (pids.every(q => n.has(q))) pids.forEach(q => n.delete(q)); else pids.forEach(q => n.add(q)); return n }) }
+  const toggleHide = pids => setHiddenPids(prev => { const n = new Set(prev); if (pids.every(q => n.has(q))) pids.forEach(q => n.delete(q)); else pids.forEach(q => n.add(q)); return n })
+  const toggleNode = key => setOpenNodes(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n })
+  const startMove = pids => {
+    const list = pids ? [...pids] : [...sel]
+    setMenu(null)
+    if (!list.length) { setShowTree(true); say('Отметьте в структуре блок или детали, которые нужно подвинуть'); return }
+    if (pids) setSel(new Set(list))
+    setShowTree(false)
+    if (tool !== 'move') setTool('move')
+  }
+  // запретные интервалы сдвига вдоль оси — от текущего (ещё не применённого) положения
+  const limitsFor = axis => {
+    if (!moveSet) return []
+    const sh = b => ({ min: b.min.map((v, k) => v + moveVec[k]), max: b.max.map((v, k) => v + moveVec[k]) })
+    return sweepLimits(boxes.filter(b => moveSet.has(b.pid)).map(sh), boxes.filter(b => !moveSet.has(b.pid)), axis)
+  }
+  const stopName = s => [s.p.des, s.p.name].filter(Boolean).join(' ') || 'деталь'
+  const nudge = step => {
+    const r = clampMove(limitsFor(moveAxis), 0, step)
+    setMoveVec(v => v.map((x, k) => (k === moveAxis ? Math.round((x + r.t) * 10) / 10 : x)))
+    if (r.stop) say(`Упор — вплотную к «${stopName(r.stop)}»`)
+  }
+  const applyMove = () => {
+    if (!moveSet || !moveVec.some(v => v)) { setTool('move'); return }
+    const mv = { parts: new Set(), ids: new Set(), sceneParts: new Set(), extras: new Set(), hardware: new Set() }
+    for (const pid of moveSet) {
+      const p = byPid.get(pid)
+      if (!p) continue
+      if (p.di >= 0) mv.parts.add(`${p.di}:${p.ii}`); else if (p.si != null) mv.sceneParts.add(`${p.si}:${p.ii}`); else if (p.xi != null) mv.extras.add(p.xi)
+      if (p.id != null) mv.ids.add(p.id)
+    }
+    for (const l of hwLinks) if (moveSet.has(l.pid)) mv.hardware.add(l.hi)
+    const r = moveModel(details, savedScene, mv, moveVec)
+    change(r.details, r.scene)
+    say(`Сдвинуто: ${AXES.map(([, n], k) => (moveVec[k] ? `${n} ${moveVec[k] > 0 ? '+' : ''}${moveVec[k]}` : '')).filter(Boolean).join(' · ')} мм. Не забудьте сохранить заказ`)
+    setToolState(''); setMoveVec([0, 0, 0])
+  }
+
   // что делать по тапу и долгому нажатию — сцена спрашивает это в момент события
   liveRef.current = {
-    tool,
+    tool, say,
+    moveSet,
+    moveBegin: () => { dragRef.current = { axis: moveAxis, limits: limitsFor(moveAxis), start: moveVec[moveAxis], cur: 0, stop: null }; return { axis: moveAxis } },
+    moveTo: t => {
+      const dg = dragRef.current
+      if (!dg) return
+      const r = clampMove(dg.limits, dg.cur, Math.round(t * 10) / 10)
+      dg.cur = r.t
+      const val = Math.round((dg.start + r.t) * 10) / 10
+      setMoveVec(v => (v[dg.axis] === val ? v : v.map((x, k) => (k === dg.axis ? val : x))))
+      if (r.stop && r.stop !== dg.stop) { say(`Упор — вплотную к «${stopName(r.stop)}»`); try { navigator.vibrate?.(8) } catch { /* без вибрации */ } }
+      dg.stop = r.stop
+    },
+    moveEnd: () => { dragRef.current = null },
     onTap: (hit, canOpen) => {
       setMenu(null); setShowViews(false)
+      if (tool === 'move') return
       if (tool === 'edge') { tapEdge(hit); return }
       const p = hit?.object.userData
       if (multi) {
@@ -886,7 +1052,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     },
     onHold: hit => {
       const p = hit.object.userData
-      if (!p?.pid) return
+      if (!p?.pid || tool === 'move') return
       try { navigator.vibrate?.(12) } catch { /* без вибрации */ }
       if (!sel.has(p.pid)) { setSel(multi ? new Set([...sel, p.pid]) : new Set([p.pid])); setPicked({ ...p }) }
       setMenu({ pid: p.pid })
@@ -967,6 +1133,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       )}
       {/* инструменты: виды, подписи, взрыв-схема, правка, ссылка */}
       <div style={{ display: 'flex', gap: 5, padding: '0 10px 6px', background: 'var(--bg)', overflowX: 'auto', alignItems: 'center', borderBottom: '0.5px solid var(--border)' }}>
+        <button type="button" style={toolChip(showTree)} onClick={() => setShowTree(v => !v)}>☰ Структура</button>
         <button type="button" style={toolChip(showViews)} onClick={() => setShowViews(v => !v)}>Виды {showViews ? '▴' : '▾'}</button>
         <select value={view.label || 'none'} onChange={e => setView({ label: e.target.value })} title="Что писать на деталях"
           style={{ width: 'auto', flex: 'none', padding: '3px 8px', fontSize: 12, borderRadius: 20, color: view.label && view.label !== 'none' ? 'var(--blue)' : 'var(--text-muted)', borderColor: view.label && view.label !== 'none' ? 'var(--blue)' : 'var(--border-md)' }}>
@@ -975,12 +1142,103 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         <button type="button" style={toolChip(showExplode || explode > 0)} onClick={() => { if (tool) setTool(tool); setShowExplode(v => !v) }}>Взрыв</button>
         {editable && <button type="button" style={toolChip(tool === 'edge')} onClick={() => setTool('edge')}>Кромка</button>}
         {editable && <button type="button" style={toolChip(tool === 'drill')} onClick={() => setTool('drill')}>Присадка</button>}
+        {editable && <button type="button" style={toolChip(tool === 'move')} onClick={() => (tool === 'move' ? setTool('move') : startMove())}>✥ Двигать</button>}
         {editable && undoN > 0 && <button type="button" style={toolChip(false)} onClick={undo}>↶ Отменить</button>}
         {!editable && !readOnly && editPath && <button type="button" style={toolChip(false)} onClick={() => navigate(editPath)}>✎ Править</button>}
         {!readOnly && orderId !== undefined && <button type="button" style={toolChip(showShare)} onClick={() => setShowShare(v => !v)}>🔗 Ссылка</button>}
       </div>
       <div ref={hostRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {error && <p className="error-text" style={{ padding: 20 }}>{error}</p>}
+        {/* куб видов: нажатие на грань — смотреть с этой стороны; под ним — перспектива или аксонометрия */}
+        {!error && (
+          <div style={{ position: 'absolute', right: 6, top: 6, zIndex: 1, width: 78, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, userSelect: 'none' }}>
+            <div style={{ width: 78, height: 78, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div ref={cubeRef} style={{ width: 46, height: 46, position: 'relative', transformStyle: 'preserve-3d' }}>
+                {CUBE.map(([label, dir, tr]) => (
+                  <div key={label} onClick={() => lookFrom(dir)}
+                    style={{ position: 'absolute', inset: 0, transform: `${tr} translateZ(23px)`, backfaceVisibility: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'rgba(255,255,255,0.92)', border: '1px solid var(--blue-mid)', color: 'var(--blue-dark)', fontSize: 10, fontWeight: 500, cursor: 'pointer' }}>{label}</div>
+                ))}
+              </div>
+            </div>
+            <button type="button" onClick={() => setView({ proj: view.proj === 'ortho' ? 'persp' : 'ortho' })} title="Перспектива или аксонометрия (параллельная проекция)"
+              style={{ ...smallBtn, padding: '3px 6px', fontSize: 10, background: 'var(--bg)', color: 'var(--blue)', borderColor: 'var(--blue-mid)' }}>
+              {view.proj === 'ortho' ? 'Аксонометрия' : 'Перспектива'}
+            </button>
+            <button type="button" onClick={() => stateRef.current?.resetView()} title="Изометрия, вся модель"
+              style={{ ...smallBtn, padding: '3px 6px', fontSize: 10, background: 'var(--bg)' }}>⌂ Изометрия</button>
+          </div>
+        )}
+        {/* структура модели: изделия → блоки → детали */}
+        {showTree && (
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, zIndex: 7, width: 'min(84%, 330px)', display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderRight: '0.5px solid var(--border-md)', boxShadow: '4px 0 16px rgba(0,0,0,0.10)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 10px 4px' }}>
+              <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>Структура модели</div>
+              <button type="button" onClick={() => setShowTree(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--text-hint)' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: 4, padding: '0 10px 6px', alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0 }}>Подписи:</span>
+              {[['none', 'нет'], ['block', 'блоки'], ['des', 'детали']].map(([id, label]) => (
+                <button key={id} type="button" style={{ ...toolChip((view.label || 'none') === id || (id === 'des' && ['pos', 'name'].includes(view.label))), padding: '3px 9px', fontSize: 11 }} onClick={() => setView({ label: id })}>{label}</button>
+              ))}
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 6px', borderTop: '0.5px solid var(--border)' }}>
+              {(() => {
+                const mark = (on, some) => ({ width: 18, height: 18, flexShrink: 0, borderRadius: 4, border: '1px solid ' + (on || some ? 'var(--blue)' : 'var(--border-md)'), background: on ? 'var(--blue)' : some ? 'var(--blue-light)' : 'transparent', color: 'white', fontSize: 12, lineHeight: '16px', textAlign: 'center', padding: 0 })
+                const eye = off => ({ background: 'none', border: 'none', padding: '4px 6px', fontSize: 13, color: off ? 'var(--text-hint)' : 'var(--blue)', flexShrink: 0 })
+                const partRow = (p, depth) => {
+                  const off = hiddenPids.has(p.pid)
+                  return (
+                    <div key={p.pid} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0 5px ' + (depth * 14 + 22) + 'px', opacity: off ? 0.5 : 1 }}>
+                      <button type="button" style={mark(sel.has(p.pid))} onClick={() => toggleSel([p.pid])}>{sel.has(p.pid) ? '✓' : ''}</button>
+                      <div onClick={() => toggleSel([p.pid])} style={{ flex: 1, minWidth: 0, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                        {p.des || p.pos ? <b style={{ fontWeight: 500 }}>{p.des || p.pos} </b> : ''}{p.name || 'Деталь'}{p.size ? <span style={{ color: 'var(--text-hint)' }}> · {p.size}</span> : ''}
+                      </div>
+                      <button type="button" style={eye(off)} onClick={() => toggleHide([p.pid])}>{off ? '○' : '●'}</button>
+                    </div>
+                  )
+                }
+                const nodeRow = (n, depth) => {
+                  const open = openNodes.has(n.key)
+                  const on = n.pids.every(q => sel.has(q)), some = !on && n.pids.some(q => sel.has(q))
+                  const off = n.pids.every(q => hiddenPids.has(q))
+                  return (
+                    <div key={n.key}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0 6px ' + depth * 14 + 'px', borderTop: depth ? 'none' : '0.5px solid var(--border)', opacity: off ? 0.5 : 1 }}>
+                        <button type="button" onClick={() => toggleNode(n.key)} style={{ background: 'none', border: 'none', padding: 0, width: 16, fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>{open ? '▾' : '▸'}</button>
+                        <button type="button" style={mark(on, some)} onClick={() => toggleSel(n.pids)}>{on ? '✓' : some ? '–' : ''}</button>
+                        <div onClick={() => toggleNode(n.key)} style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: depth ? 400 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                          {n.name} <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}>· {n.pids.length}</span>
+                        </div>
+                        <button type="button" style={eye(off)} onClick={() => toggleHide(n.pids)}>{off ? '○' : '●'}</button>
+                      </div>
+                      {open && n.children.map(c => nodeRow(c, depth + 1))}
+                      {open && n.parts.map(p => partRow(p, depth + 1))}
+                    </div>
+                  )
+                }
+                return (
+                  <>
+                    {tree.children.map(c => nodeRow(c, 0))}
+                    {tree.parts.length > 0 && tree.children.length > 0 && <div style={{ fontSize: 11, color: 'var(--text-hint)', padding: '8px 0 2px', borderTop: '0.5px solid var(--border)' }}>Вне блоков</div>}
+                    {tree.parts.map(p => partRow(p, -1))}
+                  </>
+                )
+              })()}
+            </div>
+            <div style={{ padding: '8px 10px', borderTop: '0.5px solid var(--border-md)' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
+                {sel.size ? `Отмечено деталей: ${sel.size}` : 'Галочка — отметить блок или деталь, ● — показать или скрыть'}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {editable && <button type="button" disabled={!sel.size} onClick={() => startMove()} style={{ ...smallBtn, background: 'var(--blue)', color: 'white', border: 'none', opacity: sel.size ? 1 : 0.5 }}>✥ Двигать</button>}
+                <button type="button" disabled={!sel.size} onClick={() => { isolate(sel); setShowTree(false) }} style={{ ...smallBtn, opacity: sel.size ? 1 : 0.5 }}>Оставить только их</button>
+                <button type="button" disabled={!sel.size} onClick={() => setSel(new Set())} style={{ ...smallBtn, opacity: sel.size ? 1 : 0.5 }}>Снять отметки</button>
+                {hiddenPids.size > 0 && <button type="button" onClick={showAll} style={{ ...smallBtn, color: 'var(--blue)', borderColor: 'var(--blue)' }}>Показать всё</button>}
+              </div>
+            </div>
+          </div>
+        )}
         {showViews && (
           <div style={{ position: 'absolute', left: 8, right: 8, top: 8, zIndex: 2, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, background: 'var(--bg)', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', padding: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
             {VIEWS.map(([id, label, dir]) => <button key={id} type="button" style={{ ...smallBtn, padding: '8px 4px' }} onClick={() => lookFrom(dir)}>{label}</button>)}
@@ -988,7 +1246,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
           </div>
         )}
         {(hiddenPids.size > 0 || multi) && !showViews && (
-          <div style={{ position: 'absolute', left: 8, right: 8, top: 8, zIndex: 1, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', left: 8, right: 90, top: 8, zIndex: 1, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', pointerEvents: 'none' }}>
             {hiddenPids.size > 0 && (
               <button type="button" onClick={showAll} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)', color: 'var(--blue)', borderColor: 'var(--blue)' }}>
                 Показано {shownCount} из {shownCount + hiddenPids.size} · показать всё
@@ -1127,6 +1385,9 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
             <button type="button" style={menuBtn} onClick={() => isolate([menu.pid])}>Оставить только эту деталь</button>
             <button type="button" style={menuBtn} onClick={() => { setMulti(true); setSel(new Set([...(multi ? sel : []), menu.pid])); setMenu(null) }}>Выбрать несколько деталей…</button>
             <button type="button" style={menuBtn} onClick={() => hidePids([menu.pid])}>Скрыть деталь</button>
+            {editable && menuPart.product && <button type="button" style={menuBtn} onClick={() => startMove(parts.filter(q => q.product === menuPart.product).map(q => q.pid))}>✥ Двигать блок «{menuPart.product}»</button>}
+            {editable && sel.size > 1 && sel.has(menu.pid) && <button type="button" style={menuBtn} onClick={() => startMove()}>✥ Двигать выбранные ({sel.size})</button>}
+            {editable && !menuPart.hardware && <button type="button" style={menuBtn} onClick={() => startMove([menu.pid])}>✥ Двигать только эту деталь</button>}
             {editable && menuPart.inOrder && menuPart.di >= 0 && <button type="button" style={menuBtn} onClick={() => openEditor(menu.pid)}>Править деталь: контур, паз, присадка…</button>}
             {hiddenPids.size > 0 && <button type="button" style={{ ...menuBtn, color: 'var(--blue)' }} onClick={showAll}>Показать всё</button>}
           </div>
@@ -1139,6 +1400,29 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
           <input type="range" min="0" max="100" step="1" value={Math.round(explode * 100)} style={{ flex: 1 }} onChange={e => setExplode(Number(e.target.value) / 100)} />
           <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 36, textAlign: 'right' }}>{Math.round(explode * 100)}%</span>
           <button type="button" style={smallBtn} onClick={() => { setExplode(0); setShowExplode(false) }}>Собрать</button>
+        </div>
+      )}
+      {/* перемещение блоков: одна ось свободна, остальные закреплены; упор — вплотную к соседним деталям */}
+      {tool === 'move' && !showMats && !menu && (
+        <div style={dock}>
+          <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
+            {AXES.map(([label], k) => <button key={k} type="button" style={chip(moveAxis === k)} onClick={() => setMoveAxis(k)}>{label}</button>)}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+              Сдвиг, мм: {AXES.map(([, n], k) => <span key={n} style={{ marginRight: 8, color: k === moveAxis ? 'var(--blue)' : undefined, fontWeight: k === moveAxis ? 500 : 400 }}>{n} {moveVec[k] > 0 ? '+' : ''}{moveVec[k]}</span>)}
+            </span>
+            {[-10, -1, 1, 10].map(v => <button key={v} type="button" style={{ ...smallBtn, padding: '5px 9px' }} disabled={!moveSet} onClick={() => nudge(v)}>{v > 0 ? '+' : '−'}{Math.abs(v)}</button>)}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" style={{ ...wideBtn(true), opacity: moveVec.some(v => v) ? 1 : 0.5 }} disabled={!moveVec.some(v => v)} onClick={applyMove}>Применить</button>
+            <button type="button" style={wideBtn(false)} onClick={() => setTool('move')}>Отмена</button>
+            <button type="button" style={{ ...wideBtn(false), flex: 'none' }} onClick={() => setShowTree(true)}>☰ Выбор</button>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+            {moveSet ? `Двигается: ${sel.size} дет.${moveSet.size > sel.size ? ` и фурнитура (${moveSet.size - sel.size})` : ''}. ` : 'Ничего не отмечено — нажмите «Выбор». '}
+            Тяните отмеченное пальцем: оно едет только вдоль выбранной оси, по остальным закреплено, и останавливается вплотную к соседним деталям (зазор 0). Детали, которые уже вошли друг в друга, развести можно — обратно не заедут.
+          </p>
         </div>
       )}
       {/* кромка */}

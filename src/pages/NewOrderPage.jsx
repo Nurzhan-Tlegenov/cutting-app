@@ -632,7 +632,8 @@ export default function NewOrderPage() {
           </p>
           <Model3DButton details={details} title={orderName} getScene={async () => (model3d ? (await import('../lib/basisB3d')).unpackScene(model3d) : null)}
             edgeNames={edgeNames} materialThickness={materialThickness}
-            onDetailsChange={list => setDetails(list.map(d => (d.uid ? d : { ...d, uid: ++uid })))} />
+            onDetailsChange={list => setDetails(list.map(d => (d.uid ? d : { ...d, uid: ++uid })))}
+            onSceneChange={async s => { if (s) setModel3d((await import('../lib/basisB3d')).packScene(s)) }} />
           <select value="" onChange={e => { const m = e.target.value; if (m) setDetails(d => sortDetails(d, m)) }}
             style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--blue)', borderColor: 'var(--blue-mid)', borderRadius: 20 }}>
             <option value="">Сортировать…</option>
