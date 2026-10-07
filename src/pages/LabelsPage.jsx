@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles } from '../lib/labelMaker'
+import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import SaveFilesDialog from '../components/SaveFilesDialog'
@@ -199,6 +199,7 @@ export default function LabelsPage() {
   const [tpl, setTpl] = useState(() => getLabelTpl(user))
   const [setup, setSetup] = useState(() => !getLabelTpl(user).enabled)
   const [busy, setBusy] = useState(false)
+  const [pdf, setPdf] = useState('')                 // ход сборки PDF
   const [saveAsk, setSaveAsk] = useState(null)       // файлы стола бирковки: вопрос «по отдельности или архивом»
   const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
   useEffect(() => {
@@ -220,6 +221,17 @@ export default function LabelsPage() {
   const undo = () => { const prev = hist[hist.length - 1]; if (!prev) return; setHist(h => h.slice(0, -1)); setTpl(prev); saveLabelTpl(prev, user) }
   const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { apply({ ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }) } }
   // файлы стола бирковки — тем же набором, что делает ЧПУ вместе с G-кодом
+  // все бирки одним PDF: бирка — страница, страница размером с бирку
+  const savePdf = async () => {
+    setPdf('Готовим PDF…')
+    try {
+      const data = await buildLabelsPdf({ order, mat, tpl, onProgress: (a, b) => setPdf(`PDF: ${a} из ${b}`) })
+      const url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
+      const a = document.createElement('a'); a.href = url; a.download = `Birki_${safeName(order.order_number)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}.pdf`
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 5000)
+    } finally { setPdf('') }
+  }
   const exportFiles = async () => {
     setBusy(true)
     try {
@@ -238,6 +250,7 @@ export default function LabelsPage() {
           <div style={{ fontWeight: 500 }}>Бирки</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span style={{ fontFamily: 'monospace' }}>{order.order_number}</span> · {total} шт. · {tpl.w}×{tpl.h} мм</div>
         </div>
+        {mat && <button onClick={savePdf} disabled={!!pdf} style={{ ...pill, background: 'var(--teal)' }}>{pdf || '⬇ PDF'}</button>}
         {mat && <button onClick={() => window.print()} style={pill}>🖨 Печать</button>}
       </div>
 

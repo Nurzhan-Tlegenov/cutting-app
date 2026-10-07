@@ -7,7 +7,7 @@
 //   <N>_<заказ>_<0001>.bmp      — картинка бирки;   <N>_<заказ>.jpg — картинка листа.
 // На линии сначала идёт бирковка листа, затем раскрой.
 import qrcode from 'qrcode-generator'
-import { zipSync, strToU8 } from 'fflate'
+import { zipSync, zlibSync, strToU8 } from 'fflate'
 import { getUserSettings, saveUserSettings } from './userSettings'
 import { loadLabelImages, saveLabelImage } from './materialTextures'
 import { detailMeta } from './partLabel'
@@ -569,3 +569,49 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
 }
 
 export const zipFiles = files => zipSync(Object.fromEntries(files.map(f => [f.name, typeof f.data === 'string' ? strToU8(f.data) : f.data])), { level: 6 })
+
+/**
+ * Все бирки материала одним PDF: одна бирка — одна страница, размер страницы = размер бирки.
+ * Бирка на странице — чёрно-белая картинка в разрешении печати (не меньше 300 dpi).
+ * onProgress(сделано, всего) — для счётчика. -> Uint8Array
+ */
+export async function buildLabelsPdf({ order, mat, tpl, onProgress }) {
+  await preloadLabelImages(tpl)
+  const k = Math.max(12, pxMm(tpl)), W = Math.round(tpl.w * k), H = Math.round(tpl.h * k)
+  const pw = (tpl.w * 72 / 25.4).toFixed(2), ph = (tpl.h * 72 / 25.4).toFixed(2)
+  const total = mat.sheets.reduce((a, sh) => a + sh.placed.length, 0)
+  const chunks = [], offsets = []
+  let size = 0
+  const put = d => { const b = typeof d === 'string' ? strToU8(d) : d; chunks.push(b); size += b.length }
+  const obj = (n, body, stream) => { offsets[n] = size; put(`${n} 0 obj\n${body}\n`); if (stream) { put('stream\n'); put(stream); put('\nendstream\n') } put('endobj\n') }
+  put('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n')
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H
+  const row = Math.ceil(W / 8), kids = []
+  let n = 3, done = 0
+  for (let si = 0; si < mat.sheets.length; si++) {
+    const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
+    for (let pi = 0; pi < sheet.placed.length; pi++) {
+      drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
+      const px = cv.getContext('2d').getImageData(0, 0, W, H).data, bits = new Uint8Array(row * H)
+      for (let y = 0; y < H; y++) for (let x = 0, i = y * W * 4; x < W; x++, i += 4) if ((px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10 >= 140) bits[y * row + (x >> 3)] |= 0x80 >> (x & 7)
+      const img = zlibSync(bits, { level: 6 }), content = `q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`
+      const page = n, cont = n + 1, im = n + 2; n += 3
+      kids.push(`${page} 0 R`)
+      obj(page, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${cont} 0 R >>`)
+      obj(cont, `<< /Length ${content.length} >>`, content)
+      obj(im, `<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /FlateDecode /Length ${img.length} >>`, img)
+      onProgress?.(++done, total)
+      if (done % 8 === 0) await new Promise(r => setTimeout(r))      // не замораживаем экран
+    }
+  }
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>')
+  obj(2, `<< /Type /Pages /Count ${kids.length} /Kids [${kids.join(' ')}] >>`)
+  const xref = size
+  put(`xref\n0 ${n}\n0000000000 65535 f \n`)
+  for (let i = 1; i < n; i++) put(String(offsets[i]).padStart(10, '0') + ' 00000 n \n')
+  put(`trailer\n<< /Size ${n} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`)
+  const out = new Uint8Array(size)
+  let o = 0
+  for (const c of chunks) { out.set(c, o); o += c.length }
+  return out
+}
