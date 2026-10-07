@@ -122,7 +122,7 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
 }
 
 // Список деталей колонкой: Поз. | Длина | Ширина | Шт. Под размером — черта на каждую закромленную сторону
-const LW = 50, LROW = 6.6, LC = [5, 19.5, 35, 46]            // ширина колонки и середины столбцов, мм
+const LW = 44, LROW = 6.6, LC = [4.5, 16.5, 30, 40.2]            // ширина колонки и середины столбцов, мм
 function listHead(ctx, x, y) {
   ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(x), mm(y), mm(LW), mm(6))
   ;['Поз.', 'Длина', 'Ширина', 'Шт.'].forEach((t, i) => text(ctx, t, x + LC[i], y + 4.1, { size: 2.6, bold: true, color: MUTED, align: 'center' }))
@@ -177,11 +177,11 @@ export async function buildNestingPdf({ order, mat, onProgress }) {
     text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
   }
   const edgeBlock = (x, y, title, e, w) => {
-    text(ctx, title, x, y, { size: 2.7, color: MUTED }); y += 5.6
-    text(ctx, `${m2(e.total)} м`, x, y, { size: 4.6, bold: true, color: e.total > 0 ? INK : MUTED }); y += 4
+    text(ctx, title, x, y, { size: 2.6, color: MUTED }); y += 4.6
+    text(ctx, `${m2(e.total)} м`, x, y, { size: 3.8, bold: true, color: e.total > 0 ? INK : MUTED })
     const names = Object.entries(e.byName)
-    if (names.length > 1) for (const [n, v] of names.slice(0, 3)) { text(ctx, `${n}: ${m2(v)} м`, x, y, { size: 2.6, color: MUTED, max: w }); y += 3.5 }
-    return y + 2.5
+    if (names.length > 1) text(ctx, names.slice(0, 3).map(([n, v]) => `${n} ${m2(v)}`).join(' · '), x + 19, y, { size: 2.3, color: MUTED, max: w - 19 })
+    return y + 5
   }
   sheets.forEach((sheet, si) => {
     const geo = geos[si], { rows, noOf } = sheetRows(sheet, details)
@@ -189,32 +189,31 @@ export async function buildNestingPdf({ order, mat, onProgress }) {
     pages.push(() => {
       header(si, false)
       // схема листа — слева, на всю ширину до списка
-      const box = drawSheet(ctx, 10, LIST_TOP, 136, 190, sheet, geo, details, noOf)
+      const box = drawSheet(ctx, 10, LIST_TOP, 142, 214, sheet, geo, details, noOf)
       // список деталей листа — колонкой справа
       const lx = 200 - LW
       let ly = listHead(ctx, lx, LIST_TOP)
       for (let i = 0; i < first; i++) ly = listRow(ctx, lx, ly, rows[i])
       if (rows.length > first) text(ctx, 'продолжение списка — на след. странице', 200, LIST_BOTTOM + 2.6, { size: 2.3, color: MUTED, align: 'right' })
-      // сведения о листе — под схемой, три столбца
-      const y0 = box.bottom + 7, c1 = 10, c2 = 56, c3 = 102
+      // сведения о листе — под схемой, сжато, три столбца
+      const y0 = Math.min(box.bottom + 6, 249), c1 = 10, c2 = 50, c3 = 104
       const pct = geo.usableX * geo.usableY > 0 ? used[si] / (geo.usableX * geo.usableY) * 100 : 0
       let y = y0
-      text(ctx, 'Использовано материала', c1, y, { size: 2.7, color: MUTED }); y += 9.5
-      text(ctx, `${Math.round(pct)} %`, c1, y, { size: 9, bold: true }); y += 3.5
-      ctx.fillStyle = '#E9E6DD'; ctx.fillRect(mm(c1), mm(y), mm(38), mm(2))
-      ctx.fillStyle = INK; ctx.fillRect(mm(c1), mm(y), mm(38 * Math.min(100, pct) / 100), mm(2)); y += 8
-      text(ctx, 'Всего по материалу', c1, y, { size: 2.7, color: MUTED }); y += 4.4
-      text(ctx, `листов ${sheets.length} · деталей ${totalParts}`, c1, y, { size: 3.1, bold: true, max: 42 }); y += 4.4
-      text(ctx, `использовано ${Math.round(totalArea > 0 ? totalUsed / totalArea * 100 : 0)} %`, c1, y, { size: 3.1, bold: true })
-      const info = [['Лист, мм', `${fmt(geo.sheetL)} × ${fmt(geo.sheetW)}`], ['Рабочая область, мм', `${fmt(geo.usableY)} × ${fmt(geo.usableX)}`], ['Рез, мм', fmt(geo.kerf)],
-        ['Деталей на листе', sheet.placed.length], ['Площадь деталей, м²', m2(used[si] / 1e6)],
-        ...((sheet.manualOffcuts || []).length ? [['Деловые обрезки, мм', sheet.manualOffcuts.map(o => `${Math.round(o.h)}×${Math.round(o.w)}`).join(', ')]] : [])]
+      text(ctx, 'Использовано материала', c1, y, { size: 2.6, color: MUTED }); y += 6.4
+      text(ctx, `${Math.round(pct)} %`, c1, y, { size: 5.6, bold: true }); y += 2.2
+      ctx.fillStyle = '#E9E6DD'; ctx.fillRect(mm(c1), mm(y), mm(30), mm(1.4))
+      ctx.fillStyle = INK; ctx.fillRect(mm(c1), mm(y), mm(30 * Math.min(100, pct) / 100), mm(1.4)); y += 6
+      text(ctx, `Всего: листов ${sheets.length}, деталей ${totalParts}`, c1, y, { size: 2.6, color: MUTED, max: 37 }); y += 3.8
+      text(ctx, `использовано ${Math.round(totalArea > 0 ? totalUsed / totalArea * 100 : 0)} %`, c1, y, { size: 2.6, color: MUTED })
+      const info = [['Лист, мм', `${fmt(geo.sheetL)} × ${fmt(geo.sheetW)}`], ['Рабочая область', `${fmt(geo.usableY)} × ${fmt(geo.usableX)}`], ['Рез, мм', fmt(geo.kerf)],
+        ['Деталей на листе', sheet.placed.length], ['Площадь деталей', `${m2(used[si] / 1e6)} м²`],
+        ...((sheet.manualOffcuts || []).length ? [['Обрезки, мм', sheet.manualOffcuts.map(o => `${Math.round(o.h)}×${Math.round(o.w)}`).join(', ')]] : [])]
       y = y0
-      for (const [k, v] of info) { text(ctx, k, c2, y, { size: 2.7, color: MUTED }); text(ctx, v, c2, y + 4.2, { size: 3.3, bold: true, max: 43 }); y += 8.6 }
-      y = edgeBlock(c3, y0, 'Кромка на этом листе', edges[si], 44)
-      y = edgeBlock(c3, y + 1, sheets.length > 1 ? `Кромка всего, ${sheets.length} лист.` : 'Кромка всего', edgeAll, 44)
-      text(ctx, over > 0 ? `со свесами ${fmt(over)} мм на сторону` : 'без свесов', c3, y, { size: 2.5, color: MUTED }); y += 4
-      if (rows.some(r => r.cut)) text(ctx, 'Размеры в списке — заготовки (с учётом кромки).', c3, y, { size: 2.5, color: MUTED, max: 44 })
+      for (const [k, v] of info) { text(ctx, k, c2, y, { size: 2.6, color: MUTED }); text(ctx, v, c2 + 25, y, { size: 2.9, bold: true, max: 26 }); y += 4.3 }
+      y = edgeBlock(c3, y0, 'Кромка на этом листе', edges[si], 46)
+      y = edgeBlock(c3, y, sheets.length > 1 ? `Кромка всего, ${sheets.length} лист.` : 'Кромка всего', edgeAll, 46)
+      text(ctx, over > 0 ? `со свесами ${fmt(over)} мм на сторону` : 'без свесов', c3, y, { size: 2.5, color: MUTED }); y += 3.6
+      if (rows.some(r => r.cut)) text(ctx, 'Размеры в списке — заготовки (с учётом кромки).', c3, y, { size: 2.5, color: MUTED, max: 46 })
       // условные обозначения — внизу страницы
       y = 282
       rule(ctx, 10, y - 0.9, 17, y - 0.9, 0.7, EDGE); text(ctx, 'сторона с кромкой', 19, y, { size: 2.5, color: MUTED })
@@ -223,13 +222,13 @@ export async function buildNestingPdf({ order, mat, onProgress }) {
       rule(ctx, 10, y - 1.5, 17, y - 1.5, 0.38, EDGE); rule(ctx, 10, y - 0.5, 17, y - 0.5, 0.38, EDGE)
       text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', 19, y, { size: 2.5, color: MUTED })
     })
-    for (let from = first; from < rows.length; from += PER_COL * 3) {
+    for (let from = first; from < rows.length; from += PER_COL * 4) {
       pages.push(() => {
         header(si, true)
-        for (let c = 0; c < 3; c++) {
+        for (let c = 0; c < 4; c++) {
           const part = rows.slice(from + c * PER_COL, from + (c + 1) * PER_COL)
           if (!part.length) break
-          const x = 10 + c * (LW + 20)
+          const x = 10 + c * (LW + 4.6)
           let ty = listHead(ctx, x, LIST_TOP)
           for (const r of part) ty = listRow(ctx, x, ty, r)
         }
