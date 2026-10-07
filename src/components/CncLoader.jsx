@@ -91,7 +91,7 @@ export default function CncLoader({ label = 'Загрузка…', full = false,
   const [hint, setHint] = useState(0)
   useEffect(() => { const t = setInterval(() => setHint(h => (h + 1) % HINTS.length), 4000); return () => clearInterval(t) }, [])
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: compact ? 12 : '16px 0',
+    <div className="wait-screen" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: compact ? 12 : '16px 0',
       ...(full ? { minHeight: '100vh' } : { minHeight: compact ? 0 : '70vh' }), ...style }}>
       <LiveSheets label={label} compact={compact} />
       <div style={{ fontSize: compact ? 12 : 16, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</div>

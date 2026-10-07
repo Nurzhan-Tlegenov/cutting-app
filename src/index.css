@@ -88,3 +88,13 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 .bottom-nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; text-decoration: none; color: var(--text-hint); font-size: 10px; padding: 4px 0; }
 .bottom-nav a.active { color: var(--blue); }
 .bottom-nav a svg { width: 22px; height: 22px; stroke-width: 1.5; }
+
+/* Плавные переходы между экранами: всё, что появляется на странице (сама страница после перехода, содержимое
+   после загрузки, окна поверх), проявляется мягко, а не вспыхивает. Только прозрачность — без сдвигов,
+   поэтому не тормозит и не ломает закреплённые панели. */
+@keyframes soft-in { from { opacity: 0 } to { opacity: 1 } }
+.page > * { animation: soft-in 0.28s ease-out both; }
+/* Экран ожидания: при быстрой загрузке (до 0,15 с) не показывается вовсе, при долгой — проявляется плавно */
+.wait-screen { animation: soft-in 0.35s ease-out 0.15s both; }
+.bottom-nav, .page > .bottom-nav { animation: none; }
+@media (prefers-reduced-motion: reduce) { .page > *, .wait-screen { animation: none; } }
