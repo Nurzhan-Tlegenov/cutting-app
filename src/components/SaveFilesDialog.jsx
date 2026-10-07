@@ -5,8 +5,8 @@ import { zipSync, strToU8 } from 'fflate'
 // files — [{ name, data: строка | Uint8Array }]; zipName — имя архива; onDone(сообщение) — что получилось.
 // folders — вложенные папки, в которые кладутся файлы: [заказ, материал]. При сохранении по отдельности они
 // создаются внутри выбранной папки; в архиве файлы лежат в этих же папках.
-// «Отправить в приложение» — системное меню «Поделиться» (Яндекс Диск, мессенджеры…): показывается, только если
-// браузер умеет передавать такие файлы; выбор «куда сохранить» у обычного сохранения задаёт телефон, не приложение.
+// «Поделиться» — системное меню телефона (мессенджеры, облачные диски); выбор «куда сохранить» у обычного
+// сохранения задаёт телефон, не приложение.
 const bytes = d => (typeof d === 'string' ? strToU8(d) : d)
 function download(name, data, type = 'application/octet-stream') {
   const url = URL.createObjectURL(new Blob([data], { type }))
@@ -22,12 +22,20 @@ export default function SaveFilesDialog({ files, zipName, onClose, onDone, folde
   const path = folders.filter(Boolean)
   const zipData = () => zipSync(Object.fromEntries(files.map(f => [[...path, f.name].join('/'), bytes(f.data)])), { level: 6 })
   const zipFile = () => new File([zipData()], zipName, { type: 'application/zip' })
-  let canShare
-  try { canShare = !!navigator.canShare && navigator.canShare({ files: [new File([new Uint8Array(1)], zipName, { type: 'application/zip' })] }) } catch { canShare = false }
+  // «Поделиться» — системное меню телефона (мессенджеры, облачные диски). Сначала пробуем отдать файлы по отдельности;
+  // если браузер такие файлы передавать не разрешает (у него свой список типов) — архивом. Папок при передаче
+  // по отдельности не бывает: приложение-получатель получает просто набор файлов; папки сохраняются только в архиве.
+  const MIME = { bmp: 'image/bmp', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf', xml: 'text/xml', txt: 'text/plain', csv: 'text/csv' }
+  const asFiles = () => files.map(f => new File([bytes(f.data)], f.name, { type: MIME[f.name.split('.').pop().toLowerCase()] || 'text/plain' }))
+  const can = list => { try { return !!navigator.canShare && navigator.canShare({ files: list }) } catch { return false } }
+  const shareMode = can(files.map(f => new File([new Uint8Array(1)], f.name, { type: MIME[f.name.split('.').pop().toLowerCase()] || 'text/plain' }))) ? 'files'
+    : can([new File([new Uint8Array(1)], zipName, { type: 'application/zip' })]) ? 'zip' : ''
   const share = async () => {
-    setBusy('Собираем архив…')
-    try { await navigator.share({ files: [zipFile()], title: zipName }); done(`Архив «${zipName}» передан в выбранное приложение`) }
-    catch (e) { setBusy(''); if (e?.name !== 'AbortError') window.alert('Не удалось передать файл в другое приложение. Сохраните архив и загрузите его на диск вручную.') }
+    setBusy(shareMode === 'zip' ? 'Собираем архив…' : 'Готовим файлы…')
+    try {
+      await navigator.share({ files: shareMode === 'zip' ? [zipFile()] : asFiles(), title: path.join(' / ') || zipName })
+      done(shareMode === 'zip' ? `Архив «${zipName}» передан в выбранное приложение` : `Файлы (${files.length}) переданы в выбранное приложение`)
+    } catch (e) { setBusy(''); if (e?.name !== 'AbortError') window.alert('Не удалось передать файлы в другое приложение. Сохраните их архивом и отправьте из памяти телефона.') }
   }
   const done = msg => { setBusy(''); onDone?.(msg); onClose() }
   const asZip = () => {
@@ -69,12 +77,12 @@ export default function SaveFilesDialog({ files, zipName, onClose, onDone, folde
             </p>
             <button type="button" className="btn-secondary" onClick={asZip}>Одним архивом (zip)</button>
             {path.length > 0 && <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 10px' }}>В архиве файлы лежат в папках «{path.join('/')}».</p>}
-            {canShare && (
-              <>
-                <button type="button" className="btn-secondary" onClick={share}>Отправить в приложение (Яндекс Диск и др.)</button>
-                <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>Откроется меню «Поделиться» телефона — выберите Яндекс Диск или другое приложение; архив уйдёт туда.</p>
-              </>
-            )}
+            <button type="button" className="btn-secondary" disabled={!shareMode} onClick={share} style={{ opacity: shareMode ? 1 : 0.5 }}>Поделиться…</button>
+            <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>
+              {shareMode === 'files' ? `Откроется меню «Поделиться» телефона — мессенджер или облачный диск. Уйдут файлы по отдельности (${files.length} шт.); папки при такой передаче не создаются — их создаёт только сохранение в папку или архив.`
+                : shareMode === 'zip' ? `Откроется меню «Поделиться» телефона — мессенджер или облачный диск. Файлы этого типа по отдельности браузер передавать не разрешает, поэтому уйдёт архив${path.length ? ` с папками «${path.join('/')}» внутри` : ''}.`
+                  : 'В этом браузере меню «Поделиться» для таких файлов недоступно. Сохраните архив и отправьте его из памяти телефона.'}
+            </p>
             <button type="button" onClick={onClose} style={{ width: '100%', marginTop: 10, padding: 9, background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 14 }}>Отмена</button>
           </>
         )}
