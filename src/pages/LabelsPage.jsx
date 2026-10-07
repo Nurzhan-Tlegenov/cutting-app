@@ -3,14 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 
 // Бирки деталей по принятому раскрою. Бирку собирает пользователь: размер и какие параметры детали на ней есть.
 // На бирке — карта раскроя, где эта деталь закрашена чёрным. Шаблон идёт за аккаунтом; с ним же ЧПУ делает
-// файлы для стола бирковки.
+// файлы для маркировочного стола.
 const CSS = `
 .lbl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .lbl-grid canvas { width: 100%; height: auto; border: 1px solid #2C2C2A; border-radius: 3px; background: #fff; display: block; }
@@ -200,7 +200,7 @@ export default function LabelsPage() {
   const [setup, setSetup] = useState(() => !getLabelTpl(user).enabled)
   const [busy, setBusy] = useState(false)
   const [pdf, setPdf] = useState('')                 // ход сборки PDF
-  const [saveAsk, setSaveAsk] = useState(null)       // файлы стола бирковки: вопрос «по отдельности или архивом»
+  const [saveAsk, setSaveAsk] = useState(null)       // файлы маркировочного стола: вопрос «по отдельности или архивом»
   const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
   useEffect(() => {
     let alive = true
@@ -220,7 +220,7 @@ export default function LabelsPage() {
   const change = patch => apply(normalizeLabel({ ...tpl, ...patch, enabled: true }))
   const undo = () => { const prev = hist[hist.length - 1]; if (!prev) return; setHist(h => h.slice(0, -1)); setTpl(prev); saveLabelTpl(prev, user) }
   const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { apply({ ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }) } }
-  // файлы стола бирковки — тем же набором, что делает ЧПУ вместе с G-кодом
+  // файлы маркировочного стола — тем же набором, что делает ЧПУ вместе с G-кодом
   // все бирки одним PDF: бирка — страница, страница размером с бирку
   const savePdf = async () => {
     setPdf('Готовим PDF…')
@@ -320,9 +320,9 @@ export default function LabelsPage() {
             <button type="button" onClick={() => { if (window.confirm('Вернуть раскладку по образцу?')) change(resizeLabel({ ...DEFAULT_LABEL(), rot: tpl.rot }, tpl.w, tpl.h)) }}
               style={{ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ Раскладка по образцу</button>
             <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
-              Шаблон сохраняется в аккаунте. Когда он настроен, в разделе ЧПУ при создании G-кода появляется галочка «Программа для стола бирковки».
+              Шаблон сохраняется в аккаунте. Когда он настроен, в разделе ЧПУ при создании G-кода появляется галочка «Программа для маркировочного стола».
             </p>
-            {mat && <button type="button" className="btn-secondary" style={{ marginTop: 10 }} disabled={busy} onClick={exportFiles}>{busy ? 'Собираем файлы…' : '⬇ Файлы для стола бирковки'}</button>}
+            {mat && <button type="button" className="btn-secondary" style={{ marginTop: 10 }} disabled={busy} onClick={exportFiles}>{busy ? 'Собираем файлы…' : '⬇ Файлы для маркировочного стола'}</button>}
           </div>
         )}
       </div>
@@ -337,7 +337,7 @@ export default function LabelsPage() {
         <div key={si} style={{ marginBottom: 14 }}>
           <p className="section-title no-print">{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
           <div className="lbl-grid">
-            {sh.placed.map((p, pi) => <Label key={pi} tpl={tpl} order={order} mat={mat} si={si} pi={pi} />)}
+            {labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual').map(pi => <Label key={pi} tpl={tpl} order={order} mat={mat} si={si} pi={pi} />)}
           </div>
         </div>
       ))}

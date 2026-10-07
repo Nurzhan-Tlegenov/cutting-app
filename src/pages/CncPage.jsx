@@ -108,9 +108,9 @@ export default function CncPage() {
       return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
     })
     setBuilt({ files }); setSaved('')
-    // бирковка: файлы стола бирковки для тех же листов (на линии сначала бирки, потом раскрой)
+    // маркировка: файлы маркировочного стола для тех же листов (на линии сначала бирки, потом раскрой)
     const ok = files.filter(f => !f.empty)
-    if (post.labelTable && ok.length) {                  // стол бирковки включён у постпроцессора (вкладка «Основные»)
+    if (post.labelTable && ok.length) {                  // маркировочный стол включён у постпроцессора (вкладка «Основные»)
       setLabelBusy(true)
       buildLabelFiles({ order, mat, base: baseName(), post, tpl: labelTpl, sheets: ok.map(f => ({ si: f.si, nc: f.name })) })
         .then(labels => setBuilt(b => (b && b.files === files ? { ...b, labels } : b)))
@@ -148,7 +148,7 @@ export default function CncPage() {
   const closeSim = () => navigate(-1)
   const [saved, setSaved] = useState('')
   // все файлы — отдельными файлами (не архивом): в выбранную папку, а где браузер этого не умеет — загрузками по одному
-  // сохранение нескольких файлов — через вопрос «по отдельности или архивом»; сначала бирковка, потом раскрой
+  // сохранение нескольких файлов — через вопрос «по отдельности или архивом»; сначала маркировка, потом раскрой
   const [saveAsk, setSaveAsk] = useState(null)      // { files, zipName }
   const labelFiles = () => (built.labels || []).map(f => ({ name: f.name, data: f.data }))
   const saveAll = () => setSaveAsk({ files: [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))], zipName: `${baseName()}.zip` })
@@ -278,7 +278,7 @@ export default function CncPage() {
           )}
           {post.labelTable && (
             <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-              🏷 Вместе с G-кодом будут созданы файлы стола бирковки (бирка {labelTpl.w}×{labelTpl.h} мм).{' '}
+              🏷 Вместе с G-кодом будут созданы файлы маркировочного стола (бирка {labelTpl.w}×{labelTpl.h} мм).{' '}
               <span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => navigate(`/orders/${id}/labels`)}>Шаблон бирки</span>
               {' · '}<span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => setTab('basic')}>отключить</span>
             </p>
@@ -287,11 +287,11 @@ export default function CncPage() {
           {labelBusy && <CncLoader compact label="Рисуем бирки…" />}
           {built?.labels?.length > 0 && (
             <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>Стол бирковки</div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>Маркировочный стол</div>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
-                Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт бирковка, затем раскрой.
+                Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт маркировка, затем раскрой.
               </div>
-              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${baseName()}.zip` })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы бирковки</button>
+              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${baseName()}.zip` })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
             </div>
           )}
           {built && (built.files.filter(f => !f.empty).length > 1 || built.labels?.length > 0) && (

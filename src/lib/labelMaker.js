@@ -1,11 +1,11 @@
-// Бирка детали: шаблон (размер + какие параметры показывать), рисование на canvas и файлы для стола бирковки.
+// Бирка детали: шаблон (размер + какие параметры показывать), рисование на canvas и файлы для маркировочного стола.
 // Шаблон идёт за аккаунтом (user_metadata.app_settings.labelTpl).
 //
 // Файлы для линии раскроя (как в образцах):
 //   List_<заказ>.xml            — список листов: программа раскроя, файл бирок, картинка листа, толщина;
 //   Label_<N>_<заказ>.cyc       — бирки листа N: картинка бирки и точка наклейки X, Y (центр детали на листе), R — поворот;
 //   <N>_<заказ>_<0001>.bmp      — картинка бирки;   <N>_<заказ>.jpg — картинка листа.
-// На линии сначала идёт бирковка листа, затем раскрой.
+// На линии сначала идёт маркировка листа, затем раскрой.
 import qrcode from 'qrcode-generator'
 import { zipSync, zlibSync, strToU8 } from 'fflate'
 import { getUserSettings, saveUserSettings } from './userSettings'
@@ -535,7 +535,33 @@ const xml = (cycles) => '﻿' + ['<?xml version="1.0" encoding="UTF-8"?>', '<Cyc
   ...fields.map(([k, v]) => `    <Field Name="${k}" Value="${String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"/>`), '  </Cycle>']), '</CycleFile>', ''].join('\r\n')
 
 /**
- * Файлы стола бирковки для выбранных листов.
+ * Порядок бирок листа: номера деталей (индексы в sheet.placed).
+ *  'manual' — клеит человек: сначала левая половина листа (по X) снизу вверх по Y, затем правая половина снизу вверх —
+ *             с каждой стороны станка человек обклеивает свою половину и не бегает вокруг стола;
+ *  'table'  — маркировочный стол: от X0 Y0 «змейкой» — ряд по возрастанию X, следующий ряд (выше по Y) по убыванию X
+ *             и так до конца листа, без холостых переездов.
+ */
+export function labelOrder(sheet, geo, mode = 'manual') {
+  const items = (sheet.placed || []).map((p, pi) => {
+    const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
+    const xs = pts.map(q => q.x), ys = pts.map(q => q.y)
+    return { pi, cx: geo.marginL + p.x + (Math.min(...xs) + Math.max(...xs)) / 2, cy: geo.marginB + p.y + (Math.min(...ys) + Math.max(...ys)) / 2, h: Math.max(...ys) - Math.min(...ys) }
+  })
+  if (mode === 'table') {
+    const left = items.slice().sort((a, b) => a.cy - b.cy || a.cx - b.cx), out = []
+    for (let r = 0; left.length; r++) {
+      const band = left[0].cy + Math.max(150, left[0].h * 0.5)        // ряд: детали, центры которых примерно на одной высоте
+      const row = left.filter(q => q.cy <= band).sort((a, b) => (r % 2 ? b.cx - a.cx : a.cx - b.cx))
+      out.push(...row); row.forEach(q => left.splice(left.indexOf(q), 1))
+    }
+    return out.map(q => q.pi)
+  }
+  const half = geo.sheetW / 2
+  return items.sort((a, b) => (a.cx >= half) - (b.cx >= half) || a.cy - b.cy || a.cx - b.cx).map(q => q.pi)
+}
+
+/**
+ * Файлы маркировочного стола для выбранных листов.
  * sheets: [{ si, nc }] — номер листа и имя его программы раскроя; base — общая часть имени (заказ); post — постпроцессор (начало обработки).
  * -> [{ name, data: Uint8Array }]
  */
@@ -547,10 +573,11 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet), stem = `${si + 1}_${base}`
     const cyc = `Label_${stem}.cyc`, jpg = `${stem}.jpg`
     const cycles = []
-    sheet.placed.forEach((p, pi) => {
+    labelOrder(sheet, geo, 'table').forEach((pi, seq) => {            // файлы и точки наклейки — в порядке обхода стола
+      const p = sheet.placed[pi]
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h
       drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[p.detailIndex] })
-      const bmp = `${stem}_${String(pi + 1).padStart(4, '0')}.bmp`
+      const bmp = `${stem}_${String(seq + 1).padStart(4, '0')}.bmp`
       files.push({ name: bmp, data: canvasToBmp(cv, tpl.dpi) })
       // точка наклейки — центр детали; бирки клеятся в одном положении (R = 0), как в образцах
       const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
@@ -590,7 +617,7 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress }) {
   let n = 3, done = 0
   for (let si = 0; si < mat.sheets.length; si++) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
-    for (let pi = 0; pi < sheet.placed.length; pi++) {
+    for (const pi of labelOrder(sheet, geo, 'manual')) {            // страницы — в порядке ручной наклейки
       drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
       const px = cv.getContext('2d').getImageData(0, 0, W, H).data, bits = new Uint8Array(row * H)
       for (let y = 0; y < H; y++) for (let x = 0, i = y * W * 4; x < W; x++, i += 4) if ((px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10 >= 140) bits[y * row + (x >> 3)] |= 0x80 >> (x & 7)

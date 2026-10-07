@@ -562,7 +562,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const add = list => { const o = shortenTravel(nearestOrder(list, cur), cur); seq.push(...o); if (o.length) cur = o[o.length - 1].at }
   const stage0 = jobs.filter(j => j.stage === 0)
   ;[...new Set(stage0.map(j => j.tool))].sort((a, b) => toolRank(a) - toolRank(b)).forEach(t => {
-    [0, 1, 2, 3].forEach(rank => add(stage0.filter(j => j.tool === t && j.rank === rank)))
+    add(stage0.filter(j => j.tool === t))          // инструмент проходит всё своё одним кратчайшим маршрутом, потом — смена
   })
   const stage1 = jobs.filter(j => j.stage === 1)
   const prevTool = seq[seq.length - 1]?.tool

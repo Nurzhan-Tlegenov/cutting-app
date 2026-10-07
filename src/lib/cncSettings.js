@@ -16,7 +16,7 @@ export const DEFAULT_POST = () => ({
   millOver: 0.15,                 // заглубление фрезы в жертвенный стол при сквозном резе
   drillOver: 1,                   // заглубление сверла при сквозном отверстии
   ext: 'nc',
-  labelTable: false,              // у станка есть стол бирковки: вместе с G-кодом делаются файлы бирок (List.xml, Label_N.cyc, картинки)
+  labelTable: false,              // у станка есть маркировочный стол: вместе с G-кодом делаются файлы бирок (List.xml, Label_N.cyc, картинки)
   // Команды
   cmdStart: 'M16\nG54',
   cmdToolStart: 'G53 Z0\nM05\nM06 T{T}\nG43 H{T}\nM03 S{S}',
