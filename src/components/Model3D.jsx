@@ -140,6 +140,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const [editing, setEditing] = useState(null)                   // правка детали в редакторе контура: { di, draft }
   const [undoN, setUndoN] = useState(0)
   const [newScheme, setNewScheme] = useState(null)               // форма «новый крепёж» (создаётся прямо в 3D)
+  const [treeW, setTreeW] = useState(null)                       // ширина структуры, пока её тянут (потом — в настройках вида)
+  const treeDrag = useRef(null)
   const [showTree, setShowTree] = useState(false)                // структура модели (блоки и детали) — панель слева
   const [openNodes, setOpenNodes] = useState(() => new Set())
   const [moveAxis, setMoveAxis] = useState(0)                    // перемещение: свободная ось (0 — X, 1 — Y, 2 — Z), остальные закреплены
@@ -1202,11 +1204,36 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
             </button>
             <button type="button" onClick={() => stateRef.current?.resetView()} title="Изометрия, вся модель"
               style={{ ...smallBtn, padding: '3px 6px', fontSize: 10, background: 'var(--bg)' }}>⌂ Изометрия</button>
+            {/* инструменты для отмеченных деталей (или всей модели): кромка и крепёж */}
+            {editable && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                {[['edge', 'Кромка: закромить торцы, которые смотрят на вас',
+                  <svg key="e" width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="12" rx="1" stroke="currentColor" strokeWidth="1.4" /><rect x="3" y="4" width="18" height="3.4" rx="1" fill="#ff6a00" /></svg>],
+                ['drill', 'Крепёж: распознать стыки и установить крепёж',
+                  <svg key="d" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M7 4h10l-1.2 3.2H8.2z" fill="currentColor" stroke="none" /><path d="M12 7.2V20l0 0M9.3 10l5.4 1.6M9.3 13l5.4 1.6M9.3 16l5.4 1.6" /></svg>]].map(([id, hint, icon]) => (
+                  <button key={id} type="button" title={hint} aria-label={hint} onClick={() => setTool(id)}
+                    style={{ position: 'relative', width: 42, height: 42, padding: 0, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                      border: tool === id ? 'none' : '0.5px solid var(--blue-mid)', background: tool === id ? 'var(--blue)' : 'var(--bg)', color: tool === id ? 'white' : 'var(--blue)', boxShadow: '0 1px 4px rgba(0,0,0,0.10)' }}>
+                    {icon}
+                    {sel.size > 0 && <span style={{ position: 'absolute', top: -5, right: -5, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, background: '#ff6a00', color: 'white', fontSize: 10, lineHeight: '16px', textAlign: 'center' }}>{sel.size}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {/* структура модели: изделия → блоки → детали */}
         {showTree && (
-          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, zIndex: 7, width: 'min(84%, 330px)', display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderRight: '0.5px solid var(--border-md)', boxShadow: '4px 0 16px rgba(0,0,0,0.10)' }}>
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, zIndex: 7, width: Math.round(treeW ?? view.treeW ?? 300), maxWidth: 'calc(100% - 28px)', minWidth: 150, display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderRight: '0.5px solid var(--border-md)', boxShadow: '4px 0 16px rgba(0,0,0,0.10)' }}>
+            {/* ползунок ширины: тянуть за правый край; ширина запоминается */}
+            <div title="Тяните, чтобы изменить ширину"
+              onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); treeDrag.current = { x: e.clientX, w: e.currentTarget.parentElement.offsetWidth } }}
+              onPointerMove={e => { const d = treeDrag.current; if (d) setTreeW(Math.max(150, Math.min((hostRef.current?.clientWidth || 400) - 28, d.w + e.clientX - d.x))) }}
+              onPointerUp={() => { if (treeDrag.current) { treeDrag.current = null; if (treeW != null) setView({ treeW: Math.round(treeW) }) } }}
+              onPointerCancel={() => { treeDrag.current = null }}
+              style={{ position: 'absolute', top: 0, bottom: 0, right: -14, width: 28, zIndex: 2, cursor: 'ew-resize', touchAction: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 6, height: 54, borderRadius: 3, background: 'var(--blue)', opacity: 0.75, boxShadow: '0 0 0 2px var(--bg)' }} />
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', padding: '8px 10px 4px' }}>
               <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>Структура модели</div>
               <button type="button" onClick={() => setShowTree(false)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--text-hint)' }}>✕</button>
@@ -1263,12 +1290,10 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
             </div>
             <div style={{ padding: '8px 10px', borderTop: '0.5px solid var(--border-md)' }}>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
-                {sel.size ? `Отмечено деталей: ${sel.size}` : 'Галочка — отметить блок или деталь, ● — показать или скрыть'}
+                {sel.size ? `Отмечено деталей: ${sel.size}` : 'Галочка — отметить блок или деталь, ● — показать или скрыть'}{editable && sel.size > 0 ? ' · кромка и крепёж — значки справа под кубом' : ''}
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {editable && <button type="button" disabled={!sel.size} onClick={() => startMove()} style={{ ...smallBtn, background: 'var(--blue)', color: 'white', border: 'none', opacity: sel.size ? 1 : 0.5 }}>✥ Двигать</button>}
-                {editable && <button type="button" disabled={!sel.size} onClick={() => { setShowTree(false); if (tool !== 'edge') setTool('edge') }} style={{ ...smallBtn, color: 'var(--blue)', borderColor: 'var(--blue)', opacity: sel.size ? 1 : 0.5 }}>Кромка</button>}
-                {editable && <button type="button" disabled={!sel.size} onClick={() => { setShowTree(false); if (tool !== 'drill') setTool('drill') }} style={{ ...smallBtn, color: 'var(--blue)', borderColor: 'var(--blue)', opacity: sel.size ? 1 : 0.5 }}>Крепёж</button>}
                 <button type="button" disabled={!sel.size} onClick={() => { const keep = new Set(sel); isolate(keep); setSel(keep); setShowTree(false) }} style={{ ...smallBtn, opacity: sel.size ? 1 : 0.5 }}>Оставить только их</button>
                 <button type="button" disabled={!sel.size} onClick={() => setSel(new Set())} style={{ ...smallBtn, opacity: sel.size ? 1 : 0.5 }}>Снять отметки</button>
                 {hiddenPids.size > 0 && <button type="button" onClick={showAll} style={{ ...smallBtn, color: 'var(--blue)', borderColor: 'var(--blue)' }}>Показать всё</button>}
