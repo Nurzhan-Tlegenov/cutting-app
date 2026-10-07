@@ -1,6 +1,7 @@
 // Импорт списка деталей из таблиц: Excel (.xlsx/.xls), CSV/TXT,
 // выгрузки Базис-Мебельщик и PRO100.
 // Модуль без React: чтение файла -> таблица строк -> распознавание колонок -> детали.
+import { importRetry } from './lazyRetry.js'
 
 // Роли колонок
 export const ROLES = [
@@ -90,16 +91,16 @@ export async function readTableFile(file) {
     const head = text.slice(0, 300).trimStart().toLowerCase()
     if (head.startsWith('<')) {
       // «.xls», который на самом деле HTML- или XML-таблица
-      const XLSX = await import('@e965/xlsx')
+      const XLSX = await importRetry(() => import('@e965/xlsx'))
       const wb = XLSX.read(text, { type: 'string' })
       sheets = wb.SheetNames.map(n => ({ name: n, rows: XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: '', raw: true }) }))
     } else {
       sheets = [{ name: file.name, rows: parseDelimited(text) }]
     }
   } else {
-    const XLSX = await import('@e965/xlsx')
+    const XLSX = await importRetry(() => import('@e965/xlsx'))
     if (isOle) {
-      const cptable = await import('@e965/xlsx/dist/cpexcel.full.mjs')
+      const cptable = await importRetry(() => import('@e965/xlsx/dist/cpexcel.full.mjs'))
       XLSX.set_cptable(cptable)
     }
     const wb = XLSX.read(u8, isOle ? { type: 'array', codepage: 1251 } : { type: 'array' })

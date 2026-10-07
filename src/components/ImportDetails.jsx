@@ -1,4 +1,11 @@
 import { useState, useRef, useMemo } from 'react'
+// Чтение моделей лежит в основной части приложения, а не подгружается отдельно: после обновления приложения
+// у открытой страницы адреса подгружаемых частей устаревают, и импорт падал с «Failed to fetch dynamically imported module».
+import { readBasisFile, packScene } from '../lib/basisB3d'
+import { readAstraFile } from '../lib/astraAdd'
+import { readAstraXmlFile, looksLikeAstraXml } from '../lib/astraXml'
+import { readPro100Obj } from '../lib/pro100Obj'
+import { millsFromItems, mergeMills } from '../lib/facadeCarve'
 import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importDetails'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -35,25 +42,21 @@ async function readModelFile(file, faceRule) {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
   const lower = file.name.toLowerCase()
   if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
-    const { readBasisFile } = await import('../lib/basisB3d')
     return { src: 'basis', res: await readBasisFile(file, { faceRule }) }
   }
   const ole = head[0] === 0xD0 && head[1] === 0xCF && head[2] === 0x11 && head[3] === 0xE0
   if (lower.endsWith('.add') || (ole && !/\.xls$/.test(lower))) {
-    const { readAstraFile } = await import('../lib/astraAdd')
     return { src: 'astra', res: await readAstraFile(file, { faceRule }) }
   }
   // XML-экспорт Астры
   const h = new TextDecoder('latin1').decode(head)
   if (lower.endsWith('.xml') || h.trimStart().startsWith('<')) {
-    const { readAstraXmlFile, looksLikeAstraXml } = await import('../lib/astraXml')
     const probe = new TextDecoder('latin1').decode(new Uint8Array(await file.slice(0, 4000).arrayBuffer()))
     if (!looksLikeAstraXml(probe) && !/<data_order|<list_materials/.test(probe)) throw new Error('это не XML-экспорт Астры (нужен файл из «Файл → Экспорт XML»)')
     return { src: 'astra', res: await readAstraXmlFile(file, { faceRule }) }
   }
   // модель PRO100, сохранённая в OBJ
   if (lower.endsWith('.obj')) {
-    const { readPro100Obj } = await import('../lib/pro100Obj')
     return { src: 'pro100', res: await readPro100Obj(file, { faceRule }) }
   }
   return null
@@ -173,12 +176,11 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const doImport = async () => {
     let model3d = null
     if (basis?.scene) {
-      try { const { packScene } = await import('../lib/basisB3d'); model3d = packScene(basis.scene) } catch { model3d = null }
+      try { model3d = packScene(basis.scene) } catch { model3d = null }
     }
     if (basis) {
       // типы фасадных фрез из модели — в каталог пользователя (Профиль → Фасадные фрезы)
       try {
-        const { millsFromItems, mergeMills } = await import('../lib/facadeCarve')
         const found = millsFromItems(basis.items)
         if (found.length) saveUserSettings({ facadeMills: mergeMills(getUserSettings(user).facadeMills, found) }, user)
       } catch { /* каталог — не главное */ }

@@ -16,3 +16,14 @@ export function lazyRetry(load) {
     throw err
   }))
 }
+
+// То же для подгружаемых библиотек (чтение Excel, QR): страницу сами не перезагружаем — в ней может быть
+// несохранённый заказ, — а говорим человеку понятными словами, что делать.
+export function importRetry(load) {
+  return load().catch(() => load()).catch(err => {
+    if (/dynamically imported module|Importing a module script failed|module script|Failed to fetch/i.test(String(err?.message || err))) {
+      throw new Error('приложение обновилось, а эта страница открыта в старой версии. Сохраните заказ, обновите страницу (потяните вниз или закройте и откройте приложение) и повторите')
+    }
+    throw err
+  })
+}
