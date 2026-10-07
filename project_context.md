@@ -10,7 +10,7 @@
 - **Backend/DB**: Supabase (PostgreSQL + Auth + RLS)
 - **Хостинг**: Vercel (автодеплой из GitHub)
 - **Репозиторий**: https://github.com/Nurzhan-Tlegenov/cutting-app
-- **Prod URL**: https://cutting-app-nine.vercel.app
+- **Prod URL**: https://raskroypro.com (свой домен, куплен в Vercel 2026-10-07). Старый адрес https://cutting-app-nine.vercel.app переадресуется на него (`vercel.json` → `redirects` по host). В Supabase Auth: Site URL и Redirect URLs — `https://raskroypro.com`.
 - **Supabase**: https://bmcmyrdsxievaglpspcn.supabase.co
 
 ## Стандарт координат (мебельный)
