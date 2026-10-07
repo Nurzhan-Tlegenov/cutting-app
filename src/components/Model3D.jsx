@@ -11,7 +11,7 @@ import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { loadTextures, saveTexture, deleteTexture, fileToTexture, textureKey } from '../lib/materialTextures'
 import { orderParts, segFace, edgeTargetAt, applyEdgeOps, findJoints, partGroups, applyJoints, clearJoints, jointsDone, contourOf, BUILTIN_SCHEMES, schemeFace, schemeEdge } from '../lib/model3dEdit'
 import { loadHardwarePresets, saveHardwarePreset } from '../lib/hardwarePresets'
-import { blockTree, partBox, hardwareLinks, movingSet, sweepLimits, clampMove, moveModel } from '../lib/model3dMove'
+import { blockTree, partBox, hardwareLinks, movingSet, sweepLimits, clampMove, moveModel, rotateModel, planStretch, stretchModel } from '../lib/model3dMove'
 import ShareLinkBox from './ShareLinkBox'
 import { lazyRetry } from '../lib/lazyRetry'
 const ContourEditor = lazyRetry(() => import('./ContourEditor'))
@@ -28,6 +28,8 @@ const LABELS = [['none', 'Без подписей'], ['pos', 'Позиция'], 
 const CUBE = [['Перед', [0, 0, 1], ''], ['Зад', [0, 0, -1], 'rotateY(180deg)'], ['Право', [1, 0, 0], 'rotateY(90deg)'], ['Лево', [-1, 0, 0], 'rotateY(-90deg)'],
   ['Верх', [0, 1, 0.0001], 'rotateX(90deg)'], ['Низ', [0, -1, 0.0001], 'rotateX(-90deg)']]
 const AXES = [['← → Влево-вправо', 'X'], ['↑ ↓ Вверх-вниз', 'Y'], ['Вперёд-назад', 'Z']]
+// изменение размера блока: название размера и какие края можно закрепить (минус / плюс по оси)
+const SIZES = [['Ширина', 'левый край', 'правый край'], ['Высота', 'низ', 'верх'], ['Глубина', 'задний край', 'передний край']]
 const HOLD_MS = 550
 const labelText = (p, mode) => {
   if (mode === 'name') return p.name || ''
@@ -145,6 +147,9 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const [showTree, setShowTree] = useState(false)                // структура модели (блоки и детали) — панель слева
   const [openNodes, setOpenNodes] = useState(() => new Set())
   const [moveAxis, setMoveAxis] = useState(0)                    // перемещение: свободная ось (0 — X, 1 — Y, 2 — Z), остальные закреплены
+  const [moveMode, setMoveMode] = useState('move')               // 'move' — сдвиг · 'size' — размер блока · 'turn' — поворот на 90°
+  const [sizeFix, setSizeFix] = useState('min')                  // какой край блока закреплён при изменении размера
+  const [sizeVal, setSizeVal] = useState('')
   const [moveVec, setMoveVec] = useState([0, 0, 0])              // ещё не применённый сдвиг выбранного, мм
   const cubeRef = useRef(null)
   const dragRef = useRef(null)
@@ -1025,8 +1030,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const startMove = pids => {
     const list = pids ? [...pids] : [...sel]
     setMenu(null)
-    if (!list.length) { setShowTree(true); say('Отметьте в структуре блок или детали, которые нужно подвинуть'); return }
     if (pids) setSel(new Set(list))
+    if (!list.length) say('Отметьте блок или детали (тапом, долгим нажатием или в «Структуре»). Повернуть можно и всю модель сразу')
     setShowTree(false)
     if (tool !== 'move') setTool('move')
   }
@@ -1042,16 +1047,65 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     setMoveVec(v => v.map((x, k) => (k === moveAxis ? Math.round((x + r.t) * 10) / 10 : x)))
     if (r.stop) say(`Упор — вплотную к «${stopName(r.stop)}»`)
   }
-  const applyMove = () => {
-    if (!moveSet || !moveVec.some(v => v)) { setTool('move'); return }
+  // отмеченные объекты -> где они лежат в заказе и в сохранённой модели
+  const mvOf = pids => {
     const mv = { parts: new Set(), ids: new Set(), sceneParts: new Set(), extras: new Set(), hardware: new Set() }
-    for (const pid of moveSet) {
+    for (const pid of pids) {
       const p = byPid.get(pid)
       if (!p) continue
       if (p.di >= 0) mv.parts.add(`${p.di}:${p.ii}`); else if (p.si != null) mv.sceneParts.add(`${p.si}:${p.ii}`); else if (p.xi != null) mv.extras.add(p.xi)
       if (p.id != null) mv.ids.add(p.id)
     }
-    for (const l of hwLinks) if (moveSet.has(l.pid)) mv.hardware.add(l.hi)
+    for (const l of hwLinks) if (pids.has(l.pid)) mv.hardware.add(l.hi)
+    return mv
+  }
+  const spanOf = (pids, axis) => {
+    let lo = Infinity, hi = -Infinity
+    for (const b of boxes) if (pids.has(b.pid)) { lo = Math.min(lo, b.min[axis]); hi = Math.max(hi, b.max[axis]) }
+    return lo <= hi ? [lo, hi] : null
+  }
+  const sizeSpan = tool === 'move' && moveSet ? spanOf(moveSet, moveAxis) : null
+  const sizeNow = sizeSpan ? Math.round((sizeSpan[1] - sizeSpan[0]) * 10) / 10 : null
+  // размер блока: всё по подвижную сторону от середины сдвигается, детали вдоль оси становятся длиннее или короче
+  const applySize = () => {
+    if (!moveSet || !sizeSpan) { say('Отметьте блок, размер которого нужно изменить'); return }
+    const target = numOf(sizeVal)
+    if (!(target > 1)) { say('Введите новый размер в мм'); return }
+    const delta = Math.round((target - sizeNow) * 10) / 10
+    if (!delta) { say('Размер уже такой'); return }
+    const dir = sizeFix === 'min' ? 1 : -1, plane = (sizeSpan[0] + sizeSpan[1]) / 2
+    const recs = stateRef.current?.recs
+    const hw = hwLinks.filter(l => moveSet.has(l.pid) && recs?.get(l.pid)).map(l => ({ pid: l.pid, c: recs.get(l.pid).center.toArray() }))
+    const plan = planStretch(boxes, moveSet, hw, moveAxis, plane, dir)
+    if (!plan.stretch.size && !plan.move.size) { say('В отмеченном нечего менять вдоль этой оси'); return }
+    const d = [0, 0, 0]; d[moveAxis] = dir * delta
+    let r = moveModel(details, savedScene, mvOf(plan.move), d)
+    const stc = { parts: new Set(), sceneParts: new Set(), extras: new Set() }
+    for (const pid of plan.stretch) {
+      const p = byPid.get(pid)
+      if (!p) continue
+      if (p.di >= 0) stc.parts.add(pid); else if (p.si != null) stc.sceneParts.add(`${p.si}:${p.ii}`); else if (p.xi != null) stc.extras.add(p.xi)
+    }
+    r = stretchModel(r.details, r.scene, stc, moveAxis, plane, dir, delta)
+    change(r.details, r.scene)
+    setMoveVec([0, 0, 0]); setSizeVal('')
+    say(`${SIZES[moveAxis][0]}: ${sizeNow} → ${target} мм · деталей изменено: ${plan.stretch.size}, сдвинуто: ${[...plan.move].filter(q => byPid.has(q)).length}. Проверьте присадку изменённых деталей`)
+  }
+  // поворот на 90°: отмеченное, а если ничего не отмечено — вся модель (например, модель пришла «лёжа»)
+  const applyTurn = (axis, turns) => {
+    const pids = moveSet || new Set([...parts.map(q => q.pid), ...hwLinks.map(l => l.pid)])
+    const all = boxes.filter(b => pids.has(b.pid))
+    if (!all.length) return
+    const c = [0, 1, 2].map(k => (Math.min(...all.map(b => b.min[k])) + Math.max(...all.map(b => b.max[k]))) / 2)
+    const r = rotateModel(details, savedScene, mvOf(pids), axis, turns, c)
+    fitNext.current = true
+    change(r.details, r.scene)
+    setMoveVec([0, 0, 0])
+    say(`${moveSet ? 'Отмеченное повёрнуто' : 'Вся модель повёрнута'} на 90° вокруг оси ${AXES[axis][1]}`)
+  }
+  const applyMove = () => {
+    if (!moveSet || !moveVec.some(v => v)) { setTool('move'); return }
+    const mv = mvOf(moveSet)
     const r = moveModel(details, savedScene, mv, moveVec)
     change(r.details, r.scene)
     say(`Сдвинуто: ${AXES.map(([, n], k) => (moveVec[k] ? `${n} ${moveVec[k] > 0 ? '+' : ''}${moveVec[k]}` : '')).filter(Boolean).join(' · ')} мм. Не забудьте сохранить заказ`)
@@ -1061,7 +1115,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   // что делать по тапу и долгому нажатию — сцена спрашивает это в момент события
   liveRef.current = {
     tool, say,
-    moveSet,
+    moveSet: moveMode === 'move' ? moveSet : null,
     moveBegin: () => { dragRef.current = { axis: moveAxis, limits: limitsFor(moveAxis), start: moveVec[moveAxis], cur: 0, stop: null }; return { axis: moveAxis } },
     moveTo: t => {
       const dg = dragRef.current
@@ -1210,8 +1264,10 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
                 {[['edge', 'Кромка: закромить торцы, которые смотрят на вас',
                   <svg key="e" width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="12" rx="1" stroke="currentColor" strokeWidth="1.4" /><rect x="3" y="4" width="18" height="3.4" rx="1" fill="#ff6a00" /></svg>],
                 ['drill', 'Крепёж: распознать стыки и установить крепёж',
-                  <svg key="d" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M7 4h10l-1.2 3.2H8.2z" fill="currentColor" stroke="none" /><path d="M12 7.2V20l0 0M9.3 10l5.4 1.6M9.3 13l5.4 1.6M9.3 16l5.4 1.6" /></svg>]].map(([id, hint, icon]) => (
-                  <button key={id} type="button" title={hint} aria-label={hint} onClick={() => setTool(id)}
+                  <svg key="d" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M7 4h10l-1.2 3.2H8.2z" fill="currentColor" stroke="none" /><path d="M12 7.2V20l0 0M9.3 10l5.4 1.6M9.3 13l5.4 1.6M9.3 16l5.4 1.6" /></svg>],
+                ['move', 'Двигать, менять размер блока, поворачивать',
+                  <svg key="m" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M3 12h18M12 3l-2.6 2.6M12 3l2.6 2.6M12 21l-2.6-2.6M12 21l2.6-2.6M3 12l2.6-2.6M3 12l2.6 2.6M21 12l-2.6-2.6M21 12l-2.6 2.6" /></svg>]].map(([id, hint, icon]) => (
+                  <button key={id} type="button" title={hint} aria-label={hint} onClick={() => (id === 'move' && tool !== 'move' ? startMove() : setTool(id))}
                     style={{ position: 'relative', width: 42, height: 42, padding: 0, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
                       border: tool === id ? 'none' : '0.5px solid var(--blue-mid)', background: tool === id ? 'var(--blue)' : 'var(--bg)', color: tool === id ? 'white' : 'var(--blue)', boxShadow: '0 1px 4px rgba(0,0,0,0.10)' }}>
                     {icon}
@@ -1472,23 +1528,78 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       {tool === 'move' && !showMats && !menu && (
         <div style={dock}>
           <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
-            {AXES.map(([label], k) => <button key={k} type="button" style={chip(moveAxis === k)} onClick={() => setMoveAxis(k)}>{label}</button>)}
+            {[['move', 'Сдвиг'], ['size', 'Размер блока'], ['turn', 'Поворот 90°']].map(([id, label]) => (
+              <button key={id} type="button" onClick={() => { setMoveMode(id); setMoveVec([0, 0, 0]) }}
+                style={{ flex: 1, padding: '6px 4px', fontSize: 12, borderRadius: 'var(--radius)', cursor: 'pointer', border: '0.5px solid ' + (moveMode === id ? 'var(--blue)' : 'var(--border-md)'), background: moveMode === id ? 'var(--blue-light)' : 'transparent', color: moveMode === id ? 'var(--blue-dark)' : 'var(--text-muted)', fontWeight: moveMode === id ? 500 : 400 }}>{label}</button>
+            ))}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)' }}>
-              Сдвиг, мм: {AXES.map(([, n], k) => <span key={n} style={{ marginRight: 8, color: k === moveAxis ? 'var(--blue)' : undefined, fontWeight: k === moveAxis ? 500 : 400 }}>{n} {moveVec[k] > 0 ? '+' : ''}{moveVec[k]}</span>)}
-            </span>
-            {[-10, -1, 1, 10].map(v => <button key={v} type="button" style={{ ...smallBtn, padding: '5px 9px' }} disabled={!moveSet} onClick={() => nudge(v)}>{v > 0 ? '+' : '−'}{Math.abs(v)}</button>)}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" style={{ ...wideBtn(true), opacity: moveVec.some(v => v) ? 1 : 0.5 }} disabled={!moveVec.some(v => v)} onClick={applyMove}>Применить</button>
-            <button type="button" style={wideBtn(false)} onClick={() => setTool('move')}>Отмена</button>
-            <button type="button" style={{ ...wideBtn(false), flex: 'none' }} onClick={() => setShowTree(true)}>☰ Выбор</button>
-          </div>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
-            {moveSet ? `Двигается: ${sel.size} дет.${moveSet.size > sel.size ? ` и фурнитура (${moveSet.size - sel.size})` : ''}. ` : 'Ничего не отмечено — нажмите «Выбор». '}
-            Тяните отмеченное пальцем: оно едет только вдоль выбранной оси, по остальным закреплено, и останавливается вплотную к соседним деталям (зазор 0). Детали, которые уже вошли друг в друга, развести можно — обратно не заедут.
-          </p>
+          {moveMode === 'move' && (
+            <>
+              <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
+                {AXES.map(([label], k) => <button key={k} type="button" style={chip(moveAxis === k)} onClick={() => setMoveAxis(k)}>{label}</button>)}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+                  Сдвиг, мм: {AXES.map(([, n], k) => <span key={n} style={{ marginRight: 8, color: k === moveAxis ? 'var(--blue)' : undefined, fontWeight: k === moveAxis ? 500 : 400 }}>{n} {moveVec[k] > 0 ? '+' : ''}{moveVec[k]}</span>)}
+                </span>
+                {[-10, -1, 1, 10].map(v => <button key={v} type="button" style={{ ...smallBtn, padding: '5px 9px' }} disabled={!moveSet} onClick={() => nudge(v)}>{v > 0 ? '+' : '−'}{Math.abs(v)}</button>)}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" style={{ ...wideBtn(true), opacity: moveVec.some(v => v) ? 1 : 0.5 }} disabled={!moveVec.some(v => v)} onClick={applyMove}>Применить</button>
+                <button type="button" style={wideBtn(false)} onClick={() => setTool('move')}>Отмена</button>
+                <button type="button" style={{ ...wideBtn(false), flex: 'none' }} onClick={() => setShowTree(true)}>☰ Выбор</button>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+                {moveSet ? `Двигается: ${sel.size} дет.${moveSet.size > sel.size ? ` и фурнитура (${moveSet.size - sel.size})` : ''}. ` : 'Ничего не отмечено — нажмите «Выбор». '}
+                Тяните отмеченное пальцем: оно едет только вдоль выбранной оси, по остальным закреплено, и останавливается вплотную к соседним деталям (зазор 0). Детали, которые уже вошли друг в друга, развести можно — обратно не заедут.
+              </p>
+            </>
+          )}
+          {moveMode === 'size' && (
+            <>
+              <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
+                {SIZES.map(([label], k) => <button key={k} type="button" style={chip(moveAxis === k)} onClick={() => { setMoveAxis(k); setSizeVal('') }}>{label}</button>)}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                <span>Сейчас: <b style={{ color: 'var(--text)' }}>{sizeNow ?? '—'}</b> мм</span>
+                <span>→ новый размер</span>
+                <input type="text" inputMode="decimal" value={sizeVal} placeholder={sizeNow != null ? String(sizeNow) : 'мм'} onChange={e => setSizeVal(e.target.value)} style={{ width: 84, padding: '5px 6px', fontSize: 13, textAlign: 'center' }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                <span style={{ flexShrink: 0 }}>Закреплён:</span>
+                {[['min', SIZES[moveAxis][1]], ['max', SIZES[moveAxis][2]]].map(([id, label]) => <button key={id} type="button" style={chip(sizeFix === id)} onClick={() => setSizeFix(id)}>{label}</button>)}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" style={{ ...wideBtn(true), opacity: moveSet && numOf(sizeVal) > 1 ? 1 : 0.5 }} disabled={!moveSet || !(numOf(sizeVal) > 1)} onClick={applySize}>Изменить размер</button>
+                <button type="button" style={wideBtn(false)} onClick={() => setTool('move')}>Закрыть</button>
+                <button type="button" style={{ ...wideBtn(false), flex: 'none' }} onClick={() => setShowTree(true)}>☰ Выбор</button>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+                {moveSet ? `Отмечено: ${sel.size} дет. ` : 'Отметьте блок — нажмите «Выбор». '}
+                Закреплённый край остаётся на месте, другой переезжает: детали вдоль размера (полки, дно, задняя стенка) становятся длиннее или короче, остальное сдвигается. Соседние блоки не двигаются — их при необходимости подвиньте «Сдвигом».
+              </p>
+            </>
+          )}
+          {moveMode === 'turn' && (
+            <>
+              {AXES.map(([, n], k) => (
+                <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Вокруг оси {n} <span style={{ color: 'var(--text-hint)' }}>({['влево-вправо', 'вверх-вниз', 'вперёд-назад'][k]})</span></span>
+                  <button type="button" style={{ ...smallBtn, padding: '6px 14px' }} onClick={() => applyTurn(k, 3)}>↺ 90°</button>
+                  <button type="button" style={{ ...smallBtn, padding: '6px 14px' }} onClick={() => applyTurn(k, 1)}>↻ 90°</button>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button type="button" style={wideBtn(false)} onClick={() => setTool('move')}>Закрыть</button>
+                {sel.size > 0 && <button type="button" style={wideBtn(false)} onClick={() => setSel(new Set())}>Вся модель</button>}
+                <button type="button" style={{ ...wideBtn(false), flex: 'none' }} onClick={() => setShowTree(true)}>☰ Выбор</button>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+                {moveSet ? `Поворачивается отмеченное: ${sel.size} дет. ` : 'Ничего не отмечено — поворачивается вся модель. '}
+                Если модель пришла «лёжа», поверните её здесь и поставьте как нужно; лишний поворот отменяется кнопкой «↶ Отменить».
+              </p>
+            </>
+          )}
         </div>
       )}
       {/* кромка */}
