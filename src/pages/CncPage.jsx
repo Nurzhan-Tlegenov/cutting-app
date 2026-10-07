@@ -8,8 +8,9 @@ import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { getCnc, fetchCnc, saveCnc, activePost, withShared } from '../lib/cncSettings'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor } from '../lib/gcode'
 import { listSharedPosts, saveSharedPost, removeSharedPost, sendNews } from '../lib/messages'
-import { getLabelTpl, buildLabelFiles, zipFiles } from '../lib/labelMaker'
+import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
+import SaveFilesDialog from '../components/SaveFilesDialog'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
 import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from '../lib/simShare'
@@ -147,21 +148,10 @@ export default function CncPage() {
   const closeSim = () => navigate(-1)
   const [saved, setSaved] = useState('')
   // все файлы — отдельными файлами (не архивом): в выбранную папку, а где браузер этого не умеет — загрузками по одному
-  const saveAll = async () => {
-    const files = [...(built.labels || []).map(f => ({ name: f.name, text: f.data })), ...built.files.filter(f => !f.empty)]   // сначала бирковка, потом раскрой
-    if (files.length > 1 && window.showDirectoryPicker) {
-      try {
-        const dir = await window.showDirectoryPicker({ mode: 'readwrite' })
-        for (const f of files) { const h = await dir.getFileHandle(f.name, { create: true }); const w = await h.createWritable(); await w.write(f.text); await w.close() }
-        setSaved(`Сохранено файлов: ${files.length} — в папку «${dir.name}»`)
-        return
-      } catch (e) { if (e?.name === 'AbortError') return }
-    }
-    if (built.labels?.length) download(`Birki_${baseName()}.zip`, zipFiles(built.labels), 'application/zip')
-    const nc = built.files.filter(f => !f.empty)
-    for (const f of nc) { await new Promise(r => setTimeout(r, 400)); download(f.name, f.text) }
-    setSaved(`Отправлено на сохранение: программ ${nc.length}${built.labels?.length ? ' + архив бирковки' : ''}`)
-  }
+  // сохранение нескольких файлов — через вопрос «по отдельности или архивом»; сначала бирковка, потом раскрой
+  const [saveAsk, setSaveAsk] = useState(null)      // { files, zipName }
+  const labelFiles = () => (built.labels || []).map(f => ({ name: f.name, data: f.data }))
+  const saveAll = () => setSaveAsk({ files: [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))], zipName: `${baseName()}.zip` })
   const simView = useMemo(() => {
     if (!sim || !mat) return null
     const sheet = mat.sheets[sim.si], geo = sheetGeo(order, mat.result, sheet)
@@ -304,7 +294,7 @@ export default function CncPage() {
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
                 Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт бирковка, затем раскрой.
               </div>
-              <button type="button" onClick={() => download(`Birki_${baseName()}.zip`, zipFiles(built.labels), 'application/zip')} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Скачать архивом</button>
+              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${baseName()}.zip` })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы бирковки</button>
             </div>
           )}
           {built && (built.files.filter(f => !f.empty).length > 1 || built.labels?.length > 0) && (
@@ -355,6 +345,7 @@ export default function CncPage() {
           </div>
         </div>
       )}
+      {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={setSaved} />}
       <BottomNav />
     </div>
   )

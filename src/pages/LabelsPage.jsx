@@ -3,9 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles, zipFiles } from '../lib/labelMaker'
+import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
+import SaveFilesDialog from '../components/SaveFilesDialog'
 
 // Бирки деталей по принятому раскрою. Бирку собирает пользователь: размер и какие параметры детали на ней есть.
 // На бирке — карта раскроя, где эта деталь закрашена чёрным. Шаблон идёт за аккаунтом; с ним же ЧПУ делает
@@ -197,6 +198,7 @@ export default function LabelsPage() {
   const [tpl, setTpl] = useState(() => getLabelTpl(user))
   const [setup, setSetup] = useState(() => !getLabelTpl(user).enabled)
   const [busy, setBusy] = useState(false)
+  const [saveAsk, setSaveAsk] = useState(null)       // файлы стола бирковки: вопрос «по отдельности или архивом»
   const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
   useEffect(() => {
     let alive = true
@@ -222,9 +224,7 @@ export default function LabelsPage() {
     try {
       const post = activePost(getCnc(user)), base = `${safeName(order.order_number)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}`
       const files = await buildLabelFiles({ order, mat, base, post, tpl, sheets: mat.sheets.map((_, si) => ({ si, nc: `${si + 1}_${base}.${post.ext || 'nc'}` })) })
-      const url = URL.createObjectURL(new Blob([zipFiles(files)], { type: 'application/zip' }))
-      const a = document.createElement('a'); a.href = url; a.download = `Birki_${base}.zip`; document.body.appendChild(a); a.click(); a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 3000)
+      setSaveAsk({ files, zipName: `Birki_${base}.zip` })
     } finally { setBusy(false) }
   }
   const pill = { padding: '8px 14px', borderRadius: 20, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 13 }
@@ -295,7 +295,7 @@ export default function LabelsPage() {
             <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
               Шаблон сохраняется в аккаунте. Когда он настроен, в разделе ЧПУ при создании G-кода появляется галочка «Программа для стола бирковки».
             </p>
-            {mat && <button type="button" className="btn-secondary" style={{ marginTop: 10 }} disabled={busy} onClick={exportFiles}>{busy ? 'Собираем файлы…' : '⬇ Файлы для стола бирковки (zip)'}</button>}
+            {mat && <button type="button" className="btn-secondary" style={{ marginTop: 10 }} disabled={busy} onClick={exportFiles}>{busy ? 'Собираем файлы…' : '⬇ Файлы для стола бирковки'}</button>}
           </div>
         )}
       </div>
@@ -314,6 +314,7 @@ export default function LabelsPage() {
           </div>
         </div>
       ))}
+      {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} />}
     </div>
   )
 }
