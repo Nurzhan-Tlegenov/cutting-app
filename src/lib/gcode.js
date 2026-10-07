@@ -436,6 +436,56 @@ function shortenTravel(items, from, fixed = 0) {
 }
 
 /**
+ * Порядок реза контуров деталей — без пробегов из конца в конец листа.
+ * list: [{ at: [x, y] — точка входа, box: [x0, y0, x1, y1], edgeDist, small }], from — где сейчас фреза.
+ *  • начинаем с детали у края листа, ближайшей к фрезе, и идём от соседа к соседу (каждый раз ближайшая деталь);
+ *  • центральная деталь листа (самая дальняя от краёв) режется последней — середину до конца не трогаем;
+ *  • smallFirst: мелкая деталь режется раньше своих соседей — пока лист вокруг неё цел и её держит вакуум;
+ *  • затем маршрут укорачивается разворотами участков (2-opt), не нарушая этих правил.
+ */
+export function routeContours(list, from, sheetRect, smallFirst = true) {
+  const n = list.length
+  if (n < 2) return list.slice()
+  const NEAR = 40                                        // мм: зазор, при котором детали — соседи
+  const gap = (a, b) => Math.max(a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], 0)
+  const D = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1])
+  // центральная деталь: дальше всех от краёв листа (при равенстве — ближе к центру)
+  const cx = (sheetRect.x0 + sheetRect.x1) / 2, cy = (sheetRect.y0 + sheetRect.y1) / 2
+  const mid = j => [(j.box[0] + j.box[2]) / 2, (j.box[1] + j.box[3]) / 2]
+  let centre = null
+  if (n > 3) centre = list.reduce((b, j) => (!b || j.edgeDist > b.edgeDist + 1 || (Math.abs(j.edgeDist - b.edgeDist) <= 1 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
+  if (centre && centre.edgeDist < 60) centre = null     // все детали у края — центральной нет
+  // кто кого ждёт: крупная деталь — своих мелких соседей; центральная — всех
+  const before = new Map(list.map(j => [j, []]))
+  if (smallFirst) for (const s of list) if (s.small) for (const b of list) if (!b.small && b !== s && gap(s, b) <= NEAR) before.get(b).push(s)
+  if (centre) for (const j of list) if (j !== centre && !before.get(j).includes(centre)) before.get(centre).push(j)
+  const valid = R => { const pos = new Map(R.map((j, i) => [j, i])); return R.every(j => before.get(j).every(q => pos.get(q) < pos.get(j))) }
+  // жадный обход: ближайшая из доступных; первая — у края листа
+  const me = Math.min(...list.map(j => j.edgeDist)), done = new Set(), R = []
+  let cur = from
+  while (R.length < n) {
+    let free = list.filter(j => !done.has(j) && before.get(j).every(q => done.has(q)))
+    if (!free.length) free = list.filter(j => !done.has(j))                       // на всякий случай: правила не должны запирать маршрут
+    if (!R.length) { const edge = free.filter(j => j.edgeDist <= me + NEAR); if (edge.length) free = edge }
+    const next = free.reduce((b, j) => (!b || D(j.at, cur) < D(b.at, cur) ? j : b), null)
+    R.push(next); done.add(next); cur = next.at
+  }
+  // 2-opt: разворот участка, если путь короче и правила целы
+  const pt = i => (i < 0 ? from : R[i].at)
+  for (let round = 0, better = true; better && round < 40; round++) {
+    better = false
+    for (let i = 0; i < n - 1; i++) for (let k = i + 1; k < n; k++) {
+      const a = pt(i - 1), b = pt(i), c = pt(k), e = k + 1 < n ? pt(k + 1) : null
+      if (D(a, c) + (e ? D(b, e) : 0) >= D(a, b) + (e ? D(c, e) : 0) - 1e-6) continue
+      const rev = () => { for (let l = i, r = k; l < r; l++, r--) { const t = R[l]; R[l] = R[r]; R[r] = t } }
+      rev()
+      if (valid(R)) better = true; else rev()
+    }
+  }
+  return R
+}
+
+/**
  * G-код одного листа.
  * sheet — лист из раскроя, geo — геометрия листа (sheetGeo), details — детали материала, thickness — толщина,
  * cnc — настройки (см. cncSettings.js).  -> { text, lines, warnings, tools }
@@ -568,44 +618,11 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const prevTool = seq[seq.length - 1]?.tool
   const cutTools = [...new Set(stage1.map(j => j.tool))].sort((a, b) => (b === prevTool) - (a === prevTool))
   cutTools.forEach(t => add(stage1.filter(j => j.tool === t && j.rank === 4)))
-  // Контуры деталей: сначала мелкие, затем остальные — от края листа по спирали к центру, центральная деталь — последней.
-  // Кольца: 0 — детали у края листа, 1 — их соседи внутрь листа и т.д. Внутри кольца — по кругу в одну сторону,
-  // начиная с ближайшей к фрезе детали: переезды короткие и идут вдоль уже вырезанного ряда.
-  const spiralOrder = list => {
-    if (list.length < 2) return list
-    const NEAR = 40                                      // мм: зазор, при котором детали — соседи
-    const gap = (a, b) => Math.max(a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], 0)
-    const me = Math.min(...list.map(j => j.edgeDist))
-    const ring = new Map(list.filter(j => j.edgeDist <= me + NEAR).map(j => [j, 0]))
-    for (let k = 0, grew = true; grew && ring.size < list.length; k++) {
-      grew = false
-      const front = list.filter(j => ring.get(j) === k)
-      for (const j of list) if (!ring.has(j) && front.some(q => gap(j, q) <= NEAR)) { ring.set(j, k + 1); grew = true }
-    }
-    const maxRing = Math.max(...ring.values())
-    list.forEach(j => { if (!ring.has(j)) ring.set(j, maxRing + 1) })     // отдельно стоящие — в конце
-    const cx = (sheetRect.x0 + sheetRect.x1) / 2, cy = (sheetRect.y0 + sheetRect.y1) / 2
-    const ang = j => Math.atan2(j.mid[1] - cy, j.mid[0] - cx)
-    const res = []
-    let pos = cur, sign = 0
-    for (let k = 0; k <= maxRing + 1; k++) {
-      const R = list.filter(j => ring.get(j) === k).sort((a, b) => ang(a) - ang(b))
-      if (!R.length) continue
-      let st = 0, bd = Infinity
-      R.forEach((j, i) => { const d = Math.hypot(j.at[0] - pos[0], j.at[1] - pos[1]); if (d < bd) { bd = d; st = i } })
-      const n = R.length, D = (a, b) => Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1])
-      if (!sign) sign = n > 2 && D(R[st], R[(st - 1 + n) % n]) < D(R[st], R[(st + 1) % n]) ? -1 : 1   // сторона обхода — одна на весь лист
-      for (let i = 0; i < n; i++) res.push(R[((st + sign * i) % n + n) % n])
-      pos = res[res.length - 1].at
-    }
-    return res
-  }
-  // Мелкие детали (если не отключено) — первыми, пока лист держит вакуум; затем остальные. И те и другие — по спирали от края.
+  // Контуры деталей — одним кратчайшим маршрутом, см. routeContours
   const smallFirst = ops.outer?.smallFirst !== false
   cutTools.forEach(t => {
-    const outer = stage1.filter(j => j.tool === t && j.rank === 5)
-    const groups = smallFirst ? [outer.filter(j => j.small), outer.filter(j => !j.small)] : [outer]
-    groups.forEach(g => { const r = spiralOrder(g); if (r.length) { seq.push(...r); cur = r[r.length - 1].at } })
+    const r = routeContours(stage1.filter(j => j.tool === t && j.rank === 5), cur, sheetRect, smallFirst)
+    if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
 
   const out = new Out(zTop ? T : 0)

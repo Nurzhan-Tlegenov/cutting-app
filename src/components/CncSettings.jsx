@@ -306,10 +306,10 @@ export function CncOps({ cnc, onChange, layers }) {
       <div className="divider" />
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
         <input type="checkbox" checked={o.smallFirst !== false} onChange={e => set('outer', { smallFirst: e.target.checked })} style={{ width: 18, height: 18 }} />
-        Мелкие детали вырезать первыми
+        Мелкую деталь вырезать раньше её соседей
       </label>
       <Num label="Мелкая деталь — площадь до" unit="м²" value={o.smallArea} onChange={v => set('outer', { smallArea: v })}
-        hint="Сначала режутся мелкие детали (если галочка стоит), затем остальные — от края листа по спирали к центру, центральная деталь последней. Рез начинается с угла со стороны середины листа — последним режется отрезок, отделяющий деталь от основной части листа, и деталь не сдвигается." />
+        hint="Контуры режутся одним кратчайшим маршрутом, без пробегов из конца в конец листа: от детали у края — к соседней, центральная деталь листа последней. Мелкая деталь (если галочка стоит) режется раньше своих соседей, пока лист вокруг неё цел. Рез начинается с угла со стороны середины листа — последним режется отрезок, отделяющий деталь от основной части листа, и деталь не сдвигается." />
       <div style={{ marginTop: 8 }}>
         <Num label="Количество проходов" value={o.passes} onChange={v => set('outer', { passes: Math.max(1, Math.min(6, Math.round(Number(v) || 1))) })} />
       </div>
