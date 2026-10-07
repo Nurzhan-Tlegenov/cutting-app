@@ -92,9 +92,11 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 /* Плавные переходы между экранами: всё, что появляется на странице (сама страница после перехода, содержимое
    после загрузки, окна поверх), проявляется мягко, а не вспыхивает. Только прозрачность — без сдвигов,
    поэтому не тормозит и не ломает закреплённые панели. */
+   Без fill-mode: после окончания анимация не должна оставаться на элементе, иначе он образует свой слой и
+   окна поверх (3D, диалоги) из шапки оказываются под соседними блоками страницы.
 @keyframes soft-in { from { opacity: 0 } to { opacity: 1 } }
-.page > * { animation: soft-in 0.28s ease-out both; }
+.page > * { animation: soft-in 0.28s ease-out; }
 /* Экран ожидания: запускается сразу при переходе и проявляется плавно */
-.wait-screen { animation: soft-in 0.25s ease-out both; }
+.wait-screen { animation: soft-in 0.25s ease-out; }
 .bottom-nav, .page > .bottom-nav { animation: none; }
 @media (prefers-reduced-motion: reduce) { .page > *, .wait-screen { animation: none; } }
