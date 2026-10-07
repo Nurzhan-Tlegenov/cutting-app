@@ -16,6 +16,8 @@ import { placedTurns, placedHoles } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
+import { orderTitle, toLatin } from './orderUtils'
+export { toLatin }
 
 // Бирка собирается из элементов: каждый можно поставить в любое место бирки и задать ему размер.
 // Элемент шаблона: { id, type, x, y, w, h (мм), size (высота шрифта, мм), bold, img }.
@@ -58,7 +60,6 @@ export const LABEL_ITEMS = [
 // Из чего собирается строка QR-кода — выбирает пользователь; порядок — как в этом списке
 export const QR_PARTS = [
   ['text', 'Свой текст'],
-  ['number', 'Номер заказа (присвоен приложением)'],
   ['order', 'Название заказа'],
   ['des', 'Обозначение детали'],
   ['name', 'Наименование детали'],
@@ -69,14 +70,10 @@ export const QR_PARTS = [
   ['sheet', 'Номер карты'],
   ['num', 'Номер детали на листе'],
 ]
-const QR_DEFAULT = { parts: ['number', 'sheet', 'num', 'des', 'size'], sep: ';', text: '', latin: false }
-// кириллица -> латиница (как в именах файлов образца: «Белый» -> «Belij»)
-const LAT = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'j', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'i', ь: '', э: 'e', ю: 'yu', я: 'ya',
-  ә: 'a', ғ: 'g', қ: 'k', ң: 'n', ө: 'o', ұ: 'u', ү: 'u', һ: 'h', і: 'i' }
-export const toLatin = str => String(str || '').replace(/[а-яёәғқңөұүһі]/gi, ch => { const l = LAT[ch.toLowerCase()] ?? ch; return ch === ch.toLowerCase() ? l : l.charAt(0).toUpperCase() + l.slice(1) })
+const QR_DEFAULT = { parts: ['order', 'sheet', 'num', 'des', 'size'], sep: ';', text: '', latin: false }
 export function labelQr(tpl, info) {
   const q = tpl.qr || QR_DEFAULT
-  const val = { text: q.text, number: info.orderNumber, order: info.orderName, des: info.des, name: info.name, pos: info.pos, prefix: info.prefix, material: info.materialName,
+  const val = { text: q.text, order: info.order, des: info.des, name: info.name, pos: info.pos, prefix: info.prefix, material: info.materialName,
     size: `${r1(info.length)}x${r1(info.width)}x${info.thickness || ''}`, sheet: `L${info.sheet}`, num: `N${info.num}` }
   const out = QR_PARTS.filter(([k]) => q.parts.includes(k)).map(([k]) => String(val[k] ?? '').trim()).filter(Boolean).join(q.sep)
   return (q.latin ? toLatin(out) : out).replace(/\s+/g, '_')        // пробелов в коде нет — вместо них прочерк
@@ -212,7 +209,7 @@ export function normalizeLabel(raw) {
     // contour — толщина линии контура, мм; hole — наименьший размер точки отверстия, мм; ring — отверстия кружком, без заливки
     part: { dims: !!t.part?.dims, dimSize: Math.max(1, Math.min(6, Number(t.part?.dimSize) || 2)),
       contour: Math.max(0.08, Math.min(0.8, Number(t.part?.contour) || 0.18)), hole: Math.max(0.15, Math.min(2, Number(t.part?.hole) || 0.35)), ring: !!t.part?.ring },
-    qr: { parts: Array.isArray(t.qr?.parts) ? t.qr.parts.filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin } }
+    qr: { parts: Array.isArray(t.qr?.parts) ? [...new Set(t.qr.parts.map(k => (k === 'number' ? 'order' : k)))].filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
 export function resizeLabel(tpl, w, h) {
@@ -252,7 +249,7 @@ export function labelInfo(order, mat, si, pi) {
   const cutouts = (c?.holes || []).filter(h => h.type !== 'pocket').length
   const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
-    order: [order.order_number, order.order_name].filter(Boolean).join(' '), orderNumber: order.order_number || '', orderName: order.order_name || '', materialName: mat.name || '',
+    order: orderTitle(order), materialName: mat.name || '',
     num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
     name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
     material: [mat.name, mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · '),
@@ -424,7 +421,7 @@ function fitText(ctx, text, maxW, size, weight = '') {
 /** Текст элемента бирки */
 export function labelText(type, info, tpl = null) {
   switch (type) {
-    case 'order': { const o = tpl?.order || { prefix: 'Заказ', number: true, name: true }; return [o.prefix, o.number && info.orderNumber, o.name && info.orderName].filter(Boolean).join(' ') }
+    case 'order': return [tpl?.order ? tpl.order.prefix : 'Заказ', info.order].filter(Boolean).join(' ')
     case 'material': return info.material
     case 'title': return [info.des, info.name].filter(Boolean).join(' ')
     case 'name': return info.name

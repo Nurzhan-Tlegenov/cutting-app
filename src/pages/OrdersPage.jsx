@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
+import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 import { simShareOrders } from '../lib/simShare'
@@ -159,13 +159,12 @@ export default function OrdersPage() {
                           {isSelected && <span style={{ color: 'white', fontSize: 12 }}>✓</span>}
                         </div>
                       )}
-                      <span style={{ fontWeight: 500, fontSize: 15, fontFamily: 'monospace' }}>{order.order_number}</span>
+                      <span style={{ fontWeight: 500, fontSize: 15, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(order)}</span>
                     </div>
                     <span className={`badge ${STATUS_BADGE[order.status] || 'badge-new'}`}>
                       {STATUS_LABELS[order.status] || order.status}
                     </span>
                   </div>
-                  {order.order_name && <div style={{ fontSize: 14, fontWeight: 500 }}>{order.order_name}</div>}
                   <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{order.material_name}</div>
                   {shares.has(order.id) && (
                     <div title="По ссылке 3D-модель этого заказа открыта для просмотра. Закрыть доступ можно в заказе."

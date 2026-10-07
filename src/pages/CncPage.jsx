@@ -10,6 +10,7 @@ import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, g
 import { listSharedPosts, saveSharedPost, removeSharedPost, sendNews } from '../lib/messages'
 import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
+import { orderTitle, orderFileName } from '../lib/orderUtils'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
@@ -99,7 +100,7 @@ export default function CncPage() {
     return w
   }, [layers, cnc])
 
-  const baseName = () => `${safeName(order.order_number)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}`
+  const baseName = () => `${orderFileName(order)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}`
   const fileName = si => `${si + 1}_${baseName()}.${post.ext || 'nc'}`
   const build = () => {
     const files = sel.map(si => {
@@ -200,7 +201,7 @@ export default function CncPage() {
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 500 }}>ЧПУ</div>
-          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span style={{ fontFamily: 'monospace' }}>{order.order_number}</span>{mat ? ` · ${mat.label}` : ''}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>{orderTitle(order)}</span>{mat ? ` · ${mat.label}` : ''}</div>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 2 }}>

@@ -27,6 +27,7 @@ import { detailHoles } from '../lib/partHoles'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
+import { orderTitle, orderFileName } from '../lib/orderUtils'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import CncLoader from '../components/CncLoader'
 import SendToMaster from '../components/SendToMaster'
@@ -2067,7 +2068,7 @@ export default function NestingPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${order.order_number || 'raskroy'}${suffix}.dxf`
+    a.download = `${orderFileName(order)}${suffix}.dxf`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -2139,7 +2140,7 @@ export default function NestingPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${order?.order_number || 'раскрой'}${suffix}_лист${sheetIdx + 1}.dxf`
+    a.download = `${orderFileName(order)}${suffix}_лист${sheetIdx + 1}.dxf`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -2200,7 +2201,7 @@ export default function NestingPage() {
   }
 
   // Файлы для отладки: мастер-аккаунт скачивает, остальные — отправляют мастер-аккаунту с описанием проблемы
-  const debugName = suffix => `${order?.order_number || 'raskroy'}${suffix}`
+  const debugName = suffix => `${orderFileName(order)}${suffix}`
   function exportHistory(cfg, idx) {
     if (!cfg.history) return
     if (!isMaster) {
@@ -2213,7 +2214,7 @@ export default function NestingPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${order?.order_number || 'raskroy'}_k${idx + 1}_history.json`
+    a.download = `${orderFileName(order)}_k${idx + 1}_history.json`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -2795,10 +2796,10 @@ export default function NestingPage() {
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, cursor: 'pointer' }}>←</button>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 500 }}>Раскрой</div>
-          <div style={{ fontSize: 12, color: 'var(--text-hint)', fontFamily: 'monospace' }}>{order.order_number}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{orderTitle(order)}</div>
         </div>
         {/* 3D открывается поверх страницы — раскрой при этом не сбрасывается */}
-        <Model3DButton details={allDetails} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)} orderId={id} />
+        <Model3DButton details={allDetails} title={orderTitle(order)} getScene={() => loadOrderModel(id)} orderId={id} />
       </div>
 
       {/* Статистика */}
@@ -3041,7 +3042,7 @@ export default function NestingPage() {
       {/* Экспорт контуров для отладки — скопировать точные координаты детали разработчику */}
       {details.some(d => d.contour) && (
         <div style={{ marginBottom: 12 }}>
-          <button onClick={() => isMaster ? setShowDebugExport(v => !v) : setSendJob({ title: 'Контуры деталей', fileName: `contours_${order.order_number}.json`, getPayload: () => debugExportText, orderId: id })}
+          <button onClick={() => isMaster ? setShowDebugExport(v => !v) : setSendJob({ title: 'Контуры деталей', fileName: `contours_${orderFileName(order)}.json`, getPayload: () => debugExportText, orderId: id })}
             style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
               background: 'transparent', color: 'var(--text-hint)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
             {isMaster ? (showDebugExport ? '▼ ' : '▶ ') : '✉ '}Экспорт контуров деталей (для отладки)
@@ -3067,7 +3068,7 @@ export default function NestingPage() {
       {/* Экспорт РЕЗУЛЬТАТА укладки (по конфигурации, выбранной для шапки) */}
       {result && (
         <div style={{ marginBottom: 12 }}>
-          <button onClick={() => isMaster ? setShowResultExport(v => !v) : setSendJob({ title: 'Результат раскроя', fileName: `nesting_${order.order_number}.json`, getPayload: () => resultExportText, orderId: id })}
+          <button onClick={() => isMaster ? setShowResultExport(v => !v) : setSendJob({ title: 'Результат раскроя', fileName: `nesting_${orderFileName(order)}.json`, getPayload: () => resultExportText, orderId: id })}
             style={{ width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
               background: 'transparent', color: 'var(--text-hint)', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
             {isMaster ? (showResultExport ? '▼ ' : '▶ ') : '✉ '}Экспорт результата раскроя (для отладки){configs.length > 1 ? ` — конфигурация ${focusIdx + 1}` : ''}

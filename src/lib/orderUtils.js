@@ -47,3 +47,14 @@ export const STATUS_BADGE = {
   inwork: 'badge-inwork',
   done: 'badge-done'
 }
+
+// Название заказа — то, как его назвал пользователь (или как назывался загруженный файл).
+// Номер, который приложение присваивает само, показывается только у заказа без названия.
+export const orderTitle = order => String(order?.order_name || '').trim() || order?.order_number || ''
+
+// кириллица -> латиница (как в именах файлов станка: «Белый» -> «Belij»)
+const LAT = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'j', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'i', ь: '', э: 'e', ю: 'yu', я: 'ya',
+  ә: 'a', ғ: 'g', қ: 'k', ң: 'n', ө: 'o', ұ: 'u', ү: 'u', һ: 'h', і: 'i' }
+export const toLatin = str => String(str || '').replace(/[а-яёәғқңөұүһі]/gi, ch => { const l = LAT[ch.toLowerCase()] ?? ch; return ch === ch.toLowerCase() ? l : l.charAt(0).toUpperCase() + l.slice(1) })
+/** Название заказа для имён файлов: латиницей, без пробелов и знаков, которые не любят станки */
+export const orderFileName = order => toLatin(orderTitle(order)).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'zakaz'

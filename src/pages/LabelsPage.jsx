@@ -6,6 +6,7 @@ import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
+import { orderTitle, orderFileName } from '../lib/orderUtils'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 
 // Бирки деталей по принятому раскрою. Бирку собирает пользователь: размер и какие параметры детали на ней есть.
@@ -121,8 +122,6 @@ function LabelEditor({ tpl, onChange, order, mat }) {
             <div style={{ flex: '1 1 100%', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Подпись
                 <input type="text" key={'op' + tpl.order.prefix} defaultValue={tpl.order.prefix} placeholder="без подписи" onBlur={e => { if (e.target.value !== tpl.order.prefix) onChange({ ...tpl, order: { ...tpl.order, prefix: e.target.value.trim() } }) }} style={{ width: 120, marginLeft: 6, padding: '6px 8px' }} /></label>
-              <button type="button" style={chip(tpl.order.number)} onClick={() => onChange({ ...tpl, order: { ...tpl.order, number: !tpl.order.number } })}>{tpl.order.number ? '✓ ' : ''}Номер от приложения</button>
-              <button type="button" style={chip(tpl.order.name)} onClick={() => onChange({ ...tpl, order: { ...tpl.order, name: !tpl.order.name } })}>{tpl.order.name ? '✓ ' : ''}Название заказа</button>
             </div>
           )}
           {cur.type === 'part' && (
@@ -227,7 +226,7 @@ export default function LabelsPage() {
     try {
       const data = await buildLabelsPdf({ order, mat, tpl, onProgress: (a, b) => setPdf(`PDF: ${a} из ${b}`) })
       const url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
-      const a = document.createElement('a'); a.href = url; a.download = `Birki_${safeName(order.order_number)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}.pdf`
+      const a = document.createElement('a'); a.href = url; a.download = `Birki_${orderFileName(order)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}.pdf`
       document.body.appendChild(a); a.click(); a.remove()
       setTimeout(() => URL.revokeObjectURL(url), 5000)
     } finally { setPdf('') }
@@ -235,7 +234,7 @@ export default function LabelsPage() {
   const exportFiles = async () => {
     setBusy(true)
     try {
-      const post = activePost(getCnc(user)), base = `${safeName(order.order_number)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}`
+      const post = activePost(getCnc(user)), base = `${orderFileName(order)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}`
       const files = await buildLabelFiles({ order, mat, base, post, tpl, sheets: mat.sheets.map((_, si) => ({ si, nc: `${si + 1}_${base}.${post.ext || 'nc'}` })) })
       setSaveAsk({ files, zipName: `Birki_${base}.zip` })
     } finally { setBusy(false) }
@@ -248,7 +247,7 @@ export default function LabelsPage() {
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 500 }}>Бирки</div>
-          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span style={{ fontFamily: 'monospace' }}>{order.order_number}</span> · {total} шт. · {tpl.w}×{tpl.h} мм</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>{orderTitle(order)}</span> · {total} шт. · {tpl.w}×{tpl.h} мм</div>
         </div>
         {mat && <button onClick={savePdf} disabled={!!pdf} style={{ ...pill, background: 'var(--teal)' }}>{pdf || '⬇ PDF'}</button>}
         {mat && <button onClick={() => window.print()} style={pill}>🖨 Печать</button>}

@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
 import { myProduction, productionOrders, productionSetStatus } from '../lib/productionApi'
-import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
+import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 
@@ -135,10 +135,9 @@ export default function ProductionPage() {
                 <div key={o.id} className="card" style={{ padding: '10px 12px' }}>
                   <div onClick={() => navigate(`/orders/${o.id}`)} style={{ cursor: 'pointer' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <span style={{ fontWeight: 500, fontSize: 15, fontFamily: 'monospace' }}>{o.order_number}</span>
+                      <span style={{ fontWeight: 500, fontSize: 15 }}>{orderTitle(o)}</span>
                       <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || o.status}</span>
                     </div>
-                    {o.order_name && <div style={{ fontSize: 14, fontWeight: 500, marginTop: 2 }}>{o.order_name}</div>}
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[o.material_name, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
                   {simShares.has(o.id) && (
                     <div title="По ссылке открыта симуляция обработки этого заказа. Закрыть доступ можно в заказе."

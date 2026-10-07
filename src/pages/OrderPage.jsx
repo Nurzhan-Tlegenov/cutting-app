@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { STATUS_LABELS, STATUS_BADGE } from '../lib/orderUtils'
+import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import MaterialFilter from '../components/MaterialFilter'
@@ -100,7 +100,7 @@ export default function OrderPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
         <button onClick={() => navigate(inProduction ? '/production' : '/orders')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 16 }}>{order.order_number}</div>
+          <div style={{ fontWeight: 600, fontSize: 16 }}>{orderTitle(order)}</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{order.material_name}</div>
         </div>
         <span className={`badge ${STATUS_BADGE[order.status] || 'badge-new'}`}>
@@ -189,7 +189,7 @@ export default function OrderPage() {
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
-          <Model3DButton details={details} title={order.order_name || order.order_number} getScene={() => loadOrderModel(id)}
+          <Model3DButton details={details} title={orderTitle(order)} getScene={() => loadOrderModel(id)}
             orderId={id} editPath={isDraft ? `/orders/${id}/edit` : ''} />
           <select value={sortMode} onChange={e => setSortMode(e.target.value)}
             style={{ width: 'auto', padding: '3px 6px', fontSize: 12, color: 'var(--text-muted)', borderRadius: 20 }}>
