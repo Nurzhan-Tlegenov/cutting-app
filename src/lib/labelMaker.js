@@ -47,6 +47,10 @@ export const LABEL_ITEMS = [
   ['image', 'Своя картинка (логотип)', 'text'],
   ['sheet', 'Номер карты', 'text'],
   ['num', 'Номер детали на листе', 'text'],
+  ['edgeTop', 'Кромка — сверху', 'text'],
+  ['edgeBottom', 'Кромка — снизу', 'text'],
+  ['edgeLeft', 'Кромка — слева', 'text'],
+  ['edgeRight', 'Кромка — справа', 'text'],
   ['part', 'Чертёж детали', 'pic'],
   ['map', 'Карта раскроя — деталь чёрным', 'pic'],
   ['qr', 'QR-код', 'pic'],
@@ -89,6 +93,11 @@ export function metaItems(details) {
   return [...keys].filter(k => !['des', 'pos'].includes(k)).map(k => ['meta:' + k, itemTitle('meta:' + k)])
 }
 /** Элемент рисуется прямоугольником с высотой (картинка), а не строкой текста */
+/** Текст идёт вдоль бирки по вертикали (кромка слева и справа) */
+export const isVert = it => it.type === 'edgeLeft' || it.type === 'edgeRight'
+const EDGE_TYPES = ['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight']
+/** Размер рамки элемента на бирке, мм: [ширина, высота] */
+export const itemBox = it => (isBox(it) ? [it.w, it.h] : isVert(it) ? [it.size * 1.25, it.w] : [it.w, it.size * 1.25])
 export const isBox = it => itemKind(it.type) === 'pic' || !!it.img || it.type === 'image'
 // Картинки шаблона. В шаблоне — ссылка «ref:<id>», сама картинка хранится отдельно (за аккаунтом) в хорошем качестве.
 const IMAGES = new Map()
@@ -157,17 +166,22 @@ const DEFAULT_ITEMS = [
   { type: 'part', x: 6.5, y: 23.5, w: 38, h: 25.5 },
   { type: 'sheet', x: 6.5, y: 50, w: 24, size: 2.8 },
   { type: 'num', x: 70, y: 1.2, w: 9, size: 3.2, bold: true, align: 'right' },
+  // кромка по сторонам бирки — там же, где она у детали на карте
+  { type: 'edgeTop', x: 14, y: 1.3, w: 54, size: 2.4, bold: true, align: 'center' },
+  { type: 'edgeBottom', x: 21, y: 54.6, w: 43, size: 2.4, bold: true, align: 'center' },
+  { type: 'edgeLeft', x: 1.3, y: 6, w: 47, size: 2.4, bold: true, align: 'center' },
+  { type: 'edgeRight', x: 80.7, y: 6, w: 47, size: 2.4, bold: true, align: 'center' },
   { type: 'qr', x: 58, y: 6.5, w: 21, h: 21 },
   { type: 'map', x: 46.5, y: 30, w: 32.5, h: 22 },
 ]
 // место нового элемента — там же, где он стоит в раскладке по умолчанию, иначе — посередине
 export function newLabelItem(type, tpl) {
   const d = DEFAULT_ITEMS.find(i => i.type === type), kx = tpl.w / BASE.w, ky = tpl.h / BASE.h
-  const it = d ? { ...d, x: d.x * kx, y: d.y * ky, w: d.w * kx, ...(d.h ? { h: d.h * ky } : {}), ...(d.size ? { size: d.size * Math.min(kx, ky) } : {}) }
+  const it = d ? { ...d, x: d.x * kx, y: d.y * ky, w: d.w * (isVert(d) ? ky : kx), ...(d.h ? { h: d.h * ky } : {}), ...(d.size ? { size: d.size * Math.min(kx, ky) } : {}) }
     : itemKind(type) === 'pic' || type === 'image' ? { type, x: tpl.w * 0.3, y: tpl.h * 0.3, w: tpl.w * 0.3, h: tpl.h * 0.3 } : { type, x: tpl.w * 0.1, y: tpl.h * 0.45, w: tpl.w * 0.5, size: 2.6 * Math.min(kx, ky) }
   return { ...it, id: type + '_' + Math.random().toString(36).slice(2, 7) }
 }
-export const DEFAULT_LABEL = () => { const t = { enabled: false, w: BASE.w, h: BASE.h, edges: true, rot: true, qr: { ...QR_DEFAULT }, order: { prefix: 'Заказ', number: true, name: true }, part: { dims: false, dimSize: 2 } }; return { ...t, items: DEFAULT_ITEMS.map(i => newLabelItem(i.type, t)) } }
+export const DEFAULT_LABEL = () => { const t = { enabled: false, w: BASE.w, h: BASE.h, edges: false, rot: true, qr: { ...QR_DEFAULT }, order: { prefix: 'Заказ', number: true, name: true }, part: { dims: false, dimSize: 2 } }; return { ...t, items: DEFAULT_ITEMS.map(i => newLabelItem(i.type, t)) } }
 export function normalizeLabel(raw) {
   const d = DEFAULT_LABEL(), t = raw && typeof raw === 'object' ? raw : {}
   const n = (v, def, lo, hi) => { const x = Number(v); return isFinite(x) && x > 0 ? Math.max(lo, Math.min(hi, x)) : def }
@@ -175,19 +189,21 @@ export function normalizeLabel(raw) {
   let items = Array.isArray(t.items) ? t.items.filter(i => i && knownType(i.type)) : null
   if (!items) {                                            // шаблон прежнего вида (галочки) — раскладка по умолчанию с теми же полями
     const f = t.fields, base = { w, h }
-    items = DEFAULT_ITEMS.filter(i => !f || (i.type === 'title' ? f.name !== false || f.des !== false : f[i.type] !== false)).map(i => newLabelItem(i.type, base))
+    items = DEFAULT_ITEMS.filter(i => !f || (i.type === 'title' ? f.name !== false || f.des !== false : EDGE_TYPES.includes(i.type) ? f.edges !== false : f[i.type] !== false)).map(i => newLabelItem(i.type, base))
   }
+  // прежняя галочка «кромка по сторонам» -> четыре обычных элемента, которые можно двигать и менять
+  else if (t.edges === true && !items.some(i => EDGE_TYPES.includes(i.type))) items = [...items, ...EDGE_TYPES.map(k => newLabelItem(k, { w, h }))]
   items = items.map(i => {
-    const pic = isBox(i), iw = Math.max(3, Math.min(w, Number(i.w) || 20))
-    const o = { id: i.id || i.type + '_' + Math.random().toString(36).slice(2, 7), type: i.type, w: iw, bold: !!i.bold, align: i.align === 'right' ? 'right' : 'left' }
+    const pic = isBox(i), iw = Math.max(3, Math.min(isVert(i) ? h : w, Number(i.w) || 20))
+    const o = { id: i.id || i.type + '_' + Math.random().toString(36).slice(2, 7), type: i.type, w: iw, bold: !!i.bold, align: ['right', 'center'].includes(i.align) ? i.align : 'left' }
     if (typeof i.img === 'string' && (i.img.startsWith('ref:') || (i.img.startsWith('data:image/') && i.img.length < 40000))) o.img = i.img
     if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 10))
     if (itemKind(i.type) !== 'pic') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
-    const ih = pic ? o.h : o.size * 1.25
-    o.x = Math.max(0, Math.min(w - iw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - ih, Number(i.y) || 0))
+    const [bw, bh] = itemBox(o)
+    o.x = Math.max(0, Math.min(w - bw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - bh, Number(i.y) || 0))
     return o
   })
-  return { enabled: !!t.enabled, w, h, edges: t.edges ?? (t.fields ? t.fields.edges !== false : true), rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
+  return { enabled: !!t.enabled, w, h, edges: false, rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
     // строка «Заказ»: своя подпись, номер от приложения и название заказа включаются отдельно
     order: { prefix: typeof t.order?.prefix === 'string' ? t.order.prefix.slice(0, 30) : 'Заказ', number: t.order?.number !== false, name: t.order?.name !== false },
     // чертёж детали: размеры торцевых отверстий от края и высота их цифр (мм)
@@ -197,7 +213,7 @@ export function normalizeLabel(raw) {
 /** Новый размер бирки — элементы растягиваются вместе с ней */
 export function resizeLabel(tpl, w, h) {
   const kx = w / tpl.w, ky = h / tpl.h, k = Math.min(kx, ky)
-  return normalizeLabel({ ...tpl, w, h, items: tpl.items.map(i => ({ ...i, x: i.x * kx, y: i.y * ky, w: i.w * kx, ...(i.h ? { h: i.h * ky } : {}), ...(i.size ? { size: i.size * k } : {}) })) })
+  return normalizeLabel({ ...tpl, w, h, items: tpl.items.map(i => ({ ...i, x: i.x * kx, y: i.y * ky, w: i.w * (isVert(i) ? ky : kx), ...(i.h ? { h: i.h * ky } : {}), ...(i.size ? { size: i.size * k } : {}) })) })
 }
 export const getLabelTpl = user => { imgUser = user || imgUser; return normalizeLabel(getUserSettings(user).labelTpl) }
 export const saveLabelTpl = (tpl, user) => saveUserSettings({ labelTpl: tpl }, user)
@@ -412,6 +428,12 @@ export function labelText(type, info, tpl = null) {
     case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
     case 'sheet': return `Карта  ${info.sheet}`
     case 'num': return String(info.num)
+    case 'edgeTop': case 'edgeBottom': case 'edgeLeft': case 'edgeRight': {
+      // сторона бирки = сторона детали на карте (карта и деталь на бирке повёрнуты одинаково)
+      const rot = tpl ? tpl.rot !== false : true, side = type.slice(4).toLowerCase(), name = (rot ? info.sidesCw : info.sides)[side]
+      const horiz = side === 'top' || side === 'bottom'
+      return name ? `${name} · ${r1(horiz === rot ? info.sizeY : info.sizeX)}` : ''
+    }
     case 'faceHoles': return info.faceHoles ? `Отв. в пласть: ${info.faceHoles}` : ''
     case 'backHoles': return info.backHoles ? `Нижняя присадка: ${info.backHoles}` : ''
     case 'endHoles': return info.endHoles ? `Отв. в торец: ${info.endHoles}` : ''
@@ -439,23 +461,6 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
 
-  // кромка — по сторонам бирки: там же, где она у детали на карте (карта и деталь на бирке повёрнуты одинаково)
-  if (tpl.edges) {
-    const pad = 5.5 * mm, sides = rot ? info.sidesCw : info.sides, lenH = rot ? info.sizeY : info.sizeX, lenV = rot ? info.sizeX : info.sizeY
-    const side = (name, len, cx, cy, ang, maxW) => {
-      if (!name) return
-      ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang)
-      const t = fitText(ctx, `${name} · ${r1(len)}`, maxW, 2.4 * mm, 'bold')
-      ctx.textAlign = 'center'; ctx.fillText(t, 0, 0)
-      const tw = ctx.measureText(t).width
-      ctx.fillRect(-tw / 2, 1.4 * mm, tw, Math.max(1, 0.25 * mm))
-      ctx.restore()
-    }
-    side(sides.top, lenH, W / 2, pad / 2, 0, W - pad * 2 - 12 * mm)
-    side(sides.bottom, lenH, W / 2, H - pad / 2 - 0.3 * mm, 0, W * 0.5)
-    side(sides.right, lenV, W - pad / 2, H / 2, Math.PI / 2, H - pad * 2)
-    side(sides.left, lenV, pad / 2, H / 2, -Math.PI / 2, H - pad * 2)
-  }
   for (const it of tpl.items || []) {
     const x = it.x * mm, y = it.y * mm, w = it.w * mm
     if (it.type === 'qr') {
@@ -482,9 +487,15 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
         }
         continue
       }
-      const t = fitText(ctx, text, w, it.size * mm, it.bold ? 'bold' : '')
-      ctx.textAlign = it.align === 'right' ? 'right' : 'left'
-      ctx.fillText(t, it.align === 'right' ? x + w : x, y + it.size * mm * 0.62)
+      const t = fitText(ctx, text, w, it.size * mm, it.bold ? 'bold' : ''), sz = it.size * mm
+      const ax = it.align === 'right' ? w : it.align === 'center' ? w / 2 : 0
+      ctx.textAlign = it.align === 'right' ? 'right' : it.align === 'center' ? 'center' : 'left'
+      ctx.save()
+      // кромка слева читается снизу вверх, справа — сверху вниз; рамка элемента — узкая и высокая
+      if (it.type === 'edgeLeft') { ctx.translate(x, y + w); ctx.rotate(-Math.PI / 2) } else if (it.type === 'edgeRight') { ctx.translate(x + sz * 1.25, y); ctx.rotate(Math.PI / 2) } else ctx.translate(x, y)
+      ctx.fillText(t, ax, sz * 0.62)
+      if (EDGE_TYPES.includes(it.type)) { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? w - tw : it.align === 'center' ? (w - tw) / 2 : 0; ctx.fillRect(x0, sz * 1.16, tw, Math.max(1, sz * 0.09)) }
+      ctx.restore()
     }
   }
   return canvas

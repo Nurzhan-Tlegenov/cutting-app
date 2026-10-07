@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles } from '../lib/labelMaker'
+import { QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, buildLabelFiles } from '../lib/labelMaker'
 import { getCnc, activePost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import SaveFilesDialog from '../components/SaveFilesDialog'
@@ -59,7 +59,6 @@ function LabelEditor({ tpl, onChange, order, mat }) {
     const draw = () => drawLabel(cv, t, labelInfo(order, mat, 0, 0), { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] })
     draw(); if (t.items.some(i => i.img)) preloadLabelImages(t).then(draw)
   }, [t, order, mat])
-  const boxH = it => (isBox(it) ? it.h : it.size * 1.25)
   const fileRef = useRef(null)
   const [imgErr, setImgErr] = useState('')
   const setImage = async src => {
@@ -78,7 +77,8 @@ function LabelEditor({ tpl, onChange, order, mat }) {
     if (!d) return
     const dx = (e.clientX - d.x) / scale, dy = (e.clientY - d.y) / scale, o = d.it, pic = isBox(o)
     const patch = d.mode === 'move' ? { x: o.x + dx, y: o.y + dy }
-      : pic ? { w: Math.max(4, o.w + dx), h: Math.max(4, o.h + dy) } : { w: Math.max(4, o.w + dx), size: Math.max(1.2, o.size + dy / 1.25) }
+      : pic ? { w: Math.max(4, o.w + dx), h: Math.max(4, o.h + dy) }
+        : isVert(o) ? { w: Math.max(4, o.w + dy), size: Math.max(1.2, o.size + dx / 1.25) } : { w: Math.max(4, o.w + dx), size: Math.max(1.2, o.size + dy / 1.25) }
     setLive(normalizeLabel({ ...tpl, items: tpl.items.map(i => (i.id === d.id ? { ...i, ...patch } : i)) }))
   }
   const up = () => { if (drag.current && live) onChange(live); drag.current = null; setLive(null) }
@@ -95,7 +95,7 @@ function LabelEditor({ tpl, onChange, order, mat }) {
           const on = it.id === sel
           return (
             <div key={it.id} onPointerDown={e => down(e, it, 'move')}
-              style={{ position: 'absolute', left: it.x * scale, top: it.y * scale, width: it.w * scale, height: boxH(it) * scale, boxSizing: 'border-box', cursor: 'move',
+              style={{ position: 'absolute', left: it.x * scale, top: it.y * scale, width: itemBox(it)[0] * scale, height: itemBox(it)[1] * scale, boxSizing: 'border-box', cursor: 'move',
                 border: on ? '1.5px solid #185FA5' : '1px dashed rgba(24,95,165,0.45)', background: on ? 'rgba(24,95,165,0.08)' : 'transparent' }}>
               {on && <div onPointerDown={e => down(e, it, 'size')}
                 style={{ position: 'absolute', right: -9, bottom: -9, width: 20, height: 20, borderRadius: 10, background: '#185FA5', border: '2px solid #fff', cursor: 'nwse-resize' }} />}
@@ -113,7 +113,7 @@ function LabelEditor({ tpl, onChange, order, mat }) {
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{cur.size.toFixed(1)} мм</span>
               <button type="button" style={chip(false)} onClick={() => edit({ size: cur.size + 0.3 })}>A+</button>
               <button type="button" style={{ ...chip(cur.bold), fontWeight: 700 }} onClick={() => edit({ bold: !cur.bold })}>Ж</button>
-              <button type="button" style={chip(cur.align === 'right')} onClick={() => edit({ align: cur.align === 'right' ? 'left' : 'right' })}>{cur.align === 'right' ? 'По правому краю' : 'По левому краю'}</button>
+              <button type="button" style={chip(cur.align !== 'left')} onClick={() => edit({ align: cur.align === 'left' ? 'center' : cur.align === 'center' ? 'right' : 'left' })}>{cur.align === 'right' ? 'По правому краю' : cur.align === 'center' ? 'По центру' : 'По левому краю'}</button>
             </>
           )}
           {cur.type === 'order' && !cur.img && (
@@ -261,7 +261,7 @@ export default function LabelsPage() {
             </button>
             {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} />
               : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
-            {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же'], ['edges', 'Кромка — по сторонам бирки, там же, где она у детали']].map(([k, label]) => (
+            {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же']].map(([k, label]) => (
               <label key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
                 <input type="checkbox" checked={!!tpl[k]} onChange={e => change({ [k]: e.target.checked })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
                 {label}
@@ -290,7 +290,7 @@ export default function LabelsPage() {
                 <option value={600}>600 dpi</option>
               </select>
             </label>
-            <button type="button" onClick={() => { if (window.confirm('Вернуть раскладку по образцу?')) change(resizeLabel({ ...DEFAULT_LABEL(), rot: tpl.rot, edges: tpl.edges }, tpl.w, tpl.h)) }}
+            <button type="button" onClick={() => { if (window.confirm('Вернуть раскладку по образцу?')) change(resizeLabel({ ...DEFAULT_LABEL(), rot: tpl.rot }, tpl.w, tpl.h)) }}
               style={{ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ Раскладка по образцу</button>
             <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
               Шаблон сохраняется в аккаунте. Когда он настроен, в разделе ЧПУ при создании G-кода появляется галочка «Программа для стола бирковки».
