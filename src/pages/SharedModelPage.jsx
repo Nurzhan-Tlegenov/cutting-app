@@ -4,7 +4,8 @@ import { fetchSharedModel } from '../lib/modelShare'
 import { textureKey } from '../lib/materialTextures'
 import CncLoader from '../components/CncLoader'
 
-const Model3D = lazy(() => import('../components/Model3D'))
+import { lazyRetry } from '../lib/lazyRetry'
+const Model3D = lazyRetry(() => import('../components/Model3D'))
 
 // 3D-модель заказа по ссылке — для клиента: только просмотр, вход не нужен.
 export default function SharedModelPage() {

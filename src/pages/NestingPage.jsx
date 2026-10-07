@@ -30,7 +30,8 @@ import { detailMeta } from '../lib/partLabel'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import CncLoader from '../components/CncLoader'
 import SendToMaster from '../components/SendToMaster'
-const Model3D = lazy(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
+import { lazyRetry } from '../lib/lazyRetry'
+const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
 const COLORS = [
   '#B5D4F4','#9FE1CB','#F5C4B3','#CECBF6','#FAC775',

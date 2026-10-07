@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { flipDetail } from '../lib/mirrorDetail'
 import { contourSegments, segmentSide, distToPolyline, holeEdgeSegments, detailEdgeList } from '../lib/edgeLength'
-const Model3D = lazy(() => import('./Model3D'))
+import { lazyRetry } from '../lib/lazyRetry'
+const Model3D = lazyRetry(() => import('./Model3D'))
 
 // ─── База фурнитуры (конфирматы, шканты, полкодержатели, минификсы...) ───────
 // Единая для присадки по плоскости и по торцу. Хранится в Supabase, привязана

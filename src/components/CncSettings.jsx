@@ -81,6 +81,14 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         <Hint>Постпроцессор — это станок: его поле, высоты и команды. Инструменты и обработка контуров — общие.</Hint>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Стол бирковки</Title>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!post.labelTable} onChange={e => set({ labelTable: e.target.checked })} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
+          Создавать файлы для стола бирковки
+        </label>
+        <Hint>Для станков со столом бирковки. Когда включено, при создании G-кода вместе с управляющими программами становятся доступны файлы бирок: список листов (List_….xml), бирки по листам (Label_N_….cyc) и картинки бирок. Вид бирки настраивается в заказе, в разделе «Бирки».</Hint>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
         <Title>Рабочее поле станка</Title>
         <div className="row2">
           <Num label="Поле X" unit="мм" value={post.fieldX} onChange={v => set({ fieldX: v })} />

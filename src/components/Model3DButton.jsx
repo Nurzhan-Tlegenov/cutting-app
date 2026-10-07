@@ -2,7 +2,8 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { hasModel } from '../lib/model3d'
 import { cachedShare, getShare, onShareChange } from '../lib/modelShare'
 
-const Model3D = lazy(() => import('./Model3D'))
+import { lazyRetry } from '../lib/lazyRetry'
+const Model3D = lazyRetry(() => import('./Model3D'))
 
 // Кнопка «3D-модель»: открывает просмотр поверх текущей страницы (страница не закрывается
 // и ничего не теряет). getScene — откуда взять всю модель Базиса (может вернуть null).

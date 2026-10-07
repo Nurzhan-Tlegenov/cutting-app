@@ -17,7 +17,8 @@ import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from 
 
 // ЧПУ: листы принятого раскроя → управляющая программа (G-код) + симулятор.
 // Настройки (постпроцессор, инструменты, обработка контуров, команды) идут за аккаунтом.
-const GcodeSimulator = lazy(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
+import { lazyRetry } from '../lib/lazyRetry'
+const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 const safeName = s => String(s || '').replace(/[^\wа-яё.-]+/gi, '_').replace(/^_+|_+$/g, '')
@@ -35,7 +36,6 @@ export default function CncPage() {
   const navigate = useNavigate()
   const { user, profile, isMaster } = useAuth()
   const labelTpl = useMemo(() => getLabelTpl(user), [user])
-  const [withLabels, setWithLabels] = useState(true)   // вместе с G-кодом — программа для стола бирковки
   const [labelBusy, setLabelBusy] = useState(false)
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
@@ -110,7 +110,7 @@ export default function CncPage() {
     setBuilt({ files }); setSaved('')
     // бирковка: файлы стола бирковки для тех же листов (на линии сначала бирки, потом раскрой)
     const ok = files.filter(f => !f.empty)
-    if (labelTpl.enabled && withLabels && ok.length) {
+    if (post.labelTable && ok.length) {                  // стол бирковки включён у постпроцессора (вкладка «Основные»)
       setLabelBusy(true)
       buildLabelFiles({ order, mat, base: baseName(), post, tpl: labelTpl, sheets: ok.map(f => ({ si: f.si, nc: f.name })) })
         .then(labels => setBuilt(b => (b && b.files === files ? { ...b, labels } : b)))
@@ -276,14 +276,11 @@ export default function CncPage() {
               {warnings.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
             </div>
           )}
-          {labelTpl.enabled ? (
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10, cursor: 'pointer' }}>
-              <input type="checkbox" checked={withLabels} onChange={e => { setWithLabels(e.target.checked); setBuilt(null) }} style={{ width: 18, height: 18 }} />
-              <span>Программа для стола бирковки <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· бирка {labelTpl.w}×{labelTpl.h} мм</span></span>
-            </label>
-          ) : (
-            <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 10 }}>
-              Бирки вместе с G-кодом: настройте шаблон в разделе <span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => navigate(`/orders/${id}/labels`)}>«Бирки»</span> — здесь появится галочка.
+          {post.labelTable && (
+            <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+              🏷 Вместе с G-кодом будут созданы файлы стола бирковки (бирка {labelTpl.w}×{labelTpl.h} мм).{' '}
+              <span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => navigate(`/orders/${id}/labels`)}>Шаблон бирки</span>
+              {' · '}<span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => setTab('basic')}>отключить</span>
             </p>
           )}
           <button className="btn-primary" disabled={!sel.length} onClick={build}>{built ? '↻ Создать G-код заново' : 'Создать G-код'}</button>

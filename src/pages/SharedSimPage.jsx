@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom'
 import { fetchSharedSim } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 
-const GcodeSimulator = lazy(() => import('../components/GcodeSimulator'))
+import { lazyRetry } from '../lib/lazyRetry'
+const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))
 
 // Симуляция обработки листа по ссылке: только просмотр, вход не нужен.
 export default function SharedSimPage() {

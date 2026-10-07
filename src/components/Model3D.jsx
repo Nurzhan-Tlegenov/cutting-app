@@ -12,7 +12,8 @@ import { loadTextures, saveTexture, deleteTexture, fileToTexture, textureKey } f
 import { orderParts, segFace, edgeTargetAt, applyEdgeOps, findJoints, partGroups, applyJoints, clearJoints, jointsDone, contourOf, BUILTIN_SCHEMES, schemeFace, schemeEdge } from '../lib/model3dEdit'
 import { loadHardwarePresets } from '../lib/hardwarePresets'
 import ShareLinkBox from './ShareLinkBox'
-const ContourEditor = lazy(() => import('./ContourEditor'))
+import { lazyRetry } from '../lib/lazyRetry'
+const ContourEditor = lazyRetry(() => import('./ContourEditor'))
 
 // Просмотр 3D-модели заказа (детали, импортированные из Базиса или Астры).
 // Вращение — пальцем, масштаб — щипком, сдвиг — двумя пальцами,
