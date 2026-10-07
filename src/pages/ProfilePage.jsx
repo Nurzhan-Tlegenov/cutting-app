@@ -107,6 +107,16 @@ export default function ProfilePage() {
         })}
       </div>
 
+      <button onClick={() => navigate('/scan')} className="card"
+        style={{ width: '100%', marginBottom: 12, textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 22 }}>📷</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>Сканер QR-кода бирки</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Навели камеру на бирку — открылась эта деталь в 3D-модели заказа</div>
+        </div>
+        <span style={{ color: 'var(--blue)', fontSize: 18 }}>→</span>
+      </button>
+
       {isMaster && <p className="section-title">Мастер-аккаунт</p>}
       {isMaster && (
         <button onClick={() => navigate('/users')} className="card"

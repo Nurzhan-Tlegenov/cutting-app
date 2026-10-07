@@ -31,6 +31,7 @@ import ProductionPage from './pages/ProductionPage'
 import CncPage from './pages/CncPage'
 import LabelsPage from './pages/LabelsPage'
 import MessagesPage from './pages/MessagesPage'
+import ScanPage from './pages/ScanPage'
 import CncLoader from './components/CncLoader'
 import Watermark from './components/Watermark'
 
@@ -64,6 +65,7 @@ function AppRoutes() {
       <Route path="/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
       <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
       <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
+      <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to={user ? home : '/auth'} />} />
     </Routes>
   )
