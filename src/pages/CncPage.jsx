@@ -1,3 +1,4 @@
+import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -59,7 +60,7 @@ export default function CncPage() {
       const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
       const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
       if (!alive) return
-      setOrder(o || null); setDetails(d || []); setLoading(false)
+      setOrder(o || null); setDetails(cutDetails(d || [], parseEdgeTypes(o?.edge_types)))   /* заготовки: с учётом кромки, как в раскрое */; setLoading(false)
     })()
     // свои настройки + общие постпроцессоры (мастер-аккаунт отметил «для всех»)
     Promise.all([fetchCnc(user), listSharedPosts()]).then(([c, sh]) => { if (alive) { setCnc(withShared(c, sh.data || [])); setCncReady(true) } })

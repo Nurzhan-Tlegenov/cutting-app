@@ -17,6 +17,7 @@ import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
 import { orderClient, productionSetStatus } from '../lib/productionApi'
 import SimLinksBox from '../components/SimLinksBox'
+import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
@@ -80,7 +81,7 @@ export default function OrderPage() {
     totalQty += d.qty
   })
   // принятые карты раскроя — показываются над списком деталей
-  const nestings = savedNestings(order, details)
+  const nestings = savedNestings(order, cutDetails(details, parseEdgeTypes(order?.edge_types)))   // карты — по заготовкам, как в раскрое
   const nest = nestings.find(n => n.key === mapMat) || nestings[0] || null
   // Есть принятый раскрой — статистика только по его материалу (тому, чьи карты сейчас показаны), листы — по факту
   const statDetails = nest ? nest.details.filter(d => d.length > 0 && d.width > 0) : validDetails

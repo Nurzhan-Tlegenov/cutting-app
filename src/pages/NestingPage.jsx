@@ -25,6 +25,7 @@ import { loadOrderModel } from '../lib/orderModel'
 import { hasModel } from '../lib/model3d'
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
+import { cutDetails, rawDetail, parseEdgeTypes } from '../lib/edgeCut'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
@@ -1449,7 +1450,9 @@ export default function NestingPage() {
   const [savedByMat, setSavedByMat] = useState({})   // сохранённые раскрои: ключ материала -> результат
   const materials = useMemo(() => materialsOf(allDetails, order), [allDetails, order])
   const multiMat = materials.length > 1
-  const details = useMemo(() => (multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails), [allDetails, multiMat, matKey, order])
+  // В раскрой деталь идёт заготовкой: с учётом подрезки на толщину кромки и прифуговки (edgeCut.js).
+  // allDetails — строки заказа как есть (их правим и сохраняем), details — заготовки; исходная строка — rawDetail(d).
+  const details = useMemo(() => cutDetails(multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails, parseEdgeTypes(order?.edge_types)), [allDetails, multiMat, matKey, order])
   const { user, profile, refreshProfile, cabinet, isMaster } = useAuth()
   // кабинет производства: ЧПУ и бирки по принятому раскрою
   const canProduce = cabinet === 'production' && (profile?.role === 'admin' || profile?.role === 'operator')
@@ -1583,7 +1586,7 @@ export default function NestingPage() {
   // ─── Деталь с карты (долгое удержание): 3D-вид лицевой стороной к нам; там же — «Сменить лицевую сторону»
   // и «Редактор контура». Правки сохраняются при закрытии.
   function partDraft(di) {
-    const d = details[di]
+    const d = rawDetail(details[di])
     if (!d) return null
     let c
     try { c = d.contour ? JSON.parse(d.contour) : null } catch { c = null }
@@ -1624,7 +1627,7 @@ export default function NestingPage() {
     if (ep) savePartDraft(ep)
   }
   async function savePartDraft(ep) {
-    const d = details[ep.index], dr = ep.draft
+    const d = rawDetail(details[ep.index]), dr = ep.draft
     const patch = {
       contour: dr.contour ? JSON.stringify(dr.contour) : null,
       edge_top: dr.edges.top || null, edge_right: dr.edges.right || null,
@@ -3159,7 +3162,7 @@ export default function NestingPage() {
           <Model3D key={part3d.index} details={part3dDetails(part3d)} title={part3d.draft.name || 'Деталь'} onClose={closePart3d} readOnly
             materialThickness={thicknessOf(part3d.index)}
             actions={[{ label: '⇄ Сменить лицевую сторону', onClick: flipPart3d }, { label: '✎ Редактор контура', onClick: part3dToEditor, primary: true },
-              ...(hasModel(allDetails) ? [{ label: '⬆ В модели', onClick: () => { const d = details[part3d.index]; const focus = { di: allDetails.indexOf(d), des: detailMeta(d)?.des || '' }; setInModel({ focus, scene: undefined }); loadOrderModel(id).then(sc => setInModel(m => (m ? { ...m, scene: sc || null } : m))).catch(() => setInModel(m => (m ? { ...m, scene: null } : m))) } }] : [])]} />
+              ...(hasModel(allDetails) ? [{ label: '⬆ В модели', onClick: () => { const d = rawDetail(details[part3d.index]); const focus = { di: allDetails.indexOf(d), des: detailMeta(d)?.des || '' }; setInModel({ focus, scene: undefined }); loadOrderModel(id).then(sc => setInModel(m => (m ? { ...m, scene: sc || null } : m))).catch(() => setInModel(m => (m ? { ...m, scene: null } : m))) } }] : [])]} />
         </Suspense>
       )}
       {inModel && (inModel.scene === undefined

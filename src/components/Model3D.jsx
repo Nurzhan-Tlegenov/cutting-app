@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { loadTextures, saveTexture, deleteTexture, fileToTexture, textureKey } from '../lib/materialTextures'
 import { orderParts, segFace, edgeTargetAt, applyEdgeOps, findJoints, partGroups, applyJoints, clearJoints, jointsDone, contourOf, BUILTIN_SCHEMES, schemeFace, schemeEdge } from '../lib/model3dEdit'
-import { loadHardwarePresets } from '../lib/hardwarePresets'
+import { loadHardwarePresets, saveHardwarePreset } from '../lib/hardwarePresets'
 import { blockTree, partBox, hardwareLinks, movingSet, sweepLimits, clampMove, moveModel } from '../lib/model3dMove'
 import ShareLinkBox from './ShareLinkBox'
 import { lazyRetry } from '../lib/lazyRetry'
@@ -99,7 +99,7 @@ function woodTexture(hex) {
   return tex
 }
 
-export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16, actions = null, focus = null, onSceneChange = null }) {
+export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16, actions = null, focus = null, onSceneChange = null, edgeTypes = null, onEdgeTypesChange = null, onEdgeNamesChange = null }) {
   const hostRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
@@ -139,6 +139,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const [toast, setToast] = useState('')
   const [editing, setEditing] = useState(null)                   // правка детали в редакторе контура: { di, draft }
   const [undoN, setUndoN] = useState(0)
+  const [newScheme, setNewScheme] = useState(null)               // форма «новый крепёж» (создаётся прямо в 3D)
   const [showTree, setShowTree] = useState(false)                // структура модели (блоки и детали) — панель слева
   const [openNodes, setOpenNodes] = useState(() => new Set())
   const [moveAxis, setMoveAxis] = useState(0)                    // перемещение: свободная ось (0 — X, 1 — Y, 2 — Z), остальные закреплены
@@ -630,7 +631,10 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     const p = byPid.get(pid)
     return !hiddenPids.has(pid) && !(p?.material && hidden.has(p.material)) && (scope === 'all' || !p || p.inOrder)
   }
-  const shownJoints = joints.filter(j => pidShown(j.a) && pidShown(j.b))
+  // отмечены детали — работаем только с ними: стыки между отмеченными (у одной отмеченной — все её стыки)
+  const inScope = pid => !sel.size || sel.has(pid)
+  const jointInScope = j => !sel.size || (sel.size === 1 ? sel.has(j.a) || sel.has(j.b) : sel.has(j.a) && sel.has(j.b))
+  const shownJoints = joints.filter(j => pidShown(j.a) && pidShown(j.b) && jointInScope(j))
   const jointOn = j => j.ok && (j.thin ? jOn.has(j.key) : !jOff.has(j.key))
   const activeJoints = shownJoints.filter(jointOn)
 
@@ -774,7 +778,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       st.jointMeshes.push(m)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tool, joints, doneJoints, jOff, jOn, hiddenPids, hidden, scope, model])
+  }, [tool, joints, doneJoints, jOff, jOn, hiddenPids, hidden, scope, model, sel])
 
   const [opened, setOpened] = useState(false)
 
@@ -890,7 +894,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const modeBefore = useRef('')
   const setTool = t => {
     const next = tool === t ? '' : t
-    if (next) { setExplode(0); setShowExplode(false); setMulti(false); setShowViews(false); setShowShare(false); if (next !== 'move') setSel(new Set()); setPicked(null); setMenu(null) }
+    if (next) { setExplode(0); setShowExplode(false); setMulti(false); setShowViews(false); setShowShare(false); setPicked(null); setMenu(null) }   // отмеченные детали остаются: инструмент работает по ним
     // двигаем при закрытых дверях и ящиках; несохранённый сдвиг при выходе сбрасывается
     if (next === 'move') { stateRef.current?.openAll(false); setOpened(false) }
     setMoveVec([0, 0, 0])
@@ -907,6 +911,15 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     }
     return [...names]
   }, [details, edgeNames])
+  // толщина кромки обязательна: без неё не посчитать подрезку и размер в раскрой
+  const edgeType = edgeTypes?.[edgeValue] || null
+  const numOf = v => Number(String(v ?? '').replace(',', '.')) || 0
+  const patchEdgeType = p => onEdgeTypesChange?.({ ...(edgeTypes || {}), [edgeValue]: { t: '', trim: false, joint: 0, ...(edgeTypes?.[edgeValue] || {}), ...p } })
+  const edgeReady = () => {
+    if (!edgeTypes || !onEdgeTypesChange || numOf(edgeType?.t) > 0) return true
+    say('Укажите толщину кромки — без неё кромка не ставится')
+    return false
+  }
   const tapEdge = hit => {
     if (!hit) return
     const p = hit.object.userData
@@ -917,22 +930,24 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     const t = edgeTargetAt(details[p.di], p.ii, [local.x, local.y])
     if (!t) return
     const on = t.hole != null ? !!contourOf(details[p.di])?.holes?.[t.hole]?.edge : !!editByPid.get(p.pid)?.segs.find(x => x.i === t.seg)?.on
+    if (!on && !edgeReady()) return
     change(applyEdgeOps(details, [{ pid: p.pid, ...t, value: on ? null : edgeValue }]))
   }
   // «Закромить видимые»: торцы показанных деталей, которые смотрят на зрителя и ничем не закрыты
   const bandVisible = value => {
     const st = stateRef.current
     if (!st) return
+    if (value && !edgeReady()) return
     const ops = []
     for (const ep of editParts) {
-      if (!pidShown(ep.pid)) continue
+      if (!pidShown(ep.pid) || !inScope(ep.pid)) continue
       for (const sg of ep.segs) {
         if (sg.arc || (value ? sg.on : !sg.on)) continue
         const face = segFace(ep, sg)
         if (st.faceVisible(face, face.quad[0], face.quad[1], ep.f.T)) ops.push({ pid: ep.pid, seg: sg.i, value })
       }
     }
-    if (!ops.length) { say(value ? 'С этого вида нет открытых торцов без кромки' : 'С этого вида нет торцов с кромкой'); return }
+    if (!ops.length) { say((value ? 'С этого вида нет открытых торцов без кромки' : 'С этого вида нет торцов с кромкой') + (sel.size ? ' у отмеченных деталей' : '')); return }
     change(applyEdgeOps(details, ops))
     say(`${value ? 'Закромлено торцов' : 'Кромка снята с торцов'}: ${ops.length}`)
   }
@@ -959,6 +974,25 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     const r = clearJoints(details, list)
     change(r.details)
     say(`Присадка убрана со стыков: ${r.joints}`)
+  }
+  // новый крепёж — прямо из 3D, в ту же базу фурнитуры, что и в редакторе контура
+  const blankScheme = () => ({ name: '', faceD: 7, faceDepth: 16, through: true, edgeD: 5, edgeDepth: 40, offset: 50, mirror: true, pair: false, pairFaceD: 8, pairFaceDepth: 12, pairEdgeD: 8, pairEdgeDepth: 20, pairGap: 32 })
+  const saveScheme = async () => {
+    const f = newScheme, n = k => numOf(f[k])
+    const name = String(f.name || '').trim()
+    if (!name) { say('Назовите крепёж'); return }
+    if (!(n('faceD') > 0) || !(n('edgeD') > 0) || !(n('edgeDepth') > 0) || (!f.through && !(n('faceDepth') > 0))) { say('Заполните диаметры и глубины отверстий'); return }
+    const pairF = f.pair ? { pairEnabled: true, pairD: n('pairFaceD'), pairDepth: n('pairFaceDepth'), pairAxis: 'x', pairGap: n('pairGap') || 32, pairMirrorSwap: false } : {}
+    const pairE = f.pair ? { pairEnabled: true, pairD: n('pairEdgeD'), pairDepth: n('pairEdgeDepth'), pairGap: n('pairGap') || 32, pairMirrorSwap: false } : {}
+    const spec = {
+      face: { d: n('faceD'), depth: f.through ? 100 : n('faceDepth'), faceSide: 'front', sides: ['left'], offsets: { left: n('offset') }, mirrorX: !!f.mirror, ...pairF },
+      edge: { d: n('edgeD'), depth: n('edgeDepth'), edgeSide: 'left', alongFrom: 'start', offsetAlong: n('offset'), mirrorY: !!f.mirror, ...pairE },
+    }
+    const saved = await saveHardwarePreset(user?.id, name, spec)
+    const item = saved || { id: 'local:' + Date.now(), name, ...spec }
+    setSchemes(list => [...list.filter(x => String(x.id) !== String(item.id) && x.name.toLowerCase() !== name.toLowerCase()), item])
+    setSchemeId(String(item.id)); setNewScheme(null)
+    say(saved ? `Крепёж «${name}» записан в базу фурнитуры` : `Крепёж «${name}» добавлен только на этот сеанс — в базу записать не удалось`)
   }
   const setAllJoints = on => {
     if (on) { setJOff(new Set()); setJOn(new Set(shownJoints.filter(j => j.ok && j.thin).map(j => j.key))) }
@@ -1043,6 +1077,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       if (tool === 'move') return
       if (tool === 'edge') { tapEdge(hit); return }
       const p = hit?.object.userData
+      if (tool === 'drill') { setPicked(p?.pid ? { ...p } : null); return }      // отмеченные детали — область работы, тап их не сбрасывает
       if (multi) {
         if (!p?.pid) return
         setSel(prev => { const n = new Set(prev); if (n.has(p.pid)) n.delete(p.pid); else n.add(p.pid); return n })
@@ -1141,7 +1176,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
         </select>
         <button type="button" style={toolChip(showExplode || explode > 0)} onClick={() => { if (tool) setTool(tool); setShowExplode(v => !v) }}>Взрыв</button>
         {editable && <button type="button" style={toolChip(tool === 'edge')} onClick={() => setTool('edge')}>Кромка</button>}
-        {editable && <button type="button" style={toolChip(tool === 'drill')} onClick={() => setTool('drill')}>Присадка</button>}
+        {editable && <button type="button" style={toolChip(tool === 'drill')} onClick={() => setTool('drill')}>Крепёж</button>}
         {editable && <button type="button" style={toolChip(tool === 'move')} onClick={() => (tool === 'move' ? setTool('move') : startMove())}>✥ Двигать</button>}
         {editable && undoN > 0 && <button type="button" style={toolChip(false)} onClick={undo}>↶ Отменить</button>}
         {!editable && !readOnly && editPath && <button type="button" style={toolChip(false)} onClick={() => navigate(editPath)}>✎ Править</button>}
@@ -1232,7 +1267,9 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {editable && <button type="button" disabled={!sel.size} onClick={() => startMove()} style={{ ...smallBtn, background: 'var(--blue)', color: 'white', border: 'none', opacity: sel.size ? 1 : 0.5 }}>✥ Двигать</button>}
-                <button type="button" disabled={!sel.size} onClick={() => { isolate(sel); setShowTree(false) }} style={{ ...smallBtn, opacity: sel.size ? 1 : 0.5 }}>Оставить только их</button>
+                {editable && <button type="button" disabled={!sel.size} onClick={() => { setShowTree(false); if (tool !== 'edge') setTool('edge') }} style={{ ...smallBtn, color: 'var(--blue)', borderColor: 'var(--blue)', opacity: sel.size ? 1 : 0.5 }}>Кромка</button>}
+                {editable && <button type="button" disabled={!sel.size} onClick={() => { setShowTree(false); if (tool !== 'drill') setTool('drill') }} style={{ ...smallBtn, color: 'var(--blue)', borderColor: 'var(--blue)', opacity: sel.size ? 1 : 0.5 }}>Крепёж</button>}
+                <button type="button" disabled={!sel.size} onClick={() => { const keep = new Set(sel); isolate(keep); setSel(keep); setShowTree(false) }} style={{ ...smallBtn, opacity: sel.size ? 1 : 0.5 }}>Оставить только их</button>
                 <button type="button" disabled={!sel.size} onClick={() => setSel(new Set())} style={{ ...smallBtn, opacity: sel.size ? 1 : 0.5 }}>Снять отметки</button>
                 {hiddenPids.size > 0 && <button type="button" onClick={showAll} style={{ ...smallBtn, color: 'var(--blue)', borderColor: 'var(--blue)' }}>Показать всё</button>}
               </div>
@@ -1257,6 +1294,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
                 <span style={{ ...smallBtn, background: 'var(--bg)', color: 'var(--text)' }}>Выбрано: {sel.size}</span>
                 <button type="button" disabled={!sel.size} onClick={() => isolate(sel)} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--blue)', color: 'white', border: 'none', opacity: sel.size ? 1 : 0.5 }}>Оставить только их</button>
                 <button type="button" disabled={!sel.size} onClick={() => hidePids(sel)} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)' }}>Скрыть</button>
+                {editable && <button type="button" disabled={!sel.size} onClick={() => { if (tool !== 'edge') setTool('edge') }} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)', color: 'var(--blue)', borderColor: 'var(--blue)', opacity: sel.size ? 1 : 0.5 }}>Кромка</button>}
+                {editable && <button type="button" disabled={!sel.size} onClick={() => { if (tool !== 'drill') setTool('drill') }} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)', color: 'var(--blue)', borderColor: 'var(--blue)', opacity: sel.size ? 1 : 0.5 }}>Крепёж</button>}
                 <button type="button" onClick={() => { setMulti(false); setSel(new Set()); setPicked(null) }} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)' }}>Готово</button>
               </>
             )}
@@ -1385,6 +1424,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
             <button type="button" style={menuBtn} onClick={() => isolate([menu.pid])}>Оставить только эту деталь</button>
             <button type="button" style={menuBtn} onClick={() => { setMulti(true); setSel(new Set([...(multi ? sel : []), menu.pid])); setMenu(null) }}>Выбрать несколько деталей…</button>
             <button type="button" style={menuBtn} onClick={() => hidePids([menu.pid])}>Скрыть деталь</button>
+            {editable && sel.size > 1 && sel.has(menu.pid) && <button type="button" style={menuBtn} onClick={() => { setMenu(null); if (tool !== 'edge') setTool('edge') }}>Кромка на отмеченные ({sel.size})</button>}
+            {editable && sel.size > 1 && sel.has(menu.pid) && <button type="button" style={menuBtn} onClick={() => { setMenu(null); if (tool !== 'drill') setTool('drill') }}>Крепёж на отмеченные ({sel.size})</button>}
             {editable && menuPart.product && <button type="button" style={menuBtn} onClick={() => startMove(parts.filter(q => q.product === menuPart.product).map(q => q.pid))}>✥ Двигать блок «{menuPart.product}»</button>}
             {editable && sel.size > 1 && sel.has(menu.pid) && <button type="button" style={menuBtn} onClick={() => startMove()}>✥ Двигать выбранные ({sel.size})</button>}
             {editable && !menuPart.hardware && <button type="button" style={menuBtn} onClick={() => startMove([menu.pid])}>✥ Двигать только эту деталь</button>}
@@ -1433,19 +1474,41 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
             <select value={edgeValue} onChange={e => {
               if (e.target.value !== '+') { setEdgeValue(e.target.value); return }
               const name = (window.prompt('Название кромки (например: ПВХ 2 мм)') || '').trim()
-              if (name) setEdgeValue(name)
+              if (name) { setEdgeValue(name); onEdgeNamesChange?.(prev => (prev.includes(name) ? prev : [...prev, name])) }
             }} style={{ flex: 1, padding: '6px 8px', fontSize: 13 }}>
               <option value="default">Кромка (без названия)</option>
               {[...new Set([...edgeList, ...(edgeValue !== 'default' ? [edgeValue] : [])])].map(n => <option key={n} value={n}>{n}</option>)}
               <option value="+">+ другая…</option>
             </select>
           </div>
+          {edgeTypes && onEdgeTypesChange && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+              <span style={{ color: numOf(edgeType?.t) > 0 ? undefined : 'var(--danger)' }}>Толщина, мм</span>
+              <input type="text" inputMode="decimal" value={edgeType?.t ?? ''} onChange={e => patchEdgeType({ t: e.target.value })}
+                style={{ width: 56, padding: '4px 6px', fontSize: 12, textAlign: 'center', borderColor: numOf(edgeType?.t) > 0 ? undefined : 'var(--danger)' }} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
+                <input type="checkbox" checked={!!edgeType?.trim} onChange={e => patchEdgeType({ trim: e.target.checked })} style={{ width: 'auto' }} />Подрезка
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
+                <input type="checkbox" checked={numOf(edgeType?.joint) > 0 || edgeType?.joint === ''} onChange={e => patchEdgeType({ joint: e.target.checked ? 0.5 : 0 })} style={{ width: 'auto' }} />Прифуговка
+              </label>
+              {(numOf(edgeType?.joint) > 0 || edgeType?.joint === '') && (
+                <input type="text" inputMode="decimal" value={edgeType.joint} onChange={e => patchEdgeType({ joint: e.target.value })} style={{ width: 50, padding: '4px 6px', fontSize: 12, textAlign: 'center' }} />
+              )}
+            </div>
+          )}
+          {sel.size > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12, color: 'var(--blue)' }}>
+              <span style={{ flex: 1 }}>Только отмеченные детали: {sel.size}</span>
+              <button type="button" style={smallBtn} onClick={() => setSel(new Set())}>Все детали</button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" style={wideBtn(true)} onClick={() => bandVisible(edgeValue)}>Закромить видимые торцы</button>
             <button type="button" style={wideBtn(false)} onClick={() => bandVisible(null)}>Снять с видимых</button>
           </div>
           <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
-            Оставьте нужный блок, выберите вид и нажмите «Закромить» — кромка встанет на торцы, видимые с этого вида. Тап по торцу — поставить или снять.
+            Отметьте детали (или оставьте нужный блок), выберите вид на кубе и нажмите «Закромить» — кромка встанет на торцы, которые смотрят на вас. Тап по торцу — поставить или снять.
           </p>
         </div>
       )}
@@ -1462,9 +1525,16 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
                 {BUILTIN_SCHEMES.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
               </optgroup>
             </select>
+            <button type="button" style={{ ...smallBtn, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setNewScheme(blankScheme())}>+ Новый</button>
           </div>
+          {sel.size > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12, color: 'var(--blue)' }}>
+              <span style={{ flex: 1 }}>Стыки только отмеченных деталей: {sel.size}</span>
+              <button type="button" style={smallBtn} onClick={() => setSel(new Set())}>Все стыки модели</button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" style={wideBtn(true)} onClick={placeDrill}>Расставить · стыков {activeJoints.length}</button>
+            <button type="button" style={wideBtn(true)} onClick={placeDrill}>Установить крепёж · стыков {activeJoints.length}</button>
             <button type="button" style={wideBtn(false)} onClick={removeDrill}>Убрать</button>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
@@ -1479,6 +1549,47 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
           </p>
         </div>
       )}
+      {/* новый крепёж и его схема — без перехода в редактор контура */}
+      {newScheme && (() => {
+        const f = newScheme, set = p => setNewScheme(v => ({ ...v, ...p }))
+        const num = (key, w = 58) => <input type="text" inputMode="decimal" value={f[key]} onChange={e => set({ [key]: e.target.value })} style={{ width: w, padding: '5px 6px', fontSize: 13, textAlign: 'center' }} />
+        const line = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }
+        const cap = { width: 92, flexShrink: 0 }
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 965, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'flex-end' }} onClick={() => setNewScheme(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxHeight: '88%', overflowY: 'auto', background: 'var(--bg)', borderRadius: '14px 14px 0 0', padding: '12px 14px calc(12px + env(safe-area-inset-bottom))' }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ flex: 1, fontSize: 15, fontWeight: 500 }}>Новый крепёж</div>
+                <button type="button" onClick={() => setNewScheme(null)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--text-hint)' }}>✕</button>
+              </div>
+              <input type="text" placeholder="Название: Конфирмат 7×50, Эксцентрик…" value={f.name} onChange={e => set({ name: e.target.value })} style={{ marginBottom: 10 }} />
+              <div style={line}><span style={cap}>В пласть</span>Ø {num('faceD')}
+                {!f.through && <>глубина {num('faceDepth')}</>}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}><input type="checkbox" checked={f.through} onChange={e => set({ through: e.target.checked })} style={{ width: 'auto' }} />сквозное</label>
+              </div>
+              <div style={line}><span style={cap}>В торец</span>Ø {num('edgeD')} глубина {num('edgeDepth')}</div>
+              <div style={line}><span style={cap}>Отступ от края</span>{num('offset')} мм
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}><input type="checkbox" checked={f.mirror} onChange={e => set({ mirror: e.target.checked })} style={{ width: 'auto' }} />и с другого края</label>
+              </div>
+              <label style={{ ...line, margin: '0 0 8px' }}><input type="checkbox" checked={f.pair} onChange={e => set({ pair: e.target.checked })} style={{ width: 'auto' }} />Второе отверстие рядом (например, шкант к конфирмату)</label>
+              {f.pair && (
+                <>
+                  <div style={line}><span style={cap}>Шаг до второго</span>{num('pairGap')} мм</div>
+                  <div style={line}><span style={cap}>Второе в пласть</span>Ø {num('pairFaceD')} глубина {num('pairFaceDepth')}</div>
+                  <div style={line}><span style={cap}>Второе в торец</span>Ø {num('pairEdgeD')} глубина {num('pairEdgeDepth')}</div>
+                </>
+              )}
+              <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '2px 0 10px' }}>
+                Схема ставится на стык «торец к пласти»: отверстия в пласти одной детали и ответные в торце другой, на заданном отступе от края стыка. Крепёж запишется в вашу базу фурнитуры и будет доступен и в редакторе контура.
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" style={wideBtn(true)} onClick={saveScheme}>Сохранить крепёж</button>
+                <button type="button" style={wideBtn(false)} onClick={() => setNewScheme(null)}>Отмена</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
       {/* ссылка для клиента */}
       {showShare && !showMats && !menu && (
         <div style={dock}>

@@ -10,7 +10,7 @@ const Model3D = lazyRetry(() => import('./Model3D'))
 // onDetailsChange — если передан, модель можно править прямо в 3D (кромка, присадка, деталь).
 // orderId — заказ уже сохранён: можно дать клиенту ссылку; значок 🔗 на кнопке — ссылка открыта.
 // onSceneChange — в 3D подвинули блоки: вся модель (профили, фурнитура, детали других материалов) тоже изменилась.
-export default function Model3DButton({ details, title, getScene, label = '3D-модель', style, onDetailsChange, onSceneChange, edgeNames, orderId, editPath, materialThickness }) {
+export default function Model3DButton({ details, title, getScene, label = '3D-модель', style, onDetailsChange, onSceneChange, edgeNames, edgeTypes, onEdgeTypesChange, onEdgeNamesChange, orderId, editPath, materialThickness }) {
   const [open, setOpen] = useState(false)
   const [scene, setScene] = useState(undefined)   // undefined — ещё не загружали
   const [shared, setShared] = useState(() => !!(orderId && cachedShare(orderId)))
@@ -39,7 +39,7 @@ export default function Model3DButton({ details, title, getScene, label = '3D-м
       {open && (
         <Suspense fallback={null}>
           <Model3D details={details} scene={scene || null} title={title} onClose={() => setOpen(false)}
-            onDetailsChange={onDetailsChange} onSceneChange={s => { setScene(s); onSceneChange?.(s) }} edgeNames={edgeNames} orderId={orderId ?? null} editPath={editPath} materialThickness={materialThickness} />
+            onDetailsChange={onDetailsChange} onSceneChange={s => { setScene(s); onSceneChange?.(s) }} edgeNames={edgeNames} edgeTypes={edgeTypes} onEdgeTypesChange={onEdgeTypesChange} onEdgeNamesChange={onEdgeNamesChange} orderId={orderId ?? null} editPath={editPath} materialThickness={materialThickness} />
         </Suspense>
       )}
     </>

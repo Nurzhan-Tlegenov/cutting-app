@@ -1,3 +1,4 @@
+import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { lazyRetry } from '../lib/lazyRetry'
@@ -393,7 +394,7 @@ export default function LabelsPage() {
     ;(async () => {
       const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
       const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
-      if (alive) { setOrder(o || null); setDetails(d || []); setLoading(false) }
+      if (alive) { setOrder(o || null); setDetails(cutDetails(d || [], parseEdgeTypes(o?.edge_types)))   /* заготовки: с учётом кромки, как в раскрое */; setLoading(false) }
     })()
     return () => { alive = false }
   }, [id])

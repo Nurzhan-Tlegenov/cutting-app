@@ -13,6 +13,9 @@ import { detailMatKey } from '../lib/detailMaterial'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided } from '../lib/partInfo'
 import { saveOrderModel, loadOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
+import EdgeTypes from '../components/EdgeTypes'
+import { cutSize, parseEdgeTypes, typesFromItems, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
 const SHEET_DEFAULTS = {
@@ -51,7 +54,7 @@ function Toggle({ on }) {
     </div>
   )
 }
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, autoFocus, onEditContour, siblings, onCopyFrom }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, edgeTypes, autoFocus, onEditContour, siblings, onCopyFrom }) {
   const SIDES = ['Дл','Дп','Шв','Шн']
   const KEYS = ['left','right','top','bottom']
   const lengthRef = useRef(null)
@@ -150,6 +153,12 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
         </div>
       )}
 
+      {/* размер в раскрой — когда у кромки включена подрезка или прифуговка */}
+      {(() => {
+        const cs = Number(detail.w) > 0 && Number(detail.h) > 0 ? cutSize(detail.w, detail.h, detail.edges, edgeTypes) : null
+        return cs ? <div style={{ marginTop: 4, fontSize: 10, color: 'var(--teal)' }}>В раскрой с учётом кромки: {cs[0]} × {cs[1]}</div> : null
+      })()}
+
       {/* Копирование контура/присадки/кромок из другой детали (с зеркалированием) */}
       {showCopyPicker && (
         <div style={{ marginTop: 8, padding: 10, background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
@@ -229,31 +238,6 @@ function PrefixManager({ prefixes, active, onChange, onSetActive }) {
     </div>
   )
 }
-function EdgeManager({ edgeNames, activeEdge, onChange, onSetActive }) {
-  const [input, setInput] = useState('')
-  const add = () => {
-    const val = input.trim()
-    if (!val || edgeNames.includes(val)) return
-    onChange([...edgeNames, val]); onSetActive(val); setInput('')
-  }
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        <input type="text" placeholder="ПВХ 0.4мм / ПВХ 2мм / ABS" value={input}
-          onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} style={{ flex: 1 }} />
-        <button type="button" onClick={add} style={{ padding: '0 14px', background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>+</button>
-      </div>
-      {edgeNames.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {edgeNames.map(e => (
-            <button key={e} type="button" onClick={() => onSetActive(activeEdge === e ? null : e)}
-              style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: activeEdge === e ? 'var(--blue)' : 'transparent', color: activeEdge === e ? 'white' : 'var(--text-muted)', cursor: 'pointer' }}>{e}</button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 let uid = 0
 function makeDetail(d) {
   uid++
@@ -284,6 +268,13 @@ export default function EditOrderPage() {
   const [activePrefix, setActivePrefix] = useState(null)
   const [edgeNames, setEdgeNames] = useState([])
   const [activeEdge, setActiveEdge] = useState(null)
+  // толщина, подрезка и прифуговка по видам кромки; запоминаются за аккаунтом для следующих заказов
+  const [edgeTypes, setEdgeTypesState] = useState({})          // у сохранённого заказа — только свои настройки (см. fetchOrder)
+  const setEdgeTypes = next => setEdgeTypesState(prev => {
+    const v = typeof next === 'function' ? next(prev) : next
+    saveUserSettings({ edgeTypes: { ...(getUserSettings(user).edgeTypes || {}), ...v } }, user)
+    return v
+  })
   const [details, setDetails] = useState([])
   const [showEdge, setShowEdge] = useState(true)
   const [lastAddedUid, setLastAddedUid] = useState(null)
@@ -294,6 +285,7 @@ export default function EditOrderPage() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
     if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16) }
+    if (o) { const saved = parseEdgeTypes(o.edge_types); if (Object.keys(saved).length) setEdgeTypesState(prev => ({ ...prev, ...saved })) }
     let loadedDetails = []
     if (d && d.length > 0) {
       const pfxSet = [...new Set(d.filter(x => x.prefix).map(x => x.prefix))]
@@ -368,6 +360,8 @@ export default function EditOrderPage() {
     const newPrefixes = [...new Set(imported.map(d => d.prefix).filter(Boolean))]
     if (newPrefixes.length) setPrefixes(prev => [...new Set([...prev, ...newPrefixes])])
     const newEdges = [...new Set(imported.flatMap(d => Object.values(d.edges)).filter(v => v && v !== 'default'))]
+    const fromModel = typesFromItems(items)                       // толщина кромок из модели — только для тех, что ещё не заданы
+    if (Object.keys(fromModel).length) setEdgeTypes(prev => ({ ...fromModel, ...prev }))
     if (newEdges.length) setEdgeNames(prev => [...new Set([...prev, ...newEdges])])
     if (material && (!materialName.trim() || mode === 'replace')) {
       setMaterialName(material)
@@ -414,12 +408,18 @@ export default function EditOrderPage() {
     if (!valid.length) { setError('Добавьте хотя бы одну деталь с размерами'); return }
     setSaving(true); setError('')
     try {
-      const { error: oErr } = await supabase.from('orders').update({
+      const orderPatch = {
         order_name: orderName || null,
         material_name: materialName || 'Без названия',
         material_thickness: Number(materialThickness) || 16,
         nesting_result: null
-      }).eq('id', id)
+      }
+      let { error: oErr } = await supabase.from('orders').update({ ...orderPatch, edge_types: typesToSave(edgeTypes, edgeNames) }).eq('id', id)
+      // в базе ещё нет колонки с настройками кромки — сохраняем заказ без неё
+      if (oErr && /edge_types/.test(String(oErr.message))) {
+        ({ error: oErr } = await supabase.from('orders').update(orderPatch).eq('id', id))
+        if (!oErr && Object.keys(typesToSave(edgeTypes, edgeNames)).length) window.alert(EDGE_TYPES_HINT)
+      }
       if (oErr) throw new Error('Ошибка обновления заказа: ' + oErr.message)
       const { error: dErr } = await supabase.from('order_details').delete().eq('order_id', id)
       if (dErr) throw new Error('Ошибка удаления деталей: ' + dErr.message)
@@ -480,7 +480,7 @@ export default function EditOrderPage() {
       <div style={{ marginBottom: 14 }}>
         <p className="section-title">Виды кромки</p>
         <div className="card">
-          <EdgeManager edgeNames={edgeNames} activeEdge={activeEdge} onChange={setEdgeNames} onSetActive={setActiveEdge} />
+          <EdgeTypes edgeNames={edgeNames} edgeTypes={edgeTypes} activeEdge={activeEdge} onNames={setEdgeNames} onTypes={setEdgeTypes} onSetActive={setActiveEdge} />
         </div>
       </div>
       <ImportDetails
@@ -491,6 +491,7 @@ export default function EditOrderPage() {
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
           <Model3DButton details={details} title={orderName} getScene={async () => (model3d ? (await import('../lib/basisB3d')).unpackScene(model3d) : loadOrderModel(id))}
             orderId={id} edgeNames={edgeNames} materialThickness={materialThickness}
+            edgeTypes={edgeTypes} onEdgeTypesChange={setEdgeTypes} onEdgeNamesChange={setEdgeNames}
             onDetailsChange={list => setDetails(list.map(d => (d.uid ? d : { ...d, uid: ++uid })))}
             onSceneChange={async s => { if (s) setModel3d((await import('../lib/basisB3d')).packScene(s)) }} />
           <select value="" onChange={e => { const m = e.target.value; if (m) setDetails(d => sortDetails(d, m)) }}
@@ -524,7 +525,7 @@ export default function EditOrderPage() {
                 <DetailCard key={d.uid} detail={d} index={globalIndex}
                   onUpdate={u => updateDetail(d.uid, u)}
                   onRemove={() => removeDetail(d.uid)}
-                  activeEdgeName={activeEdge} showEdge={showEdge}
+                  activeEdgeName={activeEdge} edgeTypes={edgeTypes} showEdge={showEdge}
                   autoFocus={d.uid === lastAddedUid}
                   onEditContour={() => setEditingContourUid(d.uid)}
                   siblings={details.filter(x => x.uid !== d.uid).map(x => ({

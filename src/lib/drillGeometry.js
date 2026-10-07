@@ -315,19 +315,33 @@ export function getDrillPoints(dr, panelW, panelH, layout) {
 export function getAllDrillPoints(contour, panelW, panelH, frontOnly = false) {
   if (!contour?.drillings?.length) return []
   const pts = []
+  // contour.cut — деталь идёт в раскрой заготовкой (подрезка на кромку / прифуговка, см. edgeCut.js):
+  // panelW/panelH — размер заготовки, а присадка записана по готовой детали. Считаем по готовой и сдвигаем.
+  const k = contour.cut || null
+  const fw = k ? panelW + k.l + k.r : panelW, fh = k ? panelH + k.b + k.t : panelH
+  const onSide = (v, full) => Math.abs(v) < 0.05 || Math.abs(v - full) < 0.05
   contour.drillings.forEach(dr => {
     if (dr.installed === false) return // не сверлить — предпросмотр, на карту не выводим
     if (frontOnly && dr.kind !== 'edge' && dr.face === 'back') return
     const d = dr.d || 8
-    getDrillPoints(dr, panelW, panelH, contour.layout).forEach(p => {
+    getDrillPoints(dr, fw, fh, contour.layout).forEach(p => {
+      let x = p.x, y = p.y, less = 0     // less — на сколько торцевое отверстие короче в заготовке (кромки ещё нет)
+      if (k) {
+        x = p.x - k.l; y = p.y - k.b
+        if (dr.kind === 'edge' && !p.isFaceType) {
+          if (p.dx && onSide(p.x, fw)) { less = p.x < fw / 2 ? k.l : k.r; x = p.x < fw / 2 ? 0 : panelW }
+          if (p.dy && onSide(p.y, fh)) { less = p.y < fh / 2 ? k.b : k.t; y = p.y < fh / 2 ? 0 : panelH }
+        }
+      }
       // отверстие в торец: направление вглубь детали и глубина — карта рисует его на всю длину
       if (dr.kind === 'edge' && !p.isFaceType && (p.dx || p.dy)) {
-        pts.push({ x: p.x, y: p.y, d: p.ehD ?? (p.isPair ? (dr.pairD ?? d) : d), back: false, edge: true, dx: p.dx, dy: p.dy,
-          depth: p.ehDepth ?? (p.isPair ? (dr.pairDepth ?? dr.depth ?? 0) : (dr.depth ?? 0)) })
+        const depth = p.ehDepth ?? (p.isPair ? (dr.pairDepth ?? dr.depth ?? 0) : (dr.depth ?? 0))
+        pts.push({ x, y, d: p.ehD ?? (p.isPair ? (dr.pairD ?? d) : d), back: false, edge: true, dx: p.dx, dy: p.dy,
+          depth: less ? Math.max(0, Math.round((depth - less) * 100) / 100) : depth })
         return
       }
       // диаметр и глубина именно этого отверстия (у парного и дополнительного — свои)
-      pts.push({ x: p.x, y: p.y, d: p.ehD ?? (p.isPair ? (dr.pairD ?? d) : d), back: dr.kind !== 'edge' && dr.face === 'back',
+      pts.push({ x, y, d: p.ehD ?? (p.isPair ? (dr.pairD ?? d) : d), back: dr.kind !== 'edge' && dr.face === 'back',
         depth: p.ehDepth ?? (p.isPair ? (dr.pairDepth ?? 13) : (dr.depth ?? 13)) })
     })
   })
