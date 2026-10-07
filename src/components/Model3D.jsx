@@ -759,7 +759,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     fitNext.current = true
     setLevel(i); setHiddenPids(new Set(keep ? all.filter(q => !keep.has(q)) : [])); setSel(new Set(focusPids)); setMenu(null); setMulti(false)
     // поднялись от детали к блоку — детали чуть раздвинуты (взрыв 20 %), чтобы было видно соединения; сама деталь — без взрыва
-    if (i === 0) setExplode(0); else if (level === 0) setExplode(0.2)
+    if (i === 0) setExplode(0); else if (level === 0) { setExplode(0.2); if (mode === 'solid') setMode('xray') }
   }
   useEffect(() => { if (levels.length) goLevel(0) }, [focusPids.join('|')])   // eslint-disable-line react-hooks/exhaustive-deps
   const hidePids = pids => { setHiddenPids(h => new Set([...h, ...pids])); setSel(new Set()); setPicked(null); setMenu(null); setMulti(false) }
