@@ -32,5 +32,10 @@ export const orderClient = orderId => call('order_client', { p_order: orderId })
 /** Администратор: подтвердить / отклонить производство ('approved' | 'rejected' | 'pending') */
 export const adminSetProduction = (id, status) => call('admin_set_production', { p_id: id, p_status: status })
 export const productionSetStatus = (orderId, status) => call('production_set_status', { p_order: orderId, p_status: status })
+/** Производство возвращает заказ заказчику на доработку (заказ снова черновик). note — что поправить. -> {} | { error } */
+export async function productionReturnOrder(orderId, note) {
+  const r = await call('production_return_order', { p_order: orderId, p_note: note || '' })
+  return r.missing ? { error: 'База ещё не обновлена: выполните migration_return_order.sql в Supabase (SQL Editor) — один раз.' } : r
+}
 /** Производство (или администратор) сохраняет свой вариант раскроя в оформленный на него заказ. -> {} | { error } */
 export const productionSaveNesting = (orderId, value) => call('production_save_nesting', { p_order: orderId, p_value: value })

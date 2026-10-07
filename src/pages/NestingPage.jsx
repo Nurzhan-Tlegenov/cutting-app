@@ -2804,10 +2804,21 @@ export default function NestingPage() {
           <div style={{ fontWeight: 500 }}>Раскрой</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{orderTitle(order)}</div>
         </div>
+        {/* черновик можно править: название, материал, детали, кромку */}
+        {order?.status === 'draft' && (!order.user_id || order.user_id === user?.id || profile?.role === 'admin') && (
+          <button type="button" onClick={() => navigate(`/orders/${id}/edit`)}
+            style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px', whiteSpace: 'nowrap', cursor: 'pointer' }}>✎ Править заказ</button>
+        )}
         {/* 3D открывается поверх страницы — раскрой при этом не сбрасывается */}
         <Model3DButton details={allDetails} title={orderTitle(order)} getScene={() => loadOrderModel(id)} orderId={id}
           saveToOrder={order?.status === 'draft'} order={order} materialThickness={Number(order?.material_thickness) || 16} onSaved={() => window.location.reload()} />
       </div>
+
+      {order?.status === 'draft' && order.returned_at && (
+        <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '6px 10px', marginBottom: 8 }}>
+          ↩ Производство вернуло заказ на доработку{order.return_note ? `: ${order.return_note}` : ''}. Поправьте заказ («✎ Править заказ») и оформите его заново.
+        </div>
+      )}
 
       {/* Статистика */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: focus && configs.length > 1 ? 3 : 8 }}>

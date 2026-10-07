@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
-import { myProduction, productionOrders, productionSetStatus } from '../lib/productionApi'
+import { myProduction, productionOrders, productionSetStatus, productionReturnOrder } from '../lib/productionApi'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
@@ -45,6 +45,16 @@ export default function ProductionPage() {
     setBusy('')
     if (r.error) { setError(r.error); return }
     setOrders(list => list.map(x => (x.id === o.id ? { ...x, status } : x)))
+  }
+  // вернуть заказ заказчику на доработку: он снова сможет править заказ и оформить его заново
+  const returnOrder = async o => {
+    const note = window.prompt(`Вернуть заказ «${orderTitle(o)}» заказчику на доработку?\nНапишите, что нужно поправить (заказчик это увидит):`, '')
+    if (note === null) return
+    setBusy(o.id)
+    const r = await productionReturnOrder(o.id, note)
+    setBusy('')
+    if (r.error) { setError(r.error); return }
+    setOrders(list => list.filter(x => x.id !== o.id))
   }
   const saveSheet = async key => {
     const v = sheet[key] === '' ? null : Number(String(sheet[key]).replace(',', '.'))
@@ -159,6 +169,7 @@ export default function ProductionPage() {
                     {o.status === 'inwork' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'done')}>Исполнен</button>}
                     {o.status === 'done' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'inwork')}>Вернуть в работу</button>}
                     <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
+                    {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}
                   </div>
                 </div>
               )

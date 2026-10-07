@@ -167,7 +167,21 @@ export default function OrdersPage() {
                       {STATUS_LABELS[order.status] || order.status}
                     </span>
                   </div>
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{order.material_name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text-muted)' }}>{order.material_name}</div>
+                    {/* черновик можно править: название, материал, детали, кромку */}
+                    {order.status === 'draft' && !selectMode && (
+                      <button type="button"
+                        onClick={e => { e.stopPropagation(); navigate(`/orders/${order.id}/edit`) }}
+                        onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
+                        style={{ flexShrink: 0, padding: '4px 12px', borderRadius: 20, fontSize: 12, background: 'transparent', border: '0.5px solid var(--blue-mid)', color: 'var(--blue)', cursor: 'pointer' }}>✎ Редактировать</button>
+                    )}
+                  </div>
+                  {order.status === 'draft' && order.returned_at && (
+                    <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '5px 8px' }}>
+                      ↩ Производство вернуло заказ на доработку{order.return_note ? `: ${order.return_note}` : ''}
+                    </div>
+                  )}
                   {shares.has(order.id) && (
                     <div title="По ссылке 3D-модель этого заказа открыта для просмотра. Закрыть доступ можно в заказе."
                       style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px' }}>
