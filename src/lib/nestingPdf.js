@@ -1,18 +1,19 @@
-// Карты раскроя в PDF: лист на страницу — схема листа (детали с номерами, размерами по сторонам и кромкой),
-// сведения о листе с процентом использования материала и список деталей этого листа.
+// Карты раскроя в PDF: лист на страницу — крупная схема листа (детали с номерами позиций, размерами по сторонам
+// и кромкой), справа колонкой список деталей листа (позиция, длина, ширина, количество; кромка — чертами под размером:
+// одна черта — закромлена одна сторона, две — обе), под схемой — сведения о листе, процент использования и метраж кромки.
 // Страница рисуется на canvas (так кириллица и линии получаются чёткими без встраивания шрифтов) и кладётся
 // в PDF картинкой A4, 200 точек на дюйм.
 import { zlibSync, strToU8 } from 'fflate'
 import { sheetGeo } from './savedNesting'
 import { placedHoles } from './partHoles'
-import { detailMeta } from './partLabel'
 import { orderTitle } from './orderUtils'
-import { rawDetail } from './edgeCut'
+import { rawDetail, overMm, parseEdgeTypes } from './edgeCut'
+import { detailEdgeList } from './edgeLength'
 
 const K = 1654 / 210                     // точек на мм
 const PW = 1654, PH = 2339
 const mm = v => v * K
-const INK = '#1F1F1D', MUTED = '#6B6A66', LINE = '#B9B7B0', EDGE = '#E8590C', FILL = '#F3F0E8'
+const INK = '#1F1F1D', MUTED = '#6B6A66', LINE = '#B9B7B0', EDGE = '#E8590C', FILL = '#F3F0E8', BRAND = '#009BDE'
 const r1 = v => Math.round(v * 10) / 10
 const fmt = v => String(r1(v)).replace('.', ',')
 
@@ -32,22 +33,39 @@ function text(ctx, s, x, y, { size = 3, bold = false, color = INK, align = 'left
 }
 const rule = (ctx, x0, y0, x1, y1, w = 0.2, color = LINE) => { ctx.strokeStyle = color; ctx.lineWidth = mm(w); ctx.beginPath(); ctx.moveTo(mm(x0), mm(y0)); ctx.lineTo(mm(x1), mm(y1)); ctx.stroke() }
 
-// кромка детали словами: «Белая: Дл, Шв, Шн»
-function edgeText(d) {
-  const sides = [['edge_left', 'Дл'], ['edge_right', 'Дп'], ['edge_top', 'Шв'], ['edge_bottom', 'Шн']]
-  const by = new Map()
-  for (const [k, s] of sides) { const v = d?.[k]; if (!v || v === 'false') continue; const n = v === 'default' || v === true ? 'кромка' : String(v); by.set(n, [...(by.get(n) || []), s]) }
-  return [...by].map(([n, list]) => `${n}: ${list.join(', ')}`).join('; ')
+const on = v => !!v && v !== 'false'
+const m2 = v => v.toFixed(2).replace('.', ',')
+
+// Знак приложения (тот же, что на значке): треугольник с «MD» и подписью RaskroyPro. x, y — левый верхний угол, h — высота, мм
+function drawLogo(ctx, x, y, h) {
+  const u = h / 1180, X = v => mm(x + v * u), Y = v => mm(y + v * u)
+  ctx.fillStyle = BRAND; ctx.beginPath()
+  ;[[519, 0], [1040, 897], [0, 897], [70, 777], [830, 777], [519, 240], [290, 637], [150, 637]].forEach(([a, b], i) => (i ? ctx.lineTo(X(a), Y(b)) : ctx.moveTo(X(a), Y(b))))
+  ctx.closePath(); ctx.fill()
+  const word = (s, left, base, size, len, weight) => {            // слово, растянутое ровно на заданную ширину
+    ctx.save(); ctx.font = `${weight} ${mm(size * u)}px "Arial Black", Arial, Helvetica, sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'
+    const w = ctx.measureText(s).width || 1
+    ctx.translate(X(left), Y(base)); ctx.scale(mm(len * u) / w, 1); ctx.fillText(s, 0, 0); ctx.restore()
+  }
+  word('MD', 108, 760, 146, 266, 900)
+  word('RaskroyPro', 15, 1120, 190, 1010, 700)
+  return 1040 * u
 }
 
-/** Строки списка деталей листа: [{ no, di, name, size, qty, edge }] и номер по детали */
+// кромка одной детали, м по названиям (со свесом на каждую закромленную сторону)
+function addEdges(acc, d, over, qty = 1) {
+  for (const e of detailEdgeList(d)) { const v = (e.mm + over) / 1000 * qty; acc.total += v; acc.byName[e.name] = (acc.byName[e.name] || 0) + v }
+  return acc
+}
+
+/** Строки списка деталей листа: [{ no, di, len, wid, qty, nl, nw }] и номер позиции по детали */
 function sheetRows(sheet, details) {
   const cnt = new Map()
   for (const p of sheet.placed) cnt.set(p.detailIndex, (cnt.get(p.detailIndex) || 0) + 1)
   const rows = [...cnt].sort((a, b) => a[0] - b[0]).map(([di, qty], i) => {
-    const d = details[di] || {}, raw = rawDetail(d), m = detailMeta(d)
-    const blank = d._cut ? ` (готовая ${fmt(raw.length)}×${fmt(raw.width)})` : ''
-    return { no: i + 1, di, name: [m?.des, d.display_name || d.name].filter(Boolean).join('  ') || 'Деталь', size: `${fmt(d.length)} × ${fmt(d.width)}${blank}`, qty, edge: edgeText(raw) }
+    const d = details[di] || {}, raw = rawDetail(d)
+    return { no: i + 1, di, len: fmt(d.length), wid: fmt(d.width), qty, cut: !!d._cut,
+      nl: (on(raw.edge_left) ? 1 : 0) + (on(raw.edge_right) ? 1 : 0), nw: (on(raw.edge_top) ? 1 : 0) + (on(raw.edge_bottom) ? 1 : 0) }
   })
   return { rows, noOf: new Map(rows.map(r => [r.di, r.no])) }
 }
@@ -103,21 +121,27 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
   return { right: x0 + geo.sheetW * s, bottom: y0 + geo.sheetL * s }
 }
 
-const COLS = [[10, '№', 9], [19, 'Деталь', 62], [81, 'Длина × ширина, мм', 50], [131, 'Шт.', 10], [141, 'Кромка', 59]]
-function tableHead(ctx, y) {
-  ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y), mm(190), mm(6.4))
-  COLS.forEach(([x, t]) => text(ctx, t, x + 1.2, y + 4.4, { size: 2.7, bold: true, color: MUTED }))
-  return y + 6.4
-}
-function tableRow(ctx, y, r) {
-  text(ctx, r.no, COLS[0][0] + 1.2, y + 4.3, { size: 3, bold: true })
-  text(ctx, r.name, COLS[1][0] + 1.2, y + 4.3, { size: 3, max: COLS[1][2] - 2 })
-  text(ctx, r.size, COLS[2][0] + 1.2, y + 4.3, { size: 3, max: COLS[2][2] - 2 })
-  text(ctx, r.qty, COLS[3][0] + 1.2, y + 4.3, { size: 3, bold: true })
-  text(ctx, r.edge || '—', COLS[4][0] + 1.2, y + 4.3, { size: 2.8, color: r.edge ? EDGE : MUTED, max: COLS[4][2] - 2 })
-  rule(ctx, 10, y + 6, 200, y + 6, 0.12)
+// Список деталей колонкой: Поз. | Длина | Ширина | Шт. Под размером — черта на каждую закромленную сторону
+const LW = 50, LROW = 6.6, LC = [5, 19.5, 35, 46]            // ширина колонки и середины столбцов, мм
+function listHead(ctx, x, y) {
+  ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(x), mm(y), mm(LW), mm(6))
+  ;['Поз.', 'Длина', 'Ширина', 'Шт.'].forEach((t, i) => text(ctx, t, x + LC[i], y + 4.1, { size: 2.6, bold: true, color: MUTED, align: 'center' }))
   return y + 6
 }
+function listRow(ctx, x, y, r) {
+  const dim = (s, cx, n) => {
+    text(ctx, s, cx, y + 3.7, { size: 3.1, align: 'center' })
+    const w = ctx.measureText(s).width / K + 1.2
+    for (let i = 0; i < n; i++) rule(ctx, cx - w / 2, y + 4.5 + i * 0.95, cx + w / 2, y + 4.5 + i * 0.95, 0.38, EDGE)
+  }
+  text(ctx, r.no, x + LC[0], y + 4.2, { size: 3.3, bold: true, align: 'center' })
+  dim(r.len, x + LC[1], r.nl); dim(r.wid, x + LC[2], r.nw)
+  text(ctx, r.qty, x + LC[3], y + 4.2, { size: 3.1, bold: true, align: 'center' })
+  rule(ctx, x, y + LROW, x + LW, y + LROW, 0.12)
+  return y + LROW
+}
+const LIST_TOP = 29, LIST_BOTTOM = 287
+const PER_COL = Math.floor((LIST_BOTTOM - LIST_TOP - 6) / LROW)
 
 /**
  * mat — { name | label, thickness, result, sheets, details } (как у savedNestings; details — детали этого материала).
@@ -125,6 +149,7 @@ function tableRow(ctx, y, r) {
  */
 export async function buildNestingPdf({ order, mat, onProgress }) {
   const sheets = (mat.sheets || []).filter(sh => sh?.placed?.length)
+  const details = mat.details || []
   const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
   const ctx = cv.getContext('2d')
   const matName = [mat.name || mat.label || order?.material_name || '', mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · ')
@@ -132,49 +157,83 @@ export async function buildNestingPdf({ order, mat, onProgress }) {
   const used = sheets.map(sh => sh.placed.reduce((a, p) => a + partArea(p), 0))
   const totalUsed = used.reduce((a, b) => a + b, 0), totalArea = geos.reduce((a, g) => a + g.usableX * g.usableY, 0)
   const totalParts = sheets.reduce((a, sh) => a + sh.placed.length, 0)
+  // кромка: на каждом листе и всего по листам этого файла
+  const over = overMm(parseEdgeTypes(order?.edge_types))
+  const edges = sheets.map(sh => sh.placed.reduce((a, p) => (details[p.detailIndex] ? addEdges(a, rawDetail(details[p.detailIndex]), over) : a), { total: 0, byName: {} }))
+  const edgeAll = edges.reduce((a, e) => { a.total += e.total; for (const [k, v] of Object.entries(e.byName)) a.byName[k] = (a.byName[k] || 0) + v; return a }, { total: 0, byName: {} })
   const pages = []                                   // функции, рисующие страницу
+  let pageNo = 0
   const header = (si, cont) => {
+    pageNo++
     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
-    text(ctx, `Карта раскроя · ${orderTitle(order)}`, 10, 15, { size: 5, bold: true, max: 140 })
-    text(ctx, `${sheets[si].stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${cont ? ' (продолжение)' : ''}`, 200, 15, { size: 5, bold: true, align: 'right' })
-    text(ctx, matName, 10, 21, { size: 3.4, color: MUTED, max: 130 })
-    text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 21, { size: 3, color: MUTED, align: 'right' })
-    rule(ctx, 10, 24, 200, 24, 0.35, INK)
+    const lw = drawLogo(ctx, 10, 7.5, 16.5)
+    const tx = 10 + lw + 4
+    text(ctx, `Карта раскроя · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 150 - tx })
+    text(ctx, `${sheets[si].stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${cont ? ' (продолжение)' : ''}`, 200, 14.5, { size: 5, bold: true, align: 'right' })
+    text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
+    text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+    rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
+    text(ctx, 'Сформировано в приложении RaskroyPro', 10, 292.5, { size: 2.4, color: MUTED })
+    text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
+  }
+  const edgeBlock = (x, y, title, e, w) => {
+    text(ctx, title, x, y, { size: 2.7, color: MUTED }); y += 5.6
+    text(ctx, `${m2(e.total)} м`, x, y, { size: 4.6, bold: true, color: e.total > 0 ? INK : MUTED }); y += 4
+    const names = Object.entries(e.byName)
+    if (names.length > 1) for (const [n, v] of names.slice(0, 3)) { text(ctx, `${n}: ${m2(v)} м`, x, y, { size: 2.6, color: MUTED, max: w }); y += 3.5 }
+    return y + 2.5
   }
   sheets.forEach((sheet, si) => {
-    const geo = geos[si], { rows, noOf } = sheetRows(sheet, mat.details || [])
-    const first = Math.min(rows.length, 13)
+    const geo = geos[si], { rows, noOf } = sheetRows(sheet, details)
+    const first = Math.min(rows.length, PER_COL)
     pages.push(() => {
       header(si, false)
-      const box = drawSheet(ctx, 10, 28, 112, 160, sheet, geo, mat.details || [], noOf)
-      // сведения о листе
-      const ix = 128
-      let y = 33
+      // схема листа — слева, на всю ширину до списка
+      const box = drawSheet(ctx, 10, LIST_TOP, 136, 190, sheet, geo, details, noOf)
+      // список деталей листа — колонкой справа
+      const lx = 200 - LW
+      let ly = listHead(ctx, lx, LIST_TOP)
+      for (let i = 0; i < first; i++) ly = listRow(ctx, lx, ly, rows[i])
+      if (rows.length > first) text(ctx, 'продолжение списка — на след. странице', 200, LIST_BOTTOM + 2.6, { size: 2.3, color: MUTED, align: 'right' })
+      // сведения о листе — под схемой, три столбца
+      const y0 = box.bottom + 7, c1 = 10, c2 = 56, c3 = 102
       const pct = geo.usableX * geo.usableY > 0 ? used[si] / (geo.usableX * geo.usableY) * 100 : 0
-      text(ctx, 'Использовано материала', ix, y, { size: 3, color: MUTED }); y += 9
-      text(ctx, `${Math.round(pct)} %`, ix, y, { size: 9, bold: true }); y += 4
-      ctx.fillStyle = '#E9E6DD'; ctx.fillRect(mm(ix), mm(y), mm(72), mm(2.2))
-      ctx.fillStyle = INK; ctx.fillRect(mm(ix), mm(y), mm(72 * Math.min(100, pct) / 100), mm(2.2)); y += 9
+      let y = y0
+      text(ctx, 'Использовано материала', c1, y, { size: 2.7, color: MUTED }); y += 9.5
+      text(ctx, `${Math.round(pct)} %`, c1, y, { size: 9, bold: true }); y += 3.5
+      ctx.fillStyle = '#E9E6DD'; ctx.fillRect(mm(c1), mm(y), mm(38), mm(2))
+      ctx.fillStyle = INK; ctx.fillRect(mm(c1), mm(y), mm(38 * Math.min(100, pct) / 100), mm(2)); y += 8
+      text(ctx, 'Всего по материалу', c1, y, { size: 2.7, color: MUTED }); y += 4.4
+      text(ctx, `листов ${sheets.length} · деталей ${totalParts}`, c1, y, { size: 3.1, bold: true, max: 42 }); y += 4.4
+      text(ctx, `использовано ${Math.round(totalArea > 0 ? totalUsed / totalArea * 100 : 0)} %`, c1, y, { size: 3.1, bold: true })
       const info = [['Лист, мм', `${fmt(geo.sheetL)} × ${fmt(geo.sheetW)}`], ['Рабочая область, мм', `${fmt(geo.usableY)} × ${fmt(geo.usableX)}`], ['Рез, мм', fmt(geo.kerf)],
-        ['Деталей на листе', sheet.placed.length], ['Площадь деталей, м²', (used[si] / 1e6).toFixed(2).replace('.', ',')],
-        ...((sheet.manualOffcuts || []).length ? [['Деловые обрезки', sheet.manualOffcuts.map(o => `${Math.round(o.h)}×${Math.round(o.w)}`).join(', ')]] : [])]
-      for (const [k, v] of info) { text(ctx, k, ix, y, { size: 2.8, color: MUTED }); text(ctx, v, ix, y + 4.6, { size: 3.6, bold: true, max: 72 }); y += 10.5 }
-      y += 2; rule(ctx, ix, y, 200, y, 0.15); y += 6
-      text(ctx, 'Всего по материалу', ix, y, { size: 2.8, color: MUTED }); y += 4.8
-      text(ctx, `листов ${sheets.length} · деталей ${totalParts}`, ix, y, { size: 3.4, bold: true }); y += 4.8
-      text(ctx, `использовано ${Math.round(totalArea > 0 ? totalUsed / totalArea * 100 : 0)} %`, ix, y, { size: 3.4, bold: true }); y += 9
-      // условные обозначения
-      ctx.strokeStyle = EDGE; ctx.lineWidth = mm(0.7); ctx.beginPath(); ctx.moveTo(mm(ix), mm(y - 1)); ctx.lineTo(mm(ix + 9), mm(y - 1)); ctx.stroke()
-      text(ctx, 'сторона с кромкой', ix + 11, y, { size: 2.8, color: MUTED }); y += 5.5
-      text(ctx, '12', ix + 4.5, y, { size: 3.4, bold: true, align: 'center' }); text(ctx, 'номер детали по списку ниже', ix + 11, y, { size: 2.8, color: MUTED }); y += 5.5
-      text(ctx, 'Размеры на детали — как она лежит на листе.', ix, y, { size: 2.6, color: MUTED })
-      // список деталей листа
-      let ty = tableHead(ctx, Math.max(box.bottom + 5, 193))
-      for (let i = 0; i < first; i++) ty = tableRow(ctx, ty, rows[i])
-      if (rows.length > first) text(ctx, 'продолжение списка — на следующей странице', 200, 290, { size: 2.6, color: MUTED, align: 'right' })
+        ['Деталей на листе', sheet.placed.length], ['Площадь деталей, м²', m2(used[si] / 1e6)],
+        ...((sheet.manualOffcuts || []).length ? [['Деловые обрезки, мм', sheet.manualOffcuts.map(o => `${Math.round(o.h)}×${Math.round(o.w)}`).join(', ')]] : [])]
+      y = y0
+      for (const [k, v] of info) { text(ctx, k, c2, y, { size: 2.7, color: MUTED }); text(ctx, v, c2, y + 4.2, { size: 3.3, bold: true, max: 43 }); y += 8.6 }
+      y = edgeBlock(c3, y0, 'Кромка на этом листе', edges[si], 44)
+      y = edgeBlock(c3, y + 1, sheets.length > 1 ? `Кромка всего, ${sheets.length} лист.` : 'Кромка всего', edgeAll, 44)
+      text(ctx, over > 0 ? `со свесами ${fmt(over)} мм на сторону` : 'без свесов', c3, y, { size: 2.5, color: MUTED }); y += 4
+      if (rows.some(r => r.cut)) text(ctx, 'Размеры в списке — заготовки (с учётом кромки).', c3, y, { size: 2.5, color: MUTED, max: 44 })
+      // условные обозначения — внизу страницы
+      y = 282
+      rule(ctx, 10, y - 0.9, 17, y - 0.9, 0.7, EDGE); text(ctx, 'сторона с кромкой', 19, y, { size: 2.5, color: MUTED })
+      text(ctx, '12', 53, y + 0.1, { size: 3, bold: true, align: 'center' }); text(ctx, 'позиция по списку справа', 57, y, { size: 2.5, color: MUTED })
+      y = 286.5
+      rule(ctx, 10, y - 1.5, 17, y - 1.5, 0.38, EDGE); rule(ctx, 10, y - 0.5, 17, y - 0.5, 0.38, EDGE)
+      text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', 19, y, { size: 2.5, color: MUTED })
     })
-    for (let from = first; from < rows.length; from += 42) {
-      pages.push(() => { header(si, true); let ty = tableHead(ctx, 28); for (const r of rows.slice(from, from + 42)) ty = tableRow(ctx, ty, r) })
+    for (let from = first; from < rows.length; from += PER_COL * 3) {
+      pages.push(() => {
+        header(si, true)
+        for (let c = 0; c < 3; c++) {
+          const part = rows.slice(from + c * PER_COL, from + (c + 1) * PER_COL)
+          if (!part.length) break
+          const x = 10 + c * (LW + 20)
+          let ty = listHead(ctx, x, LIST_TOP)
+          for (const r of part) ty = listRow(ctx, x, ty, r)
+        }
+      })
     }
   })
   // PDF: страница — картинка A4
