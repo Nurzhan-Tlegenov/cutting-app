@@ -196,6 +196,8 @@ export function normalizeLabel(raw) {
   items = items.map(i => {
     const pic = isBox(i), iw = Math.max(3, Math.min(isVert(i) ? h : w, Number(i.w) || 20))
     const o = { id: i.id || i.type + '_' + Math.random().toString(36).slice(2, 7), type: i.type, w: iw, bold: !!i.bold, align: ['right', 'center'].includes(i.align) ? i.align : 'left' }
+    // черта у текста: снизу, сверху или без неё; у кромки по умолчанию — снизу
+    o.ul = ['below', 'above', 'none'].includes(i.ul) ? i.ul : EDGE_TYPES.includes(i.type) ? 'below' : 'none'
     if (typeof i.img === 'string' && (i.img.startsWith('ref:') || (i.img.startsWith('data:image/') && i.img.length < 40000))) o.img = i.img
     if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 10))
     if (itemKind(i.type) !== 'pic') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
@@ -494,7 +496,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       // кромка слева читается снизу вверх, справа — сверху вниз; рамка элемента — узкая и высокая
       if (it.type === 'edgeLeft') { ctx.translate(x, y + w); ctx.rotate(-Math.PI / 2) } else if (it.type === 'edgeRight') { ctx.translate(x + sz * 1.25, y); ctx.rotate(Math.PI / 2) } else ctx.translate(x, y)
       ctx.fillText(t, ax, sz * 0.62)
-      if (EDGE_TYPES.includes(it.type)) { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? w - tw : it.align === 'center' ? (w - tw) / 2 : 0; ctx.fillRect(x0, sz * 1.16, tw, Math.max(1, sz * 0.09)) }
+      if (it.ul === 'below' || it.ul === 'above') { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? w - tw : it.align === 'center' ? (w - tw) / 2 : 0, th = Math.max(1, Math.round(sz * 0.09)); ctx.fillRect(x0, it.ul === 'below' ? sz * 1.16 : 0, tw, th) }
       ctx.restore()
     }
   }

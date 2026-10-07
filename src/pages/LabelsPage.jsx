@@ -114,6 +114,7 @@ function LabelEditor({ tpl, onChange, order, mat }) {
               <button type="button" style={chip(false)} onClick={() => edit({ size: cur.size + 0.3 })}>A+</button>
               <button type="button" style={{ ...chip(cur.bold), fontWeight: 700 }} onClick={() => edit({ bold: !cur.bold })}>Ж</button>
               <button type="button" style={chip(cur.align !== 'left')} onClick={() => edit({ align: cur.align === 'left' ? 'center' : cur.align === 'center' ? 'right' : 'left' })}>{cur.align === 'right' ? 'По правому краю' : cur.align === 'center' ? 'По центру' : 'По левому краю'}</button>
+              <button type="button" style={chip(cur.ul !== 'none')} onClick={() => edit({ ul: cur.ul === 'none' ? 'below' : cur.ul === 'below' ? 'above' : 'none' })}>{cur.ul === 'below' ? 'Черта снизу' : cur.ul === 'above' ? 'Черта сверху' : 'Без черты'}</button>
             </>
           )}
           {cur.type === 'order' && !cur.img && (
