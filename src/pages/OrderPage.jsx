@@ -16,6 +16,7 @@ import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
 import { orderClient, productionSetStatus, orderMarks } from '../lib/productionApi'
+import NestingCost from '../components/NestingCost'
 import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
@@ -204,6 +205,11 @@ export default function OrderPage() {
             </div>
           )}
         </div>
+      )}
+      {/* производство видит всю статистику раскроя и расчёт; заказчик — стоимость работ (если цены ему доступны) */}
+      {nestings.length > 0 && (order.production_id || inProduction) && (
+        <NestingCost order={order} mats={nestings} method={order.cutting_method || 'nesting'} productionId={order.production_id}
+          full={inProduction} style={{ marginBottom: 12 }} />
       )}
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>

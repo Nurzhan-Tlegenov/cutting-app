@@ -8,6 +8,7 @@ import { myProduction, productionOrders, productionSetStatus, productionReturnOr
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
+import PriceList from '../components/PriceList'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -26,6 +27,7 @@ export default function ProductionPage() {
   const setFilter = f => { setFilterState(f); try { sessionStorage.setItem('prodFilter', f) } catch { /* без памяти */ } }
   const [edit, setEdit] = useState(false)
   const [busy, setBusy] = useState('')
+  const [prices, setPrices] = useState(false)       // открыт прайс-лист
   const [open, setOpen] = useState(() => new Set())   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
   const toggle = id => setOpen(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const [sheet, setSheet] = useState({})
@@ -130,6 +132,10 @@ export default function ProductionPage() {
                     ))}
                   </div>
                 </details>
+                <div onClick={() => setPrices(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
+                  <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Прайс-лист (цены на распил, кромление, присадку)</span>
+                  <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
+                </div>
               </>
             )}
           </div>
@@ -199,6 +205,7 @@ export default function ProductionPage() {
           </div>
         </>
       )}
+      {prices && prod && <PriceList production={prod} onClose={() => setPrices(false)} />}
       <BottomNav />
     </div>
   )

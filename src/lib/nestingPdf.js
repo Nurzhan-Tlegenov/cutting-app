@@ -222,9 +222,11 @@ const PER_COL = Math.floor((LIST_BOTTOM - LIST_TOP - 6) / LROW)
 
 /**
  * mat — { name | label, thickness, result, sheets, details } (как у savedNestings; details — детали этого материала).
+ * summary (необязательно, PDF из кабинета производства) — последняя страница «Статистика и стоимость»:
+ *   { rows: [{ label, value }], lines: [{ title, qty, sum }], total, currency, minApplied }
  * -> Uint8Array (PDF, A4)
  */
-export async function buildNestingPdf({ order, mat, onProgress }) {
+export async function buildNestingPdf({ order, mat, onProgress, summary = null }) {
   const sheets = (mat.sheets || []).filter(sh => sh?.placed?.length)
   const details = mat.details || []
   const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
@@ -312,6 +314,60 @@ export async function buildNestingPdf({ order, mat, onProgress }) {
       })
     }
   })
+  // Статистика раскроя и стоимость работ — отдельной страницей после карт
+  if (summary && ((summary.rows || []).length || (summary.lines || []).length || summary.total != null)) {
+    pages.push(() => {
+      pageNo++
+      ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
+      const lw = drawLogo(ctx, 10, 7.5, 16.5), tx = 10 + lw + 4
+      text(ctx, `Статистика раскроя · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
+      text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
+      text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+      rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
+      text(ctx, 'Сформировано в приложении RaskroyPro', 10, 292.5, { size: 2.4, color: MUTED })
+      text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
+      let y = 34
+      const rows = summary.rows || []
+      if (rows.length) {
+        text(ctx, 'Раскрой', 10, y, { size: 3.6, bold: true }); y += 3
+        // две колонки: подпись слева, значение справа
+        const half = Math.ceil(rows.length / 2), colW = 92
+        rows.forEach((r, i) => {
+          const c = i < half ? 0 : 1, yy = y + 5.4 * ((i < half ? i : i - half) + 1), x = 10 + c * (colW + 6)
+          text(ctx, r.label, x, yy, { size: 3, color: MUTED, max: colW - 34 })
+          text(ctx, r.value, x + colW, yy, { size: 3.1, bold: true, align: 'right', max: 40 })
+          rule(ctx, x, yy + 1.6, x + colW, yy + 1.6, 0.1)
+        })
+        y += 5.4 * half + 10
+      }
+      const lines = summary.lines || []
+      if (lines.length || summary.total != null) {
+        const cur = summary.currency ? `, ${summary.currency}` : ''
+        text(ctx, 'Стоимость работ', 10, y, { size: 3.6, bold: true }); y += 6
+        if (lines.length) {
+          ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y - 4.2), mm(190), mm(6))
+          text(ctx, 'Операция', 12, y, { size: 2.7, bold: true, color: MUTED })
+          text(ctx, 'Количество', 150, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
+          text(ctx, `Сумма${cur}`, 198, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
+          y += 2
+          for (const l of lines) {
+            y += 5.6
+            text(ctx, l.title, 12, y, { size: 3.1, max: 100 })
+            if (l.qty) text(ctx, l.qty, 150, y, { size: 3, color: MUTED, align: 'right' })
+            text(ctx, l.sum, 198, y, { size: 3.1, bold: true, align: 'right' })
+            rule(ctx, 10, y + 1.7, 200, y + 1.7, 0.1)
+          }
+          y += 8
+        }
+        if (summary.total != null) {
+          text(ctx, summary.minApplied ? 'Итого (минимальная сумма заказа)' : 'Итого', 12, y, { size: 3.8, bold: true })
+          text(ctx, summary.total, 198, y, { size: 5, bold: true, align: 'right' })
+          rule(ctx, 10, y + 2.4, 200, y + 2.4, 0.35, INK); y += 8
+          text(ctx, 'Стоимость работ; материал и кромка в сумму не входят.', 12, y, { size: 2.5, color: MUTED })
+        }
+      }
+    })
+  }
   // PDF: страница — картинка A4
   const chunks = [], offsets = []
   let size = 0
@@ -385,8 +441,8 @@ function askShare(file, title) {
  * PDF карт раскроя: на телефоне сразу открывается «Поделиться» (мессенджер, почта, облако) — файл уходит клиенту
  * без скачивания. Где так нельзя (компьютер, старый браузер) — файл скачивается, как раньше.
  */
-export async function saveNestingPdf({ order, mat, fileName, onProgress }) {
-  const data = await buildNestingPdf({ order, mat, onProgress })
+export async function saveNestingPdf({ order, mat, fileName, onProgress, summary = null }) {
+  const data = await buildNestingPdf({ order, mat, onProgress, summary })
   const file = new File([data], fileName, { type: 'application/pdf' })
   const title = `Карта раскроя · ${orderTitle(order)}`
   let can
