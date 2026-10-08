@@ -1,11 +1,11 @@
--- Прайс-лист производства и расчёт стоимости заказа.
--- Выполнить один раз в Supabase → SQL Editor (можно повторно). После migration_security_all.sql.
+-- Прайс-лист производства, расчёт стоимости заказа и фиксация цены при оформлении.
+-- Выполнить один раз в Supabase -> SQL Editor (можно повторно; заменяет прежнюю версию этого файла).
+-- После migration_security_all.sql.
 --
--- Расценки лежат в отдельной таблице, которую читает и меняет ТОЛЬКО владелец производства
--- (ни другие производства, ни заказчики, ни администратор её не видят).
--- Заказчик получает не расценки, а готовую сумму: её считает сама база (функция production_quote)
--- по статистике раскроя. Аккаунту, у которого есть своё производство, стоимость у ЧУЖОГО
--- производства не показывается вовсе — одно производство не может смотреть цены другого.
+-- Расценки лежат в отдельной таблице, которую читает и меняет ТОЛЬКО владелец производства.
+-- Заказчик получает не расценки, а готовую сумму: её считает сама база по статистике раскроя.
+-- Аккаунту, у которого есть своё производство, стоимость у ЧУЖОГО производства не показывается.
+-- При оформлении заказа цена фиксируется (order_quotes) и дальше не зависит от изменений прайс-листа.
 
 create table if not exists public.production_prices (
   production_id uuid primary key references public.productions(id) on delete cascade,
@@ -13,29 +13,32 @@ create table if not exists public.production_prices (
   updated_at timestamptz default now()
 );
 alter table public.production_prices enable row level security;
+
+create or replace function public.owns_production(p_id uuid) returns boolean
+language sql security definer set search_path = public stable as $$
+  select exists (select 1 from productions p where p.id = p_id and p.owner_id = auth.uid())
+$$;
+grant execute on function public.owns_production(uuid) to authenticated;
+
 drop policy if exists "production_prices: владелец" on public.production_prices;
-create policy "production_prices: владелец" on public.production_prices for all to authenticated
-  using (exists (select 1 from public.productions p where p.id = production_id and p.owner_id = auth.uid()))
-  with check (exists (select 1 from public.productions p where p.id = production_id and p.owner_id = auth.uid()));
+drop policy if exists production_prices_owner on public.production_prices;
+create policy production_prices_owner on public.production_prices
+  for all to authenticated
+  using (public.owns_production(production_id))
+  with check (public.owns_production(production_id));
 
 -- число из JSON: пусто, текст или отрицательное — 0
 create or replace function public.jnum(j jsonb, k text) returns numeric
 language sql immutable as $$
-  select case when replace(coalesce(j->>k, ''), ',', '.') ~ '^\s*\d+(\.\d+)?\s*$' then least(trim(replace(j->>k, ',', '.'))::numeric, 1e9) else 0 end
+  select case when replace(coalesce(j->>k, ''), ',', '.') ~ '^[ ]*[0-9]+([.][0-9]+)?[ ]*$'
+    then least(trim(replace(j->>k, ',', '.'))::numeric, 1000000000) else 0 end
 $$;
 
--- Стоимость работ производства p_production для раскроя со статистикой p_stats.
--- p_stats: { sheets: [{ parts }], parts, cut_m, edge_thin_m, edge_thick_m, edge_curved_m, edge_curved_parts,
---            holes, edge_holes, groove_m, pockets, cutouts, shaped_parts }
--- Ответ:
---   { hidden: true }  — у вызывающего есть своё производство, а это чужое: цены не показываем;
---   { empty: true }   — прайс-лист не заполнен или выключен;
---   владельцу:  { own: true, currency, total, min_applied, lines: [{ group, key, qty, rate, sum }] }
---   заказчику:  { currency, total, min_applied, groups: [{ group, sum }] }  — без расценок и количеств
-create or replace function public.production_quote(p_production uuid, p_stats jsonb) returns jsonb
+-- Сам расчёт (служебная функция, напрямую из приложения не вызывается).
+-- -> null (прайс не заполнен или выключен) | { currency, lines: [{ group, key, qty, rate, sum }], sum, total, min, min_applied }
+create or replace function public.quote_calc(p_production uuid, p_stats jsonb) returns jsonb
 language plpgsql security definer set search_path = public stable as $$
 declare
-  own boolean;
   pr jsonb;
   s jsonb := coalesce(p_stats, '{}'::jsonb);
   lines jsonb := '[]'::jsonb;
@@ -49,15 +52,10 @@ declare
   sh jsonb;
   r record;
 begin
-  if auth.uid() is null then raise exception 'not signed in'; end if;
-  own := exists (select 1 from productions where id = p_production and owner_id = auth.uid());
-  if not own and exists (select 1 from productions where owner_id = auth.uid()) then
-    return jsonb_build_object('hidden', true);
-  end if;
   select data into pr from production_prices where production_id = p_production;
-  if pr is null or coalesce(pr->>'on', '') <> 'true' then return jsonb_build_object('empty', true); end if;
+  if pr is null or coalesce(pr->>'on', '') <> 'true' then return null; end if;
 
-  -- распил: цена за лист — по числу деталей на листе (ступени «до N деталей»), иначе единая цена за лист
+  -- распил: цена за лист — по числу деталей на листе (ступени), иначе единая цена за лист
   has_tiers := jsonb_typeof(pr->'tiers') = 'array' and jsonb_array_length(pr->'tiers') > 0;
   if jsonb_typeof(s->'sheets') = 'array' then
     for sh in select value from jsonb_array_elements(s->'sheets') limit 5000 loop
@@ -67,7 +65,7 @@ begin
         tprice := null;
         select jnum(t.value, 'price') into tprice from jsonb_array_elements(pr->'tiers') t
           where jnum(t.value, 'to') > 0 and n <= jnum(t.value, 'to') order by jnum(t.value, 'to') limit 1;
-        if tprice is null then        -- деталей больше, чем в последней ступени: «свыше» (ступень без числа), а если её нет — последняя ступень
+        if tprice is null then
           select jnum(t.value, 'price') into tprice from jsonb_array_elements(pr->'tiers') t
             order by (jnum(t.value, 'to') = 0) desc, jnum(t.value, 'to') desc limit 1;
         end if;
@@ -83,7 +81,7 @@ begin
     total := total + round(sheet_sum, 2);
   end if;
 
-  -- остальное: количество из статистики × цена из прайс-листа
+  -- остальное: количество из статистики x цена из прайс-листа
   for r in select * from (values
       ('cut',   'cut_m',            'cut_m'),
       ('cut',   'cut_part',         'parts'),
@@ -113,17 +111,93 @@ begin
   end if;
 
   mn := jnum(pr, 'min');
-  if own then
-    return jsonb_build_object('own', true, 'currency', coalesce(pr->>'currency', ''), 'lines', lines,
-      'sum', total, 'total', greatest(total, mn), 'min_applied', total < mn and total > 0, 'min', mn);
-  end if;
-  return jsonb_build_object('currency', coalesce(pr->>'currency', ''),
-    'total', greatest(total, case when total > 0 then mn else 0 end), 'min_applied', total < mn and total > 0,
+  return jsonb_build_object('currency', coalesce(pr->>'currency', ''), 'lines', lines, 'sum', total,
+    'total', greatest(total, case when total > 0 then mn else 0 end), 'min', mn, 'min_applied', total > 0 and total < mn);
+end $$;
+revoke all on function public.quote_calc(uuid, jsonb) from public;
+revoke all on function public.quote_calc(uuid, jsonb) from anon, authenticated;
+
+-- То же для заказчика: без расценок и количеств, только суммы по видам работ
+create or replace function public.quote_public(q jsonb) returns jsonb
+language sql immutable as $$
+  select jsonb_build_object('currency', q->'currency', 'total', q->'total', 'min_applied', q->'min_applied',
     'groups', (select coalesce(jsonb_agg(jsonb_build_object('group', g.grp, 'sum', g.sm) order by g.ord), '[]'::jsonb) from (
       select l->>'group' as grp, sum((l->>'sum')::numeric) as sm,
         min(case l->>'group' when 'cut' then 1 when 'edge' then 2 when 'drill' then 3 else 4 end) as ord
-      from jsonb_array_elements(lines) l group by l->>'group') g));
+      from jsonb_array_elements(q->'lines') l group by l->>'group') g))
+$$;
+
+-- Стоимость по текущему прайс-листу (до оформления заказа).
+--   { hidden: true } — у вызывающего своё производство, а это чужое;  { empty: true } — прайс не заполнен;
+--   владельцу — построчно с ценами (own: true), заказчику — итог и суммы по видам работ.
+create or replace function public.production_quote(p_production uuid, p_stats jsonb) returns jsonb
+language plpgsql security definer set search_path = public stable as $$
+declare own boolean; q jsonb;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  own := owns_production(p_production);
+  if not own and exists (select 1 from productions where owner_id = auth.uid()) then
+    return jsonb_build_object('hidden', true);
+  end if;
+  q := quote_calc(p_production, p_stats);
+  if q is null then return jsonb_build_object('empty', true); end if;
+  if own then return q || jsonb_build_object('own', true); end if;
+  return quote_public(q);
 end $$;
 revoke all on function public.production_quote(uuid, jsonb) from public;
 grant execute on function public.production_quote(uuid, jsonb) to authenticated;
+
+-- ── Фиксация цены при оформлении заказа ──
+create table if not exists public.order_quotes (
+  order_id uuid primary key references public.orders(id) on delete cascade,
+  production_id uuid,
+  quote jsonb not null,
+  stats jsonb,
+  created_at timestamptz default now()
+);
+alter table public.order_quotes enable row level security;
+-- политик нет: читается и пишется только через функции ниже
+
+-- Зафиксировать цену заказа: вызывает заказчик при оформлении (или производство — для своего заказа).
+-- Цена считается по прайс-листу производства, на которое оформлен заказ, и записывается.
+create or replace function public.fix_order_quote(p_order uuid, p_stats jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare o record; q jsonb;
+begin
+  select * into o from orders where id = p_order;
+  if not found or not (o.user_id = auth.uid() or owns_production(o.production_id)) then raise exception 'not allowed'; end if;
+  if o.production_id is null then return jsonb_build_object('none', true); end if;
+  q := quote_calc(o.production_id, p_stats);
+  if q is null then
+    delete from order_quotes where order_id = p_order;
+    return jsonb_build_object('none', true);
+  end if;
+  insert into order_quotes (order_id, production_id, quote, stats, created_at) values (p_order, o.production_id, q, p_stats, now())
+    on conflict (order_id) do update set production_id = excluded.production_id, quote = excluded.quote, stats = excluded.stats, created_at = now();
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.fix_order_quote(uuid, jsonb) from public;
+grant execute on function public.fix_order_quote(uuid, jsonb) to authenticated;
+
+-- Зафиксированная цена заказа.
+--   { none: true } — цена не фиксировалась;  { hidden: true } — у вызывающего своё производство, а заказ на чужом;
+--   производству — построчно (own: true), заказчику — итог и суммы по видам работ. В обоих случаях fixed: true и at.
+create or replace function public.order_quote(p_order uuid) returns jsonb
+language plpgsql security definer set search_path = public stable as $$
+declare o record; r record; own boolean;
+begin
+  if auth.uid() is null then raise exception 'not signed in'; end if;
+  select * into o from orders where id = p_order;
+  if not found then return jsonb_build_object('none', true); end if;
+  select * into r from order_quotes where order_id = p_order;
+  if not found or r.production_id is distinct from o.production_id then return jsonb_build_object('none', true); end if;
+  own := owns_production(r.production_id);
+  if own then return r.quote || jsonb_build_object('own', true, 'fixed', true, 'at', r.created_at); end if;
+  if o.user_id is distinct from auth.uid() then return jsonb_build_object('none', true); end if;
+  if exists (select 1 from productions where owner_id = auth.uid()) then return jsonb_build_object('hidden', true); end if;
+  return quote_public(r.quote) || jsonb_build_object('fixed', true, 'at', r.created_at);
+end $$;
+revoke all on function public.order_quote(uuid) from public;
+grant execute on function public.order_quote(uuid) to authenticated;
+
 notify pgrst, 'reload schema';

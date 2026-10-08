@@ -24,7 +24,9 @@ export default function NestingCost({ order, mats, method, productionId, full = 
           </div>
         )}
         {quote.min_applied && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Действует минимальная сумма заказа.</div>}
-        <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 2 }}>Расчёт по этому раскрою и текущему прайс-листу производства; материал и кромка в сумму не входят.</div>
+        <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 2 }}>
+          {quote.fixed ? `Цена зафиксирована при оформлении заказа${quote.at ? ' ' + new Date(quote.at).toLocaleDateString('ru-RU') : ''}` : 'Предварительно: по этому раскрою и текущему прайс-листу. Цена фиксируется при оформлении заказа'}; материал и кромка в сумму не входят.
+        </div>
       </div>
     )
   }
@@ -40,7 +42,7 @@ export default function NestingCost({ order, mats, method, productionId, full = 
       </div>
       {quote?.own && (
         <>
-          <p className="section-title" style={{ marginTop: 10 }}>Стоимость работ</p>
+          <p className="section-title" style={{ marginTop: 10 }}>Стоимость работ{quote.fixed ? ` · зафиксирована${quote.at ? ' ' + new Date(quote.at).toLocaleDateString('ru-RU') : ''}` : ' · по текущему прайс-листу'}</p>
           {!quote.lines?.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В прайс-листе нет цен на операции этого заказа.</p>}
           {(quote.lines || []).map(l => (
             <div key={l.key} style={{ display: 'flex', gap: 8, padding: '2px 0', borderTop: '0.5px solid var(--border)' }}>

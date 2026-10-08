@@ -29,6 +29,9 @@ import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY } from 
 import { saveNestingPdf } from '../lib/nestingPdf'
 import { computeCutLines } from '../lib/cutLines'
 import NestingCost from '../components/NestingCost'
+import { nestingStats, sumStats, statsPayload } from '../lib/nestingStats'
+import { fixOrderQuote } from '../lib/pricing'
+import { savedNestings } from '../lib/savedNesting'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
@@ -1948,6 +1951,15 @@ export default function NestingPage() {
     setConfigs(cs => cs.map(c => ({ ...c, history: null, histPos: -1 })))
     await saveNesting(cfg)
     await supabase.from('orders').update({ status: 'new', submitted_at: new Date().toISOString() }).eq('id', id)
+    // цена работ фиксируется в момент оформления: по сохранённым картам всех материалов и прайс-листу производства
+    try {
+      const { data: fresh } = await supabase.from('orders').select('*').eq('id', id).single()
+      if (fresh?.production_id) {
+        const mats = savedNestings(fresh, cutDetails(allDetails, parseEdgeTypes(fresh.edge_types)))
+        const st = sumStats(mats.map(mat => nestingStats({ order: fresh, mat, method: fresh.cutting_method || 'nesting' })))
+        if (st.parts) await fixOrderQuote(id, statsPayload(st))
+      }
+    } catch { /* не посчиталось — заказ всё равно оформлен, цена покажется по текущему прайсу */ }
     navigate(`/orders/${id}`)
   }
 

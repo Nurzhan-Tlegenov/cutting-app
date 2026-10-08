@@ -67,3 +67,18 @@ export async function fetchQuote(productionId, payload) {
     return data
   } catch { return null }
 }
+
+/** Зафиксировать цену заказа при оформлении (по прайс-листу производства на этот момент). Ошибки не мешают оформлению. */
+export async function fixOrderQuote(orderId, payload) {
+  try { await supabase.rpc('fix_order_quote', { p_order: orderId, p_stats: payload }) } catch { /* цена просто не зафиксируется */ }
+}
+/** Зафиксированная цена заказа. -> null (не фиксировалась, скрыта или база не обновлена) | { fixed: true, at, ...как у fetchQuote } */
+export async function fetchFixedQuote(orderId) {
+  if (!orderId) return null
+  try {
+    const { data, error } = await supabase.rpc('order_quote', { p_order: orderId })
+    if (error || !data || data.none) return null
+    return data
+  } catch { return null }
+}
+
