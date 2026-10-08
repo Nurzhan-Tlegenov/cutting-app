@@ -58,13 +58,20 @@ function addEdges(acc, d, over, qty = 1) {
   return acc
 }
 
+// Номер позиции детали — тот же, что в задании на раскрой в бланке заказа (порядок строк заказа),
+// а не счёт заново на каждом листе: по нему деталь находят в заказе и на любом листе
+function orderPos(d, di) {
+  const so = rawDetail(d || {})?.sort_order
+  return so !== null && so !== undefined && so !== '' && Number.isFinite(Number(so)) ? Number(so) + 1 : di + 1
+}
+
 /** Строки списка деталей листа: [{ no, di, len, wid, qty, nl, nw }] и номер позиции по детали */
 function sheetRows(sheet, details) {
   const cnt = new Map()
   for (const p of sheet.placed) cnt.set(p.detailIndex, (cnt.get(p.detailIndex) || 0) + 1)
-  const rows = [...cnt].sort((a, b) => a[0] - b[0]).map(([di, qty], i) => {
+  const rows = [...cnt].map(([di, qty]) => [di, qty, orderPos(details[di], di)]).sort((a, b) => a[2] - b[2] || a[0] - b[0]).map(([di, qty, no]) => {
     const d = details[di] || {}, raw = rawDetail(d)
-    return { no: i + 1, di, len: fmt(d.length), wid: fmt(d.width), qty, cut: !!d._cut,
+    return { no, di, len: fmt(d.length), wid: fmt(d.width), qty, cut: !!d._cut,
       nl: (on(raw.edge_left) ? 1 : 0) + (on(raw.edge_right) ? 1 : 0), nw: (on(raw.edge_top) ? 1 : 0) + (on(raw.edge_bottom) ? 1 : 0) }
   })
   return { rows, noOf: new Map(rows.map(r => [r.di, r.no])) }
@@ -104,17 +111,62 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
     if (p.edgeBottom) seg(g, g, w - g, g)
     if (p.edgeLeft) seg(g, g, g, h - g)
     if (p.edgeRight) seg(w - g, g, w - g, h - g)
-    // подписи: номер по списку — в середине, размеры — вдоль сторон внутри детали
+    // подписи: номер позиции — в середине, размеры — вдоль сторон внутри детали (ширина — у верхней, длина — у левой).
+    // На мелкой детали всё уменьшается, пока помещается; на совсем мелкой — номер и размер одной-двумя строками
     const pw = w * s, ph = h * s, cx = x0 + (px + w / 2) * s, cy = y0 + (geo.sheetL - py - h / 2) * s
     const no = String(noOf.get(p.detailIndex) ?? '')
-    const ns = Math.max(2.2, Math.min(5, Math.min(pw, ph) * 0.42))
-    if (pw > 3.2 && ph > 3.2) text(ctx, no, cx, cy, { size: ns, bold: true, align: 'center', base: 'middle' })
-    const ds = Math.max(1.9, Math.min(2.6, Math.min(pw, ph) * 0.16))
-    if (pw > 13 && ph > ns + ds * 2.4 + 2) text(ctx, fmt(w), cx, y0 + (geo.sheetL - py - h) * s + ds + 1.6, { size: ds, color: MUTED, align: 'center' })
-    if (ph > 13 && pw > ns + ds * 2.4 + 2) {
-      ctx.save(); ctx.translate(mm(x0 + px * s + ds + 1.4), mm(cy)); ctx.rotate(-Math.PI / 2)
-      ctx.font = `${mm(ds)}px Arial, Helvetica, sans-serif`; ctx.fillStyle = MUTED; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'
-      ctx.fillText(fmt(h), 0, 0); ctx.restore()
+    const sw = fmt(w), sh = fmt(h)
+    const tw = (str, size, bold) => { ctx.font = `${bold ? '600 ' : ''}${mm(size)}px Arial, Helvetica, sans-serif`; return ctx.measureText(str).width / K }
+    const vtext = (str, x, y, size, opt = {}) => {                         // текст снизу вверх
+      ctx.save(); ctx.translate(mm(x), mm(y)); ctx.rotate(-Math.PI / 2)
+      ctx.font = `${opt.bold ? '600 ' : ''}${mm(size)}px Arial, Helvetica, sans-serif`; ctx.fillStyle = opt.color || INK
+      ctx.textAlign = 'center'; ctx.textBaseline = opt.base || 'alphabetic'; ctx.fillText(str, 0, 0); ctx.restore()
+    }
+    let placed = false
+    for (const k of [1, 0.85, 0.72, 0.6, 0.5]) {
+      const ds = Math.max(1.3, Math.min(2.6, Math.min(pw, ph) * 0.16) * k)
+      const ns = Math.max(1.8, Math.min(5, Math.min(pw, ph) * 0.42) * k)
+      const eL = p.edgeLeft ? 0.9 : 0, eT = p.edgeTop ? 0.9 : 0           // размер не наезжает на полоску кромки
+      const bandL = ds + 1.2 + eL, bandT = ds + 1.2 + eT                  // полосы под размер у левой и верхней стороны
+      const fitTop = tw(sw, ds) <= pw - bandL - 0.8, fitLeft = tw(sh, ds) <= ph - bandT - 0.8
+      const fitNo = ph / 2 - ns / 2 >= bandT + 0.3 && pw / 2 - tw(no, ns, true) / 2 >= bandL + 0.3
+      if (!(fitTop && fitLeft && fitNo)) continue
+      text(ctx, no, cx, cy, { size: ns, bold: true, align: 'center', base: 'middle' })
+      text(ctx, sw, cx, y0 + (geo.sheetL - py - h) * s + ds + 0.9 + eT, { size: ds, color: MUTED, align: 'center' })
+      vtext(sh, x0 + px * s + ds + 0.8 + eL, cy, ds, { color: MUTED })
+      placed = true
+      break
+    }
+    if (!placed) {
+      // мелкая деталь: вдоль длинной стороны — номер и размер «длина × ширина», как в списке справа.
+      // Место считаем без полосок кромки, чтобы надпись на них не наезжала
+      const eg = side => (side ? Math.min(1.6, Math.min(pw, ph) * 0.2) : 0.2)
+      const il = eg(p.edgeLeft), ir = eg(p.edgeRight), it = eg(p.edgeTop), ib = eg(p.edgeBottom)
+      const iw = pw - il - ir, ih = ph - it - ib
+      const cx = x0 + px * s + il + iw / 2, cy = y0 + (geo.sheetL - py - h) * s + it + ih / 2
+      const dims = d ? `${fmt(d.length)}×${fmt(d.width)}` : `${sh}×${sw}`
+      const long = Math.max(iw, ih), short = Math.min(iw, ih), vert = ih > iw
+      const one = Math.min(2.6, (short - 0.4) * 0.8, (long - 0.8) / Math.max(0.1, tw(`${no}  ${dims}`, 1, true)))
+      const two = Math.min(2.6, (short - 0.4) / 2.3, (long - 0.8) / Math.max(0.1, tw(dims, 1), tw(no, 1.15, true)))
+      if (one >= two) {
+        const size = Math.max(0.9, one), wn = tw(no, size, true), gap = size * 0.5, total = wn + gap + tw(dims, size)
+        if (vert) {
+          vtext(no, cx, cy + total / 2 - wn / 2, size, { bold: true, base: 'middle' })
+          vtext(dims, cx, cy - total / 2 + (total - wn - gap) / 2, size, { color: MUTED, base: 'middle' })
+        } else {
+          text(ctx, no, cx - total / 2 + wn / 2, cy, { size, bold: true, align: 'center', base: 'middle' })
+          text(ctx, dims, cx + total / 2 - (total - wn - gap) / 2, cy, { size, color: MUTED, align: 'center', base: 'middle' })
+        }
+      } else {
+        const size = Math.max(0.9, two), off = size * 0.6
+        if (vert) {
+          vtext(no, cx - off, cy, size * 1.15, { bold: true, base: 'middle' })
+          vtext(dims, cx + off, cy, size, { color: MUTED, base: 'middle' })
+        } else {
+          text(ctx, no, cx, cy - off, { size: size * 1.15, bold: true, align: 'center', base: 'middle' })
+          text(ctx, dims, cx, cy + off, { size, color: MUTED, align: 'center', base: 'middle' })
+        }
+      }
     }
   }
   ctx.strokeStyle = INK; ctx.lineWidth = mm(0.4); ctx.strokeRect(X(0), Y(geo.sheetL), mm(geo.sheetW * s), mm(geo.sheetL * s))
@@ -217,7 +269,7 @@ export async function buildNestingPdf({ order, mat, onProgress }) {
       // условные обозначения — внизу страницы
       y = 282
       rule(ctx, 10, y - 0.9, 17, y - 0.9, 0.7, EDGE); text(ctx, 'сторона с кромкой', 19, y, { size: 2.5, color: MUTED })
-      text(ctx, '12', 53, y + 0.1, { size: 3, bold: true, align: 'center' }); text(ctx, 'позиция по списку справа', 57, y, { size: 2.5, color: MUTED })
+      text(ctx, '12', 53, y + 0.1, { size: 3, bold: true, align: 'center' }); text(ctx, 'позиция по бланку заказа', 57, y, { size: 2.5, color: MUTED })
       y = 286.5
       rule(ctx, 10, y - 1.5, 17, y - 1.5, 0.38, EDGE); rule(ctx, 10, y - 0.5, 17, y - 0.5, 0.38, EDGE)
       text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', 19, y, { size: 2.5, color: MUTED })
@@ -268,11 +320,58 @@ export async function buildNestingPdf({ order, mat, onProgress }) {
   return out
 }
 
-/** Скачать PDF карт раскроя */
-export async function saveNestingPdf({ order, mat, fileName, onProgress }) {
-  const data = await buildNestingPdf({ order, mat, onProgress })
-  const url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
-  const a = document.createElement('a'); a.href = url; a.download = fileName
+function download(file) {
+  const url = URL.createObjectURL(file)
+  const a = document.createElement('a'); a.href = url; a.download = file.name
   document.body.appendChild(a); a.click(); a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 5000)
+}
+
+// Окошко «PDF готов»: если телефон не дал открыть «Поделиться» сразу (PDF собирался дольше, чем живёт нажатие)
+function askShare(file, title) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div')
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center'
+    const box = document.createElement('div')
+    box.style.cssText = 'width:100%;max-width:480px;background:var(--bg,#fff);color:var(--text,#111);border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));font-family:inherit'
+    const h = document.createElement('div')
+    h.textContent = 'PDF готов'; h.style.cssText = 'font-size:16px;font-weight:500;margin-bottom:4px'
+    const sub = document.createElement('div')
+    sub.textContent = file.name; sub.style.cssText = 'font-size:12px;color:var(--text-hint,#888);margin-bottom:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+    box.append(h, sub)
+    const close = () => { wrap.remove(); resolve() }
+    const btn = (label, primary, fn) => {
+      const b = document.createElement('button')
+      b.type = 'button'; b.textContent = label
+      b.style.cssText = `display:block;width:100%;padding:12px;margin-top:8px;border-radius:10px;font-size:15px;cursor:pointer;border:0.5px solid var(--border-md,#ccc);background:${primary ? 'var(--blue,#009BDE)' : 'transparent'};color:${primary ? '#fff' : 'inherit'}`
+      b.onclick = fn; box.append(b)
+    }
+    btn('Поделиться', true, async () => {
+      try { await navigator.share({ files: [file], title }); close() } catch (e) { if (e?.name !== 'AbortError') { download(file); close() } }
+    })
+    btn('Скачать', false, () => { download(file); close() })
+    btn('Отмена', false, close)
+    wrap.onclick = e => { if (e.target === wrap) close() }
+    wrap.append(box); document.body.append(wrap)
+  })
+}
+
+/**
+ * PDF карт раскроя: на телефоне сразу открывается «Поделиться» (мессенджер, почта, облако) — файл уходит клиенту
+ * без скачивания. Где так нельзя (компьютер, старый браузер) — файл скачивается, как раньше.
+ */
+export async function saveNestingPdf({ order, mat, fileName, onProgress }) {
+  const data = await buildNestingPdf({ order, mat, onProgress })
+  const file = new File([data], fileName, { type: 'application/pdf' })
+  const title = `Карта раскроя · ${orderTitle(order)}`
+  let can
+  try { can = !!navigator.share && !!navigator.canShare && navigator.canShare({ files: [file] }) } catch { can = false }
+  const phone = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+  if (!can || !phone) { download(file); return }
+  try {
+    await navigator.share({ files: [file], title })
+  } catch (e) {
+    if (e?.name === 'AbortError') return                       // человек сам закрыл меню
+    await askShare(file, title)                                // нажатие «устарело», пока собирался PDF — спрашиваем ещё раз
+  }
 }

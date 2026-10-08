@@ -249,7 +249,7 @@ export default function CncPage() {
             <p className="section-title" style={{ marginBottom: 0, flex: 1 }}>Листы ({sel.length} из {mat.sheets.length})</p>
             <button type="button" style={{ ...small, marginRight: 6 }} disabled={!!pdfBusy} title="Карты раскроя: листы с деталями, размерами, кромкой и процентом использования материала"
               onClick={async () => { setPdfBusy('…'); try { await saveNestingPdf({ order, mat, fileName: `Karty_${baseName()}.pdf`, onProgress: (a, b) => setPdfBusy(`${a}/${b}`) }) } catch (e) { window.alert('Не удалось собрать PDF: ' + (e?.message || e)) } finally { setPdfBusy('') } }}>
-              {pdfBusy ? `PDF ${pdfBusy}` : '⬇ PDF карт'}
+              {pdfBusy ? `PDF ${pdfBusy}` : 'PDF карт'}
             </button>
             <button type="button" style={small} onClick={() => { setPicked(sel.length === mat.sheets.length ? [] : null); setBuilt(null) }}>{sel.length === mat.sheets.length ? 'Снять все' : 'Выбрать все'}</button>
           </div>
