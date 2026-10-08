@@ -214,7 +214,8 @@ export default function CncPage() {
           <div style={{ fontWeight: 500 }}>ЧПУ</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>{orderTitle(order)}</span>{mat ? ` · ${mat.label}` : ''}</div>
         </div>
-        <button type="button" onClick={toOrders} style={{ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
+        {order && <div style={{ display: 'flex', gap: 4, flex: '0 0 auto' }}>{orderMarks(order).map(m => <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>)}</div>}
+        <button type="button" onClick={toOrders} style={{ flex: '0 0 auto', padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
       </div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 2 }}>
         {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={chip(tab === k)}>{l}{k === 'ops' && pre.length ? ' ⚠' : ''}</button>)}
@@ -315,13 +316,6 @@ export default function CncPage() {
             <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({built.files.filter(f => !f.empty).length + (built.labels?.length || 0)})</button>
           )}
           {saved && built && <p style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6, textAlign: 'center' }}>{saved}</p>}
-          {built && order && (order.gcode_at || order.files_saved_at) && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', marginTop: 8 }}>
-              {orderMarks(order).map(m => (
-                <span key={m.key} style={{ fontSize: 11, borderRadius: 10, padding: '2px 8px', border: `0.5px solid ${m.on ? 'var(--teal)' : 'var(--border-md)'}`, background: m.on ? 'var(--teal-light)' : 'transparent', color: m.on ? 'var(--teal)' : 'var(--text-hint)' }}>{m.on ? '✓ ' : ''}{m.text}</span>
-              ))}
-            </div>
-          )}
           {saved && built && <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={toOrders}>← Перейти к заказам</button>}
         </>
       ))}

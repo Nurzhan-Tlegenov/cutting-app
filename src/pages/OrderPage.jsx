@@ -103,22 +103,22 @@ export default function OrderPage() {
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
         <button onClick={() => navigate(inProduction ? '/production' : '/orders')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 600, fontSize: 16 }}>{orderTitle(order)}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{order.material_name}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(order)}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{order.material_name}</div>
         </div>
-        <span className={`badge ${STATUS_BADGE[order.status] || 'badge-new'}`}>
-          {STATUS_LABELS[order.status] || order.status}
-        </span>
+        {inProduction && order.status !== 'draft' && <button type="button" onClick={() => navigate('/production')} style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
+          <span className={`badge ${STATUS_BADGE[order.status] || 'badge-new'}`}>
+            {STATUS_LABELS[order.status] || order.status}
+          </span>
+          {inProduction && (order.status === 'inwork' || order.status === 'done' || order.gcode_at || order.files_saved_at) && (
+            <div style={{ display: 'flex', gap: 4 }}>
+              {orderMarks(order).map(m => <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>)}
+            </div>
+          )}
+        </div>
       </div>
-      {inProduction && order.status !== 'draft' && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '-10px 0 14px' }}>
-          {(order.status === 'inwork' || order.status === 'done' || order.gcode_at || order.files_saved_at) && orderMarks(order).map(m => (
-            <span key={m.key} style={{ fontSize: 11, borderRadius: 10, padding: '2px 8px', border: `0.5px solid ${m.on ? 'var(--teal)' : 'var(--border-md)'}`, background: m.on ? 'var(--teal-light)' : 'transparent', color: m.on ? 'var(--teal)' : 'var(--text-hint)' }}>{m.on ? '✓ ' : ''}{m.text}</span>
-          ))}
-          <button type="button" onClick={() => navigate('/production')} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
-        </div>
-      )}
       {client && (client.production || (!isMine && client.full_name)) && (
         <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
           {!isMine && (client.full_name || client.phone) && (

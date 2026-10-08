@@ -147,7 +147,7 @@ export default function ProductionPage() {
               return (
                 <div key={o.id} className="card" style={{ padding: '10px 12px' }}>
                   <div onClick={() => navigate(`/orders/${o.id}`)} style={{ cursor: 'pointer' }}>
-                    {/* слева — заказ, справа — статус и под ним короткие пометки (G-код, файлы): карточка не растёт в высоту */}
+                    {/* слева — заказ, справа — статус и под ним короткие пометки (G-код, Файлы): серые — не сделано, синие — сделано */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</div>
@@ -158,7 +158,7 @@ export default function ProductionPage() {
                         {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
                           <div style={{ display: 'flex', gap: 4 }}>
                             {orderMarks(o).map(m => (
-                              <span key={m.key} title={m.text} style={{ fontSize: 10, lineHeight: '15px', borderRadius: 8, padding: '0 6px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--teal)' : 'var(--border-md)'}`, background: m.on ? 'var(--teal-light)' : 'transparent', color: m.on ? 'var(--teal)' : 'var(--text-hint)' }}>{m.short} {m.on ? '✓' : '—'}</span>
+                              <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>
                             ))}
                           </div>
                         )}
