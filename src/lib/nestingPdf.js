@@ -5,10 +5,11 @@
 // в PDF картинкой A4, 200 точек на дюйм.
 import { zlibSync, strToU8 } from 'fflate'
 import { sheetGeo } from './savedNesting'
-import { placedHoles } from './partHoles'
+import { placedHoles, placedTurns } from './partHoles'
 import { orderTitle } from './orderUtils'
 import { rawDetail, overMm, parseEdgeTypes } from './edgeCut'
-import { detailEdgeList } from './edgeLength'
+import { detailEdgeList, contourSegments, segmentSide, holeEdgeSegments } from './edgeLength'
+import { rotatePointTimes } from './drillGeometry'
 
 const K = 1654 / 210                     // точек на мм
 const PW = 1654, PH = 2339
@@ -102,7 +103,8 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
     path(shaped ? p.polygon : [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }])
     ctx.fill(); ctx.stroke()
     const d = details[p.detailIndex]
-    for (const hole of (d ? placedHoles(p, d) : [])) { ctx.fillStyle = '#FFFFFF'; path(hole); ctx.fill(); ctx.stroke() }
+    const holes = d ? placedHoles(p, d) : []
+    for (const hole of holes) { ctx.fillStyle = '#FFFFFF'; path(hole); ctx.fill(); ctx.stroke() }
     // кромка — жирная линия с отступом внутрь, со стороны, где она стоит (стороны уже повёрнуты вместе с деталью)
     const g = Math.min(1.1 / s, Math.min(w, h) * 0.12)
     ctx.strokeStyle = EDGE; ctx.lineWidth = mm(0.7); ctx.lineCap = 'butt'
@@ -111,6 +113,29 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
     if (p.edgeBottom) seg(g, g, w - g, g)
     if (p.edgeLeft) seg(g, g, g, h - g)
     if (p.edgeRight) seg(w - g, g, w - g, h - g)
+    // кромка на фигурных участках контура (дуги, скосы, скругления) и на вырезах — по самой линии, как на карте в приложении
+    let contour = d?.contour
+    if (typeof contour === 'string') { try { contour = JSON.parse(contour) } catch { contour = null } }
+    if (contour) {
+      const dW = Number(d.width) || 0, dL = Number(d.length) || 0, turns = placedTurns(p, d)
+      const native = { left: d.edge_left, right: d.edge_right, top: d.edge_top, bottom: d.edge_bottom }
+      ctx.save(); ctx.strokeStyle = EDGE; ctx.lineWidth = mm(0.8); ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+      const curve = pts => {
+        ctx.beginPath()
+        pts.forEach(([qx, qy], k) => { const r = rotatePointTimes(qx, qy, dW, dL, turns); if (k) ctx.lineTo(X(px + r.x), Y(py + r.y)); else ctx.moveTo(X(px + r.x), Y(py + r.y)) })
+        ctx.stroke()
+      }
+      for (const sg of contourSegments(contour.vertices)) {
+        if (!sg.edge) continue
+        const side = segmentSide(sg, dW, dL)
+        if (side && on(native[side])) continue                       // вся сторона уже нарисована выше
+        curve(sg.pts)
+      }
+      const cut = contour.holes || []
+      cut.forEach(hh => holeEdgeSegments(hh).forEach(sg => curve(sg.pts)))
+      if (cut.length === holes.length) cut.forEach((hh, hi) => { if (hh.edge) { path(holes[hi]); ctx.stroke() } })   // вырез закромлен целиком
+      ctx.restore()
+    }
     // подписи: номер позиции — в середине, размеры — вдоль сторон внутри детали (ширина — у верхней, длина — у левой).
     // На мелкой детали всё уменьшается, пока помещается; на совсем мелкой — номер и размер одной-двумя строками
     const pw = w * s, ph = h * s, cx = x0 + (px + w / 2) * s, cy = y0 + (geo.sheetL - py - h / 2) * s
