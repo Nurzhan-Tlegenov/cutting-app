@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
-import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen } from '../lib/adminApi'
+import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
@@ -16,6 +16,7 @@ export default function UsersPage() {
   const { user } = useAuth()
   const [users, setUsers] = useState(null)
   const [reqs, setReqs] = useState([])
+  const [resets, setResets] = useState(null)   // запросы на восстановление пароля; null — в базе ещё нет этой части
   const [open, setOpen] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -26,7 +27,8 @@ export default function UsersPage() {
   const [ready, setReady] = useState(false)   // база ответила: функции на месте и вы администратор
 
   const load = async () => {
-    const [u, r, o] = await Promise.all([adminUsers(), adminRequests(), signupOpen()])
+    const [u, r, o, pr] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets()])
+    setResets(pr.error ? null : pr.data || [])
     if (u.error) { setError(u.error); setReady(false); setUsers([]); return }
     setError(''); setReady(true); setUsers(u.data || []); setReqs(r.data || []); setOpen(o)
   }
@@ -77,6 +79,40 @@ export default function UsersPage() {
               <button type="button" disabled={busy} onClick={toggle} style={btn(open ? 'danger' : 'main')}>{open ? 'Закрыть регистрацию' : 'Открыть для всех'}</button>
             </div>
           </div>
+
+          {resets === null && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 10 }}>{RESET_SQL_HINT}</p>}
+          {resets?.some(r => r.status !== 'done') && (
+            <>
+              <p className="section-title">Восстановление пароля · {resets.filter(r => r.status !== 'done').length}</p>
+              <div className="card" style={{ marginBottom: 12, border: '1px solid var(--amber)' }}>
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Убедитесь, что пишет сам владелец номера, выдайте код и отправьте его. Код действует сутки, 5 попыток ввода.</p>
+                {resets.filter(r => r.status !== 'done').map(r => {
+                  const wa = digits(r.whatsapp) || r.digits
+                  const dead = r.status === 'issued' && (r.expired || r.attempts >= 5)
+                  const msg = `Код для смены пароля в RaskroyPro: ${r.code}. Откройте вход → «Забыли пароль?», введите код и новый пароль.`
+                  return (
+                    <div key={r.id} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name || 'Без имени'}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.phone || '+' + r.digits}</span>
+                      </div>
+                      {r.status === 'issued' && (
+                        <div style={{ fontSize: 13, marginTop: 2 }}>
+                          Код: <b style={{ fontSize: 16, letterSpacing: 2 }}>{r.code}</b>
+                          <span style={{ fontSize: 11, color: dead ? 'var(--danger)' : 'var(--text-hint)', marginLeft: 8 }}>{r.expired ? 'срок вышел' : r.attempts >= 5 ? 'попытки исчерпаны' : r.attempts ? `неверных попыток: ${r.attempts}` : 'ждёт ввода'}</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                        <button type="button" disabled={busy} style={btn(r.status === 'new' || dead ? 'main' : undefined)} onClick={() => act(() => adminIssueReset(r.id))}>{r.status === 'new' ? 'Выдать код' : 'Новый код'}</button>
+                        {r.status === 'issued' && !dead && <a href={`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" style={{ ...btn('main'), textDecoration: 'none' }}>Отправить в WhatsApp</a>}
+                        <button type="button" disabled={busy} style={btn('danger')} onClick={() => act(() => adminCloseReset(r.id))}>Отказать</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
 
           <p className="section-title">Заявки на регистрацию{fresh.length ? ` · новых ${fresh.length}` : ''}</p>
           <div className="card" style={{ marginBottom: 12 }}>

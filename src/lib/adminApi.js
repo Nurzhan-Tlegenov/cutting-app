@@ -31,3 +31,22 @@ export const adminSetSignup = open => call('admin_set_signup', { p_open: !!open 
 export const adminSetRequest = (id, status) => call('admin_set_request', { p_id: id, p_status: status })
 export const adminAllowPhone = (phone, name) => call('admin_allow_phone', { p_phone: phone, p_name: name || '' })
 export const adminSetRole = (userId, role) => call('admin_set_role', { p_user: userId, p_role: role })
+
+// ── Восстановление пароля через администратора (migration_password_reset.sql) ──
+export const RESET_SQL_HINT = 'Восстановление пароля ещё не включено: выполните migration_password_reset.sql в Supabase (SQL Editor) — один раз.'
+/** С экрана входа: попросить код для смены пароля. -> {} | { error } */
+export async function requestPasswordReset(phone) {
+  const r = await call('request_password_reset', { p_phone: phone || '' })
+  if (r.error) return { error: r.missing ? 'Восстановление пароля пока недоступно. Напишите нам.' : /bad phone/.test(r.error) ? 'Проверьте номер телефона' : r.error }
+  return {}
+}
+/** С экрана входа: новый пароль по коду. -> { ok: true } | { error } */
+export async function confirmPasswordReset(phone, code, password) {
+  const r = await call('confirm_password_reset', { p_phone: phone || '', p_code: code || '', p_password: password || '' })
+  if (r.error) return { error: r.missing ? 'Восстановление пароля пока недоступно. Напишите нам.' : r.error }
+  const text = { bad: 'Код не подошёл. Проверьте номер телефона и код.', expired: 'Срок действия кода вышел. Запросите новый.', blocked: 'Слишком много попыток. Попросите выдать новый код.', weak: 'Пароль минимум 6 символов' }[r.data]
+  return text ? { error: text } : { ok: true }
+}
+export const adminPasswordResets = () => call('admin_password_resets')
+export const adminIssueReset = id => call('admin_issue_reset', { p_id: id })
+export const adminCloseReset = id => call('admin_close_reset', { p_id: id })

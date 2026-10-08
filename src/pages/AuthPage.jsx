@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { signupOpen, requestSignup } from '../lib/adminApi'
+import { signupOpen, requestSignup, requestPasswordReset, confirmPasswordReset } from '../lib/adminApi'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 
@@ -12,7 +12,7 @@ export default function AuthPage() {
 
   const [showPass, setShowPass] = useState(false)
   const [form, setForm] = useState({
-    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: ''
+    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: ''
   })
   // Регистрация может быть закрыта: тогда новый человек оставляет заявку, а регистрируется после одобрения
   const [open, setOpen] = useState(true)
@@ -28,12 +28,29 @@ export default function AuthPage() {
     return `${digits}@raskoypro.local`
   }
 
+  // «Забыли пароль?»: человек просит код, администратор сообщает его (WhatsApp), здесь вводится код и новый пароль
+  async function askCode() {
+    setError(''); setNote('')
+    if (form.phone.replace(/\D/g, '').length < 10) { setError('Введите номер телефона, с которым вы регистрировались'); return }
+    setLoading(true)
+    const r = await requestPasswordReset(form.phone)
+    setLoading(false)
+    if (r.error) setError(r.error)
+    else setNote('Запрос отправлен. Мы пришлём вам код (обычно в WhatsApp) — введите его ниже вместе с новым паролем.')
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      if (mode === 'login') {
+      if (mode === 'forgot') {
+        if (!form.code.trim()) throw new Error('Введите код, который мы вам прислали')
+        if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
+        const r = await confirmPasswordReset(form.phone, form.code, form.password)
+        if (r.error) throw new Error(r.error)
+        await signIn(phoneToEmail(form.phone), form.password)
+      } else if (mode === 'login') {
         const email = phoneToEmail(form.phone)
         await signIn(email, form.password)
       } else {
@@ -74,7 +91,7 @@ export default function AuthPage() {
       <div style={{ marginBottom: 32, textAlign: 'center' }}>
         <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--blue)', marginBottom: 4 }}>РаскройPro</div>
         <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>
-          {mode === 'login' ? 'Войдите в личный кабинет' : byRequest ? 'Регистрация по заявке' : 'Создайте аккаунт'}
+          {mode === 'forgot' ? 'Восстановление пароля' : mode === 'login' ? 'Войдите в личный кабинет' : byRequest ? 'Регистрация по заявке' : 'Создайте аккаунт'}
         </div>
       </div>
 
@@ -84,9 +101,9 @@ export default function AuthPage() {
             {['login','register'].map(m => (
               <button key={m} type="button" onClick={() => { setMode(m); setError(''); setNote('') }}
                 style={{ flex: 1, padding: '8px', border: 'none', borderRadius: 6,
-                  background: mode === m ? 'var(--bg)' : 'transparent',
-                  color: mode === m ? 'var(--blue)' : 'var(--text-hint)',
-                  fontWeight: mode === m ? 500 : 400, fontSize: 14 }}>
+                  background: (mode === 'forgot' ? 'login' : mode) === m ? 'var(--bg)' : 'transparent',
+                  color: (mode === 'forgot' ? 'login' : mode) === m ? 'var(--blue)' : 'var(--text-hint)',
+                  fontWeight: (mode === 'forgot' ? 'login' : mode) === m ? 500 : 400, fontSize: 14 }}>
                 {m === 'login' ? 'Вход' : 'Регистрация'}
               </button>
             ))}
@@ -137,8 +154,22 @@ export default function AuthPage() {
               </div>
             )}
 
+            {mode === 'forgot' && (
+              <>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
+                  Введите номер телефона и нажмите «Запросить код». Мы пришлём код — впишите его и придумайте новый пароль.
+                </p>
+                <button type="button" className="btn-secondary" disabled={loading} onClick={askCode}>Запросить код</button>
+                <div>
+                  <label className="label">Код *</label>
+                  <input type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="6 цифр" maxLength={8} value={form.code}
+                    onChange={e => set('code', e.target.value.replace(/\D/g, ''))} />
+                </div>
+              </>
+            )}
+
             {!byRequest && <div>
-              <label className="label">Пароль *</label>
+              <label className="label">{mode === 'forgot' ? 'Новый пароль *' : 'Пароль *'}</label>
               <div style={{ position: 'relative' }}>
                 <input type={showPass ? 'text' : 'password'} placeholder="Минимум 6 символов" value={form.password}
                   onChange={e => set('password', e.target.value)} required minLength={6}
@@ -155,8 +186,12 @@ export default function AuthPage() {
             {error && <p className="error-text">{error}</p>}
 
             <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: 4 }}>
-              {loading ? 'Загрузка...' : mode === 'login' ? 'Войти' : byRequest ? 'Продолжить' : 'Зарегистрироваться'}
+              {loading ? 'Загрузка...' : mode === 'forgot' ? 'Сменить пароль и войти' : mode === 'login' ? 'Войти' : byRequest ? 'Продолжить' : 'Зарегистрироваться'}
             </button>
+            {mode === 'login' && <button type="button" onClick={() => { setMode('forgot'); setError(''); setNote('') }}
+              style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>Забыли пароль?</button>}
+            {mode === 'forgot' && <button type="button" onClick={() => { setMode('login'); setError(''); setNote('') }}
+              style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>← Вернуться ко входу</button>}
           </div>
         </form>
       </div>
