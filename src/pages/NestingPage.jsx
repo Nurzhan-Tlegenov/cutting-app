@@ -1453,6 +1453,11 @@ export default function NestingPage() {
   const multiMat = materials.length > 1
   // В раскрой деталь идёт заготовкой: с учётом подрезки на толщину кромки и прифуговки (edgeCut.js).
   // allDetails — строки заказа как есть (их правим и сохраняем), details — заготовки; исходная строка — rawDetail(d).
+  // виды кромки заказа (из бланка: настройки видов + то, что стоит на деталях) — для выбора в редакторе контура
+  const orderEdgeNames = useMemo(() => [...new Set([
+    ...Object.keys(parseEdgeTypes(order?.edge_types)).filter(k => !k.startsWith('__')),
+    ...allDetails.flatMap(d => [d.edge_left, d.edge_right, d.edge_top, d.edge_bottom]),
+  ].filter(v => v && v !== 'default' && v !== 'false' && v !== true))], [order, allDetails])
   const details = useMemo(() => cutDetails(multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails, parseEdgeTypes(order?.edge_types)), [allDetails, multiMat, matKey, order])
   const { user, profile, refreshProfile, cabinet, isMaster } = useAuth()
   // кабинет производства: ЧПУ и бирки по принятому раскрою
@@ -3244,6 +3249,7 @@ export default function NestingPage() {
             detail={editPart.draft}
             onUpdate={u => setEditPart(ep => (ep ? { ...ep, draft: { ...ep.draft, contour: u.contour, edges: u.edges || ep.draft.edges } } : ep))}
             onClose={closePartEditor}
+            edgeNames={orderEdgeNames}
             materialThickness={order.material_thickness || 16} />
         </div>
       )}

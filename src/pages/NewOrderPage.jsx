@@ -55,7 +55,7 @@ const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => 
 }
 
 // Компактная карточка детали
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, edgeTypes, autoFocus, onQtyEnter, materialThickness, siblings, onCopyFrom }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNames, showEdge, edgeTypes, autoFocus, onQtyEnter, materialThickness, siblings, onCopyFrom }) {
   const widthRef = useRef(null)
   const qtyRef = useRef(null)
   const SIDES = ['Дл','Дп','Шв','Шн']
@@ -257,7 +257,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
 
       {/* Редактор контура */}
       {showContour && (
-        <ContourEditor detail={detail} onUpdate={onUpdate} materialThickness={materialThickness} />
+        <ContourEditor detail={detail} onUpdate={onUpdate} materialThickness={materialThickness} edgeNames={edgeNames} activeEdge={activeEdgeName} />
       )}
     </div>
   )
@@ -664,7 +664,7 @@ export default function NewOrderPage() {
                 <DetailCard key={d.uid} detail={d} index={globalIndex}
                   onUpdate={u => updateDetail(d.uid, u)}
                   onRemove={() => removeDetail(d.uid)}
-                  activeEdgeName={activeEdge} edgeTypes={edgeTypes}
+                  activeEdgeName={activeEdge} edgeNames={edgeNames} edgeTypes={edgeTypes}
                   showEdge={showEdge}
                   autoFocus={d.uid === lastAddedUid}
                   onQtyEnter={onQtyEnter}

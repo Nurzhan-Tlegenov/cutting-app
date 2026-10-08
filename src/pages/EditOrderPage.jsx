@@ -396,6 +396,7 @@ export default function EditOrderPage() {
           onUpdate={(updated) => updateDetail(editingContourUid, { ...editingDetail, contour: updated.contour, edges: updated.edges || editingDetail.edges })}
           onClose={() => setEditingContourUid(null)}
           materialThickness={materialThickness}
+          edgeNames={edgeNames} activeEdge={activeEdge}
         />
         {showLeaveConfirm && (
           <LeaveConfirmModal saving={saving} onSave={handleSave} onDiscard={leavePage} onStay={stayOnPage} />

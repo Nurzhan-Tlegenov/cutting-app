@@ -1748,7 +1748,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
           <Suspense fallback={null}>
             <ContourEditor detail={editing.draft} materialThickness={contourOf(details[editing.di])?.meta?.thickness || materialThickness}
               onUpdate={u => setEditing(ed => (ed ? { ...ed, draft: { ...ed.draft, contour: u.contour, edges: u.edges || ed.draft.edges } } : ed))}
-              onClose={closeEditor} />
+              onClose={closeEditor} edgeNames={edgeNames} />
           </Suspense>
         </div>
       )}

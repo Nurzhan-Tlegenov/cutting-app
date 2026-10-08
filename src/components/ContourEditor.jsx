@@ -1841,7 +1841,9 @@ function ExtraHolesEditor({ dr, i, allowEdgeType, addExtraHole, updateExtraHole,
 }
 
 // ─── Главный компонент ────────────────────────────────────────────────────────
-export default function ContourEditor({ detail, onUpdate, materialThickness, onClose }) {
+// edgeNames — виды кромки, которые пользователь создал в бланке заказа; activeEdge — выбранный там сейчас.
+// В режиме «Кромить» они предлагаются на выбор для участков контура и вырезов (а не безымянная «Кромка»).
+export default function ContourEditor({ detail, onUpdate, materialThickness, onClose, edgeNames = null, activeEdge = null }) {
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
   const w = Number(detail.h) || 0
   const h = Number(detail.w) || 0
@@ -2126,7 +2128,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
   // ─── Режим «Кромить» ────────────────────────────────────────────────────────
   const sideEdgesNow = detail.edges || {}
   const usedEdgeNames = [...new Set([...Object.values(sideEdgesNow), ...contour.vertices.flatMap(v => [v.edge, v.edgeR]), ...contour.holes.flatMap(hh => [hh.edge, ...(hh.vertices || []).flatMap(v => [v.edge, v.edgeR])])].filter(v => v && v !== 'default' && v !== true))]
-  const edgeNameNow = () => (edgeName || '').trim() || usedEdgeNames[0] || 'default'
+  // на выбор: кромки из бланка заказа, затем те, что уже стоят на этой детали
+  const edgeOptions = [...new Set([...(edgeNames || []), ...usedEdgeNames].filter(v => v && v !== 'default' && v !== true))]
+  const edgeNameNow = () => (edgeName || '').trim() || (activeEdge && edgeOptions.includes(activeEdge) ? activeEdge : '') || usedEdgeNames[0] || edgeOptions[0] || 'default'
   // Поставить / снять кромку на участке внешнего контура
   const toggleOuterEdge = (seg) => {
     const name = edgeNameNow()
@@ -2731,11 +2735,20 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                 <div style={{ fontSize:12, color:'#1F7A38', fontWeight:500, marginBottom:5 }}>
                   👆 Нажимайте на участки контура: отрезок, дугу, скругление, вырез — кромка ставится и снимается
                 </div>
+{edgeOptions.length > 0 && (
+                  <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:5 }}>
+                    {edgeOptions.map(u => {
+                      const act = edgeNameNow() === u
+                      return <button key={u} type="button" onClick={() => setEdgeName(u)}
+                        style={{ padding:'4px 10px', borderRadius:14, fontSize:12, cursor:'pointer', border: act ? '1px solid var(--blue)' : '0.5px solid var(--border-md)', background: act ? 'var(--blue)' : 'var(--bg)', color: act ? 'white' : 'var(--text-muted)' }}>{u}</button>
+                    })}
+                  </div>
+                )}
                 <div style={{ display:'flex', gap:6, alignItems:'center' }}>
                   <span style={{ fontSize:11, color:'var(--text-muted)', flexShrink:0 }}>Кромка:</span>
-                  <input type="text" list="contour-edge-names" value={edgeName} placeholder={usedEdgeNames[0] || 'название (необязательно)'}
+                  <input type="text" list="contour-edge-names" value={edgeName} placeholder={edgeNameNow() !== 'default' ? edgeNameNow() : 'название (необязательно)'}
                     onChange={e => setEdgeName(e.target.value)} style={{ padding:'5px 6px', fontSize:12 }} />
-                  <datalist id="contour-edge-names">{usedEdgeNames.map(u => <option key={u} value={u} />)}</datalist>
+                  <datalist id="contour-edge-names">{edgeOptions.map(u => <option key={u} value={u} />)}</datalist>
                 </div>
                 <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:5 }}>
                   На детали: <b>{((st + cu) / 1000).toFixed(2)} м</b> · прямая {(st / 1000).toFixed(2)} м · криволинейная {(cu / 1000).toFixed(2)} м
@@ -3085,11 +3098,22 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
             <summary style={{ fontSize:12, color: banded ? '#1F7A38' : 'var(--text-muted)', cursor:'pointer' }}>
               Кромка по участкам контура{banded ? ` · ${banded} из ${segs.length}` : ''}
             </summary>
-            <div style={{ display:'flex', gap:6, alignItems:'center', margin:'8px 0' }}>
+            <div style={{ marginTop:8 }}>
+              {edgeOptions.length > 0 && (
+              <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginBottom:5 }}>
+                {edgeOptions.map(u => {
+                  const act = edgeNameNow() === u
+                  return <button key={u} type="button" onClick={() => setEdgeName(u)}
+                    style={{ padding:'4px 10px', borderRadius:14, fontSize:12, cursor:'pointer', border: act ? '1px solid var(--blue)' : '0.5px solid var(--border-md)', background: act ? 'var(--blue)' : 'var(--bg)', color: act ? 'white' : 'var(--text-muted)' }}>{u}</button>
+                })}
+              </div>
+            )}
+            </div>
+            <div style={{ display:'flex', gap:6, alignItems:'center', margin:'0 0 8px' }}>
               <span style={{ fontSize:11, color:'var(--text-hint)', flexShrink:0 }}>Кромка:</span>
-              <input type="text" list="contour-edge-names-2" value={edgeName} placeholder={usedEdgeNames[0] || 'название (необязательно)'}
+              <input type="text" list="contour-edge-names-2" value={edgeName} placeholder={edgeNameNow() !== 'default' ? edgeNameNow() : 'название (необязательно)'}
                 onChange={e => setEdgeName(e.target.value)} style={{ padding:'5px 6px', fontSize:12 }} />
-              <datalist id="contour-edge-names-2">{usedEdgeNames.map(u => <option key={u} value={u} />)}</datalist>
+              <datalist id="contour-edge-names-2">{edgeOptions.map(u => <option key={u} value={u} />)}</datalist>
             </div>
             <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
               {segs.map(seg => {
