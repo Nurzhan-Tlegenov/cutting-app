@@ -147,18 +147,23 @@ export default function ProductionPage() {
               return (
                 <div key={o.id} className="card" style={{ padding: '10px 12px' }}>
                   <div onClick={() => navigate(`/orders/${o.id}`)} style={{ cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <span style={{ fontWeight: 500, fontSize: 15 }}>{orderTitle(o)}</span>
-                      <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || o.status}</span>
+                    {/* слева — заказ, справа — статус и под ним короткие пометки (G-код, файлы): карточка не растёт в высоту */}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[o.material_name, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
+                        <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || o.status}</span>
+                        {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            {orderMarks(o).map(m => (
+                              <span key={m.key} title={m.text} style={{ fontSize: 10, lineHeight: '15px', borderRadius: 8, padding: '0 6px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--teal)' : 'var(--border-md)'}`, background: m.on ? 'var(--teal-light)' : 'transparent', color: m.on ? 'var(--teal)' : 'var(--text-hint)' }}>{m.short} {m.on ? '✓' : '—'}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[o.material_name, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
-                  {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
-                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
-                      {orderMarks(o).map(m => (
-                        <span key={m.key} style={{ fontSize: 11, borderRadius: 10, padding: '1px 8px', border: `0.5px solid ${m.on ? 'var(--teal)' : 'var(--border-md)'}`, background: m.on ? 'var(--teal-light)' : 'transparent', color: m.on ? 'var(--teal)' : 'var(--text-hint)' }}>{m.on ? '✓ ' : ''}{m.text}</span>
-                      ))}
-                    </div>
-                  )}
                   {simShares.has(o.id) && (
                     <div title="По ссылке открыта симуляция обработки этого заказа. Закрыть доступ можно в заказе."
                       style={{ display: 'inline-block', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px', marginTop: 2 }}>

@@ -50,8 +50,8 @@ export const MARKS_SQL_HINT = 'Чтобы на заказах были поме�
 export function orderMarks(o) {
   const d = v => new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
   return [
-    { key: 'gcode', on: !!o?.gcode_at, text: o?.gcode_at ? `G-код создан · ${d(o.gcode_at)}` : 'G-код не создан' },
-    { key: 'files', on: !!o?.files_saved_at, text: o?.files_saved_at ? `Файлы сохранены · ${d(o.files_saved_at)}` : 'Файлы не сохранены' },
+    { key: 'gcode', short: 'G-код', on: !!o?.gcode_at, text: o?.gcode_at ? `G-код создан · ${d(o.gcode_at)}` : 'G-код не создан' },
+    { key: 'files', short: 'Файлы', on: !!o?.files_saved_at, text: o?.files_saved_at ? `Файлы сохранены · ${d(o.files_saved_at)}` : 'Файлы не сохранены' },
   ]
 }
 /** Производство (или администратор) сохраняет свой вариант раскроя в оформленный на него заказ. -> {} | { error } */
