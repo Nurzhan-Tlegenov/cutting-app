@@ -26,6 +26,8 @@ export default function ProductionPage() {
   const setFilter = f => { setFilterState(f); try { sessionStorage.setItem('prodFilter', f) } catch { /* без памяти */ } }
   const [edit, setEdit] = useState(false)
   const [busy, setBusy] = useState('')
+  const [open, setOpen] = useState(() => new Set())   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
+  const toggle = id => setOpen(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const [sheet, setSheet] = useState({})
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
 
@@ -141,14 +143,17 @@ export default function ProductionPage() {
           </div>
           {orders.length > 0 && !('gcode_at' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{MARKS_SQL_HINT}</p>}
           {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {shown.map(o => {
               const tel = digits(o.client_phone), wa = digits(o.client_whatsapp) || tel
+              const isOpen = open.has(o.id)
               return (
-                <div key={o.id} className="card" style={{ padding: '10px 12px' }}>
-                  <div onClick={() => navigate(`/orders/${o.id}`)} style={{ cursor: 'pointer' }}>
+                <div key={o.id} className="card" style={{ padding: isOpen ? '8px 12px 10px' : '7px 12px' }}>
+                  {/* свёрнуто — только строка заказа со статусом и пометками; нажатие разворачивает: заказчик и действия */}
+                  <div onClick={() => toggle(o.id)} style={{ cursor: 'pointer' }}>
                     {/* слева — заказ, справа — статус и под ним короткие пометки (G-код, Файлы): серые — не сделано, синие — сделано */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <span style={{ flex: '0 0 auto', width: 10, fontSize: 11, lineHeight: '20px', color: 'var(--text-hint)' }}>{isOpen ? '▾' : '▸'}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</div>
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[o.material_name, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
@@ -164,13 +169,14 @@ export default function ProductionPage() {
                         )}
                       </div>
                     </div>
-                  {simShares.has(o.id) && (
+                  {isOpen && simShares.has(o.id) && (
                     <div title="По ссылке открыта симуляция обработки этого заказа. Закрыть доступ можно в заказе."
                       style={{ display: 'inline-block', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px', marginTop: 2 }}>
                       🔗 открыта ссылка на симуляцию{simShares.get(o.id) > 1 ? ` · ${simShares.get(o.id)}` : ''}
                     </div>
                   )}
                   </div>
+                  {isOpen && <>
                   <div style={{ fontSize: 13, marginTop: 6 }}>
                     {o.own ? <span style={{ color: 'var(--text-hint)' }}>Ваш собственный заказ</span> : <>
                       <span>{o.client_name || 'Заказчик'}</span>
@@ -186,6 +192,7 @@ export default function ProductionPage() {
                     <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
                     {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}
                   </div>
+                  </>}
                 </div>
               )
             })}
