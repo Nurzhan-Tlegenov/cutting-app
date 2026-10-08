@@ -42,9 +42,9 @@ export default function AuthPage() {
         if (byRequest) {
           const r = await requestSignup(form.full_name, form.phone, form.comment)
           if (r.error) throw new Error(r.error)
-          if (r.status === 'approved' || r.status === 'open') { setApproved(true); setNote('Регистрация для вашего номера разрешена — придумайте пароль.') }
+          if (r.status === 'approved' || r.status === 'open') { setApproved(true); setNote('Заявка одобрена. Остался один шаг: придумайте пароль и нажмите «Зарегистрироваться».') }
           else if (r.status === 'rejected') setError('Заявка для этого номера отклонена. Свяжитесь с нами.')
-          else setNote('Заявка отправлена. Мы свяжемся с вами; после одобрения зайдите сюда снова и зарегистрируйтесь с этим же номером.')
+          else setNote('Заявка отправлена. Мы свяжемся с вами. После одобрения откройте «Регистрация», введите этот же номер и нажмите «Продолжить» — появится создание пароля.')
           return
         }
         if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
@@ -58,7 +58,7 @@ export default function AuthPage() {
       navigate('/')
     } catch (err) {
       const msg = err.message
-      if (msg.includes('Invalid login')) setError('Неверный телефон или пароль')
+      if (msg.includes('Invalid login')) setError('Неверный телефон или пароль. Если вашу заявку одобрили, а пароль вы ещё не задавали — откройте вкладку «Регистрация».')
       else if (msg.includes('already registered')) setError('Этот номер уже зарегистрирован')
       else if (/signup_closed|Database error saving new user|Signups not allowed/i.test(msg)) { setOpen(false); setApproved(false); setError('Регистрация сейчас только по запросу. Оставьте заявку.') }
       else setError(msg)
@@ -72,7 +72,7 @@ export default function AuthPage() {
       <div style={{ marginBottom: 32, textAlign: 'center' }}>
         <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--blue)', marginBottom: 4 }}>РаскройPro</div>
         <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>
-          {mode === 'login' ? 'Войдите в личный кабинет' : byRequest ? 'Заявка на регистрацию' : 'Создайте аккаунт'}
+          {mode === 'login' ? 'Войдите в личный кабинет' : byRequest ? 'Регистрация по заявке' : 'Создайте аккаунт'}
         </div>
       </div>
 
@@ -85,7 +85,7 @@ export default function AuthPage() {
                   background: mode === m ? 'var(--bg)' : 'transparent',
                   color: mode === m ? 'var(--blue)' : 'var(--text-hint)',
                   fontWeight: mode === m ? 500 : 400, fontSize: 14 }}>
-                {m === 'login' ? 'Вход' : open ? 'Регистрация' : 'Заявка'}
+                {m === 'login' ? 'Вход' : 'Регистрация'}
               </button>
             ))}
           </div>
@@ -93,7 +93,8 @@ export default function AuthPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {byRequest && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
-                Регистрация сейчас только по запросу. Оставьте имя и телефон — после одобрения вы сможете зарегистрироваться с этим номером.
+                Регистрация сейчас по запросу. <b>Заявка уже одобрена?</b> Введите имя и тот же номер телефона, нажмите «Продолжить» — и откроется создание пароля.
+                Заявки ещё не было — она отправится этим же шагом, и мы с вами свяжемся.
               </p>
             )}
             {mode === 'register' && (
@@ -143,7 +144,7 @@ export default function AuthPage() {
             {error && <p className="error-text">{error}</p>}
 
             <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: 4 }}>
-              {loading ? 'Загрузка...' : mode === 'login' ? 'Войти' : byRequest ? 'Отправить заявку' : 'Зарегистрироваться'}
+              {loading ? 'Загрузка...' : mode === 'login' ? 'Войти' : byRequest ? 'Продолжить' : 'Зарегистрироваться'}
             </button>
           </div>
         </form>
