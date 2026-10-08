@@ -312,7 +312,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
 export default function LabelsPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, cabinet } = useAuth()
   const [order, setOrder] = useState(null)
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
@@ -451,6 +451,7 @@ export default function LabelsPage() {
           <div style={{ fontWeight: 500 }}>Бирки</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>{orderTitle(order)}</span> · {total} шт. · {tpl.w}×{tpl.h} мм</div>
         </div>
+        <button onClick={() => navigate(cabinet === 'production' ? '/production' : '/orders')} style={{ padding: '7px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
         {mat && <button onClick={savePdf} disabled={!!pdf} style={{ ...pill, background: 'var(--teal)' }}>{pdf || '⬇ PDF'}</button>}
         {mat && <button onClick={() => window.print()} style={pill}>🖨 Печать</button>}
       </div>

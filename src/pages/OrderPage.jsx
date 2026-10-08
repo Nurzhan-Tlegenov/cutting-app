@@ -15,7 +15,7 @@ import { isTwoSided } from '../lib/partInfo'
 import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
-import { orderClient, productionSetStatus } from '../lib/productionApi'
+import { orderClient, productionSetStatus, orderMarks } from '../lib/productionApi'
 import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
@@ -111,6 +111,14 @@ export default function OrderPage() {
           {STATUS_LABELS[order.status] || order.status}
         </span>
       </div>
+      {inProduction && order.status !== 'draft' && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', margin: '-10px 0 14px' }}>
+          {(order.status === 'inwork' || order.status === 'done' || order.gcode_at || order.files_saved_at) && orderMarks(order).map(m => (
+            <span key={m.key} style={{ fontSize: 11, borderRadius: 10, padding: '2px 8px', border: `0.5px solid ${m.on ? 'var(--teal)' : 'var(--border-md)'}`, background: m.on ? 'var(--teal-light)' : 'transparent', color: m.on ? 'var(--teal)' : 'var(--text-hint)' }}>{m.on ? '✓ ' : ''}{m.text}</span>
+          ))}
+          <button type="button" onClick={() => navigate('/production')} style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
+        </div>
+      )}
       {client && (client.production || (!isMine && client.full_name)) && (
         <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
           {!isMine && (client.full_name || client.phone) && (

@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
-import { myProduction, productionOrders, productionSetStatus, productionReturnOrder } from '../lib/productionApi'
+import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT } from '../lib/productionApi'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
@@ -21,7 +21,9 @@ export default function ProductionPage() {
   const [prod, setProd] = useState(undefined)       // undefined — загрузка, null — производства нет
   const [orders, setOrders] = useState([])
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState('new')
+  // раздел списка запоминается: вернувшись из ЧПУ или бирок «к заказам», попадаем туда же, где были
+  const [filter, setFilterState] = useState(() => { try { return sessionStorage.getItem('prodFilter') || 'new' } catch { return 'new' } })
+  const setFilter = f => { setFilterState(f); try { sessionStorage.setItem('prodFilter', f) } catch { /* без памяти */ } }
   const [edit, setEdit] = useState(false)
   const [busy, setBusy] = useState('')
   const [sheet, setSheet] = useState({})
@@ -137,6 +139,7 @@ export default function ProductionPage() {
               </button>
             ))}
           </div>
+          {orders.length > 0 && !('gcode_at' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{MARKS_SQL_HINT}</p>}
           {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {shown.map(o => {
@@ -149,6 +152,13 @@ export default function ProductionPage() {
                       <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || o.status}</span>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[o.material_name, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
+                  {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
+                      {orderMarks(o).map(m => (
+                        <span key={m.key} style={{ fontSize: 11, borderRadius: 10, padding: '1px 8px', border: `0.5px solid ${m.on ? 'var(--teal)' : 'var(--border-md)'}`, background: m.on ? 'var(--teal-light)' : 'transparent', color: m.on ? 'var(--teal)' : 'var(--text-hint)' }}>{m.on ? '✓ ' : ''}{m.text}</span>
+                      ))}
+                    </div>
+                  )}
                   {simShares.has(o.id) && (
                     <div title="По ссылке открыта симуляция обработки этого заказа. Закрыть доступ можно в заказе."
                       style={{ display: 'inline-block', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px', marginTop: 2 }}>

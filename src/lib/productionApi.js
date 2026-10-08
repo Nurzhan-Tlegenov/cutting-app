@@ -37,5 +37,22 @@ export async function productionReturnOrder(orderId, note) {
   const r = await call('production_return_order', { p_order: orderId, p_note: note || '' })
   return r.missing ? { error: 'База ещё не обновлена: выполните migration_return_order.sql в Supabase (SQL Editor) — один раз.' } : r
 }
+/**
+ * Пометка на заказе для кабинета производства: 'gcode' — создан G-код, 'files' — файлы сохранены (выгружены).
+ * Пока в базе нет migration_production_marks.sql — молча ничего не делает. -> { at } | { error }
+ */
+export async function productionMark(orderId, what) {
+  const r = await call('production_mark', { p_order: orderId, p_what: what })
+  return r.error ? r : { at: new Date().toISOString() }
+}
+export const MARKS_SQL_HINT = 'Чтобы на заказах были пометки «G-код создан» и «файлы сохранены», выполните migration_production_marks.sql в Supabase (SQL Editor) — один раз.'
+/** Пометки заказа одной строкой-списком: [{ text, on }] */
+export function orderMarks(o) {
+  const d = v => new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+  return [
+    { key: 'gcode', on: !!o?.gcode_at, text: o?.gcode_at ? `G-код создан · ${d(o.gcode_at)}` : 'G-код не создан' },
+    { key: 'files', on: !!o?.files_saved_at, text: o?.files_saved_at ? `Файлы сохранены · ${d(o.files_saved_at)}` : 'Файлы не сохранены' },
+  ]
+}
 /** Производство (или администратор) сохраняет свой вариант раскроя в оформленный на него заказ. -> {} | { error } */
 export const productionSaveNesting = (orderId, value) => call('production_save_nesting', { p_order: orderId, p_value: value })

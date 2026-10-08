@@ -13,6 +13,7 @@ import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName, toLatin, programName } from '../lib/orderUtils'
 import SaveFilesDialog from '../components/SaveFilesDialog'
+import { productionMark, orderMarks } from '../lib/productionApi'
 import { saveNestingPdf } from '../lib/nestingPdf'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
@@ -38,7 +39,8 @@ function download(name, data, type = 'text/plain') {
 export default function CncPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user, profile, isMaster } = useAuth()
+  const { user, profile, isMaster, cabinet } = useAuth()
+  const toOrders = () => navigate(cabinet === 'production' ? '/production' : '/orders')   // «К заказам» — в список своего кабинета
   const labelTpl = useMemo(() => getLabelTpl(user), [user])
   const [labelBusy, setLabelBusy] = useState(false)
   const [order, setOrder] = useState(null)
@@ -153,6 +155,9 @@ export default function CncPage() {
   const openSim = f => navigate(`?sim=${f.si}`)
   const closeSim = () => navigate(-1)
   const [saved, setSaved] = useState('')
+  // пометки на заказе в кабинете производства: «G-код создан» и «файлы сохранены»
+  const mark = what => { productionMark(id, what).then(r => { if (r.at) setOrder(o => (o ? { ...o, ...(what === 'gcode' ? { gcode_at: r.at, files_saved_at: null } : { files_saved_at: r.at, gcode_at: o.gcode_at || r.at }) } : o)) }) }
+  const savedDone = msg => { setSaved(msg); mark('files') }
   // все файлы — отдельными файлами (не архивом): в выбранную папку, а где браузер этого не умеет — загрузками по одному
   // сохранение нескольких файлов — через вопрос «по отдельности или архивом»; сначала маркировка, потом раскрой
   const [saveAsk, setSaveAsk] = useState(null)      // { files, zipName }
@@ -209,6 +214,7 @@ export default function CncPage() {
           <div style={{ fontWeight: 500 }}>ЧПУ</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>{orderTitle(order)}</span>{mat ? ` · ${mat.label}` : ''}</div>
         </div>
+        <button type="button" onClick={toOrders} style={{ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
       </div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 2 }}>
         {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={chip(tab === k)}>{l}{k === 'ops' && pre.length ? ' ⚠' : ''}</button>)}
@@ -272,7 +278,7 @@ export default function CncPage() {
                       {!f.empty && (
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button type="button" onClick={() => openSim(f)} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>▶ Симулятор</button>
-                          <button type="button" onClick={() => download(f.name, f.text)} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Скачать</button>
+                          <button type="button" onClick={() => { download(f.name, f.text); mark('files') }} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Скачать</button>
                         </div>
                       )}
                     </div>
@@ -294,7 +300,7 @@ export default function CncPage() {
               {' · '}<span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => setTab('basic')}>отключить</span>
             </p>
           )}
-          <button className="btn-primary" disabled={!sel.length} onClick={build}>{built ? '↻ Создать G-код заново' : 'Создать G-код'}</button>
+          <button className="btn-primary" disabled={!sel.length} onClick={() => { build(); mark('gcode') }}>{built ? '↻ Создать G-код заново' : 'Создать G-код'}</button>
           {labelBusy && <CncLoader compact label="Рисуем бирки…" />}
           {built?.labels?.length > 0 && (
             <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
@@ -309,6 +315,14 @@ export default function CncPage() {
             <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({built.files.filter(f => !f.empty).length + (built.labels?.length || 0)})</button>
           )}
           {saved && built && <p style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6, textAlign: 'center' }}>{saved}</p>}
+          {built && order && (order.gcode_at || order.files_saved_at) && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', marginTop: 8 }}>
+              {orderMarks(order).map(m => (
+                <span key={m.key} style={{ fontSize: 11, borderRadius: 10, padding: '2px 8px', border: `0.5px solid ${m.on ? 'var(--teal)' : 'var(--border-md)'}`, background: m.on ? 'var(--teal-light)' : 'transparent', color: m.on ? 'var(--teal)' : 'var(--text-hint)' }}>{m.on ? '✓ ' : ''}{m.text}</span>
+              ))}
+            </div>
+          )}
+          {saved && built && <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={toOrders}>← Перейти к заказам</button>}
         </>
       ))}
       {tab === 'ops' && <CncOps cnc={cnc} onChange={change} layers={layers} />}
@@ -321,7 +335,7 @@ export default function CncPage() {
           <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000} zShift={sim.zShift}
-                toolDia={toolDia} onClose={closeSim} onDownload={() => download(sim.name, sim.text)} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
+                toolDia={toolDia} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
             </Suspense>
           </div>
         </div>
@@ -353,7 +367,7 @@ export default function CncPage() {
           </div>
         </div>
       )}
-      {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={setSaved}
+      {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={savedDone}
         folders={[orderFileName(order), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
       <BottomNav />
     </div>
