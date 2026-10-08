@@ -22,7 +22,17 @@ function MillIcon({ profile, depth }) {
 }
 
 export default function ProfilePage() {
-  const { profile, user, signOut, cabinet, setCabinet, isMaster } = useAuth()
+  const { profile, user, signOut, cabinet, setCabinet, isMaster, setContactEmail } = useAuth()
+  // почта для восстановления пароля — необязательная, меняется здесь
+  const contactEmail = user?.user_metadata?.contact_email || ''
+  const [mail, setMail] = useState(null)             // null — не редактируем; строка — идёт ввод
+  const [mailErr, setMailErr] = useState('')
+  const saveMail = async () => {
+    const v = (mail || '').trim()
+    if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { setMailErr('Проверьте адрес почты'); return }
+    const err = await setContactEmail(v)
+    if (err) setMailErr(err); else { setMailErr(''); setMail(null) }
+  }
   const navigate = useNavigate()
   const [loggingOut, setLoggingOut] = useState(false)
   const [mills, setMills] = useState(() => getUserSettings(user).facadeMills || [])
@@ -84,6 +94,24 @@ export default function ProfilePage() {
               <span style={{ fontSize: 13 }}>{val}</span>
             </div>
           ))}
+          <div style={{ padding: '10px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: 'var(--text-hint)', fontSize: 13, flex: '0 0 auto' }}>Почта</span>
+              {mail === null ? (
+                <span style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {contactEmail || <span style={{ color: 'var(--text-hint)' }}>не указана</span>}
+                  <span onClick={() => { setMail(contactEmail); setMailErr('') }} style={{ color: 'var(--blue)', marginLeft: 8, cursor: 'pointer' }}>{contactEmail ? 'Изменить' : 'Указать'}</span>
+                </span>
+              ) : (
+                <span style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0, justifyContent: 'flex-end' }}>
+                  <input type="email" inputMode="email" autoComplete="email" placeholder="name@mail.com" value={mail} onChange={e => setMail(e.target.value)} style={{ padding: '5px 8px', fontSize: 13, minWidth: 0 }} />
+                  <button type="button" onClick={saveMail} style={{ flex: '0 0 auto', padding: '5px 10px', borderRadius: 20, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 12 }}>Сохранить</button>
+                </span>
+              )}
+            </div>
+            {mailErr ? <p className="error-text" style={{ marginTop: 4 }}>{mailErr}</p>
+              : <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Необязательно. Нужна для восстановления пароля; вход — по номеру телефона.</p>}
+          </div>
         </div>
       </div>
 

@@ -12,7 +12,7 @@ export default function AuthPage() {
 
   const [showPass, setShowPass] = useState(false)
   const [form, setForm] = useState({
-    full_name: '', phone: '', whatsapp: '', password: '', comment: ''
+    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: ''
   })
   // Регистрация может быть закрыта: тогда новый человек оставляет заявку, а регистрируется после одобрения
   const [open, setOpen] = useState(true)
@@ -48,11 +48,13 @@ export default function AuthPage() {
           return
         }
         if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
+        if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) throw new Error('Проверьте адрес почты — или оставьте поле пустым')
         const email = phoneToEmail(form.phone)
         await signUp(email, form.password, {
           full_name: form.full_name,
           phone: form.phone,
-          whatsapp: form.whatsapp
+          whatsapp: form.whatsapp,
+          contact_email: form.email
         })
       }
       navigate('/')
@@ -123,6 +125,15 @@ export default function AuthPage() {
                 <label className="label">WhatsApp (если отличается)</label>
                 <input type="tel" placeholder="+7 700..." value={form.whatsapp}
                   onChange={e => set('whatsapp', e.target.value)} />
+              </div>
+            )}
+
+            {mode === 'register' && !byRequest && (
+              <div>
+                <label className="label">Электронная почта (необязательно)</label>
+                <input type="email" inputMode="email" autoComplete="email" placeholder="name@mail.com" value={form.email}
+                  onChange={e => set('email', e.target.value)} />
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Для восстановления пароля. Вход — по номеру телефона.</p>
               </div>
             )}
 

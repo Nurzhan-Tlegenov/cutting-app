@@ -42,7 +42,10 @@ export function AuthProvider({ children }) {
   }
 
   async function signUp(email, password, profileData) {
-    const { data, error } = await supabase.auth.signUp({ email, password })
+    // Вход идёт по номеру телефона (служебный адрес собирается из него). Настоящая почта необязательна и лежит
+    // в данных аккаунта (contact_email) — для восстановления пароля; на вход она не влияет.
+    const contact = String(profileData.contact_email || '').trim()
+    const { data, error } = await supabase.auth.signUp({ email, password, ...(contact ? { options: { data: { contact_email: contact } } } : {}) })
     if (error) throw error
     if (data.user) {
       await supabase.from('profiles').insert({
@@ -63,12 +66,20 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  /** Почта для восстановления пароля ('' — убрать). -> текст ошибки или '' */
+  async function setContactEmail(value) {
+    const { data, error } = await supabase.auth.updateUser({ data: { contact_email: String(value || '').trim() } })
+    if (error) return error.message
+    if (data?.user) setUser(data.user)
+    return ''
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, refreshProfile: () => (user ? fetchProfile(user.id) : null),
+    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, setContactEmail, refreshProfile: () => (user ? fetchProfile(user.id) : null),
       cabinet, setCabinet, isMaster: profile?.role === 'admin' }}>
       {children}
     </AuthContext.Provider>
