@@ -109,11 +109,11 @@ export default function ProductionPage() {
                   </div>
                   <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 8 }}>
                   {[['Заявок', count.all], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', count.done]].map(([l, v]) => (
-                    <div key={l} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
-                      <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{l}</div>
-                      <div style={{ fontSize: 20, fontWeight: 500 }}>{v}</div>
+                    <div key={l} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '3px 9px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6, minWidth: 0 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l}</span>
+                      <span style={{ fontSize: 15, fontWeight: 500 }}>{v}</span>
                     </div>
                   ))}
                 </div>
