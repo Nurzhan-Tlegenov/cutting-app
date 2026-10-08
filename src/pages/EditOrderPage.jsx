@@ -342,7 +342,7 @@ export default function EditOrderPage() {
     updateDetail(targetUid, patch)
   }
   // Импорт деталей из таблицы (Excel / Базис-Мебельщик / PRO100)
-  const handleImport = ({ items, mode, material, thickness, orderName: importedName, model3d: importedModel }) => {
+  const handleImport = ({ items, mode, material, thickness, orderName: importedName, model3d: importedModel, edgeTypes: importedTypes }) => {
     if (importedModel) setModel3d(importedModel)
     const imported = items.map(it => ({
       ...makeDetail(null),
@@ -360,7 +360,7 @@ export default function EditOrderPage() {
     const newPrefixes = [...new Set(imported.map(d => d.prefix).filter(Boolean))]
     if (newPrefixes.length) setPrefixes(prev => [...new Set([...prev, ...newPrefixes])])
     const newEdges = [...new Set(imported.flatMap(d => Object.values(d.edges)).filter(v => v && v !== 'default'))]
-    const fromModel = typesFromItems(items)                       // толщина кромок из модели — только для тех, что ещё не заданы
+    const fromModel = { ...typesFromItems(items), ...(importedTypes || {}) }                       // толщина кромок из модели — только для тех, что ещё не заданы
     if (Object.keys(fromModel).length) setEdgeTypes(prev => ({ ...fromModel, ...prev }))
     if (newEdges.length) setEdgeNames(prev => [...new Set([...prev, ...newEdges])])
     if (material && (!materialName.trim() || mode === 'replace')) {

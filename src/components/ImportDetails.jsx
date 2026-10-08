@@ -5,6 +5,7 @@ import { readBasisFile, packScene } from '../lib/basisB3d'
 import { readAstraFile } from '../lib/astraAdd'
 import { readAstraXmlFile, looksLikeAstraXml } from '../lib/astraXml'
 import { readPro100Obj } from '../lib/pro100Obj'
+import { readSketchCutPdf } from '../lib/sketchcutPdf'
 import { millsFromItems, mergeMills } from '../lib/facadeCarve'
 import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importDetails'
 import { useAuth } from '../context/AuthContext'
@@ -18,7 +19,7 @@ const FACE_RULES = [
   ['model', 'Как в модели (не переворачивать)'],
 ]
 
-// Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, Астра, PRO100.
+// Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, Астра, PRO100, SketchCut (PDF).
 // Базис-Мебельщик (.b3d) и Астра Конструктор Мебели (.add) читаются напрямую
 // из файла модели — с контуром, кромкой, пазами и присадкой.
 // onImport({ items, mode: 'add' | 'replace', material, thickness, orderName })
@@ -32,6 +33,8 @@ const SOURCES = [
     hint: 'Выберите файл проекта «Астра Конструктор Мебели» (.add) — возьмём детали с контуром, кромкой, пазами, присадкой и 3D-моделью. Если проект не читается — подойдёт XML из Астры (Файл → Экспорт XML), но без 3D.' },
   { id: 'pro100', icon: '🪑', label: 'PRO100',
     hint: 'Выберите модель, сохранённую из PRO100 в формате OBJ (Файл → Экспорт) — возьмём панели с размерами и 3D-модель; названия, кромку и присадку нужно будет добавить в приложении. Подойдёт и отчёт со списком деталей в Excel или CSV.' },
+  { id: 'sketchcut', icon: '📄', label: 'SketchCut',
+    hint: 'Выберите PDF, сохранённый из SketchCut, — возьмём детали из таблицы «Детали» и кромку: чёрточки под размером показывают, на скольких сторонах она стоит (одна — на одной, две — на обеих).' },
 ]
 
 const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain'
@@ -41,6 +44,10 @@ const ALL = '__all__'
 async function readModelFile(file, faceRule) {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
   const lower = file.name.toLowerCase()
+  // PDF из SketchCut ('%PDF')
+  if ((head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) || lower.endsWith('.pdf')) {
+    return { src: 'sketchcut', res: await readSketchCutPdf(file) }
+  }
   if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
     return { src: 'basis', res: await readBasisFile(file, { faceRule }) }
   }
@@ -97,7 +104,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     setSource(src); setError('')
     if (!fileRef.current) return
     // у .b3d и .add нет своего типа — с фильтром телефон может не дать выбрать файл
-    fileRef.current.accept = src.id === 'excel' ? ACCEPT : ''
+    fileRef.current.accept = src.id === 'excel' ? ACCEPT : src.id === 'sketchcut' ? '.pdf,application/pdf' : ''
     fileRef.current.click()
   }
 
@@ -114,7 +121,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
         const { res } = model
         setFaceRule(rule)
         basisFileRef.current = file
-        if (!res.items.length) throw new Error('в модели нет панелей')
+        if (!res.items.length) throw new Error(res.pdf ? 'в файле нет деталей' : 'в модели нет панелей')
         setFileName(file.name); setSource(SOURCES.find(x => x.id === model.src)); setMode('add')
         setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
         setSheets(null); setBasis(res)
@@ -198,6 +205,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
       thickness: g?.thickness || null,
       orderName: basis?.orderName || '',
       model3d,                                   // вся модель для 3D-просмотра (упакована)
+      edgeTypes: basis?.edgeTypes || null,       // толщина видов кромки, если она есть в файле (SketchCut)
     })
     close()
   }
@@ -214,10 +222,10 @@ export default function ImportDetails({ hasDetails, onImport }) {
     <div style={{ marginBottom: 14 }}>
       <p className="section-title">Импорт деталей</p>
       <div className="card" style={{ background: 'var(--bg2)' }}>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {SOURCES.map(s => (
             <button key={s.id} type="button" disabled={busy} onClick={() => pick(s)}
-              style={{ flex: 1, padding: '10px 4px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)',
+              style={{ flex: '1 1 30%', minWidth: 0, padding: '10px 4px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)',
                 background: 'var(--bg)', color: 'var(--text)', fontSize: 12, cursor: 'pointer', textAlign: 'center', lineHeight: 1.3 }}>
               <div style={{ fontSize: 18 }}>{s.icon}</div>
               {s.label}
@@ -359,7 +367,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 <div style={{ marginTop: 4 }}>Размеры деталей взяты как в модели. Исправьте модель у конструктора или проверьте эти детали перед раскроем.</div>
               </div>
             )}
-            {basis && !basis.bare && (
+            {basis && !basis.bare && !basis.pdf && (
               <div style={{ marginBottom: 12 }}>
                 <label className="label">Лицевая сторона детали (смотрит вверх на станке)</label>
                 <select value={faceRule} disabled={busy} onChange={e => changeFaceRule(e.target.value)} style={{ padding: '7px 8px', fontSize: 13 }}>
@@ -372,8 +380,31 @@ export default function ImportDetails({ hasDetails, onImport }) {
               </div>
             )}
 
+            {/* PDF из SketchCut: сверка с итогами самого файла */}
+            {basis?.pdf && (() => {
+              const p = basis.pdf
+              const m = v => String(v).replace('.', ',')
+              const piecesBad = p.filePieces != null && p.filePieces !== p.pieces
+              const edgeBad = p.edgeChecked && !p.edgeOk
+              const bad = piecesBad || edgeBad
+              return (
+                <div style={{ background: bad ? 'var(--amber-light)' : 'var(--bg)', border: `0.5px solid ${bad ? 'var(--amber)' : 'var(--border)'}`,
+                  borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: bad ? 'var(--amber)' : 'var(--text-muted)' }}>
+                  <div>
+                    Деталей: {p.pieces} шт.
+                    {p.filePieces != null && (piecesBad ? ` — а в файле указано ${p.filePieces}. Проверьте список.` : ' — сходится с файлом ✓')}
+                  </div>
+                  <div>
+                    Кромка: {m(p.edgeMeters)} м
+                    {p.fileEdgeMeters != null && (edgeBad ? ` — а в файле указано ${m(p.fileEdgeMeters)} м. Проверьте кромку на деталях.` : p.edgeChecked ? ' — сходится с файлом ✓' : '')}
+                  </div>
+                  {basis.groups[0] && !basis.groups[0].material && <div style={{ color: 'var(--text-hint)', marginTop: 2 }}>Материал в файле не указан — выберите его в заказе.</div>}
+                </div>
+              )
+            })()}
+
             {/* Что получится */}
-            {basis && !basis.bare && chosen.length > 0 && (
+            {basis && !basis.bare && !basis.pdf && chosen.length > 0 && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
                 Присадка: {sumInfo('holes')} отв. · пазов: {sumInfo('grooves')} · фигурных деталей: {sumInfo('shaped')} · вырезов: {sumInfo('cutouts')}
                 {sumInfo('shapedEdges') > 0 && ` · кромка на фигурных участках: ${sumInfo('shapedEdges')}`}
@@ -384,7 +415,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 Фрезеровка фасадов (скругление кромки, V-паз, выемка): {sumInfo('decor')} — показывается объёмно в 3D, на раскрой и присадку не влияет. Типы фрез добавятся в Профиль → Фасадные фрезы.
               </div>
             )}
-            {basis && !basis.scene && (
+            {basis && !basis.scene && !basis.pdf && (
               <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
                 В XML нет положения деталей в изделии — 3D-модели по этому файлу не будет. Для 3D импортируйте файл проекта (.add).
               </div>
@@ -409,7 +440,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 {chosen.slice(0, basis ? 300 : 5).map((it, i) => {
                   const e = it.edges
                   const edgeTxt = [['left', 'Дл'], ['right', 'Дп'], ['top', 'Шв'], ['bottom', 'Шн']]
-                    .filter(([k]) => e[k]).map(([k, s]) => (basis || e[k] === 'default' ? s : `${s}:${e[k]}`)).join(' ')
+                    .filter(([k]) => e[k]).map(([k, s]) => ((basis && !basis.pdf) || e[k] === 'default' ? s : `${s}:${e[k]}`)).join(' ')
                   const inf = it.info
                   const extra = inf ? [
                     inf.shaped && 'контур', inf.cutouts > 0 && `вырезов ${inf.cutouts}`,
