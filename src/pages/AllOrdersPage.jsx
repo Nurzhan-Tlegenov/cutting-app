@@ -6,6 +6,7 @@ import { adminUsers } from '../lib/adminApi'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
+import { archiveOrder, restoreOrder, deleteOrder } from '../lib/orderArchive'
 
 // Мастер-аккаунт: заказы всех пользователей — чтобы по обращению открыть чужой заказ и разобраться с ошибкой.
 // Обычный список «Мои заказы» остаётся только своим. Доступ — только у администратора (так же решает и база).
@@ -26,8 +27,10 @@ export default function AllOrdersPage() {
   useEffect(() => {
     if (!isMaster) return
     let alive = true
+    // тяжёлые поля (карта раскроя) не тянем; пока в базе нет архива — список без пометки архива
+    const q = cols => supabase.from('orders').select(cols).order('created_at', { ascending: false }).limit(1000)
     Promise.all([
-      supabase.from('orders').select('id, user_id, order_name, order_number, status, material_name, material_thickness, created_at').order('created_at', { ascending: false }).limit(1000),
+      q('id, user_id, order_name, order_number, status, material_name, material_thickness, created_at, archived_at').then(r => (r.error ? q('id, user_id, order_name, order_number, status, material_name, material_thickness, created_at') : r)),
       adminUsers(),
     ]).then(([o, u]) => {
       if (!alive) return
@@ -40,6 +43,8 @@ export default function AllOrdersPage() {
   useEffect(() => { sessionStorage.setItem('allOrdersFind', find); sessionStorage.setItem('allOrdersStatus', status) }, [find, status])
 
   const owner = o => users.get(o.user_id)
+  const patch = (id, p) => setOrders(list => (p ? list.map(x => (x.id === id ? { ...x, ...p } : x)) : list.filter(x => x.id !== id)))
+  const act = async (fn, id, done) => { const r = await fn(); if (!r) return; if (r.error) { setError(r.error); return } setError(''); done(r) }
   const tel = u => digits(u?.phone) || digits(String(u?.email || '').split('@')[0])
   const shown = useMemo(() => {
     const q = find.trim().toLowerCase(), qd = digits(q)
@@ -96,6 +101,13 @@ export default function AllOrdersPage() {
                 </span>
                 <button style={LINK} onClick={() => navigate(`/orders/${o.id}`)}>Заказ</button>
                 <button style={LINK} onClick={() => navigate(`/orders/${o.id}/nesting`)}>Раскрой</button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ flex: 1, fontSize: 11, color: 'var(--amber)' }}>{o.archived_at ? 'В архиве' : ''}</span>
+                {o.archived_at
+                  ? <button style={{ ...LINK, color: 'var(--text-muted)', borderColor: 'var(--border-md)' }} onClick={() => act(() => restoreOrder(o.id), o.id, () => patch(o.id, { archived_at: null }))}>↩ Восстановить</button>
+                  : (o.status === 'done' || o.status === 'draft') && <button style={{ ...LINK, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => act(() => archiveOrder(o, orderTitle(o)), o.id, r => patch(o.id, { archived_at: r.at }))}>📦 В архив</button>}
+                <button style={{ ...LINK, color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => act(() => deleteOrder(o, orderTitle(o)), o.id, () => patch(o.id, null))}>🗑 Удалить</button>
               </div>
             </div>
           )

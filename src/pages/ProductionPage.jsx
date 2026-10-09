@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
 import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT } from '../lib/productionApi'
-import { archiveOrder, restoreOrder, archivedMap, keepUntil, KEEP_MONTHS } from '../lib/orderArchive'
+import { archiveOrder, restoreOrder, deleteOrder, archivedMap, keepUntil, KEEP_MONTHS } from '../lib/orderArchive'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
@@ -45,6 +45,15 @@ export default function ProductionPage() {
     if (!r) return
     if (r.error) { setError(r.error); return }
     setArchived(m => new Map(m).set(o.id, r.at))
+  }
+  const removeOrder = async o => {
+    setBusy(o.id)
+    const r = await deleteOrder(o, orderTitle(o))
+    setBusy('')
+    if (!r) return
+    if (r.error) { setError(r.error); return }
+    setOrders(list => list.filter(x => x.id !== o.id))
+    setArchived(m => { const n = new Map(m); n.delete(o.id); return n })
   }
   const fromArchive = async o => {
     setBusy(o.id)
@@ -238,6 +247,7 @@ export default function ProductionPage() {
                     {o.status === 'done' && !archived.has(o.id) && <button type="button" disabled={busy === o.id} style={{ ...btn('main'), background: 'var(--amber)' }} onClick={() => toArchive(o)}>📦 В архив</button>}
                     {archived.has(o.id) && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => fromArchive(o)}>↩ Восстановить из архива</button>}
                     {o.status === 'done' && !archived.has(o.id) && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'inwork')}>Вернуть в работу</button>}
+                    {(o.status === 'done' || o.own) && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => removeOrder(o)}>🗑 Удалить</button>}
                     <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
                     {!o.own && wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none', color: 'var(--teal)', borderColor: 'var(--teal)' }}>WhatsApp</a>}
                     {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}

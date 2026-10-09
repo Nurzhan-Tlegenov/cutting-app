@@ -11,7 +11,7 @@ const missing = e => /PGRST202|42883|schema cache|Could not find the function/i.
 async function call(fn, args) {
   try {
     const { data, error } = await supabase.rpc(fn, args)
-    if (error) return { error: missing(error) ? ARCHIVE_SQL_HINT : /not done/.test(error.message) ? 'В архив можно отправить только исполненный заказ' : error.message }
+    if (error) return { error: missing(error) ? ARCHIVE_SQL_HINT : /not done/.test(error.message) ? 'В архив можно отправить исполненный заказ или свой черновик (для черновика нужен migration_order_delete.sql)' : error.message }
     return { data }
   } catch (e) { return { error: String(e?.message || e) } }
 }
@@ -32,6 +32,28 @@ export async function archiveOrder(order, title) {
   return r.error ? r : { at: r.data || new Date().toISOString() }
 }
 export const restoreOrder = id => call('restore_order', { p_order: id })
+
+/**
+ * Удалить заказ совсем (migration_order_delete.sql). В общей статистике остаётся короткая запись: сумма, листы, объёмы.
+ * Пока в базе нет этой функции — свой заказ удаляется по-старому. -> {} | { error }
+ */
+export async function deleteOrderNow(id) {
+  try {
+    const { error } = await supabase.rpc('delete_order', { p_order: id })
+    if (!error) return {}
+    if (!missing(error)) return { error: /not allowed/.test(error.message) ? 'Этот заказ удалить нельзя: производство может удалить только исполненный заказ' : error.message }
+    await supabase.from('order_details').delete().eq('order_id', id)
+    const r = await supabase.from('orders').delete().eq('id', id)
+    return r.error ? { error: r.error.message } : {}
+  } catch (e) { return { error: String(e?.message || e) } }
+}
+/** Спросить и удалить. -> {} | { error } | null (отказались) */
+export async function deleteOrder(order, title) {
+  if (!window.confirm(`Удалить заказ «${title}» полностью?\n\nДетали, контуры, карта раскроя и 3D-модель удалятся без возможности восстановления. Для статистики останется только запись: сумма и количество листов.`)) return null
+  return deleteOrderNow(order.id)
+}
+/** Можно ли отправить заказ в архив: исполненный — всегда, свой черновик — тоже */
+export const canArchive = (order, mine = true) => !order.archived_at && (order.status === 'done' || (mine && order.status === 'draft'))
 
 /** Удалить заказы, у которых вышел срок хранения в архиве. Вызывается при входе; ошибки не важны. */
 export async function purgeArchived() {

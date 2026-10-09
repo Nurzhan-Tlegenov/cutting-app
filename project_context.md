@@ -619,3 +619,7 @@ git push
 - `migration_order_archive.sql`: `orders.archived_at / archived_by / archived_sheets`, таблица `order_history` (без политик), функции `archive_order`, `restore_order` (владелец заказа, его производство, администратор), `purge_archived_orders` (условие удаления зашито в функции; вызывается при входе любого пользователя — `AuthContext`, раз за запуск), `admin_production_orders` теперь включает историю удалённых (`deleted: true`).
 - `src/lib/orderArchive.js` (`KEEP_MONTHS = 3`); `OrdersPage` — кнопка «В архив» на исполненных, раздел «Архив» внизу, «Восстановить»; `ProductionPage` — раздел «Архив», кнопки в карточке; `AllProductionsPage` — пометки «В архиве» / «Удалён · история».
 - Срок 3 месяца записан в двух местах: `KEEP_MONTHS` и `interval '3 months'` в `purge_archived_orders`.
+
+## 09.10.2026 — удаление заказа с записью для статистики
+- `migration_order_delete.sql` (выполнять после `migration_order_archive.sql`): триггер `orders_keep_history` перед удалением заказа пишет в `order_history` лёгкую запись (статус, сумма, листы, детали, объёмы) — при любом способе удаления; черновики и заказы без производства не записываются. `delete_order` — владелец и администратор любой заказ, производство — только исполненный. `archive_order` — теперь и свой черновик.
+- Кнопки «🗑 Удалить» и «📦 В архив» / «↩ Восстановить»: `OrdersPage` (все заказы), `ProductionPage` (исполненные и свои), `AllOrdersPage` (мастер). `orderArchive.js`: `deleteOrder`, `deleteOrderNow`, `canArchive`.

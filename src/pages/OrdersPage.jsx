@@ -9,7 +9,7 @@ import BottomNav from '../components/BottomNav'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
-import { archiveOrder, restoreOrder, keepUntilText, daysLeft, KEEP_MONTHS } from '../lib/orderArchive'
+import { archiveOrder, restoreOrder, deleteOrder, deleteOrderNow, canArchive, keepUntilText, daysLeft, KEEP_MONTHS } from '../lib/orderArchive'
 
 export default function OrdersPage() {
   const { user, profile, cabinet, isMaster } = useAuth()
@@ -38,6 +38,14 @@ export default function OrdersPage() {
     if (!r) return
     if (r.error) { window.alert(r.error); return }
     setOrders(prev => prev.map(o => (o.id === order.id ? { ...o, archived_at: r.at, nesting_result: null } : o)))
+  }
+  const removeOrder = async order => {
+    setArchBusy(order.id)
+    const r = await deleteOrder(order, orderTitle(order))
+    setArchBusy('')
+    if (!r) return
+    if (r.error) { window.alert(r.error); return }
+    setOrders(prev => prev.filter(o => o.id !== order.id))
   }
   const fromArchive = async order => {
     setArchBusy(order.id)
@@ -100,10 +108,7 @@ export default function OrdersPage() {
   async function deleteSelected() {
     if (!window.confirm(`Удалить ${selected.size} заказ(ов)? Это действие нельзя отменить.`)) return
     setDeleting(true)
-    for (const id of selected) {
-      await supabase.from('order_details').delete().eq('order_id', id)
-      await supabase.from('orders').delete().eq('id', id)
-    }
+    for (const id of selected) await deleteOrderNow(id)     // в общей статистике остаётся запись: сумма и листы
     setOrders(prev => prev.filter(o => !selected.has(o.id)))
     setDeleting(false)
     exitSelectMode()
@@ -233,15 +238,21 @@ export default function OrdersPage() {
                         ? (isMaster ? 'В архиве · заказы мастер-аккаунта сами не удаляются' : `В архиве · хранится до ${keepUntilText(order.archived_at)} (осталось ${daysLeft(order.archived_at)} дн.), потом удалится`)
                         : new Date(order.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}
                     </div>
-                    {!selectMode && order.status === 'done' && (
+                    {!selectMode && (order.archived_at || canArchive(order)) && (
                       <button type="button" disabled={archBusy === order.id}
                         onClick={e => { e.stopPropagation(); if (order.archived_at) fromArchive(order); else toArchive(order) }}
                         onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
-                        style={order.archived_at
+                        style={order.archived_at || order.status !== 'done'
                           ? { ...EDIT_BTN }
                           : { border: 'none', background: 'var(--amber)', color: 'white', borderRadius: 'var(--radius)', padding: '5px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
                         {archBusy === order.id ? '…' : order.archived_at ? '↩ Восстановить' : '📦 В архив'}
                       </button>
+                    )}
+                    {!selectMode && (
+                      <button type="button" disabled={archBusy === order.id} title="Удалить заказ"
+                        onClick={e => { e.stopPropagation(); removeOrder(order) }}
+                        onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
+                        style={{ ...EDIT_BTN, color: 'var(--danger)', borderColor: 'var(--danger)' }}>🗑 Удалить</button>
                     )}
                   </div>
                 </div>
