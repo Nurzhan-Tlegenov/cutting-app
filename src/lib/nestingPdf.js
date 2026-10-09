@@ -9,7 +9,7 @@ import { placedHoles, placedTurns } from './partHoles'
 import { orderTitle } from './orderUtils'
 import { rawDetail, overMm, parseEdgeTypes } from './edgeCut'
 import { detailEdgeList, holeEdgeSegments } from './edgeLength'
-import { rotatePointTimes } from './drillGeometry'
+import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { insetEdgeLines } from './edgeLines'
 
 const K = 1654 / 210                     // точек на мм
@@ -135,6 +135,37 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
       cut.forEach(hh => holeEdgeSegments(hh).forEach(sg => curve(sg.pts)))
       if (cut.length === holes.length) cut.forEach((hh, hi) => { if (hh.edge) { path(holes[hi]); ctx.stroke() } })   // вырез закромлен целиком
       ctx.restore()
+      // Присадка — то же, что видно на карте раскроя в приложении: пазы и отверстия лицевой стороны, отверстия в торец
+      const at = (qx, qy) => { const r = rotatePointTimes(qx, qy, dW, dL, turns); return [X(px + r.x), Y(py + r.y)] }
+      const grooves = getGrooveRects(contour, dW, dL, true)
+      if (grooves.length) {
+        ctx.save(); ctx.fillStyle = 'rgba(250,199,117,0.75)'; ctx.strokeStyle = '#BA7517'; ctx.lineWidth = mm(0.12)
+        for (const gr of grooves) {
+          ctx.beginPath()
+          gr.pts.forEach(([qx, qy], k) => { const [sx, sy] = at(qx, qy); if (k) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy) })
+          ctx.closePath(); ctx.fill(); ctx.stroke()
+        }
+        ctx.restore()
+      }
+      const drills = getAllDrillPoints(contour, dW, dL, true)
+      if (drills.length) {
+        ctx.save(); ctx.fillStyle = '#6A4A17'
+        for (const pt of drills) {
+          const [sx, sy] = at(pt.x, pt.y)
+          if (pt.edge && pt.depth > 0) {
+            // отверстие в торец — полоса шириной в диаметр от края вглубь детали на глубину сверления
+            const [ex, ey] = at(pt.x + pt.dx * pt.depth, pt.y + pt.dy * pt.depth)
+            ctx.strokeStyle = 'rgba(106,74,23,0.85)'; ctx.lineCap = 'butt'; ctx.lineWidth = Math.max(mm(0.22), mm((pt.d || 8) * s))
+            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke()
+            continue
+          }
+          const r = Math.max(mm(0.2), mm((pt.d || 8) * s / 2))
+          ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2)
+          // с лица — закрашенный кружок, с изнанки — пустой (только для сведения)
+          if (pt.back) { ctx.strokeStyle = '#7B1FA2'; ctx.lineWidth = mm(0.1); ctx.stroke() } else ctx.fill()
+        }
+        ctx.restore()
+      }
     }
     // подписи: номер позиции — в середине, размеры — вдоль сторон внутри детали (ширина — у верхней, длина — у левой).
     // На мелкой детали всё уменьшается, пока помещается; на совсем мелкой — номер и размер одной-двумя строками
@@ -196,6 +227,17 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
   }
   ctx.strokeStyle = INK; ctx.lineWidth = mm(0.4); ctx.strokeRect(X(0), Y(geo.sheetL), mm(geo.sheetW * s), mm(geo.sheetL * s))
   return { right: x0 + geo.sheetW * s, bottom: y0 + geo.sheetL * s }
+}
+
+// Обозначения присадки в легенде: отверстие в пласть, отверстие в торец, паз. x, y — начало и базовая линия текста, мм
+function drillLegend(ctx, x, y) {
+  ctx.fillStyle = '#6A4A17'; ctx.beginPath(); ctx.arc(mm(x + 1), mm(y - 0.9), mm(0.8), 0, Math.PI * 2); ctx.fill()
+  text(ctx, 'отверстие', x + 3, y, { size: 2.5, color: MUTED })
+  ctx.fillStyle = 'rgba(106,74,23,0.85)'; ctx.fillRect(mm(x + 21), mm(y - 1.5), mm(4), mm(1.1))
+  text(ctx, 'в торец', x + 26.5, y, { size: 2.5, color: MUTED })
+  ctx.fillStyle = 'rgba(250,199,117,0.75)'; ctx.strokeStyle = '#BA7517'; ctx.lineWidth = mm(0.12)
+  ctx.fillRect(mm(x + 41), mm(y - 1.9), mm(5), mm(1.7)); ctx.strokeRect(mm(x + 41), mm(y - 1.9), mm(5), mm(1.7))
+  text(ctx, 'паз', x + 47.5, y, { size: 2.5, color: MUTED })
 }
 
 // Список деталей колонкой: Поз. | Длина | Ширина | Шт. Под размером — черта на каждую закромленную сторону
@@ -267,6 +309,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
   const legend = (x, y) => {
     rule(ctx, x, y + 1.6, x + 7, y + 1.6, 0.7, EDGE); text(ctx, 'сторона с кромкой', x + 9, y + 2.5, { size: 2.5, color: MUTED })
     text(ctx, '12', x + 43, y + 2.6, { size: 3, bold: true, align: 'center' }); text(ctx, 'позиция по бланку заказа', x + 47, y + 2.5, { size: 2.5, color: MUTED })
+    drillLegend(ctx, x + 92, y + 2.5)
     rule(ctx, x, y + 5.5, x + 7, y + 5.5, 0.38, EDGE); rule(ctx, x, y + 6.5, x + 7, y + 6.5, 0.38, EDGE)
     text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', x + 9, y + 7, { size: 2.5, color: MUTED })
   }
@@ -310,7 +353,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
         boxes.push({ id: it.id, x: it.x, y: it.y, w, h: it.h, rot: 0, kind: 'square' })
       } else if (it.type === 'legend') {
         legend(it.x, it.y)
-        boxes.push({ id: it.id, x: it.x, y: it.y, w: 118, h: 8.5, rot: 0, kind: 'fixed' })
+        boxes.push({ id: it.id, x: it.x, y: it.y, w: 146, h: 8.5, rot: 0, kind: 'fixed' })
       } else if (it.type === 'line') {
         rule(ctx, it.x, it.y + 1, it.x + it.w, it.y + 1, 0.35, INK)
         boxes.push({ id: it.id, x: it.x, y: it.y, w: it.w, h: 2, rot: 0, kind: 'wide' })
@@ -365,6 +408,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
       y = 282
       rule(ctx, 10, y - 0.9, 17, y - 0.9, 0.7, EDGE); text(ctx, 'сторона с кромкой', 19, y, { size: 2.5, color: MUTED })
       text(ctx, '12', 53, y + 0.1, { size: 3, bold: true, align: 'center' }); text(ctx, 'позиция по бланку заказа', 57, y, { size: 2.5, color: MUTED })
+      drillLegend(ctx, 102, y)
       y = 286.5
       rule(ctx, 10, y - 1.5, 17, y - 1.5, 0.38, EDGE); rule(ctx, 10, y - 0.5, 17, y - 0.5, 0.38, EDGE)
       text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', 19, y, { size: 2.5, color: MUTED })
