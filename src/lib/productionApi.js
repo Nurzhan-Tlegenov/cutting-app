@@ -28,6 +28,17 @@ export async function registerProduction({ name, phone, city, country }, sheet =
   return { id: r.data }
 }
 export const productionOrders = () => call('production_orders')
+/**
+ * Статистика своего производства (migration_production_stats.sql): лёгкие строки всех заказов, оформленных на производство, —
+ * статус, даты, листы, детали, зафиксированная сумма, объёмы работ; вместе с уже удалёнными (от них осталась запись истории).
+ */
+export const STATS_SQL_HINT = 'Статистика за период и архив производства ещё не включены: выполните migration_production_stats.sql в Supabase (SQL Editor) — один раз.'
+export async function productionStats() { const r = await call('production_stats'); return r.missing ? { error: STATS_SQL_HINT, missing: true } : r }
+/** Производство убирает исполненный заказ из своих списков (on = false — возвращает). Заказ клиента не меняется. -> { at } | { error } */
+export async function productionArchive(orderId, on = true) {
+  const r = await call('production_archive_order', { p_order: orderId, p_on: on })
+  return r.error ? { error: r.missing ? STATS_SQL_HINT : r.error } : { at: r.data }
+}
 export const orderClient = orderId => call('order_client', { p_order: orderId })
 /** Администратор: подтвердить / отклонить производство ('approved' | 'rejected' | 'pending') */
 export const adminSetProduction = (id, status) => call('admin_set_production', { p_id: id, p_status: status })

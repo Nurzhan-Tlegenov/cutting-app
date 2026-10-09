@@ -5,8 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
-import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT } from '../lib/productionApi'
-import { archiveOrder, restoreOrder, deleteOrder, archivedMap, keepUntil, KEEP_MONTHS } from '../lib/orderArchive'
+import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT, productionStats, productionArchive } from '../lib/productionApi'
+import { Totals, totals, usePeriod } from '../components/OrderStats'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
@@ -38,29 +38,30 @@ export default function ProductionPage() {
   const [sheet, setSheet] = useState({})
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
   const [archived, setArchived] = useState(() => new Map())     // заказы в архиве: id -> когда отправлен
+  const [stats, setStats] = useState(null)                       // строки статистики (вместе с удалёнными заказами); null — в базе её ещё нет
+  const [statsHint, setStatsHint] = useState('')
+  const per = usePeriod('prodStats_')
+  // «В архив» у производства — убрать исполненный заказ из своих списков. Заказ клиента не трогается: он хранит его сам
+  // (и при рекламации отправит заново). В статистике и в счётчике «Исполнено» заказ остаётся.
   const toArchive = async o => {
     setBusy(o.id)
-    const r = await archiveOrder(o, orderTitle(o))
+    const r = await productionArchive(o.id, true)
     setBusy('')
-    if (!r) return
     if (r.error) { setError(r.error); return }
-    setArchived(m => new Map(m).set(o.id, r.at))
-  }
-  const removeOrder = async o => {
-    setBusy(o.id)
-    const r = await deleteOrder(o, orderTitle(o))
-    setBusy('')
-    if (!r) return
-    if (r.error) { setError(r.error); return }
-    setOrders(list => list.filter(x => x.id !== o.id))
-    setArchived(m => { const n = new Map(m); n.delete(o.id); return n })
+    setArchived(m => new Map(m).set(o.id, r.at || new Date().toISOString()))
   }
   const fromArchive = async o => {
     setBusy(o.id)
-    const r = await restoreOrder(o.id)
+    const r = await productionArchive(o.id, false)
     setBusy('')
     if (r.error) { setError(r.error); return }
     setArchived(m => { const n = new Map(m); n.delete(o.id); return n })
+  }
+  const loadStats = async () => {
+    const r = await productionStats()
+    if (r.error) { setStats(null); setStatsHint(r.missing ? r.error : ''); return }
+    setStatsHint(''); setStats(r.data || [])
+    setArchived(new Map((r.data || []).filter(x => !x.deleted && x.prod_archived_at).map(x => [x.id, x.prod_archived_at])))
   }
 
   const load = async () => {
@@ -69,7 +70,7 @@ export default function ProductionPage() {
     if (p && (p.status ?? 'approved') === 'approved') {
       setSheet(Object.fromEntries([...MARGINS, ...HDF_MARGINS].map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
-      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []); archivedMap((r.data || []).filter(o => o.status === 'done').map(o => o.id)).then(setArchived) }
+      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []); loadStats() }
       simShareOrders().then(setSimShares)
     }
   }
@@ -85,6 +86,7 @@ export default function ProductionPage() {
     setBusy('')
     if (r.error) { setError(r.error); return }
     setOrders(list => list.map(x => (x.id === o.id ? { ...x, status } : x)))
+    loadStats()
   }
   // вернуть заказ заказчику на доработку: он снова сможет править заказ и оформить его заново
   const returnOrder = async o => {
@@ -150,13 +152,22 @@ export default function ProductionPage() {
                   </div>
                   <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginTop: 8 }}>
-                  {[['Заявок', count.all], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', count.done]].map(([l, v]) => (
-                    <div key={l} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '3px 9px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6, minWidth: 0 }}>
-                      <span style={{ fontSize: 11, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l}</span>
-                      <span style={{ fontSize: 15, fontWeight: 500 }}>{v}</span>
-                    </div>
-                  ))}
+                {/* статистика за период: заявки, в работе, исполнено, суммы, листы, объёмы работ. Исполненные считаются и после
+                    архива, и после того, как клиент удалил заказ, — от него остаётся запись */}
+                <div style={{ marginTop: 8 }}>
+                  {stats ? <>{per.picker}<Totals t={totals(per.inPeriod(stats))} /></> : (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                        {[['Заявок', orders.length], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', orders.filter(o => o.status === 'done').length]].map(([l, v]) => (
+                          <div key={l} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '3px 9px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6, minWidth: 0 }}>
+                            <span style={{ fontSize: 11, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l}</span>
+                            <span style={{ fontSize: 15, fontWeight: 500 }}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {statsHint && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 6 }}>{statsHint}</p>}
+                    </>
+                  )}
                 </div>
                 <details style={{ marginTop: 10 }}>
                   <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Параметры станка (рез и отступы листа) — по типу материала</summary>
@@ -193,10 +204,10 @@ export default function ProductionPage() {
           {orders.length > 0 && 'gcode_at' in orders[0] && !('sheets' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{KIND_HINT}</p>}
           {orders.length > 0 && !('gcode_at' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{MARKS_SQL_HINT}</p>}
           {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
-          {filter === 'archive' && shown.length > 0 && <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8 }}>Заказ хранится в архиве {KEEP_MONTHS} месяца и потом удаляется полностью — в статистике остаётся только строка истории. Пока он в архиве, его можно восстановить.</p>}
+          {filter === 'archive' && shown.length > 0 && <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8 }}>Исполненные заказы, убранные из ваших списков. У заказчика они остаются; когда он удалит заказ, отсюда тот тоже исчезнет. В статистике «Исполнено» они учтены всегда.</p>}
           {filter !== 'archive' && count.done > 0 && (
             <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
-              Исполненных заказов не в архиве: <b>{count.done}</b>. Отправьте их в архив — кнопка «📦 В архив» в заказе.
+              Исполненных заказов не в архиве: <b>{count.done}</b>. Уберите их в архив — кнопка «📦 В архив» в заказе: список станет короче, в статистике они останутся.
             </div>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -222,7 +233,7 @@ export default function ProductionPage() {
                         </div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
-                        <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{archived.has(o.id) ? `В архиве до ${keepUntil(archived.get(o.id)).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}` : STATUS_LABELS[o.status] || o.status}</span>
+                        <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{archived.has(o.id) ? 'В архиве' : STATUS_LABELS[o.status] || o.status}</span>
                         {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
                           <div style={{ display: 'flex', gap: 4 }}>
                             {orderMarks(o).map(m => (
@@ -245,9 +256,8 @@ export default function ProductionPage() {
                     {o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
                     {o.status === 'inwork' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'done')}>Исполнен</button>}
                     {o.status === 'done' && !archived.has(o.id) && <button type="button" disabled={busy === o.id} style={{ ...btn('main'), background: 'var(--amber)' }} onClick={() => toArchive(o)}>📦 В архив</button>}
-                    {archived.has(o.id) && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => fromArchive(o)}>↩ Восстановить из архива</button>}
+                    {archived.has(o.id) && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => fromArchive(o)}>↩ Вернуть из архива</button>}
                     {o.status === 'done' && !archived.has(o.id) && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'inwork')}>Вернуть в работу</button>}
-                    {(o.status === 'done' || o.own) && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => removeOrder(o)}>🗑 Удалить</button>}
                     <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
                     {!o.own && wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none', color: 'var(--teal)', borderColor: 'var(--teal)' }}>WhatsApp</a>}
                     {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}
