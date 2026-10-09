@@ -39,6 +39,7 @@ import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
 import { orderTitle, orderFileName } from '../lib/orderUtils'
+import { productionLabel, sortProductions } from '../lib/productionLabel'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import CncLoader from '../components/CncLoader'
 import SendToMaster from '../components/SendToMaster'
@@ -1632,6 +1633,7 @@ export default function NestingPage() {
       const { data, error } = await supabase.from('productions').select('*').order('name')
       if (!error && Array.isArray(data)) list = data
     } catch { list = [] }
+    list = sortProductions(list)                          // страна → город → название
     setProductions(list)
     // Выбрано производство — параметры листа всегда его (могли поменяться)
     const pr = o?.production_id ? list.find(x => x.id === o.production_id) : null
@@ -2955,7 +2957,7 @@ export default function NestingPage() {
                       onChange={e => chooseProduction(e.target.value)}
                       style={{ ...inp, padding: '5px 6px' }}>
                       <option value="">— не выбрано (свои параметры) —</option>
-                      {productions.filter(pr => (pr.status ?? 'approved') === 'approved' || pr.id === order.production_id).map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                      {productions.filter(pr => (pr.status ?? 'approved') === 'approved' || pr.id === order.production_id).map(pr => <option key={pr.id} value={pr.id}>{productionLabel(pr)}</option>)}
                     </select>
                   </label>
                 )}
@@ -3209,7 +3211,7 @@ export default function NestingPage() {
                     <>
                       <label className="label">Производство</label>
                       <select value={needProd.pick} onChange={e => setNeedProd(n => ({ ...n, pick: e.target.value }))} style={{ marginBottom: 10 }}>
-                        {list.map(pr => <option key={pr.id} value={pr.id}>{pr.name}{[pr.country, pr.city].filter(Boolean).length ? ` · ${[pr.country, pr.city].filter(Boolean).join(', ')}` : ''}</option>)}
+                        {list.map(pr => <option key={pr.id} value={pr.id}>{productionLabel(pr)}</option>)}
                       </select>
                       <button type="button" className="btn-primary" disabled={!needProd.pick} onClick={() => submitOrder(needProd.cfg, needProd.force, needProd.pick)}>✓ Оформить на это производство</button>
                     </>
