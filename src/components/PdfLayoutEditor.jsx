@@ -138,6 +138,7 @@ export default function PdfLayoutEditor({ order, mat, onClose }) {
           </div>
         )}
 
+        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>Знак RaskroyPro и адрес raskroypro.com всегда стоят в левом верхнем углу страницы — убрать или передвинуть их нельзя.</p>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на лист</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
           {PDF_ITEMS.filter(([k]) => !used.has(k) || k === 'text' || k === 'line').map(([k, label]) => (

@@ -54,6 +54,20 @@ function drawLogo(ctx, x, y, h) {
   return 1040 * u
 }
 
+// Фирменный знак страницы: логотип и адрес приложения. Всегда в левом верхнем углу каждой страницы PDF —
+// в стандартном виде и в любом своём макете; убрать или передвинуть его в конструкторе нельзя.
+// -> правый край знака, мм (от него начинается заголовок)
+const SITE = 'raskroypro.com'
+function drawBrand(ctx, backing = false) {
+  const x = 10, y = 8.5, h = 11
+  if (backing) { ctx.fillStyle = '#FFFFFF'; ctx.fillRect(mm(x - 1), mm(y - 1), mm(38), mm(h + 2)) }
+  const lw = drawLogo(ctx, x, y, h)
+  ctx.font = `600 ${mm(3)}px Arial, Helvetica, sans-serif`
+  const tw = ctx.measureText(SITE).width / K
+  text(ctx, SITE, x + lw + 2, y + h * 0.62, { size: 3, bold: true, color: BRAND })
+  return x + lw + 2 + tw
+}
+
 // кромка одной детали, м по названиям (со свесом на каждую закромленную сторону)
 function addEdges(acc, d, over, qty = 1) {
   for (const e of detailEdgeList(d)) { const v = (e.mm + over) / 1000 * qty; acc.total += v; acc.byName[e.name] = (acc.byName[e.name] || 0) + v }
@@ -288,14 +302,13 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
   const header = (si, cont) => {
     pageNo++
     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
-    const lw = drawLogo(ctx, 10, 7.5, 16.5)
-    const tx = 10 + lw + 4
+    const tx = drawBrand(ctx) + 4
     text(ctx, `Карта раскроя · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 150 - tx })
     text(ctx, `${sheets[si].stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${cont ? ' (продолжение)' : ''}`, 200, 14.5, { size: 5, bold: true, align: 'right' })
     text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
     text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
     rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
-    text(ctx, 'Сформировано в приложении RaskroyPro', 10, 292.5, { size: 2.4, color: MUTED })
+    text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
     text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
   }
   const edgeBlock = (x, y, title, e, w) => {
@@ -326,7 +339,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
       edgeSheet: ['Кромка на листе', `${m2(edges[si].total)} м`], edgeTotal: ['Кромка всего', `${m2(edgeAll.total)} м`],
       overs: ['', over > 0 ? `кромка со свесами ${fmt(over)} мм на сторону` : 'кромка без свесов'],
       totals: ['Всего', `листов ${sheets.length}, деталей ${totalParts}, использовано ${Math.round(totalArea > 0 ? totalUsed / totalArea * 100 : 0)} %`],
-      footer: ['', 'Сформировано в приложении RaskroyPro'], pageNo: ['', `стр. ${pageNo}`],
+      footer: ['', `Сформировано в приложении RaskroyPro · ${SITE}`], pageNo: ['', `стр. ${pageNo}`],
     }
   }
   const drawCustom = (si, { sheet, geo, rows, noOf, first }) => {
@@ -348,9 +361,6 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
         for (let i = 0; i < first; i++) ly = listRow(ctx, it.x, ly, rows[i])
         if (rows.length > first) text(ctx, 'продолжение — на след. странице', it.x + LW, ly + 3, { size: 2.3, color: MUTED, align: 'right' })
         boxes.push({ id: it.id, x: it.x, y: it.y, w: LW, h: it.h, rot: 0, kind: 'tall' })
-      } else if (it.type === 'logo') {
-        const w = drawLogo(ctx, it.x, it.y, it.h)
-        boxes.push({ id: it.id, x: it.x, y: it.y, w, h: it.h, rot: 0, kind: 'square' })
       } else if (it.type === 'legend') {
         legend(it.x, it.y)
         boxes.push({ id: it.id, x: it.x, y: it.y, w: 146, h: 8.5, rot: 0, kind: 'fixed' })
@@ -370,6 +380,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
         boxes.push({ id: it.id, x: it.x, y: it.y, w: Math.max(3, w), h: size * 1.15, rot, kind: 'text' })
       }
     }
+    drawBrand(ctx, true)          // знак приложения — всегда вверху, поверх всего, что на него поставили
   }
   const listItem = custom ? custom.items.find(i => i.type === 'list') : null
   sheets.forEach((sheet, si) => {
@@ -432,12 +443,12 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
     pages.push(() => {
       pageNo++
       ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
-      const lw = drawLogo(ctx, 10, 7.5, 16.5), tx = 10 + lw + 4
+      const tx = drawBrand(ctx) + 4
       text(ctx, `Статистика раскроя · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
       text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
       text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
       rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
-      text(ctx, 'Сформировано в приложении RaskroyPro', 10, 292.5, { size: 2.4, color: MUTED })
+      text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
       text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
       let y = 34
       const rows = summary.rows || []
@@ -594,7 +605,7 @@ export async function saveNestingPdf({ order, mat, fileName, onProgress, summary
 // ─── Конструктор листа: элементы страницы и шаблон ──────────────────────────────────────────────
 // [тип, название, вид]: box — рамка с размером, text — строка текста (размер, жирность, поворот)
 export const PDF_ITEMS = [
-  ['map', 'Карта листа', 'box'], ['list', 'Список деталей', 'box'], ['logo', 'Знак RaskroyPro', 'box'], ['legend', 'Условные обозначения', 'box'], ['line', 'Линия', 'box'],
+  ['map', 'Карта листа', 'box'], ['list', 'Список деталей', 'box'], ['legend', 'Условные обозначения', 'box'], ['line', 'Линия', 'box'],
   ['title', 'Заголовок: карта раскроя и заказ', 'text'], ['order', 'Заказ', 'text'], ['sheetNo', 'Номер листа', 'text'], ['material', 'Материал', 'text'], ['date', 'Дата', 'text'],
   ['used', 'Использовано материала', 'text'], ['sheetSize', 'Размер листа', 'text'], ['usable', 'Рабочая область', 'text'], ['kerf', 'Ширина реза', 'text'],
   ['partsOnSheet', 'Деталей на листе', 'text'], ['partsArea', 'Площадь деталей', 'text'], ['offcuts', 'Обрезки', 'text'],
@@ -608,9 +619,8 @@ export const pdfItemHasLabel = type => HAS_LABEL.has(type)
 
 const T = (type, x, y, size, extra = {}) => ({ type, x, y, size, ...extra })
 const DEFAULT_ITEMS = [
-  { type: 'logo', x: 10, y: 7.5, h: 16.5 },
-  T('title', 30, 10.4, 5, { bold: true }), T('sheetNo', 168, 10.4, 5, { bold: true }),
-  T('material', 30, 17.6, 3.4, { muted: true, label: false }), T('date', 183, 17.8, 3, { muted: true, label: false }),
+  T('title', 49, 10.4, 5, { bold: true }), T('sheetNo', 168, 10.4, 5, { bold: true }),
+  T('material', 49, 17.6, 3.4, { muted: true, label: false }), T('date', 183, 17.8, 3, { muted: true, label: false }),
   { type: 'line', x: 10, y: 24.5, w: 190 },
   { type: 'map', x: 10, y: 29, w: 142, h: 214, rot: 0 },
   { type: 'list', x: 156, y: 29, h: 258 },
@@ -624,7 +634,7 @@ const DEFAULT_ITEMS = [
 let pdfItemSeq = 0
 const newId = () => `p${Date.now().toString(36)}${++pdfItemSeq}`
 export const newPdfItem = type => {
-  const base = type === 'map' ? { x: 20, y: 40, w: 100, h: 150, rot: 0 } : type === 'list' ? { x: 150, y: 40, h: 200 } : type === 'logo' ? { x: 10, y: 10, h: 16 }
+  const base = type === 'map' ? { x: 20, y: 40, w: 100, h: 150, rot: 0 } : type === 'list' ? { x: 150, y: 40, h: 200 }
     : type === 'legend' ? { x: 10, y: 270 } : type === 'line' ? { x: 10, y: 60, w: 190 } : { x: 20, y: 60, size: 3.2, ...(type === 'text' ? { text: '' } : {}) }
   return { id: newId(), type, ...base }
 }
@@ -637,7 +647,8 @@ export function normalizePdfTpl(raw) {
     const o = { id: i.id || newId(), type: i.type, x: clamp(i.x, -20, 215, 10), y: clamp(i.y, -20, 300, 10) }
     if (i.type === 'map') Object.assign(o, { w: clamp(i.w, 20, 210, 142), h: clamp(i.h, 20, 297, 214), rot: normRot(i.rot) })
     else if (i.type === 'list') o.h = clamp(i.h, 20, 290, 258)
-    else if (i.type === 'logo') o.h = clamp(i.h, 5, 60, 16.5)
+    // левый верхний угол занят знаком приложения: текст оттуда сдвигается правее, чтобы знак его не закрыл
+    if (i.type !== 'map' && i.type !== 'line' && o.y < 20 && o.y > -4 && o.x < 48) o.x = 49
     else if (i.type === 'line') o.w = clamp(i.w, 5, 210, 190)
     else if (i.type !== 'legend') Object.assign(o, { size: clamp(i.size, 1.5, 14, 3), bold: !!i.bold, muted: !!i.muted, rot: normRot(i.rot), ...(i.label === false ? { label: false } : {}), ...(i.type === 'text' ? { text: String(i.text || '').slice(0, 200) } : {}) })
     return o
