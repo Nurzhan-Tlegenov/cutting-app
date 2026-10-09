@@ -1932,8 +1932,9 @@ export default function NestingPage() {
   // «Выбрать вариант» — записать этот результат в заказ (остальные остаются на экране)
   // ЧПУ и бирки работают по сохранённому раскрою: несохранённый вариант сначала сохраняем
   async function goProduce(cfg, where) {
+    // раскрой с ошибками (пересечение, зазор меньше реза, деталь на отступе) в ЧПУ и на бирки не идёт — это брак
+    if (!checkCfg(cfg)) return
     if (!cfg.saved) {
-      if (!checkCfg(cfg) && !window.confirm('В раскрое есть замечания (см. проверку). Всё равно сохранить его и продолжить?')) return
       setBusyId(cfg.id)
       await saveNesting(cfg)
       setConfigs(cs => cs.map(c => ({ ...c, saved: c.id === cfg.id })))
@@ -1941,8 +1942,10 @@ export default function NestingPage() {
     }
     navigate(`/orders/${id}/${where}`)
   }
-  async function chooseCfg(cfg, force = false) {
-    if (!force && !checkCfg(cfg)) return
+  // Раскрой с ошибками нельзя ни выбрать, ни отправить: обойти проверку нельзя («всё равно сохранить» убрано —
+  // так на производство ушёл раскрой с зазором меньше реза)
+  async function chooseCfg(cfg) {
+    if (!checkCfg(cfg)) return
     setBusyId(cfg.id)
     await saveNesting(cfg)
     setConfigs(cs => cs.map(c => ({ ...c, saved: c.id === cfg.id })))
@@ -1953,12 +1956,13 @@ export default function NestingPage() {
   // Заказ оформляется на производство. Если оно не выбрано: у кого есть своё производство — заказ идёт туда;
   // остальным предлагаем выбрать производство или зарегистрировать своё.
   async function submitOrder(cfg, force = false, prodId = null) {
-    if (!force && !checkCfg(cfg)) return
+    if (!checkCfg(cfg)) return
+    let pid = prodId || order.production_id || null
     if (prodId) await saveOrderPatch({ production_id: prodId }, false)     // раскрой уже посчитан — параметры листа не трогаем
     else if (!order.production_id) {
       const mine = await myProduction(user?.id)
       const ready = mine && (mine.status ?? 'approved') === 'approved'
-      if (ready) await saveOrderPatch({ production_id: mine.id }, false)
+      if (ready) { await saveOrderPatch({ production_id: mine.id }, false); pid = mine.id }
       else if (mine !== undefined) {
         const list = productions.filter(pr => (pr.status ?? 'approved') === 'approved')
         setNeedProd({ cfg, force, pick: list[0]?.id || '', own: !mine && list.length === 0, pending: mine ? (mine.status || 'pending') : '' })
@@ -1967,6 +1971,18 @@ export default function NestingPage() {
       // mine === undefined — в базе ещё нет кабинета производства: оформляем как раньше
     }
     setNeedProd(null)
+    // Раскрой должен быть посчитан с резом и отступами не меньше, чем у производства, куда идёт заказ.
+    // Если производство выбрали уже после раскроя и его рез шире — заказ не отправляется: нужен пересчёт.
+    const pr = pid ? productions.find(x => x.id === pid) : null
+    if (pr) {
+      const g = geoOf(order, cfg.result)
+      const less = (have, col) => { const need = prodVal(pr, col, order); return need != null && need !== '' && Number(have) < Number(need) - 0.01 }
+      if (less(g.kerf, 'kerf_width') || less(g.marginL, 'margin_left') || less(g.marginR, 'margin_right') || less(g.marginT, 'margin_top') || less(g.marginB, 'margin_bottom')) {
+        chooseProduction(pid)                 // рез и отступы производства — в заказ, чтобы новый расчёт шёл уже с ними
+        window.alert(`Раскрой посчитан с резом ${g.kerf} мм и отступами, которые меньше, чем у производства «${pr.name}» (рез ${prodVal(pr, 'kerf_width', order)} мм).\n\nЗаказ не отправлен. Параметры производства подставлены — выполните раскрой заново и отправьте заказ.`)
+        return
+      }
+    }
     if (multiMat) {
       const missing = materials.filter(m => m.key !== matKey && !savedByMat[m.key])
       if (missing.length && !window.confirm(`Раскрой ещё не выбран для материалов:\n${missing.map(m => '· ' + m.label).join('\n')}\n\nВсё равно оформить заказ?`)) return
@@ -2771,20 +2787,13 @@ export default function NestingPage() {
                   ) : (
                     <div style={{ padding: 8, marginBottom: 8, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.08)', border: '1px solid rgba(220,53,69,0.4)' }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#dc3545', marginBottom: 4 }}>
-                        ⚠ Раскрой с ошибками — проверьте перед отправкой в производство
+                        ⚠ Раскрой с ошибками — его нельзя выбрать и отправить на производство
                       </div>
                       {cfg.check.errors.map((e, i) => (
                         <div key={i} style={{ fontSize: 11, color: '#a71d2a', padding: '1px 0' }}>• {e}</div>
                       ))}
-                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                        <button onClick={() => chooseCfg(cfg, true)} disabled={busyId === cfg.id}
-                          style={{ flex: 1, padding: 6, borderRadius: 'var(--radius)', border: '0.5px solid #dc3545', background: 'transparent', color: '#dc3545', fontSize: 11, cursor: 'pointer' }}>
-                          Всё равно сохранить
-                        </button>
-                        <button onClick={() => submitOrder(cfg, true)} disabled={busyId === cfg.id}
-                          style={{ flex: 1, padding: 6, borderRadius: 'var(--radius)', border: 'none', background: '#dc3545', color: 'white', fontSize: 11, cursor: 'pointer' }}>
-                          Всё равно оформить
-                        </button>
+                      <div style={{ fontSize: 11, color: '#a71d2a', marginTop: 6, fontWeight: 500 }}>
+                        Исправьте раскладку: раздвиньте детали на ширину реза (красные — с нарушением) или выполните раскрой заново. Пока ошибки есть, сохранить и отправить этот раскрой нельзя.
                       </div>
                     </div>
                   )

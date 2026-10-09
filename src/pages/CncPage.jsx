@@ -1,3 +1,4 @@
+import { nestingFaults, FAULT_TITLE } from '../lib/nestingCheck'
 import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
@@ -74,6 +75,8 @@ export default function CncPage() {
 
   const mats = useMemo(() => savedNestings(order, details), [order, details])
   const mat = mats.find(m => m.key === matKey) || mats[0] || null
+  // сохранённый раскрой проверяется ещё раз: пересечение деталей или зазор меньше реза — это брак, G-код по нему не выпускается
+  const faults = useMemo(() => (order && mat ? nestingFaults(order, [mat]) : []), [order, mat])
   const layers = useMemo(() => (mat ? collectLayers(mat.sheets, mat.details, mat.thickness) : null), [mat])
   const post = activePost(cnc)
   const change = next => {
@@ -110,6 +113,7 @@ export default function CncPage() {
   const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для архива, бирок, PDF
   const fileName = si => `${programName(post.nameTpl, nameCtx(si + 1))}.${post.ext || 'nc'}`
   const build = () => {
+    if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     const files = sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc })
@@ -299,7 +303,15 @@ export default function CncPage() {
               {' · '}<span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => setTab('basic')}>отключить</span>
             </p>
           )}
-          <button className="btn-primary" disabled={!sel.length} onClick={() => { build(); mark('gcode') }}>{built ? '↻ Создать G-код заново' : 'Создать G-код'}</button>
+          {faults.length > 0 && (
+            <div style={{ padding: 8, marginBottom: 8, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.08)', border: '1px solid rgba(220,53,69,0.4)' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#dc3545', marginBottom: 4 }}>⛔ {FAULT_TITLE}</div>
+              {faults.slice(0, 10).map((e, i) => <div key={i} style={{ fontSize: 11, color: '#a71d2a', padding: '1px 0' }}>• {e}</div>)}
+              <div style={{ fontSize: 11, color: '#a71d2a', marginTop: 5, fontWeight: 500 }}>G-код не создаётся. Откройте раскрой и исправьте раскладку или верните заказ заказчику на доработку.</div>
+              <button type="button" className="btn-secondary" style={{ marginTop: 6 }} onClick={() => navigate(`/orders/${id}/nesting`)}>Открыть раскрой</button>
+            </div>
+          )}
+          <button className="btn-primary" disabled={!sel.length || faults.length > 0} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{built ? '↻ Создать G-код заново' : 'Создать G-код'}</button>
           {labelBusy && <CncLoader compact label="Рисуем бирки…" />}
           {built?.labels?.length > 0 && (
             <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>

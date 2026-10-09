@@ -1,3 +1,4 @@
+import { nestingFaults, faultText, FAULT_TITLE } from '../lib/nestingCheck'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -56,6 +57,8 @@ export default function OrderPage() {
     orderClient(id).then(r => { if (!r.error) setClient(r.data || null) })
   }
   async function setStatus(status) {
+    // раскрой с нарушением реза в работу не принимается
+    if (status === 'inwork' && faults.length) { window.alert(faultText(faults, 'Принять такой заказ в работу нельзя. Исправьте раскрой (кнопка «Открыть / перекроить») или верните заказ заказчику на доработку.')); return }
     // статус меняет производство (или администратор) — через функцию базы; в старой базе — напрямую
     let r = await productionSetStatus(id, status)
     if (r.missing) { const { error } = await supabase.from('orders').update({ status }).eq('id', id); r = error ? { error: error.message } : {} }
@@ -85,6 +88,7 @@ export default function OrderPage() {
   // принятые карты раскроя — показываются над списком деталей
   const nestings = savedNestings(order, cutDetails(details, parseEdgeTypes(order?.edge_types)))   // карты — по заготовкам, как в раскрое
   const nest = nestings.find(n => n.key === mapMat) || nestings[0] || null
+  const faults = nestingFaults(order, nestings)      // пересечения деталей, зазор меньше реза, деталь на отступе
   // Есть принятый раскрой — статистика только по его материалу (тому, чьи карты сейчас показаны), листы — по факту
   const statDetails = nest ? nest.details.filter(d => d.length > 0 && d.width > 0) : validDetails
   if (nest) totalQty = statDetails.reduce((a, d) => a + (Number(d.qty) || 0), 0)
@@ -207,6 +211,13 @@ export default function OrderPage() {
               {canProduce && <button onClick={() => navigate(`/orders/${id}/labels`)} style={actBtn(false)}>Бирки</button>}
             </div>
           )}
+        </div>
+      )}
+      {faults.length > 0 && (
+        <div style={{ padding: 10, marginBottom: 12, borderRadius: 'var(--radius)', background: 'rgba(220,53,69,0.08)', border: '1px solid rgba(220,53,69,0.4)' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#dc3545', marginBottom: 4 }}>⛔ {FAULT_TITLE}</div>
+          {faults.slice(0, 10).map((e, i) => <div key={i} style={{ fontSize: 12, color: '#a71d2a', padding: '1px 0' }}>• {e}</div>)}
+          <div style={{ fontSize: 12, color: '#a71d2a', marginTop: 5 }}>{inProduction ? 'В работу и в ЧПУ такой раскрой не идёт: исправьте раскладку или верните заказ на доработку.' : 'Откройте раскрой и исправьте раскладку: раздвиньте детали на ширину реза или выполните раскрой заново.'}</div>
         </div>
       )}
       {/* производство видит всю статистику раскроя и расчёт; заказчик — стоимость работ (если цены ему доступны) */}

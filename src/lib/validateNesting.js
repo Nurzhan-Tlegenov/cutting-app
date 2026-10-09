@@ -17,7 +17,9 @@ const EPS = 0.5 // мм — допуск на округления
 
 function polyOf(p, kerf) {
   if (Array.isArray(p.polygon) && p.polygon.length > 2) return p.polygon.map(q => ({ x: p.x + q.x, y: p.y + q.y }))
-  const w = p.w - kerf, h = p.h - kerf
+  // размер детали — её собственный (origX/origY), а не «габарит с резом минус рез»: если раскрой считали
+  // с одним резом, а проверяют с другим, деталь не должна «менять размер»
+  const w = Number(p.origX) > 0 ? Number(p.origX) : p.w - kerf, h = Number(p.origY) > 0 ? Number(p.origY) : p.h - kerf
   return [{ x: p.x, y: p.y }, { x: p.x + w, y: p.y }, { x: p.x + w, y: p.y + h }, { x: p.x, y: p.y + h }]
 }
 const hasShape = p => Array.isArray(p.polygon) && p.polygon.length > 2
@@ -113,19 +115,19 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
         else if (!d.rotatable && !sameDims && W !== H) push(`${L}: «${name(p)}» повёрнута, хотя вращать её нельзя (текстура)`)
       }
     })
-    // 3. Пересечения и зазор на рез
+    // 3. Пересечения и зазор на рез — по настоящим координатам деталей. Между любыми двумя деталями должен быть
+    // зазор не меньше ширины реза хотя бы по одной оси (так кладёт детали и сам раскрой); у фигурных — по контуру.
+    const TOL = 0.05                                    // мм — только на погрешность сложения дробных чисел
+    const box = polys.map(P => ({ x0: Math.min(...P.map(q => q.x)), x1: Math.max(...P.map(q => q.x)), y0: Math.min(...P.map(q => q.y)), y1: Math.max(...P.map(q => q.y)) }))
     for (let i = 0; i < sh.placed.length; i++) {
-      const a = sh.placed[i]
+      const a = sh.placed[i], A = box[i]
       for (let j = i + 1; j < sh.placed.length; j++) {
-        const b = sh.placed[j]
-        // габариты с резом разнесены — заведомо ок
-        if (a.x >= b.x + b.w - 0.01 || b.x >= a.x + a.w - 0.01 || a.y >= b.y + b.h - 0.01 || b.y >= a.y + a.h - 0.01) continue
+        const b = sh.placed[j], B = box[j]
+        const gx = Math.max(B.x0 - A.x1, A.x0 - B.x1), gy = Math.max(B.y0 - A.y1, A.y0 - B.y1)   // зазоры между габаритами
+        if (gx >= kerf - TOL || gy >= kerf - TOL) continue                                        // разнесены на рез — ок
         if (!hasShape(a) && !hasShape(b)) {
-          // прямоугольники: габариты с резом перекрываются — зазор меньше реза
-          const ox = Math.min(a.x + a.w - kerf, b.x + b.w - kerf) - Math.max(a.x, b.x)
-          const oy = Math.min(a.y + a.h - kerf, b.y + b.h - kerf) - Math.max(a.y, b.y)
-          if (ox > 0.01 && oy > 0.01) push(`${L}: пересекаются «${name(a)}» и «${name(b)}»`)
-          else push(`${L}: между «${name(a)}» и «${name(b)}» зазор меньше реза ${kerf} мм`)
+          if (gx < -0.01 && gy < -0.01) push(`${L}: пересекаются «${name(a)}» и «${name(b)}»`)
+          else push(`${L}: между «${name(a)}» и «${name(b)}» зазор ${Math.max(0, Math.max(gx, gy)).toFixed(1)} мм — меньше реза ${kerf} мм`)
           continue
         }
         const g = polyGap(polys[i], polys[j])
@@ -135,8 +137,7 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
     }
     // 5. Пила — только сквозные резы
     if (cuttingMethod === 'guillotine' && sh.placed.length > 1) {
-      const rects = sh.placed.map(p => ({ x0: p.x, y0: p.y, x1: p.x + p.w - kerf, y1: p.y + p.h - kerf }))
-      if (!guillotineOk(rects, kerf)) push(`${L}: не раскраивается сквозными резами — пилой его не разрезать`)
+      if (!guillotineOk(box.map(r => ({ ...r })), kerf)) push(`${L}: не раскраивается сквозными резами — пилой его не разрезать`)
     }
     if (!sh.placed.length) push(`${L} пустой`)
   })

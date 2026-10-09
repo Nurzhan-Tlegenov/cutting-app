@@ -1,3 +1,4 @@
+import { orderFaults, faultText } from '../lib/nestingCheck'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -50,6 +51,10 @@ export default function ProductionPage() {
 
   const setStatus = async (o, status) => {
     setBusy(o.id)
+    if (status === 'inwork') {              // раскрой с нарушением реза в работу не принимается
+      const faults = await orderFaults(o.id)
+      if (faults.length) { setBusy(''); window.alert(faultText(faults, 'Принять такой заказ в работу нельзя. Откройте заказ и исправьте раскрой или верните заказ заказчику на доработку.')); return }
+    }
     const r = await productionSetStatus(o.id, status)
     setBusy('')
     if (r.error) { setError(r.error); return }
