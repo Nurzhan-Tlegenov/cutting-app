@@ -28,6 +28,7 @@ import SharedModelPage from './pages/SharedModelPage'
 import SharedSimPage from './pages/SharedSimPage'
 import UsersPage from './pages/UsersPage'
 import AllOrdersPage from './pages/AllOrdersPage'
+import KeyboardNext from './components/KeyboardNext'
 import ProductionPage from './pages/ProductionPage'
 import CncPage from './pages/CncPage'
 import LabelsPage from './pages/LabelsPage'
@@ -79,6 +80,7 @@ export default function App() {
       <AuthProvider>
         <ErrorBoundary>
           <AppRoutes />
+          <KeyboardNext />
           <Watermark />
         </ErrorBoundary>
       </AuthProvider>
