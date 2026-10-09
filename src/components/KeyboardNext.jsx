@@ -25,6 +25,25 @@ export default function KeyboardNext() {
   const [top, setTop] = useState(null)
   const timer = useRef(0)
 
+  // Клавиатуру спрятали (кнопкой «назад» на Android или «спрятать» на iPhone), а курсор остался в поле: тогда любое
+  // нажатие кнопки приложения, которая бережёт фокус поля (кромка в бланке заказа), снова поднимало клавиатуру.
+  // Раз клавиатуру убрали — убираем и курсор из поля: она появится, только когда снова нажмут на поле ввода.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    let low = vv.height, width = vv.width
+    const editable = a => a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|file|range|color)$/.test(a.type)) || a.isContentEditable)
+    const onIn = () => { low = vv.height; width = vv.width }
+    const onResize = () => {
+      if (Math.abs(vv.width - width) > 1) { width = vv.width; low = vv.height; return }      // поворот экрана — не клавиатура
+      if (vv.height < low) { low = vv.height; return }
+      if (vv.height - low > 120) { low = vv.height; const a = document.activeElement; if (editable(a)) a.blur() }
+    }
+    document.addEventListener('focusin', onIn)
+    vv.addEventListener('resize', onResize)
+    return () => { document.removeEventListener('focusin', onIn); vv.removeEventListener('resize', onResize) }
+  }, [])
+
   useEffect(() => {
     if (!IOS) return
     const onIn = e => { clearTimeout(timer.current); setEl(isNumeric(e.target) ? e.target : null) }

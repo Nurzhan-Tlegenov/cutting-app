@@ -28,6 +28,7 @@ import SharedModelPage from './pages/SharedModelPage'
 import SharedSimPage from './pages/SharedSimPage'
 import UsersPage from './pages/UsersPage'
 import AllOrdersPage from './pages/AllOrdersPage'
+import AllProductionsPage from './pages/AllProductionsPage'
 import KeyboardNext from './components/KeyboardNext'
 import ProductionPage from './pages/ProductionPage'
 import CncPage from './pages/CncPage'
@@ -66,6 +67,7 @@ function AppRoutes() {
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
       <Route path="/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
       <Route path="/all-orders" element={<ProtectedRoute><AllOrdersPage /></ProtectedRoute>} />
+      <Route path="/all-productions" element={<ProtectedRoute><AllProductionsPage /></ProtectedRoute>} />
       <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
       <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />

@@ -50,3 +50,13 @@ export async function confirmPasswordReset(phone, code, password) {
 export const adminPasswordResets = () => call('admin_password_resets')
 export const adminIssueReset = id => call('admin_issue_reset', { p_id: id })
 export const adminCloseReset = id => call('admin_close_reset', { p_id: id })
+
+// Заказы всех производств со статистикой и зафиксированной ценой — только администратору (migration_admin_productions.sql)
+export const PRODS_SQL_HINT = 'Раздел ещё не включён: выполните migration_admin_productions.sql в Supabase (SQL Editor) — один раз.'
+export async function adminProductionOrders() {
+  try {
+    const { data, error } = await supabase.rpc('admin_production_orders')
+    if (error) return { error: /PGRST202|42883|schema cache|Could not find the function/i.test(`${error.message} ${error.code}`) ? PRODS_SQL_HINT : error.message }
+    return { data: data || [] }
+  } catch (e) { return { error: String(e?.message || e) } }
+}

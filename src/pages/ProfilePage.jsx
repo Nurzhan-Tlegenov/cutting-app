@@ -175,6 +175,17 @@ export default function ProfilePage() {
       )}
 
       {isMaster && (
+        <button onClick={() => navigate('/all-productions')} className="card"
+          style={{ width: '100%', marginBottom: 12, textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>Заказы всех производств</div>
+            <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Заявки, что в работе и исполнено, листы и суммы по каждому производству за период</div>
+          </div>
+          <span style={{ color: 'var(--blue)', fontSize: 18 }}>→</span>
+        </button>
+      )}
+
+      {isMaster && (
         <button onClick={() => navigate('/messages')} className="card"
           style={{ width: '100%', marginBottom: 12, textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ flex: 1 }}>
