@@ -80,6 +80,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const [faceRule, setFaceRule] = useState(() => getUserSettings(user).basisFaceRule || 'holes')
   const [source, setSource] = useState(SOURCES[0])
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)        // блок свёрнут, пока не нажали «Импорт деталей»
   const [error, setError] = useState('')
 
   const [fileName, setFileName] = useState('')
@@ -195,6 +196,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     const g = activeKey === ALL
       ? (result.groups.length === 1 ? result.groups[0] : null)
       : result.groups.find(x => x.key === activeKey)
+    setOpen(false)
     onImport({
       items: chosen.map(it => ({
         name: it.name, w: it.w, h: it.h, qty: it.qty, edges: it.edges, prefix: it.prefix,
@@ -220,8 +222,16 @@ export default function ImportDetails({ hasDetails, onImport }) {
 
   return (
     <div style={{ marginBottom: 14 }}>
-      <p className="section-title">Импорт деталей</p>
-      <div className="card" style={{ background: 'var(--bg2)' }}>
+      <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)',
+          background: 'var(--bg2)', color: 'var(--text)', fontSize: 14, cursor: 'pointer', textAlign: 'left' }}>
+        <span style={{ fontSize: 16 }}>📥</span>
+        <span style={{ flex: '0 0 auto', fontWeight: 500 }}>Импорт деталей</span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{busy ? 'читаю файл…' : open ? '' : 'Excel, Базис, Астра, PRO100, SketchCut'}</span>
+        <span style={{ color: 'var(--text-hint)', fontSize: 12, transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
+      </button>
+      {!open && error && <p className="error-text" style={{ marginTop: 6 }}>{error}</p>}
+      <div className="card" style={{ background: 'var(--bg2)', marginTop: 6, display: open ? 'block' : 'none' }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {SOURCES.map(s => (
             <button key={s.id} type="button" disabled={busy} onClick={() => pick(s)}
