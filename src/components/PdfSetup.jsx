@@ -3,13 +3,14 @@ import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useNestingQuote } from '../hooks/useNestingQuote'
 import { statsRows } from '../lib/nestingStats'
-import { money, GROUP_TITLE, lineTitle, lineUnit } from '../lib/pricing'
+import { money } from '../lib/pricing'
 import { saveNestingPdf } from '../lib/nestingPdf'
+import { quoteLines, pdfSummaryOf, userPdfTpl } from '../lib/pdfSummary'
+import PdfLayoutEditor from './PdfLayoutEditor'
 
 // PDF карт раскроя из кабинета производства — конструктор: что из статистики раскроя и стоимости вывести
 // на последней странице. Выбор запоминается за аккаунтом.
-const num = v => (Math.round(Number(v) * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
-const PRICE_MODES = [['lines', 'Построчно'], ['total', 'Только итог'], ['none', 'Не выводить']]
+const PRICE_MODES = [['lines', 'Смета построчно'], ['total', 'Только итог'], ['none', 'Без сметы']]
 
 export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const { user } = useAuth()
@@ -17,24 +18,19 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const [cfg, setCfg] = useState(() => ({ off: [], price: 'lines', ...(getUserSettings(user).pdfSummary || {}) }))
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [layout, setLayout] = useState(false)       // открыт конструктор листа
+  const customTpl = userPdfTpl(user)
   const change = patch => { const next = { ...cfg, ...patch }; setCfg(next); saveUserSettings({ pdfSummary: next }, user) }
   const rows = stats ? statsRows(stats) : []
   const off = new Set(cfg.off || [])
   const toggle = key => change({ off: off.has(key) ? [...off].filter(k => k !== key) : [...off, key] })
   const priced = quote && !quote.empty && Number(quote.total) > 0
-  const lines = !priced ? [] : quote.lines
-    ? quote.lines.map(l => ({ title: lineTitle(l.key), qty: `${num(l.qty)} ${lineUnit(l.key)}`, sum: num(l.sum) }))
-    : (quote.groups || []).map(g => ({ title: GROUP_TITLE[g.group] || g.group, qty: '', sum: num(g.sum) }))
+  const lines = priced ? quoteLines(quote) : []
   const make = async () => {
     setBusy('…'); setError('')
     try {
-      const summary = {
-        rows: rows.filter(r => !off.has(r.key)).map(r => ({ label: r.label, value: r.value })),
-        lines: priced && cfg.price === 'lines' ? lines : [],
-        total: priced && cfg.price !== 'none' ? money(quote.total, quote.currency) : null,
-        currency: priced ? quote.currency : '', minApplied: !!quote?.min_applied,
-      }
-      await saveNestingPdf({ order, mat, fileName, summary, onProgress: (a, b) => setBusy(`${a}/${b}`) })
+      const summary = pdfSummaryOf(stats, quote, cfg)
+      await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), onProgress: (a, b) => setBusy(`${a}/${b}`) })
       onClose()
     } catch (e) { setError('Не удалось собрать PDF: ' + (e?.message || e)); setBusy('') }
   }
@@ -44,7 +40,14 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
       <div style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderRadius: '16px 16px 0 0' }}>
         <div style={{ padding: '14px 16px 8px' }}>
           <div style={{ fontSize: 16, fontWeight: 500 }}>PDF карт раскроя</div>
-          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Карты листов — как обычно. Отметьте, что вывести на последней странице.</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Отметьте, что вывести на последней странице: статистику раскроя и смету.</div>
+          <div onClick={() => setLayout(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, padding: '8px 10px', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', cursor: 'pointer' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, color: 'var(--blue)', fontWeight: 500 }}>Оформление листа (конструктор)</div>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{customTpl ? 'Свой макет: карта, список и подписи расставлены вами' : 'Стандартный вид. Можно расставить карту, список и подписи по-своему'}</div>
+            </div>
+            <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
+          </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px' }}>
           <p className="section-title">Статистика раскроя</p>
@@ -59,7 +62,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
             <button type="button" style={{ ...chip(false), flex: '0 0 auto', padding: '5px 12px' }} onClick={() => change({ off: [] })}>Выбрать всё</button>
             <button type="button" style={{ ...chip(false), flex: '0 0 auto', padding: '5px 12px' }} onClick={() => change({ off: rows.map(r => r.key) })}>Снять всё</button>
           </div>
-          <p className="section-title">Стоимость работ</p>
+          <p className="section-title">Смета</p>
           {quote === undefined ? <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 10 }}>Считаем…</p>
             : !priced ? <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 10 }}>Цен нет: прайс-лист производства не заполнен или выключен (Производство → Прайс-лист).</p>
             : (
@@ -70,7 +73,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
                 {cfg.price === 'lines' && lines.map((l, i) => (
                   <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12.5, padding: '2px 0' }}>
                     <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)' }}>{l.title}</span>
-                    <span style={{ color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{l.qty}</span>
+                    <span style={{ color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{l.qty}{l.rate ? ` × ${l.rate}` : ''}</span>
                     <b style={{ fontWeight: 500, minWidth: 60, textAlign: 'right' }}>{l.sum}</b>
                   </div>
                 ))}
@@ -90,6 +93,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
           </div>
         </div>
       </div>
+      {layout && <PdfLayoutEditor order={order} mat={mat} onClose={() => setLayout(false)} />}
     </div>
   )
 }

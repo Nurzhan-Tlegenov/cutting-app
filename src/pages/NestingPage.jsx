@@ -31,6 +31,7 @@ import { computeCutLines } from '../lib/cutLines'
 import NestingCost from '../components/NestingCost'
 import { nestingStats, sumStats, statsPayload } from '../lib/nestingStats'
 import { fixOrderQuote } from '../lib/pricing'
+import { statsAndQuote, pdfSummaryOf, userPdfTpl } from '../lib/pdfSummary'
 import { savedNestings } from '../lib/savedNesting'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
@@ -1893,13 +1894,22 @@ export default function NestingPage() {
 
   // Карты раскроя этого варианта в PDF: лист на страницу, список деталей листа, кромка, процент использования
   const [pdfBusy, setPdfBusy] = useState(null)
+  const [pdfEstimate, setPdfEstimateState] = useState(() => !!getUserSettings(user).pdfEstimate)   // галочка «Смета» под кнопкой PDF
+  const setPdfEstimate = on => { setPdfEstimateState(on); saveUserSettings({ pdfEstimate: on }, user) }
   async function pdfCfg(cfg, idx) {
     setPdfBusy(cfg.id)
     try {
       const m = materials.find(x => x.key === matKey) || materials[0] || {}
       const [name, thick] = String(m.key || '|').split('|')
-      await saveNestingPdf({ order, fileName: `Karty_${orderFileName(order)}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`,
-        mat: { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details } })
+      const mat = { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details }
+      // кабинет производства: своё оформление листа, а с галочкой «Смета» — ещё страница со статистикой раскроя и сметой
+      let summary = null
+      if (cabinet === 'production' && pdfEstimate) {
+        const { stats, quote } = await statsAndQuote({ order, mats: [mat], method: cuttingMethod })
+        summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {})
+      }
+      await saveNestingPdf({ order, fileName: `Karty_${orderFileName(order)}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`, mat,
+        summary, tpl: cabinet === 'production' ? userPdfTpl(user) : null })
     } catch (e) { window.alert('Не удалось собрать PDF: ' + (e?.message || e)) } finally { setPdfBusy(null) }
   }
 
@@ -2784,10 +2794,17 @@ export default function NestingPage() {
                           background: cfg.saved ? '#e6f4ea' : 'var(--teal-light)', color: cfg.saved ? '#1e7e34' : 'var(--teal)' }}>
                         {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение…' : 'Выбрать'}
                       </button>
-                      <button onClick={() => pdfCfg(cfg, idx)} disabled={!!pdfBusy} title="Карты раскроя в PDF: листы с деталями, размерами, кромкой и процентом использования материала"
-                        style={{ flex: 'none', padding: '9px 12px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: pdfBusy ? 'default' : 'pointer' }}>
-                        {pdfBusy === cfg.id ? '…' : 'PDF'}
-                      </button>
+                      <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                        <button onClick={() => pdfCfg(cfg, idx)} disabled={!!pdfBusy} title="Карты раскроя в PDF: листы с деталями, размерами, кромкой и процентом использования материала"
+                          style={{ padding: '9px 12px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: pdfBusy ? 'default' : 'pointer' }}>
+                          {pdfBusy === cfg.id ? '…' : 'PDF'}
+                        </button>
+                        {cabinet === 'production' && (
+                          <label title="Добавить в PDF страницу со статистикой раскроя и сметой: операция, количество, цена, сумма" style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10.5, color: pdfEstimate ? 'var(--blue)' : 'var(--text-hint)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                            <input type="checkbox" checked={pdfEstimate} onChange={e => setPdfEstimate(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />Смета
+                          </label>
+                        )}
+                      </div>
                       {order.status !== 'draft' ? (canProduce && <>
                         <button onClick={() => goProduce(cfg, 'cnc')} disabled={blocked} title="Управляющие программы для станка с ЧПУ"
                           style={{ flex: 1, padding: 9, background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
