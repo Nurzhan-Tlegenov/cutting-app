@@ -18,7 +18,6 @@ export default function OrdersPage() {
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState(new Set())
   const [deleting, setDeleting] = useState(false)
-  const isOperator = profile?.role === 'admin'   // чужие заказы видит только администратор (так же настроена база)
   const holdTimers = useRef({})
   const [shares, setShares] = useState(() => new Map())
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заказов открыты ссылки на симуляцию
@@ -33,7 +32,9 @@ export default function OrdersPage() {
 
   async function fetchOrders() {
     let query = supabase.from('orders').select('*').order('created_at', { ascending: false })
-    if (!isOperator) query = query.eq('user_id', user.id)
+    // кабинет клиента — только свои заказы, у любого аккаунта (и у мастер-аккаунта тоже): чужие заказы видны
+    // только в кабинете производства, как заявки
+    query = query.eq('user_id', user.id)
     const { data } = await query
     setOrders(data || [])
     setLoading(false)
@@ -116,7 +117,7 @@ export default function OrdersPage() {
           </>
         ) : (
           <>
-            <h1 style={{ fontSize: 18, fontWeight: 500 }}>{isOperator ? 'Все заказы' : 'Мои заказы'}</h1>
+            <h1 style={{ fontSize: 18, fontWeight: 500 }}>Мои заказы</h1>
             <button onClick={() => navigate('/orders/new')}
               style={{ background: 'var(--blue)', color: 'white', border: 'none',
                 borderRadius: 'var(--radius)', padding: '8px 16px', fontSize: 14, fontWeight: 500 }}>
