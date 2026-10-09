@@ -107,6 +107,13 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         <Hint>Куда уходит шпиндель в конце программы (на высоте безопасности). По умолчанию X0 Y0. Пустое поле — не уходить.</Hint>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Скругления и дуги</Title>
+        <Seg value={post.arcs === 'ij' ? 'ij' : 'lines'} options={[['lines', 'Плавная линия G1'], ['ij', 'Дуга G2 / G3']]} onChange={v => set({ arcs: v })} />
+        <Hint>{post.arcs === 'ij'
+          ? 'Скругление идёт одной командой дуги: G2 — по часовой, G3 — против, I и J — смещение центра от начала дуги. Перед работой проверьте на обрезке, что станок ведёт дугу правильно.'
+          : 'Скругление идёт очень мелкими отрезками — отклонение от дуги не больше 0,005 мм, граней на детали нет. Работает на любом станке.'}</Hint>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
         <Title>Высоты и скорости</Title>
         <label className="label">Ноль по Z — от какой пласти</label>
         <Seg value={post.zRef === 'top' ? 'top' : 'bottom'} options={[['bottom', 'От нижней (стол)'], ['top', 'От верхней пласти']]} onChange={v => set({ zRef: v })} />

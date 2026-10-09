@@ -27,6 +27,7 @@ import EditOrderPage from './pages/EditOrderPage'
 import SharedModelPage from './pages/SharedModelPage'
 import SharedSimPage from './pages/SharedSimPage'
 import UsersPage from './pages/UsersPage'
+import AllOrdersPage from './pages/AllOrdersPage'
 import ProductionPage from './pages/ProductionPage'
 import CncPage from './pages/CncPage'
 import LabelsPage from './pages/LabelsPage'
@@ -63,6 +64,7 @@ function AppRoutes() {
       <Route path="/orders/:id/labels" element={<ProtectedRoute><LabelsPage /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
       <Route path="/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
+      <Route path="/all-orders" element={<ProtectedRoute><AllOrdersPage /></ProtectedRoute>} />
       <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
       <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />

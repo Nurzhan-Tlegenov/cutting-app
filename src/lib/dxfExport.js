@@ -23,6 +23,7 @@ import { partLabel } from './partLabel'
 import { placedHoles, placedTurns } from './partHoles'
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeometry'
 import { contourSegments, segmentSide, holeEdgeSegments } from './edgeLength'
+import { loopElements } from './arcFit'
 
 const GAP_BETWEEN_SHEETS = 200 // мм, зазор между листами на чертеже
 const EDGE_INSET = 3           // мм, линия кромки — с отступом внутрь, чтобы не лежала на контуре
@@ -36,6 +37,11 @@ function line(x1, y1, x2, y2, layer) {
 }
 function circle(x, y, r, layer) {
   return `0\nCIRCLE\n8\n${layer}\n10\n${f(x)}\n20\n${f(y)}\n30\n0\n40\n${f(r)}\n`
+}
+// дуга в DXF всегда идёт против часовой стрелки от начального угла к конечному (градусы)
+function arc(cx, cy, r, a0, a1, layer) {
+  const deg = a => { let d = a * 180 / Math.PI % 360; if (d < 0) d += 360; return Math.round(d * 1e6) / 1e6 }
+  return `0\nARC\n8\n${layer}\n10\n${f(cx)}\n20\n${f(cy)}\n30\n0\n40\n${f(r)}\n50\n${deg(a0)}\n51\n${deg(a1)}\n`
 }
 function text(x, y, s, layer, height) {
   // не-ASCII символы кодируются как \U+XXXX — это понимает любой CAD, независимо от кодовой страницы файла
@@ -88,6 +94,18 @@ export function buildNestingDxf(sheetsData, order, details = [], labelMode = 'na
   const put = (layer, ent) => layers.set(layer, (layers.get(layer) || '') + ent)
   const poly = (pts, layer) => { for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; put(layer, line(a[0], a[1], b[0], b[1], layer)) } }
 
+  // контур со скруглениями: прямые — отрезками, скругления и дуги — настоящими дугами (а не хордами)
+  const shape = (pts, layer) => {
+    const els = loopElements(pts)
+    if (!els.some(e => e.r)) { poly(pts, layer); return }
+    for (const e of els) {
+      if (!e.r) { put(layer, line(e.a[0], e.a[1], e.b[0], e.b[1], layer)); continue }
+      if (e.sweep > 2 * Math.PI - 1e-6) { put(layer, circle(e.cx, e.cy, e.r, layer)); continue }
+      const a0 = Math.atan2(e.a[1] - e.cy, e.a[0] - e.cx), a1 = Math.atan2(e.b[1] - e.cy, e.b[0] - e.cx)
+      put(layer, e.ccw ? arc(e.cx, e.cy, e.r, a0, a1, layer) : arc(e.cx, e.cy, e.r, a1, a0, layer))
+    }
+  }
+
   let offsetX = 0
   sheetsData.forEach((sheet, si) => {
     // ВАЖНО: тут только sheetWAll — sheetW ниже объявлен через const
@@ -106,8 +124,8 @@ export function buildNestingDxf(sheetsData, order, details = [], labelMode = 'na
       const baseY = marginB + p.y
       const detail = details[p.detailIndex]
       const outline = piecePolygonLocal(p)
-      poly(outline.map(([x, y]) => [baseX + x, baseY + y]), 'detal')
-      placedHoles(p, detail).forEach(hp => poly(hp.map(q => [baseX + q.x, baseY + q.y]), 'vyrez'))
+      shape(outline.map(([x, y]) => [baseX + x, baseY + y]), 'detal')
+      placedHoles(p, detail).forEach(hp => shape(hp.map(q => [baseX + q.x, baseY + q.y]), 'vyrez'))
 
       // кромка по прямым сторонам габарита
       const w = p.origX, h = p.origY, g = EDGE_INSET

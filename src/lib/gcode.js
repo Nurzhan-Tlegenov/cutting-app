@@ -14,6 +14,7 @@
  */
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeometry'
 import { detailHoles, placedTurns } from './partHoles'
+import { smoothLoop, arcRuns } from './arcFit'
 
 const EPS = 0.05
 const ROUGH_ALLOWANCE = 2        // черновые проходы выборки не доходят до контура на 2 мм — их подчищает обход по периметру
@@ -270,6 +271,25 @@ class Out {
   }
   g0(x, y, z) { this.move('G0', x, y, z) }
   g1(x, y, z, feed) { this.move('G1', x, y, z, feed) }
+  /**
+   * Дуга G2 (по часовой) / G3 (против) в плоскости XY от текущей точки вокруг центра (cx, cy) в сторону точки (x, y).
+   * I, J — смещение центра от НАЧАЛА дуги. Конец ставится на ту же окружность, что и начало — радиусы
+   * в начале и в конце совпадают с точностью вывода, стойка не выдаст ошибку дуги.
+   */
+  arc(ccw, x, y, cx, cy, feed) {
+    const x0 = this.pos[0], y0 = this.pos[1]
+    if (x0 == null || y0 == null) { this.g1(x, y, null, feed); return }
+    const r3 = v => Math.round(v * 1000) / 1000
+    const sx = r3(x0), sy = r3(y0), i = r3(cx - sx), j = r3(cy - sy), r = Math.hypot(i, j)
+    const ox = sx + i, oy = sy + j, d = Math.hypot(x - ox, y - oy)
+    if (!(r > 0.05) || !(d > 1e-6)) { this.g1(x, y, null, feed); return }
+    const ex = ox + (x - ox) * r / d, ey = oy + (y - oy) * r / d
+    if (Math.hypot(ex - sx, ey - sy) < 0.002) return
+    let s = `${ccw ? 'G3' : 'G2'} X${fmt(ex)} Y${fmt(ey)} I${fmt(i)} J${fmt(j)}`
+    this.pos[0] = ex; this.pos[1] = ey
+    if (feed && Math.round(feed) !== this.f) { s += ` F${Math.round(feed)}`; this.f = Math.round(feed) }
+    this.push(s)
+  }
 }
 function levels(top, bottom, maxPass) {
   const n = Math.max(1, Math.ceil((top - bottom) / (maxPass > 0 ? maxPass : 1e9) - 1e-9))
@@ -301,11 +321,11 @@ function loopMetric(loop) {
  * Подача: вход — подача входа. Промежуточные проходы — основная подача. Последний проход — по настройкам фрезы:
  * плавный разгон от подачи входа до основной на длине разгона и плавное снижение до подачи выхода перед концом.
  */
-function cutLoop(out, passes, top, tool, op, safeZ) {
+function cutLoop(out, passes, top, tool, op, safeZ, arcs = false) {
   const feed = n0(tool.feed) || 1000, inFeed = n0(tool.inFeed) || feed, outFeed = n0(tool.outFeed) || feed
   const ramp = op.entry !== 'straight'
   const tan = Math.tan(Math.max(1, Math.min(89, n0(op.angle) || 45)) * Math.PI / 180)
-  let cur = null, M = null, zPrev = 0
+  let cur = null, M = null, zPrev = 0, R = []
   passes.forEach((ps, k) => {
     const last = k === passes.length - 1, z = ps.z
     if (ps.loop !== cur) {
@@ -313,6 +333,8 @@ function cutLoop(out, passes, top, tool, op, safeZ) {
       if (!(m.per > 0)) return
       if (cur) out.g0(null, null, safeZ)
       cur = ps.loop; M = m
+      // дуги контура: участки пути [d0, d1], которые идут одной командой G2 / G3 (не больше четверти окружности каждая)
+      R = arcs ? arcRuns([...cur, cur[0]]).map(a => ({ ...a, d0: M.cum[a.i0], d1: M.cum[a.i1] })) : []
       zPrev = top + 1
       const L = ramp ? Math.min(M.per / 2, (zPrev - z) / tan) : 0
       const s = M.at(L)
@@ -333,7 +355,13 @@ function cutLoop(out, passes, top, tool, op, safeZ) {
     const kIn = inFeed !== feed && inLen > 0 ? Math.max(2, Math.min(8, Math.round(inLen / 6))) : 0
     const kOut = outFeed !== feed && outLen > 0 ? Math.max(2, Math.min(8, Math.round(outLen / 6))) : 0
     const stops = new Set([D])
-    for (let i = 1; i < M.n; i++) stops.add(M.cum[i])
+    const inArc = new Set()
+    for (const a of R) {
+      const parts = Math.max(1, Math.ceil(a.sweep / (Math.PI / 2) - 1e-6)), keep = new Set()
+      for (let m = 1; m < parts; m++) keep.add(a.i0 + Math.round((a.i1 - a.i0) * m / parts))
+      for (let i = a.i0 + 1; i < a.i1; i++) if (!keep.has(i)) inArc.add(i)
+    }
+    for (let i = 1; i < M.n; i++) if (!inArc.has(i)) stops.add(M.cum[i])
     for (let i = 1; i <= kIn; i++) stops.add(inLen * i / kIn)
     for (let i = 0; i < kOut; i++) stops.add(D - outLen + outLen * i / kOut)
     let prev = 0
@@ -343,8 +371,9 @@ function cutLoop(out, passes, top, tool, op, safeZ) {
       let f = feed
       if (kIn && mid < inLen) f = inFeed + (feed - inFeed) * (Math.floor(mid / (inLen / kIn)) + 1) / (kIn + 1)
       else if (kOut && mid > D - outLen) f = feed + (outFeed - feed) * (Math.floor((mid - (D - outLen)) / (outLen / kOut)) + 1) / kOut
-      const q = M.at(d)
-      out.g1(q[0], q[1], z, f)
+      const q = M.at(d), a = R.find(a => mid > a.d0 && mid < a.d1)
+      if (a) { if (out.pos[2] !== z) out.g1(null, null, z, f); out.arc(a.ccw, q[0], q[1], a.cx, a.cy, f) }
+      else out.g1(q[0], q[1], z, f)
       prev = d
     }
     zPrev = z
@@ -546,6 +575,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   if (n0(post.fieldY) && n0(post.originY) + geo.sheetL > n0(post.fieldY) + EPS) warn.add(`Лист по Y (${num(n0(post.originY) + geo.sheetL)} мм) выходит за рабочее поле станка ${num(post.fieldY)} мм.`)
   const millOver = Math.max(0, n0(post.millOver)), drillOver = Math.max(0, n0(post.drillOver))
   const ops = cnc.ops
+  const arcs = post.arcs === 'ij'                        // дуги — командами G2 / G3 (иначе — мелкими отрезками, см. smoothLoop)
   const smallArea = n0(ops.outer?.smallArea) > 0 ? n0(ops.outer.smallArea) : 0.12      // мельче — «мелкая деталь», режется первой
   const sheetRect = { x0: n0(post.originX), y0: n0(post.originY), x1: n0(post.originX) + geo.sheetW, y1: n0(post.originY) + geo.sheetL }
   const tool = id => toolById(cnc, id)
@@ -610,11 +640,11 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
       if (!t) { noTool('контур выреза'); continue }
       if (t.type !== 'mill') { warn.add('На контур выреза назначено сверло — нужна фреза.'); continue }
       const r = n0(t.d) / 2
-      const loop = c.circle ? (c.circle.r - r > 0.2 ? circleLoop(c.circle.cx, c.circle.cy, c.circle.r - r) : null) : offsetLoop(c.pts, -r)
+      const loop = c.circle ? (c.circle.r - r > 0.2 ? circleLoop(c.circle.cx, c.circle.cy, c.circle.r - r) : null) : offsetLoop(smoothLoop(c.pts), -r)
       if (!loop) { warn.add(`Фреза Ø${num(t.d)} не проходит в вырез — он пропущен.`); continue }
       const L = orientLoop(loop.map(G), ops.cutout.dir)
       const zs = levels(T, -millOver, n0(t.maxPass))
-      jobs.push({ stage: 1, rank: 4, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.cutout, safeZ) })
+      jobs.push({ stage: 1, rank: 4, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.cutout, safeZ, arcs) })
     }
     // контур детали — фреза идёт снаружи
     {
@@ -622,7 +652,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
       if (!t) noTool('контур детали')
       else if (t.type !== 'mill') warn.add('На контур детали назначено сверло — нужна фреза.')
       else {
-        const r = n0(t.d) / 2, base = offsetLoop(f.outline, r)
+        const r = n0(t.d) / 2, smooth = smoothLoop(f.outline), base = offsetLoop(smooth, r)
         if (!base) warn.add('Не удалось построить обход контура одной из деталей — она пропущена.')
         else {
           const L = orientFromInside(base.map(G), o.dir, sheetRect)
@@ -632,13 +662,13 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
           if (N > 1 && (!o.smallOnly || small)) {
             // первые проходы — с припуском по контуру и остатком по глубине, последний — начисто
             const allow = Math.max(0, n0(o.sideAllow)), left = Math.max(0, Math.min(T - 0.5, n0(o.leftover)))
-            const rough = allow > 0 ? offsetLoop(f.outline, r + allow) : null
+            const rough = allow > 0 ? offsetLoop(smooth, r + allow) : null
             const Lr = rough ? orientFromInside(rough.map(G), o.dir, sheetRect) : L
             passes = [...levels(T, left, Math.min(n0(t.maxPass) || 1e9, (T - left) / (N - 1) + 1e-6)).map(z => ({ loop: Lr, z })), { loop: L, z: -millOver }]
           } else passes = levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: L, z }))
           const bb = bboxOf(f.outline)
           const edgeDist = Math.min(geo.marginL + p.x + bb.x0, geo.sheetW - (geo.marginL + p.x + bb.x1), geo.marginB + p.y + bb.y0, geo.sheetL - (geo.marginB + p.y + bb.y1))
-          jobs.push({ stage: 1, rank: 5, tool: t, at: L[0], small, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1], run: out => cutLoop(out, passes, T, t, o, safeZ) })
+          jobs.push({ stage: 1, rank: 5, tool: t, at: L[0], small, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1], run: out => cutLoop(out, passes, T, t, o, safeZ, arcs) })
         }
       }
     }
