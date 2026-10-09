@@ -134,7 +134,7 @@ export function OrderBreakdown({ list, show, onOpen }) {
               {money1 && <b style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>{o.total != null ? money(o.total, o.currency) : '—'}</b>}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
-              {day(orderDate(o))} · {o.status === 'done' ? 'исполнен' : 'в работе'}{o.deleted ? ' · заказ удалён заказчиком' : ''}
+              {o.client_name ? <span style={{ color: 'var(--text-muted)' }}>{o.client_name} · </span> : null}{day(orderDate(o))} · {o.status === 'done' ? 'исполнен' : 'в работе'}{o.deleted ? ' · заказ удалён заказчиком' : ''}
             </div>
             {parts.length > 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{parts.join(' · ')}</div>}
           </div>
