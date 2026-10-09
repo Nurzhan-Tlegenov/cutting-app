@@ -1,3 +1,4 @@
+import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
 import { useState, useRef, useEffect } from 'react'
 import ContourEditor from '../components/ContourEditor'
 import { useNavigate } from 'react-router-dom'
@@ -327,6 +328,7 @@ export default function NewOrderPage() {
   const [orderName, setOrderName] = useState('')
   const [materialName, setMaterialName] = useState('')
   const [materialThickness, setMaterialThickness] = useState(16)
+  const [materialKind, setMaterialKind] = useState('')     // '' — плита (ЛДСП, МДФ), 'hdf' — ХДФ / ДВП (только пила)
 
   // Префиксы
   const [prefixes, setPrefixes] = useState([])
@@ -476,6 +478,11 @@ export default function NewOrderPage() {
       }
       if (oErr) throw oErr
       if (edgeMissing) window.alert(EDGE_TYPES_HINT)
+      // тип материала пишется отдельно: если колонки в базе ещё нет, заказ всё равно создан
+      if (materialKind === 'hdf') {
+        const { error: kErr } = await supabase.from('orders').update({ material_kind: 'hdf', cutting_method: 'guillotine' }).eq('id', order.id)
+        if (kErr) window.alert(KIND_SQL_HINT)
+      }
 
       const rows = details.map((d, i) => {
         const pfx = d.prefix || null
@@ -564,6 +571,7 @@ export default function NewOrderPage() {
                 onChange={e => setMaterialThickness(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
             </div>
           </div>
+          <MaterialKind value={materialKind} onChange={setMaterialKind} style={{ marginTop: 8 }} />
         </div>
       </div>
 

@@ -125,7 +125,8 @@ export default function OrderPage() {
       {client && (client.production || (!isMine && client.full_name)) && (
         <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
           {!isMine && (client.full_name || client.phone) && (
-            <div>Заказчик: <b>{client.full_name || '—'}</b>{client.phone ? <a href={`tel:+${String(client.phone).replace(/\D/g, '')}`} style={{ color: 'var(--blue)', marginLeft: 8 }}>{client.phone}</a> : null}</div>
+            <div>Заказчик: <b>{client.full_name || '—'}</b>{client.phone ? <a href={`tel:+${String(client.phone).replace(/\D/g, '')}`} style={{ color: 'var(--blue)', marginLeft: 8 }}>{client.phone}</a> : null}
+              {(client.whatsapp || client.phone) ? <a href={`https://wa.me/${String(client.whatsapp || client.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 8, fontSize: 12 }}>WhatsApp</a> : null}</div>
           )}
           {client.production && <div style={{ color: 'var(--text-muted)' }}>Производство: {client.production}</div>}
         </div>

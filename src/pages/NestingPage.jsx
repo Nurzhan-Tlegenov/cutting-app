@@ -1211,6 +1211,8 @@ const countTxt = s => `${s.count} л.${s.offcuts ? ` + ${s.offcuts} обр.` : '
 // Производство задаёт только рез и отступы (это его станок); формат листа
 // пользователь меняет всегда — вдруг привезёт свой материал
 const PROD_LOCKED = ['kerf', 'ml', 'mr', 'mt', 'mb']
+// рез и отступы производства для материала заказа: у ХДФ / ДВП — свои (если производство их задало), иначе общие
+const prodVal = (pr, col, order) => (order?.material_kind === 'hdf' && pr['hdf_' + col] != null ? pr['hdf_' + col] : pr[col])
 const SHEET_FIELDS = [
   ['L', 'sheet_length'], ['W', 'sheet_width'], ['kerf', 'kerf_width'],
   ['ml', 'margin_left'], ['mr', 'margin_right'], ['mt', 'margin_top'], ['mb', 'margin_bottom'],
@@ -1482,7 +1484,7 @@ export default function NestingPage() {
       setSheetForm(sheetFormOf(o))
       setOffForm(parseOffcuts(o.offcuts))
       fetchProductions(o)
-      setCuttingMethod(o.cutting_method || 'nesting')
+      setCuttingMethod(o.material_kind === 'hdf' ? 'guillotine' : (o.cutting_method || 'nesting'))   // ХДФ / ДВП режется только на пиле
       let store = null
       if (o.nesting_result) { try { store = JSON.parse(o.nesting_result) } catch { store = null } }
       // несколько материалов — раскрой хранится по каждому отдельно: { multi: true, byMat: { ключ: результат } }
@@ -1635,7 +1637,7 @@ export default function NestingPage() {
     const pr = o?.production_id ? list.find(x => x.id === o.production_id) : null
     if (pr) {
       const patch = {}
-      SHEET_FIELDS.forEach(([k, col]) => { if (PROD_LOCKED.includes(k) && pr[col] != null && Number(pr[col]) !== Number(o[col])) patch[col] = Number(pr[col]) })
+      SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(pr, col, o); if (PROD_LOCKED.includes(k) && v != null && Number(v) !== Number(o[col])) patch[col] = Number(v) })
       if (Object.keys(patch).length) await saveOrderPatch(patch, false)
     }
   }
@@ -1671,7 +1673,7 @@ export default function NestingPage() {
     const pr = productions.find(x => x.id === pid)
     if (!pr) { saveOrderPatch({ production_id: null }); return }
     const patch = { production_id: pr.id }
-    SHEET_FIELDS.forEach(([k, col]) => { if (PROD_LOCKED.includes(k) && pr[col] != null) patch[col] = Number(pr[col]) }) // формат листа не трогаем
+    SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(pr, col, order); if (PROD_LOCKED.includes(k) && v != null) patch[col] = Number(v) }) // формат листа не трогаем
     saveOrderPatch(patch)
   }
   function commitOffcuts(form = offForm) {
@@ -3037,9 +3039,10 @@ export default function NestingPage() {
       {/* Тип станка — общий для всех конфигураций */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)']].map(([val, label]) => (
-          <div key={val} onClick={() => { setCuttingMethod(val); saveSmallPartsSettings({ cutting_method: val }) }}
-            title={val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
+          <div key={val} onClick={() => { if (val === 'nesting' && order.material_kind === 'hdf') return; setCuttingMethod(val); saveSmallPartsSettings({ cutting_method: val }) }}
+            title={val === 'nesting' && order.material_kind === 'hdf' ? 'Материал заказа — ХДФ / ДВП: он режется только на пиле' : val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
             style={{ flex: 1, padding: '6px 4px', borderRadius: 'var(--radius)', textAlign: 'center',
+              opacity: val === 'nesting' && order.material_kind === 'hdf' ? 0.4 : 1,
               fontSize: 12, cursor: 'pointer',
               background: cuttingMethod === val ? 'var(--blue)' : 'var(--bg2)',
               color: cuttingMethod === val ? 'white' : 'var(--text-muted)', fontWeight: cuttingMethod === val ? 500 : 400 }}>
@@ -3047,6 +3050,8 @@ export default function NestingPage() {
           </div>
         ))}
       </div>
+
+      {order.material_kind === 'hdf' && <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Материал заказа — ХДФ / ДВП: раскрой только под пилу{order.production_id ? ', рез и отступы — как задало производство для этого материала' : ''}.</p>}
 
       {/* Конфигурации раскроя */}
       <p className="section-title" style={{ margin: '0 0 6px' }}>Конфигурации раскроя</p>

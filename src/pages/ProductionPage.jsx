@@ -15,6 +15,9 @@ const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit',
 const digits = v => String(v || '').replace(/\D/g, '')
 const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['done', 'Исполнены'], ['all', 'Все']]
 const MARGINS = [['kerf_width', 'Рез / фреза'], ['margin_left', 'Отступ ←'], ['margin_right', 'Отступ →'], ['margin_top', 'Отступ ↑'], ['margin_bottom', 'Отступ ↓']]
+// то же для ХДФ / ДВП (задние стенки): тонкий материал режется на пиле — рез и отступы свои
+const HDF_MARGINS = MARGINS.map(([k, l]) => ['hdf_' + k, k === 'kerf_width' ? 'Рез (пила)' : l])
+const KIND_HINT = 'Чтобы задать параметры для ХДФ и видеть число листов в заявках, выполните migration_material_kind.sql в Supabase (SQL Editor) — один раз.'
 
 export default function ProductionPage() {
   const navigate = useNavigate()
@@ -37,7 +40,7 @@ export default function ProductionPage() {
     const p = (await myProduction(user?.id)) ?? null
     setProd(p)
     if (p && (p.status ?? 'approved') === 'approved') {
-      setSheet(Object.fromEntries(MARGINS.map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
+      setSheet(Object.fromEntries([...MARGINS, ...HDF_MARGINS].map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
       if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []) }
       simShareOrders().then(setSimShares)
@@ -67,7 +70,7 @@ export default function ProductionPage() {
     if (v != null && (!isFinite(v) || v < 0)) return
     if ((prod[key] ?? null) === v) return
     const { error: e } = await supabase.from('productions').update({ [key]: v }).eq('id', prod.id)
-    if (e) setError(e.message); else setProd(p => ({ ...p, [key]: v }))
+    if (e) setError(/hdf_/.test(String(e.message)) ? KIND_HINT : e.message); else setProd(p => ({ ...p, [key]: v }))
   }
 
   const count = { new: orders.filter(o => o.status === 'new').length, work: orders.filter(o => o.status === 'discussion' || o.status === 'inwork').length, done: orders.filter(o => o.status === 'done').length, all: orders.length }
@@ -122,15 +125,21 @@ export default function ProductionPage() {
                   ))}
                 </div>
                 <details style={{ marginTop: 10 }}>
-                  <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Параметры станка (рез и отступы листа)</summary>
-                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство.</p>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {MARGINS.map(([k, l]) => (
-                      <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
-                        <input type="text" inputMode="decimal" value={sheet[k] ?? ''} onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
-                      </label>
-                    ))}
-                  </div>
+                  <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Параметры станка (рез и отступы листа) — по типу материала</summary>
+                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство, — по типу материала, который он указал в заказе.</p>
+                  {[['Плита: ЛДСП, МДФ — фрезер ЧПУ или пила', MARGINS], ['ХДФ, ДВП (задние стенки) — пила', HDF_MARGINS]].map(([title, list]) => (
+                    <div key={title} style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>{title}</div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {list.map(([k, l]) => (
+                          <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
+                            <input type="text" inputMode="decimal" value={sheet[k] ?? ''} placeholder={k.startsWith('hdf_') && prod[k.slice(4)] != null ? String(prod[k.slice(4)]) : ''} onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
                 </details>
                 <div onClick={() => setPrices(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
                   <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Прайс-лист (цены на распил, кромление, присадку)</span>
@@ -147,6 +156,7 @@ export default function ProductionPage() {
               </button>
             ))}
           </div>
+          {orders.length > 0 && 'gcode_at' in orders[0] && !('sheets' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{KIND_HINT}</p>}
           {orders.length > 0 && !('gcode_at' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{MARKS_SQL_HINT}</p>}
           {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -162,7 +172,14 @@ export default function ProductionPage() {
                       <span style={{ flex: '0 0 auto', width: 10, fontSize: 11, lineHeight: '20px', color: 'var(--text-hint)' }}>{isOpen ? '▾' : '▸'}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[o.material_name, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[o.material_name, o.material_kind === 'hdf' && 'ХДФ', o.sheets > 0 && `листов ${o.sheets}`, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
+                        {/* заказчик — сразу в карточке: имя и телефон (звонок по нажатию) */}
+                        <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {o.own ? <span style={{ color: 'var(--text-hint)' }}>Ваш собственный заказ</span> : <>
+                            <span>{o.client_name || 'Заказчик'}</span>
+                            {tel && <a href={`tel:+${tel}`} onClick={e => e.stopPropagation()} style={{ color: 'var(--blue)', marginLeft: 8 }}>{o.client_phone}</a>}
+                          </>}
+                        </div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
                         <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || o.status}</span>
@@ -183,19 +200,13 @@ export default function ProductionPage() {
                   )}
                   </div>
                   {isOpen && <>
-                  <div style={{ fontSize: 13, marginTop: 6 }}>
-                    {o.own ? <span style={{ color: 'var(--text-hint)' }}>Ваш собственный заказ</span> : <>
-                      <span>{o.client_name || 'Заказчик'}</span>
-                      {tel && <a href={`tel:+${tel}`} style={{ color: 'var(--blue)', marginLeft: 8 }}>{o.client_phone}</a>}
-                      {wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 8, fontSize: 12 }}>WhatsApp</a>}
-                    </>}
-                  </div>
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     {o.status !== 'inwork' && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять</button>}
                     {o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
                     {o.status === 'inwork' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'done')}>Исполнен</button>}
                     {o.status === 'done' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'inwork')}>Вернуть в работу</button>}
                     <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
+                    {!o.own && wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none', color: 'var(--teal)', borderColor: 'var(--teal)' }}>WhatsApp</a>}
                     {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}
                   </div>
                   </>}

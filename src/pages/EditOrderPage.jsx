@@ -1,3 +1,4 @@
+import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -269,6 +270,8 @@ export default function EditOrderPage() {
   const [activePrefix, setActivePrefix] = useState(null)
   const [edgeNames, setEdgeNames] = useState([])
   const [activeEdge, setActiveEdge] = useState(null)
+  const [materialKind, setMaterialKind] = useState('')     // '' — плита (ЛДСП, МДФ), 'hdf' — ХДФ / ДВП (только пила)
+  const kindWas = useRef('')
   // толщина, подрезка и прифуговка по видам кромки; запоминаются за аккаунтом для следующих заказов
   const [edgeTypes, setEdgeTypesState] = useState({})          // у сохранённого заказа — только свои настройки (см. fetchOrder)
   const setEdgeTypes = next => setEdgeTypesState(prev => {
@@ -285,7 +288,7 @@ export default function EditOrderPage() {
   async function fetchOrder() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
-    if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16) }
+    if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16); setMaterialKind(o.material_kind === 'hdf' ? 'hdf' : ''); kindWas.current = o.material_kind === 'hdf' ? 'hdf' : '' }
     if (o) { const saved = parseEdgeTypes(o.edge_types); if (Object.keys(saved).length) setEdgeTypesState(prev => ({ ...prev, ...saved })) }
     let loadedDetails = []
     if (d && d.length > 0) {
@@ -423,6 +426,12 @@ export default function EditOrderPage() {
         if (!oErr && Object.keys(typesToSave(edgeTypes, edgeNames)).length) window.alert(EDGE_TYPES_HINT)
       }
       if (oErr) throw new Error('Ошибка обновления заказа: ' + oErr.message)
+      // тип материала пишется отдельно и только если его меняли: нет колонки в базе — заказ всё равно сохранён
+      if (materialKind !== kindWas.current) {
+        const { error: kErr } = await supabase.from('orders').update(materialKind === 'hdf' ? { material_kind: 'hdf', cutting_method: 'guillotine' } : { material_kind: null }).eq('id', id)
+        if (kErr && materialKind === 'hdf') window.alert(KIND_SQL_HINT)
+        else kindWas.current = materialKind
+      }
       const { error: dErr } = await supabase.from('order_details').delete().eq('order_id', id)
       if (dErr) throw new Error('Ошибка удаления деталей: ' + dErr.message)
       let sortIdx = 0
@@ -471,6 +480,7 @@ export default function EditOrderPage() {
             <input type="number" placeholder="16" value={materialThickness}
               onChange={e => setMaterialThickness(e.target.value)} style={{ width:70 }} />
           </div>
+          <MaterialKind value={materialKind} onChange={setMaterialKind} style={{ marginTop: 8 }} />
         </div>
       </div>
       <div style={{ marginBottom: 14 }}>
