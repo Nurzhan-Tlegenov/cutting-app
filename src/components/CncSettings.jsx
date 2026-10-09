@@ -1,4 +1,4 @@
-import { NAME_PARTS, NAME_TPL_DEFAULT, programName } from '../lib/orderUtils'
+import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState } from 'react'
 import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, activePost, newId } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
@@ -144,8 +144,27 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           </div>
           <Hint>
             Части в фигурных скобках подставляются сами, между ними можно писать свой текст. Получится, например:{' '}
-            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16 })}.{post.ext || 'nc'}</b>.
+            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' })}.{post.ext || 'nc'}</b>.
             Название всегда латиницей; номер листа обязателен — если его убрать, он встанет в начало.
+          </Hint>
+        </div>
+        {/* название папки заказа — тот же конструктор */}
+        <div style={{ marginTop: 10 }}>
+          <label className="label">Название папки заказа</label>
+          <input type="text" key={post.id + 'f' + (post.folderTpl || '')} defaultValue={post.folderTpl || FOLDER_TPL_DEFAULT}
+            onBlur={e => { const v = e.target.value.trim() || FOLDER_TPL_DEFAULT; if (v !== post.folderTpl) set({ folderTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
+            {FOLDER_PARTS.map(([code, label]) => (
+              <button key={code} type="button" title={`Добавить в название папки: ${label}`}
+                onClick={() => { const cur = (post.folderTpl || FOLDER_TPL_DEFAULT).replace(/_+$/, ''); set({ folderTpl: cur + (cur ? '_' : '') + code }) }}
+                style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
+            ))}
+            <button type="button" onClick={() => set({ folderTpl: FOLDER_TPL_DEFAULT })} style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ как было</button>
+          </div>
+          <Hint>
+            В эту папку складываются программы и файлы бирок заказа, внутри — папка материала. Получится, например:{' '}
+            <b style={{ fontFamily: 'monospace' }}>{folderName(post.folderTpl, { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' })}</b>.
+            Имя клиента берётся из заказа; если его нет — эта часть пропускается.
           </Hint>
         </div>
         <div style={{ marginTop: 8, maxWidth: 160 }}>

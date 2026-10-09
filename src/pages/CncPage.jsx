@@ -12,7 +12,8 @@ import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, g
 import { listSharedPosts, saveSharedPost, removeSharedPost, sendNews } from '../lib/messages'
 import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
-import { orderTitle, orderFileName, toLatin, programName } from '../lib/orderUtils'
+import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
+import { orderClient } from '../lib/productionApi'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 import { productionMark, orderMarks } from '../lib/productionApi'
 import PdfSetup from '../components/PdfSetup'
@@ -45,6 +46,8 @@ export default function CncPage() {
   const labelTpl = useMemo(() => getLabelTpl(user), [user])
   const [labelBusy, setLabelBusy] = useState(false)
   const [order, setOrder] = useState(null)
+  const [clientName, setClientName] = useState('')   // имя заказчика — для названий программ и папки
+  useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }); return () => { alive = false } }, [id])
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('sheets')
@@ -109,7 +112,7 @@ export default function CncPage() {
   }, [layers, cnc])
 
   // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
-  const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness })
+  const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName })
   const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для архива, бирок, PDF
   const fileName = si => `${programName(post.nameTpl, nameCtx(si + 1))}.${post.ext || 'nc'}`
   const build = () => {
@@ -373,7 +376,7 @@ export default function CncPage() {
       )}
       {pdfAsk && mat && <PdfSetup order={order} mat={mat} method={order?.cutting_method || 'nesting'} fileName={`Karty_${baseName()}.pdf`} onClose={() => setPdfAsk(false)} />}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={savedDone}
-        folders={[orderFileName(order), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
+        folders={[folderName(post.folderTpl, nameCtx(null)), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
       <BottomNav />
     </div>
   )

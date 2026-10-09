@@ -61,19 +61,25 @@ export const orderFileName = order => toLatin(orderTitle(order)).replace(/[^\w.-
 
 // ─── Название управляющей программы: пользователь собирает его сам из частей ─────────────────────
 // Части в фигурных скобках подставляются, остальное — свой текст. Итог — строго латиницей.
-export const NAME_PARTS = [['{N}', 'номер листа'], ['{ZAKAZ}', 'название заказа'], ['{NOMER}', 'номер заказа'], ['{MAT}', 'материал'], ['{T}', 'толщина'], ['{DATA}', 'дата'], ['{LISTOV}', 'всего листов']]
+export const NAME_PARTS = [['{N}', 'номер листа'], ['{ZAKAZ}', 'название заказа'], ['{NOMER}', 'номер заказа'], ['{MAT}', 'материал'], ['{T}', 'толщина'], ['{DATA}', 'дата'], ['{LISTOV}', 'всего листов'], ['{KLIENT}', 'имя клиента']]
 export const NAME_TPL_DEFAULT = '{N}_{ZAKAZ}_{MAT}'
 const latinName = s => toLatin(String(s ?? '')).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^[_.-]+|[_.-]+$/g, '')
 /**
- * tpl — шаблон; ctx — { n (номер листа; null — общая часть имени без номера), total, order, material, thickness }.
+ * tpl — шаблон; ctx — { n (номер листа; null — общая часть имени без номера), total, order, material, thickness, client (имя заказчика) }.
  * Номер листа обязателен (иначе программы листов затрут друг друга): если его нет в шаблоне, он ставится в начало.
  */
 export function programName(tpl, ctx) {
   let t = String(tpl || '').trim() || NAME_TPL_DEFAULT
   if (!/\{N\}/i.test(t)) t = '{N}_' + t
+  return fillName(t, ctx) || (ctx.n == null ? 'zakaz' : String(ctx.n))
+}
+/** Название папки заказа при сохранении программ: тот же конструктор, но без номера листа */
+export const FOLDER_PARTS = NAME_PARTS.filter(([code]) => code !== '{N}' && code !== '{MAT}')
+export const FOLDER_TPL_DEFAULT = '{ZAKAZ}'
+export const folderName = (tpl, ctx) => fillName(String(tpl || '').trim() || FOLDER_TPL_DEFAULT, { ...ctx, n: null }) || fillName(FOLDER_TPL_DEFAULT, { ...ctx, n: null }) || 'zakaz'
+function fillName(t, ctx) {
   const d = new Date(), date = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')
   const val = { N: ctx.n == null ? '' : String(ctx.n), ZAKAZ: String(ctx.order?.order_name || '').trim() || ctx.order?.order_number || '', NOMER: ctx.order?.order_number || '',
-    MAT: ctx.material || '', T: ctx.thickness ? String(ctx.thickness).replace('.', '_') : '', DATA: date, LISTOV: ctx.total ? String(ctx.total) : '' }
-  const out = latinName(t.replace(/\{([A-Z]+)\}/gi, (m, k) => (k.toUpperCase() in val ? val[k.toUpperCase()] : '')))
-  return out || (ctx.n == null ? 'zakaz' : String(ctx.n))
+    MAT: ctx.material || '', T: ctx.thickness ? String(ctx.thickness).replace('.', '_') : '', DATA: date, LISTOV: ctx.total ? String(ctx.total) : '', KLIENT: String(ctx.client || '').trim() }
+  return latinName(t.replace(/\{([A-Z]+)\}/gi, (m, k) => (k.toUpperCase() in val ? val[k.toUpperCase()] : '')))
 }
