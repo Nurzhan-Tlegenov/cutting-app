@@ -509,6 +509,66 @@ function shortenTravel(items, from, fixed = 0) {
 }
 
 /**
+ * Насколько мелкая деталь далека от опоры — крупной детали: 1 — прилегает к крупной, 2 — к такой мелкой, и т. д.
+ * В группе соседей без крупных деталей опорой считается самая большая из них. Крупные — 0.
+ */
+function supportDepth(list, gap, near) {
+  const depth = new Map(), nb = j => list.filter(k => k !== j && gap(j, k) <= near)
+  const spread = roots => {
+    let wave = roots
+    roots.forEach(j => depth.set(j, j.small ? 1 : 0))
+    while (wave.length) {
+      const next = []
+      for (const j of wave) for (const k of nb(j)) if (!depth.has(k)) { depth.set(k, depth.get(j) + 1); next.push(k) }
+      wave = next
+    }
+  }
+  spread(list.filter(j => !j.small))
+  // группы мелких, не связанные ни с одной крупной
+  for (;;) {
+    const rest = list.filter(j => !depth.has(j))
+    if (!rest.length) break
+    spread([rest.reduce((b, j) => ((j.area || 0) > (b.area || 0) ? j : b))])
+  }
+  return depth
+}
+
+/**
+ * Мелкая деталь: контур начинается так, чтобы ПОСЛЕДНИЙ отрезок отделял её от ещё не отрезанного соседа —
+ * чем он крупнее и чем длиннее общая сторона, тем лучше. Пока фреза идёт по остальным сторонам, деталь
+ * держится за него. route — контуры в порядке реза. Если опоры нет (вокруг край листа или всё отрезано) —
+ * начало остаётся как было.
+ */
+function lastCutToSupport(route) {
+  const NEAR = 40
+  route.forEach((j, pos) => {
+    if (!j.small || !j.L || j.L.length < 3) return
+    const P = j.L, n = P.length, [x0, y0, x1, y1] = j.box, e = j.reach || 4
+    const later = route.slice(pos + 1)
+    const support = side => later.reduce((s, k) => {
+      const [a0, b0, a1, b1] = k.box
+      const d = side === 'l' ? x0 - a1 : side === 'r' ? a0 - x1 : side === 'b' ? y0 - b1 : b0 - y1
+      if (d < -1 || d > NEAR) return s
+      const ov = side === 'l' || side === 'r' ? Math.min(y1, b1) - Math.max(y0, b0) : Math.min(x1, a1) - Math.max(x0, a0)
+      return ov > 1 ? s + ov * (k.area || 0) : s
+    }, 0)
+    const score = { l: support('l'), r: support('r'), b: support('b'), t: support('t') }
+    let best = -1, bs = 0
+    for (let i = 0; i < n; i++) {
+      const a = P[(i - 1 + n) % n], b = P[i], c = P[(i + 1) % n]
+      const u = [b[0] - a[0], b[1] - a[1]], v = [c[0] - b[0], c[1] - b[1]], lu = Math.hypot(u[0], u[1]), lv = Math.hypot(v[0], v[1])
+      if (!(lu > 1e-6 && lv > 1e-6) || (u[0] * v[0] + u[1] * v[1]) / (lu * lv) >= 0.94) continue          // не угол
+      // последний отрезок приходит в точку i: на какой стороне габарита он лежит
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, flatX = Math.abs(u[0]) < 0.01 * lu, flatY = Math.abs(u[1]) < 0.01 * lu
+      const side = flatX && Math.abs(mx - x0) <= e ? 'l' : flatX && Math.abs(mx - x1) <= e ? 'r' : flatY && Math.abs(my - y0) <= e ? 'b' : flatY && Math.abs(my - y1) <= e ? 't' : null
+      const sc = side ? score[side] * Math.min(1, lu / 50) : 0
+      if (sc > bs + 1e-9) { bs = sc; best = i }
+    }
+    if (best > 0) j.restart(best)
+  })
+}
+
+/**
  * Порядок реза контуров деталей — без пробегов из конца в конец листа.
  * list: [{ at: [x, y] — точка входа, box: [x0, y0, x1, y1], edgeDist, small }], from — где сейчас фреза.
  *  • начинаем с детали у края листа, ближайшей к фрезе, и идём от соседа к соседу (каждый раз ближайшая деталь);
@@ -526,11 +586,33 @@ export function routeContours(list, from, sheetRect, smallFirst = true) {
   const cx = (sheetRect.x0 + sheetRect.x1) / 2, cy = (sheetRect.y0 + sheetRect.y1) / 2
   const mid = j => [(j.box[0] + j.box[2]) / 2, (j.box[1] + j.box[3]) / 2]
   let centre = null
-  if (n > 3) centre = list.reduce((b, j) => (!b || j.edgeDist > b.edgeDist + 1 || (Math.abs(j.edgeDist - b.edgeDist) <= 1 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
+  // при «мелкие первыми» центральной может быть только крупная деталь — иначе правила противоречили бы друг другу
+  if (n > 3) centre = (smallFirst ? list.filter(j => !j.small) : list).reduce((b, j) => (!b || j.edgeDist > b.edgeDist + 1 || (Math.abs(j.edgeDist - b.edgeDist) <= 1 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
   if (centre && centre.edgeDist < 60) centre = null     // все детали у края — центральной нет
-  // кто кого ждёт: крупная деталь — своих мелких соседей; центральная — всех
+  // кто кого ждёт: крупная деталь — ВСЕ мелкие листа; центральная — всех.
+  // Среди мелких: сначала те, что дальше от крупных деталей (считая по соседям), последними — прилегающие к крупной.
+  // Так мелкая деталь в момент реза ещё держится за нетронутого соседа, а фреза не возвращается в россыпь уже отрезанных.
   const before = new Map(list.map(j => [j, []]))
-  if (smallFirst) for (const s of list) if (s.small) for (const b of list) if (!b.small && b !== s && gap(s, b) <= NEAR) before.get(b).push(s)
+  if (smallFirst) {
+    const depth = supportDepth(list, gap, NEAR)
+    // какой долей своей длины мелкая деталь прилегает к крупным: из двух соседних мелких на одном удалении
+    // первой режется та, что держится за крупную слабее, — пока её держит и сосед
+    const hold = new Map(list.map(j => {
+      const [x0, y0, x1, y1] = j.box
+      let len = 0
+      for (const k of list) {
+        if (k === j || k.small || gap(j, k) > NEAR) continue
+        const ox = Math.min(x1, k.box[2]) - Math.max(x0, k.box[0]), oy = Math.min(y1, k.box[3]) - Math.max(y0, k.box[1])
+        len += Math.max(ox, oy, 0)
+      }
+      return [j, len / Math.max(x1 - x0, y1 - y0, 1)]
+    }))
+    for (const s of list) if (s.small) for (const b of list) {
+      if (b === s) continue
+      if (!b.small) before.get(b).push(s)
+      else if (gap(s, b) <= NEAR && (depth.get(s) > depth.get(b) || (depth.get(s) === depth.get(b) && hold.get(s) < hold.get(b) - 0.05))) before.get(b).push(s)
+    }
+  }
   if (centre) for (const j of list) if (j !== centre && !before.get(j).includes(centre)) before.get(centre).push(j)
   const valid = R => { const pos = new Map(R.map((j, i) => [j, i])); return R.every(j => before.get(j).every(q => pos.get(q) < pos.get(j))) }
   // жадный обход: ближайшая из доступных; первая — у края листа
@@ -577,6 +659,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const ops = cnc.ops
   const arcs = post.arcs === 'ij'                        // дуги — командами G2 / G3 (иначе — мелкими отрезками, см. smoothLoop)
   const smallArea = n0(ops.outer?.smallArea) > 0 ? n0(ops.outer.smallArea) : 0.12      // мельче — «мелкая деталь», режется первой
+  const smallSide = ops.outer?.smallSide === '' || ops.outer?.smallSide == null ? 150 : Math.max(0, n0(ops.outer.smallSide))   // уже — тоже «мелкая»
   const sheetRect = { x0: n0(post.originX), y0: n0(post.originY), x1: n0(post.originX) + geo.sheetW, y1: n0(post.originY) + geo.sheetL }
   const tool = id => toolById(cnc, id)
   const jobs = []                    // { stage, rank, tool, at: [x, y], area, run(out) }
@@ -656,19 +739,30 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
         if (!base) warn.add('Не удалось построить обход контура одной из деталей — она пропущена.')
         else {
           const L = orientFromInside(base.map(G), o.dir, sheetRect)
-          const area = Math.abs(signedArea(f.outline)) / 1e6, small = area <= smallArea
+          const bb = bboxOf(f.outline)
+          // мелкая деталь: по площади или узкая полоса — вакуум держит её плохо при любой длине
+          const area = Math.abs(signedArea(f.outline)) / 1e6, small = area <= smallArea || Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) <= smallSide
           const N = Math.max(1, Math.round(n0(o.passes) || 1))
-          let passes
+          let mk                                         // проходы по контуру L (и черновому Lr)
+          let Lr = null
           if (N > 1 && (!o.smallOnly || small)) {
             // первые проходы — с припуском по контуру и остатком по глубине, последний — начисто
             const allow = Math.max(0, n0(o.sideAllow)), left = Math.max(0, Math.min(T - 0.5, n0(o.leftover)))
             const rough = allow > 0 ? offsetLoop(smooth, r + allow) : null
-            const Lr = rough ? orientFromInside(rough.map(G), o.dir, sheetRect) : L
-            passes = [...levels(T, left, Math.min(n0(t.maxPass) || 1e9, (T - left) / (N - 1) + 1e-6)).map(z => ({ loop: Lr, z })), { loop: L, z: -millOver }]
-          } else passes = levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: L, z }))
-          const bb = bboxOf(f.outline)
+            Lr = rough ? orientFromInside(rough.map(G), o.dir, sheetRect) : null
+            mk = (A, B) => [...levels(T, left, Math.min(n0(t.maxPass) || 1e9, (T - left) / (N - 1) + 1e-6)).map(z => ({ loop: B || A, z })), { loop: A, z: -millOver }]
+          } else mk = A => levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: A, z }))
           const edgeDist = Math.min(geo.marginL + p.x + bb.x0, geo.sheetW - (geo.marginL + p.x + bb.x1), geo.marginB + p.y + bb.y0, geo.sheetL - (geo.marginB + p.y + bb.y1))
-          jobs.push({ stage: 1, rank: 5, tool: t, at: L[0], small, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1], run: out => cutLoop(out, passes, T, t, o, safeZ, arcs) })
+          const job = { stage: 1, rank: 5, tool: t, at: L[0], small, area, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1],
+            L, Lr, reach: r + 1.5, passes: mk(L, Lr),
+            // начать контур с другой его точки (см. lastCutToSupport): черновой контур — с ближайшей к ней
+            restart(i) {
+              this.L = [...this.L.slice(i), ...this.L.slice(0, i)]
+              if (this.Lr) { const q = this.L[0]; let k = 0, bd = Infinity; this.Lr.forEach((v, n) => { const d = Math.hypot(v[0] - q[0], v[1] - q[1]); if (d < bd) { bd = d; k = n } }); this.Lr = [...this.Lr.slice(k), ...this.Lr.slice(0, k)] }
+              this.at = this.L[0]; this.passes = mk(this.L, this.Lr)
+            },
+            run: out => cutLoop(out, job.passes, T, t, o, safeZ, arcs) }
+          jobs.push(job)
         }
       }
     }
@@ -728,6 +822,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const smallFirst = ops.outer?.smallFirst !== false
   cutTools.forEach(t => {
     const r = routeContours(stage1.filter(j => j.tool === t && j.rank === 5), cur, sheetRect, smallFirst)
+    if (smallFirst) lastCutToSupport(r)
     if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
 

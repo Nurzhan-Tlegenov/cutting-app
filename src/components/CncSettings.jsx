@@ -333,10 +333,13 @@ export function CncOps({ cnc, onChange, layers }) {
       <div className="divider" />
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
         <input type="checkbox" checked={o.smallFirst !== false} onChange={e => set('outer', { smallFirst: e.target.checked })} style={{ width: 18, height: 18 }} />
-        Мелкую деталь вырезать раньше её соседей
+        Мелкие детали вырезать первыми
       </label>
-      <Num label="Мелкая деталь — площадь до" unit="м²" value={o.smallArea} onChange={v => set('outer', { smallArea: v })}
-        hint="Контуры режутся одним кратчайшим маршрутом, без пробегов из конца в конец листа: от детали у края — к соседней, центральная деталь листа последней. Мелкая деталь (если галочка стоит) режется раньше своих соседей, пока лист вокруг неё цел. Рез начинается с угла со стороны середины листа — последним режется отрезок, отделяющий деталь от основной части листа, и деталь не сдвигается." />
+      <div className="row2">
+        <Num label="Мелкая деталь — площадь до" unit="м²" value={o.smallArea} onChange={v => set('outer', { smallArea: v })} />
+        <Num label="или ширина до" unit="мм" value={o.smallSide ?? 150} onChange={v => set('outer', { smallSide: v })} />
+      </div>
+      <Hint>Мелкой считается деталь с малой площадью или узкая полоса — вакуум держит их слабо. Если галочка стоит, сначала режутся все мелкие детали листа, и только потом крупные. Среди мелких первыми идут те, что дальше от крупных деталей, последними — прилегающие к крупной: в момент реза мелкая деталь ещё держится за нетронутого соседа. Последним у мелкой детали режется отрезок, отделяющий её от ещё не отрезанного соседа (чем он крупнее, тем лучше). Крупные детали режутся кратчайшим маршрутом, центральная деталь листа — последней.</Hint>
       <div style={{ marginTop: 8 }}>
         <Num label="Количество проходов" value={o.passes} onChange={v => set('outer', { passes: Math.max(1, Math.min(6, Math.round(Number(v) || 1))) })} />
       </div>
