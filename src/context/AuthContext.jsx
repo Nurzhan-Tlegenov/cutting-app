@@ -36,8 +36,25 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function fetchProfile(userId) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
-    setProfile(data)
+    let { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+    // Профиля нет или в нём нет имени / телефона (так бывало после регистрации по заявке) — производство тогда не видит,
+    // чей заказ. Дозаполняем: база берёт имя из заявки на регистрацию и номер входа, остальное — из данных регистрации.
+    if (!data || !String(data.full_name || '').trim() || !String(data.phone || '').trim()) {
+      try {
+        await supabase.rpc('ensure_profile')
+        const { data: u } = await supabase.auth.getUser()
+        const meta = u?.user?.user_metadata || {}
+        const { data: again } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+        if (again) {
+          data = again
+          const patch = {}
+          if (!String(again.full_name || '').trim() && meta.full_name) patch.full_name = meta.full_name
+          if (!String(again.phone || '').trim() && meta.phone) patch.phone = meta.phone
+          if (Object.keys(patch).length) { const { error } = await supabase.from('profiles').update(patch).eq('id', userId); if (!error) data = { ...again, ...patch } }
+        }
+      } catch { /* база ещё не обновлена — работаем с тем, что есть */ }
+    }
+    setProfile(data || null)
     setLoading(false)
   }
 
@@ -45,17 +62,15 @@ export function AuthProvider({ children }) {
     // Вход идёт по номеру телефона (служебный адрес собирается из него). Настоящая почта необязательна и лежит
     // в данных аккаунта (contact_email) — для восстановления пароля; на вход она не влияет.
     const contact = String(profileData.contact_email || '').trim()
-    const { data, error } = await supabase.auth.signUp({ email, password, ...(contact ? { options: { data: { contact_email: contact } } } : {}) })
+    // имя и телефон дублируются в данных аккаунта: если профиль почему-то не создастся, они не потеряются
+    const meta = { full_name: profileData.full_name || '', phone: profileData.phone || '', ...(contact ? { contact_email: contact } : {}) }
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: meta } })
     if (error) throw error
     if (data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
-        email,
-        full_name: profileData.full_name,
-        phone: profileData.phone,
-        whatsapp: profileData.whatsapp,
-        role: 'client'
-      })
+      const row = { id: data.user.id, email, full_name: profileData.full_name, phone: profileData.phone, whatsapp: profileData.whatsapp, role: 'client' }
+      const { error: pErr } = await supabase.from('profiles').insert(row)
+      // профиль не создался (например, запись уже есть пустая) — записываем те же данные обновлением
+      if (pErr) await supabase.from('profiles').update({ full_name: row.full_name, phone: row.phone, whatsapp: row.whatsapp }).eq('id', row.id)
     }
     return data
   }

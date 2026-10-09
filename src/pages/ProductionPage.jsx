@@ -181,8 +181,8 @@ export default function ProductionPage() {
                         {/* заказчик — сразу в карточке: имя и телефон (звонок по нажатию) */}
                         <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {o.own ? <span style={{ color: 'var(--text-hint)' }}>Ваш собственный заказ</span> : <>
-                            <span>{o.client_name || 'Заказчик'}</span>
-                            {tel && <a href={`tel:+${tel}`} onClick={e => e.stopPropagation()} style={{ color: 'var(--blue)', marginLeft: 8 }}>{o.client_phone}</a>}
+                            {(o.client_name || !tel) && <span style={{ marginRight: 8, color: o.client_name ? 'inherit' : 'var(--text-hint)' }}>{o.client_name || 'Заказчик не указал имя и телефон'}</span>}
+                            {tel && <a href={`tel:+${tel}`} onClick={e => e.stopPropagation()} style={{ color: 'var(--blue)' }}>{o.client_phone}</a>}
                           </>}
                         </div>
                       </div>
