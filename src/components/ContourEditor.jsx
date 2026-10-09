@@ -2401,7 +2401,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     const newVerts = [...verts]
     newVerts.splice(after ? idx + 1 : idx, 0, mid)
     setActiveVerts(newVerts)
-    setActiveIdx(after ? idx + 1 : idx)
+    setActiveIdx(after ? idx : idx + 1)   // выбранной остаётся исходная точка — от неё можно сразу строить ещё точки
   }
 
   // Удалить точку

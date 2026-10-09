@@ -534,25 +534,44 @@ function supportDepth(list, gap, near) {
 }
 
 /**
- * Мелкая деталь: контур начинается так, чтобы ПОСЛЕДНИЙ отрезок отделял её от ещё не отрезанного соседа —
- * чем он крупнее и чем длиннее общая сторона, тем лучше. Пока фреза идёт по остальным сторонам, деталь
- * держится за него. route — контуры в порядке реза. Если опоры нет (вокруг край листа или всё отрезано) —
+ * Мелкая деталь: контур начинается так, чтобы ПОСЛЕДНИЙ отрезок (на нём подача снижается до подачи выхода)
+ * шёл по стороне, вдоль которой ещё НЕ БЫЛО реза соседних деталей, и отделял деталь от самого крупного
+ * нетронутого куска — неотрезанной соседней детали или свободного листа. Стороны, где сосед уже отрезан,
+ * проходятся раньше. route — контуры в порядке реза, rect — лист. Если все стороны уже прорезаны соседями —
  * начало остаётся как было.
  */
-function lastCutToSupport(route) {
+function lastCutToSupport(route, rect) {
   const NEAR = 40
   route.forEach((j, pos) => {
     if (!j.small || !j.L || j.L.length < 3) return
     const P = j.L, n = P.length, [x0, y0, x1, y1] = j.box, e = j.reach || 4
-    const later = route.slice(pos + 1)
-    const support = side => later.reduce((s, k) => {
-      const [a0, b0, a1, b1] = k.box
-      const d = side === 'l' ? x0 - a1 : side === 'r' ? a0 - x1 : side === 'b' ? y0 - b1 : b0 - y1
-      if (d < -1 || d > NEAR) return s
-      const ov = side === 'l' || side === 'r' ? Math.min(y1, b1) - Math.max(y0, b0) : Math.min(x1, a1) - Math.max(x0, a0)
-      return ov > 1 ? s + ov * (k.area || 0) : s
-    }, 0)
-    const score = { l: support('l'), r: support('r'), b: support('b'), t: support('t') }
+    const earlier = route.slice(0, pos), later = route.slice(pos + 1)
+    const vert = side => side === 'l' || side === 'r'
+    // какая часть стороны прилегает к деталям из списка: [доля длины, сумма «длина общей стороны, м × площадь соседа, м²», длина стороны]
+    const along = (side, list) => {
+      const len = Math.max(1, vert(side) ? y1 - y0 : x1 - x0)
+      let cover = 0, mass = 0
+      for (const k of list) {
+        const [a0, b0, a1, b1] = k.box
+        const d = side === 'l' ? x0 - a1 : side === 'r' ? a0 - x1 : side === 'b' ? y0 - b1 : b0 - y1
+        if (d < -1 || d > NEAR) continue
+        const ov = vert(side) ? Math.min(y1, b1) - Math.max(y0, b0) : Math.min(x1, a1) - Math.max(x0, a0)
+        if (ov > 1) { cover += ov; mass += ov * (k.area || 0) }
+      }
+      return [Math.min(1, cover / len), mass / 1000, len]
+    }
+    // Оценка стороны как места ПОСЛЕДНЕГО реза: вдоль неё ещё не резали (соседи с этой стороны не отрезаны),
+    // и за ней — как можно более крупный нетронутый кусок: неотрезанная деталь или свободный лист до края.
+    const rate = side => {
+      const [cut] = along(side, earlier), [kept, mass, len] = along(side, later)
+      const free = 1 - cut                                // доля стороны, вдоль которой реза ещё не было
+      if (free < 0.5) return 0
+      const toEdge = rect ? Math.max(0, side === 'l' ? x0 - rect.x0 : side === 'r' ? rect.x1 - x1 : side === 'b' ? y0 - rect.y0 : rect.y1 - y1) : 0
+      // свободный лист за стороной считается так же — длина × площадь, но вдвое дешевле: что там на самом деле, неизвестно
+      const wl = Math.max(0, free - kept) * len, waste = wl / 1000 * (wl * Math.min(toEdge, 400) / 1e6) * 0.5
+      return free * (0.001 + mass + waste)
+    }
+    const score = { l: rate('l'), r: rate('r'), b: rate('b'), t: rate('t') }
     let best = -1, bs = 0
     for (let i = 0; i < n; i++) {
       const a = P[(i - 1 + n) % n], b = P[i], c = P[(i + 1) % n]
@@ -822,7 +841,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const smallFirst = ops.outer?.smallFirst !== false
   cutTools.forEach(t => {
     const r = routeContours(stage1.filter(j => j.tool === t && j.rank === 5), cur, sheetRect, smallFirst)
-    if (smallFirst) lastCutToSupport(r)
+    if (smallFirst) lastCutToSupport(r, sheetRect)
     if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
 
