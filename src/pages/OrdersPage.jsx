@@ -1,3 +1,4 @@
+import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { changedOrders, markOrdersSeen } from '../lib/notices'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -177,11 +178,11 @@ export default function OrdersPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text-muted)' }}>{order.material_name}</div>
                     {/* черновик можно править: название, материал, детали, кромку */}
-                    {order.status === 'draft' && !selectMode && (
+                    {canEditOrder(order, user, profile) && !selectMode && order.status !== 'done' && (
                       <button type="button"
-                        onClick={e => { e.stopPropagation(); navigate(`/orders/${order.id}/edit`) }}
+                        onClick={e => { e.stopPropagation(); openOrderEdit(order, navigate) }}
                         onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
-                        style={{ flexShrink: 0, padding: '4px 12px', borderRadius: 20, fontSize: 12, background: 'transparent', border: '0.5px solid var(--blue-mid)', color: 'var(--blue)', cursor: 'pointer' }}>✎ Редактировать</button>
+                        style={EDIT_BTN}>✎ Редактировать</button>
                     )}
                   </div>
                   {order.status === 'draft' && order.returned_at && (

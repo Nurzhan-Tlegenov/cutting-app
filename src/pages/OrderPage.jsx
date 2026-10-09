@@ -1,3 +1,4 @@
+import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -108,6 +109,7 @@ export default function OrderPage() {
           <div style={{ fontWeight: 600, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(order)}</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{order.material_name}</div>
         </div>
+        {!inProduction && canEditOrder(order, user, profile) && order.status !== 'done' && <button type="button" onClick={() => openOrderEdit(order, navigate)} style={EDIT_BTN}>✎ Редактировать</button>}
         {inProduction && order.status !== 'draft' && <button type="button" onClick={() => navigate('/production')} style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
           <span className={`badge ${STATUS_BADGE[order.status] || 'badge-new'}`}>

@@ -1,3 +1,4 @@
+import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -2800,7 +2801,7 @@ export default function NestingPage() {
                         ⬇ DXF
                       </button>}
                       <button onClick={() => chooseCfg(cfg)} disabled={blocked || cfg.saved}
-                        title="Сохранить этот раскрой в заказ; остальные конфигурации остаются на экране"
+                        title="Сохранить этот раскрой за заказом (заказ при этом не отправляется); остальные варианты остаются на экране"
                         style={{ flex: 1, padding: 9, borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500,
                           cursor: (blocked || cfg.saved) ? 'default' : 'pointer',
                           border: '0.5px solid var(--teal)',
@@ -2828,11 +2829,13 @@ export default function NestingPage() {
                           Бирки
                         </button>
                       </>) :
-                      <button onClick={() => submitOrder(cfg)} disabled={blocked}
-                        title="Сохранить раскрой и отправить заказ на производство"
+                      // «Выбрать» только сохраняет раскладку за заказом. Отправка — отдельным действием и только у выбранного варианта
+                      !cfg.saved ? null :
+                      <button onClick={() => { if (window.confirm('Отправить заказ на производство?\n\nПока производство не приняло заказ, его можно отозвать кнопкой «Редактировать».')) submitOrder(cfg) }} disabled={blocked}
+                        title="Отправить заказ с выбранным раскроем на производство"
                         style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
                           borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
-                        {busyId === cfg.id ? 'Отправка…' : '✓ Оформить'}
+                        {busyId === cfg.id ? 'Отправка…' : 'Отправить заказ'}
                       </button>}
                     </div>
                   )
@@ -2856,9 +2859,8 @@ export default function NestingPage() {
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{orderTitle(order)}</div>
         </div>
         {/* черновик можно править: название, материал, детали, кромку */}
-        {order?.status === 'draft' && (!order.user_id || order.user_id === user?.id || profile?.role === 'admin') && (
-          <button type="button" onClick={() => navigate(`/orders/${id}/edit`)}
-            style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px', whiteSpace: 'nowrap', cursor: 'pointer' }}>✎ Править заказ</button>
+        {cabinet !== 'production' && canEditOrder(order, user, profile) && order.status !== 'done' && (
+          <button type="button" onClick={() => openOrderEdit(order, navigate)} style={EDIT_BTN}>✎ Редактировать</button>
         )}
         {/* 3D открывается поверх страницы — раскрой при этом не сбрасывается */}
         <Model3DButton details={allDetails} title={orderTitle(order)} getScene={() => loadOrderModel(id)} orderId={id}
