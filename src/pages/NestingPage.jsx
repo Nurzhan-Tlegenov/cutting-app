@@ -11,7 +11,7 @@ import { getAllDrillPoints, getGrooveRects, rotatePointTimes, rotateEdgesTimes }
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles, placedTurns } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
-import { edgeTotals, detailEdgeList, contourSegments, segmentSide, holeEdgeSegments } from '../lib/edgeLength'
+import { edgeTotals, detailEdgeList, holeEdgeSegments } from '../lib/edgeLength'
 import { isTwoSided } from '../lib/partInfo'
 import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
@@ -28,6 +28,7 @@ import { detailHoles } from '../lib/partHoles'
 import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY } from '../lib/edgeCut'
 import { saveNestingPdf } from '../lib/nestingPdf'
 import { computeCutLines } from '../lib/cutLines'
+import { insetEdgeLines } from '../lib/edgeLines'
 import NestingCost from '../components/NestingCost'
 import { nestingStats, sumStats, statsPayload } from '../lib/nestingStats'
 import { fixOrderQuote } from '../lib/pricing'
@@ -567,7 +568,32 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       ctx.strokeStyle = EDGE_COLOR
       ctx.lineWidth = 2
       const g = EDGE_GAP
+      // у детали с контуром кромка идёт по участкам контура с тем же отступом внутрь (прямые и дуги одинаково) —
+      // на скруглённом углу без «прямоугольника» по габариту и без перехлёста; без контура — по сторонам габарита
+      let edgeLines = null
       if (showEdges) {
+        const dd = details && details[p.detailIndex]
+        if (dd && dd.contour) {
+          let cc = dd._parsedContour
+          if (cc === undefined) { try { cc = dd.contour ? JSON.parse(dd.contour) : null } catch { cc = null } dd._parsedContour = cc }
+          edgeLines = cc ? insetEdgeLines(dd, cc, g / sc) : null
+          if (edgeLines) {
+            const dW = Number(dd.width) || 0, dL = Number(dd.length) || 0, times = placedTurns(p, dd)
+            ctx.save(); ctx.lineJoin = 'round'
+            edgeLines.forEach(line => {
+              ctx.beginPath()
+              line.forEach(([qx, qy], k) => {
+                const { x: fx, y: fy } = rotatePointTimes(qx, qy, dW, dL, times)
+                const sx = x + fx * sc, sy = y + h - fy * sc
+                if (k) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy)
+              })
+              ctx.stroke()
+            })
+            ctx.restore()
+          }
+        }
+      }
+      if (showEdges && !edgeLines) {
         if (p.edgeTop) { ctx.beginPath(); ctx.moveTo(x + g, y + g); ctx.lineTo(x + w - g, y + g); ctx.stroke() }
         if (p.edgeBottom) { ctx.beginPath(); ctx.moveTo(x + g, y + h - g); ctx.lineTo(x + w - g, y + h - g); ctx.stroke() }
         if (p.edgeLeft) { ctx.beginPath(); ctx.moveTo(x + g, y + g); ctx.lineTo(x + g, y + h - g); ctx.stroke() }
@@ -588,21 +614,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           // Кромка на фигурных участках контура и на вырезах — по самой линии контура
           if (showEdges) {
             const times = placedTurns(p, detail)
-            const native = { left: detail.edge_left, right: detail.edge_right, top: detail.edge_top, bottom: detail.edge_bottom }
             ctx.save()
             ctx.strokeStyle = EDGE_COLOR; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-            contourSegments(contour.vertices).forEach(seg => {
-              if (!seg.edge) return
-              const side = segmentSide(seg, panelW, panelH)
-              if (side && native[side]) return     // вся сторона уже нарисована выше
-              ctx.beginPath()
-              seg.pts.forEach(([px, py], k) => {
-                const { x: fx, y: fy } = rotatePointTimes(px, py, panelW, panelH, times)
-                const sx = x + fx * sc, sy = y + h - fy * sc
-                if (k) ctx.lineTo(sx, sy); else ctx.moveTo(sx, sy)
-              })
-              ctx.stroke()
-            })
             // кромка на отдельных участках вырезов
             ;(contour.holes || []).forEach(hh => holeEdgeSegments(hh).forEach(seg => {
               ctx.beginPath()

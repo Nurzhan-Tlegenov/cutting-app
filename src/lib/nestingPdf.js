@@ -8,8 +8,9 @@ import { sheetGeo } from './savedNesting'
 import { placedHoles, placedTurns } from './partHoles'
 import { orderTitle } from './orderUtils'
 import { rawDetail, overMm, parseEdgeTypes } from './edgeCut'
-import { detailEdgeList, contourSegments, segmentSide, holeEdgeSegments } from './edgeLength'
+import { detailEdgeList, holeEdgeSegments } from './edgeLength'
 import { rotatePointTimes } from './drillGeometry'
+import { insetEdgeLines } from './edgeLines'
 
 const K = 1654 / 210                     // точек на мм
 const PW = 1654, PH = 2339
@@ -113,8 +114,8 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
     const seg = (ax, ay, bx2, by2) => { ctx.beginPath(); ctx.moveTo(X(px + ax), Y(py + ay)); ctx.lineTo(X(px + bx2), Y(py + by2)); ctx.stroke() }
     let contour = d?.contour
     if (typeof contour === 'string') { try { contour = JSON.parse(contour) } catch { contour = null } }
-    const segs = contour && Array.isArray(contour.vertices) && contour.vertices.length >= 3 ? contourSegments(contour.vertices).filter(sg => sg.pts.length > 1) : []
-    if (!segs.length) {
+    const edgeLines = d && contour ? insetEdgeLines(d, contour, g) : null
+    if (!edgeLines) {
       // прямоугольная деталь без контура: стороны уже повёрнуты вместе с деталью
       if (p.edgeTop) seg(g, h - g, w - g, h - g)
       if (p.edgeBottom) seg(g, g, w - g, g)
@@ -123,47 +124,13 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
     }
     if (contour) {
       const dW = Number(d.width) || 0, dL = Number(d.length) || 0, turns = placedTurns(p, d)
-      const native = { left: d.edge_left, right: d.edge_right, top: d.edge_top, bottom: d.edge_bottom }
       ctx.save(); ctx.strokeStyle = EDGE; ctx.lineWidth = mm(0.7); ctx.lineCap = 'butt'; ctx.lineJoin = 'round'
       const curve = pts => {
         ctx.beginPath()
         pts.forEach(([qx, qy], k) => { const r = rotatePointTimes(qx, qy, dW, dL, turns); if (k) ctx.lineTo(X(px + r.x), Y(py + r.y)); else ctx.moveTo(X(px + r.x), Y(py + r.y)) })
         ctx.stroke()
       }
-      // направление обхода контура — чтобы знать, где «внутрь»
-      const ring = segs.flatMap(sg => sg.pts)
-      let twice = 0
-      for (let i = 0; i < ring.length; i++) { const u = ring[i], v = ring[(i + 1) % ring.length]; twice += u[0] * v[1] - v[0] * u[1] }
-      const sign = twice >= 0 ? 1 : -1
-      const dirAt = (pts, end) => { const u = end ? pts[pts.length - 2] : pts[0], v = end ? pts[pts.length - 1] : pts[1]; const l = Math.hypot(v[0] - u[0], v[1] - u[1]) || 1; return [(v[0] - u[0]) / l, (v[1] - u[1]) / l] }
-      const sharp = (da, db) => da[0] * db[0] + da[1] * db[1] < 0.9                 // излом больше ~25° — угол, а не плавный переход
-      // укоротить ломаную на t с начала (или с конца)
-      const trim = (pts, t, fromEnd) => {
-        const q = fromEnd ? pts.slice().reverse() : pts.slice()
-        let left = t
-        while (q.length > 1) {
-          const l = Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1])
-          if (l > left) { const k = left / l; q[0] = [q[0][0] + (q[1][0] - q[0][0]) * k, q[0][1] + (q[1][1] - q[0][1]) * k]; break }
-          left -= l; q.shift()
-        }
-        return fromEnd ? q.reverse() : q
-      }
-      segs.forEach((sg, i) => {
-        const side = segmentSide(sg, dW, dL)
-        if (!((side && on(native[side])) || sg.edge)) return
-        const pts = sg.pts
-        // отступ внутрь по нормали в каждой точке
-        let line = pts.map((q, k) => {
-          const u = pts[Math.max(0, k - 1)], v = pts[Math.min(pts.length - 1, k + 1)]
-          const l = Math.hypot(v[0] - u[0], v[1] - u[1]) || 1
-          return [q[0] - (v[1] - u[1]) / l * g * sign, q[1] + (v[0] - u[0]) / l * g * sign]
-        })
-        // у острого угла линия не доходит до него на величину отступа (как у прямоугольной детали); на плавном стыке — идёт без разрыва
-        const prev = segs[(i - 1 + segs.length) % segs.length], next = segs[(i + 1) % segs.length]
-        if (sharp(dirAt(prev.pts, true), dirAt(pts, false))) line = trim(line, g, false)
-        if (sharp(dirAt(pts, true), dirAt(next.pts, false))) line = trim(line, g, true)
-        if (line.length > 1) curve(line)
-      })
+      ;(edgeLines || []).forEach(curve)
       const cut = contour.holes || []
       cut.forEach(hh => holeEdgeSegments(hh).forEach(sg => curve(sg.pts)))
       if (cut.length === holes.length) cut.forEach((hh, hi) => { if (hh.edge) { path(holes[hi]); ctx.stroke() } })   // вырез закромлен целиком

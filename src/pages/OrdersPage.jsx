@@ -1,3 +1,4 @@
+import { changedOrders, markOrdersSeen } from '../lib/notices'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -26,6 +27,7 @@ export default function OrdersPage() {
     return next
   })), [orders])
 
+  const [changed, setChanged] = useState(() => new Set())   // заказы, у которых сменился статус
   useEffect(() => { fetchOrders() }, [user])
 
   async function fetchOrders() {
@@ -34,6 +36,10 @@ export default function OrdersPage() {
     const { data } = await query
     setOrders(data || [])
     setLoading(false)
+    // у каких своих заказов статус сменился с прошлого раза — подсветить; раз список открыт, считаем их просмотренными
+    const mine = (data || []).filter(o => o.user_id === user.id)
+    setChanged(changedOrders(user.id, mine))
+    markOrdersSeen(user.id, mine)
     listShares().then(setShares)      // у каких заказов открыта ссылка на 3D-модель
     simShareOrders().then(setSimShares)
   }
@@ -161,6 +167,7 @@ export default function OrdersPage() {
                           {isSelected && <span style={{ color: 'white', fontSize: 12 }}>✓</span>}
                         </div>
                       )}
+                      {changed.has(order.id) && <span title="Статус изменился" style={{ width: 9, height: 9, borderRadius: 5, background: 'var(--danger)', flex: '0 0 auto' }} />}
                       <span style={{ fontWeight: 500, fontSize: 15, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(order)}</span>
                     </div>
                     <span className={`badge ${STATUS_BADGE[order.status] || 'badge-new'}`}>

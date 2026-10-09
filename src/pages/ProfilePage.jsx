@@ -1,3 +1,4 @@
+import { fetchNotices } from '../lib/notices'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -35,6 +36,9 @@ export default function ProfilePage() {
   }
   const navigate = useNavigate()
   const [loggingOut, setLoggingOut] = useState(false)
+  // мастер: сколько заявок на регистрацию, запросов пароля и производств ждут его решения
+  const [waiting, setWaiting] = useState(0)
+  useEffect(() => { let alive = true; if (isMaster) fetchNotices({ user, isMaster }).then(n => { if (alive) setWaiting(n.users) }); return () => { alive = false } }, [user, isMaster])
   const [mills, setMills] = useState(() => getUserSettings(user).facadeMills || [])
   useEffect(() => { let alive = true; fetchUserSettings(user).then(s => { if (alive) setMills(s.facadeMills || []) }); return () => { alive = false } }, [user])
   const removeMill = key => { const next = mills.filter(m => m.key !== key); setMills(next); saveUserSettings({ facadeMills: next }, user) }
@@ -150,7 +154,9 @@ export default function ProfilePage() {
         <button onClick={() => navigate('/users')} className="card"
           style={{ width: '100%', marginBottom: 12, textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>Пользователи и регистрация</div>
+            <div style={{ fontWeight: 500, fontSize: 15, color: 'var(--text)' }}>Пользователи и регистрация
+              {waiting > 0 && <span style={{ marginLeft: 8, padding: '1px 7px', borderRadius: 9, background: 'var(--danger)', color: 'white', fontSize: 11, fontWeight: 600 }}>ждут ответа: {waiting}</span>}
+            </div>
             <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Кто зарегистрирован и как работает, заявки, закрыть или открыть регистрацию</div>
           </div>
           <span style={{ color: 'var(--blue)', fontSize: 18 }}>→</span>

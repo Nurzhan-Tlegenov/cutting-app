@@ -138,6 +138,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
             const val = detail.edges[key]
             return (
               <button key={key} type="button" onClick={() => toggleEdge(key)}
+                onMouseDown={e => e.preventDefault()} onPointerDown={e => e.preventDefault()}  /* фокус остаётся в поле размера: клавиатура не прячется, экран не прыгает */
                 style={{ flex: 1, padding: '5px 2px', border: val ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
                   borderRadius: 'var(--radius)', background: val ? 'var(--blue-light)' : 'transparent',
                   fontSize: 10, color: val ? 'var(--blue-dark)' : 'var(--text-hint)', cursor: 'pointer', textAlign: 'center', lineHeight: 1.3 }}>

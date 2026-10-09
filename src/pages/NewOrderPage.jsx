@@ -164,6 +164,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
             const isActive = !!val
             return (
               <button key={key} type="button" onClick={() => toggleEdge(key)}
+                onMouseDown={e => e.preventDefault()} onPointerDown={e => e.preventDefault()}  /* фокус остаётся в поле размера: клавиатура не прячется, экран не прыгает */
                 style={{
                   flex: 1, padding: '5px 2px', border: isActive ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
                   borderRadius: 'var(--radius)', background: isActive ? 'var(--blue-light)' : 'transparent',
