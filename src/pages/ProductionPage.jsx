@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
 import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT } from '../lib/productionApi'
+import { archiveOrder, restoreOrder, archivedMap, keepUntil, KEEP_MONTHS } from '../lib/orderArchive'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
@@ -14,7 +15,7 @@ import PriceList from '../components/PriceList'
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
 const digits = v => String(v || '').replace(/\D/g, '')
-const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['done', 'Исполнены'], ['all', 'Все']]
+const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['done', 'Исполнены'], ['all', 'Все'], ['archive', 'Архив']]
 const MARGINS = [['kerf_width', 'Рез / фреза'], ['margin_left', 'Отступ ←'], ['margin_right', 'Отступ →'], ['margin_top', 'Отступ ↑'], ['margin_bottom', 'Отступ ↓']]
 // то же для ХДФ / ДВП (задние стенки): тонкий материал режется на пиле — рез и отступы свои
 const HDF_MARGINS = MARGINS.map(([k, l]) => ['hdf_' + k, k === 'kerf_width' ? 'Рез (пила)' : l])
@@ -36,6 +37,22 @@ export default function ProductionPage() {
   const toggle = id => setOpen(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const [sheet, setSheet] = useState({})
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
+  const [archived, setArchived] = useState(() => new Map())     // заказы в архиве: id -> когда отправлен
+  const toArchive = async o => {
+    setBusy(o.id)
+    const r = await archiveOrder(o, orderTitle(o))
+    setBusy('')
+    if (!r) return
+    if (r.error) { setError(r.error); return }
+    setArchived(m => new Map(m).set(o.id, r.at))
+  }
+  const fromArchive = async o => {
+    setBusy(o.id)
+    const r = await restoreOrder(o.id)
+    setBusy('')
+    if (r.error) { setError(r.error); return }
+    setArchived(m => { const n = new Map(m); n.delete(o.id); return n })
+  }
 
   const load = async () => {
     const p = (await myProduction(user?.id)) ?? null
@@ -43,7 +60,7 @@ export default function ProductionPage() {
     if (p && (p.status ?? 'approved') === 'approved') {
       setSheet(Object.fromEntries([...MARGINS, ...HDF_MARGINS].map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
-      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []) }
+      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []); archivedMap((r.data || []).filter(o => o.status === 'done').map(o => o.id)).then(setArchived) }
       simShareOrders().then(setSimShares)
     }
   }
@@ -78,8 +95,11 @@ export default function ProductionPage() {
     if (e) setError(/hdf_/.test(String(e.message)) ? KIND_HINT : e.message); else setProd(p => ({ ...p, [key]: v }))
   }
 
-  const count = { new: orders.filter(o => o.status === 'new').length, work: orders.filter(o => o.status === 'discussion' || o.status === 'inwork').length, done: orders.filter(o => o.status === 'done').length, all: orders.length }
-  const shown = orders.filter(o => filter === 'all' || (filter === 'new' ? o.status === 'new' : filter === 'done' ? o.status === 'done' : o.status === 'discussion' || o.status === 'inwork'))
+  // заказы в архиве — в своём разделе; в остальных разделах и счётчиках их нет
+  const live = orders.filter(o => !archived.has(o.id))
+  const count = { new: live.filter(o => o.status === 'new').length, work: live.filter(o => o.status === 'discussion' || o.status === 'inwork').length, done: live.filter(o => o.status === 'done').length, all: live.length, archive: archived.size }
+  const shown = filter === 'archive' ? orders.filter(o => archived.has(o.id))
+    : live.filter(o => filter === 'all' || (filter === 'new' ? o.status === 'new' : filter === 'done' ? o.status === 'done' : o.status === 'discussion' || o.status === 'inwork'))
   const btn = kind => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : 'var(--text-muted)' })
 
   return (
@@ -164,6 +184,12 @@ export default function ProductionPage() {
           {orders.length > 0 && 'gcode_at' in orders[0] && !('sheets' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{KIND_HINT}</p>}
           {orders.length > 0 && !('gcode_at' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{MARKS_SQL_HINT}</p>}
           {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
+          {filter === 'archive' && shown.length > 0 && <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8 }}>Заказ хранится в архиве {KEEP_MONTHS} месяца и потом удаляется полностью — в статистике остаётся только строка истории. Пока он в архиве, его можно восстановить.</p>}
+          {filter !== 'archive' && count.done > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
+              Исполненных заказов не в архиве: <b>{count.done}</b>. Отправьте их в архив — кнопка «📦 В архив» в заказе.
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {shown.map(o => {
               const tel = digits(o.client_phone), wa = digits(o.client_whatsapp) || tel
@@ -187,7 +213,7 @@ export default function ProductionPage() {
                         </div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
-                        <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || o.status}</span>
+                        <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{archived.has(o.id) ? `В архиве до ${keepUntil(archived.get(o.id)).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}` : STATUS_LABELS[o.status] || o.status}</span>
                         {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
                           <div style={{ display: 'flex', gap: 4 }}>
                             {orderMarks(o).map(m => (
@@ -209,7 +235,9 @@ export default function ProductionPage() {
                     {o.status !== 'inwork' && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять</button>}
                     {o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
                     {o.status === 'inwork' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'done')}>Исполнен</button>}
-                    {o.status === 'done' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'inwork')}>Вернуть в работу</button>}
+                    {o.status === 'done' && !archived.has(o.id) && <button type="button" disabled={busy === o.id} style={{ ...btn('main'), background: 'var(--amber)' }} onClick={() => toArchive(o)}>📦 В архив</button>}
+                    {archived.has(o.id) && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => fromArchive(o)}>↩ Восстановить из архива</button>}
+                    {o.status === 'done' && !archived.has(o.id) && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'inwork')}>Вернуть в работу</button>}
                     <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
                     {!o.own && wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none', color: 'var(--teal)', borderColor: 'var(--teal)' }}>WhatsApp</a>}
                     {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}

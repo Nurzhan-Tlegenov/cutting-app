@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { purgeArchived } from '../lib/orderArchive'
+
+let purged = false   // заказы с истёкшим сроком хранения в архиве удаляются раз за запуск приложения
 import { getUserSettings, saveUserSettings, fetchUserSettings } from '../lib/userSettings'
 
 const AuthContext = createContext(null)
@@ -36,6 +39,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function fetchProfile(userId) {
+    if (!purged) { purged = true; purgeArchived() }
     let { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
     // Профиля нет или в нём нет имени / телефона (так бывало после регистрации по заявке) — производство тогда не видит,
     // чей заказ. Дозаполняем: база берёт имя из заявки на регистрацию и номер входа, остальное — из данных регистрации.

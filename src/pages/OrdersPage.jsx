@@ -9,9 +9,10 @@ import BottomNav from '../components/BottomNav'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
+import { archiveOrder, restoreOrder, keepUntilText, daysLeft, KEEP_MONTHS } from '../lib/orderArchive'
 
 export default function OrdersPage() {
-  const { user, profile, cabinet } = useAuth()
+  const { user, profile, cabinet, isMaster } = useAuth()
   const navigate = useNavigate()
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
@@ -28,6 +29,23 @@ export default function OrdersPage() {
   })), [orders])
 
   const [changed, setChanged] = useState(() => new Set())   // заказы, у которых сменился статус
+  const [showArchive, setShowArchive] = useState(false)
+  const [archBusy, setArchBusy] = useState('')
+  const toArchive = async order => {
+    setArchBusy(order.id)
+    const r = await archiveOrder(order, orderTitle(order))
+    setArchBusy('')
+    if (!r) return
+    if (r.error) { window.alert(r.error); return }
+    setOrders(prev => prev.map(o => (o.id === order.id ? { ...o, archived_at: r.at, nesting_result: null } : o)))
+  }
+  const fromArchive = async order => {
+    setArchBusy(order.id)
+    const r = await restoreOrder(order.id)
+    setArchBusy('')
+    if (r.error) { window.alert(r.error); return }
+    setOrders(prev => prev.map(o => (o.id === order.id ? { ...o, archived_at: null } : o)))
+  }
   useEffect(() => { fetchOrders() }, [user])
 
   async function fetchOrders() {
@@ -141,8 +159,14 @@ export default function OrdersPage() {
               Удержите заказ для выбора и удаления
             </p>
           )}
+          {/* исполненные заказы просим отправить в архив: тяжёлые данные удаляются, заказ остаётся в истории */}
+          {!selectMode && orders.some(o => o.status === 'done' && !o.archived_at) && (
+            <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
+              Исполненных заказов не в архиве: <b>{orders.filter(o => o.status === 'done' && !o.archived_at).length}</b>. Отправьте их в архив — кнопка «📦 В архив» на заказе.
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {orders.map(order => {
+            {[...orders.filter(o => !o.archived_at), ...(showArchive ? orders.filter(o => o.archived_at) : [])].map(order => {
               const isSelected = selected.has(order.id)
               return (
                 <div key={order.id}
@@ -203,13 +227,34 @@ export default function OrdersPage() {
                       🔗 открыта ссылка на симуляцию{simShares.get(order.id) > 1 ? ` · ${simShares.get(order.id)}` : ''}
                     </div>
                   )}
-                  <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
-                    {new Date(order.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 11, color: order.archived_at ? 'var(--amber)' : 'var(--text-hint)' }}>
+                      {order.archived_at
+                        ? (isMaster ? 'В архиве · заказы мастер-аккаунта сами не удаляются' : `В архиве · хранится до ${keepUntilText(order.archived_at)} (осталось ${daysLeft(order.archived_at)} дн.), потом удалится`)
+                        : new Date(order.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                    {!selectMode && order.status === 'done' && (
+                      <button type="button" disabled={archBusy === order.id}
+                        onClick={e => { e.stopPropagation(); if (order.archived_at) fromArchive(order); else toArchive(order) }}
+                        onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
+                        style={order.archived_at
+                          ? { ...EDIT_BTN }
+                          : { border: 'none', background: 'var(--amber)', color: 'white', borderRadius: 'var(--radius)', padding: '5px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                        {archBusy === order.id ? '…' : order.archived_at ? '↩ Восстановить' : '📦 В архив'}
+                      </button>
+                    )}
                   </div>
                 </div>
               )
             })}
           </div>
+          {!selectMode && orders.some(o => o.archived_at) && (
+            <button type="button" onClick={() => setShowArchive(v => !v)}
+              style={{ width: '100%', marginTop: 10, padding: '9px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', textAlign: 'left' }}>
+              📦 Архив · {orders.filter(o => o.archived_at).length} {showArchive ? '▴' : '▾'}
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Заказ хранится в архиве {KEEP_MONTHS} месяца и потом удаляется. Пока он в архиве, его можно восстановить.</span>
+            </button>
+          )}
         </>
       )}
       <BottomNav />

@@ -168,7 +168,7 @@ export default function AllProductionsPage() {
                     <div key={o.id} style={{ padding: '7px 0', borderTop: '0.5px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</span>
-                        <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || o.status}</span>
+                        <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{o.deleted ? 'Удалён · история' : o.archived_at ? 'В архиве' : STATUS_LABELS[o.status] || o.status}</span>
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {date(orderDate(o))} · {o.client_name || 'Без имени'}{o.client_phone ? ` · ${o.client_phone}` : ''}
@@ -177,8 +177,8 @@ export default function AllProductionsPage() {
                         <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           листов {o.sheets || 0} · деталей {o.parts || 0} · {o.total != null ? <b style={{ color: 'var(--text)' }}>{money(o.total, o.currency)}</b> : 'цена не зафиксирована'}
                         </span>
-                        <button style={LINK} onClick={() => navigate(`/orders/${o.id}`)}>Заказ</button>
-                        <button style={LINK} onClick={() => navigate(`/orders/${o.id}/nesting`)}>Раскрой</button>
+                        {!o.deleted && <button style={LINK} onClick={() => navigate(`/orders/${o.id}`)}>Заказ</button>}
+                        {!o.deleted && <button style={LINK} onClick={() => navigate(`/orders/${o.id}/nesting`)}>Раскрой</button>}
                       </div>
                     </div>
                   ))}
