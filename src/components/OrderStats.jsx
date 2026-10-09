@@ -43,34 +43,149 @@ export function totals(list) {
 }
 const sums = o => Object.entries(o).filter(([, v]) => v > 0).map(([cur, v]) => money(v, cur)).join(' + ') || '—'
 
-export function Totals({ t }) {
-  const edge = (t.st.edge_thin_m || 0) + (t.st.edge_thick_m || 0)
-  const work = [['Рез', t.st.cut_m, 'м'], ['Кромка', edge, 'м'], ['в т. ч. криволинейная', t.st.edge_curved_m, 'м'], ['Отверстия', (t.st.holes || 0) + (t.st.edge_holes || 0), 'шт.'], ['Пазы', t.st.groove_m, 'м'],
-    ['Выемки', t.st.pockets, 'шт.'], ['Вырезы', t.st.cutouts, 'шт.'], ['Фигурные детали', t.st.shaped_parts, 'шт.']].filter(r => r[1] > 0)
+// Что показывать в итогах — пользователь отмечает галочками (см. Results). По умолчанию — всё.
+export const RESULT_ITEMS = [
+  ['counts', 'Заявки: всего, новые, в работе, исполнено'],
+  ['sumDone', 'Заработано (исполненные заказы)'],
+  ['sumWork', 'Сумма заказов в работе'],
+  ['sheets', 'Листы'],
+  ['parts', 'Детали'],
+  ['cut', 'Рез, м'],
+  ['edge', 'Кромка, м'],
+  ['edgeCurved', 'Криволинейная кромка, м'],
+  ['holes', 'Отверстия'],
+  ['grooves', 'Пазы, м'],
+  ['pockets', 'Выемки'],
+  ['cutouts', 'Вырезы'],
+  ['shaped', 'Фигурные детали'],
+  ['byOrder', 'Раскладка по заказам'],
+]
+const on = (show, k) => !show || show[k] !== false
+/** Объёмы работ из статистики заказа (или суммы по заказам): [[ключ, название, значение, единица]] — только ненулевые и отмеченные */
+function works(st, show) {
+  const s = st || {}
+  return [
+    ['cut', 'Рез', Number(s.cut_m) || 0, 'м'],
+    ['edge', 'Кромка', (Number(s.edge_thin_m) || 0) + (Number(s.edge_thick_m) || 0), 'м'],
+    ['edgeCurved', 'Кромка криволинейная', Number(s.edge_curved_m) || 0, 'м'],
+    ['holes', 'Отверстия', (Number(s.holes) || 0) + (Number(s.edge_holes) || 0), 'шт.'],
+    ['grooves', 'Пазы', Number(s.groove_m) || 0, 'м'],
+    ['pockets', 'Выемки', Number(s.pockets) || 0, 'шт.'],
+    ['cutouts', 'Вырезы', Number(s.cutouts) || 0, 'шт.'],
+    ['shaped', 'Фигурные детали', Number(s.shaped_parts) || 0, 'шт.'],
+  ].filter(r => r[2] > 0 && on(show, r[0]))
+}
+
+/** Итоги по списку заказов. show — что показывать ({ ключ: false } — скрыто), см. RESULT_ITEMS */
+export function Totals({ t, show }) {
+  const rows = [
+    on(show, 'sheets') && ['Листы', `${t.sheetsDone + t.sheetsWork}`, `исполнено ${t.sheetsDone} · в работе ${t.sheetsWork}`],
+    on(show, 'parts') && t.parts > 0 && ['Детали', n2(t.parts), ''],
+    ...works(t.st, show).map(([, l, v, u]) => [l, `${n2(v)} ${u}`, '']),
+  ].filter(Boolean)
   return (
     <>
-      <div style={{ display: 'flex', gap: 6 }}>
-        {[['Заявок', t.all], ['Новые', t.fresh], ['В работе', t.work], ['Исполнено', t.done]].map(([l, v]) => (
-          <div key={l} style={{ flex: 1, minWidth: 0, textAlign: 'center', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '4px 2px' }}>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>{v}</div>
-            <div style={{ fontSize: 10, color: 'var(--text-hint)' }}>{l}</div>
-          </div>
-        ))}
+      {on(show, 'counts') && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          {[['Заявок', t.all], ['Новые', t.fresh], ['В работе', t.work], ['Исполнено', t.done]].map(([l, v]) => (
+            <div key={l} style={{ flex: 1, minWidth: 0, textAlign: 'center', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '4px 2px' }}>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>{v}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-hint)' }}>{l}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+        {on(show, 'sumDone') && <div>Заработано (исполнено): <b>{sums(t.sumDone)}</b></div>}
+        {on(show, 'sumWork') && <div style={{ color: 'var(--text-muted)' }}>В работе: {sums(t.sumWork)}</div>}
+        {t.noPrice > 0 && (on(show, 'sumDone') || on(show, 'sumWork')) && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Без зафиксированной цены: {t.noPrice} — в суммы не вошли</div>}
       </div>
-      <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.6 }}>
-        <div>Исполнено: <b>{sums(t.sumDone)}</b> · листов <b>{t.sheetsDone}</b></div>
-        <div style={{ color: 'var(--text-muted)' }}>В работе: {sums(t.sumWork)} · листов {t.sheetsWork}</div>
-        {t.noPrice > 0 && <div style={{ fontSize: 11, color: 'var(--amber)' }}>Без зафиксированной цены: {t.noPrice} — в суммы не вошли</div>}
-      </div>
-      {work.length > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-          Принято в работу и исполнено — деталей {n2(t.parts)}{work.map(([l, v, u]) => ` · ${l.toLowerCase()} ${n2(v)} ${u}`).join('')}
+      {rows.length > 0 && (
+        <div style={{ marginTop: 6, borderTop: '0.5px solid var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '5px 0 2px' }}>Выполненные работы (принято в работу и исполнено)</div>
+          {rows.map(([l, v, note]) => (
+            <div key={l} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13, padding: '2px 0' }}>
+              <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)' }}>{l}{note && <span style={{ fontSize: 11, color: 'var(--text-hint)' }}> · {note}</span>}</span>
+              <b style={{ fontWeight: 500 }}>{v}</b>
+            </div>
+          ))}
         </div>
       )}
     </>
   )
 }
 
+const day = v => new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
+/** Раскладка по заказам: какие работы и на какую сумму сделаны по каждому принятому или исполненному заказу */
+export function OrderBreakdown({ list, show, onOpen }) {
+  const rows = list.filter(o => o.status === 'done' || o.status === 'inwork').sort((a, b) => orderDate(b) - orderDate(a))
+  if (!rows.length) return <p style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 6 }}>За этот период принятых и исполненных заказов нет.</p>
+  const money1 = on(show, 'sumDone') || on(show, 'sumWork')
+  return (
+    <div style={{ marginTop: 8, borderTop: '0.5px solid var(--border)' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '5px 0 2px' }}>По заказам · {rows.length}</div>
+      {rows.map(o => {
+        const parts = [on(show, 'sheets') && `листов ${o.sheets || 0}`, on(show, 'parts') && `деталей ${n2(o.parts)}`, ...works(o.stats, show).map(([, l, v, u]) => `${l.toLowerCase()} ${n2(v)} ${u}`)].filter(Boolean)
+        const title = String(o.order_name || '').trim() || o.order_number || 'Заказ'
+        return (
+          <div key={o.id} onClick={onOpen && !o.deleted ? () => onOpen(o) : undefined} style={{ padding: '6px 0', borderTop: '0.5px solid var(--border)', cursor: onOpen && !o.deleted ? 'pointer' : 'default' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+              {money1 && <b style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>{o.total != null ? money(o.total, o.currency) : '—'}</b>}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
+              {day(orderDate(o))} · {o.status === 'done' ? 'исполнен' : 'в работе'}{o.deleted ? ' · заказ удалён заказчиком' : ''}
+            </div>
+            {parts.length > 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{parts.join(' · ')}</div>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * «Итоги» кабинета производства: свёрнутый блок — период, итоги, раскладка по заказам и настройка, что показывать.
+ * list — строки статистики; show / onShow — отмеченные пункты (хранятся в настройках аккаунта); per — usePeriod().
+ */
+export function Results({ list, per, show, onShow, onOpen }) {
+  const [open, setOpen] = useState(() => { try { return sessionStorage.getItem('resultsOpen') === '1' } catch { return false } })
+  const [setup, setSetup] = useState(false)
+  const toggle = () => setOpen(v => { try { sessionStorage.setItem('resultsOpen', v ? '0' : '1') } catch { /* без памяти */ } return !v })
+  const inP = per.inPeriod(list), t = totals(inP)
+  const label = PERIODS.find(p => p[0] === per.period)?.[1] || ''
+  return (
+    <div style={{ marginTop: 8, border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)' }}>
+      <button type="button" onClick={toggle} aria-expanded={open}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--bg2)', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', textAlign: 'left', color: 'var(--text)' }}>
+        <span style={{ fontWeight: 500, fontSize: 14 }}>Итоги</span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {label.toLowerCase()}: исполнено {t.done}{on(show, 'sumDone') && Object.keys(t.sumDone).length ? ` · ${sums(t.sumDone)}` : ''}
+        </span>
+        <span style={{ color: 'var(--text-hint)', fontSize: 12, transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ padding: '8px 10px 10px' }}>
+          {per.picker}
+          <Totals t={t} show={show} />
+          {on(show, 'byOrder') && <OrderBreakdown list={inP} show={show} onOpen={onOpen} />}
+          <button type="button" onClick={() => setSetup(v => !v)}
+            style={{ marginTop: 10, background: 'none', border: 'none', padding: 0, color: 'var(--blue)', fontSize: 12, cursor: 'pointer' }}>⚙ Что показывать в итогах {setup ? '▴' : '▾'}</button>
+          {setup && (
+            <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 10px' }}>
+              {RESULT_ITEMS.map(([k, l]) => (
+                <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', gridColumn: k === 'counts' || k === 'byOrder' ? '1 / -1' : 'auto' }}>
+                  <input type="checkbox" checked={on(show, k)} onChange={e => onShow({ ...(show || {}), [k]: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto' }} />
+                  {l}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** Выбор периода: состояние запоминается под ключом key. -> { period, from, to, inPeriod(list), picker } */
 export function usePeriod(key, def = 'month') {

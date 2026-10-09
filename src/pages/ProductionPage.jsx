@@ -6,7 +6,8 @@ import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
 import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT, productionStats, productionArchive } from '../lib/productionApi'
-import { Totals, totals, usePeriod } from '../components/OrderStats'
+import { Results, usePeriod } from '../components/OrderStats'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
@@ -41,6 +42,9 @@ export default function ProductionPage() {
   const [stats, setStats] = useState(null)                       // строки статистики (вместе с удалёнными заказами); null — в базе её ещё нет
   const [statsHint, setStatsHint] = useState('')
   const per = usePeriod('prodStats_')
+  // что показывать в итогах — галочки, хранятся в настройках аккаунта
+  const [resShow, setResShow] = useState(() => getUserSettings(user).resultsShow || null)
+  const saveResShow = v => { setResShow(v); saveUserSettings({ resultsShow: v }, user) }
   // «В архив» у производства — убрать исполненный заказ из своих списков. Заказ клиента не трогается: он хранит его сам
   // (и при рекламации отправит заново). В статистике и в счётчике «Исполнено» заказ остаётся.
   const toArchive = async o => {
@@ -155,7 +159,7 @@ export default function ProductionPage() {
                 {/* статистика за период: заявки, в работе, исполнено, суммы, листы, объёмы работ. Исполненные считаются и после
                     архива, и после того, как клиент удалил заказ, — от него остаётся запись */}
                 <div style={{ marginTop: 8 }}>
-                  {stats ? <>{per.picker}<Totals t={totals(per.inPeriod(stats))} /></> : (
+                  {stats ? <Results list={stats} per={per} show={resShow} onShow={saveResShow} onOpen={o => navigate(`/orders/${o.id}`)} /> : (
                     <>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
                         {[['Заявок', orders.length], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', orders.filter(o => o.status === 'done').length]].map(([l, v]) => (
