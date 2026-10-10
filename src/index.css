@@ -100,3 +100,6 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 .wait-screen { animation: soft-in 0.25s ease-out; }
 .bottom-nav, .page > .bottom-nav { animation: none; }
 @media (prefers-reduced-motion: reduce) { .page > *, .wait-screen { animation: none; } }
+
+/* арабский (справа налево): телефоны, почта и коды остаются слева направо */
+[dir="rtl"] input[type="tel"], [dir="rtl"] input[type="email"], [dir="rtl"] input[inputmode="numeric"] { direction: ltr; text-align: right; }
