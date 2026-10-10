@@ -12,6 +12,7 @@ import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 import PriceList from '../components/PriceList'
+import CncSetup from '../components/CncSetup'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -34,6 +35,7 @@ export default function ProductionPage() {
   const [edit, setEdit] = useState(false)
   const [busy, setBusy] = useState('')
   const [prices, setPrices] = useState(false)       // открыт прайс-лист
+  const [postOpen, setPostOpen] = useState(false)   // развёрнуты настройки постпроцессора (свёрнуты по умолчанию)
   const [open, setOpen] = useState(() => new Set())   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
   const toggle = id => setOpen(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const [sheet, setSheet] = useState({})
@@ -189,6 +191,11 @@ export default function ProductionPage() {
                     </div>
                   ))}
                   <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
+                </details>
+                {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
+                <details style={{ marginTop: 8 }} onToggle={e => setPostOpen(e.currentTarget.open)}>
+                  <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Настройки постпроцессора (станки ЧПУ, инструменты, обработка)</summary>
+                  {postOpen && <CncSetup />}
                 </details>
                 <div onClick={() => setPrices(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
                   <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Прайс-лист (цены на распил, кромление, присадку)</span>

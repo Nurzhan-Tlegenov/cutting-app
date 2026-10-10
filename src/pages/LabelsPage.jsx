@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
-import { getCnc, activePost } from '../lib/cncSettings'
+import { getCnc, routerPost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName, toLatin, programName, folderName } from '../lib/orderUtils'
 import { orderClient } from '../lib/productionApi'
@@ -439,7 +439,7 @@ export default function LabelsPage() {
   const exportFiles = async () => {
     setBusy(true)
     try {
-      const post = activePost(getCnc(user)), base = programName(post.nameTpl, { n: null, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })   // как у программ ЧПУ
+      const post = routerPost(getCnc(user)), base = programName(post.nameTpl, { n: null, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })   // как у программ ЧПУ
       const files = await buildLabelFiles({ order, mat, base, post, tpl, sheets: mat.sheets.map((_, si) => ({ si, nc: `${programName(post.nameTpl, { n: si + 1, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })}.${post.ext || 'nc'}` })) })
       setSaveAsk({ files, zipName: `Birki_${base}.zip` })
     } finally { setBusy(false) }
@@ -611,7 +611,7 @@ export default function LabelsPage() {
         return <Suspense fallback={wait}><Model3D key={view} details={one} title={name} onClose={closeView} readOnly materialThickness={T} /></Suspense>
       })()}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)}
-        folders={[folderName(activePost(getCnc(user)).folderTpl, { total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName }), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
+        folders={[folderName(routerPost(getCnc(user)).folderTpl, { total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName }), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
     </div>
   )
 }

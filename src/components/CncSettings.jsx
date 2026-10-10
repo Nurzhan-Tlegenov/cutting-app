@@ -2,7 +2,7 @@ import { LABEL_POS, getLabelTpl } from '../lib/labelMaker'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState } from 'react'
-import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, activePost, newId } from '../lib/cncSettings'
+import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, DEFAULT_DRILL6, KINDS, isDrill6, activePost, routerPost, pickPost, toggleUse6, newId } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -74,21 +74,42 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
     if (foreign) { const p = { ...post, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: patch.name || post.name + ' (мой)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }); return }
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
   }
-  const add = () => { const p = { ...DEFAULT_POST(), name: `Постпроцессор ${cnc.posts.length + 1}` }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }) }
+  const add = kind => {
+    const p = kind === 'drill6' ? { ...DEFAULT_DRILL6(), name: `Шестисторонний ${cnc.posts.filter(isDrill6).length + 1}` } : { ...DEFAULT_POST(), name: `Постпроцессор ${cnc.posts.length + 1}` }
+    // новый присадочный сразу включён в выпуск — его и добавляют, чтобы выпускать программы
+    onChange({ ...(kind === 'drill6' ? toggleUse6(cnc, p.id, true) : cnc), posts: [...cnc.posts, p], post: p.id })
+  }
+  const drill = isDrill6(post)
+  const routers = cnc.posts.filter(p => !isDrill6(p)), drills = cnc.posts.filter(isDrill6)
+  const router = routerPost(cnc)
+  const setKind = kind => {
+    if (kind === post.kind || (kind === 'drill6') === drill) return
+    if (!drill && routers.length < 2) { window.alert('Это единственный раскроечный станок. Чтобы добавить присадочный, нажмите «+ Присадочный».'); return }
+    set(kind === 'drill6' ? { kind, ext: 'XML', nameTpl: '{ZAKAZ}' } : { kind: 'router', ext: 'nc', nameTpl: NAME_TPL_DEFAULT })
+  }
   const copy = () => { const p = { ...post, id: newId(), shared: false, forAll: false, ownerId: undefined, name: post.name + ' (копия)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }) }
-  const del = () => { if (foreign || cnc.posts.length < 2 || !window.confirm(`Удалить постпроцессор «${post.name}»?`)) return; const posts = cnc.posts.filter(p => p.id !== post.id); onChange({ ...cnc, posts, post: posts[0].id }) }
+  const del = () => {
+    if (foreign || cnc.posts.length < 2) return
+    if (!isDrill6(post) && !cnc.posts.some(p => p.id !== post.id && !isDrill6(p))) { window.alert('Это единственный раскроечный станок — его удалить нельзя.'); return }
+    if (!window.confirm(`Удалить постпроцессор «${post.name}»?`)) return
+    const posts = cnc.posts.filter(p => p.id !== post.id)
+    onChange({ ...toggleUse6(cnc, post.id, false), posts, post: posts[0].id, router: cnc.router === post.id ? '' : cnc.router })
+  }
   const small = { padding: '6px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }
   return (
     <>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Постпроцессор</Title>
-        <select value={post.id} onChange={e => onChange({ ...cnc, post: e.target.value })} style={{ marginBottom: 8 }}>
-          {cnc.posts.map(p => <option key={p.id} value={p.id}>{p.name}{p.shared || p.forAll ? ' · общий' : ''}</option>)}
+        <select value={post.id} onChange={e => onChange(pickPost(cnc, e.target.value))} style={{ marginBottom: 8 }}>
+          {cnc.posts.map(p => <option key={p.id} value={p.id}>{isDrill6(p) ? '⬡ ' : ''}{p.name}{p.shared || p.forAll ? ' · общий' : ''}</option>)}
         </select>
+        <label className="label">Тип станка</label>
+        <div style={{ marginBottom: 8 }}><Seg value={drill ? 'drill6' : 'router'} options={KINDS.map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : 'Раскроечный'])} onChange={setKind} /></div>
         <label className="label">Название</label>
         <input type="text" key={post.id} defaultValue={post.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== post.name) set({ name: v }) }} />
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-          <button type="button" style={small} onClick={add}>+ Новый</button>
+          <button type="button" style={small} onClick={() => add('router')}>+ Раскроечный</button>
+          <button type="button" style={small} onClick={() => add('drill6')}>+ Присадочный</button>
           <button type="button" style={small} onClick={copy}>Копия</button>
           {!foreign && cnc.posts.length > 1 && <button type="button" style={{ ...small, color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={del}>Удалить</button>}
         </div>
@@ -99,8 +120,30 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           </label>
         )}
         {foreign && <Hint>Это общий постпроцессор. Если изменить его настройки — у вас появится своя копия, общий останется как есть.</Hint>}
-        <Hint>Постпроцессор — это станок: его поле, высоты и команды. Инструменты и обработка контуров — общие.</Hint>
+        <Hint>Постпроцессор — это станок: его поле, высоты и команды. Инструменты и обработка контуров — общие для раскроечных станков.</Hint>
       </div>
+      {/* выпуск программ: одним раскроечным станком (G-код по листам) и сразу несколькими присадочными (файлы по деталям) */}
+      <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Выпускать программы одновременно</Title>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Раскрой — G-код по листам:</div>
+        {routers.map(p => (
+          <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0', cursor: 'pointer' }}>
+            <input type="radio" name="routerPost" checked={router?.id === p.id} onChange={() => onChange({ ...cnc, router: p.id })} style={{ width: 18, height: 18 }} />
+            {p.name}
+          </label>
+        ))}
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 4px' }}>Присадка — шестисторонний станок, файл на каждую деталь:</div>
+        {!drills.length && <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Нет присадочных станков — добавьте кнопкой «+ Присадочный».</div>}
+        {drills.map(p => (
+          <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0', cursor: 'pointer' }}>
+            <input type="checkbox" checked={(cnc.use6 || []).includes(p.id)} onChange={e => onChange(toggleUse6(cnc, p.id, e.target.checked))} style={{ width: 18, height: 18 }} />
+            {p.name}
+          </label>
+        ))}
+        <Hint>Кнопка «Создать программы» в заказе выпускает G-код выбранным раскроечным станком и, вместе с ним, файлы для каждого отмеченного присадочного.</Hint>
+      </div>
+      {drill && <Drill6Basic post={post} set={set} />}
+      {!drill && <>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Маркировочный стол</Title>
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
@@ -212,6 +255,54 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           <input type="text" key={post.id + post.ext} defaultValue={post.ext} onBlur={e => { const v = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 8); if (v && v !== post.ext) set({ ext: v }) }} />
         </div>
       </div>
+      </>}
+    </>
+  )
+}
+
+// ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
+function Drill6Basic({ post, set }) {
+  const ctx = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
+  return (
+    <>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Деталь на станке</Title>
+        <label className="label">Как лежит деталь</label>
+        <Seg value={post.d6Orient === 'asis' ? 'asis' : 'lenX'} options={[['lenX', 'Длина вдоль X'], ['asis', 'Ширина вдоль X']]} onChange={v => set({ d6Orient: v })} />
+        <Hint>Ноль — левый нижний угол детали, вид сверху. В файлах вашего станка длинная сторона (Length) идёт вдоль X — так по умолчанию.</Hint>
+        <label className="label" style={{ marginTop: 8 }}>Лицевая пласть</label>
+        <Seg value={post.d6Face === 'back' ? 'back' : 'front'} options={[['front', 'Сверху (Face 5)'], ['back', 'Снизу (Face 6)']]} onChange={v => set({ d6Face: v })} />
+        <Hint>Присадка с лицевой стороны детали идёт в верхнюю пласть (Face 5), с обратной — в нижнюю (Face 6). Если станок сверлит зеркально — переключите.</Hint>
+        <div className="row2" style={{ marginTop: 8 }}>
+          <Num label="Высота отверстий в торец" unit="мм" value={post.d6EdgeZ} onChange={v => set({ d6EdgeZ: v })} hint="от нижней пласти; пусто — середина толщины" />
+          <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', minWidth: 0 }}>Инструмент для пазов
+            <input type="text" key={post.id + (post.d6Tool || '')} defaultValue={post.d6Tool || 'T2'} onBlur={e => { const v = e.target.value.trim() || 'T2'; if (v !== post.d6Tool) set({ d6Tool: v }) }} style={{ marginTop: 3, padding: '8px 10px' }} />
+            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>как в станке, например T2</span>
+          </label>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!post.d6All} onChange={e => set({ d6All: e.target.checked })} style={{ width: 18, height: 18 }} />
+          Выводить и детали без присадки
+        </label>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Файлы</Title>
+        <label className="label">Начало названия файла</label>
+        <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || '{ZAKAZ}'}
+          onBlur={e => { const v = e.target.value.trim() || '{ZAKAZ}'; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
+          {NAME_PARTS.filter(([c]) => c !== '{N}').map(([code, label]) => (
+            <button key={code} type="button" onClick={() => { const cur = (post.nameTpl || '{ZAKAZ}').replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
+              style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
+          ))}
+        </div>
+        <Hint>Файл — на каждую деталь: начало названия, знак ^ и номер детали (позиция из модели или номер в списке). Например: <b style={{ fontFamily: 'monospace' }}>{folderName(post.nameTpl || '{ZAKAZ}', ctx)}^01.{post.ext || 'XML'}</b></Hint>
+        <div style={{ marginTop: 8, maxWidth: 160 }}>
+          <label className="label">Расширение файла</label>
+          <input type="text" key={post.id + post.ext} defaultValue={post.ext || 'XML'} onBlur={e => { const v = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 8); if (v && v !== post.ext) set({ ext: v }) }} />
+        </div>
+        <Hint>Формат SWJ (как у вашего станка): размеры детали с кромкой, отверстия в пласть сверху и снизу, отверстия в 4 торца, пазы, толщина кромки по сторонам.</Hint>
+      </div>
     </>
   )
 }
@@ -229,6 +320,12 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
       <textarea key={post.id + k} defaultValue={post[k]} rows={rows} spellCheck={false}
         onBlur={e => { if (e.target.value !== post[k]) set({ [k]: e.target.value }) }}
         style={{ fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }} />
+    </div>
+  )
+  if (isDrill6(post)) return (
+    <div className="card">
+      <Title>Команды · {post.name}</Title>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Шестисторонний станок читает программу в XML — команды G-кода ему не нужны. Настройки этого станка — на вкладке «Основные».</p>
     </div>
   )
   return (
@@ -440,7 +537,8 @@ export function CncOps({ cnc, onChange, layers }) {
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>4. Выемки</Title>
-        {!layers?.pockets.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе выемок нет.</p>}
+        {!layers && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Выемки настраиваются по глубине — в заказе, где видно, какие глубины в нём есть.</p>}
+        {layers && !layers.pockets.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе выемок нет.</p>}
         {layers?.pockets.map(l => (
           <div key={l.key} style={{ marginBottom: 8 }}>
             <label className="label">Выемка глубиной {r1(l.depth)} мм <span style={{ color: 'var(--text-hint)' }}>· {l.count} шт.</span></label>
@@ -460,7 +558,8 @@ export function CncOps({ cnc, onChange, layers }) {
       </div>
       <div className="card">
         <Title>5. Отверстия</Title>
-        {!layers?.holes.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе отверстий в пласть нет.</p>}
+        {!layers && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Отверстия по диаметру и глубине настраиваются в заказе. Если сверло не назначено — берётся сверло того же диаметра из «Инструментов».</p>}
+        {layers && !layers.holes.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе отверстий в пласть нет.</p>}
         {layers?.holes.map((l, i) => {
           const o = ops.holes?.[l.key] || {}
           const auto = holeToolFor({ key: l.key, d: l.d }, { ...cnc, ops: { ...ops, holes: { ...ops.holes, [l.key]: { ...o, tool: '' } } } })
