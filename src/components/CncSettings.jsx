@@ -267,13 +267,11 @@ function Drill6Basic({ post, set, router }) {
     <>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Деталь на станке</Title>
-        <label className="label">Как лежит деталь</label>
-        <Seg value={post.d6Orient === 'asis' ? 'asis' : 'lenX'} options={[['lenX', 'Длина вдоль X'], ['asis', 'Ширина вдоль X']]} onChange={v => set({ d6Orient: v })} />
-        <Hint>Ноль — левый нижний угол детали, вид сверху. В файлах вашего станка длинная сторона (Length) идёт вдоль X — так по умолчанию.</Hint>
         {/* лицевая пласть — синхронно с фрезерным ЧПУ, отдельной настройки нет */}
         <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px', marginTop: 8 }}>
-          Лицевая пласть — <b>сверху (Face 5)</b>, как на фрезерном ЧПУ{router ? <> «{router.name}»</> : null}: та же пласть, что лежит сверху на раскрое. Обратная — снизу (Face 6).
-          <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Сменить лицевую сторону детали — на карте раскроя (долгое нажатие на деталь): поменяется сразу и для фрезера, и для присадки. Высота отверстий в торец берётся из детали («от пласти» — от лицевой).</span>
+          Деталь кладётся на станок так же, как лежала на фрезерном ЧПУ{router ? <> «{router.name}»</> : null}: <b>лицевой пластью вверх</b> (Face 5) — той, на которую клеится этикетка. Отсканировали — и программа совпадает, переворачивать деталь не нужно.
+          <span style={{ display: 'block', marginTop: 4 }}>Положение — само: <b>длинной стороной вдоль станка</b> (по X), и если кромка с одной длинной стороны — <b>кромкой вверх</b> (Face 1). Длинная сторона — главнее.</span>
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Деталь только поворачивается, не переворачивается. Высота отверстий в торец берётся из детали («от пласти» — от лицевой).</span>
         </div>
         <div style={{ marginTop: 8 }}>
           <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', minWidth: 0, maxWidth: 200 }}>Инструмент для пазов

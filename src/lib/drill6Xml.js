@@ -37,22 +37,47 @@ function contourOf(d) {
 
 /**
  * Перевод координат детали приложения (x — ширина W, y — длина H, вид на лицевую пласть) в координаты станка.
- * orient: 'lenX' — длина детали вдоль X станка (как в образце: Length — длинная сторона), 'asis' — без поворота.
- * face:   лицевая пласть сверху (Face 5) — всегда, синхронно с фрезерным ЧПУ: на фрезере сверху лежит лицевая пласть,
- *         он сверлит только её. «Сменить лицевую сторону» на карте раскроя переворачивает саму деталь — и для фрезера,
- *         и для присадки сразу. Параметр 'back' оставлен только для проверок.
+ * turn — поворот детали в плоскости против часовой: 0, 1 (90°), 2 (180°), 3 (270°). Только поворот, без зеркала:
+ * лицевая пласть всегда сверху (Face 5) — как на фрезерном ЧПУ, где по ней клеится этикетка. Деталь со стола фрезера
+ * кладут на шестисторонний той же стороной вверх, сканируют — и программа сразу совпадает, переворачивать не нужно.
+ * face 'back' — только для проверок.
  */
-export function machineFrame(W, H, orient = 'lenX', face = 'front') {
-  const rot = orient !== 'asis'
-  const L = rot ? H : W, Wm = rot ? W : H       // Length (X станка), Width (Y станка)
+export function machineFrame(W, H, turn = 3, face = 'front') {
+  const k = ((turn % 4) + 4) % 4
+  const L = k % 2 ? H : W, Wm = k % 2 ? W : H       // Length (X станка), Width (Y станка)
   const flip = face === 'back'
   const at = (x, y) => {
-    let X = rot ? y : x, Y = rot ? W - x : y     // поворот на 90° по часовой: длина уходит вдоль X, вид сверху сохраняется
-    if (flip) Y = Wm - Y                         // перевернули деталь вокруг оси X станка
+    let X, Y
+    if (k === 0) { X = x; Y = y }
+    else if (k === 1) { X = H - y; Y = x }
+    else if (k === 2) { X = W - x; Y = H - y }
+    else { X = y; Y = W - x }
+    if (flip) Y = Wm - Y
     return [X, Y]
   }
   const faceAt = (X, Y) => (Math.abs(Y - Wm) < EPS ? 1 : Math.abs(Y) < EPS ? 2 : Math.abs(X - L) < EPS ? 3 : Math.abs(X) < EPS ? 4 : 0)
-  return { L, Wm, at, faceAt, top: flip ? 6 : 5, bottom: flip ? 5 : 6 }
+  return { L, Wm, at, faceAt, top: flip ? 6 : 5, bottom: flip ? 5 : 6, turn: k }
+}
+
+const SIDE_MID = (W, H) => ({ left: [0, H / 2], right: [W, H / 2], bottom: [W / 2, 0], top: [W / 2, H] })
+/** Кромка по торцам станка { 1..4: толщина } при данном положении детали */
+function edgesByFace(fr, W, H, et) {
+  const out = { 1: 0, 2: 0, 3: 0, 4: 0 }
+  const mid = SIDE_MID(W, H)
+  for (const s of Object.keys(mid)) { const f = fr.faceAt(...fr.at(...mid[s])); if (f) out[f] = et[s] }
+  return out
+}
+/**
+ * Как положить деталь на шестисторонний станок:
+ *   1) главное — длинной стороной вдоль станка (по X);
+ *   2) затем — кромкой вверх (к торцу Face 1, верхний край детали), если кромка с одной из длинных сторон.
+ * Если обе длинные стороны с кромкой или обе без — положение как в файлах станка (длина детали по X, поворот 270°).
+ */
+export function chooseTurn(W, H, et) {
+  const order = W > H + EPS ? [0, 2, 1, 3] : H > W + EPS ? [3, 1, 0, 2] : [3, 1, 0, 2]
+  const long = order.filter(k => { const f = machineFrame(W, H, k); return f.L >= f.Wm - EPS })
+  const up = long.find(k => { const e = edgesByFace(machineFrame(W, H, k), W, H, et); return e[1] > 0 && !(e[2] > 0) })
+  return up ?? long[0]
 }
 
 /** Толщина кромки на сторонах детали: { left, right, top, bottom } в мм (0 — без кромки) */
@@ -74,7 +99,9 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   const raw = rawDetail(d)
   const W = n0(raw.width), H = n0(raw.length)
   const c = contourOf(raw) || {}
-  const fr = machineFrame(W, H, post.d6Orient, 'front')   // лицевая — сверху, как на фрезерном ЧПУ
+  // лицевая — сверху, как на фрезерном ЧПУ; длинная сторона — вдоль станка, кромка — вверх
+  const et = edgeThick(raw, types)
+  const fr = machineFrame(W, H, chooseTurn(W, H, et), 'front')
   const warnings = []
   const top = [], bottom = [], edge = [], grooves = []
 
@@ -135,11 +162,7 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   grooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" Drill="${esc(tool)}" />`))
   bottom.forEach(hole)
 
-  // кромка: сторона детали -> торец станка (по середине стороны)
-  const et = edgeThick(raw, types)
-  const sideMid = { left: [0, H / 2], right: [W, H / 2], bottom: [W / 2, 0], top: [W / 2, H] }
-  const faceEdge = { 1: 0, 2: 0, 3: 0, 4: 0 }
-  for (const s of Object.keys(sideMid)) { const f = fr.faceAt(...fr.at(...sideMid[s])); if (f) faceEdge[f] = et[s] }
+  const faceEdge = edgesByFace(fr, W, H, et)
   const eth = v => (v > 0 ? f3(v) : '0.000000')
 
   const name = String(raw.name || '').trim() || 'Деталь'

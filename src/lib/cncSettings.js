@@ -36,7 +36,6 @@ export const DEFAULT_DRILL6 = () => ({
   ...DEFAULT_POST(), kind: 'drill6', name: 'Шестисторонний присадочный (XML)', ext: 'XML',
   nameTpl: '{ZAKAZ}',             // начало названия файла; дальше — ^номер детали
   folderTpl: '{ZAKAZ}',
-  d6Orient: 'lenX',               // 'lenX' — длина детали вдоль X станка (как в образце), 'asis' — без поворота
   d6Tool: 'T2',                   // инструмент станка для пазов
   d6All: false,                   // выводить и детали без присадки
 })
