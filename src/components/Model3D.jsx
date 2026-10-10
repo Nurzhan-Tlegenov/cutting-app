@@ -829,6 +829,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       const t = { data, size: prev?.size || 600, rot: !!prev?.rot }
       applyTex(name, t)
       const r = await saveTexture(user, name, t)
+      if (r.limit) { applyTex(name, prev || null); window.alert(r.limit); return }
       setTexCloud(r.cloud)
     } catch (err) { setError(String(err?.message || err)) } finally { setTexBusy('') }
   }

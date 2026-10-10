@@ -13,6 +13,8 @@ import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 import PriceList from '../components/PriceList'
 import CncSetup from '../components/CncSetup'
+import LimitsBar from '../components/LimitsBar'
+import { limitFromError, resetLimitsCache } from '../lib/limits'
 import Drill6Viewer from '../components/Drill6Viewer'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
@@ -92,7 +94,10 @@ export default function ProductionPage() {
     }
     const r = await productionSetStatus(o.id, status)
     setBusy('')
+    const lim = r.error && limitFromError(r.error)
+    if (lim) { window.alert(lim.text); return }      // заказ видно, а принять нельзя — предел бесплатного использования
     if (r.error) { setError(r.error); return }
+    resetLimitsCache()
     setOrders(list => list.map(x => (x.id === o.id ? { ...x, status } : x)))
     loadStats()
   }
@@ -211,6 +216,7 @@ export default function ProductionPage() {
             )}
           </div>
 
+          <LimitsBar cabinet="production" refresh={orders.map(o => o.status).join() + archived.size} />
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             {FILTERS.map(([id, label]) => (
               <button key={id} type="button" onClick={() => setFilter(id)} style={{ flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, background: filter === id ? 'var(--blue)' : 'var(--bg2)', color: filter === id ? 'white' : 'var(--text-muted)' }}>

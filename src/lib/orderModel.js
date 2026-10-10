@@ -1,12 +1,15 @@
 // 3D-модель заказа в базе: таблица order_models (см. migration_order_models.sql).
 // data — упакованная модель (packScene из basisB3d).
 import { supabase } from './supabase'
+import { limitFromError } from './limits'
 
 /** -> { ok } или { ok: false, missing: true } если таблицы ещё нет */
 export async function saveOrderModel(orderId, data) {
   if (!orderId || !data) return { ok: true }
   const { error } = await supabase.from('order_models').upsert({ order_id: orderId, data }, { onConflict: 'order_id' })
   if (!error) return { ok: true }
+  const lim = limitFromError(error)
+  if (lim) return { ok: false, limit: true, message: lim.text }
   const msg = String(error.message || '') + ' ' + String(error.code || '')
   return { ok: false, missing: /order_models|PGRST205|42P01|schema cache/i.test(msg), message: error.message }
 }

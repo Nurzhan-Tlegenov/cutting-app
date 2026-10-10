@@ -5,6 +5,8 @@ import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
+import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
+import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
 import { countryCode } from '../lib/productionLabel'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
@@ -28,9 +30,11 @@ export default function UsersPage() {
   const [land, setLand] = useState('')         // страна (обозначение) — фильтр списка
   const [town, setTown] = useState('')         // город — фильтр списка
   const [ready, setReady] = useState(false)   // база ответила: функции на месте и вы администратор
+  const [lim, setLim] = useState(null)         // лимиты: { defaults, users } или { error } — в базе ещё нет лимитов
 
   const load = async () => {
-    const [u, r, o, pr] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets()])
+    const [u, r, o, pr, lm] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits()])
+    setLim(lm.error ? { error: lm.error } : { defaults: lm.data?.defaults || {}, users: new Map((lm.data?.users || []).map(x => [x.user_id, x])) })
     setResets(pr.error ? null : pr.data || [])
     if (u.error) { setError(u.error); setReady(false); setUsers([]); return }
     setError(''); setReady(true); setUsers(u.data || []); setReqs(r.data || []); setOpen(o)
@@ -185,6 +189,8 @@ export default function UsersPage() {
               </div>
             </>
           )}
+          {lim?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{lim.error}</p>
+            : lim && <DefaultLimits key={JSON.stringify(lim.defaults)} defaults={lim.defaults} busy={busy} onSave={v => act(() => adminSetDefaultLimits(v))} />}
           <p className="section-title">Зарегистрированы ({users.length})</p>
           <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
             {[['all', `Все · ${users.length}`], ['client', `Клиенты · ${users.length - prodCount}`], ['prod', `Производства · ${prodCount}`]].map(([id, label]) => (
@@ -245,6 +251,8 @@ export default function UsersPage() {
                       Производство «{u.production_name}»{[u.production_country, u.production_city].filter(Boolean).length ? `, ${[u.production_country, u.production_city].filter(Boolean).join(', ')}` : ''}: заявок получено <b>{u.received}</b> · принято <b>{u.accepted}</b> · исполнено <b>{u.done}</b>
                     </div>
                   )}
+                  {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.defaults} isProd={isProd(u)} busy={busy}
+                    onSave={(id, unl, l) => act(() => adminSetUserLimits(id, unl, l))} />}
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                     Регистрация {date(u.created_at)} · последний вход {date(u.last_sign_in_at)} · заказов создано {u.orders}{u.submitted != null ? `, оформлено ${u.submitted}` : ''}{u.last_order_at ? ` (последний ${date(u.last_order_at)})` : ''}
                   </div>

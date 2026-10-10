@@ -4,6 +4,7 @@ import ContourEditor from '../components/ContourEditor'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { reached, limitFromError, resetLimitsCache } from '../lib/limits'
 import { getNextOrderNumber } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import { useLeaveGuard } from '../hooks/useLeaveGuard'
@@ -356,6 +357,9 @@ export default function NewOrderPage() {
   const [error, setError] = useState('')
   const [lastAddedUid, setLastAddedUid] = useState(null)
   const newDetailLengthRef = useRef(null)
+  // лимит заказов: предел достигнут — сразу говорим, до того как человек начнёт вводить заказ
+  const [limitBlock, setLimitBlock] = useState(null)
+  useEffect(() => { let alive = true; reached('orders').then(r => { if (alive) setLimitBlock(r) }); return () => { alive = false } }, [])
 
   useEffect(() => {
     const vv = window.visualViewport
@@ -509,7 +513,8 @@ export default function NewOrderPage() {
       if (model3d) { const r = await saveOrderModel(order.id, model3d); if (!r.ok) window.alert(r.missing ? MODEL_TABLE_HINT : 'Заказ сохранён, но 3D-модель сохранить не удалось: ' + r.message) }
       navigate(`/orders/${order.id}/nesting`)   // сразу к делу: статистика и детали есть и в раскрое
     } catch (err) {
-      setError(err.message)
+      const lim = limitFromError(err)
+      if (lim) { setLimitBlock(lim); resetLimitsCache() } else setError(err.message)
     } finally {
       setSaving(false)
     }
@@ -538,6 +543,16 @@ export default function NewOrderPage() {
     grouped[groupAt.get(key)][1].push(d)
   })
 
+  if (limitBlock) return (
+    <div className="page" style={{ paddingBottom: 100 }}>
+      <div className="card" style={{ marginTop: 16, border: '1px solid var(--amber)', background: 'var(--amber-light)' }}>
+        <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--amber)', marginBottom: 6 }}>Предел бесплатного использования</div>
+        <p style={{ fontSize: 13, whiteSpace: 'pre-line', marginBottom: 12 }}>{limitBlock.text}</p>
+        <button type="button" className="btn-primary" onClick={() => navigate('/orders')}>К моим заказам</button>
+      </div>
+      <BottomNav />
+    </div>
+  )
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>

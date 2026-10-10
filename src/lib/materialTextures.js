@@ -3,6 +3,7 @@
 // migration_material_textures.sql). Если таблицы ещё нет — картинки
 // сохраняются только на этом устройстве (localStorage).
 import { supabase } from './supabase'
+import { limitFromError } from './limits'
 
 const key = name => String(name || '').trim().toLowerCase()
 const lsKey = uid => 'matTextures:' + (uid || 'anon')
@@ -39,6 +40,8 @@ export async function saveTexture(user, name, tex) {
       const { error } = await supabase.from('material_textures')
         .upsert({ user_id: uid, name, data: tex.data, size_mm: tex.size, rot: !!tex.rot, updated_at: new Date().toISOString() }, { onConflict: 'user_id,name' })
       if (!error) return { ok: true, cloud: true }
+      const lim = limitFromError(error)
+      if (lim) return { ok: false, cloud: false, limit: lim.text }   // предел — на устройство тоже не сохраняем
     } catch { /* ниже — на устройство */ }
   }
   const all = readLocal(uid)

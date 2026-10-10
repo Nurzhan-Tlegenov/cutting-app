@@ -9,11 +9,19 @@ import BottomNav from '../components/BottomNav'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
+import LimitsBar from '../components/LimitsBar'
+import { myLimits, limitText } from '../lib/limits'
 import { archiveOrder, restoreOrder, deleteOrder, deleteOrderNow, canArchive, keepUntilText, daysLeft, KEEP_MONTHS } from '../lib/orderArchive'
 
 export default function OrdersPage() {
   const { user, profile, cabinet, isMaster } = useAuth()
   const navigate = useNavigate()
+  // новый заказ: предел бесплатного использования достигнут — уведомление вместо пустой формы
+  const newOrder = async () => {
+    const l = (await myLimits(true))?.limits?.orders
+    if (l && l.limit != null && l.used >= l.limit) { window.alert(limitText('orders', l.limit)); return }
+    navigate('/orders/new')
+  }
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectMode, setSelectMode] = useState(false)
@@ -141,7 +149,7 @@ export default function OrdersPage() {
         ) : (
           <>
             <h1 style={{ fontSize: 18, fontWeight: 500 }}>Мои заказы</h1>
-            <button onClick={() => navigate('/orders/new')}
+            <button onClick={newOrder}
               style={{ background: 'var(--blue)', color: 'white', border: 'none',
                 borderRadius: 'var(--radius)', padding: '8px 16px', fontSize: 14, fontWeight: 500 }}>
               + Новый
@@ -150,10 +158,11 @@ export default function OrdersPage() {
         )}
       </div>
 
+      <LimitsBar cabinet="client" refresh={orders.length} />
       {orders.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 20px' }}>
           <p style={{ color: 'var(--text-hint)', marginBottom: 16 }}>Заказов пока нет</p>
-          <button className="btn-primary" style={{ maxWidth: 200 }} onClick={() => navigate('/orders/new')}>
+          <button className="btn-primary" style={{ maxWidth: 200 }} onClick={newOrder}>
             Создать первый заказ
           </button>
         </div>
