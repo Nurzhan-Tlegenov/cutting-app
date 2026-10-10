@@ -621,7 +621,8 @@ export const labelOrder = (sheet, geo, mode = 'manual') => labelSeq(sheet, geo, 
  */
 export const LABEL_POS = [['center', 'Середина'], ['bl', 'Левый нижний'], ['br', 'Правый нижний'], ['tl', 'Левый верхний'], ['tr', 'Правый верхний']]
 export function labelPoint(x0, x1, y0, y1, pos, tpl) {
-  const hw = (Number(tpl?.w) || 0) / 2, hh = (Number(tpl?.h) || 0) / 2
+  // на маркировочном столе бирка лежит повёрнутой: ШИРИНА шаблона идёт вдоль Y стола, ВЫСОТА — вдоль X
+  const hw = (Number(tpl?.h) || 0) / 2, hh = (Number(tpl?.w) || 0) / 2
   const at = (lo, hi, half, side) => (side === 0 || hi - lo < 2 * half ? (lo + hi) / 2 : side < 0 ? lo + half : hi - half)
   const sx = pos === 'bl' || pos === 'tl' ? -1 : pos === 'br' || pos === 'tr' ? 1 : 0
   const sy = pos === 'bl' || pos === 'br' ? -1 : pos === 'tl' || pos === 'tr' ? 1 : 0

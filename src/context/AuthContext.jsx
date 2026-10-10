@@ -67,14 +67,21 @@ export function AuthProvider({ children }) {
     // в данных аккаунта (contact_email) — для восстановления пароля; на вход она не влияет.
     const contact = String(profileData.contact_email || '').trim()
     // имя и телефон дублируются в данных аккаунта: если профиль почему-то не создастся, они не потеряются
-    const meta = { full_name: profileData.full_name || '', phone: profileData.phone || '', ...(contact ? { contact_email: contact } : {}) }
+    const country = String(profileData.country || '').trim(), city = String(profileData.city || '').trim()
+    const meta = { full_name: profileData.full_name || '', phone: profileData.phone || '', country, city, ...(contact ? { contact_email: contact } : {}) }
     const { data, error } = await supabase.auth.signUp({ email, password, options: { data: meta } })
     if (error) throw error
     if (data.user) {
       const row = { id: data.user.id, email, full_name: profileData.full_name, phone: profileData.phone, whatsapp: profileData.whatsapp, role: 'client' }
-      const { error: pErr } = await supabase.from('profiles').insert(row)
+      // страна и город — в профиле (migration_user_location.sql); пока в базе нет этих колонок, они остаются в данных аккаунта
+      let { error: pErr } = await supabase.from('profiles').insert({ ...row, country, city })
+      if (pErr) ({ error: pErr } = await supabase.from('profiles').insert(row))
+      else return data
       // профиль не создался (например, запись уже есть пустая) — записываем те же данные обновлением
-      if (pErr) await supabase.from('profiles').update({ full_name: row.full_name, phone: row.phone, whatsapp: row.whatsapp }).eq('id', row.id)
+      if (pErr) {
+        await supabase.from('profiles').update({ full_name: row.full_name, phone: row.phone, whatsapp: row.whatsapp }).eq('id', row.id)
+        await supabase.from('profiles').update({ country, city }).eq('id', row.id)   // нет колонок — ошибка, это не страшно
+      }
     }
     return data
   }

@@ -19,8 +19,11 @@ export async function signupOpen() {
   return r.error ? true : r.data !== false
 }
 /** Заявка на регистрацию. -> { status: 'open' | 'new' | 'approved' | 'rejected' } | { error } */
-export async function requestSignup(name, phone, comment) {
-  const r = await call('request_signup', { p_name: name || '', p_phone: phone || '', p_comment: comment || '' })
+export async function requestSignup(name, phone, comment, country = '', city = '') {
+  let r = await call('request_signup', { p_name: name || '', p_phone: phone || '', p_comment: comment || '', p_country: country || '', p_city: city || '' })
+  // база ещё без страны и города в заявке — они уходят в комментарий, чтобы не потеряться
+  if (r.error && /PGRST202|schema cache|Could not find the function|request_signup/i.test(r.error))
+    r = await call('request_signup', { p_name: name || '', p_phone: phone || '', p_comment: [[country, city].filter(Boolean).join(', '), comment].filter(Boolean).join(' · ') })
   if (r.error) return { error: /bad phone/.test(r.error) ? 'Проверьте номер телефона' : r.error }
   return { status: r.data }
 }

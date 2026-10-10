@@ -1,4 +1,5 @@
-import { LABEL_POS } from '../lib/labelMaker'
+import { LABEL_POS, getLabelTpl } from '../lib/labelMaker'
+import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState } from 'react'
 import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, activePost, newId } from '../lib/cncSettings'
@@ -65,6 +66,8 @@ const Title = ({ children }) => <div style={{ fontWeight: 500, fontSize: 14, mar
 
 // ─── А. Основные ────────────────────────────────────────────────────────────
 export function CncBasic({ cnc, onChange, isMaster = false }) {
+  const { user } = useAuth()
+  const labelSize = (() => { const t = getLabelTpl(user); return { w: Number(t?.w) || 0, h: Number(t?.h) || 0 } })()
   const post = activePost(cnc)
   const foreign = !!post.shared && !isMaster          // общий постпроцессор: правка делает свою копию
   const set = patch => {
@@ -106,6 +109,11 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         </label>
         {post.labelTable && (
           <div style={{ marginTop: 10 }}>
+            {/* размер бирки — из шаблона бирок, здесь только для справки */}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
+              Бирка по шаблону: ширина <b>{labelSize.w}</b> мм, высота <b>{labelSize.h}</b> мм. На столе она клеится шириной вдоль Y и высотой вдоль X: по X — {labelSize.h} мм, по Y — {labelSize.w} мм.
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>Размер меняется в шаблоне бирок.</span>
+            </div>
             <label className="label">Положение бирки на детали</label>
             <select value={post.labelPos || 'center'} onChange={e => set({ labelPos: e.target.value })} style={{ marginBottom: 4 }}>
               {LABEL_POS.map(([k, l]) => <option key={k} value={k}>{l}{k === 'center' ? '' : ' угол'}</option>)}

@@ -5,6 +5,7 @@ import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
+import { countryCode } from '../lib/productionLabel'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
@@ -24,6 +25,8 @@ export default function UsersPage() {
   const [name, setName] = useState('')
   const [find, setFind] = useState('')
   const [kind, setKind] = useState('all')      // все / клиенты / производства
+  const [land, setLand] = useState('')         // страна (обозначение) — фильтр списка
+  const [town, setTown] = useState('')         // город — фильтр списка
   const [ready, setReady] = useState(false)   // база ответила: функции на месте и вы администратор
 
   const load = async () => {
@@ -50,7 +53,17 @@ export default function UsersPage() {
   const q = find.trim().toLowerCase()
   const isProd = u => !!u.production_id && (u.production_status ?? 'approved') === 'approved'
   const prodCount = (users || []).filter(isProd).length
-  const shown = (users || []).filter(u => kind === 'all' || (kind === 'prod' ? isProd(u) : !isProd(u))).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
+  // страна и город пользователя: свои, а у производства без них — из данных производства
+  const landOf = u => countryCode(u.country || u.production_country) || '—'
+  const townOf = u => String(u.city || u.production_city || '').trim() || '—'
+  const cmp = (a, b) => a.localeCompare(b, 'ru', { sensitivity: 'base' })
+  const inKind = (users || []).filter(u => kind === 'all' || (kind === 'prod' ? isProd(u) : !isProd(u)))
+  // сколько пользователей в каждой стране и городе — количество и доля
+  const tally = (list, key) => { const m = new Map(); list.forEach(u => m.set(key(u), (m.get(key(u)) || 0) + 1)); return [...m.entries()].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0])) }
+  const lands = tally(inKind, landOf), towns = land ? tally(inKind.filter(u => landOf(u) === land), townOf) : []
+  const pct = (n, of) => (of ? Math.round(n / of * 100) : 0)
+  const shown = inKind.filter(u => (!land || landOf(u) === land) && (!town || townOf(u) === town))
+    .sort((a, b) => cmp(landOf(a), landOf(b)) || cmp(townOf(a), townOf(b)) || cmp(String(a.full_name || ''), String(b.full_name || ''))).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
   const btn = (kind) => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', border: kind === 'main' ? 'none' : `0.5px solid ${kind === 'danger' ? 'var(--danger)' : 'var(--border-md)'}`, background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : kind === 'danger' ? 'var(--danger)' : 'var(--text-muted)', whiteSpace: 'nowrap' })
   const statusLabel = r => (r.registered ? 'зарегистрирован' : r.status === 'approved' ? 'одобрена — ждём регистрации' : 'отклонена')
 
@@ -121,6 +134,7 @@ export default function UsersPage() {
               <div key={r.id} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
                 <div style={{ fontSize: 14, fontWeight: 500 }}>{r.full_name || 'Без имени'}</div>
                 <div style={{ fontSize: 13 }}><a href={`tel:+${r.digits}`} style={{ color: 'var(--blue)' }}>{r.phone}</a> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· {date(r.created_at)}</span></div>
+                {(r.country || r.city) && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{[countryCode(r.country), r.city].filter(Boolean).join(' · ')}</div>}
                 {r.comment && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{r.comment}</div>}
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button type="button" disabled={busy} style={btn('main')} onClick={() => act(() => adminSetRequest(r.id, 'approved'))}>Одобрить</button>
@@ -177,6 +191,28 @@ export default function UsersPage() {
               <button key={id} type="button" onClick={() => setKind(id)} style={{ flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, background: kind === id ? 'var(--blue)' : 'var(--bg2)', color: kind === id ? 'white' : 'var(--text-muted)' }}>{label}</button>
             ))}
           </div>
+          {/* страны и города: количество и доля; нажатие оставляет в списке только их */}
+          <div className="card" style={{ padding: '8px 10px', marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>По странам{land ? ' и городам' : ''} · список отсортирован: страна, город, имя</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {lands.map(([c, n]) => (
+                <button key={c} type="button" onClick={() => { setLand(land === c ? '' : c); setTown('') }}
+                  style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: `0.5px solid ${land === c ? 'var(--blue)' : 'var(--border-md)'}`, background: land === c ? 'var(--blue)' : 'transparent', color: land === c ? 'white' : 'var(--text)' }}>
+                  {c === '—' ? 'не указана' : c} · {n} · {pct(n, inKind.length)} %
+                </button>
+              ))}
+            </div>
+            {land && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                {towns.map(([c, n]) => (
+                  <button key={c} type="button" onClick={() => setTown(town === c ? '' : c)}
+                    style={{ padding: '3px 9px', borderRadius: 14, fontSize: 11, cursor: 'pointer', border: `0.5px solid ${town === c ? 'var(--teal)' : 'var(--border-md)'}`, background: town === c ? 'var(--teal)' : 'transparent', color: town === c ? 'white' : 'var(--text-muted)' }}>
+                    {c === '—' ? 'город не указан' : c} · {n} · {pct(n, lands.find(l => l[0] === land)?.[1] || 0)} %
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {users.length > 6 && <input type="text" placeholder="Поиск: имя или телефон" value={find} onChange={e => setFind(e.target.value)} style={{ marginBottom: 8 }} />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {shown.map(u => {
@@ -187,6 +223,7 @@ export default function UsersPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || 'Без имени'}{u.id === user?.id ? ' (вы)' : ''}</div>
+                      <div style={{ fontSize: 12, color: landOf(u) === '—' ? 'var(--text-hint)' : 'var(--text-muted)' }}>{landOf(u) === '—' ? 'страна и город не указаны' : `${landOf(u)} · ${townOf(u) === '—' ? 'город не указан' : townOf(u)}`}</div>
                       <div style={{ fontSize: 13 }}>
                         {tel ? <a href={`tel:+${tel}`} style={{ color: 'var(--blue)' }}>{u.phone || `+${tel}`}</a> : <span style={{ color: 'var(--text-hint)' }}>{u.email}</span>}
                         {wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 10, fontSize: 12 }}>WhatsApp</a>}

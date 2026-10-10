@@ -3,6 +3,8 @@ import { signupOpen, requestSignup, requestPasswordReset, confirmPasswordReset }
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 
+const COUNTRIES = ['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан']
+
 export default function AuthPage() {
   const [mode, setMode] = useState('login')
   const [loading, setLoading] = useState(false)
@@ -12,7 +14,7 @@ export default function AuthPage() {
 
   const [showPass, setShowPass] = useState(false)
   const [form, setForm] = useState({
-    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: ''
+    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: '', country: '', city: ''
   })
   // Регистрация может быть закрыта: тогда новый человек оставляет заявку, а регистрируется после одобрения
   const [open, setOpen] = useState(true)
@@ -56,8 +58,10 @@ export default function AuthPage() {
       } else {
         if (!form.full_name.trim()) throw new Error('Введите имя и фамилию')
         if (!form.phone.trim()) throw new Error('Введите контактный телефон')
+        if (form.country.trim().length < 2) throw new Error('Укажите страну')
+        if (form.city.trim().length < 2) throw new Error('Укажите город')
         if (byRequest) {
-          const r = await requestSignup(form.full_name, form.phone, form.comment)
+          const r = await requestSignup(form.full_name, form.phone, form.comment, form.country.trim(), form.city.trim())
           if (r.error) throw new Error(r.error)
           if (r.status === 'approved' || r.status === 'open') { setApproved(true); setNote('Заявка одобрена. Остался один шаг: придумайте пароль и нажмите «Зарегистрироваться».') }
           else if (r.status === 'rejected') setError('Заявка для этого номера отклонена. Свяжитесь с нами.')
@@ -71,6 +75,7 @@ export default function AuthPage() {
           full_name: form.full_name,
           phone: form.phone,
           whatsapp: form.whatsapp,
+          country: form.country.trim(), city: form.city.trim(),
           contact_email: form.email
         })
       }
@@ -130,6 +135,19 @@ export default function AuthPage() {
                 onChange={e => set('phone', e.target.value)} required />
             </div>
 
+            {mode === 'register' && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <label className="label">Страна *</label>
+                  <input type="text" list="reg-countries" placeholder="Казахстан" value={form.country} onChange={e => set('country', e.target.value)} maxLength={60} required />
+                  <datalist id="reg-countries">{COUNTRIES.map(c => <option key={c} value={c} />)}</datalist>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <label className="label">Город *</label>
+                  <input type="text" placeholder="Алматы" value={form.city} onChange={e => set('city', e.target.value)} maxLength={80} required />
+                </div>
+              </div>
+            )}
             {byRequest && (
               <div>
                 <label className="label">Комментарий (кто вы, чем занимаетесь)</label>
