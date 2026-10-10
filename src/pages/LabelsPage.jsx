@@ -10,7 +10,8 @@ const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D дет�
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, QR_PARTS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import QrPartsEditor from '../components/QrPartsEditor'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, routerPost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName, toLatin, programName, folderName } from '../lib/orderUtils'
@@ -276,28 +277,9 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
                 : 'Ссылка на 3D-модель у этого заказа не открыта — в код пойдут обычные части ниже. Откройте ссылку в заказе: «3D-модель» → «Ссылка».'}
             </p>
           )}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {QR_PARTS.map(([k, label]) => {
-              const on = tpl.qr.parts.includes(k)
-              return <button key={k} type="button" style={chip(on)} onClick={() => onChange({ ...tpl, qr: { ...tpl.qr, parts: on ? tpl.qr.parts.filter(x => x !== k) : [...tpl.qr.parts, k] } })}>{on ? '✓ ' : ''}{label}</button>
-            })}
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            {tpl.qr.parts.includes('text') && (
-              <label style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Свой текст
-                <input type="text" key={'t' + tpl.qr.text} defaultValue={tpl.qr.text} onBlur={e => { if (e.target.value !== tpl.qr.text) onChange({ ...tpl, qr: { ...tpl.qr, text: e.target.value } }) }} style={{ marginTop: 3, padding: '7px 9px' }} /></label>
-            )}
-            <label style={{ flex: '0 0 96px', fontSize: 12, color: 'var(--text-muted)' }}>Разделитель
-              <input type="text" key={'s' + tpl.qr.sep} defaultValue={tpl.qr.sep} maxLength={3} onBlur={e => { if (e.target.value !== tpl.qr.sep) onChange({ ...tpl, qr: { ...tpl.qr, sep: e.target.value } }) }} style={{ marginTop: 3, padding: '7px 9px', textAlign: 'center' }} /></label>
-          </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, cursor: 'pointer', marginTop: 8 }}>
-            <input type="checkbox" checked={!!tpl.qr.latin} onChange={e => onChange({ ...tpl, qr: { ...tpl.qr, latin: e.target.checked } })} style={{ width: 17, height: 17 }} />
-            Перевести в латиницу
-          </label>
-          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Пробелы в коде всегда заменяются прочерком «_».</div>
-          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>
-            Сейчас в коде: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{mat ? labelQr(tpl, labelInfo(order, mat, 0, 0)) || '— пусто —' : '—'}</span>
-          </div>
+          {/* тот же конструктор — у имени файла присадочного станка (ЧПУ → постпроцессор присадки) */}
+          <QrPartsEditor value={tpl.qr} onChange={qr => onChange({ ...tpl, qr })} preview={mat ? labelQr(tpl, labelInfo(order, mat, 0, 0)) : null} />
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6 }}>Этот же код может быть именем файла программы шестистороннего станка: на станке бирку сканируют — открывается программа детали (настройка в постпроцессоре присадки).</div>
         </div>
       )}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на бирку</div>

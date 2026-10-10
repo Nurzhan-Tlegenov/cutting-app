@@ -35,7 +35,6 @@ const EPS = 0.05
 const n0 = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 const f3 = v => (Math.round(n0(v) * 1000) / 1000).toFixed(3)
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-const pad2 = n => String(n).padStart(2, '0')
 const latin = s => toLatin(String(s ?? '')).replace(/[^\w.^-]+/g, '_').replace(/_{2,}/g, '_').replace(/^[_.-]+|[_.-]+$/g, '')
 
 function contourOf(d) {
@@ -298,44 +297,62 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   return { xml, ops, warnings }
 }
 
-/** Начало названия файлов (и кода детали на бирке): по шаблону присадочного постпроцессора, без имени клиента */
-export function drill6Prefix(post, order, mat) {
-  const ctx = { order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, total: mat?.sheets?.length || 0 }
-  return latin(folderName(post?.nameTpl || '{NOMER}_{ZAKAZ}', ctx)) || 'zakaz'
+// ─── Имена файлов и папки ───────────────────────────────────────────────────
+// Главное — код на бирке: на станке бирку сканируют, и станок открывает файл с этим именем (у шестистороннего
+// станка код = ID детали = имя файла). Поэтому по умолчанию имя файла — это код QR с бирки (шаблон бирок).
+// Можно и своё имя — тем же конструктором, что QR бирки (например, когда бирки и программы делает другая программа,
+// а у нас только раскрой — или наоборот). Папка — свой шаблон, вложенные папки через «/».
+export const D6_QR_DEFAULT = { parts: ['order', 'sheet', 'num'], sep: '_', text: '', latin: true }
+export const D6_FOLDER_DEFAULT = '{ZAKAZ}/XML'
+const BAD_CHARS = /[\\/:*?"<>|]/g                      // в имени файла недопустимы (Windows, флешки станков)
+
+/** Настройки кода для имени файла: код бирки или свой конструктор (ссылка на 3D в имени файла невозможна) */
+export function drill6Qr(post, labelTpl) {
+  const q = post?.d6Name === 'own' ? { ...D6_QR_DEFAULT, ...post.d6Qr } : { ...D6_QR_DEFAULT, ...labelTpl?.qr }
+  return { ...q, parts: (q.parts || []).filter(k => k !== 'link') }
 }
-/**
- * Код каждой детали материала: «начало^номер» — это и имя файла (без расширения), и Panel ID, и то, что пишется в QR
- * бирки: на шестистороннем станке деталь сканируют — и открывается её программа. Номер — позиция из модели
- * (Базис / Астра), иначе порядковый номер в списке; не зависит от того, есть ли у детали присадка.
- */
-export function drill6Ids(details, prefix) {
-  const used = new Set()
-  return (details || []).map((d, i) => {
-    const meta = detailMeta(rawDetail(d))
-    let num = meta?.pos != null && String(meta.pos).trim() ? latin(String(meta.pos).trim()) : pad2(i + 1)
-    while (used.has(num)) num += '_'
-    used.add(num)
-    return `${prefix}^${num}`
-  })
+/** Вложенные папки для сохранения: шаблон «{ZAKAZ}/XML» -> ['Kuhnya', 'XML'] */
+export function drill6Folders(post, ctx) {
+  return String(post?.d6Folder ?? D6_FOLDER_DEFAULT).split('/').map(t => t.trim()).filter(Boolean)
+    .map(t => folderName(t, ctx)).filter(Boolean)
 }
 
 /**
- * Файлы для шестистороннего станка по деталям материала.
- * details — детали материала (как в раскрое; размеры берутся по готовой детали), mat — материал (для названия файлов).
- * -> { files: [{ name, data, detail, qty, ops }], skipped (без присадки), warnings }
+ * Файлы для шестистороннего станка — по каждой детали на картах раскроя (у каждой своя бирка).
+ * Имя файла и ID детали — код (как в QR бирки, см. drill6Qr). Одинаковый код у одной и той же детали — один файл;
+ * у разных деталей — к коду добавляется _2, _3 и предупреждение (код не уникален, сканер не различит детали).
+ * makeCode(si, pi, q) -> строка кода (labelQr(labelInfo(...)) — передаётся снаружи, чтобы не тянуть сюда бирки).
+ * -> { files: [{ name, data, detail, code }], skipped, warnings }
  */
-export function buildDrill6Files({ details, thickness, order, post = {}, mat = null }) {
+export function buildDrill6Files({ mat, order, post = {}, labelTpl, makeCode }) {
   const types = parseEdgeTypes(order?.edge_types)
-  const ids = drill6Ids(details, drill6Prefix(post, order, mat))
+  const T = n0(mat?.thickness) || 16
   const ext = latin(post.ext || 'XML') || 'XML'
-  const files = [], warnings = new Set()
-  let skipped = 0
-  ;(details || []).forEach((d, i) => {
-    const id = ids[i]
-    const r = panelXml(d, { T: n0(thickness) || 16, id, post, types })
-    if (!r) { skipped++; return }
-    r.warnings.forEach(w => warnings.add(`${rawDetail(d).name || 'Деталь ' + (i + 1)}: ${w}`))
-    files.push({ name: `${id}.${ext}`, data: r.xml, detail: rawDetail(d).name || '', qty: n0(d.qty) || 1, ops: r.ops })
-  })
-  return { files, skipped, warnings: [...warnings] }
+  const q = drill6Qr(post, labelTpl)
+  const files = [], warnings = new Set(), byCode = new Map(), body = new Map(), skippedDi = new Set()
+  ;(mat?.sheets || []).forEach((sh, si) => (sh.placed || []).forEach((p, pi) => {
+    const di = p.detailIndex, d = mat.details?.[di]
+    if (!d) return
+    if (!body.has(di)) body.set(di, panelXml(d, { T, id: '\u0000ID\u0000', post, types }))
+    const r = body.get(di)
+    if (!r) { skippedDi.add(di); return }
+    let code = String(makeCode?.(si, pi, q) || '').trim()
+    if (!code) { code = `L${si + 1}_N${pi + 1}`; warnings.add('код детали пуст — выберите части кода (QR бирки или своё имя файла); пока имя: L<лист>_N<деталь>') }
+    if (BAD_CHARS.test(code)) { code = code.replace(BAD_CHARS, '-'); warnings.add('в коде есть символы, недопустимые в имени файла (\\ / : * ? " < > |) — заменены на «-», имя файла не совпадёт с кодом на бирке; уберите их из кода') }
+    BAD_CHARS.lastIndex = 0
+    if (/[^\x20-\x7E]/.test(code)) warnings.add('в коде есть не латинские буквы — по спецификации станка код только из латиницы и цифр: включите «Перевести в латиницу»')
+    const was = byCode.get(code)
+    if (was === di) return                                // та же деталь с тем же кодом — один файл
+    if (was != null) {
+      let k = 2
+      while (byCode.has(`${code}_${k}`) && byCode.get(`${code}_${k}`) !== di) k++
+      warnings.add('код на бирке повторяется у разных деталей — сканер станка их не различит: добавьте в код номер карты и номер детали на листе (или обозначение)')
+      code = `${code}_${k}`
+      if (byCode.get(code) === di) return
+    }
+    byCode.set(code, di)
+    r.warnings.forEach(w => warnings.add(`${rawDetail(d).name || 'Деталь'}: ${w}`))
+    files.push({ name: `${code}.${ext}`, code, data: r.xml.replace('\u0000ID\u0000', esc(code)), detail: rawDetail(d).name || '', ops: r.ops })
+  }))
+  return { files, skipped: skippedDi.size, warnings: [...warnings] }
 }

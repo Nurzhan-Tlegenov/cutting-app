@@ -9,10 +9,10 @@ import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettin
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { routerPost, drillPosts, toggleUse6, isDrill6 } from '../lib/cncSettings'
 import { useCnc } from '../hooks/useCnc'
-import { buildDrill6Files } from '../lib/drill6Xml'
+import { buildDrill6Files, drill6Folders } from '../lib/drill6Xml'
 import Drill6Viewer from '../components/Drill6Viewer'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor } from '../lib/gcode'
-import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
+import { getLabelTpl, buildLabelFiles, labelInfo, labelQr } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
 import { orderClient } from '../lib/productionApi'
@@ -110,7 +110,7 @@ export default function CncPage() {
       return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
     })
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
-    const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ details: mat.details, thickness: mat.thickness, order, post: p, mat }) }))
+    const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
     setBuilt({ files, drill }); setSaved('')
     // маркировка: файлы маркировочного стола для тех же листов (на линии сначала бирки, потом раскрой)
     const ok = files.filter(f => !f.empty)
@@ -331,7 +331,7 @@ export default function CncPage() {
             <div key={r.post.id} className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
               <div style={{ fontSize: 13, fontWeight: 500 }}>⬡ {r.post.name}</div>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
-                {r.files.length ? `Файлов: ${r.files.length} — по одному на деталь${r.files.some(f => f.qty > 1) ? ' (деталей больше одной штуки: ' + r.files.filter(f => f.qty > 1).length + ' — программа запускается на каждую)' : ''}.` : 'Нет деталей с присадкой.'}
+                {r.files.length ? `Файлов: ${r.files.length} — по одному на каждую деталь с биркой; имя файла = код детали (${r.post.d6Name === 'own' ? 'своё имя' : 'код QR бирки'}): ${r.files[0].name}${r.files.length > 1 ? ' …' : ''}. Папка: ${r.folders.join(' / ') || '—'}.` : 'Нет деталей с обработкой.'}
                 {r.skipped > 0 ? ` Без обработки: ${r.skipped} — не выводятся.` : ''}
               </div>
               {r.warnings.length > 0 && (
@@ -343,7 +343,7 @@ export default function CncPage() {
               {r.files.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => setXmlView({ title: r.post.name, files: r.files })} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>👁 Просмотр</button>
-                  <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${baseName()}.zip`, folders: [folderName(post.folderTpl, nameCtx(null)), safeName(r.post.name).slice(0, 40) || 'drill6'] })}
+                  <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${baseName()}.zip`, folders: r.folders })}
                     style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы ({r.files.length})</button>
                   {r.files.length === 1 && <button type="button" onClick={() => { download(r.files[0].name, r.files[0].data, 'text/xml'); mark('files') }} style={small}>⬇ {r.files[0].name}</button>}
                 </div>

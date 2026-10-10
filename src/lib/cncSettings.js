@@ -37,7 +37,9 @@ export const DEFAULT_DRILL6 = () => ({
   nameTpl: '{NOMER}_{ZAKAZ}',     // начало названия файла; дальше — ^номер детали. Код детали должен быть уникален во всех заказах — поэтому с номером заказа
   folderTpl: '{ZAKAZ}',
   d6Tool: 'T2',                   // инструмент станка для пазов
-  d6All: false,                   // выводить и детали без присадки
+  d6All: false,                   // выводить и детали без обработки
+  d6Name: 'label',                // имя файла: 'label' — код QR с бирки, 'own' — свой конструктор (d6Qr), см. drill6Xml.js
+  d6Folder: '{ZAKAZ}/XML',        // папка для XML, вложенные через «/»
 })
 export const isDrill6 = p => p?.kind === 'drill6'
 export const KINDS = [['router', 'Раскроечный фрезер (G-код)'], ['drill6', 'Шестисторонний присадочный (XML)']]

@@ -1,4 +1,6 @@
-import { LABEL_POS, getLabelTpl } from '../lib/labelMaker'
+import { LABEL_POS, getLabelTpl, QR_PARTS, labelQr } from '../lib/labelMaker'
+import QrPartsEditor from './QrPartsEditor'
+import { D6_QR_DEFAULT, D6_FOLDER_DEFAULT, drill6Folders } from '../lib/drill6Xml'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState } from 'react'
@@ -262,7 +264,15 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
 
 // ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
 function Drill6Basic({ post, set, router }) {
-  const ctx = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
+  const { user } = useAuth()
+  const exampleCtx = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
+  // код с бирки: что в нём сейчас (шаблон бирок аккаунта)
+  const ltpl = getLabelTpl(user)
+  const labelQrSet = { ...D6_QR_DEFAULT, ...ltpl.qr, parts: (ltpl.qr?.parts || []).filter(k => k !== 'link') }
+  const labelQrParts = QR_PARTS.filter(([k]) => labelQrSet.parts.includes(k)).map(([, l]) => l.toLowerCase()).join(' + ')
+  const labelHasQr = (ltpl.items || []).some(i => i.type === 'qr')
+  const exampleInfo = { order: 'Кухня Ивановых', des: 'КБ.01.003', name: 'Боковина', pos: '3', prefix: 'Шкаф', materialName: 'ЛДСП Белый', length: 720, width: 560, thickness: 16, sheet: 2, num: 5 }
+  const example = q => labelQr({ qr: { ...q, parts: (q.parts || []).filter(k => k !== 'link') } }, exampleInfo)
   return (
     <>
       <div className="card" style={{ marginBottom: 10 }}>
@@ -286,17 +296,37 @@ function Drill6Basic({ post, set, router }) {
         <Hint>На станок уходит вся обработка детали: отверстия в пласти и торцы, пазы, фигурный контур, вырезы, выемки, фрезеровка фасада — даже то, что уже сделал фрезерный ЧПУ на раскрое. Лишнее отключается фильтром на стойке станка (например, всю обработку верхней пласти Face 5).</Hint>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
-        <Title>Файлы</Title>
-        <label className="label">Начало названия файла</label>
-        <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || '{NOMER}_{ZAKAZ}'}
-          onBlur={e => { const v = e.target.value.trim() || '{NOMER}_{ZAKAZ}'; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+        <Title>Имя файла и папка</Title>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+          <input type="checkbox" checked={post.d6Name !== 'own'} onChange={e => set({ d6Name: e.target.checked ? 'label' : 'own', ...(e.target.checked || post.d6Qr ? {} : { d6Qr: { ...labelQrSet } }) })} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
+          <span>Имя файла = код QR с бирки <span style={{ color: 'var(--text-hint)' }}>(рекомендуется)</span></span>
+        </label>
+        {post.d6Name !== 'own' ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px', marginTop: 8 }}>
+            Все программы присадки выпускаются с именем, которое зашито в QR-код бирки: на станке бирку сканируют — и открывается программа этой детали.
+            <span style={{ display: 'block', marginTop: 4 }}>Сейчас в QR бирки: <b>{labelQrParts || '— ничего не выбрано —'}</b>{labelQrSet.latin ? ', латиницей' : ''}. Например: <b style={{ fontFamily: 'monospace' }}>{example(labelQrSet)}.{post.ext || 'XML'}</b></span>
+            {!labelHasQr && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>На бирке сейчас нет QR-кода — добавьте его в шаблоне бирок, иначе сканировать будет нечего.</span>}
+            {!labelQrSet.latin && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>По спецификации станка код — только латиница и цифры: в шаблоне бирок включите «Перевести в латиницу».</span>}
+            {!(labelQrSet.parts || []).some(k => k === 'num' || k === 'des' || k === 'pos') && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>В коде нет номера детали — у разных деталей он может совпасть. Добавьте «Номер детали на листе» (и «Номер карты»).</span>}
+            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Код меняется в шаблоне бирок (заказ → Бирки → «Что зашито в QR-код»). Файл выпускается на каждую деталь с биркой.</span>
+          </div>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Своё имя файла — тем же конструктором, что и QR бирки. Например, когда бирки или программы делает другая программа и имена должны совпасть с её кодом.</div>
+            <QrPartsEditor value={post.d6Qr || D6_QR_DEFAULT} exclude={['link']} onChange={v => set({ d6Qr: v })} preview={`${example(post.d6Qr || D6_QR_DEFAULT)}.${post.ext || 'XML'}`} />
+          </div>
+        )}
+        <label className="label" style={{ marginTop: 12 }}>Папка для XML-файлов</label>
+        <input type="text" key={post.id + 'd6f' + (post.d6Folder ?? '')} defaultValue={post.d6Folder ?? D6_FOLDER_DEFAULT}
+          onBlur={e => { const v = e.target.value.trim(); if (v !== (post.d6Folder ?? D6_FOLDER_DEFAULT)) set({ d6Folder: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
-          {NAME_PARTS.filter(([c]) => c !== '{N}' && c !== '{KLIENT}').map(([code, label]) => (
-            <button key={code} type="button" onClick={() => { const cur = (post.nameTpl || '{NOMER}_{ZAKAZ}').replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
+          {[...NAME_PARTS.filter(([c]) => c !== '{N}'), ['/', 'вложенная папка']].map(([code, label]) => (
+            <button key={code} type="button" onClick={() => { const cur = (post.d6Folder ?? D6_FOLDER_DEFAULT).replace(/_+$/, ''); set({ d6Folder: code === '/' ? cur + '/' : cur + (cur && !cur.endsWith('/') ? '_' : '') + code }) }}
               style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
           ))}
+          <button type="button" onClick={() => set({ d6Folder: D6_FOLDER_DEFAULT })} style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ как было</button>
         </div>
-        <Hint>Файл — на каждую деталь: начало названия, знак ^ и номер детали (позиция из модели или номер в списке). Например: <b style={{ fontFamily: 'monospace' }}>{folderName(post.nameTpl || '{NOMER}_{ZAKAZ}', ctx)}^01.{post.ext || 'XML'}</b> Это же имя (без расширения) — код детали: выберите в шаблоне бирки QR «Код детали для присадочного станка» — на станке деталь сканируют, и открывается её программа.</Hint>
+        <Hint>Куда складываются XML-файлы при сохранении (и в архиве). «/» — вложенная папка; любой свой текст можно вписать. Пусто — файлы без папки. Получится, например: <b style={{ fontFamily: 'monospace' }}>{drill6Folders(post, exampleCtx).join(' / ') || '— без папки —'}</b></Hint>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
           <label className="label">Расширение файла</label>
           <input type="text" key={post.id + post.ext} defaultValue={post.ext || 'XML'} onBlur={e => { const v = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 8); if (v && v !== post.ext) set({ ext: v }) }} />
