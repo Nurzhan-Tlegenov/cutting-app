@@ -220,14 +220,13 @@ function PanelSvg({ p, filter, sel, onSel, view, upp, dims }) {
   const dim = o => (!o.gen ? 0.35 : sel != null && sel !== o.i ? 0.45 : 1)
   const isSel = o => sel === o.i
   const els = [], bandText = []
-  // кромка — цветная полоса снаружи торца и толщина рядом с ней (подпись — поверх шкал размеров)
+  // кромка — только надпись с толщиной снаружи торца (контур не подкрашивается; подпись — поверх шкал размеров)
   const band = { 1: [0, 0, L, 0], 2: [0, W, L, W], 3: [L, 0, L, W], 4: [0, 0, 0, W] }
   const out = { 1: [0, -1], 2: [0, 1], 3: [1, 0], 4: [-1, 0] }
   for (const f of [1, 2, 3, 4]) if (p.edges[f] > 0) {
-    const [x1, y1, x2, y2] = band[f], [ox, oy] = out[f], o = px(4)
-    els.push(<line key={'b' + f} x1={x1 + ox * o} y1={y1 + oy * o} x2={x2 + ox * o} y2={y2 + oy * o} stroke={C.band} strokeWidth={5} vectorEffect="non-scaling-stroke" strokeLinecap="round" />)
-    const t = px(15), cx = (x1 + x2) / 2 + ox * t, cy = (y1 + y2) / 2 + oy * t
-    bandText.push(<text key={'bt' + f} x={cx} y={cy} fontSize={px(12)} fill={C.band} fontWeight="600" textAnchor="middle" dominantBaseline="middle" stroke="var(--bg)" strokeWidth={px(4)} paintOrder="stroke"
+    const [x1, y1, x2, y2] = band[f], [ox, oy] = out[f]
+    const t = px(13), cx = (x1 + x2) / 2 + ox * t, cy = (y1 + y2) / 2 + oy * t
+    bandText.push(<text key={'bt' + f} x={cx} y={cy} fontSize={px(12)} fill="var(--text)" fontWeight="600" textAnchor="middle" dominantBaseline="middle" stroke="var(--bg)" strokeWidth={px(4)} paintOrder="stroke"
       transform={f >= 3 ? `rotate(${f === 3 ? 90 : -90} ${cx} ${cy})` : undefined}>кромка {r3(p.edges[f])}</text>)
   }
   for (const o of p.ops) {
@@ -381,7 +380,7 @@ function Preview({ p, filter, sel, onSel, focus, dims }) {
   const btn = { width: 34, height: 34, borderRadius: 17, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', fontSize: 17, lineHeight: '30px', padding: 0, boxShadow: '0 1px 3px rgba(0,0,0,.12)' }
   const tag = (f, st) => (
     <span style={{ position: 'absolute', ...st, minWidth: 20, height: 20, padding: '0 5px', borderRadius: 10, fontSize: 11, lineHeight: '20px', textAlign: 'center', pointerEvents: 'none',
-      background: p.edges[f] > 0 ? C.band : 'var(--bg)', color: p.edges[f] > 0 ? 'white' : 'var(--text-hint)', border: '0.5px solid ' + (p.edges[f] > 0 ? C.band : 'var(--border-md)') }}>{f}</span>
+      background: 'var(--bg)', color: 'var(--text-hint)', border: '0.5px solid var(--border-md)' }}>{f}</span>
   )
   return (
     <div ref={wrap} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerLeave={up}
@@ -535,7 +534,7 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8, lineHeight: 1.6 }}>
               Вид сверху, ноль — левый нижний угол.{' '}
-              <span style={{ color: C.top }}>●</span> сверху (5) · <span style={{ color: C.bottom }}>◌</span> снизу (6) · <span style={{ color: C.edge }}>▬</span> в торец · <span style={{ color: C.groove }}>▬</span> паз · <span style={{ color: C.mill }}>━</span> фрезеровка · <span style={{ color: C.band }}>━</span> кромка (толщина подписана снаружи).
+              <span style={{ color: C.top }}>●</span> сверху (5) · <span style={{ color: C.bottom }}>◌</span> снизу (6) · <span style={{ color: C.edge }}>▬</span> в торец · <span style={{ color: C.groove }}>▬</span> паз · <span style={{ color: C.mill }}>━</span> фрезеровка · кромка — толщина подписана снаружи торца.
             </div>
             <details>
               <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Исходный XML · {p.file}</summary>

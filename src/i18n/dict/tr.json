@@ -2461,5 +2461,7 @@
 "попытки исчерпаны": "deneme hakkı bitti",
 "срок вышел": "süresi doldu",
 "страна и город не указаны": "ülke ve şehir belirtilmemiş",
-"страна не указана": "ülke belirtilmemiş"
+"страна не указана": "ülke belirtilmemiş",
+"⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: «{1}» desene ters döndürülmüş",
+"кромка — толщина подписана снаружи торца.": "kenar bandı — kalınlık kenarın dışında yazılı."
 }

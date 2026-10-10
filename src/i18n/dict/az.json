@@ -2461,5 +2461,7 @@
 "попытки исчерпаны": "cəhdlər bitib",
 "срок вышел": "müddəti bitib",
 "страна и город не указаны": "ölkə və şəhər göstərilməyib",
-"страна не указана": "ölkə göstərilməyib"
+"страна не указана": "ölkə göstərilməyib",
+"⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: «{1}» teksturaya qarşı döndərilib",
+"кромка — толщина подписана снаружи торца.": "kromka — qalınlıq toretsin xaricində yazılıb."
 }

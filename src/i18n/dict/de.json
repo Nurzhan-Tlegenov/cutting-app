@@ -2461,5 +2461,7 @@
 "попытки исчерпаны": "Versuche aufgebraucht",
 "срок вышел": "abgelaufen",
 "страна и город не указаны": "Land und Stadt nicht angegeben",
-"страна не указана": "Land nicht angegeben"
+"страна не указана": "Land nicht angegeben",
+"⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: «{1}» ist gegen die Faser gedreht",
+"кромка — толщина подписана снаружи торца.": "Kante — Stärke außen an der Schmalseite angegeben."
 }

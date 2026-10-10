@@ -5,7 +5,7 @@
 //   1. все детали заказа на листах, ни одна не потеряна и не задвоена;
 //   2. ни одна деталь не выходит за рабочую зону (отступы от края листа);
 //   3. между деталями выдержан зазор на рез (у фигурных — по реальному контуру);
-//   4. размеры деталей совпадают с заказом, запрет поворота соблюдён;
+//   4. размеры деталей совпадают с заказом (поворот против текстуры — только предупреждение: решает заказчик);
 //   5. для пилы (форматника) — каждый лист режется сквозными резами.
 //
 // Координаты — как во всех данных раскроя: мм, Y вверх от низа рабочей зоны;
@@ -74,6 +74,7 @@ function guillotineOk(rects, kerf) {
  */
 export function validateNesting({ sheets, details, usableX, usableY, kerf, cuttingMethod = 'nesting' }) {
   const errors = []
+  const warnings = []   // не мешают сохранить и отправить раскрой
   const name = p => ((p.prefix ? p.prefix + ' ' : '') + String(p.label || details[p.detailIndex]?.display_name || details[p.detailIndex]?.name || 'деталь')).trim()
   const cap = 30 // не заваливаем экран — показываем первые ошибки
   const push = s => { if (errors.length < cap) errors.push(s) }
@@ -112,7 +113,8 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
         const sameDims = (Math.abs(p.origX - W) <= EPS && Math.abs(p.origY - H) <= EPS)
         const turned = (Math.abs(p.origX - H) <= EPS && Math.abs(p.origY - W) <= EPS)
         if (!sameDims && !turned) push(`${L}: «${name(p)}» ${Math.round(p.origY)}×${Math.round(p.origX)} не совпадает с заказом ${H}×${W}`)
-        else if (!d.rotatable && !sameDims && W !== H) push(`${L}: «${name(p)}» повёрнута, хотя вращать её нельзя (текстура)`)
+        // повёрнута против текстуры — это решение заказчика (например, чтобы сэкономить лист): не ошибка, только предупреждение
+        else if (!d.rotatable && !sameDims && W !== H && warnings.length < cap) warnings.push(`⚠ ${L}: «${name(p)}» повёрнута против текстуры`)
       }
     })
     // 3. Пересечения и зазор на рез — по настоящим координатам деталей. Между любыми двумя деталями должен быть
@@ -144,7 +146,6 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
 
   // Предупреждение (не ошибка): «мелкие — в центр», но мелкая деталь у края листа
   // (у края = ближе SMALL_EDGE_MIN мм к краю листа через отход, см. nesting.smallEdgeSides)
-  const warnings = []
   const edge = smallAtEdge(sheets, usableX, usableY, true)
   const gap = sheets.flatMap(sh => sh.placed).find(p => p.isSmall)?.edgeMin || SMALL_EDGE_MIN
   if (edge) warnings.push(`⚠ мелких/узких деталей у края листа: ${edge} (ближе ${gap} мм через отход)`)

@@ -2461,5 +2461,7 @@
 "попытки исчерпаны": "próby wyczerpane",
 "срок вышел": "wygasł",
 "страна и город не указаны": "nie podano kraju i miasta",
-"страна не указана": "nie podano kraju"
+"страна не указана": "nie podano kraju",
+"⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: «{1}» obrócony wbrew usłojeniu",
+"кромка — толщина подписана снаружи торца.": "obrzeże — grubość podpisana na zewnątrz czoła."
 }

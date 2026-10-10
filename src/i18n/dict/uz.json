@@ -2461,5 +2461,7 @@
 "попытки исчерпаны": "urinishlar tugadi",
 "срок вышел": "muddati tugadi",
 "страна и город не указаны": "mamlakat va shahar koʻrsatilmagan",
-"страна не указана": "mamlakat koʻrsatilmagan"
+"страна не указана": "mamlakat koʻrsatilmagan",
+"⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: «{1}» teksturaga qarshi burilgan",
+"кромка — толщина подписана снаружи торца.": "kromka — qalinligi torets tashqarisida yozilgan."
 }

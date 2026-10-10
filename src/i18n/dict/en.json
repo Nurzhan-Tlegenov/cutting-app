@@ -2461,5 +2461,7 @@
 "попытки исчерпаны": "attempts exhausted",
 "срок вышел": "expired",
 "страна и город не указаны": "country and city not specified",
-"страна не указана": "country not specified"
+"страна не указана": "country not specified",
+"⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: “{1}” is rotated against the grain",
+"кромка — толщина подписана снаружи торца.": "edge banding — thickness labeled outside the edge."
 }
