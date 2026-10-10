@@ -10,6 +10,7 @@ import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { routerPost, drillPosts, toggleUse6, isDrill6 } from '../lib/cncSettings'
 import { useCnc } from '../hooks/useCnc'
 import { buildDrill6Files } from '../lib/drill6Xml'
+import Drill6Viewer from '../components/Drill6Viewer'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor } from '../lib/gcode'
 import { getLabelTpl, buildLabelFiles } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
@@ -156,6 +157,7 @@ export default function CncPage() {
   // все файлы — отдельными файлами (не архивом): в выбранную папку, а где браузер этого не умеет — загрузками по одному
   // сохранение нескольких файлов — через вопрос «по отдельности или архивом»; сначала маркировка, потом раскрой
   const [saveAsk, setSaveAsk] = useState(null)      // { files, zipName }
+  const [xmlView, setXmlView] = useState(null)      // открыт просмотр XML присадки: { title, files }
   const [pdfAsk, setPdfAsk] = useState(false)        // открыт конструктор PDF карт раскроя
   const labelFiles = () => (built.labels || []).map(f => ({ name: f.name, data: f.data }))
   const saveAll = () => setSaveAsk({ files: [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))], zipName: `${baseName()}.zip` })
@@ -340,6 +342,7 @@ export default function CncPage() {
               )}
               {r.files.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => setXmlView({ title: r.post.name, files: r.files })} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>👁 Просмотр</button>
                   <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${baseName()}.zip`, folders: [folderName(post.folderTpl, nameCtx(null)), safeName(r.post.name).slice(0, 40) || 'drill6'] })}
                     style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы ({r.files.length})</button>
                   {r.files.length === 1 && <button type="button" onClick={() => { download(r.files[0].name, r.files[0].data, 'text/xml'); mark('files') }} style={small}>⬇ {r.files[0].name}</button>}
@@ -396,6 +399,7 @@ export default function CncPage() {
           </div>
         </div>
       )}
+      {xmlView && <Drill6Viewer title={xmlView.title} files={xmlView.files} onClose={() => setXmlView(null)} />}
       {pdfAsk && mat && <PdfSetup order={order} mat={mat} method={order?.cutting_method || 'nesting'} fileName={`Karty_${baseName()}.pdf`} onClose={() => setPdfAsk(false)} />}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={savedDone}
         folders={saveAsk.folders || [folderName(post.folderTpl, nameCtx(null)), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
