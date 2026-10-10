@@ -76,21 +76,105 @@ function opBox(o, W) {
   return [Math.min(...pts.map(q => q[0])), W - Math.max(...pts.map(q => q[1])), Math.max(...pts.map(q => q[0])), W - Math.min(...pts.map(q => q[1]))]
 }
 
+// ─── Размеры как на чертеже ─────────────────────────────────────────────────
+// Координаты отверстий от нуля детали (как в программе станка), по шкалам у сторон детали:
+//   снизу — X отверстий в пласть (5 и 6) и в торец 2; сверху — X отверстий в торец 1;
+//   слева — Y отверстий в пласть и в торец 4; справа — Y отверстий в торец 3.
+// Только видимые сейчас отверстия (фильтр пластей). Подписи, которым тесно, прячутся — видны при увеличении.
+const isHole = o => o.type === 1 || o.type === 2
+const r1 = v => String(Math.round((Number(v) || 0) * 10) / 10)
+/** -> { bottom, top, left, right }: [{ v, color }] — значения по шкалам */
+function dimSets(p, filter) {
+  const out = { bottom: new Map(), top: new Map(), left: new Map(), right: new Map() }
+  const add = (side, v, color) => { const k = Math.round(v * 10) / 10; if (!out[side].has(k)) out[side].set(k, color) }
+  for (const o of p.ops) {
+    if (!isHole(o) || !pass(o, filter)) continue
+    const col = isEdge(o) ? C.edge : isBottom(o) ? C.bottom : C.top
+    if (o.face === 5 || o.face === 6) { add('bottom', o.x, col); add('left', o.y, col) }
+    else if (o.face === 1) add('top', o.x, col)
+    else if (o.face === 2) add('bottom', o.x, col)
+    else if (o.face === 3) add('right', o.y, col)
+    else if (o.face === 4) add('left', o.y, col)
+  }
+  const res = {}
+  for (const [side, m] of Object.entries(out)) res[side] = [...m.entries()].map(([v, color]) => ({ v, color })).sort((a, b) => a.v - b.v)
+  return res
+}
+const AX = 30          // шкала размеров — на столько пикселей снаружи от края детали
+/** Шкала размеров у одной стороны. side: bottom | top | left | right */
+function DimAxis({ side, items, p, px }) {
+  if (!items.length) return null
+  const { L, W } = p
+  const horiz = side === 'bottom' || side === 'top'
+  const max = horiz ? L : W
+  const sgn = side === 'bottom' || side === 'right' ? 1 : -1
+  const a = px(AX) * sgn                              // положение шкалы от края
+  const base = side === 'bottom' ? W : side === 'top' ? 0 : side === 'left' ? 0 : L
+  const at = v => (horiz ? [v, base + a] : [base + a, W - v])          // точка на шкале для значения v
+  const edge = v => (horiz ? [v, base] : [base, W - v])
+  // значения: 0, отверстия, полный размер; подписи — без наложений (минимум 12 px между ними)
+  const vals = [{ v: 0, color: 'var(--text-muted)', end: true }, ...items.filter(i => i.v > 0.05 && i.v < max - 0.05), { v: max, color: 'var(--text-muted)', end: true }]
+  // сначала подписи отверстий (без наложений), потом 0 и полный размер — если для них есть место
+  const gap = px(12)
+  const shown = []
+  for (const it of vals) if (!it.end && (!shown.length || it.v - shown[shown.length - 1].v >= gap)) shown.push(it)
+  for (const it of [vals[0], vals[vals.length - 1]]) if (shown.every(q => Math.abs(q.v - it.v) >= gap)) shown.push(it)
+  const fs = px(10.5), tOff = px(5) * sgn
+  const els = []
+  const [ax1, ay1] = at(0), [ax2, ay2] = at(max)
+  els.push(<line key="ax" x1={ax1} y1={ay1} x2={ax2} y2={ay2} stroke="var(--text-hint)" strokeWidth={1} vectorEffect="non-scaling-stroke" />)
+  vals.forEach((it, i) => {
+    const [x0, y0] = edge(it.v), [x1, y1] = at(it.v)
+    els.push(<line key={'e' + i} x1={x0} y1={y0} x2={x1} y2={y1} stroke={it.color} strokeOpacity={it.end ? 0.5 : 0.45} strokeWidth={0.8} vectorEffect="non-scaling-stroke" strokeDasharray={it.end ? undefined : '2 2'} />)
+    const t = px(4)
+    els.push(<line key={'t' + i} x1={horiz ? x1 : x1 - t} y1={horiz ? y1 - t : y1} x2={horiz ? x1 : x1 + t} y2={horiz ? y1 + t : y1} stroke={it.color} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />)
+  })
+  shown.forEach((it, i) => {
+    const [x1, y1] = at(it.v), tx = horiz ? x1 : x1 + tOff, ty = horiz ? y1 + tOff : y1
+    const rot = horiz ? `rotate(-90 ${tx} ${ty})` : undefined
+    // снизу и справа текст уходит наружу, сверху и слева — тоже наружу (якорь с другой стороны)
+    const anchor = horiz ? (sgn > 0 ? 'end' : 'start') : (sgn > 0 ? 'start' : 'end')
+    els.push(<text key={'v' + i} x={tx} y={ty} transform={rot} fontSize={fs} fill={it.end ? 'var(--text)' : it.color} fontWeight={it.end ? 600 : 400} textAnchor={anchor} dominantBaseline="middle">{r1(it.v)}</text>)
+  })
+  return <g pointerEvents="none">{els}</g>
+}
+/** Размерные линии выбранного отверстия: от нуля по X и по Y, со стрелками и значением */
+function SelDims({ o, p, px }) {
+  if (!o || !isHole(o)) return null
+  const { W } = p
+  const hx = o.x, hy = W - o.y, col = C.sel, fs = px(11.5), ar = px(6)
+  const arrow = (x, y, dx, dy) => `M${x} ${y} l${-dx * ar - dy * ar * 0.4} ${-dy * ar + dx * ar * 0.4} M${x} ${y} l${-dx * ar + dy * ar * 0.4} ${-dy * ar - dx * ar * 0.4}`
+  const els = []
+  if (o.x > 0.05) {          // по X: от левого края до отверстия, на высоте отверстия
+    els.push(<line key="lx" x1={0} y1={hy} x2={hx} y2={hy} stroke={col} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />)
+    els.push(<path key="ax" d={arrow(hx, hy, 1, 0) + ' ' + arrow(0, hy, -1, 0)} stroke={col} strokeWidth={1.4} vectorEffect="non-scaling-stroke" fill="none" />)
+    els.push(<text key="tx" x={hx / 2} y={hy - px(7)} fontSize={fs} fontWeight="600" fill={col} stroke="var(--bg)" strokeWidth={px(3)} paintOrder="stroke" textAnchor="middle">{r1(o.x)}</text>)
+  }
+  if (o.y > 0.05) {          // по Y: от нижнего края до отверстия
+    els.push(<line key="ly" x1={hx} y1={W} x2={hx} y2={hy} stroke={col} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />)
+    els.push(<path key="ay" d={arrow(hx, hy, 0, -1) + ' ' + arrow(hx, W, 0, 1)} stroke={col} strokeWidth={1.4} vectorEffect="non-scaling-stroke" fill="none" />)
+    const ty = (hy + W) / 2
+    els.push(<text key="ty" x={hx + px(7)} y={ty} fontSize={fs} fontWeight="600" fill={col} stroke="var(--bg)" strokeWidth={px(3)} paintOrder="stroke" textAnchor="middle" transform={`rotate(-90 ${hx + px(7)} ${ty})`}>{r1(o.y)}</text>)
+  }
+  if (o.z != null && isEdge(o)) els.push(<text key="tz" x={hx + px(10)} y={hy - px(10)} fontSize={fs} fill={col} stroke="var(--bg)" strokeWidth={px(3)} paintOrder="stroke">Z {r1(o.z)}</text>)
+  return <g pointerEvents="none">{els}</g>
+}
+
 /** Чертёж детали. view — { x, y, w, h } (viewBox), upp — мм на пиксель экрана (подписи и линии постоянного размера) */
-function PanelSvg({ p, filter, sel, onSel, view, upp }) {
+function PanelSvg({ p, filter, sel, onSel, view, upp, dims }) {
   const { L, W } = p
   const px = v => v * upp                              // пиксели экрана -> мм детали
   const dim = o => (!o.gen ? 0.35 : sel != null && sel !== o.i ? 0.45 : 1)
   const isSel = o => sel === o.i
-  const els = []
-  // кромка — цветная полоса снаружи торца и толщина рядом с ней
+  const els = [], bandText = []
+  // кромка — цветная полоса снаружи торца и толщина рядом с ней (подпись — поверх шкал размеров)
   const band = { 1: [0, 0, L, 0], 2: [0, W, L, W], 3: [L, 0, L, W], 4: [0, 0, 0, W] }
   const out = { 1: [0, -1], 2: [0, 1], 3: [1, 0], 4: [-1, 0] }
   for (const f of [1, 2, 3, 4]) if (p.edges[f] > 0) {
     const [x1, y1, x2, y2] = band[f], [ox, oy] = out[f], o = px(4)
     els.push(<line key={'b' + f} x1={x1 + ox * o} y1={y1 + oy * o} x2={x2 + ox * o} y2={y2 + oy * o} stroke={C.band} strokeWidth={5} vectorEffect="non-scaling-stroke" strokeLinecap="round" />)
     const t = px(15), cx = (x1 + x2) / 2 + ox * t, cy = (y1 + y2) / 2 + oy * t
-    els.push(<text key={'bt' + f} x={cx} y={cy} fontSize={px(12)} fill={C.band} fontWeight="600" textAnchor="middle" dominantBaseline="middle"
+    bandText.push(<text key={'bt' + f} x={cx} y={cy} fontSize={px(12)} fill={C.band} fontWeight="600" textAnchor="middle" dominantBaseline="middle" stroke="var(--bg)" strokeWidth={px(4)} paintOrder="stroke"
       transform={f >= 3 ? `rotate(${f === 3 ? 90 : -90} ${cx} ${cy})` : undefined}>кромка {r3(p.edges[f])}</text>)
   }
   for (const o of p.ops) {
@@ -129,6 +213,7 @@ function PanelSvg({ p, filter, sel, onSel, view, upp }) {
     )
   }
   const outline = outlineD(p.outline, W)
+  const dimSet = dims ? dimSets(p, filter) : null
   return (
     <svg viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
       <style>{'@keyframes d6p{0%{stroke-opacity:1}50%{stroke-opacity:.25}100%{stroke-opacity:1}}.d6-pulse{animation:d6p 1s ease-in-out infinite}'}</style>
@@ -136,18 +221,25 @@ function PanelSvg({ p, filter, sel, onSel, view, upp }) {
         ? <><rect x={0} y={0} width={L} height={W} fill="none" stroke="var(--border-md)" strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="4 4" /><path d={outline} fill="var(--bg2)" stroke="var(--text)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /></>
         : <rect x={0} y={0} width={L} height={W} fill="var(--bg2)" stroke="var(--text)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
       {els}
+      {dims && ['bottom', 'top', 'left', 'right'].map(sd => <DimAxis key={sd} side={sd} items={dimSet[sd]} p={p} px={px} />)}
+      {bandText}
+      {dims && so && pass(so, filter) && <SelDims o={so} p={p} px={px} />}
       {halo}
-      {/* ноль детали и размеры — снаружи, за подписями кромки */}
+      {/* ноль детали; общие размеры — когда шкалы размеров скрыты (иначе полный размер — на шкале) */}
       <circle cx={0} cy={W} r={px(4)} fill="var(--text)" />
-      <text x={0} y={W + px(16)} fontSize={px(11)} fill="var(--text-hint)" textAnchor="middle">0</text>
-      <text x={L / 2} y={W + px(36)} fontSize={px(12)} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle">X · {r3(p.L)}</text>
-      <text x={-px(38)} y={W / 2} fontSize={px(12)} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90 ${-px(38)} ${W / 2})`}>Y · {r3(p.W)}</text>
+      {!dims && <>
+        <text x={0} y={W + px(16)} fontSize={px(11)} fill="var(--text-hint)" textAnchor="middle">0</text>
+        <text x={L / 2} y={W + px(36)} fontSize={px(12)} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle">X · {r3(p.L)}</text>
+        <text x={-px(38)} y={W / 2} fontSize={px(12)} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90 ${-px(38)} ${W / 2})`}>Y · {r3(p.W)}</text>
+      </>}
+      {dims && !dimSet.bottom.length && <text x={L / 2} y={W + px(36)} fontSize={px(12)} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle">X · {r3(p.L)}</text>}
+      {dims && !dimSet.left.length && <text x={-px(38)} y={W / 2} fontSize={px(12)} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90 ${-px(38)} ${W / 2})`}>Y · {r3(p.W)}</text>}
     </svg>
   )
 }
 
 // Превью с увеличением: щипок двумя пальцами, колёсико мыши, кнопки; сдвиг — одним пальцем. Нажатие (без сдвига) — выбор.
-function Preview({ p, filter, sel, onSel, focus }) {
+function Preview({ p, filter, sel, onSel, focus, dims }) {
   const wrap = useRef(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [view, setView] = useState(null)
@@ -159,17 +251,20 @@ function Preview({ p, filter, sel, onSel, focus }) {
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+  // поля в пикселях вокруг детали; со шкалами размеров шире: шкала (AX) + подписи значений
+  const ds = dims ? dimSets(p, filter) : null
+  const marg = [ds?.left.length ? 112 : 78, ds?.right.length ? 96 : 52, ds?.top.length ? 96 : 50, ds?.bottom.length ? 106 : 70]
   // вписать деталь в окно (с полями под подписи кромки и размеры)
   const fit = () => {
     if (!size.w || !size.h) return null
     // поля в пикселях экрана: слева — номер торца, кромка и размер Y; снизу — кромка и размер X
-    const ML = 78, MR = 52, MT = 50, MB = 70
+    const [ML, MR, MT, MB] = marg
     const k = Math.max(p.L / Math.max(40, size.w - ML - MR), p.W / Math.max(40, size.h - MT - MB)), w = size.w * k, h = size.h * k
     const cx = p.L / 2 + (MR - ML) / 2 * k, cy = p.W / 2 + (MB - MT) / 2 * k
     return { x: cx - w / 2, y: cy - h / 2, w, h }
   }
   // вид привязан к детали и размеру окна: сменилась деталь или окно — деталь вписывается заново
-  const fitKey = `${p.key}|${Math.round(size.w)}|${Math.round(size.h)}`
+  const fitKey = `${p.key}|${Math.round(size.w)}|${Math.round(size.h)}|${marg.join(',')}`
   const v = (view && view.key === fitKey ? view : null) || fit()
   const put = nv => setView(nv ? { ...nv, key: fitKey } : null)
   const upp = v && size.w ? v.w / size.w : 1
@@ -238,7 +333,7 @@ function Preview({ p, filter, sel, onSel, focus }) {
     <div ref={wrap} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerLeave={up}
       onClickCapture={e => { if (moved.current) { e.stopPropagation(); moved.current = false } }} onClick={() => onSel(null)}
       style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', touchAction: 'none', userSelect: 'none', background: 'var(--bg)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
-      {v && <PanelSvg p={p} filter={filter} sel={sel} onSel={onSel} view={v} upp={upp} />}
+      {v && <PanelSvg p={p} filter={filter} sel={sel} onSel={onSel} view={v} upp={upp} dims={dims} />}
       {/* номера торцов — по краям окна превью (как на станке: 1 — верх, 2 — низ, 3 — справа, 4 — слева) */}
       {tag(1, { top: 4, left: '50%', transform: 'translateX(-50%)' })}
       {tag(2, { bottom: 4, left: '50%', transform: 'translateX(-50%)' })}
@@ -260,6 +355,7 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
   const errors = parsed.filter(f => f.error)
   const [idx, setIdx] = useState(0)
   const [filter, setFilter] = useState('all')
+  const [dims, setDims] = useState(true)              // размеры отверстий на превью: показать / скрыть
   const [sel, setSel] = useState(null)
   const [focus, setFocus] = useState(null)            // операция, выбранная в списке, — превью сдвигается к ней
   const [q, setQ] = useState('')
@@ -338,6 +434,9 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
             </div>
             <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 6 }}>
               {FILTERS.map(([k, l]) => <button key={k} type="button" onClick={() => { setFilter(k); setSel(null) }} style={chip(filter === k)}>{l}</button>)}
+              <span style={{ flex: 1 }} />
+              <button type="button" onClick={() => setDims(d => !d)} title="Размеры до отверстий — показать или скрыть"
+                style={{ ...chip(dims), background: dims ? 'var(--teal, #1f9d6b)' : 'var(--bg2)' }}>📏 Размеры</button>
             </div>
           </>
         )}
@@ -352,7 +451,7 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
       ) : (
         <>
           <div style={{ flex: '0 0 auto', height: viewH, padding: '0 12px' }}>
-            <Preview p={p} filter={filter} sel={sel} onSel={pickFromPreview} focus={focus} />
+            <Preview p={p} filter={filter} sel={sel} onSel={pickFromPreview} focus={focus} dims={dims} />
           </div>
           {/* ползунок: больше превью или больше списка операций */}
           <div onPointerDown={dragStart} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd} title="Потяните вверх или вниз"
