@@ -102,8 +102,9 @@ function dimSets(p, filter) {
 }
 const AX = 30          // шкала размеров — на столько пикселей снаружи от края детали
 /** Шкала размеров у одной стороны. side: bottom | top | left | right */
-function DimAxis({ side, items, p, px }) {
+function DimAxis({ side, items, p, px, mode }) {
   if (!items.length) return null
+  if (mode === 'chain') return <ChainAxis side={side} items={items} p={p} px={px} />
   const { L, W } = p
   const horiz = side === 'bottom' || side === 'top'
   const max = horiz ? L : W
@@ -138,6 +139,58 @@ function DimAxis({ side, items, p, px }) {
   })
   return <g pointerEvents="none">{els}</g>
 }
+/**
+ * Цепные размеры, как на чертеже: расстояния между соседними осями отверстий — от одного края детали до другого
+ * (первый отрезок — от края до первой оси, последний — от последней оси до противоположного края), дальше от детали —
+ * общий размер. Текст — вдоль размерной линии, если помещается, иначе поперёк; если тесно и так — виден при увеличении.
+ */
+function ChainAxis({ side, items, p, px }) {
+  const { L, W } = p
+  const horiz = side === 'bottom' || side === 'top'
+  const max = horiz ? L : W
+  const sgn = side === 'bottom' || side === 'right' ? 1 : -1
+  const base = side === 'bottom' ? W : side === 'top' ? 0 : side === 'left' ? 0 : L
+  const at = (v, off) => (horiz ? [v, base + off * sgn] : [base + off * sgn, W - v])
+  const edge = v => (horiz ? [v, base] : [base, W - v])
+  const pts = [{ v: 0, color: 'var(--text-muted)' }, ...items.filter(i => i.v > 0.05 && i.v < max - 0.05), { v: max, color: 'var(--text-muted)' }]
+  const A = px(AX), T = px(AX + 46)                    // цепь и общий размер
+  const fs = px(10.5), tick = px(4), els = []
+  const mark = (x, y, k) => els.push(<line key={k} x1={horiz ? x - tick * 0.7 : x - tick * 0.7} y1={horiz ? y + tick * 0.7 : y + tick * 0.7} x2={horiz ? x + tick * 0.7 : x + tick * 0.7} y2={horiz ? y - tick * 0.7 : y - tick * 0.7} stroke="var(--text)" strokeWidth={1.3} vectorEffect="non-scaling-stroke" />)
+  // цепь
+  const [c1x, c1y] = at(0, A), [c2x, c2y] = at(max, A)
+  els.push(<line key="cl" x1={c1x} y1={c1y} x2={c2x} y2={c2y} stroke="var(--text-hint)" strokeWidth={1} vectorEffect="non-scaling-stroke" />)
+  pts.forEach((it, i) => {
+    const [x0, y0] = edge(it.v), [x1, y1] = at(it.v, A + px(4))
+    const end = i === 0 || i === pts.length - 1
+    els.push(<line key={'e' + i} x1={x0} y1={y0} x2={x1} y2={y1} stroke={end ? 'var(--text-hint)' : it.color} strokeOpacity={end ? 0.8 : 0.5} strokeWidth={0.8} vectorEffect="non-scaling-stroke" strokeDasharray={end ? undefined : '2 2'} />)
+    const [mx, my] = at(it.v, A)
+    mark(mx, my, 'm' + i)
+  })
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const d = pts[i + 1].v - pts[i].v, mid = (pts[i].v + pts[i + 1].v) / 2, txt = r1(d)
+    const segPx = d / px(1), textPx = txt.length * 6.3 + 4
+    const color = i === 0 || i === pts.length - 2 ? 'var(--text)' : 'var(--text-muted)'
+    if (segPx >= textPx) {                              // вдоль линии — над ней (снаружи от детали)
+      const [tx, ty] = at(mid, A + px(7))
+      const rot = horiz ? undefined : `rotate(-90 ${tx} ${ty})`
+      els.push(<text key={'t' + i} x={tx} y={ty} transform={rot} fontSize={fs} fill={color} textAnchor="middle" dominantBaseline={horiz ? (sgn > 0 ? 'hanging' : 'auto') : (sgn > 0 ? 'hanging' : 'auto')}>{txt}</text>)
+    } else if (segPx >= 12) {                           // поперёк линии
+      const [tx, ty] = at(mid, A + px(6))
+      const rot = horiz ? `rotate(-90 ${tx} ${ty})` : undefined
+      const anchor = horiz ? (sgn > 0 ? 'end' : 'start') : (sgn > 0 ? 'start' : 'end')
+      els.push(<text key={'t' + i} x={tx} y={ty} transform={rot} fontSize={fs} fill={color} textAnchor={anchor} dominantBaseline="middle">{txt}</text>)
+    }
+  }
+  // общий размер
+  const [g1x, g1y] = at(0, T), [g2x, g2y] = at(max, T)
+  ;[0, max].forEach((v, i) => { const [x0, y0] = at(v, A + px(4)), [x1, y1] = at(v, T + px(4)); els.push(<line key={'ge' + i} x1={x0} y1={y0} x2={x1} y2={y1} stroke="var(--text-hint)" strokeWidth={0.8} vectorEffect="non-scaling-stroke" />) })
+  els.push(<line key="gl" x1={g1x} y1={g1y} x2={g2x} y2={g2y} stroke="var(--text-hint)" strokeWidth={1} vectorEffect="non-scaling-stroke" />)
+  mark(g1x, g1y, 'g1'); mark(g2x, g2y, 'g2')
+  const [gx, gy] = at(max / 2, T + px(7))
+  els.push(<text key="gt" x={gx} y={gy} transform={horiz ? undefined : `rotate(-90 ${gx} ${gy})`} fontSize={px(11.5)} fontWeight="600" fill="var(--text)" textAnchor="middle" dominantBaseline={sgn > 0 ? 'hanging' : 'auto'}>{r1(max)}</text>)
+  return <g pointerEvents="none">{els}</g>
+}
+
 /** Размерные линии выбранного отверстия: от нуля по X и по Y, со стрелками и значением */
 function SelDims({ o, p, px }) {
   if (!o || !isHole(o)) return null
@@ -221,7 +274,7 @@ function PanelSvg({ p, filter, sel, onSel, view, upp, dims }) {
         ? <><rect x={0} y={0} width={L} height={W} fill="none" stroke="var(--border-md)" strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="4 4" /><path d={outline} fill="var(--bg2)" stroke="var(--text)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /></>
         : <rect x={0} y={0} width={L} height={W} fill="var(--bg2)" stroke="var(--text)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
       {els}
-      {dims && ['bottom', 'top', 'left', 'right'].map(sd => <DimAxis key={sd} side={sd} items={dimSet[sd]} p={p} px={px} />)}
+      {dims && ['bottom', 'top', 'left', 'right'].map(sd => <DimAxis key={sd} side={sd} items={dimSet[sd]} p={p} px={px} mode={dims} />)}
       {bandText}
       {dims && so && pass(so, filter) && <SelDims o={so} p={p} px={px} />}
       {halo}
@@ -253,7 +306,8 @@ function Preview({ p, filter, sel, onSel, focus, dims }) {
   }, [])
   // поля в пикселях вокруг детали; со шкалами размеров шире: шкала (AX) + подписи значений
   const ds = dims ? dimSets(p, filter) : null
-  const marg = [ds?.left.length ? 112 : 78, ds?.right.length ? 96 : 52, ds?.top.length ? 96 : 50, ds?.bottom.length ? 106 : 70]
+  const ch = dims === 'chain' ? 8 : 0                  // цепь + общий размер — чуть шире, чем шкала «от нуля»
+  const marg = [ds?.left.length ? 112 + ch : 78, ds?.right.length ? 96 + ch : 52, ds?.top.length ? 96 + ch : 50, ds?.bottom.length ? 106 + ch : 70]
   // вписать деталь в окно (с полями под подписи кромки и размеры)
   const fit = () => {
     if (!size.w || !size.h) return null
@@ -355,7 +409,7 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
   const errors = parsed.filter(f => f.error)
   const [idx, setIdx] = useState(0)
   const [filter, setFilter] = useState('all')
-  const [dims, setDims] = useState(true)              // размеры отверстий на превью: показать / скрыть
+  const [dims, setDims] = useState('chain')           // размеры отверстий: 'chain' — цепные, 'ord' — от нуля, false — скрыты
   const [sel, setSel] = useState(null)
   const [focus, setFocus] = useState(null)            // операция, выбранная в списке, — превью сдвигается к ней
   const [q, setQ] = useState('')
@@ -435,8 +489,8 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
             <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 6 }}>
               {FILTERS.map(([k, l]) => <button key={k} type="button" onClick={() => { setFilter(k); setSel(null) }} style={chip(filter === k)}>{l}</button>)}
               <span style={{ flex: 1 }} />
-              <button type="button" onClick={() => setDims(d => !d)} title="Размеры до отверстий — показать или скрыть"
-                style={{ ...chip(dims), background: dims ? 'var(--teal, #1f9d6b)' : 'var(--bg2)' }}>📏 Размеры</button>
+              <button type="button" onClick={() => setDims(d => (d === 'chain' ? 'ord' : d === 'ord' ? false : 'chain'))} title="Размеры: цепные (между осями, от обоих краёв) → от нуля → скрыть"
+                style={{ ...chip(!!dims), background: dims ? 'var(--teal, #1f9d6b)' : 'var(--bg2)' }}>📏 {dims === 'chain' ? 'Цепь' : dims === 'ord' ? 'От нуля' : 'Размеры'}</button>
             </div>
           </>
         )}
