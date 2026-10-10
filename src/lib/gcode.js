@@ -534,18 +534,18 @@ function supportDepth(list, gap, near) {
 }
 
 /**
- * Мелкая деталь: контур начинается так, чтобы ПОСЛЕДНИЙ отрезок (на нём подача снижается до подачи выхода)
+ * Любая деталь, мелкая и крупная: контур начинается так, чтобы ПОСЛЕДНИЙ отрезок (на нём подача снижается до подачи выхода)
  * шёл по стороне, вдоль которой ещё НЕ БЫЛО реза соседних деталей, и отделял деталь от самого крупного
  * нетронутого куска — неотрезанной соседней детали или свободного листа. Стороны, где сосед уже отрезан,
  * проходятся раньше. route — контуры в порядке реза, rect — лист. Если все стороны уже прорезаны соседями —
  * начало остаётся как было.
  */
-function lastCutToSupport(route, rect) {
+function lastCutToSupport(route, rect, extra = []) {
   const NEAR = 40
   route.forEach((j, pos) => {
-    if (!j.small || !j.L || j.L.length < 3) return
+    if (!j.L || j.L.length < 3) return
     const P = j.L, n = P.length, [x0, y0, x1, y1] = j.box, e = j.reach || 4
-    const earlier = route.slice(0, pos), later = route.slice(pos + 1)
+    const earlier = route.slice(0, pos), later = [...route.slice(pos + 1), ...extra]   // extra — деловые обрезки: режутся после всех деталей
     const vert = side => side === 'l' || side === 'r'
     // какая часть стороны прилегает к деталям из списка: [доля длины, сумма «длина общей стороны, м × площадь соседа, м²», длина стороны]
     const along = (side, list) => {
@@ -591,7 +591,7 @@ function lastCutToSupport(route, rect) {
  * Порядок реза контуров деталей — без пробегов из конца в конец листа.
  * list: [{ at: [x, y] — точка входа, box: [x0, y0, x1, y1], edgeDist, small }], from — где сейчас фреза.
  *  • начинаем с детали у края листа, ближайшей к фрезе, и идём от соседа к соседу (каждый раз ближайшая деталь);
- *  • центральная деталь листа (самая дальняя от краёв) режется последней — середину до конца не трогаем;
+ *  • самая большая деталь листа режется последней; из двух соседних крупных раньше — та, что заметно меньше;
  *  • smallFirst: мелкая деталь режется раньше своих соседей — пока лист вокруг неё цел и её держит вакуум;
  *  • затем маршрут укорачивается разворотами участков (2-opt), не нарушая этих правил.
  */
@@ -601,13 +601,12 @@ export function routeContours(list, from, sheetRect, smallFirst = true) {
   const NEAR = 40                                        // мм: зазор, при котором детали — соседи
   const gap = (a, b) => Math.max(a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], 0)
   const D = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1])
-  // центральная деталь: дальше всех от краёв листа (при равенстве — ближе к центру)
-  const cx = (sheetRect.x0 + sheetRect.x1) / 2, cy = (sheetRect.y0 + sheetRect.y1) / 2
+  // Последней режется самая большая деталь листа: пока идут остальные, она цела и держит лист, а каждая деталь
+  // поменьше отделяется от куска крупнее себя. (Раньше последней была деталь в середине листа.)
   const mid = j => [(j.box[0] + j.box[2]) / 2, (j.box[1] + j.box[3]) / 2]
-  let centre = null
-  // при «мелкие первыми» центральной может быть только крупная деталь — иначе правила противоречили бы друг другу
-  if (n > 3) centre = (smallFirst ? list.filter(j => !j.small) : list).reduce((b, j) => (!b || j.edgeDist > b.edgeDist + 1 || (Math.abs(j.edgeDist - b.edgeDist) <= 1 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
-  if (centre && centre.edgeDist < 60) centre = null     // все детали у края — центральной нет
+  const cx = (sheetRect.x0 + sheetRect.x1) / 2, cy = (sheetRect.y0 + sheetRect.y1) / 2
+  const pool = smallFirst && list.some(j => !j.small) ? list.filter(j => !j.small) : list
+  const centre = pool.reduce((b, j) => (!b || (j.area || 0) > (b.area || 0) * 1.02 || (Math.abs((j.area || 0) - (b.area || 0)) <= (b.area || 0) * 0.02 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
   // кто кого ждёт: крупная деталь — ВСЕ мелкие листа; центральная — всех.
   // Среди мелких: сначала те, что дальше от крупных деталей (считая по соседям), последними — прилегающие к крупной.
   // Так мелкая деталь в момент реза ещё держится за нетронутого соседа, а фреза не возвращается в россыпь уже отрезанных.
@@ -631,6 +630,10 @@ export function routeContours(list, from, sheetRect, smallFirst = true) {
       if (!b.small) before.get(b).push(s)
       else if (gap(s, b) <= NEAR && (depth.get(s) > depth.get(b) || (depth.get(s) === depth.get(b) && hold.get(s) < hold.get(b) - 0.05))) before.get(b).push(s)
     }
+  }
+  // и среди крупных: из двух соседей раньше режется та, что заметно меньше, — она отделяется от большей
+  if (smallFirst) for (const s of list) if (!s.small) for (const b of list) {
+    if (b !== s && !b.small && gap(s, b) <= NEAR && (s.area || 0) < (b.area || 0) * 0.6) before.get(b).push(s)
   }
   if (centre) for (const j of list) if (j !== centre && !before.get(j).includes(centre)) before.get(centre).push(j)
   const valid = R => { const pos = new Map(R.map((j, i) => [j, i])); return R.every(j => before.get(j).every(q => pos.get(q) < pos.get(j))) }
@@ -840,8 +843,15 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   // Контуры деталей — одним кратчайшим маршрутом, см. routeContours
   const smallFirst = ops.outer?.smallFirst !== false
   cutTools.forEach(t => {
-    const r = routeContours(stage1.filter(j => j.tool === t && j.rank === 5), cur, sheetRect, smallFirst)
-    if (smallFirst) lastCutToSupport(r, sheetRect)
+    const own = stage1.filter(j => j.tool === t && j.rank === 5)
+    const offcuts = (sheet.manualOffcuts || []).map(of => ({ box: [ox + of.x, oy + of.y, ox + of.x + of.w, oy + of.y + of.h], area: of.w * of.h / 1e6 }))
+    // Последний рез каждой детали — по стороне, где ещё не резали, у самого крупного нетронутого куска (деталь или обрезок).
+    // От этого меняются точки входа, поэтому маршрут строится ещё раз уже по ним — холостые переезды остаются короткими.
+    let r = []
+    for (let pass = 0; pass < 3; pass++) {
+      r = routeContours(own, cur, sheetRect, smallFirst)
+      lastCutToSupport(r, sheetRect, offcuts)
+    }
     if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
 

@@ -746,6 +746,8 @@ function getMarkers(verts, sc, ox, oy, dh) {
 }
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
+const ZOOM_MIN = 0.3, ZOOM_MAX = 6      // масштаб превью детали
+
 function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, showDrillDims=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0, materialThickness=16, edgeMode=false, onEdgeTap=null }) {
   const ref = useRef(null)
   const wrapRef = useRef(null)
@@ -762,51 +764,69 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
-    const state = { active: false, dist: 0, zoom: 1 }
+    // Пока пальцы на экране, картинка не перерисовывается, а растягивается целиком вокруг точки щипка — она остаётся
+    // точно под пальцами и не «уплывает». Перерисовка в новом масштабе — один раз, когда пальцы отпущены.
+    const state = { active: false, dist: 0, zoom: 1, ratio: 1, ax: 0, ay: 0, mx: 0, my: 0, sx: 0, sy: 0 }
     const getDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const mid = t => { const r = wrapRef.current.getBoundingClientRect(); return [(t[0].clientX + t[1].clientX) / 2 - r.left, (t[0].clientY + t[1].clientY) / 2 - r.top] }
     const onStart = (e) => {
-      if (e.touches.length === 2) {
-        state.active = true
-        state.dist = getDist(e.touches)
-        state.zoom = zoomRef.current
-        // Запоминаем, куда именно щипаем — относительно текущего канваса и видимой области
-        const wrap = wrapRef.current
-        const canvas = ref.current
-        if (wrap && canvas) {
-          const wrapRect = wrap.getBoundingClientRect()
-          const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - wrapRect.left
-          const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - wrapRect.top
-          const canvasX = wrap.scrollLeft + midX
-          const canvasY = wrap.scrollTop + midY
-          const cw = canvas.offsetWidth || 1, ch = canvas.offsetHeight || 1
-          zoomAnchorRef.current = { fracX: canvasX / cw, fracY: canvasY / ch, midX, midY }
-        }
-      }
+      const wrap = wrapRef.current, canvas = ref.current
+      if (e.touches.length !== 2 || !wrap || !canvas) return
+      if (e.cancelable) e.preventDefault()               // страница и окно превью при щипке не прокручиваются
+      state.active = true
+      state.dist = getDist(e.touches)
+      state.zoom = zoomRef.current
+      state.ratio = 1
+      const [mx, my] = mid(e.touches)
+      state.sx = state.mx = mx; state.sy = state.my = my
+      // точка под пальцами — в координатах самой картинки (с учётом прокрутки и полей при мелком масштабе)
+      state.ax = wrap.scrollLeft + mx - (parseFloat(canvas.style.marginLeft) || 0)
+      state.ay = wrap.scrollTop + my - (parseFloat(canvas.style.marginTop) || 0)
+      canvas.style.transformOrigin = `${state.ax}px ${state.ay}px`
+      canvas.style.willChange = 'transform'
     }
     const onMove = (e) => {
-      if (state.active && e.touches.length === 2) {
-        e.preventDefault()
-        const d = getDist(e.touches)
-        if (state.dist > 0) {
-          const ratio = d / state.dist
-          const nz = Math.max(0.3, Math.min(2.5, state.zoom * ratio))
-          onZoomChangeRef.current && onZoomChangeRef.current(nz)
-        }
-      }
+      const canvas = ref.current
+      if (!state.active || e.touches.length !== 2 || !canvas) return
+      if (e.cancelable) e.preventDefault()
+      const d = getDist(e.touches)
+      if (!(state.dist > 0)) return
+      const nz = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, state.zoom * d / state.dist))
+      state.ratio = nz / state.zoom
+      const [mx, my] = mid(e.touches)
+      state.mx = mx; state.my = my
+      canvas.style.transform = `translate(${mx - state.sx}px, ${my - state.sy}px) scale(${state.ratio})`
     }
     const onEnd = (e) => {
-      if (e.touches.length < 2) {
-        state.active = false
-        // Небольшая задержка — чтобы последнее движение зума успело отрисоваться
-        // с этой же точкой привязки, а не сбросилось в центр раньше времени
-        setTimeout(() => { zoomAnchorRef.current = null }, 60)
+      if (!state.active || e.touches.length >= 2) return
+      state.active = false
+      const canvas = ref.current
+      if (!canvas) return
+      const cw = canvas.offsetWidth || 1, ch = canvas.offsetHeight || 1
+      const nz = state.zoom * state.ratio
+      if (Math.abs(nz - state.zoom) < 0.005 && Math.hypot(state.mx - state.sx, state.my - state.sy) < 2) { canvas.style.transform = ''; canvas.style.willChange = ''; return }
+      // после перерисовки та же точка картинки должна оказаться под пальцами
+      zoomAnchorRef.current = { fracX: state.ax / cw, fracY: state.ay / ch, midX: state.mx, midY: state.my, clear: true }
+      if (Math.abs(nz - state.zoom) < 0.005) {             // только сдвинули двумя пальцами — масштаб тот же
+        const wrap = wrapRef.current
+        canvas.style.transform = ''; canvas.style.willChange = ''
+        wrap.scrollLeft = Math.max(0, state.ax + (parseFloat(canvas.style.marginLeft) || 0) - state.mx)
+        wrap.scrollTop = Math.max(0, state.ay + (parseFloat(canvas.style.marginTop) || 0) - state.my)
+        zoomAnchorRef.current = null
+        return
       }
+      onZoomChangeRef.current && onZoomChangeRef.current(nz)
     }
-    el.addEventListener('touchstart', onStart, { passive: true })
+    const noGesture = e => e.preventDefault()               // iPhone: собственное увеличение страницы поверх превью не нужно
+    el.addEventListener('touchstart', onStart, { passive: false })
     el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
     el.addEventListener('touchcancel', onEnd, { passive: true })
+    el.addEventListener('gesturestart', noGesture)
+    el.addEventListener('gesturechange', noGesture)
     return () => {
+      el.removeEventListener('gesturestart', noGesture)
+      el.removeEventListener('gesturechange', noGesture)
       el.removeEventListener('touchstart', onStart)
       el.removeEventListener('touchmove', onMove)
       el.removeEventListener('touchend', onEnd)
@@ -823,7 +843,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     const canvas = ref.current
     if (!canvas || !w || !h) return
     const ctx = canvas.getContext('2d')
-    const DPR = window.devicePixelRatio || 1
+    let DPR = window.devicePixelRatio || 1
+    // что сейчас в середине окна превью — чтобы кнопки «+» и «−» увеличивали вокруг этого места, а не уводили в центр детали
+    const seen = wrapRef.current && canvas.offsetWidth ? (() => {
+      const wr = wrapRef.current, ml = parseFloat(canvas.style.marginLeft) || 0, mt = parseFloat(canvas.style.marginTop) || 0
+      return { fracX: (wr.scrollLeft + wr.clientWidth / 2 - ml) / canvas.offsetWidth, fracY: (wr.scrollTop + wr.clientHeight / 2 - mt) / canvas.offsetHeight }
+    })() : null
     const rot90 = rotation === 90 || rotation === 270
     // При повороте на 90/270 деталь ложится "на бок" — под неё нужно отвести
     // столько же места, сколько было бы под её перевёрнутый силуэт
@@ -838,11 +863,16 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     // по центру и растягивается на всё доступное место, при любом повороте
     const sc = (CSS_W - PAD*2) / fitW
     const CSS_H = Math.round(fitH * sc + PAD*2)
-    canvas.width = CSS_W * DPR
-    canvas.height = CSS_H * DPR
+    // при большом увеличении картинка не должна превысить предел телефона (иначе она пропадает или съезжает):
+    // чёткость снижается ровно настолько, чтобы уложиться
+    DPR = Math.max(0.5, Math.min(DPR, Math.sqrt(12e6 / (CSS_W * CSS_H)), 8000 / CSS_W, 8000 / CSS_H))
+    canvas.width = Math.round(CSS_W * DPR)
+    canvas.height = Math.round(CSS_H * DPR)
     canvas.style.width = CSS_W + 'px'
     canvas.style.height = CSS_H + 'px'
-    ctx.scale(DPR, DPR)
+    canvas.style.transform = ''                              // растяжение на время щипка снимается — картинка уже в новом масштабе
+    canvas.style.willChange = ''
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
 
     // Центрируем канвас через margin, если он МЕНЬШЕ видимой области (зум < 100%) —
     // без flexbox, чтобы не ломать ручную прокрутку/наведение при зуме > 100%
@@ -865,8 +895,12 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       if (rotationChanged || zoomChanged || zoomAnchorRef.current) {
         const anchor = rotationChanged ? null : zoomAnchorRef.current
         if (anchor) {
-          wrap.scrollLeft = Math.max(0, anchor.fracX * CSS_W - anchor.midX)
-          wrap.scrollTop = Math.max(0, anchor.fracY * CSS_H - anchor.midY)
+          wrap.scrollLeft = Math.max(0, anchor.fracX * CSS_W + (parseFloat(canvas.style.marginLeft) || 0) - anchor.midX)
+          wrap.scrollTop = Math.max(0, anchor.fracY * CSS_H + (parseFloat(canvas.style.marginTop) || 0) - anchor.midY)
+          if (anchor.clear) zoomAnchorRef.current = null
+        } else if (seen && !rotationChanged) {
+          wrap.scrollLeft = Math.max(0, seen.fracX * CSS_W + (parseFloat(canvas.style.marginLeft) || 0) - wrap.clientWidth / 2)
+          wrap.scrollTop = Math.max(0, seen.fracY * CSS_H + (parseFloat(canvas.style.marginTop) || 0) - wrap.clientHeight / 2)
         } else {
           wrap.scrollLeft = Math.max(0, (CSS_W - wrap.clientWidth) / 2)
           wrap.scrollTop = Math.max(0, (CSS_H - wrap.clientHeight) / 2)
@@ -1556,7 +1590,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
   }
 
   return (
-    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y' }}>
+    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y', overscrollBehavior:'contain' }}>
       <canvas ref={ref}
         onClick={handleTap}
         style={{ display:'block', cursor:'pointer', touchAction:'manipulation',
@@ -2704,7 +2738,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
         <>
           {/* Подсказка pinch-zoom — масштабируется только сама деталь в превью, щипком двух пальцев */}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6, gap:6 }}>
-            <span style={{ fontSize:10, color:'var(--text-hint)', flex:1 }}>🤏 Щипком двух пальцев — масштаб детали</span>
+            <span style={{ fontSize:10, color:'var(--text-hint)', flex:1 }}>🤏 Щипок двумя пальцами — масштаб</span>
             <button type="button" onClick={toggleEdgeMode}
               title="Кромить: нажимайте на отрезки, дуги и скругления контура прямо на детали"
               style={{ fontSize:12, fontWeight:500, padding:'5px 12px', border: edgeMode ? '1.5px solid #2FA84F' : '0.5px solid #2FA84F',
@@ -2718,6 +2752,11 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                 color: rotation ? 'var(--blue-dark)' : 'var(--text-muted)', cursor:'pointer', flexShrink:0 }}>
               ⟳ {rotation}°
             </button>
+            {[['−', 1 / 1.4], ['+', 1.4]].map(([t, k]) => (
+              <button key={t} type="button" title={t === '+' ? 'Увеличить деталь' : 'Уменьшить деталь'}
+                onClick={() => setZoom(z => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * k)))}
+                style={{ width:28, height:26, border:'0.5px solid var(--border-md)', borderRadius:6, background:'transparent', color:'var(--text-muted)', fontSize:16, lineHeight:1, cursor:'pointer', flexShrink:0, padding:0 }}>{t}</button>
+            ))}
             {Math.abs(zoom-1) > 0.02 && (
               <button type="button" onClick={() => setZoom(1)}
                 style={{ fontSize:10, padding:'3px 7px', border:'0.5px solid var(--border-md)', borderRadius:6,
