@@ -2463,5 +2463,7 @@
 "страна и город не указаны": "ölkə və şəhər göstərilməyib",
 "страна не указана": "ölkə göstərilməyib",
 "⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: «{1}» teksturaya qarşı döndərilib",
-"кромка — толщина подписана снаружи торца.": "kromka — qalınlıq toretsin xaricində yazılıb."
+"кромка — толщина подписана снаружи торца.": "kromka — qalınlıq toretsin xaricində yazılıb.",
+"⚙ Настройки производства": "⚙ İstehsalat parametrləri",
+"Сотрудники, рабочие посты, прайс-лист, рез и отступы, станки ЧПУ, просмотр XML": "Əməkdaşlar, iş postları, qiymət siyahısı, kəsim və məsafələr, ÇPİ dəzgahları, XML baxışı"
 }

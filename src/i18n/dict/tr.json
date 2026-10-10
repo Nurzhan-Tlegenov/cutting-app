@@ -2463,5 +2463,7 @@
 "страна и город не указаны": "ülke ve şehir belirtilmemiş",
 "страна не указана": "ülke belirtilmemiş",
 "⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: «{1}» desene ters döndürülmüş",
-"кромка — толщина подписана снаружи торца.": "kenar bandı — kalınlık kenarın dışında yazılı."
+"кромка — толщина подписана снаружи торца.": "kenar bandı — kalınlık kenarın dışında yazılı.",
+"⚙ Настройки производства": "⚙ Üretim ayarları",
+"Сотрудники, рабочие посты, прайс-лист, рез и отступы, станки ЧПУ, просмотр XML": "Çalışanlar, iş istasyonları, fiyat listesi, kesim payı ve boşluklar, CNC makineleri, XML görüntüleyici"
 }

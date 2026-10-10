@@ -2463,5 +2463,7 @@
 "страна и город не указаны": "nie podano kraju i miasta",
 "страна не указана": "nie podano kraju",
 "⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: «{1}» obrócony wbrew usłojeniu",
-"кромка — толщина подписана снаружи торца.": "obrzeże — grubość podpisana na zewnątrz czoła."
+"кромка — толщина подписана снаружи торца.": "obrzeże — grubość podpisana na zewnątrz czoła.",
+"⚙ Настройки производства": "⚙ Ustawienia zakładu",
+"Сотрудники, рабочие посты, прайс-лист, рез и отступы, станки ЧПУ, просмотр XML": "Pracownicy, stanowiska, cennik, rzaz i marginesy, maszyny CNC, podgląd XML"
 }

@@ -2463,5 +2463,7 @@
 "страна и город не указаны": "country and city not specified",
 "страна не указана": "country not specified",
 "⚠ {0}: «{1}» повёрнута против текстуры": "⚠ {0}: “{1}” is rotated against the grain",
-"кромка — толщина подписана снаружи торца.": "edge banding — thickness labeled outside the edge."
+"кромка — толщина подписана снаружи торца.": "edge banding — thickness labeled outside the edge.",
+"⚙ Настройки производства": "⚙ Production settings",
+"Сотрудники, рабочие посты, прайс-лист, рез и отступы, станки ЧПУ, просмотр XML": "Employees, work posts, price list, kerf and margins, CNC machines, XML viewer"
 }

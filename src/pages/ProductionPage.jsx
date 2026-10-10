@@ -172,16 +172,9 @@ export default function ProductionPage() {
               <ProductionForm initial={prod} submitLabel="Сохранить" onCancel={() => setEdit(false)} onDone={() => { setEdit(false); load() }} />
             ) : (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 500, fontSize: 16 }}>{prod.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
-                  </div>
-                  <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
-                </div>
                 {/* статистика за период: заявки, в работе, исполнено, суммы, листы, объёмы работ. Исполненные считаются и после
                     архива, и после того, как клиент удалил заказ, — от него остаётся запись */}
-                <div style={{ marginTop: 8 }}>
+                <div>
                   {stats ? <Results list={stats.map(x => (x.client_name ? x : { ...x, client_name: x.own ? '' : orders.find(o => o.id === x.id)?.client_name || '' }))} per={per} show={resShow} onShow={saveResShow} onOpen={o => navigate(`/orders/${o.id}`)} /> : (
                     <>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
@@ -196,38 +189,51 @@ export default function ProductionPage() {
                     </>
                   )}
                 </div>
+                {/* компания — свёрнуто: название, страна, телефон */}
                 <details style={{ marginTop: 10 }}>
-                  <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Параметры станка (рез и отступы листа) — по типу материала</summary>
-                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство, — по типу материала, который он указал в заказе.</p>
-                  {[['Плита: ЛДСП, МДФ — фрезер ЧПУ или пила', MARGINS], ['ХДФ, ДВП (задние стенки) — пила', HDF_MARGINS]].map(([title, list]) => (
-                    <div key={title} style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>{title}</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        {list.map(([k, l]) => (
-                          <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
-                            <input type="text" inputMode="decimal" value={sheet[k] ?? ''} placeholder={k.startsWith('hdf_') && prod[k.slice(4)] != null ? String(prod[k.slice(4)]) : ''} onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
-                          </label>
-                        ))}
-                      </div>
+                  <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer', color: 'var(--text)' }}>🏭 {prod.name}</summary>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
+                    <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
+                  </div>
+                </details>
+                {/* всё, что настраивается редко, — одним свёрнутым окном; внутри — свои разделы */}
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer', color: 'var(--text)' }}>⚙ Настройки производства</summary>
+                  <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 2px' }}>Сотрудники, рабочие посты, прайс-лист, рез и отступы, станки ЧПУ, просмотр XML</div>
+                    <StaffSection data={staff.data} error={staff.error} onReload={loadStaff} />
+                    <PostsSection members={staff.data?.members} />
+                    <div onClick={() => setPrices(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
+                      <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Прайс-лист (цены на распил, кромление, присадку)</span>
+                      <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
                     </div>
-                  ))}
-                  <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
+                    <details style={{ marginTop: 10 }}>
+                      <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Параметры станка (рез и отступы листа) — по типу материала</summary>
+                      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство, — по типу материала, который он указал в заказе.</p>
+                      {[['Плита: ЛДСП, МДФ — фрезер ЧПУ или пила', MARGINS], ['ХДФ, ДВП (задние стенки) — пила', HDF_MARGINS]].map(([title, list]) => (
+                        <div key={title} style={{ marginBottom: 8 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>{title}</div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            {list.map(([k, l]) => (
+                              <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
+                                <input type="text" inputMode="decimal" value={sheet[k] ?? ''} placeholder={k.startsWith('hdf_') && prod[k.slice(4)] != null ? String(prod[k.slice(4)]) : ''} onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
+                    </details>
+                    {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
+                    <details style={{ marginTop: 8 }} onToggle={e => setPostOpen(e.currentTarget.open)}>
+                      <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Настройки постпроцессора (станки ЧПУ, инструменты, обработка)</summary>
+                      {postOpen && <CncSetup />}
+                    </details>
+                    <div onClick={() => setXmlView(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
+                      <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Просмотр XML-программ присадочного станка</span>
+                      <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
+                    </div>
                 </details>
-                {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
-                <details style={{ marginTop: 8 }} onToggle={e => setPostOpen(e.currentTarget.open)}>
-                  <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Настройки постпроцессора (станки ЧПУ, инструменты, обработка)</summary>
-                  {postOpen && <CncSetup />}
-                </details>
-                <StaffSection data={staff.data} error={staff.error} onReload={loadStaff} />
-                <PostsSection members={staff.data?.members} />
-                <div onClick={() => setXmlView(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
-                  <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Просмотр XML-программ присадочного станка</span>
-                  <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
-                </div>
-                <div onClick={() => setPrices(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
-                  <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Прайс-лист (цены на распил, кромление, присадку)</span>
-                  <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
-                </div>
               </>
             )}
           </div>
