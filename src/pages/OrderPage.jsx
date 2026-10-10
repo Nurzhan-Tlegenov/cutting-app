@@ -19,6 +19,7 @@ import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
 import { orderClient, productionSetStatus, orderMarks, productionArchive } from '../lib/productionApi'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
+import { myOrderPerms } from '../lib/workplaces'
 import NestingCost from '../components/NestingCost'
 import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
@@ -42,6 +43,9 @@ export default function OrderPage() {
   const [labelMode] = useLabelMode(user)
   const [mapMat, setMapMat] = useState('')        // материал, чьи карты раскроя показаны
   useEffect(() => { fetchOrder() }, [id])
+  // сотрудник производства: что ему можно в этом заказе (статусы, ЧПУ, бирки, цены); null — не сотрудник
+  const [wperms, setWperms] = useState(null)
+  useEffect(() => { let alive = true; if (inProduction) myOrderPerms(id).then(r => { if (alive) setWperms(r.data || null) }); return () => { alive = false } }, [id, inProduction])
   // открыта ли ссылка для просмотра 3D-модели (её могли создать в самой модели)
   const [shared, setShared] = useState(() => !!cachedShare(id))
   useEffect(() => {
@@ -106,11 +110,13 @@ export default function OrderPage() {
   const sheetsNeeded = nest ? nest.sheets.length : usableArea > 0 ? Math.ceil(totalPartArea / (usableArea * 0.85)) : 0
   const isMine = order.user_id === user?.id
   const isDraft = order.status === 'draft' && (isMine || profile?.role === 'admin')
-  const canStatus = inProduction && order.status !== 'draft' && (profile?.role === 'admin' || (isOperator && !!order.production_id))
+  const canStatus = inProduction && order.status !== 'draft' && (profile?.role === 'admin' || (isOperator && !!order.production_id) || !!(wperms?.all || wperms?.status))
   const edgeNames = { edge_top:'В', edge_right:'П', edge_bottom:'Н', edge_left:'Л' }
   const nestGeo = nest ? sheetGeo(order, nest.result) : null
   const materials = materialsOf(details, order)
-  const canProduce = inProduction && order.status !== 'draft' && isOperator
+  const canProduce = inProduction && order.status !== 'draft' && (isOperator || !!(wperms?.all || wperms?.cnc || wperms?.labels))
+  const canCnc = canProduce && (isOperator || !!(wperms?.all || wperms?.cnc)), canLabels = canProduce && (isOperator || !!(wperms?.all || wperms?.labels))
+  const showPrices = !wperms || !!wperms.prices || !!wperms.owner   // сотруднику цены — только с галочкой «Цены»
   const actBtn = main => ({ flex: 1, padding: '10px 8px', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: 'pointer',
     border: main ? 'none' : '0.5px solid var(--blue)', background: main ? 'var(--blue)' : 'var(--bg)', color: main ? 'white' : 'var(--blue)' })
   return (
@@ -215,8 +221,8 @@ export default function OrderPage() {
           {order.status !== 'draft' && (
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button onClick={() => navigate(`/orders/${id}/nesting`)} style={actBtn(false)}>{canProduce ? 'Открыть / перекроить' : 'Открыть раскрой'}</button>
-              {canProduce && <button onClick={() => navigate(`/orders/${id}/cnc`)} style={actBtn(true)}>ЧПУ</button>}
-              {canProduce && <button onClick={() => navigate(`/orders/${id}/labels`)} style={actBtn(false)}>Бирки</button>}
+              {canCnc && <button onClick={() => navigate(`/orders/${id}/cnc`)} style={actBtn(true)}>ЧПУ</button>}
+              {canLabels && <button onClick={() => navigate(`/orders/${id}/labels`)} style={actBtn(false)}>Бирки</button>}
             </div>
           )}
         </div>
@@ -229,7 +235,7 @@ export default function OrderPage() {
         </div>
       )}
       {/* производство видит всю статистику раскроя и расчёт; заказчик — стоимость работ (если цены ему доступны) */}
-      {nestings.length > 0 && (order.production_id || inProduction) && (
+      {nestings.length > 0 && (order.production_id || inProduction) && showPrices && (
         <NestingCost order={order} mats={nestings} method={order.cutting_method || 'nesting'} productionId={order.production_id}
           full={inProduction} style={{ marginBottom: 12 }} />
       )}

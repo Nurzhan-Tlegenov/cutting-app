@@ -35,6 +35,8 @@ import CncPage from './pages/CncPage'
 import LabelsPage from './pages/LabelsPage'
 import MessagesPage from './pages/MessagesPage'
 import ScanPage from './pages/ScanPage'
+import JoinPage from './pages/JoinPage'
+import { pendingInvite } from './lib/workplaces'
 import CncLoader from './components/CncLoader'
 import Watermark from './components/Watermark'
 
@@ -56,7 +58,8 @@ function AppRoutes() {
       <Route path="/v/:code" element={<SharedModelPage />} />
       {/* симуляция обработки листа по ссылке — без входа */}
       <Route path="/s/:code" element={<SharedSimPage />} />
-      <Route path="/auth" element={user ? <Navigate to={home} /> : <AuthPage />} />
+      <Route path="/auth" element={user ? <Navigate to={pendingInvite() ? `/join/${pendingInvite()}` : home} /> : <AuthPage />} />
+      <Route path="/join/:code" element={<JoinPage />} />
       <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
       <Route path="/orders/new" element={<ProtectedRoute><NewOrderPage /></ProtectedRoute>} />
       <Route path="/orders/:id" element={<ProtectedRoute><OrderPage /></ProtectedRoute>} />
