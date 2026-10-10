@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { unzipSync } from 'fflate'
 import { parseDrillXml, panelSummary, TYPE_NAMES, FACE_NAMES } from '../lib/drill6Parse'
 
@@ -6,6 +6,9 @@ import { parseDrillXml, panelSummary, TYPE_NAMES, FACE_NAMES } from '../lib/dril
 // фрезеровки и выемки, контур, кромка. Открывает созданные приложением файлы и любые XML с устройства (и архивы .zip).
 // Поиск по коду детали — как на станке при сканировании бирки: код = ID детали = имя файла.
 // files — [{ name, data }] (необязательно); onClose — закрыть.
+// Превью: щипок / колёсико / кнопки — увеличение, палец — сдвиг; ползунок делит экран между превью и списком операций
+// (как в симуляторе G-кода). Операция, выбранная в списке, выделяется на превью; нажатие на превью — строка в списке.
+// Номера торцов 1–4 — по краям окна превью, у закромленной стороны снаружи — толщина кромки.
 
 const r3 = v => String(Math.round((Number(v) || 0) * 1000) / 1000)
 const C = { top: '#2f6fd6', bottom: '#d64545', edge: '#1f9d6b', groove: '#e08a00', mill: '#8a4fd1', band: '#c23ac0', off: '#9a9a9a', sel: '#f5b400' }
@@ -54,65 +57,199 @@ function outlineD(pts, W) {
   return pathD([pts[0].X, pts[0].Y], segs, W, true)
 }
 
-function PanelSvg({ p, filter, sel, onSel, zoom }) {
+// Отверстие в торец: прямоугольник от торца вглубь детали (экранные координаты, Y вниз)
+function edgeRect(o, W) {
+  const d = o.d || 5, len = o.depth || 10
+  let x = o.x, y = W - o.y, w = d, h = len
+  if (o.face === 1) x -= d / 2
+  else if (o.face === 2) { x -= d / 2; y -= len }
+  else if (o.face === 3) { y -= d / 2; x -= len; w = len; h = d }
+  else { y -= d / 2; w = len; h = d }
+  return { x, y, w, h }
+}
+// Габарит операции в экранных координатах — для выделения и показа
+function opBox(o, W) {
+  if ((o.type === 2 || o.type === 1) && isEdge(o)) { const r = edgeRect(o, W); return [r.x, r.y, r.x + r.w, r.y + r.h] }
+  if (o.type === 2) { const r = (o.d || 5) / 2; return [o.x - r, W - o.y - r, o.x + r, W - o.y + r] }
+  if (o.type === 4) { const h = (o.width || 4) / 2; return [Math.min(o.x, o.endX) - h, W - Math.max(o.y, o.endY) - h, Math.max(o.x, o.endX) + h, W - Math.min(o.y, o.endY) + h] }
+  const pts = [[o.x, o.y], ...(o.segs || []).map(g => g.to)]
+  return [Math.min(...pts.map(q => q[0])), W - Math.max(...pts.map(q => q[1])), Math.max(...pts.map(q => q[0])), W - Math.min(...pts.map(q => q[1]))]
+}
+
+/** Чертёж детали. view — { x, y, w, h } (viewBox), upp — мм на пиксель экрана (подписи и линии постоянного размера) */
+function PanelSvg({ p, filter, sel, onSel, view, upp }) {
   const { L, W } = p
-  const pad = Math.max(L, W) * 0.06 + 20
-  const sw = Math.max(L, W) / 400                    // толщина линий в мм детали
-  const font = Math.max(L, W) / 28
-  const dim = o => (!o.gen ? 0.35 : sel != null && sel !== o.i ? 0.55 : 1)
-  const hl = o => (sel === o.i ? { stroke: C.sel, strokeWidth: sw * 4 } : {})
+  const px = v => v * upp                              // пиксели экрана -> мм детали
+  const dim = o => (!o.gen ? 0.35 : sel != null && sel !== o.i ? 0.45 : 1)
+  const isSel = o => sel === o.i
   const els = []
-  // кромка — по торцам 1..4
+  // кромка — цветная полоса снаружи торца и толщина рядом с ней
   const band = { 1: [0, 0, L, 0], 2: [0, W, L, W], 3: [L, 0, L, W], 4: [0, 0, 0, W] }
+  const out = { 1: [0, -1], 2: [0, 1], 3: [1, 0], 4: [-1, 0] }
   for (const f of [1, 2, 3, 4]) if (p.edges[f] > 0) {
-    const [x1, y1, x2, y2] = band[f], off = sw * 5, dx = f === 3 ? off : f === 4 ? -off : 0, dy = f === 1 ? -off : f === 2 ? off : 0
-    els.push(<line key={'b' + f} x1={x1 + dx} y1={y1 + dy} x2={x2 + dx} y2={y2 + dy} stroke={C.band} strokeWidth={sw * 5} strokeLinecap="round" />)
+    const [x1, y1, x2, y2] = band[f], [ox, oy] = out[f], o = px(4)
+    els.push(<line key={'b' + f} x1={x1 + ox * o} y1={y1 + oy * o} x2={x2 + ox * o} y2={y2 + oy * o} stroke={C.band} strokeWidth={5} vectorEffect="non-scaling-stroke" strokeLinecap="round" />)
+    const t = px(15), cx = (x1 + x2) / 2 + ox * t, cy = (y1 + y2) / 2 + oy * t
+    els.push(<text key={'bt' + f} x={cx} y={cy} fontSize={px(12)} fill={C.band} fontWeight="600" textAnchor="middle" dominantBaseline="middle"
+      transform={f >= 3 ? `rotate(${f === 3 ? 90 : -90} ${cx} ${cy})` : undefined}>кромка {r3(p.edges[f])}</text>)
   }
   for (const o of p.ops) {
     if (!pass(o, filter)) continue
     const k = 'o' + o.i, click = e => { e.stopPropagation(); onSel(o.i) }, op = dim(o)
-    const col = !o.gen ? C.off : null
+    const col = isSel(o) ? C.sel : !o.gen ? C.off : null
+    const sw = isSel(o) ? 3 : 1.2
     if ((o.type === 2 || o.type === 1) && isEdge(o)) {
-      // отверстие в торец: полоса от торца вглубь детали на глубину
-      const d = o.d || 5, len = o.depth || 10
-      let x = o.x, y = W - o.y, w = d, h = len
-      if (o.face === 1) { x -= d / 2; h = len }                       // торец Y = ширина (верх экрана), вглубь — вниз
-      else if (o.face === 2) { x -= d / 2; y -= len }
-      else if (o.face === 3) { y -= d / 2; x -= len; w = len; h = d }
-      else { y -= d / 2; w = len; h = d }
-      els.push(<rect key={k} x={x} y={y} width={w} height={h} fill={col || C.edge} fillOpacity={0.35} stroke={col || C.edge} strokeWidth={sw} opacity={op} onClick={click} {...hl(o)} />)
+      const r = edgeRect(o, W)
+      els.push(<rect key={k} x={r.x} y={r.y} width={r.w} height={r.h} fill={col || C.edge} fillOpacity={0.4} stroke={col || C.edge} strokeWidth={sw} vectorEffect="non-scaling-stroke" opacity={op} onClick={click} />)
     } else if (o.type === 2) {
-      const r = Math.max(o.d / 2, sw * 2), bottom = isBottom(o)
-      els.push(<circle key={k + 'h'} cx={o.x} cy={W - o.y} r={Math.max(r * 2, sw * 12)} fill="transparent" onClick={click} />)   // по мелкому отверстию легко попасть пальцем
-      els.push(<circle key={k} cx={o.x} cy={W - o.y} r={r} fill={bottom ? 'none' : (col || C.top)} fillOpacity={0.85} stroke={col || (bottom ? C.bottom : C.top)} strokeWidth={bottom ? sw * 1.6 : sw} strokeDasharray={bottom ? `${sw * 3} ${sw * 2}` : undefined} opacity={op} onClick={click} {...hl(o)} />)
+      const r = Math.max(o.d / 2, px(2.5)), bottom = isBottom(o)
+      els.push(<circle key={k + 'h'} cx={o.x} cy={W - o.y} r={Math.max(r, px(12))} fill="transparent" onClick={click} />)   // по мелкому отверстию легко попасть пальцем
+      els.push(<circle key={k} cx={o.x} cy={W - o.y} r={r} fill={bottom && !isSel(o) ? 'none' : (col || C.top)} fillOpacity={0.85} stroke={col || (bottom ? C.bottom : C.top)} strokeWidth={bottom ? sw + 0.6 : sw} vectorEffect="non-scaling-stroke" strokeDasharray={bottom ? '3 2' : undefined} opacity={op} onClick={click} />)
     } else if (o.type === 4) {
       const bottom = isBottom(o)
-      if (isEdge(o)) els.push(<line key={k} x1={o.x} y1={W - o.y} x2={o.endX} y2={W - o.endY} stroke={col || C.edge} strokeWidth={sw * 6} opacity={op} onClick={click} {...hl(o)} />)
-      else els.push(<line key={k} x1={o.x} y1={W - o.y} x2={o.endX} y2={W - o.endY} stroke={col || C.groove} strokeOpacity={bottom ? 0.45 : 0.75} strokeWidth={Math.max(o.width, sw * 2)} strokeDasharray={bottom ? `${sw * 8} ${sw * 4}` : undefined} opacity={op} onClick={click} {...(sel === o.i ? { stroke: C.sel } : {})} />)
+      if (isEdge(o)) els.push(<line key={k} x1={o.x} y1={W - o.y} x2={o.endX} y2={W - o.endY} stroke={col || C.edge} strokeWidth={6} vectorEffect="non-scaling-stroke" opacity={op} onClick={click} />)
+      else els.push(<line key={k} x1={o.x} y1={W - o.y} x2={o.endX} y2={W - o.endY} stroke={col || C.groove} strokeOpacity={bottom ? 0.45 : 0.75} strokeWidth={Math.max(o.width, px(3))} strokeDasharray={bottom ? `${px(8)} ${px(4)}` : undefined} opacity={op} onClick={click} />)
     } else if (o.type === 3 && o.segs?.length) {
       const d = pathD([o.x, o.y], o.segs, W, o.closed), bottom = isBottom(o)
-      els.push(<path key={k} d={d} fill={o.pocket ? (col || C.mill) : 'none'} fillOpacity={0.25} stroke={col || C.mill} strokeWidth={sw * 2} strokeDasharray={bottom ? `${sw * 6} ${sw * 3}` : undefined} opacity={op} onClick={click} {...hl(o)} />)
-      // начало пути — точка
-      els.push(<circle key={k + 's'} cx={o.x} cy={W - o.y} r={sw * 3} fill={col || C.mill} opacity={op} onClick={click} />)
+      els.push(<path key={k + 'h'} d={d} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" onClick={click} />)
+      els.push(<path key={k} d={d} fill={o.pocket ? (col || C.mill) : 'none'} fillOpacity={0.25} stroke={col || C.mill} strokeWidth={sw + 0.8} vectorEffect="non-scaling-stroke" strokeDasharray={bottom ? '6 3' : undefined} opacity={op} onClick={click} />)
+      els.push(<circle key={k + 's'} cx={o.x} cy={W - o.y} r={px(3)} fill={col || C.mill} opacity={op} onClick={click} />)   // начало пути
     }
+  }
+  // выделенная операция — рамка и пульсирующее кольцо, видно даже мелкое отверстие
+  const so = sel != null ? p.ops.find(o => o.i === sel) : null
+  let halo = null
+  if (so && pass(so, filter)) {
+    const [x0, y0, x1, y1] = opBox(so, W), m = px(6)
+    halo = (
+      <g pointerEvents="none">
+        <rect x={x0 - m} y={y0 - m} width={x1 - x0 + 2 * m} height={y1 - y0 + 2 * m} fill="none" stroke={C.sel} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeDasharray="5 3" rx={px(4)} />
+        <circle cx={(x0 + x1) / 2} cy={(y0 + y1) / 2} r={Math.max((x1 - x0) / 2, (y1 - y0) / 2, 0) + px(14)} fill="none" stroke={C.sel} strokeWidth={3} vectorEffect="non-scaling-stroke" className="d6-pulse" />
+      </g>
+    )
   }
   const outline = outlineD(p.outline, W)
   return (
-    <svg viewBox={`${-pad} ${-pad} ${L + 2 * pad} ${W + 2 * pad}`} style={{ width: `${100 * zoom}%`, display: 'block', touchAction: 'pan-x pan-y' }} onClick={() => onSel(null)}>
+    <svg viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }}>
+      <style>{'@keyframes d6p{0%{stroke-opacity:1}50%{stroke-opacity:.25}100%{stroke-opacity:1}}.d6-pulse{animation:d6p 1s ease-in-out infinite}'}</style>
       {outline
-        ? <><rect x={0} y={0} width={L} height={W} fill="none" stroke="var(--border-md)" strokeWidth={sw} strokeDasharray={`${sw * 4} ${sw * 4}`} /><path d={outline} fill="var(--bg2)" stroke="var(--text)" strokeWidth={sw * 1.5} /></>
-        : <rect x={0} y={0} width={L} height={W} fill="var(--bg2)" stroke="var(--text)" strokeWidth={sw * 1.5} />}
+        ? <><rect x={0} y={0} width={L} height={W} fill="none" stroke="var(--border-md)" strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="4 4" /><path d={outline} fill="var(--bg2)" stroke="var(--text)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /></>
+        : <rect x={0} y={0} width={L} height={W} fill="var(--bg2)" stroke="var(--text)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
       {els}
-      {/* номера торцов — как в файлах станка: 1 — верх, 2 — низ, 3 — справа, 4 — слева */}
-      {[[1, L * 0.12, -pad * 0.45], [2, L * 0.12, W + pad * 0.45], [3, L + pad * 0.45, W * 0.2], [4, -pad * 0.34, W * 0.2]].map(([f, x, y]) => (
-        <text key={'f' + f} x={x} y={y} fontSize={font * 0.8} textAnchor="middle" dominantBaseline="middle" fill="var(--text-hint)">{f}</text>
-      ))}
-      {/* ноль детали и размеры */}
-      <circle cx={0} cy={W} r={sw * 4} fill="var(--text)" />
-      <text x={-sw * 6} y={W + font * 0.9} fontSize={font * 0.7} fill="var(--text-hint)" textAnchor="end">0</text>
-      <text x={L / 2} y={W + font * 1.4} fontSize={font} fill="var(--text-muted)" textAnchor="middle">X · {r3(p.L)}</text>
-      <text x={-pad * 0.74} y={W / 2} fontSize={font} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90 ${-pad * 0.74} ${W / 2})`}>Y · {r3(p.W)}</text>
+      {halo}
+      {/* ноль детали и размеры — снаружи, за подписями кромки */}
+      <circle cx={0} cy={W} r={px(4)} fill="var(--text)" />
+      <text x={0} y={W + px(16)} fontSize={px(11)} fill="var(--text-hint)" textAnchor="middle">0</text>
+      <text x={L / 2} y={W + px(36)} fontSize={px(12)} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle">X · {r3(p.L)}</text>
+      <text x={-px(38)} y={W / 2} fontSize={px(12)} fill="var(--text-muted)" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90 ${-px(38)} ${W / 2})`}>Y · {r3(p.W)}</text>
     </svg>
+  )
+}
+
+// Превью с увеличением: щипок двумя пальцами, колёсико мыши, кнопки; сдвиг — одним пальцем. Нажатие (без сдвига) — выбор.
+function Preview({ p, filter, sel, onSel, focus }) {
+  const wrap = useRef(null)
+  const [size, setSize] = useState({ w: 0, h: 0 })
+  const [view, setView] = useState(null)
+  const ptrs = useRef(new Map()), gesture = useRef(null), moved = useRef(false)
+  useEffect(() => {
+    const el = wrap.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  // вписать деталь в окно (с полями под подписи кромки и размеры)
+  const fit = () => {
+    if (!size.w || !size.h) return null
+    // поля в пикселях экрана: слева — номер торца, кромка и размер Y; снизу — кромка и размер X
+    const ML = 78, MR = 52, MT = 50, MB = 70
+    const k = Math.max(p.L / Math.max(40, size.w - ML - MR), p.W / Math.max(40, size.h - MT - MB)), w = size.w * k, h = size.h * k
+    const cx = p.L / 2 + (MR - ML) / 2 * k, cy = p.W / 2 + (MB - MT) / 2 * k
+    return { x: cx - w / 2, y: cy - h / 2, w, h }
+  }
+  // вид привязан к детали и размеру окна: сменилась деталь или окно — деталь вписывается заново
+  const fitKey = `${p.key}|${Math.round(size.w)}|${Math.round(size.h)}`
+  const v = (view && view.key === fitKey ? view : null) || fit()
+  const put = nv => setView(nv ? { ...nv, key: fitKey } : null)
+  const upp = v && size.w ? v.w / size.w : 1
+  // выбранная в списке операция не видна — сдвигаем превью к ней
+  const [seenFocus, setSeenFocus] = useState(focus)
+  if (focus !== seenFocus) {
+    setSeenFocus(focus)
+    const o = focus && v ? p.ops.find(q => q.i === focus.i) : null
+    if (o) {
+      const [x0, y0, x1, y1] = opBox(o, p.W), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, pad = 30 * upp
+      if (cx < v.x + pad || cx > v.x + v.w - pad || cy < v.y + pad || cy > v.y + v.h - pad) put({ ...v, x: cx - v.w / 2, y: cy - v.h / 2 })
+    }
+  }
+  const zoomAt = (k, sx, sy, base = v) => {
+    const f = fit(), minW = (f?.w || base.w) / 60, maxW = (f?.w || base.w) * 1.5
+    const w = Math.max(minW, Math.min(maxW, base.w * k)), kk = w / base.w, h = base.h * kk
+    const ux = base.x + sx / size.w * base.w, uy = base.y + sy / size.h * base.h
+    put({ x: ux - (ux - base.x) * kk, y: uy - (uy - base.y) * kk, w, h })
+  }
+  useEffect(() => {
+    const el = wrap.current
+    if (!el) return
+    const onWheel = e => { e.preventDefault(); const r = el.getBoundingClientRect(); zoomAt(Math.exp(e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top) }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  })
+  const local = e => { const r = wrap.current.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top] }
+  const down = e => {
+    ptrs.current.set(e.pointerId, local(e))
+    moved.current = false
+    const pts = [...ptrs.current.values()]
+    gesture.current = { view: v, pts: pts.map(q => [...q]) }
+  }
+  const move = e => {
+    if (!ptrs.current.has(e.pointerId) || !gesture.current) return
+    ptrs.current.set(e.pointerId, local(e))
+    const g = gesture.current, pts = [...ptrs.current.values()]
+    if (pts.length >= 2 && g.pts.length >= 2) {
+      const d0 = Math.hypot(g.pts[0][0] - g.pts[1][0], g.pts[0][1] - g.pts[1][1]), d1 = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1])
+      const mx = (pts[0][0] + pts[1][0]) / 2, my = (pts[0][1] + pts[1][1]) / 2
+      const m0x = (g.pts[0][0] + g.pts[1][0]) / 2, m0y = (g.pts[0][1] + g.pts[1][1]) / 2
+      if (d0 > 10 && d1 > 10) {
+        // сдвиг середины пальцев + масштаб вокруг неё
+        const b = g.view, kpx = b.w / size.w
+        const shifted = { ...b, x: b.x - (mx - m0x) * kpx, y: b.y - (my - m0y) * kpx }
+        zoomAt(d0 / d1, mx, my, shifted)
+        moved.current = true
+      }
+    } else if (pts.length === 1) {
+      const [x0, y0] = g.pts[0], [x1, y1] = pts[0]
+      if (Math.hypot(x1 - x0, y1 - y0) > 6) moved.current = true
+      if (moved.current) { const kpx = g.view.w / size.w; put({ ...g.view, x: g.view.x - (x1 - x0) * kpx, y: g.view.y - (y1 - y0) * kpx }) }
+    }
+  }
+  const up = e => {
+    ptrs.current.delete(e.pointerId)
+    const pts = [...ptrs.current.values()]
+    gesture.current = pts.length ? { view: v, pts: pts.map(q => [...q]) } : null
+  }
+  const btn = { width: 34, height: 34, borderRadius: 17, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', fontSize: 17, lineHeight: '30px', padding: 0, boxShadow: '0 1px 3px rgba(0,0,0,.12)' }
+  const tag = (f, st) => (
+    <span style={{ position: 'absolute', ...st, minWidth: 20, height: 20, padding: '0 5px', borderRadius: 10, fontSize: 11, lineHeight: '20px', textAlign: 'center', pointerEvents: 'none',
+      background: p.edges[f] > 0 ? C.band : 'var(--bg)', color: p.edges[f] > 0 ? 'white' : 'var(--text-hint)', border: '0.5px solid ' + (p.edges[f] > 0 ? C.band : 'var(--border-md)') }}>{f}</span>
+  )
+  return (
+    <div ref={wrap} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerLeave={up}
+      onClickCapture={e => { if (moved.current) { e.stopPropagation(); moved.current = false } }} onClick={() => onSel(null)}
+      style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', touchAction: 'none', userSelect: 'none', background: 'var(--bg)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+      {v && <PanelSvg p={p} filter={filter} sel={sel} onSel={onSel} view={v} upp={upp} />}
+      {/* номера торцов — по краям окна превью (как на станке: 1 — верх, 2 — низ, 3 — справа, 4 — слева) */}
+      {tag(1, { top: 4, left: '50%', transform: 'translateX(-50%)' })}
+      {tag(2, { bottom: 4, left: '50%', transform: 'translateX(-50%)' })}
+      {tag(3, { right: 4, top: '50%', transform: 'translateY(-50%)' })}
+      {tag(4, { left: 4, top: '50%', transform: 'translateY(-50%)' })}
+      <div style={{ position: 'absolute', right: 8, bottom: 30, display: 'flex', flexDirection: 'column', gap: 6 }} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
+        <button type="button" style={btn} onClick={() => zoomAt(1 / 1.6, size.w / 2, size.h / 2)}>+</button>
+        <button type="button" style={btn} onClick={() => zoomAt(1.6, size.w / 2, size.h / 2)}>−</button>
+        <button type="button" style={{ ...btn, fontSize: 14 }} title="Вписать деталь" onClick={() => put(fit())}>⤢</button>
+      </div>
+    </div>
   )
 }
 
@@ -124,10 +261,13 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
   const [idx, setIdx] = useState(0)
   const [filter, setFilter] = useState('all')
   const [sel, setSel] = useState(null)
-  const [zoom, setZoom] = useState(1)
+  const [focus, setFocus] = useState(null)            // операция, выбранная в списке, — превью сдвигается к ней
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
-  const inp = useRef(null)
+  // высота превью — двигается ползунком (как в симуляторе G-кода)
+  const [viewH, setViewH] = useState(() => Math.round(Math.max(220, Math.min(window.innerHeight * 0.5, 700))))
+  const drag = useRef(null)
+  const inp = useRef(null), rows = useRef(new Map())
   const p = panels[Math.min(idx, panels.length - 1)] || null
   const go = i => { setIdx(Math.max(0, Math.min(panels.length - 1, i))); setSel(null) }
   const open = async list => {
@@ -146,10 +286,12 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
     const j = i >= 0 ? i : panels.findIndex(x => x.id.toLowerCase().includes(s) || x.name.toLowerCase().includes(s) || x.file.toLowerCase().includes(s))
     if (j >= 0) go(j)
   }
+  const pickFromList = i => { setSel(i); setFocus(f => ({ i, n: (f?.n || 0) + 1 })) }
+  const pickFromPreview = i => { setSel(i); if (i != null) Promise.resolve().then(() => rows.current.get(i)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) }
   const sum = p ? panelSummary(p) : null
   const selOp = p && sel != null ? p.ops.find(o => o.i === sel) : null
   const small = { padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', whiteSpace: 'nowrap' }
-  const chip = on => ({ flex: '0 0 auto', padding: '6px 10px', borderRadius: 20, border: 'none', fontSize: 12, background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
+  const chip = on => ({ flex: '0 0 auto', padding: '5px 10px', borderRadius: 20, border: 'none', fontSize: 12, background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
   const opText = o => {
     const f = FACE_NAMES[o.face] || `Face ${o.face}`
     if (o.type === 2 || o.type === 1) return `Ø${r3(o.d)} × ${r3(o.depth)} · ${f} · X ${r3(o.x)} Y ${r3(o.y)}${o.z != null ? ' Z ' + r3(o.z) : ''}`
@@ -157,26 +299,26 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
     if (o.type === 3) return `${o.pocket ? 'выборка' : o.closed ? 'замкнутый' : 'открытый'} · глубина ${r3(o.depth)} · ${f} · фреза ${o.offset || '—'} · отрезков ${o.segs?.length || 0}${o.segs?.some(g => g.angle) ? ', есть дуги' : ''}`
     return f
   }
+  const dot = o => (o.type === 3 ? C.mill : o.type === 4 && !isEdge(o) ? C.groove : isEdge(o) ? C.edge : isBottom(o) ? C.bottom : C.top)
+  const list = p ? p.ops.filter(o => pass(o, filter)) : []
+  const dragStart = e => { e.currentTarget.setPointerCapture?.(e.pointerId); drag.current = { y: e.clientY, h: viewH } }
+  const dragMove = e => { const d = drag.current; if (d) setViewH(Math.round(Math.max(140, Math.min(window.innerHeight - 160, d.h + e.clientY - d.y)))) }
+  const dragEnd = () => { drag.current = null }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 220, display: 'flex', flexDirection: 'column', height: '100dvh' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px 6px' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 500 }}>{title}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{panels.length ? `Деталей: ${panels.length} · файлов: ${files.length}` : 'Откройте XML-файлы станка или архив .zip'}</div>
-        </div>
-        <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => inp.current?.click()}>{busy ? 'Открываем…' : 'Открыть файлы'}</button>
-        <input ref={inp} type="file" multiple accept=".xml,.XML,.zip,text/xml,application/xml,application/zip" style={{ display: 'none' }} onChange={e => { open(e.target.files); e.target.value = '' }} />
-        <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 26, lineHeight: 1, color: 'var(--text-muted)', padding: '0 4px' }}>×</button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 16px' }}>
-        {errors.length > 0 && <div style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 8 }}>{errors.map(f => <div key={f.name}>{f.name}: {f.error}</div>)}</div>}
-        {!p ? (
-          <div className="card" style={{ textAlign: 'center', padding: 24 }}>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>Здесь можно посмотреть программы для присадочного станка: и созданные в приложении, и любые XML-файлы станка (формат Syntec / SWJ).</p>
-            <button type="button" className="btn-primary" onClick={() => inp.current?.click()}>Открыть XML или .zip</button>
+      <div style={{ flex: '0 0 auto', padding: '8px 12px 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 500, fontSize: 15 }}>{title}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{panels.length ? `Деталей: ${panels.length} · файлов: ${files.length}` : 'Откройте XML-файлы станка или архив .zip'}</div>
           </div>
-        ) : (
+          <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => inp.current?.click()}>{busy ? 'Открываем…' : 'Открыть файлы'}</button>
+          <input ref={inp} type="file" multiple accept=".xml,.XML,.zip,text/xml,application/xml,application/zip" style={{ display: 'none' }} onChange={e => { open(e.target.files); e.target.value = '' }} />
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 26, lineHeight: 1, color: 'var(--text-muted)', padding: '0 4px' }}>×</button>
+        </div>
+        {errors.length > 0 && <div style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 6 }}>{errors.map(f => <div key={f.name}>{f.name}: {f.error}</div>)}</div>}
+        {p && (
           <>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
               <button type="button" style={small} disabled={idx <= 0} onClick={() => go(idx - 1)}>‹</button>
@@ -185,54 +327,70 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
               </select>
               <button type="button" style={small} disabled={idx >= panels.length - 1} onClick={() => go(idx + 1)}>›</button>
             </div>
-            <input type="search" value={q} onChange={e => find(e.target.value)} placeholder="Код детали (как при сканировании) или название" style={{ fontSize: 13, padding: '7px 10px', marginBottom: 8 }} />
-            <div className="card" style={{ padding: '8px 10px', marginBottom: 8 }}>
-              <div style={{ fontSize: 14, fontWeight: 500 }}>{p.name || 'Деталь'} <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-hint)', fontFamily: 'monospace' }}>{p.id}</span></div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                {r3(p.L)} × {r3(p.W)} × {r3(p.T)} мм{p.material ? ` · ${p.material}` : ''}{p.outline.length ? ' · фигурный контур' : ''}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>
+            <input type="search" value={q} onChange={e => find(e.target.value)} placeholder="Код детали (как при сканировании) или название" style={{ fontSize: 13, padding: '6px 10px', marginBottom: 6 }} />
+            <div style={{ fontSize: 12, marginBottom: 6, lineHeight: 1.45 }}>
+              <b style={{ fontWeight: 500 }}>{p.name || 'Деталь'}</b> <span style={{ color: 'var(--text-hint)', fontFamily: 'monospace', fontSize: 11 }}>{p.id}</span>
+              <span style={{ color: 'var(--text-muted)' }}> · {r3(p.L)} × {r3(p.W)} × {r3(p.T)} мм{p.outline.length ? ' · фигурный контур' : ''}</span>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                 {[sum.top && `сверху ${sum.top}`, sum.bottom && `снизу ${sum.bottom}`, sum.edge && `в торцы ${sum.edge}`, sum.grooves && `пазов ${sum.grooves}`, sum.mills && `фрезеровок ${sum.mills}`, sum.pockets && `выборок ${sum.pockets}`, sum.off && `отключено ${sum.off}`].filter(Boolean).join(' · ') || 'обработки нет'}
-                {' · кромка: '}{[1, 2, 3, 4].filter(f => p.edges[f] > 0).map(f => `${f} (${r3(p.edges[f])})`).join(', ') || 'нет'}
+                {' · кромка: '}{[1, 2, 3, 4].filter(f => p.edges[f] > 0).map(f => `${f} — ${r3(p.edges[f])}`).join(', ') || 'нет'}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 6 }}>
               {FILTERS.map(([k, l]) => <button key={k} type="button" onClick={() => { setFilter(k); setSel(null) }} style={chip(filter === k)}>{l}</button>)}
-              <span style={{ flex: 1 }} />
-              <button type="button" style={small} onClick={() => setZoom(z => Math.max(1, z / 1.5))}>−</button>
-              <button type="button" style={small} onClick={() => setZoom(z => Math.min(8, z * 1.5))}>+</button>
             </div>
-            <div style={{ overflow: 'auto', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg)', marginBottom: 6 }}>
-              <PanelSvg p={p} filter={filter} sel={sel} onSel={setSel} zoom={zoom} />
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8, lineHeight: 1.6 }}>
-              Вид сверху, ноль — левый нижний угол.{' '}
-              <span style={{ color: C.top }}>●</span> сверху (5) · <span style={{ color: C.bottom }}>◌</span> снизу (6) · <span style={{ color: C.edge }}>▬</span> в торец · <span style={{ color: C.groove }}>▬</span> паз · <span style={{ color: C.mill }}>━</span> фрезеровка · <span style={{ color: C.band }}>━</span> кромка. Нажмите на элемент — покажу его данные.
-            </div>
-            {selOp && (
-              <div className="card" style={{ padding: '8px 10px', marginBottom: 8, borderColor: C.sel }}>
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{TYPE_NAMES[selOp.type] || `Type ${selOp.type}`}{!selOp.gen ? ' · отключено (IsGenCode 0)' : ''}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{opText(selOp)}</div>
-                <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-hint)', wordBreak: 'break-all' }}>{Object.entries(selOp.attrs).map(([k, v]) => `${k}="${v}"`).join(' ')}</div>
-              </div>
-            )}
-            <details style={{ marginBottom: 6 }}>
-              <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Исходный XML · {p.file}</summary>
-              <pre style={{ fontSize: 10.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: 8, maxHeight: '40vh', overflow: 'auto', marginTop: 6 }}>{files.find(f => f.name === p.file)?.data || ''}</pre>
-            </details>
-            <details>
-              <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Все операции детали ({p.ops.filter(o => pass(o, filter)).length})</summary>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 6 }}>
-                {p.ops.filter(o => pass(o, filter)).map(o => (
-                  <div key={o.i} onClick={() => setSel(o.i)} style={{ fontSize: 12, padding: '4px 6px', borderRadius: 6, cursor: 'pointer', background: sel === o.i ? 'var(--amber-light)' : 'transparent', color: o.gen ? 'var(--text)' : 'var(--text-hint)' }}>
-                    <b style={{ fontWeight: 500 }}>{TYPE_NAMES[o.type] || `Type ${o.type}`}</b> · {opText(o)}
-                  </div>
-                ))}
-              </div>
-            </details>
           </>
         )}
       </div>
+      {!p ? (
+        <div style={{ padding: '0 12px' }}>
+          <div className="card" style={{ textAlign: 'center', padding: 24 }}>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>Здесь можно посмотреть программы для присадочного станка: и созданные в приложении, и любые XML-файлы станка (формат Syntec / SWJ).</p>
+            <button type="button" className="btn-primary" onClick={() => inp.current?.click()}>Открыть XML или .zip</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ flex: '0 0 auto', height: viewH, padding: '0 12px' }}>
+            <Preview p={p} filter={filter} sel={sel} onSel={pickFromPreview} focus={focus} />
+          </div>
+          {/* ползунок: больше превью или больше списка операций */}
+          <div onPointerDown={dragStart} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd} title="Потяните вверх или вниз"
+            style={{ flex: '0 0 auto', height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'row-resize', touchAction: 'none', userSelect: 'none', color: 'var(--text-hint)', fontSize: 10 }}>
+            <span>▲</span><i style={{ width: 54, height: 5, borderRadius: 3, background: 'var(--gray-mid, #bbb)' }} /><span>▼</span>
+          </div>
+          <div style={{ flex: '1 1 0', minHeight: 60, overflowY: 'auto', padding: '0 12px 16px', WebkitOverflowScrolling: 'touch' }}>
+            {selOp && (
+              <div className="card" style={{ padding: '7px 10px', marginBottom: 6, borderColor: C.sel }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>{TYPE_NAMES[selOp.type] || `Type ${selOp.type}`}{!selOp.gen ? ' · отключено (IsGenCode 0)' : ''}</div>
+                  <button type="button" onClick={() => setSel(null)} style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, padding: 0 }}>×</button>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>{opText(selOp)}</div>
+                <div style={{ fontSize: 10.5, fontFamily: 'monospace', color: 'var(--text-hint)', wordBreak: 'break-all' }}>{Object.entries(selOp.attrs).map(([k, v]) => `${k}="${v}"`).join(' ')}</div>
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Операции ({list.length}) — нажмите, чтобы выделить на превью</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 8 }}>
+              {list.map(o => (
+                <div key={o.i} ref={el => { if (el) rows.current.set(o.i, el); else rows.current.delete(o.i) }} onClick={() => pickFromList(o.i)}
+                  style={{ display: 'flex', gap: 7, alignItems: 'baseline', fontSize: 12, padding: '6px 6px', borderRadius: 6, cursor: 'pointer', background: sel === o.i ? 'var(--amber-light)' : 'transparent', borderLeft: `3px solid ${sel === o.i ? C.sel : 'transparent'}`, color: o.gen ? 'var(--text)' : 'var(--text-hint)' }}>
+                  <span style={{ flex: '0 0 auto', width: 8, height: 8, borderRadius: 4, background: o.gen ? dot(o) : C.off, transform: 'translateY(-1px)' }} />
+                  <span><b style={{ fontWeight: 500 }}>{TYPE_NAMES[o.type] || `Type ${o.type}`}</b> · {opText(o)}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8, lineHeight: 1.6 }}>
+              Вид сверху, ноль — левый нижний угол.{' '}
+              <span style={{ color: C.top }}>●</span> сверху (5) · <span style={{ color: C.bottom }}>◌</span> снизу (6) · <span style={{ color: C.edge }}>▬</span> в торец · <span style={{ color: C.groove }}>▬</span> паз · <span style={{ color: C.mill }}>━</span> фрезеровка · <span style={{ color: C.band }}>━</span> кромка (толщина подписана снаружи).
+            </div>
+            <details>
+              <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Исходный XML · {p.file}</summary>
+              <pre style={{ fontSize: 10.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: 8, marginTop: 6 }}>{files.find(f => f.name === p.file)?.data || ''}</pre>
+            </details>
+          </div>
+        </>
+      )}
     </div>
   )
 }
