@@ -615,6 +615,20 @@ export function labelSeq(sheet, geo, mode = 'manual', tpl = null) {
 export const labelOrder = (sheet, geo, mode = 'manual') => labelSeq(sheet, geo, mode, null).map(q => q.pi)
 
 /**
+ * Точка наклейки бирки на детали (центр бирки) в габарите детали x0..x1, y0..y1 — как деталь лежит на столе.
+ * pos: 'center' — середина детали; 'bl' | 'br' | 'tl' | 'tr' — бирка целиком в этом углу габарита (её край по краю детали).
+ * Деталь меньше бирки по какой-то стороне — по этой стороне бирка ставится посередине.
+ */
+export const LABEL_POS = [['center', 'Середина'], ['bl', 'Левый нижний'], ['br', 'Правый нижний'], ['tl', 'Левый верхний'], ['tr', 'Правый верхний']]
+export function labelPoint(x0, x1, y0, y1, pos, tpl) {
+  const hw = (Number(tpl?.w) || 0) / 2, hh = (Number(tpl?.h) || 0) / 2
+  const at = (lo, hi, half, side) => (side === 0 || hi - lo < 2 * half ? (lo + hi) / 2 : side < 0 ? lo + half : hi - half)
+  const sx = pos === 'bl' || pos === 'tl' ? -1 : pos === 'br' || pos === 'tr' ? 1 : 0
+  const sy = pos === 'bl' || pos === 'br' ? -1 : pos === 'tl' || pos === 'tr' ? 1 : 0
+  return [at(x0, x1, hw, sx), at(y0, y1, hh, sy)]
+}
+
+/**
  * Файлы маркировочного стола для выбранных листов.
  * sheets: [{ si, nc }] — номер листа и имя его программы раскроя; base — общая часть имени (заказ); post — постпроцессор (начало обработки).
  * -> [{ name, data: Uint8Array }]
@@ -646,7 +660,8 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
       // точка наклейки — центр детали; бирки клеятся в одном положении (R = 0), как в образцах
       const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
       const xs = pts.map(q => q.x), ys = pts.map(q => q.y), R = 0
-      cycles.push(['Cycle_Label', [['LabelName', bmp], ['X', r1(ox + geo.marginL + p.x + (Math.min(...xs) + Math.max(...xs)) / 2)], ['Y', r1(oy + geo.marginB + p.y + (Math.min(...ys) + Math.max(...ys)) / 2)], ['R', R]]])
+      const [lx, ly] = labelPoint(Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), post?.labelPos, tpl)
+      cycles.push(['Cycle_Label', [['LabelName', bmp], ['X', r1(ox + geo.marginL + p.x + lx)], ['Y', r1(oy + geo.marginB + p.y + ly)], ['R', R]]])
     })
     files.push({ name: cyc, data: strToU8(xml(cycles)) })
     const map = document.createElement('canvas'); map.width = 500; map.height = 500

@@ -1,3 +1,4 @@
+import { LABEL_POS } from '../lib/labelMaker'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState } from 'react'
 import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, activePost, newId } from '../lib/cncSettings'
@@ -105,12 +106,17 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         </label>
         {post.labelTable && (
           <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Коррекция положения бирки</div>
+            <label className="label">Положение бирки на детали</label>
+            <select value={post.labelPos || 'center'} onChange={e => set({ labelPos: e.target.value })} style={{ marginBottom: 4 }}>
+              {LABEL_POS.map(([k, l]) => <option key={k} value={k}>{l}{k === 'center' ? '' : ' угол'}</option>)}
+            </select>
+            <Hint>Углы — как деталь лежит на столе: «нижний» — ближе к нулю по Y, «левый» — ближе к нулю по X. В углу бирка ставится целиком на деталь, краем по её краю. У фигурной детали берётся угол её габарита — там может не оказаться материала, тогда оставьте середину.</Hint>
+            <div style={{ fontSize: 13, fontWeight: 500, margin: '10px 0 4px' }}>Коррекция положения бирки</div>
             <div className="row2">
               <SignedNum label="По X" unit="мм" value={post.labelDX} onChange={v => set({ labelDX: v })} />
               <SignedNum label="По Y" unit="мм" value={post.labelDY} onChange={v => set({ labelDY: v })} />
             </div>
-            <Hint>Если стол клеит бирку со сдвигом, укажите, на сколько её переместить: «+» — в сторону увеличения координаты (от нуля стола), «−» — к нулю. Например, бирка ложится на 5 мм дальше по Y, чем нужно, — поставьте по Y «−» 5. Сдвигаются все бирки во всех файлах стола; на программу раскроя это не влияет.</Hint>
+            <Hint>Если стол клеит бирку со сдвигом, укажите, на сколько её переместить: «+» — в сторону увеличения координаты (от нуля стола), «−» — к нулю. Например, бирка ложится на 5 мм дальше по Y, чем нужно, — поставьте по Y «−» 5. Коррекция считается от выбранного положения бирки (середины или угла) и сдвигает все бирки во всех файлах стола; на программу раскроя это не влияет.</Hint>
           </div>
         )}
         <Hint>Для станков со маркировочным столом. Когда включено, при создании G-кода вместе с управляющими программами становятся доступны файлы бирок: список листов (List_….xml), бирки по листам (Label_N_….cyc) и картинки бирок. Вид бирки настраивается в заказе, в разделе «Бирки».</Hint>
