@@ -85,7 +85,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
   const setKind = kind => {
     if (kind === post.kind || (kind === 'drill6') === drill) return
     if (!drill && routers.length < 2) { window.alert('Это единственный раскроечный станок. Чтобы добавить присадочный, нажмите «+ Присадочный».'); return }
-    set(kind === 'drill6' ? { kind, ext: 'XML', nameTpl: '{ZAKAZ}' } : { kind: 'router', ext: 'nc', nameTpl: NAME_TPL_DEFAULT })
+    set(kind === 'drill6' ? { kind, ext: 'XML', nameTpl: '{NOMER}_{ZAKAZ}' } : { kind: 'router', ext: 'nc', nameTpl: NAME_TPL_DEFAULT })
   }
   const copy = () => { const p = { ...post, id: newId(), shared: false, forAll: false, ownerId: undefined, name: post.name + ' (копия)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }) }
   const del = () => {
@@ -288,15 +288,15 @@ function Drill6Basic({ post, set, router }) {
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Файлы</Title>
         <label className="label">Начало названия файла</label>
-        <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || '{ZAKAZ}'}
-          onBlur={e => { const v = e.target.value.trim() || '{ZAKAZ}'; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+        <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || '{NOMER}_{ZAKAZ}'}
+          onBlur={e => { const v = e.target.value.trim() || '{NOMER}_{ZAKAZ}'; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
           {NAME_PARTS.filter(([c]) => c !== '{N}' && c !== '{KLIENT}').map(([code, label]) => (
-            <button key={code} type="button" onClick={() => { const cur = (post.nameTpl || '{ZAKAZ}').replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
+            <button key={code} type="button" onClick={() => { const cur = (post.nameTpl || '{NOMER}_{ZAKAZ}').replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
               style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
           ))}
         </div>
-        <Hint>Файл — на каждую деталь: начало названия, знак ^ и номер детали (позиция из модели или номер в списке). Например: <b style={{ fontFamily: 'monospace' }}>{folderName(post.nameTpl || '{ZAKAZ}', ctx)}^01.{post.ext || 'XML'}</b> Это же имя (без расширения) — код детали: выберите в шаблоне бирки QR «Код детали для присадочного станка» — на станке деталь сканируют, и открывается её программа.</Hint>
+        <Hint>Файл — на каждую деталь: начало названия, знак ^ и номер детали (позиция из модели или номер в списке). Например: <b style={{ fontFamily: 'monospace' }}>{folderName(post.nameTpl || '{NOMER}_{ZAKAZ}', ctx)}^01.{post.ext || 'XML'}</b> Это же имя (без расширения) — код детали: выберите в шаблоне бирки QR «Код детали для присадочного станка» — на станке деталь сканируют, и открывается её программа.</Hint>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
           <label className="label">Расширение файла</label>
           <input type="text" key={post.id + post.ext} defaultValue={post.ext || 'XML'} onBlur={e => { const v = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 8); if (v && v !== post.ext) set({ ext: v }) }} />
