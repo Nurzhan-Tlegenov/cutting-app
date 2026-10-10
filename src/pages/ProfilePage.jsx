@@ -1,4 +1,5 @@
 import { fetchNotices } from '../lib/notices'
+import LangPicker from '../components/LangPicker'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -85,6 +86,7 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        <LangPicker style={{ marginBottom: 10 }} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           {[
             ['Телефон', profile?.phone],

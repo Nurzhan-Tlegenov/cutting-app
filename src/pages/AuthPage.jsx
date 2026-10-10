@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import LangPicker from '../components/LangPicker'
 import { signupOpen, requestSignup, requestPasswordReset, confirmPasswordReset } from '../lib/adminApi'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -93,6 +94,7 @@ export default function AuthPage() {
 
   return (
     <div className="page" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', paddingTop: 48 }}>
+      <LangPicker style={{ maxWidth: 220, margin: '0 auto 16px' }} />
       <div style={{ marginBottom: 32, textAlign: 'center' }}>
         <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--blue)', marginBottom: 4 }}>РаскройPro</div>
         <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>
