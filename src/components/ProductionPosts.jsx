@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import StageParts from './StageParts'
+import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule } from '../lib/stageParts'
 import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, stageBack, startOrderStages, stageDone, stageAccept, since, clock } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
@@ -44,6 +46,7 @@ export function PostsSection({ members }) {
                 <span style={{ width: 20, fontSize: 12, color: 'var(--text-hint)', textAlign: 'right' }}>{i + 1}.</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 500 }}>{p.name}{!p.active ? ' · выключен' : ''}{p.queue ? <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--blue)' }}> · заказов на посту: {p.queue}</span> : null}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Детали: {ruleText(ruleOf(p.rule, p.name))}</div>
                   <div style={{ fontSize: 11, color: (p.members || []).length ? 'var(--text-muted)' : 'var(--amber)' }}>
                     {(p.members || []).length ? (p.members || []).map(u => { const m = staff.find(x => x.user_id === u) || (members || []).find(x => x.user_id === u); return m?.name || m?.full_name || 'сотрудник' }).join(', ') : 'сотрудники не закреплены — заказ на этом посту увидят только владелец и начальник'}
                   </div>
@@ -60,6 +63,7 @@ export function PostsSection({ members }) {
                       {staff.map(m => <button key={m.user_id} type="button" disabled={busy} style={chip((p.members || []).includes(m.user_id))} onClick={() => toggleMember(p, m.user_id)}>{(p.members || []).includes(m.user_id) ? '✓ ' : ''}{m.name || m.full_name || 'Сотрудник'}</button>)}
                     </div>
                   ) : <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>Сначала пригласите сотрудников (раздел «Сотрудники»).</div>}
+                  <RuleEditor post={p} busy={busy} onSave={rule => act(async () => { const { error } = await savePostRule(p.id, rule); return error ? { error: error.message } : null })} />
                   <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
                     <button type="button" disabled={busy} style={small} onClick={() => { const n = window.prompt('Название поста', p.name); if (n) act(() => savePost(p.id, n)) }}>Переименовать</button>
                     <button type="button" disabled={busy} style={small} onClick={() => act(() => savePost(p.id, p.name, !p.active))}>{p.active ? 'Выключить' : 'Включить'}</button>
@@ -82,6 +86,7 @@ export function PostsSection({ members }) {
 /** Маршрут заказа по постам: где заказ сейчас, кто принял, сколько времени. manage — владелец/начальник (пропустить, вернуть) */
 export function StageTrack({ orderId, status, manage = false, refresh, onChange }) {
   const [st, setSt] = useState(null)
+  const [parts, setParts] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const load = () => orderStages(orderId).then(r => setSt(r.error ? [] : r.data || []))
@@ -125,12 +130,39 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
       {manage && cur && (
         <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
           {cur.status === 'queued' && <button type="button" disabled={busy} style={small} onClick={() => act(() => stageAccept(cur.id))}>Принять за пост</button>}
+          {ruleOf(cur.rule, cur.name).list !== 'none' && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts(true)}>📦 Детали{Number(cur.scanned) ? ` · ${cur.scanned}` : ''}</button>}
           <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Отметить пост «${cur.name}» выполненным?`)) act(() => stageDone(cur.id)) }}>✓ Выполнено</button>
           <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Пропустить пост «${cur.name}» для этого заказа?`)) act(() => stageSkip(cur.id)) }}>Пропустить пост</button>
           {st.some(s => s.status === 'done') && <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm('Вернуть заказ на предыдущий пост (переделать)?')) act(() => stageBack(orderId)) }}>↩ На предыдущий пост</button>}
         </div>
       )}
       {err && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>{err}</div>}
+      {parts && cur && <StageParts stage={{ stage_id: cur.id, post_name: cur.name, rule: cur.rule, status: cur.status }} orderId={orderId} onClose={ch => { setParts(false); if (ch) { load(); onChange?.() } }} />}
+    </div>
+  )
+}
+
+/** Какие детали идут через пост: все, с кромкой, с присадкой (что учитывать), без списка */
+function RuleEditor({ post, busy, onSave }) {
+  const r = ruleOf(post.rule, post.name)
+  const set = patch => onSave({ ...r, ...patch })
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Детали на посту (сканируют бирки и отмечают, что прошло):</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {RULE_LISTS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(r.list === k)} onClick={() => set(k === 'drill' && r.list !== 'drill' ? { list: k, top: false, bottom: true, edge: true, grooves: false, mills: false } : { list: k })}>{r.list === k ? '✓ ' : ''}{l}</button>)}
+      </div>
+      {r.list === 'drill' && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Учитывать (деталь попадёт в список, если у неё есть хоть что-то из отмеченного):</div>
+          {DRILL_KEYS.map(([k, l]) => (
+            <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, padding: '2px 0', cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!r[k]} disabled={busy} onChange={e => set({ [k]: e.target.checked })} style={{ width: 16, height: 16 }} />
+              {l}{k === 'top' ? <span style={{ color: 'var(--text-hint)', fontSize: 11 }}> — обычно их делает фрезер на раскрое</span> : null}
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

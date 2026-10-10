@@ -7,6 +7,8 @@ import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { permsText } from '../lib/workplaces'
 import { myPostQueue, stageAccept, stageDone, since, clock } from '../lib/posts'
 import { StageTrack } from './ProductionPosts'
+import StageParts from './StageParts'
+import { ruleOf } from '../lib/stageParts'
 import ProductionForm from './ProductionForm'
 import CncLoader from './CncLoader'
 
@@ -31,6 +33,7 @@ export default function WorkerProduction({ wps, onRegister }) {
   const [open, setOpen] = useState(() => new Set())
   const [filter, setFilter] = useState('work')
   const [tick, setTick] = useState(0)
+  const [parts, setParts] = useState(null)       // открыт список деталей поста: { stage, orderId }
   const load = async () => {
     const q = await myPostQueue()
     if (q.error) setError(q.error); else setError('')
@@ -128,9 +131,10 @@ export default function WorkerProduction({ wps, onRegister }) {
                     {'gcode_at' in q && q.gcode_at && <div style={{ display: 'flex', gap: 4 }}>{marksOf(q)}</div>}
                   </div>
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                    {isNew
-                      ? <button type="button" disabled={busy === q.stage_id} style={btn('main')} onClick={() => stage(q, stageAccept)}>✓ Принять</button>
-                      : <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => stage(q, stageDone, `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`)}>✓ Выполнено</button>}
+                    {isNew && <button type="button" disabled={busy === q.stage_id} style={btn('main')} onClick={() => stage(q, stageAccept)}>✓ Принять</button>}
+                    {ruleOf(q.rule, q.post_name).list !== 'none' && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали{Number(q.scanned) ? ` · ${q.scanned}` : ''}</button>}
+                    {!isNew && <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => (ruleOf(q.rule, q.post_name).list !== 'none' ? setParts({ stage: q, orderId: q.order_id })
+                      : stage(q, stageDone, `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
                     {orderBtns(q.order_id)}
                   </div>
                 </div>
@@ -184,6 +188,7 @@ export default function WorkerProduction({ wps, onRegister }) {
           )}
         </>
       )}
+      {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) { load(); window.dispatchEvent(new Event('notices-seen')) } }} />}
       <details className="card" style={{ marginTop: 16, padding: '10px 12px' }}>
         <summary style={{ fontSize: 12.5, color: 'var(--text-muted)', cursor: 'pointer' }}>У вас есть и своё производство? Зарегистрировать</summary>
         <div style={{ marginTop: 8 }}><ProductionForm onDone={onRegister} /></div>

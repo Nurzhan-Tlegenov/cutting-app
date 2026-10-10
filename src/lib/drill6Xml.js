@@ -294,7 +294,11 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
     '</Root>',
     '',
   ].join('\r\n')
-  return { xml, ops, warnings }
+  // сколько чего у детали (для списков деталей на рабочих постах): лицевая — сверху (fr.top), обратная — снизу
+  const counts = { top: top.length, bottom: bottom.length, edge: edge.length,
+    groovesTop: grooves.filter(g => g.face === fr.top).length, groovesBottom: grooves.filter(g => g.face !== fr.top).length,
+    millsTop: mills.filter(m => m.face === fr.top).length, millsBottom: mills.filter(m => m.face !== fr.top).length }
+  return { xml, ops, warnings, counts }
 }
 
 // ─── Имена файлов и папки ───────────────────────────────────────────────────
