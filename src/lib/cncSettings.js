@@ -19,6 +19,7 @@ export const DEFAULT_POST = () => ({
   ext: 'nc',
   folderTpl: '{ZAKAZ}',           // название папки заказа при сохранении (см. folderName)
   nameTpl: '{N}_{ZAKAZ}_{MAT}',   // из чего складывается название управляющей программы (см. programName)
+  labelDX: 0, labelDY: 0,         // коррекция точки наклейки бирки на маркировочном столе, мм (плюс и минус), см. buildLabelFiles
   labelTable: false,              // у станка есть маркировочный стол: вместе с G-кодом делаются файлы бирок (List.xml, Label_N.cyc, картинки)
   // Команды
   cmdStart: 'M16\nG54',

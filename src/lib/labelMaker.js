@@ -623,7 +623,10 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
   const files = [], list = [], { w, h } = labelPx(tpl)
   await preloadLabelImages(tpl)
   if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)   // для QR со ссылкой на 3D
-  const ox = Number(post?.originX) || 0, oy = Number(post?.originY) || 0
+  // коррекция наклейки: стол клеит со сдвигом — все точки наклейки смещаются на заданную величину (плюс и минус).
+  // На программу раскроя (G-код) коррекция не влияет.
+  const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
+  const ox = (Number(post?.originX) || 0) + num(post?.labelDX), oy = (Number(post?.originY) || 0) + num(post?.labelDY)
   for (const { si, nc } of sheets) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet), stem = `${si + 1}_${base}`
     const cyc = `Label_${stem}.cyc`, jpg = `${stem}.jpg`

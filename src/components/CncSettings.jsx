@@ -20,6 +20,22 @@ function Num({ label, value, onChange, unit, hint }) {
     </label>
   )
 }
+// число со знаком: на телефонной цифровой клавиатуре минуса часто нет — знак меняется кнопкой «±»
+function SignedNum({ label, value, onChange, unit }) {
+  const v = Number(value) || 0
+  return (
+    <div style={{ minWidth: 0 }}>
+      <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>{label}{unit ? <span style={{ color: 'var(--text-hint)' }}>, {unit}</span> : null}</span>
+      <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
+        <button type="button" title="Сменить знак" onClick={() => onChange(-v)}
+          style={{ flex: '0 0 40px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: v < 0 ? 'var(--amber-light)' : 'var(--bg2)', color: 'var(--text)', fontSize: 16, cursor: 'pointer' }}>{v < 0 ? '−' : '+'}</button>
+        <input type="text" inputMode="decimal" key={String(v)} defaultValue={v ? String(Math.abs(v)).replace('.', ',') : ''} placeholder="0"
+          onBlur={e => { const s = e.target.value.replace(',', '.').trim(); const n = s === '' || !isFinite(Number(s)) ? 0 : Number(s); const out = s.startsWith('-') ? n : (v < 0 ? -Math.abs(n) : Math.abs(n)); if (out !== v) onChange(out) }}
+          style={{ flex: 1, minWidth: 0, padding: '8px 10px' }} />
+      </div>
+    </div>
+  )
+}
 function Seg({ value, options, onChange }) {
   return (
     <div style={{ display: 'flex', gap: 4 }}>
@@ -87,6 +103,16 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           <input type="checkbox" checked={!!post.labelTable} onChange={e => set({ labelTable: e.target.checked })} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
           Создавать файлы для маркировочного стола
         </label>
+        {post.labelTable && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Коррекция положения бирки</div>
+            <div className="row2">
+              <SignedNum label="По X" unit="мм" value={post.labelDX} onChange={v => set({ labelDX: v })} />
+              <SignedNum label="По Y" unit="мм" value={post.labelDY} onChange={v => set({ labelDY: v })} />
+            </div>
+            <Hint>Если стол клеит бирку со сдвигом, укажите, на сколько её переместить: «+» — в сторону увеличения координаты (от нуля стола), «−» — к нулю. Например, бирка ложится на 5 мм дальше по Y, чем нужно, — поставьте по Y «−» 5. Сдвигаются все бирки во всех файлах стола; на программу раскроя это не влияет.</Hint>
+          </div>
+        )}
         <Hint>Для станков со маркировочным столом. Когда включено, при создании G-кода вместе с управляющими программами становятся доступны файлы бирок: список листов (List_….xml), бирки по листам (Label_N_….cyc) и картинки бирок. Вид бирки настраивается в заказе, в разделе «Бирки».</Hint>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
