@@ -16,7 +16,7 @@
  *   Type 4 — паз: X, Y → EndX, EndY (средняя линия), Width, Depth, Drill (инструмент станка, например T2)
  *   Type 3 — фрезеровка по линиям (в образце — выборки в краю детали) — пока не выводим.
  */
-import { getAllDrillPoints, getGrooveRects } from './drillGeometry'
+import { getDrillPoints, getGrooveRects } from './drillGeometry'
 import { rawDetail, parseEdgeTypes, edgeKey } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
@@ -38,7 +38,9 @@ function contourOf(d) {
 /**
  * Перевод координат детали приложения (x — ширина W, y — длина H, вид на лицевую пласть) в координаты станка.
  * orient: 'lenX' — длина детали вдоль X станка (как в образце: Length — длинная сторона), 'asis' — без поворота.
- * face:   'front' — лицевая пласть детали = Face 5 (сверху), 'back' — деталь перевёрнута, лицевая снизу (Face 6).
+ * face:   лицевая пласть сверху (Face 5) — всегда, синхронно с фрезерным ЧПУ: на фрезере сверху лежит лицевая пласть,
+ *         он сверлит только её. «Сменить лицевую сторону» на карте раскроя переворачивает саму деталь — и для фрезера,
+ *         и для присадки сразу. Параметр 'back' оставлен только для проверок.
  */
 export function machineFrame(W, H, orient = 'lenX', face = 'front') {
   const rot = orient !== 'asis'
@@ -72,22 +74,34 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   const raw = rawDetail(d)
   const W = n0(raw.width), H = n0(raw.length)
   const c = contourOf(raw) || {}
-  const fr = machineFrame(W, H, post.d6Orient, post.d6Face)
+  const fr = machineFrame(W, H, post.d6Orient, 'front')   // лицевая — сверху, как на фрезерном ЧПУ
   const warnings = []
   const top = [], bottom = [], edge = [], grooves = []
 
-  getAllDrillPoints(c, W, H, false).forEach(p => {
-    const [X, Y] = fr.at(p.x, p.y)
-    const dia = n0(p.d) || 8
-    if (p.edge) {
-      const face = fr.faceAt(X, Y)
-      if (!face) { warnings.push('отверстие в торец не на краю детали — пропущено'); return }
-      const z = n0(post.d6EdgeZ) > 0 ? n0(post.d6EdgeZ) : T / 2
-      edge.push({ face, X, Y, Z: post.d6Face === 'back' ? T - z : z, depth: n0(p.depth) || 0, dia })
-      return
+  // присадка — по тем же правилам, что 3D-модель детали: у каждого отверстия своя пласть (лицевая, обратная или обе),
+  // у торцевого — высота от лицевой пласти (offsetFace). Размеры — готовой детали, без подрезки под кромку.
+  const faceHole = (x, y, face, dia, depth) => {
+    const [X, Y] = fr.at(x, y), back = face === 'back'
+    ;(back ? bottom : top).push({ X, Y, depth: depth > 0 ? Math.min(depth, T) : T, dia, face: back ? fr.bottom : fr.top })
+  }
+  ;(c.drillings || []).forEach(dr => {
+    if (dr.installed === false) return
+    let pts
+    try { pts = getDrillPoints(dr, W, H, c.layout || []) } catch { pts = [] }
+    for (const p of pts) {
+      const dia = n0(p.ehD ?? (p.isPair ? dr.pairD ?? dr.d : dr.d)) || 8
+      const depth = n0(p.ehDepth ?? (p.isPair ? dr.pairDepth ?? dr.depth : dr.depth) ?? 13)
+      if (dr.kind === 'edge' && !p.isFaceType) {
+        const [X, Y] = fr.at(p.x, p.y), face = fr.faceAt(X, Y)
+        if (!face) { warnings.push('отверстие в торец не на краю детали (в вырезе) — пропущено'); continue }
+        const zf = dr.offsetFace != null && dr.offsetFace !== '' ? n0(dr.offsetFace) : T / 2   // от лицевой пласти
+        edge.push({ face, X, Y, Z: T - zf, depth, dia })   // на станке Z — от нижней пласти, лицевая сверху
+        continue
+      }
+      const face = p.ehFace ?? (dr.kind === 'edge' || p.isPair ? dr.pairFace ?? dr.face : dr.face) ?? 'front'
+      if (face === 'both') { faceHole(p.x, p.y, 'front', dia, depth); faceHole(p.x, p.y, 'back', dia, depth) }
+      else faceHole(p.x, p.y, face, dia, depth)
     }
-    const depth = n0(p.depth) > 0 ? Math.min(n0(p.depth), T) : T
-    ;(p.back ? bottom : top).push({ X, Y, depth, dia, face: p.back ? fr.bottom : fr.top })
   })
 
   getGrooveRects(c, W, H, false).forEach(g => {

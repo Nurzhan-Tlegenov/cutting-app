@@ -142,7 +142,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         ))}
         <Hint>Кнопка «Создать программы» в заказе выпускает G-код выбранным раскроечным станком и, вместе с ним, файлы для каждого отмеченного присадочного.</Hint>
       </div>
-      {drill && <Drill6Basic post={post} set={set} />}
+      {drill && <Drill6Basic post={post} set={set} router={router} />}
       {!drill && <>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Маркировочный стол</Title>
@@ -261,7 +261,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
 }
 
 // ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
-function Drill6Basic({ post, set }) {
+function Drill6Basic({ post, set, router }) {
   const ctx = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
   return (
     <>
@@ -270,12 +270,13 @@ function Drill6Basic({ post, set }) {
         <label className="label">Как лежит деталь</label>
         <Seg value={post.d6Orient === 'asis' ? 'asis' : 'lenX'} options={[['lenX', 'Длина вдоль X'], ['asis', 'Ширина вдоль X']]} onChange={v => set({ d6Orient: v })} />
         <Hint>Ноль — левый нижний угол детали, вид сверху. В файлах вашего станка длинная сторона (Length) идёт вдоль X — так по умолчанию.</Hint>
-        <label className="label" style={{ marginTop: 8 }}>Лицевая пласть</label>
-        <Seg value={post.d6Face === 'back' ? 'back' : 'front'} options={[['front', 'Сверху (Face 5)'], ['back', 'Снизу (Face 6)']]} onChange={v => set({ d6Face: v })} />
-        <Hint>Присадка с лицевой стороны детали идёт в верхнюю пласть (Face 5), с обратной — в нижнюю (Face 6). Если станок сверлит зеркально — переключите.</Hint>
-        <div className="row2" style={{ marginTop: 8 }}>
-          <Num label="Высота отверстий в торец" unit="мм" value={post.d6EdgeZ} onChange={v => set({ d6EdgeZ: v })} hint="от нижней пласти; пусто — середина толщины" />
-          <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', minWidth: 0 }}>Инструмент для пазов
+        {/* лицевая пласть — синхронно с фрезерным ЧПУ, отдельной настройки нет */}
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px', marginTop: 8 }}>
+          Лицевая пласть — <b>сверху (Face 5)</b>, как на фрезерном ЧПУ{router ? <> «{router.name}»</> : null}: та же пласть, что лежит сверху на раскрое. Обратная — снизу (Face 6).
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Сменить лицевую сторону детали — на карте раскроя (долгое нажатие на деталь): поменяется сразу и для фрезера, и для присадки. Высота отверстий в торец берётся из детали («от пласти» — от лицевой).</span>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', minWidth: 0, maxWidth: 200 }}>Инструмент для пазов
             <input type="text" key={post.id + (post.d6Tool || '')} defaultValue={post.d6Tool || 'T2'} onBlur={e => { const v = e.target.value.trim() || 'T2'; if (v !== post.d6Tool) set({ d6Tool: v }) }} style={{ marginTop: 3, padding: '8px 10px' }} />
             <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>как в станке, например T2</span>
           </label>
