@@ -14,12 +14,20 @@
  *   Type 2 — отверстие в пласть: X, Y, Depth, Diameter
  *   Type 1 — отверстие в торец: X, Y (точка на торце), Z (высота от нижней пласти), Depth (вглубь детали), Diameter
  *   Type 4 — паз: X, Y → EndX, EndY (средняя линия), Width, Depth, Drill (инструмент станка, например T2)
- *   Type 3 — фрезеровка по линиям (в образце — выборки в краю детали) — пока не выводим.
+ *   Type 3 — фрезеровка по линиям: X, Y — начало, <Lines><Line EndX EndY Angle/></Lines>, Depth, Pocket (1 — выборка
+ *            площади внутри контура), ToolOffset (右 — фреза справа от направления хода, 左 — слева, 中 — по линии), Drill.
+ *            В образце: выборка в краю детали, Depth 17 при толщине 16 — сквозь. Дуги выводим мелкими отрезками (Angle 0).
+ *
+ * На станок уходит ВСЁ, что есть в детали, — даже то, что уже сделал фрезерный ЧПУ на раскрое (отверстия и пазы лицевой
+ * пласти, фигурный контур, вырезы, выемки): лишнее оператор отключает фильтром на стойке (например, обработку Face 5).
  */
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
 import { rawDetail, parseEdgeTypes, edgeKey } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
+import { detailHoles } from './partHoles'
+import { parsePolygonFromDetail } from './trueShapeNesting'
+import { smoothLoop } from './arcFit'
 
 const EPS = 0.05
 const n0 = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -91,8 +99,76 @@ function edgeThick(d, types) {
   return out
 }
 
+const area = P => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1] } return a / 2 }
+const dedupe = P => P.filter((p, i) => { const q = P[(i + 1) % P.length]; return Math.hypot(p[0] - q[0], p[1] - q[1]) > 0.001 })
+const smooth = P => { try { const s = smoothLoop(P, 0.02); return s?.length > 2 ? s : P } catch { return P } }
 /**
- * Одна деталь -> { xml, ops, warnings } или null (нет присадки и includeEmpty выключен).
+ * Фрезеровки детали (Type 3) в координатах станка: [{ face, pts (первая — начало), depth, pocket, offset }]
+ *   фигурный контур — только участки, которые не лежат на габарите детали (прямые края габарита не фрезеруются), фреза снаружи;
+ *   вырезы внутри детали — замкнуто, фреза внутри, насквозь; выемки — выборка (Pocket 1) на свою глубину и пласть;
+ *   фрезеровка фасада (декор из импорта) — выборки и траектории по линии.
+ * ToolOffset: 右 — справа от хода. Для нижней пласти (Face 6) сторона считается как при взгляде снизу.
+ */
+function millPaths(raw, c, W, H, T, fr) {
+  const out = [], through = T + 1
+  const sideOf = (P, outside, face) => {          // P — в координатах станка, замкнутый
+    let ccw = area(P) > 0
+    if (face === fr.bottom) ccw = !ccw
+    return (ccw === outside) ? '右' : '左'      // обход против часовой: снаружи — справа
+  }
+  const onBox = ([x, y]) => x < EPS || y < EPS || x > fr.L - EPS || y > fr.Wm - EPS
+  // 1) фигурный контур детали
+  let outer = null
+  try { const r = parsePolygonFromDetail(raw); if (r?.custom) outer = r.polygon } catch { outer = null }
+  if (outer?.length > 2) {
+    const P = dedupe(smooth(outer.map(q => (Array.isArray(q) ? q : [q.x, q.y]))).map(([x, y]) => fr.at(x, y)))
+    const off = sideOf(P, true, fr.top), n = P.length
+    const sameSide = (a, b) => (Math.abs(a[0] - b[0]) < EPS && (a[0] < EPS || a[0] > fr.L - EPS)) || (Math.abs(a[1] - b[1]) < EPS && (a[1] < EPS || a[1] > fr.Wm - EPS))
+    const cut = i => !sameSide(P[i], P[(i + 1) % n])          // ребро i (P[i] -> P[i+1]) не лежит на габарите
+    const start = [...Array(n).keys()].find(i => !cut(i))
+    if (start == null) out.push({ face: fr.top, pts: [...P, P[0]], depth: through, pocket: false, offset: off })   // вся деталь фигурная
+    else {
+      let run = null
+      for (let k = 1; k <= n; k++) {
+        const i = (start + k) % n
+        if (cut(i)) { if (!run) run = [P[i]]; run.push(P[(i + 1) % n]) }
+        else if (run) { out.push({ face: fr.top, pts: run, depth: through, pocket: false, offset: off }); run = null }
+      }
+      if (run) out.push({ face: fr.top, pts: run, depth: through, pocket: false, offset: off })
+    }
+  }
+  // 2) вырезы и выемки
+  ;(c.holes || []).forEach(hole => {
+    const poly = detailHoles({ width: W, length: H, contour: JSON.stringify({ holes: [hole] }) })[0]
+    if (!poly) return
+    const P = dedupe(smooth(poly.map(q => [q.x, q.y])).map(([x, y]) => fr.at(x, y)))
+    if (P.length < 3) return
+    if (hole.type === 'pocket') {
+      const face = hole.face === 'back' ? fr.bottom : fr.top
+      out.push({ face, pts: [...P, P[0]], depth: Math.min(n0(hole.depth) || 10, T), pocket: true, offset: sideOf(P, false, face) })
+      return
+    }
+    if (P.some(onBox)) return                    // вырез до края — уже в фигурном контуре
+    out.push({ face: fr.top, pts: [...P, P[0]], depth: through, pocket: false, offset: sideOf(P, false, fr.top) })
+  })
+  // 3) фрезеровка фасада из импорта (выборки и профильные траектории)
+  ;(c.decor || []).forEach(dc => {
+    const face = dc.face === 'back' ? fr.bottom : fr.top
+    if (dc.kind === 'pocket') {
+      ;(dc.polys || []).forEach(pl => {
+        const P = dedupe(pl.map(([x, y]) => fr.at(x, y)))
+        if (P.length > 2 && n0(dc.depth) > 0) out.push({ face, pts: [...P, P[0]], depth: Math.min(n0(dc.depth), T), pocket: true, offset: sideOf(P, false, face) })
+      })
+    } else if (Array.isArray(dc.path) && dc.path.length > 1) {
+      const depth = Math.max(0, ...(dc.profile || []).map(q => n0(q?.[1])))
+      if (depth > 0) out.push({ face, pts: dc.path.map(([x, y]) => fr.at(x, y)), depth: Math.min(depth, T), pocket: false, offset: '中' })
+    }
+  })
+  return out
+}
+
+/**
+ * Одна деталь -> { xml, ops, warnings } или null (нет никакой обработки и d6All выключен).
  * d — строка order_details (по готовой детали), T — толщина, id — имя детали в файле.
  */
 export function panelXml(d, { T, id, post = {}, types = {} }) {
@@ -141,11 +217,8 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
     grooves.push({ face: g.back ? fr.bottom : fr.top, line, width, depth: n0(g.depth) > 0 ? n0(g.depth) : T })
   })
 
-  const pockets = (c.holes || []).length
-  if (pockets) warnings.push('выемки и вырезы в XML шестистороннего станка пока не выводятся')
-  if (Array.isArray(c.vertices) && (c.vertices.length > 4 || c.vertices.some(v => v?.type === 'arc'))) warnings.push('фигурный контур детали в XML не передаётся — только прямоугольник')
-
-  const ops = top.length + bottom.length + edge.length + grooves.length
+  const mills = millPaths(raw, c, W, H, T, fr)
+  const ops = top.length + bottom.length + edge.length + grooves.length + mills.length
   if (!ops && !post.d6All) return null
 
   // порядок — как в образце: пласть сверху (по Y, затем по X), торцы, пазы, пласть снизу
@@ -159,8 +232,16 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   const hole = h => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="2" IsGenCode="2" Face="${h.face}" X="${f3(h.X)}" Y="${f3(h.Y)}" Depth="${f3(h.depth)}" Diameter="${f3(h.dia)}" />`)
   top.forEach(hole)
   edge.forEach(h => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="1" IsGenCode="2" Face="${h.face}" X="${f3(h.X)}" Y="${f3(h.Y)}" Z="${f3(h.Z)}" Depth="${f3(h.depth)}" Diameter="${f3(h.dia)}" />`))
+  const mill = m => {
+    lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="3" IsGenCode="2" Face="${m.face}" Depth="${f3(m.depth)}" X="${f3(m.pts[0][0])}" Y="${f3(m.pts[0][1])}" Pocket="${m.pocket ? 1 : 0}" ToolOffset="${m.offset}" Drill="${esc(tool)}">`)
+    lines.push('\t\t\t\t\t\t<Lines>')
+    m.pts.slice(1).forEach(([X, Y], i) => lines.push(`\t\t\t\t\t\t\t<Line LineID="${i + 1}" EndX="${f3(X)}" EndY="${f3(Y)}" Angle="0.000000" />`))
+    lines.push('\t\t\t\t\t\t</Lines>', '\t\t\t\t\t</Machining>')
+  }
+  mills.filter(m => m.face === fr.top).forEach(mill)
   grooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" Drill="${esc(tool)}" />`))
   bottom.forEach(hole)
+  mills.filter(m => m.face !== fr.top).forEach(mill)
 
   const faceEdge = edgesByFace(fr, W, H, et)
   const eth = v => (v > 0 ? f3(v) : '0.000000')
@@ -188,27 +269,42 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   return { xml, ops, warnings }
 }
 
+/** Начало названия файлов (и кода детали на бирке): по шаблону присадочного постпроцессора, без имени клиента */
+export function drill6Prefix(post, order, mat) {
+  const ctx = { order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, total: mat?.sheets?.length || 0 }
+  return latin(folderName(post?.nameTpl || '{ZAKAZ}', ctx)) || 'zakaz'
+}
+/**
+ * Код каждой детали материала: «начало^номер» — это и имя файла (без расширения), и Panel ID, и то, что пишется в QR
+ * бирки: на шестистороннем станке деталь сканируют — и открывается её программа. Номер — позиция из модели
+ * (Базис / Астра), иначе порядковый номер в списке; не зависит от того, есть ли у детали присадка.
+ */
+export function drill6Ids(details, prefix) {
+  const used = new Set()
+  return (details || []).map((d, i) => {
+    const meta = detailMeta(rawDetail(d))
+    let num = meta?.pos != null && String(meta.pos).trim() ? latin(String(meta.pos).trim()) : pad2(i + 1)
+    while (used.has(num)) num += '_'
+    used.add(num)
+    return `${prefix}^${num}`
+  })
+}
+
 /**
  * Файлы для шестистороннего станка по деталям материала.
- * details — детали материала (как в раскрое; размеры берутся по готовой детали), ctx — для названия файлов.
+ * details — детали материала (как в раскрое; размеры берутся по готовой детали), mat — материал (для названия файлов).
  * -> { files: [{ name, data, detail, qty, ops }], skipped (без присадки), warnings }
  */
-export function buildDrill6Files({ details, thickness, order, post = {}, ctx = {} }) {
+export function buildDrill6Files({ details, thickness, order, post = {}, mat = null }) {
   const types = parseEdgeTypes(order?.edge_types)
-  const prefix = latin(folderName(post.nameTpl || '{ZAKAZ}', ctx)) || 'zakaz'
+  const ids = drill6Ids(details, drill6Prefix(post, order, mat))
   const ext = latin(post.ext || 'XML') || 'XML'
   const files = [], warnings = new Set()
   let skipped = 0
-  const used = new Set()
   ;(details || []).forEach((d, i) => {
-    const meta = detailMeta(rawDetail(d))
-    // номер детали: позиция из модели (Базис / Астра), иначе — порядковый номер в списке
-    let num = meta?.pos != null && String(meta.pos).trim() ? latin(String(meta.pos).trim()) : pad2(i + 1)
-    while (used.has(num)) num += '_'
-    const id = `${prefix}^${num}`
+    const id = ids[i]
     const r = panelXml(d, { T: n0(thickness) || 16, id, post, types })
     if (!r) { skipped++; return }
-    used.add(num)
     r.warnings.forEach(w => warnings.add(`${rawDetail(d).name || 'Деталь ' + (i + 1)}: ${w}`))
     files.push({ name: `${id}.${ext}`, data: r.xml, detail: rawDetail(d).name || '', qty: n0(d.qty) || 1, ops: r.ops })
   })

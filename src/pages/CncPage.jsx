@@ -109,7 +109,7 @@ export default function CncPage() {
       return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
     })
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
-    const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ details: mat.details, thickness: mat.thickness, order, post: p, ctx: nameCtx(null) }) }))
+    const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ details: mat.details, thickness: mat.thickness, order, post: p, mat }) }))
     setBuilt({ files, drill }); setSaved('')
     // маркировка: файлы маркировочного стола для тех же листов (на линии сначала бирки, потом раскрой)
     const ok = files.filter(f => !f.empty)
@@ -330,7 +330,7 @@ export default function CncPage() {
               <div style={{ fontSize: 13, fontWeight: 500 }}>⬡ {r.post.name}</div>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
                 {r.files.length ? `Файлов: ${r.files.length} — по одному на деталь${r.files.some(f => f.qty > 1) ? ' (деталей больше одной штуки: ' + r.files.filter(f => f.qty > 1).length + ' — программа запускается на каждую)' : ''}.` : 'Нет деталей с присадкой.'}
-                {r.skipped > 0 ? ` Без присадки: ${r.skipped} — не выводятся.` : ''}
+                {r.skipped > 0 ? ` Без обработки: ${r.skipped} — не выводятся.` : ''}
               </div>
               {r.warnings.length > 0 && (
                 <details style={{ marginBottom: 6 }}>

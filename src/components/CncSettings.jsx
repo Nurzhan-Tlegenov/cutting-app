@@ -274,15 +274,16 @@ function Drill6Basic({ post, set, router }) {
           <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Деталь только поворачивается, не переворачивается. Высота отверстий в торец берётся из детали («от пласти» — от лицевой).</span>
         </div>
         <div style={{ marginTop: 8 }}>
-          <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', minWidth: 0, maxWidth: 200 }}>Инструмент для пазов
+          <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', minWidth: 0, maxWidth: 200 }}>Инструмент для пазов и фрезеровки
             <input type="text" key={post.id + (post.d6Tool || '')} defaultValue={post.d6Tool || 'T2'} onBlur={e => { const v = e.target.value.trim() || 'T2'; if (v !== post.d6Tool) set({ d6Tool: v }) }} style={{ marginTop: 3, padding: '8px 10px' }} />
             <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>как в станке, например T2</span>
           </label>
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!post.d6All} onChange={e => set({ d6All: e.target.checked })} style={{ width: 18, height: 18 }} />
-          Выводить и детали без присадки
+          Выводить и детали без обработки
         </label>
+        <Hint>На станок уходит вся обработка детали: отверстия в пласти и торцы, пазы, фигурный контур, вырезы, выемки, фрезеровка фасада — даже то, что уже сделал фрезерный ЧПУ на раскрое. Лишнее отключается фильтром на стойке станка (например, всю обработку верхней пласти Face 5).</Hint>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Файлы</Title>
@@ -290,12 +291,12 @@ function Drill6Basic({ post, set, router }) {
         <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || '{ZAKAZ}'}
           onBlur={e => { const v = e.target.value.trim() || '{ZAKAZ}'; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
-          {NAME_PARTS.filter(([c]) => c !== '{N}').map(([code, label]) => (
+          {NAME_PARTS.filter(([c]) => c !== '{N}' && c !== '{KLIENT}').map(([code, label]) => (
             <button key={code} type="button" onClick={() => { const cur = (post.nameTpl || '{ZAKAZ}').replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
               style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
           ))}
         </div>
-        <Hint>Файл — на каждую деталь: начало названия, знак ^ и номер детали (позиция из модели или номер в списке). Например: <b style={{ fontFamily: 'monospace' }}>{folderName(post.nameTpl || '{ZAKAZ}', ctx)}^01.{post.ext || 'XML'}</b></Hint>
+        <Hint>Файл — на каждую деталь: начало названия, знак ^ и номер детали (позиция из модели или номер в списке). Например: <b style={{ fontFamily: 'monospace' }}>{folderName(post.nameTpl || '{ZAKAZ}', ctx)}^01.{post.ext || 'XML'}</b> Это же имя (без расширения) — код детали: выберите в шаблоне бирки QR «Код детали для присадочного станка» — на станке деталь сканируют, и открывается её программа.</Hint>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
           <label className="label">Расширение файла</label>
           <input type="text" key={post.id + post.ext} defaultValue={post.ext || 'XML'} onBlur={e => { const v = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 8); if (v && v !== post.ext) set({ ext: v }) }} />

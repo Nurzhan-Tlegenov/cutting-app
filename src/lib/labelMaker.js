@@ -14,6 +14,8 @@ import { detailMeta } from './partLabel'
 import { isTwoSided } from './partInfo'
 import { placedTurns, placedHoles } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
+import { getCnc, drillPosts, isDrill6 } from './cncSettings'
+import { drill6Ids, drill6Prefix } from './drill6Xml'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
 import { orderTitle, toLatin } from './orderUtils'
@@ -61,6 +63,7 @@ export const LABEL_ITEMS = [
 // Из чего собирается строка QR-кода — выбирает пользователь; порядок — как в этом списке
 export const QR_PARTS = [
   ['link', 'Ссылка на 3D-модель детали'],
+  ['drill6', 'Код детали для присадочного станка (имя её файла)'],
   ['text', 'Свой текст'],
   ['order', 'Название заказа'],
   ['des', 'Обозначение детали'],
@@ -78,6 +81,8 @@ export function labelQr(tpl, info) {
   // ссылка на 3D: по коду открывается модель заказа сразу на этой детали. Работает, пока у заказа открыта ссылка
   // на 3D-модель; в коде тогда только адрес (иначе телефон не распознает его как ссылку). Ссылки нет — обычный текст.
   if (q.parts.includes('link') && info.share) return `${shareUrl(info.share)}?n=${info.di}${info.des ? '&des=' + encodeURIComponent(info.des) : ''}`
+  // код для шестистороннего станка — один: сканер станка ищет по нему файл детали, лишнего в коде быть не должно
+  if (q.parts.includes('drill6') && info.drill6) return info.drill6
   const val = { text: q.text, order: info.order, des: info.des, name: info.name, pos: info.pos, prefix: info.prefix, material: info.materialName,
     size: `${r1(info.length)}x${r1(info.width)}x${info.thickness || ''}`, sheet: `L${info.sheet}`, num: `N${info.num}` }
   const out = QR_PARTS.filter(([k]) => q.parts.includes(k)).map(([k]) => String(val[k] ?? '').trim()).filter(Boolean).join(q.sep)
@@ -232,6 +237,20 @@ const pxMm = tpl => ({ 300: 12, 600: 24 })[tpl?.dpi] || LABEL_PX_MM
 const edgeName = v => (!v || v === 'false' ? '' : v === 'default' || v === true ? 'Кромка' : String(v))
 const r1 = v => String(Math.round((Number(v) || 0) * 10) / 10)
 
+// Код детали для шестистороннего присадочного станка — тот же, что имя её файла (см. drill6Xml.js): по шаблону названия
+// присадочного постпроцессора, включённого в выпуск (или первого присадочного).
+const d6Cache = new WeakMap()
+function drill6Code(order, mat, di) {
+  let ids = d6Cache.get(mat)
+  if (!ids) {
+    const cnc = getCnc(imgUser)
+    const post = drillPosts(cnc)[0] || cnc.posts.find(isDrill6)
+    ids = post ? drill6Ids(mat.details, drill6Prefix(post, order, mat)) : []
+    d6Cache.set(mat, ids)
+  }
+  return ids[di] || ''
+}
+
 /** Все свойства детали для бирки. mat — материал из savedNestings, si / pi — лист и деталь на нём */
 export function labelInfo(order, mat, si, pi) {
   const sh = mat.sheets[si], p = sh.placed[pi], d = mat.details[p.detailIndex] || {}, m = detailMeta(d) || {}
@@ -258,7 +277,7 @@ export function labelInfo(order, mat, si, pi) {
   const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
     order: orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
-    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
+    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, drill6: drill6Code(order, mat, p.detailIndex),
     name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
     material: [mat.name, mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · '),
     length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: Number(d.qty) || 1,
