@@ -72,7 +72,8 @@ export const QR_PARTS = [
   ['sheet', 'Номер карты'],
   ['num', 'Номер детали на листе'],
 ]
-const QR_DEFAULT = { parts: ['order', 'sheet', 'num', 'des', 'size'], sep: ';', text: '', latin: false }
+// по умолчанию — название заказа и обозначение детали: по ним и сканер станка находит файл, и заказчик — деталь в 3D-модели
+const QR_DEFAULT = { parts: ['order', 'des'], sep: '_', text: '', latin: true }
 export function labelQr(tpl, info) {
   const q = tpl.qr || QR_DEFAULT
   // ссылка на 3D: по коду открывается модель заказа сразу на этой детали. Работает, пока у заказа открыта ссылка

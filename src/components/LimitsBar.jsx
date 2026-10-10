@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { myLimits, LIMIT_KEYS } from '../lib/limits'
+import { myLimits, LIMIT_KEYS, isCap } from '../lib/limits'
 
 // Сколько осталось по лимитам бесплатного использования — компактно, одной строкой (только где лимит есть).
 // cabinet — 'client' | 'production'; refresh — любое значение, при смене которого лимиты перечитываются.
@@ -7,7 +7,7 @@ export default function LimitsBar({ cabinet, refresh, style }) {
   const [l, setL] = useState(null)
   useEffect(() => { let alive = true; myLimits(true).then(v => { if (alive) setL(v) }); return () => { alive = false } }, [refresh])
   if (!l || l.master || l.unlimited) return null
-  const items = LIMIT_KEYS.filter(([k, , c]) => c === cabinet && l.limits?.[k]?.limit != null).map(([k, label]) => ({ k, label, ...l.limits[k] }))
+  const items = LIMIT_KEYS.filter(([k, , c]) => c === cabinet && !isCap(k) && l.limits?.[k]?.limit != null).map(([k, label]) => ({ k, label, ...l.limits[k] }))
   if (!items.length) return null
   const full = items.some(i => i.used >= i.limit)
   return (

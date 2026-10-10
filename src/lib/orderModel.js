@@ -16,6 +16,12 @@ export async function saveOrderModel(orderId, data) {
 
 /** -> распакованная модель или null */
 export async function loadOrderModel(orderId) {
+  // производство смотрит 3D-модель заказа в пределах лимита (заказчику и мастеру — всегда)
+  try {
+    const { error } = await supabase.rpc('open_order_model', { p_order: orderId })
+    const lim = error && limitFromError(error)
+    if (lim) throw Object.assign(new Error(lim.text), { limit: true })
+  } catch (e) { if (e?.limit) throw e }   // нет функции в базе — лимитов ещё нет
   try {
     const { data, error } = await supabase.from('order_models').select('data').eq('order_id', orderId).maybeSingle()
     if (error || !data?.data) return null

@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 // Чтение моделей лежит в основной части приложения, а не подгружается отдельно: после обновления приложения
 // у открытой страницы адреса подгружаемых частей устаревают, и импорт падал с «Failed to fetch dynamically imported module».
 import { readBasisFile, packScene } from '../lib/basisB3d'
@@ -9,6 +9,7 @@ import { readSketchCutPdf } from '../lib/sketchcutPdf'
 import { millsFromItems, mergeMills } from '../lib/facadeCarve'
 import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importDetails'
 import { useAuth } from '../context/AuthContext'
+import { myLimits, limitText } from '../lib/limits'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 
 // Какую пласть считать лицевой при импорте модели (копия списка из basisB3d — он грузится по требованию)
@@ -89,6 +90,9 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const [headerRow, setHeaderRow] = useState(-1)
   const [roles, setRoles] = useState([])
   const [groupKey, setGroupKey] = useState(ALL)
+  // лимит бесплатного использования: сколько материалов можно взять за один импорт (null — сколько угодно)
+  const [matCap, setMatCap] = useState(null)
+  useEffect(() => { let alive = true; myLimits().then(l => { if (alive) setMatCap(l?.limits?.import_mats?.limit ?? null) }); return () => { alive = false } }, [])
   const [mode, setMode] = useState('add')
   const [basis, setBasis] = useState(null)       // разобранная модель Базиса или Астры (вместо таблицы)
 
@@ -153,7 +157,9 @@ export default function ImportDetails({ hasDetails, onImport }) {
       : sheets ? buildDetails(rows, headerRow, roles) : { items: [], skipped: 0, groups: [] }),
     [basis, sheets, rows, headerRow, roles]
   )
-  const activeKey = groupKey === ALL || result.groups.some(g => g.key === groupKey) ? groupKey : ALL
+  // «Все вместе» — только если материалов не больше лимита; иначе по умолчанию первый материал
+  const allowAll = matCap == null || result.groups.length <= matCap
+  const activeKey = result.groups.some(g => g.key === groupKey) ? groupKey : (allowAll || !result.groups.length ? ALL : result.groups[0].key)
   const chosen = activeKey === ALL ? result.items : result.items.filter(it => it.groupKey === activeKey)
   const pieces = chosen.reduce((s, it) => s + it.qty, 0)
   const hasDims = !!basis || (roles.includes('length') && roles.includes('width')) || roles.includes('size')
@@ -339,8 +345,11 @@ export default function ImportDetails({ hasDetails, onImport }) {
                       {groupLabel(g)} · {g.pieces} шт.
                     </button>
                   ))}
-                  <button type="button" style={chip(activeKey === ALL)} onClick={() => setGroupKey(ALL)}>Все вместе</button>
+                  {allowAll
+                    ? <button type="button" style={chip(activeKey === ALL)} onClick={() => setGroupKey(ALL)}>Все вместе</button>
+                    : <button type="button" style={{ ...chip(false), opacity: 0.5 }} onClick={() => window.alert(limitText('import_mats', matCap))}>Все вместе 🔒</button>}
                 </div>
+                {!allowAll && <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4 }}>Бесплатно — не больше {matCap} материал{matCap === 1 ? 'а' : 'ов'} за один импорт. Остальные можно загрузить в другие заказы.</div>}
               </div>
             )}
 

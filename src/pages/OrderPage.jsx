@@ -17,7 +17,8 @@ import { isTwoSided } from '../lib/partInfo'
 import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
-import { orderClient, productionSetStatus, orderMarks } from '../lib/productionApi'
+import { orderClient, productionSetStatus, orderMarks, productionArchive } from '../lib/productionApi'
+import { limitFromError, resetLimitsCache } from '../lib/limits'
 import NestingCost from '../components/NestingCost'
 import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
@@ -59,11 +60,18 @@ export default function OrderPage() {
   async function setStatus(status) {
     // раскрой с нарушением реза в работу не принимается
     if (status === 'inwork' && faults.length) { window.alert(faultText(faults, 'Принять такой заказ в работу нельзя. Исправьте раскрой (кнопка «Открыть / перекроить») или верните заказ заказчику на доработку.')); return }
+    // производство отмечает «Исполнен» — заказ уходит из его списков (остаётся у заказчика и в «Итогах»)
+    const leave = status === 'done' && order.status !== 'done' && order.user_id !== user?.id
+    if (leave && !window.confirm(`Заказ исполнен?\nОн уйдёт из списка производства и останется только в «Итогах» (статистика). Заказ остаётся у заказчика.`)) return
     // статус меняет производство (или администратор) — через функцию базы; в старой базе — напрямую
     let r = await productionSetStatus(id, status)
+    const lim = r.error && limitFromError(r.error)
+    if (lim) { window.alert(lim.text); return }                // предел бесплатного использования
     if (r.missing) { const { error } = await supabase.from('orders').update({ status }).eq('id', id); r = error ? { error: error.message } : {} }
     if (r.error) { window.alert('Не удалось изменить статус: ' + r.error); return }
+    resetLimitsCache()
     setOrder(o => ({ ...o, status }))
+    if (leave) { await productionArchive(id, true); navigate('/production') }
   }
   async function deleteOrder() {
     if (!window.confirm('Удалить заказ? Это действие нельзя отменить.')) return

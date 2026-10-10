@@ -6,6 +6,10 @@
 --   models    — заказов с загруженной 3D-моделью
 --   materials — загруженных материалов (текстур)
 --   accepted  — принятых производством заказов (в работе и исполненных, не убранных в архив производства)
+--   views3d   — заказов в работе, чью 3D-модель производство открывало (повторно тот же заказ — бесплатно;
+--               заказ исполнен и ушёл из производства — место освобождается)
+--   import_mats — материалов за один импорт из модели (Базис, Астра, PRO100…): 1 — только один материал за раз.
+--               Это не счётчик, а предел на одно действие; проверяет приложение при импорте
 -- Пороги по умолчанию — app_config.limits (мастер-аккаунт), у отдельного пользователя — свои (user_limits):
 -- «без ограничений» или свои числа. Число null у ключа — без лимита. На мастер-аккаунт лимиты не действуют.
 -- Проверка — в базе (триггеры): из приложения её не обойти. Ошибка начинается с «LIMIT:ключ:порог».
@@ -18,6 +22,14 @@ create table if not exists public.user_limits (
 );
 alter table public.user_limits enable row level security;   -- читается только через функции ниже
 insert into public.app_config (key, value) values ('limits', '{}'::jsonb) on conflict (key) do nothing;
+-- какие 3D-модели заказов открывало производство (для лимита views3d)
+create table if not exists public.production_model_views (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  order_id uuid not null references public.orders(id) on delete cascade,
+  at timestamptz default now(),
+  primary key (user_id, order_id)
+);
+alter table public.production_model_views enable row level security;
 
 -- порог для пользователя: null — без лимита
 create or replace function public.limit_of(p_user uuid, p_key text) returns integer
@@ -42,6 +54,8 @@ language sql security definer set search_path = public stable as $$
     when 'materials' then (select count(*) from material_textures where user_id = p_user and name not like '\_\_label\_\_%')
     when 'accepted' then (select count(*) from orders o join productions p on p.id = o.production_id
                           where p.owner_id = p_user and o.status in ('inwork', 'done') and o.prod_archived_at is null)
+    when 'views3d' then (select count(*) from production_model_views v join orders o on o.id = v.order_id
+                         where v.user_id = p_user and o.status <> 'done' and o.prod_archived_at is null)
     else 0 end::integer
 $$;
 
@@ -50,7 +64,7 @@ create or replace function public.my_limits() returns json
 language plpgsql security definer set search_path = public stable as $$
 declare k text; res jsonb := '{}'::jsonb;
 begin
-  foreach k in array array['orders', 'models', 'materials', 'accepted'] loop
+  foreach k in array array['orders', 'models', 'materials', 'accepted', 'views3d', 'import_mats'] loop
     res := res || jsonb_build_object(k, jsonb_build_object('limit', limit_of(auth.uid(), k), 'used', usage_of(auth.uid(), k)));
   end loop;
   return json_build_object('limits', res, 'master', is_admin(),
@@ -112,6 +126,19 @@ end $$;
 drop trigger if exists limit_accept on public.orders;
 create trigger limit_accept before update of status on public.orders for each row execute function public.trg_limit_accept();
 
+-- открыть 3D-модель заказа: заказчику и мастеру — всегда; производству — в пределах лимита views3d
+create or replace function public.open_order_model(p_order uuid) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare o record;
+begin
+  select * into o from orders where id = p_order;
+  if not found or o.user_id = auth.uid() or is_admin() or not is_my_production(o.production_id) then return true; end if;
+  if exists (select 1 from production_model_views where user_id = auth.uid() and order_id = p_order) then return true; end if;
+  perform check_limit(auth.uid(), 'views3d');
+  insert into production_model_views (user_id, order_id) values (auth.uid(), p_order) on conflict do nothing;
+  return true;
+end $$;
+
 -- ── мастер-аккаунт ──
 -- всё о лимитах: пороги по умолчанию, личные настройки и сколько у кого уже есть
 create or replace function public.admin_limits() returns json
@@ -121,7 +148,7 @@ begin
   return json_build_object(
     'defaults', (select value from app_config where key = 'limits'),
     'users', coalesce((select json_agg(json_build_object('user_id', p.id, 'unlimited', coalesce(u.unlimited, false), 'limits', coalesce(u.limits, '{}'::jsonb),
-        'used', json_build_object('orders', usage_of(p.id, 'orders'), 'models', usage_of(p.id, 'models'), 'materials', usage_of(p.id, 'materials'), 'accepted', usage_of(p.id, 'accepted'))))
+        'used', json_build_object('orders', usage_of(p.id, 'orders'), 'models', usage_of(p.id, 'models'), 'materials', usage_of(p.id, 'materials'), 'accepted', usage_of(p.id, 'accepted'), 'views3d', usage_of(p.id, 'views3d'))))
       from profiles p left join user_limits u on u.user_id = p.id), '[]'::json));
 end $$;
 
@@ -142,5 +169,7 @@ begin
 end $$;
 
 revoke all on function public.limit_of(uuid, text), public.usage_of(uuid, text), public.check_limit(uuid, text) from public, anon, authenticated;
+revoke all on function public.open_order_model(uuid) from public, anon;
+grant execute on function public.open_order_model(uuid) to authenticated;
 revoke all on function public.my_limits(), public.admin_limits(), public.admin_set_default_limits(jsonb), public.admin_set_user_limits(uuid, boolean, jsonb) from public, anon;
 grant execute on function public.my_limits(), public.admin_limits(), public.admin_set_default_limits(jsonb), public.admin_set_user_limits(uuid, boolean, jsonb) to authenticated;

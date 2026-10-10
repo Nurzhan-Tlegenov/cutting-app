@@ -567,7 +567,7 @@ export default function LabelsPage() {
           </div>
         ))}
       </div>
-      {view != null && allLabels[view] && <LabelViewer tpl={tpl} order={order} mat={mat} list={allLabels} index={view} onIndex={setView} onClose={closeView} on3d={() => { if (scene === undefined && hasModel(details)) loadOrderModel(id).then(sc => setScene(sc || null)).catch(() => setScene(null)); navigate(`?lbl=${view}&d3=1`) }} />}
+      {view != null && allLabels[view] && <LabelViewer tpl={tpl} order={order} mat={mat} list={allLabels} index={view} onIndex={setView} onClose={closeView} on3d={async () => { if (scene === undefined && hasModel(details)) { try { setScene((await loadOrderModel(id)) || null) } catch (e) { if (e?.limit) { window.alert(e.message); return } setScene(null) } } navigate(`?lbl=${view}&d3=1`) }} />}
       {view != null && show3d && allLabels[view] && (() => {
         const q = allLabels[view], d = mat.details[mat.sheets[q.si].placed[q.pi].detailIndex] || {}
         let c = d.contour

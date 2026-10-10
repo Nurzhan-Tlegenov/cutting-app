@@ -307,7 +307,7 @@ function Drill6Basic({ post, set, router }) {
             <span style={{ display: 'block', marginTop: 4 }}>Сейчас в QR бирки: <b>{labelQrParts || '— ничего не выбрано —'}</b>{labelQrSet.latin ? ', латиницей' : ''}. Например: <b style={{ fontFamily: 'monospace' }}>{example(labelQrSet)}.{post.ext || 'XML'}</b></span>
             {!labelHasQr && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>На бирке сейчас нет QR-кода — добавьте его в шаблоне бирок, иначе сканировать будет нечего.</span>}
             {!labelQrSet.latin && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>По спецификации станка код — только латиница и цифры: в шаблоне бирок включите «Перевести в латиницу».</span>}
-            {!(labelQrSet.parts || []).some(k => k === 'num' || k === 'des' || k === 'pos') && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>В коде нет номера детали — у разных деталей он может совпасть. Добавьте «Номер детали на листе» (и «Номер карты»).</span>}
+            {!(labelQrSet.parts || []).some(k => k === 'des' || k === 'pos' || k === 'num') && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>В коде нет обозначения детали — у разных деталей он совпадёт. Добавьте в QR бирки «Обозначение детали».</span>}
             <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Код меняется в шаблоне бирок (заказ → Бирки → «Что зашито в QR-код»). Файл выпускается на каждую деталь с биркой.</span>
           </div>
         ) : (

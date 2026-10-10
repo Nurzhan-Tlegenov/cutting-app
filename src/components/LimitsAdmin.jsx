@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LIMIT_KEYS } from '../lib/limits'
+import { LIMIT_KEYS, isCap } from '../lib/limits'
 
 // Мастер-аккаунт: лимиты бесплатного использования — общие пороги (кабинет клиента и кабинет производства)
 // и личные у отдельного пользователя: снять ограничения или поставить свои пороги. Пустое поле — без лимита
@@ -52,6 +52,7 @@ export function UserLimits({ u, data, defaults, isProd, onSave, busy }) {
         <span style={{ flex: 1, color: 'var(--text-hint)' }}>
           {data?.unlimited ? <b style={{ color: 'var(--teal)' }}>Без ограничений</b> : keys.map(([k, label], i) => {
             const lim = eff(k), full = lim != null && used(k) >= lim
+            if (isCap(k)) return <span key={k}>{i ? ' · ' : ''}{label.toLowerCase()} <b style={{ color: 'var(--text-muted)' }}>{lim != null ? lim : 'без лимита'}</b></span>
             return <span key={k}>{i ? ' · ' : ''}{label.split(' (')[0].toLowerCase()} <b style={{ color: full ? 'var(--amber)' : 'var(--text-muted)' }}>{used(k)}{lim != null ? ` из ${lim}` : ''}</b></span>
           })}
           {own && !data?.unlimited && <span style={{ color: 'var(--blue)' }}> · свои пороги</span>}

@@ -44,7 +44,7 @@ export default function Model3DButton({ details, title, getScene, label = '3D-м
   const show = async () => {
     if (scene === undefined) {
       let s
-      try { s = getScene ? await getScene() : null } catch { s = null }
+      try { s = getScene ? await getScene() : null } catch (e) { if (e?.limit) { window.alert(e.message); return } s = null }
       setScene(s)
     }
     setOpen(true)

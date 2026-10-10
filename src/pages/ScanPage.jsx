@@ -30,7 +30,7 @@ export default function ScanPage() {
     const r = await resolveQr(text)
     if (r.error) { setState({ step: 'fail', text, error: r.error }); busy.current = false; return }
     let scene = null
-    if (hasModel(r.details)) { try { scene = await loadOrderModel(r.order.id) } catch { scene = null } }
+    if (hasModel(r.details)) { try { scene = await loadOrderModel(r.order.id) } catch (e) { if (e?.limit) { setState({ step: 'fail', text, error: e.message }); busy.current = false; return } scene = null } }
     setState({ step: 'show', text, ...r, scene })
     busy.current = false
   }
