@@ -13,7 +13,9 @@ import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 import PriceList from '../components/PriceList'
 import CncSetup from '../components/CncSetup'
-import { StaffSection, OrderAssign } from '../components/ProductionStaff'
+import { StaffSection } from '../components/ProductionStaff'
+import { PostsSection, StageTrack } from '../components/ProductionPosts'
+import { productionStageMap } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
 import { membersList, myWorkplaces } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
@@ -49,6 +51,8 @@ export default function ProductionPage() {
   const [sheet, setSheet] = useState({})
   const [staff, setStaff] = useState({ data: null, error: '' })   // сотрудники и приглашения (владелец)
   const [wps, setWps] = useState([])                              // где я сотрудник (своего производства нет)
+  const [stages, setStages] = useState({})                        // где сейчас заказы: id -> { name (пост), status, done, total }
+  const loadStages = () => productionStageMap().then(r => setStages(r.data || {}))
   const loadStaff = () => membersList().then(r => setStaff({ data: r.data || null, error: r.error || '' }))
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
   const [archived, setArchived] = useState(() => new Map())     // заказы в архиве: id -> когда отправлен
@@ -84,7 +88,7 @@ export default function ProductionPage() {
     const p = (await myProduction(user?.id)) ?? null
     if (!p) { const w = await myWorkplaces(); setWps(w.data || []) }    // своего производства нет — может, я сотрудник
     setProd(p)
-    if (p && (p.status ?? 'approved') === 'approved') loadStaff()
+    if (p && (p.status ?? 'approved') === 'approved') { loadStaff(); loadStages() }
     if (p && (p.status ?? 'approved') === 'approved') {
       setSheet(Object.fromEntries([...MARGINS, ...HDF_MARGINS].map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
@@ -215,6 +219,7 @@ export default function ProductionPage() {
                   {postOpen && <CncSetup />}
                 </details>
                 <StaffSection data={staff.data} error={staff.error} onReload={loadStaff} />
+                <PostsSection members={staff.data?.members} />
                 <div onClick={() => setXmlView(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
                   <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Просмотр XML-программ присадочного станка</span>
                   <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
@@ -262,6 +267,7 @@ export default function ProductionPage() {
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
                         <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{archived.has(o.id) ? 'В архиве' : STATUS_LABELS[o.status] || o.status}</span>
+                        {stages[o.id]?.name && <span title="Пост, на котором сейчас заказ" style={{ fontSize: 11, lineHeight: '16px', color: stages[o.id].status === 'queued' ? 'var(--amber)' : 'var(--blue)', whiteSpace: 'nowrap' }}>📍 {stages[o.id].name} · {stages[o.id].done}/{stages[o.id].total}</span>}
                         {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
                           <div style={{ display: 'flex', gap: 4 }}>
                             {orderMarks(o).map(m => (
@@ -287,7 +293,7 @@ export default function ProductionPage() {
                     {!o.own && wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none', color: 'var(--teal)', borderColor: 'var(--teal)' }}>WhatsApp</a>}
                     {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}
                   </div>
-                  <OrderAssign orderId={o.id} members={staff.data?.members} />
+                  <StageTrack orderId={o.id} status={o.status} manage onChange={loadStages} />
                   </>}
                 </div>
               )

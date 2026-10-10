@@ -5,6 +5,7 @@
 // Проверяется, пока приложение открыто (раз в 45 секунд и при возвращении в него). Отдельной базы не нужно:
 // всё берётся из уже существующих списков; «какой статус заказа я уже видел» хранится на этом устройстве.
 import { supabase } from './supabase'
+import { myPostQueue } from './posts'
 import { adminRequests, adminPasswordResets, adminUsers } from './adminApi'
 import { myProduction, productionOrders } from './productionApi'
 import { STATUS_LABELS, orderTitle } from './orderUtils'
@@ -61,6 +62,12 @@ export async function fetchNotices({ user, isMaster }) {
     const fresh = (r.data || []).filter(o => o.status === 'new' && !o.own)
     res.production = fresh.length
     for (const o of fresh) res.list.push({ key: `po:${o.id}`, text: `Новая заявка: ${orderTitle(o)}${o.client_name ? ' — ' + o.client_name : ''}`, to: '/production' })
+  }).catch(() => {}))
+  // заказы, пришедшие на мои рабочие посты (сотрудник производства): новые — ещё никто не принял
+  jobs.push(myPostQueue().then(r => {
+    const fresh = (r.data || []).filter(q => q.status === 'queued')
+    res.production += fresh.length
+    for (const q of fresh) res.list.push({ key: `ps:${q.stage_id}`, text: `Новый заказ на посту «${q.post_name}»: ${orderTitle(q)}`, to: '/production' })
   }).catch(() => {}))
   jobs.push(supabase.from('orders').select('id,status,order_name,order_number,created_at').eq('user_id', user.id).then(({ data }) => {
     const changed = changedOrders(user.id, data || [])

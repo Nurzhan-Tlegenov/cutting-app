@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { PERMS, permsText, createInvite, setMember, removeMember, cancelInvite, inviteUrl, assignOrder, orderWorkers } from '../lib/workplaces'
+import { useState } from 'react'
+import { PERMS, permsText, createInvite, setMember, removeMember, cancelInvite, inviteUrl } from '../lib/workplaces'
 
-// Рабочие места производства: сотрудники, приглашения по ссылке, полномочия; назначение заказа сотрудникам.
+// Рабочие места производства: сотрудники, приглашения по ссылке, полномочия. Заказы сотрудникам не назначаются —
+// сотрудник закреплён за рабочими постами (ProductionPosts), заказ приходит к нему, когда доходит до его поста.
 const chip = on => ({ padding: '4px 10px', borderRadius: 14, fontSize: 11.5, cursor: 'pointer', border: '0.5px solid ' + (on ? 'var(--blue)' : 'var(--border-md)'), background: on ? 'var(--blue-light)' : 'transparent', color: on ? 'var(--blue-dark)' : 'var(--text-muted)' })
 const small = { padding: '4px 10px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', whiteSpace: 'nowrap' }
 const digits = v => String(v || '').replace(/\D/g, '')
@@ -52,7 +53,7 @@ export function StaffSection({ data, error, onReload }) {
       <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Сотрудники (рабочие места){members.length ? ` · ${members.filter(m => m.active).length}` : ''}</summary>
       {error ? <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>{error}</p> : (
         <div style={{ marginTop: 6 }}>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Сотрудник заходит по ссылке-приглашению и работает в своём аккаунте (он может быть и клиентом приложения). Начальник производства видит все заказы и назначает их; остальные видят только назначенные им заказы.</p>
+          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Сотрудник заходит по ссылке-приглашению и работает в своём аккаунте (он может быть и клиентом приложения). Начальник производства видит все заказы; остальные — только заказы, которые сейчас на их рабочих постах.</p>
           {err && <p className="error-text" style={{ marginBottom: 6 }}>{err}</p>}
           {members.map(m => (
             <div key={m.user_id} style={{ padding: '7px 0', borderTop: '0.5px solid var(--border)', opacity: m.active ? 1 : 0.55 }}>
@@ -95,29 +96,5 @@ export function StaffSection({ data, error, onReload }) {
         </div>
       )}
     </details>
-  )
-}
-
-/** Кому назначен заказ: нажатие на сотрудника назначает или снимает. members — активные сотрудники производства */
-export function OrderAssign({ orderId, members }) {
-  const [on, setOn] = useState(null)
-  const [err, setErr] = useState('')
-  useEffect(() => { let alive = true; orderWorkers(orderId).then(r => { if (alive) setOn(new Set((r.data || []).map(w => w.user_id))) }); return () => { alive = false } }, [orderId])
-  const list = (members || []).filter(m => m.active && !m.perms?.all)
-  if (!list.length || !on) return null
-  const toggle = async m => {
-    const next = !on.has(m.user_id)
-    setOn(s => { const n = new Set(s); if (next) n.add(m.user_id); else n.delete(m.user_id); return n })
-    const r = await assignOrder(orderId, m.user_id, next)
-    if (r.error) { setErr(r.error); setOn(s => { const n = new Set(s); if (next) n.delete(m.user_id); else n.add(m.user_id); return n }) }
-  }
-  return (
-    <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
-      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Сотрудники на заказе — нажмите, чтобы назначить или снять:</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-        {list.map(m => <button key={m.user_id} type="button" style={chip(on.has(m.user_id))} onClick={() => toggle(m)}>{on.has(m.user_id) ? '✓ ' : ''}{m.name || m.full_name || 'Сотрудник'}</button>)}
-      </div>
-      {err && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>{err}</div>}
-    </div>
   )
 }
