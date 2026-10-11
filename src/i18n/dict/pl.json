@@ -2510,5 +2510,13 @@
 "▶ Продолжить": "▶ Kontynuuj",
 "Сначала положите детали из буфера на листы": "Najpierw połóż elementy z bufora na arkusze",
 "Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Kontynuuj szukanie od tego układu — elementy zostają na miejscach, wyszukiwanie szuka gęstszego ułożenia",
-"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Przesuń w lewo/prawo — inny arkusz · Stuknięcie — zaznacz (do schowka) · podwójne stuknięcie — obrót · przytrzymaj i ciągnij — przeniesienie · długo trzymaj w miejscu — edytor konturu · szczypanie — skala · fioletowe tło — obróbka z dwóch stron (na rozkroju pokazano tylko lico; spód widać w edytorze)"
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Przesuń w lewo/prawo — inny arkusz · Stuknięcie — zaznacz (do schowka) · podwójne stuknięcie — obrót · przytrzymaj i ciągnij — przeniesienie · długo trzymaj w miejscu — edytor konturu · szczypanie — skala · fioletowe tło — obróbka z dwóch stron (na rozkroju pokazano tylko lico; spód widać w edytorze)",
+"Лицевая сторона детали (смотрит вверх на станке) — по приоритету": "Strona licowa elementu (do góry na maszynie) — według priorytetu",
+"Назначена в модели": "Przypisana w modelu",
+"лицевую сторону задал конструктор (Базис)": "stronę licową ustawił konstruktor (Bazis)",
+"Больше глухих отверстий": "Więcej otworów nieprzelotowych",
+"вверх — пласть, где больше глухих отверстий": "do góry — strona z większą liczbą otworów nieprzelotowych",
+"Пазы и вырезы": "Wpusty i wycięcia",
+"вверх — пласть с пазами и вырезами": "do góry — strona z wpustami i wycięciami",
+"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "Decyduje pierwsze kryterium, które ma element: jeśli strona licowa nie jest przypisana w modelu — sprawdzane jest następne. Gdy nic nie zdecyduje, element leży jak w modelu."
 }

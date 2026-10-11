@@ -325,8 +325,12 @@ function basisSrc(panel) {
   }))
   const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
   const texDir = val(o, 'TexDir', 0)
+  // Лицевая сторона, назначенная конструктором в Базисе: поле есть, только если её задали вручную.
+  // 0 — лицевая пласть «сверху» панели (Z = толщина, как без переворота), 1 — противоположная.
+  const ff = val(o, 'FrontFace', null)
   return {
     T, elems, texDir, M: panel.M, butts, cutsRaw, decorRaw, warnCuts,
+    frontFace: ff === 0 || ff === 1 ? ff : null,
     name: cleanName(val(o, 'Name')), prefix: panel.ctx.product || '', material: cleanName(val(o, 'Mat')),
     rotatable: texDir === 0, anim: panel.ctx.anim || null,
     meta: {
@@ -397,12 +401,18 @@ export function buildItem(src, holes, faceRule) {
   // --- какая пласть «лицевая» (смотрит вверх на станке): та, где больше глухой обработки ---
   const holesTop = face.filter(f => !f.through && f.top).length, holesBottom = face.filter(f => !f.through && !f.top).length
   const cutsTop = cutsRaw.filter(c => c.top).length, cutsBottom = cutsRaw.filter(c => !c.top).length
-  // Правило выбирает пользователь при импорте (FACE_RULES)
+  // Порядок признаков задаёт пользователь при импорте (faceOrder): первый признак, который решает, — решает.
+  // Ничего не решило — как в модели (не переворачиваем).
   let flip = false
-  if (faceRule === 'holes') flip = holesBottom !== holesTop ? holesBottom > holesTop : cutsBottom > cutsTop
-  else if (faceRule === 'groove') flip = cutsBottom !== cutsTop ? cutsBottom > cutsTop : holesBottom > holesTop
-  else if (faceRule === 'sum') flip = holesBottom + cutsBottom > holesTop + cutsTop
-  // 'model' — как в модели Базиса, не переворачиваем
+  for (const crit of faceOrder(faceRule)) {
+    let d = null
+    if (crit === 'model') d = src.frontFace === 1 ? true : src.frontFace === 0 ? false : null
+    else if (crit === 'holes') d = holesBottom !== holesTop ? holesBottom > holesTop : null
+    else if (crit === 'groove') d = cutsBottom !== cutsTop ? cutsBottom > cutsTop : null
+    else if (crit === 'sum') d = holesBottom + cutsBottom !== holesTop + cutsTop ? holesBottom + cutsBottom > holesTop + cutsTop : null
+    else if (crit === 'keep') d = false
+    if (d !== null) { flip = d; break }
+  }
 
   const tf = (p) => {
     const u = p[0] - x0, v = p[1] - y0
@@ -737,7 +747,24 @@ export function isBasisFile(u8) {
   return u8.length > 9 && u8[0] === 0x42 && u8[1] === 0x5A && u8[2] === 0x38 && u8[3] === 0x35   // 'BZ85'
 }
 
-// Какую пласть считать лицевой (она смотрит вверх на станке)
+// Какую пласть считать лицевой (она смотрит вверх на станке) — признаки по приоритету.
+// model — лицевая сторона назначена конструктором в модели (только Базис, поле FrontFace);
+// holes — где больше глухих отверстий; groove — где пазы и вырезы.
+export const FACE_CRITERIA = [
+  ['model', 'Назначена в модели'],
+  ['holes', 'Больше глухих отверстий'],
+  ['groove', 'Пазы и вырезы'],
+]
+export const FACE_ORDER_DEFAULT = ['model', 'holes', 'groove']
+// Старые одиночные правила → порядок признаков (назначенная в модели сторона теперь всегда учитывается первой)
+const LEGACY_ORDER = { holes: ['model', 'holes', 'groove'], groove: ['model', 'groove', 'holes'], sum: ['model', 'sum'], model: ['model', 'keep'] }
+export function faceOrder(rule) {
+  if (Array.isArray(rule)) {
+    const ok = rule.filter(c => ['model', 'holes', 'groove', 'sum', 'keep'].includes(c))
+    return ok.length ? ok : FACE_ORDER_DEFAULT
+  }
+  return LEGACY_ORDER[rule] || FACE_ORDER_DEFAULT
+}
 export const FACE_RULES = [
   ['holes', 'Где больше глухих отверстий, затем — где паз'],
   ['groove', 'Где паз, затем — где больше глухих отверстий'],
@@ -746,7 +773,7 @@ export const FACE_RULES = [
 ]
 
 export function parseBasis(u8, opts = {}) {
-  const faceRule = FACE_RULES.some(r => r[0] === opts.faceRule) ? opts.faceRule : 'holes'
+  const faceRule = Array.isArray(opts.faceRule) || FACE_RULES.some(r => r[0] === opts.faceRule) ? opts.faceRule : FACE_ORDER_DEFAULT
   if (u8.length < 4 || u8[0] !== 0x42 || u8[1] !== 0x5A) throw new Error('Это не файл модели Базис-Мебельщик')
   if (!isBasisFile(u8)) throw new Error('Эта версия файла Базис пока не поддерживается (нужен формат BZ85 — пересохраните модель в свежей версии Базиса)')
   const skip = new Set(['Undo', 'TriData', 'Thumbnail'])

@@ -2510,5 +2510,13 @@
 "▶ Продолжить": "▶ Fortsetzen",
 "Сначала положите детали из буфера на листы": "Legen Sie zuerst die Teile aus dem Puffer auf die Platten",
 "Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Suche von dieser Anordnung fortsetzen — die Teile bleiben an ihren Plätzen, die Suche sucht eine dichtere Packung",
-"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Nach links/rechts wischen — andere Platte · Tippen — markieren (für die Ablage) · Doppeltipp — drehen · halten und ziehen — verschieben · lange an der Stelle halten — Kontureditor · Zusammenziehen — Zoom · violetter Hintergrund — beidseitige Bearbeitung (im Plan ist nur die Sichtseite gezeigt; die Rückseite sehen Sie im Editor)"
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Nach links/rechts wischen — andere Platte · Tippen — markieren (für die Ablage) · Doppeltipp — drehen · halten und ziehen — verschieben · lange an der Stelle halten — Kontureditor · Zusammenziehen — Zoom · violetter Hintergrund — beidseitige Bearbeitung (im Plan ist nur die Sichtseite gezeigt; die Rückseite sehen Sie im Editor)",
+"Лицевая сторона детали (смотрит вверх на станке) — по приоритету": "Sichtseite des Teils (oben auf der Maschine) — nach Priorität",
+"Назначена в модели": "Im Modell festgelegt",
+"лицевую сторону задал конструктор (Базис)": "die Sichtseite hat der Konstrukteur festgelegt (Bazis)",
+"Больше глухих отверстий": "Mehr Sacklöcher",
+"вверх — пласть, где больше глухих отверстий": "oben — die Seite mit mehr Sacklöchern",
+"Пазы и вырезы": "Nuten und Ausschnitte",
+"вверх — пласть с пазами и вырезами": "oben — die Seite mit Nuten und Ausschnitten",
+"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "Es entscheidet das erste Kriterium, das das Teil erfüllt: ist die Sichtseite im Modell nicht festgelegt, wird das nächste geprüft. Entscheidet keines, liegt das Teil wie im Modell."
 }

@@ -2510,5 +2510,13 @@
 "▶ Продолжить": "▶ Devam et",
 "Сначала положите детали из буфера на листы": "Önce tampondaki parçaları levhalara yerleştirin",
 "Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Aramaya bu yerleşimden devam et — parçalar yerinde kalır, arama daha sıkı bir yerleşim arar",
-"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Sola/sağa kaydır — başka levha · Dokunma — seç (pano için) · çift dokunma — döndür · basılı tutup sürükle — taşı · yerinde uzun basma — kontur düzenleyici · sıkıştırma — yakınlaştırma · mor arka plan — iki taraflı işleme (planda yalnızca ön yüz gösterilir; arka yüz düzenleyicide görünür)"
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Sola/sağa kaydır — başka levha · Dokunma — seç (pano için) · çift dokunma — döndür · basılı tutup sürükle — taşı · yerinde uzun basma — kontur düzenleyici · sıkıştırma — yakınlaştırma · mor arka plan — iki taraflı işleme (planda yalnızca ön yüz gösterilir; arka yüz düzenleyicide görünür)",
+"Лицевая сторона детали (смотрит вверх на станке) — по приоритету": "Parçanın ön yüzü (makinede yukarı bakar) — önceliğe göre",
+"Назначена в модели": "Modelde atanmış",
+"лицевую сторону задал конструктор (Базис)": "ön yüzü tasarımcı belirledi (Bazis)",
+"Больше глухих отверстий": "Daha çok kör delik",
+"вверх — пласть, где больше глухих отверстий": "yukarı — kör deliği çok olan yüz",
+"Пазы и вырезы": "Kanallar ve kesikler",
+"вверх — пласть с пазами и вырезами": "yukarı — kanallı ve kesikli yüz",
+"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "Parçada bulunan ilk ölçüt karar verir: modelde ön yüz atanmamışsa sonraki kontrol edilir. Hiçbiri karar vermezse parça modeldeki gibi yatar."
 }

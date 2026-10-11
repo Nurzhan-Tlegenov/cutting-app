@@ -2510,5 +2510,13 @@
 "▶ Продолжить": "▶ Davom etish",
 "Сначала положите детали из буфера на листы": "Avval buferdagi detallarni varaqlarga qo‘ying",
 "Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Shu joylashuvdan qidiruvni davom ettirish — detallar joyida qoladi, qidiruv zichroq joylashtirishni izlaydi",
-"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Chapga/o‘ngga suring — boshqa varaq · Bosish — belgilash (bufer uchun) · ikki marta bosish — burish · ushlab tortish — koʻchirish · joyida uzoq ushlash — kontur muharriri · chimdish — masshtab · binafsha fon — ikki tomondan ishlov (kartada faqat old yuz koʻrsatilgan; orqa yuz muharrirda koʻrinadi)"
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Chapga/o‘ngga suring — boshqa varaq · Bosish — belgilash (bufer uchun) · ikki marta bosish — burish · ushlab tortish — koʻchirish · joyida uzoq ushlash — kontur muharriri · chimdish — masshtab · binafsha fon — ikki tomondan ishlov (kartada faqat old yuz koʻrsatilgan; orqa yuz muharrirda koʻrinadi)",
+"Лицевая сторона детали (смотрит вверх на станке) — по приоритету": "Detalning old tomoni (dastgohda yuqoriga qaraydi) — ustuvorlik bo‘yicha",
+"Назначена в модели": "Modelda belgilangan",
+"лицевую сторону задал конструктор (Базис)": "old tomonni konstruktor belgilagan (Bazis)",
+"Больше глухих отверстий": "Ko‘r teshiklar ko‘proq",
+"вверх — пласть, где больше глухих отверстий": "yuqoriga — ko‘r teshiklari ko‘p tomon",
+"Пазы и вырезы": "Ariqchalar va o‘yiqlar",
+"вверх — пласть с пазами и вырезами": "yuqoriga — ariqcha va o‘yiqli tomon",
+"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "Detalda bor birinchi belgi hal qiladi: modelda old tomon belgilanmagan bo‘lsa — keyingisi tekshiriladi. Hech biri hal qilmasa — detal modeldagidek yotadi."
 }

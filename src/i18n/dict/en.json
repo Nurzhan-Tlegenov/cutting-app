@@ -2510,5 +2510,13 @@
 "▶ Продолжить": "▶ Continue",
 "Сначала положите детали из буфера на листы": "First place the parts from the buffer onto the sheets",
 "Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Continue the search from this layout — the parts stay where they are, the search looks for a tighter packing",
-"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Swipe left/right — another sheet · Tap — select (for buffer) · double tap — rotate · hold and drag — move · long hold in place — contour editor · pinch — zoom · purple background — two-sided machining (only the front is shown on the map; the back is visible in the editor)"
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Swipe left/right — another sheet · Tap — select (for buffer) · double tap — rotate · hold and drag — move · long hold in place — contour editor · pinch — zoom · purple background — two-sided machining (only the front is shown on the map; the back is visible in the editor)",
+"Лицевая сторона детали (смотрит вверх на станке) — по приоритету": "Part face side (faces up on the machine) — by priority",
+"Назначена в модели": "Assigned in the model",
+"лицевую сторону задал конструктор (Базис)": "the face side was set by the designer (Bazis)",
+"Больше глухих отверстий": "More blind holes",
+"вверх — пласть, где больше глухих отверстий": "up — the face with more blind holes",
+"Пазы и вырезы": "Grooves and cutouts",
+"вверх — пласть с пазами и вырезами": "up — the face with grooves and cutouts",
+"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "The first criterion the part has decides: if the face side isn’t assigned in the model, the next one is checked. If nothing decides, the part lies as in the model."
 }

@@ -13,13 +13,20 @@ import { myLimits, limitText } from '../lib/limits'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useBackClose } from '../lib/backStack'
 
-// Какую пласть считать лицевой при импорте модели (копия списка из basisB3d — он грузится по требованию)
-const FACE_RULES = [
-  ['holes', 'Где больше глухих отверстий, затем — где паз'],
-  ['groove', 'Где паз, затем — где больше глухих отверстий'],
-  ['sum', 'Где больше обработки всего (отверстия + пазы)'],
-  ['model', 'Как в модели (не переворачивать)'],
+// Какую пласть считать лицевой при импорте модели — признаки по приоритету, порядок меняет пользователь
+// (копия списка из basisB3d — он грузится по требованию). Первый признак, который решает, — решает.
+const FACE_CRITERIA = [
+  ['model', 'Назначена в модели', 'лицевую сторону задал конструктор (Базис)'],
+  ['holes', 'Больше глухих отверстий', 'вверх — пласть, где больше глухих отверстий'],
+  ['groove', 'Пазы и вырезы', 'вверх — пласть с пазами и вырезами'],
 ]
+const FACE_ORDER_DEFAULT = ['model', 'holes', 'groove']
+const LEGACY_ORDER = { holes: ['model', 'holes', 'groove'], groove: ['model', 'groove', 'holes'], sum: ['model', 'holes', 'groove'], model: ['model', 'holes', 'groove'] }
+// сохранённое правило (старое — строкой) → полный порядок трёх признаков
+function savedFaceOrder(v) {
+  const list = Array.isArray(v) ? v.filter(c => FACE_CRITERIA.some(([k]) => k === c)) : (LEGACY_ORDER[v] || FACE_ORDER_DEFAULT)
+  return [...list, ...FACE_ORDER_DEFAULT.filter(c => !list.includes(c))]
+}
 
 // Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, Астра, PRO100, SketchCut (PDF).
 // Базис-Мебельщик (.b3d) и Астра Конструктор Мебели (.add) читаются напрямую
@@ -79,7 +86,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const auth = useAuth()
   const user = auth?.user || null
   const basisFileRef = useRef(null)              // выбранный файл модели — чтобы пересчитать при смене правила
-  const [faceRule, setFaceRule] = useState(() => getUserSettings(user).basisFaceRule || 'holes')
+  const [faceRule, setFaceRule] = useState(() => savedFaceOrder(getUserSettings(user).basisFaceOrder || getUserSettings(user).basisFaceRule))
   const [source, setSource] = useState(SOURCES[0])
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)        // блок свёрнут, пока не нажали «Импорт деталей»
@@ -121,7 +128,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     setBusy(true); setError('')
     try {
       const lower = file.name.toLowerCase()
-      const rule = getUserSettings(user).basisFaceRule || faceRule
+      const rule = savedFaceOrder(getUserSettings(user).basisFaceOrder || getUserSettings(user).basisFaceRule || faceRule)
       const model = await readModelFile(file, rule)
       if (model) {
         const { res } = model
@@ -173,7 +180,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
   // Другое правило лицевой стороны — пересчитываем детали и запоминаем выбор за аккаунтом
   const changeFaceRule = async (rule) => {
     setFaceRule(rule)
-    saveUserSettings({ basisFaceRule: rule }, user)
+    saveUserSettings({ basisFaceOrder: rule }, user)
     if (!basisFileRef.current) return
     setBusy(true)
     try {
@@ -390,10 +397,24 @@ export default function ImportDetails({ hasDetails, onImport }) {
             )}
             {basis && !basis.bare && !basis.pdf && (
               <div style={{ marginBottom: 12 }}>
-                <label className="label">Лицевая сторона детали (смотрит вверх на станке)</label>
-                <select value={faceRule} disabled={busy} onChange={e => changeFaceRule(e.target.value)} style={{ padding: '7px 8px', fontSize: 13 }}>
-                  {FACE_RULES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
+                <label className="label">Лицевая сторона детали (смотрит вверх на станке) — по приоритету</label>
+                {faceRule.map((k, i) => {
+                  const [, label, hint] = FACE_CRITERIA.find(c => c[0] === k) || [k, k, '']
+                  const move = d => { const n = [...faceRule]; [n[i], n[i + d]] = [n[i + d], n[i]]; changeFaceRule(n) }
+                  const arrow = { width: 30, height: 28, padding: 0, borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text-muted)', fontSize: 14 }
+                  return (
+                    <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
+                      <span style={{ width: 18, fontSize: 12, color: 'var(--text-hint)', textAlign: 'right' }}>{i + 1}.</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{hint}</div>
+                      </div>
+                      <button type="button" style={arrow} disabled={busy || i === 0} onClick={() => move(-1)} title="Выше">↑</button>
+                      <button type="button" style={arrow} disabled={busy || i === faceRule.length - 1} onClick={() => move(1)} title="Ниже">↓</button>
+                    </div>
+                  )
+                })}
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.</p>
                 <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                   Обработка с изнанки не теряется: она остаётся в детали и видна в редакторе контура, там же деталь можно перевернуть.
                   {chosen.length > 0 && ` Деталей с обработкой с двух сторон: ${chosen.filter(it => it.info?.back > 0).length}.`}
