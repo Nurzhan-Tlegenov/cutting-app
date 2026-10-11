@@ -397,20 +397,62 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null, canSwipe = null }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
-  // Смахивание влево/вправо — соседний лист (при просмотре по одному). Только без масштаба (иначе палец
-  // прокручивает карту) и только если деталь не тащат: быстрое движение (<500 мс) в основном по горизонтали.
-  const swipeRef = useRef(null)
-  const swipeStart = e => { const t = e.touches?.[0]; swipeRef.current = t ? { x: t.clientX, y: t.clientY, t: Date.now() } : null }
-  const swipeEnd = e => {
-    const s = swipeRef.current; swipeRef.current = null
-    const t = e.changedTouches?.[0]
-    if (!s || !t || !onSwipe || zoomRef.current > 1.02 || draggingRef.current?.active || draggingRef.current?.dragged) return
-    const dx = t.clientX - s.x, dy = t.clientY - s.y
-    if (Date.now() - s.t < 500 && Math.abs(dx) >= 50 && Math.abs(dy) < Math.abs(dx) * 0.6) onSwipe(dx < 0 ? 1 : -1)
+  // Перелистывание как в галерее телефона: карта едет за пальцем, при отпускании уходит за край, а соседний
+  // лист въезжает с другой стороны. Только без масштаба (иначе палец прокручивает карту) и пока деталь не
+  // тащат; движение в основном по горизонтали. Без соседа карта пружинит обратно.
+  const slideRef = useRef(null)          // обёртка карты, которую двигаем
+  const swipeRef = useRef(null)          // { x, y, t, horiz: null | true | false, dx }
+  const enterRef = useRef(0)             // с какой стороны въезжает новый лист после переключения
+  const SLIDE_MS = 190
+  const slideW = () => (slideRef.current?.offsetWidth || window.innerWidth)
+  const setSlide = (px, animate) => {
+    const el = slideRef.current
+    if (!el) return
+    el.style.transition = animate ? `transform ${SLIDE_MS}ms ease-out, opacity ${SLIDE_MS}ms ease-out` : 'none'
+    el.style.transform = px ? `translateX(${px}px)` : ''
+    el.style.opacity = px ? String(Math.max(0.35, 1 - Math.abs(px) / slideW() * 0.8)) : ''
   }
+  const swipeStart = e => { const t = e.touches?.[0]; swipeRef.current = t ? { x: t.clientX, y: t.clientY, t: Date.now(), horiz: null, dx: 0 } : null }
+  // -> true, если палец ведёт карту (деталь трогать не нужно)
+  const swipeMove = e => {
+    const s = swipeRef.current, t = e.touches?.[0]
+    if (!s || !t || !onSwipe || zoomRef.current > 1.02 || draggingRef.current?.active || draggingRef.current?.dragged) return false
+    const dx = t.clientX - s.x, dy = t.clientY - s.y
+    if (s.horiz === null && (Math.abs(dx) > 12 || Math.abs(dy) > 12)) s.horiz = Math.abs(dx) > Math.abs(dy) * 1.2
+    if (!s.horiz) return false
+    s.dx = dx
+    // сосед есть — карта едет за пальцем; нет — только чуть поддаётся (упор)
+    const can = !canSwipe || canSwipe(dx < 0 ? 1 : -1)
+    setSlide(can ? dx : dx / 4, false)
+    return true
+  }
+  const swipeEnd = () => {
+    const s = swipeRef.current; swipeRef.current = null
+    if (!s || !s.horiz) return false
+    const dir = s.dx < 0 ? 1 : -1
+    const fast = Date.now() - s.t < 300 && Math.abs(s.dx) > 30
+    const can = !canSwipe || canSwipe(dir)
+    if (can && (Math.abs(s.dx) >= slideW() * 0.25 || fast)) {
+      setSlide(-dir * slideW(), true)
+      setTimeout(() => {
+        enterRef.current = dir
+        if (onSwipe(dir) === false) { enterRef.current = 0; setSlide(0, true) }
+      }, SLIDE_MS)
+    } else setSlide(0, true)
+    return true
+  }
+  // Новый лист въезжает с той стороны, куда ушёл предыдущий
+  useEffect(() => {
+    const dir = enterRef.current
+    if (!dir) return
+    enterRef.current = 0
+    setSlide(dir * slideW(), false)
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => setSlide(0, true)))
+    return () => cancelAnimationFrame(id)
+  }, [sheet])
   // Масштаб карты — щипком двух пальцев (как в редакторе контура), с
   // фокусом в точке между пальцами, как при просмотре фотографии
   const [zoom, setZoom] = useState(1)
@@ -1131,7 +1173,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   }, [zoom])
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: 'relative', overflow: 'hidden' }}>
+     <div ref={slideRef} style={{ willChange: 'transform' }}>
       <div ref={wrapRef}
         style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8,
           display: zoom > 1 ? 'block' : 'flex', justifyContent: 'center' }}>
@@ -1140,12 +1183,15 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
           onMouseMove={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerMove(e) }}
           onMouseUp={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerUp(e) }}
-          onTouchStart={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) { swipeRef.current = null; return } swipeStart(e); onPointerDown(e) }}
-          onTouchMove={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) { swipeRef.current = null; return } onPointerMove(e) }}
-          onTouchEnd={e => { lastTouchRef.current = Date.now(); const d = draggingRef.current; onPointerUp(e); if (!d?.active) swipeEnd(e); else swipeRef.current = null }}
-          onTouchCancel={() => { clearLongPress(); draggingRef.current = null; swipeRef.current = null }}
+          onTouchStart={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) { swipeRef.current = null; setSlide(0, true); return } swipeStart(e); onPointerDown(e) }}
+          onTouchMove={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) { swipeRef.current = null; setSlide(0, true); return }
+            if (swipeMove(e)) { clearLongPress(); if (draggingRef.current && !draggingRef.current.active) draggingRef.current.moved = true; return }
+            onPointerMove(e) }}
+          onTouchEnd={e => { lastTouchRef.current = Date.now(); if (swipeRef.current?.horiz) { clearLongPress(); draggingRef.current = null; emptyTapRef.current = null; swipeEnd(); return } swipeRef.current = null; onPointerUp(e) }}
+          onTouchCancel={() => { clearLongPress(); draggingRef.current = null; swipeRef.current = null; setSlide(0, true) }}
         />
       </div>
+     </div>
       {/* Масштаб — под картой, справа: поверх карты он закрывал детали */}
       {zoom > 1.02 && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
@@ -2729,7 +2775,8 @@ export default function NestingPage() {
                         selectedIdx={cfg.selPart}
                         onSelect={i => updateCfg(cfg.id, { selPart: i, note: '' })}
                         onEditPart={locked ? null : openPart3d}
-                        onSwipe={d => { const i = cfg.activeSheet + d; if (i >= 0 && i < cfg.sheetsData.length) openSheet(i) }}
+                        onSwipe={d => { const i = cfg.activeSheet + d; if (i < 0 || i >= cfg.sheetsData.length) return false; openSheet(i); return true }}
+                        canSwipe={d => { const i = cfg.activeSheet + d; return i >= 0 && i < cfg.sheetsData.length }}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {showOffcuts && offcutMode === 'manual'
