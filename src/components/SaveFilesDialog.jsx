@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { zipSync, strToU8 } from 'fflate'
+import { useBackClose } from '../lib/backStack'
 
 // Перед сохранением нескольких файлов — вопрос: одним архивом или все файлы по отдельности (не архивом).
 // files — [{ name, data: строка | Uint8Array }]; zipName — имя архива; onDone(сообщение) — что получилось.
@@ -17,6 +18,7 @@ function download(name, data, type = 'application/octet-stream') {
 }
 
 export default function SaveFilesDialog({ files, zipName, onClose, onDone, folders = [] }) {
+  useBackClose(true, onClose)
   const [busy, setBusy] = useState('')
   if (!files?.length) return null
   const path = folders.filter(Boolean)

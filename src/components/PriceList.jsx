@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { loadPrices, savePrices, PRICE_GROUPS } from '../lib/pricing'
+import { useBackClose } from '../lib/backStack'
 
 // Прайс-лист производства: цены на операции, с которыми сталкивается раскрой.
 // Заполнять можно не всё — в расчёт идут только операции с ценой. Видит и меняет прайс только владелец производства.
@@ -7,6 +8,7 @@ const clean = v => String(v ?? '').replace(/[^0-9.,]/g, '')
 const CURRENCIES = ['₸', '₽', 'сом', 'сум', 'Br', '₴', '$', '€']
 
 export default function PriceList({ production, onClose }) {
+  useBackClose(true, onClose)   // «Назад» телефона — закрыть
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)

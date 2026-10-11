@@ -7,12 +7,14 @@ import { money } from '../lib/pricing'
 import { saveNestingPdf } from '../lib/nestingPdf'
 import { quoteLines, pdfSummaryOf, userPdfTpl } from '../lib/pdfSummary'
 import PdfLayoutEditor from './PdfLayoutEditor'
+import { useBackClose } from '../lib/backStack'
 
 // PDF карт раскроя из кабинета производства — конструктор: что из статистики раскроя и стоимости вывести
 // на последней странице. Выбор запоминается за аккаунтом.
 const PRICE_MODES = [['lines', 'Смета построчно'], ['total', 'Только итог'], ['none', 'Без сметы']]
 
 export default function PdfSetup({ order, mat, method, fileName, onClose }) {
+  useBackClose(true, onClose)
   const { user } = useAuth()
   const { stats, quote } = useNestingQuote({ order, mats: [mat], method, productionId: order?.production_id })
   const [cfg, setCfg] = useState(() => ({ off: [], price: 'lines', ...(getUserSettings(user).pdfSummary || {}) }))

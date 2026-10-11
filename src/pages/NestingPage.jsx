@@ -45,6 +45,7 @@ import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import CncLoader from '../components/CncLoader'
 import SendToMaster from '../components/SendToMaster'
 import { lazyRetry } from '../lib/lazyRetry'
+import { useBackClose } from '../lib/backStack'
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
 const COLORS = [
@@ -1497,6 +1498,8 @@ export default function NestingPage() {
   const [partsOpen, setPartsOpen] = useKeptState('partsOpen', false)   // список деталей под картами — свёрнут
   const [partsSort, setPartsSort] = useState('')
   const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
+  // «Назад» телефона закрывает редактор контура, открытый с карты (а не уводит со страницы раскроя)
+  useBackClose(!!editPart, () => closePartEditor())   // eslint-disable-line no-use-before-define
   const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
   // показывать ли кромку на картах (без неё карта читается легче) — тоже за аккаунтом
   const [showEdges, setShowEdges] = useState(() => getUserSettings(user).nestShowEdges !== false)
@@ -1515,6 +1518,7 @@ export default function NestingPage() {
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
   const [productions, setProductions] = useState([])     // зарегистрированные производства (если есть)
   const [needProd, setNeedProd] = useState(null)         // «Оформить» без производства: { cfg, force, pick, own }
+  useBackClose(!!needProd, () => setNeedProd(null))
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
   const [offForm, setOffForm] = useState(() => parseOffcuts(null))
   const [sheetOpen, setSheetOpen] = useKeptState('sheetOpen', false)   // «Лист и обрезки» по умолчанию свёрнут
@@ -1796,6 +1800,8 @@ export default function NestingPage() {
       smallPartsMaxSquareSide: cfg.sq === '' ? 0 : Number(cfg.sq),
       smallPartsMaxSide: cfg.side === '' ? 0 : Number(cfg.side),
       smallPartsEdgeGap: cfg.edge === '' ? 100 : Number(cfg.edge),
+      // «Торцом к краю до, мм» (строка потерялась 2.10 при загрузке файлов — порог не доходил до раскроя)
+      smallPartsEndSide: cfg.end === '' ? null : Number(cfg.end),
       optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
       cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',

@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { sendDebugFile } from '../lib/messages'
+import { useBackClose } from '../lib/backStack'
 
 // Отправка файла для отладки мастер-аккаунту: «Точно отправить?» + обязательное описание того, что не работает.
 // Сам файл пользователю не скачивается — он уходит мастер-аккаунту вместе с комментарием.
 // job — { title, fileName, getPayload(), orderId }; onClose().
 export default function SendToMaster({ job, onClose }) {
+  useBackClose(!!job, onClose)
   const { user, profile } = useAuth()
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { drawPdfPreview, normalizePdfTpl, newPdfItem, PDF_ITEMS, pdfItemTitle, pdfItemKind, pdfItemHasLabel } from '../lib/nestingPdf'
+import { useBackClose } from '../lib/backStack'
 
 // Конструктор листа PDF карт раскроя — как конструктор бирки: карта листа, список деталей, заголовок и каждая строка
 // статистики ставятся на страницу там, где нужно; у карты и у текста — размер и поворот в обе стороны.
@@ -10,6 +11,7 @@ const PAGE_W = 210, PAGE_H = 297
 const ZOOMS = [1, 1.5, 2, 3]
 
 export default function PdfLayoutEditor({ order, mat, onClose }) {
+  useBackClose(true, onClose)
   const { user } = useAuth()
   const [tpl, setTpl] = useState(() => normalizePdfTpl(getUserSettings(user).pdfTpl))
   const [sel, setSel] = useState(null)

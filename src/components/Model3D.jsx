@@ -14,6 +14,7 @@ import { loadHardwarePresets, saveHardwarePreset } from '../lib/hardwarePresets'
 import { blockTree, partBox, hardwareLinks, movingSet, sweepLimits, clampMove, moveModel, rotateModel, planStretch, stretchModel } from '../lib/model3dMove'
 import ShareLinkBox from './ShareLinkBox'
 import { lazyRetry } from '../lib/lazyRetry'
+import { useBackClose } from '../lib/backStack'
 const ContourEditor = lazyRetry(() => import('./ContourEditor'))
 
 // Просмотр 3D-модели заказа (детали, импортированные из Базиса или Астры).
@@ -102,6 +103,7 @@ function woodTexture(hex) {
 }
 
 export default function Model3D({ details, scene: savedScene = null, title, onClose, onDetailsChange = null, edgeNames = null, orderId, readOnly = false, sharedTextures = null, editPath = '', materialThickness = 16, actions = null, focus = null, onSceneChange = null, edgeTypes = null, onEdgeTypesChange = null, onEdgeNamesChange = null }) {
+  useBackClose(!!onClose, onClose)   // «Назад» телефона — закрыть модель (вложенные окна модели закрываются раньше)
   const hostRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
@@ -142,6 +144,10 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const [editing, setEditing] = useState(null)                   // правка детали в редакторе контура: { di, draft }
   const [undoN, setUndoN] = useState(0)
   const [newScheme, setNewScheme] = useState(null)               // форма «новый крепёж» (создаётся прямо в 3D)
+  // «Назад» телефона закрывает вложенные окна модели по одному: меню, форму крепежа, редактор контура
+  useBackClose(!!menu, () => setMenu(null))
+  useBackClose(!!newScheme, () => setNewScheme(null))
+  useBackClose(!!editing, () => closeEditor())   // eslint-disable-line no-use-before-define
   const [treeW, setTreeW] = useState(null)                       // ширина структуры, пока её тянут (потом — в настройках вида)
   const treeDrag = useRef(null)
   const [showTree, setShowTree] = useState(false)                // структура модели (блоки и детали) — панель слева

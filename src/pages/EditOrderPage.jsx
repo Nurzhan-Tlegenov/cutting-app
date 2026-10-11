@@ -19,6 +19,7 @@ import { cutSize, parseEdgeTypes, typesFromItems, typesToSave, EDGE_TYPES_HINT }
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
+import { useBackClose } from '../lib/backStack'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -283,6 +284,7 @@ export default function EditOrderPage() {
   const [showEdge, setShowEdge] = useState(true)
   const [lastAddedUid, setLastAddedUid] = useState(null)
   const [editingContourUid, setEditingContourUid] = useState(null)
+  useBackClose(!!editingContourUid, () => setEditingContourUid(null))   // «Назад» телефона — закрыть редактор контура
   const initialSnapshotRef = useRef(null)
   useEffect(() => { fetchOrder() }, [id])
   async function fetchOrder() {

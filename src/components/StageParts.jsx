@@ -7,6 +7,7 @@ import { stageDone } from '../lib/posts'
 import QrCamera from './QrCamera'
 import CncLoader from './CncLoader'
 import { useKeptState } from '../hooks/useKeptState'
+import { useBackClose } from '../lib/backStack'
 
 // Детали заказа на рабочем посту: список по правилу поста и отметка сканированием бирок (камера телефона или
 // сканер-пистолет — он печатает код как клавиатура) или вручную. Видно, какие детали ещё не прошли пост.
@@ -24,6 +25,7 @@ export default function StageParts({ stage, orderId, onClose }) {
   const [show, setShow] = useKeptState('stageShow', 'left')      // left — не отмечены, all
   const [busy, setBusy] = useState(false)
   const [changed, setChanged] = useState(false)
+  useBackClose(true, () => onClose(changed))   // «Назад» телефона — закрыть список
   const inputRef = useRef(null)
   useEffect(() => {
     let alive = true

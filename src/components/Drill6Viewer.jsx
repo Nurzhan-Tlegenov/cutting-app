@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { unzipSync } from 'fflate'
 import { parseDrillXml, panelSummary, TYPE_NAMES, FACE_NAMES } from '../lib/drill6Parse'
+import { useBackClose } from '../lib/backStack'
 
 // Просмотрщик XML-программ присадочного станка (Syntec / SWJ): деталь сверху — отверстия в пласти и торцы, пазы,
 // фрезеровки и выемки, контур, кромка. Открывает созданные приложением файлы и любые XML с устройства (и архивы .zip).
@@ -402,6 +403,7 @@ function Preview({ p, filter, sel, onSel, focus, dims }) {
 }
 
 export default function Drill6Viewer({ files: initial = [], onClose, title = 'Просмотр XML присадки' }) {
+  useBackClose(true, onClose)   // «Назад» телефона — закрыть
   const [files, setFiles] = useState(initial)
   const parsed = useMemo(() => files.map(f => ({ ...f, ...(f.error ? { panels: [] } : parseDrillXml(f.data, f.name)) })), [files])
   const panels = useMemo(() => parsed.flatMap(f => f.panels), [parsed])

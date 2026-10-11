@@ -27,6 +27,7 @@ import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from 
 // ЧПУ: листы принятого раскроя → управляющая программа (G-код) + симулятор.
 // Настройки (постпроцессор, инструменты, обработка контуров, команды) идут за аккаунтом.
 import { lazyRetry } from '../lib/lazyRetry'
+import { useBackClose } from '../lib/backStack'
 const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -172,6 +173,7 @@ export default function CncPage() {
   }, [sim])
   // ссылка на симуляцию: снимок программы этого листа, открывается без входа
   const [share, setShare] = useState(null)          // null — окно закрыто; { busy, code, error, copied }
+  useBackClose(!!share, () => setShare(null))
   useEffect(() => { setShare(null) }, [simSi])
   const openShare = async () => {
     setShare({ busy: true })

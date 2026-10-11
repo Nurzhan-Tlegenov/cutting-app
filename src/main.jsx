@@ -1,3 +1,4 @@
+import './lib/backStack'   // «Назад» телефона закрывает окна поверх страницы — обработчик ставится раньше роутера
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'

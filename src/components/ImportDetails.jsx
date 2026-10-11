@@ -11,6 +11,7 @@ import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importD
 import { useAuth } from '../context/AuthContext'
 import { myLimits, limitText } from '../lib/limits'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
+import { useBackClose } from '../lib/backStack'
 
 // Какую пласть считать лицевой при импорте модели (копия списка из basisB3d — он грузится по требованию)
 const FACE_RULES = [
@@ -186,6 +187,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const setRole = (ci, role) => setRoles(prev => prev.map((r, i) => (i === ci ? role : (role && r === role ? '' : r))))
 
   const close = () => { setSheets(null); setBasis(null) }
+  useBackClose(!!(sheets || basis), close)   // «Назад» телефона — закрыть окно импорта
 
   const doImport = async () => {
     let model3d = null

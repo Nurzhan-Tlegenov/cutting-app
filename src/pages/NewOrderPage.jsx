@@ -20,6 +20,7 @@ import EdgeTypes from '../components/EdgeTypes'
 import { cutSize, typesFromItems, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
 import Model3DButton from '../components/Model3DButton'
 import { fetchUserSettings, ORDER_DEFAULT_COLS, getUserSettings, saveUserSettings } from '../lib/userSettings'
+import { useBackClose } from '../lib/backStack'
 
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
@@ -64,6 +65,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
   const KEYS = ['left','right','top','bottom']
   const lengthRef = useRef(null)
   const [showContour, setShowContour] = useState(false)
+  useBackClose(showContour, () => setShowContour(false))   // «Назад» телефона — закрыть редактор контура
   const [showCopyPicker, setShowCopyPicker] = useState(false)
   const [copySourceUid, setCopySourceUid] = useState(null)
   const [copyMirror, setCopyMirror] = useState(false)
