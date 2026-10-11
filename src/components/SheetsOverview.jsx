@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { placedHoles } from '../lib/partHoles'
 import { partLabel } from '../lib/partLabel'
 import { smallEdgeReal } from '../lib/nesting'
+import { backSide } from '../lib/partInfo'
 
 // ─── Обзор ВСЕХ листов раскроя на одном холсте ──────────────────────────────
 // Нужен для онлайн-раскроя: пока идёт поиск, пользователь видит, как укладка
@@ -111,6 +112,7 @@ export default function SheetsOverview({
           holes: details ? placedHoles(p, details[p.detailIndex]) : [],
           label: partLabel(p, details, labelMode, true),
           alpha: 1, atEdge,
+          back: details && details[p.detailIndex] ? backSide(details[p.detailIndex]) : null,   // обработка снизу — фиолетовым
         })
       })
     })
@@ -186,7 +188,7 @@ export default function SheetsOverview({
       const x = X(it.x), y = Y(it.y), w = it.w * sc, h = it.h * sc
       ctx.globalAlpha = it.alpha
       // мелкая/узкая деталь у края листа («мелкие — в центр» не выполнено) — оранжевым
-      ctx.fillStyle = it.atEdge ? 'rgba(245,158,11,0.35)' : PART_FILL
+      ctx.fillStyle = it.atEdge ? 'rgba(245,158,11,0.35)' : it.back === 'both' ? 'rgba(123,31,162,0.22)' : it.back === 'back' ? 'rgba(123,31,162,0.13)' : PART_FILL
       ctx.strokeStyle = it.atEdge ? '#D97706' : PART_STROKE
       ctx.lineWidth = it.atEdge ? 1.6 : (w < 6 ? 0.5 : 1)
       if (it.polygon) {

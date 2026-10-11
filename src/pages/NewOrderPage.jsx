@@ -14,7 +14,7 @@ import ImportDetails from '../components/ImportDetails'
 import MaterialFilter from '../components/MaterialFilter'
 import { detailMatKey } from '../lib/detailMaterial'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
-import { isTwoSided } from '../lib/partInfo'
+import { isTwoSided, backSide } from '../lib/partInfo'
 import { saveOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import EdgeTypes from '../components/EdgeTypes'
 import { cutSize, typesFromItems, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
@@ -151,10 +151,10 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
         </button>
       </div>
 
-      {(detail.name || isTwoSided(detail)) && (
+      {(detail.name || backSide(detail)) && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 36, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {detail.contour?.meta?.des ? `${detail.contour.meta.des} · ` : ''}{detail.name}
-          {isTwoSided(detail) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2' }}>⇅ 2 стороны</span>}
+          {isTwoSided(detail) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2' }}>⇅ 2 стороны</span>}{backSide(detail) === 'back' && <span title="Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇣ снизу</span>}
         </div>
       )}
 

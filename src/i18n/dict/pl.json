@@ -2518,5 +2518,7 @@
 "вверх — пласть, где больше глухих отверстий": "do góry — strona z większą liczbą otworów nieprzelotowych",
 "Пазы и вырезы": "Wpusty i wycięcia",
 "вверх — пласть с пазами и вырезами": "do góry — strona z wpustami i wycięciami",
-"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "Decyduje pierwsze kryterium, które ma element: jeśli strona licowa nie jest przypisana w modelu — sprawdzane jest następne. Gdy nic nie zdecyduje, element leży jak w modelu."
+"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "Decyduje pierwsze kryterium, które ma element: jeśli strona licowa nie jest przypisana w modelu — sprawdzane jest następne. Gdy nic nie zdecyduje, element leży jak w modelu.",
+"⇣ снизу": "⇣ od spodu",
+"Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают": "Obróbka tylko od spodu (strona nielicowa) — element obraca się na maszynie"
 }

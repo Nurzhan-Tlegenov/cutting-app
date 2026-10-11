@@ -2518,5 +2518,7 @@
 "вверх — пласть, где больше глухих отверстий": "yukarı — kör deliği çok olan yüz",
 "Пазы и вырезы": "Kanallar ve kesikler",
 "вверх — пласть с пазами и вырезами": "yukarı — kanallı ve kesikli yüz",
-"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "Parçada bulunan ilk ölçüt karar verir: modelde ön yüz atanmamışsa sonraki kontrol edilir. Hiçbiri karar vermezse parça modeldeki gibi yatar."
+"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "Parçada bulunan ilk ölçüt karar verir: modelde ön yüz atanmamışsa sonraki kontrol edilir. Hiçbiri karar vermezse parça modeldeki gibi yatar.",
+"⇣ снизу": "⇣ altta",
+"Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают": "İşlem yalnız altta (ön olmayan yüzde) — parça makinede çevrilir"
 }

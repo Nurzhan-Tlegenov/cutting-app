@@ -2518,5 +2518,7 @@
 "вверх — пласть, где больше глухих отверстий": "up — the face with more blind holes",
 "Пазы и вырезы": "Grooves and cutouts",
 "вверх — пласть с пазами и вырезами": "up — the face with grooves and cutouts",
-"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "The first criterion the part has decides: if the face side isn’t assigned in the model, the next one is checked. If nothing decides, the part lies as in the model."
+"Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.": "The first criterion the part has decides: if the face side isn’t assigned in the model, the next one is checked. If nothing decides, the part lies as in the model.",
+"⇣ снизу": "⇣ underside",
+"Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают": "Machining only on the underside (non-face side) — the part is flipped on the machine"
 }

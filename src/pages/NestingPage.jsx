@@ -14,7 +14,7 @@ import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles, placedTurns } from '../lib/partHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
 import { edgeTotals, detailEdgeList, holeEdgeSegments } from '../lib/edgeLength'
-import { isTwoSided } from '../lib/partInfo'
+import { backSide } from '../lib/partInfo'
 import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
 import { productionSaveNesting } from '../lib/productionApi'
@@ -581,9 +581,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // Деталь — если есть реальный контур (true-shape нестинг для фрезера),
       // рисуем именно его; иначе — прямоугольник, как раньше
       const hasShape = Array.isArray(p.polygon) && p.polygon.length > 2
-      // Обработка с двух сторон — полупрозрачный фиолетовый фон: деталь придётся переворачивать
-      const twoSided = !!(details && details[p.detailIndex] && isTwoSided(details[p.detailIndex]))
-      const baseFill = twoSided ? 'rgba(123,31,162,0.22)' : PART_FILL
+      // Обработка снизу (с нелицевой пласти) — фиолетовый фон: с двух сторон — деталь переворачивают,
+      // только снизу (фасад: лицевая без присадки, петли с изнанки) — тоже нужно видеть, тон светлее
+      const back = details && details[p.detailIndex] ? backSide(details[p.detailIndex]) : null
+      const baseFill = back === 'both' ? 'rgba(123,31,162,0.22)' : back === 'back' ? 'rgba(123,31,162,0.13)' : PART_FILL
       const atEdge = edgeSmall.has(i)
       ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : atEdge ? 'rgba(245,158,11,0.28)' : baseFill))
       ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : atEdge ? '#D97706' : PART_STROKE)
@@ -2789,7 +2790,7 @@ export default function NestingPage() {
                           ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                           : (showOffcuts && offcutMode === 'cuts'
                             ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                            : 'Смахни влево/вправо — другой лист · тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)')}
+                            : 'Смахни влево/вправо — другой лист · тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — есть обработка снизу (с изнанки или с двух сторон; на карте показана только лицевая, изнанку видно в редакторе)')}
                       </p>
                     </>
                   )}
