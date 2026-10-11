@@ -6,6 +6,7 @@ import { ruleOf, ruleText, stageParts, loadOrderParts, codeMatcher, stageScan, s
 import { stageDone } from '../lib/posts'
 import QrCamera from './QrCamera'
 import CncLoader from './CncLoader'
+import { useKeptState } from '../hooks/useKeptState'
 
 // Детали заказа на рабочем посту: список по правилу поста и отметка сканированием бирок (камера телефона или
 // сканер-пистолет — он печатает код как клавиатура) или вручную. Видно, какие детали ещё не прошли пост.
@@ -20,7 +21,7 @@ export default function StageParts({ stage, orderId, onClose }) {
   const [cam, setCam] = useState(false)
   const [code, setCode] = useState('')
   const [msg, setMsg] = useState(null)          // { ok, text }
-  const [show, setShow] = useState('left')      // left — не отмечены, all
+  const [show, setShow] = useKeptState('stageShow', 'left')      // left — не отмечены, all
   const [busy, setBusy] = useState(false)
   const [changed, setChanged] = useState(false)
   const inputRef = useRef(null)
@@ -31,6 +32,8 @@ export default function StageParts({ stage, orderId, onClose }) {
   }, [orderId, stage.stage_id])
   const parts = useMemo(() => (data?.order ? stageParts(data.order, data.rows, rule) : []), [data])   // eslint-disable-line react-hooks/exhaustive-deps
   const match = useMemo(() => (data?.order ? codeMatcher(data.order, data.rows, getLabelTpl(user)) : () => null), [data, user])
+  const bySides = rule.list === 'edge' && !!rule.sides          // счёт по сторонам кромления: единица — один проход через станок
+  const unit = bySides ? 'стор.' : 'шт.'
   const total = parts.reduce((a, p) => a + p.qty, 0)
   const done = parts.reduce((a, p) => a + Math.min(p.qty, scans.get(p.id) || 0), 0)
   const left = total - done
@@ -49,12 +52,12 @@ export default function StageParts({ stage, orderId, onClose }) {
     if (!id) { beep(false); setMsg({ ok: false, text: `Не найдено в этом заказе: ${text}` }); return }
     if (!p) { beep(false); const r = data.rows.find(x => x.id === id); setMsg({ ok: false, text: `«${r?.name || 'Деталь'}» — не для этого поста (${ruleText(rule)})` }); return }
     const n = scans.get(p.id) || 0
-    if (n >= p.qty) { beep(false); setMsg({ ok: false, text: `«${p.name}» — уже отмечены все ${p.qty} шт.` }); return }
-    if (await setN(p, n + 1)) { beep(true); setMsg({ ok: true, text: `✓ ${p.name}${p.des ? ` (${p.des})` : ''} — ${n + 1} из ${p.qty}` }) }
+    if (n >= p.qty) { beep(false); setMsg({ ok: false, text: `«${p.name}» — уже отмечены все ${p.qty} ${unit}` }); return }
+    if (await setN(p, n + 1)) { beep(true); setMsg({ ok: true, text: `✓ ${p.name}${p.des ? ` (${p.des})` : ''} — ${n + 1} из ${p.qty}${p.per > 1 ? ` (${p.pcs} шт. × ${p.per} стор.)` : ''}` }) }
   }
   const submitCode = e => { e.preventDefault(); const t = code.trim(); setCode(''); if (t) onScan(t); inputRef.current?.focus() }
   const finish = async () => {
-    if (left > 0 && !window.confirm(`Не отмечено ${left} шт. Всё равно отметить пост «${stage.post_name}» выполненным?`)) return
+    if (left > 0 && !window.confirm(`Не отмечено ${left} ${unit} Всё равно отметить пост «${stage.post_name}» выполненным?`)) return
     if (left === 0 && !window.confirm(`Все детали отмечены. Пост «${stage.post_name}» выполнен?`)) return
     setBusy(true)
     const r = await stageDone(stage.stage_id)
@@ -81,7 +84,7 @@ export default function StageParts({ stage, orderId, onClose }) {
             {/* прогресс */}
             <div style={{ margin: '8px 0 6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 3 }}>
-                <span>Отмечено <b>{done}</b> из <b>{total}</b> шт.</span>
+                <span>Отмечено <b>{done}</b> из <b>{total}</b> <span>{unit}</span></span>
                 <span style={{ color: left ? 'var(--amber)' : 'var(--teal)', fontWeight: 500 }}>{left ? `осталось ${left}` : '✓ все детали'}</span>
               </div>
               <div style={{ height: 6, borderRadius: 3, background: 'var(--bg2)', overflow: 'hidden' }}>
@@ -115,7 +118,7 @@ export default function StageParts({ stage, orderId, onClose }) {
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '0.5px solid var(--border)' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 500, color: full ? 'var(--teal)' : 'var(--text)' }}>{full ? '✓ ' : ''}{p.name}{p.des ? <span style={{ fontWeight: 400, color: 'var(--text-hint)', fontFamily: 'monospace', fontSize: 11.5 }}> {p.des}</span> : null}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{p.size}{p.what ? ` · ${p.what}` : ''}{p.edged && rule.list === 'edge' ? ' · кромка' : ''}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{p.size}{p.what ? ` · ${p.what}` : ''}{p.edged && rule.list === 'edge' ? (bySides ? (p.sides ? <span>{` · кромка с ${p.sides} сторон`}{p.pcs > 1 ? ` · ${p.pcs} × ${p.sides}` : ''}</span> : <span> · кромка по контуру (фигурная) — 1 проход на штуку</span>) : ' · кромка') : ''}</div>
               </div>
               <button type="button" style={step} onClick={() => setN(p, n - 1)} disabled={!n}>−</button>
               <span style={{ minWidth: 42, textAlign: 'center', fontSize: 13, fontWeight: 600, color: full ? 'var(--teal)' : n ? 'var(--blue)' : 'var(--text-hint)' }}>{n}/{p.qty}</span>

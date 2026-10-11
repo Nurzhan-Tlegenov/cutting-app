@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { CncBasic, CncCommands, CncTools, CncOps } from './CncSettings'
+import { useKeptState } from '../hooks/useKeptState'
+import { CncBasic, CncCommands, CncTools, CncOps, CncSaved } from './CncSettings'
 import { useCnc } from '../hooks/useCnc'
 import { activePost, routerPost, drillPosts } from '../lib/cncSettings'
 import CncLoader from './CncLoader'
@@ -10,7 +10,7 @@ const TABS = [['basic', 'Основные'], ['cmd', 'Команды'], ['tools'
 
 export default function CncSetup() {
   const { cnc, change, ready, isMaster } = useCnc()
-  const [tab, setTab] = useState('basic')
+  const [tab, setTab] = useKeptState('cncTab', 'basic')
   if (!ready) return <CncLoader compact label="Загружаем постпроцессоры…" />
   const chip = on => ({ flex: '0 0 auto', padding: '6px 11px', borderRadius: 20, border: 'none', fontSize: 12, background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
   const drills = drillPosts(cnc)
@@ -22,7 +22,9 @@ export default function CncSetup() {
       </p>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 10, paddingBottom: 2 }}>
         {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={chip(tab === k)}>{l}</button>)}
+        {(cnc.saved || []).length > 0 && <button type="button" onClick={() => setTab('mine')} style={chip(tab === 'mine')}>{`Мои постпроцессоры · ${cnc.saved.length}`}</button>}
       </div>
+      {tab === 'mine' && <CncSaved cnc={cnc} onChange={change} />}
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'tools' && <CncTools cnc={cnc} onChange={change} />}

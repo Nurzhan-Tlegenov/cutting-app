@@ -5,7 +5,8 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
-import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettings'
+import { CncBasic, CncCommands, CncTools, CncOps, CncSaved } from '../components/CncSettings'
+import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { routerPost, drillPosts, toggleUse6, isDrill6 } from '../lib/cncSettings'
 import { useCnc } from '../hooks/useCnc'
@@ -52,7 +53,7 @@ export default function CncPage() {
   useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }); return () => { alive = false } }, [id])
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState('sheets')
+  const [tab, setTab] = useKeptState('tab', 'sheets')
   const [matKey, setMatKey] = useState('')
   const [picked, setPicked] = useState(null)        // выбранные листы (индексы); null — все
   const [built, setBuilt] = useState(null)          // { for: cnc, files: [{ si, name, text, lines, time, warnings, empty }] }
@@ -216,6 +217,7 @@ export default function CncPage() {
       </div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 2 }}>
         {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={chip(tab === k)}>{l}{k === 'ops' && pre.length ? ' ⚠' : ''}</button>)}
+        {(cnc.saved || []).length > 0 && <button type="button" onClick={() => setTab('mine')} style={chip(tab === 'mine')}>{`Мои постпроцессоры · ${cnc.saved.length}`}</button>}
       </div>
 
       {tab === 'sheets' && (!mat ? (
@@ -361,6 +363,7 @@ export default function CncPage() {
       {tab === 'tools' && <CncTools cnc={cnc} onChange={change} />}
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
+      {tab === 'mine' && <CncSaved cnc={cnc} onChange={change} />}
 
       {sim && (
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 200, padding: 10, boxSizing: 'border-box', height: '100dvh' }}>

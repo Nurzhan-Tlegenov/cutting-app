@@ -1,4 +1,5 @@
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
+import { useKeptState } from '../hooks/useKeptState'
 import { changedOrders, markOrdersSeen } from '../lib/notices'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -37,7 +38,7 @@ export default function OrdersPage() {
   })), [orders])
 
   const [changed, setChanged] = useState(() => new Set())   // заказы, у которых сменился статус
-  const [showArchive, setShowArchive] = useState(false)
+  const [showArchive, setShowArchive] = useKeptState('archive', false)
   const [archBusy, setArchBusy] = useState('')
   const toArchive = async order => {
     setArchBusy(order.id)

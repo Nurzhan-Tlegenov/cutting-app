@@ -4,7 +4,7 @@ import { D6_QR_DEFAULT, D6_FOLDER_DEFAULT, drill6Folders } from '../lib/drill6Xm
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState } from 'react'
-import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, DEFAULT_DRILL6, KINDS, isDrill6, activePost, routerPost, pickPost, toggleUse6, newId } from '../lib/cncSettings'
+import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, DEFAULT_DRILL6, KINDS, isDrill6, activePost, routerPost, pickPost, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -102,6 +102,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
     <>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Постпроцессор</Title>
+        <SaveSnapshotButton cnc={cnc} onChange={onChange} />
         <select value={post.id} onChange={e => onChange(pickPost(cnc, e.target.value))} style={{ marginBottom: 8 }}>
           {cnc.posts.map(p => <option key={p.id} value={p.id}>{isDrill6(p) ? '⬡ ' : ''}{p.name}{p.shared || p.forAll ? ' · общий' : ''}</option>)}
         </select>
@@ -338,6 +339,65 @@ function Drill6Basic({ post, set, router }) {
 }
 
 // ─── Команды ────────────────────────────────────────────────────────────────
+// «Сохранить»: текущие настройки открытого постпроцессора — в «Мои постпроцессоры» под своим именем.
+// Настройки и так запоминаются при каждой правке; эта кнопка откладывает удачный вариант, чтобы вернуться к нему
+// после других проб. Показывается в «Основных» и в «Командах» — для присадочного и для фрезерного.
+export function SaveSnapshotButton({ cnc, onChange }) {
+  const post = activePost(cnc)
+  const [done, setDone] = useState('')
+  const save = () => {
+    const def = `${post.name} · ${new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}`
+    const name = window.prompt('Сохранить настройки постпроцессора под именем:', def)
+    if (name === null) return
+    onChange(saveSnapshot(cnc, name || def))
+    setDone(`Сохранено в «Мои постпроцессоры»: ${name || def}`)
+    setTimeout(() => setDone(''), 4000)
+  }
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <button type="button" className="btn-primary" onClick={save} style={{ padding: '8px 14px', fontSize: 13 }}>💾 Сохранить настройки</button>
+      <Hint>{done || `Текущие настройки «${post.name}» попадут в «Мои постпроцессоры» — потом их можно применить снова.`}</Hint>
+    </div>
+  )
+}
+
+// Вкладка «Мои постпроцессоры»: сохранённые настройки — применить к открытому постпроцессору, добавить новым, переименовать, удалить
+export function CncSaved({ cnc, onChange }) {
+  const post = activePost(cnc)
+  const kindOf = s => (s.kind === 'drill6' ? 'Присадочный 6-стор.' : 'Раскроечный')
+  const same = s => (isDrill6(post) ? 'drill6' : 'router') === s.kind && !post.shared
+  const when = t => (t ? new Date(t).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '')
+  const small = { padding: '6px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }
+  const apply = (s, asNew) => {
+    if (!asNew && !window.confirm(`Применить «${s.name}» к открытому постпроцессору «${post.name}»? Его текущие настройки заменятся.`)) return
+    onChange(applySnapshot(cnc, s.id, asNew))
+  }
+  const list = [...(cnc.saved || [])].sort((a, b) => (b.at || 0) - (a.at || 0))
+  return (
+    <div className="card" style={{ marginBottom: 10 }}>
+      <Title>Мои постпроцессоры</Title>
+      {!list.length ? <Hint>Пока пусто. Настройте постпроцессор и нажмите «Сохранить настройки» — вариант появится здесь.</Hint> : (
+        <>
+          <Hint>{`Открыт: ${post.name} (${isDrill6(post) ? 'присадочный' : 'раскроечный'}).`}</Hint>
+          <Hint>«Применить» — настройки варианта станут настройками открытого постпроцессора (имя остаётся). «Новым» — добавить отдельным постпроцессором.</Hint>
+          {list.map(s => (
+            <div key={s.id} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
+              <div style={{ fontSize: 13.5, fontWeight: 500 }}>{s.kind === 'drill6' ? '⬡ ' : ''}{s.name}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)' }}><span>{kindOf(s)}</span> · {when(s.at)}{s.kind === 'router' ? <span>{` · поле ${s.post.fieldX}×${s.post.fieldY}`}</span> : null}{s.ops ? <span> · с обработкой контуров</span> : null}</div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                {same(s) && <button type="button" style={{ ...small, color: 'white', background: 'var(--blue)', border: 'none' }} onClick={() => apply(s, false)}>{`Применить к «${post.name}»`}</button>}
+                <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => apply(s, true)}>+ Новым постпроцессором</button>
+                <button type="button" style={small} onClick={() => { const n = window.prompt('Название', s.name); if (n && n.trim()) onChange(renameSnapshot(cnc, s.id, n.trim())) }}>Переименовать</button>
+                <button type="button" style={{ ...small, color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => { if (window.confirm(`Удалить сохранённый вариант «${s.name}»?`)) onChange(removeSnapshot(cnc, s.id)) }}>Удалить</button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
 export function CncCommands({ cnc, onChange, isMaster = false }) {
   const post = activePost(cnc)
   const set = patch => {
@@ -366,6 +426,7 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
       {Box({ k: 'cmdToolEnd', label: 'Смена инструмента — конец' })}
       {Box({ k: 'cmdEnd', label: 'Конец программы' })}
       <Hint>Каждая команда — с новой строки. В смене инструмента вместо {'{T}'} подставляется номер инструмента в магазине, вместо {'{S}'} — обороты шпинделя.</Hint>
+      <div style={{ marginTop: 10 }}><SaveSnapshotButton cnc={cnc} onChange={onChange} /></div>
     </div>
   )
 }

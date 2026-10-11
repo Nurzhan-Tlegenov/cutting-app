@@ -21,13 +21,21 @@ export function defaultRule(name) {
 export const ruleOf = (rule, name) => (rule && rule.list ? rule : defaultRule(name))
 export function ruleText(rule) {
   if (rule.list === 'none') return 'без списка деталей'
-  if (rule.list === 'edge') return 'детали с кромкой'
+  if (rule.list === 'edge') return rule.sides ? 'детали с кромкой, счёт по сторонам' : 'детали с кромкой'
   if (rule.list === 'drill') { const on = DRILL_KEYS.filter(([k]) => rule[k]).map(([, l]) => l); return on.length ? `детали, у которых есть: ${on.join(', ')}` : 'ничего не выбрано' }
   return 'все детали заказа'
 }
 
 const n0 = v => Number(v) || 0
 const r1 = v => String(Math.round(n0(v) * 10) / 10)
+const SIDES = ['left', 'right', 'top', 'bottom']
+/** Фигурная (криволинейная) деталь — у контура есть свои вершины; отверстия и пазы деталь фигурной не делают */
+export function isShaped(d) {
+  if (!d?.contour) return false
+  try { const c = typeof d.contour === 'string' ? JSON.parse(d.contour) : d.contour; return Array.isArray(c?.vertices) && c.vertices.length > 2 } catch { return false }
+}
+/** Сколько прямых сторон с кромкой у прямолинейной детали (у фигурной — 0: кромка там по участкам контура) */
+export const edgedSides = d => (isShaped(d) ? 0 : SIDES.filter(s => edgeKey(d['edge_' + s])).length)
 
 /** Детали поста: [{ id, name, des, pos, size, qty, what, counts, edged }] — строки заказа (по готовой детали), что прошли фильтр */
 export function stageParts(order, rows, rule) {
@@ -47,7 +55,12 @@ export function stageParts(order, rows, rule) {
     if (rule.list === 'edge' && !edged) continue
     if (rule.list === 'drill' && !drillHit) continue
     const what = [c.top && `сверху ${c.top}`, c.bottom && `снизу ${c.bottom}`, c.edge && `в торцы ${c.edge}`, (c.groovesTop + c.groovesBottom) && `пазов ${c.groovesTop + c.groovesBottom}`, (c.millsTop + c.millsBottom) && `фрезеровок ${c.millsTop + c.millsBottom}`].filter(Boolean).join(', ')
-    out.push({ id: d.id, name: d.name || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', size: `${r1(d.length)}×${r1(d.width)}`, qty: Math.max(1, n0(d.qty) || 1), what, counts: c, edged })
+    const pcs = Math.max(1, n0(d.qty) || 1)
+    // кромление по сторонам: прямолинейная деталь проходит кромочный станок столько раз, сколько у неё сторон с кромкой —
+    // каждый проход сканируется отдельно. Фигурная деталь (кромка по участкам контура) считается как 1 проход на штуку.
+    const sides = rule.list === 'edge' && rule.sides ? edgedSides(d) : 0
+    const per = sides || 1
+    out.push({ id: d.id, name: d.name || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', size: `${r1(d.length)}×${r1(d.width)}`, qty: pcs * per, pcs, per, sides, what, counts: c, edged })
   }
   return out
 }

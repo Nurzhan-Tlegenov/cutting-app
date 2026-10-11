@@ -72,6 +72,8 @@ export function normalizeCnc(raw, shared = []) {
   const d = DEFAULT_OPS(), o = c.ops || {}
   return {
     posts, post: posts.some(p => p.id === c.post) ? c.post : posts[0].id, tools,
+    // «Мои постпроцессоры» — сохранённые кнопкой «Сохранить» настройки станка: { id, name, kind, at, post, ops? }
+    saved: (Array.isArray(c.saved) ? c.saved : []).filter(s => s && s.post && typeof s.post === 'object'),
     // какими постпроцессорами выпускать программы одновременно: раскроечный (один — G-код по листам) и присадочные (сколько угодно)
     router: posts.some(p => p.id === c.router && !isDrill6(p)) ? c.router : '',
     use6: (Array.isArray(c.use6) ? c.use6 : []).filter(id => posts.some(p => p.id === id && isDrill6(p))),
@@ -95,3 +97,32 @@ export const pickPost = (cnc, id) => { const p = cnc.posts.find(q => q.id === id
 /** Включить / выключить выпуск программ присадочным станком */
 export const toggleUse6 = (cnc, id, on) => ({ ...cnc, use6: on ? [...new Set([...(cnc.use6 || []), id])] : (cnc.use6 || []).filter(x => x !== id) })
 export const newId = uid
+
+// ── «Мои постпроцессоры»: сохранённые настройки, которые можно применить снова ──
+// Пользователь пробует разные настройки: сохранил удачную под именем — потом применяет к открытому постпроцессору.
+// Для раскроечного вместе со станком сохраняется и обработка контуров (ops): она влияет на G-код так же, как команды.
+const strip = p => { const q = { ...p }; delete q.id; delete q.shared; delete q.forAll; delete q.ownerId; return q }
+export function saveSnapshot(cnc, name) {
+  const post = activePost(cnc)
+  const snap = { id: uid(), name: String(name || post.name).trim() || post.name, kind: isDrill6(post) ? 'drill6' : 'router', at: Date.now(), post: strip(post), ...(isDrill6(post) ? {} : { ops: cnc.ops }) }
+  return { ...cnc, saved: [...(cnc.saved || []), snap] }
+}
+/** Применить сохранённые настройки: к открытому постпроцессору того же типа (его имя и id остаются), иначе — новым постпроцессором */
+export function applySnapshot(cnc, snapId, asNew = false) {
+  const snap = (cnc.saved || []).find(s => s.id === snapId)
+  if (!snap) return cnc
+  const cur = activePost(cnc)
+  const same = (isDrill6(cur) ? 'drill6' : 'router') === snap.kind && !cur.shared
+  let next
+  if (same && !asNew) {
+    next = { ...cnc, posts: cnc.posts.map(p => (p.id === cur.id ? { ...p, ...snap.post, id: p.id, name: p.name, shared: false, forAll: p.forAll } : p)) }
+  } else {
+    const p = { ...(snap.kind === 'drill6' ? DEFAULT_DRILL6() : DEFAULT_POST()), ...snap.post, id: uid(), name: snap.name, shared: false, forAll: false }
+    next = { ...cnc, posts: [...cnc.posts, p], post: p.id, ...(snap.kind === 'drill6' ? {} : { router: p.id }) }
+    if (snap.kind === 'drill6') next = toggleUse6(next, p.id, true)
+  }
+  if (snap.ops && snap.kind === 'router') next = { ...next, ops: { ...DEFAULT_OPS(), ...snap.ops } }
+  return next
+}
+export const removeSnapshot = (cnc, snapId) => ({ ...cnc, saved: (cnc.saved || []).filter(s => s.id !== snapId) })
+export const renameSnapshot = (cnc, snapId, name) => ({ ...cnc, saved: (cnc.saved || []).map(s => (s.id === snapId ? { ...s, name } : s)) })

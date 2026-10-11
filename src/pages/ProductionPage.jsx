@@ -1,5 +1,5 @@
 import { orderFaults, faultText } from '../lib/nestingCheck'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -13,6 +13,7 @@ import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 import PriceList from '../components/PriceList'
 import CncSetup from '../components/CncSetup'
+import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
 import { productionStageMap } from '../lib/posts'
@@ -41,13 +42,16 @@ export default function ProductionPage() {
   // раздел списка запоминается: вернувшись из ЧПУ или бирок «к заказам», попадаем туда же, где были
   const [filter, setFilterState] = useState(() => { try { const f = sessionStorage.getItem('prodFilter'); return FILTERS.some(([k]) => k === f) ? f : 'new' } catch { return 'new' } })
   const setFilter = f => { setFilterState(f); try { sessionStorage.setItem('prodFilter', f) } catch { /* без памяти */ } }
-  const [edit, setEdit] = useState(false)
+  const [edit, setEdit] = useKeptState('edit', false)
   const [busy, setBusy] = useState('')
-  const [prices, setPrices] = useState(false)       // открыт прайс-лист
-  const [xmlView, setXmlView] = useState(false)     // просмотрщик XML-программ присадочного станка
-  const [postOpen, setPostOpen] = useState(false)   // развёрнуты настройки постпроцессора (свёрнуты по умолчанию)
-  const [open, setOpen] = useState(() => new Set())   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
-  const toggle = id => setOpen(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const [prices, setPrices] = useKeptState('prices', false)       // открыт прайс-лист
+  const [xmlView, setXmlView] = useKeptState('xml', false)     // просмотрщик XML-программ присадочного станка
+  const [postOpen, setPostOpen] = useKeptState('postOpen', false)   // развёрнуты настройки постпроцессора (свёрнуты по умолчанию)
+  // развёрнутые разделы — остаются открытыми после обновления страницы
+  const dCompany = useKeptDetails('company'), dSettings = useKeptDetails('settings'), dSheet = useKeptDetails('sheet')
+  const [openIds, setOpenIds] = useKeptState('open', [])   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
+  const open = useMemo(() => new Set(openIds), [openIds])
+  const toggle = id => setOpenIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
   const [sheet, setSheet] = useState({})
   const [staff, setStaff] = useState({ data: null, error: '' })   // сотрудники и приглашения (владелец)
   const [wps, setWps] = useState([])                              // где я сотрудник (своего производства нет)
@@ -190,7 +194,7 @@ export default function ProductionPage() {
                   )}
                 </div>
                 {/* компания — свёрнуто: название, страна, телефон */}
-                <details style={{ marginTop: 10 }}>
+                <details style={{ marginTop: 10 }} {...dCompany}>
                   <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer', color: 'var(--text)' }}>🏭 {prod.name}</summary>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                     <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
@@ -198,7 +202,7 @@ export default function ProductionPage() {
                   </div>
                 </details>
                 {/* всё, что настраивается редко, — одним свёрнутым окном; внутри — свои разделы */}
-                <details style={{ marginTop: 8 }}>
+                <details style={{ marginTop: 8 }} {...dSettings}>
                   <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer', color: 'var(--text)' }}>⚙ Настройки производства</summary>
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 2px' }}>Сотрудники, рабочие посты, прайс-лист, рез и отступы, станки ЧПУ, просмотр XML</div>
                     <StaffSection data={staff.data} error={staff.error} onReload={loadStaff} />
@@ -207,7 +211,7 @@ export default function ProductionPage() {
                       <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Прайс-лист (цены на распил, кромление, присадку)</span>
                       <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
                     </div>
-                    <details style={{ marginTop: 10 }}>
+                    <details style={{ marginTop: 10 }} {...dSheet}>
                       <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Параметры станка (рез и отступы листа) — по типу материала</summary>
                       <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство, — по типу материала, который он указал в заказе.</p>
                       {[['Плита: ЛДСП, МДФ — фрезер ЧПУ или пила', MARGINS], ['ХДФ, ДВП (задние стенки) — пила', HDF_MARGINS]].map(([title, list]) => (
@@ -225,7 +229,7 @@ export default function ProductionPage() {
                       <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
                     </details>
                     {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
-                    <details style={{ marginTop: 8 }} onToggle={e => setPostOpen(e.currentTarget.open)}>
+                    <details style={{ marginTop: 8 }} open={postOpen} onToggle={e => setPostOpen(e.currentTarget.open)}>
                       <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Настройки постпроцессора (станки ЧПУ, инструменты, обработка)</summary>
                       {postOpen && <CncSetup />}
                     </details>

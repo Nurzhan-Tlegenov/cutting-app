@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Component } from 'react'
 
 class ErrorBoundary extends Component {
@@ -36,14 +36,22 @@ import LabelsPage from './pages/LabelsPage'
 import MessagesPage from './pages/MessagesPage'
 import ScanPage from './pages/ScanPage'
 import JoinPage from './pages/JoinPage'
+import PostPage from './pages/PostPage'
 import { pendingInvite } from './lib/workplaces'
 import CncLoader from './components/CncLoader'
 import Watermark from './components/Watermark'
 
+// Куда вернуться после входа: открыли ссылку (например, на рабочий пост) без входа — после входа попадаем туда же
+const AFTER_LOGIN = 'afterLogin'
+const afterLogin = () => { try { const v = sessionStorage.getItem(AFTER_LOGIN); if (v) sessionStorage.removeItem(AFTER_LOGIN); return v && v.startsWith('/') ? v : null } catch { return null } }
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
+  const loc = useLocation()
   if (loading) return <CncLoader full label="Открываем приложение…" />
-  if (!user) return <Navigate to="/auth" replace />
+  if (!user) {
+    try { sessionStorage.setItem(AFTER_LOGIN, loc.pathname + loc.search) } catch { /* без памяти */ }
+    return <Navigate to="/auth" replace />
+  }
   return children
 }
 
@@ -58,7 +66,7 @@ function AppRoutes() {
       <Route path="/v/:code" element={<SharedModelPage />} />
       {/* симуляция обработки листа по ссылке — без входа */}
       <Route path="/s/:code" element={<SharedSimPage />} />
-      <Route path="/auth" element={user ? <Navigate to={pendingInvite() ? `/join/${pendingInvite()}` : home} /> : <AuthPage />} />
+      <Route path="/auth" element={user ? <Navigate to={pendingInvite() ? `/join/${pendingInvite()}` : (afterLogin() || home)} /> : <AuthPage />} />
       <Route path="/join/:code" element={<JoinPage />} />
       <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
       <Route path="/orders/new" element={<ProtectedRoute><NewOrderPage /></ProtectedRoute>} />
@@ -74,6 +82,8 @@ function AppRoutes() {
       <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
       <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
+      {/* рабочий пост по ссылке — окно одного поста (настольный компьютер со сканером); видят только свои */}
+      <Route path="/post/:id" element={<ProtectedRoute><PostPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to={user ? home : '/auth'} />} />
     </Routes>
   )

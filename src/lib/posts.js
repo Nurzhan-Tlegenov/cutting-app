@@ -9,6 +9,7 @@ const call = async (fn, args) => {
   const { data, error } = await supabase.rpc(fn, args)
   if (!error) return { data }
   const m = String(error.message || '')
+  if (/post_page/i.test(m) && /function|schema cache|PGRST202/i.test(m)) return { error: 'Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.', missing: true }
   if (/function|schema cache|PGRST202|order_stages|production_posts/i.test(m)) return { error: POSTS_SQL_HINT, missing: true }
   if (m.includes('not allowed')) return { error: 'Нет прав на это действие.' }
   if (m.includes('stage: not queued')) return { error: 'Этот заказ уже принял другой сотрудник.' }
@@ -28,6 +29,9 @@ export const stageBack = orderId => call('stage_back', { p_order: orderId })
 export const startOrderStages = orderId => call('start_order_stages', { p_order: orderId })
 export const orderStages = orderId => call('order_stages_of', { p_order: orderId })
 export const myPostQueue = () => call('my_post_queue')
+/** Один пост по ссылке /post/<id>: { post, queue } — только своим (сотрудник поста, владелец, начальник) */
+export const postPage = id => call('post_page', { p_post: id })
+export const postLink = id => `${window.location.origin}/post/${id}`
 export const productionStageMap = () => call('production_stage_map')
 
 /** Сколько прошло: «25 мин», «3 ч 10 мин», «2 дн 4 ч» */

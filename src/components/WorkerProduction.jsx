@@ -11,6 +11,7 @@ import StageParts from './StageParts'
 import { ruleOf } from '../lib/stageParts'
 import ProductionForm from './ProductionForm'
 import CncLoader from './CncLoader'
+import { useKeptState } from '../hooks/useKeptState'
 
 // Кабинет производства у сотрудника (своего производства нет, есть рабочие места по приглашению).
 // Сотрудник закреплён за рабочими постами: видит заказы, которые сейчас на его постах — новые (принять) и в работе
@@ -30,10 +31,11 @@ export default function WorkerProduction({ wps, onRegister }) {
   const [orders, setOrders] = useState(null)       // все заказы — начальнику
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
-  const [open, setOpen] = useState(() => new Set())
-  const [filter, setFilter] = useState('work')
+  const [openIds, setOpenIds] = useKeptState('wOpen', [])
+  const open = new Set(openIds)
+  const [filter, setFilter] = useKeptState('wFilter', 'work')
   const [tick, setTick] = useState(0)
-  const [parts, setParts] = useState(null)       // открыт список деталей поста: { stage, orderId }
+  const [parts, setParts] = useKeptState('wParts', null)       // открыт список деталей поста: { stage, orderId } — после обновления страницы открыт снова
   const load = async () => {
     const q = await myPostQueue()
     if (q.error) setError(q.error); else setError('')
@@ -81,7 +83,7 @@ export default function WorkerProduction({ wps, onRegister }) {
     setBusy('')
     if (r.error) setError(r.error); else load()
   }
-  const toggle = id => setOpen(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const toggle = id => setOpenIds(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]))
   const btn = kind => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : kind === 'ok' ? 'var(--teal)' : 'transparent', color: kind === 'main' || kind === 'ok' ? 'white' : 'var(--text-muted)', ...(kind === 'ok' ? { border: 'none' } : {}) })
   const orderBtns = id => (
     <>

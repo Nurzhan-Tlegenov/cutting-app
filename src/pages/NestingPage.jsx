@@ -1,4 +1,5 @@
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
+import { useKeptState } from '../hooks/useKeptState'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -1416,7 +1417,7 @@ export default function NestingPage() {
   const [part3d, setPart3d] = useState(null)       // { index, draft } — деталь в 3D-виде (долгое удержание на карте)
   const [inModel, setInModel] = useState(null)     // деталь в общей 3D-модели заказа: { focus, scene }
   const [sendJob, setSendJob] = useState(null)     // файл для отладки, который уходит мастер-аккаунту
-  const [partsOpen, setPartsOpen] = useState(false)   // список деталей под картами — свёрнут
+  const [partsOpen, setPartsOpen] = useKeptState('partsOpen', false)   // список деталей под картами — свёрнут
   const [partsSort, setPartsSort] = useState('')
   const [editPart, setEditPart] = useState(null)   // { index, draft } — деталь, открытая в редакторе контура с карты
   const [labelMode, setLabelMode] = useLabelMode(user)   // что писать на деталях карты (идёт за аккаунтом)
@@ -1433,13 +1434,13 @@ export default function NestingPage() {
   const [resultCopyStatus, setResultCopyStatus] = useState('')
   const [busyId, setBusyId] = useState(null)     // конфигурация, которая сейчас сохраняется / оформляется
   const [cuttingMethod, setCuttingMethod] = useState('nesting')
-  const [showOffcuts, setShowOffcuts] = useState(false)
+  const [showOffcuts, setShowOffcuts] = useKeptState('offcuts', false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
   const [productions, setProductions] = useState([])     // зарегистрированные производства (если есть)
   const [needProd, setNeedProd] = useState(null)         // «Оформить» без производства: { cfg, force, pick, own }
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
   const [offForm, setOffForm] = useState(() => parseOffcuts(null))
-  const [sheetOpen, setSheetOpen] = useState(false)   // «Лист и обрезки» по умолчанию свёрнут
+  const [sheetOpen, setSheetOpen] = useKeptState('sheetOpen', false)   // «Лист и обрезки» по умолчанию свёрнут
   const [paramsWarn, setParamsWarn] = useState('')
   const jobsRef = useRef({})     // cfgId -> { cancel }
   const skipRef = useRef(new Set()) // конфигурации, снятые из очереди

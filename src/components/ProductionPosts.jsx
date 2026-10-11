@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
 import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule } from '../lib/stageParts'
-import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, stageBack, startOrderStages, stageDone, stageAccept, since, clock } from '../lib/posts'
+import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, stageBack, startOrderStages, stageDone, stageAccept, since, clock, postLink } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
 // Заказ, принятый в работу, идёт по постам по порядку; маршрут заказа с временем на каждом посту — StageTrack.
@@ -14,7 +15,8 @@ export function PostsSection({ members }) {
   const [posts, setPosts] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const [edit, setEdit] = useState(null)
+  const [edit, setEdit] = useKeptState('postEdit', null)
+  const dPosts = useKeptDetails('posts')
   const load = () => postsList().then(r => { if (r.error) { setErr(r.error); setPosts([]) } else { setErr(''); setPosts(r.data || []) } })
   useEffect(() => { Promise.resolve().then(load) }, [])
   const act = async fn => { setBusy(true); setErr(''); const r = await fn(); setBusy(false); if (r?.error) setErr(r.error); await load() }
@@ -34,7 +36,7 @@ export function PostsSection({ members }) {
   }
   const missing = posts && err && /migration_posts/.test(err)
   return (
-    <details style={{ marginTop: 8 }}>
+    <details style={{ marginTop: 8 }} {...dPosts}>
       <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Рабочие посты (техпроцесс){posts?.length ? ` · ${posts.filter(p => p.active).length}` : ''}</summary>
       {missing ? <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>{err}</p> : (
         <div style={{ marginTop: 6 }}>
@@ -64,6 +66,7 @@ export function PostsSection({ members }) {
                     </div>
                   ) : <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>Сначала пригласите сотрудников (раздел «Сотрудники»).</div>}
                   <RuleEditor post={p} busy={busy} onSave={rule => act(async () => { const { error } = await savePostRule(p.id, rule); return error ? { error: error.message } : null })} />
+                  <PostLinkBox post={p} />
                   <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
                     <button type="button" disabled={busy} style={small} onClick={() => { const n = window.prompt('Название поста', p.name); if (n) act(() => savePost(p.id, n)) }}>Переименовать</button>
                     <button type="button" disabled={busy} style={small} onClick={() => act(() => savePost(p.id, p.name, !p.active))}>{p.active ? 'Выключить' : 'Включить'}</button>
@@ -142,6 +145,27 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
   )
 }
 
+/** Ссылка на пост: открывает окно одного поста (очередь, сканирование деталей) — например, на настольном компьютере со
+ * сканером-пистолетом. Видят только свои: сотрудники поста, владелец и начальник; чужой аккаунт по ссылке ничего не увидит. */
+function PostLinkBox({ post }) {
+  const [msg, setMsg] = useState('')
+  const url = postLink(post.id)
+  const copy = async () => { try { await navigator.clipboard.writeText(url); setMsg('Ссылка скопирована') } catch { setMsg('Выделите ссылку и скопируйте вручную') } }
+  const send = async () => { try { await navigator.share({ title: `Рабочий пост «${post.name}»`, url }) } catch { /* отменили */ } }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Ссылка на пост — открыть на компьютере со сканером (нужен вход в аккаунт сотрудника этого поста):</div>
+      <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input type="text" readOnly value={url} onFocus={e => e.target.select()} style={{ flex: '1 1 180px', minWidth: 0, fontSize: 12, padding: '5px 8px' }} />
+        <button type="button" style={small} onClick={copy}>Копировать</button>
+        {typeof navigator.share === 'function' && <button type="button" style={small} onClick={send}>Отправить</button>}
+        <a href={url} target="_blank" rel="noreferrer" style={{ ...small, textDecoration: 'none', color: 'var(--blue)', borderColor: 'var(--blue)' }}>Открыть</a>
+      </div>
+      {msg && <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 3 }}>{msg}</div>}
+    </div>
+  )
+}
+
 /** Какие детали идут через пост: все, с кромкой, с присадкой (что учитывать), без списка */
 function RuleEditor({ post, busy, onSave }) {
   const r = ruleOf(post.rule, post.name)
@@ -152,6 +176,12 @@ function RuleEditor({ post, busy, onSave }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
         {RULE_LISTS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(r.list === k)} onClick={() => set(k === 'drill' && r.list !== 'drill' ? { list: k, top: false, bottom: true, edge: true, grooves: false, mills: false } : { list: k })}>{r.list === k ? '✓ ' : ''}{l}</button>)}
       </div>
+      {r.list === 'edge' && (
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!r.sides} disabled={busy} onChange={e => set({ sides: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />
+          <span><span>Считать по сторонам: прямолинейная деталь с кромкой на 3 сторонах — 3 прохода через станок, сканируется 3 раза.</span> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>Фигурные детали (кромка по контуру) — 1 проход на штуку.</span></span>
+        </label>
+      )}
       {r.list === 'drill' && (
         <div style={{ marginTop: 6 }}>
           <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Учитывать (деталь попадёт в список, если у неё есть хоть что-то из отмеченного):</div>

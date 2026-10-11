@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useKeptDetails } from '../hooks/useKeptState'
 import { PERMS, permsText, createInvite, setMember, removeMember, cancelInvite, inviteUrl } from '../lib/workplaces'
 
 // Рабочие места производства: сотрудники, приглашения по ссылке, полномочия. Заказы сотрудникам не назначаются —
@@ -45,11 +46,12 @@ export function StaffSection({ data, error, onReload }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [edit, setEdit] = useState(null)       // user_id сотрудника, у которого открыты полномочия
+  const dStaff = useKeptDetails('staff')
   const act = async fn => { setBusy(true); setErr(''); const r = await fn(); setBusy(false); if (r?.error) setErr(r.error); else onReload() }
   const members = data?.members || [], invites = data?.invites || []
   const invite = () => act(async () => { const r = await createInvite(form.name, form.phone, form.perms); if (!r.error) setForm(null); return r })
   return (
-    <details style={{ marginTop: 8 }}>
+    <details style={{ marginTop: 8 }} {...dStaff}>
       <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Сотрудники (рабочие места){members.length ? ` · ${members.filter(m => m.active).length}` : ''}</summary>
       {error ? <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>{error}</p> : (
         <div style={{ marginTop: 6 }}>
