@@ -98,7 +98,7 @@ export function buildHistoryExport(hist, { order, details, cfgIdx }) {
       cores: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || null,
       ua: typeof navigator !== 'undefined' ? navigator.userAgent : '',
     },
-    islands: hist.islands, config: hist.config, params: hist.params, seed: hist.seed || null,
+    islands: hist.islands, fallback: hist.fallback || null, config: hist.config, params: hist.params, seed: hist.seed || null,
     durationMs: (hist.stoppedAt || Date.now()) - hist.startedAt, thinned: hist.thinned,
     details: details.map((d, i) => ({
       i, name: d.display_name || d.name, prefix: d.prefix || '', length: Number(d.length), width: Number(d.width),

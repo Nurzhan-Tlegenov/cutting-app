@@ -1285,7 +1285,19 @@ function islandsFor(concurrentJobs = 1) {
 // заказ независимо (у каждого свой случайный поиск), а лучший найденный вариант
 // сразу пересылается остальным — они продолжают искать от него. Так за то же
 // время перебирается в N раз больше вариантов укладки.
-function startNestingJob(params, { live = false, onProgress = null, onStats = null, onIslandProgress = null, islands = 1 } = {}) {
+// Потоки не поднялись (чаще всего — приложение обновилось, а страница открыта в старой версии и файл потока
+// уже не найти): один раз перезагружаем страницу (окно останется тем же), повторно — считаем в основном потоке
+// и говорим об этом (onFallback), иначе расчёт молча шёл в основном потоке и «подвешивал» экран.
+const WORKER_RELOAD_KEY = 'workerReloadAt'
+function reloadOnce() {
+  let last = 0
+  try { last = Number(sessionStorage.getItem(WORKER_RELOAD_KEY)) || 0 } catch { /* без памяти */ }
+  if (Date.now() - last < 60000) return false
+  try { sessionStorage.setItem(WORKER_RELOAD_KEY, String(Date.now())) } catch { /* без памяти */ }
+  window.location.reload()
+  return true
+}
+function startNestingJob(params, { live = false, onProgress = null, onStats = null, onIslandProgress = null, onFallback = null, islands = 1 } = {}) {
   const workers = []
   let rejectFn = null, resolveFn = null
   let cancelled = false, finished = false, stopFlag = false
@@ -1315,7 +1327,9 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     return top
   }
   // Все живые острова отчитались — итог = лучший из их итогов
-  const checkDone = () => { if (expected > 0 && finals.length >= expected) finish(pickBest(finals)) }
+  // лучший показанный промежуточный результат участвует в выборе итога: итог потока после «финальной» обработки
+  // бывает хуже того, что уже было на экране (261010_Timur_k1_history_2: показано 0,05 м², итог 0,09 м²)
+  const checkDone = () => { if (expected > 0 && finals.length >= expected) finish(pickBest(best ? [...finals, best] : finals)) }
   const onFinal = res => { if (res?.rawSheets) { res = { ...res }; delete res.rawSheets } finals.push(res); checkDone() }
   // Остров упал: если остались другие — считаем без него, если нет — ошибка
   const onIslandFail = (msg, fallback) => {
@@ -1330,6 +1344,8 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     resolveFn = resolve; rejectFn = reject
     const fallback = () => {
       killAll()
+      if (reloadOnce()) return                 // страница перезагружается — свежая версия поднимет потоки
+      onFallback?.()
       expected = 1
       mainThreadQueue = mainThreadQueue.catch(() => {}).then(async () => {
         if (cancelled) return
@@ -1445,7 +1461,10 @@ export default function NestingPage() {
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
   const [offForm, setOffForm] = useState(() => parseOffcuts(null))
   const [sheetOpen, setSheetOpen] = useKeptState('sheetOpen', false)   // «Лист и обрезки» по умолчанию свёрнут
-  const [paramsWarn, setParamsWarn] = useState('')
+  const [paramsWarn, setParamsWarn] = useState(() => {
+    // страница только что перезагрузилась из-за не поднявшихся потоков (см. reloadOnce) — скажем, что делать
+    try { return Date.now() - (Number(sessionStorage.getItem(WORKER_RELOAD_KEY)) || 0) < 10000 ? 'Приложение обновилось до новой версии — нажмите «Выполнить раскрой» ещё раз.' : '' } catch { return '' }
+  })
   const jobsRef = useRef({})     // cfgId -> { cancel }
   const skipRef = useRef(new Set()) // конфигурации, снятые из очереди
   const launchBatchRef = useRef(1)  // сколько конфигураций запускается одновременно (для деления ядер)
@@ -1754,6 +1773,11 @@ export default function NestingPage() {
       live: cfg.live,
       islands,
       onStats: (st, island) => { if (jobsRef.current[cfg.id] === job) recordStats(hist, st, island) },
+      onFallback: () => {
+        hist.fallback = 'main-thread'; hist.islands = 1
+        updateCfg(cfg.id, { islands: 1 })
+        setParamsWarn('Потоки расчёта не поднялись — считаю в основном потоке (медленнее, экран может притормаживать). Обновите приложение: потяните страницу вниз или закройте и откройте его.')
+      },
       onIslandProgress: (res, island, global) => { if (jobsRef.current[cfg.id] === job) recordIsland(hist, res, island, global) },
       onProgress: (res, island) => {
         if (jobsRef.current[cfg.id] !== job) return
