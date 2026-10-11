@@ -239,23 +239,39 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
     return res
   }
 
-  // Онлайн — раунды до «Стоп»
+  // Онлайн — раунды до «Стоп». Раунды чередуются: точная укладка по контурам / гибрид. Гибридные раунды
+  // стартуют от лучшей раскладки соседних потоков (мигрант). Если после первой пары раундов лучший результат гибрида
+  // лучше лучшего результата точной укладки — поток переходит на непрерывный гибридный поиск (как нечётные потоки):
+  // раньше половина ядер телефона до самого «Стоп» считала то, что заведомо проигрывало
+  // (261010_Timur_k1: все улучшения — от гибрида, 11 листов нашлись только на 72-й с).
   let best = rough, bestScore = rough ? liveScore(rough.sheets, meta.usableX, meta.usableY) : null, round = 0
+  let shapeBest = null, hybridBest = null     // лучший счёт каждого пути
+  const take = (res, tag) => {
+    const sc = liveScore(res.sheets, meta.usableX, meta.usableY)
+    if (tag === 'hybrid') { if (liveBetter(sc, hybridBest)) hybridBest = sc } else if (liveBetter(sc, shapeBest)) shapeBest = sc
+    const improved = liveBetter(sc, bestScore)
+    if (improved) { best = res; bestScore = sc }
+    return { sc, improved }
+  }
   while (!shouldStop()) {
+    if (hybridAllowed && round >= 2 && hybridBest && shapeBest && liveBetter(hybridBest, shapeBest)) {
+      // непрерывный гибрид до «Стоп» — каждое улучшение сразу на экран
+      const r = await runHybrid(params, meta, {
+        live: true, shouldStop, takeMigrant, onStats, t0,
+        onProgress: onProgress ? res => { const { improved } = take(res, 'hybrid'); if (improved) onProgress({ ...res, iter: round, round }) } : null,
+      })
+      if (r) { const { improved } = take(r, 'hybrid'); if (improved && onProgress) onProgress({ ...r, iter: round, round }) }
+      break
+    }
     const secs = ROUND_SECONDS[Math.min(round, ROUND_SECONDS.length - 1)]
-    // один поток — раунды чередуются: точная укладка / гибрид
-    const useHybrid = hybridAllowed && islands <= 1 && round % 2 === 1
-    const res = (useHybrid && await runHybrid({ ...params, optimizeSeconds: secs }, meta, { live: false, shouldStop, onProgress: null, takeMigrant: null, onStats: null, t0 }))
+    const useHybrid = hybridAllowed && round % 2 === 1
+    const res = (useHybrid && await runHybrid({ ...params, optimizeSeconds: secs }, meta, { live: false, shouldStop, onProgress: null, takeMigrant: islands > 1 ? takeMigrant : null, onStats: null, t0 }))
       || withFilled(await runNesting({ ...params, optimizeSeconds: secs }), params)
     round++
-    const sc = liveScore(res.sheets, meta.usableX, meta.usableY)
-    const improved = liveBetter(sc, bestScore)
+    const { sc, improved } = take(res, res.hybrid ? 'hybrid' : 'shape')
     // «Пульс» по раундам: что дал каждый раунд, даже если он не лучше
     onStats?.({ t: Date.now() - t0, phase: 'shape', round, roundSeconds: secs, result: { count: sc.count, last: Math.round(sc.last) }, improved })
-    if (improved) {
-      best = res; bestScore = sc
-      if (onProgress) onProgress({ ...res, iter: round, round })
-    }
+    if (improved && onProgress) onProgress({ ...res, iter: round, round })
   }
   return best || await runNesting({ ...params, optimizeSeconds: 0 })
 }

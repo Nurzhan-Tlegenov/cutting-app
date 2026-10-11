@@ -451,6 +451,8 @@ export async function runNesting({
         : Math.min(8000, genMs * (stalled ? 4 : 1)))
       sqCur = squeezeLast(sqCur, scoringModes, direction, usableX, usableY, stalled ? SQUEEZE_PER_GEN * 2 : SQUEEZE_PER_GEN, true, sqDeadline,
         pool ? res => res.forEach(sh => pool.add(stripEdgeSmall(sh, usableX, usableY))) : null)
+      // прямой перенос деталей последнего листа в свободные места предыдущих (см. insertLeftovers)
+      if (cuttingMethod !== 'guillotine') sqCur = insertLeftovers(sqCur, direction, usableX, usableY, scoringModes.includes('baf') ? 'baf' : scoringModes[0])
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
     }
@@ -569,6 +571,50 @@ function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allow
     }
   }
   return improved ? cur : sheets
+}
+
+// ─── Перенос с последнего листа в свободные места ───────────────────────────
+// Дожим (squeezeLast) перекладывает листы целиком и наугад — а часто на последнем
+// листе лежит пара деталей, которым просто есть место в дырках предыдущих листов
+// (261010_Timur_k1: деталь 0,045 м² держала 12-й лист 40 с). Здесь — прямой ход:
+// каждую деталь последнего листа (крупные первыми) пробуем поставить в свободный
+// прямоугольник любого предыдущего листа; удалось — переносим. Детерминированно
+// и дёшево: свободные места листа строятся заново по его деталям.
+function rebuildFree(sheet, usableX, usableY) {
+  const next = { ...sheet, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
+  sheet.placed.forEach(p => { split(next, p); prune(next) })
+  updateFreeBounds(next)
+  return next
+}
+function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf') {
+  if (sheets.length < 2) return sheets
+  const n = sheets.length - 1
+  const last = sheets[n]
+  const movers = last.placed.slice().sort((a, b) => b.w * b.h - a.w * a.h)
+  let cur = null, left = last.placed
+  for (const p of movers) {
+    const piece = placedToPiece(p)
+    for (let j = 0; j < n; j++) {
+      const sh = (cur || sheets)[j]
+      if (!sh.freeRects?.length || sh.maxFreeW === undefined) { if (!cur) cur = sheets.slice(); cur[j] = rebuildFree(sh, usableX, usableY) }
+      const target = (cur || sheets)[j]
+      if (cannotFit(target, piece)) continue
+      const spot = chooseSpot(target.freeRects, piece, direction, usableX, usableY, mode, target.placed)
+      if (!spot) continue
+      // «мелкие — в центр» не ухудшаем
+      if (spot.isSmall && smallEdgeSides(spot, target.placed, usableX, usableY) > 0) continue
+      if (!cur) cur = sheets.slice()
+      const next = { ...target, placed: [...target.placed, spot], freeRects: target.freeRects.slice() }
+      split(next, spot); prune(next); updateFreeBounds(next)
+      cur[j] = next
+      left = left.filter(q => q !== p)
+      break
+    }
+  }
+  if (!cur || left.length === last.placed.length) return sheets
+  if (left.length) cur[n] = rebuildFree({ ...last, placed: left }, usableX, usableY)
+  else cur.splice(n, 1)
+  return cur
 }
 
 // ─── Перестановка в ряду: мелкую деталь — внутрь, соседа — к краю ───────────
