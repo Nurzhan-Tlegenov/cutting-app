@@ -2505,5 +2505,9 @@
 "«{0}» — уже отмечены все {1} стор.": "„{0}” — wszystkie {1} str. już oznaczone",
 "Не отмечено {0} стор. Всё равно отметить пост «{1}» выполненным?": "{0} str. nieoznaczonych. Mimo to oznaczyć stanowisko „{1}” jako wykonane?",
 "✓ {0}{1} — {2} из {3} ({4} шт. × {5} стор.)": "✓ {0}{1} — {2} z {3} ({4} szt. × {5} str.)",
-"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "Link do stanowiska nie jest jeszcze włączony w bazie: wykonaj migration_post_link.sql w Supabase (SQL Editor) — raz."
+"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "Link do stanowiska nie jest jeszcze włączony w bazie: wykonaj migration_post_link.sql w Supabase (SQL Editor) — raz.",
+"↻ Заново": "↻ Od nowa",
+"▶ Продолжить": "▶ Kontynuuj",
+"Сначала положите детали из буфера на листы": "Najpierw połóż elementy z bufora na arkusze",
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Kontynuuj szukanie od tego układu — elementy zostają na miejscach, wyszukiwanie szuka gęstszego ułożenia"
 }

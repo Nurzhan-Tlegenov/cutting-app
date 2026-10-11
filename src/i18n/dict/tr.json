@@ -2505,5 +2505,9 @@
 "«{0}» — уже отмечены все {1} стор.": "“{0}” — tüm {1} kenar zaten işaretli",
 "Не отмечено {0} стор. Всё равно отметить пост «{1}» выполненным?": "{0} kenar işaretlenmedi. “{1}” istasyonu yine de tamamlandı olarak işaretlensin mi?",
 "✓ {0}{1} — {2} из {3} ({4} шт. × {5} стор.)": "✓ {0}{1} — {3} / {2} ({4} adet × {5} kenar)",
-"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "İstasyon bağlantısı veritabanında henüz etkin değil: Supabase (SQL Editor) içinde migration_post_link.sql dosyasını bir kez çalıştırın."
+"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "İstasyon bağlantısı veritabanında henüz etkin değil: Supabase (SQL Editor) içinde migration_post_link.sql dosyasını bir kez çalıştırın.",
+"↻ Заново": "↻ Yeniden",
+"▶ Продолжить": "▶ Devam et",
+"Сначала положите детали из буфера на листы": "Önce tampondaki parçaları levhalara yerleştirin",
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Aramaya bu yerleşimden devam et — parçalar yerinde kalır, arama daha sıkı bir yerleşim arar"
 }

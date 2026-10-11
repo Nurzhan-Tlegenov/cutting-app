@@ -388,7 +388,9 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
       }),
     })),
   })
-  return { hybridDetails: hybridDetails.map(({ _h, ...d }) => d), expand, hasPairs: pairKinds.size > 0, pairShapes }
+  // singles: номер гибридной детали → номер настоящей детали (undefined — сцепленная пара); нужен, чтобы
+  // продолжить поиск с готовой раскладки (см. seed в liveNesting.js)
+  return { hybridDetails: hybridDetails.map(({ _h, ...d }) => d), expand, hasPairs: pairKinds.size > 0, pairShapes, singles: hybridDetails.map(d => d._h.single) }
 }
 
 // Повёрнута ли деталь прямоугольного раскроя на 90° относительно исходной.

@@ -2505,5 +2505,9 @@
 "«{0}» — уже отмечены все {1} стор.": "“{0}” — all {1} sides already marked",
 "Не отмечено {0} стор. Всё равно отметить пост «{1}» выполненным?": "{0} sides not marked. Mark post “{1}” as done anyway?",
 "✓ {0}{1} — {2} из {3} ({4} шт. × {5} стор.)": "✓ {0}{1} — {2} of {3} ({4} pcs × {5} sides)",
-"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "The post link is not enabled in the database yet: run migration_post_link.sql in Supabase (SQL Editor) — once."
+"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "The post link is not enabled in the database yet: run migration_post_link.sql in Supabase (SQL Editor) — once.",
+"↻ Заново": "↻ Start over",
+"▶ Продолжить": "▶ Continue",
+"Сначала положите детали из буфера на листы": "First place the parts from the buffer onto the sheets",
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Continue the search from this layout — the parts stay where they are, the search looks for a tighter packing"
 }

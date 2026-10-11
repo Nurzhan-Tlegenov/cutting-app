@@ -2505,5 +2505,9 @@
 "«{0}» — уже отмечены все {1} стор.": "«{0}» — barcha {1} tomon belgilangan",
 "Не отмечено {0} стор. Всё равно отметить пост «{1}» выполненным?": "{0} tomon belgilanmagan. «{1}» posti baribir bajarildi deb belgilansinmi?",
 "✓ {0}{1} — {2} из {3} ({4} шт. × {5} стор.)": "✓ {0}{1} — {3} dan {2} ({4} dona × {5} tomon)",
-"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "Postga havola bazada hali yoqilmagan: Supabase (SQL Editor) da migration_post_link.sql ni bajaring — bir marta."
+"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "Postga havola bazada hali yoqilmagan: Supabase (SQL Editor) da migration_post_link.sql ni bajaring — bir marta.",
+"↻ Заново": "↻ Qaytadan",
+"▶ Продолжить": "▶ Davom etish",
+"Сначала положите детали из буфера на листы": "Avval buferdagi detallarni varaqlarga qo‘ying",
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Shu joylashuvdan qidiruvni davom ettirish — detallar joyida qoladi, qidiruv zichroq joylashtirishni izlaydi"
 }

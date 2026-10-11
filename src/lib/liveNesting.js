@@ -107,6 +107,24 @@ async function chooseHybridPlan(params, meta) {
   }
   return best || base
 }
+// Готовая раскладка (seed) в терминах гибридных деталей: настоящие номера деталей → гибридные. Детали из
+// сцепленных пар так не переводятся — тогда продолжить с раскладки нельзя, поиск идёт с нуля.
+function seedToHybrid(m, singles) {
+  if (!m?.seed) return m
+  const hi = new Map()
+  singles.forEach((di, h) => { if (di !== undefined) hi.set(di, h) })
+  const cnt = {}
+  let ok = true
+  const sheets = m.sheets.map(sh => ({ freeRects: [], placed: sh.placed.map(p => {
+    const h = hi.get(p.detailIndex)
+    if (h === undefined) { ok = false; return p }
+    const q = cnt[h] = (cnt[h] || 0) + 1
+    const out = { ...p, detailIndex: h, id: `${h}_${q - 1}` }
+    delete out.polygon
+    return out
+  }) }))
+  return ok ? { ...m, sheets, ids: sheets.flatMap(sh => sh.placed.map(p => p.id)) } : null
+}
 async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigrant, onStats, t0 }) {
   try {
     const key = JSON.stringify([params.details.map(d => [d.width, d.length, d.qty, d.rotatable, d.contour]), params.kerf, params.sheetL, params.sheetW, params.marginT, params.marginR, params.marginB, params.marginL])
@@ -120,7 +138,9 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
     const res = await runNesting({
       ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting',
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
-      shouldStop, takeMigrant,
+      // «Продолжить»: готовая раскладка — сразу стартовый лучший вариант поиска (в гибридных деталях)
+      seed: Array.isArray(params.seed) ? (seedToHybrid({ seed: true, sheets: params.seed }, plan.singles)?.sheets || null) : null,
+      shouldStop, takeMigrant: takeMigrant ? () => seedToHybrid(takeMigrant(), plan.singles) : null,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
       onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...withFilled(plan.expand({ ...meta, sheets }), params, false), iter, genome, hybrid: true }) : null,
     })
@@ -208,13 +228,14 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
   // до 10 с) — сначала сразу показываем черновик (см. roughLayout).
   const t0 = Date.now()
   let rough = null
-  if (onProgress) {
-    rough = withFilled(await roughLayout(params), params)
-    if (rough) {
-      const sc = liveScore(rough.sheets, meta.usableX, meta.usableY)
-      onStats?.({ t: Date.now() - t0, phase: 'rough', result: { count: sc.count, last: Math.round(sc.last) }, improved: true })
-      onProgress({ ...rough, iter: 0, round: 0 })
-    }
+  if (Array.isArray(params.seed) && params.seed.length) {
+    // «Продолжить»: исходная раскладка — первый лучший вариант, хуже него не покажем
+    rough = { ...meta, sheets: params.seed.map((sh, i) => ({ ...sh, index: i, placed: sh.placed.map(p => ({ ...p })) })), seeded: true }
+  } else if (onProgress) rough = withFilled(await roughLayout(params), params)
+  if (rough && onProgress) {
+    const sc = liveScore(rough.sheets, meta.usableX, meta.usableY)
+    onStats?.({ t: Date.now() - t0, phase: 'rough', result: { count: sc.count, last: Math.round(sc.last) }, improved: true })
+    onProgress({ ...rough, iter: 0, round: 0 })
   }
   // Роли потоков для фигурных деталей: чётные — точная укладка по контурам
   // раундами, нечётные — гибрид (пары → прямоугольники, быстрый непрерывный
@@ -359,6 +380,18 @@ export async function fillOffcuts(params, offs, shaped, budget) {
  * (если есть) идут в начале res.sheets, их число — res.offcutSheets.
  */
 export async function runLiveNesting(params, opts = {}) {
+  // Продолжить с готовой раскладки (params.seed.sheets — листы, как на экране): раскладка уходит в поиск
+  // первым «мигрантом» — порядок деталей и сама укладка; поиск продолжает дожимать её, а не начинает с нуля.
+  // С обрезками не поддерживается (остаток заказа там — отдельная задача): тогда обычный старт.
+  if (params.seed?.sheets?.length && !offcutInstances(params.offcuts).length) {
+    const sheets = params.seed.sheets.filter(sh => sh?.placed?.length).map(sh => ({ freeRects: [], placed: sh.placed.map(p => ({ ...p })) }))
+    const ids = sheets.flatMap(sh => sh.placed.map(p => p.id))
+    let seed = ids.every(Boolean) ? { ids, mode: (params.cuttingMethod || 'nesting') === 'guillotine' ? 'g-baf' : 'baf', sheets, seed: true } : null
+    const inner = opts.takeMigrant
+    opts = { ...opts, takeMigrant: () => { if (seed) { const s = seed; seed = null; return s } return inner ? inner() : null } }
+    // и сразу стартовым лучшим вариантом (runNesting.seed) — чтобы на экране не мелькала раскладка хуже исходной
+    params = { ...params, seed: sheets }
+  } else params = { ...params, seed: undefined }
   const offs = offcutInstances(params.offcuts)
   if (!offs.length) return await runCore(params, opts)
 

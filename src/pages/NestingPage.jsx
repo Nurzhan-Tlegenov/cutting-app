@@ -1703,7 +1703,10 @@ export default function NestingPage() {
   }
 
   // Запуск одной конфигурации. Возвращает промис, который завершается, когда расчёт закончен.
-  function launch(cfg) {
+  // continueFrom — «Продолжить»: поиск стартует с раскладки, которая сейчас на экране (после «Стоп» или
+  // выбранного варианта, вместе с ручными правками), а не с нуля. Если параметры листа с тех пор поменяли
+  // или детали лежат в буфере — раскладка в поиск не передаётся, идёт обычный старт.
+  function launch(cfg, continueFrom = false) {
     // ?nfp=1 — прогнать ЭТОТ заказ через NFP для сравнения (только для фрезера)
     const useNfp = new URLSearchParams(window.location.search).get('nfp') === '1'
     const params = {
@@ -1720,6 +1723,9 @@ export default function NestingPage() {
       optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
       cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
+    }
+    if (continueFrom && cfg.result && cfg.sheetsData?.length && !(cfg.buffer || []).length && cfg.result.paramsKey === paramsKey(params)) {
+      params.seed = { sheets: cfg.sheetsData.filter(sh => sh.placed?.length).map(sh => ({ placed: sh.placed.map(p => ({ ...p })) })) }
     }
     const stamp = res => {
       res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
@@ -1787,11 +1793,11 @@ export default function NestingPage() {
     })
   }
 
-  function runCfg(cfgId) {
+  function runCfg(cfgId, continueFrom = false) {
     const cfg = configsRef.current.find(c => c.id === cfgId)
     if (!cfg || !order || !details.length) return
     if (cfg.status === 'running' || cfg.status === 'stopping') return
-    launch(cfg)
+    launch(cfg, continueFrom)
   }
 
   async function runAll() {
@@ -2510,8 +2516,17 @@ export default function NestingPage() {
                   fontSize: 13, fontWeight: 500, cursor: isStopping ? 'default' : 'pointer' }}>
                 {isStopping ? 'Фиксирую лучший вариант…'
                   : isRunning ? `■ Стоп — зафиксировать (${secs} с)`
-                  : isQueued ? '■ Убрать из очереди' : cfg.result ? '🔄 Пересчитать' : '▶ Выполнить раскрой'}
+                  : isQueued ? '■ Убрать из очереди' : cfg.result ? '↻ Заново' : '▶ Выполнить раскрой'}
               </button>
+              {/* «Продолжить» — поиск идёт дальше с раскладки на экране (после «Стоп» / выбранного варианта / ручных правок), а не с нуля */}
+              {cfg.result && !isRunning && !isQueued && !isStopping && (
+                <button onClick={() => runCfg(cfg.id, true)} disabled={!details.length || (cfg.buffer || []).length > 0}
+                  title={(cfg.buffer || []).length ? 'Сначала положите детали из буфера на листы' : 'Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее'}
+                  style={{ flex: 1, padding: 8, background: 'var(--teal)', color: 'white', border: 'none', borderRadius: 'var(--radius)',
+                    fontSize: 13, fontWeight: 500, cursor: 'pointer', opacity: (cfg.buffer || []).length ? 0.5 : 1 }}>
+                  ▶ Продолжить
+                </button>
+              )}
               {configs.length > 1 && (
                 <button onClick={() => removeCfg(cfg.id)}
                   style={{ padding: '8px 12px', background: 'transparent', color: 'var(--text-hint)',

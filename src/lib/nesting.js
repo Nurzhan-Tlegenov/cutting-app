@@ -129,6 +129,7 @@ export async function runNesting({
   shouldStop = null,              // онлайн-раскрой: () => true — пользователь нажал «Стоп», поиск заканчивается и результат доводится до финала
   takeMigrant = null,             // параллельный поиск («острова»): () => { ids, mode } — лучший вариант соседнего потока, вливается в популяцию
   onStats = null,                 // хронология раскроя: «пульс» поиска раз в ~1 с (итерации, поколение, режимы в популяции, разнообразие)
+  seed = null,                    // «Продолжить»: листы готовой раскладки (как в результате) — поиск начинается с неё, а не с нуля
 }) {
   const realX = sheetW - marginL - marginR  // рабочая зона: горизонталь = 1830 - отступы
   const realY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
@@ -298,6 +299,38 @@ export async function runNesting({
       bestStatPerMode[mode] = result.stat
       bestPerMode[mode] = order
     }
+  }
+
+  // «Продолжить»: готовая раскладка — стартовый лучший вариант и порядок деталей для популяции.
+  // Детали сопоставляются по номеру в заказе и размеру (в раскладке могли повернуть вручную);
+  // раскладка с другим резом/листом, с потерянными деталями или наложением — не принимается, поиск идёт с нуля.
+  const seedSheets = (() => {
+    if (!Array.isArray(seed) || !seed.length) return null
+    const used = new Map(), out = []
+    for (const sh of seed) {
+      const placed = []
+      for (const p of sh?.placed || []) {
+        const di = p.detailIndex, q = used.get(di) || 0
+        used.set(di, q + 1)
+        const piece = pieceById.get(`${di}_${q}`)
+        if (!piece) return null
+        const same = Math.abs(p.w - piece.pw) < 0.05 && Math.abs(p.h - piece.ph) < 0.05
+        const turned = Math.abs(p.w - piece.ph) < 0.05 && Math.abs(p.h - piece.pw) < 0.05
+        if (!same && !turned) return null
+        if (p.x < -0.01 || p.y < -0.01 || p.x + p.w > usableX + 0.01 || p.y + p.h > usableY + 0.01) return null
+        placed.push(makePlacedFrom(piece, { x: p.x, y: p.y }, !same, p.w, p.h))
+      }
+      if (placed.length) out.push(rebuildFree({ index: out.length, placed }, usableX, usableY))
+    }
+    return out.length && validLayout(out) ? out : null
+  })()
+  if (seedSheets) {
+    const stat = evaluate(seedSheets, usableX, usableY)
+    const order = seedSheets.flatMap(sh => sh.placed).map(p => pieceById.get(p.id))
+    best = { sheets: seedSheets, stat, order, mode: scoringModes[0] }
+    bestOrder = { order, mode: best.mode }
+    scoringModes.forEach(m => { bestPerMode[m] = order; bestStatPerMode[m] = stat })
+    dirty = true; maybeReport(true)
   }
 
   for (const sortFn of sortStrategies) {

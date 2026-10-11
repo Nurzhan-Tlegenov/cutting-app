@@ -2505,5 +2505,9 @@
 "«{0}» — уже отмечены все {1} стор.": "„{0}“ — alle {1} Seiten bereits markiert",
 "Не отмечено {0} стор. Всё равно отметить пост «{1}» выполненным?": "{0} Seiten nicht markiert. Posten „{1}“ trotzdem als erledigt markieren?",
 "✓ {0}{1} — {2} из {3} ({4} шт. × {5} стор.)": "✓ {0}{1} — {2} von {3} ({4} Stk. × {5} Seiten)",
-"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "Der Postenlink ist in der Datenbank noch nicht aktiviert: migration_post_link.sql in Supabase (SQL Editor) einmal ausführen."
+"Ссылка на пост ещё не включена в базе: выполните migration_post_link.sql в Supabase (SQL Editor) — один раз.": "Der Postenlink ist in der Datenbank noch nicht aktiviert: migration_post_link.sql in Supabase (SQL Editor) einmal ausführen.",
+"↻ Заново": "↻ Neu starten",
+"▶ Продолжить": "▶ Fortsetzen",
+"Сначала положите детали из буфера на листы": "Legen Sie zuerst die Teile aus dem Puffer auf die Platten",
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Suche von dieser Anordnung fortsetzen — die Teile bleiben an ihren Plätzen, die Suche sucht eine dichtere Packung"
 }
