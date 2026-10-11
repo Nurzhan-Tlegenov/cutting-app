@@ -49,17 +49,23 @@ const ROUND_SECONDS = [3, 6, 10, 15, 20, 30]
 // Дозаполняем его и другие пустоты прямоугольными деталями с последних листов
 // (см. fillConcavities). Берём, только если раскладка не хуже и проверка не
 // нашла новых ошибок. Пример 261010_Timur_k1, лист 4: вырезы боковин пустовали.
-function withFilled(res, params) {
+// final — итог (дозаполняем всегда и проверяем раскладку); промежуточные улучшения — не чаще раза в секунду,
+// без тяжёлой проверки: геометрия дозаполнения точная, а проверка всего заказа на каждом шаге подвешивала телефон
+let lastFillAt = 0
+function withFilled(res, params, final = true) {
   try {
     if (!res?.sheets?.length || (params.cuttingMethod || 'nesting') === 'guillotine') return res
+    if (!final) { const now = Date.now(); if (now - lastFillAt < 1000) return res; lastFillAt = now }
     const usableX = res.usableX ?? (params.sheetW - params.marginL - params.marginR)
     const usableY = res.usableY ?? (params.sheetL - params.marginT - params.marginB)
     const kerf = params.kerf || 0
     const sheets = fillConcavities({ sheets: res.sheets, details: params.details, kerf, usableX, usableY })
     if (!sheets) return res
     if (liveBetter(liveScore(res.sheets, usableX, usableY), liveScore(sheets, usableX, usableY))) return res
-    const chk = sh => validateNesting({ sheets: sh, details: params.details, usableX, usableY, kerf }).errors.length
-    if (chk(sheets) > chk(res.sheets)) return res
+    if (final) {
+      const chk = sh => validateNesting({ sheets: sh, details: params.details, usableX, usableY, kerf }).errors.length
+      if (chk(sheets) > chk(res.sheets)) return res
+    }
     // rawSheets — раскладка ДО дозаполнения. Соседним потокам (мигрант) уходит именно она: гибридный поиск
     // считает фигурную деталь прямоугольником-габаритом, и деталь, положенная в её вырез, для него — наложение.
     // Стяжка такой раскладки протаскивала мелкие детали сквозь боковину (261010_Timur_k1, лист 2).
@@ -116,7 +122,7 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
       shouldStop, takeMigrant,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
-      onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...withFilled(plan.expand({ ...meta, sheets }), params), iter, genome, hybrid: true }) : null,
+      onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...withFilled(plan.expand({ ...meta, sheets }), params, false), iter, genome, hybrid: true }) : null,
     })
     return { ...withFilled(plan.expand(res), params), hybrid: true }
   } catch (e) {

@@ -10,6 +10,11 @@
 // p.w/p.h включают рез, polygon — локальный контур детали.
 import { smallEdgeReal } from './nesting'
 
+function polyArea(P) {
+  let a = 0
+  for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p.x * q.y - q.x * p.y }
+  return Math.abs(a) / 2
+}
 const isRect = p => {
   if (!Array.isArray(p.polygon) || p.polygon.length < 3) return true
   if (p.polygon.length !== 4) return false
@@ -25,7 +30,9 @@ function shapeOf(p, kerf) {
     : [{ x: p.x, y: p.y }, { x: p.x + w, y: p.y }, { x: p.x + w, y: p.y + h }, { x: p.x, y: p.y + h }]
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
   for (const q of P) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.y < y0) y0 = q.y; if (q.y > y1) y1 = q.y }
-  return { P, x0, y0, x1, y1, rect: isRect(p) }
+  const rect = isRect(p)
+  // hole — площадь вырезов: габарит минус сама деталь (сколько места в вырезах вообще есть)
+  return { P, x0, y0, x1, y1, rect, hole: rect ? 0 : (x1 - x0) * (y1 - y0) - polyArea(P) }
 }
 
 // Зазор между прямоугольником [x0..x1]×[y0..y1] и многоугольником (0 — пересекаются)
@@ -86,25 +93,30 @@ function turned(p) {
   }
 }
 
+// Место для детали w×h — только в вырезах фигурных деталей листа: кандидаты — вплотную через рез к вершинам
+// фигурной детали и к соседям, которые заходят в её габарит; сама деталь должна лечь внутрь этого габарита.
+// Весь лист не перебираем: это дорого (поиск шёл на каждом улучшении и подвешивал телефон), а пустоты вне
+// вырезов и так заполняет основной раскрой.
 function tryPlace(sh, p, kerf, uX, uY) {
   const [w, h] = sizeOf(p, kerf)
   if (w > uX + 0.01 || h > uY + 0.01) return null
   const shapes = sh._shapes
-  // кандидаты: край листа, вплотную через рез к вершинам и габаритам соседей
-  const xs = new Set([0, uX - w]), ys = new Set([0, uY - h])
-  for (const s of shapes) {
-    for (const q of s.P) { xs.add(q.x + kerf); xs.add(q.x - kerf - w); ys.add(q.y + kerf); ys.add(q.y - kerf - h) }
-  }
-  const X = [...new Set([...xs].map(r1))].filter(v => v >= -0.01 && v + w <= uX + 0.01).sort((a, b) => a - b)
-  const Y = [...new Set([...ys].map(r1))].filter(v => v >= -0.01 && v + h <= uY + 0.01).sort((a, b) => a - b)
-  for (const y of Y) for (let k = 0, skip = -Infinity; k < X.length; k++) {
-    const x = X[k]
-    if (x < skip) continue
-    const f = fits(x, y, w, h, shapes, kerf)
-    if (f !== true) { if (f) skip = f.x1 + kerf - 0.05; continue }
-    const q = { ...p, x: Math.max(0, x), y: Math.max(0, y) }
-    if (q.isSmall && smallEdgeReal(q, sh.placed, uX, uY) > 0) continue
-    return q
+  for (const c of shapes) {
+    if (c.rect || c.x1 - c.x0 < w || c.y1 - c.y0 < h || (c.hole || 0) < w * h) continue
+    const near = shapes.filter(s => s !== c && s.x0 < c.x1 + kerf && s.x1 > c.x0 - kerf && s.y0 < c.y1 + kerf && s.y1 > c.y0 - kerf)
+    const xs = new Set([c.x0, c.x1 - w]), ys = new Set([c.y0, c.y1 - h])
+    for (const s of [c, ...near]) for (const q of s.P) { xs.add(q.x + kerf); xs.add(q.x - kerf - w); ys.add(q.y + kerf); ys.add(q.y - kerf - h) }
+    const X = [...new Set([...xs].map(r1))].filter(v => v >= Math.max(0, c.x0) - 0.01 && v + w <= Math.min(uX, c.x1) + 0.01).sort((a, b) => a - b)
+    const Y = [...new Set([...ys].map(r1))].filter(v => v >= Math.max(0, c.y0) - 0.01 && v + h <= Math.min(uY, c.y1) + 0.01).sort((a, b) => a - b)
+    for (const y of Y) for (let k = 0, skip = -Infinity; k < X.length; k++) {
+      const x = X[k]
+      if (x < skip) continue
+      const f = fits(x, y, w, h, shapes, kerf)
+      if (f !== true) { if (f) skip = f.x1 + kerf - 0.05; continue }
+      const q = { ...p, x: Math.max(0, x), y: Math.max(0, y) }
+      if (q.isSmall && smallEdgeReal(q, sh.placed, uX, uY) > 0) continue
+      return q
+    }
   }
   return null
 }
@@ -140,12 +152,13 @@ export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usabl
         if (dst.stock === 'offcut' || src.stock === 'offcut') continue
         const uX = dst.usableX ?? usableX, uY = dst.usableY ?? usableY
         const [mw, mh] = sizeOf(p, kerf)
-        if (dst._free == null) dst._free = uX * uY - dst.placed.reduce((a, q) => { const [w, h] = sizeOf(q, kerf); return a + w * h }, 0)   // по чистым размерам — оценка свободного сверху
+        // на листе должен быть вырез, куда деталь хотя бы по площади влезет
+        if (dst._free == null) dst._free = Math.max(0, ...dst._shapes.map(s => s.hole || 0))
         if (mw * mh > dst._free) continue
         for (const v of variants) {
           const q = tryPlace(dst, v, kerf, uX, uY)
           if (!q) continue
-          dst.placed.push(q); dst._shapes.push(shapeOf(q, kerf)); dst._free -= mw * mh
+          dst.placed.push(q); dst._shapes.push(shapeOf(q, kerf)); dst._free = null
           gone.add(i); moved++; done = true
           break
         }

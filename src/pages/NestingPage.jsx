@@ -1296,16 +1296,18 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   const finish = res => { if (finished || cancelled) return; finished = true; killAll(); resolveFn(res) }
   const fail = err => { if (finished || cancelled) return; finished = true; killAll(); rejectFn(err) }
   const consider = (res, fromIdx) => {
+    const raw = res.rawSheets || res.sheets      // раскладка самого поиска — для соседних потоков
+    if (res.rawSheets) { res = { ...res }; delete res.rawSheets }
     const sc = liveScore(res.sheets, res.usableX, res.usableY)
     const global = liveBetter(sc, bestScore)
     if (!cancelled && !finished) onIslandProgress?.(res, fromIdx, global)
     if (!global) return
+    // соседям — и порядок деталей, и саму раскладку (дожатую, «починенную»). Уходит раскладка самого поиска
+    // (rawSheets), а не дозаполненная вырезами: для прямоугольного поиска деталь в вырезе фигурной детали —
+    // наложение (см. withFilled в liveNesting.js). На экран и в историю rawSheets не идёт — лишний вес.
+    if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome, sheets: raw }) })
     best = res; bestScore = sc
     if (!cancelled && !finished) onProgress?.(res, fromIdx)
-    // соседям — и порядок деталей, и саму раскладку (дожатую, «починенную»)
-    // Соседям уходит раскладка самого поиска (rawSheets), а не дозаполненная вырезами — для прямоугольного
-    // поиска деталь в вырезе фигурной детали выглядит наложением (см. withFilled в liveNesting.js)
-    if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome, sheets: res.rawSheets || res.sheets }) })
   }
   const pickBest = list => {
     let top = null, topScore = null
@@ -1314,7 +1316,7 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   }
   // Все живые острова отчитались — итог = лучший из их итогов
   const checkDone = () => { if (expected > 0 && finals.length >= expected) finish(pickBest(finals)) }
-  const onFinal = res => { finals.push(res); checkDone() }
+  const onFinal = res => { if (res?.rawSheets) { res = { ...res }; delete res.rawSheets } finals.push(res); checkDone() }
   // Остров упал: если остались другие — считаем без него, если нет — ошибка
   const onIslandFail = (msg, fallback) => {
     if (cancelled || finished) return
