@@ -13,6 +13,8 @@
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
 import { runNesting, smallAtEdge } from './nesting'
 import { needsTrueShape, roughShapePolygons, placedRotation, buildHybridPlan } from './trueShapeNesting'
+import { fillConcavities } from './fillConcavities'
+import { validateNesting } from './validateNesting'
 
 const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажатия «Стоп»
 
@@ -41,6 +43,29 @@ async function roughLayout(params) {
   } catch { return null }
 }
 const ROUND_SECONDS = [3, 6, 10, 15, 20, 30]
+
+// Вырезы фигурных деталей. Гибрид и черновик кладут одиночную фигурную деталь
+// (Г-образная боковина с вырезом под цоколь) по габариту — вырез пустой.
+// Дозаполняем его и другие пустоты прямоугольными деталями с последних листов
+// (см. fillConcavities). Берём, только если раскладка не хуже и проверка не
+// нашла новых ошибок. Пример 261010_Timur_k1, лист 4: вырезы боковин пустовали.
+function withFilled(res, params) {
+  try {
+    if (!res?.sheets?.length || (params.cuttingMethod || 'nesting') === 'guillotine') return res
+    const usableX = res.usableX ?? (params.sheetW - params.marginL - params.marginR)
+    const usableY = res.usableY ?? (params.sheetL - params.marginT - params.marginB)
+    const kerf = params.kerf || 0
+    const sheets = fillConcavities({ sheets: res.sheets, details: params.details, kerf, usableX, usableY })
+    if (!sheets) return res
+    if (liveBetter(liveScore(res.sheets, usableX, usableY), liveScore(sheets, usableX, usableY))) return res
+    const chk = sh => validateNesting({ sheets: sh, details: params.details, usableX, usableY, kerf }).errors.length
+    if (chk(sheets) > chk(res.sheets)) return res
+    return { ...res, sheets, filled: true }
+  } catch (e) {
+    console.warn('Дозаполнение вырезов не удалось:', e)
+    return res
+  }
+}
 
 // Гибрид для фигурных деталей: сцепленные пары → прямоугольники их габарита,
 // весь заказ — быстрым прямоугольным поиском (непрерывно в онлайн-режиме, с
@@ -88,9 +113,9 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
       shouldStop, takeMigrant,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
-      onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...plan.expand({ ...meta, sheets }), iter, genome, hybrid: true }) : null,
+      onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...withFilled(plan.expand({ ...meta, sheets }), params), iter, genome, hybrid: true }) : null,
     })
-    return { ...plan.expand(res), hybrid: true }
+    return { ...withFilled(plan.expand(res), params), hybrid: true }
   } catch (e) {
     console.warn('Гибрид не удался:', e)
     return null
@@ -175,7 +200,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
   const t0 = Date.now()
   let rough = null
   if (onProgress) {
-    rough = await roughLayout(params)
+    rough = withFilled(await roughLayout(params), params)
     if (rough) {
       const sc = liveScore(rough.sheets, meta.usableX, meta.usableY)
       onStats?.({ t: Date.now() - t0, phase: 'rough', result: { count: sc.count, last: Math.round(sc.last) }, improved: true })
@@ -192,7 +217,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
     if (r) return rough && liveBetter(liveScore(rough.sheets, meta.usableX, meta.usableY), liveScore(r.sheets, meta.usableX, meta.usableY)) ? rough : r
   }
   if (!live) {
-    let res = await runNesting(params)
+    let res = withFilled(await runNesting(params), params)
     if (islands <= 1 && hybridAllowed) {
       // один поток: дополнительно гибрид с тем же временем — берём лучший
       const hy = await runHybrid(params, meta, { live: false, shouldStop, onProgress: null, takeMigrant: null, onStats, t0 })
@@ -212,7 +237,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
     // один поток — раунды чередуются: точная укладка / гибрид
     const useHybrid = hybridAllowed && islands <= 1 && round % 2 === 1
     const res = (useHybrid && await runHybrid({ ...params, optimizeSeconds: secs }, meta, { live: false, shouldStop, onProgress: null, takeMigrant: null, onStats: null, t0 }))
-      || await runNesting({ ...params, optimizeSeconds: secs })
+      || withFilled(await runNesting({ ...params, optimizeSeconds: secs }), params)
     round++
     const sc = liveScore(res.sheets, meta.usableX, meta.usableY)
     const improved = liveBetter(sc, bestScore)
