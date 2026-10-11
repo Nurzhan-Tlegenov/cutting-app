@@ -142,7 +142,7 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       seed: Array.isArray(params.seed) ? (seedToHybrid({ seed: true, sheets: params.seed }, plan.singles)?.sheets || null) : null,
       shouldStop, takeMigrant: takeMigrant ? () => seedToHybrid(takeMigrant(), plan.singles) : null,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
-      onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...withFilled(plan.expand({ ...meta, sheets }), params, false), iter, genome, hybrid: true }) : null,
+      onProgress: onProgress ? ({ sheets, iter, genome, seeded }) => onProgress({ ...withFilled(plan.expand({ ...meta, sheets }), params, false), iter, genome, hybrid: true, ...(seeded ? { seeded } : {}) }) : null,
     })
     return { ...withFilled(plan.expand(res), params), hybrid: true }
   } catch (e) {
@@ -220,7 +220,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
       ...params,
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
       shouldStop, takeMigrant, onStats,
-      onProgress: onProgress ? ({ sheets, iter, genome }) => onProgress({ ...meta, sheets, iter, genome }) : null,
+      onProgress: onProgress ? ({ sheets, iter, genome, seeded }) => onProgress({ ...meta, sheets, iter, genome, ...(seeded ? { seeded } : {}) }) : null,
     })
   }
 
@@ -379,28 +379,66 @@ export async function fillOffcuts(params, offs, shaped, budget) {
  * в том же формате, что и итог runNesting (+ iter, round). Листы-обрезки
  * (если есть) идут в начале res.sheets, их число — res.offcutSheets.
  */
+// «Продолжить» (params.seed.sheets — листы, как на экране): раскладка уходит в поиск стартовым лучшим вариантом
+// (runNesting.seed — на экране не мелькнёт раскладка хуже исходной) и первым «мигрантом» (порядок деталей + сама
+// укладка). Номера деталей в листах — по details переданного params; id деталей выставляются заново по номеру
+// и порядку (`${di}_${q}`, как у buildPieces) — ручные правки и переносы их не ломают.
+function seedInto(params, opts, sheetsIn) {
+  const sheets = (sheetsIn || []).filter(sh => sh?.placed?.length)
+  if (!sheets.length) return { params: { ...params, seed: undefined }, opts }
+  const cnt = new Map()
+  const prepared = sheets.map(sh => ({ freeRects: [], placed: sh.placed.map(p => {
+    const q = cnt.get(p.detailIndex) || 0
+    cnt.set(p.detailIndex, q + 1)
+    return { ...p, id: `${p.detailIndex}_${q}` }
+  }) }))
+  let seed = { ids: prepared.flatMap(sh => sh.placed.map(p => p.id)), mode: (params.cuttingMethod || 'nesting') === 'guillotine' ? 'g-baf' : 'baf', sheets: prepared, seed: true }
+  const inner = opts.takeMigrant
+  return {
+    params: { ...params, seed: prepared },
+    opts: { ...opts, takeMigrant: () => { if (seed) { const s = seed; seed = null; return s } return inner ? inner() : null } },
+  }
+}
+
 export async function runLiveNesting(params, opts = {}) {
-  // Продолжить с готовой раскладки (params.seed.sheets — листы, как на экране): раскладка уходит в поиск
-  // первым «мигрантом» — порядок деталей и сама укладка; поиск продолжает дожимать её, а не начинает с нуля.
-  // С обрезками не поддерживается (остаток заказа там — отдельная задача): тогда обычный старт.
-  if (params.seed?.sheets?.length && !offcutInstances(params.offcuts).length) {
-    const sheets = params.seed.sheets.filter(sh => sh?.placed?.length).map(sh => ({ freeRects: [], placed: sh.placed.map(p => ({ ...p })) }))
-    const ids = sheets.flatMap(sh => sh.placed.map(p => p.id))
-    let seed = ids.every(Boolean) ? { ids, mode: (params.cuttingMethod || 'nesting') === 'guillotine' ? 'g-baf' : 'baf', sheets, seed: true } : null
-    const inner = opts.takeMigrant
-    opts = { ...opts, takeMigrant: () => { if (seed) { const s = seed; seed = null; return s } return inner ? inner() : null } }
-    // и сразу стартовым лучшим вариантом (runNesting.seed) — чтобы на экране не мелькала раскладка хуже исходной
-    params = { ...params, seed: sheets }
-  } else params = { ...params, seed: undefined }
   const offs = offcutInstances(params.offcuts)
-  if (!offs.length) return await runCore(params, opts)
+  const seedSheets = Array.isArray(params.seed?.sheets) ? params.seed.sheets : null
+  if (!offs.length) {
+    ;({ params, opts } = seedInto(params, opts, seedSheets))
+    return await runCore(params, opts)
+  }
+  params = { ...params, seed: undefined }
 
   const shaped = !isRasterPath(params)
   // Время на обрезок: больше 0,15 с заполнение не улучшает (замер на 260906_009:
   // 0,15 с — 93,9%, 1 с — 93,9%), а первая картинка из-за него появлялась на ~1 с позже
   const budget = Math.min(0.15, 1 / offs.length)
-  const { sheets: offSheets, remaining } = await fillOffcuts(params, offs, shaped, budget)
-  if (!offSheets.length) return await runCore(params, opts)
+  // «Продолжить» с обрезками: листы-обрезки берём из раскладки на экране как есть (они должны совпадать с
+  // обрезками со склада по размеру и отступу — иначе склад поменяли, и идёт обычный старт), остаток заказа
+  // продолжает поиск с остальных листов экрана.
+  let seedMain = null, filled = null
+  if (seedSheets?.length) {
+    const offSeed = seedSheets.filter(sh => sh?.stock === 'offcut'), mainSeed = seedSheets.filter(sh => sh?.stock !== 'offcut' && sh?.placed?.length)
+    const free = offs.slice()
+    const taken = []
+    let ok = true
+    for (const sh of offSeed) {
+      const k = free.findIndex(o => Math.abs(o.length - Number(sh.sheetL)) < 0.01 && Math.abs(o.width - Number(sh.sheetW)) < 0.01 && Math.abs(o.margin - Number(sh.marginL)) < 0.01)
+      if (k < 0) { ok = false; break }
+      taken.push({ ...sh, index: taken.length, offcutItem: free[k].item, placed: (sh.placed || []).map(p => ({ ...p })) })
+      free.splice(k, 1)
+    }
+    if (ok) {
+      const remaining = params.details.map(d => Math.max(0, Number(d.qty) || 0))
+      for (const sh of taken) for (const p of sh.placed) { if (!(remaining[p.detailIndex] > 0)) { ok = false; break } remaining[p.detailIndex]-- }
+      if (ok) { filled = { sheets: taken, remaining }; seedMain = mainSeed }
+    }
+  }
+  const { sheets: offSheets, remaining } = filled || await fillOffcuts(params, offs, shaped, budget)
+  if (!offSheets.length) {
+    ;({ params, opts } = seedInto(params, opts, seedMain))
+    return await runCore(params, opts)
+  }
 
   const meta = {
     usableX: params.sheetW - params.marginL - params.marginR,
@@ -444,8 +482,20 @@ export async function runLiveNesting(params, opts = {}) {
     return { ...m, sheets }
   } : null
 
-  const res = await runCore({ ...params, details: subDetails }, {
-    ...opts, takeMigrant,
+  // остаток заказа продолжает с листов экрана (номера деталей → номера остатка)
+  let subSeed = null
+  if (seedMain) {
+    subSeed = []
+    for (const sh of seedMain) {
+      const placed = []
+      for (const p of sh.placed) { const s = origToSub.get(p.detailIndex); if (s === undefined) { subSeed = null; break } placed.push({ ...p, detailIndex: s }) }
+      if (!subSeed) break
+      subSeed.push({ placed })
+    }
+  }
+  const seeded = seedInto({ ...params, details: subDetails }, { ...opts, takeMigrant }, subSeed)
+  const res = await runCore(seeded.params, {
+    ...seeded.opts,
     onProgress: opts.onProgress ? r => opts.onProgress(toFull(r)) : null,
   })
   return toFull(res)

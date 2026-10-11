@@ -31,6 +31,12 @@ export function newHistory(cfg, islands, params) {
       cuttingMethod: params.cuttingMethod, algo: params.algo,
       offcuts: params.offcuts || null,
     },
+    // «Продолжить»: с какой раскладки стартовал поиск (для отладки — видно, что было исходным, а что нашёл поиск)
+    seed: params.seed?.sheets ? {
+      sheets: params.seed.sheets.length, offcuts: params.seed.sheets.filter(sh => sh?.stock === 'offcut').length,
+      parts: params.seed.sheets.reduce((a, sh) => a + (sh?.placed?.length || 0), 0),
+      algoVersion: params.seed.algoVersion || null, saved: !!params.seed.saved,
+    } : null,
     events: [],        // улучшения лучшего результата (что видел пользователь) + финал
     islandEvents: [],  // улучшения внутри каждого потока (в т.ч. не ставшие общим лучшим)
     stats: [],         // «пульс» поиска по потокам
@@ -51,7 +57,7 @@ function scoreOf(sheets, usableX, usableY) {
 export function recordEvent(hist, res, island, kind) {
   const t = Date.now() - hist.startedAt
   // via — чем найден: черновик / гибрид (пары → прямоугольники) / точная укладка по контурам / прямоугольный поиск
-  const via = res.rough ? 'rough' : res.hybrid ? 'hybrid' : res.round !== undefined ? 'exact' : 'rect'
+  const via = res.seeded ? 'seed' : res.rough ? 'rough' : res.hybrid ? 'hybrid' : res.round !== undefined ? 'exact' : 'rect'
   hist.events.push({ t, kind, island, via, iter: res.iter || 0, mode: res.genome?.mode || null, ...scoreOf(res.sheets, res.usableX, res.usableY), sheets: res.sheets })
   if (hist.events.length > HIST_MAX_EVENTS) {
     // прореживаем старшую половину через один (первый и последние снимки остаются)
@@ -92,7 +98,7 @@ export function buildHistoryExport(hist, { order, details, cfgIdx }) {
       cores: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || null,
       ua: typeof navigator !== 'undefined' ? navigator.userAgent : '',
     },
-    islands: hist.islands, config: hist.config, params: hist.params,
+    islands: hist.islands, config: hist.config, params: hist.params, seed: hist.seed || null,
     durationMs: (hist.stoppedAt || Date.now()) - hist.startedAt, thinned: hist.thinned,
     details: details.map((d, i) => ({
       i, name: d.display_name || d.name, prefix: d.prefix || '', length: Number(d.length), width: Number(d.width),

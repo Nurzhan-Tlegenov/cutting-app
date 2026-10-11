@@ -1725,7 +1725,10 @@ export default function NestingPage() {
       algo: useNfp ? 'nfp' : 'raster',
     }
     if (continueFrom && cfg.result && cfg.sheetsData?.length && !(cfg.buffer || []).length && cfg.result.paramsKey === paramsKey(params)) {
-      params.seed = { sheets: cfg.sheetsData.filter(sh => sh.placed?.length).map(sh => ({ placed: sh.placed.map(p => ({ ...p })) })) }
+      params.seed = {
+        sheets: cfg.sheetsData.filter(sh => sh.placed?.length).map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p })) })),   // листы целиком: у обрезков свои размеры и stock
+        algoVersion: cfg.result.algoVersion || null, saved: !!cfg.saved,   // в хронологию: чем и когда была посчитана исходная раскладка
+      }
     }
     const stamp = res => {
       res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
@@ -1754,7 +1757,7 @@ export default function NestingPage() {
       onIslandProgress: (res, island, global) => { if (jobsRef.current[cfg.id] === job) recordIsland(hist, res, island, global) },
       onProgress: (res, island) => {
         if (jobsRef.current[cfg.id] !== job) return
-        recordEvent(hist, res, island, res.rough ? 'rough' : 'improve')
+        recordEvent(hist, res, island, res.seeded ? 'seed' : res.rough ? 'rough' : 'improve')
         updateCfg(cfg.id, c => {
           const sheetsData = toSheets(res)
           return {

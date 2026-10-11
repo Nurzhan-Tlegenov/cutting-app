@@ -240,6 +240,7 @@ export async function runNesting({
 
   let best = null
   let bestOrder = null
+  let seedSheets = null   // «Продолжить»: исходная раскладка (см. ниже) — первый отчёт помечается seeded
   // ─── Онлайн-показ: промежуточный лучший результат уходит на экран уже со
   // стяжкой к нулю листа (как финальный), чтобы пользователь видел реальное
   // сжатие укладки, а не сырую раскладку перед стяжкой.
@@ -278,7 +279,7 @@ export async function runNesting({
     const sheets = cuttingMethod !== 'guillotine' ? wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY) : best.sheets
     // genome — порядок деталей + режим: по нему соседние потоки воспроизводят вариант у себя
     const genome = best.order ? { ids: best.order.map(p => p.id), mode: best.mode } : null
-    onProgress({ sheets, iter, genome })
+    onProgress({ sheets, iter, genome, ...(seedSheets && best.sheets === seedSheets ? { seeded: true } : {}) })
   }
   const bestPerMode = {}     // лучший порядок ОТДЕЛЬНО по каждому режиму — не только глобальный лидер
   const bestStatPerMode = {}
@@ -304,7 +305,7 @@ export async function runNesting({
   // «Продолжить»: готовая раскладка — стартовый лучший вариант и порядок деталей для популяции.
   // Детали сопоставляются по номеру в заказе и размеру (в раскладке могли повернуть вручную);
   // раскладка с другим резом/листом, с потерянными деталями или наложением — не принимается, поиск идёт с нуля.
-  const seedSheets = (() => {
+  seedSheets = (() => {
     if (!Array.isArray(seed) || !seed.length) return null
     const used = new Map(), out = []
     for (const sh of seed) {
