@@ -2509,5 +2509,6 @@
 "↻ Заново": "↻ Start over",
 "▶ Продолжить": "▶ Continue",
 "Сначала положите детали из буфера на листы": "First place the parts from the buffer onto the sheets",
-"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Continue the search from this layout — the parts stay where they are, the search looks for a tighter packing"
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Continue the search from this layout — the parts stay where they are, the search looks for a tighter packing",
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Swipe left/right — another sheet · Tap — select (for buffer) · double tap — rotate · hold and drag — move · long hold in place — contour editor · pinch — zoom · purple background — two-sided machining (only the front is shown on the map; the back is visible in the editor)"
 }

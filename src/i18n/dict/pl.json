@@ -2509,5 +2509,6 @@
 "↻ Заново": "↻ Od nowa",
 "▶ Продолжить": "▶ Kontynuuj",
 "Сначала положите детали из буфера на листы": "Najpierw połóż elementy z bufora na arkusze",
-"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Kontynuuj szukanie od tego układu — elementy zostają na miejscach, wyszukiwanie szuka gęstszego ułożenia"
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Kontynuuj szukanie od tego układu — elementy zostają na miejscach, wyszukiwanie szuka gęstszego ułożenia",
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Przesuń w lewo/prawo — inny arkusz · Stuknięcie — zaznacz (do schowka) · podwójne stuknięcie — obrót · przytrzymaj i ciągnij — przeniesienie · długo trzymaj w miejscu — edytor konturu · szczypanie — skala · fioletowe tło — obróbka z dwóch stron (na rozkroju pokazano tylko lico; spód widać w edytorze)"
 }

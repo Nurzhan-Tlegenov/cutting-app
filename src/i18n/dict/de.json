@@ -2509,5 +2509,6 @@
 "↻ Заново": "↻ Neu starten",
 "▶ Продолжить": "▶ Fortsetzen",
 "Сначала положите детали из буфера на листы": "Legen Sie zuerst die Teile aus dem Puffer auf die Platten",
-"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Suche von dieser Anordnung fortsetzen — die Teile bleiben an ihren Plätzen, die Suche sucht eine dichtere Packung"
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Suche von dieser Anordnung fortsetzen — die Teile bleiben an ihren Plätzen, die Suche sucht eine dichtere Packung",
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Nach links/rechts wischen — andere Platte · Tippen — markieren (für die Ablage) · Doppeltipp — drehen · halten und ziehen — verschieben · lange an der Stelle halten — Kontureditor · Zusammenziehen — Zoom · violetter Hintergrund — beidseitige Bearbeitung (im Plan ist nur die Sichtseite gezeigt; die Rückseite sehen Sie im Editor)"
 }

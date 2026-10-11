@@ -397,9 +397,20 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
+  // Смахивание влево/вправо — соседний лист (при просмотре по одному). Только без масштаба (иначе палец
+  // прокручивает карту) и только если деталь не тащат: быстрое движение (<500 мс) в основном по горизонтали.
+  const swipeRef = useRef(null)
+  const swipeStart = e => { const t = e.touches?.[0]; swipeRef.current = t ? { x: t.clientX, y: t.clientY, t: Date.now() } : null }
+  const swipeEnd = e => {
+    const s = swipeRef.current; swipeRef.current = null
+    const t = e.changedTouches?.[0]
+    if (!s || !t || !onSwipe || zoomRef.current > 1.02 || draggingRef.current?.active || draggingRef.current?.dragged) return
+    const dx = t.clientX - s.x, dy = t.clientY - s.y
+    if (Date.now() - s.t < 500 && Math.abs(dx) >= 50 && Math.abs(dy) < Math.abs(dx) * 0.6) onSwipe(dx < 0 ? 1 : -1)
+  }
   // Масштаб карты — щипком двух пальцев (как в редакторе контура), с
   // фокусом в точке между пальцами, как при просмотре фотографии
   const [zoom, setZoom] = useState(1)
@@ -1129,10 +1140,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
           onMouseMove={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerMove(e) }}
           onMouseUp={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerUp(e) }}
-          onTouchStart={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) return; onPointerDown(e) }}
-          onTouchMove={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) return; onPointerMove(e) }}
-          onTouchEnd={e => { lastTouchRef.current = Date.now(); onPointerUp(e) }}
-          onTouchCancel={() => { clearLongPress(); draggingRef.current = null }}
+          onTouchStart={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) { swipeRef.current = null; return } swipeStart(e); onPointerDown(e) }}
+          onTouchMove={e => { lastTouchRef.current = Date.now(); if (e.touches.length > 1) { swipeRef.current = null; return } onPointerMove(e) }}
+          onTouchEnd={e => { lastTouchRef.current = Date.now(); const d = draggingRef.current; onPointerUp(e); if (!d?.active) swipeEnd(e); else swipeRef.current = null }}
+          onTouchCancel={() => { clearLongPress(); draggingRef.current = null; swipeRef.current = null }}
         />
       </div>
       {/* Масштаб — под картой, справа: поверх карты он закрывал детали */}
@@ -2718,13 +2729,14 @@ export default function NestingPage() {
                         selectedIdx={cfg.selPart}
                         onSelect={i => updateCfg(cfg.id, { selPart: i, note: '' })}
                         onEditPart={locked ? null : openPart3d}
+                        onSwipe={d => { const i = cfg.activeSheet + d; if (i >= 0 && i < cfg.sheetsData.length) openSheet(i) }}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {showOffcuts && offcutMode === 'manual'
                           ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                           : (showOffcuts && offcutMode === 'cuts'
                             ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
-                            : 'Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)')}
+                            : 'Смахни влево/вправо — другой лист · тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)')}
                       </p>
                     </>
                   )}

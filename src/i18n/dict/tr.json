@@ -2509,5 +2509,6 @@
 "↻ Заново": "↻ Yeniden",
 "▶ Продолжить": "▶ Devam et",
 "Сначала положите детали из буфера на листы": "Önce tampondaki parçaları levhalara yerleştirin",
-"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Aramaya bu yerleşimden devam et — parçalar yerinde kalır, arama daha sıkı bir yerleşim arar"
+"Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее": "Aramaya bu yerleşimden devam et — parçalar yerinde kalır, arama daha sıkı bir yerleşim arar",
+"Смахни влево/вправо — другой лист · Тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — обработка с двух сторон (на карте показана только лицевая; изнанку видно в редакторе)": "Sola/sağa kaydır — başka levha · Dokunma — seç (pano için) · çift dokunma — döndür · basılı tutup sürükle — taşı · yerinde uzun basma — kontur düzenleyici · sıkıştırma — yakınlaştırma · mor arka plan — iki taraflı işleme (planda yalnızca ön yüz gösterilir; arka yüz düzenleyicide görünür)"
 }
