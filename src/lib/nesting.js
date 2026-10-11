@@ -168,11 +168,18 @@ export async function runNesting({
   const basePieces = buildPieces(details, kerf, direction)
   const pieceById = new Map(basePieces.map(p => [p.id, p]))
   // Раскладка соседа годится, только если в ней ровно наши детали (по id), по одной
+  // …и в ней нет наложений габаритов: чужая раскладка могла быть «дозаполнена» по контурам (вырезы фигурных
+  // деталей) — для прямоугольного поиска это наложение, стяжка протащит детали друг сквозь друга
   const validLayout = sheets => {
     const seen = new Set()
     for (const sh of sheets) {
       if (!sh || !Array.isArray(sh.placed) || !Array.isArray(sh.freeRects)) return false
       for (const p of sh.placed) { if (!pieceById.has(p.id) || seen.has(p.id)) return false; seen.add(p.id) }
+      const L = sh.placed
+      for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+        const a = L[i], b = L[j]
+        if (a.x < b.x + b.w - 0.01 && b.x < a.x + a.w - 0.01 && a.y < b.y + b.h - 0.01 && b.y < a.y + a.h - 0.01) return false
+      }
     }
     return seen.size === basePieces.length
   }

@@ -60,7 +60,10 @@ function withFilled(res, params) {
     if (liveBetter(liveScore(res.sheets, usableX, usableY), liveScore(sheets, usableX, usableY))) return res
     const chk = sh => validateNesting({ sheets: sh, details: params.details, usableX, usableY, kerf }).errors.length
     if (chk(sheets) > chk(res.sheets)) return res
-    return { ...res, sheets, filled: true }
+    // rawSheets — раскладка ДО дозаполнения. Соседним потокам (мигрант) уходит именно она: гибридный поиск
+    // считает фигурную деталь прямоугольником-габаритом, и деталь, положенная в её вырез, для него — наложение.
+    // Стяжка такой раскладки протаскивала мелкие детали сквозь боковину (261010_Timur_k1, лист 2).
+    return { ...res, sheets, filled: true, rawSheets: res.rawSheets || res.sheets }
   } catch (e) {
     console.warn('Дозаполнение вырезов не удалось:', e)
     return res
@@ -362,9 +365,11 @@ export async function runLiveNesting(params, opts = {}) {
 
   const toFull = res => {
     if (!res) return res
-    const main = (res.sheets || []).map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p, detailIndex: subToOrig[p.detailIndex] })) }))
+    const full = list => (list || []).map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p, detailIndex: subToOrig[p.detailIndex] })) }))
+    const main = full(res.sheets)
     return {
       ...meta, ...res, sheets: [...offSheets, ...main], offcutSheets: nOff,
+      rawSheets: res.rawSheets ? [...offSheets, ...full(res.rawSheets)] : undefined,
       genome: res.genome ? { ...res.genome, subKey, offcutSheets: nOff } : res.genome,
     }
   }

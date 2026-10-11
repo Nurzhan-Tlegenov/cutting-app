@@ -1303,7 +1303,9 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     best = res; bestScore = sc
     if (!cancelled && !finished) onProgress?.(res, fromIdx)
     // соседям — и порядок деталей, и саму раскладку (дожатую, «починенную»)
-    if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome, sheets: res.sheets }) })
+    // Соседям уходит раскладка самого поиска (rawSheets), а не дозаполненная вырезами — для прямоугольного
+    // поиска деталь в вырезе фигурной детали выглядит наложением (см. withFilled в liveNesting.js)
+    if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome, sheets: res.rawSheets || res.sheets }) })
   }
   const pickBest = list => {
     let top = null, topScore = null
@@ -1886,8 +1888,10 @@ export default function NestingPage() {
     if (!cfg?.result) return
     // Пустые листы (все детали унесли в буфер/на другие листы) не сохраняем
     const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
+    const result = { ...cfg.result }
+    delete result.rawSheets           // служебная копия раскладки до дозаполнения — в заказе не нужна
     const toSave = {
-      ...cfg.result, sheets,
+      ...result, sheets,
       config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
     }
     const next = multiMat ? { ...savedByMat, [matKey]: toSave } : {}
