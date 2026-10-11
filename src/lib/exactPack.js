@@ -884,7 +884,9 @@ function fillStripWithSingles(sheet, group, kerf, usableX, usableY) {
 }
 
 // Заменяет пары одинаковых вогнутых деталей составными «деталями-парами».
-export function tileIntoPairs(instances, kerf, usableX, usableY) {
+// pairLimit — { [detailIndex]: сколько пар не больше } (гибрид пробует разное число пар: лучшая раскладка бывает
+// смешанной — часть деталей парами, часть поодиночке, 261011_002). null — все возможные пары.
+export function tileIntoPairs(instances, kerf, usableX, usableY, pairLimit = null) {
   const byDetail = new Map()
   for (const inst of instances) {
     if (!byDetail.has(inst.detailIndex)) byDetail.set(inst.detailIndex, [])
@@ -966,7 +968,8 @@ export function tileIntoPairs(instances, kerf, usableX, usableY) {
       }
     }
     const pair = pairs[0]
-    const n = Math.floor(group.length / 2)
+    const lim = pairLimit && pairLimit[first.detailIndex] != null ? Math.max(0, pairLimit[first.detailIndex]) : Infinity
+    const n = Math.min(Math.floor(group.length / 2), lim)
     for (let k = 0; k < n; k++) {
       out.push({
         id: nextId++, detailIndex: first.detailIndex, kind: 'pair' + first.detailIndex, isComposite: true,
@@ -975,7 +978,7 @@ export function tileIntoPairs(instances, kerf, usableX, usableY) {
         label: first.label, prefix: first.prefix,
       })
     }
-    if (group.length % 2) out.push(group[group.length - 1])
+    out.push(...group.slice(2 * n))      // без пары: нечётная деталь и те, что сверх лимита пар
   }
   return out
 }

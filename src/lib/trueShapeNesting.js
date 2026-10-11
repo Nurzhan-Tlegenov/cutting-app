@@ -293,7 +293,7 @@ export function parsePolygonFromDetail(d) {
 // 964×1690 и 1380×1200). Раньше бралась только первая (самая плотная), а листу
 // подходила вторая: 2 пары «лёжа» на лист = 4 детали, «стоя» — только 2 (10 листов
 // вместо 6). Какая лучше — решает runHybrid быстрым пробным раскроем (pairShapes).
-export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, marginR, marginB, marginL }, choice = {}) {
+export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, marginR, marginB, marginL }, choice = {}, pairLimit = null) {
   const usableX = sheetW - marginL - marginR
   const usableY = sheetL - marginT - marginB
   const cellSize = Math.min(MAX_CELL_MM, Math.max(MIN_CELL_MM, Math.sqrt((usableX * usableY) / TARGET_CELLS)))
@@ -310,7 +310,7 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
       })
     }
   })
-  const tiled = tileIntoPairs(instances, kerf, usableX, usableY)
+  const tiled = tileIntoPairs(instances, kerf, usableX, usableY, pairLimit)
   const pairKinds = new Map()   // kind → { tmpl, n }
   const singles = new Map()     // detailIndex → n (фигурные детали без пары)
   tiled.forEach(inst => {
@@ -390,7 +390,9 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
   })
   // singles: номер гибридной детали → номер настоящей детали (undefined — сцепленная пара); нужен, чтобы
   // продолжить поиск с готовой раскладки (см. seed в liveNesting.js)
-  return { hybridDetails: hybridDetails.map(({ _h, ...d }) => d), expand, hasPairs: pairKinds.size > 0, pairShapes, singles: hybridDetails.map(d => d._h.single) }
+  // pairCounts — сколько пар собрано у каждой детали: гибрид пробует и меньше (см. chooseHybridPlan)
+  const pairCounts = [...pairKinds.values()].map(({ tmpl, n }) => [tmpl.detailIndex, n])
+  return { hybridDetails: hybridDetails.map(({ _h, ...d }) => d), expand, hasPairs: pairKinds.size > 0, pairShapes, pairCounts, singles: hybridDetails.map(d => d._h.single) }
 }
 
 // Повёрнута ли деталь прямоугольного раскроя на 90° относительно исходной.

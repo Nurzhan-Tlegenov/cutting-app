@@ -84,20 +84,31 @@ const HYBRID_PLANS = new Map()
 // У вогнутой детали несколько форм сцепленной пары («стоя», «лёжа»). Какая
 // лучше ляжет на лист, заранее не сказать — пробуем каждое сочетание быстрым
 // раскроем без оптимизации (доли секунды) и берём лучшее по liveBetter.
+// Сколько пар собирать, тоже заранее не сказать: лучшая раскладка бывает смешанной — часть деталей парами,
+// часть поодиночке (261011_002: 10 деталей с вырезом — 3 пары + 4 одиночных дают тот же последний лист, что и
+// россыпь, но с парами; «все 5 пар» — последний лист больше). Пробуем и меньшее число пар.
 async function chooseHybridPlan(params, meta) {
   const base = buildHybridPlan(params)
   if (!base) return null
-  let combos = [{}]
+  let combos = [{ c: {}, lim: null }]
   for (const [kind, n] of base.pairShapes || []) {
     if (n < 2) continue
     const next = []
-    for (const c of combos) for (let i = 0; i < Math.min(n, 3); i++) next.push({ ...c, [kind]: i })
+    for (const x of combos) for (let i = 0; i < Math.min(n, 3); i++) next.push({ ...x, c: { ...x.c, [kind]: i } })
     combos = next.slice(0, 9)
+  }
+  // число пар: все, на одну меньше, ~половина, ~треть (для каждой детали с парами; сочетаний — не больше 16)
+  for (const [di, n] of base.pairCounts || []) {
+    if (n < 2) continue
+    const opts = [...new Set([n - 1, Math.ceil(n * 0.6), Math.ceil(n / 2), Math.ceil(n / 3)])].filter(k => k >= 1 && k < n)
+    const next = combos.slice()
+    for (const x of combos) for (const k of opts) next.push({ ...x, lim: { ...(x.lim || {}), [di]: k } })
+    combos = next.slice(0, 16)
   }
   if (combos.length < 2) return base
   let best = null, bestScore = null
-  for (const c of combos) {
-    const plan = Object.values(c).some(Boolean) ? buildHybridPlan(params, c) : base
+  for (const { c, lim } of combos) {
+    const plan = Object.values(c).some(Boolean) || lim ? buildHybridPlan(params, c, lim) : base
     if (!plan) continue
     try {
       const r = await runNesting({ ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting', optimizeSeconds: 0, onProgress: null, shouldStop: null, takeMigrant: null, onStats: null })
