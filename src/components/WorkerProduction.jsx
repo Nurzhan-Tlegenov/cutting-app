@@ -5,7 +5,7 @@ import { orderFaults, faultText } from '../lib/nestingCheck'
 import { limitFromError } from '../lib/limits'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { permsText, workPid, openWorkplace } from '../lib/workplaces'
-import { myPostQueue, stageAccept, stageDone, since, clock } from '../lib/posts'
+import { myPostQueue, stageAccept, stageDone, since, clock, planStages } from '../lib/posts'
 import { StageTrack } from './ProductionPosts'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
@@ -73,6 +73,7 @@ export default function WorkerProduction({ wps }) {
     const lim = r.error && limitFromError(r.error)
     if (lim) { window.alert(lim.text); return }
     if (r.error) { setError(r.error); return }
+    if (status === 'inwork') await planStages(o.id)          // посты без деталей у заказа — пропустить
     load()
   }
   const returnOrder = async o => {
@@ -132,7 +133,7 @@ export default function WorkerProduction({ wps }) {
                     </div>
                     {'gcode_at' in q && q.gcode_at && <div style={{ display: 'flex', gap: 4 }}>{marksOf(q)}</div>}
                   </div>
-                  <StageProgress orderId={q.order_id} rule={q.rule} postName={q.post_name} scanned={q.scanned} onOpen={() => setParts({ stage: q, orderId: q.order_id })} />
+                  <StageProgress orderId={q.order_id} rule={q.rule} postName={q.post_name} scanned={q.scanned} onOpen={() => setParts({ stage: q, orderId: q.order_id })} onSkipped={load} />
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     {isNew && <button type="button" disabled={busy === q.stage_id} style={btn('main')} onClick={() => stage(q, stageAccept)}>✓ Принять</button>}
                     {ruleOf(q.rule, q.post_name).list !== 'none' && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Список деталей</button>}

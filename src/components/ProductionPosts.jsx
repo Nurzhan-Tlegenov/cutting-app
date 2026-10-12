@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
-import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule } from '../lib/stageParts'
-import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, stageBack, startOrderStages, stageDone, stageAccept, since, clock, postLink } from '../lib/posts'
+import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, onDemandOf } from '../lib/stageParts'
+import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, stageBack, startOrderStages, stageDone, stageAccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
 // Заказ, принятый в работу, идёт по постам по порядку; маршрут заказа с временем на каждом посту — StageTrack.
@@ -94,18 +94,31 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const load = () => orderStages(orderId).then(r => setSt(r.error ? [] : r.data || []))
-  useEffect(() => { let alive = true; orderStages(orderId).then(r => { if (alive) setSt(r.error ? [] : r.data || []) }); return () => { alive = false } }, [orderId, refresh])
+  useEffect(() => {
+    let alive = true
+    // посты кромления / присадки без деталей у этого заказа пропускаются сами (нет кромки — нет кромления)
+    orderStages(orderId).then(async r => {
+      if (!alive) return
+      setSt(r.error ? [] : r.data || [])
+      if (status === 'inwork' && (r.data || []).length && await planStages(orderId) > 0 && alive) { await load(); onChange?.() }
+    })
+    return () => { alive = false }
+  }, [orderId, refresh, status])   // eslint-disable-line react-hooks/exhaustive-deps
   const act = async fn => { setBusy(true); setErr(''); const r = await fn(); setBusy(false); if (r?.error) setErr(r.error); await load(); onChange?.() }
   if (!st) return null
-  if (!st.length) return manage && status === 'inwork' ? (
+  const ops = manage ? <OrderOps orderId={orderId} onChange={async () => { await load(); onChange?.() }} /> : null
+  // галочки операций — и до принятия заказа (отметили сборку / установку → при принятии маршрут сразу с ними)
+  if (!st.length) return manage && ['new', 'discussion', 'inwork'].includes(status) ? (
     <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
-      <button type="button" disabled={busy} style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => act(() => startOrderStages(orderId))}>▶ Запустить по постам</button>
+      {ops}
+      {status === 'inwork' && <button type="button" disabled={busy} style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => act(async () => { const r = await startOrderStages(orderId); if (!r.error) await planStages(orderId); return r })}>▶ Запустить по постам</button>}
       {err && <span style={{ fontSize: 11, color: 'var(--danger)', marginLeft: 6 }}>{err}</span>}
     </div>
   ) : null
   const cur = st.find(s => s.status === 'queued' || s.status === 'accepted')
   return (
     <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
+      {ops}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 3 }}>
         {st.map((s, i) => {
           const on = s === cur, done = s.status === 'done', skip = s.status === 'skipped'
@@ -147,6 +160,44 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
   )
 }
 
+/**
+ * Галочки операций в заказе: посты «по галочке» (сборка, установка, упаковка…) — их не видно в свойствах деталей.
+ * Отмечен — заказ пройдёт этот пост; не отмечен — пост пропускается. Кромление и присадка решаются по деталям сами.
+ */
+export function OrderOps({ orderId, onChange }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  useEffect(() => { let alive = true; orderOps(orderId).then(r => { if (!alive) return; if (r.error) setErr(r.missing ? r.error : ''); setD(r.data || null) }); return () => { alive = false } }, [orderId])
+  if (err) return <div style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 6 }}>{err}</div>
+  if (!d || !d.posts?.length) return null
+  const toggle = async p => {
+    const on = !d.ops?.[p.id]
+    setBusy(p.id)
+    const r = await setOrderOp(orderId, p.id, on)
+    setBusy('')
+    if (r.error) { setErr(r.error); return }
+    setD(x => ({ ...x, ops: { ...(x.ops || {}), [p.id]: on } }))
+    onChange?.()
+  }
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Операции заказа (чего не видно в деталях):</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {d.posts.map(p => {
+          const on = !!d.ops?.[p.id]
+          return (
+            <label key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '3px 9px', borderRadius: 14, cursor: 'pointer',
+              border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue-light)' : 'transparent', color: on ? 'var(--blue-dark)' : 'var(--text-muted)' }}>
+              <input type="checkbox" checked={on} disabled={busy === p.id} onChange={() => toggle(p)} style={{ width: 14, height: 14, margin: 0 }} />{p.name}
+            </label>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /** Ссылка на пост: открывает окно одного поста (очередь, сканирование деталей) — например, на настольном компьютере со
  * сканером-пистолетом. Видят только свои: сотрудники поста, владелец и начальник; чужой аккаунт по ссылке ничего не увидит. */
 function PostLinkBox({ post }) {
@@ -178,6 +229,10 @@ function RuleEditor({ post, busy, onSave }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
         {RULE_LISTS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(r.list === k)} onClick={() => set(k === 'drill' && r.list !== 'drill' ? { list: k, top: false, bottom: true, edge: true, grooves: false, mills: false } : { list: k })}>{r.list === k ? '✓ ' : ''}{l}</button>)}
       </div>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
+        <input type="checkbox" checked={onDemandOf(post.rule, post.name)} disabled={busy} onChange={e => set({ onDemand: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />
+        <span><span>Только по галочке в заказе</span> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>— сборка, установка, упаковка: заказ идёт на пост, только если в заказе отмечена эта операция.{r.list === 'edge' || r.list === 'drill' ? ' Без галочки пост всё равно пропускается, если у заказа нет таких деталей.' : ''}</span></span>
+      </label>
       {r.list === 'edge' && (
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!r.sides} disabled={busy} onChange={e => set({ sides: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />

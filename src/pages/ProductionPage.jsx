@@ -18,6 +18,7 @@ import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
 import { productionStageMap } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
+import { planStages } from '../lib/posts'
 import { sendAppeal } from '../lib/messages'
 import { membersList, myWorkplaces, prodView } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
@@ -133,6 +134,7 @@ export default function ProductionPage() {
     if (lim) { window.alert(lim.text); return false }      // заказ видно, а принять нельзя — предел бесплатного использования
     if (r.error) { setError(r.error); return false }
     resetLimitsCache()
+    if (status === 'inwork') await planStages(o.id)          // посты без деталей у заказа (нет кромки / присадки) — пропустить
     setOrders(list => list.map(x => (x.id === o.id ? { ...x, status } : x)))
     loadStats()
     return true

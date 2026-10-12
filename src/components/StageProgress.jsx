@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ruleOf, stageParts, loadOrderParts } from '../lib/stageParts'
+import { planStages } from '../lib/posts'
 
 // Счётчик поста прямо на карточке заказа: сколько деталей (или сторон кромления) идёт через пост, сколько уже
 // отмечено сканированием и сколько осталось — убывает с каждым сканом. Список деталей заказа грузится один раз на заказ.
@@ -27,11 +28,14 @@ function useStageTotal(orderId, rule, postName) {
   return res
 }
 
-export default function StageProgress({ orderId, rule, postName, scanned, onOpen }) {
+export default function StageProgress({ orderId, rule, postName, scanned, onOpen, onSkipped }) {
   const t = useStageTotal(orderId, rule, postName)
+  // кромление / присадка, а деталей для поста у заказа нет — пост пропускается сам, заказ идёт дальше
+  const empty = t && !t.total && ['edge', 'drill'].includes(ruleOf(rule, postName).list) && !Number(scanned)
+  useEffect(() => { if (empty) planStages(orderId).then(n => { if (n) onSkipped?.() }) }, [empty, orderId])   // eslint-disable-line react-hooks/exhaustive-deps
   if (ruleOf(rule, postName).list === 'none' || !t) return null
   const done = Math.min(t.total, Number(scanned) || 0), left = Math.max(0, t.total - done)
-  if (!t.total) return <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>На этот пост деталей нет — пост можно сразу отметить выполненным.</div>
+  if (!t.total) return <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>У заказа нет деталей для этого поста — пост пропускается.</div>
   return (
     <div onClick={onOpen} style={{ marginTop: 7, cursor: onOpen ? 'pointer' : 'default' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 12.5, flexWrap: 'wrap' }}>

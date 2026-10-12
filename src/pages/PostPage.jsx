@@ -68,7 +68,7 @@ export default function PostPage() {
           {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)}, ${since(q.accepted_at)}`}
           {q.next_post ? ` · дальше: ${q.next_post}` : ' · последний пост'}
         </div>
-        <StageProgress orderId={q.order_id} rule={post.rule} postName={post.name} scanned={q.scanned} onOpen={() => setParts({ stage: q, orderId: q.order_id })} />
+        <StageProgress orderId={q.order_id} rule={post.rule} postName={post.name} scanned={q.scanned} onOpen={() => setParts({ stage: q, orderId: q.order_id })} onSkipped={load} />
         <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
           {isNew && <button type="button" disabled={busy === q.stage_id} style={btn('main')} onClick={() => act(q, stageAccept)}>✓ Принять</button>}
           {withParts && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали — сканировать</button>}

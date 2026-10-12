@@ -1,5 +1,6 @@
 // Рабочие посты производства (см. migration_posts.sql): техпроцесс, по которому заказ идёт как по канбану.
 import { supabase } from './supabase'
+import { ruleOf, stageParts, loadOrderParts } from './stageParts'
 
 export const POSTS_SQL_HINT = 'Рабочие посты ещё не включены в базе: выполните migration_posts.sql в Supabase (SQL Editor) — один раз.'
 export const POST_PRESETS = ['Раскрой', 'Кромление', 'Присадка', 'Сборка', 'Упаковка', 'Доставка']
@@ -33,6 +34,26 @@ export const myPostQueue = () => call('my_post_queue')
 export const postPage = id => call('post_page', { p_post: id })
 export const postLink = id => `${window.location.origin}/post/${id}`
 export const productionStageMap = () => call('production_stage_map')
+
+// Операции заказа (migration_stage_ops.sql): галочки постов «по галочке» и пропуск постов без деталей
+const OPS_HINT = 'Галочки операций ещё не включены в базе: выполните migration_stage_ops.sql в Supabase (SQL Editor) — один раз.'
+export async function orderOps(orderId) { const r = await call('order_ops_of', { p_order: orderId }); return r.missing ? { error: OPS_HINT, missing: true } : r }
+export async function setOrderOp(orderId, postId, on) { const r = await call('set_order_op', { p_order: orderId, p_post: postId, p_on: !!on }); return r.missing ? { error: OPS_HINT } : r }
+/**
+ * Пропустить посты кромления / присадки, для которых у заказа нет деталей (нет кромки — кромление не нужно, нет присадки —
+ * присадка не нужна). Решается по деталям заказа и правилу поста. -> сколько постов пропущено
+ */
+export async function planStages(orderId) {
+  const st = await orderStages(orderId)
+  const open = (st.data || []).filter(s => (s.status === 'waiting' || s.status === 'queued') && !Number(s.scanned) && ['edge', 'drill'].includes(ruleOf(s.rule, s.name).list))
+  if (!open.length) return 0
+  const d = await loadOrderParts(orderId)
+  if (!d.order) return 0
+  const empty = open.filter(s => { try { return !stageParts(d.order, d.rows, ruleOf(s.rule, s.name)).length } catch { return false } }).map(s => s.post_id).filter(Boolean)
+  if (!empty.length) return 0
+  const r = await call('stage_auto_skip', { p_order: orderId, p_posts: empty })
+  return r.error ? 0 : Number(r.data) || 0
+}
 
 /** Сколько прошло: «25 мин», «3 ч 10 мин», «2 дн 4 ч» */
 export function since(from, to = null) {

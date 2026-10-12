@@ -18,6 +18,7 @@ import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
 import { orderClient, productionSetStatus, orderMarks, productionArchive } from '../lib/productionApi'
+import { planStages } from '../lib/posts'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
 import { myOrderPerms } from '../lib/workplaces'
 import NestingCost from '../components/NestingCost'
@@ -74,6 +75,7 @@ export default function OrderPage() {
     if (r.missing) { const { error } = await supabase.from('orders').update({ status }).eq('id', id); r = error ? { error: error.message } : {} }
     if (r.error) { window.alert('Не удалось изменить статус: ' + r.error); return }
     resetLimitsCache()
+    if (status === 'inwork') await planStages(id)             // посты без деталей у заказа (нет кромки / присадки) — пропустить
     setOrder(o => ({ ...o, status }))
     if (leave) { await productionArchive(id, true); navigate('/production') }
   }
