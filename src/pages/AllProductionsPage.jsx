@@ -6,6 +6,7 @@ import { adminProductionOrders } from '../lib/adminApi'
 import { productionLabel, sortProductions } from '../lib/productionLabel'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { money } from '../lib/pricing'
+import { productionExcludeStats, testOrderMinutes, setTestOrderMinutes } from '../lib/productionApi'
 import { Totals, totals, usePeriod, orderDate, isWork } from '../components/OrderStats'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
@@ -39,10 +40,24 @@ export default function AllProductionsPage() {
     })
     return () => { alive = false }
   }, [isMaster])
+  // тестовые заказы: время прохождения всех этапов (для производств); мастер убирает из итогов любой заказ
+  const [testMin, setTestMin] = useState('')
+  useEffect(() => { let alive = true; if (isMaster) testOrderMinutes().then(m => { if (alive) setTestMin(String(m)) }); return () => { alive = false } }, [isMaster])
+  const saveTestMin = async () => {
+    const r = await setTestOrderMinutes(testMin)
+    if (r.error) window.alert(r.error); else setTestMin(String(r.min))
+  }
+  const exclude = async (o, on) => {
+    if (on && !window.confirm(`Убрать заказ «${orderTitle(o)}» из итогов как тестовый?`)) return
+    const r = await productionExcludeStats(o.id, on)
+    if (r.error) { window.alert(r.error); return }
+    setOrders(list => list.map(x => (x.id === o.id ? { ...x, excluded: on } : x)))
+  }
   useEffect(() => { Object.entries({ filter, open }).forEach(([k, v]) => sessionStorage.setItem('allProds_' + k, v)) }, [filter, open])
 
-  const inPeriod = useMemo(() => per.inPeriod(orders), [orders, per.period, per.from, per.to])   // eslint-disable-line react-hooks/exhaustive-deps
-  const byProd = useMemo(() => { const m = new Map(); for (const o of inPeriod) { if (!m.has(o.production_id)) m.set(o.production_id, []); m.get(o.production_id).push(o) } return m }, [inPeriod])
+  const inPeriodAll = useMemo(() => per.inPeriod(orders), [orders, per.period, per.from, per.to])   // eslint-disable-line react-hooks/exhaustive-deps
+  const inPeriod = useMemo(() => inPeriodAll.filter(o => !o.excluded), [inPeriodAll])   // тестовые — не в суммах   // eslint-disable-line react-hooks/exhaustive-deps
+  const byProd = useMemo(() => { const m = new Map(); for (const o of inPeriodAll) { if (!m.has(o.production_id)) m.set(o.production_id, []); m.get(o.production_id).push(o) } return m }, [inPeriodAll])
 
   if (!isMaster) return (
     <div className="page" style={{ paddingBottom: 100 }}>
@@ -60,6 +75,11 @@ export default function AllProductionsPage() {
       </div>
       {error && <div className="card" style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 10 }}>{error}</div>}
 
+      <div className="card" style={{ marginBottom: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, fontSize: 12.5 }}>Тестовые заказы — время прохождения всех этапов, мин
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>Быстрее — производство само убирает заказ из итогов; дольше — по обращению к вам</span></span>
+        <input type="number" inputMode="numeric" min={1} value={testMin} onChange={e => setTestMin(e.target.value)} onBlur={saveTestMin} style={{ width: 70, padding: '5px 8px', fontSize: 13 }} />
+      </div>
       {per.picker}
 
       <div className="card" style={{ marginBottom: 12, padding: '10px 12px' }}>
@@ -80,7 +100,7 @@ export default function AllProductionsPage() {
                 {(pr.status ?? 'approved') !== 'approved' && <span style={{ fontSize: 11, color: 'var(--amber)' }}>{pr.status === 'rejected' ? 'отклонено' : 'не подтверждено'}</span>}
                 <span style={{ color: 'var(--text-hint)', fontSize: 12, transform: isOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
               </button>
-              <Totals t={totals(list)} />
+              <Totals t={totals(list.filter(o => !o.excluded))} />
               {isOpen && (
                 <div style={{ marginTop: 10, borderTop: '0.5px solid var(--border)', paddingTop: 8 }}>
                   <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 8 }}>
@@ -91,6 +111,7 @@ export default function AllProductionsPage() {
                     <div key={o.id} style={{ padding: '7px 0', borderTop: '0.5px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</span>
+                        {o.excluded && <span style={{ fontSize: 11, color: 'var(--amber)' }}>тест · не в итогах</span>}
                         <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{o.deleted ? 'Удалён · история' : o.archived_at ? 'В архиве' : STATUS_LABELS[o.status] || o.status}</span>
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -100,6 +121,7 @@ export default function AllProductionsPage() {
                         <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           листов {o.sheets || 0} · деталей {o.parts || 0} · {o.total != null ? <b style={{ color: 'var(--text)' }}>{money(o.total, o.currency)}</b> : 'цена не зафиксирована'}
                         </span>
+                        {o.status === 'done' && <button style={{ ...LINK, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => exclude(o, !o.excluded)}>{o.excluded ? 'В итоги' : 'Не в итоги'}</button>}
                         {!o.deleted && <button style={LINK} onClick={() => navigate(`/orders/${o.id}`)}>Заказ</button>}
                         {!o.deleted && <button style={LINK} onClick={() => navigate(`/orders/${o.id}/nesting`)}>Раскрой</button>}
                       </div>

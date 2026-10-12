@@ -45,7 +45,16 @@ export async function productionExcludeStats(orderId, on = true) {
   const r = await call('production_exclude_stats', { p_order: orderId, p_on: on })
   if (!r.error) return {}
   if (r.missing) return { error: TEST_SQL_HINT }
-  return { error: /not a fast order/.test(r.error) ? 'Убрать из итогов можно только заказ, который прошёл от принятия до исполнения быстрее 20 минут.' : r.error }
+  return { error: /not a fast order/.test(r.error) ? 'Этот заказ прошёл этапы дольше времени для тестовых заказов. Попросите мастер-аккаунт убрать его из итогов.' : r.error }
+}
+/** Тестовые заказы: время прохождения всех этапов, мин (задаёт мастер-аккаунт; migration_test_minutes.sql). Нет в базе — 20 */
+export async function testOrderMinutes() {
+  const r = await call('test_order_minutes')
+  return r.error ? 20 : Number(r.data) || 60
+}
+export async function setTestOrderMinutes(min) {
+  const r = await call('admin_set_test_minutes', { p_min: Math.round(Number(min)) })
+  return r.error ? { error: r.missing ? 'Выполните migration_test_minutes.sql в Supabase (SQL Editor) — один раз.' : r.error } : { min: r.data }
 }
 export const orderClient = orderId => call('order_client', { p_order: orderId })
 /** Администратор: подтвердить / отклонить производство ('approved' | 'rejected' | 'pending') */

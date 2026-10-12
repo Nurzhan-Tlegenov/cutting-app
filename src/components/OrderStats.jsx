@@ -117,13 +117,13 @@ export function Totals({ t, show }) {
 
 const day = v => new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
 /** Раскладка по заказам: какие работы и на какую сумму сделаны по каждому принятому или исполненному заказу */
-// «быстрый» заказ: от принятия до исполнения ≤ 20 минут — скорее всего тест, его можно убрать из итогов
-const TEST_MINUTES = 20
-const isFast = o => o.status === 'done' && o.done_at && (o.accepted_at || o.submitted_at)
-  && new Date(o.done_at) - new Date(o.accepted_at || o.submitted_at) <= TEST_MINUTES * 60000
-const mins = o => Math.max(0, Math.round((new Date(o.done_at) - new Date(o.accepted_at || o.submitted_at)) / 60000))
+// тестовый заказ: все этапы (от принятия до исполнения) прошёл быстрее времени, заданного мастер-аккаунтом
+const passMs = o => (o.status === 'done' && o.done_at && (o.accepted_at || o.submitted_at) ? new Date(o.done_at) - new Date(o.accepted_at || o.submitted_at) : null)
+const isFast = (o, testMin) => passMs(o) != null && passMs(o) <= testMin * 60000
+const mins = o => { const m = Math.max(0, Math.round(passMs(o) / 60000)); return m < 120 ? `${m} мин` : `${Math.round(m / 60)} ч` }
 
-export function OrderBreakdown({ list, show, onOpen, onExclude }) {
+// test: { min, master, onExclude(o, on), onAsk(o) } — убрать тестовый заказ из итогов или попросить об этом мастер-аккаунт
+export function OrderBreakdown({ list, show, onOpen, test }) {
   const rows = list.filter(o => o.status === 'done' || o.status === 'inwork').sort((a, b) => orderDate(b) - orderDate(a))
   if (!rows.length) return <p style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 6 }}>За этот период принятых и исполненных заказов нет.</p>
   const money1 = on(show, 'sumDone') || on(show, 'sumWork')
@@ -143,13 +143,18 @@ export function OrderBreakdown({ list, show, onOpen, onExclude }) {
               {o.client_name ? <span style={{ color: 'var(--text-muted)' }}>{o.client_name} · </span> : null}{day(orderDate(o))} · {o.status === 'done' ? 'исполнен' : 'в работе'}{o.deleted ? ' · заказ удалён заказчиком' : ''}
             </div>
             {parts.length > 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{parts.join(' · ')}</div>}
-            {onExclude && isFast(o) && (
+            {test && o.status === 'done' && (test.master || isFast(o, test.min) ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }} onClick={e => e.stopPropagation()}>
-                <span style={{ fontSize: 11, color: 'var(--amber)' }}>исполнен за {mins(o)} мин — тест?</span>
-                <button type="button" onClick={() => onExclude(o, true)}
+                {passMs(o) != null && <span style={{ fontSize: 11, color: isFast(o, test.min) ? 'var(--amber)' : 'var(--text-hint)' }}>все этапы за {mins(o)}{isFast(o, test.min) ? ' — тест?' : ''}</span>}
+                <button type="button" onClick={() => test.onExclude(o, true)}
                   style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, border: '0.5px solid var(--amber)', background: 'transparent', color: 'var(--amber)', cursor: 'pointer' }}>Убрать из итогов</button>
               </div>
-            )}
+            ) : test.onAsk && (
+              <div style={{ marginTop: 2 }} onClick={e => e.stopPropagation()}>
+                <button type="button" onClick={() => test.onAsk(o)}
+                  style={{ fontSize: 11, padding: 0, border: 'none', background: 'none', color: 'var(--text-hint)', textDecoration: 'underline', cursor: 'pointer' }}>Тестовый? Попросить мастер-аккаунт убрать</button>
+              </div>
+            ))}
           </div>
         )
       })}
@@ -161,7 +166,7 @@ export function OrderBreakdown({ list, show, onOpen, onExclude }) {
  * «Итоги» кабинета производства: свёрнутый блок — период, итоги, раскладка по заказам и настройка, что показывать.
  * list — строки статистики; show / onShow — отмеченные пункты (хранятся в настройках аккаунта); per — usePeriod().
  */
-export function Results({ list, per, show, onShow, onOpen, onExclude }) {
+export function Results({ list, per, show, onShow, onOpen, test }) {
   const [open, setOpen] = useState(() => { try { return sessionStorage.getItem('resultsOpen') === '1' } catch { return false } })
   const [setup, setSetup] = useState(false)
   const toggle = () => setOpen(v => { try { sessionStorage.setItem('resultsOpen', v ? '0' : '1') } catch { /* без памяти */ } return !v })
@@ -183,9 +188,9 @@ export function Results({ list, per, show, onShow, onOpen, onExclude }) {
         <div style={{ padding: '8px 10px 10px' }}>
           {per.picker}
           <Totals t={t} show={show} />
-          {on(show, 'byOrder') && <OrderBreakdown list={inP} show={show} onOpen={onOpen} onExclude={onExclude} />}
-          {!on(show, 'byOrder') && onExclude && inP.some(isFast) && (
-            <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>Есть заказы, исполненные быстрее {TEST_MINUTES} минут ({inP.filter(isFast).length}). Убрать тестовые из итогов можно в «По заказам» — включите его в настройке ниже.</p>
+          {on(show, 'byOrder') && <OrderBreakdown list={inP} show={show} onOpen={onOpen} test={test} />}
+          {!on(show, 'byOrder') && test && inP.some(o => isFast(o, test.min)) && (
+            <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>Есть тестовые заказы — прошли все этапы быстрее {test.min} мин ({inP.filter(o => isFast(o, test.min)).length}). Убрать их из итогов можно в «По заказам» — включите его в настройке ниже.</p>
           )}
           {tests.length > 0 && (
             <details style={{ marginTop: 8 }}>
@@ -195,7 +200,7 @@ export function Results({ list, per, show, onShow, onOpen, onExclude }) {
                   <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
                     {String(o.order_name || '').trim() || o.order_number || 'Заказ'} · {o.total != null ? money(o.total, o.currency) : '—'}
                   </span>
-                  {onExclude && <button type="button" onClick={() => onExclude(o, false)}
+                  {test && <button type="button" onClick={() => test.onExclude(o, false)}
                     style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>Вернуть в итоги</button>}
                 </div>
               ))}

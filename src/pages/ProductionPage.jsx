@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
-import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT, productionStats, productionArchive, productionExcludeStats } from '../lib/productionApi'
+import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT, productionStats, productionArchive, productionExcludeStats, testOrderMinutes } from '../lib/productionApi'
 import { Results, usePeriod } from '../components/OrderStats'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
@@ -18,6 +18,7 @@ import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
 import { productionStageMap } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
+import { sendAppeal } from '../lib/messages'
 import { membersList, myWorkplaces, prodView } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
@@ -35,7 +36,7 @@ const KIND_HINT = 'Чтобы задать параметры для ХДФ и �
 
 export default function ProductionPage() {
   const navigate = useNavigate()
-  const { user, refreshProfile } = useAuth()
+  const { user, profile, isMaster, refreshProfile } = useAuth()
   const [prod, setProd] = useState(undefined)       // undefined — загрузка, null — производства нет
   const [orders, setOrders] = useState([])
   const [error, setError] = useState('')
@@ -81,7 +82,18 @@ export default function ProductionPage() {
     if (r.error) { setError(r.error); return }
     setArchived(m => new Map(m).set(o.id, r.at || new Date().toISOString()))
   }
-  // тестовый заказ (исполнен быстрее 20 минут) — убрать из итогов / вернуть
+  // тестовые заказы: время прохождения всех этапов задаёт мастер-аккаунт
+  const [testMin, setTestMin] = useState(60)
+  useEffect(() => { let alive = true; testOrderMinutes().then(m => { if (alive) setTestMin(m) }); return () => { alive = false } }, [])
+  // заказ прошёл этапы дольше — просим мастер-аккаунт убрать его из итогов (обращение в «Сообщения»)
+  const askExclude = async o => {
+    const note = window.prompt(`Попросить мастер-аккаунт убрать тестовый заказ «${orderTitle(o)}» из итогов производства?\nКомментарий (необязательно):`, '')
+    if (note === null) return
+    const body = `Прошу убрать из итогов тестовый заказ «${orderTitle(o)}»${o.order_number ? ` (№ ${o.order_number})` : ''} производства «${prod?.name || ''}».${note.trim() ? ` ${note.trim()}` : ''}\nСделать: Профиль → Заказы всех производств → «${prod?.name || ''}» → заказ → «Не в итоги».`
+    const r = await sendAppeal(user, profile, body)
+    window.alert(r.error ? `Не отправилось: ${r.error}` : 'Обращение отправлено мастер-аккаунту.')
+  }
+  // тестовый заказ — убрать из итогов / вернуть
   const excludeStats = async (o, on) => {
     if (on && !window.confirm(`Заказ «${orderTitle(o)}» — тестовый?\nЕго сумма, листы и работы не будут считаться в итогах. Вернуть можно в «Тестовые, не в итогах».`)) return
     const r = await productionExcludeStats(o.id, on)
@@ -186,7 +198,7 @@ export default function ProductionPage() {
                 {/* статистика за период: заявки, в работе, исполнено, суммы, листы, объёмы работ. Исполненные считаются и после
                     архива, и после того, как клиент удалил заказ, — от него остаётся запись */}
                 <div>
-                  {stats ? <Results list={stats.map(x => (x.client_name ? x : { ...x, client_name: x.own ? '' : orders.find(o => o.id === x.id)?.client_name || '' }))} per={per} show={resShow} onShow={saveResShow} onOpen={o => navigate(`/orders/${o.id}`)} onExclude={excludeStats} /> : (
+                  {stats ? <Results list={stats.map(x => (x.client_name ? x : { ...x, client_name: x.own ? '' : orders.find(o => o.id === x.id)?.client_name || '' }))} per={per} show={resShow} onShow={saveResShow} onOpen={o => navigate(`/orders/${o.id}`)} test={{ min: testMin, master: isMaster, onExclude: excludeStats, onAsk: askExclude }} /> : (
                     <>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
                         {[['Заявок', orders.length], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', orders.filter(o => o.status === 'done').length]].map(([l, v]) => (

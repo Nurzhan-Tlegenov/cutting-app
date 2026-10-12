@@ -38,6 +38,7 @@ export default function ProfilePage() {
     if (err) setMailErr(err); else { setMailErr(''); setMail(null) }
   }
   const navigate = useNavigate()
+  const [cardOpen, setCardOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   // мастер: сколько заявок на регистрацию, запросов пароля и производств ждут его решения
   const [waiting, setWaiting] = useState(0)
@@ -93,13 +94,14 @@ export default function ProfilePage() {
     <div className="page" style={{ paddingBottom: 100 }}>
       <h1 style={{ fontSize: 18, fontWeight: 500, marginBottom: 20, paddingTop: 8 }}>Профиль</h1>
 
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+      {/* карточка профиля свёрнута: значок, имя и кабинет; тап — телефон, почта, язык */}
+      <div className="card" style={{ marginBottom: 12, padding: cardOpen ? undefined : '10px 14px' }}>
+        <div onClick={() => setCardOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: cardOpen ? 16 : 0, cursor: 'pointer' }}>
           <div style={{
-            width: 52, height: 52, borderRadius: '50%',
+            width: cardOpen ? 52 : 40, height: cardOpen ? 52 : 40, borderRadius: '50%',
             background: isOperator ? 'var(--amber-light)' : 'var(--blue-light)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 20, fontWeight: 600,
+            fontSize: cardOpen ? 20 : 16, fontWeight: 600,
             color: isOperator ? 'var(--amber)' : 'var(--blue)',
             flexShrink: 0
           }}>
@@ -113,8 +115,10 @@ export default function ProfilePage() {
               {isMaster ? 'Мастер-аккаунт' : cabinet === 'production' ? (workView ? `Сотрудник · ${wps.find(w => w.production_id === curPid)?.production_name || ''}` : 'Кабинет производства') : 'Кабинет клиента'}
             </div>
           </div>
+          <span style={{ marginLeft: 'auto', color: 'var(--text-hint)', fontSize: 13, transform: cardOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
         </div>
 
+        {cardOpen && <>
         <LangPicker style={{ marginBottom: 10 }} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           {[
@@ -148,6 +152,7 @@ export default function ProfilePage() {
               : <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Необязательно. Нужна для восстановления пароля; вход — по номеру телефона.</p>}
           </div>
         </div>
+        </>}
       </div>
 
       {/* Кабинеты: клиент и производство — переключаются здесь */}
