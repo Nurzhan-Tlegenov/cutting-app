@@ -72,3 +72,10 @@ export async function productionBoard(prodId = null) {
   if (r.missing) return { error: 'Доска техпроцесса ещё не включена в базе: выполните migration_production_board.sql в Supabase (SQL Editor) — один раз.', missing: true }
   return r
 }
+
+/** Вернуть заказ на выбранный пройденный пост (migration_stage_return.sql); старой базе — на предыдущий */
+export async function stageReturn(orderId, stageId) {
+  const r = await call('stage_return', { p_order: orderId, p_stage: stageId })
+  if (r.missing) return stageBack(orderId)
+  return r
+}

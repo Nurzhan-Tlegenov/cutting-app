@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { postPage, stageAccept, stageDone, stageBack, since, clock } from '../lib/posts'
+import { postPage, stageAccept, stageDone, since, clock } from '../lib/posts'
 import { ruleOf, ruleText } from '../lib/stageParts'
 import { orderTitle } from '../lib/orderUtils'
 import StageParts from '../components/StageParts'
+import StageReturn from '../components/StageReturn'
 import StageProgress from '../components/StageProgress'
 import CncLoader from '../components/CncLoader'
 import { useKeptState } from '../hooks/useKeptState'
@@ -21,6 +22,7 @@ export default function PostPage() {
   const [busy, setBusy] = useState('')
   const [parts, setParts] = useKeptState('parts', null)   // открыт список деталей: { stage, orderId } — переживает обновление страницы
   const [tick, setTick] = useState(0)
+  const [ret, setRet] = useState(null)                 // выбор поста, на который вернуть заказ
   const load = async () => {
     const r = await postPage(id)
     if (r.error) { setErr(r.error); if (r.missing) setData(null); return }
@@ -74,12 +76,7 @@ export default function PostPage() {
           {withParts && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали — сканировать</button>}
           {!isNew && <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => (withParts ? setParts({ stage: q, orderId: q.order_id })
             : act(q, stageDone, `Пост «${post.name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
-          <button type="button" disabled={busy === q.stage_id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={async () => {
-            if (!window.confirm(`Вернуть заказ «${orderTitle(q)}» на предыдущий пост (переделать)?`)) return
-            setBusy(q.stage_id); const r = await stageBack(q.order_id); setBusy('')
-            if (r.error) window.alert(r.error); else if (r.data === false) window.alert('Это первый пост заказа — возвращать некуда.')
-            load()
-          }}>↩ На предыдущий пост</button>
+          <button type="button" disabled={busy === q.stage_id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setRet({ orderId: q.order_id, title: orderTitle(q) })}>↩ Вернуть на пост</button>
         </div>
       </div>
     )
@@ -106,6 +103,7 @@ export default function PostPage() {
         </>
       )}
       <p style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 18 }}>Сканер-пистолет работает как клавиатура: откройте «Детали» заказа, поставьте курсор в поле кода и сканируйте бирки. Список обновляется сам каждые полминуты.</p>
+      {ret && <StageReturn orderId={ret.orderId} title={ret.title} onClose={ch => { setRet(null); if (ch) load() }} />}
       {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) load() }} />}
     </div>
   )

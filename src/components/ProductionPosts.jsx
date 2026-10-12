@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
+import StageReturn from './StageReturn'
 import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, onDemandOf, isBasePost } from '../lib/stageParts'
-import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, stageBack, startOrderStages, stageDone, stageAccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
+import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, startOrderStages, stageDone, stageAccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
 // Заказ, принятый в работу, идёт по постам по порядку; маршрут заказа с временем на каждом посту — StageTrack.
@@ -91,6 +92,7 @@ export function PostsSection({ members }) {
 export function StageTrack({ orderId, status, manage = false, refresh, onChange }) {
   const [st, setSt] = useState(null)
   const [parts, setParts] = useState(false)
+  const [ret, setRet] = useState(false)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const load = () => orderStages(orderId).then(r => setSt(r.error ? [] : r.data || []))
@@ -157,10 +159,11 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
           {ruleOf(cur.rule, cur.name).list !== 'none' && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts(true)}>📦 Список деталей</button>}
           <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Отметить пост «${cur.name}» выполненным?`)) act(() => stageDone(cur.id)) }}>✓ Выполнено</button>
           <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Пропустить пост «${cur.name}» для этого заказа?`)) act(() => stageSkip(cur.id)) }}>Пропустить пост</button>
-          {st.some(s => s.status === 'done' && (!cur || s.sort < cur.sort)) && <button type="button" disabled={busy} style={{ ...small, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => { const prv = [...st].reverse().find(s => s.status === 'done' && (!cur || s.sort < cur.sort)); if (window.confirm(`Вернуть заказ на предыдущий пост «${prv?.name || ''}» (переделать)?`)) act(() => stageBack(orderId)) }}>↩ На предыдущий пост</button>}
+          {st.some(s => s.status === 'done' && (!cur || s.sort < cur.sort)) && <button type="button" disabled={busy} style={{ ...small, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setRet(true)}>↩ Вернуть на пост</button>}
         </div>
       )}
       {err && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>{err}</div>}
+      {ret && <StageReturn orderId={orderId} title="" onClose={ch => { setRet(false); if (ch) { load(); onChange?.() } }} />}
       {parts && cur && <StageParts stage={{ stage_id: cur.id, post_name: cur.name, rule: cur.rule, status: cur.status }} orderId={orderId} onClose={ch => { setParts(false); if (ch) { load(); onChange?.() } }} />}
     </div>
   )

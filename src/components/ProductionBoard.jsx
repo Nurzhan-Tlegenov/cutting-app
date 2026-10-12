@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { productionBoard, stageAccept, stageDone, stageBack, startOrderStages, planStages, since, clock } from '../lib/posts'
+import { productionBoard, stageAccept, stageDone, startOrderStages, planStages, since, clock } from '../lib/posts'
 import { ruleOf } from '../lib/stageParts'
 import { orderTitle } from '../lib/orderUtils'
 import StageParts from './StageParts'
+import StageReturn from './StageReturn'
 import StageProgress from './StageProgress'
 import { OrderOps } from './ProductionPosts'
 import CncLoader from './CncLoader'
@@ -24,6 +25,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   const [openOps, setOpenOps] = useState('')                     // у какого «не пущенного» заказа раскрыты операции
   const [narrow, setNarrow] = useState(() => window.innerWidth < 760)
   const [stamp, setStamp] = useState(null)
+  const [ret, setRet] = useState(null)                           // { orderId, title } — выбор поста, на который вернуть
   const colRefs = useRef({})
   const load = async () => {
     const r = await productionBoard(prodId)
@@ -68,7 +70,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.own ? 'свой заказ' : q.client_name || '—'} · {meta(q)}</div>
         </div>
         <div style={{ fontSize: 11, color: isNew ? 'var(--amber)' : 'var(--text-muted)', marginTop: 2 }}>
-          {isNew ? `Новый · ждёт ${since(q.queued_at)}` : `В работе · ${q.accepted_me ? 'вы' : q.accepted_by || '—'} · ${since(q.accepted_at)}`}
+          {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)}, идёт ${since(q.accepted_at)}`}
           {q.next_post ? ` → ${q.next_post}` : ' · последний'}
         </div>
         <StageProgress orderId={q.order_id} rule={q.rule} postName={q.post_name} scanned={q.scanned} onOpen={withParts ? () => setParts({ stage: q, orderId: q.order_id }) : undefined} onSkipped={load} />
@@ -77,7 +79,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           {!isNew && <button type="button" disabled={busy === key} style={btn('ok')} onClick={() => (withParts ? setParts({ stage: q, orderId: q.order_id })
             : act(key, () => stageDone(key), `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
           {withParts && <button type="button" style={btn('blue')} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали</button>}
-          {q.has_prev && <button type="button" disabled={busy === key} style={btn('warn')} onClick={() => act(key, () => stageBack(q.order_id), `Вернуть заказ «${orderTitle(q)}» на предыдущий пост (переделать)?`)}>↩ Назад</button>}
+          {q.has_prev && <button type="button" disabled={busy === key} style={btn('warn')} onClick={() => setRet({ orderId: q.order_id, title: orderTitle(q) })}>↩ Вернуть</button>}
         </div>
       </div>
     )
@@ -138,6 +140,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           )
         })}
       </div>
+      {ret && <StageReturn orderId={ret.orderId} title={ret.title} onClose={ch => { setRet(null); if (ch) { load(); onChange?.(); window.dispatchEvent(new Event('notices-seen')) } }} />}
       {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) { load(); onChange?.() } }} />}
     </div>
   )

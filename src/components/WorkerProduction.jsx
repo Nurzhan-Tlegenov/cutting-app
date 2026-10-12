@@ -5,9 +5,10 @@ import { orderFaults, faultText } from '../lib/nestingCheck'
 import { limitFromError } from '../lib/limits'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { permsText, workPid, openWorkplace } from '../lib/workplaces'
-import { myPostQueue, stageAccept, stageDone, stageBack, since, clock, planStages } from '../lib/posts'
+import { myPostQueue, stageAccept, stageDone, since, clock, planStages } from '../lib/posts'
 import { StageTrack } from './ProductionPosts'
 import StageParts from './StageParts'
+import StageReturn from './StageReturn'
 import StageProgress from './StageProgress'
 import ProductionBoard from './ProductionBoard'
 import { ruleOf } from '../lib/stageParts'
@@ -63,15 +64,9 @@ export default function WorkerProduction({ wps }) {
     if (r.error) { setError(r.error); window.alert(r.error) }
     load(); window.dispatchEvent(new Event('notices-seen'))
   }
-  // вернуть заказ на предыдущий пост (переделать)
-  const back = async q => {
-    if (!window.confirm(`Вернуть заказ «${orderTitle(q)}» на предыдущий пост (переделать)?`)) return
-    setBusy(q.stage_id)
-    const r = await stageBack(q.order_id)
-    setBusy('')
-    if (r.error) window.alert(r.error); else if (r.data === false) window.alert('Это первый пост заказа — возвращать некуда.')
-    load(); window.dispatchEvent(new Event('notices-seen'))
-  }
+  // вернуть заказ на любой пройденный пост — выбор поста
+  const [ret, setRet] = useState(null)
+  const back = q => setRet({ orderId: q.order_id, title: orderTitle(q) })
   const setStatus = async (o, status) => {
     if (status === 'inwork') {
       const f = await orderFaults(o.id)
@@ -162,7 +157,7 @@ export default function WorkerProduction({ wps }) {
                     {!isNew && <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => (ruleOf(q.rule, q.post_name).list !== 'none' ? setParts({ stage: q, orderId: q.order_id })
                       : stage(q, stageDone, `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
                     {orderBtns(q.order_id)}
-                    <button type="button" disabled={busy === q.stage_id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => back(q)}>↩ На предыдущий пост</button>
+                    <button type="button" disabled={busy === q.stage_id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => back(q)}>↩ Вернуть на пост</button>
                   </div>
                 </div>
               )
@@ -219,6 +214,7 @@ export default function WorkerProduction({ wps }) {
         </>
       )}
       </>}
+      {ret && <StageReturn orderId={ret.orderId} title={ret.title} onClose={ch => { setRet(null); if (ch) { load(); window.dispatchEvent(new Event('notices-seen')) } }} />}
       {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) { load(); window.dispatchEvent(new Event('notices-seen')) } }} />}
     </>
   )
