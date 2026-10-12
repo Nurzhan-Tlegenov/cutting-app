@@ -62,16 +62,31 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     return () => document.removeEventListener('touchmove', stop)
   }, [!!drag])   // eslint-disable-line react-hooks/exhaustive-deps
   // щипок по доске: пальцы сводим — больше постов на экране (как галерея карт раскроя), разводим — крупнее
+  // щипок: пока пальцы на экране — доска плавно масштабируется; отпустили — число постов на экране = во сколько раз свели/развели
   const pinch = useRef(null)
-  const onTouchStart = e => { if (e.touches.length === 2 && !dragRef.current) { const [a, b] = e.touches; pinch.current = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) } } }
-  const onTouchMove = e => {
-    if (!pinch.current || e.touches.length !== 2) return
-    const [a, b] = e.touches, d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), k = d / pinch.current.d
-    const max = (data?.posts?.length || 1) + 1
-    if (k < 0.78) { setGcols(c => Math.min(max, (c || 1) + 1)); pinch.current = { d } }
-    else if (k > 1.28) { setGcols(c => Math.max(1, (c || 2) - 1)); pinch.current = { d } }
+  const onTouchStart = e => {
+    if (e.touches.length !== 2 || dragRef.current) return
+    const [a, b] = e.touches, el = boardRef.current, r = el.getBoundingClientRect()
+    pinch.current = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, k: 1, cols: gcols || Math.max(1, Math.round(r.width / 260)) }
+    el.style.transformOrigin = `${(a.clientX + b.clientX) / 2 - r.left}px ${(a.clientY + b.clientY) / 2 - r.top}px`
+    el.style.transition = 'none'
   }
-  const onTouchEnd = e => { if (e.touches.length < 2) pinch.current = null }
+  const onTouchMove = e => {
+    const P = pinch.current
+    if (!P || e.touches.length !== 2) return
+    const [a, b] = e.touches
+    P.k = Math.max(0.25, Math.min(4, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / P.d0))
+    boardRef.current.style.transform = `scale(${P.k})`
+  }
+  const onTouchEnd = e => {
+    const P = pinch.current
+    if (!P || e.touches.length >= 2) return
+    pinch.current = null
+    const el = boardRef.current
+    el.style.transition = 'transform 160ms ease-out'; el.style.transform = 'scale(1)'
+    const next = Math.max(1, Math.min((data?.posts?.length || 0) + 1, Math.round(P.cols / P.k)))
+    if (next !== P.cols) setGcols(next)
+  }
   const colAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-col]')?.getAttribute('data-col') || null
   const dragProps = (q, from) => ({
     onPointerDown: e => {
@@ -92,17 +107,25 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     onPointerCancel: () => { if (press.current) { clearTimeout(press.current.t); press.current = null } },
     onContextMenu: e => e.preventDefault(),
   })
+  const ghostRef = useRef(null)
   useEffect(() => {
     if (!drag) return
-    const move = e => {
-      const x = e.clientX, y = e.clientY
+    const pos = { x: drag.x, y: drag.y }
+    let over = drag.over, raf = 0
+    const place = () => { const g = ghostRef.current; if (g) g.style.transform = `translate(${pos.x - 70}px, ${pos.y - 26}px)` }
+    // у края экрана доска едет сама — плавно, пока палец там
+    const tick = () => {
       const el = boardRef.current
-      if (el) { const r = el.getBoundingClientRect(); if (x < r.left + 30) el.scrollLeft -= 14; else if (x > r.right - 30) el.scrollLeft += 14 }   // у края — доска едет
-      setDrag(d => (d ? { ...d, x, y, over: colAt(x, y) || d.over } : d))
+      if (el) { const r = el.getBoundingClientRect(), edge = 40; if (pos.x < r.left + edge) el.scrollLeft -= 10; else if (pos.x > r.right - edge) el.scrollLeft += 10 }
+      const c = colAt(pos.x, pos.y)
+      if (c && c !== over) { over = c; setDrag(d => (d ? { ...d, over: c } : d)) }
+      raf = requestAnimationFrame(tick)
     }
-    const up = () => { const d = dragRef.current; setDrag(null); if (d) drop(d) }
+    const move = e => { pos.x = e.clientX; pos.y = e.clientY; place() }
+    const up = () => { cancelAnimationFrame(raf); const d = dragRef.current; setDrag(null); if (d) drop({ ...d, over }) }
+    place(); raf = requestAnimationFrame(tick)
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up)
-    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up) }
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up) }
   }, [!!drag])   // eslint-disable-line react-hooks/exhaustive-deps
   async function drop(d) {
     const to = d.over, q = d.q
@@ -202,8 +225,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
       ) : !total ? (
         <p style={{ fontSize: 13, color: 'var(--text-hint)', padding: '6px 0 10px' }}>Сейчас в работе заказов нет. Принятые заказы появятся в колонке «Принят, не пущен».</p>
       ) : null}
-      <div ref={boardRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
-        style={{ display: 'flex', gap: gcols >= 3 ? 6 : 10, overflowX: 'auto', scrollSnapType: gcols === 1 && !drag ? 'x mandatory' : 'none', paddingBottom: 8, alignItems: 'flex-start' }}>
+      <div ref={boardRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}
+        style={{ touchAction: 'pan-x pan-y', display: 'flex', gap: gcols >= 3 ? 6 : 10, overflowX: 'auto', scrollSnapType: gcols === 1 && !drag ? 'x mandatory' : 'none', paddingBottom: 8, alignItems: 'flex-start' }}>
         {cols.map(c => {
           const list = byPost(c.id)
           if (c.id === IDLE && !list.length && data.items.length) return null      // пустую «не пущены» прячем, если есть работа
@@ -226,7 +249,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
       </div>
       <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Удержите заказ и перенесите пальцем на нужный пост — вперёд или назад. Щипок двумя пальцами — больше или меньше постов на экране.</p>
       {drag && (
-        <div style={{ position: 'fixed', left: drag.x - 70, top: drag.y - 26, width: 140, zIndex: 500, pointerEvents: 'none', padding: '7px 9px', borderRadius: 10, background: 'var(--bg)', border: '1.5px solid var(--blue)', boxShadow: '0 6px 18px rgba(0,0,0,0.25)', fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div ref={ghostRef} style={{ position: 'fixed', left: 0, top: 0, transform: `translate(${drag.x - 70}px, ${drag.y - 26}px)`, willChange: 'transform', width: 140, zIndex: 500, pointerEvents: 'none', padding: '7px 9px', borderRadius: 10, background: 'var(--bg)', border: '1.5px solid var(--blue)', boxShadow: '0 6px 18px rgba(0,0,0,0.25)', fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {orderTitle(drag.q)}
           <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--blue)' }}>→ {drag.over === IDLE ? 'не пущен' : data.posts.find(p => p.id === drag.over)?.name || '…'}</div>
         </div>
