@@ -28,17 +28,32 @@ export async function resolveQr(text) {
   if (!code) return { error: 'Код пустой' }
   const { data: orders, error } = await supabase.from('orders').select('id,order_number,order_name,created_at').order('created_at', { ascending: false }).limit(2000)
   if (error) return { error: error.message }
-  // заказ: его название (или номер) входит в код; из подходящих — с самым длинным совпадением, при равенстве — самый новый
-  let best = null
-  for (const o of orders || []) for (const f of [...forms(orderTitle(o)), ...forms(o.order_number)]) {
-    if (f.length >= 2 && code.includes(f) && (!best || f.length > best.len)) best = { o, len: f.length, f }
+  // заказ: его название (или номер) входит в код. Подходящих может быть несколько (например, заказ отправлен повторно —
+  // копия с тем же названием): пробуем по порядку — самое длинное совпадение, при равенстве — новее, — пока не найдётся деталь
+  const cands = []
+  for (const o of orders || []) {
+    let m = null
+    for (const f of [...forms(orderTitle(o)), ...forms(o.order_number)]) if (f.length >= 2 && code.includes(f) && (!m || f.length > m.len)) m = { o, len: f.length, f }
+    if (m) cands.push(m)
   }
-  if (!best) return { error: 'Заказ с таким названием не найден среди ваших заказов' }
+  if (!cands.length) return { error: 'Заказ с таким названием не найден среди ваших заказов' }
+  cands.sort((a, b) => b.len - a.len)
+  let first = null
+  for (const best of cands.slice(0, 8)) {
+    const r = await matchIn(best, code)
+    if (!r) continue
+    if (r.di >= 0) return r
+    if (!first) first = r
+  }
+  return first || { error: 'Заказ не открывается' }
+}
+
+async function matchIn(best, code) {
   const [{ data: order }, { data: details }] = await Promise.all([
     supabase.from('orders').select('*').eq('id', best.o.id).single(),
     supabase.from('order_details').select('*').eq('order_id', best.o.id).order('sort_order'),
   ])
-  if (!order) return { error: 'Заказ не открывается' }
+  if (!order) return null
   const list = details || []
   // части кода, кроме названия заказа
   const rest = code.replace(best.f, ' ')
@@ -77,5 +92,5 @@ export async function resolveQr(text) {
   }
   // 3) по наименованию детали
   if (di < 0) list.forEach((d, i) => { if (di < 0 && d.name && forms(d.name).some(f => f.length > 2 && tokens.includes(f))) di = i })
-  return { order, details: list, di, des }
+  return { order, details: list, di, des, code, loaded: list.length }
 }

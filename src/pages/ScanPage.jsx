@@ -103,7 +103,11 @@ export default function ScanPage() {
               <div style={{ fontSize: 15, fontWeight: 500 }}>{[detailMeta(d)?.des, d.name].filter(Boolean).join(' ') || 'Деталь'} — {d.length}×{d.width}, {d.qty} шт.</div>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>У этого заказа нет 3D-модели (детали введены вручную), поэтому показать деталь в модели нельзя.</p>
             </>
-          ) : <p style={{ fontSize: 13, color: 'var(--amber)' }}>Заказ найден, но деталь по коду определить не удалось. В код бирки нужно включить обозначение детали или номер карты и номер детали.</p>}
+          ) : <>
+            <p style={{ fontSize: 13, color: 'var(--amber)' }}>{state.loaded === 0 ? 'Заказ найден, но его детали этому аккаунту не открываются.' : 'Заказ найден, но деталь по коду определить не удалось. В код бирки нужно включить обозначение детали или номер карты и номер детали.'}</p>
+            {/* что прочитано с бирки — чтобы было видно, чего не хватает в коде */}
+            <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4, wordBreak: 'break-all' }}>Код с бирки: <span style={{ fontFamily: 'monospace' }}>{state.text}</span>{state.loaded != null ? ` · деталей в заказе: ${state.loaded}` : ''}</p>
+          </>}
           <button className="btn-primary" style={{ marginTop: 10 }} onClick={() => navigate(`/orders/${order.id}`)}>Открыть заказ</button>
         </div>
         <button className="btn-secondary" onClick={again}>Сканировать ещё</button>
