@@ -21,7 +21,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
 
   // общий (виден всем пользователям): мастер-аккаунт отметил «Для всех»
   const isPub = p => !!(p.forAll || p.shared)
-  const pubTag = p => isPub(p) ? <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', whiteSpace: 'nowrap', fontWeight: 600 }}>🌐 {isMaster ? 'для всех' : 'общий'}</span> : null
+  const pubTag = p => isMaster && isPub(p) ? <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', whiteSpace: 'nowrap', fontWeight: 600 }}>🌐 для всех</span> : null
   const togglePub = p => {
     const on = !p.forAll
     if (!window.confirm(on ? `Сделать «${p.name}» общим?\nЕго увидят все пользователи приложения.` : `Убрать «${p.name}» из общих?\nДругие пользователи его больше не увидят.`)) return
@@ -34,7 +34,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
     close()
   }
   const del = p => {
-    if (p.shared) { window.alert('Это общий постпроцессор (от мастер-аккаунта) — его не удалить.'); return }
+    if (p.shared) { window.alert('Этот постпроцессор удалить нельзя.'); return }
     if (!isDrill6(p) && !cnc.posts.some(q => q.id !== p.id && !isDrill6(q))) { window.alert('Это единственный раскроечный станок — его удалить нельзя.'); return }
     if (!window.confirm(`Удалить постпроцессор «${p.name}»?\nЕго настройки пропадут (сохранённые в «Мои постпроцессоры» останутся).`)) return
     const posts = cnc.posts.filter(q => q.id !== p.id)
