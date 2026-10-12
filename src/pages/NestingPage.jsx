@@ -39,7 +39,7 @@ import { savedNestings } from '../lib/savedNesting'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
-import { orderTitle, orderFileName } from '../lib/orderUtils'
+import { orderTitle, orderFileName, getNextOrderNumber } from '../lib/orderUtils'
 import { productionLabel, sortProductions } from '../lib/productionLabel'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import CncLoader from '../components/CncLoader'
@@ -2111,6 +2111,64 @@ export default function NestingPage() {
     navigate(`/orders/${id}`)
   }
 
+  // Повторная отправка исполненного заказа: создаётся новый заказ — копия этого (детали, кромка, 3D-модель) с выбранным
+  // сейчас раскроем — и сразу уходит на то же производство. Исполненный заказ и его место в итогах производства не меняются.
+  async function resendOrder(cfg) {
+    if (!checkCfg(cfg)) return
+    const pr = order.production_id ? productions.find(x => x.id === order.production_id) : null
+    if (!order.production_id) { window.alert('У заказа не выбрано производство.'); return }
+    if (pr) {
+      const g = geoOf(order, cfg.result)
+      const less = (have, col) => { const need = prodVal(pr, col, order); return need != null && need !== '' && Number(have) < Number(need) - 0.01 }
+      if (less(g.kerf, 'kerf_width') || less(g.marginL, 'margin_left') || less(g.marginR, 'margin_right') || less(g.marginT, 'margin_top') || less(g.marginB, 'margin_bottom')) {
+        chooseProduction(order.production_id)
+        window.alert(`Раскрой посчитан с резом ${g.kerf} мм или отступами меньше, чем сейчас у производства «${pr.name}» (рез ${prodVal(pr, 'kerf_width', order)} мм).\n\nПараметры производства подставлены — выполните раскрой заново и отправьте повторно.`)
+        return
+      }
+    }
+    if (!window.confirm(`Отправить заказ повторно${pr ? ` на производство «${pr.name}»` : ''}?\n\nБудет создан новый заказ — копия этого, с раскроем, который выбран сейчас. Исполненный заказ останется как есть.`)) return
+    setBusyId(cfg.id)
+    try {
+      // раскрой для копии — как при сохранении, но в новый заказ (исполненный не трогаем)
+      const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
+      const result = { ...cfg.result }
+      delete result.rawSheets
+      const toSave = { ...result, sheets, config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
+      const nesting = multiMat ? JSON.stringify({ multi: true, byMat: { ...savedByMat, [matKey]: toSave } }) : JSON.stringify(toSave)
+      const { data: src, error: e0 } = await supabase.from('orders').select('*').eq('id', id).single()
+      if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
+      const row = {}
+      for (const [k, v] of Object.entries(src)) {
+        if (k === 'id' || k === 'order_number' || k === 'status' || k.endsWith('_at') || k === 'archived_by' || k === 'archived_sheets' || k === 'return_note' || k === 'nesting_result') continue
+        row[k] = v
+      }
+      const now = new Date().toISOString()
+      Object.assign(row, { user_id: user.id, order_number: await getNextOrderNumber(supabase), status: 'new', submitted_at: now, nesting_result: nesting })
+      const { data: copy, error: e1 } = await supabase.from('orders').insert(row).select().single()
+      if (e1 || !copy) throw new Error(/limit/i.test(e1?.message || '') ? 'Достигнут предел бесплатного использования: заказов слишком много. Удалите или отправьте в архив ненужные.' : (e1?.message || 'не удалось создать заказ'))
+      const { data: rows } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+      if (rows?.length) {
+        const { error: e2 } = await supabase.from('order_details').insert(rows.map(r => { const { id: _i, created_at: _c, ...rest } = r; void _i; void _c; return { ...rest, order_id: copy.id } }))
+        if (e2) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e2.message) }
+      }
+      try {   // 3D-модель заказа — тоже в копию (если была)
+        const { data: m } = await supabase.from('order_models').select('data').eq('order_id', id).maybeSingle()
+        if (m?.data) await supabase.from('order_models').insert({ order_id: copy.id, data: m.data })
+      } catch { /* без модели */ }
+      // цена фиксируется в момент отправки — по картам копии и текущему прайсу производства
+      try {
+        const mats = savedNestings(copy, cutDetails(allDetails, parseEdgeTypes(copy.edge_types)))
+        const st = sumStats(mats.map(mat => nestingStats({ order: copy, mat, method: copy.cutting_method || 'nesting' })))
+        if (st.parts) await fixOrderQuote(copy.id, statsPayload(st))
+      } catch { /* цена покажется по текущему прайсу */ }
+      setBusyId(null)
+      navigate(`/orders/${copy.id}`)
+    } catch (err) {
+      setBusyId(null)
+      window.alert('Повторно отправить не удалось: ' + (err?.message || err))
+    }
+  }
+
   function onMoveCfg(cfgId, sheetIdx, newPlaced) {
     setConfigs(cs => cs.map(c => c.id !== cfgId ? c : {
       ...c, saved: false,
@@ -2928,14 +2986,15 @@ export default function NestingPage() {
                           background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
                         ⬇ DXF
                       </button>}
-                      <button onClick={() => chooseCfg(cfg)} disabled={blocked || cfg.saved}
+                      {/* исполненный заказ клиента не перезаписывается: перекроенный вариант уходит копией («Отправить повторно») */}
+                      {!(cabinet !== 'production' && order.status === 'done' && order.user_id === user?.id) && <button onClick={() => chooseCfg(cfg)} disabled={blocked || cfg.saved}
                         title="Сохранить этот раскрой за заказом (заказ при этом не отправляется); остальные варианты остаются на экране"
                         style={{ flex: 1, padding: 9, borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500,
                           cursor: (blocked || cfg.saved) ? 'default' : 'pointer',
                           border: '0.5px solid var(--teal)',
                           background: cfg.saved ? '#e6f4ea' : 'var(--teal-light)', color: cfg.saved ? '#1e7e34' : 'var(--teal)' }}>
                         {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение…' : 'Выбрать'}
-                      </button>
+                      </button>}
                       <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                         <button onClick={() => pdfCfg(cfg, idx)} disabled={!!pdfBusy} title="Карты раскроя в PDF: листы с деталями, размерами, кромкой и процентом использования материала"
                           style={{ padding: '9px 12px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: pdfBusy ? 'default' : 'pointer' }}>
@@ -2947,7 +3006,14 @@ export default function NestingPage() {
                           </label>
                         )}
                       </div>
-                      {order.status !== 'draft' ? (canProduce && <>
+                      {cabinet !== 'production' && order.status === 'done' && order.user_id === user?.id ? (
+                        <button onClick={() => resendOrder(cfg)} disabled={blocked}
+                          title="Создать копию этого заказа с выбранным раскроем и отправить на производство ещё раз"
+                          style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
+                            borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
+                          {busyId === cfg.id ? 'Отправка…' : '↻ Отправить повторно'}
+                        </button>
+                      ) : order.status !== 'draft' ? (canProduce && <>
                         <button onClick={() => goProduce(cfg, 'cnc')} disabled={blocked} title="Управляющие программы для станка с ЧПУ"
                           style={{ flex: 1, padding: 9, background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
                           ЧПУ
