@@ -22,7 +22,7 @@ export default function CncSetup() {
         Выпуск: <b style={{ color: 'var(--text-muted)' }}>{routerPost(cnc)?.name}</b>{drills.length ? <> + <b style={{ color: 'var(--text-muted)' }}>{drills.map(p => p.name).join(', ')}</b></> : null}.
         {' '}Это те же настройки, что в заказе (ЧПУ): поправили здесь — там уже так же.
       </p>
-      <PostPicker cnc={cnc} onChange={change} />
+      <PostPicker cnc={cnc} onChange={change} isMaster={isMaster} />
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 10, paddingBottom: 2 }}>
         {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={chip(tab === k)}>{l}</button>)}
       </div>

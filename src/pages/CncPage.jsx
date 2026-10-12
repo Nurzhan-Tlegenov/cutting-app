@@ -414,7 +414,7 @@ export default function CncPage() {
       ))}
       {tab === 'ops' && <CncOps cnc={cnc} onChange={change} layers={layers} />}
       {tab === 'tools' && <CncTools cnc={cnc} onChange={change} />}
-      {(tab === 'basic' || tab === 'cmd') && <PostPicker cnc={cnc} onChange={change} />}
+      {(tab === 'basic' || tab === 'cmd') && <PostPicker cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
 

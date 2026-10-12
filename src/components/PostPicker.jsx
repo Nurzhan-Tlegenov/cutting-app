@@ -9,7 +9,7 @@ import { DEFAULT_POST, DEFAULT_DRILL6, isDrill6, activePost, routerPost, pickPos
 
 const EASE = 'cubic-bezier(.32,.72,0,1)'
 
-export default function PostPicker({ cnc, onChange }) {
+export default function PostPicker({ cnc, onChange, isMaster = false }) {
   const [open, setOpen] = useState(false)
   const [shown, setShown] = useState(false)          // для анимации: окно выезжает и уезжает
   useEffect(() => {
@@ -19,6 +19,14 @@ export default function PostPicker({ cnc, onChange }) {
   const post = activePost(cnc), router = routerPost(cnc)
   const used = id => id === router?.id || (cnc.use6 || []).includes(id)
 
+  // общий (виден всем пользователям): мастер-аккаунт отметил «Для всех»
+  const isPub = p => !!(p.forAll || p.shared)
+  const pubTag = p => isPub(p) ? <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', whiteSpace: 'nowrap', fontWeight: 600 }}>🌐 {isMaster ? 'для всех' : 'общий'}</span> : null
+  const togglePub = p => {
+    const on = !p.forAll
+    if (!window.confirm(on ? `Сделать «${p.name}» общим?\nЕго увидят все пользователи приложения.` : `Убрать «${p.name}» из общих?\nДругие пользователи его больше не увидят.`)) return
+    onChange({ ...cnc, posts: cnc.posts.map(q => (q.id === p.id ? { ...q, forAll: on, shared: false } : q)) })
+  }
   const openPost = id => { onChange(pickPost(cnc, id)); close() }
   const add = kind => {
     const p = kind === 'drill6' ? { ...DEFAULT_DRILL6(), name: `Шестисторонний ${cnc.posts.filter(isDrill6).length + 1}` } : { ...DEFAULT_POST(), name: `Постпроцессор ${cnc.posts.filter(q => !isDrill6(q)).length + 1}` }
@@ -58,6 +66,7 @@ export default function PostPicker({ cnc, onChange }) {
           <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Постпроцессор (открыт в настройках)</div>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{post.name}</div>
         </div>
+        {pubTag(post)}
         {kindTag(post)}
         <span style={{ color: 'var(--blue)', fontSize: 13, fontWeight: 500 }}>Выбрать ▾</span>
       </button>
@@ -75,6 +84,7 @@ export default function PostPicker({ cnc, onChange }) {
             </div>
             <div style={{ overflowY: 'auto', padding: '0 12px 14px', overscrollBehavior: 'contain' }}>
               <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', margin: '4px 4px 6px' }}>Станки в настройке</div>
+              {isMaster && <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-2px 4px 6px' }}>🌐 — общий: виден всем пользователям{cnc.posts.some(isPub) ? ` (сейчас ${cnc.posts.filter(isPub).length})` : ''}. Кнопка 🌐 у станка — сделать общим или убрать.</div>}
               {cnc.posts.map(p => {
                 const on = p.id === post.id
                 return (
@@ -84,10 +94,12 @@ export default function PostPicker({ cnc, onChange }) {
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
                         {kindTag(p)}
                         {used(p.id) && <span style={{ fontSize: 10.5, color: 'var(--teal)' }}>✓ выпускает программы</span>}
-                        {p.shared && <span style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>общий</span>}
+                        {pubTag(p)}
                         {on && <span style={{ fontSize: 10.5, color: 'var(--blue)' }}>открыт</span>}
                       </div>
                     </div>
+                    {isMaster && !p.shared && <button type="button" title={p.forAll ? 'Общий для всех — убрать из общих' : 'Сделать общим для всех'} onClick={() => togglePub(p)}
+                      style={{ ...icon, background: p.forAll || p.shared ? 'var(--teal)' : 'var(--bg)', color: p.forAll || p.shared ? 'white' : 'var(--text-hint)', border: '0.5px solid var(--border-md)' }}>🌐</button>}
                     {!p.shared && <button type="button" title="Переименовать" onClick={() => rename(p)} style={icon}>✎</button>}
                     {!p.shared && <button type="button" title="Удалить" onClick={() => del(p)} style={{ ...icon, color: 'var(--danger)' }}>🗑</button>}
                   </div>
