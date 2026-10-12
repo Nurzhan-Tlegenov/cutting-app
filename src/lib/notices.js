@@ -42,7 +42,7 @@ export function markOrdersSeen(uid, orders) {
  *   users — сколько ждёт решения мастера; production — новых заявок производству; orders — заказов со сменившимся статусом.
  */
 export async function fetchNotices({ user, isMaster }) {
-  const res = { users: 0, production: 0, orders: 0, list: [] }
+  const res = { users: 0, production: 0, orders: 0, ownNew: 0, ownId: null, byProd: {}, list: [] }
   if (!user?.id) return res
   const jobs = []
   if (isMaster) {
@@ -51,28 +51,32 @@ export async function fetchNotices({ user, isMaster }) {
       const resets = (pr.data || []).filter(r => r.status === 'new')
       const prods = (us.data || []).filter(u => u.production_status === 'pending')
       res.users = reqs.length + resets.length + prods.length
-      for (const r of reqs) res.list.push({ key: `rq:${r.id}`, text: `Новая заявка на регистрацию: ${r.full_name || r.phone || 'без имени'}`, to: '/users' })
-      for (const r of resets) res.list.push({ key: `pw:${r.id}`, text: `Просят восстановить пароль: ${r.full_name || r.phone || '+' + r.digits}`, to: '/users' })
-      for (const u of prods) res.list.push({ key: `pd:${u.production_id}`, text: `Производство ждёт подтверждения: ${u.production_name || u.full_name || ''}`, to: '/users' })
+      for (const r of reqs) res.list.push({ key: `rq:${r.id}`, text: `Новая заявка на регистрацию: ${r.full_name || r.phone || 'без имени'}`, to: '/users', src: 'users' })
+      for (const r of resets) res.list.push({ key: `pw:${r.id}`, text: `Просят восстановить пароль: ${r.full_name || r.phone || '+' + r.digits}`, to: '/users', src: 'users' })
+      for (const u of prods) res.list.push({ key: `pd:${u.production_id}`, text: `Производство ждёт подтверждения: ${u.production_name || u.full_name || ''}`, to: '/users', src: 'users' })
     }).catch(() => {}))
   }
   jobs.push(myProduction(user.id).then(async p => {
     if (!p || (p.status ?? 'approved') !== 'approved') return
     const r = await productionOrders()
     const fresh = (r.data || []).filter(o => o.status === 'new' && !o.own)
-    res.production = fresh.length
-    for (const o of fresh) res.list.push({ key: `po:${o.id}`, text: `Новая заявка: ${orderTitle(o)}${o.client_name ? ' — ' + o.client_name : ''}`, to: '/production' })
+    res.production += fresh.length
+    res.ownNew = fresh.length; res.ownId = p.id ?? null
+    for (const o of fresh) res.list.push({ key: `po:${o.id}`, text: `Новая заявка: ${orderTitle(o)}${o.client_name ? ' — ' + o.client_name : ''}`, to: '/production', src: 'own' })
   }).catch(() => {}))
   // заказы, пришедшие на мои рабочие посты (сотрудник производства): новые — ещё никто не принял
   jobs.push(myPostQueue().then(r => {
     const fresh = (r.data || []).filter(q => q.status === 'queued')
     res.production += fresh.length
-    for (const q of fresh) res.list.push({ key: `ps:${q.stage_id}`, text: `Новый заказ на посту «${q.post_name}»: ${orderTitle(q)}`, to: '/production' })
+    for (const q of fresh) {
+      if (q.production_id) res.byProd[q.production_id] = (res.byProd[q.production_id] || 0) + 1
+      res.list.push({ key: `ps:${q.stage_id}`, text: `Новый заказ на посту «${q.post_name}»: ${orderTitle(q)}`, to: '/production', src: `work:${q.production_id || ''}`, pid: q.production_id })
+    }
   }).catch(() => {}))
   jobs.push(supabase.from('orders').select('id,status,order_name,order_number,created_at').eq('user_id', user.id).then(({ data }) => {
     const changed = changedOrders(user.id, data || [])
     res.orders = changed.size
-    for (const o of data || []) if (changed.has(o.id)) res.list.push({ key: `os:${o.id}:${o.status}`, text: `Заказ «${orderTitle(o)}»: ${(STATUS_LABELS[o.status] || o.status).toLowerCase()}`, to: `/orders/${o.id}` })
+    for (const o of data || []) if (changed.has(o.id)) res.list.push({ key: `os:${o.id}:${o.status}`, text: `Заказ «${orderTitle(o)}»: ${(STATUS_LABELS[o.status] || o.status).toLowerCase()}`, to: `/orders/${o.id}`, src: 'client' })
   }).catch(() => {}))
   await Promise.all(jobs)
   return res

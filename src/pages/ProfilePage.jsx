@@ -41,8 +41,32 @@ export default function ProfilePage() {
   const [cardOpen, setCardOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
   // мастер: сколько заявок на регистрацию, запросов пароля и производств ждут его решения
-  const [waiting, setWaiting] = useState(0)
-  useEffect(() => { let alive = true; if (isMaster) fetchNotices({ user, isMaster }).then(n => { if (alive) setWaiting(n.users) }); return () => { alive = false } }, [user, isMaster])
+  // уведомления по источникам: красная пометка на кабинете, откуда пришло сообщение
+  const [notes, setNotes] = useState(null)
+  useEffect(() => {
+    let alive = true
+    const load = () => fetchNotices({ user, isMaster }).then(n => { if (alive) setNotes(n) })
+    load()
+    window.addEventListener('notices-seen', load)
+    return () => { alive = false; window.removeEventListener('notices-seen', load) }
+  }, [user, isMaster])
+  const waiting = notes?.users || 0
+  const countOf = id => {
+    if (!notes) return 0
+    if (id === 'client') return notes.orders
+    if (id === 'own') return notes.ownNew + (notes.ownId ? notes.byProd[notes.ownId] || 0 : 0)
+    if (id.startsWith('work:')) return id.slice(5) === notes.ownId ? 0 : notes.byProd[id.slice(5)] || 0
+    return 0
+  }
+  const srcOf = it => (it.src?.startsWith('work:') && it.pid && it.pid === notes?.ownId ? 'own' : it.src)
+  const openNotice = it => {
+    const src = srcOf(it)
+    if (src === 'users') { navigate('/users'); return }
+    if (src === 'client') { setCabinet('client'); navigate(it.to); return }
+    if (src?.startsWith('work:') && src.length > 5) openWorkplace(src.slice(5)); else openOwnProduction()
+    setCabinet('production'); navigate('/production')
+  }
+  const badge = n => n > 0 ? <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10, background: 'var(--danger)', color: 'white', fontSize: 11.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{n}</span> : null
   const [mills, setMills] = useState(() => getUserSettings(user).facadeMills || [])
   useEffect(() => { let alive = true; fetchUserSettings(user).then(s => { if (alive) setMills(s.facadeMills || []) }); return () => { alive = false } }, [user])
   const removeMill = key => { const next = mills.filter(m => m.key !== key); setMills(next); saveUserSettings({ facadeMills: next }, user) }
@@ -169,11 +193,35 @@ export default function ProfilePage() {
                 <div style={{ fontWeight: 500, fontSize: 15, color: on ? 'var(--blue-dark)' : 'var(--text)' }}>{label}{on ? ' · сейчас' : ''}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{note}</div>
               </div>
+              {badge(countOf(id))}
               <span style={{ color: 'var(--blue)', fontSize: 18 }}>→</span>
             </button>
           )
         })}
       </div>
+
+      {/* что именно пришло — тап открывает нужный кабинет и место */}
+      {notes?.list?.length > 0 && (
+        <div className="card" style={{ marginBottom: 14, padding: '8px 12px', border: '1px solid var(--danger)' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)', marginBottom: 4 }}>Новое: {notes.list.length}</div>
+          {notes.list.slice(0, 8).map(it => {
+            const src = srcOf(it)
+            const from = src === 'users' ? 'Мастер' : src === 'client' ? 'Клиент' : src === 'own' ? (own?.name || 'Своё производство')
+              : wps.find(w => `work:${w.production_id}` === src)?.production_name || 'Производство'
+            return (
+              <div key={it.key} onClick={() => openNotice(it)} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '7px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--danger)', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{from}</div>
+                  <div style={{ fontSize: 13 }}>{it.text}</div>
+                </div>
+                <span style={{ color: 'var(--blue)' }}>→</span>
+              </div>
+            )
+          })}
+          {notes.list.length > 8 && <div style={{ fontSize: 12, color: 'var(--text-hint)', paddingTop: 4 }}>и ещё {notes.list.length - 8}</div>}
+        </div>
+      )}
 
       <button onClick={() => navigate('/scan')} className="card"
         style={{ width: '100%', marginBottom: 12, textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
