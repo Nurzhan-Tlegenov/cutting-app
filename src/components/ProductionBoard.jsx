@@ -8,6 +8,8 @@ import StageReturn from './StageReturn'
 import StageProgress from './StageProgress'
 import { OrderOps } from './ProductionPosts'
 import CncLoader from './CncLoader'
+import PostIcon, { POST_ICONS } from './PostIcon'
+import { savePostRule } from '../lib/stageParts'
 import { useKeptState } from '../hooks/useKeptState'
 
 // Доска техпроцесса: колонка на каждый пост (в порядке техпроцесса) и первая — «Принят, не пущен».
@@ -15,22 +17,6 @@ import { useKeptState } from '../hooks/useKeptState'
 // Обновляется сама каждые 15 с — заказы переходят по колонкам почти в реальном времени.
 // Телефон — колонки листаются пальцем вбок (по одной на экран), сверху — переход к посту; компьютер — колонки рядом.
 const IDLE = '__idle'
-// значок поста по названию
-function postIcon(c) {
-  if (c.id === IDLE) return '▶'
-  const n = String(c.name || '').toLowerCase()
-  if (/раскр|распил|пил/.test(n)) return '🪚'
-  if (/кром/.test(n)) return '🎞️'
-  if (/присад|сверл/.test(n)) return '🔩'
-  if (/паз|фрез/.test(n)) return '⚙️'
-  if (/сбор/.test(n)) return '🛠️'
-  if (/упак/.test(n)) return '📦'
-  if (/достав|отгруз/.test(n)) return '🚚'
-  if (/установ|монтаж/.test(n)) return '🏠'
-  if (/отк|контрол|провер/.test(n)) return '✅'
-  if (/покрас|эмал|лак/.test(n)) return '🎨'
-  return '📍'
-}
 
 export default function ProductionBoard({ prodId = null, onChange }) {
   const navigate = useNavigate()
@@ -40,7 +26,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   const [parts, setParts] = useKeptState('boardParts', null)    // { stage, orderId } — открыт список деталей поста
   const [openOps, setOpenOps] = useState('')                     // у какого «не пущенного» заказа раскрыты операции
   const [stamp, setStamp] = useState(null)
-  const [ret, setRet] = useState(null)                           // { orderId, title } — выбор поста, на который вернуть
+  const [ret, setRet] = useState(null)
+  const [iconFor, setIconFor] = useState(null)                     // пост, для которого выбирается значок                           // { orderId, title } — выбор поста, на который вернуть
   const colRefs = useRef({})
   // галерея: сколько колонок-постов на экране (щипок двумя пальцами или −/+); 0 — компьютер, колонки по ширине
   const [gcols, setGcols] = useKeptState('boardCols', window.innerWidth < 760 ? 1 : 0)
@@ -85,8 +72,17 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   }, [!!drag])   // eslint-disable-line react-hooks/exhaustive-deps
   // щипок по доске: пальцы сводим — больше постов на экране (как галерея карт раскроя), разводим — крупнее
   // щипок: пока пальцы на экране — доска плавно масштабируется; отпустили — число постов на экране = во сколько раз свели/развели
-  const pinch = useRef(null)
+  const pinch = useRef(null), pinchAt = useRef(0), fingers = useRef(0)
+  // сколько пальцев на экране — считается на всём окне (второй палец отменяет перенос: это щипок)
+  useEffect(() => {
+    const dn = e => { if (e.pointerType === 'touch') { fingers.current++; if (fingers.current > 1 && press.current) { clearTimeout(press.current.t); press.current = null } } }
+    const upf = e => { if (e.pointerType === 'touch') fingers.current = Math.max(0, fingers.current - 1) }
+    window.addEventListener('pointerdown', dn, true); window.addEventListener('pointerup', upf, true); window.addEventListener('pointercancel', upf, true)
+    return () => { window.removeEventListener('pointerdown', dn, true); window.removeEventListener('pointerup', upf, true); window.removeEventListener('pointercancel', upf, true) }
+  }, [])
+  const cancelPress = () => { if (press.current) { clearTimeout(press.current.t); press.current = null } }
   const onTouchStart = e => {
+    if (e.touches.length >= 2) { cancelPress(); pinchAt.current = Date.now(); if (dragRef.current) { dragged.current = true; setDrag(null) } }   // второй палец — это щипок, не перенос
     if (e.touches.length !== 2 || dragRef.current) return
     const [a, b] = e.touches, el = boardRef.current, r = el.getBoundingClientRect()
     pinch.current = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, k: 1, cols: gcols || Math.max(1, Math.round(r.width / 260)) }
@@ -113,21 +109,25 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   const colAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-col]')?.getAttribute('data-col') || null
   const dragProps = (q, from) => ({
     onPointerDown: e => {
+      if (!e.isPrimary || fingers.current > 1) { cancelPress(); return }     // два пальца — щипок
       if (e.button > 0 || e.target.closest('button, input, label, a')) return
+      if (Date.now() - pinchAt.current < 600) return                         // только что был щипок
       dragged.current = false
       const x = e.clientX, y = e.clientY
       press.current = { x, y, t: setTimeout(() => {
-        press.current = null; dragged.current = true
+        press.current = null
+        if (fingers.current > 1 || Date.now() - pinchAt.current < 600) return
+        dragged.current = true
         try { navigator.vibrate?.(30) } catch { /* без вибрации */ }
         setDrag({ q, from, x, y, x0: x, y0: y, over: from })
-      }, 700) }
+      }, 800) }
     },
     onPointerMove: e => {
       const p = press.current
       if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8) { clearTimeout(p.t); press.current = null }
     },
-    onPointerUp: () => { if (press.current) { clearTimeout(press.current.t); press.current = null } },
-    onPointerCancel: () => { if (press.current) { clearTimeout(press.current.t); press.current = null } },
+    onPointerUp: () => cancelPress(),
+    onPointerCancel: () => cancelPress(),
     onContextMenu: e => e.preventDefault(),
   })
   // щипок увеличивает только доску, не весь экран: браузеру жест двумя пальцами по доске не отдаём
@@ -272,13 +272,12 @@ export default function ProductionBoard({ prodId = null, onChange }) {
             const list = byPost(c.id)
             if (c.id === IDLE && !list.length && data.items.length) return null
             const target = drag && drag.over === c.id && drag.from !== c.id
-            const ic = postIcon(c)
             return (
               <div key={c.id} ref={el => { colRefs.current[c.id] = el }} data-col={c.id}
                 style={{ display: 'flex', alignItems: 'stretch', gap: 6, minHeight: compact ? 64 : 84, borderRadius: 'var(--radius)', background: target ? 'var(--blue-light)' : 'transparent', outline: target ? '2px dashed var(--blue)' : 'none' }}>
                 {/* пост — значком слева */}
                 <div title={c.name} style={{ flex: '0 0 54px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '4px 2px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}>
-                  <span style={{ position: 'relative', fontSize: 20, lineHeight: 1 }}>{ic}
+                  <span onClick={() => c.id !== IDLE && setIconFor(c)} style={{ position: 'relative', lineHeight: 1, color: c.id === IDLE ? 'var(--amber)' : 'var(--blue-dark)', cursor: c.id !== IDLE ? 'pointer' : 'default' }}>{c.id === IDLE ? <span style={{ fontSize: 20 }}>▶</span> : <PostIcon icon={c.rule?.icon} name={c.name} size={24} />}
                     {list.length > 0 && <span style={{ position: 'absolute', top: -6, right: -12, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, fontSize: 10, fontWeight: 700, lineHeight: '16px', textAlign: 'center', color: 'white', background: c.id === IDLE ? 'var(--amber)' : 'var(--blue)' }}>{list.length}</span>}
                   </span>
                   <span style={{ maxWidth: 52, fontSize: 9.5, lineHeight: 1.15, textAlign: 'center', color: c.id === IDLE ? 'var(--amber)' : 'var(--text-muted)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word' }}>{c.id === IDLE ? 'Не пущены' : c.name}</span>
@@ -322,6 +321,32 @@ export default function ProductionBoard({ prodId = null, onChange }) {
         <div ref={ghostRef} style={{ position: 'fixed', left: 0, top: 0, transform: `translate(${drag.x - 70}px, ${drag.y - 26}px)`, willChange: 'transform', width: 140, zIndex: 500, pointerEvents: 'none', padding: '7px 9px', borderRadius: 10, background: 'var(--bg)', border: '1.5px solid var(--blue)', boxShadow: '0 6px 18px rgba(0,0,0,0.25)', fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {orderTitle(drag.q)}
           <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--blue)' }}>→ {drag.over === IDLE ? 'не пущен' : data.posts.find(p => p.id === drag.over)?.name || '…'}</div>
+        </div>
+      )}
+      {iconFor && (
+        <div onClick={() => setIconFor(null)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 460, borderRadius: '16px 16px 0 0', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
+            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 8 }}>Значок поста «{iconFor.name}»</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))', gap: 6 }}>
+              {POST_ICONS.map(([k, label]) => {
+                const on = (iconFor.rule?.icon || '') === k
+                return (
+                  <button key={k} type="button" onClick={async () => {
+                    const base = iconFor.rule && iconFor.rule.list ? iconFor.rule : { ...ruleOf(iconFor.rule, iconFor.name), ...(iconFor.rule || {}) }
+                    const { error } = await savePostRule(iconFor.id, { ...base, icon: k })
+                    if (error) window.alert(/not allowed/.test(error.message) ? 'Менять значки может руководитель или начальник производства.' : error.message)
+                    setIconFor(null); load()
+                  }}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '8px 4px', borderRadius: 10, cursor: 'pointer',
+                      border: `1px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue-light)' : 'transparent', color: on ? 'var(--blue-dark)' : 'var(--text)' }}>
+                    <PostIcon icon={k} size={28} />
+                    <span style={{ fontSize: 10, lineHeight: 1.15, color: 'var(--text-muted)', textAlign: 'center' }}>{label}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <button type="button" className="btn-secondary" style={{ marginTop: 10 }} onClick={() => setIconFor(null)}>Отмена</button>
+          </div>
         </div>
       )}
       {ret && <StageReturn orderId={ret.orderId} title={ret.title} onClose={ch => { setRet(null); if (ch) { load(); onChange?.(); window.dispatchEvent(new Event('notices-seen')) } }} />}
