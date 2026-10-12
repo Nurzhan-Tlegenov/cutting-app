@@ -79,3 +79,10 @@ export async function stageReturn(orderId, stageId) {
   if (r.missing) return stageBack(orderId)
   return r
 }
+
+/** Перенести заказ на пост (канбан, migration_stage_move.sql) -> { data: 'ok' | 'same' | 'no_stage' } | { error } */
+export async function stageMove(orderId, postId) {
+  const r = await call('stage_move', { p_order: orderId, p_post: postId })
+  if (r.missing) return { error: 'Перенос заказов по доске ещё не включён в базе: выполните migration_stage_move.sql в Supabase (SQL Editor) — один раз.' }
+  return r
+}

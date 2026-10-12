@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { productionBoard, stageAccept, stageDone, startOrderStages, planStages, since, clock } from '../lib/posts'
+import { productionBoard, stageAccept, stageDone, startOrderStages, planStages, stageMove, since, clock } from '../lib/posts'
 import { ruleOf } from '../lib/stageParts'
 import { orderTitle } from '../lib/orderUtils'
 import StageParts from './StageParts'
@@ -23,10 +23,15 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   const [busy, setBusy] = useState('')
   const [parts, setParts] = useKeptState('boardParts', null)    // { stage, orderId } — открыт список деталей поста
   const [openOps, setOpenOps] = useState('')                     // у какого «не пущенного» заказа раскрыты операции
-  const [narrow, setNarrow] = useState(() => window.innerWidth < 760)
   const [stamp, setStamp] = useState(null)
   const [ret, setRet] = useState(null)                           // { orderId, title } — выбор поста, на который вернуть
   const colRefs = useRef({})
+  // галерея: сколько колонок-постов на экране (щипок двумя пальцами или −/+); 0 — компьютер, колонки по ширине
+  const [gcols, setGcols] = useKeptState('boardCols', window.innerWidth < 760 ? 1 : 0)
+  // канбан: удержание карточки — и переносим её пальцем на другой пост
+  const [drag, setDrag] = useState(null)          // { q, from, x, y, over }
+  const press = useRef(null), dragged = useRef(false), boardRef = useRef(null), dragRef = useRef(null)
+  useEffect(() => { dragRef.current = drag }, [drag])
   const load = async () => {
     const r = await productionBoard(prodId)
     if (r.error) { setErr(r.error); setData(d => d || { posts: [], items: [], idle: [] }); return }
@@ -36,9 +41,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     Promise.resolve().then(load)
     const t = setInterval(() => { if (!document.hidden) load() }, 15000)
     const vis = () => { if (!document.hidden) load() }
-    const rs = () => setNarrow(window.innerWidth < 760)
-    document.addEventListener('visibilitychange', vis); window.addEventListener('resize', rs)
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); window.removeEventListener('resize', rs) }
+    document.addEventListener('visibilitychange', vis)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis) }
   }, [prodId])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const act = async (key, fn, confirmText) => {
@@ -50,10 +54,82 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     else if (r?.data === false) window.alert('Это первый пост заказа — возвращать некуда.')
     await load(); onChange?.(); window.dispatchEvent(new Event('notices-seen'))
   }
+  // пока тянем карточку — страница не листается (иначе палец уводит экран, а не заказ)
+  useEffect(() => {
+    if (!drag) return
+    const stop = e => e.preventDefault()
+    document.addEventListener('touchmove', stop, { passive: false })
+    return () => document.removeEventListener('touchmove', stop)
+  }, [!!drag])   // eslint-disable-line react-hooks/exhaustive-deps
+  // щипок по доске: пальцы сводим — больше постов на экране (как галерея карт раскроя), разводим — крупнее
+  const pinch = useRef(null)
+  const onTouchStart = e => { if (e.touches.length === 2 && !dragRef.current) { const [a, b] = e.touches; pinch.current = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) } } }
+  const onTouchMove = e => {
+    if (!pinch.current || e.touches.length !== 2) return
+    const [a, b] = e.touches, d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), k = d / pinch.current.d
+    const max = (data?.posts?.length || 1) + 1
+    if (k < 0.78) { setGcols(c => Math.min(max, (c || 1) + 1)); pinch.current = { d } }
+    else if (k > 1.28) { setGcols(c => Math.max(1, (c || 2) - 1)); pinch.current = { d } }
+  }
+  const onTouchEnd = e => { if (e.touches.length < 2) pinch.current = null }
+  const colAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-col]')?.getAttribute('data-col') || null
+  const dragProps = (q, from) => ({
+    onPointerDown: e => {
+      if (e.button > 0 || e.target.closest('button, input, label, a')) return
+      dragged.current = false
+      const x = e.clientX, y = e.clientY
+      press.current = { x, y, t: setTimeout(() => {
+        press.current = null; dragged.current = true
+        try { navigator.vibrate?.(30) } catch { /* без вибрации */ }
+        setDrag({ q, from, x, y, over: from })
+      }, 450) }
+    },
+    onPointerMove: e => {
+      const p = press.current
+      if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8) { clearTimeout(p.t); press.current = null }
+    },
+    onPointerUp: () => { if (press.current) { clearTimeout(press.current.t); press.current = null } },
+    onPointerCancel: () => { if (press.current) { clearTimeout(press.current.t); press.current = null } },
+    onContextMenu: e => e.preventDefault(),
+  })
+  useEffect(() => {
+    if (!drag) return
+    const move = e => {
+      const x = e.clientX, y = e.clientY
+      const el = boardRef.current
+      if (el) { const r = el.getBoundingClientRect(); if (x < r.left + 30) el.scrollLeft -= 14; else if (x > r.right - 30) el.scrollLeft += 14 }   // у края — доска едет
+      setDrag(d => (d ? { ...d, x, y, over: colAt(x, y) || d.over } : d))
+    }
+    const up = () => { const d = dragRef.current; setDrag(null); if (d) drop(d) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up)
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up) }
+  }, [!!drag])   // eslint-disable-line react-hooks/exhaustive-deps
+  async function drop(d) {
+    const to = d.over, q = d.q
+    if (!to || to === d.from) return
+    if (to === IDLE) { window.alert('Вернуть в «Принят, не пущен» нельзя — верните заказ на нужный пост.'); return }
+    const post = data.posts.find(p => p.id === to)
+    const fromIdx = data.posts.findIndex(p => p.id === d.from), toIdx = data.posts.findIndex(p => p.id === to)
+    const text = d.from === IDLE ? `Пустить заказ «${orderTitle(q)}» в работу сразу на пост «${post?.name}»?`
+      : toIdx < fromIdx ? `Вернуть заказ «${orderTitle(q)}» на пост «${post?.name}»?\nДальше он снова пройдёт посты после него.`
+      : `Перенести заказ «${orderTitle(q)}» вперёд на пост «${post?.name}»?\nТекущий пост будет отмечен выполненным, посты между — пропущены.`
+    if (!window.confirm(text)) return
+    setBusy(q.stage_id || 'o' + q.order_id)
+    let r = {}
+    if (d.from === IDLE) { r = await startOrderStages(q.order_id); if (!r.error) await planStages(q.order_id) }
+    if (!r.error) r = await stageMove(q.order_id, to)
+    setBusy('')
+    if (r.error) window.alert(r.error)
+    else if (r.data === 'no_stage') window.alert(`В маршруте этого заказа нет поста «${post?.name}» (пост добавили позже, чем заказ пустили в работу).`)
+    await load(); onChange?.(); window.dispatchEvent(new Event('notices-seen'))
+  }
   if (!data) return <CncLoader compact label="Загружаем техпроцесс…" />
   const cols = [{ id: IDLE, name: 'Принят, не пущен' }, ...data.posts]
   const byPost = id => (id === IDLE ? data.idle : data.items.filter(q => q.post_id === id))
   const goCol = id => colRefs.current[id]?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
+  const compact = gcols >= 3                                   // мелко — только названия; тап по заказу — крупно, к его посту
+  const zoomTo = id => { setGcols(1); setTimeout(() => goCol(id), 60) }
+  const maxCols = cols.length
   const btn = kind => ({ padding: '5px 10px', borderRadius: 16, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
     border: kind === 'main' || kind === 'ok' ? 'none' : `0.5px solid ${kind === 'warn' ? 'var(--amber)' : kind === 'blue' ? 'var(--blue)' : 'var(--border-md)'}`,
     background: kind === 'main' ? 'var(--blue)' : kind === 'ok' ? 'var(--teal)' : 'transparent',
@@ -64,8 +140,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     const isNew = q.status === 'queued', withParts = ruleOf(q.rule, q.post_name).list !== 'none'
     const key = q.stage_id
     return (
-      <div key={key} className="card" style={{ padding: '8px 10px', border: isNew ? '1px solid var(--amber)' : undefined }}>
-        <div onClick={() => navigate(`/orders/${q.order_id}`)} style={{ cursor: 'pointer' }}>
+      <div key={key} className="card" {...dragProps(q, q.post_id)} style={{ padding: compact ? '6px 8px' : '8px 10px', border: isNew ? '1px solid var(--amber)' : undefined, opacity: drag?.q === q ? 0.35 : 1, userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}>
+        <div onClick={() => { if (dragged.current) return; if (compact) { zoomTo(q.post_id); return } navigate(`/orders/${q.order_id}`) }} style={{ cursor: 'pointer' }}>
           <div style={{ fontWeight: 500, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(q)}</div>
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.own ? 'свой заказ' : q.client_name || '—'} · {meta(q)}</div>
         </div>
@@ -73,32 +149,32 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)}, идёт ${since(q.accepted_at)}`}
           {q.next_post ? ` → ${q.next_post}` : ' · последний'}
         </div>
-        <StageProgress orderId={q.order_id} rule={q.rule} postName={q.post_name} scanned={q.scanned} onOpen={withParts ? () => setParts({ stage: q, orderId: q.order_id }) : undefined} onSkipped={load} />
-        <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+        {!compact && <StageProgress orderId={q.order_id} rule={q.rule} postName={q.post_name} scanned={q.scanned} onOpen={withParts ? () => setParts({ stage: q, orderId: q.order_id }) : undefined} onSkipped={load} />}
+        {!compact && <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
           {isNew && <button type="button" disabled={busy === key} style={btn('main')} onClick={() => act(key, () => stageAccept(key))}>✓ Принять</button>}
           {!isNew && <button type="button" disabled={busy === key} style={btn('ok')} onClick={() => (withParts ? setParts({ stage: q, orderId: q.order_id })
             : act(key, () => stageDone(key), `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
           {withParts && <button type="button" style={btn('blue')} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали</button>}
           {q.has_prev && <button type="button" disabled={busy === key} style={btn('warn')} onClick={() => setRet({ orderId: q.order_id, title: orderTitle(q) })}>↩ Вернуть</button>}
-        </div>
+        </div>}
       </div>
     )
   }
   const idleCard = q => {
     const key = 'o' + q.order_id
     return (
-      <div key={key} className="card" style={{ padding: '8px 10px', border: '1px dashed var(--amber)' }}>
-        <div onClick={() => navigate(`/orders/${q.order_id}`)} style={{ cursor: 'pointer' }}>
+      <div key={key} className="card" {...dragProps(q, IDLE)} style={{ padding: compact ? '6px 8px' : '8px 10px', border: '1px dashed var(--amber)', opacity: drag?.q === q ? 0.35 : 1, userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}>
+        <div onClick={() => { if (dragged.current) return; if (compact) { zoomTo(IDLE); return } navigate(`/orders/${q.order_id}`) }} style={{ cursor: 'pointer' }}>
           <div style={{ fontWeight: 500, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(q)}</div>
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.own ? 'свой заказ' : q.client_name || '—'} · {meta(q)}</div>
           {q.accepted_at && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>принят {clock(q.accepted_at)}</div>}
         </div>
-        {openOps === q.order_id && <div style={{ marginTop: 6 }}><OrderOps orderId={q.order_id} /></div>}
-        <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+        {!compact && openOps === q.order_id && <div style={{ marginTop: 6 }}><OrderOps orderId={q.order_id} /></div>}
+        {!compact && <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
           <button type="button" disabled={busy === key} style={btn('ok')} onClick={() => act(key, async () => { const r = await startOrderStages(q.order_id); if (!r.error) await planStages(q.order_id); return r },
             `Пустить заказ «${orderTitle(q)}» в работу?\nОн встанет на первый пост техпроцесса.`)}>▶ Пустить в работу</button>
           <button type="button" style={btn(openOps === q.order_id ? 'blue' : '')} onClick={() => setOpenOps(v => (v === q.order_id ? '' : q.order_id))}>Операции {openOps === q.order_id ? '▴' : '▾'}</button>
-        </div>
+        </div>}
       </div>
     )
   }
@@ -115,22 +191,30 @@ export default function ProductionBoard({ prodId = null, onChange }) {
             style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 14, fontSize: 11.5, border: `0.5px solid ${n ? (c.id === IDLE ? 'var(--amber)' : 'var(--blue)') : 'var(--border-md)'}`,
               background: 'transparent', color: n ? (c.id === IDLE ? 'var(--amber)' : 'var(--blue)') : 'var(--text-hint)', whiteSpace: 'nowrap' }}>{c.id === IDLE ? '▶ Не пущены' : c.name} · {n}</button>
         })}
-        <button type="button" onClick={load} title="Обновить" style={{ flex: '0 0 auto', marginLeft: 'auto', padding: '4px 9px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>⟳{stamp ? ` ${stamp.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : ''}</button>
+        <span style={{ flex: '0 0 auto', marginLeft: 'auto', display: 'inline-flex', gap: 3 }}>
+          <button type="button" title="Мельче — больше постов на экране" onClick={() => setGcols(c => Math.min(maxCols, (c || 1) + 1))} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>−</button>
+          <button type="button" title="Крупнее" onClick={() => setGcols(c => Math.max(1, (c || 2) - 1))} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>+</button>
+        </span>
+        <button type="button" onClick={load} title="Обновить" style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>⟳{stamp ? ` ${stamp.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : ''}</button>
       </div>
       {!data.posts.length ? (
         <p style={{ fontSize: 13, color: 'var(--text-hint)', padding: '16px 0' }}>Рабочих постов ещё нет. Создайте их во вкладке «⚙ Настройки» → «Рабочие посты»: раскрой, кромление, присадка, сборка…</p>
       ) : !total ? (
         <p style={{ fontSize: 13, color: 'var(--text-hint)', padding: '6px 0 10px' }}>Сейчас в работе заказов нет. Принятые заказы появятся в колонке «Принят, не пущен».</p>
       ) : null}
-      <div style={{ display: 'flex', gap: 10, overflowX: 'auto', scrollSnapType: narrow ? 'x mandatory' : 'none', paddingBottom: 8, alignItems: 'flex-start' }}>
+      <div ref={boardRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        style={{ display: 'flex', gap: gcols >= 3 ? 6 : 10, overflowX: 'auto', scrollSnapType: gcols === 1 && !drag ? 'x mandatory' : 'none', paddingBottom: 8, alignItems: 'flex-start' }}>
         {cols.map(c => {
           const list = byPost(c.id)
           if (c.id === IDLE && !list.length && data.items.length) return null      // пустую «не пущены» прячем, если есть работа
           return (
             <div key={c.id} ref={el => { colRefs.current[c.id] = el }}
-              style={{ flex: narrow ? '0 0 86%' : '1 0 250px', maxWidth: narrow ? 'none' : 360, scrollSnapAlign: 'start', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: 8, minHeight: 80 }}>
+              data-col={c.id}
+              style={{ flex: gcols ? `0 0 calc((100% - ${(gcols - 1) * (gcols >= 3 ? 6 : 10)}px) / ${gcols})` : '1 0 250px', maxWidth: gcols ? 'none' : 360, minWidth: 0, scrollSnapAlign: 'start',
+                background: drag && drag.over === c.id && drag.from !== c.id ? 'var(--blue-light)' : 'var(--bg2)', outline: drag && drag.over === c.id && drag.from !== c.id ? '2px dashed var(--blue)' : 'none',
+                borderRadius: 'var(--radius)', padding: compact ? 5 : 8, minHeight: drag ? 200 : 80 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
-                <span style={{ fontWeight: 600, fontSize: 13, color: c.id === IDLE ? 'var(--amber)' : 'var(--text)' }}>{c.id === IDLE ? '▶ ' : '📍 '}{c.name}</span>
+                <span style={{ fontWeight: 600, fontSize: compact ? 11.5 : 13, color: c.id === IDLE ? 'var(--amber)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{c.id === IDLE ? '▶ ' : compact ? '' : '📍 '}{c.name}</span>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{list.length}</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -140,6 +224,13 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           )
         })}
       </div>
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Удержите заказ и перенесите пальцем на нужный пост — вперёд или назад. Щипок двумя пальцами — больше или меньше постов на экране.</p>
+      {drag && (
+        <div style={{ position: 'fixed', left: drag.x - 70, top: drag.y - 26, width: 140, zIndex: 500, pointerEvents: 'none', padding: '7px 9px', borderRadius: 10, background: 'var(--bg)', border: '1.5px solid var(--blue)', boxShadow: '0 6px 18px rgba(0,0,0,0.25)', fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {orderTitle(drag.q)}
+          <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--blue)' }}>→ {drag.over === IDLE ? 'не пущен' : data.posts.find(p => p.id === drag.over)?.name || '…'}</div>
+        </div>
+      )}
       {ret && <StageReturn orderId={ret.orderId} title={ret.title} onClose={ch => { setRet(null); if (ch) { load(); onChange?.(); window.dispatchEvent(new Event('notices-seen')) } }} />}
       {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) { load(); onChange?.() } }} />}
     </div>
