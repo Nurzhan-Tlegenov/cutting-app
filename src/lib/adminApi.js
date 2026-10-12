@@ -60,6 +60,6 @@ export async function adminProductionOrders() {
   try {
     const { data, error } = await supabase.rpc('admin_production_orders')
     if (error) return { error: /PGRST202|42883|schema cache|Could not find the function/i.test(`${error.message} ${error.code}`) ? PRODS_SQL_HINT : error.message }
-    return { data: data || [] }
+    return { data: (data || []).filter(x => !x.excluded) }   // тестовые заказы в суммы не идут
   } catch (e) { return { error: String(e?.message || e) } }
 }

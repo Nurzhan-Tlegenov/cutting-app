@@ -117,7 +117,13 @@ export function Totals({ t, show }) {
 
 const day = v => new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })
 /** Раскладка по заказам: какие работы и на какую сумму сделаны по каждому принятому или исполненному заказу */
-export function OrderBreakdown({ list, show, onOpen }) {
+// «быстрый» заказ: от принятия до исполнения ≤ 20 минут — скорее всего тест, его можно убрать из итогов
+const TEST_MINUTES = 20
+const isFast = o => o.status === 'done' && o.done_at && (o.accepted_at || o.submitted_at)
+  && new Date(o.done_at) - new Date(o.accepted_at || o.submitted_at) <= TEST_MINUTES * 60000
+const mins = o => Math.max(0, Math.round((new Date(o.done_at) - new Date(o.accepted_at || o.submitted_at)) / 60000))
+
+export function OrderBreakdown({ list, show, onOpen, onExclude }) {
   const rows = list.filter(o => o.status === 'done' || o.status === 'inwork').sort((a, b) => orderDate(b) - orderDate(a))
   if (!rows.length) return <p style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 6 }}>За этот период принятых и исполненных заказов нет.</p>
   const money1 = on(show, 'sumDone') || on(show, 'sumWork')
@@ -137,6 +143,13 @@ export function OrderBreakdown({ list, show, onOpen }) {
               {o.client_name ? <span style={{ color: 'var(--text-muted)' }}>{o.client_name} · </span> : null}{day(orderDate(o))} · {o.status === 'done' ? 'исполнен' : 'в работе'}{o.deleted ? ' · заказ удалён заказчиком' : ''}
             </div>
             {parts.length > 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{parts.join(' · ')}</div>}
+            {onExclude && isFast(o) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }} onClick={e => e.stopPropagation()}>
+                <span style={{ fontSize: 11, color: 'var(--amber)' }}>исполнен за {mins(o)} мин — тест?</span>
+                <button type="button" onClick={() => onExclude(o, true)}
+                  style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, border: '0.5px solid var(--amber)', background: 'transparent', color: 'var(--amber)', cursor: 'pointer' }}>Убрать из итогов</button>
+              </div>
+            )}
           </div>
         )
       })}
@@ -148,11 +161,13 @@ export function OrderBreakdown({ list, show, onOpen }) {
  * «Итоги» кабинета производства: свёрнутый блок — период, итоги, раскладка по заказам и настройка, что показывать.
  * list — строки статистики; show / onShow — отмеченные пункты (хранятся в настройках аккаунта); per — usePeriod().
  */
-export function Results({ list, per, show, onShow, onOpen }) {
+export function Results({ list, per, show, onShow, onOpen, onExclude }) {
   const [open, setOpen] = useState(() => { try { return sessionStorage.getItem('resultsOpen') === '1' } catch { return false } })
   const [setup, setSetup] = useState(false)
   const toggle = () => setOpen(v => { try { sessionStorage.setItem('resultsOpen', v ? '0' : '1') } catch { /* без памяти */ } return !v })
-  const inP = per.inPeriod(list), t = totals(inP)
+  // тестовые заказы (убраны из итогов) не считаются нигде; их список — отдельно, внизу, с возвратом
+  const inP = per.inPeriod(list.filter(o => !o.excluded)), t = totals(inP)
+  const tests = per.inPeriod(list.filter(o => o.excluded))
   const label = PERIODS.find(p => p[0] === per.period)?.[1] || ''
   return (
     <div style={{ marginTop: 8, border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)' }}>
@@ -168,7 +183,24 @@ export function Results({ list, per, show, onShow, onOpen }) {
         <div style={{ padding: '8px 10px 10px' }}>
           {per.picker}
           <Totals t={t} show={show} />
-          {on(show, 'byOrder') && <OrderBreakdown list={inP} show={show} onOpen={onOpen} />}
+          {on(show, 'byOrder') && <OrderBreakdown list={inP} show={show} onOpen={onOpen} onExclude={onExclude} />}
+          {!on(show, 'byOrder') && onExclude && inP.some(isFast) && (
+            <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>Есть заказы, исполненные быстрее {TEST_MINUTES} минут ({inP.filter(isFast).length}). Убрать тестовые из итогов можно в «По заказам» — включите его в настройке ниже.</p>
+          )}
+          {tests.length > 0 && (
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Тестовые, не в итогах · {tests.length}</summary>
+              {tests.map(o => (
+                <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderTop: '0.5px solid var(--border)' }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+                    {String(o.order_name || '').trim() || o.order_number || 'Заказ'} · {o.total != null ? money(o.total, o.currency) : '—'}
+                  </span>
+                  {onExclude && <button type="button" onClick={() => onExclude(o, false)}
+                    style={{ fontSize: 11, padding: '1px 8px', borderRadius: 10, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>Вернуть в итоги</button>}
+                </div>
+              ))}
+            </details>
+          )}
           <button type="button" onClick={() => setSetup(v => !v)}
             style={{ marginTop: 10, background: 'none', border: 'none', padding: 0, color: 'var(--blue)', fontSize: 12, cursor: 'pointer' }}>⚙ Что показывать в итогах {setup ? '▴' : '▾'}</button>
           {setup && (

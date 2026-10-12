@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
-import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT, productionStats, productionArchive } from '../lib/productionApi'
+import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT, productionStats, productionArchive, productionExcludeStats } from '../lib/productionApi'
 import { Results, usePeriod } from '../components/OrderStats'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
@@ -80,6 +80,13 @@ export default function ProductionPage() {
     setBusy('')
     if (r.error) { setError(r.error); return }
     setArchived(m => new Map(m).set(o.id, r.at || new Date().toISOString()))
+  }
+  // тестовый заказ (исполнен быстрее 20 минут) — убрать из итогов / вернуть
+  const excludeStats = async (o, on) => {
+    if (on && !window.confirm(`Заказ «${orderTitle(o)}» — тестовый?\nЕго сумма, листы и работы не будут считаться в итогах. Вернуть можно в «Тестовые, не в итогах».`)) return
+    const r = await productionExcludeStats(o.id, on)
+    if (r.error) { window.alert(r.error); return }
+    setStats(list => (list || []).map(x => (x.id === o.id ? { ...x, excluded: on } : x)))
   }
   const loadStats = async () => {
     const r = await productionStats()
@@ -179,7 +186,7 @@ export default function ProductionPage() {
                 {/* статистика за период: заявки, в работе, исполнено, суммы, листы, объёмы работ. Исполненные считаются и после
                     архива, и после того, как клиент удалил заказ, — от него остаётся запись */}
                 <div>
-                  {stats ? <Results list={stats.map(x => (x.client_name ? x : { ...x, client_name: x.own ? '' : orders.find(o => o.id === x.id)?.client_name || '' }))} per={per} show={resShow} onShow={saveResShow} onOpen={o => navigate(`/orders/${o.id}`)} /> : (
+                  {stats ? <Results list={stats.map(x => (x.client_name ? x : { ...x, client_name: x.own ? '' : orders.find(o => o.id === x.id)?.client_name || '' }))} per={per} show={resShow} onShow={saveResShow} onOpen={o => navigate(`/orders/${o.id}`)} onExclude={excludeStats} /> : (
                     <>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
                         {[['Заявок', orders.length], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', orders.filter(o => o.status === 'done').length]].map(([l, v]) => (

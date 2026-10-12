@@ -39,6 +39,14 @@ export async function productionArchive(orderId, on = true) {
   const r = await call('production_archive_order', { p_order: orderId, p_on: on })
   return r.error ? { error: r.missing ? STATS_SQL_HINT : r.error } : { at: r.data }
 }
+/** Тестовый заказ (прошёл от принятия до исполнения ≤ 20 мин) — убрать из итогов / вернуть (migration_stats_test.sql) */
+export const TEST_SQL_HINT = 'Пометка тестовых заказов ещё не включена: выполните migration_stats_test.sql в Supabase (SQL Editor) — один раз.'
+export async function productionExcludeStats(orderId, on = true) {
+  const r = await call('production_exclude_stats', { p_order: orderId, p_on: on })
+  if (!r.error) return {}
+  if (r.missing) return { error: TEST_SQL_HINT }
+  return { error: /not a fast order/.test(r.error) ? 'Убрать из итогов можно только заказ, который прошёл от принятия до исполнения быстрее 20 минут.' : r.error }
+}
 export const orderClient = orderId => call('order_client', { p_order: orderId })
 /** Администратор: подтвердить / отклонить производство ('approved' | 'rejected' | 'pending') */
 export const adminSetProduction = (id, status) => call('admin_set_production', { p_id: id, p_status: status })
