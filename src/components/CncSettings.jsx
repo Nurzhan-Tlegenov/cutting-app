@@ -251,7 +251,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         </div>
         {/* папки выгрузки — матрёшка: вложенные папки и их имена */}
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
-          <label className="label">Папки для программ (вложенные)</label>
+          <label className="label">📁 Папки для G-кода раскроя{<span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--blue-light)', color: 'var(--blue-dark)', whiteSpace: 'nowrap', fontWeight: 500 }}>фрезер · .{post.ext || 'nc'}</span>}</label>
           {(() => { const def = routerDirDefault(post, drillPosts(cnc).length > 0), v = post.dirPath ?? def
             return <DirPathEditor value={v} def={def} preview={dirPreview(v)} onChange={x => set({ dirPath: x })} /> })()}
           <Hint>Куда складываются G-код и файлы бирок при «Сохранить все файлы» (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
@@ -320,7 +320,7 @@ function Drill6Basic({ post, set, router }) {
           </div>
         )}
         <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-          <label className="label">Папки для XML-файлов (вложенные)</label>
+          <label className="label">📁 Папки для программ присадки{<span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', whiteSpace: 'nowrap', fontWeight: 500 }}>шестисторонний · .{post.ext || 'XML'}</span>}</label>
           <DirPathEditor value={post.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={dirPreview(post.dirPath ?? DRILL_DIR_DEFAULT)} onChange={x => set({ dirPath: x })} />
           <Hint>Куда складываются XML-файлы при сохранении (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
         </div>
