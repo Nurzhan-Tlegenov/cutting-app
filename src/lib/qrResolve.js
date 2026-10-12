@@ -54,7 +54,14 @@ async function matchIn(best, code) {
     supabase.from('order_details').select('*').eq('order_id', best.o.id).order('sort_order'),
   ])
   if (!order) return null
-  const list = details || []
+  let list = details || [], model
+  // деталей не видно (сотрудник производства, заказ не на его посту) — берём через функцию базы, вместе с 3D-моделью
+  if (!list.length) {
+    try {
+      const { data: so } = await supabase.rpc('scan_order', { p_order: order.id })
+      if (so?.details?.length) { list = so.details; model = so.model || null }
+    } catch { /* функции в базе ещё нет */ }
+  }
   // части кода, кроме названия заказа
   const rest = code.replace(best.f, ' ')
   const tokens = rest.split(/[^\p{L}\p{N}._/\\-]+/u).filter(Boolean)
@@ -92,5 +99,5 @@ async function matchIn(best, code) {
   }
   // 3) по наименованию детали
   if (di < 0) list.forEach((d, i) => { if (di < 0 && d.name && forms(d.name).some(f => f.length > 2 && tokens.includes(f))) di = i })
-  return { order, details: list, di, des, code, loaded: list.length }
+  return { order, details: list, di, des, code, loaded: list.length, model }
 }

@@ -31,6 +31,7 @@ export default function ScanPage() {
     if (r.error) { setState({ step: 'fail', text, error: r.error }); busy.current = false; return }
     let scene = null
     if (hasModel(r.details)) { try { scene = await loadOrderModel(r.order.id) } catch (e) { if (e?.limit) { setState({ step: 'fail', text, error: e.message }); busy.current = false; return } scene = null } }
+    if (!scene && r.model) { try { const { unpackScene } = await import('../lib/basisB3d'); scene = unpackScene(r.model) } catch { scene = null } }   // модель пришла вместе с деталями
     setState({ step: 'show', text, ...r, scene })
     busy.current = false
   }
