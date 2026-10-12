@@ -19,13 +19,16 @@ export function defaultRule(name) {
   return { list: 'all' }
 }
 export const ruleOf = (rule, name) => (rule && rule.list ? rule : defaultRule(name))
-/** Пост по умолчанию — раскрой, кромление, присадка: заказ проходит его всегда (без галочки в заказе) */
+/** Название похоже на раскрой / кромление / присадку — у таких постов «по умолчанию» включено, пока его не меняли */
 export const isBasePost = name => /(раскр|распил|кром|присад|сверл)/i.test(String(name || ''))
-/** Пост «по галочке в заказе» — сборка, установка, упаковка и любые свои посты. Как post_on_demand в базе */
-export function onDemandOf(rule, name) {
-  if (isBasePost(name)) return false
-  return rule && typeof rule.onDemand === 'boolean' ? rule.onDemand : true
+/** Пост «по умолчанию»: всегда добавляется в маршрут приходящего заказа (галочка в настройке поста). Иначе — по галочке в заказе */
+export function byDefaultOf(rule, name) {
+  if (rule && typeof rule.byDefault === 'boolean') return rule.byDefault
+  if (rule && typeof rule.onDemand === 'boolean') return !rule.onDemand
+  return isBasePost(name)
 }
+/** Пост «по галочке в заказе» — не по умолчанию. Как post_on_demand в базе */
+export const onDemandOf = (rule, name) => !byDefaultOf(rule, name)
 export function ruleText(rule) {
   if (rule.list === 'none') return 'без списка деталей'
   if (rule.list === 'edge') return rule.sides ? 'детали с кромкой, счёт по сторонам' : 'детали с кромкой'

@@ -1,6 +1,7 @@
 import { nestingFaults, FAULT_TITLE } from '../lib/nestingCheck'
 import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -183,6 +184,13 @@ export default function CncPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [built, picked, matKey, pendingBuild])
   const sim = (simSi != null && built?.files.find(f => String(f.si) === simSi && !f.empty)) || null
+  // пока открыт симулятор — страница под ним не прокручивается
+  useEffect(() => {
+    if (!sim) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [!!sim])   // eslint-disable-line react-hooks/exhaustive-deps
   const openSim = f => navigate(`?sim=${f.si}`)
   const closeSim = () => navigate(-1)
   const [saved, setSaved] = useState('')
@@ -441,18 +449,19 @@ export default function CncPage() {
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'mine' && <CncSaved cnc={cnc} onChange={change} />}
 
-      {sim && (
-        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 200, padding: 10, boxSizing: 'border-box', height: '100dvh' }}>
+      {/* симулятор — поверх всего экрана: выносится прямо в body (иначе при прокрученной странице снизу виднелось окно заказа) */}
+      {sim && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 1100, padding: 10, boxSizing: 'border-box', height: '100dvh', overscrollBehavior: 'contain' }}>
           <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000} zShift={sim.zShift}
                 toolDia={toolDia} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
             </Suspense>
           </div>
-        </div>
+        </div>, document.body
       )}
-      {sim && share && (
-        <div onClick={() => setShare(null)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      {sim && share && createPortal(
+        <div onClick={() => setShare(null)} style={{ position: 'fixed', inset: 0, zIndex: 1150, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
           <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 480, borderRadius: '16px 16px 0 0', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
               <div style={{ flex: 1, fontWeight: 500 }}>Ссылка на симуляцию</div>
@@ -476,7 +485,7 @@ export default function CncPage() {
               <button type="button" className="btn-primary" disabled={share.busy} onClick={makeShare}>{share.busy ? 'Создание…' : '🔗 Создать ссылку'}</button>
             )}
           </div>
-        </div>
+        </div>, document.body
       )}
       {xmlView && <Drill6Viewer title={xmlView.title} files={xmlView.files} onClose={() => setXmlView(null)} />}
       {pdfAsk && mat && <PdfSetup order={order} mat={mat} method={order?.cutting_method || 'nesting'} fileName={`Karty_${baseName()}.pdf`} onClose={() => setPdfAsk(false)} />}

@@ -3,7 +3,7 @@ import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
 import StageReturn from './StageReturn'
-import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, onDemandOf, isBasePost } from '../lib/stageParts'
+import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, byDefaultOf } from '../lib/stageParts'
 import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, startOrderStages, stageDone, stageAccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
@@ -238,14 +238,10 @@ function RuleEditor({ post, busy, onSave }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
         {RULE_LISTS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(r.list === k)} onClick={() => set(k === 'drill' && r.list !== 'drill' ? { list: k, top: false, bottom: true, edge: true, grooves: false, mills: false } : { list: k })}>{r.list === k ? '✓ ' : ''}{l}</button>)}
       </div>
-      {isBasePost(post.name) ? (
-        <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 6 }}>Пост по умолчанию: заказ проходит его всегда{r.list === 'edge' || r.list === 'drill' ? ' — кроме заказов, где таких деталей нет' : ''}.</div>
-      ) : (
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
-        <input type="checkbox" checked={onDemandOf(post.rule, post.name)} disabled={busy} onChange={e => set({ onDemand: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />
-        <span><span>Только по галочке в заказе</span> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>— сборка, установка, упаковка: заказ идёт на пост, только если в заказе отмечена эта операция.</span></span>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
+        <input type="checkbox" checked={byDefaultOf(post.rule, post.name)} disabled={busy} onChange={e => set({ byDefault: e.target.checked, onDemand: !e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />
+        <span><span>Учитывать техпроцесс по умолчанию</span> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>— включено: пост всегда добавляется в приходящие заказы{r.list === 'edge' || r.list === 'drill' ? ' (пропускается, только если таких деталей в заказе нет)' : ''}; выключено: пост выбирается галочкой в «Операциях» заказа.</span></span>
       </label>
-      )}
       {r.list === 'edge' && (
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!r.sides} disabled={busy} onChange={e => set({ sides: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />
