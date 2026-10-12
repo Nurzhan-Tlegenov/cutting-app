@@ -1,3 +1,4 @@
+import { MenuButton } from '../components/NavDrawer'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useKeptState } from '../hooks/useKeptState'
 import { changedOrders, markOrdersSeen } from '../lib/notices'
@@ -155,7 +156,7 @@ export default function OrdersPage() {
           </>
         ) : (
           <>
-            <h1 style={{ fontSize: 18, fontWeight: 500 }}>Мои заказы</h1>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Мои заказы</h1></span>
             <button onClick={newOrder}
               style={{ background: 'var(--blue)', color: 'white', border: 'none',
                 borderRadius: 'var(--radius)', padding: '8px 16px', fontSize: 14, fontWeight: 500 }}>

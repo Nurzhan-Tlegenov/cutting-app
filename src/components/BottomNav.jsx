@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { unreadCount } from '../lib/messages'
 import { fetchNotices } from '../lib/notices'
+import NavDrawer, { setMenuBadge } from './NavDrawer'
 
 const IconOrders = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -80,6 +81,7 @@ export default function BottomNav() {
     return () => { alive = false; clearInterval(timer); clearTimeout(hide); document.removeEventListener('visibilitychange', onShow); window.removeEventListener('notices-seen', check) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isMaster])
+  useEffect(() => { setMenuBadge(notices.users + notices.production + notices.orders + unread) }, [notices, unread])
   const dot = n => (n > 0 ? <span style={{ position: 'absolute', top: 0, left: '50%', marginLeft: 6, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, background: 'var(--danger)', color: 'white', fontSize: 10, fontWeight: 600, lineHeight: '16px', textAlign: 'center' }}>{n > 9 ? '9+' : n}</span> : null)
   const cls = ({ isActive }) => (isActive ? 'active' : '')
   const { pathname } = useLocation()
@@ -87,6 +89,7 @@ export default function BottomNav() {
 
   return (
     <>
+    <NavDrawer notices={notices} unread={unread} />
     {toast && (
       <div onClick={() => { setToast(null); navigate(toast.to) }}
         style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top))', left: 10, right: 10, zIndex: 1200, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',

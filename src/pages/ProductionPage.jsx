@@ -1,6 +1,7 @@
+import { MenuButton } from '../components/NavDrawer'
 import { orderFaults, faultText } from '../lib/nestingCheck'
 import { useEffect, useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
@@ -21,7 +22,7 @@ import WorkerProduction from '../components/WorkerProduction'
 import ProductionBoard from '../components/ProductionBoard'
 import { planStages } from '../lib/posts'
 import { sendAppeal } from '../lib/messages'
-import { membersList, myWorkplaces, prodView } from '../lib/workplaces'
+import { membersList, myWorkplaces, prodView, workPid } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
 import Drill6Viewer from '../components/Drill6Viewer'
@@ -61,6 +62,9 @@ export default function ProductionPage() {
   const [stages, setStages] = useState({})                        // где сейчас заказы: id -> { name (пост), status, done, total }
   const loadStages = () => productionStageMap().then(r => setStages(r.data || {}))
   const [tab, setTab] = useKeptState('prodTab', 'orders')    // вкладка кабинета: orders | board | settings
+  // переход из бокового меню: сразу нужная вкладка
+  const loc = useLocation()
+  useEffect(() => { const t = loc.state?.tab; if (t) Promise.resolve().then(() => setTab(t)) }, [loc.key])   // eslint-disable-line react-hooks/exhaustive-deps
   const [hasPosts, setHasPosts] = useState(false)       // есть посты — принятый, но не пущенный заказ помечается
   useEffect(() => { let alive = true; postsList().then(r => { if (alive) setHasPosts((r.data || []).some(p => p.active !== false)) }); return () => { alive = false } }, [])
   const loadStaff = () => membersList().then(r => setStaff({ data: r.data || null, error: r.error || '' }))
@@ -169,10 +173,10 @@ export default function ProductionPage() {
 
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 500, marginBottom: 16, paddingTop: 8 }}>Производство</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Производство</h1></div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
       {prod === undefined ? <CncLoader label="Открываем производство…" /> : wps.length && (prod ? prodView() === 'work' : prodView() !== 'own') ? (
-        <WorkerProduction wps={wps} />
+        <WorkerProduction key={workPid() || 'w'} wps={wps} />
       ) : !prod ? (
         <div className="card">
           <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>У вас есть своё производство?</div>

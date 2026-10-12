@@ -1,3 +1,4 @@
+import { MenuButton } from '../components/NavDrawer'
 import { fetchNotices } from '../lib/notices'
 import LangPicker from '../components/LangPicker'
 import { useState, useEffect } from 'react'
@@ -116,7 +117,7 @@ export default function ProfilePage() {
 
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 500, marginBottom: 20, paddingTop: 8 }}>Профиль</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 20, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Профиль</h1></div>
 
       {/* карточка профиля свёрнута: значок, имя и кабинет; тап — телефон, почта, язык */}
       <div className="card" style={{ marginBottom: 12, padding: cardOpen ? undefined : '10px 14px' }}>

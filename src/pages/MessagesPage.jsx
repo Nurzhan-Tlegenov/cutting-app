@@ -1,3 +1,4 @@
+import { MenuButton } from '../components/NavDrawer'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -78,7 +79,7 @@ export default function MessagesPage() {
 
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 500, marginBottom: 12, paddingTop: 8 }}>Сообщения</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 12, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Сообщения</h1></div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 
       <div className="card" style={{ marginBottom: 12 }}>

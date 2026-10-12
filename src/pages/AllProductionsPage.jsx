@@ -1,3 +1,4 @@
+import { MenuButton } from '../components/NavDrawer'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -70,7 +71,7 @@ export default function AllProductionsPage() {
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, paddingTop: 8 }}>
-        <button onClick={() => navigate('/profile')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 20, cursor: 'pointer', padding: 0 }}>←</button>
+        <MenuButton />
         <h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Заказы всех производств</h1>
       </div>
       {error && <div className="card" style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 10 }}>{error}</div>}

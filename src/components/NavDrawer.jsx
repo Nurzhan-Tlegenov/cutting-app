@@ -1,0 +1,254 @@
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import { myWorkplaces, openWorkplace, openOwnProduction, prodView, workPid } from '../lib/workplaces'
+import { myProduction } from '../lib/productionApi'
+
+// Боковое меню (кнопка ☰ слева вверху или свайп от левого края): все кабинеты и их разделы в одном месте —
+// производство (заказы, техпроцесс, настройки), рабочие места, клиент (заказы, новый заказ), мастер-аккаунт.
+// Один тап — сразу нужный раздел нужного кабинета. Панель идёт за пальцем, закрывается свайпом влево.
+
+let cache = null                                       // { wps, own } — один раз за запуск, обновляется при открытии
+const W = () => Math.min(340, Math.round(window.innerWidth * 0.86))
+const EASE = 'cubic-bezier(.32,.72,0,1)'                // кривая iOS: быстрый старт, мягкая остановка
+
+/** Кнопка ☰ — ставится в шапку главных экранов. Красная точка — есть новое */
+let lastBadge = 0
+export function MenuButton({ style }) {
+  const [n, setN] = useState(lastBadge)
+  useEffect(() => {
+    const on = e => setN(e.detail || 0)
+    window.addEventListener('nav-badge', on)
+    return () => window.removeEventListener('nav-badge', on)
+  }, [])
+  return (
+    <button type="button" aria-label="Меню" onClick={() => window.dispatchEvent(new Event('nav-open'))}
+      style={{ position: 'relative', flex: '0 0 auto', width: 38, height: 38, marginLeft: -6, borderRadius: 19, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text)', WebkitTapHighlightColor: 'transparent', ...style }}>
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+      {n > 0 && <span style={{ position: 'absolute', top: 6, right: 5, width: 9, height: 9, borderRadius: '50%', background: 'var(--danger)', border: '1.5px solid var(--bg)' }} />}
+    </button>
+  )
+}
+// eslint-disable-next-line react-refresh/only-export-components
+export const setMenuBadge = n => { lastBadge = n; window.dispatchEvent(new CustomEvent('nav-badge', { detail: n })) }
+
+const I = {   // линейные значки пунктов
+  orders: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 3h6v4H9zM9 12h6M9 16h4',
+  plus: 'M12 4v16M4 12h16',
+  board: 'M4 4h5v16H4zM10 4h5v10h-5zM16 4h4v7h-4z',
+  gear: 'M12 15a3 3 0 100-6 3 3 0 000 6zM19 12l2-1-1-3-2 .2-1.2-1.2L17 5l-3-1-1 2h-2L10 4 7 5l.2 2L6 8.2 4 8 3 11l2 1v0l-2 1 1 3 2-.2L7.2 17 7 19l3 1 1-2h2l1 2 3-1-.2-2 1.2-1.2 2 .2 1-3z',
+  posts: 'M4 6h16M4 12h16M4 18h16M8 4v4M14 10v4M10 16v4',
+  scan: 'M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M7 12h10',
+  msg: 'M18 9a6 6 0 10-12 0c0 6-2.5 7.5-2.5 7.5h17S18 15 18 9zM10 20a2.2 2.2 0 004 0',
+  user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 20c0-4 3.6-7 8-7s8 3 8 7',
+  users: 'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 4.5a3.2 3.2 0 010 6M18 14c2 .6 3.5 2.6 3.5 6',
+  factory: 'M3 20V9l6 4V9l6 4V5h6v15zM7 17h2M12 17h2M17 17h1',
+  globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zM3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9z',
+  inbox: 'M3 13l3-8h12l3 8v6H3zM3 13h5l1 2h6l1-2h5',
+  bag: 'M5 8h14l-1 12H6zM9 8V6a3 3 0 016 0v2',
+  crown: 'M3 8l4 4 5-7 5 7 4-4-2 11H5z',
+}
+const Ico = ({ d, size = 20 }) => <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d={d} /></svg>
+const tabOf = key => { try { return JSON.parse(sessionStorage.getItem(`keep:/production#${key}`) || 'null') } catch { return null } }
+const setTabKey = (key, v) => { try { sessionStorage.setItem(`keep:/production#${key}`, JSON.stringify(v)) } catch { /* без памяти */ } }
+
+export default function NavDrawer({ notices, unread }) {
+  const { user, profile, cabinet, setCabinet, isMaster } = useAuth()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const [open, setOpen] = useState(false)
+  const [drag, setDrag] = useState(null)               // px, насколько панель выдвинута, пока её ведёт палец
+  const [data, setData] = useState(cache)
+  const [shut, setShut] = useState({})                 // свёрнутые разделы
+  const panel = useRef(null)
+  const w = W()
+
+  const refresh = () => Promise.all([myWorkplaces(), myProduction(user?.id)]).then(([r, p]) => { cache = { wps: r.data || [], own: p || null }; setData(cache) })
+  useEffect(() => {
+    const on = () => { setOpen(true); refresh() }
+    window.addEventListener('nav-open', on)
+    return () => window.removeEventListener('nav-open', on)
+  }, [user?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // свайп от левого края экрана — панель выезжает за пальцем
+  useEffect(() => {
+    let st = null
+    const down = e => { if (open || e.touches.length !== 1) return; const t = e.touches[0]; if (t.clientX < 18) st = { x: t.clientX, y: t.clientY, on: false } }
+    const move = e => {
+      if (!st) return
+      const t = e.touches[0], dx = t.clientX - st.x, dy = t.clientY - st.y
+      if (!st.on) { if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) { st = null; return } if (dx > 10) { st.on = true; refresh() } else return }
+      e.preventDefault()
+      setDrag(Math.max(0, Math.min(w, dx)))
+    }
+    const up = e => {
+      if (!st) return
+      const on = st.on; st = null
+      if (!on) return
+      const x = e.changedTouches[0].clientX
+      setDrag(null); setOpen(x > w * 0.33)
+    }
+    document.addEventListener('touchstart', down, { passive: true })
+    document.addEventListener('touchmove', move, { passive: false })
+    document.addEventListener('touchend', up)
+    return () => { document.removeEventListener('touchstart', down); document.removeEventListener('touchmove', move); document.removeEventListener('touchend', up) }
+  }, [open, w])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // открытая панель закрывается свайпом влево — тоже за пальцем
+  const sw = useRef(null)
+  const pDown = e => { const t = e.touches[0]; sw.current = { x: t.clientX, y: t.clientY, on: false, t: Date.now() } }
+  const pMove = e => {
+    const s = sw.current; if (!s) return
+    const t = e.touches[0], dx = t.clientX - s.x, dy = t.clientY - s.y
+    if (!s.on) { if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { sw.current = null; return } if (dx < -10) s.on = true; else return }
+    setDrag(Math.max(0, Math.min(w, w + dx)))
+  }
+  const pUp = e => {
+    const s = sw.current; sw.current = null
+    if (!s?.on) return
+    const dx = e.changedTouches[0].clientX - s.x, fast = dx < -40 && Date.now() - s.t < 250
+    setDrag(null); setOpen(!(fast || w + dx < w * 0.6))
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    try { navigator.vibrate?.(6) } catch { /* без вибрации */ }
+    const esc = e => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', esc)
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', esc) }
+  }, [open])
+
+  // закрытая панель прячется только после того, как доехала — иначе анимация закрытия не видна
+  const [vis, setVis] = useState(false)
+  const moving = open || drag != null
+  useEffect(() => {
+    if (moving) { Promise.resolve().then(() => setVis(true)); return }
+    const t = setTimeout(() => setVis(false), 450)
+    return () => clearTimeout(t)
+  }, [moving])
+  const shown = drag != null ? drag : open ? w : 0
+  const k = shown / w
+  if (!user) return null
+
+  const wps = data?.wps || [], own = data?.own
+  const ownOk = own && (own.status ?? 'approved') === 'approved'
+  const workView = wps.length > 0 && (own ? prodView() === 'work' : prodView() !== 'own')
+  const curPid = wps.some(x => x.production_id === workPid()) ? workPid() : wps[0]?.production_id
+  const n = notices || {}
+
+  // переходы
+  const go = (to, state) => { setOpen(false); navigate(to, state ? { state } : undefined) }
+  const goOwn = tab => { openOwnProduction(); if (tab) setTabKey('prodTab', tab); setCabinet('production'); go('/production', { tab }) }
+  const goWork = (pid, wtab) => { openWorkplace(pid); if (wtab) setTabKey('wTab', wtab); setCabinet('production'); go('/production', { wtab }) }
+  const goClient = to => { setCabinet('client'); go(to) }
+
+  // что сейчас открыто — подсвечивается
+  const onProd = cabinet === 'production' && pathname === '/production'
+  const ownTab = tabOf('prodTab') || 'orders', wTab = tabOf('wTab') || 'posts'
+  const isOwn = t => onProd && !workView && ownTab === t
+  const isWork = (pid, t) => onProd && workView && curPid === pid && wTab === t
+  const isClient = to => cabinet === 'client' && (to === '/orders' ? pathname === '/orders' || (pathname.startsWith('/orders/') && pathname !== '/orders/new') : pathname === to)
+
+  const sections = []
+  for (const x of wps) {
+    const chief = !!x.perms?.all, cnt = n.byProd?.[x.production_id] || 0
+    sections.push({ id: `w:${x.production_id}`, icon: I.factory, title: x.production_name, sub: `Рабочее место${x.name ? ' · ' + x.name : ''}`, badge: cnt, items: [
+      { icon: I.posts, label: 'Мои посты', badge: cnt, on: isWork(x.production_id, 'posts'), act: () => goWork(x.production_id, 'posts') },
+      ...(chief ? [
+        { icon: I.board, label: 'Техпроцесс', on: isWork(x.production_id, 'board'), act: () => goWork(x.production_id, 'board') },
+        { icon: I.orders, label: 'Все заказы', on: isWork(x.production_id, 'orders'), act: () => goWork(x.production_id, 'orders') },
+      ] : []),
+    ] })
+  }
+  const ownPosts = own?.id ? n.byProd?.[own.id] || 0 : 0
+  const prodSec = ownOk
+    ? { id: 'own', icon: I.factory, title: own.name || 'Производство', sub: 'Своё производство', badge: (n.ownNew || 0) + ownPosts, items: [
+        { icon: I.orders, label: 'Заказы', badge: n.ownNew || 0, on: isOwn('orders'), act: () => goOwn('orders') },
+        { icon: I.board, label: 'Техпроцесс', badge: ownPosts, on: isOwn('board'), act: () => goOwn('board') },
+        { icon: I.gear, label: 'Настройки', on: isOwn('settings'), act: () => goOwn('settings') },
+      ] }
+    : { id: 'own', icon: I.factory, title: own ? own.name || 'Производство' : wps.length ? 'Своё производство' : 'Производство', sub: own ? 'Ждёт подтверждения' : 'Ещё не создано', items: [
+        { icon: own ? I.factory : I.plus, label: own ? 'Открыть' : wps.length ? 'Создать своё производство' : 'Зарегистрировать производство', on: onProd && !workView, act: () => goOwn(null) },
+      ] }
+  const clientSec = { id: 'client', icon: I.bag, title: 'Клиент', sub: 'Мои заказы на раскрой', badge: n.orders || 0, items: [
+    { icon: I.orders, label: 'Мои заказы', badge: n.orders || 0, on: isClient('/orders'), act: () => goClient('/orders') },
+    { icon: I.plus, label: 'Новый заказ', on: isClient('/orders/new'), act: () => goClient('/orders/new') },
+  ] }
+  // сотруднику — сначала рабочее место, потом клиент, потом своё производство; остальным — производство, клиент
+  if (wps.length) sections.push(clientSec, prodSec); else sections.unshift(prodSec, clientSec)
+  const common = { id: 'common', icon: I.user, title: 'Общее', items: [
+    { icon: I.scan, label: 'Сканер бирки', on: pathname === '/scan', act: () => go('/scan') },
+    { icon: I.msg, label: 'Сообщения', badge: unread || 0, on: pathname === '/messages', act: () => go('/messages') },
+    { icon: I.user, label: 'Профиль', badge: 0, on: pathname === '/profile', act: () => go('/profile') },
+  ] }
+  sections.push(common)
+  if (isMaster) sections.push({ id: 'master', icon: I.crown, title: 'Мастер-аккаунт', badge: n.users || 0, items: [
+    { icon: I.users, label: 'Пользователи и регистрация', badge: n.users || 0, on: pathname === '/users', act: () => go('/users') },
+    { icon: I.globe, label: 'Заказы всех клиентов', on: pathname === '/all-orders', act: () => go('/all-orders') },
+    { icon: I.factory, label: 'Заказы всех производств', on: pathname === '/all-productions', act: () => go('/all-productions') },
+    { icon: I.inbox, label: 'Обращения и файлы', on: false, act: () => go('/messages') },
+  ] })
+
+  const initials = (profile?.full_name || user?.email || '?').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase()
+  const where = cabinet === 'production' ? (workView ? wps.find(x => x.production_id === curPid)?.production_name : own?.name) || 'Производство' : 'Клиент'
+  const pill = c => c > 0 ? <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10, background: 'var(--danger)', color: '#fff', fontSize: 11.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{c > 99 ? '99+' : c}</span> : null
+  const tr = drag != null ? 'none' : `transform .42s ${EASE}`
+
+  return createPortal(
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1100, pointerEvents: moving ? 'auto' : 'none', visibility: moving || vis ? 'visible' : 'hidden' }}>
+      <div onClick={() => setOpen(false)} style={{ position: 'absolute', inset: 0, background: '#000', opacity: k * 0.38, transition: drag != null ? 'none' : `opacity .42s ${EASE}`, WebkitTapHighlightColor: 'transparent' }} />
+      <nav ref={panel} onTouchStart={pDown} onTouchMove={pMove} onTouchEnd={pUp}
+        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: w, transform: `translate3d(${shown - w}px,0,0)`, transition: tr, willChange: 'transform',
+          background: 'var(--bg)', boxShadow: k > 0 ? '8px 0 32px rgba(0,0,0,.18)' : 'none', display: 'flex', flexDirection: 'column',
+          paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', borderRadius: '0 18px 18px 0', overflow: 'hidden' }}>
+        {/* шапка: кто и где сейчас */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 16px 12px' }}>
+          <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: 15, flexShrink: 0 }}>{initials}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile?.full_name || 'Пользователь'}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Сейчас: {where}</div>
+          </div>
+          <button type="button" aria-label="Закрыть" onClick={() => setOpen(false)} style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 18, padding: 0, cursor: 'pointer' }}>×</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', padding: '0 10px 16px' }}>
+          {!data && <div style={{ fontSize: 12, color: 'var(--text-hint)', padding: '6px 8px' }}>Загружаем…</div>}
+          {sections.map((s, si) => {
+            const closed = !!shut[s.id]
+            return (
+              <div key={s.id} style={{ marginTop: si ? 6 : 0, opacity: k, transform: `translate3d(${(1 - k) * -24 * (1 + si * 0.25)}px,0,0)`, transition: drag != null ? 'none' : `transform .5s ${EASE}, opacity .4s ${EASE}` }}>
+                <button type="button" onClick={() => setShut(m => ({ ...m, [s.id]: !closed }))}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px 6px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}>
+                  <span style={{ color: 'var(--text-hint)' }}><Ico d={s.icon} size={18} /></span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 12, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
+                    {s.sub && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>{s.sub}</span>}
+                  </span>
+                  {closed && pill(s.badge)}
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--text-hint)" strokeWidth="2" strokeLinecap="round" style={{ transform: closed ? 'rotate(-90deg)' : 'none', transition: `transform .3s ${EASE}` }}><path d="M6 9l6 6 6-6" /></svg>
+                </button>
+                {/* плавное сворачивание: высота через сетку 0fr ↔ 1fr */}
+                <div style={{ display: 'grid', gridTemplateRows: closed ? '0fr' : '1fr', transition: `grid-template-rows .34s ${EASE}` }}>
+                  <div style={{ overflow: 'hidden' }}>
+                    {s.items.map(it => (
+                      <button key={it.label} type="button" onClick={it.act} className="nav-item"
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', margin: '1px 0', borderRadius: 12, border: 'none', textAlign: 'left', cursor: 'pointer',
+                          background: it.on ? 'var(--blue-light)' : 'transparent', color: it.on ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: it.on ? 600 : 400 }}>
+                        <Ico d={it.icon} />
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+                        {pill(it.badge)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </nav>
+    </div>,
+    document.body,
+  )
+}

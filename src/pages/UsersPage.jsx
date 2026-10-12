@@ -1,5 +1,5 @@
+import { MenuButton } from '../components/NavDrawer'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
@@ -15,7 +15,6 @@ const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit',
 const digits = v => String(v || '').replace(/\D/g, '')
 
 export default function UsersPage() {
-  const navigate = useNavigate()
   const { user } = useAuth()
   const [users, setUsers] = useState(null)
   const [reqs, setReqs] = useState([])
@@ -74,7 +73,7 @@ export default function UsersPage() {
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingTop: 8 }}>
-        <button type="button" onClick={() => navigate('/profile')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1 }}>←</button>
+        <MenuButton />
         <h1 style={{ fontSize: 18, fontWeight: 500 }}>Пользователи</h1>
       </div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}

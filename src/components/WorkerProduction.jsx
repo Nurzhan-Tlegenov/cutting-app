@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { productionOrders, productionSetStatus, productionReturnOrder, orderMarks } from '../lib/productionApi'
 import { orderFaults, faultText } from '../lib/nestingCheck'
 import { limitFromError } from '../lib/limits'
@@ -37,6 +37,8 @@ export default function WorkerProduction({ wps }) {
   const open = new Set(openIds)
   const [filter, setFilter] = useKeptState('wFilter', 'work')
   const [wtab, setWtab] = useKeptState('wTab', 'posts')
+  const loc = useLocation()
+  useEffect(() => { const t = loc.state?.wtab; if (t) Promise.resolve().then(() => setWtab(t)) }, [loc.key])   // eslint-disable-line react-hooks/exhaustive-deps
   const [tick, setTick] = useState(0)
   const [parts, setParts] = useKeptState('wParts', null)       // открыт список деталей поста: { stage, orderId } — после обновления страницы открыт снова
   const load = async () => {

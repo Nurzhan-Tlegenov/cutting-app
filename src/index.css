@@ -103,3 +103,7 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 
 /* арабский (справа налево): телефоны, почта и коды остаются слева направо */
 [dir="rtl"] input[type="tel"], [dir="rtl"] input[type="email"], [dir="rtl"] input[inputmode="numeric"] { direction: ltr; text-align: right; }
+
+/* боковое меню: отклик на нажатие — лёгкое «вдавливание», как в iOS */
+.nav-item { transition: transform .18s cubic-bezier(.32,.72,0,1), background-color .18s; -webkit-tap-highlight-color: transparent; }
+.nav-item:active { transform: scale(.97); background-color: var(--bg2) !important; }
