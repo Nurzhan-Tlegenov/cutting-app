@@ -197,12 +197,16 @@ export default function ProductionPage() {
       ) : (
         <>
           {/* вкладки кабинета: заказы, техпроцесс (доска постов), настройки — небольшие, чтобы беречь экран телефона */}
-          <div style={{ display: 'flex', gap: 4, marginBottom: 10, background: 'var(--bg2)', borderRadius: 18, padding: 3 }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 4, background: 'var(--bg2)', borderRadius: 18, padding: 3 }}>
             {[['orders', `Заказы${count.all ? ` · ${count.all}` : ''}`], ['board', `Техпроцесс${Object.keys(stages).length ? ` · ${Object.keys(stages).length}` : ''}`], ['settings', '⚙ Настройки']].map(([k, l]) => (
               <button key={k} type="button" onClick={() => setTab(k)}
                 style={{ flex: 1, padding: '5px 6px', borderRadius: 15, border: 'none', fontSize: 12.5, fontWeight: tab === k ? 600 : 400, whiteSpace: 'nowrap',
                   background: tab === k ? 'var(--bg)' : 'transparent', color: tab === k ? 'var(--blue)' : 'var(--text-muted)', boxShadow: tab === k ? '0 1px 2px rgba(0,0,0,0.12)' : 'none' }}>{l}</button>
             ))}
+          </div>
+          {/* сканер бирки: деталь в 3D-модели заказа и вверх по структуре — для сборки */}
+          <button type="button" title="Сканер бирки — деталь в 3D-модели (сборка)" onClick={() => navigate('/scan')} style={{ flex: '0 0 auto', width: 36, height: 34, borderRadius: 17, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', fontSize: 16, padding: 0, cursor: 'pointer' }}>📷</button>
           </div>
 
           {tab === 'settings' && (

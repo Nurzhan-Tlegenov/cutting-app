@@ -114,6 +114,7 @@ export default function WorkerProduction({ wps }) {
         ) : <div style={{ fontWeight: 500, fontSize: 16 }}>{wp.production_name}</div>}
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ваше рабочее место: <b style={{ fontWeight: 500 }}>{wp.name || 'сотрудник'}</b></div>
         <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Доступ: {permsText(perms)}{wp.owner_name ? ` · руководитель: ${wp.owner_name}` : ''}</div>
+        <button type="button" onClick={() => navigate('/scan')} style={{ marginTop: 8, width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>📷 Сканер бирки — деталь в 3D-модели (сборка)</button>
       </div>
       {error && <p className="error-text" style={{ marginBottom: 10 }}>{error}</p>}
 

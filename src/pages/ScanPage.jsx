@@ -115,7 +115,7 @@ export default function ScanPage() {
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0 12px' }}>
-        <button type="button" onClick={() => navigate('/profile')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1 }}>←</button>
+        <button type="button" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate('/profile'))} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1 }}>←</button>
         <h1 style={{ fontSize: 18, fontWeight: 500 }}>Сканер QR</h1>
       </div>
       {state.step === 'find' && <CncLoader compact label="Ищем деталь…" />}

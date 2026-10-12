@@ -96,8 +96,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
       press.current = { x, y, t: setTimeout(() => {
         press.current = null; dragged.current = true
         try { navigator.vibrate?.(30) } catch { /* без вибрации */ }
-        setDrag({ q, from, x, y, over: from })
-      }, 450) }
+        setDrag({ q, from, x, y, x0: x, y0: y, over: from })
+      }, 700) }
     },
     onPointerMove: e => {
       const p = press.current
@@ -107,6 +107,17 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     onPointerCancel: () => { if (press.current) { clearTimeout(press.current.t); press.current = null } },
     onContextMenu: e => e.preventDefault(),
   })
+  // щипок увеличивает только доску, не весь экран: браузеру жест двумя пальцами по доске не отдаём
+  useEffect(() => {
+    const el = boardRef.current
+    if (!el) return
+    const stop2 = e => { if (e.touches && e.touches.length >= 2) e.preventDefault() }
+    const stopG = e => e.preventDefault()
+    el.addEventListener('touchstart', stop2, { passive: false })
+    el.addEventListener('touchmove', stop2, { passive: false })
+    el.addEventListener('gesturestart', stopG); el.addEventListener('gesturechange', stopG)
+    return () => { el.removeEventListener('touchstart', stop2); el.removeEventListener('touchmove', stop2); el.removeEventListener('gesturestart', stopG); el.removeEventListener('gesturechange', stopG) }
+  }, [!!data])   // eslint-disable-line react-hooks/exhaustive-deps
   const ghostRef = useRef(null)
   useEffect(() => {
     if (!drag) return
@@ -122,7 +133,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
       raf = requestAnimationFrame(tick)
     }
     const move = e => { pos.x = e.clientX; pos.y = e.clientY; place() }
-    const up = () => { cancelAnimationFrame(raf); const d = dragRef.current; setDrag(null); if (d) drop({ ...d, over }) }
+    // защита от случайного переноса: бросить можно, только если карточку реально увели (≥ 60 px) на другой пост
+    const up = () => { cancelAnimationFrame(raf); const d = dragRef.current; setDrag(null); if (d && Math.hypot(pos.x - d.x0, pos.y - d.y0) >= 60) drop({ ...d, over }) }
     place(); raf = requestAnimationFrame(tick)
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up) }
@@ -247,7 +259,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           )
         })}
       </div>
-      <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Удержите заказ и перенесите пальцем на нужный пост — вперёд или назад. Щипок двумя пальцами — больше или меньше постов на экране.</p>
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Удержите заказ (около секунды) и перенесите пальцем на нужный пост — вперёд или назад. Щипок двумя пальцами — больше или меньше постов на экране.</p>
       {drag && (
         <div ref={ghostRef} style={{ position: 'fixed', left: 0, top: 0, transform: `translate(${drag.x - 70}px, ${drag.y - 26}px)`, willChange: 'transform', width: 140, zIndex: 500, pointerEvents: 'none', padding: '7px 9px', borderRadius: 10, background: 'var(--bg)', border: '1.5px solid var(--blue)', boxShadow: '0 6px 18px rgba(0,0,0,0.25)', fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {orderTitle(drag.q)}
