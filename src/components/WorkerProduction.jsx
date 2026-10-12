@@ -106,15 +106,18 @@ export default function WorkerProduction({ wps }) {
   const shown = live.filter(o => filter === 'all' || (filter === 'new' ? o.status === 'new' : o.status === 'discussion' || o.status === 'inwork'))
   return (
     <>
-      <div className="card" style={{ marginBottom: 12 }}>
-        {wps.length > 1 ? (
-          <select value={pid} onChange={e => pick(e.target.value)} style={{ marginBottom: 6, fontWeight: 500 }}>
-            {wps.map(w => <option key={w.production_id} value={w.production_id}>{w.production_name}{w.city ? `, ${w.city}` : ''}</option>)}
-          </select>
-        ) : <div style={{ fontWeight: 500, fontSize: 16 }}>{wp.production_name}</div>}
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ваше рабочее место: <b style={{ fontWeight: 500 }}>{wp.name || 'сотрудник'}</b></div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Доступ: {permsText(perms)}{wp.owner_name ? ` · руководитель: ${wp.owner_name}` : ''}</div>
-        <button type="button" onClick={() => navigate('/scan')} style={{ marginTop: 8, width: '100%', padding: '8px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>📷 Сканер бирки — деталь в 3D-модели (сборка)</button>
+      {/* шапка: производство, имя сотрудника и значок сканера — одной строкой, без лишнего */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {wps.length > 1 ? (
+            <select value={pid} onChange={e => pick(e.target.value)} style={{ fontWeight: 600, fontSize: 15, padding: '4px 8px' }}>
+              {wps.map(w => <option key={w.production_id} value={w.production_id}>{w.production_name}{w.city ? `, ${w.city}` : ''}</option>)}
+            </select>
+          ) : <div title={`Доступ: ${permsText(perms)}`} style={{ fontWeight: 600, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{wp.production_name}</div>}
+        </div>
+        <span style={{ flex: '0 1 auto', minWidth: 0, fontSize: 12.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{wp.name || ''}</span>
+        <button type="button" title="Сканер бирки — деталь в 3D-модели (сборка)" onClick={() => navigate('/scan')}
+          style={{ flex: '0 0 auto', width: 36, height: 34, borderRadius: 17, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', fontSize: 16, padding: 0, cursor: 'pointer' }}>📷</button>
       </div>
       {error && <p className="error-text" style={{ marginBottom: 10 }}>{error}</p>}
 
