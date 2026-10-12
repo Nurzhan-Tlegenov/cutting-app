@@ -309,6 +309,8 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
 // заказ + обозначение детали (без номера карты и номера на листе); имя клиента — только в папке, не в имени файла
 export const D6_QR_DEFAULT = { parts: ['order', 'des'], sep: '_', text: '', latin: true }
 export const D6_FOLDER_DEFAULT = '{ZAKAZ}/XML'
+/** Папки XML шестистороннего станка по умолчанию (матрёшка, см. DirPathEditor) */
+export const DRILL_DIR_DEFAULT = '{ZAKAZ}_CNC_6side/{MAT}'
 const BAD_CHARS = /[\\/:*?"<>|]/g                      // в имени файла недопустимы (Windows, флешки станков)
 
 /** Настройки кода для имени файла: код бирки или свой конструктор (ссылка на 3D в имени файла невозможна) */
@@ -318,7 +320,7 @@ export function drill6Qr(post, labelTpl) {
 }
 /** Вложенные папки для сохранения: шаблон «{ZAKAZ}/XML» -> ['Kuhnya', 'XML'] */
 export function drill6Folders(post, ctx) {
-  return String(post?.d6Folder ?? D6_FOLDER_DEFAULT).split('/').map(t => t.trim()).filter(Boolean)
+  return String(post?.dirPath ?? DRILL_DIR_DEFAULT).split('/').map(t => t.trim()).filter(Boolean)
     .map(t => folderName(t, ctx)).filter(Boolean)
 }
 

@@ -1,10 +1,11 @@
 import { LABEL_POS, getLabelTpl, QR_PARTS, labelQr } from '../lib/labelMaker'
 import QrPartsEditor from './QrPartsEditor'
-import { D6_QR_DEFAULT, D6_FOLDER_DEFAULT, drill6Folders } from '../lib/drill6Xml'
+import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
+import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState } from 'react'
-import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, DEFAULT_DRILL6, KINDS, isDrill6, activePost, routerPost, pickPost, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
+import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, DEFAULT_DRILL6, KINDS, isDrill6, activePost, routerPost, drillPosts, pickPost, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -12,6 +13,10 @@ import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 const r1 = v => String(Math.round(num(v) * 10) / 10)
+
+// как будут называться папки выгрузки — на примере заказа
+const DIR_EXAMPLE = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
+const dirPreview = tpl => String(tpl || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, DIR_EXAMPLE)).filter(Boolean)
 
 function Num({ label, value, onChange, unit, hint }) {
   return (
@@ -253,6 +258,13 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
             Имя клиента берётся из заказа; если его нет — эта часть пропускается.
           </Hint>
         </div>
+        {/* папки выгрузки — матрёшка: вложенные папки и их имена */}
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+          <label className="label">Папки для программ (вложенные)</label>
+          {(() => { const def = routerDirDefault(post, drillPosts(cnc).length > 0), v = post.dirPath ?? def
+            return <DirPathEditor value={v} def={def} preview={dirPreview(v)} onChange={x => set({ dirPath: x })} /> })()}
+          <Hint>Куда складываются G-код и файлы бирок при «Сохранить все файлы» (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
+        </div>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
           <label className="label">Расширение файла</label>
           <input type="text" key={post.id + post.ext} defaultValue={post.ext} onBlur={e => { const v = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 8); if (v && v !== post.ext) set({ ext: v }) }} />
@@ -266,7 +278,6 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
 // ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
 function Drill6Basic({ post, set, router }) {
   const { user } = useAuth()
-  const exampleCtx = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
   // код с бирки: что в нём сейчас (шаблон бирок аккаунта)
   const ltpl = getLabelTpl(user)
   const labelQrSet = { ...D6_QR_DEFAULT, ...ltpl.qr, parts: (ltpl.qr?.parts || []).filter(k => k !== 'link') }
@@ -317,17 +328,11 @@ function Drill6Basic({ post, set, router }) {
             <QrPartsEditor value={post.d6Qr || D6_QR_DEFAULT} exclude={['link']} onChange={v => set({ d6Qr: v })} preview={`${example(post.d6Qr || D6_QR_DEFAULT)}.${post.ext || 'XML'}`} />
           </div>
         )}
-        <label className="label" style={{ marginTop: 12 }}>Папка для XML-файлов</label>
-        <input type="text" key={post.id + 'd6f' + (post.d6Folder ?? '')} defaultValue={post.d6Folder ?? D6_FOLDER_DEFAULT}
-          onBlur={e => { const v = e.target.value.trim(); if (v !== (post.d6Folder ?? D6_FOLDER_DEFAULT)) set({ d6Folder: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
-          {[...NAME_PARTS.filter(([c]) => c !== '{N}'), ['/', 'вложенная папка']].map(([code, label]) => (
-            <button key={code} type="button" onClick={() => { const cur = (post.d6Folder ?? D6_FOLDER_DEFAULT).replace(/_+$/, ''); set({ d6Folder: code === '/' ? cur + '/' : cur + (cur && !cur.endsWith('/') ? '_' : '') + code }) }}
-              style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
-          ))}
-          <button type="button" onClick={() => set({ d6Folder: D6_FOLDER_DEFAULT })} style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ как было</button>
+        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <label className="label">Папки для XML-файлов (вложенные)</label>
+          <DirPathEditor value={post.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={dirPreview(post.dirPath ?? DRILL_DIR_DEFAULT)} onChange={x => set({ dirPath: x })} />
+          <Hint>Куда складываются XML-файлы при сохранении (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
         </div>
-        <Hint>Куда складываются XML-файлы при сохранении (и в архиве). «/» — вложенная папка; любой свой текст можно вписать. Пусто — файлы без папки. Получится, например: <b style={{ fontFamily: 'monospace' }}>{drill6Folders(post, exampleCtx).join(' / ') || '— без папки —'}</b></Hint>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
           <label className="label">Расширение файла</label>
           <input type="text" key={post.id + post.ext} defaultValue={post.ext || 'XML'} onBlur={e => { const v = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 8); if (v && v !== post.ext) set({ ext: v }) }} />
