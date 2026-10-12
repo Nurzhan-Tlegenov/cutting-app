@@ -85,9 +85,13 @@ export default function StageParts({ stage, orderId, onClose }) {
           <>
             {/* прогресс */}
             <div style={{ margin: '8px 0 6px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 3 }}>
-                <span>Отмечено <b>{done}</b> из <b>{total}</b> <span>{unit}</span></span>
-                <span style={{ color: left ? 'var(--amber)' : 'var(--teal)', fontWeight: 500 }}>{left ? `осталось ${left}` : '✓ все детали'}</span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 5 }}>
+                {[['Всего', total, 'var(--text)'], ['Отмечено', done, 'var(--blue)'], ['Осталось', left, left ? 'var(--amber)' : 'var(--teal)']].map(([l, v, c]) => (
+                  <div key={l} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '4px 8px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{l}, {unit}</div>
+                    <div style={{ fontSize: 20, fontWeight: 600, color: c, lineHeight: 1.2 }}>{v}</div>
+                  </div>
+                ))}
               </div>
               <div style={{ height: 6, borderRadius: 3, background: 'var(--bg2)', overflow: 'hidden' }}>
                 <div style={{ width: `${total ? done / total * 100 : 0}%`, height: '100%', background: left ? 'var(--blue)' : 'var(--teal)', transition: 'width .2s' }} />
@@ -123,7 +127,10 @@ export default function StageParts({ stage, orderId, onClose }) {
                 <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{p.size}{p.what ? ` · ${p.what}` : ''}{p.edged && rule.list === 'edge' ? (bySides ? (p.sides ? <span>{` · кромка с ${p.sides} сторон`}{p.pcs > 1 ? ` · ${p.pcs} × ${p.sides}` : ''}</span> : <span> · кромка по контуру (фигурная) — 1 проход на штуку</span>) : ' · кромка') : ''}</div>
               </div>
               <button type="button" style={step} onClick={() => setN(p, n - 1)} disabled={!n}>−</button>
-              <span style={{ minWidth: 42, textAlign: 'center', fontSize: 13, fontWeight: 600, color: full ? 'var(--teal)' : n ? 'var(--blue)' : 'var(--text-hint)' }}>{n}/{p.qty}</span>
+              <span style={{ minWidth: 54, textAlign: 'center', lineHeight: 1.15 }}>
+                <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: full ? 'var(--teal)' : n ? 'var(--blue)' : 'var(--text-hint)' }}>{n}/{p.qty}</span>
+                <span style={{ display: 'block', fontSize: 10.5, color: full ? 'var(--teal)' : 'var(--amber)' }}>{full ? 'готово' : `ост. ${p.qty - n}`}</span>
+              </span>
               <button type="button" style={step} onClick={() => setN(p, n + 1)} disabled={full}>+</button>
             </div>
           )

@@ -4,12 +4,12 @@ import { productionOrders, productionSetStatus, productionReturnOrder, orderMark
 import { orderFaults, faultText } from '../lib/nestingCheck'
 import { limitFromError } from '../lib/limits'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
-import { permsText } from '../lib/workplaces'
+import { permsText, workPid, openWorkplace } from '../lib/workplaces'
 import { myPostQueue, stageAccept, stageDone, since, clock } from '../lib/posts'
 import { StageTrack } from './ProductionPosts'
 import StageParts from './StageParts'
+import StageProgress from './StageProgress'
 import { ruleOf } from '../lib/stageParts'
-import ProductionForm from './ProductionForm'
 import CncLoader from './CncLoader'
 import { useKeptState } from '../hooks/useKeptState'
 
@@ -21,9 +21,9 @@ const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit',
 const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['all', 'Все']]
 const marksOf = o => orderMarks(o).map(m => <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>)
 
-export default function WorkerProduction({ wps, onRegister }) {
+export default function WorkerProduction({ wps }) {
   const navigate = useNavigate()
-  const [pid, setPid] = useState(() => { try { const v = localStorage.getItem('workPid'); return wps.some(w => w.production_id === v) ? v : wps[0].production_id } catch { return wps[0].production_id } })
+  const [pid, setPid] = useState(() => { const v = workPid(); return wps.some(w => w.production_id === v) ? v : wps[0].production_id })
   const wp = wps.find(w => w.production_id === pid) || wps[0]
   const perms = wp.perms || {}, chief = !!perms.all
   const can = k => chief || !!perms[k]
@@ -51,7 +51,7 @@ export default function WorkerProduction({ wps, onRegister }) {
     const timer = setInterval(() => { if (!document.hidden) load() }, 45000)   // новые заказы на посту — без перезагрузки
     return () => clearInterval(timer)
   }, [pid])   // eslint-disable-line react-hooks/exhaustive-deps
-  const pick = v => { setPid(v); try { localStorage.setItem('workPid', v) } catch { /* без памяти */ } }
+  const pick = v => { setPid(v); openWorkplace(v) }
 
   const stage = async (q, fn, confirmText) => {
     if (confirmText && !window.confirm(confirmText)) return
@@ -132,9 +132,10 @@ export default function WorkerProduction({ wps, onRegister }) {
                     </div>
                     {'gcode_at' in q && q.gcode_at && <div style={{ display: 'flex', gap: 4 }}>{marksOf(q)}</div>}
                   </div>
+                  <StageProgress orderId={q.order_id} rule={q.rule} postName={q.post_name} scanned={q.scanned} onOpen={() => setParts({ stage: q, orderId: q.order_id })} />
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     {isNew && <button type="button" disabled={busy === q.stage_id} style={btn('main')} onClick={() => stage(q, stageAccept)}>✓ Принять</button>}
-                    {ruleOf(q.rule, q.post_name).list !== 'none' && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали{Number(q.scanned) ? ` · ${q.scanned}` : ''}</button>}
+                    {ruleOf(q.rule, q.post_name).list !== 'none' && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Список деталей</button>}
                     {!isNew && <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => (ruleOf(q.rule, q.post_name).list !== 'none' ? setParts({ stage: q, orderId: q.order_id })
                       : stage(q, stageDone, `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
                     {orderBtns(q.order_id)}
@@ -191,10 +192,6 @@ export default function WorkerProduction({ wps, onRegister }) {
         </>
       )}
       {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) { load(); window.dispatchEvent(new Event('notices-seen')) } }} />}
-      <details className="card" style={{ marginTop: 16, padding: '10px 12px' }}>
-        <summary style={{ fontSize: 12.5, color: 'var(--text-muted)', cursor: 'pointer' }}>У вас есть и своё производство? Зарегистрировать</summary>
-        <div style={{ marginTop: 8 }}><ProductionForm onDone={onRegister} /></div>
-      </details>
     </>
   )
 }

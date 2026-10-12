@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav'
 import { getUserSettings, saveUserSettings, fetchUserSettings } from '../lib/userSettings'
+import { myWorkplaces, openWorkplace, openOwnProduction, prodView, workPid, permsText, clientAccess } from '../lib/workplaces'
+import { myProduction } from '../lib/productionApi'
 
 const KIND = { mill: 'Фреза по траектории', round: 'Скругление кромки', pocket: 'Выемка' }
 
@@ -51,11 +53,38 @@ export default function ProfilePage() {
   }
 
   const isOperator = profile?.role === 'operator' || profile?.role === 'admin'
-  const pickCabinet = mode => { setCabinet(mode); navigate(mode === 'production' ? '/production' : '/orders') }
-  const CABINETS = [
-    ['client', 'Клиент', 'Заказы: ввод и импорт деталей, контуры, кромка, раскрой до готовых карт'],
-    ['production', 'Производство', 'Заявки: принятые карты раскроя, статусы, ЧПУ и бирки'],
-  ]
+  // Кабинеты. Сотрудник производства видит первым производство, которое его пригласило, затем «Клиент»,
+  // последним — своё производство (или «Создать своё производство»). Остальные — «Клиент», затем «Производство».
+  const [wps, setWps] = useState([])
+  const [own, setOwn] = useState(null)
+  const [access, setAccess] = useState(null)
+  useEffect(() => {
+    let alive = true
+    myWorkplaces().then(r => { if (alive) setWps(r.data || []) })
+    myProduction(user?.id).then(p => { if (alive) setOwn(p || null) })
+    clientAccess().then(a => { if (alive) setAccess(a) })
+    return () => { alive = false }
+  }, [user?.id])
+  const workView = wps.length > 0 && (own ? prodView() === 'work' : prodView() !== 'own')
+  const curPid = wps.some(w => w.production_id === workPid()) ? workPid() : wps[0]?.production_id
+  const pickCabinet = id => {
+    if (id === 'client') { setCabinet('client'); navigate('/orders'); return }
+    if (id.startsWith('work:')) openWorkplace(id.slice(5)); else openOwnProduction()
+    setCabinet('production'); navigate('/production')
+  }
+  const clientNote = access?.staff && !access.ok
+    ? (access.request === 'new' ? 'Заявка на кабинет клиента ждёт одобрения администратора' : 'Подавать свои заказы — после одобрения администратора: откройте и отправьте заявку')
+    : 'Заказы: ввод и импорт деталей, контуры, кромка, раскрой до готовых карт'
+  const ownCard = own
+    ? ['own', own.name || 'Своё производство', (own.status ?? 'approved') === 'approved' ? 'Своё производство: заявки, статусы, ЧПУ, бирки, сотрудники' : 'Заявка на регистрацию производства ждёт подтверждения']
+    : ['own', wps.length ? 'Создать своё производство' : 'Производство', wps.length ? 'Регистрация своего производства — после подтверждения администратором' : 'Заявки: принятые карты раскроя, статусы, ЧПУ и бирки']
+  const CABINETS = wps.length
+    ? [...wps.map(w => [`work:${w.production_id}`, `${w.production_name}${w.city ? `, ${w.city}` : ''}`, `Рабочее место: ${w.name || 'сотрудник'} · ${permsText(w.perms)}`]),
+      ['client', 'Клиент', clientNote], ownCard]
+    : [['client', 'Клиент', clientNote], ownCard]
+  const isOn = id => (id === 'client' ? cabinet === 'client'
+    : cabinet !== 'production' ? false
+    : id.startsWith('work:') ? workView && id.slice(5) === curPid : !workView)
   const initials = profile?.full_name
     ? profile.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : (user?.email?.[0] || '?').toUpperCase()
@@ -81,7 +110,7 @@ export default function ProfilePage() {
               {profile?.full_name || 'Пользователь'}
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-hint)' }}>
-              {isMaster ? 'Мастер-аккаунт' : cabinet === 'production' ? 'Кабинет производства' : 'Кабинет клиента'}
+              {isMaster ? 'Мастер-аккаунт' : cabinet === 'production' ? (workView ? `Сотрудник · ${wps.find(w => w.production_id === curPid)?.production_name || ''}` : 'Кабинет производства') : 'Кабинет клиента'}
             </div>
           </div>
         </div>
@@ -125,7 +154,7 @@ export default function ProfilePage() {
       <p className="section-title">Кабинет</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
         {CABINETS.map(([id, label, note]) => {
-          const on = cabinet === id
+          const on = isOn(id)
           return (
             <button key={id} type="button" onClick={() => pickCabinet(id)} className="card"
               style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px',

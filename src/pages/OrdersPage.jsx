@@ -10,6 +10,8 @@ import BottomNav from '../components/BottomNav'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
+import ClientGate from '../components/ClientGate'
+import { clientAccess } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
 import { myLimits, limitText } from '../lib/limits'
 import { archiveOrder, restoreOrder, deleteOrder, deleteOrderNow, canArchive, keepUntilText, daysLeft, KEEP_MONTHS } from '../lib/orderArchive'
@@ -23,6 +25,9 @@ export default function OrdersPage() {
     if (l && l.limit != null && l.used >= l.limit) { window.alert(limitText('orders', l.limit)); return }
     navigate('/orders/new')
   }
+  // сотрудник, зарегистрированный по ссылке производства: кабинет клиента — после одобрения мастера
+  const [access, setAccess] = useState(null)
+  useEffect(() => { let alive = true; clientAccess().then(a => { if (alive) setAccess(a) }); return () => { alive = false } }, [user?.id])
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectMode, setSelectMode] = useState(false)
@@ -123,6 +128,7 @@ export default function OrdersPage() {
     exitSelectMode()
   }
 
+  if (access?.staff && !access.ok) return <ClientGate access={access} onChange={setAccess} />
   if (loading) return (
     <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <CncLoader label="Загружаем заказы…" />

@@ -3,6 +3,7 @@ import LangPicker from '../components/LangPicker'
 import { signupOpen, requestSignup, requestPasswordReset, confirmPasswordReset } from '../lib/adminApi'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
+import { pendingInvite } from '../lib/workplaces'
 
 const COUNTRIES = ['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан']
 
@@ -22,7 +23,8 @@ export default function AuthPage() {
   const [approved, setApproved] = useState(false)   // заявка этого номера одобрена — можно задать пароль
   const [note, setNote] = useState('')
   useEffect(() => { let alive = true; signupOpen().then(v => { if (alive) setOpen(v) }); return () => { alive = false } }, [])
-  const byRequest = mode === 'register' && !open && !approved
+  const invite = pendingInvite()   // пришёл по ссылке-приглашению производства — регистрация сотрудника без заявки
+  const byRequest = mode === 'register' && !open && !approved && !invite
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   // Генерируем фейковый email из номера телефона
@@ -59,8 +61,8 @@ export default function AuthPage() {
       } else {
         if (!form.full_name.trim()) throw new Error('Введите имя и фамилию')
         if (!form.phone.trim()) throw new Error('Введите контактный телефон')
-        if (form.country.trim().length < 2) throw new Error('Укажите страну')
-        if (form.city.trim().length < 2) throw new Error('Укажите город')
+        if (!invite && form.country.trim().length < 2) throw new Error('Укажите страну')
+        if (!invite && form.city.trim().length < 2) throw new Error('Укажите город')
         if (byRequest) {
           const r = await requestSignup(form.full_name, form.phone, form.comment, form.country.trim(), form.city.trim())
           if (r.error) throw new Error(r.error)
@@ -77,7 +79,8 @@ export default function AuthPage() {
           phone: form.phone,
           whatsapp: form.whatsapp,
           country: form.country.trim(), city: form.city.trim(),
-          contact_email: form.email
+          contact_email: form.email,
+          invite
         })
       }
       navigate('/')
@@ -141,12 +144,12 @@ export default function AuthPage() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <label className="label">Страна *</label>
-                  <input type="text" list="reg-countries" placeholder="Казахстан" value={form.country} onChange={e => set('country', e.target.value)} maxLength={60} required />
+                  <input type="text" list="reg-countries" placeholder="Казахстан" value={form.country} onChange={e => set('country', e.target.value)} maxLength={60} required={!invite} />
                   <datalist id="reg-countries">{COUNTRIES.map(c => <option key={c} value={c} />)}</datalist>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <label className="label">Город *</label>
-                  <input type="text" placeholder="Алматы" value={form.city} onChange={e => set('city', e.target.value)} maxLength={80} required />
+                  <input type="text" placeholder="Алматы" value={form.city} onChange={e => set('city', e.target.value)} maxLength={80} required={!invite} />
                 </div>
               </div>
             )}

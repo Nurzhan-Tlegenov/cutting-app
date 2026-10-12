@@ -68,7 +68,8 @@ export function AuthProvider({ children }) {
     const contact = String(profileData.contact_email || '').trim()
     // имя и телефон дублируются в данных аккаунта: если профиль почему-то не создастся, они не потеряются
     const country = String(profileData.country || '').trim(), city = String(profileData.city || '').trim()
-    const meta = { full_name: profileData.full_name || '', phone: profileData.phone || '', country, city, ...(contact ? { contact_email: contact } : {}) }
+    const invite = String(profileData.invite || '').trim()   // регистрация по приглашению производства — без заявки, сразу сотрудник
+    const meta = { full_name: profileData.full_name || '', phone: profileData.phone || '', country, city, ...(contact ? { contact_email: contact } : {}), ...(invite ? { invite } : {}) }
     const { data, error } = await supabase.auth.signUp({ email, password, options: { data: meta } })
     if (error) throw error
     if (data.user) {

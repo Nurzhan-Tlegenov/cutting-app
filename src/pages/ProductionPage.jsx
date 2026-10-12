@@ -18,7 +18,7 @@ import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
 import { productionStageMap } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
-import { membersList, myWorkplaces } from '../lib/workplaces'
+import { membersList, myWorkplaces, prodView } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
 import Drill6Viewer from '../components/Drill6Viewer'
@@ -90,7 +90,7 @@ export default function ProductionPage() {
 
   const load = async () => {
     const p = (await myProduction(user?.id)) ?? null
-    if (!p) { const w = await myWorkplaces(); setWps(w.data || []) }    // своего производства нет — может, я сотрудник
+    { const w = await myWorkplaces(); setWps(w.data || []) }    // где я сотрудник — рабочие места (может быть и своё производство)
     setProd(p)
     if (p && (p.status ?? 'approved') === 'approved') { loadStaff(); loadStages() }
     if (p && (p.status ?? 'approved') === 'approved') {
@@ -146,8 +146,8 @@ export default function ProductionPage() {
     <div className="page" style={{ paddingBottom: 100 }}>
       <h1 style={{ fontSize: 18, fontWeight: 500, marginBottom: 16, paddingTop: 8 }}>Производство</h1>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
-      {prod === undefined ? <CncLoader label="Открываем производство…" /> : !prod && wps.length ? (
-        <WorkerProduction wps={wps} onRegister={async () => { await refreshProfile?.(); load() }} />
+      {prod === undefined ? <CncLoader label="Открываем производство…" /> : wps.length && (prod ? prodView() === 'work' : prodView() !== 'own') ? (
+        <WorkerProduction wps={wps} />
       ) : !prod ? (
         <div className="card">
           <div style={{ fontWeight: 500, fontSize: 15, marginBottom: 4 }}>У вас есть своё производство?</div>

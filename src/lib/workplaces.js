@@ -42,3 +42,22 @@ const KEY = 'pendingInvite'
 export const savePendingInvite = code => { try { localStorage.setItem(KEY, code) } catch { /* без памяти */ } }
 export const pendingInvite = () => { try { return localStorage.getItem(KEY) || '' } catch { return '' } }
 export const clearPendingInvite = () => { try { localStorage.removeItem(KEY) } catch { /* без памяти */ } }
+
+// Какое производство открыто в кабинете производства: рабочее место (сотрудник) или своё. Хранится на устройстве.
+const VIEW = 'workView', PID = 'workPid'
+export const openWorkplace = pid => { try { localStorage.setItem(VIEW, 'work'); if (pid) localStorage.setItem(PID, pid) } catch { /* без памяти */ } }
+export const openOwnProduction = () => { try { localStorage.setItem(VIEW, 'own') } catch { /* без памяти */ } }
+/** 'work' | 'own' | '' (не выбрано: сотруднику — рабочее место, владельцу — своё) */
+export const prodView = () => { try { return localStorage.getItem(VIEW) || '' } catch { return '' } }
+export const workPid = () => { try { return localStorage.getItem(PID) || '' } catch { return '' } }
+
+// Кабинет клиента у сотрудника, зарегистрированного по приглашению: открывается после одобрения мастера (migration_staff_signup.sql)
+export async function clientAccess() {
+  const { data, error } = await supabase.rpc('client_access')
+  if (error) return { ok: true, staff: false }          // база ещё без этой проверки — как раньше
+  return data || { ok: true, staff: false }
+}
+export async function requestClientAccess(comment = '') {
+  const { data, error } = await supabase.rpc('request_client_access', { p_comment: comment })
+  return error ? { error: error.message } : { status: data }
+}

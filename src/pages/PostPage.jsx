@@ -5,6 +5,7 @@ import { postPage, stageAccept, stageDone, since, clock } from '../lib/posts'
 import { ruleOf, ruleText } from '../lib/stageParts'
 import { orderTitle } from '../lib/orderUtils'
 import StageParts from '../components/StageParts'
+import StageProgress from '../components/StageProgress'
 import CncLoader from '../components/CncLoader'
 import { useKeptState } from '../hooks/useKeptState'
 
@@ -40,7 +41,7 @@ export default function PostPage() {
     if (r.error) window.alert(r.error)
     load()
   }
-  const home = cabinet === 'production' ? '/production' : '/orders'
+  const home = cabinet === 'client' ? '/orders' : '/production'
   const btn = kind => ({ padding: '8px 14px', borderRadius: 20, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' || kind === 'ok' ? 'none' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : kind === 'ok' ? 'var(--teal)' : 'transparent', color: kind === 'main' || kind === 'ok' ? 'white' : 'var(--text-muted)' })
 
   if (data === undefined && !err) return <CncLoader full label="Открываем пост…" />
@@ -65,9 +66,9 @@ export default function PostPage() {
         <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{[q.client_name, q.material_name, q.sheets > 0 && `листов ${q.sheets}`, `деталей ${q.parts}`].filter(Boolean).join(' · ')}</div>
         <div style={{ fontSize: 12, color: isNew ? 'var(--amber)' : 'var(--text-muted)', marginTop: 2 }}>
           {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)}, ${since(q.accepted_at)}`}
-          {withParts && Number(q.scanned) ? ` · отмечено ${q.scanned}` : ''}
           {q.next_post ? ` · дальше: ${q.next_post}` : ' · последний пост'}
         </div>
+        <StageProgress orderId={q.order_id} rule={post.rule} postName={post.name} scanned={q.scanned} onOpen={() => setParts({ stage: q, orderId: q.order_id })} />
         <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
           {isNew && <button type="button" disabled={busy === q.stage_id} style={btn('main')} onClick={() => act(q, stageAccept)}>✓ Принять</button>}
           {withParts && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали — сканировать</button>}

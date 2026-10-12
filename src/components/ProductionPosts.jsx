@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
+import StageProgress from './StageProgress'
 import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule } from '../lib/stageParts'
 import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, stageBack, startOrderStages, stageDone, stageAccept, since, clock, postLink } from '../lib/posts'
 
@@ -130,10 +131,11 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
           </div>
         ))}
       </div>
+      {cur && <StageProgress orderId={orderId} rule={cur.rule} postName={cur.name} scanned={cur.scanned} onOpen={manage ? () => setParts(true) : undefined} />}
       {manage && cur && (
         <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
           {cur.status === 'queued' && <button type="button" disabled={busy} style={small} onClick={() => act(() => stageAccept(cur.id))}>Принять за пост</button>}
-          {ruleOf(cur.rule, cur.name).list !== 'none' && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts(true)}>📦 Детали{Number(cur.scanned) ? ` · ${cur.scanned}` : ''}</button>}
+          {ruleOf(cur.rule, cur.name).list !== 'none' && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts(true)}>📦 Список деталей</button>}
           <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Отметить пост «${cur.name}» выполненным?`)) act(() => stageDone(cur.id)) }}>✓ Выполнено</button>
           <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Пропустить пост «${cur.name}» для этого заказа?`)) act(() => stageSkip(cur.id)) }}>Пропустить пост</button>
           {st.some(s => s.status === 'done') && <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm('Вернуть заказ на предыдущий пост (переделать)?')) act(() => stageBack(orderId)) }}>↩ На предыдущий пост</button>}
