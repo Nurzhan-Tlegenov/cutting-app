@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, routerPost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName, toLatin, programName, folderName } from '../lib/orderUtils'
@@ -341,6 +341,36 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
               <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setImage(f) }} />
             </>
           )}
+          {/* картинка: повернуть, вписать рамку по картинке, во всю бирку, крупнее / мельче, по центру бирки */}
+          {cur.img && (() => {
+            const r = cur.irot || 0, sz = labelImageSize(cur.img, r), ar = sz ? sz.w / sz.h : cur.w / cur.h
+            const cx = cur.x + cur.w / 2, cy = cur.y + cur.h / 2
+            // рамка с пропорциями картинки, не больше бирки; центр — на месте
+            const box = (w, h, mx = cx, my = cy) => {
+              const k = Math.min(1, tpl.w / w, tpl.h / h), W = Math.max(3, w * k), H = Math.max(3, h * k)
+              return { w: W, h: H, x: Math.max(0, Math.min(tpl.w - W, mx - W / 2)), y: Math.max(0, Math.min(tpl.h - H, my - H / 2)) }
+            }
+            const rotate = d => { const nr = (r + d + 360) % 360, nar = 1 / ar; edit({ irot: nr || undefined, ...box(Math.sqrt(cur.w * cur.h * nar), Math.sqrt(cur.w * cur.h / nar)) }) }
+            const fit = () => edit(box(Math.sqrt(cur.w * cur.h * ar), Math.sqrt(cur.w * cur.h / ar)))
+            const full = () => { const W = Math.min(tpl.w, tpl.h * ar); edit(box(W, W / ar, tpl.w / 2, tpl.h / 2)) }
+            const scale = f => edit(box(Math.max(3, cur.w * f), Math.max(3, cur.h * f)))
+            return (
+              <div style={{ flex: '1 1 100%', display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Картинка:</span>
+                <button type="button" style={chip(false)} onClick={() => rotate(-90)} title="Повернуть влево">⟲ 90°</button>
+                <button type="button" style={chip(false)} onClick={() => rotate(90)} title="Повернуть вправо">⟳ 90°</button>
+                {r ? <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{r}°</span> : null}
+                <button type="button" style={chip(false)} onClick={() => scale(1 / 1.15)}>− мельче</button>
+                <button type="button" style={chip(false)} onClick={() => scale(1.15)}>+ крупнее</button>
+                <button type="button" style={chip(false)} onClick={fit} title="Рамка по форме картинки — без пустых полей">▣ Рамка по картинке</button>
+                <button type="button" style={chip(false)} onClick={full} title="Максимально — во всю бирку, по центру">⛶ Во всю бирку</button>
+                <button type="button" style={chip(false)} onClick={() => edit({ x: (tpl.w - cur.w) / 2 })}>↔ По центру</button>
+                <button type="button" style={chip(false)} onClick={() => edit({ y: (tpl.h - cur.h) / 2 })}>↕ По центру</button>
+                <button type="button" style={chip(false)} onClick={() => edit({ x: (tpl.w - cur.w) / 2, y: (tpl.h - cur.h) / 2 })}>✛ В центр бирки</button>
+                <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{cur.w.toFixed(1)} × {cur.h.toFixed(1)} мм</span>
+              </div>
+            )
+          })()}
           {imgErr && <div style={{ flex: '1 1 100%', fontSize: 11, color: 'var(--danger)' }}>{imgErr}</div>}
           {cur.img && cur.type !== 'image' && <div style={{ flex: '1 1 100%', fontSize: 11, color: 'var(--text-hint)' }}>Картинка печатается только на бирках тех деталей, у которых этот параметр есть.</div>}
           <button type="button" style={{ ...chip(false), color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }}

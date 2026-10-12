@@ -104,6 +104,12 @@ export const itemBox = it => (isBox(it) ? [it.w, it.h] : isVert(it) ? [it.size *
 export const isBox = it => itemKind(it.type) === 'pic' || !!it.img || it.type === 'image'
 // Картинки шаблона. В шаблоне — ссылка «ref:<id>», сама картинка хранится отдельно (за аккаунтом) в хорошем качестве.
 const IMAGES = new Map()
+/** Размер загруженной картинки шаблона (точки) с учётом поворота -> { w, h } | null */
+export function labelImageSize(img, rot = 0) {
+  const im = IMAGES.get(img)
+  if (!im?.complete || !im.naturalWidth) return null
+  return rot % 180 ? { w: im.naturalHeight, h: im.naturalWidth } : { w: im.naturalWidth, h: im.naturalHeight }
+}
 let imgUser = null, imgStore = null, imgStoreUid
 const imageStore = () => { const uid = imgUser?.id || null; if (!imgStore || imgStoreUid !== uid) { imgStoreUid = uid; imgStore = loadLabelImages(imgUser) } return imgStore }
 export async function preloadLabelImages(tpl) {
@@ -215,6 +221,7 @@ export function normalizeLabel(raw) {
     o.ul = ['below', 'above', 'none'].includes(i.ul) ? i.ul : EDGE_TYPES.includes(i.type) ? 'below' : 'none'
     if (typeof i.img === 'string' && (i.img.startsWith('ref:') || (i.img.startsWith('data:image/') && i.img.length < 40000))) o.img = i.img
     if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 10))
+    if (o.img && [90, 180, 270].includes(Number(i.irot))) o.irot = Number(i.irot)   // поворот картинки
     if (itemKind(i.type) !== 'pic') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
     const [bw, bh] = itemBox(o)
     o.x = Math.max(0, Math.min(w - bw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - bh, Number(i.y) || 0))
@@ -509,8 +516,13 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       if (it.img || it.type === 'image') {
         const im = IMAGES.get(it.img)
         if (im?.complete && im.naturalWidth) {
-          const bh = it.h * mm, k = Math.min(w / im.naturalWidth, bh / im.naturalHeight)
-          ctx.drawImage(printImage(it.img, im, Math.max(1, Math.round(im.naturalWidth * k)), Math.max(1, Math.round(im.naturalHeight * k))), Math.round(x), Math.round(y))
+          // картинка вписана в рамку по центру; повёрнута на 90/180/270°
+          const bh = it.h * mm, r = it.irot || 0, side = r % 180 !== 0
+          const k = side ? Math.min(w / im.naturalHeight, bh / im.naturalWidth) : Math.min(w / im.naturalWidth, bh / im.naturalHeight)
+          const dw = Math.max(1, Math.round(im.naturalWidth * k)), dh = Math.max(1, Math.round(im.naturalHeight * k))
+          ctx.save(); ctx.translate(Math.round(x + w / 2), Math.round(y + bh / 2)); if (r) ctx.rotate(r * Math.PI / 180)
+          ctx.drawImage(printImage(it.img, im, dw, dh), -Math.round(dw / 2), -Math.round(dh / 2))
+          ctx.restore()
         }
         continue
       }
