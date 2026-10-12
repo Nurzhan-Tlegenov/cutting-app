@@ -5,7 +5,7 @@ import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState } from 'react'
-import { DEFAULT_MILL, DEFAULT_DRILL, DEFAULT_POST, DEFAULT_DRILL6, KINDS, isDrill6, activePost, routerPost, drillPosts, pickPost, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
+import { DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -81,17 +81,12 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
     if (foreign) { const p = { ...post, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: patch.name || post.name + ' (мой)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }); return }
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
   }
-  const add = kind => {
-    const p = kind === 'drill6' ? { ...DEFAULT_DRILL6(), name: `Шестисторонний ${cnc.posts.filter(isDrill6).length + 1}` } : { ...DEFAULT_POST(), name: `Постпроцессор ${cnc.posts.length + 1}` }
-    // новый присадочный сразу включён в выпуск — его и добавляют, чтобы выпускать программы
-    onChange({ ...(kind === 'drill6' ? toggleUse6(cnc, p.id, true) : cnc), posts: [...cnc.posts, p], post: p.id })
-  }
   const drill = isDrill6(post)
   const routers = cnc.posts.filter(p => !isDrill6(p)), drills = cnc.posts.filter(isDrill6)
   const router = routerPost(cnc)
   const setKind = kind => {
     if (kind === post.kind || (kind === 'drill6') === drill) return
-    if (!drill && routers.length < 2) { window.alert('Это единственный раскроечный станок. Чтобы добавить присадочный, нажмите «+ Присадочный».'); return }
+    if (!drill && routers.length < 2) { window.alert('Это единственный раскроечный станок. Чтобы добавить присадочный: «Выбрать ▾» → «+ Присадочный 6-стор.».'); return }
     set(kind === 'drill6' ? { kind, ext: 'XML', nameTpl: '{NOMER}_{ZAKAZ}' } : { kind: 'router', ext: 'nc', nameTpl: NAME_TPL_DEFAULT })
   }
   const copy = () => { const p = { ...post, id: newId(), shared: false, forAll: false, ownerId: undefined, name: post.name + ' (копия)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }) }
@@ -108,19 +103,15 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Постпроцессор</Title>
         <SaveSnapshotButton cnc={cnc} onChange={onChange} />
-        <select value={post.id} onChange={e => onChange(pickPost(cnc, e.target.value))} style={{ marginBottom: 8 }}>
-          {cnc.posts.map(p => <option key={p.id} value={p.id}>{isDrill6(p) ? '⬡ ' : ''}{p.name}{p.shared || p.forAll ? ' · общий' : ''}</option>)}
-        </select>
         <label className="label">Тип станка</label>
         <div style={{ marginBottom: 8 }}><Seg value={drill ? 'drill6' : 'router'} options={KINDS.map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : 'Раскроечный'])} onChange={setKind} /></div>
         <label className="label">Название</label>
         <input type="text" key={post.id} defaultValue={post.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== post.name) set({ name: v }) }} />
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-          <button type="button" style={small} onClick={() => add('router')}>+ Раскроечный</button>
-          <button type="button" style={small} onClick={() => add('drill6')}>+ Присадочный</button>
           <button type="button" style={small} onClick={copy}>Копия</button>
           {!foreign && cnc.posts.length > 1 && <button type="button" style={{ ...small, color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={del}>Удалить</button>}
         </div>
+        <Hint>Выбрать другой станок, добавить или удалить — кнопкой «Выбрать ▾» сверху.</Hint>
         {isMaster && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
             <input type="checkbox" checked={!!post.forAll || !!post.shared} onChange={e => set({ forAll: e.target.checked, shared: false })} style={{ width: 18, height: 18 }} />
@@ -141,7 +132,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           </label>
         ))}
         <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 4px' }}>Присадка — шестисторонний станок, файл на каждую деталь:</div>
-        {!drills.length && <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Нет присадочных станков — добавьте кнопкой «+ Присадочный».</div>}
+        {!drills.length && <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Нет присадочных станков — добавьте: «Выбрать ▾» сверху → «+ Присадочный 6-стор.».</div>}
         {drills.map(p => (
           <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0', cursor: 'pointer' }}>
             <input type="checkbox" checked={(cnc.use6 || []).includes(p.id)} onChange={e => onChange(toggleUse6(cnc, p.id, e.target.checked))} style={{ width: 18, height: 18 }} />

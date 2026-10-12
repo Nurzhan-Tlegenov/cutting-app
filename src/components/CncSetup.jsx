@@ -1,5 +1,6 @@
 import { useKeptState } from '../hooks/useKeptState'
-import { CncBasic, CncCommands, CncTools, CncOps, CncSaved } from './CncSettings'
+import { CncBasic, CncCommands, CncTools, CncOps } from './CncSettings'
+import PostPicker from './PostPicker'
 import { useCnc } from '../hooks/useCnc'
 import { activePost, routerPost, drillPosts, isDrill6 } from '../lib/cncSettings'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
@@ -27,11 +28,10 @@ export default function CncSetup() {
         Выпуск: <b style={{ color: 'var(--text-muted)' }}>{routerPost(cnc)?.name}</b>{drills.length ? <> + <b style={{ color: 'var(--text-muted)' }}>{drills.map(p => p.name).join(', ')}</b></> : null}.
         {' '}Это те же настройки, что в заказе (ЧПУ): поправили здесь — там уже так же.
       </p>
+      <PostPicker cnc={cnc} onChange={change} />
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 10, paddingBottom: 2 }}>
         {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={chip(tab === k)}>{l}</button>)}
-        {(cnc.saved || []).length > 0 && <button type="button" onClick={() => setTab('mine')} style={chip(tab === 'mine')}>{`Мои постпроцессоры · ${cnc.saved.length}`}</button>}
       </div>
-      {tab === 'mine' && <CncSaved cnc={cnc} onChange={change} />}
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'basic' && (() => {
         // папки выгрузки программ (матрёшка) — у открытого станка; то же, что в заказе (ЧПУ)
@@ -50,7 +50,6 @@ export default function CncSetup() {
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'tools' && <CncTools cnc={cnc} onChange={change} />}
       {tab === 'ops' && <CncOps cnc={cnc} onChange={change} layers={null} />}
-      <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6 }}>Открыт: {activePost(cnc)?.name}</p>
     </div>
   )
 }

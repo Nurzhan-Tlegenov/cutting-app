@@ -6,7 +6,8 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
-import { CncBasic, CncCommands, CncTools, CncOps, CncSaved } from '../components/CncSettings'
+import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettings'
+import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { routerPost, drillPosts, toggleUse6, isDrill6 } from '../lib/cncSettings'
@@ -245,7 +246,6 @@ export default function CncPage() {
       </div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 2 }}>
         {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={chip(tab === k)}>{l}{k === 'ops' && pre.length ? ' ⚠' : ''}</button>)}
-        {(cnc.saved || []).length > 0 && <button type="button" onClick={() => setTab('mine')} style={chip(tab === 'mine')}>{`Мои постпроцессоры · ${cnc.saved.length}`}</button>}
       </div>
 
       {tab === 'sheets' && (!mat ? (
@@ -414,9 +414,9 @@ export default function CncPage() {
       ))}
       {tab === 'ops' && <CncOps cnc={cnc} onChange={change} layers={layers} />}
       {tab === 'tools' && <CncTools cnc={cnc} onChange={change} />}
+      {(tab === 'basic' || tab === 'cmd') && <PostPicker cnc={cnc} onChange={change} />}
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
-      {tab === 'mine' && <CncSaved cnc={cnc} onChange={change} />}
 
       {/* симулятор — поверх всего экрана: выносится прямо в body (иначе при прокрученной странице снизу виднелось окно заказа) */}
       {sim && createPortal(
