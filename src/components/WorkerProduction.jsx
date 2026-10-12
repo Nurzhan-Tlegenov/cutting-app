@@ -5,7 +5,7 @@ import { orderFaults, faultText } from '../lib/nestingCheck'
 import { limitFromError } from '../lib/limits'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { permsText, workPid, openWorkplace } from '../lib/workplaces'
-import { myPostQueue, stageAccept, stageDone, since, clock, planStages } from '../lib/posts'
+import { myPostQueue, stageAccept, stageDone, stageBack, since, clock, planStages } from '../lib/posts'
 import { StageTrack } from './ProductionPosts'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
@@ -59,6 +59,15 @@ export default function WorkerProduction({ wps }) {
     const r = await fn(q.stage_id)
     setBusy('')
     if (r.error) { setError(r.error); window.alert(r.error) }
+    load(); window.dispatchEvent(new Event('notices-seen'))
+  }
+  // вернуть заказ на предыдущий пост (переделать)
+  const back = async q => {
+    if (!window.confirm(`Вернуть заказ «${orderTitle(q)}» на предыдущий пост (переделать)?`)) return
+    setBusy(q.stage_id)
+    const r = await stageBack(q.order_id)
+    setBusy('')
+    if (r.error) window.alert(r.error); else if (r.data === false) window.alert('Это первый пост заказа — возвращать некуда.')
     load(); window.dispatchEvent(new Event('notices-seen'))
   }
   const setStatus = async (o, status) => {
@@ -140,6 +149,7 @@ export default function WorkerProduction({ wps }) {
                     {!isNew && <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => (ruleOf(q.rule, q.post_name).list !== 'none' ? setParts({ stage: q, orderId: q.order_id })
                       : stage(q, stageDone, `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
                     {orderBtns(q.order_id)}
+                    <button type="button" disabled={busy === q.stage_id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => back(q)}>↩ На предыдущий пост</button>
                   </div>
                 </div>
               )

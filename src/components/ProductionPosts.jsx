@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
-import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, onDemandOf } from '../lib/stageParts'
+import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, onDemandOf, isBasePost } from '../lib/stageParts'
 import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, stageBack, startOrderStages, stageDone, stageAccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
@@ -111,7 +111,13 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
   if (!st.length) return manage && ['new', 'discussion', 'inwork'].includes(status) ? (
     <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
       {ops}
-      {status === 'inwork' && <button type="button" disabled={busy} style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => act(async () => { const r = await startOrderStages(orderId); if (!r.error) await planStages(orderId); return r })}>▶ Запустить по постам</button>}
+      {status === 'inwork' && (
+        <>
+          <div style={{ fontSize: 11.5, color: 'var(--amber)', margin: '2px 0 5px' }}>Заказ принят, по постам ещё не запущен. Отметьте операции заказа и нажмите «Пустить в работу».</div>
+          <button type="button" disabled={busy} style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, fontWeight: 500, border: 'none', background: 'var(--teal)', color: 'white', cursor: 'pointer' }}
+            onClick={() => { if (window.confirm('Пустить заказ в работу?\nОн встанет на первый пост техпроцесса, сотрудники поста получат его.')) act(async () => { const r = await startOrderStages(orderId); if (!r.error) await planStages(orderId); return r }) }}>▶ Пустить в работу</button>
+        </>
+      )}
       {err && <span style={{ fontSize: 11, color: 'var(--danger)', marginLeft: 6 }}>{err}</span>}
     </div>
   ) : null
@@ -151,7 +157,7 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
           {ruleOf(cur.rule, cur.name).list !== 'none' && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts(true)}>📦 Список деталей</button>}
           <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Отметить пост «${cur.name}» выполненным?`)) act(() => stageDone(cur.id)) }}>✓ Выполнено</button>
           <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Пропустить пост «${cur.name}» для этого заказа?`)) act(() => stageSkip(cur.id)) }}>Пропустить пост</button>
-          {st.some(s => s.status === 'done') && <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm('Вернуть заказ на предыдущий пост (переделать)?')) act(() => stageBack(orderId)) }}>↩ На предыдущий пост</button>}
+          {st.some(s => s.status === 'done' && (!cur || s.sort < cur.sort)) && <button type="button" disabled={busy} style={{ ...small, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => { const prv = [...st].reverse().find(s => s.status === 'done' && (!cur || s.sort < cur.sort)); if (window.confirm(`Вернуть заказ на предыдущий пост «${prv?.name || ''}» (переделать)?`)) act(() => stageBack(orderId)) }}>↩ На предыдущий пост</button>}
         </div>
       )}
       {err && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>{err}</div>}
@@ -229,10 +235,14 @@ function RuleEditor({ post, busy, onSave }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
         {RULE_LISTS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(r.list === k)} onClick={() => set(k === 'drill' && r.list !== 'drill' ? { list: k, top: false, bottom: true, edge: true, grooves: false, mills: false } : { list: k })}>{r.list === k ? '✓ ' : ''}{l}</button>)}
       </div>
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
+      {isBasePost(post.name) ? (
+        <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 6 }}>Пост по умолчанию: заказ проходит его всегда{r.list === 'edge' || r.list === 'drill' ? ' — кроме заказов, где таких деталей нет' : ''}.</div>
+      ) : (
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
         <input type="checkbox" checked={onDemandOf(post.rule, post.name)} disabled={busy} onChange={e => set({ onDemand: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />
-        <span><span>Только по галочке в заказе</span> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>— сборка, установка, упаковка: заказ идёт на пост, только если в заказе отмечена эта операция.{r.list === 'edge' || r.list === 'drill' ? ' Без галочки пост всё равно пропускается, если у заказа нет таких деталей.' : ''}</span></span>
+        <span><span>Только по галочке в заказе</span> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>— сборка, установка, упаковка: заказ идёт на пост, только если в заказе отмечена эта операция.</span></span>
       </label>
+      )}
       {r.list === 'edge' && (
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!r.sides} disabled={busy} onChange={e => set({ sides: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />

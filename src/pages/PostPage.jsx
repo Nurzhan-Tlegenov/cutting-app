@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { postPage, stageAccept, stageDone, since, clock } from '../lib/posts'
+import { postPage, stageAccept, stageDone, stageBack, since, clock } from '../lib/posts'
 import { ruleOf, ruleText } from '../lib/stageParts'
 import { orderTitle } from '../lib/orderUtils'
 import StageParts from '../components/StageParts'
@@ -74,6 +74,12 @@ export default function PostPage() {
           {withParts && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали — сканировать</button>}
           {!isNew && <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => (withParts ? setParts({ stage: q, orderId: q.order_id })
             : act(q, stageDone, `Пост «${post.name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
+          <button type="button" disabled={busy === q.stage_id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={async () => {
+            if (!window.confirm(`Вернуть заказ «${orderTitle(q)}» на предыдущий пост (переделать)?`)) return
+            setBusy(q.stage_id); const r = await stageBack(q.order_id); setBusy('')
+            if (r.error) window.alert(r.error); else if (r.data === false) window.alert('Это первый пост заказа — возвращать некуда.')
+            load()
+          }}>↩ На предыдущий пост</button>
         </div>
       </div>
     )

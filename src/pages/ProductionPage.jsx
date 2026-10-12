@@ -16,7 +16,7 @@ import CncSetup from '../components/CncSetup'
 import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
-import { productionStageMap } from '../lib/posts'
+import { productionStageMap, postsList } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
 import { planStages } from '../lib/posts'
 import { sendAppeal } from '../lib/messages'
@@ -59,6 +59,8 @@ export default function ProductionPage() {
   const [wps, setWps] = useState([])                              // где я сотрудник (своего производства нет)
   const [stages, setStages] = useState({})                        // где сейчас заказы: id -> { name (пост), status, done, total }
   const loadStages = () => productionStageMap().then(r => setStages(r.data || {}))
+  const [hasPosts, setHasPosts] = useState(false)       // есть посты — принятый, но не пущенный заказ помечается
+  useEffect(() => { let alive = true; postsList().then(r => { if (alive) setHasPosts((r.data || []).some(p => p.active !== false)) }); return () => { alive = false } }, [])
   const loadStaff = () => membersList().then(r => setStaff({ data: r.data || null, error: r.error || '' }))
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
   const [archived, setArchived] = useState(() => new Map())     // заказы в архиве: id -> когда отправлен
@@ -298,6 +300,7 @@ export default function ProductionPage() {
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
                         <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{archived.has(o.id) ? 'В архиве' : STATUS_LABELS[o.status] || o.status}</span>
+                        {hasPosts && o.status === 'inwork' && !stages[o.id] && <span title="Принят, но ещё не пущен в работу по постам" style={{ fontSize: 11, lineHeight: '16px', color: 'var(--amber)', whiteSpace: 'nowrap' }}>▶ не пущен в работу</span>}
                         {stages[o.id]?.name && <span title="Пост, на котором сейчас заказ" style={{ fontSize: 11, lineHeight: '16px', color: stages[o.id].status === 'queued' ? 'var(--amber)' : 'var(--blue)', whiteSpace: 'nowrap' }}>📍 {stages[o.id].name} · {stages[o.id].done}/{stages[o.id].total}</span>}
                         {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
                           <div style={{ display: 'flex', gap: 4 }}>

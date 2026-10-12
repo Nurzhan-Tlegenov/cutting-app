@@ -19,10 +19,12 @@ export function defaultRule(name) {
   return { list: 'all' }
 }
 export const ruleOf = (rule, name) => (rule && rule.list ? rule : defaultRule(name))
-/** Пост «по галочке в заказе» — сборка, установка, упаковка, доставка (то, чего не видно в деталях). Как post_on_demand в базе */
+/** Пост по умолчанию — раскрой, кромление, присадка: заказ проходит его всегда (без галочки в заказе) */
+export const isBasePost = name => /(раскр|распил|кром|присад|сверл)/i.test(String(name || ''))
+/** Пост «по галочке в заказе» — сборка, установка, упаковка и любые свои посты. Как post_on_demand в базе */
 export function onDemandOf(rule, name) {
-  if (rule && typeof rule.onDemand === 'boolean') return rule.onDemand
-  return /(сборк|установ|монтаж|упаков|достав|отгруз)/i.test(String(name || '')) || rule?.list === 'none'
+  if (isBasePost(name)) return false
+  return rule && typeof rule.onDemand === 'boolean' ? rule.onDemand : true
 }
 export function ruleText(rule) {
   if (rule.list === 'none') return 'без списка деталей'
