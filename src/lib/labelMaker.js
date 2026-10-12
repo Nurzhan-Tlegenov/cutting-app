@@ -128,15 +128,27 @@ export async function imageToLabel(src) {
     const iw = im.naturalWidth || 600, ih = im.naturalHeight || 600                 // у SVG размеров может не быть
     const k = Math.min(1, 1400 / Math.max(iw, ih)), cv = document.createElement('canvas')
     cv.width = Math.max(1, Math.round(iw * k)); cv.height = Math.max(1, Math.round(ih * k))
-    const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(im, 0, 0, cv.width, cv.height)
+    // прозрачный фон сохраняется (PNG); слишком тяжёлая картинка уменьшается, а не переводится в JPG (у JPG фона нет)
+    const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0, cv.width, cv.height)
     let data = cv.toDataURL('image/png')
-    if (data.length > 700000) data = cv.toDataURL('image/jpeg', 0.92)
+    for (let i = 0; data.length > 900000 && i < 4; i++) {
+      const c2 = document.createElement('canvas'); c2.width = Math.max(1, Math.round(cv.width * 0.75)); c2.height = Math.max(1, Math.round(cv.height * 0.75))
+      const g2 = c2.getContext('2d'); g2.imageSmoothingQuality = 'high'; g2.drawImage(cv, 0, 0, c2.width, c2.height)
+      cv.width = c2.width; cv.height = c2.height; cv.getContext('2d').drawImage(c2, 0, 0)
+      data = cv.toDataURL('image/png')
+    }
     const id = Math.random().toString(36).slice(2, 10)
     const r = await saveLabelImage(imgUser, id, data)
     if (!r.ok) throw new Error('Не удалось сохранить картинку')
     ;(await imageStore())[id] = data
     return 'ref:' + id
   } finally { URL.revokeObjectURL(url) }
+}
+/** Исходник картинки шаблона (для повторной обработки в редакторе) -> data:… | '' */
+export async function labelImageSrc(img) {
+  if (!img) return ''
+  if (!img.startsWith('ref:')) return img
+  return (await imageStore())[img.slice(4)] || ''
 }
 // Картинка в размере печати, переведённая в чёрные и белые точки с рассеиванием (полутона — как в газете):
 // принтер бирок печатает только чёрным, так фотографии и серые логотипы выходят узнаваемо, а чёткие значки — чётко.

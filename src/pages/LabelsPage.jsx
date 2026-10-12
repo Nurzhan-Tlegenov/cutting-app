@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, routerPost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName, toLatin, programName, folderName } from '../lib/orderUtils'
@@ -158,17 +158,67 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d }) {
 
 // Конструктор бирки: элементы перетаскиваются по бирке пальцем, за уголок — меняется размер.
 // Показана бирка первой детали первого листа — на настоящих данных заказа.
+import LabelImageEditor from '../components/LabelImageEditor'
+
 function LabelEditor({ tpl, onChange, order, mat, shared }) {
   const wrapRef = useRef(null), cvRef = useRef(null), drag = useRef(null)
   const [live, setLive] = useState(null)            // шаблон во время перетаскивания
   const [sel, setSel] = useState(null)
-  const [scale, setScale] = useState(4)             // точек экрана на мм
+  const [fitScale, setFitScale] = useState(4)       // точек экрана на мм, когда бирка во всю ширину
+  // увеличение бирки для точной расстановки с телефона: кнопки −/+ или щипок двумя пальцами; одним пальцем по пустому
+  // месту — двигать увеличенную бирку
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const scale = fitScale * zoom
   const t = live || tpl
   useEffect(() => {
-    const fit = () => { const w = wrapRef.current?.clientWidth; if (w) setScale(w / tpl.w) }
+    const fit = () => { const w = wrapRef.current?.clientWidth; if (w) setFitScale(w / tpl.w) }
     fit(); window.addEventListener('resize', fit)
     return () => window.removeEventListener('resize', fit)
   }, [tpl.w])
+  const viewH = Math.min(tpl.h * scale, Math.max(tpl.h * fitScale, (typeof window !== 'undefined' ? window.innerHeight : 800) * 0.55))
+  const clampPan = (p, z = zoom) => {
+    const W = tpl.w * fitScale * z, H = tpl.h * fitScale * z, vw = tpl.w * fitScale, vh = Math.min(H, Math.max(tpl.h * fitScale, window.innerHeight * 0.55))
+    return { x: Math.min(0, Math.max(vw - W, p.x)), y: Math.min(0, Math.max(vh - H, p.y)) }
+  }
+  const zoomAt = (nz, cx, cy) => {      // cx, cy — точка экрана внутри окна бирки, которая остаётся на месте
+    const z = Math.max(1, Math.min(8, nz))
+    setPan(p => clampPan({ x: cx - (cx - p.x) * z / zoom, y: cy - (cy - p.y) * z / zoom }, z))
+    setZoom(z)
+  }
+  const gest = useRef({ pts: new Map(), moved: false })
+  const bgDown = e => {
+    const G = gest.current
+    G.pts.set(e.pointerId, [e.clientX, e.clientY]); G.moved = false
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    if (G.pts.size === 2) { const [a, b] = [...G.pts.values()]; G.pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: zoom } }
+    else G.last = [e.clientX, e.clientY]
+  }
+  const bgMove = e => {
+    const G = gest.current
+    if (drag.current) { move(e); return }
+    if (!G.pts.has(e.pointerId)) return
+    G.pts.set(e.pointerId, [e.clientX, e.clientY])
+    const r = wrapRef.current.getBoundingClientRect()
+    if (G.pts.size >= 2 && G.pinch) {
+      const [a, b] = [...G.pts.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1])
+      zoomAt(G.pinch.z * d / (G.pinch.d || 1), (a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top); G.moved = true
+    } else if (G.last && zoom > 1) {
+      const dx = e.clientX - G.last[0], dy = e.clientY - G.last[1]
+      if (Math.abs(dx) + Math.abs(dy) > 2) G.moved = true
+      G.last = [e.clientX, e.clientY]
+      setPan(p => clampPan({ x: p.x + dx, y: p.y + dy }))
+    }
+  }
+  const bgUp = e => {
+    const G = gest.current
+    if (drag.current) { up(); G.pts.delete(e.pointerId); return }
+    const tap = G.pts.size === 1 && !G.moved
+    G.pts.delete(e.pointerId)
+    if (G.pts.size < 2) G.pinch = null
+    G.last = G.pts.size ? [...G.pts.values()][0] : null
+    if (tap) setSel(null)
+  }
   useEffect(() => {
     const cv = cvRef.current
     if (!cv || !mat) return
@@ -180,11 +230,21 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
   }, [t, order, mat])
   const fileRef = useRef(null)
   const [imgErr, setImgErr] = useState('')
-  const setImage = async src => {
-    setImgErr('')
-    try { const img = await imageToLabel(src); edit({ img, h: cur?.h || 9, w: cur?.img ? cur.w : 9 }) }
-    catch (e) { setImgErr(typeof src === 'string' ? 'С этого адреса картинку взять не получилось (сайт не разрешает). Сохраните её на телефон и выберите файлом.' : String(e?.message || e)) }
+  // картинка сначала открывается в редакторе (убрать фон → прозрачный PNG, обрезать поля), потом ставится на бирку
+  const [imgEdit, setImgEdit] = useState(null)      // { src } — открыт редактор картинки
+  const setImage = src => { setImgErr(''); setImgEdit({ src }) }
+  const putImage = async blob => {
+    setImgEdit(null)
+    try {
+      const img = await imageToLabel(blob)
+      // пропорции рамки — как у картинки
+      let ar = 1
+      try { const u = URL.createObjectURL(blob); const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u }); ar = (im.naturalWidth || 1) / (im.naturalHeight || 1); URL.revokeObjectURL(u) } catch { /* квадрат */ }
+      const h = cur?.img ? cur.h : Math.min(tpl.h * 0.3, 10), w = cur?.img ? cur.w : Math.min(tpl.w * 0.6, h * ar)
+      edit({ img, h, w })
+    } catch (e) { setImgErr(String(e?.message || e)) }
   }
+  const reEdit = async () => { const src = await labelImageSrc(cur?.img); if (src) setImgEdit({ src }) }
   const down = (e, it, mode) => {
     e.stopPropagation(); e.preventDefault()
     e.currentTarget.setPointerCapture?.(e.pointerId)
@@ -207,25 +267,43 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
   const used = new Set(t.items.map(i => i.type))
   return (
     <div>
-      <div ref={wrapRef} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerDown={() => setSel(null)}
-        style={{ position: 'relative', width: '100%', aspectRatio: `${t.w} / ${t.h}`, border: '1px solid #2C2C2A', borderRadius: 3, background: '#fff', touchAction: 'none', userSelect: 'none', overflow: 'hidden' }}>
+      <div ref={wrapRef} onPointerDown={bgDown} onPointerMove={bgMove} onPointerUp={bgUp} onPointerCancel={bgUp}
+        style={{ position: 'relative', width: '100%', height: viewH, border: '1px solid #2C2C2A', borderRadius: 3, background: zoom > 1 ? 'var(--bg2)' : '#fff', touchAction: 'none', userSelect: 'none', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', left: pan.x, top: pan.y, width: tpl.w * scale, height: tpl.h * scale, background: '#fff' }}>
         <canvas ref={cvRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
         {t.items.map(it => {
           const on = it.id === sel
           return (
-            <div key={it.id} onPointerDown={e => down(e, it, 'move')}
+            <div key={it.id} onPointerDown={e => down(e, it, 'move')} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
               style={{ position: 'absolute', left: it.x * scale, top: it.y * scale, width: itemBox(it)[0] * scale, height: itemBox(it)[1] * scale, boxSizing: 'border-box', cursor: 'move',
                 border: on ? '1.5px solid #185FA5' : '1px dashed rgba(24,95,165,0.45)', background: on ? 'rgba(24,95,165,0.08)' : 'transparent' }}>
-              {on && <div onPointerDown={e => down(e, it, 'size')}
+              {on && <div onPointerDown={e => down(e, it, 'size')} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
                 style={{ position: 'absolute', right: -9, bottom: -9, width: 20, height: 20, borderRadius: 10, background: '#185FA5', border: '2px solid #fff', cursor: 'nwse-resize' }} />}
             </div>
           )
         })}
+        </div>
       </div>
-      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0 8px' }}>Перетащите элемент на своё место; у выбранного — синяя точка в углу меняет размер.</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '6px 0 4px', flexWrap: 'wrap' }}>
+        <button type="button" style={chip(false)} onClick={() => zoomAt(zoom / 1.5, tpl.w * fitScale / 2, viewH / 2)} disabled={zoom <= 1}>−</button>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 44, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+        <button type="button" style={chip(false)} onClick={() => zoomAt(zoom * 1.5, tpl.w * fitScale / 2, viewH / 2)} disabled={zoom >= 8}>+</button>
+        {zoom > 1 && <button type="button" style={chip(false)} onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>Вся бирка</button>}
+        {cur && zoom < 2.5 && <button type="button" style={chip(false)} onClick={() => { const [bw, bh] = itemBox(cur), z = 3; setZoom(z); setPan(clampPan({ x: tpl.w * fitScale / 2 - (cur.x + bw / 2) * fitScale * z, y: viewH / 2 - (cur.y + bh / 2) * fitScale * z }, z)) }}>🔍 К выбранному</button>}
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>Перетащите элемент на своё место; у выбранного — синяя точка в углу меняет размер. Увеличить — «+» или щипком двумя пальцами, сдвинуть увеличенную бирку — пальцем по пустому месту.</p>
       {cur && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
-          <div style={{ flex: '1 1 100%', fontSize: 13, fontWeight: 500 }}>{itemTitle(cur.type)}</div>
+          <div style={{ flex: '1 1 100%', fontSize: 13, fontWeight: 500 }}>{itemTitle(cur.type)}{cur.img ? ' · картинкой' : ''}</div>
+          {/* точная подвижка: шаг 0,5 мм (с увеличением — 0,2 мм) */}
+          <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Сдвинуть на {zoom > 1.5 ? '0,2' : '0,5'} мм:</span>
+            {[['←', -1, 0], ['→', 1, 0], ['↑', 0, -1], ['↓', 0, 1]].map(([l, ix, iy]) => {
+              const st = zoom > 1.5 ? 0.2 : 0.5
+              return <button key={l} type="button" style={{ ...chip(false), padding: '6px 13px', fontSize: 14 }} onClick={() => edit({ x: cur.x + ix * st, y: cur.y + iy * st })}>{l}</button>
+            })}
+            <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>x {cur.x.toFixed(1)} · y {cur.y.toFixed(1)} мм</span>
+          </div>
           {!isBox(cur) && (
             <>
               <button type="button" style={chip(false)} onClick={() => edit({ size: cur.size - 0.3 })}>A−</button>
@@ -258,6 +336,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
             <>
               <button type="button" style={chip(!!cur.img)} onClick={() => fileRef.current?.click()}>🖼 {cur.img ? 'Другая картинка' : 'Картинка вместо текста'}</button>
               <button type="button" style={chip(false)} onClick={() => { const u = window.prompt('Адрес картинки в интернете (https://…)'); if (u) setImage(u.trim()) }}>🔗 По ссылке</button>
+              {cur.img && <button type="button" style={chip(false)} onClick={reEdit}>✂ Убрать фон / обработать</button>}
               {cur.img && cur.type !== 'image' && <button type="button" style={chip(false)} onClick={() => edit({ img: undefined })}>Вернуть текст</button>}
               <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setImage(f) }} />
             </>
@@ -284,10 +363,19 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
       )}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на бирку</div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-        {[...LABEL_ITEMS, ...metaItems(mat?.details)].filter(([k]) => !used.has(k) || k === 'image').map(([k, label]) => (
-          <button key={k} type="button" style={chip(false)} onClick={() => { const it = newLabelItem(k, tpl); onChange({ ...tpl, items: [...tpl.items, it] }); setSel(it.id) }}>+ {label}</button>
-        ))}
+        {/* любой параметр можно поставить несколько раз: например, один раз текстом, другой — картинкой в другом месте */}
+        {[...LABEL_ITEMS, ...metaItems(mat?.details)].map(([k, label]) => {
+          const n = t.items.filter(i => i.type === k).length
+          return (
+            <button key={k} type="button" style={chip(n > 0)} onClick={() => {
+              let it = newLabelItem(k, tpl)
+              if (n) { const [bw, bh] = itemBox(it); it = { ...it, x: Math.min(tpl.w - bw, it.x + 3 * n), y: Math.min(tpl.h - bh, it.y + 3 * n) } }   // копия — чуть в стороне
+              onChange({ ...tpl, items: [...tpl.items, it] }); setSel(it.id)
+            }}>+ {label}{n ? ` · ${n}` : ''}</button>
+          )
+        })}
       </div>
+      {imgEdit && <LabelImageEditor src={imgEdit.src} onDone={putImage} onCancel={() => setImgEdit(null)} />}
     </div>
   )
 }
