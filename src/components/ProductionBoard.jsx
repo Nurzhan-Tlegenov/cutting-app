@@ -181,7 +181,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     if (!r.error) r = await stageMove(q.order_id, to)
     setBusy('')
     if (r.error) window.alert(r.error)
-    else if (r.data === 'no_stage') window.alert(`В маршруте этого заказа нет поста «${post?.name}» (пост добавили позже, чем заказ пустили в работу).`)
+    else if (r.data === 'no_stage') window.alert(`Пост «${post?.name}» не добавился в маршрут заказа. Выполните migration_stage_move_new_post.sql в Supabase (SQL Editor) — один раз.`)
     await load(); onChange?.(); window.dispatchEvent(new Event('notices-seen'))
   }
   if (!data) return <CncLoader compact label="Загружаем техпроцесс…" />
