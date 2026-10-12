@@ -869,15 +869,18 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     if (!focusPids.length) return []
     const p = parts.find(q => q.pid === focusPids[0]), out = [{ label: 'Деталь', pids: focusPids }]
     const add = (label, pids) => { if (pids.length > out[out.length - 1].pids.length) out.push({ label, pids }) }
-    if (p.block) {
-      // одинаковое имя блока бывает у разных блоков модели (несколько «Корпус 1 / Секция»). Обозначение детали «01.05» —
-      // блок 01, деталь 05: если в блоке с этим именем есть детали других номеров блока, берём только свой номер
-      let inBlock = parts.filter(q => q.block === p.block || String(q.block || '').startsWith(p.block + ' / '))
-      const pre = d => (String(d || '').match(/^([^.\s]+)\./) || [])[1] || ''
-      const mine = pre(p.des)
-      if (mine && inBlock.some(q => pre(q.des) && pre(q.des) !== mine)) inBlock = inBlock.filter(q => pre(q.des) === mine)
-      add(`Блок «${p.block}»${mine ? ` · ${mine}` : ''}`, inBlock.map(q => q.pid))
+    // Обозначение вида «04.06» или «01.02.03» — уровни идут строго по нему: 04.06 → все детали «04.…» → вся модель.
+    // Имена блоков и панелей тогда не используются (одинаковые имена бывают у разных блоков модели).
+    const segs = String(p.des || '').split('.').map(x => x.trim()).filter(Boolean)
+    if (segs.length >= 2) {
+      for (let k = segs.length - 1; k >= 1; k--) {
+        const pref = segs.slice(0, k).join('.') + '.'
+        add(`Блок ${segs.slice(0, k).join('.')}`, parts.filter(q => String(q.des || '').startsWith(pref)).map(q => q.pid))
+      }
+      out.push({ label: 'Вся модель', pids: null })
+      return out
     }
+    if (p.block) add(`Блок «${p.block}»`, parts.filter(q => q.block === p.block || String(q.block || '').startsWith(p.block + ' / ')).map(q => q.pid))
     if (p.product) add(`Изделие «${p.product}»`, parts.filter(q => q.product === p.product).map(q => q.pid))
     out.push({ label: 'Вся модель', pids: null })
     return out
