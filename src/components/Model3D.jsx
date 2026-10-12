@@ -869,7 +869,15 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     if (!focusPids.length) return []
     const p = parts.find(q => q.pid === focusPids[0]), out = [{ label: 'Деталь', pids: focusPids }]
     const add = (label, pids) => { if (pids.length > out[out.length - 1].pids.length) out.push({ label, pids }) }
-    if (p.block) add(`Блок «${p.block}»`, parts.filter(q => q.block === p.block || String(q.block || '').startsWith(p.block + ' / ')).map(q => q.pid))
+    if (p.block) {
+      // одинаковое имя блока бывает у разных блоков модели (несколько «Корпус 1 / Секция»). Обозначение детали «01.05» —
+      // блок 01, деталь 05: если в блоке с этим именем есть детали других номеров блока, берём только свой номер
+      let inBlock = parts.filter(q => q.block === p.block || String(q.block || '').startsWith(p.block + ' / '))
+      const pre = d => (String(d || '').match(/^([^.\s]+)\./) || [])[1] || ''
+      const mine = pre(p.des)
+      if (mine && inBlock.some(q => pre(q.des) && pre(q.des) !== mine)) inBlock = inBlock.filter(q => pre(q.des) === mine)
+      add(`Блок «${p.block}»${mine ? ` · ${mine}` : ''}`, inBlock.map(q => q.pid))
+    }
     if (p.product) add(`Изделие «${p.product}»`, parts.filter(q => q.product === p.product).map(q => q.pid))
     out.push({ label: 'Вся модель', pids: null })
     return out

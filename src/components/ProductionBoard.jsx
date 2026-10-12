@@ -28,6 +28,10 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   const colRefs = useRef({})
   // галерея: сколько колонок-постов на экране (щипок двумя пальцами или −/+); 0 — компьютер, колонки по ширине
   const [gcols, setGcols] = useKeptState('boardCols', window.innerWidth < 760 ? 1 : 0)
+  // вид доски: rows — посты сверху вниз (удобно на телефоне), cols — колонками слева направо (монитор)
+  const [layout, setLayout] = useKeptState('boardLayout', window.innerWidth < 760 ? 'rows' : 'cols')
+  const [fold, setFold] = useKeptState('boardFold', [])           // свёрнутые посты (вид сверху вниз)
+  const rows = layout === 'rows'
   // канбан: удержание карточки — и переносим её пальцем на другой пост
   const [drag, setDrag] = useState(null)          // { q, from, x, y, over }
   const press = useRef(null), dragged = useRef(false), boardRef = useRef(null), dragRef = useRef(null)
@@ -65,7 +69,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   // щипок: пока пальцы на экране — доска плавно масштабируется; отпустили — число постов на экране = во сколько раз свели/развели
   const pinch = useRef(null)
   const onTouchStart = e => {
-    if (e.touches.length !== 2 || dragRef.current) return
+    if (e.touches.length !== 2 || dragRef.current || dragRows.current) return
     const [a, b] = e.touches, el = boardRef.current, r = el.getBoundingClientRect()
     pinch.current = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, k: 1, cols: gcols || Math.max(1, Math.round(r.width / 260)) }
     el.style.transformOrigin = `${(a.clientX + b.clientX) / 2 - r.left}px ${(a.clientY + b.clientY) / 2 - r.top}px`
@@ -119,6 +123,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     return () => { el.removeEventListener('touchstart', stop2); el.removeEventListener('touchmove', stop2); el.removeEventListener('gesturestart', stopG); el.removeEventListener('gesturechange', stopG) }
   }, [!!data])   // eslint-disable-line react-hooks/exhaustive-deps
   const ghostRef = useRef(null)
+  const dragRows = useRef(false)
+  useEffect(() => { dragRows.current = rows }, [rows])
   useEffect(() => {
     if (!drag) return
     const pos = { x: drag.x, y: drag.y }
@@ -127,7 +133,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     // у края экрана доска едет сама — плавно, пока палец там
     const tick = () => {
       const el = boardRef.current
-      if (el) { const r = el.getBoundingClientRect(), edge = 40; if (pos.x < r.left + edge) el.scrollLeft -= 10; else if (pos.x > r.right - edge) el.scrollLeft += 10 }
+      if (dragRows.current) { const edge = 70; if (pos.y < edge) window.scrollBy(0, -12); else if (pos.y > window.innerHeight - edge) window.scrollBy(0, 12) }
+      else if (el) { const r = el.getBoundingClientRect(), edge = 40; if (pos.x < r.left + edge) el.scrollLeft -= 10; else if (pos.x > r.right - edge) el.scrollLeft += 10 }
       const c = colAt(pos.x, pos.y)
       if (c && c !== over) { over = c; setDrag(d => (d ? { ...d, over: c } : d)) }
       raf = requestAnimationFrame(tick)
@@ -161,8 +168,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   if (!data) return <CncLoader compact label="Загружаем техпроцесс…" />
   const cols = [{ id: IDLE, name: 'Принят, не пущен' }, ...data.posts]
   const byPost = id => (id === IDLE ? data.idle : data.items.filter(q => q.post_id === id))
-  const goCol = id => colRefs.current[id]?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
-  const compact = gcols >= 3                                   // мелко — только названия; тап по заказу — крупно, к его посту
+  const goCol = id => { if (rows) setFold(f => f.filter(x => x !== id)); setTimeout(() => colRefs.current[id]?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: rows ? 'start' : 'nearest' }), 30) }
+  const compact = !rows && gcols >= 3                                   // мелко — только названия; тап по заказу — крупно, к его посту
   const zoomTo = id => { setGcols(1); setTimeout(() => goCol(id), 60) }
   const maxCols = cols.length
   const btn = kind => ({ padding: '5px 10px', borderRadius: 16, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
@@ -226,10 +233,12 @@ export default function ProductionBoard({ prodId = null, onChange }) {
             style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 14, fontSize: 11.5, border: `0.5px solid ${n ? (c.id === IDLE ? 'var(--amber)' : 'var(--blue)') : 'var(--border-md)'}`,
               background: 'transparent', color: n ? (c.id === IDLE ? 'var(--amber)' : 'var(--blue)') : 'var(--text-hint)', whiteSpace: 'nowrap' }}>{c.id === IDLE ? '▶ Не пущены' : c.name} · {n}</button>
         })}
-        <span style={{ flex: '0 0 auto', marginLeft: 'auto', display: 'inline-flex', gap: 3 }}>
+        <button type="button" title={rows ? 'Колонками слева направо (удобно на мониторе)' : 'Сверху вниз (удобно на телефоне)'} onClick={() => setLayout(rows ? 'cols' : 'rows')}
+          style={{ flex: '0 0 auto', marginLeft: 'auto', padding: '3px 9px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)' }}>{rows ? '⇆ Колонки' : '☰ Списком'}</button>
+        {!rows && <span style={{ flex: '0 0 auto', display: 'inline-flex', gap: 3 }}>
           <button type="button" title="Мельче — больше постов на экране" onClick={() => setGcols(c => Math.min(maxCols, (c || 1) + 1))} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>−</button>
           <button type="button" title="Крупнее" onClick={() => setGcols(c => Math.max(1, (c || 2) - 1))} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>+</button>
-        </span>
+        </span>}
         <button type="button" onClick={load} title="Обновить" style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>⟳{stamp ? ` ${stamp.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : ''}</button>
       </div>
       {!data.posts.length ? (
@@ -237,6 +246,27 @@ export default function ProductionBoard({ prodId = null, onChange }) {
       ) : !total ? (
         <p style={{ fontSize: 13, color: 'var(--text-hint)', padding: '6px 0 10px' }}>Сейчас в работе заказов нет. Принятые заказы появятся в колонке «Принят, не пущен».</p>
       ) : null}
+      {rows ? (
+        <div ref={boardRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 8 }}>
+          {cols.map(c => {
+            const list = byPost(c.id)
+            if (c.id === IDLE && !list.length && data.items.length) return null
+            const target = drag && drag.over === c.id && drag.from !== c.id
+            const open = drag ? false : list.length > 0 && !fold.includes(c.id)
+            return (
+              <div key={c.id} ref={el => { colRefs.current[c.id] = el }} data-col={c.id}
+                style={{ background: target ? 'var(--blue-light)' : 'var(--bg2)', outline: target ? '2px dashed var(--blue)' : 'none', borderRadius: 'var(--radius)', padding: drag ? '12px 10px' : '7px 10px', transition: 'padding 120ms' }}>
+                <div onClick={() => list.length && setFold(f => (f.includes(c.id) ? f.filter(x => x !== c.id) : [...f, c.id]))} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: list.length ? 'pointer' : 'default' }}>
+                  <span style={{ width: 10, fontSize: 11, color: 'var(--text-hint)' }}>{list.length ? (open ? '▾' : '▸') : ''}</span>
+                  <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 13.5, color: c.id === IDLE ? 'var(--amber)' : list.length ? 'var(--text)' : 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.id === IDLE ? '▶ ' : '📍 '}{c.name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, minWidth: 22, textAlign: 'center', padding: '1px 7px', borderRadius: 10, background: list.length ? (c.id === IDLE ? 'var(--amber)' : 'var(--blue)') : 'transparent', color: list.length ? 'white' : 'var(--text-hint)' }}>{list.length}</span>
+                </div>
+                {open && <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 7 }}>{list.map(q => (c.id === IDLE ? idleCard(q) : stageCard(q)))}</div>}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
       <div ref={boardRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}
         style={{ touchAction: 'pan-x pan-y', display: 'flex', gap: gcols >= 3 ? 6 : 10, overflowX: 'auto', scrollSnapType: gcols === 1 && !drag ? 'x mandatory' : 'none', paddingBottom: 8, alignItems: 'flex-start' }}>
         {cols.map(c => {
@@ -259,7 +289,8 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           )
         })}
       </div>
-      <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Удержите заказ (около секунды) и перенесите пальцем на нужный пост — вперёд или назад. Щипок двумя пальцами — больше или меньше постов на экране.</p>
+      )}
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Удержите заказ (около секунды) и перенесите пальцем на нужный пост — вперёд или назад. {rows ? 'Пост с заказами раскрывается и сворачивается тапом по названию; пока тянете заказ — все посты свёрнуты, бросайте на нужный.' : 'Щипок двумя пальцами — больше или меньше постов на экране.'}</p>
       {drag && (
         <div ref={ghostRef} style={{ position: 'fixed', left: 0, top: 0, transform: `translate(${drag.x - 70}px, ${drag.y - 26}px)`, willChange: 'transform', width: 140, zIndex: 500, pointerEvents: 'none', padding: '7px 9px', borderRadius: 10, background: 'var(--bg)', border: '1.5px solid var(--blue)', boxShadow: '0 6px 18px rgba(0,0,0,0.25)', fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {orderTitle(drag.q)}
