@@ -10,7 +10,7 @@ import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { routerPost, drillPosts, toggleUse6, isDrill6 } from '../lib/cncSettings'
 import { useCnc } from '../hooks/useCnc'
-import { buildDrill6Files, drill6Folders } from '../lib/drill6Xml'
+import { buildDrill6Files, drill6Folders, drill6Qr } from '../lib/drill6Xml'
 import Drill6Viewer from '../components/Drill6Viewer'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor } from '../lib/gcode'
 import { getLabelTpl, buildLabelFiles, labelInfo, labelQr } from '../lib/labelMaker'
@@ -32,6 +32,7 @@ const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))  
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 // имена программ и папок — строго латиницей: станки и флешки кириллицу читают не везде
+const latinExt = s => String(s || '').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'XML'
 const safeName = s => toLatin(String(s || '')).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '')
 
 function download(name, data, type = 'text/plain') {
@@ -162,7 +163,17 @@ export default function CncPage() {
   const [xmlView, setXmlView] = useState(null)      // открыт просмотр XML присадки: { title, files }
   const [pdfAsk, setPdfAsk] = useState(false)        // открыт конструктор PDF карт раскроя
   const labelFiles = () => (built.labels || []).map(f => ({ name: f.name, data: f.data }))
-  const saveAll = () => setSaveAsk({ files: [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))], zipName: `${baseName()}.zip` })
+  // «Сохранить все файлы» — и фрезер, и шестисторонний станок: в архиве две папки — «<заказ>_<пометка фрезера>»
+  // (G-код, маркировка, внутри — папка материала) и «<папка присадки>_<пометка станка>» (XML по деталям)
+  const routerDir = () => [[folderName(post.folderTpl, nameCtx(null)), safeName(post.dirMark ?? 'CNC_frezer')].filter(Boolean).join('_'), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']
+  const drillDir = r => { const f = r.folders.length ? r.folders : [folderName(null, nameCtx(null))]; return [[f[0], safeName(r.post.dirMark ?? 'CNC_6side')].filter(Boolean).join('_'), ...f.slice(1)] }
+  const saveAll = () => {
+    const rd = routerDir()
+    const files = [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))].map(f => ({ ...f, dir: rd }))
+    for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
+    setSaveAsk({ files, zipName: `${baseName()}.zip` })
+  }
+  const allCount = () => built.files.filter(f => !f.empty).length + (built.labels?.length || 0) + (built.drill || []).reduce((a, r) => a + r.files.length, 0)
   const simView = useMemo(() => {
     if (!sim || !mat) return null
     const sheet = mat.sheets[sim.si], geo = sheetGeo(order, mat.result, sheet)
@@ -253,6 +264,35 @@ export default function CncPage() {
                     {p.name}
                   </label>
                 ))}
+                {/* что выйдет для шестистороннего станка: расширение, имя файла (= код QR бирки), папка — и пометки папок */}
+                {drills.map(p => {
+                  let example = ''
+                  try { example = mat?.sheets?.[0]?.placed?.length ? labelQr({ qr: drill6Qr(p, labelTpl) }, labelInfo(order, mat, 0, 0)) : '' } catch { example = '' }
+                  const dd = [[(drill6Folders(p, nameCtx(null))[0] || folderName(null, nameCtx(null))), safeName(p.dirMark ?? 'CNC_6side')].filter(Boolean).join('_'), ...drill6Folders(p, nameCtx(null)).slice(1)]
+                  return (
+                    <div key={'i' + p.id} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '4px 0 2px 26px', lineHeight: 1.5 }}>
+                      <div>Файлы: <b>.{latinExt(p.ext || 'XML')}</b> — по файлу на деталь</div>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Имя файла = код QR бирки, например: <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{example || '—'}.{latinExt(p.ext || 'XML')}</b></div>
+                      <div>Папка: <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{dd.join('/')}</b></div>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>Пометка папки
+                        <input type="text" key={p.id + 'dm' + (p.dirMark ?? '')} defaultValue={p.dirMark ?? 'CNC_6side'} placeholder="без пометки"
+                          onBlur={e => { const v = safeName(e.target.value); if (v !== (p.dirMark ?? 'CNC_6side')) change({ ...cnc, posts: cnc.posts.map(q => (q.id === p.id ? { ...q, dirMark: v } : q)) }) }}
+                          style={{ width: 130, padding: '3px 7px', fontSize: 12, fontFamily: 'monospace' }} />
+                      </label>
+                    </div>
+                  )
+                })}
+                {drills.length > 0 && (
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '4px 0 0 0', paddingTop: 6, borderTop: '0.5px dashed var(--border)' }}>
+                    <div>Фрезер ({post.name}): <b>.{post.ext || 'nc'}</b>, папка <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{routerDir().join('/')}</b></div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>Пометка папки фрезера
+                      <input type="text" key={post.id + 'dm' + (post.dirMark ?? '')} defaultValue={post.dirMark ?? 'CNC_frezer'} placeholder="без пометки"
+                        onBlur={e => { const v = safeName(e.target.value); if (v !== (post.dirMark ?? 'CNC_frezer')) change({ ...cnc, posts: cnc.posts.map(q => (q.id === post.id ? { ...q, dirMark: v } : q)) }) }}
+                        style={{ width: 130, padding: '3px 7px', fontSize: 12, fontFamily: 'monospace' }} />
+                    </label>
+                    <div style={{ color: 'var(--text-hint)' }}>«Сохранить все файлы» положит программы обоих станков в одну выгрузку — двумя папками.</div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -354,8 +394,15 @@ export default function CncPage() {
               )}
             </div>
           ))}
-          {built && (built.files.filter(f => !f.empty).length > 1 || built.labels?.length > 0) && (
-            <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({built.files.filter(f => !f.empty).length + (built.labels?.length || 0)})</button>
+          {built && allCount() > 1 && (
+            <>
+              <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({allCount()})</button>
+              {(built.drill || []).some(r => r.files.length) && (
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+                  Папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}
+                </p>
+              )}
+            </>
           )}
           {saved && built && <p style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6, textAlign: 'center' }}>{saved}</p>}
           {saved && built && <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={toOrders}>← Перейти к заказам</button>}

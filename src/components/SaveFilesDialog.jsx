@@ -22,7 +22,9 @@ export default function SaveFilesDialog({ files, zipName, onClose, onDone, folde
   const [busy, setBusy] = useState('')
   if (!files?.length) return null
   const path = folders.filter(Boolean)
-  const zipData = () => zipSync(Object.fromEntries(files.map(f => [[...path, f.name].join('/'), bytes(f.data)])), { level: 6 })
+  // у файла может быть своя папка (f.dir — массив): так в одном архиве лежат папки фрезера и шестистороннего станка
+  const dirOf = f => (Array.isArray(f.dir) ? f.dir.filter(Boolean) : path)
+  const zipData = () => zipSync(Object.fromEntries(files.map(f => [[...dirOf(f), f.name].join('/'), bytes(f.data)])), { level: 6 })
   const zipFile = () => new File([zipData()], zipName, { type: 'application/zip' })
   // «Поделиться» — системное меню телефона (мессенджеры, облачные диски). Сначала пробуем отдать файлы по отдельности;
   // если браузер такие файлы передавать не разрешает (у него свой список типов) — архивом. Папок при передаче
@@ -53,10 +55,17 @@ export default function SaveFilesDialog({ files, zipName, onClose, onDone, folde
       try {
         const top = await window.showDirectoryPicker({ mode: 'readwrite' })
         setBusy('Сохраняем файлы…')
-        let dir = top
-        for (const name of path) dir = await dir.getDirectoryHandle(name, { create: true })       // папка заказа, в ней — папка материала
-        for (const f of files) { const h = await dir.getFileHandle(f.name, { create: true }); const w = await h.createWritable(); await w.write(f.data); await w.close() }
-        done(`Сохранено файлов: ${files.length} — в папку «${[top.name, ...path].join('/')}»`)
+        const dirs = new Map()
+        const dirFor = async parts => {
+          const key = parts.join('/')
+          if (dirs.has(key)) return dirs.get(key)
+          let dir = top
+          for (const name of parts) dir = await dir.getDirectoryHandle(name, { create: true })     // папка заказа, в ней — папка материала
+          dirs.set(key, dir); return dir
+        }
+        for (const f of files) { const dir = await dirFor(dirOf(f)); const h = await dir.getFileHandle(f.name, { create: true }); const w = await h.createWritable(); await w.write(f.data); await w.close() }
+        const tops = [...new Set(files.map(f => dirOf(f)[0]).filter(Boolean))]
+        done(`Сохранено файлов: ${files.length} — в папку «${top.name}»${tops.length ? `: ${tops.join(', ')}` : ''}`)
         return
       } catch (e) { if (e?.name === 'AbortError') { setBusy(''); return } }
     }
@@ -74,7 +83,7 @@ export default function SaveFilesDialog({ files, zipName, onClose, onDone, folde
             <button type="button" className="btn-primary" onClick={separate}>Все файлы по отдельности</button>
             <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 10px' }}>
               {window.showDirectoryPicker
-                ? `Выберите папку — в ней ${path.length ? `создастся «${path.join('/')}», и ` : ''}все файлы запишутся туда разом.`
+                ? `Выберите папку — в ней ${files.some(f => Array.isArray(f.dir)) ? `создадутся папки ${[...new Set(files.map(f => dirOf(f)[0]).filter(Boolean))].map(x => `«${x}»`).join(' и ')}, и ` : path.length ? `создастся «${path.join('/')}», и ` : ''}все файлы запишутся туда разом.`
                 : `Файлы сохранятся в «Загрузки» друг за другом; браузер может спросить разрешение на несколько загрузок — разрешите.${path.length ? ' Папки на телефоне браузер создать не может — они есть внутри архива.' : ''}`}
             </p>
             <button type="button" className="btn-secondary" onClick={asZip}>Одним архивом (zip)</button>
