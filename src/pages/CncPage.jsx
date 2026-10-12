@@ -32,6 +32,38 @@ const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))  
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 // имена программ и папок — строго латиницей: станки и флешки кириллицу читают не везде
+const DRILL_DIR_DEFAULT = '{ZAKAZ}_CNC_6side/{MAT}'
+const DIR_PARTS = [['{ZAKAZ}', 'заказ'], ['{NOMER}', 'номер'], ['{MAT}', 'материал'], ['{T}', 'толщина'], ['{DATA}', 'дата'], ['{KLIENT}', 'клиент'], ['{LISTOV}', 'листов']]
+// Конструктор папок выгрузки: уровни вложенности (матрёшка), у каждого уровня — части имени и свой текст
+function DirPathEditor({ value, def, preview, onChange }) {
+  const levels = String(value || '').split('/')
+  const [cur, setCur] = useState(Math.max(0, levels.length - 1))
+  const k = Math.min(cur, levels.length - 1)
+  const setLevels = ls => onChange(ls.map(x => x.trim()).filter((x, i, a) => x || i === a.length - 1).join('/'))
+  const chip = { padding: '2px 8px', borderRadius: 12, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }
+  return (
+    <div style={{ marginTop: 3 }}>
+      <div>Папки: <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{preview.join(' / ') || '— без папок —'}</b></div>
+      {levels.map((lv, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3, paddingLeft: i * 12 }}>
+          <span style={{ color: 'var(--text-hint)' }}>{i ? '└' : '📁'}</span>
+          <input type="text" key={value + i} defaultValue={lv} onFocus={() => setCur(i)} placeholder="имя папки"
+            onBlur={e => { if (e.target.value !== lv) setLevels(levels.map((x, j) => (j === i ? e.target.value : x))) }}
+            style={{ flex: 1, minWidth: 0, padding: '3px 7px', fontSize: 12, fontFamily: 'monospace', border: i === k ? '1px solid var(--blue)' : undefined }} />
+          {levels.length > 1 && <button type="button" style={{ ...chip, color: 'var(--danger)' }} onClick={() => setLevels(levels.filter((_, j) => j !== i))}>✕</button>}
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+        {DIR_PARTS.map(([code, l]) => (
+          <button key={code} type="button" style={chip} onClick={() => { const x = (levels[k] || '').replace(/_+$/, ''); setLevels(levels.map((v, j) => (j === k ? x + (x ? '_' : '') + code : v))) }}>+ {l}</button>
+        ))}
+        <button type="button" style={{ ...chip, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => { setLevels([...levels, '{MAT}']); setCur(levels.length) }}>+ вложенная папка</button>
+        <button type="button" style={chip} onClick={() => onChange(def)}>↺ как было</button>
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 2 }}>Части добавляются в выделенную папку; свой текст — прямо в поле. Имена — латиницей.</div>
+    </div>
+  )
+}
 const latinExt = s => String(s || '').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'XML'
 const safeName = s => toLatin(String(s || '')).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '')
 
@@ -165,8 +197,14 @@ export default function CncPage() {
   const labelFiles = () => (built.labels || []).map(f => ({ name: f.name, data: f.data }))
   // «Сохранить все файлы» — и фрезер, и шестисторонний станок: в архиве две папки — «<заказ>_<пометка фрезера>»
   // (G-код, маркировка, внутри — папка материала) и «<папка присадки>_<пометка станка>» (XML по деталям)
-  const routerDir = () => [[folderName(post.folderTpl, nameCtx(null)), safeName(post.dirMark ?? 'CNC_frezer')].filter(Boolean).join('_'), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']
-  const drillDir = r => { const f = r.folders.length ? r.folders : [folderName(null, nameCtx(null))]; return [[f[0], safeName(r.post.dirMark ?? 'CNC_6side')].filter(Boolean).join('_'), ...f.slice(1)] }
+  // Папки выгрузки — матрёшка, которую пользователь собирает сам: уровни через «/», в каждом — части имени
+  // ({ZAKAZ}, {MAT}, …) и свой текст. Своя у фрезера и у каждого шестистороннего станка.
+  const pathOf = tpl => String(tpl || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, nameCtx(null))).filter(Boolean)
+  // по умолчанию — как раньше («папка заказа»/материал); с шестисторонним станком — с пометкой фрезера
+  const routerDef = () => `${post.folderTpl || '{ZAKAZ}'}${drills.length ? '_CNC_frezer' : ''}/{MAT}`
+  const routerDir = () => pathOf(post.dirPath ?? routerDef())
+  const drillDir = r => pathOf(r.post.dirPath ?? DRILL_DIR_DEFAULT)
+  const setPostPath = (id, v) => change({ ...cnc, posts: cnc.posts.map(q => (q.id === id ? { ...q, dirPath: v } : q)) })
   const saveAll = () => {
     const rd = routerDir()
     const files = [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))].map(f => ({ ...f, dir: rd }))
@@ -264,33 +302,22 @@ export default function CncPage() {
                     {p.name}
                   </label>
                 ))}
-                {/* что выйдет для шестистороннего станка: расширение, имя файла (= код QR бирки), папка — и пометки папок */}
+                {/* что выйдет для шестистороннего станка: расширение и имя файла (= код QR бирки); папки — матрёшка, собирается здесь */}
                 {drills.map(p => {
-                  let example = ''
+                  let example
                   try { example = mat?.sheets?.[0]?.placed?.length ? labelQr({ qr: drill6Qr(p, labelTpl) }, labelInfo(order, mat, 0, 0)) : '' } catch { example = '' }
-                  const dd = [[(drill6Folders(p, nameCtx(null))[0] || folderName(null, nameCtx(null))), safeName(p.dirMark ?? 'CNC_6side')].filter(Boolean).join('_'), ...drill6Folders(p, nameCtx(null)).slice(1)]
                   return (
-                    <div key={'i' + p.id} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '4px 0 2px 26px', lineHeight: 1.5 }}>
-                      <div>Файлы: <b>.{latinExt(p.ext || 'XML')}</b> — по файлу на деталь</div>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Имя файла = код QR бирки, например: <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{example || '—'}.{latinExt(p.ext || 'XML')}</b></div>
-                      <div>Папка: <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{dd.join('/')}</b></div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>Пометка папки
-                        <input type="text" key={p.id + 'dm' + (p.dirMark ?? '')} defaultValue={p.dirMark ?? 'CNC_6side'} placeholder="без пометки"
-                          onBlur={e => { const v = safeName(e.target.value); if (v !== (p.dirMark ?? 'CNC_6side')) change({ ...cnc, posts: cnc.posts.map(q => (q.id === p.id ? { ...q, dirMark: v } : q)) }) }}
-                          style={{ width: 130, padding: '3px 7px', fontSize: 12, fontFamily: 'monospace' }} />
-                      </label>
+                    <div key={'i' + p.id} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '4px 0 6px 26px', lineHeight: 1.5 }}>
+                      <div>Файлы: <b>.{latinExt(p.ext || 'XML')}</b> — по файлу на деталь; имя = код QR бирки, например <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{example || '—'}.{latinExt(p.ext || 'XML')}</b></div>
+                      <DirPathEditor value={p.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={pathOf(p.dirPath ?? DRILL_DIR_DEFAULT)} onChange={v => setPostPath(p.id, v)} />
                     </div>
                   )
                 })}
                 {drills.length > 0 && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '4px 0 0 0', paddingTop: 6, borderTop: '0.5px dashed var(--border)' }}>
-                    <div>Фрезер ({post.name}): <b>.{post.ext || 'nc'}</b>, папка <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{routerDir().join('/')}</b></div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>Пометка папки фрезера
-                      <input type="text" key={post.id + 'dm' + (post.dirMark ?? '')} defaultValue={post.dirMark ?? 'CNC_frezer'} placeholder="без пометки"
-                        onBlur={e => { const v = safeName(e.target.value); if (v !== (post.dirMark ?? 'CNC_frezer')) change({ ...cnc, posts: cnc.posts.map(q => (q.id === post.id ? { ...q, dirMark: v } : q)) }) }}
-                        style={{ width: 130, padding: '3px 7px', fontSize: 12, fontFamily: 'monospace' }} />
-                    </label>
-                    <div style={{ color: 'var(--text-hint)' }}>«Сохранить все файлы» положит программы обоих станков в одну выгрузку — двумя папками.</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', paddingTop: 6, borderTop: '0.5px dashed var(--border)' }}>
+                    <div>Фрезер ({post.name}): файлы <b>.{post.ext || 'nc'}</b></div>
+                    <DirPathEditor value={post.dirPath ?? routerDef()} def={routerDef()} preview={routerDir()} onChange={v => setPostPath(post.id, v)} />
+                    <div style={{ color: 'var(--text-hint)' }}>«Сохранить все файлы» кладёт программы обоих станков в одну выгрузку — каждую в свои папки.</div>
                   </div>
                 )}
               </div>
@@ -375,7 +402,7 @@ export default function CncPage() {
             <div key={r.post.id} className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
               <div style={{ fontSize: 13, fontWeight: 500 }}>⬡ {r.post.name}</div>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
-                {r.files.length ? `Файлов: ${r.files.length} — по одному на каждую деталь с биркой; имя файла = код детали (${r.post.d6Name === 'own' ? 'своё имя' : 'код QR бирки'}): ${r.files[0].name}${r.files.length > 1 ? ' …' : ''}. Папка: ${r.folders.join(' / ') || '—'}.` : 'Нет деталей с обработкой.'}
+                {r.files.length ? `Файлов: ${r.files.length} — по одному на каждую деталь с биркой; имя файла = код детали (${r.post.d6Name === 'own' ? 'своё имя' : 'код QR бирки'}): ${r.files[0].name}${r.files.length > 1 ? ' …' : ''}. Папка: ${drillDir(r).join(' / ') || '—'}.` : 'Нет деталей с обработкой.'}
                 {r.skipped > 0 ? ` Без обработки: ${r.skipped} — не выводятся.` : ''}
               </div>
               {r.warnings.length > 0 && (
@@ -387,7 +414,7 @@ export default function CncPage() {
               {r.files.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => setXmlView({ title: r.post.name, files: r.files })} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>👁 Просмотр</button>
-                  <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${baseName()}.zip`, folders: r.folders })}
+                  <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${baseName()}.zip`, folders: drillDir(r) })}
                     style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы ({r.files.length})</button>
                   {r.files.length === 1 && <button type="button" onClick={() => { download(r.files[0].name, r.files[0].data, 'text/xml'); mark('files') }} style={small}>⬇ {r.files[0].name}</button>}
                 </div>
@@ -454,7 +481,7 @@ export default function CncPage() {
       {xmlView && <Drill6Viewer title={xmlView.title} files={xmlView.files} onClose={() => setXmlView(null)} />}
       {pdfAsk && mat && <PdfSetup order={order} mat={mat} method={order?.cutting_method || 'nesting'} fileName={`Karty_${baseName()}.pdf`} onClose={() => setPdfAsk(false)} />}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={savedDone}
-        folders={saveAsk.folders || [folderName(post.folderTpl, nameCtx(null)), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
+        folders={saveAsk.folders || routerDir()} />}
       <BottomNav />
     </div>
   )
