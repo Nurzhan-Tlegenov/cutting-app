@@ -343,7 +343,11 @@ export default function ProductionPage() {
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     {o.status !== 'inwork' && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять</button>}
                     {o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
-                    {o.status === 'inwork' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => finish(o)}>Исполнен</button>}
+                    {/* по постам «Исполнен» ставится сам после последнего поста; без маршрута — кнопкой */}
+                    {o.status === 'inwork' && !stages[o.id] && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => finish(o)}>Исполнен</button>}
+                    {/* отменить своё «Принять»: пока ни один пост заказ не взял — заказ снова новый */}
+                    {o.status === 'inwork' && (!stages[o.id] || (stages[o.id].status === 'queued' && !stages[o.id].done)) && <button type="button" disabled={busy === o.id} style={btn()}
+                      onClick={() => { if (window.confirm(`Отменить принятие заказа «${orderTitle(o)}»?\nОн снова станет новой заявкой${stages[o.id] ? ', маршрут по постам сбросится' : ''}.`)) setStatus(o, 'new') }}>✕ Отменить принятие</button>}
                     <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
                     {!o.own && wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none', color: 'var(--teal)', borderColor: 'var(--teal)' }}>WhatsApp</a>}
                     {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}

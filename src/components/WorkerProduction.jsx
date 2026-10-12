@@ -5,7 +5,7 @@ import { orderFaults, faultText } from '../lib/nestingCheck'
 import { limitFromError } from '../lib/limits'
 import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
 import { permsText, workPid, openWorkplace } from '../lib/workplaces'
-import { myPostQueue, stageAccept, stageDone, since, clock, planStages } from '../lib/posts'
+import { myPostQueue, stageAccept, stageUnaccept, stageDone, since, clock, planStages } from '../lib/posts'
 import { StageTrack } from './ProductionPosts'
 import StageParts from './StageParts'
 import StageReturn from './StageReturn'
@@ -150,7 +150,7 @@ export default function WorkerProduction({ wps }) {
                       <div style={{ fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(q)}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[q.material_name, q.sheets > 0 && `листов ${q.sheets}`, `деталей ${q.parts}`].filter(Boolean).join(' · ')}</div>
                       <div style={{ fontSize: 11.5, color: isNew ? 'var(--amber)' : 'var(--text-muted)' }}>
-                        {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)}, ${since(q.accepted_at)}`}
+                        {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт принятия ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)} (увидел через ${since(q.queued_at, q.accepted_at)}), ${since(q.accepted_at)}`}
                         {q.next_post ? ` · дальше: ${q.next_post}` : ' · последний пост'}
                       </div>
                     </div>
@@ -159,6 +159,7 @@ export default function WorkerProduction({ wps }) {
                   <StageProgress orderId={q.order_id} rule={q.rule} postName={q.post_name} scanned={q.scanned} onOpen={() => setParts({ stage: q, orderId: q.order_id })} onSkipped={load} />
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     {isNew && <button type="button" disabled={busy === q.stage_id} style={btn('main')} onClick={() => stage(q, stageAccept)}>✓ Принять</button>}
+                    {!isNew && q.accepted_me && <button type="button" disabled={busy === q.stage_id} style={btn()} onClick={() => stage(q, stageUnaccept, `Отменить принятие заказа «${orderTitle(q)}»?\nОн снова будет новым на посту.`)}>✕ Отменить принятие</button>}
                     {ruleOf(q.rule, q.post_name).list !== 'none' && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Список деталей</button>}
                     {!isNew && <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => (ruleOf(q.rule, q.post_name).list !== 'none' ? setParts({ stage: q, orderId: q.order_id })
                       : stage(q, stageDone, `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}

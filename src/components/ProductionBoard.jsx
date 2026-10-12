@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { productionBoard, stageAccept, stageDone, startOrderStages, planStages, stageMove, since, clock } from '../lib/posts'
+import { productionBoard, stageAccept, stageUnaccept, stageDone, startOrderStages, planStages, stageMove, since, clock } from '../lib/posts'
 import { ruleOf } from '../lib/stageParts'
 import { orderTitle } from '../lib/orderUtils'
 import StageParts from './StageParts'
@@ -207,12 +207,15 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.own ? 'свой заказ' : q.client_name || '—'} · {meta(q)}</div>
         </div>
         <div style={{ fontSize: 11, color: isNew ? 'var(--amber)' : 'var(--text-muted)', marginTop: 2 }}>
-          {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)}, идёт ${since(q.accepted_at)}`}
+          {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт принятия${q.members?.length ? ` (${q.members.join(', ')})` : ''} · ${since(q.queued_at)}`
+            : `Принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)} · увидел через ${since(q.queued_at, q.accepted_at)}, в работе ${since(q.accepted_at)}`}
           {q.next_post ? ` → ${q.next_post}` : ' · последний'}
         </div>
         {!compact && <StageProgress orderId={q.order_id} rule={q.rule} postName={q.post_name} scanned={q.scanned} onOpen={withParts ? () => setParts({ stage: q, orderId: q.order_id }) : undefined} onSkipped={load} />}
         {!compact && <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
-          {isNew && <button type="button" disabled={busy === key} style={btn('main')} onClick={() => act(key, () => stageAccept(key))}>✓ Принять</button>}
+          {/* принять — только сотрудники поста (если за постом закреплены); руководитель двигает сам заказ — перетаскиванием */}
+          {isNew && q.can_accept !== false && <button type="button" disabled={busy === key} style={btn('main')} onClick={() => act(key, () => stageAccept(key))}>✓ Принять</button>}
+          {!isNew && q.can_unaccept && <button type="button" disabled={busy === key} style={btn()} onClick={() => act(key, () => stageUnaccept(key), `Отменить принятие на посту «${q.post_name}»?\nЗаказ снова будет новым на этом посту.`)}>✕ Отменить принятие</button>}
           {!isNew && <button type="button" disabled={busy === key} style={btn('ok')} onClick={() => (withParts ? setParts({ stage: q, orderId: q.order_id })
             : act(key, () => stageDone(key), `Пост «${q.post_name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
           {withParts && <button type="button" style={btn('blue')} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали</button>}

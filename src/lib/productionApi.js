@@ -7,7 +7,10 @@ export const PROD_SQL_HINT = 'База ещё не обновлена: выпо�
 async function call(fn, args) {
   try {
     const { data, error } = await supabase.rpc(fn, args)
-    if (error) return { error: isMissing(error) ? PROD_SQL_HINT : error.message, missing: isMissing(error) }
+    if (error) {
+      if (/stages: not finished/.test(String(error.message))) return { error: 'Заказ ещё идёт по техпроцессу: «Исполнен» ставится сам, когда выполнен последний пост.' }
+      return { error: isMissing(error) ? PROD_SQL_HINT : error.message, missing: isMissing(error) }
+    }
     return { data }
   } catch (e) { return { error: String(e?.message || e) } }
 }

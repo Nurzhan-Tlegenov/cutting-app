@@ -15,6 +15,8 @@ const call = async (fn, args) => {
   if (m.includes('not allowed')) return { error: 'Нет прав на это действие.' }
   if (m.includes('stage: not queued')) return { error: 'Этот заказ уже принял другой сотрудник.' }
   if (m.includes('stage: not active')) return { error: 'Этап уже выполнен.' }
+  if (m.includes('stage: members only')) return { error: 'Принять заказ на этом посту могут только закреплённые за ним сотрудники.' }
+  if (m.includes('stage: accept first')) return { error: 'Сначала нажмите «Принять» — потом «Выполнено».' }
   return { error: m }
 }
 
@@ -86,3 +88,10 @@ export async function stageMove(orderId, postId) {
   if (r.missing) return { error: 'Перенос заказов по доске ещё не включён в базе: выполните migration_stage_move.sql в Supabase (SQL Editor) — один раз.' }
   return r
 }
+
+const LOG_HINT = 'Журнал техпроцесса ещё не включён в базе: выполните migration_stage_log.sql в Supabase (SQL Editor) — один раз.'
+/** Отменить «Принять» на посту (migration_stage_log.sql) */
+export async function stageUnaccept(stageId) { const r = await call('stage_unaccept', { p_stage: stageId }); return r.missing ? { error: LOG_HINT } : r }
+/** Журнал движения заказа по постам: [{ kind, post, at, who, me }] | null — нет доступа */
+export async function orderStageLog(orderId) { const r = await call('order_stage_log', { p_order: orderId }); return r.missing ? { error: LOG_HINT, missing: true } : r }
+export const STAGES_UNFINISHED = 'Заказ ещё идёт по техпроцессу: «Исполнен» ставится сам, когда выполнен последний пост.'

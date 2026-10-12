@@ -4,7 +4,7 @@ import StageParts from './StageParts'
 import StageProgress from './StageProgress'
 import StageReturn from './StageReturn'
 import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, byDefaultOf } from '../lib/stageParts'
-import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, startOrderStages, stageDone, stageAccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
+import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, startOrderStages, stageDone, stageAccept, stageUnaccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
 // Заказ, принятый в работу, идёт по постам по порядку; маршрут заказа с временем на каждом посту — StageTrack.
@@ -140,26 +140,29 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
           )
         })}
       </div>
-      {/* время по постам: ждал — от прихода на пост до «Принять», в работе — от «Принять» до «Выполнено» */}
+      {/* время по постам: увидел — от прихода на пост до «Принять» (кто принял), в работе — от «Принять» до «Выполнено» */}
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
         {st.filter(s => s.queued_at || s.status === 'skipped').map(s => (
           <div key={s.id}>
             <b style={{ fontWeight: 500 }}>{s.name}</b>{': '}
             {s.status === 'skipped' ? 'пропущен'
-              : s.status === 'queued' ? `пришёл ${clock(s.queued_at)}, ждёт ${since(s.queued_at)}`
-              : s.status === 'accepted' ? `принял ${s.accepted_by || '—'} ${clock(s.accepted_at)}, в работе ${since(s.accepted_at)}`
-              : `ждал ${since(s.queued_at, s.accepted_at)}, в работе ${since(s.accepted_at, s.done_at)} · принял ${s.accepted_by || '—'}${s.done_by && s.done_by !== s.accepted_by ? `, выполнил ${s.done_by}` : ''}`}
+              : s.status === 'queued' ? <span style={{ color: 'var(--amber)' }}>пришёл {clock(s.queued_at)}, ждёт принятия{s.members?.length ? ` (${s.members.join(', ')})` : ''} · {since(s.queued_at)}</span>
+              : s.status === 'accepted' ? `принял ${s.accepted_me ? 'вы' : s.accepted_by || '—'} ${clock(s.accepted_at)} (увидел через ${since(s.queued_at, s.accepted_at)}), в работе ${since(s.accepted_at)}`
+              : s.accepted_at ? `увидел через ${since(s.queued_at, s.accepted_at)}, в работе ${since(s.accepted_at, s.done_at)} · принял ${s.accepted_by || '—'}${s.done_by && s.done_by !== s.accepted_by ? `, выполнил ${s.done_by}` : ''}`
+              : <span>пройден без принятия{s.done_by ? ` · перенёс ${s.done_by}` : ''}, на посту {since(s.queued_at, s.done_at)}</span>}
           </div>
         ))}
       </div>
       {cur && <StageProgress orderId={orderId} rule={cur.rule} postName={cur.name} scanned={cur.scanned} onOpen={manage ? () => setParts(true) : undefined} />}
-      {manage && cur && (
+      {cur && (manage || cur.can_accept || cur.can_unaccept || cur.mine) && (
         <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
-          {cur.status === 'queued' && <button type="button" disabled={busy} style={small} onClick={() => act(() => stageAccept(cur.id))}>Принять за пост</button>}
-          {ruleOf(cur.rule, cur.name).list !== 'none' && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts(true)}>📦 Список деталей</button>}
-          <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Отметить пост «${cur.name}» выполненным?`)) act(() => stageDone(cur.id)) }}>✓ Выполнено</button>
-          <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Пропустить пост «${cur.name}» для этого заказа?`)) act(() => stageSkip(cur.id)) }}>Пропустить пост</button>
-          {st.some(s => s.status === 'done' && (!cur || s.sort < cur.sort)) && <button type="button" disabled={busy} style={{ ...small, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setRet(true)}>↩ Вернуть на пост</button>}
+          {/* принять — только сотрудники поста (если за постом закреплены); руководитель двигает сам заказ */}
+          {cur.status === 'queued' && (cur.can_accept ?? manage) && <button type="button" disabled={busy} style={{ ...small, background: 'var(--blue)', color: 'white', border: 'none' }} onClick={() => act(() => stageAccept(cur.id))}>✓ Принять</button>}
+          {cur.status === 'accepted' && cur.can_unaccept && <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Отменить принятие на посту «${cur.name}»?\nЗаказ снова будет новым на этом посту.`)) act(() => stageUnaccept(cur.id)) }}>✕ Отменить принятие</button>}
+          {manage && ruleOf(cur.rule, cur.name).list !== 'none' && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts(true)}>📦 Список деталей</button>}
+          {(cur.status === 'accepted' && (manage || cur.mine)) && <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Отметить пост «${cur.name}» выполненным?`)) act(() => stageDone(cur.id)) }}>✓ Выполнено</button>}
+          {manage && <button type="button" disabled={busy} style={small} onClick={() => { if (window.confirm(`Пропустить пост «${cur.name}» для этого заказа?`)) act(() => stageSkip(cur.id)) }}>Пропустить пост</button>}
+          {manage && st.some(s => s.status === 'done' && (!cur || s.sort < cur.sort)) && <button type="button" disabled={busy} style={{ ...small, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setRet(true)}>↩ Вернуть на пост</button>}
         </div>
       )}
       {err && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>{err}</div>}

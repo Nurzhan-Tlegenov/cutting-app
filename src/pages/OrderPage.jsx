@@ -1,3 +1,4 @@
+import OrderTechProcess from '../components/StageLog'
 import { nestingFaults, faultText, FAULT_TITLE } from '../lib/nestingCheck'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useState, useEffect } from 'react'
@@ -165,6 +166,8 @@ export default function OrderPage() {
           </div>
         </div>
       )}
+      {/* техпроцесс: где заказ, кто принял и через сколько увидел, история движения — руководителю и сотрудникам */}
+      {order.status !== 'draft' && <OrderTechProcess orderId={id} status={order.status} manage={inProduction && (!wperms || !!wperms.all)} />}
       {shared && (
         <div className="card" style={{ marginBottom: 12, border: '1px solid var(--teal)' }}>
           <p className="section-title" style={{ color: 'var(--teal)' }}>🔗 Открыта ссылка на 3D-модель</p>

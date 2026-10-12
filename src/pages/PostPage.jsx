@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { postPage, stageAccept, stageDone, since, clock } from '../lib/posts'
+import { postPage, stageAccept, stageUnaccept, stageDone, since, clock } from '../lib/posts'
 import { ruleOf, ruleText } from '../lib/stageParts'
 import { orderTitle } from '../lib/orderUtils'
 import StageParts from '../components/StageParts'
@@ -67,12 +67,13 @@ export default function PostPage() {
         <div style={{ fontWeight: 600, fontSize: 16 }}>{orderTitle(q)}</div>
         <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{[q.client_name, q.material_name, q.sheets > 0 && `листов ${q.sheets}`, `деталей ${q.parts}`].filter(Boolean).join(' · ')}</div>
         <div style={{ fontSize: 12, color: isNew ? 'var(--amber)' : 'var(--text-muted)', marginTop: 2 }}>
-          {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)}, ${since(q.accepted_at)}`}
+          {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт принятия ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)} (увидел через ${since(q.queued_at, q.accepted_at)}), ${since(q.accepted_at)}`}
           {q.next_post ? ` · дальше: ${q.next_post}` : ' · последний пост'}
         </div>
         <StageProgress orderId={q.order_id} rule={post.rule} postName={post.name} scanned={q.scanned} onOpen={() => setParts({ stage: q, orderId: q.order_id })} onSkipped={load} />
         <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
           {isNew && <button type="button" disabled={busy === q.stage_id} style={btn('main')} onClick={() => act(q, stageAccept)}>✓ Принять</button>}
+          {!isNew && q.accepted_me && <button type="button" disabled={busy === q.stage_id} style={btn()} onClick={() => act(q, stageUnaccept, `Отменить принятие заказа «${orderTitle(q)}»?\nОн снова будет новым на посту.`)}>✕ Отменить принятие</button>}
           {withParts && <button type="button" style={{ ...btn(), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setParts({ stage: q, orderId: q.order_id })}>📦 Детали — сканировать</button>}
           {!isNew && <button type="button" disabled={busy === q.stage_id} style={btn('ok')} onClick={() => (withParts ? setParts({ stage: q, orderId: q.order_id })
             : act(q, stageDone, `Пост «${post.name}» выполнен?\n${q.next_post ? `Заказ перейдёт на пост «${q.next_post}».` : 'Это последний пост — заказ будет исполнен.'}`))}>✓ Выполнено</button>}
