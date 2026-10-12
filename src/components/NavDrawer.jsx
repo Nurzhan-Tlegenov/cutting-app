@@ -95,21 +95,42 @@ export default function NavDrawer({ notices, unread }) {
     return () => { document.removeEventListener('touchstart', down); document.removeEventListener('touchmove', move); document.removeEventListener('touchend', up) }
   }, [open, w])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // открытая панель закрывается свайпом влево — тоже за пальцем
-  const sw = useRef(null)
-  const pDown = e => { const t = e.touches[0]; sw.current = { x: t.clientX, y: t.clientY, on: false, t: Date.now() } }
-  const pMove = e => {
-    const s = sw.current; if (!s) return
-    const t = e.touches[0], dx = t.clientX - s.x, dy = t.clientY - s.y
-    if (!s.on) { if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { sw.current = null; return } if (dx < -10) s.on = true; else return }
-    setDrag(Math.max(0, Math.min(w, w + dx)))
-  }
-  const pUp = e => {
-    const s = sw.current; sw.current = null
-    if (!s?.on) return
-    const dx = e.changedTouches[0].clientX - s.x, fast = dx < -40 && Date.now() - s.t < 250
-    setDrag(null); setOpen(!(fast || w + dx < w * 0.6))
-  }
+  // открытая панель закрывается свайпом влево в любом месте экрана (панель или затемнение, сверху или снизу) —
+  // панель идёт за пальцем; отпустили дальше трети или смахнули быстро — закрылась. Свои обработчики (не пассивные):
+  // горизонтальный жест не отдаётся прокрутке списка.
+  const root = useRef(null)
+  useEffect(() => {
+    const el = root.current
+    if (!el || !open) return
+    let s = null, swallow = false
+    const down = e => { if (e.touches.length !== 1) { s = null; return } const t = e.touches[0]; s = { x: t.clientX, y: t.clientY, on: false, t: Date.now(), lx: t.clientX, lt: Date.now(), v: 0 } }
+    const move = e => {
+      if (!s) return
+      const t = e.touches[0], dx = t.clientX - s.x, dy = t.clientY - s.y
+      if (!s.on) {
+        if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx) * 1.2) { s = null; return }   // вертикально — это прокрутка списка
+        if (dx < -6 && Math.abs(dx) > Math.abs(dy)) s.on = true; else return
+      }
+      e.preventDefault()
+      const now = Date.now(); s.v = (t.clientX - s.lx) / Math.max(1, now - s.lt); s.lx = t.clientX; s.lt = now
+      setDrag(Math.max(0, Math.min(w, w + Math.min(0, dx))))
+    }
+    const up = e => {
+      if (!s) return
+      const st = s; s = null
+      if (!st.on) return
+      swallow = true; setTimeout(() => { swallow = false }, 350)   // после смахивания тап по пункту не срабатывает
+      const dx = (e.changedTouches[0]?.clientX ?? st.lx) - st.x
+      setDrag(null); setOpen(!(st.v < -0.35 || dx < -w * 0.33))
+    }
+    const click = e => { if (swallow) { e.stopPropagation(); e.preventDefault() } }
+    el.addEventListener('touchstart', down, { passive: true })
+    el.addEventListener('touchmove', move, { passive: false })
+    el.addEventListener('touchend', up)
+    el.addEventListener('touchcancel', up)
+    el.addEventListener('click', click, true)
+    return () => { el.removeEventListener('touchstart', down); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', up); el.removeEventListener('touchcancel', up); el.removeEventListener('click', click, true) }
+  }, [open, w])
 
   useEffect(() => {
     if (!open) return
@@ -198,9 +219,9 @@ export default function NavDrawer({ notices, unread }) {
   const tr = drag != null ? 'none' : `transform .42s ${EASE}`
 
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1100, pointerEvents: moving ? 'auto' : 'none', visibility: moving || vis ? 'visible' : 'hidden' }}>
+    <div ref={root} style={{ position: 'fixed', inset: 0, zIndex: 1100, pointerEvents: moving ? 'auto' : 'none', visibility: moving || vis ? 'visible' : 'hidden' }}>
       <div onClick={() => setOpen(false)} style={{ position: 'absolute', inset: 0, background: '#000', opacity: k * 0.38, transition: drag != null ? 'none' : `opacity .42s ${EASE}`, WebkitTapHighlightColor: 'transparent' }} />
-      <nav ref={panel} onTouchStart={pDown} onTouchMove={pMove} onTouchEnd={pUp}
+      <nav ref={panel}
         style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: w, transform: `translate3d(${shown - w}px,0,0)`, transition: tr, willChange: 'transform',
           background: 'var(--bg)', boxShadow: k > 0 ? '8px 0 32px rgba(0,0,0,.18)' : 'none', display: 'flex', flexDirection: 'column',
           paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', borderRadius: '0 18px 18px 0', overflow: 'hidden' }}>
