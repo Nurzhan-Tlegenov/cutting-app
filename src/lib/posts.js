@@ -65,3 +65,10 @@ export function since(from, to = null) {
   return `${Math.floor(h / 24)} дн${h % 24 ? ` ${h % 24} ч` : ''}`
 }
 export const clock = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
+
+/** Доска техпроцесса (migration_production_board.sql): { posts, items (заказы на постах), idle (принят, не пущен) } */
+export async function productionBoard(prodId = null) {
+  const r = await call('production_board', { p_prod: prodId })
+  if (r.missing) return { error: 'Доска техпроцесса ещё не включена в базе: выполните migration_production_board.sql в Supabase (SQL Editor) — один раз.', missing: true }
+  return r
+}

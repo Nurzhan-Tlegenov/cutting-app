@@ -18,6 +18,7 @@ import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
 import { productionStageMap, postsList } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
+import ProductionBoard from '../components/ProductionBoard'
 import { planStages } from '../lib/posts'
 import { sendAppeal } from '../lib/messages'
 import { membersList, myWorkplaces, prodView } from '../lib/workplaces'
@@ -50,7 +51,7 @@ export default function ProductionPage() {
   const [xmlView, setXmlView] = useKeptState('xml', false)     // просмотрщик XML-программ присадочного станка
   const [postOpen, setPostOpen] = useKeptState('postOpen', false)   // развёрнуты настройки постпроцессора (свёрнуты по умолчанию)
   // развёрнутые разделы — остаются открытыми после обновления страницы
-  const dCompany = useKeptDetails('company'), dSettings = useKeptDetails('settings'), dSheet = useKeptDetails('sheet')
+  const dSheet = useKeptDetails('sheet')
   const [openIds, setOpenIds] = useKeptState('open', [])   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
   const open = useMemo(() => new Set(openIds), [openIds])
   const toggle = id => setOpenIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
@@ -59,6 +60,7 @@ export default function ProductionPage() {
   const [wps, setWps] = useState([])                              // где я сотрудник (своего производства нет)
   const [stages, setStages] = useState({})                        // где сейчас заказы: id -> { name (пост), status, done, total }
   const loadStages = () => productionStageMap().then(r => setStages(r.data || {}))
+  const [tab, setTab] = useKeptState('prodTab', 'orders')    // вкладка кабинета: orders | board | settings
   const [hasPosts, setHasPosts] = useState(false)       // есть посты — принятый, но не пущенный заказ помечается
   useEffect(() => { let alive = true; postsList().then(r => { if (alive) setHasPosts((r.data || []).some(p => p.active !== false)) }); return () => { alive = false } }, [])
   const loadStaff = () => membersList().then(r => setStaff({ data: r.data || null, error: r.error || '' }))
@@ -194,40 +196,29 @@ export default function ProductionPage() {
         </div>
       ) : (
         <>
-          <div className="card" style={{ marginBottom: 12 }}>
-            {edit ? (
-              <ProductionForm initial={prod} submitLabel="Сохранить" onCancel={() => setEdit(false)} onDone={() => { setEdit(false); load() }} />
-            ) : (
-              <>
-                {/* статистика за период: заявки, в работе, исполнено, суммы, листы, объёмы работ. Исполненные считаются и после
-                    архива, и после того, как клиент удалил заказ, — от него остаётся запись */}
-                <div>
-                  {stats ? <Results list={stats.map(x => (x.client_name ? x : { ...x, client_name: x.own ? '' : orders.find(o => o.id === x.id)?.client_name || '' }))} per={per} show={resShow} onShow={saveResShow} onOpen={o => navigate(`/orders/${o.id}`)} test={{ min: testMin, master: isMaster, onExclude: excludeStats, onAsk: askExclude }} /> : (
-                    <>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                        {[['Заявок', orders.length], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', orders.filter(o => o.status === 'done').length]].map(([l, v]) => (
-                          <div key={l} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '3px 9px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6, minWidth: 0 }}>
-                            <span style={{ fontSize: 11, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l}</span>
-                            <span style={{ fontSize: 15, fontWeight: 500 }}>{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                      {statsHint && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 6 }}>{statsHint}</p>}
-                    </>
-                  )}
-                </div>
+          {/* вкладки кабинета: заказы, техпроцесс (доска постов), настройки — небольшие, чтобы беречь экран телефона */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 10, background: 'var(--bg2)', borderRadius: 18, padding: 3 }}>
+            {[['orders', `Заказы${count.all ? ` · ${count.all}` : ''}`], ['board', `Техпроцесс${Object.keys(stages).length ? ` · ${Object.keys(stages).length}` : ''}`], ['settings', '⚙ Настройки']].map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setTab(k)}
+                style={{ flex: 1, padding: '5px 6px', borderRadius: 15, border: 'none', fontSize: 12.5, fontWeight: tab === k ? 600 : 400, whiteSpace: 'nowrap',
+                  background: tab === k ? 'var(--bg)' : 'transparent', color: tab === k ? 'var(--blue)' : 'var(--text-muted)', boxShadow: tab === k ? '0 1px 2px rgba(0,0,0,0.12)' : 'none' }}>{l}</button>
+            ))}
+          </div>
+
+          {tab === 'settings' && (
+            <div className="card" style={{ marginBottom: 12 }}>
+              {edit ? (
+                <ProductionForm initial={prod} submitLabel="Сохранить" onCancel={() => setEdit(false)} onDone={() => { setEdit(false); load() }} />
+              ) : (
+                <>
                 {/* компания — свёрнуто: название, страна, телефон */}
-                <details style={{ marginTop: 10 }} {...dCompany}>
+                <details open style={{ marginBottom: 6 }}>
                   <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer', color: 'var(--text)' }}>🏭 {prod.name}</summary>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                     <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
                     <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
                   </div>
                 </details>
-                {/* всё, что настраивается редко, — одним свёрнутым окном; внутри — свои разделы */}
-                <details style={{ marginTop: 8 }} {...dSettings}>
-                  <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer', color: 'var(--text)' }}>⚙ Настройки производства</summary>
-                  <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 2px' }}>Сотрудники, рабочие посты, прайс-лист, рез и отступы, станки ЧПУ, просмотр XML</div>
                     <StaffSection data={staff.data} error={staff.error} onReload={loadStaff} />
                     <PostsSection members={staff.data?.members} />
                     <div onClick={() => setPrices(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
@@ -260,11 +251,33 @@ export default function ProductionPage() {
                       <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Просмотр XML-программ присадочного станка</span>
                       <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
                     </div>
-                </details>
-              </>
-            )}
-          </div>
+                </>
+              )}
+            </div>
+          )}
 
+          {tab === 'board' && <ProductionBoard onChange={() => { loadStages(); load() }} />}
+
+          {tab === 'orders' && <>
+          <div className="card" style={{ marginBottom: 10, padding: '8px 12px' }}>
+                {/* статистика за период: заявки, в работе, исполнено, суммы, листы, объёмы работ. Исполненные считаются и после
+                    архива, и после того, как клиент удалил заказ, — от него остаётся запись */}
+                <div>
+                  {stats ? <Results list={stats.map(x => (x.client_name ? x : { ...x, client_name: x.own ? '' : orders.find(o => o.id === x.id)?.client_name || '' }))} per={per} show={resShow} onShow={saveResShow} onOpen={o => navigate(`/orders/${o.id}`)} test={{ min: testMin, master: isMaster, onExclude: excludeStats, onAsk: askExclude }} /> : (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                        {[['Заявок', orders.length], ['Принято', orders.filter(o => o.status === 'inwork' || o.status === 'done').length], ['Исполнено', orders.filter(o => o.status === 'done').length]].map(([l, v]) => (
+                          <div key={l} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '3px 9px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 6, minWidth: 0 }}>
+                            <span style={{ fontSize: 11, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l}</span>
+                            <span style={{ fontSize: 15, fontWeight: 500 }}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {statsHint && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 6 }}>{statsHint}</p>}
+                    </>
+                  )}
+                </div>
+          </div>
           <LimitsBar cabinet="production" refresh={orders.map(o => o.status).join() + archived.size} />
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             {FILTERS.map(([id, label]) => (
@@ -333,6 +346,7 @@ export default function ProductionPage() {
               )
             })}
           </div>
+          </>}
         </>
       )}
       {xmlView && <Drill6Viewer title="Просмотр XML присадки" onClose={() => setXmlView(false)} />}

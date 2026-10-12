@@ -9,6 +9,7 @@ import { myPostQueue, stageAccept, stageDone, stageBack, since, clock, planStage
 import { StageTrack } from './ProductionPosts'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
+import ProductionBoard from './ProductionBoard'
 import { ruleOf } from '../lib/stageParts'
 import CncLoader from './CncLoader'
 import { useKeptState } from '../hooks/useKeptState'
@@ -34,6 +35,7 @@ export default function WorkerProduction({ wps }) {
   const [openIds, setOpenIds] = useKeptState('wOpen', [])
   const open = new Set(openIds)
   const [filter, setFilter] = useKeptState('wFilter', 'work')
+  const [wtab, setWtab] = useKeptState('wTab', 'posts')
   const [tick, setTick] = useState(0)
   const [parts, setParts] = useKeptState('wParts', null)       // открыт список деталей поста: { stage, orderId } — после обновления страницы открыт снова
   const load = async () => {
@@ -120,6 +122,17 @@ export default function WorkerProduction({ wps }) {
       </div>
       {error && <p className="error-text" style={{ marginBottom: 10 }}>{error}</p>}
 
+      {/* начальнику — вкладки: мои посты, доска техпроцесса, все заказы */}
+      {chief && (
+        <div style={{ display: 'flex', gap: 4, marginBottom: 10, background: 'var(--bg2)', borderRadius: 18, padding: 3 }}>
+          {[['posts', `Мои посты${queue?.length ? ` · ${queue.length}` : ''}`], ['board', 'Техпроцесс'], ['orders', 'Все заказы']].map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setWtab(k)}
+              style={{ flex: 1, padding: '5px 6px', borderRadius: 15, border: 'none', fontSize: 12.5, fontWeight: wtab === k ? 600 : 400, whiteSpace: 'nowrap',
+                background: wtab === k ? 'var(--bg)' : 'transparent', color: wtab === k ? 'var(--blue)' : 'var(--text-muted)', boxShadow: wtab === k ? '0 1px 2px rgba(0,0,0,0.12)' : 'none' }}>{l}</button>
+          ))}
+        </div>
+      )}
+      {(!chief || wtab === 'posts') && <>
       <p className="section-title">Мои посты{queue?.length ? ` · ${queue.length}` : ''}</p>
       {queue === null ? <CncLoader compact label="Загружаем заказы…" /> : !queue.length ? (
         <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '18px 0' }}>На ваших постах сейчас нет заказов. Когда заказ дойдёт до вашего поста, он появится здесь, придёт уведомление.</p>
@@ -158,7 +171,10 @@ export default function WorkerProduction({ wps }) {
         </div>
       ))}
 
-      {chief && (
+      </>}
+      {chief && wtab === 'board' && <ProductionBoard prodId={wp.production_id} onChange={load} />}
+      {chief && wtab === 'orders' && <>
+      {(
         <>
           <p className="section-title" style={{ marginTop: 14 }}>Все заказы производства</p>
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
@@ -202,6 +218,7 @@ export default function WorkerProduction({ wps }) {
           )}
         </>
       )}
+      </>}
       {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) { load(); window.dispatchEvent(new Event('notices-seen')) } }} />}
     </>
   )
