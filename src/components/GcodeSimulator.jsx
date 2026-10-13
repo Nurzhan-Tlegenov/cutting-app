@@ -129,6 +129,20 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     for (let k = li; k < total; k++) if (data.firstByLine.has(k)) { choose(data.firstByLine.get(k)); return }
   }
   useEffect(() => { speedRef.current = speed }, [speed])
+  // Масштаб страницы — 1:1, пока открыт симулятор. Щипок двумя пальцами не точно по 3D (по кнопкам, по списку кода)
+  // увеличивал всю страницу браузера, и этот масштаб оставался и после закрытия. Смена метатега сбрасывает масштаб
+  // к 1:1 и при открытии, и при закрытии; прежний метатег возвращается чуть позже, когда масштаб уже сброшен.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]')
+    if (!meta) return
+    const was = meta.getAttribute('content') || 'width=device-width, initial-scale=1.0'
+    const lock = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no'
+    meta.setAttribute('content', lock)
+    return () => {
+      meta.setAttribute('content', lock)
+      setTimeout(() => { if (meta.getAttribute('content') === lock) meta.setAttribute('content', was) }, 400)
+    }
+  }, [])
   useEffect(() => { diaRef.current = toolDia; pickRef.current = choose })
 
   // ─── сцена ────────────────────────────────────────────────────────────────
@@ -536,7 +550,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
   const dragEnd = () => { dragRef.current = null }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, touchAction: 'manipulation' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flex: '0 0 auto' }}>
         <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title || 'Симулятор'}</div>
         <span style={{ fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{fmtTime(t)} / {fmtTime(prog.time)}</span>
