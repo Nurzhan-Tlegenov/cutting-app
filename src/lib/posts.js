@@ -106,3 +106,9 @@ export async function stageReopen(orderId, stageId) {
   if (r.missing) return { error: 'Возврат в техпроцесс ещё не включён в базе: выполните migration_stage_reopen.sql в Supabase (SQL Editor) — один раз.' }
   return r
 }
+/** Вернуть в техпроцесс на пост производства, даже если его нет в маршруте заказа (создан позже) */
+export async function stageReopenPost(orderId, postId) {
+  const r = await call('stage_reopen_post', { p_order: orderId, p_post: postId })
+  if (r.missing) return { error: 'Возврат на новый пост ещё не включён в базе: выполните migration_stage_reopen.sql в Supabase (SQL Editor) — один раз (повторно).' }
+  return r
+}

@@ -32,3 +32,26 @@ end $$;
 revoke all on function public.stage_reopen(uuid, uuid) from public, anon;
 grant execute on function public.stage_reopen(uuid, uuid) to authenticated;
 notify pgrst, 'reload schema';
+
+-- Вернуть в техпроцесс на пост, которого нет в маршруте заказа (пост создали позже): пост добавляется в маршрут
+-- на своё место по порядку постов, и заказ встаёт на него. -> true | false
+create or replace function public.stage_reopen_post(p_order uuid, p_post uuid) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare o record; p record; s order_stages; pos int;
+begin
+  select * into o from orders where id = p_order;
+  if not found or not order_boss(p_order) then raise exception 'not allowed'; end if;
+  select * into s from order_stages where order_id = p_order and post_id = p_post order by sort limit 1;
+  if s.id is null then
+    select * into p from production_posts where id = p_post and production_id = o.production_id and active;
+    if p.id is null then return false; end if;
+    select coalesce(max(x.sort), 0) + 1 into pos from order_stages x join production_posts pp on pp.id = x.post_id
+      where x.order_id = p_order and (pp.sort, pp.created_at) < (p.sort, p.created_at);
+    update order_stages set sort = sort + 1 where order_id = p_order and sort >= pos;
+    insert into order_stages (order_id, post_id, name, sort, status) values (p_order, p.id, p.name, pos, 'waiting') returning * into s;
+  end if;
+  return stage_reopen(p_order, s.id);
+end $$;
+revoke all on function public.stage_reopen_post(uuid, uuid) from public, anon;
+grant execute on function public.stage_reopen_post(uuid, uuid) to authenticated;
+notify pgrst, 'reload schema';
