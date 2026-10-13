@@ -17,7 +17,8 @@ import { edgeTotals, detailEdgeList, holeEdgeSegments } from '../lib/edgeLength'
 import { backSide } from '../lib/partInfo'
 import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
-import { productionSaveNesting } from '../lib/productionApi'
+import { productionSaveNesting, productionOrderSheet } from '../lib/productionApi'
+import { myOrderPerms } from '../lib/workplaces'
 import BottomNav from '../components/BottomNav'
 import ContourEditor from '../components/ContourEditor'
 import Model3DButton from '../components/Model3DButton'
@@ -1492,7 +1493,13 @@ export default function NestingPage() {
   const details = useMemo(() => cutDetails(multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails, parseEdgeTypes(order?.edge_types)), [allDetails, multiMat, matKey, order])
   const { user, profile, refreshProfile, cabinet, isMaster } = useAuth()
   // кабинет производства: ЧПУ и бирки по принятому раскрою
-  const canProduce = cabinet === 'production' && (profile?.role === 'admin' || profile?.role === 'operator')
+  // ЧПУ и бирки из раскроя: владелец производства, начальник производства и сотрудник с этим полномочием
+  const [wperms, setWperms] = useState(null)
+  useEffect(() => { let alive = true; if (cabinet === 'production') myOrderPerms(id).then(r => { if (alive) setWperms(r.data || null) }); return () => { alive = false } }, [id, cabinet])
+  const isOper = profile?.role === 'admin' || profile?.role === 'operator'
+  const canCnc = cabinet === 'production' && (isOper || !!(wperms?.all || wperms?.cnc))
+  const canLabels = cabinet === 'production' && (isOper || !!(wperms?.all || wperms?.labels))
+  const canProduce = canCnc || canLabels
   const [part3d, setPart3d] = useState(null)       // { index, draft } — деталь в 3D-виде (долгое удержание на карте)
   const [inModel, setInModel] = useState(null)     // деталь в общей 3D-модели заказа: { focus, scene }
   const [sendJob, setSendJob] = useState(null)     // файл для отладки, который уходит мастер-аккаунту
@@ -1736,6 +1743,15 @@ export default function NestingPage() {
     setOrder(o => ({ ...o, ...patch }))
     if (SHEET_FIELDS.some(([, col]) => col in patch)) {
       setSheetForm(f => { const n = { ...f }; SHEET_FIELDS.forEach(([k, col]) => { if (col in patch) n[k] = String(patch[col]) }); return n })
+    }
+    // чужой заказ (его перекраивает производство): лист, рез, отступы, обрезки — через функцию базы
+    if (order?.user_id && order.user_id !== user?.id && profile?.role !== 'admin') {
+      const sheet = Object.fromEntries(Object.entries(patch).filter(([c]) => c === 'offcuts' || SHEET_FIELDS.some(([, col]) => col === c)))
+      if (!Object.keys(sheet).length) return true
+      const r = await productionOrderSheet(id, sheet)
+      if (!r.error) return true
+      setParamsWarn(r.missing ? 'Лист не сохранён в заказе: выполните migration_production_sheet.sql в Supabase (SQL Editor) — один раз.' : 'Не удалось сохранить лист: ' + r.error)
+      return false
     }
     const { error } = await supabase.from('orders').update(patch).eq('id', id)
     if (!error) return true
@@ -3014,14 +3030,14 @@ export default function NestingPage() {
                           {busyId === cfg.id ? 'Отправка…' : '↻ Отправить повторно'}
                         </button>
                       ) : order.status !== 'draft' ? (canProduce && <>
-                        <button onClick={() => goProduce(cfg, 'cnc')} disabled={blocked} title="Управляющие программы для станка с ЧПУ"
+                        {canCnc && <button onClick={() => goProduce(cfg, 'cnc')} disabled={blocked} title="Управляющие программы для станка с ЧПУ"
                           style={{ flex: 1, padding: 9, background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
                           ЧПУ
-                        </button>
-                        <button onClick={() => goProduce(cfg, 'labels')} disabled={blocked} title="Бирки деталей"
+                        </button>}
+                        {canLabels && <button onClick={() => goProduce(cfg, 'labels')} disabled={blocked} title="Бирки деталей"
                           style={{ flex: 1, padding: 9, background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue)', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
                           Бирки
-                        </button>
+                        </button>}
                       </>) :
                       // «Выбрать» только сохраняет раскладку за заказом. Отправка — отдельным действием и только у выбранного варианта
                       !cfg.saved ? null :

@@ -86,6 +86,8 @@ export function orderMarks(o) {
   ]
 }
 /** Производство (или администратор) сохраняет свой вариант раскроя в оформленный на него заказ. -> {} | { error } */
+/** Лист, рез, отступы, обрезки чужого заказа — производство перекраивает (migration_production_sheet.sql) */
+export const productionOrderSheet = (orderId, patch) => call('production_order_sheet', { p_order: orderId, p_patch: patch })
 export const productionSaveNesting = (orderId, value) => call('production_save_nesting', { p_order: orderId, p_value: value })
 
 /** Настройки ЧПУ производства (migration_production_cnc.sql) -> { cnc, own, edit } | null */

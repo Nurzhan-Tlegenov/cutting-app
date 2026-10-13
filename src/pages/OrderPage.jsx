@@ -209,6 +209,9 @@ export default function OrderPage() {
         })}
         <div style={{ color: 'var(--text-hint)', fontSize: 12, marginTop: 2 }}>Лист {order.sheet_length}×{order.sheet_width} мм</div>
       </div>
+      {!nest && canProduce && (
+        <button onClick={() => navigate(`/orders/${id}/nesting`)} style={{ ...actBtn(true), width: '100%', marginBottom: 16 }}>▶ Выполнить раскрой</button>
+      )}
       {nest && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6 }}>
