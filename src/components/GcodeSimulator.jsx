@@ -94,9 +94,15 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     else { let p = 0; for (const v of stepEnds) { if (v < cur - 1e-6) p = v; else break } seek(p) }
   }
   // удержание кнопки шага — шаги идут подряд
+  // следующий шаг — только когда предыдущий уже нарисован (setTimeout после кадра), чтобы шаги не копились в очереди
   const holdRef = useRef(null)
-  const holdStart = dir => { step(dir); clearInterval(holdRef.current); const t0 = setTimeout(() => { holdRef.current = setInterval(() => step(dir), 110) }, 420); holdRef.current = t0 }
-  const holdEnd = () => { clearTimeout(holdRef.current); clearInterval(holdRef.current); holdRef.current = null }
+  const holdEnd = () => { clearTimeout(holdRef.current); holdRef.current = null }
+  const holdStart = dir => {
+    holdEnd(); step(dir)
+    const again = () => { holdRef.current = setTimeout(() => { if (!holdRef.current) return; step(dir); requestAnimationFrame(again) }, 110) }
+    holdRef.current = setTimeout(() => requestAnimationFrame(again), 420)
+  }
+  useEffect(() => () => clearTimeout(holdRef.current), [])
   // длина траектории: рабочие ходы и холостые, всего и сколько пройдено к текущему моменту
   const paths = useMemo(() => {
     let cut = 0, rap = 0
@@ -165,13 +171,16 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     body.position.set(cx, cy, T / 2); scene.add(body)
     // Рисунок листа разбит на плитки: при резе обновляются только те плитки, по которым прошла фреза —
     // шпиндель движется плавно, без рывков на перезаливке всей картинки.
-    const maxTex = Math.min(renderer.capabilities.maxTextureSize || 2048, 4096)
-    const k = Math.min(maxTex / big, 2)
+    // разрешение рисунка реза: до 1,2 пикселя на мм и не больше 2560 по длинной стороне — текстуры ~25 МБ вместо ~120;
+    // при шаге назад рисунок загружается в видеокарту заново, и большой рисунок вешал телефон (и закрытие симулятора)
+    const maxTex = Math.min(renderer.capabilities.maxTextureSize || 2048, 2560)
+    const k = Math.min(maxTex / big, 1.2)
     const Wp = Math.max(2, Math.round(S.w * k)), Hp = Math.max(2, Math.round(S.l * k)), TILE = 512, SLICES = 8
     const tiles = []
     const mkLayer = (w, h) => {
       const c = document.createElement('canvas'); c.width = w; c.height = h
-      const tex = keep(new THREE.CanvasTexture(c)); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy()
+      const tex = keep(new THREE.CanvasTexture(c)); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy())
+      tex.generateMipmaps = false; tex.minFilter = THREE.LinearFilter       // без мип-карт: при каждом обновлении их не пересчитывать
       return { ctx: c.getContext('2d'), tex, dirty: true }
     }
     for (let y0 = 0; y0 < Hp; y0 += TILE) for (let x0 = 0; x0 < Wp; x0 += TILE) {
@@ -188,12 +197,12 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       tiles.push(tl)
     }
     const PX = x => (x - S.x) * k, PY = y => (S.l - (y - S.y)) * k
-    const each = (fn, box) => tiles.forEach(tl => {            // fn(слой A, слой B) — в общих пиксельных координатах листа
+    const each = (fn, box, list = tiles) => list.forEach(tl => {            // fn(слой A, слой B) — в общих пиксельных координатах листа
       if (box && (box[0] > tl.x1 || box[2] < tl.x0 || box[1] > tl.y1 || box[3] < tl.y0)) return
       for (const L of [tl.A, tl.B]) L.ctx.setTransform(1, 0, 0, 1, -tl.x0, -tl.y0)
       fn(tl.A, tl.B)
     })
-    const base = () => each((A, B) => {
+    const base = (list = tiles) => each((A, B) => {
       for (const L of [A, B]) { L.ctx.globalCompositeOperation = 'source-over'; L.ctx.lineCap = 'round'; L.ctx.lineJoin = 'round'; L.dirty = true }
       const cA = A.ctx, cB = B.ctx
       cB.fillStyle = '#FFFFFF'; cB.fillRect(0, 0, Wp, Hp)
@@ -205,11 +214,45 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
         cA.closePath(); cA.fill(); cA.stroke()
       })
       for (const L of [A, B]) L.ctx.globalCompositeOperation = 'destination-out'
-    })
+    }, null, list)
     const erase = (c, ax, ay, bx, by, d) => {
       if (Math.abs(ax - bx) < 1e-6 && Math.abs(ay - by) < 1e-6) { c.beginPath(); c.arc(bx, by, d / 2, 0, Math.PI * 2); c.fill(); return }
       c.lineWidth = d
       c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke()
+    }
+    // Много отрезков разом (догнать ход фрезы после перемотки или шага назад): штрихи одной толщины и глубины
+    // собираются в один путь на плитку и рисуются одним мазком — в десятки раз быстрее, чем по одному отрезку.
+    const kerfMany = (list, only = tiles) => {
+      const groups = new Map()
+      for (const [m, x1, y1, z1] of list) {
+        if (m.rapid) continue
+        const zLow = Math.min(m.z0, z1)
+        if (zLow >= T - 0.001) continue
+        const d = Math.max(1.5, (diaRef.current?.(m.tool) || 3) * k), through = zLow <= T * 0.5
+        const key = d + (through ? 't' : 'a')
+        let g = groups.get(key)
+        if (!g) groups.set(key, g = { d, through, segs: [] })
+        g.segs.push([PX(m.x0), PY(m.y0), PX(x1), PY(y1)])
+      }
+      for (const g of groups.values()) {
+        const r = g.d / 2
+        only.forEach(tl => {
+          const own = g.segs.filter(([ax, ay, bx, by]) => !(Math.min(ax, bx) - r > tl.x1 || Math.max(ax, bx) + r < tl.x0 || Math.min(ay, by) - r > tl.y1 || Math.max(ay, by) + r < tl.y0))
+          if (!own.length) return
+          for (const L of g.through ? [tl.A, tl.B] : [tl.A]) {
+            const c = L.ctx
+            c.setTransform(1, 0, 0, 1, -tl.x0, -tl.y0)
+            c.lineWidth = g.d
+            c.beginPath()
+            for (const [ax, ay, bx, by] of own) {
+              if (Math.abs(ax - bx) < 1e-6 && Math.abs(ay - by) < 1e-6) { c.moveTo(bx + r, by); c.arc(bx, by, r, 0, Math.PI * 2) }
+              else { c.moveTo(ax, ay); c.lineTo(bx, by) }
+            }
+            c.stroke(); c.fill()
+            L.dirty = true
+          }
+        })
+      }
     }
     const kerf = (m, x1, y1, z1) => {
       if (m.rapid) return
@@ -301,7 +344,16 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       while (lo < hi) { const mid = (lo + hi) >> 1; if (m[mid].t1 < time) lo = mid + 1; else hi = mid }
       return lo
     }
-    const flush = () => { for (const tl of tiles) for (const L of [tl.A, tl.B]) if (L.dirty) { L.tex.needsUpdate = true; L.dirty = false } }
+    const flushNow = () => { for (const tl of tiles) for (const L of [tl.A, tl.B]) if (L.dirty) { L.tex.needsUpdate = true; L.dirty = false } }
+    // Рисунок реза уходит в видеокарту не чаще ~8 раз в секунду (шпиндель при этом движется каждый кадр): на телефоне
+    // загрузка каждый кадр копила очередь в видеокарте — симулятор, а потом и закрытие вставали.
+    let flushAt = 0, flushT = 0
+    const flush = (now = false) => {
+      clearTimeout(flushT)
+      const t = performance.now()
+      if (now || t - flushAt >= 120) { flushAt = t; flushNow(); return }
+      flushT = setTimeout(() => { flushAt = performance.now(); flushNow(); render() }, 130)
+    }
     const countBefore = (idx, cur) => { let lo = 0, hi = idx.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (idx[mid] < cur) lo = mid + 1; else hi = mid } return lo }
     const showLines = () => {
       Object.entries(lines).forEach(([g, o]) => {
@@ -319,8 +371,21 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       if (cur < 0) { showLines(); render(); return }
       if (!live) { if (st.drawn > 0) { base(); st.drawn = 0 } }
       else {
-        if (cur < st.drawn) { base(); st.drawn = 0 }
-        for (let i = st.drawn; i < cur; i++) kerf(moves[i], moves[i].x1, moves[i].y1, moves[i].z1)
+        if (cur < st.drawn) {
+          // назад: заново рисуются только плитки, по которым прошли отменённые ходы (а не весь лист) — в видеокарту
+          // уходит лишь их рисунок; перерисовка всего листа на каждый шаг вешала телефон
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, dm = 0
+          for (let i = cur; i < st.drawn; i++) {
+            const q = moves[i]
+            if (q.rapid) continue
+            x0 = Math.min(x0, PX(q.x0), PX(q.x1)); x1 = Math.max(x1, PX(q.x0), PX(q.x1)); y0 = Math.min(y0, PY(q.y0), PY(q.y1)); y1 = Math.max(y1, PY(q.y0), PY(q.y1))
+            dm = Math.max(dm, (diaRef.current?.(q.tool) || 3) * k)
+          }
+          const hit = x0 === Infinity ? [] : tiles.filter(tl => !(x0 - dm > tl.x1 || x1 + dm < tl.x0 || y0 - dm > tl.y1 || y1 + dm < tl.y0))
+          if (hit.length) { base(hit); kerfMany(moves.slice(0, cur).map(q => [q, q.x1, q.y1, q.z1]), hit) }
+          st.drawn = cur
+        }
+        if (cur > st.drawn) kerfMany(moves.slice(st.drawn, cur).map(q => [q, q.x1, q.y1, q.z1]))
         st.drawn = cur
       }
       const m = moves[cur], f = !live ? 0 : m.t1 > m.t0 ? Math.max(0, Math.min(1, (time - m.t0) / (m.t1 - m.t0))) : 1
@@ -335,7 +400,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       if (!heads.includes(Math.round(Number(m.tool)))) cutter.scale.set(d, d, 1)
       placeCarriage(x, y, z, m.tool)
       showLines()
-      flush()
+      flush(!live)
       if (st.follow) {                                     // камера едет за шпинделем, сохраняя выбранные пальцами расстояние и угол
         const dx = x - controls.target.x, dy = y - controls.target.y
         camera.position.x += dx; camera.position.y += dy
@@ -406,13 +471,14 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     api.current = { setTime, select, setVisible, setView, setFollow }
     return () => {
       api.current = null
+      clearTimeout(flushT)
       ro?.disconnect(); cancelAnimationFrame(raf)
       if (liveObj) liveObj.geometry.dispose()
       el.removeEventListener('pointerdown', onDown); el.removeEventListener('pointerup', onUp)
       controls.dispose()
       for (const o of [selObj, oneObj]) if (o) o.geometry.dispose()
       disposables.forEach(x => x.dispose())
-      renderer.dispose(); el.remove()
+      renderer.dispose(); el.remove()   // память видеокарты — сразу, не дожидаясь сборщика
     }
   }, [prog, data, opIds, sheet, outlines, thickness, headKey])
 
