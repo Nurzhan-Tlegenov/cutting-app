@@ -4,7 +4,8 @@ import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
 import { DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
@@ -393,6 +394,70 @@ export function CncSaved({ cnc, onChange }) {
   )
 }
 
+// Самонастройка (мастер-аккаунт): загрузить готовую управляющую программу станка из другой программы раскроя —
+// приложение «срисует» служебные команды (начало, смена инструмента, конец) и подставит их сюда.
+// Инструменты, обороты и остальное пользователь настраивает сам — в своих вкладках.
+function LearnFromProgram({ post, onApply }) {
+  const file = useRef(null)
+  const [res, setRes] = useState(null)        // { ...learnFromProgram, ext, fileName }
+  const [err, setErr] = useState('')
+  const pick = async e => {
+    const f = e.target.files?.[0]
+    e.target.value = ''
+    if (!f) return
+    setErr(''); setRes(null)
+    if (f.size > 30 * 1024 * 1024) { setErr('Файл больше 30 МБ — возьмите программу поменьше (хватит одного листа).'); return }
+    try {
+      const { text, ext } = await readProgramFile(f)
+      const r = learnFromProgram(text)
+      if (!r.ok) { setErr(r.warnings.join(' ')); return }
+      setRes({ ...r, ext, fileName: f.name })
+    } catch (x) { setErr(`Файл не прочитался: ${x?.message || x}`) }
+  }
+  const apply = () => {
+    if (!window.confirm(`Подставить команды из «${res.fileName}» в «${post.name}»?\nТекущие команды заменятся.`)) return
+    onApply({
+      cmdStart: res.cmdStart, cmdToolStart: res.cmdToolStart, cmdToolEnd: res.cmdToolEnd, cmdEnd: res.cmdEnd,
+      ...(res.arcs ? { arcs: res.arcs } : {}),
+      ...(res.park ? { endX: '', endY: '' } : {}),                       // парковка уже в конце программы — своя не нужна
+      ...(res.ext && /^(nc|tap|cnc|gcode|ngc|txt|mpf|iso|ptp|anc|eia|h|g)$/i.test(res.ext) ? { ext: res.ext } : {}),
+      learnedFrom: res.fileName, learnedAt: Date.now(),
+    })
+    setRes(null)
+  }
+  const pre = { fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', background: 'var(--bg2)', borderRadius: 8, padding: '6px 8px', margin: '2px 0 8px', minHeight: 18 }
+  return (
+    <div style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '0.5px solid var(--border)' }}>
+      <input ref={file} type="file" style={{ display: 'none' }} onChange={pick} />
+      <button type="button" onClick={() => file.current?.click()}
+        style={{ width: '100%', padding: '9px 12px', borderRadius: 12, border: '1px dashed var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', fontSize: 13, cursor: 'pointer' }}>
+        📂 Загрузить управляющую программу — срисовать команды
+      </button>
+      <Hint>Возьмите готовую УП этого станка из другой программы (лучше с двумя сменами инструмента). Приложение найдёт начало программы, смену инструмента и конец, номер инструмента заменит на {'{T}'}, обороты — на {'{S}'}. Инструменты и обработку настраиваете сами.</Hint>
+      {post.learnedFrom && !res && <Hint>{`Команды срисованы с «${post.learnedFrom}»${post.learnedAt ? ` · ${new Date(post.learnedAt).toLocaleDateString('ru-RU')}` : ''}.`}</Hint>}
+      {err && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '6px 0 0' }}>{err}</p>}
+      {res && (
+        <div style={{ marginTop: 8, padding: 10, borderRadius: 12, border: '1px solid var(--blue)' }}>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Найдено в «{res.fileName}»</div>
+          {res.report.map((l, i) => <div key={i} style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>• {l}</div>)}
+          {res.warnings.map((l, i) => <div key={'w' + i} style={{ fontSize: 11.5, color: 'var(--amber)' }}>⚠ {l}</div>)}
+          {[['Начало программы', res.cmdStart], ['Смена инструмента — начало', res.cmdToolStart], ['Смена инструмента — конец', res.cmdToolEnd], ['Конец программы', res.cmdEnd]].map(([l, v]) => (
+            <div key={l} style={{ marginTop: 6 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{l}</div>
+              <div style={pre}>{v || <span style={{ color: 'var(--text-hint)' }}>— пусто —</span>}</div>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <button type="button" className="btn-primary" onClick={apply} style={{ flex: 1, padding: '8px 12px', fontSize: 13 }}>Подставить в команды</button>
+            <button type="button" onClick={() => setRes(null)} style={{ padding: '8px 14px', borderRadius: 20, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>Отмена</button>
+          </div>
+          <Hint>После подставки команды можно поправить вручную ниже. Проверьте на симуляторе и на станке, прежде чем резать.</Hint>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function CncCommands({ cnc, onChange, isMaster = false }) {
   const post = activePost(cnc)
   const set = patch => {
@@ -402,7 +467,7 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
   const Box = ({ k, label, rows = 3 }) => (
     <div style={{ marginBottom: 10 }}>
       <label className="label">{label}</label>
-      <textarea key={post.id + k} defaultValue={post[k]} rows={rows} spellCheck={false}
+      <textarea key={post.id + k + (post[k] || '')} defaultValue={post[k]} rows={rows} spellCheck={false}
         onBlur={e => { if (e.target.value !== post[k]) set({ [k]: e.target.value }) }}
         style={{ fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }} />
     </div>
@@ -416,6 +481,7 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
   return (
     <div className="card">
       <Title>Команды · {post.name}</Title>
+      {isMaster && <LearnFromProgram post={post} onApply={set} />}
       {Box({ k: 'cmdStart', label: 'Начало программы' })}
       {Box({ k: 'cmdToolStart', label: 'Смена инструмента — начало', rows: 5 })}
       {Box({ k: 'cmdToolEnd', label: 'Смена инструмента — конец' })}

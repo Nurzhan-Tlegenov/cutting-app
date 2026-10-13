@@ -1,5 +1,5 @@
 // Разбор G-кода для симулятора: G0/G1 (прямые), G2/G3 (дуги через I, J), смена инструмента (T…), S, F.
-// Z = 0 — стол. Строки с G53 (машинные координаты) считаются подъёмом на безопасную высоту.
+// Z = 0 — стол. Строки с G53 (машинные координаты), G28 / G30 считаются подъёмом на безопасную высоту.
 // -> { moves: [{ x0,y0,z0, x1,y1,z1, rapid, tool, feed, line, t0, t1 }], time (сек), box, lines, tools: [T…] }
 
 const word = (s, ch) => { const m = s.match(new RegExp(ch + '\\s*(-?\\d*\\.?\\d+)', 'i')); return m ? Number(m[1]) : null }
@@ -27,7 +27,8 @@ export function parseGcode(text, { rapid = 20000, zShift = 0 } = {}) {
     if (tw != null && /M0?6\b|^T/.test(s)) { tool = tw; if (!tools.includes(tw)) tools.push(tw) }
     const fw = word(s, 'F'); if (fw != null) feed = fw
     const gs = [...s.matchAll(/G\s*(\d+(?:\.\d+)?)/g)].map(m => Number(m[1]))
-    if (gs.includes(53)) { if (/Z/.test(s) && z != null) push(x, y, Math.max(zTop, z), true, li); return }
+    // G53 (машинные координаты), G28 / G30 (выход в нулевую точку станка, часто как «G91 G28 Z0») — подъём на безопасную высоту
+    if (gs.includes(53) || gs.includes(28) || gs.includes(30)) { if (/Z/.test(s) && z != null) push(x, y, Math.max(zTop, z), true, li); return }
     for (const g of gs) if (g >= 0 && g <= 3) mode = g
     const nx = word(s, 'X'), ny = word(s, 'Y'), zw = word(s, 'Z'), nz = zw == null ? null : zw + zShift
     if (nx == null && ny == null && nz == null) return
