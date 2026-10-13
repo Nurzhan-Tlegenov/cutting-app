@@ -5,6 +5,7 @@ import { readBasisFile, packScene } from '../lib/basisB3d'
 import { readAstraFile } from '../lib/astraAdd'
 import { readAstraXmlFile, looksLikeAstraXml } from '../lib/astraXml'
 import { readPro100Obj } from '../lib/pro100Obj'
+import { readSkpFile, isSkp } from '../lib/skpImport'
 import { readSketchCutPdf } from '../lib/sketchcutPdf'
 import { millsFromItems, mergeMills } from '../lib/facadeCarve'
 import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importDetails'
@@ -42,6 +43,8 @@ const SOURCES = [
     hint: 'Выберите файл проекта «Астра Конструктор Мебели» (.add) — возьмём детали с контуром, кромкой, пазами, присадкой и 3D-моделью. Если проект не читается — подойдёт XML из Астры (Файл → Экспорт XML), но без 3D.' },
   { id: 'pro100', icon: '🪑', label: 'PRO100',
     hint: 'Выберите модель, сохранённую из PRO100 в формате OBJ (Файл → Экспорт) — возьмём панели с размерами и 3D-модель; названия, кромку и присадку нужно будет добавить в приложении. Подойдёт и отчёт со списком деталей в Excel или CSV.' },
+  { id: 'sketchup', icon: '🏠', label: 'SketchUp',
+    hint: 'Выберите модель SketchUp (.skp, версия 2021 и новее), собранную мебельным плагином, — возьмём панели с названием, размером, материалом, кромкой по сторонам и направлением текстуры, а всю модель (фурнитуру, штанги, ручки) — в 3D.' },
   { id: 'sketchcut', icon: '📄', label: 'SketchCut',
     hint: 'Выберите PDF, сохранённый из SketchCut, — возьмём детали из таблицы «Детали» и кромку: чёрточки под размером показывают, на скольких сторонах она стоит (одна — на одной, две — на обеих).' },
 ]
@@ -56,6 +59,10 @@ async function readModelFile(file, faceRule) {
   // PDF из SketchCut ('%PDF')
   if ((head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) || lower.endsWith('.pdf')) {
     return { src: 'sketchcut', res: await readSketchCutPdf(file) }
+  }
+  // SketchUp (.skp): заголовок «SketchUp Model» в UTF-16 (FF FE FF …)
+  if (isSkp(head) || lower.endsWith('.skp')) {
+    return { src: 'sketchup', res: await readSkpFile(file, { faceRule }) }
   }
   if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
     return { src: 'basis', res: await readBasisFile(file, { faceRule }) }
@@ -395,7 +402,13 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 <div style={{ marginTop: 4 }}>Размеры деталей взяты как в модели. Исправьте модель у конструктора или проверьте эти детали перед раскроем.</div>
               </div>
             )}
-            {basis && !basis.bare && !basis.pdf && (
+            {basis?.skp && (
+              <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                Из SketchUp взяты панели мебельного плагина: название, размер, материал, кромка по сторонам и направление текстуры. Присадка и пазы из SketchUp пока не переносятся — добавьте их в заказе.
+                {basis.other > 0 && ` Фурнитура и прочие объекты (${basis.other}) — в 3D.`}{basis.hidden > 0 && ` Скрытые в модели объекты не взяты (${basis.hidden}).`}
+              </div>
+            )}
+            {basis && !basis.bare && !basis.skp && !basis.pdf && (
               <div style={{ marginBottom: 12 }}>
                 <label className="label">Лицевая сторона детали (смотрит вверх на станке) — по приоритету</label>
                 {faceRule.map((k, i) => {
@@ -446,7 +459,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
             })()}
 
             {/* Что получится */}
-            {basis && !basis.bare && !basis.pdf && chosen.length > 0 && (
+            {basis && !basis.bare && !basis.skp && !basis.pdf && chosen.length > 0 && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
                 Присадка: {sumInfo('holes')} отв. · пазов: {sumInfo('grooves')} · фигурных деталей: {sumInfo('shaped')} · вырезов: {sumInfo('cutouts')}
                 {sumInfo('shapedEdges') > 0 && ` · кромка на фигурных участках: ${sumInfo('shapedEdges')}`}
