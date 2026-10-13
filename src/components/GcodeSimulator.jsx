@@ -18,7 +18,7 @@ import { parseGcode, fmtTime } from '../lib/gcodeSim'
 // headTools — номера свёрл присадочной головы (если она у станка есть): голова рисуется слева от шпинделя на той же каретке;
 // сверлит голова — её сверло выдвинуто вниз, шпиндель поднят; режет шпиндель — поднята голова.
 
-const SPEEDS = [1, 5, 20, 60, 200]
+const SPEEDS = [1, 3, 5, 20, 60, 200]
 const LAYERS = [
   { id: 'outer', label: 'Контуры деталей', groups: ['outer'], css: '#185FA5' },
   { id: 'cutout', label: 'Вырезы', groups: ['cutout'], css: '#7B1FA2' },
@@ -81,6 +81,43 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     return lo
   }
   const seek = v => { tRef.current = Number(v); setT(tRef.current) }
+  // шаг по программе: конец каждой строки с движением (вперёд — к следующей, назад — к предыдущей)
+  const stepEnds = useMemo(() => {
+    const ends = new Map()
+    for (const m of prog.moves) ends.set(m.line, m.t1)
+    return [...new Set(ends.values())].sort((a, b) => a - b)
+  }, [prog])
+  const step = dir => {
+    setPlaying(false)
+    const cur = tRef.current
+    if (dir > 0) { const n = stepEnds.find(v => v > cur + 1e-6); seek(n ?? prog.time) }
+    else { let p = 0; for (const v of stepEnds) { if (v < cur - 1e-6) p = v; else break } seek(p) }
+  }
+  // удержание кнопки шага — шаги идут подряд
+  const holdRef = useRef(null)
+  const holdStart = dir => { step(dir); clearInterval(holdRef.current); const t0 = setTimeout(() => { holdRef.current = setInterval(() => step(dir), 110) }, 420); holdRef.current = t0 }
+  const holdEnd = () => { clearTimeout(holdRef.current); clearInterval(holdRef.current); holdRef.current = null }
+  // длина траектории: рабочие ходы и холостые, всего и сколько пройдено к текущему моменту
+  const paths = useMemo(() => {
+    let cut = 0, rap = 0
+    const acc = new Array(prog.moves.length)
+    for (let i = 0; i < prog.moves.length; i++) {
+      const m = prog.moves[i], l = Math.hypot(m.x1 - m.x0, m.y1 - m.y0, m.z1 - m.z0)
+      if (m.rapid) rap += l; else cut += l
+      acc[i] = cut + rap
+    }
+    return { cut, rap, acc }
+  }, [prog])
+  const passed = (() => {
+    const ms = prog.moves
+    if (!ms.length || t <= 0) return 0
+    let lo = 0, hi = ms.length - 1
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (ms[mid].t1 < t) lo = mid + 1; else hi = mid }
+    const m = ms[lo], f = m.t1 > m.t0 ? Math.max(0, Math.min(1, (t - m.t0) / (m.t1 - m.t0))) : 1
+    const prev = lo ? paths.acc[lo - 1] : 0
+    return prev + (paths.acc[lo] - prev) * f
+  })()
+  const mtr = v => `${(Math.round(v / 100) / 10).toLocaleString('ru-RU')} м`
   const choose = i => { setPlaying(false); setSel(i); if (i >= 0) seek(prog.moves[i].t1) }
   const chooseLine = li => {
     for (let k = li; k < total; k++) if (data.firstByLine.has(k)) { choose(data.firstByLine.get(k)); return }
@@ -449,18 +486,22 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
           ))}
         </div>
         <input type="range" min={0} max={prog.time || 1} step="any" value={t} onChange={e => { setPlaying(false); seek(e.target.value) }} style={{ width: '100%', padding: 0, margin: '6px 0 4px', border: 'none' }} />
-        <div style={{ display: 'flex', gap: 5, alignItems: 'center', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 5, rowGap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" onClick={() => { if (t >= prog.time) seek(0); setSel(-1); setPlaying(p => !p) }}
             style={{ flex: '0 0 auto', padding: '7px 14px', borderRadius: 20, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 14, fontWeight: 500 }}>{playing ? '⏸ Пауза' : '▶ Пуск'}</button>
-          <button type="button" onClick={() => { setPlaying(false); seek(0) }} style={chip(false)}>⏮</button>
-          <button type="button" onClick={() => { setPlaying(false); seek(prog.time) }} style={chip(false)}>⏭</button>
+          <button type="button" title="В начало" onClick={() => { setPlaying(false); seek(0) }} style={chip(false)}>⏮</button>
+          <button type="button" title="Шаг назад (держите — шаги подряд)" onPointerDown={() => holdStart(-1)} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} style={{ ...chip(false), touchAction: 'none' }}>◀ шаг</button>
+          <button type="button" title="Шаг вперёд (держите — шаги подряд)" onPointerDown={() => holdStart(1)} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} style={{ ...chip(false), touchAction: 'none' }}>шаг ▶</button>
+          <button type="button" title="В конец" onClick={() => { setPlaying(false); seek(prog.time) }} style={chip(false)}>⏭</button>
           <span style={{ flex: 1 }} />
-          {SPEEDS.map(s => <button key={s} type="button" onClick={() => setSpeed(s)} style={chip(speed === s)}>×{s}</button>)}
+          <span style={{ display: 'flex', gap: 3 }}>{SPEEDS.map(s => <button key={s} type="button" onClick={() => setSpeed(s)} style={chip(speed === s)}>×{s}</button>)}</span>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
           <span>T{cm?.tool ?? '—'}</span>
           <span>X{cm ? Math.round(cm.x1 * 10) / 10 : 0} Y{cm ? Math.round(cm.y1 * 10) / 10 : 0} Z{cm ? Math.round(cm.z1 * 100) / 100 : 0}</span>
           <span>{cm?.rapid ? 'холостой' : `F${cm ? Math.round(cm.feed) : 0}`}</span>
+          <span style={{ flexBasis: '100%', height: 0 }} />
+          <span title="Длина траектории: рабочие ходы (рез, сверление) и холостые переезды">Путь: рабочий <b style={{ fontWeight: 500 }}>{mtr(paths.cut)}</b> · холостой <b style={{ fontWeight: 500 }}>{mtr(paths.rap)}</b> · пройдено <b style={{ fontWeight: 500 }}>{mtr(passed)}</b> из {mtr(paths.cut + paths.rap)}</span>
           {sel >= 0 && (
             <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
               <b style={{ fontWeight: 500, color: '#B26A00' }}>Выбрано: {GROUP[data.grp[sel]]?.[1]}, строка {selLine + 1}</b>

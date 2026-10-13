@@ -301,18 +301,60 @@ function levels(top, bottom, maxPass) {
   const n = Math.max(1, Math.ceil((top - bottom) / (maxPass > 0 ? maxPass : 1e9) - 1e-9))
   return Array.from({ length: n }, (_, i) => top - (top - bottom) * (i + 1) / n)
 }
-// Присадочная голова идёт по листу «змейкой» от X0 Y0: полоса по Y шириной HEAD_BAND — по X в плюс, следующая полоса
-// (Y в плюс) — по X в минус, и так до конца листа. Всё, что попало в полосу, сверлится по ходу, свёрла меняются на ходу.
-const HEAD_BAND = 50
-function snakeOrder(list) {
-  const byY = [...list].sort((a, b) => a.at[1] - b.at[1] || a.at[0] - b.at[0])
+// Присадочная голова: свёрла меняются на ходу, поэтому порядок отверстий — только по пути. Берётся кратчайший маршрут
+// от X0 Y0: стартовые варианты (ближайший сосед, «змейка» полосами по X и по Y) улучшаются разворотами участков (2-opt)
+// и переносом отверстий в лучшее место (or-opt); из них выбирается самый короткий. На реальном листе (138 отверстий)
+// это ~18 м холостого пути головы против ~37 м у змейки с узкой полосой.
+function snakeOrder(list, band, ax = 1) {
+  const a = 1 - ax, by = [...list].sort((p, q) => p.at[ax] - q.at[ax] || p.at[a] - q.at[a])
   const bands = []
-  for (const j of byY) {
+  for (const j of by) {
     const b = bands[bands.length - 1]
-    if (b && j.at[1] - b.y0 <= HEAD_BAND) b.jobs.push(j)
-    else bands.push({ y0: j.at[1], jobs: [j] })
+    if (b && j.at[ax] - b.v <= band) b.jobs.push(j)
+    else bands.push({ v: j.at[ax], jobs: [j] })
   }
-  return bands.flatMap((b, i) => b.jobs.sort((p, q) => (i % 2 ? q.at[0] - p.at[0] : p.at[0] - q.at[0]) || p.at[1] - q.at[1]))
+  return bands.flatMap((b, i) => b.jobs.sort((p, q) => (i % 2 ? q.at[a] - p.at[a] : p.at[a] - q.at[a])))
+}
+const pathLen = (list, from) => { let t = 0, c = from; for (const j of list) { t += Math.hypot(j.at[0] - c[0], j.at[1] - c[1]); c = j.at } return t }
+// перенос отверстия (и цепочек из 2–3) в место, где маршрут короче
+function orOpt(items, from, until = Infinity) {
+  const R = items.slice(), n = R.length, d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]), pt = i => (i < 0 ? from : R[i].at)
+  for (let round = 0, better = true; better && round < 20; round++) {
+    better = false
+    for (let k = 1; k <= 3; k++) for (let i = 0; i + k <= n; i++) {
+      if ((i & 15) === 0 && Date.now() > until) return R
+      const prev = pt(i - 1), first = R[i].at, last = R[i + k - 1].at, next = i + k < n ? R[i + k].at : null
+      const gain = d(prev, first) + (next ? d(last, next) - d(prev, next) : 0)
+      let best = 1e-6, at = -1, rev = false, found = false
+      for (let j = -1; j < n; j++) {
+        if (j >= i - 1 && j <= i + k - 1) continue
+        const a = pt(j), b = j + 1 < n ? R[j + 1].at : null
+        const base = b ? d(a, b) : 0
+        const c1 = d(a, first) + (b ? d(last, b) : 0) - base, c2 = d(a, last) + (b ? d(first, b) : 0) - base
+        if (gain - c1 > best) { best = gain - c1; at = j; rev = false; found = true }
+        if (gain - c2 > best) { best = gain - c2; at = j; rev = true; found = true }
+      }
+      if (!found) continue
+      const seg = R.splice(i, k); if (rev) seg.reverse()
+      R.splice(at < i ? at + 1 : at + 1 - k, 0, ...seg); better = true
+    }
+  }
+  return R
+}
+export function headOrder(list, from = [0, 0], budgetMs = 1500) {
+  if (list.length < 3) return nearestOrder(list, from)
+  // на большом листе — один старт (ближайший сосед), и улучшение не дольше budgetMs: программа не должна ждать
+  const starts = list.length > 400 ? [nearestOrder(list, from)] : [nearestOrder(list, from), snakeOrder(list, 200, 1), snakeOrder(list, 200, 0)]
+  const until = Date.now() + budgetMs
+  let best = null, bl = Infinity
+  for (const s0 of starts) {
+    const per = Date.now() + Math.max(50, (until - Date.now()) / Math.max(1, starts.length - starts.indexOf(s0)))
+    let r = shortenTravel(s0, from, 0, per)
+    r = orOpt(r, from, per); r = shortenTravel(r, from, 0, per)
+    const l = pathLen(r, from)
+    if (l < bl) { bl = l; best = r }
+  }
+  return best
 }
 // сверло стоит в присадочной голове станка (у постпроцессора включена голова, у сверла — «в присадочной голове»)
 export const inHead = (post, t) => !!post?.drillHead && t?.type === 'drill' && !!t.inHead
@@ -512,17 +554,20 @@ function nearestOrder(items, from = [0, 0]) {
 }
 // Сокращение холостых переездов: разворот участков маршрута (2-opt), пока суммарный путь уменьшается.
 // from — откуда приезжает фреза; fixed — сколько первых операций остаются на своих местах.
-function shortenTravel(items, from, fixed = 0) {
+function shortenTravel(items, from, fixed = 0, until = Infinity) {
   const n = items.length
   if (n - fixed < 3) return items
   const R = items.slice(), pt = i => (i < 0 ? from : R[i].at), d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1])
   for (let round = 0, better = true; better && round < 60; round++) {
     better = false
-    for (let i = fixed; i < n - 1; i++) for (let j = i + 1; j < n; j++) {
+    for (let i = fixed; i < n - 1; i++) {
+      if (until !== Infinity && (i & 31) === 0 && Date.now() > until) return R      // время вышло — что успели
+      for (let j = i + 1; j < n; j++) {
       const a = pt(i - 1), b = pt(i), c = pt(j), e = j + 1 < n ? pt(j + 1) : null
       if (d(a, c) + (e ? d(b, e) : 0) < d(a, b) + (e ? d(c, e) : 0) - 1e-6) {
         for (let l = i, r = j; l < r; l++, r--) { const t = R[l]; R[l] = R[r]; R[r] = t }
         better = true
+      }
       }
     }
   }
@@ -888,7 +933,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   // Присадочная голова (если у станка она есть и сверло стоит в ней): свёрла меняются на ходу, поэтому все отверстия
   // головы — одним проходом по листу, без группировки по диаметру (портал не ездит туда-сюда). Потом — шпиндель.
   const headJobs = jobs.filter(j => j.stage === 0 && inHead(post, j.tool))
-  if (headJobs.length) { const o = snakeOrder(headJobs); seq.push(...o); cur = o[o.length - 1].at }
+  if (headJobs.length) { const o = headOrder(headJobs, cur); seq.push(...o); cur = o[o.length - 1].at }
   if (headJobs.length && !String(post.cmdHeadStart || '').trim()) warn.add('Команды смены инструмента для присадочной головы не заданы (Команды → «Присадочная голова»): свёрла головы в программе не включатся.')
   const stage0 = jobs.filter(j => j.stage === 0 && !inHead(post, j.tool))
   ;[...new Set(stage0.map(j => j.tool))].sort((a, b) => toolRank(a) - toolRank(b)).forEach(t => {
