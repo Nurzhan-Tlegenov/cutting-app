@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState, useRef } from 'react'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
-import { normOps, secondPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
+import { normOps, sameName, secondPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -362,17 +362,19 @@ export function SaveSnapshotButton({ cnc, onChange }) {
   const post = activePost(cnc)
   const [done, setDone] = useState('')
   const save = () => {
-    const def = `${post.name} · ${new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}`
-    const name = window.prompt('Сохранить настройки постпроцессора под именем:', def)
+    const def = post.name
+    const name = window.prompt('Сохранить настройки постпроцессора под именем:\n(то же имя — сохранённое перезапишется)', def)
     if (name === null) return
-    onChange(saveSnapshot(cnc, name || def))
-    setDone(`Сохранено в «Мои постпроцессоры»: ${name || def}`)
+    const nm = (name || def).trim()
+    const over = (cnc.saved || []).some(x => sameName(x.name, nm))
+    onChange(saveSnapshot(cnc, nm))
+    setDone(over ? `Перезаписано: «${nm}»` : `Сохранено: «${nm}»`)
     setTimeout(() => setDone(''), 4000)
   }
   return (
     <div style={{ marginBottom: 8 }}>
       <button type="button" className="btn-primary" onClick={save} style={{ padding: '8px 14px', fontSize: 13 }}>💾 Сохранить настройки</button>
-      <Hint>{done || `Текущие настройки «${post.name}» попадут в «Мои постпроцессоры» — потом их можно применить снова.`}</Hint>
+      <Hint>{done || `Запомнить текущие настройки «${post.name}», чтобы потом к ним вернуться (Выбрать ▾ → ↺ у станка). То же имя — перезапись.`}</Hint>
     </div>
   )
 }

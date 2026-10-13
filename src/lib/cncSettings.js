@@ -79,7 +79,10 @@ export function normalizeCnc(raw, shared = []) {
   return {
     posts, post: posts.some(p => p.id === c.post) ? c.post : posts[0].id, tools,
     // «Мои постпроцессоры» — сохранённые кнопкой «Сохранить» настройки станка: { id, name, kind, at, post, ops? }
-    saved: (Array.isArray(c.saved) ? c.saved : []).filter(s => s && s.post && typeof s.post === 'object'),
+    // двойники с одним именем (сохраняли раньше без перезаписи) — остаётся самый свежий
+    saved: (Array.isArray(c.saved) ? c.saved : []).filter(s => s && s.post && typeof s.post === 'object')
+      .sort((a, b) => (b.at || 0) - (a.at || 0))
+      .filter((s, i, a) => a.findIndex(x => x.kind === s.kind && String(x.name || '').trim().toLowerCase() === String(s.name || '').trim().toLowerCase()) === i),
     // какими постпроцессорами выпускать программы одновременно: раскроечный (один — G-код по листам) и присадочные (сколько угодно)
     router: posts.some(p => p.id === c.router && !isDrill6(p)) ? c.router : '',
     use6: (Array.isArray(c.use6) ? c.use6 : []).filter(id => posts.some(p => p.id === id && isDrill6(p))),
@@ -124,11 +127,15 @@ export const newId = uid
 // ── «Мои постпроцессоры»: сохранённые настройки, которые можно применить снова ──
 // Пользователь пробует разные настройки: сохранил удачную под именем — потом применяет к открытому постпроцессору.
 // Для раскроечного вместе со станком сохраняется и обработка контуров (ops): она влияет на G-код так же, как команды.
+export const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
 const strip = p => { const q = { ...p }; delete q.id; delete q.shared; delete q.forAll; delete q.ownerId; return q }
 export function saveSnapshot(cnc, name) {
   const post = activePost(cnc)
-  const snap = { id: uid(), name: String(name || post.name).trim() || post.name, kind: isDrill6(post) ? 'drill6' : 'router', at: Date.now(), post: strip(post), ...(isDrill6(post) ? {} : { ops: cnc.ops }) }
-  return { ...cnc, saved: [...(cnc.saved || []), snap] }
+  const nm = String(name || post.name).trim() || post.name
+  const snap = { id: uid(), name: nm, kind: isDrill6(post) ? 'drill6' : 'router', at: Date.now(), post: strip(post), ...(isDrill6(post) ? {} : { ops: cnc.ops }) }
+  // то же имя — тот же сохранённый вариант: перезаписывается, а не копится второй с тем же именем
+  const list = cnc.saved || [], same = list.find(x => sameName(x.name, nm))
+  return { ...cnc, saved: same ? list.map(x => (x === same ? { ...snap, id: same.id } : x)) : [...list, snap] }
 }
 /** Применить сохранённые настройки: к открытому постпроцессору того же типа (его имя и id остаются), иначе — новым постпроцессором */
 export function applySnapshot(cnc, snapId, asNew = false) {
