@@ -36,7 +36,7 @@ export default function SharedSimPage() {
     <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', padding: 10, boxSizing: 'border-box', height: '100dvh' }}>
       <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
         <Suspense fallback={<CncLoader full label="Запускаем симулятор…" />}>
-          <GcodeSimulator text={s.text} kinds={s.kinds} opIds={s.opIds} title={s.name} thickness={s.thickness} rapid={s.rapid} zShift={s.zShift} toolDia={toolDia} sheet={s.sheet} outlines={s.outlines} />
+          <GcodeSimulator text={s.text} kinds={s.kinds} opIds={s.opIds} title={s.name} thickness={s.thickness} rapid={s.rapid} zShift={s.zShift} toolDia={toolDia} headTools={s.head} sheet={s.sheet} outlines={s.outlines} />
         </Suspense>
       </div>
     </div>

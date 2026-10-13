@@ -15,6 +15,8 @@ import { parseGcode, fmtTime } from '../lib/gcodeSim'
 // text — G-код; kinds / opIds — вид операции и её номер по строкам (из генератора; без них всё — «контуры»);
 // sheet — { x, y, w, l } лист в координатах станка; outlines — контуры деталей [[x, y]…];
 // toolDia(T) — диаметр инструмента по номеру; thickness — толщина материала; rapid — холостая подача.
+// headTools — номера свёрл присадочной головы (если она у станка есть): голова рисуется слева от шпинделя на той же каретке;
+// сверлит голова — её сверло выдвинуто вниз, шпиндель поднят; режет шпиндель — поднята голова.
 
 const SPEEDS = [1, 5, 20, 60, 200]
 const LAYERS = [
@@ -41,8 +43,9 @@ function groupOf(m, kind) {
   return kind === 'cutout' ? 'cutout' : 'outer'
 }
 
-export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, toolDia, thickness = 16, rapid = 20000, zShift = 0, title = '', onClose, onDownload, onShare }) {
+export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, toolDia, headTools, thickness = 16, rapid = 20000, zShift = 0, title = '', onClose, onDownload, onShare }) {
   const prog = useMemo(() => parseGcode(text, { rapid, zShift }), [text, rapid, zShift])
+  const headKey = (headTools || []).join(',')       // свёрла головы — строкой, чтобы сцена не пересобиралась на каждой отрисовке
   const data = useMemo(() => {
     const groups = {}, firstByLine = new Map()
     const grp = prog.moves.map((m, i) => {
@@ -215,6 +218,44 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     tool.traverse(o => { o.renderOrder = 30 })
     scene.add(tool)
 
+    // присадочная голова: корпус и патроны в ряд (шаг 32 мм), слева от шпинделя на той же каретке
+    const heads = [...new Set(headKey.split(',').map(Number).filter(t => t > 0))].sort((a, b) => a - b)
+    const PITCH = 32, LIFT = 80, RETRACT = 26
+    const headW = Math.max(heads.length, 1) * PITCH + 36
+    const HEAD_OFF = headW / 2 + 70                       // от центра головы до оси шпинделя по X
+    const bitX = i => (i - (heads.length - 1) / 2) * PITCH
+    let head = null
+    const bits = []
+    if (heads.length) {
+      head = new THREE.Group()
+      const hCyl = (r, h, z0, mat, x = 0) => { const g = keep(new THREE.CylinderGeometry(r, r, h, 24)); g.translate(0, h / 2 + z0, 0); g.rotateX(Math.PI / 2); const m = new THREE.Mesh(g, mat); m.position.x = x; return m }
+      const box = new THREE.Mesh(keep(new THREE.BoxGeometry(headW, 96, 110)), keep(new THREE.MeshPhongMaterial({ color: 0xE07B28, specular: 0xffffff, shininess: 50, transparent: true, opacity: 0.5, depthWrite: false })))
+      box.position.z = 60 + 55
+      head.add(box)
+      const chuckMat = keep(new THREE.MeshPhongMaterial({ color: 0x3A3D42, specular: 0x999999, shininess: 60 }))
+      heads.forEach((t, i) => {
+        head.add(hCyl(9, 16, 44, chuckMat, bitX(i)))
+        const bit = hCyl(0.5, 38, 6, steel, bitX(i))
+        bit.__t = t
+        head.add(bit); bits.push(bit)
+      })
+      head.traverse(o => { o.renderOrder = 30 })
+      scene.add(head)
+    }
+    // поставить каретку: инструмент (шпиндель или сверло головы) кончиком в точку x, y, z
+    const placeCarriage = (x, y, z, t) => {
+      const hi = head ? heads.indexOf(Math.round(Number(t))) : -1
+      if (hi < 0) {
+        tool.position.set(x, y, z)
+        if (head) { head.position.set(x - HEAD_OFF, y, z + LIFT); bits.forEach(b => { b.position.z = RETRACT }) }
+        return
+      }
+      const hx = x - bitX(hi)                              // центр головы
+      head.position.set(hx, y, z)
+      bits.forEach((b, i) => { b.position.z = i === hi ? 0 : RETRACT; const d = diaRef.current?.(b.__t) || 5; b.scale.set(d, d, 1) })
+      tool.position.set(hx + HEAD_OFF, y, z + LIFT)
+    }
+
     const st = { drawn: 0, vis: Object.fromEntries(LAYERS.map(l => [l.id, true])), dirtyA: true, dirtyB: true, lastUp: 0, timer: 0, cur: -1, live: true }
     const find = time => {
       const m = prog.moves
@@ -254,7 +295,8 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
         if (g === 'rapid') liveObj.computeLineDistances()
       }
       const d = diaRef.current?.(m.tool) || 3
-      tool.position.set(x, y, z); cutter.scale.set(d, d, 1)
+      if (!heads.includes(Math.round(Number(m.tool)))) cutter.scale.set(d, d, 1)
+      placeCarriage(x, y, z, m.tool)
       showLines()
       flush()
       if (st.follow) {                                     // камера едет за шпинделем, сохраняя выбранные пальцами расстояние и угол
@@ -335,12 +377,12 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       disposables.forEach(x => x.dispose())
       renderer.dispose(); el.remove()
     }
-  }, [prog, data, opIds, sheet, outlines, thickness])
+  }, [prog, data, opIds, sheet, outlines, thickness, headKey])
 
-  useEffect(() => { api.current?.setTime(tRef.current, playing || tRef.current > 0) }, [t, playing, prog, data, sheet, outlines, thickness, opIds])
-  useEffect(() => { api.current?.setVisible(vis) }, [vis, prog, data, sheet, outlines, thickness, opIds])
-  useEffect(() => { api.current?.select(sel) }, [sel, prog, data, sheet, outlines, thickness, opIds])
-  useEffect(() => { api.current?.setFollow(follow) }, [follow, prog, data, sheet, outlines, thickness, opIds])
+  useEffect(() => { api.current?.setTime(tRef.current, playing || tRef.current > 0) }, [t, playing, prog, data, sheet, outlines, thickness, opIds, headKey])
+  useEffect(() => { api.current?.setVisible(vis) }, [vis, prog, data, sheet, outlines, thickness, opIds, headKey])
+  useEffect(() => { api.current?.select(sel) }, [sel, prog, data, sheet, outlines, thickness, opIds, headKey])
+  useEffect(() => { api.current?.setFollow(follow) }, [follow, prog, data, sheet, outlines, thickness, opIds, headKey])
 
   // проигрывание
   useEffect(() => {

@@ -94,6 +94,8 @@ export default function CncPage() {
   // вкладки «Инструменты» и «Обработка» — для постпроцессора, открытого в настройках
   const tview = useMemo(() => postView(cnc), [cnc])
   const tchange = v => change(postBack(cnc, v))
+  // свёрла присадочной головы раскроечного станка — для симулятора (голова рисуется слева от шпинделя)
+  const headTools = useMemo(() => (post.drillHead ? (rview.tools || []).filter(t => t.type === 'drill' && t.inHead).map(t => Math.round(num(t.t))) : []), [post.drillHead, rview])
   const sel = mat ? (picked ?? mat.sheets.map((_, i) => i)) : []
   const toggle = i => { setPicked(sel.includes(i) ? sel.filter(x => x !== i) : [...sel, i].sort((a, b) => a - b)); setBuilt(null) }
 
@@ -215,7 +217,7 @@ export default function CncPage() {
   const makeShare = async () => {
     setShare(x => ({ ...x, busy: true, error: '' }))
     const tools = Object.fromEntries((rview.tools || []).map(x => [num(x.t), num(x.d)]))
-    const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(post.rapid) || 20000, tools, zShift: sim.zShift })
+    const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(post.rapid) || 20000, tools, head: headTools, zShift: sim.zShift })
     const r = await saveSimShare(id, sim.name, user.id, payload)
     setShare(x => ({ ...x, busy: false, code: r.code || x.code, error: r.error || '', fresh: !r.error }))
     setLinksTick(t => t + 1)
@@ -429,7 +431,7 @@ export default function CncPage() {
           <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000} zShift={sim.zShift}
-                toolDia={toolDia} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
+                toolDia={toolDia} headTools={headTools} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
             </Suspense>
           </div>
         </div>, document.body
