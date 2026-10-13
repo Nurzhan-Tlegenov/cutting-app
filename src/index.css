@@ -28,6 +28,12 @@
   --amber-light: #FAEEDA;
 }
 
+/* Страница никогда не листается вбок: если какой-то элемент выпирает на пару пикселей, он обрезается, а не делает
+   страницу шире экрана (после симулятора масштаб 1:1, и такой лишний край телефон давал сдвигать пальцем влево).
+   clip — без своей прокрутки, поэтому липкие (sticky) блоки работают как раньше. Ленты, что листаются вбок, — со своей прокруткой. */
+html, body { overflow-x: clip; max-width: 100%; }
+@supports not (overflow-x: clip) { html, body { overflow-x: hidden; } }
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 15px;
