@@ -8,7 +8,8 @@ import StageReturn from './StageReturn'
 import StageProgress from './StageProgress'
 import { OrderOps } from './ProductionPosts'
 import CncLoader from './CncLoader'
-import PostIcon, { POST_ICONS } from './PostIcon'
+import PostIcon, { POST_ICONS, iconFromFile } from './PostIcon'
+import LabelImageEditor from './LabelImageEditor'
 import { savePostRule } from '../lib/stageParts'
 import { useKeptState } from '../hooks/useKeptState'
 
@@ -28,6 +29,19 @@ export default function ProductionBoard({ prodId = null, onChange }) {
   const [stamp, setStamp] = useState(null)
   const [ret, setRet] = useState(null)
   const [iconFor, setIconFor] = useState(null)                     // пост, для которого выбирается значок                           // { orderId, title } — выбор поста, на который вернуть
+  const [iconImgSrc, setIconImgSrc] = useState(null)               // своя картинка поста: файл — в редактор (убрать фон)
+  const iconFileRef = useRef(null)
+  // сохранить значок поста: из набора (icon) или свою картинку (iconImg — PNG 96×96)
+  const saveIcon = async patch => {
+    const p = iconFor
+    if (!p) return
+    const base = p.rule && p.rule.list ? p.rule : { ...ruleOf(p.rule, p.name), ...(p.rule || {}) }
+    const next = { ...base, ...patch }
+    if (!next.iconImg) delete next.iconImg
+    const { error } = await savePostRule(p.id, next)
+    if (error) window.alert(/not allowed/.test(error.message) ? 'Менять значки может руководитель или начальник производства.' : error.message)
+    setIconFor(null); load()
+  }
   const colRefs = useRef({})
   // галерея: сколько колонок-постов на экране (щипок двумя пальцами или −/+); 0 — компьютер, колонки по ширине
   const [gcols, setGcols] = useKeptState('boardCols', window.innerWidth < 760 ? 1 : 0)
@@ -280,7 +294,7 @@ export default function ProductionBoard({ prodId = null, onChange }) {
                 style={{ display: 'flex', alignItems: 'stretch', gap: 6, minHeight: compact ? 64 : 84, borderRadius: 'var(--radius)', background: target ? 'var(--blue-light)' : 'transparent', outline: target ? '2px dashed var(--blue)' : 'none' }}>
                 {/* пост — значком слева */}
                 <div title={c.name} style={{ flex: '0 0 54px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '4px 2px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}>
-                  <span onClick={() => c.id !== IDLE && setIconFor(c)} style={{ position: 'relative', lineHeight: 1, color: c.id === IDLE ? 'var(--amber)' : 'var(--blue-dark)', cursor: c.id !== IDLE ? 'pointer' : 'default' }}>{c.id === IDLE ? <span style={{ fontSize: 20 }}>▶</span> : <PostIcon icon={c.rule?.icon} name={c.name} size={24} />}
+                  <span onClick={() => c.id !== IDLE && setIconFor(c)} style={{ position: 'relative', lineHeight: 1, color: c.id === IDLE ? 'var(--amber)' : 'var(--blue-dark)', cursor: c.id !== IDLE ? 'pointer' : 'default' }}>{c.id === IDLE ? <span style={{ fontSize: 20 }}>▶</span> : <PostIcon icon={c.rule?.icon} img={c.rule?.iconImg} name={c.name} size={24} />}
                     {list.length > 0 && <span style={{ position: 'absolute', top: -6, right: -12, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, fontSize: 10, fontWeight: 700, lineHeight: '16px', textAlign: 'center', color: 'white', background: c.id === IDLE ? 'var(--amber)' : 'var(--blue)' }}>{list.length}</span>}
                   </span>
                   <span style={{ maxWidth: 52, fontSize: 9.5, lineHeight: 1.15, textAlign: 'center', color: c.id === IDLE ? 'var(--amber)' : 'var(--text-muted)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word' }}>{c.id === IDLE ? 'Не пущены' : c.name}</span>
@@ -326,20 +340,15 @@ export default function ProductionBoard({ prodId = null, onChange }) {
           <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--blue)' }}>→ {drag.over === IDLE ? 'не пущен' : data.posts.find(p => p.id === drag.over)?.name || '…'}</div>
         </div>
       )}
-      {iconFor && (
+      {iconFor && !iconImgSrc && (
         <div onClick={() => setIconFor(null)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
           <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 460, borderRadius: '16px 16px 0 0', paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}>
             <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 8 }}>Значок поста «{iconFor.name}»</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(76px, 1fr))', gap: 6 }}>
               {POST_ICONS.map(([k, label]) => {
-                const on = (iconFor.rule?.icon || '') === k
+                const on = !iconFor.rule?.iconImg && (iconFor.rule?.icon || '') === k
                 return (
-                  <button key={k} type="button" onClick={async () => {
-                    const base = iconFor.rule && iconFor.rule.list ? iconFor.rule : { ...ruleOf(iconFor.rule, iconFor.name), ...(iconFor.rule || {}) }
-                    const { error } = await savePostRule(iconFor.id, { ...base, icon: k })
-                    if (error) window.alert(/not allowed/.test(error.message) ? 'Менять значки может руководитель или начальник производства.' : error.message)
-                    setIconFor(null); load()
-                  }}
+                  <button key={k} type="button" onClick={() => saveIcon({ icon: k, iconImg: undefined })}
                     style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '8px 4px', borderRadius: 10, cursor: 'pointer',
                       border: `1px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue-light)' : 'transparent', color: on ? 'var(--blue-dark)' : 'var(--text)' }}>
                     <PostIcon icon={k} size={28} />
@@ -347,11 +356,21 @@ export default function ProductionBoard({ prodId = null, onChange }) {
                   </button>
                 )
               })}
+              {/* своя картинка с телефона или компьютера: можно убрать фон, сохраняется маленьким значком */}
+              <button type="button" onClick={() => iconFileRef.current?.click()}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '8px 4px', borderRadius: 10, cursor: 'pointer',
+                  border: `1px ${iconFor.rule?.iconImg ? 'solid var(--blue)' : 'dashed var(--blue)'}`, background: iconFor.rule?.iconImg ? 'var(--blue-light)' : 'transparent', color: 'var(--blue)' }}>
+                {iconFor.rule?.iconImg ? <PostIcon img={iconFor.rule.iconImg} size={28} /> : <span style={{ fontSize: 22, lineHeight: '28px' }}>＋</span>}
+                <span style={{ fontSize: 10, lineHeight: 1.15, textAlign: 'center' }}>{iconFor.rule?.iconImg ? 'Своя (заменить)' : 'Своя картинка'}</span>
+              </button>
             </div>
+            <input ref={iconFileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setIconImgSrc(f) }} />
             <button type="button" className="btn-secondary" style={{ marginTop: 10 }} onClick={() => setIconFor(null)}>Отмена</button>
           </div>
         </div>
       )}
+      {iconImgSrc && <LabelImageEditor src={iconImgSrc} onCancel={() => setIconImgSrc(null)}
+        onDone={async blob => { setIconImgSrc(null); try { await saveIcon({ icon: 'own', iconImg: await iconFromFile(blob) }) } catch (e) { window.alert(String(e?.message || e)) } }} />}
       {ret && <StageReturn orderId={ret.orderId} title={ret.title} onClose={ch => { setRet(null); if (ch) { load(); onChange?.(); window.dispatchEvent(new Event('notices-seen')) } }} />}
       {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) { load(); onChange?.() } }} />}
     </div>

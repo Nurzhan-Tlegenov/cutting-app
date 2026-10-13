@@ -51,7 +51,21 @@ export function iconFor(name) {
   return 'pin'
 }
 
-export default function PostIcon({ icon, name, size = 24, style }) {
+/** Своя картинка поста (rule.iconImg — маленький PNG) или значок из набора */
+export default function PostIcon({ icon, name, img, size = 24, style }) {
+  if (img) return <img src={img} alt="" width={size} height={size} style={{ display: 'block', objectFit: 'contain', borderRadius: 4, ...style }} />
   const k = BY_KEY[icon] ? icon : iconFor(name)
   return <svg viewBox="0 0 24 24" width={size} height={size} style={{ display: 'block', ...style }}>{BY_KEY[k]}</svg>
+}
+
+/** Файл картинки -> квадратный PNG 96×96 (вписан, прозрачный фон сохраняется) — для значка поста */
+export async function iconFromFile(blob) {
+  const url = URL.createObjectURL(blob)
+  try {
+    const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Не удалось прочитать картинку')); i.src = url })
+    const N = 96, cv = document.createElement('canvas'); cv.width = N; cv.height = N
+    const g = cv.getContext('2d'), w = im.naturalWidth || N, h = im.naturalHeight || N, k = Math.min(N / w, N / h)
+    g.imageSmoothingQuality = 'high'; g.drawImage(im, (N - w * k) / 2, (N - h * k) / 2, w * k, h * k)
+    return cv.toDataURL('image/png')
+  } finally { URL.revokeObjectURL(url) }
 }
