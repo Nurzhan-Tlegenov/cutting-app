@@ -50,7 +50,8 @@ export async function planStages(orderId) {
   const open = (st.data || []).filter(s => (s.status === 'waiting' || s.status === 'queued') && !Number(s.scanned) && ['edge', 'drill'].includes(ruleOf(s.rule, s.name).list))
   if (!open.length) return 0
   const d = await loadOrderParts(orderId)
-  if (!d.order) return 0
+  // деталей не видно (нет доступа или ещё не загрузились) — ничего не пропускаем: иначе заказ проскочит посты
+  if (!d.order || !d.rows.length) return 0
   const empty = open.filter(s => { try { return !stageParts(d.order, d.rows, ruleOf(s.rule, s.name)).length } catch { return false } }).map(s => s.post_id).filter(Boolean)
   if (!empty.length) return 0
   const r = await call('stage_auto_skip', { p_order: orderId, p_posts: empty })

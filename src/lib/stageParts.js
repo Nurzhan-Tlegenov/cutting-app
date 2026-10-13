@@ -81,6 +81,11 @@ export async function loadOrderParts(orderId) {
     supabase.from('orders').select('*').eq('id', orderId).single(),
     supabase.from('order_details').select('*').eq('order_id', orderId).order('sort_order'),
   ])
+  // сотруднику таблица деталей напрямую может быть закрыта — тогда детали берутся функцией базы (как у сканера)
+  if (order && !(rows || []).length) {
+    const { data: so } = await supabase.rpc('scan_order', { p_order: orderId })
+    if (so?.details?.length) return { order, rows: so.details }
+  }
   return { order: order || null, rows: rows || [] }
 }
 

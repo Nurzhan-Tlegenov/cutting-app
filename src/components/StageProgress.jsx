@@ -20,7 +20,8 @@ function useStageTotal(orderId, rule, postName) {
     if (r.list === 'none') { Promise.resolve().then(() => alive && setRes({ total: 0, unit: '' })); return () => { alive = false } }
     partsOf(orderId).then(d => {
       if (!alive) return
-      const parts = d?.order ? stageParts(d.order, d.rows, r) : []
+      if (!d?.order || !d.rows.length) { setRes(null); return }          // деталей не видно — счётчик не показываем и пост не пропускаем
+      const parts = stageParts(d.order, d.rows, r)
       setRes({ total: parts.reduce((a, p) => a + p.qty, 0), kinds: parts.length, unit: r.list === 'edge' && r.sides ? 'стор.' : 'шт.' })
     })
     return () => { alive = false }
