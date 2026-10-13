@@ -1734,6 +1734,17 @@ export default function NestingPage() {
       const patch = {}
       SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(pr, col, o); if (PROD_LOCKED.includes(k) && v != null && Number(v) !== Number(o[col])) patch[col] = Number(v) })
       if (Object.keys(patch).length) await saveOrderPatch(patch, false)
+      return
+    }
+    // Производство не выбрано — подставляем последнее, которое клиент выбирал (запоминается за аккаунтом).
+    // Только в своём ещё не отправленном заказе, где раскроя пока нет: готовый раскрой не пересчитывается от чужого реза.
+    const last = getUserSettings(user).lastProductionId
+    const lp = last && !o?.production_id && o?.user_id === user?.id && (!o.status || o.status === 'draft') && !o.nesting_result
+      ? list.find(x => x.id === last && (x.status ?? 'approved') === 'approved') : null
+    if (lp) {
+      const patch = { production_id: lp.id }
+      SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(lp, col, o); if (PROD_LOCKED.includes(k) && v != null) patch[col] = Number(v) })
+      await saveOrderPatch(patch, false)
     }
   }
   // Запись в заказ + сразу в состояние страницы. Нет колонки в базе (не
@@ -1775,6 +1786,7 @@ export default function NestingPage() {
   }
   function chooseProduction(pid) {
     const pr = productions.find(x => x.id === pid)
+    saveUserSettings({ lastProductionId: pr ? pr.id : '' }, user)     // в следующем заказе это производство подставится само
     if (!pr) { saveOrderPatch({ production_id: null }); return }
     const patch = { production_id: pr.id }
     SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(pr, col, order); if (PROD_LOCKED.includes(k) && v != null) patch[col] = Number(v) }) // формат листа не трогаем
@@ -2080,7 +2092,7 @@ export default function NestingPage() {
   async function submitOrder(cfg, force = false, prodId = null) {
     if (!checkCfg(cfg)) return
     let pid = prodId || order.production_id || null
-    if (prodId) await saveOrderPatch({ production_id: prodId }, false)     // раскрой уже посчитан — параметры листа не трогаем
+    if (prodId) { await saveOrderPatch({ production_id: prodId }, false); saveUserSettings({ lastProductionId: prodId }, user) }     // раскрой уже посчитан — параметры листа не трогаем; производство запоминается для следующих заказов
     else if (!order.production_id) {
       const mine = await myProduction(user?.id)
       const ready = mine && (mine.status ?? 'approved') === 'approved'
