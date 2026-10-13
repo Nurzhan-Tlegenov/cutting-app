@@ -430,7 +430,7 @@ function LearnFromProgram({ post, onApply, tools = [] }) {
     onApply({
       cmdStart: res.cmdStart, cmdToolStart: res.cmdToolStart, cmdToolEnd: res.cmdToolEnd, cmdEnd: res.cmdEnd,
       ...(res.arcs ? { arcs: res.arcs } : {}),
-      ...(res.park ? { endX: '', endY: '' } : {}),                       // парковка уже в конце программы — своя не нужна
+      ...(res.park ? { endX: res.park.x ?? 0, endY: res.park.y ?? 0 } : {}),   // парковка в конце программы — «конечное положение»
       ...(res.ext && /^(nc|tap|cnc|gcode|ngc|txt|mpf|iso|ptp|anc|eia|h|g)$/i.test(res.ext) ? { ext: res.ext } : {}),
       // два вида смены: присадочная голова — свои команды, у станка включается голова
       ...(res.head ? { drillHead: true, cmdHeadStart: res.head.cmdHeadStart, cmdHeadEnd: res.head.cmdHeadEnd } : { drillHead: false }),

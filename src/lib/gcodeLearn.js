@@ -83,6 +83,7 @@ export function learnFromProgram(text) {
   }
 
   // блоки смены: [подготовка | M6 | после M6 до первого переезда к работе]
+  const moveBefore = []
   const blocks = changes.map((c, n) => {
     const next = changes[n + 1] ?? lines.length
     let prevWork = -1
@@ -95,7 +96,9 @@ export function learnFromProgram(text) {
       for (let i = prevWork + 1; i < c; i++) if (kind[i] !== 'cmd') lastMotion = i
       for (let i = prevWork + 1; i < c; i++) {
         if (keep(i)) pre.push(lines[i])
-        else if (i === lastMotion && kind[i] === 'rapidxy') pre.push(lines[i])     // переезд в точку смены инструмента
+        // переезд по XY перед сменой (часто в угол листа — X = ширина листа) в команды не берём: координаты зависят
+        // от размера листа и от той программы, что делала УП; он только показывается в отчёте
+        else if (i === lastMotion && kind[i] === 'rapidxy') moveBefore.push(lines[i])
       }
     }
     const post = []
@@ -176,9 +179,10 @@ export function learnFromProgram(text) {
   const lastWork = work[work.length - 1]
   const endIdx = []
   for (let i = lastWork + 1; i < lines.length; i++) if (kind[i] === 'cmd' || kind[i] === 'rapidxy') endIdx.push(i)
+  // парковка в конце — не командой, а своей настройкой «конечное положение» (X, Y): так её видно и можно поменять
   const parkLine = endIdx.find(i => kind[i] === 'rapidxy')
-  const park = parkLine != null ? { line: lines[parkLine] } : null
-  const endLines = endIdx.map(i => lines[i])
+  const park = parkLine != null ? { line: lines[parkLine], x: word(lines[parkLine], 'X'), y: word(lines[parkLine], 'Y') } : null
+  const endLines = endIdx.filter(i => i !== parkLine).map(i => lines[i])
 
   // что ещё видно по программе
   const tools = []
@@ -203,7 +207,11 @@ export function learnFromProgram(text) {
   if (dropped) report.push(`Комментарии отброшены (${dropped} строк) — у каждой программы они свои.`)
   if (numbered) report.push('В программе были номера строк (N…) — они убраны: наша программа их не ставит.')
   if (ij) report.push('Дуги в программе — G2/G3 с I, J: в «Основных» включится вывод дуг так же.')
-  if (park) report.push(`Парковка в конце (${park.line}) осталась в конце программы как у станка; своя парковка из «Основных» для этого станка отключится.`)
+  if (park) report.push(`Парковка в конце (${park.line}) — в «Основных» станет «конечным положением» X${park.x ?? 0} Y${park.y ?? 0}; поменять или убрать можно там.`)
+  if (moveBefore.length) {
+    const u = [...new Set(moveBefore)]
+    report.push(`Перед сменой инструмента станок уезжал: ${u.slice(0, 3).join(', ')}${u.length > 3 ? '…' : ''}. В команды не взято — это координаты по листу из той программы; если станку переезд нужен, впишите его в команды смены вручную.`)
+  }
   if (rArcs) warnings.push('Дуги в программе заданы радиусом (R). Наша программа выводит дуги через I, J или отрезками — проверьте, что станок их принимает.')
   if (lines.some(l => /(?:^|\s)G20(?=\D|$)/.test(l))) warnings.push('Программа в дюймах (G20). Приложение считает в миллиметрах — G20 в начале программы заменён на G21.')
   if (!/\{T\}/.test(sp.start) || (hd && !/\{T\}/.test(hd.start))) warnings.push('Номер инструмента в смене не распознан — проверьте строку смены и поставьте {T} вручную.')

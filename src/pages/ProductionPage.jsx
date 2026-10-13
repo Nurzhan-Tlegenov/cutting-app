@@ -29,6 +29,7 @@ import { membersList, myWorkplaces, prodView, workPid } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
 import Drill6Viewer from '../components/Drill6Viewer'
+import GcodeFileSim from '../components/GcodeFileSim'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -53,6 +54,7 @@ export default function ProductionPage() {
   const [busy, setBusy] = useState('')
   const [prices, setPrices] = useKeptState('prices', false)       // открыт прайс-лист
   const [xmlView, setXmlView] = useKeptState('xml', false)     // просмотрщик XML-программ присадочного станка
+  const [gsim, setGsim] = useState(false)                       // симуляция G-кода из файла (любой программы)
   const [openIds, setOpenIds] = useKeptState('open', [])   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
   const open = useMemo(() => new Set(openIds), [openIds])
   const toggle = id => setOpenIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
@@ -183,6 +185,7 @@ export default function ProductionPage() {
     ['sheet', I.sliders, 'Параметры станка', 'Рез и отступы листа — по типу материала'],
     ['post', I.cnc, 'Постпроцессоры', 'Станки ЧПУ, инструменты, обработка'],
     ['xml', I.file, 'Просмотр XML присадки', 'Программы присадочного станка'],
+    ['gsim', I.cnc, 'Симуляция G-кода', 'Любая УП — в том числе из других программ'],
   ] : []
   const btn = kind => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : 'var(--text-muted)' })
 
@@ -236,7 +239,7 @@ export default function ProductionPage() {
             // разделы настроек — кнопками-строками, как в боковом меню: значок, название, пояснение, ›
             <div className="card" style={{ marginBottom: 12, padding: 4 }}>
               {settingsMenu.map(([id, icon, title, sub, cnt], i) => (
-                <button key={id} type="button" onClick={() => (id === 'prices' ? setPrices(true) : id === 'xml' ? setXmlView(true) : setSetSec(id))}
+                <button key={id} type="button" onClick={() => (id === 'prices' ? setPrices(true) : id === 'xml' ? setXmlView(true) : id === 'gsim' ? setGsim(true) : setSetSec(id))}
                   style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 10px', border: 'none', borderTop: i ? '0.5px solid var(--border)' : 'none',
                     background: 'transparent', textAlign: 'left', cursor: 'pointer', color: 'var(--text)', borderRadius: 0 }}>
                   <span style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Ico d={icon} size={19} /></span>
@@ -388,6 +391,7 @@ export default function ProductionPage() {
       {reopen && <StageReturn reopen orderId={reopen.id} title={orderTitle(reopen)}
         onNoRoute={async () => { const r = await productionSetStatus(reopen.id, 'inwork'); if (r.error) { window.alert(r.error); return false } await productionArchive(reopen.id, false) }}
         onClose={ch => { setReopen(null); if (ch) { setFilter('work'); load(); loadStages() } }} />}
+      {gsim && <GcodeFileSim onClose={() => setGsim(false)} />}
       {xmlView && <Drill6Viewer title="Просмотр XML присадки" onClose={() => setXmlView(false)} />}
       {prices && prod && <PriceList production={prod} onClose={() => setPrices(false)} />}
       <BottomNav />
