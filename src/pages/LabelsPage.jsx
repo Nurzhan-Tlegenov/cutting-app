@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, metaItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, routerPost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName, toLatin, programName, folderName } from '../lib/orderUtils'
@@ -310,8 +310,37 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{cur.size.toFixed(1)} мм</span>
               <button type="button" style={chip(false)} onClick={() => edit({ size: cur.size + 0.3 })}>A+</button>
               <button type="button" style={{ ...chip(cur.bold), fontWeight: 700 }} onClick={() => edit({ bold: !cur.bold })}>Ж</button>
-              <button type="button" style={chip(cur.align !== 'left')} onClick={() => edit({ align: cur.align === 'left' ? 'center' : cur.align === 'center' ? 'right' : 'left' })}>{cur.align === 'right' ? 'По правому краю' : cur.align === 'center' ? 'По центру' : 'По левому краю'}</button>
               <button type="button" style={chip(cur.ul !== 'none')} onClick={() => edit({ ul: cur.ul === 'none' ? 'below' : cur.ul === 'below' ? 'above' : 'none' })}>{cur.ul === 'below' ? 'Черта снизу' : cur.ul === 'above' ? 'Черта сверху' : 'Без черты'}</button>
+              {/* текст в рамке: по строке — влево / центр / вправо; поперёк — вверх / центр / вниз; поворот */}
+              <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 62 }}>По строке:</span>
+                {[['left', '⇤ Влево'], ['center', '↔ Центр'], ['right', 'Вправо ⇥']].map(([k, l]) => <button key={k} type="button" style={chip(cur.align === k)} onClick={() => edit({ align: k })}>{l}</button>)}
+              </div>
+              <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 62 }}>По высоте:</span>
+                {[['top', '⤒ Вверх'], ['middle', '↕ Центр'], ['bottom', '⤓ Вниз']].map(([k, l]) => (
+                  <button key={k} type="button" style={chip((cur.valign || 'top') === k)} onClick={() => {
+                    // рамка ещё в одну строку — сделать выше, иначе прижимать некуда
+                    const th = textThick(cur), line = cur.size * 1.25
+                    edit({ valign: k === 'top' ? undefined : k, ...(k !== 'top' && th <= line + 0.01 ? { th: Math.min(isVert(cur) ? tpl.w : tpl.h, line * 2) } : {}) })
+                  }}>{l}</button>
+                ))}
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)', marginLeft: 4 }}>Рамка:</span>
+                <button type="button" style={chip(false)} onClick={() => edit({ th: Math.max(cur.size * 1.25, textThick(cur) - 1) })}>−</button>
+                <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{textThick(cur).toFixed(1)} мм</span>
+                <button type="button" style={chip(false)} onClick={() => edit({ th: textThick(cur) + 1 })}>+</button>
+              </div>
+              <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 62 }}>Поворот:</span>
+                {[[-90, '⟲ 90°'], [90, '⟳ 90°']].map(([d, l]) => (
+                  <button key={d} type="button" style={chip(false)} onClick={() => {
+                    // поворот вокруг центра рамки: ширина и высота рамки меняются местами
+                    const [bw, bh] = itemBox(cur), cx = cur.x + bw / 2, cy = cur.y + bh / 2
+                    edit({ trot: (textRot(cur) + d + 360) % 360, x: cx - bh / 2, y: cy - bw / 2 })
+                  }}>{l}</button>
+                ))}
+                <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{textRot(cur)}°</span>
+              </div>
             </>
           )}
           {cur.type === 'order' && !cur.img && (
@@ -505,6 +534,7 @@ export default function LabelsPage() {
   }, [gridEl])
   const [saveAsk, setSaveAsk] = useState(null)       // файлы маркировочного стола: вопрос «по отдельности или архивом»
   const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
+  const [savedT, setSavedT] = useState(() => getLabelSaved(user))   // «Мои шаблоны бирок»
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -522,6 +552,14 @@ export default function LabelsPage() {
   const allLabels = mat ? mat.sheets.flatMap((sh, si) => labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual').map(pi => ({ si, pi }))).map((q, n) => ({ ...q, n })) : []
   const apply = t => { setHist(h => [...h.slice(-39), tpl]); setTpl(t); saveLabelTpl(t, user) }
   const change = patch => apply(normalizeLabel({ ...tpl, ...patch, enabled: true }))
+  const putSaved = list => { setSavedT(list); saveLabelSaved(list, user) }
+  const saveTpl = () => {
+    const def = `Бирка ${tpl.w}×${tpl.h}`
+    const name = window.prompt('Сохранить шаблон бирки под именем:', def)
+    if (name === null) return
+    putSaved([...savedT, { id: Math.random().toString(36).slice(2, 10), name: name.trim() || def, at: Date.now(), tpl: { ...tpl, enabled: true } }])
+  }
+  const applySaved = sv => { if (window.confirm(`Применить шаблон «${sv.name}» (${sv.tpl.w}×${sv.tpl.h} мм)?\nТекущая раскладка заменится — её можно вернуть кнопкой «Отменить».`)) apply(normalizeLabel({ ...sv.tpl, enabled: true })) }
   const undo = () => { const prev = hist[hist.length - 1]; if (!prev) return; setHist(h => h.slice(0, -1)); setTpl(prev); saveLabelTpl(prev, user) }
   const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { apply({ ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }) } }
   // файлы маркировочного стола — тем же набором, что делает ЧПУ вместе с G-кодом
@@ -578,6 +616,28 @@ export default function LabelsPage() {
               style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, marginBottom: 8, border: '0.5px solid ' + (hist.length ? 'var(--blue)' : 'var(--border-md)'), background: 'transparent', color: hist.length ? 'var(--blue)' : 'var(--text-hint)' }}>
               ↶ Отменить{hist.length ? ` (${hist.length})` : ''}
             </button>
+            {/* мои шаблоны бирок: сохранить текущий, применить сохранённый (другой размер, другая раскладка) */}
+            <div style={{ margin: '0 0 10px', padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: savedT.length ? 6 : 0 }}>
+                <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>Мои шаблоны{savedT.length ? ` · ${savedT.length}` : ''}</div>
+                <button type="button" onClick={saveTpl} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: 'none', background: 'var(--blue)', color: 'white' }}>💾 Сохранить шаблон</button>
+              </div>
+              {!savedT.length && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Настройте бирку и сохраните — потом можно переключаться между шаблонами одним тапом.</div>}
+              {[...savedT].sort((a, b) => (b.at || 0) - (a.at || 0)).map(sv => (
+                <div key={sv.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
+                  <div onClick={() => applySaved(sv)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                    <div style={{ fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--blue-dark)' }}>{sv.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{sv.tpl.w}×{sv.tpl.h} мм · элементов {sv.tpl.items?.length || 0}{sv.at ? ` · ${new Date(sv.at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}` : ''}</div>
+                  </div>
+                  <button type="button" title="Перезаписать текущим" onClick={() => { if (window.confirm(`Перезаписать «${sv.name}» текущей биркой (${tpl.w}×${tpl.h} мм)?`)) putSaved(savedT.map(x => (x.id === sv.id ? { ...x, tpl: { ...tpl, enabled: true }, at: Date.now() } : x))) }}
+                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13 }}>💾</button>
+                  <button type="button" title="Переименовать" onClick={() => { const n = window.prompt('Название шаблона', sv.name); if (n && n.trim()) putSaved(savedT.map(x => (x.id === sv.id ? { ...x, name: n.trim() } : x))) }}
+                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13 }}>✎</button>
+                  <button type="button" title="Удалить" onClick={() => { if (window.confirm(`Удалить шаблон «${sv.name}»?`)) putSaved(savedT.filter(x => x.id !== sv.id)) }}
+                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13, color: 'var(--danger)' }}>🗑</button>
+                </div>
+              ))}
+            </div>
             {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} />
               : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
             {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же']].map(([k, label]) => (

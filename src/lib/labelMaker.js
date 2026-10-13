@@ -97,10 +97,14 @@ export function metaItems(details) {
 }
 /** Элемент рисуется прямоугольником с высотой (картинка), а не строкой текста */
 /** Текст идёт вдоль бирки по вертикали (кромка слева и справа) */
-export const isVert = it => it.type === 'edgeLeft' || it.type === 'edgeRight'
+/** Поворот текста элемента, градусы: свой (trot) или по умолчанию — кромка слева 270, справа 90 */
+export const textRot = it => ([0, 90, 180, 270].includes(it.trot) ? it.trot : it.type === 'edgeLeft' ? 270 : it.type === 'edgeRight' ? 90 : 0)
+export const isVert = it => !isBox(it) && textRot(it) % 180 !== 0
 const EDGE_TYPES = ['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight']
 /** Размер рамки элемента на бирке, мм: [ширина, высота] */
-export const itemBox = it => (isBox(it) ? [it.w, it.h] : isVert(it) ? [it.size * 1.25, it.w] : [it.w, it.size * 1.25])
+// у текста: длина строки (w) и толщина рамки поперёк строки — не меньше строки, можно больше (th): тогда текст в ней — вверх/центр/вниз
+export const textThick = it => Math.max(it.size * 1.25, Number(it.th) || 0)
+export const itemBox = it => (isBox(it) ? [it.w, it.h] : isVert(it) ? [textThick(it), it.w] : [it.w, textThick(it)])
 export const isBox = it => itemKind(it.type) === 'pic' || !!it.img || it.type === 'image'
 // Картинки шаблона. В шаблоне — ссылка «ref:<id>», сама картинка хранится отдельно (за аккаунтом) в хорошем качестве.
 const IMAGES = new Map()
@@ -198,7 +202,7 @@ const DEFAULT_ITEMS = [
 // место нового элемента — там же, где он стоит в раскладке по умолчанию, иначе — посередине
 export function newLabelItem(type, tpl) {
   const d = DEFAULT_ITEMS.find(i => i.type === type), kx = tpl.w / BASE.w, ky = tpl.h / BASE.h
-  const it = d ? { ...d, x: d.x * kx, y: d.y * ky, w: d.w * (isVert(d) ? ky : kx), ...(d.h ? { h: d.h * ky } : {}), ...(d.size ? { size: d.size * Math.min(kx, ky) } : {}) }
+  const it = d ? { ...d, x: d.x * kx, y: d.y * ky, w: d.w * (isVert(d) ? ky : kx), ...(d.h ? { h: d.h * ky } : {}), ...(d.th ? { th: d.th * (isVert(d) ? kx : ky) } : {}), ...(d.size ? { size: d.size * Math.min(kx, ky) } : {}) }
     : itemKind(type) === 'pic' || type === 'image' ? { type, x: tpl.w * 0.3, y: tpl.h * 0.3, w: tpl.w * 0.3, h: tpl.h * 0.3 } : { type, x: tpl.w * 0.1, y: tpl.h * 0.45, w: tpl.w * 0.5, size: 2.6 * Math.min(kx, ky) }
   return { ...it, id: type + '_' + Math.random().toString(36).slice(2, 7) }
 }
@@ -223,6 +227,14 @@ export function normalizeLabel(raw) {
     if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 10))
     if (o.img && [90, 180, 270].includes(Number(i.irot))) o.irot = Number(i.irot)   // поворот картинки
     if (itemKind(i.type) !== 'pic') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
+    if (!pic) {
+      if ([0, 90, 180, 270].includes(Number(i.trot))) o.trot = Number(i.trot)
+      if (['middle', 'bottom'].includes(i.valign)) o.valign = i.valign
+      const vert = textRot(o) % 180 !== 0
+      o.w = Math.max(3, Math.min(vert ? h : w, Number(i.w) || 20))
+      const th = Number(i.th) || 0
+      if (th > o.size * 1.25 + 0.01) o.th = Math.min(vert ? w : h, th)
+    }
     const [bw, bh] = itemBox(o)
     o.x = Math.max(0, Math.min(w - bw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - bh, Number(i.y) || 0))
     return o
@@ -242,10 +254,13 @@ export function normalizeLabel(raw) {
 /** Новый размер бирки — элементы растягиваются вместе с ней */
 export function resizeLabel(tpl, w, h) {
   const kx = w / tpl.w, ky = h / tpl.h, k = Math.min(kx, ky)
-  return normalizeLabel({ ...tpl, w, h, items: tpl.items.map(i => ({ ...i, x: i.x * kx, y: i.y * ky, w: i.w * (isVert(i) ? ky : kx), ...(i.h ? { h: i.h * ky } : {}), ...(i.size ? { size: i.size * k } : {}) })) })
+  return normalizeLabel({ ...tpl, w, h, items: tpl.items.map(i => ({ ...i, x: i.x * kx, y: i.y * ky, w: i.w * (isVert(i) ? ky : kx), ...(i.h ? { h: i.h * ky } : {}), ...(i.th ? { th: i.th * (isVert(i) ? kx : ky) } : {}), ...(i.size ? { size: i.size * k } : {}) })) })
 }
 export const getLabelTpl = user => { imgUser = user || imgUser; return normalizeLabel(getUserSettings(user).labelTpl) }
 export const saveLabelTpl = (tpl, user) => saveUserSettings({ labelTpl: tpl }, user)
+// «Мои шаблоны бирок»: сохранённые варианты шаблона (разные размеры, раскладки) — применить в любой момент
+export const getLabelSaved = user => (Array.isArray(getUserSettings(user).labelSaved) ? getUserSettings(user).labelSaved : []).filter(s => s && s.tpl && s.id)
+export const saveLabelSaved = (list, user) => saveUserSettings({ labelSaved: list }, user)
 
 export const LABEL_PX_MM = 8                               // точек на мм при 203 dpi (обычный термопринтер)
 const pxMm = tpl => ({ 300: 12, 600: 24 })[tpl?.dpi] || LABEL_PX_MM
@@ -530,8 +545,14 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       const ax = it.align === 'right' ? w : it.align === 'center' ? w / 2 : 0
       ctx.textAlign = it.align === 'right' ? 'right' : it.align === 'center' ? 'center' : 'left'
       ctx.save()
-      // кромка слева читается снизу вверх, справа — сверху вниз; рамка элемента — узкая и высокая
-      if (it.type === 'edgeLeft') { ctx.translate(x, y + w); ctx.rotate(-Math.PI / 2) } else if (it.type === 'edgeRight') { ctx.translate(x + sz * 1.25, y); ctx.rotate(Math.PI / 2) } else ctx.translate(x, y)
+      // поворот текста в рамке: 90 — читается сверху вниз, 270 — снизу вверх (кромка слева/справа по умолчанию), 180 — вверх ногами
+      const r = textRot(it), th = textThick(it) * mm
+      if (r === 90) { ctx.translate(x + th, y); ctx.rotate(Math.PI / 2) }
+      else if (r === 180) { ctx.translate(x + w, y + th); ctx.rotate(Math.PI) }
+      else if (r === 270) { ctx.translate(x, y + w); ctx.rotate(-Math.PI / 2) }
+      else ctx.translate(x, y)
+      // по высоте рамки: сверху, по центру или снизу
+      if (it.valign === 'middle') ctx.translate(0, (th - sz * 1.25) / 2); else if (it.valign === 'bottom') ctx.translate(0, th - sz * 1.25)
       ctx.fillText(t, ax, sz * 0.62)
       if (it.ul === 'below' || it.ul === 'above') { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? w - tw : it.align === 'center' ? (w - tw) / 2 : 0, th = Math.max(1, Math.round(sz * 0.09)); ctx.fillRect(x0, it.ul === 'below' ? sz * 1.16 : 0, tw, th) }
       ctx.restore()
