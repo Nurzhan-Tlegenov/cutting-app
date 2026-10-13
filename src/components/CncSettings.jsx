@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState, useRef } from 'react'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
-import { normOps, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
+import { normOps, secondPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -83,7 +83,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
   }
   const drill = isDrill6(post)
-  const routers = cnc.posts.filter(p => !isDrill6(p)), drills = cnc.posts.filter(isDrill6)
+  const routers = cnc.posts.filter(p => !isDrill6(p))
   const router = routerPost(cnc)
   const setKind = kind => {
     if (kind === post.kind || (kind === 'drill6') === drill) return
@@ -121,26 +121,36 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         )}
         <Hint>Постпроцессор — это станок: его поле, высоты и команды. Инструменты и обработка контуров — общие для раскроечных станков.</Hint>
       </div>
-      {/* выпуск программ: одним раскроечным станком (G-код по листам) и сразу несколькими присадочными (файлы по деталям) */}
-      <div className="card" style={{ marginBottom: 10 }}>
-        <Title>Выпускать программы одновременно</Title>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Раскрой — G-код по листам:</div>
-        {routers.map(p => (
-          <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0', cursor: 'pointer' }}>
-            <input type="radio" name="routerPost" checked={router?.id === p.id} onChange={() => onChange({ ...cnc, router: p.id })} style={{ width: 18, height: 18 }} />
-            {p.name}
-          </label>
-        ))}
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 4px' }}>Присадка — шестисторонний станок, файл на каждую деталь:</div>
-        {!drills.length && <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Нет присадочных станков — добавьте: «Выбрать ▾» сверху → «+ Присадочный 6-стор.».</div>}
-        {drills.map(p => (
-          <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0', cursor: 'pointer' }}>
-            <input type="checkbox" checked={(cnc.use6 || []).includes(p.id)} onChange={e => onChange(toggleUse6(cnc, p.id, e.target.checked))} style={{ width: 18, height: 18 }} />
-            {p.name}
-          </label>
-        ))}
-        <Hint>Кнопка «Создать программы» в заказе выпускает G-код выбранным раскроечным станком и, вместе с ним, файлы для каждого отмеченного присадочного.</Hint>
-      </div>
+      {/* выпуск программ: раскроечный станок (G-код по листам) и, по галочке, второй постпроцессор — любой из своих:
+          второй раскроечный (свой G-код, например станок с присадочной головой) или шестисторонний (файлы по деталям).
+          «Создать программы» в заказе выпускает оба, «Сохранить все файлы» — одним архивом, у каждого своя папка */}
+      {(() => {
+        const sec = secondPost(cnc)
+        const others = cnc.posts.filter(p => p.id !== router?.id)
+        const sel = { width: '100%', padding: '7px 8px', fontSize: 14 }
+        return (
+          <div className="card" style={{ marginBottom: 10 }}>
+            <Title>Выпуск управляющих программ</Title>
+            <label className="label">Раскроечный станок (G-код по листам)</label>
+            <select value={router?.id || ''} onChange={e => onChange({ ...cnc, router: e.target.value, ...(cnc.router2 === e.target.value ? { router2: '' } : {}) })} style={sel}>
+              {routers.map(p => <option key={p.id} value={p.id}>{p.name}{p.drillHead ? ' — с присадочной головой' : ''}</option>)}
+            </select>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!sec} disabled={!others.length}
+                onChange={e => onChange(e.target.checked ? setSecondPost(cnc, (others.find(isDrill6) || others[0]).id) : setSecondPost(cnc, ''))} style={{ width: 18, height: 18 }} />
+              Выпускать и вторым постпроцессором
+            </label>
+            {sec && (
+              <select value={sec.id} onChange={e => onChange(setSecondPost(cnc, e.target.value))} style={{ ...sel, marginTop: 6 }}>
+                {others.map(p => <option key={p.id} value={p.id}>{p.name} — {isDrill6(p) ? 'шестисторонний (XML по деталям)' : p.drillHead ? 'раскроечный с присадочной головой (G-код)' : 'раскроечный (G-код)'}</option>)}
+              </select>
+            )}
+            <Hint>{!others.length ? 'Второго станка пока нет — добавьте его: «Выбрать ▾» сверху → «+ Раскроечный станок» или «+ Присадочный 6-стор.».'
+              : sec ? `«Создать программы» в заказе выпустит G-код «${router?.name}» и ${isDrill6(sec) ? 'файлы по деталям' : 'G-код'} «${sec.name}». «Сохранить все файлы» — одним разом, у каждого станка своя папка.`
+                : 'Только раскроечный станок. Включите галочку, чтобы вместе с ним выпускать программы для второго станка.'}</Hint>
+          </div>
+        )
+      })()}
       {drill && <Drill6Basic post={post} set={set} router={router} />}
       {!drill && <>
       <div className="card" style={{ marginBottom: 10 }}>

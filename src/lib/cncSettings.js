@@ -83,6 +83,8 @@ export function normalizeCnc(raw, shared = []) {
     // какими постпроцессорами выпускать программы одновременно: раскроечный (один — G-код по листам) и присадочные (сколько угодно)
     router: posts.some(p => p.id === c.router && !isDrill6(p)) ? c.router : '',
     use6: (Array.isArray(c.use6) ? c.use6 : []).filter(id => posts.some(p => p.id === id && isDrill6(p))),
+    // второй раскроечный станок — его G-код выпускается вместе с G-кодом основного, в свою папку
+    router2: posts.some(p => p.id === c.router2 && !isDrill6(p)) ? c.router2 : '',
     ops: normOps(c.ops),
   }
 }
@@ -101,6 +103,16 @@ export const activePost = cnc => cnc.posts.find(p => p.id === cnc.post) || cnc.p
 /** Раскроечный станок, которым выпускается G-код по листам: выбранный для выпуска, иначе открытый в настройках, иначе первый */
 export const routerPost = cnc => cnc.posts.find(p => p.id === cnc.router && !isDrill6(p))
   || cnc.posts.find(p => p.id === cnc.post && !isDrill6(p)) || cnc.posts.find(p => !isDrill6(p)) || cnc.posts[0]
+/** Второй раскроечный станок (G-код вместе с основным) — если выбран и это не тот же, что основной */
+export const secondRouter = cnc => { const r = routerPost(cnc), p = cnc.posts.find(q => q.id === cnc.router2 && !isDrill6(q)); return p && p.id !== r?.id ? p : null }
+/** Второй постпроцессор для выпуска: второй раскроечный или (первый отмеченный) шестисторонний */
+export const secondPost = cnc => secondRouter(cnc) || drillPosts(cnc)[0] || null
+/** Выбрать второй постпроцессор: раскроечный — G-код вторым станком, шестисторонний — файлы по деталям; '' — выключить */
+export const setSecondPost = (cnc, id) => {
+  const p = cnc.posts.find(q => q.id === id)
+  if (!p) return { ...cnc, router2: '', use6: [] }
+  return isDrill6(p) ? { ...cnc, router2: '', use6: [p.id] } : { ...cnc, router2: p.id, use6: [] }
+}
 /** Присадочные станки, которые выпускают программы вместе с G-кодом */
 export const drillPosts = cnc => cnc.posts.filter(p => isDrill6(p) && (cnc.use6 || []).includes(p.id))
 /** Выбрать постпроцессор в настройках: раскроечный сразу становится станком для G-кода (как раньше) */

@@ -2,7 +2,7 @@ import { useKeptState } from '../hooks/useKeptState'
 import { CncBasic, CncCommands, CncTools, CncOps } from './CncSettings'
 import PostPicker from './PostPicker'
 import { useCnc } from '../hooks/useCnc'
-import { routerPost, drillPosts, postView, postBack } from '../lib/cncSettings'
+import { routerPost, drillPosts, secondRouter, postView, postBack } from '../lib/cncSettings'
 
 import CncLoader from './CncLoader'
 
@@ -15,7 +15,7 @@ export default function CncSetup({ prodId = null }) {
   const [tab, setTab] = useKeptState('cncTab', 'basic')
   if (!ready) return <CncLoader compact label="Загружаем постпроцессоры…" />
   const chip = on => ({ flex: '0 0 auto', padding: '6px 11px', borderRadius: 20, border: 'none', fontSize: 12, background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
-  const drills = drillPosts(cnc)
+  const drills = [secondRouter(cnc), ...drillPosts(cnc)].filter(Boolean)     // второй постпроцессор: раскроечный или шестисторонний
   // инструменты и обработка открытого постпроцессора (у настроенного по чужой программе — свои, см. postTools.js)
   const view = postView(cnc), vchange = v => change(postBack(cnc, v))
   return (

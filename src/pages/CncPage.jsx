@@ -10,7 +10,7 @@ import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettin
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { routerPost, drillPosts, toggleUse6, isDrill6, postView, postBack } from '../lib/cncSettings'
+import { routerPost, drillPosts, isDrill6, postView, postBack, secondRouter, secondPost, setSecondPost } from '../lib/cncSettings'
 import { useCnc } from '../hooks/useCnc'
 import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
@@ -88,14 +88,13 @@ export default function CncPage() {
   const { cnc, change, ready: cncReady } = useCnc(() => setBuilt(null), order?.production_id || null)
   const post = routerPost(cnc)                       // раскроечный станок: G-код по листам
   const drills = drillPosts(cnc)                     // присадочные станки, выпускающие программы вместе с ним
-  const allDrills = cnc.posts.filter(isDrill6)
   // инструменты и обработка, которые видит раскроечный станок (у настроенного по чужой программе — свои, см. postTools.js)
   const rview = useMemo(() => postView({ ...cnc, post: post.id }), [cnc, post.id])
+  const r2 = secondRouter(cnc)                       // второй раскроечный станок: его G-код — вместе с основным, в свою папку
+  const r2view = useMemo(() => (r2 ? postView({ ...cnc, post: r2.id }) : null), [cnc, r2?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   // вкладки «Инструменты» и «Обработка» — для постпроцессора, открытого в настройках
   const tview = useMemo(() => postView(cnc), [cnc])
   const tchange = v => change(postBack(cnc, v))
-  // свёрла присадочной головы раскроечного станка — для симулятора (голова рисуется слева от шпинделя)
-  const headTools = useMemo(() => (post.drillHead ? (rview.tools || []).filter(t => t.type === 'drill' && t.inHead).map(t => Math.round(num(t.t))) : []), [post.drillHead, rview])
   const sel = mat ? (picked ?? mat.sheets.map((_, i) => i)) : []
   const toggle = i => { setPicked(sel.includes(i) ? sel.filter(x => x !== i) : [...sel, i].sort((a, b) => a - b)); setBuilt(null) }
 
@@ -122,9 +121,15 @@ export default function CncPage() {
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: post.id } })
       return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
     })
+    // второй раскроечный станок — свой G-код тех же листов (свои инструменты, команды, имя файла)
+    const second = r2 ? { post: r2, files: sel.map(si => {
+      const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
+      const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: r2.id } })
+      return { second: true, si, name: `${programName(r2.nameTpl, nameCtx(si + 1))}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
+    }) } : null
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
     const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
-    setBuilt({ files, drill }); setSaved('')
+    setBuilt({ files, drill, second }); setSaved('')
     // маркировка: файлы маркировочного стола для тех же листов (на линии сначала бирки, потом раскрой)
     const ok = files.filter(f => !f.empty)
     if (post.labelTable && ok.length) {                  // маркировочный стол включён у постпроцессора (вкладка «Основные»)
@@ -160,7 +165,10 @@ export default function CncPage() {
     try { localStorage.setItem(memKey, JSON.stringify({ matKey, picked, built: !!built })) } catch { /* без памяти */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [built, picked, matKey, pendingBuild])
-  const sim = (simSi != null && built?.files.find(f => String(f.si) === simSi && !f.empty)) || null
+  // ?sim=3 — программа основного станка для листа 3, ?sim=2:3 — второго раскроечного
+  const sim = (simSi != null && (String(simSi).startsWith('2:')
+    ? built?.second?.files.find(f => `2:${f.si}` === simSi && !f.empty)
+    : built?.files.find(f => String(f.si) === simSi && !f.empty))) || null
   // пока открыт симулятор — страница под ним не прокручивается
   useEffect(() => {
     if (!sim) return
@@ -168,7 +176,7 @@ export default function CncPage() {
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
   }, [!!sim])   // eslint-disable-line react-hooks/exhaustive-deps
-  const openSim = f => navigate(`?sim=${f.si}`)
+  const openSim = f => navigate(`?sim=${f.second ? '2:' : ''}${f.si}`)
   const closeSim = () => navigate(-1)
   const [saved, setSaved] = useState('')
   // пометки на заказе в кабинете производства: «G-код создан» и «файлы сохранены»
@@ -186,7 +194,10 @@ export default function CncPage() {
   // ({ZAKAZ}, {MAT}, …) и свой текст. Своя у фрезера и у каждого шестистороннего станка.
   const pathOf = tpl => String(tpl || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, nameCtx(null))).filter(Boolean)
   // по умолчанию — как раньше («папка заказа»/материал); с шестисторонним станком — с пометкой фрезера
-  const routerDef = () => routerDirDefault(post, drills.length > 0)
+  const routerDef = () => routerDirDefault(post, drills.length > 0 || !!r2)
+  // второй раскроечный: по умолчанию «<заказ>_CNC_2/<материал>» — чтобы не смешаться с файлами основного станка
+  const r2Def = () => `${r2?.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`
+  const r2Dir = () => pathOf(r2?.dirPath ?? r2Def())
   const routerDir = () => pathOf(post.dirPath ?? routerDef())
   const drillDir = r => pathOf(r.post.dirPath ?? DRILL_DIR_DEFAULT)
   const setPostPath = (id, v) => change({ ...cnc, posts: cnc.posts.map(q => (q.id === id ? { ...q, dirPath: v } : q)) })
@@ -194,9 +205,10 @@ export default function CncPage() {
     const rd = routerDir()
     const files = [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))].map(f => ({ ...f, dir: rd }))
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
+    if (built.second) { const d2 = pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`); files.push(...built.second.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: d2 }))) }
     setSaveAsk({ files, zipName: `${baseName()}.zip` })
   }
-  const allCount = () => built.files.filter(f => !f.empty).length + (built.labels?.length || 0) + (built.drill || []).reduce((a, r) => a + r.files.length, 0)
+  const allCount = () => built.files.filter(f => !f.empty).length + (built.labels?.length || 0) + (built.drill || []).reduce((a, r) => a + r.files.length, 0) + (built.second?.files.filter(f => !f.empty).length || 0)
   const simView = useMemo(() => {
     if (!sim || !mat) return null
     const sheet = mat.sheets[sim.si], geo = sheetGeo(order, mat.result, sheet)
@@ -216,8 +228,8 @@ export default function CncPage() {
   }
   const makeShare = async () => {
     setShare(x => ({ ...x, busy: true, error: '' }))
-    const tools = Object.fromEntries((rview.tools || []).map(x => [num(x.t), num(x.d)]))
-    const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(post.rapid) || 20000, tools, head: headTools, zShift: sim.zShift })
+    const tools = Object.fromEntries(((simV || rview).tools || []).map(x => [num(x.t), num(x.d)]))
+    const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(simP?.rapid) || 20000, tools, head: simHead, zShift: sim.zShift })
     const r = await saveSimShare(id, sim.name, user.id, payload)
     setShare(x => ({ ...x, busy: false, code: r.code || x.code, error: r.error || '', fresh: !r.error }))
     setLinksTick(t => t + 1)
@@ -232,11 +244,14 @@ export default function CncPage() {
     const url = simShareUrl(share.code)
     try { await navigator.clipboard.writeText(url); setShare(x => ({ ...x, copied: true })) } catch { window.prompt('Скопируйте ссылку', url) }
   }
-  const toolDia = useMemo(() => { const m = new Map((rview.tools || []).map(x => [num(x.t), num(x.d)])); return t => m.get(t) || 0 }, [rview])
+  // симулятор: диаметры и свёрла головы — того станка, чья программа открыта
+  const simV = sim?.second ? r2view : rview, simP = sim?.second ? r2 : post
+  const toolDia = useMemo(() => { const m = new Map(((simV || rview).tools || []).map(x => [num(x.t), num(x.d)])); return t => m.get(t) || 0 }, [simV, rview])
+  const simHead = useMemo(() => (simP?.drillHead ? ((simV || rview).tools || []).filter(t => t.type === 'drill' && t.inHead).map(t => Math.round(num(t.t))) : []), [simP, simV, rview])
 
   if (loading) return <div className="page"><CncLoader label="Открываем ЧПУ…" /></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
-  const warnings = built ? [...new Set(built.files.flatMap(f => f.warnings))] : []
+  const warnings = built ? [...new Set([...built.files.flatMap(f => f.warnings), ...(built.second?.files || []).flatMap(f => f.warnings.map(w => `${built.second.post.name}: ${w}`))])] : []
   const chip = on => ({ flex: '0 0 auto', padding: '7px 12px', borderRadius: 20, border: 'none', fontSize: 13, background: on ? 'var(--blue)' : 'var(--bg)', color: on ? 'white' : 'var(--text-muted)' })
   const small = { padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', whiteSpace: 'nowrap' }
 
@@ -276,36 +291,43 @@ export default function CncPage() {
               </div>
               <button type="button" style={small} onClick={() => setTab('basic')}>Настроить</button>
             </div>
-            {/* присадочные станки — включаются прямо здесь, при выпуске программ */}
-            {allDrills.length > 0 && (
-              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Вместе с G-кодом — шестисторонний станок (файл на каждую деталь):</div>
-                {allDrills.map(p => (
-                  <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={drills.some(q => q.id === p.id)} onChange={e => change(toggleUse6(cnc, p.id, e.target.checked))} style={{ width: 18, height: 18 }} />
-                    {p.name}
-                  </label>
-                ))}
-                {/* что выйдет для шестистороннего станка: расширение и имя файла (= код QR бирки); папки — матрёшка, собирается здесь */}
-                {drills.map(p => {
-                  let example
-                  try { example = mat?.sheets?.[0]?.placed?.length ? labelQr({ qr: drill6Qr(p, labelTpl) }, labelInfo(order, mat, 0, 0)) : '' } catch { example = '' }
-                  return (
-                    <div key={'i' + p.id} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '4px 0 6px 26px', lineHeight: 1.5 }}>
-                      <div>Файлы: <b>.{latinExt(p.ext || 'XML')}</b> — по файлу на деталь; имя = код QR бирки, например <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{example || '—'}.{latinExt(p.ext || 'XML')}</b></div>
-                      <DirPathEditor value={p.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={pathOf(p.dirPath ?? DRILL_DIR_DEFAULT)} onChange={v => setPostPath(p.id, v)} />
+            {/* второй постпроцессор — выбирается прямо здесь, при выпуске программ: любой из своих станков */}
+            {cnc.posts.some(p => p.id !== post.id) && (() => {
+              const sec = secondPost(cnc)
+              return (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+                  <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Вместе с ним — второй постпроцессор:</label>
+                  <select value={sec?.id || ''} onChange={e => change(setSecondPost(cnc, e.target.value))} style={{ width: '100%', padding: '6px 8px', fontSize: 13 }}>
+                    <option value="">— нет —</option>
+                    {cnc.posts.filter(p => p.id !== post.id).map(p => <option key={p.id} value={p.id}>{p.name} — {isDrill6(p) ? 'шестисторонний, XML' : p.drillHead ? 'с присадочной головой, G-код' : 'раскроечный, G-код'}</option>)}
+                  </select>
+                  {/* что выйдет для шестистороннего станка: расширение и имя файла (= код QR бирки); папки — матрёшка, собирается здесь */}
+                  {drills.map(p => {
+                    let example
+                    try { example = mat?.sheets?.[0]?.placed?.length ? labelQr({ qr: drill6Qr(p, labelTpl) }, labelInfo(order, mat, 0, 0)) : '' } catch { example = '' }
+                    return (
+                      <div key={'i' + p.id} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '6px 0 6px', lineHeight: 1.5 }}>
+                        <div>Файлы: <b>.{latinExt(p.ext || 'XML')}</b> — по файлу на деталь; имя = код QR бирки, например <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{example || '—'}.{latinExt(p.ext || 'XML')}</b></div>
+                        <DirPathEditor value={p.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={pathOf(p.dirPath ?? DRILL_DIR_DEFAULT)} onChange={v => setPostPath(p.id, v)} />
+                      </div>
+                    )
+                  })}
+                  {r2 && (
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '6px 0 6px', lineHeight: 1.5 }}>
+                      <div>{r2.name}: G-код по листам, файлы <b>.{r2.ext || 'nc'}</b>{r2.drillHead ? ' (присадочная голова + шпиндель)' : ''}</div>
+                      <DirPathEditor value={r2.dirPath ?? r2Def()} def={r2Def()} preview={r2Dir()} onChange={v => setPostPath(r2.id, v)} />
                     </div>
-                  )
-                })}
-                {drills.length > 0 && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', paddingTop: 6, borderTop: '0.5px dashed var(--border)' }}>
-                    <div>Фрезер ({post.name}): файлы <b>.{post.ext || 'nc'}</b></div>
-                    <DirPathEditor value={post.dirPath ?? routerDef()} def={routerDef()} preview={routerDir()} onChange={v => setPostPath(post.id, v)} />
-                    <div style={{ color: 'var(--text-hint)' }}>«Сохранить все файлы» кладёт программы обоих станков в одну выгрузку — каждую в свои папки.</div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                  {sec && (
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', paddingTop: 6, borderTop: '0.5px dashed var(--border)' }}>
+                      <div>Основной ({post.name}): файлы <b>.{post.ext || 'nc'}</b></div>
+                      <DirPathEditor value={post.dirPath ?? routerDef()} def={routerDef()} preview={routerDir()} onChange={v => setPostPath(post.id, v)} />
+                      <div style={{ color: 'var(--text-hint)' }}>«Сохранить все файлы» кладёт программы обоих станков в одну выгрузку — каждую в свои папки.</div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
           <SimLinksBox orderId={id} refresh={linksTick} style={{ marginBottom: 10, padding: '10px 12px' }} />
           {pre.length > 0 && (
@@ -324,7 +346,7 @@ export default function CncPage() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
             {mat.sheets.map((sh, i) => {
-              const g = sheetGeo(order, mat.result, sh), on = sel.includes(i), f = built?.files.find(x => x.si === i)
+              const g = sheetGeo(order, mat.result, sh), on = sel.includes(i), f = built?.files.find(x => x.si === i), f2 = built?.second?.files.find(x => x.si === i)
               return (
                 <div key={i} className="card" style={{ padding: '9px 12px', borderColor: on ? 'var(--blue)' : undefined }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
@@ -342,6 +364,19 @@ export default function CncPage() {
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button type="button" onClick={() => openSim(f)} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>▶ Симулятор</button>
                           <button type="button" onClick={() => { download(f.name, f.text); mark('files') }} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Скачать</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {f2 && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px dashed var(--border)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{built.second.post.name}</div>
+                      <div style={{ fontSize: 12, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f2.name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>{f2.empty ? 'пусто — у этого станка не назначены инструменты' : `${f2.lines} строк · ≈ ${fmtTime(f2.time)}`}</div>
+                      {!f2.empty && (
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button type="button" onClick={() => openSim(f2)} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>▶ Симулятор</button>
+                          <button type="button" onClick={() => { download(f2.name, f2.text); mark('files') }} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Скачать</button>
                         </div>
                       )}
                     </div>
@@ -371,7 +406,7 @@ export default function CncPage() {
               <button type="button" className="btn-secondary" style={{ marginTop: 6 }} onClick={() => navigate(`/orders/${id}/nesting`)}>Открыть раскрой</button>
             </div>
           )}
-          <button className="btn-primary" disabled={!sel.length || faults.length > 0} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{built ? (drills.length ? '↻ Создать программы заново' : '↻ Создать G-код заново') : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
+          <button className="btn-primary" disabled={!sel.length || faults.length > 0} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{built ? (drills.length || r2 ? '↻ Создать программы заново' : '↻ Создать G-код заново') : r2 ? `Создать программы (${post.name} + ${r2.name})` : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
           {labelBusy && <CncLoader compact label="Рисуем бирки…" />}
           {built?.labels?.length > 0 && (
             <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
@@ -408,9 +443,9 @@ export default function CncPage() {
           {built && allCount() > 1 && (
             <>
               <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({allCount()})</button>
-              {(built.drill || []).some(r => r.files.length) && (
+              {((built.drill || []).some(r => r.files.length) || built.second) && (
                 <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-                  Папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}
+                  Папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}{built.second && <span>; <b style={{ fontFamily: 'monospace' }}>{pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`).join('/')}</b> — {built.second.post.name}</span>}
                 </p>
               )}
             </>
@@ -430,8 +465,8 @@ export default function CncPage() {
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 1100, padding: 10, boxSizing: 'border-box', height: '100dvh', overscrollBehavior: 'contain' }}>
           <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
-              <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(post.rapid) || 20000} zShift={sim.zShift}
-                toolDia={toolDia} headTools={headTools} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
+              <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(simP?.rapid) || 20000} zShift={sim.zShift}
+                toolDia={toolDia} headTools={simHead} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
             </Suspense>
           </div>
         </div>, document.body
