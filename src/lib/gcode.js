@@ -301,6 +301,19 @@ function levels(top, bottom, maxPass) {
   const n = Math.max(1, Math.ceil((top - bottom) / (maxPass > 0 ? maxPass : 1e9) - 1e-9))
   return Array.from({ length: n }, (_, i) => top - (top - bottom) * (i + 1) / n)
 }
+// Присадочная голова идёт по листу «змейкой» от X0 Y0: полоса по Y шириной HEAD_BAND — по X в плюс, следующая полоса
+// (Y в плюс) — по X в минус, и так до конца листа. Всё, что попало в полосу, сверлится по ходу, свёрла меняются на ходу.
+const HEAD_BAND = 50
+function snakeOrder(list) {
+  const byY = [...list].sort((a, b) => a.at[1] - b.at[1] || a.at[0] - b.at[0])
+  const bands = []
+  for (const j of byY) {
+    const b = bands[bands.length - 1]
+    if (b && j.at[1] - b.y0 <= HEAD_BAND) b.jobs.push(j)
+    else bands.push({ y0: j.at[1], jobs: [j] })
+  }
+  return bands.flatMap((b, i) => b.jobs.sort((p, q) => (i % 2 ? q.at[0] - p.at[0] : p.at[0] - q.at[0]) || p.at[1] - q.at[1]))
+}
 // сверло стоит в присадочной голове станка (у постпроцессора включена голова, у сверла — «в присадочной голове»)
 export const inHead = (post, t) => !!post?.drillHead && t?.type === 'drill' && !!t.inHead
 const tpl = (s, tool) => String(s || '').replace(/\{T\}/gi, String(Math.round(n0(tool.t)))).replace(/\{S\}/gi, String(Math.round(n0(tool.rpm))))
@@ -875,7 +888,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   // Присадочная голова (если у станка она есть и сверло стоит в ней): свёрла меняются на ходу, поэтому все отверстия
   // головы — одним проходом по листу, без группировки по диаметру (портал не ездит туда-сюда). Потом — шпиндель.
   const headJobs = jobs.filter(j => j.stage === 0 && inHead(post, j.tool))
-  if (headJobs.length) add(headJobs)
+  if (headJobs.length) { const o = snakeOrder(headJobs); seq.push(...o); cur = o[o.length - 1].at }
   if (headJobs.length && !String(post.cmdHeadStart || '').trim()) warn.add('Команды смены инструмента для присадочной головы не заданы (Команды → «Присадочная голова»): свёрла головы в программе не включатся.')
   const stage0 = jobs.filter(j => j.stage === 0 && !inHead(post, j.tool))
   ;[...new Set(stage0.map(j => j.tool))].sort((a, b) => toolRank(a) - toolRank(b)).forEach(t => {
