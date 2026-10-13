@@ -85,7 +85,7 @@ export default function CncPage() {
   const faults = useMemo(() => (order && mat ? nestingFaults(order, [mat]) : []), [order, mat])
   const layers = useMemo(() => (mat ? collectLayers(mat.sheets, mat.details, mat.thickness) : null), [mat])
   // настройки ЧПУ — общие с окном «Настройки постпроцессора» в кабинете производства; после правки программы создаются заново
-  const { cnc, change, ready: cncReady } = useCnc(() => setBuilt(null))
+  const { cnc, change, ready: cncReady } = useCnc(() => setBuilt(null), order?.production_id || null)
   const post = routerPost(cnc)                       // раскроечный станок: G-код по листам
   const drills = drillPosts(cnc)                     // присадочные станки, выпускающие программы вместе с ним
   const allDrills = cnc.posts.filter(isDrill6)

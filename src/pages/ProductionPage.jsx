@@ -256,7 +256,7 @@ export default function ProductionPage() {
                     {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
                     <details style={{ marginTop: 8 }} open={postOpen} onToggle={e => setPostOpen(e.currentTarget.open)}>
                       <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Настройки постпроцессора (станки ЧПУ, инструменты, обработка)</summary>
-                      {postOpen && <CncSetup />}
+                      {postOpen && <CncSetup prodId={prod.id} />}
                     </details>
                     <div onClick={() => setXmlView(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
                       <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Просмотр XML-программ присадочного станка</span>

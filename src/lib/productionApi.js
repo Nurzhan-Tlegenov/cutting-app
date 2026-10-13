@@ -87,3 +87,14 @@ export function orderMarks(o) {
 }
 /** Производство (или администратор) сохраняет свой вариант раскроя в оформленный на него заказ. -> {} | { error } */
 export const productionSaveNesting = (orderId, value) => call('production_save_nesting', { p_order: orderId, p_value: value })
+
+/** Настройки ЧПУ производства (migration_production_cnc.sql) -> { cnc, own, edit } | null */
+export async function productionCnc(prodId) {
+  if (!prodId) return null
+  const { data, error } = await supabase.rpc('production_cnc', { p_prod: prodId })
+  return error ? null : data || null
+}
+export async function saveProductionCnc(prodId, cnc) {
+  if (!prodId) return
+  try { await supabase.rpc('production_cnc_save', { p_prod: prodId, p_cnc: cnc }) } catch { /* без сети — сохранится при следующем изменении */ }
+}

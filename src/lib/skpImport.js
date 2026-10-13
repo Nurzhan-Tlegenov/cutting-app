@@ -423,20 +423,8 @@ export function parseSkp(u8, opts = {}) {
     hardware.push({ f, m: [W[0], W[1], W[2], W[4], W[5], W[6], W[8], W[9], W[10], W[3] * IN, W[7] * IN, W[11] * IN].map((v, i) => (i < 9 ? Math.round(v * 1e6) / 1e6 : Math.round(v * 10) / 10)), b: ob.product })
   }
 
-  // Неглубокие «отверстия» от касания убираем; конфирмат в модели — два цилиндра на одной оси (Ø7 под головку и Ø4.5 под стержень): в пласти остаётся больший
-  const dropInner = c => {
-    const ds = c?.drillings; if (!ds) return
-    const pos = d => JSON.stringify([d.sides, d.offsets, d.row, d.row ? [d.rowCount, d.rowStep, d.rowDir] : 0])
-    for (let i = ds.length - 1; i >= 0; i--) {
-      const d = ds[i]
-      if (d.kind !== 'face') continue
-      // цилиндр крепежа лишь касается соседней детали (зазор, полкодержатель под полкой) — это не отверстие
-      if (d.depth < 3) { ds.splice(i, 1); continue }
-      if (ds.some(e => e !== d && e.kind === 'face' && e.face === d.face && e.d > d.d && e.depth >= d.depth - 0.1 && pos(e) === pos(d))) ds.splice(i, 1)
-    }
-  }
-  const makers0 = makers.map(mk => () => { const it = mk(); if (it) { dropInner(it.contour); it.info.holes = it.contour.drillings.reduce((k, d) => k + (d.row ? d.rowCount : 1), 0) } return it })
-  const { items, groups, skipped } = groupItems(makers0)
+  // мелкие отверстия (насечки 1–1,5 мм под саморез) и соосные Ø4,5 под Ø7 — оставляем как в модели
+  const { items, groups, skipped } = groupItems(makers)
   if (!items.length) throw new Error('в модели SketchUp не найдено панелей мебельного плагина (тела «Essence»)')
   const scene = {
     v: 1, order: '',

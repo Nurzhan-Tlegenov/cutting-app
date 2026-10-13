@@ -10,8 +10,8 @@ import CncLoader from './CncLoader'
 // настроить станки можно до заказов, а поправить — и здесь, и прямо при выпуске программ в заказе.
 const TABS = [['basic', 'Основные'], ['cmd', 'Команды'], ['tools', 'Инструменты'], ['ops', 'Обработка']]
 
-export default function CncSetup() {
-  const { cnc, change, ready, isMaster } = useCnc()
+export default function CncSetup({ prodId = null }) {
+  const { cnc, change, ready, isMaster } = useCnc(null, prodId)
   const [tab, setTab] = useKeptState('cncTab', 'basic')
   if (!ready) return <CncLoader compact label="Загружаем постпроцессоры…" />
   const chip = on => ({ flex: '0 0 auto', padding: '6px 11px', borderRadius: 20, border: 'none', fontSize: 12, background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
