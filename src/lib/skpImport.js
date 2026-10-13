@@ -176,7 +176,7 @@ export function parseSkp(u8, opts = {}) {
   const panels = []          // { M (мир), ent, parent: attrs, product, path }
   const others = []          // { M, ent, name, product }
   let hiddenSkipped = 0
-  const walk = (ent, M, path, product, parentAttrs, depth) => {
+  const walk = (ent, M, path, product, parentAttrs, depth, chain = '') => {
     if (depth > 40) return
     for (const [o, l] of instancesOf(ent)) {
       const bi = baseInfo(o, l)
@@ -190,10 +190,10 @@ export function parseSkp(u8, opts = {}) {
       const prod = product || def.name.replace(/#/g, '').trim()
       // тело панели — «Essence» плагина; у фурнитуры (штанги, держатели) тело тоже «Essence», но это не листовая деталь
       const isPanelBody = /^Essence/.test(def.name) && !/(Фурнитур|Ручк|Металл|Accessor)/i.test(ln) && (parentAttrs || {}).a09_su_type !== 'furniture'
-      if (isPanelBody) { panels.push({ M: W, ent: def.ent, own: dyn, parent: parentAttrs || {}, product: prod, layer: ln, path }); continue }
+      if (isPanelBody) { panels.push({ M: W, ent: def.ent, own: dyn, parent: parentAttrs || {}, product: prod, layer: ln, path, chain }); continue }
       const g = geomOf(def.ent)
-      if (g.F.length) others.push({ M: W, ent: def.ent, name: cleanName(sval(o, l, 0x1965) || dyn.a03_name || def.name), product: prod, layer: ln, mat: bi.mat })
-      walk(def.ent, W, [...path, cleanName(dyn.a03_name || def.name)], prod, dyn.a03_name ? dyn : parentAttrs, depth + 1)
+      if (g.F.length && !/^holes/i.test(def.name)) others.push({ M: W, ent: def.ent, name: cleanName(sval(o, l, 0x1965) || dyn.a03_name || def.name), product: prod, layer: ln, mat: bi.mat })
+      walk(def.ent, W, [...path, cleanName(dyn.a03_name || def.name)], prod, dyn.a03_name ? dyn : parentAttrs, depth + 1, chain + '/' + o)
     }
   }
   // грани прямо в корне модели (редко) — тоже в 3D
@@ -201,22 +201,123 @@ export function parseSkp(u8, opts = {}) {
   if (geomOf(rootEnt).F.length) others.push({ M: rootM, ent: rootEnt, name: 'Модель', product: '', layer: 'Layer0' })
   walk(rootEnt, rootM, [], '', null, 0)
 
+  // ── присадка: цилиндры крепежа плагина (слой Z_fastener: конфирмат, шкант, эксцентрик, полкодержатель) и чашки петель ──
+  // Отверстие в модели — тело-цилиндр: две круглые грани одного диаметра на одной оси. Передаём оба направления оси —
+  // какой торец входит в деталь (пласть или торец), решает разбор детали.
+  const cylMemo = new Map()
+  const cylindersOf = ent => {
+    let cs = cylMemo.get(ent[0]); if (cs) return cs
+    const { V, F } = geomOf(ent)
+    const circ = []
+    for (const f of F) {
+      const lp = f.loops[0]; if (lp.length < 10 || !f.n) continue
+      const P = lp.map(id => V.get(id)).filter(Boolean)
+      const c = [0, 1, 2].map(k => P.reduce((a, p) => a + p[k], 0) / P.length)
+      const ds = P.map(p => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]))
+      const r = ds.reduce((a, b) => a + b, 0) / ds.length
+      if (!(r > 0) || ds.some(d => Math.abs(d - r) > r * 0.04)) continue
+      circ.push({ c, n: norm(f.n), r })
+    }
+    cs = []
+    const used = new Set()
+    for (let i = 0; i < circ.length; i++) for (let j = i + 1; j < circ.length; j++) {
+      if (used.has(i) || used.has(j)) continue
+      const a = circ[i], b = circ[j]
+      if (Math.abs(a.r - b.r) > a.r * 0.04 || Math.abs(a.n[0] * b.n[0] + a.n[1] * b.n[1] + a.n[2] * b.n[2]) < 0.995) continue
+      const d = [b.c[0] - a.c[0], b.c[1] - a.c[1], b.c[2] - a.c[2]], L = vlen(d)
+      if (L < 1e-6) continue
+      const along = Math.abs(d[0] * a.n[0] + d[1] * a.n[1] + d[2] * a.n[2])
+      if (L - along > a.r * 0.1) continue                      // центры не на одной оси
+      used.add(i); used.add(j); cs.push({ a: a.c, b: b.c, r: a.r })
+    }
+    cylMemo.set(ent[0], cs); return cs
+  }
+  const HOLE_NAME = { 35: 'Петля', 15: 'Эксцентрик', 8: 'Шкант', 7: 'Конфирмат', 4.5: 'Конфирмат', 5: 'Полкодержатель' }
+  const holes = [], cups = [], grooves = []
+  const walkHoles = (ent, M, depth, chain = '', owner = '') => {
+    if (depth > 40) return
+    for (const [o, l] of instancesOf(ent)) {
+      const bi = baseInfo(o, l)
+      if (bi.flags & 1) continue
+      const def = defs.get(nval(o, l, 0x1967)); if (!def) continue
+      const W = mul(M, tfOf(o, l))
+      const ln = layers.get(bi.layer) || ''
+      // пазы плагина — компоненты groove… (тело-брусок): габарит в мире
+      if (/^groove/i.test(def.name)) {
+        const { V } = geomOf(def.ent)
+        if (V.size) {
+          const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+          for (const p of V.values()) for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k] }
+          const pts = []
+          for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) pts.push(apply(W, [x, y, z]).map(c => c * IN))
+          grooves.push(pts)
+        }
+      }
+      const cupHere = /hinge cup/i.test(def.name)
+      if (ln === 'Z_fastener' || cupHere) {
+        for (const cy of cylindersOf(def.ent)) {
+          const A = apply(W, cy.a).map(v => v * IN), B = apply(W, cy.b).map(v => v * IN)
+          const dvec = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], depthMm = vlen(dvec)
+          const r = Math.round(cy.r * IN * 20) / 20
+          if (depthMm < 0.5 || r < 0.5 || r > 30) continue
+          const D = norm(dvec), dia = Math.round(r * 20) / 10
+          const name = HOLE_NAME[dia] || `Ø${dia}`
+          const h = { P: A, D, r, depth: depthMm, name }, h2 = { P: B, D: D.map(v => -v), r, depth: depthMm, name }
+          if (cupHere) { h.owner = h2.owner = owner; cups.push(h, h2) } else holes.push(h, h2)
+        }
+      }
+      const ch = chain + '/' + o
+      // хозяин чашки — ближайший компонент плагина, который не фурнитура (фасад, а не сама петля)
+      const dy = attrs(o, l).dynamic_attributes || {}
+      walkHoles(def.ent, W, depth + 1, ch, dy.a03_name && dy.a09_su_type !== 'furniture' && !/Петл|hinge/i.test(def.name) ? ch : owner)
+    }
+  }
+  walkHoles(rootEnt, rootM, 0)
+
+  // рамка панели: толщина вдоль X тела Essence, пласть — Y×Z; размеры в мм
+  const frameOf = pnl => {
+    if (pnl.fr !== undefined) return pnl.fr
+    const { V } = geomOf(pnl.ent)
+    if (!V.size) return (pnl.fr = null)
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    for (const p of V.values()) for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k] }
+    const ax = applyV(pnl.M, [1, 0, 0]), ay = applyV(pnl.M, [0, 1, 0]), az = applyV(pnl.M, [0, 0, 1])
+    const sx = vlen(ax) * IN, sy = vlen(ay) * IN, sz = vlen(az) * IN
+    const T = r1((hi[0] - lo[0]) * sx)
+    const u = norm(ay), v = norm(az), n = norm(ax)
+    const o = apply(pnl.M, [lo[0], 0, 0]).map(c => c * IN)
+    const toL = P => { const d = [P[0] - o[0], P[1] - o[1], P[2] - o[2]]; return [d[0] * u[0] + d[1] * u[1] + d[2] * u[2], d[0] * v[0] + d[1] * v[1] + d[2] * v[2], d[0] * n[0] + d[1] * n[1] + d[2] * n[2]] }
+    return (pnl.fr = { lo, hi, T, u, v, n, o, sy, sz, Y0: lo[1] * sy, Y1: hi[1] * sy, Z0: lo[2] * sz, Z1: hi[2] * sz, toL })
+  }
+  // чашки петель -> фасады: каждая чашка — одному фасаду того же изделия, к кромке которого она ближе всего
+  const facades = panels.filter(p => /Фасад/i.test(p.layer))
+  for (let i = 0; i + 1 < cups.length; i += 2) {
+    const a = cups[i], b = cups[i + 1]
+    const mid = [0, 1, 2].map(k => (a.P[k] + b.P[k]) / 2)
+    let best = null, bestD = 60
+    for (const f of facades) {
+      if (!a.owner || !f.chain.startsWith(a.owner)) continue
+      const fr = frameOf(f); if (!fr) continue
+      const q = fr.toL(mid)
+      // петля повёрнута вокруг кромки у начала координат фасада (Y = 0): чашка за ней — отражаем
+      const x = q[0] < fr.Y0 ? 2 * fr.Y0 - q[0] : q[0]
+      if (!(x > fr.Y0 && x < fr.Y1 && q[1] > fr.Z0 && q[1] < fr.Z1)) continue
+      const dd = Math.abs(q[2] - fr.T / 2)
+      if (dd < bestD) { bestD = dd; best = f }
+    }
+    if (best) (best.cups = best.cups || []).push({ ...a, mid })
+  }
+
   // ── панели -> детали заказа ──
   const makers = []
   let pid = 0
   for (const pnl of panels) {
     const id = pid++
     const { V, F } = geomOf(pnl.ent)
-    if (!V.size) continue
-    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
-    for (const p of V.values()) for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k] }
-    // тело Essence: толщина — по X, пласть — Y×Z
-    const ax = applyV(pnl.M, [1, 0, 0]), ay = applyV(pnl.M, [0, 1, 0]), az = applyV(pnl.M, [0, 0, 1])
-    const sx = vlen(ax) * IN, sy = vlen(ay) * IN, sz = vlen(az) * IN
-    const T = r1((hi[0] - lo[0]) * sx)
+    const fr = frameOf(pnl)
+    if (!fr) continue
+    const { lo, hi, T, u, v, n, o, sy, sz, toL } = fr
     if (!(T > 1 && T < 80)) continue
-    const u = norm(ay), v = norm(az), n = norm(ax)
-    const o = apply(pnl.M, [lo[0], 0, 0]).map(c => c * IN)
     const Mp = [u[0], v[0], n[0], u[1], v[1], n[1], u[2], v[2], n[2], o[0], o[1], o[2]]
     // контур — пласть (грань с нормалью вдоль X): петли вершин в координатах Y, Z
     let face = null
@@ -229,7 +330,7 @@ export function parseSkp(u8, opts = {}) {
     // кромка по сторонам: y1 — у края Z=max, y2 — Z=min, z1 — Y=min (перед), z2 — Y=max
     const pa = pnl.parent
     const krom = cleanMat(pa.a07_mat_krom || pa.a00_mat_krom || pa.a06_mat_panel || pnl.own.material)
-    const Y0 = lo[1] * sy, Y1 = hi[1] * sy, Z0 = lo[2] * sz, Z1 = hi[2] * sz
+    const { Y0, Y1, Z0, Z1 } = fr
     const butts = []
     const side = (code, a, b) => { const mm = EDGE_MM[Math.round(Number(code))]; if (mm) butts.push({ e: { t: 'L', a, b }, name: `${krom ? krom + ' ' : ''}${mm} мм`.trim(), info: { mat: krom, thick: Number(mm) } }) }
     side(pa.edge_y1, [Y0, Z1], [Y1, Z1]); side(pa.edge_y2, [Y0, Z0], [Y1, Z0])
@@ -239,14 +340,61 @@ export function parseSkp(u8, opts = {}) {
     // направление текстуры: 1 — по длине (вдоль Z тела), 2 — по ширине
     const napr = String(pa.a05_napr ?? pa.napr_texture ?? '1')
     const texDir = napr === '2' ? 1 : 2
+    // чашки петель: в модели плагина петля стоит повёрнутой на 180° вокруг кромки фасада у его начала координат —
+    // чашка оказывается за этой кромкой и перед фасадом. Ставим её зеркально, на внутреннюю пласть (дальнюю от зрителя).
+    const own = []
+    const toW = q => [0, 1, 2].map(k => o[k] + q[0] * u[k] + q[1] * v[k] + q[2] * n[k])
+    const toWv = q => [0, 1, 2].map(k => q[0] * u[k] + q[1] * v[k] + q[2] * n[k])
+    const innerAtZero = n[2] >= 0
+    for (const h of pnl.cups || []) {
+      const c = toL(h.mid)
+      if (c[0] < Y0) c[0] = 2 * Y0 - c[0]
+      if (!(c[0] > Y0 && c[0] < Y1 && c[1] > Z0 && c[1] < Z1)) continue
+      c[2] = innerAtZero ? 0 : T
+      own.push({ ...h, P: toW(c), D: toWv([0, 0, innerAtZero ? 1 : -1]) })
+    }
+    const pHoles = own.length ? [...holes, ...own] : holes
+    // пазы: брусок паза в системе панели — прямоугольник на пласти и глубина от неё
+    const cutsRaw = []
+    for (const g of grooves) {
+      const L = g.map(toL)
+      const mn = [0, 1, 2].map(k => Math.min(...L.map(p => p[k]))), mx = [0, 1, 2].map(k => Math.max(...L.map(p => p[k])))
+      const x0 = Math.max(mn[0], Y0), x1 = Math.min(mx[0], Y1), y0 = Math.max(mn[1], Z0), y1 = Math.min(mx[1], Z1)
+      const z0 = Math.max(mn[2], 0), z1 = Math.min(mx[2], T)
+      if (Math.min(x1 - x0, y1 - y0) < 2 || z1 - z0 < 1) continue          // брусок лишь касается панели
+      const top = z1 >= T - 0.3, bottom = z0 <= 0.3
+      if (top === bottom) continue                              // насквозь или внутри — не паз
+      cutsRaw.push({ p: [x0, y0], q: [x1, y1], depth: r1(z1 - z0), top, name: 'Паз' })
+    }
     makers.push(() => buildItem({
-      T, elems, texDir, M: Mp, butts, cutsRaw: [], decorRaw: [], warnCuts: 0,
+      T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], warnCuts: 0,
       name, prefix: '', material, rotatable: false, anim: null,
       meta: { src: 'sketchup', ids: [id], des: pa.itemcode || '', pos: '', name, product: pnl.product, productDes: '', productPos: '', path: pnl.path.slice(1), material, materialCode: pa.type_material || '' },
-    }, [], opts.faceRule))
+    }, pHoles, opts.faceRule))
   }
 
   // ── остальное с гранями -> 3D «фурнитура»; одинаковые формы — одна сетка ──
+  // Упрощение формы фурнитуры для памяти и скорости: тяжёлые сетки (вешалки, ручки сложной формы) — слиянием вершин
+  // в ячейки сетки (около 1/24 габарита); вырожденные треугольники выбрасываются. Вид остаётся узнаваемым.
+  const simplify = pos => {
+    const tris = pos.length / 9
+    if (tris <= 240) return pos
+    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+    for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) { if (pos[i + k] < lo[k]) lo[k] = pos[i + k]; if (pos[i + k] > hi[k]) hi[k] = pos[i + k] }
+    const cell = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 24 || 1
+    const q = (i) => [0, 1, 2].map(k => Math.round(lo[k] + Math.round((pos[i + k] - lo[k]) / cell) * cell))
+    const out = [], seen = new Set()
+    for (let i = 0; i < pos.length; i += 9) {
+      const a = q(i), b = q(i + 3), c = q(i + 6)
+      const ka = a.join(), kb = b.join(), kc = c.join()
+      if (ka === kb || kb === kc || ka === kc) continue
+      const key = [ka, kb, kc].sort().join('|')
+      if (seen.has(key)) continue
+      seen.add(key); out.push(...a, ...b, ...c)
+    }
+    pos.length = 0; pos.push(...out)
+    return pos
+  }
   const meshes = {}, hardware = []
   const byShape = new Map()
   for (const ob of others) {
@@ -267,6 +415,7 @@ export function parseSkp(u8, opts = {}) {
       for (const t of tris) for (const i of t) { const p = flat[i]; if (p) pos.push(Math.round(p[0] * IN * 10), Math.round(p[1] * IN * 10), Math.round(p[2] * IN * 10)) }
     }
     if (!pos.length) continue
+    simplify(pos)
     const key = pos.length + ':' + pos.slice(0, 60).join(',') + ':' + pos.slice(-30).join(',')
     let f = byShape.get(key)
     if (f == null) { f = 's' + byShape.size; byShape.set(key, f); meshes[f] = { name: ob.name, groups: [{ mat: cleanMat(materials.get(ob.mat) || ''), pos }] } }
@@ -274,7 +423,20 @@ export function parseSkp(u8, opts = {}) {
     hardware.push({ f, m: [W[0], W[1], W[2], W[4], W[5], W[6], W[8], W[9], W[10], W[3] * IN, W[7] * IN, W[11] * IN].map((v, i) => (i < 9 ? Math.round(v * 1e6) / 1e6 : Math.round(v * 10) / 10)), b: ob.product })
   }
 
-  const { items, groups, skipped } = groupItems(makers)
+  // Неглубокие «отверстия» от касания убираем; конфирмат в модели — два цилиндра на одной оси (Ø7 под головку и Ø4.5 под стержень): в пласти остаётся больший
+  const dropInner = c => {
+    const ds = c?.drillings; if (!ds) return
+    const pos = d => JSON.stringify([d.sides, d.offsets, d.row, d.row ? [d.rowCount, d.rowStep, d.rowDir] : 0])
+    for (let i = ds.length - 1; i >= 0; i--) {
+      const d = ds[i]
+      if (d.kind !== 'face') continue
+      // цилиндр крепежа лишь касается соседней детали (зазор, полкодержатель под полкой) — это не отверстие
+      if (d.depth < 3) { ds.splice(i, 1); continue }
+      if (ds.some(e => e !== d && e.kind === 'face' && e.face === d.face && e.d > d.d && e.depth >= d.depth - 0.1 && pos(e) === pos(d))) ds.splice(i, 1)
+    }
+  }
+  const makers0 = makers.map(mk => () => { const it = mk(); if (it) { dropInner(it.contour); it.info.holes = it.contour.drillings.reduce((k, d) => k + (d.row ? d.rowCount : 1), 0) } return it })
+  const { items, groups, skipped } = groupItems(makers0)
   if (!items.length) throw new Error('в модели SketchUp не найдено панелей мебельного плагина (тела «Essence»)')
   const scene = {
     v: 1, order: '',
