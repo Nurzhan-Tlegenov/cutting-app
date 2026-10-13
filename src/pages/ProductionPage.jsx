@@ -1,4 +1,6 @@
-import { MenuButton } from '../components/NavDrawer'
+import { MenuButton, Ico } from '../components/NavDrawer'
+import { I } from '../lib/navIcons'
+import { useBackClose } from '../lib/backStack'
 import { orderFaults, faultText } from '../lib/nestingCheck'
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -14,7 +16,7 @@ import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 import PriceList from '../components/PriceList'
 import CncSetup from '../components/CncSetup'
-import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
+import { useKeptState } from '../hooks/useKeptState'
 import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
 import { productionStageMap, postsList } from '../lib/posts'
@@ -51,9 +53,6 @@ export default function ProductionPage() {
   const [busy, setBusy] = useState('')
   const [prices, setPrices] = useKeptState('prices', false)       // открыт прайс-лист
   const [xmlView, setXmlView] = useKeptState('xml', false)     // просмотрщик XML-программ присадочного станка
-  const [postOpen, setPostOpen] = useKeptState('postOpen', false)   // развёрнуты настройки постпроцессора (свёрнуты по умолчанию)
-  // развёрнутые разделы — остаются открытыми после обновления страницы
-  const dSheet = useKeptDetails('sheet')
   const [openIds, setOpenIds] = useKeptState('open', [])   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
   const open = useMemo(() => new Set(openIds), [openIds])
   const toggle = id => setOpenIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
@@ -64,9 +63,11 @@ export default function ProductionPage() {
   const loadStages = () => productionStageMap().then(r => setStages(r.data || {}))
   const [reopen, setReopen] = useState(null)                  // исполненный заказ — вернуть в техпроцесс (выбор поста)
   const [tab, setTab] = useKeptState('prodTab', 'orders')    // вкладка кабинета: orders | board | settings
+  const [setSec, setSetSec] = useKeptState('setSec', null)   // открытый раздел настроек; null — список разделов
   // переход из бокового меню: сразу нужная вкладка
   const loc = useLocation()
   useEffect(() => { const t = loc.state?.tab; if (t) Promise.resolve().then(() => setTab(t)) }, [loc.key])   // eslint-disable-line react-hooks/exhaustive-deps
+  useBackClose(tab === 'settings' && !!setSec && !edit, () => setSetSec(null))   // «Назад» телефона — к списку разделов
   const [hasPosts, setHasPosts] = useState(false)       // есть посты — принятый, но не пущенный заказ помечается
   useEffect(() => { let alive = true; postsList().then(r => { if (alive) setHasPosts((r.data || []).some(p => p.active !== false)) }); return () => { alive = false } }, [])
   const loadStaff = () => membersList().then(r => setStaff({ data: r.data || null, error: r.error || '' }))
@@ -172,6 +173,17 @@ export default function ProductionPage() {
   const count = { new: live.filter(o => o.status === 'new').length, work: live.filter(o => o.status === 'discussion' || o.status === 'inwork').length, done: live.filter(o => o.status === 'done').length, all: live.length, archive: archived.size }
   const doneList = orders.filter(o => o.status === 'done').sort((a, b) => String(b.done_at || '').localeCompare(String(a.done_at || ''))).slice(0, 40)
   const shown = filter === 'done' ? doneList : live.filter(o => filter === 'all' || (filter === 'new' ? o.status === 'new' : o.status === 'discussion' || o.status === 'inwork'))
+  // разделы экрана «Настройки»: [id, значок, название, пояснение, число]
+  const activeStaff = (staff.data?.members || []).filter(m => m.active).length
+  const settingsMenu = prod ? [
+    ['company', I.factory, prod.name || 'Производство', [prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Данные производства'],
+    ['staff', I.users, 'Сотрудники', 'Рабочие места, приглашения, права', activeStaff],
+    ['posts', I.posts, 'Рабочие посты', 'Техпроцесс: порядок постов, кто на них'],
+    ['prices', I.tag, 'Прайс-лист', 'Распил плиты и ХДФ, кромление, присадка'],
+    ['sheet', I.sliders, 'Параметры станка', 'Рез и отступы листа — по типу материала'],
+    ['post', I.cnc, 'Постпроцессоры', 'Станки ЧПУ, инструменты, обработка'],
+    ['xml', I.file, 'Просмотр XML присадки', 'Программы присадочного станка'],
+  ] : []
   const btn = kind => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : 'var(--text-muted)' })
 
   return (
@@ -216,56 +228,64 @@ export default function ProductionPage() {
           <button type="button" title="Сканер бирки — деталь в 3D-модели (сборка)" onClick={() => navigate('/scan')} style={{ flex: '0 0 auto', width: 36, height: 34, borderRadius: 17, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', fontSize: 16, padding: 0, cursor: 'pointer' }}>📷</button>
           </div>
 
-          {tab === 'settings' && (
+          {tab === 'settings' && (edit ? (
             <div className="card" style={{ marginBottom: 12 }}>
-              {edit ? (
-                <ProductionForm initial={prod} submitLabel="Сохранить" onCancel={() => setEdit(false)} onDone={() => { setEdit(false); load() }} />
-              ) : (
-                <>
-                {/* компания — свёрнуто: название, страна, телефон */}
-                <details open style={{ marginBottom: 6 }}>
-                  <summary style={{ fontSize: 13, fontWeight: 500, cursor: 'pointer', color: 'var(--text)' }}>🏭 {prod.name}</summary>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
-                    <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
-                  </div>
-                </details>
-                    <StaffSection data={staff.data} error={staff.error} onReload={loadStaff} />
-                    <PostsSection members={staff.data?.members} />
-                    <div onClick={() => setPrices(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
-                      <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Прайс-лист (цены на распил, кромление, присадку)</span>
-                      <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
-                    </div>
-                    <details style={{ marginTop: 10 }} {...dSheet}>
-                      <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Параметры станка (рез и отступы листа) — по типу материала</summary>
-                      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство, — по типу материала, который он указал в заказе.</p>
-                      {[['Плита: ЛДСП, МДФ — фрезер ЧПУ или пила', MARGINS], ['ХДФ, ДВП (задние стенки) — пила', HDF_MARGINS]].map(([title, list]) => (
-                        <div key={title} style={{ marginBottom: 8 }}>
-                          <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>{title}</div>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            {list.map(([k, l]) => (
-                              <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
-                                <input type="text" inputMode="decimal" value={sheet[k] ?? ''} placeholder={k.startsWith('hdf_') && prod[k.slice(4)] != null ? String(prod[k.slice(4)]) : ''} onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                      <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
-                    </details>
-                    {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
-                    <details style={{ marginTop: 8 }} open={postOpen} onToggle={e => setPostOpen(e.currentTarget.open)}>
-                      <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Настройки постпроцессора (станки ЧПУ, инструменты, обработка)</summary>
-                      {postOpen && <CncSetup prodId={prod.id} />}
-                    </details>
-                    <div onClick={() => setXmlView(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, cursor: 'pointer' }}>
-                      <span style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Просмотр XML-программ присадочного станка</span>
-                      <span style={{ color: 'var(--blue)', fontSize: 16 }}>›</span>
-                    </div>
-                </>
-              )}
+              <ProductionForm initial={prod} submitLabel="Сохранить" onCancel={() => setEdit(false)} onDone={() => { setEdit(false); load() }} />
             </div>
-          )}
+          ) : !setSec ? (
+            // разделы настроек — кнопками-строками, как в боковом меню: значок, название, пояснение, ›
+            <div className="card" style={{ marginBottom: 12, padding: 4 }}>
+              {settingsMenu.map(([id, icon, title, sub, cnt], i) => (
+                <button key={id} type="button" onClick={() => (id === 'prices' ? setPrices(true) : id === 'xml' ? setXmlView(true) : setSetSec(id))}
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 10px', border: 'none', borderTop: i ? '0.5px solid var(--border)' : 'none',
+                    background: 'transparent', textAlign: 'left', cursor: 'pointer', color: 'var(--text)', borderRadius: 0 }}>
+                  <span style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Ico d={icon} size={19} /></span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}{cnt ? <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}> · {cnt}</span> : null}</span>
+                    {sub && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</span>}
+                  </span>
+                  <span style={{ color: 'var(--text-hint)', fontSize: 20, lineHeight: 1, flexShrink: 0 }}>›</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="card" style={{ marginBottom: 12 }}>
+              {/* открытый раздел: назад — к списку разделов (и кнопкой «Назад» телефона) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <button type="button" onClick={() => setSetSec(null)} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 14, padding: '2px 0', cursor: 'pointer', whiteSpace: 'nowrap' }}>‹ Настройки</button>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(settingsMenu.find(m => m[0] === setSec) || [])[2]}</span>
+              </div>
+              {setSec === 'company' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{prod.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
+                  </div>
+                  <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
+                </div>
+              )}
+              {setSec === 'staff' && <StaffSection bare data={staff.data} error={staff.error} onReload={loadStaff} />}
+              {setSec === 'posts' && <PostsSection bare members={staff.data?.members} />}
+              {setSec === 'sheet' && <>
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 6px' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство, — по типу материала, который он указал в заказе.</p>
+                {[['Плита: ЛДСП, МДФ — фрезер ЧПУ или пила', MARGINS], ['ХДФ, ДВП (задние стенки) — пила', HDF_MARGINS]].map(([title, list]) => (
+                  <div key={title} style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>{title}</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {list.map(([k, l]) => (
+                        <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
+                          <input type="text" inputMode="decimal" value={sheet[k] ?? ''} placeholder={k.startsWith('hdf_') && prod[k.slice(4)] != null ? String(prod[k.slice(4)]) : ''} onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
+              </>}
+              {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
+              {setSec === 'post' && <CncSetup prodId={prod.id} />}
+            </div>
+          ))}
 
           {tab === 'board' && <ProductionBoard onChange={() => { loadStages(); load() }} />}
 

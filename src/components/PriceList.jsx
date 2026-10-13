@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { loadPrices, savePrices, PRICE_GROUPS } from '../lib/pricing'
+import { loadPrices, savePrices, PRICE_GROUPS, HDF_ITEMS } from '../lib/pricing'
 import { useBackClose } from '../lib/backStack'
 
 // Прайс-лист производства: цены на операции, с которыми сталкивается раскрой.
@@ -19,18 +19,40 @@ export default function PriceList({ production, onClose }) {
     return () => { alive = false }
   }, [production.id])
   const set = (k, v) => { setSaved(false); setData(d => ({ ...d, [k]: v })) }
-  const tiers = Array.isArray(data?.tiers) ? data.tiers : []
-  const setTier = (i, k, v) => set('tiers', tiers.map((t, j) => (j === i ? { ...t, [k]: clean(v) } : t)))
+  const tiersOf = key => (Array.isArray(data?.[key]) ? data[key] : [])
+  const tiers = tiersOf('tiers'), hdfTiers = tiersOf('hdf_tiers')
+  const setTier = (key, i, k, v) => set(key, tiersOf(key).map((t, j) => (j === i ? { ...t, [k]: clean(v) } : t)))
+  // ступени — по возрастанию числа деталей; ступень без числа («свыше») — последней
+  const sortTiers = list => list.filter(t => String(t.price ?? '') !== '').sort((a, b) => (Number(String(a.to).replace(',', '.')) || Infinity) - (Number(String(b.to).replace(',', '.')) || Infinity))
   const save = async () => {
     setBusy(true); setError('')
-    // ступени — по возрастанию числа деталей; ступень без числа («свыше») — последней
-    const ts = tiers.filter(t => String(t.price ?? '') !== '').sort((a, b) => (Number(String(a.to).replace(',', '.')) || Infinity) - (Number(String(b.to).replace(',', '.')) || Infinity))
-    const out = { ...data, tiers: ts }
+    const out = { ...data, tiers: sortTiers(tiers), hdf_tiers: sortTiers(hdfTiers) }
     const r = await savePrices(production.id, out)
     setBusy(false)
     if (r.error) setError(r.error); else { setData(out); setSaved(true) }
   }
   const inp = { padding: '6px 8px', fontSize: 14, textAlign: 'right' }
+  // ступени цены за лист по числу деталей (key — 'tiers' у плиты, 'hdf_tiers' у ХДФ)
+  const tiersEditor = (key, title) => {
+    const list = tiersOf(key)
+    return (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+                    <div style={{ fontSize: 13 }}>{title}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Цена за лист зависит от того, сколько на нём деталей: до 5 — одна цена, до 10 — другая. Строка без числа — «свыше».</div>
+                    {list.map((t, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: '0 0 auto' }}>{i > 0 && list[i - 1].to ? `от ${Number(String(list[i - 1].to).replace(',', '.')) + 1} ` : ''}до</span>
+                        <input type="text" inputMode="numeric" placeholder="свыше" value={t.to ?? ''} onChange={e => setTier(key, i, 'to', e.target.value)} style={{ ...inp, width: 64, flex: '0 0 auto' }} />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1 }}>дет. — за лист</span>
+                        <input type="text" inputMode="decimal" placeholder="цена" value={t.price ?? ''} onChange={e => setTier(key, i, 'price', e.target.value)} style={{ ...inp, width: 96, flex: '0 0 auto' }} />
+                        <button type="button" onClick={() => set(key, list.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, padding: '0 2px' }}>×</button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => set(key, [...list, { to: '', price: '' }])}
+                      style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)' }}>+ Добавить ступень</button>
+                  </div>
+    )
+  }
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'var(--bg2)', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
@@ -76,25 +98,24 @@ export default function PriceList({ production, onClose }) {
                     <input type="text" inputMode="decimal" placeholder="—" value={data[k] ?? ''} onChange={e => set(k, clean(e.target.value))} style={{ ...inp, width: 96, flex: '0 0 auto' }} />
                   </div>
                 ))}
-                {g.id === 'cut' && (
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
-                    <div style={{ fontSize: 13 }}>Раскрой листа по числу деталей на листе</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Цена за лист зависит от того, сколько на нём деталей: до 5 — одна цена, до 10 — другая. Строка без числа — «свыше».</div>
-                    {tiers.map((t, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: '0 0 auto' }}>{i > 0 && tiers[i - 1].to ? `от ${Number(String(tiers[i - 1].to).replace(',', '.')) + 1} ` : ''}до</span>
-                        <input type="text" inputMode="numeric" placeholder="свыше" value={t.to ?? ''} onChange={e => setTier(i, 'to', e.target.value)} style={{ ...inp, width: 64, flex: '0 0 auto' }} />
-                        <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1 }}>дет. — за лист</span>
-                        <input type="text" inputMode="decimal" placeholder="цена" value={t.price ?? ''} onChange={e => setTier(i, 'price', e.target.value)} style={{ ...inp, width: 96, flex: '0 0 auto' }} />
-                        <button type="button" onClick={() => set('tiers', tiers.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, padding: '0 2px' }}>×</button>
-                      </div>
-                    ))}
-                    <button type="button" onClick={() => set('tiers', [...tiers, { to: '', price: '' }])}
-                      style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)' }}>+ Добавить ступень</button>
-                  </div>
-                )}
+                {g.id === 'cut' && tiersEditor('tiers', 'Раскрой листа по числу деталей на листе')}
               </div>
             ))}
+            {/* ХДФ / ДВП — тонкий материал задних стенок, режется на пиле: распил по своим ценам */}
+            <div className="card" style={{ marginBottom: 10 }}>
+              <p className="section-title">Распил ХДФ, ДВП (задние стенки)</p>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Для заказов с типом материала «ХДФ, ДВП». Пустое поле — цена как у плиты (серым).</div>
+              {HDF_ITEMS.map(([k, title, unit, base]) => (
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13 }}>{title}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{unit}{k === 'hdf_cut_sheet' && hdfTiers.length ? ' — не действует, пока заданы ступени ниже' : ''}</div>
+                  </div>
+                  <input type="text" inputMode="decimal" placeholder={data[base] ? String(data[base]) : '—'} value={data[k] ?? ''} onChange={e => set(k, clean(e.target.value))} style={{ ...inp, width: 96, flex: '0 0 auto' }} />
+                </div>
+              ))}
+              {tiersEditor('hdf_tiers', 'Раскрой листа ХДФ по числу деталей на листе')}
+            </div>
             <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Все заполненные цены складываются: например, «за метр реза» и «за лист» вместе. Стоимость материала и самой кромки в расчёт не входит — только работа.</p>
           </>
         )}

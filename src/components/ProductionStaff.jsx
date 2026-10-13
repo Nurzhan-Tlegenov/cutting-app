@@ -41,7 +41,7 @@ function InviteLink({ inv, onCancel }) {
 }
 
 /** Раздел «Сотрудники» у владельца производства. data — { members, invites } из membersList(), onReload — перечитать */
-export function StaffSection({ data, error, onReload }) {
+export function StaffSection({ data, error, onReload, bare = false }) {
   const [form, setForm] = useState(null)       // новое приглашение: { name, phone, perms }
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -50,9 +50,10 @@ export function StaffSection({ data, error, onReload }) {
   const act = async fn => { setBusy(true); setErr(''); const r = await fn(); setBusy(false); if (r?.error) setErr(r.error); else onReload() }
   const members = data?.members || [], invites = data?.invites || []
   const invite = () => act(async () => { const r = await createInvite(form.name, form.phone, form.perms); if (!r.error) setForm(null); return r })
+  const Wrap = bare ? 'div' : 'details'   // bare — открыто отдельным экраном настроек, без свёртки
   return (
-    <details style={{ marginTop: 8 }} {...dStaff}>
-      <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Сотрудники (рабочие места){members.length ? ` · ${members.filter(m => m.active).length}` : ''}</summary>
+    <Wrap {...(bare ? {} : { style: { marginTop: 8 }, ...dStaff })}>
+      {!bare && <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Сотрудники (рабочие места){members.length ? ` · ${members.filter(m => m.active).length}` : ''}</summary>}
       {error ? <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>{error}</p> : (
         <div style={{ marginTop: 6 }}>
           <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Сотрудник заходит по ссылке-приглашению и работает в своём аккаунте (он может быть и клиентом приложения). Начальник производства видит все заказы; остальные — только заказы, которые сейчас на их рабочих постах.</p>
@@ -97,6 +98,6 @@ export function StaffSection({ data, error, onReload }) {
           )}
         </div>
       )}
-    </details>
+    </Wrap>
   )
 }

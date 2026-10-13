@@ -18,6 +18,7 @@ export const emptyStats = () => ({
   cutM: 0, cuts: 0, perimM: 0, partsM2: 0, sheetsM2: 0,
   edgeM: 0, edgeThinM: 0, edgeThickM: 0, edgeCurvedM: 0, edgeCurvedParts: 0,
   holes: 0, edgeHoles: 0, grooves: 0, grooveM: 0, pockets: 0, cutouts: 0, shapedParts: 0,
+  hdf: false,   // материал заказа — ХДФ / ДВП: распил в прайс-листе по своим ценам
 })
 
 /**
@@ -28,6 +29,7 @@ export function nestingStats({ order, mat, method }) {
   const st = emptyStats()
   if (!mat) return st
   st.method = method === 'guillotine' ? 'guillotine' : 'nesting'
+  st.hdf = order?.material_kind === 'hdf'
   const details = mat.details || []
   const T = Number(mat.thickness) || Number(order?.material_thickness) || 16
   const types = parseEdgeTypes(order?.edge_types)
@@ -90,6 +92,7 @@ export function sumStats(list) {
       if (k === 'sheets') t.sheets.push(...s.sheets)
       else if (k === 'kerf') t.kerf = t.kerf || s.kerf
       else if (k === 'method') t.method = s.method || t.method
+      else if (k === 'hdf') t.hdf = t.hdf || !!s.hdf
       else t[k] += s[k] || 0
     }
   }
@@ -103,6 +106,7 @@ export function statsPayload(st) {
     parts: st.parts, cut_m: r2(st.cutM),
     edge_thin_m: r2(st.edgeThinM), edge_thick_m: r2(st.edgeThickM), edge_curved_m: r2(st.edgeCurvedM), edge_curved_parts: st.edgeCurvedParts,
     holes: st.holes, edge_holes: st.edgeHoles, groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
+    ...(st.hdf ? { hdf: true } : {}),   // ХДФ / ДВП — база берёт цены распила ХДФ (migration_hdf_prices.sql)
   }
 }
 

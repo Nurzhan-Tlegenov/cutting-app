@@ -16,7 +16,7 @@ const idOf = o => { if (!o || typeof o !== 'object') return 0; if (!ids.has(o)) 
 export function useNestingQuote({ order, mats, method, productionId, enabled = true }) {
   const list = (mats || []).filter(Boolean)
   const sig = !enabled ? 'off' : list.map(m => `${idOf(m.sheets)}:${idOf(m.details)}:${idOf(m.result)}:${m.thickness || ''}`).join('|')
-    + `|${method}|${order?.sheet_length}x${order?.sheet_width}|${order?.kerf_width}|${order?.margin_left},${order?.margin_right},${order?.margin_top},${order?.margin_bottom}|${JSON.stringify(order?.edge_types ?? '')}`
+    + `|${method}|${order?.sheet_length}x${order?.sheet_width}|${order?.kerf_width}|${order?.margin_left},${order?.margin_right},${order?.margin_top},${order?.margin_bottom}|${JSON.stringify(order?.edge_types ?? '')}|${order?.material_kind || ''}`
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const stats = useMemo(() => (enabled ? sumStats(list.map(mat => nestingStats({ order, mat, method }))) : null), [sig])
   const payload = useMemo(() => (stats && stats.parts ? JSON.stringify(statsPayload(stats)) : ''), [stats])

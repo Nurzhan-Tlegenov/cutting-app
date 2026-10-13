@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { myWorkplaces, openWorkplace, openOwnProduction, prodView, workPid } from '../lib/workplaces'
 import { myProduction } from '../lib/productionApi'
+import { I } from '../lib/navIcons'
 
 // Боковое меню (кнопка ☰ слева вверху или свайп от левого края): все кабинеты и их разделы в одном месте —
 // производство (заказы, техпроцесс, настройки), рабочие места, клиент (заказы, новый заказ), мастер-аккаунт.
@@ -33,23 +34,7 @@ export function MenuButton({ style }) {
 // eslint-disable-next-line react-refresh/only-export-components
 export const setMenuBadge = n => { lastBadge = n; window.dispatchEvent(new CustomEvent('nav-badge', { detail: n })) }
 
-const I = {   // линейные значки пунктов
-  orders: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 3h6v4H9zM9 12h6M9 16h4',
-  plus: 'M12 4v16M4 12h16',
-  board: 'M4 4h5v16H4zM10 4h5v10h-5zM16 4h4v7h-4z',
-  gear: 'M12 15a3 3 0 100-6 3 3 0 000 6zM19 12l2-1-1-3-2 .2-1.2-1.2L17 5l-3-1-1 2h-2L10 4 7 5l.2 2L6 8.2 4 8 3 11l2 1v0l-2 1 1 3 2-.2L7.2 17 7 19l3 1 1-2h2l1 2 3-1-.2-2 1.2-1.2 2 .2 1-3z',
-  posts: 'M4 6h16M4 12h16M4 18h16M8 4v4M14 10v4M10 16v4',
-  scan: 'M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M7 12h10',
-  msg: 'M18 9a6 6 0 10-12 0c0 6-2.5 7.5-2.5 7.5h17S18 15 18 9zM10 20a2.2 2.2 0 004 0',
-  user: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 20c0-4 3.6-7 8-7s8 3 8 7',
-  users: 'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 4.5a3.2 3.2 0 010 6M18 14c2 .6 3.5 2.6 3.5 6',
-  factory: 'M3 20V9l6 4V9l6 4V5h6v15zM7 17h2M12 17h2M17 17h1',
-  globe: 'M12 21a9 9 0 100-18 9 9 0 000 18zM3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9z',
-  inbox: 'M3 13l3-8h12l3 8v6H3zM3 13h5l1 2h6l1-2h5',
-  bag: 'M5 8h14l-1 12H6zM9 8V6a3 3 0 016 0v2',
-  crown: 'M3 8l4 4 5-7 5 7 4-4-2 11H5z',
-}
-const Ico = ({ d, size = 20 }) => <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d={d} /></svg>
+export const Ico = ({ d, size = 20 }) => <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d={d} /></svg>
 const tabOf = key => { try { return JSON.parse(sessionStorage.getItem(`keep:/production#${key}`) || 'null') } catch { return null } }
 const setTabKey = (key, v) => { try { sessionStorage.setItem(`keep:/production#${key}`, JSON.stringify(v)) } catch { /* без памяти */ } }
 
@@ -162,7 +147,7 @@ export default function NavDrawer({ notices, unread }) {
 
   // переходы
   const go = (to, state) => { setOpen(false); navigate(to, state ? { state } : undefined) }
-  const goOwn = tab => { openOwnProduction(); if (tab) setTabKey('prodTab', tab); setCabinet('production'); go('/production', { tab }) }
+  const goOwn = tab => { openOwnProduction(); if (tab) setTabKey('prodTab', tab); if (tab === 'settings') setTabKey('setSec', null); setCabinet('production'); go('/production', { tab }) }
   const goWork = (pid, wtab) => { openWorkplace(pid); if (wtab) setTabKey('wTab', wtab); setCabinet('production'); go('/production', { wtab }) }
   const goClient = to => { setCabinet('client'); go(to) }
 

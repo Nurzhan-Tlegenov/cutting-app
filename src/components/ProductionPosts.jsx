@@ -13,7 +13,7 @@ const chip = on => ({ padding: '4px 10px', borderRadius: 14, fontSize: 11.5, cur
 const arrow = { width: 28, height: 26, padding: 0, borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text-muted)', fontSize: 13 }
 
 /** Настройка постов. members — сотрудники производства (из membersList) */
-export function PostsSection({ members }) {
+export function PostsSection({ members, bare = false }) {
   const [posts, setPosts] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -37,9 +37,10 @@ export function PostsSection({ members }) {
     act(() => setPostMembers(p.id, [...cur]))
   }
   const missing = posts && err && /migration_posts/.test(err)
+  const Wrap = bare ? 'div' : 'details'   // bare — открыто отдельным экраном настроек, без свёртки
   return (
-    <details style={{ marginTop: 8 }} {...dPosts}>
-      <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Рабочие посты (техпроцесс){posts?.length ? ` · ${posts.filter(p => p.active).length}` : ''}</summary>
+    <Wrap {...(bare ? {} : { style: { marginTop: 8 }, ...dPosts })}>
+      {!bare && <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Рабочие посты (техпроцесс){posts?.length ? ` · ${posts.filter(p => p.active).length}` : ''}</summary>}
       {missing ? <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>{err}</p> : (
         <div style={{ marginTop: 6 }}>
           <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Заказ, принятый в работу, идёт по постам сверху вниз. Сотрудники поста видят заказ новым, принимают и отмечают «Выполнено» — заказ сам переходит на следующий пост. После последнего поста заказ исполнен. Порядок меняется стрелками.</p>
@@ -84,7 +85,7 @@ export function PostsSection({ members }) {
           </div>
         </div>
       )}
-    </details>
+    </Wrap>
   )
 }
 
