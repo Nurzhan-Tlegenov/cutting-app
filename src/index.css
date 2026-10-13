@@ -107,3 +107,5 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 /* боковое меню: отклик на нажатие — лёгкое «вдавливание», как в iOS */
 .nav-item { transition: transform .18s cubic-bezier(.32,.72,0,1), background-color .18s; -webkit-tap-highlight-color: transparent; }
 .nav-item:active { transform: scale(.97); background-color: var(--bg2) !important; }
+
+@keyframes peek-in { from { opacity: 0; transform: scale(.92) } to { opacity: 1; transform: scale(1) } }
