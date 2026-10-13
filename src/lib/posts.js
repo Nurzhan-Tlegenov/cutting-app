@@ -54,7 +54,8 @@ export async function planStages(orderId) {
   if (!d.order || !d.rows.length) return 0
   const empty = open.filter(s => { try { return !stageParts(d.order, d.rows, ruleOf(s.rule, s.name)).length } catch { return false } }).map(s => s.post_id).filter(Boolean)
   if (!empty.length) return 0
-  const r = await call('stage_auto_skip', { p_order: orderId, p_posts: empty })
+  // база сама перепроверяет: сколько деталей видело приложение, есть ли кромка, не «без списка деталей» ли пост
+  const r = await call('stage_auto_skip_v2', { p_order: orderId, p_posts: empty, p_seen: d.rows.length })
   return r.error ? 0 : Number(r.data) || 0
 }
 
