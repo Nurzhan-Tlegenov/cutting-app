@@ -141,7 +141,8 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     let W = wrap.clientWidth || 360, H = wrap.clientHeight || 300
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3))
+    // не больше 2× экрана: на телефоне 3× — в 2,25 раза больше пикселей, видеопамяти и работы, а разницы не видно
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.setSize(W, H)
     renderer.setClearColor(0xDEDBD2)
     const el = renderer.domElement
@@ -463,7 +464,11 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       pickRef.current?.(pick(e.clientX - r.left, e.clientY - r.top))
     }
     el.addEventListener('pointerdown', onDown); el.addEventListener('pointerup', onUp)
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null
+    // Размер окна меняется (тянут границу со списком кода) — кадр пересоздаётся один раз, когда размер устоялся.
+    // Пересоздание на каждый шаг жеста копило в видеокарте очередь на секунды, и закрытие симулятора вешало телефон.
+    let resizeT = 0
+    const resizeSoon = () => { clearTimeout(resizeT); resizeT = setTimeout(resize, 160) }
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resizeSoon) : null
     ro?.observe(wrap)
 
     base(); setView('iso'); setTime(tRef.current, tRef.current > 0)
@@ -471,14 +476,20 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     api.current = { setTime, select, setVisible, setView, setFollow }
     return () => {
       api.current = null
-      clearTimeout(flushT)
+      clearTimeout(flushT); clearTimeout(resizeT)
       ro?.disconnect(); cancelAnimationFrame(raf)
       if (liveObj) liveObj.geometry.dispose()
       el.removeEventListener('pointerdown', onDown); el.removeEventListener('pointerup', onUp)
       controls.dispose()
       for (const o of [selObj, oneObj]) if (o) o.geometry.dispose()
       disposables.forEach(x => x.dispose())
-      renderer.dispose(); el.remove()   // память видеокарты — сразу, не дожидаясь сборщика
+      // Видеокарту отпускаем сразу и принудительно: без forceContextLoss телефон держит контекст WebGL и его память,
+      // пока не решит освободить сам, — после закрытия (и тем более после нескольких открытий) приложение вставало
+      renderer.renderLists?.dispose()
+      renderer.dispose()
+      el.remove()
+      // принудительно — чуть позже, когда экран уже закрылся (иначе закрытие ждёт, пока видеокарта доделает очередь)
+      setTimeout(() => { try { renderer.forceContextLoss() } catch { /* контекст уже потерян */ } el.width = el.height = 1 }, 250)
     }
   }, [prog, data, opIds, sheet, outlines, thickness, headKey])
 
