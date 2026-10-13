@@ -568,9 +568,11 @@ export function CncTools({ cnc, onChange }) {
     setEdit(null)
   }
   const del = t => { if (window.confirm(`Удалить инструмент «${t.name}»?`)) { onChange({ ...cnc, tools: tools.filter(x => x.id !== t.id) }); setEdit(null) } }
+  // новое сверло у станка с присадочной головой — сразу «в присадочной голове» (галочку можно снять)
+  const newDrill = () => ({ ...DEFAULT_DRILL(), ...(headPost ? { inHead: true } : {}) })
   const create = () => {
     const nextT = Math.max(0, ...tools.map(t => num(t.t))) + 1
-    setEdit({ ...(tools.some(t => t.type === 'mill') ? DEFAULT_DRILL() : DEFAULT_MILL()), t: nextT })
+    setEdit({ ...(tools.some(t => t.type === 'mill') ? newDrill() : DEFAULT_MILL()), t: nextT })
   }
   const e = (k, v) => setEdit(x => ({ ...x, [k]: v }))
   if (edit) {
@@ -581,7 +583,7 @@ export function CncTools({ cnc, onChange }) {
         <Title>{tools.some(t => t.id === edit.id) ? 'Инструмент' : 'Новый инструмент'}</Title>
         <label className="label">Тип</label>
         <Seg value={edit.type} options={[['mill', 'Фреза'], ['drill', 'Сверло']]}
-          onChange={v => setEdit(x => (v === x.type ? x : { ...(v === 'mill' ? DEFAULT_MILL() : DEFAULT_DRILL()), id: x.id, t: x.t, d: x.d, name: '' }))} />
+          onChange={v => setEdit(x => (v === x.type ? x : { ...(v === 'mill' ? DEFAULT_MILL() : newDrill()), id: x.id, t: x.t, d: x.d, name: '' }))} />
         <div style={{ marginTop: 10 }}>
           <label className="label">1. Наименование</label>
           <input type="text" value={edit.name} placeholder={mill ? 'Компрессионная 6 мм' : 'Сверло 8 мм'} onChange={ev => e('name', ev.target.value)} />
