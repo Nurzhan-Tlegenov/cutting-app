@@ -93,6 +93,7 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
   const [st, setSt] = useState(null)
   const [parts, setParts] = useState(false)
   const [ret, setRet] = useState(false)
+  const [reo, setReo] = useState(false)                  // исполненный заказ — вернуть в техпроцесс
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const load = () => orderStages(orderId).then(r => setSt(r.error ? [] : r.data || []))
@@ -165,6 +166,8 @@ export function StageTrack({ orderId, status, manage = false, refresh, onChange 
           {manage && st.some(s => s.status === 'done' && (!cur || s.sort < cur.sort)) && <button type="button" disabled={busy} style={{ ...small, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setRet(true)}>↩ Вернуть на пост</button>}
         </div>
       )}
+      {manage && status === 'done' && <button type="button" style={{ ...small, marginTop: 6, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setReo(true)}>↩ Вернуть в техпроцесс</button>}
+      {reo && <StageReturn reopen orderId={orderId} title="" onClose={ch => { setReo(false); if (ch) { load(); onChange?.() } }} />}
       {err && <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 3 }}>{err}</div>}
       {ret && <StageReturn orderId={orderId} title="" onClose={ch => { setRet(false); if (ch) { load(); onChange?.() } }} />}
       {parts && cur && <StageParts stage={{ stage_id: cur.id, post_name: cur.name, rule: cur.rule, status: cur.status }} orderId={orderId} onClose={ch => { setParts(false); if (ch) { load(); onChange?.() } }} />}

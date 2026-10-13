@@ -167,7 +167,7 @@ export default function OrderPage() {
         </div>
       )}
       {/* техпроцесс: где заказ, кто принял и через сколько увидел, история движения — руководителю и сотрудникам */}
-      {order.status !== 'draft' && <OrderTechProcess orderId={id} status={order.status} manage={inProduction && (!wperms || !!wperms.all)} />}
+      {order.status !== 'draft' && <OrderTechProcess orderId={id} status={order.status} manage={inProduction && (!wperms || !!wperms.all)} onChange={fetchOrder} />}
       {shared && (
         <div className="card" style={{ marginBottom: 12, border: '1px solid var(--teal)' }}>
           <p className="section-title" style={{ color: 'var(--teal)' }}>🔗 Открыта ссылка на 3D-модель</p>

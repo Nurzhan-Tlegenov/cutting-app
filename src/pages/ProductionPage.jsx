@@ -20,6 +20,7 @@ import { PostsSection, StageTrack } from '../components/ProductionPosts'
 import { productionStageMap, postsList } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
 import ProductionBoard from '../components/ProductionBoard'
+import StageReturn from '../components/StageReturn'
 import { planStages } from '../lib/posts'
 import { sendAppeal } from '../lib/messages'
 import { membersList, myWorkplaces, prodView, workPid } from '../lib/workplaces'
@@ -31,7 +32,7 @@ import Drill6Viewer from '../components/Drill6Viewer'
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
 const digits = v => String(v || '').replace(/\D/g, '')
 // исполненный заказ уходит из производства совсем (остаётся только в «Итогах» — для статистики), поэтому разделов «Исполнены» и «Архив» нет
-const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['all', 'Все']]
+const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['all', 'Все'], ['done', 'Исполнены']]   // «Исполнены» — последние: вернуть в техпроцесс, если что-то нажали не так
 const MARGINS = [['kerf_width', 'Рез / фреза'], ['margin_left', 'Отступ ←'], ['margin_right', 'Отступ →'], ['margin_top', 'Отступ ↑'], ['margin_bottom', 'Отступ ↓']]
 // то же для ХДФ / ДВП (задние стенки): тонкий материал режется на пиле — рез и отступы свои
 const HDF_MARGINS = MARGINS.map(([k, l]) => ['hdf_' + k, k === 'kerf_width' ? 'Рез (пила)' : l])
@@ -61,6 +62,7 @@ export default function ProductionPage() {
   const [wps, setWps] = useState([])                              // где я сотрудник (своего производства нет)
   const [stages, setStages] = useState({})                        // где сейчас заказы: id -> { name (пост), status, done, total }
   const loadStages = () => productionStageMap().then(r => setStages(r.data || {}))
+  const [reopen, setReopen] = useState(null)                  // исполненный заказ — вернуть в техпроцесс (выбор поста)
   const [tab, setTab] = useKeptState('prodTab', 'orders')    // вкладка кабинета: orders | board | settings
   // переход из бокового меню: сразу нужная вкладка
   const loc = useLocation()
@@ -168,7 +170,8 @@ export default function ProductionPage() {
   // заказы в архиве — в своём разделе; в остальных разделах и счётчиках их нет
   const live = orders.filter(o => !archived.has(o.id) && o.status !== 'done')
   const count = { new: live.filter(o => o.status === 'new').length, work: live.filter(o => o.status === 'discussion' || o.status === 'inwork').length, done: live.filter(o => o.status === 'done').length, all: live.length, archive: archived.size }
-  const shown = live.filter(o => filter === 'all' || (filter === 'new' ? o.status === 'new' : o.status === 'discussion' || o.status === 'inwork'))
+  const doneList = orders.filter(o => o.status === 'done').sort((a, b) => String(b.done_at || '').localeCompare(String(a.done_at || ''))).slice(0, 40)
+  const shown = filter === 'done' ? doneList : live.filter(o => filter === 'all' || (filter === 'new' ? o.status === 'new' : o.status === 'discussion' || o.status === 'inwork'))
   const btn = kind => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : 'var(--text-muted)' })
 
   return (
@@ -290,7 +293,7 @@ export default function ProductionPage() {
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             {FILTERS.map(([id, label]) => (
               <button key={id} type="button" onClick={() => setFilter(id)} style={{ flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, background: filter === id ? 'var(--blue)' : 'var(--bg2)', color: filter === id ? 'white' : 'var(--text-muted)' }}>
-                {label}{count[id] ? ` · ${count[id]}` : ''}
+                {label}{id !== 'done' && count[id] ? ` · ${count[id]}` : ''}
               </button>
             ))}
           </div>
@@ -344,6 +347,7 @@ export default function ProductionPage() {
                     {o.status !== 'inwork' && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять</button>}
                     {o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
                     {/* по постам «Исполнен» ставится сам после последнего поста; без маршрута — кнопкой */}
+                    {o.status === 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setReopen(o)}>↩ Вернуть в техпроцесс</button>}
                     {o.status === 'inwork' && !stages[o.id] && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => finish(o)}>Исполнен</button>}
                     {/* отменить своё «Принять»: пока ни один пост заказ не взял — заказ снова новый */}
                     {o.status === 'inwork' && (!stages[o.id] || (stages[o.id].status === 'queued' && !stages[o.id].done)) && <button type="button" disabled={busy === o.id} style={btn()}
@@ -361,6 +365,9 @@ export default function ProductionPage() {
           </>}
         </>
       )}
+      {reopen && <StageReturn reopen orderId={reopen.id} title={orderTitle(reopen)}
+        onNoRoute={async () => { const r = await productionSetStatus(reopen.id, 'inwork'); if (r.error) { window.alert(r.error); return false } await productionArchive(reopen.id, false) }}
+        onClose={ch => { setReopen(null); if (ch) { setFilter('work'); load(); loadStages() } }} />}
       {xmlView && <Drill6Viewer title="Просмотр XML присадки" onClose={() => setXmlView(false)} />}
       {prices && prod && <PriceList production={prod} onClose={() => setPrices(false)} />}
       <BottomNav />

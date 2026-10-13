@@ -1,6 +1,6 @@
 // Рабочие посты производства (см. migration_posts.sql): техпроцесс, по которому заказ идёт как по канбану.
 import { supabase } from './supabase'
-import { ruleOf, stageParts, loadOrderParts } from './stageParts'
+import { ruleOf, defaultRule, stageParts, loadOrderParts } from './stageParts'
 
 export const POSTS_SQL_HINT = 'Рабочие посты ещё не включены в базе: выполните migration_posts.sql в Supabase (SQL Editor) — один раз.'
 export const POST_PRESETS = ['Раскрой', 'Кромление', 'Присадка', 'Сборка', 'Упаковка', 'Доставка']
@@ -47,12 +47,14 @@ export async function setOrderOp(orderId, postId, on) { const r = await call('se
  */
 export async function planStages(orderId) {
   const st = await orderStages(orderId)
-  const open = (st.data || []).filter(s => (s.status === 'waiting' || s.status === 'queued') && !Number(s.scanned) && ['edge', 'drill'].includes(ruleOf(s.rule, s.name).list))
+  // вид поста: по его правилу, а если «без списка деталей» — по названию (кромление / присадка): нужен ли пост, решают детали заказа
+  const kindOf = s => { const r = ruleOf(s.rule, s.name); if (['edge', 'drill'].includes(r.list)) return r; const d = defaultRule(s.name); return ['edge', 'drill'].includes(d.list) ? d : null }
+  const open = (st.data || []).filter(s => (s.status === 'waiting' || s.status === 'queued') && !Number(s.scanned) && kindOf(s))
   if (!open.length) return 0
   const d = await loadOrderParts(orderId)
   // деталей не видно (нет доступа или ещё не загрузились) — ничего не пропускаем: иначе заказ проскочит посты
   if (!d.order || !d.rows.length) return 0
-  const empty = open.filter(s => { try { return !stageParts(d.order, d.rows, ruleOf(s.rule, s.name)).length } catch { return false } }).map(s => s.post_id).filter(Boolean)
+  const empty = open.filter(s => { try { return !stageParts(d.order, d.rows, kindOf(s)).length } catch { return false } }).map(s => s.post_id).filter(Boolean)
   if (!empty.length) return 0
   // база сама перепроверяет: сколько деталей видело приложение, есть ли кромка, не «без списка деталей» ли пост
   const r = await call('stage_auto_skip_v2', { p_order: orderId, p_posts: empty, p_seen: d.rows.length })
@@ -97,3 +99,10 @@ export async function stageUnaccept(stageId) { const r = await call('stage_unacc
 /** Журнал движения заказа по постам: [{ kind, post, at, who, me }] | null — нет доступа */
 export async function orderStageLog(orderId) { const r = await call('order_stage_log', { p_order: orderId }); return r.missing ? { error: LOG_HINT, missing: true } : r }
 export const STAGES_UNFINISHED = 'Заказ ещё идёт по техпроцессу: «Исполнен» ставится сам, когда выполнен последний пост.'
+
+/** Вернуть заказ (и исполненный) в техпроцесс на выбранный пост (migration_stage_reopen.sql) */
+export async function stageReopen(orderId, stageId) {
+  const r = await call('stage_reopen', { p_order: orderId, p_stage: stageId })
+  if (r.missing) return { error: 'Возврат в техпроцесс ещё не включён в базе: выполните migration_stage_reopen.sql в Supabase (SQL Editor) — один раз.' }
+  return r
+}

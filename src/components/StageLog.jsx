@@ -56,7 +56,7 @@ function findQueued(log, e) {
 }
 
 /** Техпроцесс в карточке заказа: маршрут по постам, принять / отменить, журнал. Заказчику не показывается */
-export default function OrderTechProcess({ orderId, status, manage = false }) {
+export default function OrderTechProcess({ orderId, status, manage = false, onChange }) {
   const [log, setLog] = useState(undefined)            // undefined — загрузка, null — нет доступа
   const [tick, setTick] = useState(0)
   const [open, setOpen] = useState(true)
@@ -70,7 +70,7 @@ export default function OrderTechProcess({ orderId, status, manage = false }) {
   return (
     <div className="card" style={{ marginBottom: 12 }}>
       <p className="section-title" style={{ marginBottom: 4 }}>Техпроцесс</p>
-      <StageTrack orderId={orderId} status={status} manage={manage} refresh={tick} onChange={() => setTick(t => t + 1)} />
+      <StageTrack orderId={orderId} status={status} manage={manage} refresh={tick} onChange={() => { setTick(t => t + 1); onChange?.() }} />
       <div onClick={() => setOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, cursor: 'pointer', fontSize: 12.5, fontWeight: 500, color: 'var(--text-muted)' }}>
         История движения{log.length ? ` · ${log.length}` : ''}<span style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .25s' }}>▾</span>
       </div>
