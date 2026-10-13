@@ -15,6 +15,7 @@
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeometry'
 import { detailHoles, placedTurns } from './partHoles'
 import { smoothLoop, arcRuns } from './arcFit'
+import { postView } from './postTools'
 
 const EPS = 0.05
 const ROUGH_ALLOWANCE = 2        // черновые проходы выборки не доходят до контура на 2 мм — их подчищает обход по периметру
@@ -300,6 +301,8 @@ function levels(top, bottom, maxPass) {
   const n = Math.max(1, Math.ceil((top - bottom) / (maxPass > 0 ? maxPass : 1e9) - 1e-9))
   return Array.from({ length: n }, (_, i) => top - (top - bottom) * (i + 1) / n)
 }
+// сверло стоит в присадочной голове станка (у постпроцессора включена голова, у сверла — «в присадочной голове»)
+export const inHead = (post, t) => !!post?.drillHead && t?.type === 'drill' && !!t.inHead
 const tpl = (s, tool) => String(s || '').replace(/\{T\}/gi, String(Math.round(n0(tool.t)))).replace(/\{S\}/gi, String(Math.round(n0(tool.rpm))))
 
 function loopMetric(loop) {
@@ -672,7 +675,9 @@ export function routeContours(list, from, sheetRect, smallFirst = true) {
  * sheet — лист из раскроя, geo — геометрия листа (sheetGeo), details — детали материала, thickness — толщина,
  * cnc — настройки (см. cncSettings.js).  -> { text, lines, warnings, tools }
  */
-export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
+export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll }) {
+  // инструменты и обработка — те, что видит этот постпроцессор (свой набор у настроенного по чужой программе, см. postTools.js)
+  const cnc = postView(cncAll)
   const post = cnc.posts.find(p => p.id === cnc.post) || cnc.posts[0]
   const T = Number(thickness) || 16
   const warn = new Set()
@@ -867,7 +872,12 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const seq = []
   let cur = [0, 0]
   const add = list => { const o = shortenTravel(nearestOrder(list, cur), cur); seq.push(...o); if (o.length) cur = o[o.length - 1].at }
-  const stage0 = jobs.filter(j => j.stage === 0)
+  // Присадочная голова (если у станка она есть и сверло стоит в ней): свёрла меняются на ходу, поэтому все отверстия
+  // головы — одним проходом по листу, без группировки по диаметру (портал не ездит туда-сюда). Потом — шпиндель.
+  const headJobs = jobs.filter(j => j.stage === 0 && inHead(post, j.tool))
+  if (headJobs.length) add(headJobs)
+  if (headJobs.length && !String(post.cmdHeadStart || '').trim()) warn.add('Команды смены инструмента для присадочной головы не заданы (Команды → «Присадочная голова»): свёрла головы в программе не включатся.')
+  const stage0 = jobs.filter(j => j.stage === 0 && !inHead(post, j.tool))
   ;[...new Set(stage0.map(j => j.tool))].sort((a, b) => toolRank(a) - toolRank(b)).forEach(t => {
     add(stage0.filter(j => j.tool === t))          // инструмент проходит всё своё одним кратчайшим маршрутом, потом — смена
   })
@@ -901,7 +911,8 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc }) {
   const used = []
   for (const j of seq) {
     if (j.tool !== active) {
-      out.raw(tpl(post.cmdToolStart, j.tool)); out.raw(tpl(post.cmdToolEnd, j.tool))
+      if (inHead(post, j.tool)) { out.raw(tpl(post.cmdHeadStart, j.tool)); out.raw(tpl(post.cmdHeadEnd, j.tool)) }   // своя команда — включается голова, а не шпиндель
+      else { out.raw(tpl(post.cmdToolStart, j.tool)); out.raw(tpl(post.cmdToolEnd, j.tool)) }
       out.pos = [null, null, null]
       active = j.tool
       if (!used.includes(j.tool)) used.push(j.tool)

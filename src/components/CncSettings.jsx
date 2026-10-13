@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState, useRef } from 'react'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
-import { DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
+import { normOps, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -143,6 +143,16 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
       </div>
       {drill && <Drill6Basic post={post} set={set} router={router} />}
       {!drill && <>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Присадочная голова</Title>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!post.drillHead} onChange={e => set({ drillHead: e.target.checked })} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
+          У станка есть сверлильно-присадочная голова (кроме фрезерного шпинделя)
+        </label>
+        <Hint>{post.drillHead
+          ? 'Свёрла, отмеченные в «Инструментах» как «в присадочной голове», включаются своей командой (Команды → «Присадочная голова») и сверлят все отверстия одним проходом по листу, меняясь на ходу. Потом работает шпиндель. Остальные свёрла и фрезы — через шпиндель, как обычно.'
+          : 'Только шпиндель с автосменой: все свёрла и фрезы включаются одной командой смены инструмента.'}</Hint>
+      </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Маркировочный стол</Title>
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
@@ -395,9 +405,10 @@ export function CncSaved({ cnc, onChange }) {
 }
 
 // Самонастройка (мастер-аккаунт): загрузить готовую управляющую программу станка из другой программы раскроя —
-// приложение «срисует» служебные команды (начало, смена инструмента, конец) и подставит их сюда.
-// Инструменты, обороты и остальное пользователь настраивает сам — в своих вкладках.
-function LearnFromProgram({ post, onApply }) {
+// приложение «срисует» служебные команды (начало, смена инструмента, конец — для шпинделя и присадочной головы)
+// и настроит постпроцессор целиком: свои инструменты с номерами, диаметрами, оборотами и подачами, врезание фрезы,
+// высоту безопасности. Инструменты привязываются к этому постпроцессору и не смешиваются с инструментами других станков.
+function LearnFromProgram({ post, onApply, tools = [] }) {
   const file = useRef(null)
   const [res, setRes] = useState(null)        // { ...learnFromProgram, ext, fileName }
   const [err, setErr] = useState('')
@@ -415,14 +426,19 @@ function LearnFromProgram({ post, onApply }) {
     } catch (x) { setErr(`Файл не прочитался: ${x?.message || x}`) }
   }
   const apply = () => {
-    if (!window.confirm(`Подставить команды из «${res.fileName}» в «${post.name}»?\nТекущие команды заменятся.`)) return
+    if (!window.confirm(`Настроить «${post.name}» по программе «${res.fileName}»?\nКоманды, инструменты этого постпроцессора и обработка заменятся. Инструменты других станков не тронутся.`)) return
     onApply({
       cmdStart: res.cmdStart, cmdToolStart: res.cmdToolStart, cmdToolEnd: res.cmdToolEnd, cmdEnd: res.cmdEnd,
       ...(res.arcs ? { arcs: res.arcs } : {}),
       ...(res.park ? { endX: '', endY: '' } : {}),                       // парковка уже в конце программы — своя не нужна
       ...(res.ext && /^(nc|tap|cnc|gcode|ngc|txt|mpf|iso|ptp|anc|eia|h|g)$/i.test(res.ext) ? { ext: res.ext } : {}),
+      // два вида смены: присадочная голова — свои команды, у станка включается голова
+      ...(res.head ? { drillHead: true, cmdHeadStart: res.head.cmdHeadStart, cmdHeadEnd: res.head.cmdHeadEnd } : { drillHead: false }),
+      ...(res.learned?.post.safeZ != null ? { safeZ: res.learned.post.safeZ } : {}),
+      ...(res.learned?.post.zRef ? { zRef: res.learned.post.zRef } : {}),
+      ...(res.learned?.post.millOver != null ? { millOver: res.learned.post.millOver } : {}),
       learnedFrom: res.fileName, learnedAt: Date.now(),
-    })
+    }, res.learned)
     setRes(null)
   }
   const pre = { fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', background: 'var(--bg2)', borderRadius: 8, padding: '6px 8px', margin: '2px 0 8px', minHeight: 18 }
@@ -433,7 +449,7 @@ function LearnFromProgram({ post, onApply }) {
         style={{ width: '100%', padding: '9px 12px', borderRadius: 12, border: '1px dashed var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', fontSize: 13, cursor: 'pointer' }}>
         📂 Загрузить управляющую программу — срисовать команды
       </button>
-      <Hint>Возьмите готовую УП этого станка из другой программы (лучше с двумя сменами инструмента). Приложение найдёт начало программы, смену инструмента и конец, номер инструмента заменит на {'{T}'}, обороты — на {'{S}'}. Инструменты и обработку настраиваете сами.</Hint>
+      <Hint>Возьмите готовую УП этого станка из другой программы (лучше лист, где есть и сверление, и раскрой). Приложение срисует команды (номер инструмента → {'{T}'}, обороты → {'{S}'}), узнает присадочную голову, создаст инструменты этого станка с оборотами и подачами и настроит врезание и высоты.</Hint>
       {post.learnedFrom && !res && <Hint>{`Команды срисованы с «${post.learnedFrom}»${post.learnedAt ? ` · ${new Date(post.learnedAt).toLocaleDateString('ru-RU')}` : ''}.`}</Hint>}
       {err && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '6px 0 0' }}>{err}</p>}
       {res && (
@@ -441,17 +457,32 @@ function LearnFromProgram({ post, onApply }) {
           <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Найдено в «{res.fileName}»</div>
           {res.report.map((l, i) => <div key={i} style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>• {l}</div>)}
           {res.warnings.map((l, i) => <div key={'w' + i} style={{ fontSize: 11.5, color: 'var(--amber)' }}>⚠ {l}</div>)}
-          {[['Начало программы', res.cmdStart], ['Смена инструмента — начало', res.cmdToolStart], ['Смена инструмента — конец', res.cmdToolEnd], ['Конец программы', res.cmdEnd]].map(([l, v]) => (
+          {!!res.learned?.tools.length && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 2 }}>Инструменты этого постпроцессора{tools.some(t => t.postId === post.id) ? ' (заменят прежние срисованные)' : ''}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', columnGap: 8, rowGap: 2, fontSize: 12, background: 'var(--bg2)', borderRadius: 8, padding: '6px 8px' }}>
+                {res.learned.tools.map(t => [
+                  <b key={t.t + 'a'} style={{ fontFamily: 'monospace' }}>T{t.t}</b>,
+                  <span key={t.t + 'b'}>{t.type === 'mill' ? 'Фреза' : 'Сверло'} {t.d ? 'Ø' + t.d : <span style={{ color: 'var(--amber)' }}>Ø?</span>}{t.head ? <span style={{ color: 'var(--amber)' }}> · голова</span> : ''}</span>,
+                  <span key={t.t + 'c'} style={{ color: 'var(--text-muted)' }}>{t.rpm ? `S${t.rpm}` : ''}</span>,
+                  <span key={t.t + 'd'} style={{ color: 'var(--text-muted)' }}>{t.feed ? `F${t.feed}` : ''}{t.inFeed ? ` / вход F${t.inFeed}` : ''}</span>,
+                ])}
+              </div>
+            </div>
+          )}
+          {[['Начало программы', res.cmdStart], [res.head ? 'Смена инструмента (шпиндель) — начало' : 'Смена инструмента — начало', res.cmdToolStart], [res.head ? 'Смена инструмента (шпиндель) — конец' : 'Смена инструмента — конец', res.cmdToolEnd],
+            ...(res.head ? [['Смена сверла в голове — начало', res.head.cmdHeadStart], ['Смена сверла в голове — конец', res.head.cmdHeadEnd]] : []),
+            ['Конец программы', res.cmdEnd]].map(([l, v]) => (
             <div key={l} style={{ marginTop: 6 }}>
               <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{l}</div>
               <div style={pre}>{v || <span style={{ color: 'var(--text-hint)' }}>— пусто —</span>}</div>
             </div>
           ))}
           <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-            <button type="button" className="btn-primary" onClick={apply} style={{ flex: 1, padding: '8px 12px', fontSize: 13 }}>Подставить в команды</button>
+            <button type="button" className="btn-primary" onClick={apply} style={{ flex: 1, padding: '8px 12px', fontSize: 13 }}>Настроить постпроцессор</button>
             <button type="button" onClick={() => setRes(null)} style={{ padding: '8px 14px', borderRadius: 20, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>Отмена</button>
           </div>
-          <Hint>После подставки команды можно поправить вручную ниже. Проверьте на симуляторе и на станке, прежде чем резать.</Hint>
+          <Hint>Потом всё правится вручную: команды — ниже, инструменты и обработка — на своих вкладках. Проверьте на симуляторе и на станке, прежде чем резать.</Hint>
         </div>
       )}
     </div>
@@ -463,6 +494,30 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
   const set = patch => {
     if (post.shared && !isMaster) { const p = { ...post, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: post.name + ' (мой)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }); return }
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
+  }
+  // Настроить постпроцессор по программе — одним изменением: команды и режимы станка, свои инструменты
+  // (привязаны к этому постпроцессору, у других станков не видны) и своя обработка контуров
+  const applyLearned = (patch, learned) => {
+    const lt = learned?.tools || []
+    const made = lt.map(x => {
+      const base = x.type === 'mill' ? DEFAULT_MILL() : DEFAULT_DRILL()
+      const pick = (v, def) => (v != null && v !== '' ? v : def)
+      return {
+        ...base, id: newId(), postId: post.id, t: x.t, d: x.d || '',
+        name: `${x.type === 'mill' ? 'Фреза' : 'Сверло'}${x.d ? ` Ø${x.d}` : ''} (T${x.t})`,
+        rpm: pick(x.rpm, base.rpm), feed: pick(x.feed, base.feed),
+        ...(x.type === 'mill' ? { inFeed: pick(x.inFeed, base.inFeed), maxPass: pick(x.maxPass, base.maxPass) } : { inHead: !!x.head }),
+      }
+    })
+    const keep = (cnc.tools || []).filter(t => t.postId !== post.id)
+    const main = made.find(t => t.type === 'mill' && Math.round(num(t.t)) === learned?.ops.mainT) || made.find(t => t.type === 'mill')
+    const ang = learned?.ops.angle
+    const own = !made.length ? post.ownOps : normOps({
+      outer: { tool: main?.id || '', ...(ang ? { entry: 'ramp', angle: ang } : {}) },
+      cutout: { tool: main?.id || '', ...(ang ? { entry: 'ramp', angle: ang } : {}) },
+      groove: { tool: main?.id || '' },
+    })
+    onChange({ ...cnc, tools: made.length ? [...keep, ...made] : cnc.tools, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch, ...(own ? { ownOps: own } : {}) } : p)) })
   }
   const Box = ({ k, label, rows = 3 }) => (
     <div style={{ marginBottom: 10 }}>
@@ -481,11 +536,19 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
   return (
     <div className="card">
       <Title>Команды · {post.name}</Title>
-      {isMaster && <LearnFromProgram post={post} onApply={set} />}
+      {isMaster && <LearnFromProgram post={post} tools={cnc.tools || []} onApply={applyLearned} />}
       {Box({ k: 'cmdStart', label: 'Начало программы' })}
       {Box({ k: 'cmdToolStart', label: 'Смена инструмента — начало', rows: 5 })}
       {Box({ k: 'cmdToolEnd', label: 'Смена инструмента — конец' })}
       {Box({ k: 'cmdEnd', label: 'Конец программы' })}
+      {post.drillHead && (
+        <div style={{ margin: '4px 0 10px', padding: '8px 10px', borderRadius: 12, background: 'var(--amber-light)' }}>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Присадочная голова</div>
+          {Box({ k: 'cmdHeadStart', label: 'Смена сверла в голове — начало', rows: 4 })}
+          {Box({ k: 'cmdHeadEnd', label: 'Смена сверла в голове — конец (включение головы)' })}
+          <Hint>Для свёрл «в присадочной голове». Остальные инструменты — командами смены выше (шпиндель).</Hint>
+        </div>
+      )}
       <Hint>Каждая команда — с новой строки. В смене инструмента вместо {'{T}'} подставляется номер инструмента в магазине, вместо {'{S}'} — обороты шпинделя.</Hint>
       <div style={{ marginTop: 10 }}><SaveSnapshotButton cnc={cnc} onChange={onChange} /></div>
     </div>
@@ -496,6 +559,9 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
 export function CncTools({ cnc, onChange }) {
   const [edit, setEdit] = useState(null)       // инструмент в форме
   const tools = cnc.tools || []
+  const headPost = cnc.posts.find(p => !isDrill6(p) && p.drillHead)     // станок с присадочной головой (если есть)
+  const ap = activePost(cnc)
+  const ownSet = tools.length > 0 && tools.every(t => t.postId && t.postId === ap?.id)   // свои инструменты постпроцессора (см. postTools.js)
   const save = () => {
     const t = { ...edit, name: (edit.name || '').trim() || (edit.type === 'mill' ? 'Фреза' : 'Сверло') + ' ' + r1(edit.d) + ' мм' }
     onChange({ ...cnc, tools: tools.some(x => x.id === t.id) ? tools.map(x => (x.id === t.id ? t : x)) : [...tools, t] })
@@ -531,6 +597,12 @@ export function CncTools({ cnc, onChange }) {
               hint="Глубже — обработка делится на несколько проходов." />
           </div>
         )}
+        {!mill && headPost && (
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!edit.inHead} onChange={ev => e('inHead', ev.target.checked)} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
+            <span>Стоит в присадочной голове<span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>{`Включается командой головы у «${headPost.name}». Без галочки — сверло в шпинделе.`}</span></span>
+          </label>
+        )}
         <div className="row2" style={{ marginTop: 8 }}>
           <Num label={`${mill ? 5 : 4}. Обороты шпинделя`} unit="об/мин" value={edit.rpm} onChange={v => e('rpm', v)} />
           <Num label={`${mill ? 6 : 5}. Основная подача`} unit="мм/мин" value={edit.feed} onChange={v => e('feed', v)} hint="в материале" />
@@ -565,6 +637,7 @@ export function CncTools({ cnc, onChange }) {
   }
   return (
     <>
+      {ownSet && <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--blue-light)', borderRadius: 10, padding: '7px 10px', margin: '0 0 10px' }}>{`Инструменты постпроцессора «${ap.name}»${ap.learnedFrom ? ` — срисованы с «${ap.learnedFrom}»` : ''}. Они только у этого станка: у других постпроцессоров не видны.`}</p>}
       {[['mill', 'Фрезы'], ['drill', 'Свёрла']].map(([type, title]) => {
         const list = tools.filter(t => t.type === type).sort((a, b) => num(a.t) - num(b.t))
         return (
@@ -576,7 +649,7 @@ export function CncTools({ cnc, onChange }) {
                 <div key={t.id} className="card" onClick={() => setEdit({ ...t })} style={{ padding: '10px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 13, background: 'var(--blue-light)', color: 'var(--blue-dark)', padding: '3px 7px', borderRadius: 6 }}>T{t.t}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 500 }}>{t.name}</div>
+                    <div style={{ fontSize: 14, fontWeight: 500 }}>{t.name}{headPost && t.type === 'drill' && t.inHead ? <span style={{ fontSize: 10.5, fontWeight: 500, marginLeft: 6, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)' }}>голова</span> : null}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Ø{r1(t.d)} · {t.rpm} об/мин · подача {t.feed}{type === 'mill' ? ` · проход до ${r1(t.maxPass)} мм` : ''}</div>
                   </div>
                   <span style={{ color: 'var(--text-hint)' }}>›</span>

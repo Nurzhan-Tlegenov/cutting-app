@@ -38,7 +38,8 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
     if (!isDrill6(p) && !cnc.posts.some(q => q.id !== p.id && !isDrill6(q))) { window.alert('Это единственный раскроечный станок — его удалить нельзя.'); return }
     if (!window.confirm(`Удалить постпроцессор «${p.name}»?\nЕго настройки пропадут (сохранённые в «Мои постпроцессоры» останутся).`)) return
     const posts = cnc.posts.filter(q => q.id !== p.id)
-    onChange({ ...toggleUse6(cnc, p.id, false), posts, post: cnc.post === p.id ? posts[0].id : cnc.post, router: cnc.router === p.id ? '' : cnc.router })
+    // свои инструменты постпроцессора (срисованные с программы) уходят вместе с ним — другим станкам они не видны
+    onChange({ ...toggleUse6(cnc, p.id, false), posts, tools: (cnc.tools || []).filter(t => t.postId !== p.id), post: cnc.post === p.id ? posts[0].id : cnc.post, router: cnc.router === p.id ? '' : cnc.router })
   }
   const rename = p => {
     const n = window.prompt('Название постпроцессора', p.name)

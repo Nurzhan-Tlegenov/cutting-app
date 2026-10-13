@@ -2,7 +2,7 @@ import { useKeptState } from '../hooks/useKeptState'
 import { CncBasic, CncCommands, CncTools, CncOps } from './CncSettings'
 import PostPicker from './PostPicker'
 import { useCnc } from '../hooks/useCnc'
-import { routerPost, drillPosts } from '../lib/cncSettings'
+import { routerPost, drillPosts, postView, postBack } from '../lib/cncSettings'
 
 import CncLoader from './CncLoader'
 
@@ -16,6 +16,8 @@ export default function CncSetup({ prodId = null }) {
   if (!ready) return <CncLoader compact label="Загружаем постпроцессоры…" />
   const chip = on => ({ flex: '0 0 auto', padding: '6px 11px', borderRadius: 20, border: 'none', fontSize: 12, background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
   const drills = drillPosts(cnc)
+  // инструменты и обработка открытого постпроцессора (у настроенного по чужой программе — свои, см. postTools.js)
+  const view = postView(cnc), vchange = v => change(postBack(cnc, v))
   return (
     <div style={{ marginTop: 6 }}>
       <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 6px' }}>
@@ -28,8 +30,8 @@ export default function CncSetup({ prodId = null }) {
       </div>
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
-      {tab === 'tools' && <CncTools cnc={cnc} onChange={change} />}
-      {tab === 'ops' && <CncOps cnc={cnc} onChange={change} layers={null} />}
+      {tab === 'tools' && <CncTools cnc={view} onChange={vchange} />}
+      {tab === 'ops' && <CncOps cnc={view} onChange={vchange} layers={null} />}
     </div>
   )
 }

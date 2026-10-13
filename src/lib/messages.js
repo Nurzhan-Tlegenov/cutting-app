@@ -70,7 +70,8 @@ export async function listSharedPosts() {
 }
 export async function saveSharedPost(post, user) {
   try {
-    const data = { ...post }; delete data.shared; delete data.forAll; delete data.ownerId
+    // инструменты и их назначения у каждого пользователя свои: своя обработка постпроцессора (ownOps) не публикуется
+    const data = { ...post }; delete data.shared; delete data.forAll; delete data.ownerId; delete data.ownOps
     const { error } = await supabase.from('shared_posts').upsert({ id: post.id, owner_id: user.id, name: post.name, data, updated_at: new Date().toISOString() })
     return error ? fail(error) : { ok: true }
   } catch (e) { return fail(e) }

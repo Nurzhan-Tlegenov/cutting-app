@@ -28,6 +28,11 @@ export const DEFAULT_POST = () => ({
   cmdToolStart: 'G53 Z0\nM05\nM06 T{T}\nG43 H{T}\nM03 S{S}',
   cmdToolEnd: 'G53 Z0\nG54',
   cmdEnd: 'M05\nM30',
+  // Присадочная голова (у станков, где кроме фрезерного шпинделя есть сверлильная группа): свёрла, отмеченные
+  // «в присадочной голове», включаются своей командой, а не командой шпинделя, и сверлят всё одним проходом по листу
+  drillHead: false,
+  cmdHeadStart: '',
+  cmdHeadEnd: '',
 })
 
 // Шестисторонний сверлильно-присадочный станок: программа — XML (формат SWJ), один файл на деталь (см. drill6Xml.js).
@@ -69,7 +74,8 @@ export function normalizeCnc(raw, shared = []) {
   let posts = [...mine, ...shared.filter(p => !mine.some(q => q.id === p.id)).map(p => ({ ...(isDrill6(p) ? DEFAULT_DRILL6() : DEFAULT_POST()), ...p, shared: true }))]
   if (!posts.some(p => !isDrill6(p))) posts = [DEFAULT_POST(), ...posts]   // раскроечный станок есть всегда
   const tools = Array.isArray(c.tools) ? c.tools : []
-  const d = DEFAULT_OPS(), o = c.ops || {}
+  // своя обработка постпроцессора, настроенного по чужой программе (см. postTools.js)
+  posts = posts.map(p => (p.ownOps && !p.shared ? { ...p, ownOps: normOps(p.ownOps) } : p))
   return {
     posts, post: posts.some(p => p.id === c.post) ? c.post : posts[0].id, tools,
     // «Мои постпроцессоры» — сохранённые кнопкой «Сохранить» настройки станка: { id, name, kind, at, post, ops? }
@@ -77,9 +83,14 @@ export function normalizeCnc(raw, shared = []) {
     // какими постпроцессорами выпускать программы одновременно: раскроечный (один — G-код по листам) и присадочные (сколько угодно)
     router: posts.some(p => p.id === c.router && !isDrill6(p)) ? c.router : '',
     use6: (Array.isArray(c.use6) ? c.use6 : []).filter(id => posts.some(p => p.id === id && isDrill6(p))),
-    ops: { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes } },
+    ops: normOps(c.ops),
   }
 }
+export function normOps(raw) {
+  const d = DEFAULT_OPS(), o = raw || {}
+  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes } }
+}
+export { postView, postBack, hasOwnTools } from './postTools'
 
 export const getCnc = user => normalizeCnc(getUserSettings(user).cnc)
 export const fetchCnc = async user => normalizeCnc((await fetchUserSettings(user)).cnc)

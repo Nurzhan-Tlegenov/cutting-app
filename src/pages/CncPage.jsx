@@ -10,7 +10,7 @@ import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettin
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { routerPost, drillPosts, toggleUse6, isDrill6 } from '../lib/cncSettings'
+import { routerPost, drillPosts, toggleUse6, isDrill6, postView, postBack } from '../lib/cncSettings'
 import { useCnc } from '../hooks/useCnc'
 import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
@@ -89,20 +89,25 @@ export default function CncPage() {
   const post = routerPost(cnc)                       // раскроечный станок: G-код по листам
   const drills = drillPosts(cnc)                     // присадочные станки, выпускающие программы вместе с ним
   const allDrills = cnc.posts.filter(isDrill6)
+  // инструменты и обработка, которые видит раскроечный станок (у настроенного по чужой программе — свои, см. postTools.js)
+  const rview = useMemo(() => postView({ ...cnc, post: post.id }), [cnc, post.id])
+  // вкладки «Инструменты» и «Обработка» — для постпроцессора, открытого в настройках
+  const tview = useMemo(() => postView(cnc), [cnc])
+  const tchange = v => change(postBack(cnc, v))
   const sel = mat ? (picked ?? mat.sheets.map((_, i) => i)) : []
   const toggle = i => { setPicked(sel.includes(i) ? sel.filter(x => x !== i) : [...sel, i].sort((a, b) => a - b)); setBuilt(null) }
 
   // что не назначено — видно сразу, до создания программы
   const pre = useMemo(() => {
     if (!layers) return []
-    const w = [], has = t => (cnc.tools || []).some(x => x.id === t)
-    if (!has(cnc.ops.outer.tool)) w.push('контур детали')
-    if (layers.cutouts && !has(cnc.ops.cutout.tool)) w.push(`контур выреза (${layers.cutouts} шт.)`)
-    layers.grooveLayers.forEach(l => { if (!has(grooveOpFor(cnc.ops, l.key).tool)) w.push(`пазы ${l.width} × ${l.depth} (${l.count} шт.)`) })
-    layers.pockets.forEach(l => { if (!has(cnc.ops.pockets?.[pocketKey(l.depth)]?.tool)) w.push(`выемки глубиной ${l.depth} (${l.count} шт.)`) })
-    layers.holes.forEach(l => { if (!holeToolFor(l, cnc)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
+    const w = [], has = t => (rview.tools || []).some(x => x.id === t)
+    if (!has(rview.ops.outer.tool)) w.push('контур детали')
+    if (layers.cutouts && !has(rview.ops.cutout.tool)) w.push(`контур выреза (${layers.cutouts} шт.)`)
+    layers.grooveLayers.forEach(l => { if (!has(grooveOpFor(rview.ops, l.key).tool)) w.push(`пазы ${l.width} × ${l.depth} (${l.count} шт.)`) })
+    layers.pockets.forEach(l => { if (!has(rview.ops.pockets?.[pocketKey(l.depth)]?.tool)) w.push(`выемки глубиной ${l.depth} (${l.count} шт.)`) })
+    layers.holes.forEach(l => { if (!holeToolFor(l, rview)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
     return w
-  }, [layers, cnc])
+  }, [layers, rview])
 
   // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
   const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName })
@@ -209,7 +214,7 @@ export default function CncPage() {
   }
   const makeShare = async () => {
     setShare(x => ({ ...x, busy: true, error: '' }))
-    const tools = Object.fromEntries((cnc.tools || []).map(x => [num(x.t), num(x.d)]))
+    const tools = Object.fromEntries((rview.tools || []).map(x => [num(x.t), num(x.d)]))
     const payload = packSim({ text: sim.text, kinds: sim.kinds, opIds: sim.opIds, sheet: simView?.sheet, outlines: simView?.outlines, thickness: mat.thickness, rapid: num(post.rapid) || 20000, tools, zShift: sim.zShift })
     const r = await saveSimShare(id, sim.name, user.id, payload)
     setShare(x => ({ ...x, busy: false, code: r.code || x.code, error: r.error || '', fresh: !r.error }))
@@ -225,7 +230,7 @@ export default function CncPage() {
     const url = simShareUrl(share.code)
     try { await navigator.clipboard.writeText(url); setShare(x => ({ ...x, copied: true })) } catch { window.prompt('Скопируйте ссылку', url) }
   }
-  const toolDia = useMemo(() => { const m = new Map((cnc.tools || []).map(x => [num(x.t), num(x.d)])); return t => m.get(t) || 0 }, [cnc])
+  const toolDia = useMemo(() => { const m = new Map((rview.tools || []).map(x => [num(x.t), num(x.d)])); return t => m.get(t) || 0 }, [rview])
 
   if (loading) return <div className="page"><CncLoader label="Открываем ЧПУ…" /></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
@@ -412,8 +417,8 @@ export default function CncPage() {
           {saved && built && <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={toOrders}>← Перейти к заказам</button>}
         </>
       ))}
-      {tab === 'ops' && <CncOps cnc={cnc} onChange={change} layers={layers} />}
-      {tab === 'tools' && <CncTools cnc={cnc} onChange={change} />}
+      {tab === 'ops' && <CncOps cnc={tview} onChange={tchange} layers={layers} />}
+      {tab === 'tools' && <CncTools cnc={tview} onChange={tchange} />}
       {(tab === 'basic' || tab === 'cmd') && <PostPicker cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
