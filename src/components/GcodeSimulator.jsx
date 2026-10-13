@@ -18,7 +18,7 @@ import { parseGcode, fmtTime } from '../lib/gcodeSim'
 // headTools — номера свёрл присадочной головы (если она у станка есть): голова рисуется слева от шпинделя на той же каретке;
 // сверлит голова — её сверло выдвинуто вниз, шпиндель поднят; режет шпиндель — поднята голова.
 
-const SPEEDS = [1, 3, 5, 20, 60, 200]
+const SPEEDS = [1, 3, 5, 20, 200]
 const LAYERS = [
   { id: 'outer', label: 'Контуры деталей', groups: ['outer'], css: '#185FA5' },
   { id: 'cutout', label: 'Вырезы', groups: ['cutout'], css: '#7B1FA2' },
@@ -451,7 +451,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     if (y < el.scrollTop + LH || y > el.scrollTop + h - 2 * LH) el.scrollTop = Math.max(0, y - h / 2 + LH / 2)
   }, [line])
   const first = Math.max(0, Math.floor(scrollTop / LH) - 4), count = Math.ceil((typeof window !== 'undefined' ? window.innerHeight : 800) / LH) + 8
-  const chip = on => ({ flex: '0 0 auto', padding: '5px 9px', borderRadius: 20, fontSize: 12, border: 'none', background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
+  const btnS = on => ({ flex: '0 0 auto', minWidth: 30, height: 28, padding: '0 4px', borderRadius: 14, fontSize: 12, border: 'none', background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
   const viewBtn = { padding: '5px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'rgba(255,255,255,0.9)', color: 'var(--text)' }
   // граница между 3D-окном и кодом: тянем вверх — больше кода, вниз — больше симуляции
   const dragStart = e => { e.currentTarget.setPointerCapture?.(e.pointerId); dragRef.current = { y: e.clientY, h: viewH } }
@@ -486,22 +486,22 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
           ))}
         </div>
         <input type="range" min={0} max={prog.time || 1} step="any" value={t} onChange={e => { setPlaying(false); seek(e.target.value) }} style={{ width: '100%', padding: 0, margin: '6px 0 4px', border: 'none' }} />
-        <div style={{ display: 'flex', gap: 5, rowGap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button type="button" onClick={() => { if (t >= prog.time) seek(0); setSel(-1); setPlaying(p => !p) }}
-            style={{ flex: '0 0 auto', padding: '7px 14px', borderRadius: 20, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 14, fontWeight: 500 }}>{playing ? '⏸ Пауза' : '▶ Пуск'}</button>
-          <button type="button" title="В начало" onClick={() => { setPlaying(false); seek(0) }} style={chip(false)}>⏮</button>
-          <button type="button" title="Шаг назад (держите — шаги подряд)" onPointerDown={() => holdStart(-1)} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} style={{ ...chip(false), touchAction: 'none' }}>◀ шаг</button>
-          <button type="button" title="Шаг вперёд (держите — шаги подряд)" onPointerDown={() => holdStart(1)} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} style={{ ...chip(false), touchAction: 'none' }}>шаг ▶</button>
-          <button type="button" title="В конец" onClick={() => { setPlaying(false); seek(prog.time) }} style={chip(false)}>⏭</button>
-          <span style={{ flex: 1 }} />
-          <span style={{ display: 'flex', gap: 3 }}>{SPEEDS.map(s => <button key={s} type="button" onClick={() => setSpeed(s)} style={chip(speed === s)}>×{s}</button>)}</span>
+        {/* управление — одной строкой: пуск, в начало, шаг назад, шаг вперёд, в конец, скорости */}
+        <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+          <button type="button" title={playing ? 'Пауза' : 'Пуск'} onClick={() => { if (t >= prog.time) seek(0); setSel(-1); setPlaying(p => !p) }}
+            style={{ flex: '0 0 auto', width: 38, height: 32, padding: 0, borderRadius: 16, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 15 }}>{playing ? '⏸' : '▶'}</button>
+          <button type="button" title="В начало" onClick={() => { setPlaying(false); seek(0) }} style={btnS(false)}>⏮</button>
+          <button type="button" title="Шаг назад (держите — шаги подряд)" onPointerDown={() => holdStart(-1)} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} style={{ ...btnS(false), touchAction: 'none' }}>◀</button>
+          <button type="button" title="Шаг вперёд (держите — шаги подряд)" onPointerDown={() => holdStart(1)} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} style={{ ...btnS(false), touchAction: 'none' }}>▶</button>
+          <button type="button" title="В конец" onClick={() => { setPlaying(false); seek(prog.time) }} style={btnS(false)}>⏭</button>
+          <span style={{ flex: 1, minWidth: 2 }} />
+          {SPEEDS.map(s => <button key={s} type="button" onClick={() => setSpeed(s)} style={{ ...btnS(speed === s), minWidth: 0, padding: '0 5px' }}>×{s}</button>)}
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, rowGap: 2, alignItems: 'center', marginTop: 4, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
           <span>T{cm?.tool ?? '—'}</span>
           <span>X{cm ? Math.round(cm.x1 * 10) / 10 : 0} Y{cm ? Math.round(cm.y1 * 10) / 10 : 0} Z{cm ? Math.round(cm.z1 * 100) / 100 : 0}</span>
           <span>{cm?.rapid ? 'холостой' : `F${cm ? Math.round(cm.feed) : 0}`}</span>
-          <span style={{ flexBasis: '100%', height: 0 }} />
-          <span title="Длина траектории: рабочие ходы (рез, сверление) и холостые переезды">Путь: рабочий <b style={{ fontWeight: 500 }}>{mtr(paths.cut)}</b> · холостой <b style={{ fontWeight: 500 }}>{mtr(paths.rap)}</b> · пройдено <b style={{ fontWeight: 500 }}>{mtr(passed)}</b> из {mtr(paths.cut + paths.rap)}</span>
+          <span title="Длина траектории: пройдено / всего; рабочие ходы (рез, сверление) и холостые переезды" style={{ fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>путь {mtr(passed)} / {mtr(paths.cut + paths.rap)} · раб. {mtr(paths.cut)} · хол. {mtr(paths.rap)}</span>
           {sel >= 0 && (
             <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
               <b style={{ fontWeight: 500, color: '#B26A00' }}>Выбрано: {GROUP[data.grp[sel]]?.[1]}, строка {selLine + 1}</b>
