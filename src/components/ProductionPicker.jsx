@@ -23,8 +23,11 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
     const t = approved.filter(pr => (countryCode(pr.country) || '—') === (lands.includes(myLand) ? myLand : lands[0])).map(pr => String(pr.city || '').trim())
     return t.some(x => x.toLowerCase() === myTown.toLowerCase()) ? t.find(x => x.toLowerCase() === myTown.toLowerCase()) : ''
   })
+  const sameTown = pr => !!myTown && String(pr.city || '').trim().toLowerCase() === myTown.toLowerCase()
   const shown = inLand.filter(pr => !town || String(pr.city || '').trim() === town)
-    .sort((a, b) => (b.id === lastId) - (a.id === lastId) || String(a.name || '').localeCompare(String(b.name || ''), 'ru'))
+    .sort((a, b) => (b.id === lastId) - (a.id === lastId) || sameTown(b) - sameTown(a)
+      || String(a.city || '').localeCompare(String(b.city || ''), 'ru') || String(a.name || '').localeCompare(String(b.name || ''), 'ru'))
+  const nearby = approved.some(sameTown)   // есть ли производство в городе клиента
   const [view, setView] = useState('list')   // list | register | invite
   const mineReady = mine && (mine.status ?? 'approved') === 'approved'
 
@@ -37,6 +40,7 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
         <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 1 }}>
           {note && <span style={{ color: 'var(--teal)' }}>{note} · </span>}
           {kerfOf(pr) != null && `рез ${kerfOf(pr)} мм`}{pr.id === lastId && !note ? ' · выбирали в прошлый раз' : ''}
+          {!note && myTown && !sameTown(pr) && <span style={{ color: 'var(--amber)' }}> · не в вашем городе</span>}
         </div>
       </div>
       <span style={{ color: 'var(--blue)', fontSize: 18 }}>›</span>
@@ -58,6 +62,12 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
         {view === 'list' && <>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>Рез и отступы листа возьмём у производства — раскрой сразу будет правильным, переделывать при отправке не придётся. Отправлять заказ сейчас не обязательно.</p>
           {mine && card(mine, mineReady ? 'моё производство' : 'моё · ждёт подтверждения')}
+          {!mine && myTown && !nearby && (
+            <div style={{ fontSize: 12, background: 'var(--amber-light, var(--bg))', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10 }}>
+              В вашем городе ({myTown}) производств пока нет. Можно выбрать любое другое — чтобы посмотреть раскрой, — или, если вы сами режете, зарегистрировать своё производство.
+              <button type="button" className="btn-primary" style={{ width: '100%', marginTop: 8 }} onClick={() => setView('register')}>Зарегистрировать своё производство</button>
+            </div>
+          )}
           {lands.length > 1 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '4px 0 8px' }}>
             {lands.map(l => <button key={l} type="button" style={chip(l === land)} onClick={() => { setLand(l); setTown('') }}>{l}</button>)}
           </div>}

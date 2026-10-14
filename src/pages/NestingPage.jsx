@@ -1531,6 +1531,8 @@ export default function NestingPage() {
   const [pickProd, setPickProd] = useState(null)
   const [noProdOk, setNoProdOk] = useState(false)        // «Пока раскроить со своими параметрами» — до конца работы с заказом
   const runAfterRef = useRef(null)                       // какой раскрой запустить, когда производство выбрано
+  const [prodsReady, setProdsReady] = useState(false)    // список производств загружен (и последнее выбранное подставлено)
+  const askedOnOpenRef = useRef(false)
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
   useBackClose(!!needProd, () => setNeedProd(null))
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
@@ -1583,7 +1585,7 @@ export default function NestingPage() {
     if (o) {
       setSheetForm(sheetFormOf(o))
       setOffForm(parseOffcuts(o.offcuts))
-      fetchProductions(o)
+      fetchProductions(o).then(() => setProdsReady(true))   // после этого — «Где будете резать?», если производство не выбрано
       setCuttingMethod(o.material_kind === 'hdf' ? 'guillotine' : (o.cutting_method || 'nesting'))   // ХДФ / ДВП режется только на пиле
       let store = null
       if (o.nesting_result) { try { store = JSON.parse(o.nesting_result) } catch { store = null } }
@@ -1924,9 +1926,17 @@ export default function NestingPage() {
     const mine = await myProduction(user?.id)
     if (mine === undefined) return false                  // в базе ещё нет кабинета производства — как раньше
     runAfterRef.current = run
+    // у пользователя своё подтверждённое производство — режет у себя, окно выбора не нужно
+    if (mine && (mine.status ?? 'approved') === 'approved') { pickProductionAndRun(mine); return true }
     setPickProd({ mine })
     return true
   }
+  // Заказ открыт на раскрое, а производство не выбрано — окно выбора сразу, ещё до «Выполнить раскрой»
+  useEffect(() => {
+    if (!prodsReady || askedOnOpenRef.current || !order) return
+    askedOnOpenRef.current = true
+    askProductionFirst(null)
+  }, [prodsReady, order])   // eslint-disable-line react-hooks/exhaustive-deps
   async function pickProductionAndRun(pr) {
     let list = productions
     if (!list.some(x => x.id === pr.id)) { list = sortProductions([...productions, pr]); setProductions(list) }
