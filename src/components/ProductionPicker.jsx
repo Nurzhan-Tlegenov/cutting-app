@@ -13,14 +13,16 @@ const inviteText = name => `Здравствуйте!${name ? ` Это ${name}.`
 
 export default function ProductionPicker({ productions, mine, lastId, profile, kerfOf, sheet, onPick, onSkip, onClose, onRegistered }) {
   const approved = useMemo(() => productions.filter(pr => (pr.status ?? 'approved') === 'approved' && pr.id !== mine?.id), [productions, mine])
-  const lands = useMemo(() => [...new Set(approved.map(pr => countryCode(pr.country) || '—'))].sort(), [approved])
   const myLand = countryCode(profile?.country)
-  const [land, setLand] = useState(() => (lands.includes(myLand) ? myLand : lands[0] || ''))
+  // все страны, где есть производства, — и своя первой, даже если в ней пока ни одного (тогда сразу видно «пригласите»)
+  const lands = useMemo(() => [...new Set([...(myLand ? [myLand] : []), ...approved.map(pr => countryCode(pr.country) || '—')])]
+    .sort((a, b) => (b === myLand) - (a === myLand) || a.localeCompare(b)), [approved, myLand])
+  const [land, setLand] = useState(() => lands[0] || '')
   const inLand = approved.filter(pr => (countryCode(pr.country) || '—') === land)
   const towns = [...new Set(inLand.map(pr => String(pr.city || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'))
   const myTown = String(profile?.city || '').trim()
   const [town, setTown] = useState(() => {
-    const t = approved.filter(pr => (countryCode(pr.country) || '—') === (lands.includes(myLand) ? myLand : lands[0])).map(pr => String(pr.city || '').trim())
+    const t = approved.filter(pr => (countryCode(pr.country) || '—') === lands[0]).map(pr => String(pr.city || '').trim())
     return t.some(x => x.toLowerCase() === myTown.toLowerCase()) ? t.find(x => x.toLowerCase() === myTown.toLowerCase()) : ''
   })
   const sameTown = pr => !!myTown && String(pr.city || '').trim().toLowerCase() === myTown.toLowerCase()
@@ -49,6 +51,21 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
   const link = { width: '100%', marginTop: 8, padding: 10, border: '0.5px solid var(--blue-mid, var(--border-md))', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--blue)', fontSize: 14, cursor: 'pointer' }
   const chip = on => ({ padding: '4px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: on ? 'none' : '0.5px solid var(--border-md)', background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text-muted)' })
   const text = inviteText(String(profile?.full_name || '').trim())
+  const shareRow = (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" className="btn-primary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', background: '#25D366', padding: '8px 6px' }}>WhatsApp</a>
+      <a href={`https://t.me/share/url?url=${encodeURIComponent(APP_URL)}&text=${encodeURIComponent(text.replace(' ' + APP_URL, ''))}`} target="_blank" rel="noreferrer" className="btn-primary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', background: '#229ED9', padding: '8px 6px' }}>Telegram</a>
+      {typeof navigator.share === 'function' && <button type="button" className="btn-secondary" style={{ flex: 1, padding: '8px 6px' }} onClick={() => navigator.share({ title: 'RaskroyPro', text }).catch(() => {})}>Ещё…</button>}
+    </div>
+  )
+  // приглашение цеха — на виду: сверху, если в городе клиента производств нет, иначе под списком
+  const inviteCard = (
+    <div style={{ background: 'var(--bg)', border: '1px dashed var(--blue)', borderRadius: 'var(--radius)', padding: '10px 12px', margin: '4px 0 10px' }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{nearby ? 'Режете в другом месте?' : 'Пригласите своё производство'}</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Отправьте цеху, где вы режете, ссылку на приложение. Когда он зарегистрируется, он появится в этом списке.</div>
+      {shareRow}
+    </div>
+  )
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 955, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
@@ -64,10 +81,11 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
           {mine && card(mine, mineReady ? 'моё производство' : 'моё · ждёт подтверждения')}
           {!mine && myTown && !nearby && (
             <div style={{ fontSize: 12, background: 'var(--amber-light, var(--bg))', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10 }}>
-              В вашем городе ({myTown}) производств пока нет. Можно выбрать любое другое — чтобы посмотреть раскрой, — или, если вы сами режете, зарегистрировать своё производство.
+              В вашем городе ({myTown}) производств пока нет. Можно выбрать любое другое — чтобы попробовать раскрой, — или, если вы сами режете, зарегистрировать своё производство.
               <button type="button" className="btn-primary" style={{ width: '100%', marginTop: 8 }} onClick={() => setView('register')}>Зарегистрировать своё производство</button>
             </div>
           )}
+          {!nearby && !mineReady && inviteCard}
           {lands.length > 1 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '4px 0 8px' }}>
             {lands.map(l => <button key={l} type="button" style={chip(l === land)} onClick={() => { setLand(l); setTown('') }}>{l}</button>)}
           </div>}
@@ -77,9 +95,11 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
           </div>}
           {shown.map(pr => card(pr))}
           {!approved.length && <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '6px 0' }}>Подтверждённых производств пока нет.</p>}
-          {approved.length > 0 && !shown.length && <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '6px 0' }}>В этом городе производств пока нет — посмотрите «Все города» или пригласите своё.</p>}
-          {!mine && <button type="button" style={link} onClick={() => setView('register')}>Я сам производство — зарегистрировать</button>}
-          <button type="button" style={link} onClick={() => setView('invite')}>Моего производства нет в списке</button>
+          {approved.length > 0 && !shown.length && <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '6px 0' }}>{inLand.length ? 'В этом городе производств пока нет — посмотрите «Все города».' : 'В этой стране производств пока нет — выберите другую страну, чтобы попробовать раскрой, или пригласите свой цех.'}</p>}
+          {shown.length > 0 && land !== myLand && <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '2px 0 6px' }}>Производство в другой стране подойдёт, чтобы попробовать раскрой: карты посмотреть можно, отправлять заказ не обязательно.</p>}
+          {(nearby || mineReady) && inviteCard}
+          {!mine && (nearby || !myTown) && <button type="button" style={link} onClick={() => setView('register')}>Я сам производство — зарегистрировать</button>}
+          <button type="button" style={{ ...link, color: 'var(--text-muted)', borderColor: 'var(--border-md)' }} onClick={onSkip}>Пока раскроить со своими параметрами</button>
         </>}
 
         {view === 'register' && <>
