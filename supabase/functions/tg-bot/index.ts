@@ -127,7 +127,7 @@ async function isMaster(req: Request): Promise<boolean> {
 
 async function onApp(req: Request, body: any) {
   if (!TOKEN) return json({ error: 'Нет секрета TELEGRAM_BOT_TOKEN в Supabase → Edge Functions → Secrets' })
-  if (!(await isMaster(req))) return json({ error: 'Только для мастер-аккаунта' }, 403)
+  if (!(await isMaster(req))) return json({ error: 'Только для мастер-аккаунта' })
 
   if (body.action === 'setup') {
     const r = await tg('setWebhook', {
@@ -145,13 +145,19 @@ async function onApp(req: Request, body: any) {
     const r = await send(data.chat, codeText(data.code))
     return json(r.ok ? { ok: true } : { error: r.description || 'Telegram не доставил сообщение' })
   }
-  return json({ error: 'unknown action' }, 400)
+  return json({ error: `Функция не поняла запрос (action: ${JSON.stringify(body?.action ?? null)})` })
 }
 
 Deno.serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   if (req.method !== 'POST') return new Response('RaskroyPro bot', { headers: CORS })
-  const body = await req.json().catch(() => ({}))
+  const raw = await req.text().catch(() => '')
+  let body: any = {}
+  try { body = raw ? JSON.parse(raw) : {} } catch { body = {} }
+  const qAction = new URL(req.url).searchParams.get('action')
+  if (qAction && !body.action) body.action = qAction
+  if (!req.headers.get('X-Telegram-Bot-Api-Secret-Token'))
+    console.log('app call', JSON.stringify({ ct: req.headers.get('content-type'), len: raw.length, action: body.action ?? null }))
   const hdr = req.headers.get('X-Telegram-Bot-Api-Secret-Token')
   if (hdr) {
     if (hdr !== (await webhookSecret())) return new Response('forbidden', { status: 403 })

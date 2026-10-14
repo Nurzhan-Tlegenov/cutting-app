@@ -55,7 +55,7 @@ export const adminApproveRequest = id => call('admin_approve_request', { p_id: i
 /** Вызов функции бота (только мастер): { action: 'setup' } | { action: 'send_code', request_id } */
 export async function tgBot(body) {
   try {
-    const { data, error } = await supabase.functions.invoke('tg-bot', { body })
+    const { data, error } = await supabase.functions.invoke(`tg-bot?action=${encodeURIComponent(body.action)}`, { body })
     if (error) {
       let msg = error.message
       try { const j = await error.context?.json?.(); if (j?.error) msg = j.error } catch { /* ответ не JSON */ }
