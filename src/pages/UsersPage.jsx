@@ -146,7 +146,7 @@ export default function UsersPage() {
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 500, fontSize: 15 }}>{open ? 'Регистрация открыта' : 'Регистрация только по запросу'}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>
-                  {open ? 'Зарегистрироваться может любой, кто откроет приложение.' : 'Новый человек оставляет заявку; зарегистрироваться он сможет после того, как вы её одобрите.'}
+                  {open ? 'Зарегистрироваться может любой — после подтверждения номера: в Telegram сразу, через WhatsApp — по вашему коду.' : 'Новый человек оставляет заявку; зарегистрироваться он сможет после того, как вы её одобрите.'}
                 </div>
               </div>
               <button type="button" disabled={busy} onClick={toggle} style={btn(open ? 'danger' : 'main')}>{open ? 'Закрыть регистрацию' : 'Открыть для всех'}</button>
