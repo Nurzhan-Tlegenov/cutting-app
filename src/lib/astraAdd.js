@@ -172,12 +172,14 @@ const H = {
   CVertex(s, o) { o.v = s.dd(3) },
   CVector(s, o) { o.v = s.dd(3) },
   CGeomSize(s, o) { o.v = s.dd(3) },
-  CGeomLine(s) { V(s); V(s) },
+  CGeomLine(s, o) { o.a = V(s); o.b = V(s) },
   CGeomCoordSys(s, o) { o.o = V(s); o.ax = [s.obj('CVector').v, s.obj('CVector').v, s.obj('CVector').v] },
-  CGeomContour(s) { s.list() },
+  CGeomContour(s, o) { o.l = s.list() },
   CFurniture(s, o) { o.pos = s.f64(); o.mode = s.u32(); o.u = s.u32(); o.fix = s.obj(); o.d = s.f64() },
   CGeomPartend(s, o) {
-    s.str(); s.f64(); s.obj('CGeomContour'); s.obj('CGeomCoordSys'); s.obj('CGeomSize'); s.obj('CGeomSize'); s.dd(4)
+    o.tpl = s.str(); s.f64()                      // шаблон торца («Default» или файл из «Шаблоны торцов»)
+    o.prof = s.obj('CGeomContour')?.l || []       // профиль торца поперёк толщины: x < 0 — вглубь детали, y — по толщине
+    s.obj('CGeomCoordSys'); s.obj('CGeomSize'); s.obj('CGeomSize'); s.dd(4)
     o.edge = s.obj()                              // материал кромки на этом торце (или пусто)
     s.skip(2)
     o.furn = s.list('CFurniture')
@@ -334,6 +336,21 @@ function loopsOf(part) {
     loops.push({ src: h.el.map(e => ({ ...e, a: tf(e.a), b: tf(e.b), ...(e.c ? { c: tf(e.c) } : {}), ...(e.pts ? { pts: e.pts.map(tf) } : {}) })), outer: false, hole: h, tf })
   }
   return loops
+}
+
+// Пазы в торце: прямоугольные выемки профиля торца. В профиле y — высота от пласти z = 0 (у нас она внизу,
+// в файле это Z = −T), x — вглубь детали со знаком минус. Сверено по шаблону «Паз от лицевой.xml»: параметры
+// [0, 10, 3.8, 3.5] — глубина 10, 3.8 от пласти Z = 0 файла, ширина 3.5 — дают выемку y 8.7…12.2 на x = −10 при T = 16.
+function edgeNotches(e, T) {
+  const out = []
+  for (const l of e.end?.prof || []) {
+    if (!l.a || !l.b) continue
+    const x = l.a[0]
+    if (Math.abs(l.b[0] - x) > 0.01 || x > -0.05) continue
+    const z0 = Math.max(0, Math.min(l.a[1], l.b[1])), z1 = Math.min(T, Math.max(l.a[1], l.b[1]))
+    if (z1 - z0 > 0.2 && z1 - z0 < T - 0.2) out.push({ z0, z1, depth: -x })
+  }
+  return out
 }
 
 // Отверстия от крепежа на торцах одной детали — в мировых координатах.
@@ -577,11 +594,21 @@ export function parseAstra(u8, opts = {}) {
           cutsRaw.push({ p: [x0, y0], q: [x1, y1], depth: Math.min(depth, T), top: Math.abs(pts[0][2]) < T / 2, name: 'Паз' })
         }
       }
+      // пазы в торце (шаблон торца с выемкой в профиле)
+      const edgeCutsRaw = []
+      for (const lp of loopsOf(p)) {
+        for (const e of lp.src) {
+          const ns = edgeNotches(e, T)
+          if (!ns.length) continue
+          if (!lp.outer || e._ !== 'CGeomLineEdt') { warnCuts += ns.length; continue }   // торец выреза или фигурный участок — пока не умеем
+          for (const n of ns) edgeCutsRaw.push({ a: P2(e.a), b: P2(e.b), ...n, name: 'Паз в торце' })
+        }
+      }
       const product = path[path.length - 1] || ''
       const pos = (p.pos || '').trim(), name = (p.name || '').trim()
       const material = matName(mat)
       return buildItem({
-        T, elems, texDir: 1, M, butts, cutsRaw, decorRaw: [], warnCuts, tol: TOUCH, strict: true,
+        T, elems, texDir: 1, M, butts, cutsRaw, edgeCutsRaw, decorRaw: [], warnCuts, tol: TOUCH, strict: true,
         name, prefix: product, material, rotatable: p.grain === 0, anim: null,
         meta: {
           src: 'astra',

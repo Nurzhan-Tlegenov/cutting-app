@@ -2,6 +2,7 @@
 // Детали заказа строятся из их текущего контура (contour.meta.local / inst) —
 // правки в редакторе видны и в 3D. Остальное (панели других материалов,
 // профили, фурнитура) берётся из сохранённой при импорте модели (scene).
+import { edgeGrooveGeom } from './edgeGrooves.js'
 import { verticesToPolygon } from './trueShapeNesting.js'
 import { detailHoles } from './partHoles.js'
 import { getDrillPoints } from './drillGeometry.js'
@@ -107,6 +108,13 @@ function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
       z: front ? frontZ : T - frontZ, depth: Math.min(num(g.depth) || 0, T),
     }
   }).filter(g => g.depth > 0)
+  // пазы в торце: полоса вглубь от торца на высоте паза (zb — низ, depth — ширина паза по толщине)
+  for (const g of c.edgeGrooves || []) {
+    const geo = edgeGrooveGeom(g, W, L, 0.3)
+    const wd = Math.min(num(g.width) || 0, T), ff = num(g.fromFace) || 0
+    if (!geo || !(wd > 0)) continue
+    grooves.push({ poly: geo.rect.map(toLocal), zb: frontZ > 0 ? T - ff - wd : ff, depth: wd, edge: true })
+  }
   // Фрезеровка фасада: если деталь прямоугольная — настоящий рельеф пласти по профилю фрезы
   let carve = null
   const plainRect = holes.length === 0 && verts.length === 4 && verts.every(v => !v.type && !(v.r > 0) &&

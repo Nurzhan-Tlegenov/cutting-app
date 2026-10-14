@@ -593,6 +593,25 @@ export function buildItem(src, holes, faceRule) {
     }
   })
 
+  // --- пазы в торце: отрезок торца в системе панели, высота z0…z1 от пласти z = 0, глубина вглубь детали ---
+  const edgeGrooves = []
+  for (const c of (src.edgeCutsRaw || [])) {
+    const a = tf(c.a), b = tf(c.b)
+    let side = null
+    if (Math.abs(a[0]) <= EPS && Math.abs(b[0]) <= EPS) side = 'left'
+    else if (Math.abs(a[0] - W) <= EPS && Math.abs(b[0] - W) <= EPS) side = 'right'
+    else if (Math.abs(a[1]) <= EPS && Math.abs(b[1]) <= EPS) side = 'bottom'
+    else if (Math.abs(a[1] - L) <= EPS && Math.abs(b[1] - L) <= EPS) side = 'top'
+    if (!side) { warn.cuts++; continue }                 // торец не на габарите детали (ступенька) — пока не умеем
+    const hor = side === 'bottom' || side === 'top'
+    const lo = Math.min(hor ? a[0] : a[1], hor ? b[0] : b[1]), hi = Math.max(hor ? a[0] : a[1], hor ? b[0] : b[1])
+    const total = hor ? W : L
+    edgeGrooves.push({
+      edgeSide: side, gapLow: r1(Math.max(0, lo)), gapHigh: r1(Math.max(0, total - hi)),
+      fromFace: r1(flip ? c.z0 : T - c.z1), width: r1(c.z1 - c.z0), depth: r1(c.depth), note: c.name || 'Паз в торце',
+    })
+  }
+
   // фрезеровка для вида (на раскрой и присадку не влияет)
   const decor = decorRaw.map(dc => ({
     kind: dc.kind, name: dc.name, sign: dc.sign, depth: r1(dc.depth), face: dc.top !== flip ? 'front' : 'back',
@@ -619,6 +638,7 @@ export function buildItem(src, holes, faceRule) {
     vertices: isRect ? [{ x: 0, y: 0, r: 0 }, { x: r1(W), y: 0, r: 0 }, { x: r1(W), y: r1(L), r: 0 }, { x: 0, y: r1(L), r: 0 }] : vertices,
     holes: cutouts, grooves, drillings, layout: [], meta,
   }
+  if (edgeGrooves.length) contour.edgeGrooves = edgeGrooves
   if (decor.length) contour.decor = decor
 
   const material = src.material
@@ -627,7 +647,7 @@ export function buildItem(src, holes, faceRule) {
     w: r1(L), h: r1(W), qty: 1, edges, material, thickness: T,
     rotatable: src.rotatable ?? texDir === 0, contour,
     groupKey: `${material}|${T}`,
-    info: { shaped: !isRect, cutouts: cutouts.length, holes: holeCount, grooves: grooves.length,
+    info: { shaped: !isRect, cutouts: cutouts.length, holes: holeCount, grooves: grooves.length + edgeGrooves.length,
       decor: decor.length, shapedEdges: vertices.filter(v => v.edge).length + cutouts.filter(h => h.edge).length,
       back: drillings.filter(d => d.kind === 'face' && d.face === 'back').length + grooves.filter(g => g.face === 'back').length },
     warn,

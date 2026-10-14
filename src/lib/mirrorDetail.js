@@ -1,5 +1,6 @@
 // Зеркалирование контура/присадки/разметки/кромок детали по горизонтали (лево↔право).
 // panelWidthX — горизонтальный размер детали (Ширина/X), а не Длина!
+import { mirrorEdgeGroove, flipEdgeGroove } from './edgeGrooves'
 
 function mirrorVertices(verts, panelWidthX) {
   return (verts || []).map(v => {
@@ -82,6 +83,7 @@ export function mirrorContour(contour, panelWidthX) {
     vertices: mirrorVertices(contour.vertices, panelWidthX),
     holes: (contour.holes || []).map(h => mirrorHoleLike(h, panelWidthX)),
     grooves: (contour.grooves || []).map(g => mirrorHoleLike(g, panelWidthX)),
+    ...(Array.isArray(contour.edgeGrooves) ? { edgeGrooves: contour.edgeGrooves.map(mirrorEdgeGroove) } : {}),
     drillings: (contour.drillings || []).map(dr => mirrorDrilling(dr, panelWidthX, contour.layout)),
     layout: (contour.layout || []).map(g => mirrorLayoutGuide(g, panelWidthX)),
   }
@@ -117,6 +119,7 @@ export function flipDetail(detail, thickness) {
   const grooves = (c.grooves || []).map(g => ({ ...g, face: swapFace(g.face || 'front') }))
   const holes = (c.holes || []).map(hh => (hh.type === 'pocket' ? { ...hh, face: swapFace(hh.face || 'front') } : hh))
   const contour = { ...c, drillings, grooves, holes }
+  if (Array.isArray(c.edgeGrooves)) contour.edgeGrooves = c.edgeGrooves.map(g => flipEdgeGroove(g, T))
   if (Array.isArray(c.decor)) contour.decor = c.decor.map(dc => ({ ...dc, face: swapFace(dc.face || 'front'), polys: (dc.polys || []).map(pl => pl.map(([x, y]) => [Math.round((W - x) * 10) / 10, y])), ...(dc.path ? { path: [...dc.path].reverse().map(([x, y]) => [Math.round((W - x) * 10) / 10, y]) } : {}) }))
   if (c.meta) contour.meta = { ...c.meta, flipped: !c.meta.flipped }
   return { ...detail, contour, edges: mirrorEdges(detail.edges) }

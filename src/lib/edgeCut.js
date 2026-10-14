@@ -10,6 +10,7 @@
 // деталь пересчитывается здесь (cutDetail): меняются размеры, контур, вырезы и пазы; у присадки в контуре
 // ставится пометка cut — её учитывает getAllDrillPoints (отверстия остаются на своих местах относительно
 // готовой детали). Кромка на фигурных участках и в вырезах размер пока не меняет.
+import { trimEdgeGroove } from './edgeGrooves'
 
 const num = v => Number(v) || 0
 const r2 = v => Math.round(v * 100) / 100
@@ -88,6 +89,7 @@ export function cutContour(c, W, L, k) {
       }
     })
   }
+  if (Array.isArray(c.edgeGrooves)) out.edgeGrooves = c.edgeGrooves.map(g => trimEdgeGroove(g, k))
   if (Array.isArray(c.grooves)) {
     out.grooves = c.grooves.map(g => {
       const hor = g.dir === 'horizontal'

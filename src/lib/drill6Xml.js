@@ -14,6 +14,10 @@
  *   Type 2 — отверстие в пласть: X, Y, Depth, Diameter
  *   Type 1 — отверстие в торец: X, Y (точка на торце), Z (высота от нижней пласти), Depth (вглубь детали), Diameter
  *   Type 4 — паз: X, Y → EndX, EndY (средняя линия), Width, Depth, Drill (инструмент станка, например T2)
+ *            Паз в торце (Face 1–4): X, Y → EndX, EndY — отрезок на торце, Z / EndZ — высота середины паза от нижней
+ *            пласти (как у отверстия в торец), Width — ширина поперёк толщины, Depth — вглубь детали.
+ *   Drill — только если в настройках задан свой инструмент; по умолчанию («авто») не пишется — инструмент
+ *            назначает система управления станка (у всех станков свои номера инструментов).
  *   Type 3 — фрезеровка: X, Y — начало, <Lines><Line EndX EndY Angle/></Lines>, Depth, Pocket (1 — выборка внутри
  *            контура, тогда Closed 1), Closed, ToolOffset (右 — фреза справа от хода, 左 — слева, 中 — по линии; всегда вид
  *            сверху), Drill. Angle — угол дуги в градусах: > 0 по часовой, < 0 против, 0 — прямая.
@@ -24,6 +28,7 @@
  * пласти, фигурный контур, вырезы, выемки): лишнее оператор отключает фильтром на стойке (например, обработку Face 5).
  */
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
+import { edgeGrooveGeom } from './edgeGrooves'
 import { rawDetail, parseEdgeTypes, edgeKey } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
@@ -243,7 +248,7 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   const et = edgeThick(raw, types)
   const fr = machineFrame(W, H, chooseTurn(W, H, et), 'front')
   const warnings = []
-  const top = [], bottom = [], edge = [], grooves = []
+  const top = [], bottom = [], edge = [], grooves = [], edgeGrooves = []
 
   // присадка — по тем же правилам, что 3D-модель детали: у каждого отверстия своя пласть (лицевая, обратная или обе),
   // у торцевого — высота от лицевой пласти (offsetFace). Размеры — готовой детали, без подрезки под кромку.
@@ -281,15 +286,28 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
     grooves.push({ face: g.back ? fr.bottom : fr.top, line, width, depth: n0(g.depth) > 0 ? n0(g.depth) : T })
   })
 
+  // пазы в торце — на торец Face 1–4, высота от нижней пласти (лицевая сверху)
+  ;(c.edgeGrooves || []).forEach(g => {
+    const geo = edgeGrooveGeom(g, W, H)
+    const width = n0(g.width), depth = n0(g.depth)
+    if (!geo || !(width > 0) || !(depth > 0)) return
+    const p0 = fr.at(...geo.line[0]), p1 = fr.at(...geo.line[1])
+    const face = fr.faceAt((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
+    if (!face) { warnings.push('паз в торце не на краю детали — пропущен'); return }
+    edgeGrooves.push({ face, line: [...p0, ...p1], Z: T - n0(g.fromFace) - width / 2, width, depth })
+  })
+
   const { mills, outline } = millPaths(raw, c, W, H, T, fr)
-  const ops = top.length + bottom.length + edge.length + grooves.length + mills.length
+  const ops = top.length + bottom.length + edge.length + grooves.length + edgeGrooves.length + mills.length
   if (!ops && !post.d6All) return null
 
   // порядок — как в образце: пласть сверху (по Y, затем по X), торцы, пазы, пласть снизу
   const byYX = (a, b) => a.Y - b.Y || a.X - b.X
   top.sort(byYX); bottom.sort(byYX)
   edge.sort((a, b) => a.face - b.face || a.X - b.X || a.Y - b.Y)
-  const tool = latin(post.d6Tool || 'T2') || 'T2'
+  // инструмент: «авто» (по умолчанию) — атрибут Drill не пишем, станок назначает сам
+  const own = post.d6ToolAuto === false ? latin(post.d6Tool || '') : ''
+  const drillAttr = own ? ` Drill="${esc(own)}"` : ''
   let mid = 1000
   const nextId = () => { const v = mid; mid += 10; return v }
   const lines = []
@@ -297,13 +315,14 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   top.forEach(hole)
   edge.forEach(h => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="1" IsGenCode="2" Face="${h.face}" X="${f3(h.X)}" Y="${f3(h.Y)}" Z="${f3(h.Z)}" Depth="${f3(h.depth)}" Diameter="${f3(h.dia)}" />`))
   const mill = m => {
-    lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="3" IsGenCode="2" Face="${m.face}" Depth="${f3(m.depth)}" X="${f3(m.start[0])}" Y="${f3(m.start[1])}" Pocket="${m.pocket ? 1 : 0}" Closed="${m.closed ? 1 : 0}" ToolOffset="${m.offset}" Drill="${esc(tool)}">`)
+    lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="3" IsGenCode="2" Face="${m.face}" Depth="${f3(m.depth)}" X="${f3(m.start[0])}" Y="${f3(m.start[1])}" Pocket="${m.pocket ? 1 : 0}" Closed="${m.closed ? 1 : 0}" ToolOffset="${m.offset}"${drillAttr}>`)
     lines.push(`\t\t\t\t\t\t<Lines${m.closed ? ' Closed="1"' : ''}>`)
     m.segs.forEach((g, i) => lines.push(`\t\t\t\t\t\t\t<Line LineID="${i + 1}" EndX="${f3(g.to[0])}" EndY="${f3(g.to[1])}" Angle="${(Math.round(g.angle * 1e6) / 1e6).toFixed(6)}" />`))
     lines.push('\t\t\t\t\t\t</Lines>', '\t\t\t\t\t</Machining>')
   }
   mills.filter(m => m.face === fr.top).forEach(mill)
-  grooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" Drill="${esc(tool)}" />`))
+  grooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" Width="${f3(g.width)}" Depth="${f3(g.depth)}"${drillAttr} />`))
+  edgeGrooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(g.Z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(g.Z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}"${drillAttr} />`))
   bottom.forEach(hole)
   mills.filter(m => m.face !== fr.top).forEach(mill)
 
@@ -331,7 +350,7 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
     '',
   ].join('\r\n')
   // сколько чего у детали (для списков деталей на рабочих постах): лицевая — сверху (fr.top), обратная — снизу
-  const counts = { top: top.length, bottom: bottom.length, edge: edge.length,
+  const counts = { top: top.length, bottom: bottom.length, edge: edge.length, edgeGrooves: edgeGrooves.length,
     groovesTop: grooves.filter(g => g.face === fr.top).length, groovesBottom: grooves.filter(g => g.face !== fr.top).length,
     millsTop: mills.filter(m => m.face === fr.top).length, millsBottom: mills.filter(m => m.face !== fr.top).length }
   return { xml, ops, warnings, counts }

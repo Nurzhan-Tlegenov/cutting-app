@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { flipDetail } from '../lib/mirrorDetail'
 import { contourSegments, segmentSide, distToPolyline, holeEdgeSegments, detailEdgeList } from '../lib/edgeLength'
 import { lazyRetry } from '../lib/lazyRetry'
+import { edgeGrooveLabel } from '../lib/edgeGrooves'
 const Model3D = lazyRetry(() => import('./Model3D'))
 
 // ─── База фурнитуры (конфирматы, шканты, полкодержатели, минификсы...) ───────
@@ -1894,6 +1895,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
     // свойства детали (обозначение, ID из Базиса и т.д.) — не терять при правке контура
     ...(rawContour.meta ? { meta: rawContour.meta } : {}),
     ...(rawContour.decor ? { decor: rawContour.decor } : {}),   // фрезеровка «для вида» из Базиса
+    ...(rawContour.edgeGrooves ? { edgeGrooves: rawContour.edgeGrooves } : {}),   // пазы в торце (из Астры)
   }
 
   const [tab, setTab] = useState('contour')
@@ -2698,7 +2700,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
 
   const hasContour = contour.vertices.length > 4 ||
     contour.vertices.some(v => v.r > 0) ||
-    contour.holes.length > 0 || contour.grooves.length > 0 || contour.drillings.length > 0
+    contour.holes.length > 0 || contour.grooves.length > 0 || contour.drillings.length > 0 || (contour.edgeGrooves || []).length > 0
 
   // Какие линии разметки уже используются хоть какой-то присадкой — чтобы визуально
   // отметить их в списке привязки, не заставляя пользователя вести счёт вручную
@@ -3280,7 +3282,14 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
               background:'transparent', fontSize:12, color:'var(--text-muted)', cursor:'pointer', marginBottom:12 }}>
             + Добавить паз
           </button>
-          {!contour.grooves.length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет пазов</p>}
+          {(contour.edgeGrooves || []).map((g, i) => (
+            <div key={'eg' + i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, padding:'7px 10px', marginBottom:8, borderRadius:'var(--radius)', background:'var(--bg2)', color:'var(--text-muted)' }}>
+              <span style={{ flex:1 }}>{edgeGrooveLabel(g, w, h)}<span style={{ display:'block', fontSize:11, color:'var(--text-hint)' }}>из импорта; уходит в программу сверлильного станка</span></span>
+              <button type="button" onClick={() => upd({ edgeGrooves: contour.edgeGrooves.filter((_, j) => j !== i) })}
+                style={{ border:'none', background:'transparent', color:'var(--text-hint)', fontSize:16, cursor:'pointer', padding:'0 4px' }} aria-label="Удалить паз в торце">✕</button>
+            </div>
+          ))}
+          {!contour.grooves.length && !(contour.edgeGrooves || []).length && <p style={{ fontSize:12, color:'var(--text-hint)', textAlign:'center' }}>Нет пазов</p>}
           {contour.grooves.map((g, i) => (
             <CollapsibleItem key={i}
               open={openGrooveCardIdx === i}
@@ -4081,7 +4090,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
       {/* Сброс */}
       {hasContour && (
         <button type="button"
-          onClick={() => { upd({ vertices: makeRect(w, h), holes: [], grooves: [], drillings: [], layout: [] }); setActiveIdx(null) }}
+          onClick={() => { upd({ vertices: makeRect(w, h), holes: [], grooves: [], edgeGrooves: [], drillings: [], layout: [] }); setActiveIdx(null) }}
           style={{ width:'100%', marginTop:8, padding:'6px', border:'0.5px solid var(--danger)',
             borderRadius:'var(--radius)', background:'transparent', fontSize:11, color:'var(--danger)', cursor:'pointer' }}>
           Сбросить контур

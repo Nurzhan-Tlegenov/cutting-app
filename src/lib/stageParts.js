@@ -59,12 +59,12 @@ export function stageParts(order, rows, rule) {
     let c = {}
     try { c = panelXml(d, { T: n0(m.thickness) || T0, id: 'x', post: { d6All: true }, types })?.counts || {} } catch { /* деталь не разобралась — без присадки */ }
     // пазы и фрезеровки сверху (лицевая) делает фрезер на раскрое — они в счёт, только если включены «отверстия сверху»
-    const drillHit = (rule.top && c.top) || (rule.bottom && c.bottom) || (rule.edge && c.edge)
+    const drillHit = (rule.top && c.top) || (rule.bottom && c.bottom) || (rule.edge && (c.edge || c.edgeGrooves))
       || (rule.grooves && ((rule.top && c.groovesTop) || c.groovesBottom))
       || (rule.mills && ((rule.top && c.millsTop) || c.millsBottom))
     if (rule.list === 'edge' && !edged) continue
     if (rule.list === 'drill' && !drillHit) continue
-    const what = [c.top && `сверху ${c.top}`, c.bottom && `снизу ${c.bottom}`, c.edge && `в торцы ${c.edge}`, (c.groovesTop + c.groovesBottom) && `пазов ${c.groovesTop + c.groovesBottom}`, (c.millsTop + c.millsBottom) && `фрезеровок ${c.millsTop + c.millsBottom}`].filter(Boolean).join(', ')
+    const what = [c.top && `сверху ${c.top}`, c.bottom && `снизу ${c.bottom}`, c.edge && `в торцы ${c.edge}`, c.edgeGrooves && `пазов в торце ${c.edgeGrooves}`, (c.groovesTop + c.groovesBottom) && `пазов ${c.groovesTop + c.groovesBottom}`, (c.millsTop + c.millsBottom) && `фрезеровок ${c.millsTop + c.millsBottom}`].filter(Boolean).join(', ')
     const pcs = Math.max(1, n0(d.qty) || 1)
     // кромление по сторонам: прямолинейная деталь проходит кромочный станок столько раз, сколько у неё сторон с кромкой —
     // каждый проход сканируется отдельно. Фигурная деталь (кромка по участкам контура) считается как 1 проход на штуку.

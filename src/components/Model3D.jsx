@@ -347,8 +347,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       // пазы и фрезеровка: тёмная вставка в пласть
       for (const g of p.grooves) {
         const gs = new THREE.Shape(g.poly.map(([x, y]) => new THREE.Vector2(x, y)))
-        const gg = new THREE.ExtrudeGeometry(gs, { depth: g.depth + 0.4, bevelEnabled: false })
-        gg.translate(0, 0, g.z > p.t / 2 ? p.t - g.depth : -0.4)
+        const gg = new THREE.ExtrudeGeometry(gs, { depth: g.depth + (g.zb != null ? 0 : 0.4), bevelEnabled: false })
+        gg.translate(0, 0, g.zb != null ? g.zb : g.z > p.t / 2 ? p.t - g.depth : -0.4)      // zb — паз в торце: на своей высоте
         const gm = new THREE.Mesh(gg, g.decor ? decorMat : grooveMat)
         gm.applyMatrix4(mat4)
         reg(gm, 'groove', !p.inOrder, p.anim, p.material, pid); extraGeos.push(gg)

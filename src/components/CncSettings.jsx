@@ -307,10 +307,19 @@ function Drill6Basic({ post, set, router }) {
           <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Деталь только поворачивается, не переворачивается. Высота отверстий в торец берётся из детали («от пласти» — от лицевой).</span>
         </div>
         <div style={{ marginTop: 8 }}>
-          <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', minWidth: 0, maxWidth: 200 }}>Инструмент для пазов и фрезеровки
-            <input type="text" key={post.id + (post.d6Tool || '')} defaultValue={post.d6Tool || 'T2'} onBlur={e => { const v = e.target.value.trim() || 'T2'; if (v !== post.d6Tool) set({ d6Tool: v }) }} style={{ marginTop: 3, padding: '8px 10px' }} />
-            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>как в станке, например T2</span>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Инструмент для пазов и фрезеровки</div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 4, cursor: 'pointer' }}>
+            <input type="checkbox" checked={post.d6ToolAuto !== false} onChange={e => set({ d6ToolAuto: e.target.checked })} style={{ width: 18, height: 18 }} />
+            Авто — назначает станок
           </label>
+          {post.d6ToolAuto === false ? (
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', minWidth: 0, maxWidth: 200, marginTop: 6 }}>Свой инструмент
+              <input type="text" key={post.id + (post.d6Tool || '')} defaultValue={post.d6Tool || 'T2'} onBlur={e => { const v = e.target.value.trim() || 'T2'; if (v !== post.d6Tool) set({ d6Tool: v }) }} style={{ marginTop: 3, padding: '8px 10px' }} />
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>как в станке, например T2</span>
+            </label>
+          ) : (
+            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Инструмент в программу не пишется — его подбирает система управления станка. У каждого станка свои номера инструментов, так станок не будет ругаться.</span>
+          )}
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!post.d6All} onChange={e => set({ d6All: e.target.checked })} style={{ width: 18, height: 18 }} />

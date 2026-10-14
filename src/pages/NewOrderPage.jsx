@@ -83,7 +83,8 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
     // Старый формат — для обратной совместимости
     Object.values(detail.contour.corners || {}).some(c => c?.type && c.type !== 'none') ||
     (detail.contour.cutouts || []).length > 0 ||
-    (detail.contour.grooves || []).length > 0
+    (detail.contour.grooves || []).length > 0 ||
+    (detail.contour.edgeGrooves || []).length > 0
   )
 
   useEffect(() => {

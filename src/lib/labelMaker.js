@@ -288,7 +288,7 @@ export function labelInfo(order, mat, si, pi) {
   detailEdgeList(d).filter(e => e.curved).forEach(e => { curved[e.name] = (curved[e.name] || 0) + e.mm })
   const holePts = c ? getAllDrillPoints(c, DW, DL, false) : []
   const face = holePts.filter(q => !q.edge && !q.back).length, back = holePts.filter(q => !q.edge && q.back).length, end = holePts.filter(q => q.edge).length
-  const grooves = (c?.grooves || []).length, pockets = (c?.holes || []).filter(h => h.type === 'pocket').length
+  const grooves = (c?.grooves || []).length + (c?.edgeGrooves || []).length, pockets = (c?.holes || []).filter(h => h.type === 'pocket').length
   const cutouts = (c?.holes || []).filter(h => h.type !== 'pocket').length
   const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
