@@ -127,8 +127,9 @@ async function setupWebhook(): Promise<{ ok: boolean, bot?: string, error?: stri
 }
 
 // ── Запросы из приложения: только мастер-аккаунт ──
-async function isMaster(req: Request): Promise<boolean> {
-  const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
+async function isMaster(req: Request, body: any): Promise<boolean> {
+  // токен входа — в теле запроса (приложение шлёт «простой» запрос без заголовков, его не задерживает шлюз Supabase)
+  const jwt = String(body?.jwt || '') || (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
   if (!jwt) return false
   const { data } = await getDb().auth.getUser(jwt)
   const uid = data?.user?.id
@@ -139,7 +140,7 @@ async function isMaster(req: Request): Promise<boolean> {
 
 async function onApp(req: Request, body: any) {
   if (!TOKEN) return json({ error: 'Нет секрета TELEGRAM_BOT_TOKEN в Supabase → Edge Functions → Secrets' })
-  if (!(await isMaster(req))) return json({ error: 'Только для мастер-аккаунта' })
+  if (!(await isMaster(req, body))) return json({ error: 'Только для мастер-аккаунта' })
 
   if (body.action === 'setup') {
     const r = await setupWebhook()
@@ -174,7 +175,7 @@ Deno.serve(async req => {
   const qAction = new URL(req.url).searchParams.get('action')
   if (qAction && !body.action) body.action = qAction
   if (!req.headers.get('X-Telegram-Bot-Api-Secret-Token'))
-    console.log('app call', JSON.stringify({ ct: req.headers.get('content-type'), len: raw.length, action: body.action ?? null }))
+    console.log('app call', JSON.stringify({ ct: req.headers.get('content-type'), len: raw.length, action: body.action ?? null, jwt: !!body.jwt }))
   const hdr = req.headers.get('X-Telegram-Bot-Api-Secret-Token')
   if (hdr) {
     if (hdr !== (await webhookSecret())) return new Response('forbidden', { status: 403 })

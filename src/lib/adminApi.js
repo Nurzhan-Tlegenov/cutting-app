@@ -1,6 +1,6 @@
 // Администратор: список пользователей и регистрация по запросу (см. migration_users_admin.sql).
 // Всё идёт через функции базы — они сами проверяют, что вызывает администратор.
-import { supabase } from './supabase'
+import { supabase, SUPABASE_URL } from './supabase'
 
 const isMissing = e => /PGRST202|42883|schema cache|Could not find the function/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
 export const ADMIN_SQL_HINT = 'База ещё не обновлена: выполните migration_security_all.sql в Supabase (SQL Editor) — один раз.'
@@ -54,17 +54,20 @@ export async function confirmSignupCode(phone, code) {
 export const adminApproveRequest = id => call('admin_approve_request', { p_id: id })
 /** Вызов функции бота (только мастер): { action: 'setup' } | { action: 'send_code', request_id } */
 export async function tgBot(body) {
+  // «Простой» запрос (text/plain, без заголовков авторизации): шлюз Supabase пропускает его так же, как сообщения Telegram,
+  // а права мастера функция проверяет сама по токену входа в теле запроса.
   try {
-    const { data, error } = await supabase.functions.invoke(`tg-bot?action=${encodeURIComponent(body.action)}`, { body })
-    if (error) {
-      let msg = error.message
-      try { const j = await error.context?.json?.(); if (j?.error) msg = j.error } catch { /* ответ не JSON */ }
-      if (/Failed to send/i.test(msg)) msg = 'Нет связи с функцией tg-bot: откройте её в Supabase → Logs и посмотрите ошибку'
-      else if (/404|not found/i.test(msg)) msg = 'Функция tg-bot не найдена в Supabase (Edge Functions)'
-      return { error: msg }
-    }
-    return data?.error ? { error: { no_telegram: 'Номер ещё не подтверждён в Telegram — отправьте код в WhatsApp.', not_approved: 'Заявка не одобрена.' }[data.error] || data.error } : data
-  } catch (e) { return { error: String(e?.message || e) } }
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return { error: 'Войдите заново' }
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/tg-bot`, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+      body: JSON.stringify({ ...body, jwt: session.access_token }),
+    })
+    if (r.status === 404) return { error: 'Функция tg-bot не найдена в Supabase (Edge Functions)' }
+    const data = await r.json().catch(() => null)
+    if (!data) return { error: `Функция tg-bot ответила ${r.status}` }
+    return data.error ? { error: { no_telegram: 'Номер ещё не подтверждён в Telegram — отправьте код в WhatsApp.', not_approved: 'Заявка не одобрена.' }[data.error] || data.error } : data
+  } catch (e) { return { error: /Failed to fetch|NetworkError|Load failed/i.test(String(e?.message)) ? 'Нет связи с функцией tg-bot' : String(e?.message || e) } }
 }
 
 export const adminUsers = () => call('admin_users')
