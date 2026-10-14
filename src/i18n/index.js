@@ -6,17 +6,87 @@
 // Чего нет в словаре — остаётся по-русски.
 
 export const LANGS = [
-  ['ru', 'Русский'], ['en', 'English'], ['kk', 'Қазақша'], ['ky', 'Кыргызча'], ['uz', 'Oʻzbekcha'], ['az', 'Azərbaycanca'],
+  ['ru', 'Русский'], ['uk', 'Українська'], ['en', 'English'], ['kk', 'Қазақша'], ['ky', 'Кыргызча'], ['uz', 'Oʻzbekcha'], ['az', 'Azərbaycanca'],
   ['tr', 'Türkçe'], ['zh', '中文'], ['de', 'Deutsch'], ['pl', 'Polski'], ['ar', 'العربية'],
 ]
-const LOCALE = { ru: 'ru-RU', en: 'en-GB', kk: 'kk-KZ', ky: 'ky-KG', uz: 'uz-UZ', az: 'az-AZ', tr: 'tr-TR', zh: 'zh-CN', de: 'de-DE', pl: 'pl-PL', ar: 'ar' }
+const LOCALE = { ru: 'ru-RU', uk: 'uk-UA', en: 'en-GB', kk: 'kk-KZ', ky: 'ky-KG', uz: 'uz-UZ', az: 'az-AZ', tr: 'tr-TR', zh: 'zh-CN', de: 'de-DE', pl: 'pl-PL', ar: 'ar' }
 const RTL = new Set(['ar'])
 const KEY = 'appLang'
 const dicts = import.meta.glob('./dict/*.json')     // подгружается только словарь выбранного языка
 
-export function getLang() {
-  try { const v = localStorage.getItem(KEY); return LANGS.some(([c]) => c === v) ? v : 'ru' } catch { return 'ru' }
+const known = c => LANGS.some(([x]) => x === c)
+/** Язык телефона / браузера, если он есть в приложении (uk-UA → uk, kk-KZ → kk …); иначе — русский */
+export function deviceLang() {
+  try {
+    for (const l of navigator.languages || [navigator.language]) {
+      const c = String(l || '').toLowerCase().split('-')[0]
+      if (known(c)) return c
+    }
+  } catch { /* нет navigator */ }
+  return 'ru'
 }
+/** Язык сам пользователь выбирал (тогда автоопределение его не трогает) */
+export const langChosen = () => { try { return known(localStorage.getItem(KEY)) } catch { return false } }
+// Язык: выбранный пользователем, а если он ещё ничего не выбирал — язык его телефона, чтобы не пришлось искать свой
+// Тот, кто уже входил в приложение (есть сохранённый вход), остаётся на русском, как и работал: язык телефона — только для новых
+const hadSession = () => { try { for (let i = 0; i < localStorage.length; i++) if (/^sb-.*-auth-token$/.test(localStorage.key(i) || '')) return true } catch { /* без памяти */ } return false }
+let first = null
+export function getLang() {
+  try {
+    const v = localStorage.getItem(KEY)
+    if (known(v)) return v
+    if (first == null) first = hadSession() ? 'ru' : deviceLang()     // один раз за запуск: вход после него язык уже не меняет
+    return first
+  } catch { return 'ru' }
+}
+
+/**
+ * Язык по тому, что человек написал (имя, страна, город при регистрации) — по буквам, которые есть только в этом языке.
+ * Русский и украинский/казахский различаются как раз такими буквами: ї, є, ґ, і — украинский; ә, ғ, қ, ң, ө, ұ, һ — казахский.
+ * -> код языка или '' (не понять)
+ */
+export function guessLang(text) {
+  const t = String(text || '')
+  if (/[\u4e00-\u9fff]/.test(t)) return 'zh'
+  if (/[\u0600-\u06ff]/.test(t)) return 'ar'
+  if (/[әғқұһ]/i.test(t)) return 'kk'
+  if (/[їєґ]/i.test(t) || (/[іІ]/.test(t) && !/[ыэъЫЭЪ]/.test(t) && /[А-Яа-я]/.test(t))) return 'uk'
+  if (/[ңөү]/i.test(t) && /[А-Яа-я]/.test(t)) return 'ky'
+  if (/ə/i.test(t)) return 'az'
+  if (/[ğşı]/i.test(t)) return 'tr'
+  if (/[oʻgʻ]ʻ|[og]['ʼ‘]/i.test(t) && /[a-z]/i.test(t)) return 'uz'
+  if (/[ąćęłńśźż]/i.test(t)) return 'pl'
+  if (/[äöüß]/i.test(t)) return 'de'
+  return ''
+}
+const NAMES = Object.fromEntries(LANGS)
+// вопрос «переключить язык?» — на том языке, который предлагаем
+const ASK = {
+  uk: 'Схоже, ви пишете українською. Перемкнути застосунок на українську мову?',
+  kk: 'Сіз қазақша жазып отырған сияқтысыз. Қолданбаны қазақ тіліне ауыстыру керек пе?',
+  ky: 'Сиз кыргызча жазып жаткандайсыз. Колдонмону кыргыз тилине которобузбу?',
+  uz: 'Oʻzbekcha yozayotganga oʻxshaysiz. Ilovani oʻzbek tiliga oʻtkazaylikmi?',
+  az: 'Deyəsən, azərbaycanca yazırsınız. Tətbiqi Azərbaycan dilinə keçirək?',
+  tr: 'Türkçe yazıyorsunuz gibi görünüyor. Uygulamayı Türkçeye geçirelim mi?',
+  zh: '您似乎在使用中文。要将应用切换为中文吗？',
+  ar: 'يبدو أنك تكتب بالعربية. هل تريد تبديل لغة التطبيق إلى العربية؟',
+  pl: 'Wygląda na to, że piszesz po polsku. Przełączyć aplikację na język polski?',
+  de: 'Sie schreiben anscheinend auf Deutsch. App auf Deutsch umstellen?',
+}
+/** После регистрации: если человек писал на своём языке, а язык он сам не выбирал — предложить переключиться (одним «ОК») */
+export function offerLangFrom(text, goTo = null) {
+  const g = guessLang(text)
+  if (!g || g === getLang() || langChosen() || !ASK[g]) return false
+  // confirm здесь — без перевода: вопрос уже на нужном языке
+  if (window.__nativeConfirm ? window.__nativeConfirm(ASK[g]) : window.confirm(ASK[g])) {
+    try { localStorage.setItem(KEY, g) } catch { /* без памяти */ }
+    if (goTo) window.location.assign(goTo); else window.location.reload()
+    return true
+  }
+  try { localStorage.setItem(KEY, getLang()) } catch { /* без памяти */ }   // отказался — больше не спрашивать
+  return false
+}
+export const langName = c => NAMES[c] || c
 export function setLang(code) {
   try { localStorage.setItem(KEY, code) } catch { /* без памяти */ }
   window.location.reload()            // проще и надёжнее, чем возвращать каждую надпись обратно
@@ -108,6 +178,7 @@ export async function startI18n() {
   }
   // всплывающие окна
   const { alert, confirm, prompt } = window
+  window.__nativeConfirm = m => confirm.call(window, m)
   window.alert = m => alert.call(window, trLines(m))
   window.confirm = m => confirm.call(window, trLines(m))
   window.prompt = (m, d) => prompt.call(window, trLines(m), d)

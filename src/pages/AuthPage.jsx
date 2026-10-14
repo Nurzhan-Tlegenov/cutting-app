@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
+import { offerLangFrom } from '../i18n'
 import { signupOpen, requestSignup, requestPasswordReset, confirmPasswordReset } from '../lib/adminApi'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -69,6 +70,8 @@ export default function AuthPage() {
           if (r.status === 'approved' || r.status === 'open') { setApproved(true); setNote('Заявка одобрена. Остался один шаг: придумайте пароль и нажмите «Зарегистрироваться».') }
           else if (r.status === 'rejected') setError('Заявка для этого номера отклонена. Свяжитесь с нами.')
           else setNote('Заявка отправлена. Мы свяжемся с вами. После одобрения откройте «Регистрация», введите этот же номер и нажмите «Продолжить» — появится создание пароля.')
+          // написал на своём языке (имя, страна, город) — предложить переключить приложение на него
+          if (r.status !== 'approved' && r.status !== 'open') offerLangFrom([form.full_name, form.country, form.city, form.comment].join(' '))
           return
         }
         if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
@@ -82,6 +85,7 @@ export default function AuthPage() {
           contact_email: form.email,
           invite
         })
+        if (offerLangFrom([form.full_name, form.country, form.city].join(' '), '/')) return
       }
       navigate('/')
     } catch (err) {
