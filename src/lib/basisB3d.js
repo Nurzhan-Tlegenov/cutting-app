@@ -347,6 +347,37 @@ function basisSrc(panel) {
   }
 }
 
+// Склейка: облицовка пласти листовым материалом (Plastics, толщина от 3 мм — плита, а не HPL-пластик)
+// — это отдельная деталь того же контура, которую надо раскроить и приклеить. В модели слой лежит
+// поверх основы (со стороны Z = толщина), следующий слой — поверх предыдущего. Кромка, пазы и выемки
+// остаются на основе; присадка считается для каждого слоя своя — по крепежу, который в него входит.
+const GLUE_MIN_THICK = 3
+function glueLayers(o, src) {
+  const layers = (kid(o, 'Plastics')?.c || []).filter(pl => pl && val(pl, 'Thick', 0) >= GLUE_MIN_THICK)
+  if (!layers.length) return [src]
+  const of = layers.length + 1, id = val(o, 'ID')
+  src.meta.glue = { n: 1, of, id }
+  src.meta.note = `Склейка 1/${of}`
+  const out = [src]
+  let z = src.T
+  layers.forEach((pl, i) => {
+    const T = val(pl, 'Thick', 16), texDir = val(pl, 'TexDir', src.texDir)
+    const matFull = String(val(pl, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
+    out.push({
+      ...src, T, texDir, rotatable: texDir === 0,
+      M: mul(src.M, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, z]),
+      butts: [], cutsRaw: [], decorRaw: [], warnCuts: 0, frontFace: null,
+      material: cleanName(val(pl, 'Mat')) || src.material,
+      meta: {
+        ...src.meta, ids: [`${id}/${i + 2}`], glue: { n: i + 2, of, id }, note: `Склейка ${i + 2}/${of}`,
+        material: matFull[0] || src.meta.material, materialCode: matFull.slice(1).join(' / '),
+      },
+    })
+    z += T
+  })
+  return out
+}
+
 // Нейтральное описание панели (src) -> деталь заказа. Общая часть для Базиса и Астры.
 // src: { T, elems, texDir, M, butts: [{ e, name, info }], cutsRaw, decorRaw, warnCuts,
 //        name, prefix, material, rotatable, meta, anim }
@@ -874,10 +905,13 @@ export function parseBasis(u8, opts = {}) {
   const I = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
   for (const top of model.c) {
     if (top.k !== 'Obj' || !top.c) continue
-    walk(top, I, { product: cleanName(val(top, 'Name')), productDes: cleanName(val(top, 'Des')), productPos: cleanName(val(top, 'ArtPos')), path: [], depth: 0 })
+    // изделие — только блок верхнего уровня; панель, лежащая прямо в модели, сама себе не изделие
+    // (иначе её имя становится префиксом: «БОК» с префиксом «БОК» → на карте «БОК БОК»)
+    const blk = val(top, 'Type') !== TYPE_PANEL
+    walk(top, I, { product: blk ? cleanName(val(top, 'Name')) : '', productDes: blk ? cleanName(val(top, 'Des')) : '', productPos: blk ? cleanName(val(top, 'ArtPos')) : '', path: [], depth: 0 })
   }
 
-  const srcs = panels.map(p => { try { return basisSrc(p) } catch { return null } })
+  const srcs = panels.flatMap(p => { try { return glueLayers(p.obj, basisSrc(p)) } catch { return [null] } })
   const { items, groups, skipped } = groupItems(srcs.map(s => () => {
     if (!s) throw new Error('панель не прочитана')
     return buildItem(s, holes, faceRule)

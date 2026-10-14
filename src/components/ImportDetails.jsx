@@ -559,6 +559,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
                         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
                           {it.prefix ? `${it.prefix} · ` : ''}{it.name || `Деталь ${i + 1}`}
                         </span>
+                        {it.contour?.meta?.glue && <span style={{ color: 'var(--blue)', whiteSpace: 'nowrap' }}>{it.contour.meta.note}</span>}
                         {clash && <span style={{ color: 'var(--danger)', whiteSpace: 'nowrap' }}>пересечение</span>}
                         <span style={{ whiteSpace: 'nowrap' }}>{it.w}×{it.h} — {it.qty} шт.</span>
                       </div>

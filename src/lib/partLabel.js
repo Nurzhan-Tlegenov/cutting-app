@@ -25,8 +25,14 @@ export function detailMeta(detail) {
 /** Подпись уложенной детали p по выбранному режиму; short — префикс до 3 букв (для карты) */
 export function partLabel(p, details, mode, short = false) {
   if (mode === 'none') return ''
-  const name = String(p.label || '').replace(/Деталь\s*/, 'Д')
-  const base = (p.prefix ? (short ? p.prefix.slice(0, 3) : p.prefix) + ' ' : '') + name
+  // p.label — это display_name, где префикс уже стоит впереди («Кухня БОК»): отрезаем его,
+  // иначе на карте выходит «Кух Кухня БОК»; префикс, совпадающий с именем («БОК» у «БОК»), не пишем вовсе
+  let name = String(p.label || '')
+  const pfx = String(p.prefix || '').trim()
+  if (pfx && name.startsWith(pfx + ' ')) name = name.slice(pfx.length + 1)
+  name = name.replace(/Деталь\s*/, 'Д')
+  const showPfx = pfx && pfx !== name.trim()
+  const base = (showPfx ? (short ? pfx.slice(0, 3) : pfx) + ' ' : '') + name
   if (!mode || mode === 'name') return base
   const m = detailMeta(details?.[p.detailIndex])
   if (mode === 'des') return m?.des || base
