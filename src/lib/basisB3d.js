@@ -629,6 +629,7 @@ export function buildItem(src, holes, faceRule) {
     edgeGrooves.push({
       edgeSide: side, gapLow: r1(Math.max(0, lo)), gapHigh: r1(Math.max(0, total - hi)),
       fromFace: r1(flip ? c.z0 : T - c.z1), width: r1(c.z1 - c.z0), depth: r1(c.depth), note: c.name || 'Паз в торце',
+      ...(c.kind ? { kind: c.kind } : {}), ...(c.r > 0 ? { r: r1(c.r) } : {}),
     })
   }
 

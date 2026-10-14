@@ -30,11 +30,15 @@ export function edgeGrooveGeom(g, W, L, out = 0) {
   return { side, a0, a1, length: a1 - a0, line, rect }
 }
 
-/** Подпись для списков: «Паз в торце (нижний): 450 × 3.5 × 10, 3.8 от лицевой» */
+/** Выемка в торце (а не паз): kind 'pocket' (r — радиус скругления углов в плоскости торца) */
+export const isEdgePocket = g => g?.kind === 'pocket' || /выемк/i.test(g?.note || '')
+
+/** Подпись для списков: «Паз в торце (нижний): 450 × 3.5 × 10, 3.8 от лицевой» / «Выемка в торце (…): 50 × 10 × 30, R5, …» */
 export function edgeGrooveLabel(g, W, L) {
   const geo = edgeGrooveGeom(g, W, L)
   const len = geo ? r1(geo.length) : '—'
-  return `Паз в торце (${SIDE_NAMES[g.edgeSide] || g.edgeSide}): ${len} × ${r1(num(g.width))} × ${r1(num(g.depth))}, ${r1(num(g.fromFace))} от лицевой`
+  const pk = isEdgePocket(g)
+  return `${pk ? 'Выемка' : 'Паз'} в торце (${SIDE_NAMES[g.edgeSide] || g.edgeSide}): ${len} × ${r1(num(g.width))} × ${r1(num(g.depth))}${pk && num(g.r) > 0 ? `, R${r1(num(g.r))}` : ''}, ${r1(num(g.fromFace))} от лицевой`
 }
 
 /** Деталь отзеркалена лево ↔ право (по ширине X) */

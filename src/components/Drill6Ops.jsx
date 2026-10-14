@@ -152,19 +152,29 @@ export default function Drill6Ops({ cnc, onChange, isMaster = false, layers = nu
         {Layers({ cat: 'edgeGroove', list: layers?.edgeGroove, label: l => `Паз в торце ${l.width} × ${l.depth} мм` })}
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
-        <Title>3. Выемки{inOrder(sum(layers?.pocket))}</Title>
+        <Title>3. Выемки по пласти{inOrder(sum(layers?.pocket))}</Title>
         {Mode({ cat: 'pocket' })}
-        {Layers({ cat: 'pocket', list: layers?.pocket, label: l => `Выемка глубиной ${l.depth} мм` })}
+        {MmField({ cat: 'pocket', k: 'step', label: 'Шаг между проходами, % от Ø фрезы', def: 50 })}
+        <Hint>«Авто» — выборка по контуру выемки, проходы строит станок. Свой инструмент — путь фрезы строит программа: от центра выемки кольцами по её форме, каждое по часовой, последнее — по контуру со смещением на радиус фрезы (скругление выемки повторяется, если радиус фрезы не больше него).</Hint>
+        {Layers({ cat: 'pocket', list: layers?.pocket, label: l => `Выемка ${l.size || ''} глубиной ${l.depth} мм` })}
+        {!layers && <Hint>Выемки по слоям (размер и глубина) видны в заказе — там можно назначить свой инструмент каждой.</Hint>}
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
-        <Title>4. Вырезы внутри детали{layers ? inOrder(layers.cutout) : null}</Title>
+        <Title>4. Выемки в торце{inOrder(sum(layers?.edgePocket))}</Title>
+        {Mode({ cat: 'edgePocket' })}
+        {MmField({ cat: 'edgePocket', k: 'step', label: 'Шаг между проходами, % от Ø фрезы', def: 50 })}
+        <Hint>Фрезеровка на торце (торцевой фрезерный узел) по форме выемки со скруглениями. Как у выемок по пласти: «авто» — выборку строит станок; свой инструмент — от центра, кольцами, по часовой (если смотреть на торец), последнее — по контуру.</Hint>
+        {Layers({ cat: 'edgePocket', list: layers?.edgePocket, label: l => `Выемка в торце ${l.size || ''} глубиной ${l.depth} мм` })}
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <Title>5. Вырезы внутри детали{layers ? inOrder(layers.cutout) : null}</Title>
         {Mode({ cat: 'cutout' })}
         {Dir({ cat: 'cutout' })}
         {MmField({ cat: 'cutout', k: 'lead', label: 'Вход с отступа от контура, мм', def: 20 })}
         <Hint>Фреза внутри выреза, насквозь. По умолчанию — по часовой (встречное фрезерование). Вход — изнутри выреза, по нормали к контуру; в узком вырезе отступ уменьшается сам. 0 — без отступа.</Hint>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
-        <Title>5. Вырезы на краю детали{layers ? inOrder(layers.edge) : null}</Title>
+        <Title>6. Вырезы на краю детали{layers ? inOrder(layers.edge) : null}</Title>
         {Mode({ cat: 'edge' })}
         {Dir({ cat: 'edge' })}
         {MmField({ cat: 'edge', k: 'lead', label: 'Заход и выход за краем детали, мм', def: 10 })}

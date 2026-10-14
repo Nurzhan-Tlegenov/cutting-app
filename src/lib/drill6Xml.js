@@ -30,7 +30,7 @@
  * пласти, фигурный контур, вырезы, выемки): лишнее оператор отключает фильтром на стойке (например, обработку Face 5).
  */
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
-import { edgeGrooveGeom } from './edgeGrooves'
+import { edgeGrooveGeom, isEdgePocket } from './edgeGrooves'
 import { rawDetail, parseEdgeTypes, edgeKey } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
@@ -174,6 +174,153 @@ const inPoly = ([x, y], pts) => {
   }
   return ins
 }
+// ── Выборка выемки: от центра наружу, концентрическими проходами по форме контура, каждый — по часовой ──
+const pArea = P => P.reduce((A, p, i) => { const q = P[(i + 1) % P.length]; return A + (p[0] * q[1] - q[0] * p[1]) / 2 }, 0)
+function isConvex(P) {
+  let sgn = 0
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i], b = P[(i + 1) % P.length], c = P[(i + 2) % P.length]
+    const cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])
+    if (Math.abs(cr) < 1e-6) continue
+    if (!sgn) sgn = Math.sign(cr); else if (Math.sign(cr) !== sgn) return false
+  }
+  return true
+}
+// выпуклый контур по часовой (P) -> контур на d внутрь (пересечение сдвинутых полуплоскостей); null — схлопнулся
+function insetConvex(P, d) {
+  let Q = P
+  for (let i = 0; i < P.length && Q.length >= 3; i++) {
+    const a = P[i], b = P[(i + 1) % P.length], L = Math.hypot(b[0] - a[0], b[1] - a[1])
+    if (L < 1e-9) continue
+    const n = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L]              // внутрь при обходе по часовой — вправо
+    const k = n[0] * a[0] + n[1] * a[1] + d
+    const f = p => n[0] * p[0] + n[1] * p[1] - k
+    const out = []
+    for (let j = 0; j < Q.length; j++) {
+      const p = Q[j], q = Q[(j + 1) % Q.length], fp = f(p), fq = f(q)
+      if (fp >= 0) out.push(p)
+      if ((fp >= 0) !== (fq >= 0)) { const t = fp / (fp - fq); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]) }
+    }
+    Q = out.filter((p, j) => j === 0 || Math.hypot(p[0] - out[j - 1][0], p[1] - out[j - 1][1]) > 1e-6)
+  }
+  return Q.length >= 3 && Math.abs(pArea(Q)) > 0.01 ? Q : null
+}
+const IDF = { at: (x, y) => [x, y] }
+/**
+ * Траектория выборки (координаты станка, ось фрезы): начало — в центре, дальше проходы от внутреннего к внешнему,
+ * каждый — по часовой; последний — по контуру выемки, отступив на радиус фрезы. step — шаг между проходами, мм.
+ * -> { start, segs } или null (контур не выпуклый — такую выборку строит станок; или фреза больше выемки).
+ */
+// круглая выемка: точные окружности от центра наружу, каждая — по часовой (четыре дуги по 90°)
+function circlePocket(cx, cy, Rp, r, step) {
+  const top = Rp - r
+  if (!(top > 1e-3)) return null
+  const rs = []
+  for (let q = top; q > 1e-3; q -= step) rs.push(q)
+  rs.reverse()                                                    // от внутреннего к внешнему
+  const segs = []
+  for (const q of rs) {
+    segs.push({ to: [cx + q, cy], angle: 0 })                      // по радиусу к следующей окружности
+    segs.push({ to: [cx, cy - q], angle: 90 }, { to: [cx - q, cy], angle: 90 }, { to: [cx, cy + q], angle: 90 }, { to: [cx + q, cy], angle: 90 })
+  }
+  return { start: [cx, cy], segs }
+}
+function spiralPocket(poly, r, step) {
+  let P = poly.filter((p, i) => Math.hypot(p[0] - poly[(i + 1) % poly.length][0], p[1] - poly[(i + 1) % poly.length][1]) > 1e-6)
+  if (P.length < 3) return null
+  if (pArea(P) > 0) P = [...P].reverse()
+  if (!isConvex(P)) return null
+  const loops = []
+  for (let d = r, g = 0; g < 400; d += step, g++) { const q = insetConvex(P, d); if (!q) break; loops.push(q) }
+  if (!loops.length) return null
+  // середина, которую не задело самое внутреннее кольцо, выбирается проходом ещё на полшага внутрь (если влезает)
+  const deeper = insetConvex(P, r + (loops.length - 1) * step + step / 2)
+  if (deeper) loops.push(deeper)
+  const inner = loops[loops.length - 1]
+  const c = inner.reduce((s, p) => [s[0] + p[0] / inner.length, s[1] + p[1] / inner.length], [0, 0])
+  const segs = []
+  let cur = c
+  for (const lp of loops.reverse()) {
+    let els = loopToMachine(lp, IDF)
+    if (els.length < 2) continue
+    if (loopArea(els) > 0) els = reverseEls(els)
+    let k = 0, best = Infinity
+    els.forEach((e, i) => { const dd = Math.hypot(e.a[0] - cur[0], e.a[1] - cur[1]); if (dd < best) { best = dd; k = i } })
+    els = [...els.slice(k), ...els.slice(0, k)]
+    if (best > 1e-3) segs.push({ to: els[0].a, angle: 0 })
+    for (const e of els) segs.push({ to: e.b, angle: e.angle })
+    cur = els[0].a
+  }
+  return { start: c, segs }
+}
+// размер выемки для слоя: круг — Ø, иначе габарит (длина × ширина)
+function pocketSize(poly) {
+  const xs = poly.map(p => p[0]), ys = poly.map(p => p[1])
+  const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys)
+  const round = Math.abs(w - h) < 0.2 && Math.abs(Math.abs(pArea(poly)) - Math.PI * w * h / 4) < 0.03 * w * h
+  return round ? { key: `d${r1(w)}`, text: `Ø${r1(w)}`, min: w } : { key: `${r1(Math.max(w, h))}x${r1(Math.min(w, h))}`, text: `${r1(Math.max(w, h))} × ${r1(Math.min(w, h))}`, min: Math.min(w, h) }
+}
+// прямоугольник со скруглёнными углами в координатах (u, f) против часовой: u0..u1 × f0..f1, радиус r
+function roundRect(u0, u1, f0, f1, r) {
+  const w = u1 - u0, h = f1 - f0
+  if (w < -1e-6 || h < -1e-6) return null
+  if (w < 1e-3 || h < 1e-3) return w < 1e-3 ? [[u0, f0], [u0, f1]] : [[u0, f0], [u1, f0]]     // выродился в отрезок
+  r = Math.max(0, Math.min(r, w / 2, h / 2))
+  if (r < 1e-3) return [[u0, f0], [u1, f0], [u1, f1], [u0, f1]]
+  const n = Math.max(2, Math.ceil(r / 1.5)), pts = []
+  const arc = (cx, cy, a0) => { for (let k = 0; k <= n; k++) { const a = a0 + (Math.PI / 2) * k / n; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]) } }
+  arc(u1 - r, f0 + r, -Math.PI / 2); arc(u1 - r, f1 - r, 0); arc(u0 + r, f1 - r, Math.PI / 2); arc(u0 + r, f0 + r, Math.PI)
+  return pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 1e-6)
+}
+/**
+ * Выемка в торце -> фрезеровка на торце (Face 1–4) в трёхмерных точках станка.
+ * u — вдоль торца (координата детали), f — от лицевой пласти; на станке лицевая сверху, Z = T − f.
+ * «Авто» (нет инструмента / Ø): выборка по контуру (Pocket 1), проходы строит станок; контур — по часовой, если смотреть на торец.
+ * Свой инструмент Ø D: путь фрезы сами (ToolOffset 中) — от центра кольцами по форме выемки, каждое по часовой, шаг step % от D,
+ * последнее — по контуру со смещением на радиус фрезы (скругление R повторяется, если R фрезы ≤ R).
+ */
+function edgePocketMill({ side, a0, a1, f0, h, r, depth, W, H, T, fr, face, tool, step }) {
+  const appOf = u => (side === 'bottom' ? [u, 0] : side === 'top' ? [u, H] : side === 'left' ? [0, u] : [W, u])
+  const P = (u, f) => { const q = fr.at(...appOf(u)); return [q[0], q[1], T - f] }
+  // направление «по часовой, если смотреть на торец снаружи»: знак тройки (du × df) · наружу
+  const A = P(a0, 0), B = P(a0 + 1, 0)
+  const inApp = side === 'bottom' ? [0, 1] : side === 'top' ? [0, -1] : side === 'left' ? [1, 0] : [-1, 0]
+  const q0 = fr.at(...appOf(a0)), q1 = fr.at(appOf(a0)[0] + inApp[0], appOf(a0)[1] + inApp[1])
+  const nOut = [q0[0] - q1[0], q0[1] - q1[1], 0]
+  const du = [B[0] - A[0], B[1] - A[1], 0], df = [0, 0, -1]
+  const cr = [du[1] * df[2] - du[2] * df[1], du[2] * df[0] - du[0] * df[2], du[0] * df[1] - du[1] * df[0]]
+  const s = Math.sign(cr[0] * nOut[0] + cr[1] * nOut[1] + cr[2] * nOut[2]) || 1
+  const cw = pts => { const ar = pArea(pts); return (ar > 0) === (s > 0) ? [...pts].reverse() : pts }   // по часовой с торца
+  const to3 = pts => pts.map(([u, f]) => P(u, f))
+  const f1 = f0 + h
+  const D = n0(tool?.d)
+  if (!tool || !(D > 0) || tool.kind === 'saw' || D > Math.min(h, a1 - a0) + 0.05) {
+    const loop = to3(cw(roundRect(a0, a1, f0, f1, r)))
+    const warn = tool && D > Math.min(h, a1 - a0) + 0.05 ? `фреза ${tool.name} Ø${r1(D)} больше выемки — выборку строит станок` : ''
+    return { face, start: loop[0], segs: loop.slice(1).concat([loop[0]]).map(to => ({ to, angle: 0 })), closed: true, depth, pocket: true, offset: '中', cat: 'edgePocket', tool, warn }
+  }
+  const R = D / 2, st = Math.max(0.5, D * Math.min(100, Math.max(10, step)) / 100)
+  const half = Math.min(h, a1 - a0) / 2
+  const ds = [R]
+  while (ds[ds.length - 1] + st < half - 1e-3) ds.push(ds[ds.length - 1] + st)
+  if (ds[ds.length - 1] + R < half - 1e-3) ds.push(half)            // середина не задета — проход по средней линии
+  const uc = (a0 + a1) / 2, fc = (f0 + f1) / 2
+  let cur = [uc, fc]
+  const segs = []
+  for (const d of ds.reverse()) {                    // от внутреннего кольца к внешнему
+    let lp = roundRect(a0 + d, a1 - d, f0 + d, f1 - d, Math.max(0, r - d))
+    if (!lp) continue
+    if (lp.length > 2) lp = cw(lp)
+    let k = 0, best = Infinity
+    lp.forEach((p, i) => { const dd = Math.hypot(p[0] - cur[0], p[1] - cur[1]); if (dd < best) { best = dd; k = i } })
+    lp = [...lp.slice(k), ...lp.slice(0, k)]
+    segs.push(...lp.map(p => ({ to: P(...p), angle: 0 })))
+    if (lp.length > 2) segs.push({ to: P(...lp[0]), angle: 0 })          // кольцо замкнуть
+    else segs.push({ to: P(...lp[0]), angle: 0 })                        // отрезок — туда и обратно
+    cur = lp[0]
+  }
+  return { face, start: P(uc, fc), segs, closed: false, depth, pocket: false, offset: '中', cat: 'edgePocket', tool }
+}
 const reverseEls = els => [...els].reverse().map(e => ({ ...e, a: e.b, b: e.a, angle: -e.angle }))
 function millPaths(raw, c, W, H, T, fr, set = {}) {
   const out = [], through = T + 1
@@ -240,7 +387,8 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
     if (els.length < 2) return
     if (hole.type === 'pocket') {
       const face = hole.face === 'back' ? fr.bottom : fr.top
-      out.push(closedPath(els, { face, depth: Math.min(n0(hole.depth) || 10, T), pocket: true, offset: sideOf(els, false), cat: 'pocket' }))
+      if (loopArea(els) > 0) els = reverseEls(els)            // выемка — по часовой
+      out.push(closedPath(els, { face, depth: Math.min(n0(hole.depth) || 10, T), pocket: true, offset: sideOf(els, false), cat: 'pocket', poly: poly.map(q => fr.at(q.x, q.y)) }))
       return
     }
     if (els.some(e => onBox(e.a))) return       // вырез до края — уже в фигурном контуре
@@ -278,11 +426,12 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
 // post.d6Tools: [{ id, name — как в станке (T2), kind: 'mill' | 'saw' (фреза | диск), d — диаметр фрезы / толщина диска }]
 // post.d6Ops: по видам обработки { mode: 'auto' | 'tool' | 'width', tool, rules: [{ upTo, tool }], dir } и layers — свой
 // инструмент слоя: ключ слоя -> id инструмента или 'auto'
-export const D6_CATS = ['groove', 'edgeGroove', 'pocket', 'cutout', 'edge']
+export const D6_CATS = ['groove', 'edgeGroove', 'pocket', 'edgePocket', 'cutout', 'edge']
 export const D6_OPS_DEFAULT = () => ({
   groove: { mode: 'auto', tool: '', rules: [] },          // пазы в пласти
   edgeGroove: { mode: 'auto', tool: '', rules: [] },      // пазы в торце
-  pocket: { mode: 'auto', tool: '' },                     // выемки (выборки)
+  pocket: { mode: 'auto', tool: '', step: 50 },           // выемки по пласти: от центра, по часовой; step — шаг, % от Ø фрезы
+  edgePocket: { mode: 'auto', tool: '', step: 50 },       // выемки в торце
   cutout: { mode: 'auto', tool: '', dir: 'cw', lead: 20 },                 // вырезы внутри: фреза внутри, по часовой (встречное), вход с отступа 20 мм
   edge: { mode: 'auto', tool: '', dir: 'ccw', lead: 10, notch: true },     // вырезы на краю: фреза снаружи, против часовой, заход/выход за край 10 мм, надсечка на выходе
   layers: {},
@@ -299,7 +448,7 @@ export function d6OpsOf(post) {
   }
   return { ops, tools }
 }
-export const layerKey = (cat, width, depth) => (cat === 'pocket' ? `p${r1(depth)}` : `${cat === 'edgeGroove' ? 'e' : 'g'}${r1(width)}x${r1(depth)}`)
+export const layerKey = (cat, width, depth, size = '') => (cat === 'pocket' ? `p${size}x${r1(depth)}` : cat === 'edgePocket' ? `ep${size}x${r1(depth)}` : `${cat === 'edgeGroove' ? 'e' : 'g'}${r1(width)}x${r1(depth)}`)
 const r1 = v => Math.round(n0(v) * 10) / 10
 /** Какой инструмент у обработки: { tool (null — авто), how: 'layer' | 'tool' | 'width' | 'auto', missing } */
 export function resolveD6Tool(o6, cat, width, key) {
@@ -331,16 +480,18 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   const warnings = []
   const o6 = d6OpsOf(post)
   const layers = []                                  // слои детали (для настроек: какие пазы и выемки есть в заказе)
-  const toolOf = (cat, width, depth, what) => {
-    const key = cat === 'groove' || cat === 'edgeGroove' || cat === 'pocket' ? layerKey(cat, width, depth) : null
-    if (key) layers.push({ key, cat, width: r1(width), depth: r1(depth) })
+  // size — у выемок размер для слоя: { key, text } (Ø100 или 200 × 100; в торце — длина × высота)
+  const toolOf = (cat, width, depth, what, size = null) => {
+    const layered = cat === 'groove' || cat === 'edgeGroove' || ((cat === 'pocket' || cat === 'edgePocket') && size)
+    const key = layered ? layerKey(cat, width, depth, size?.key) : null
+    if (key) layers.push({ key, cat, width: r1(width), depth: r1(depth), ...(size ? { size: size.text } : {}) })
     const r = resolveD6Tool(o6, cat, width, key)
     if (r.missing) warnings.push(`${what}: инструмент не назначен — в программе «авто»`)
-    else if (r.tool && r.tool.kind !== 'saw' && width > 0 && n0(r.tool.d) > width + 0.05) warnings.push(`${what}: фреза ${r.tool.name} Ø${r1(r.tool.d)} шире паза`)
+    else if (r.tool && r.tool.kind !== 'saw' && width > 0 && n0(r.tool.d) > width + 0.05) warnings.push(`${what}: фреза ${r.tool.name} Ø${r1(r.tool.d)} шире ${cat === 'pocket' || cat === 'edgePocket' ? 'выемки' : 'паза'}`)
     return r.tool
   }
   const drillAttr = t => (t ? ` Drill="${esc(latin(t.name) || t.name)}"` : '')
-  const top = [], bottom = [], edge = [], grooves = [], edgeGrooves = []
+  const top = [], bottom = [], edge = [], grooves = [], edgeGrooves = [], edgeMills = []
 
   // присадка — по тем же правилам, что 3D-модель детали: у каждого отверстия своя пласть (лицевая, обратная или обе),
   // у торцевого — высота от лицевой пласти (offsetFace). Размеры — готовой детали, без подрезки под кромку.
@@ -386,15 +537,44 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
     if (!geo || !(width > 0) || !(depth > 0)) return
     const p0 = fr.at(...geo.line[0]), p1 = fr.at(...geo.line[1])
     const face = fr.faceAt((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
-    if (!face) { warnings.push('паз в торце не на краю детали — пропущен'); return }
-    edgeGrooves.push({ face, line: [...p0, ...p1], Z: T - n0(g.fromFace) - width / 2, width, depth, tool: toolOf('edgeGroove', width, depth, `паз в торце ${r1(width)} × ${r1(depth)}`) })
+    const isPocket = isEdgePocket(g)
+    if (!face) { warnings.push(`${isPocket ? 'выемка' : 'паз'} в торце не на краю детали — пропущен${isPocket ? 'а' : ''}`); return }
+    const zc = T - n0(g.fromFace) - width / 2                   // середина по высоте, от нижней пласти
+    if (!isPocket) {
+      edgeGrooves.push({ face, line: [...p0, ...p1], Z: zc, width, depth, tool: toolOf('edgeGroove', width, depth, `паз в торце ${r1(width)} × ${r1(depth)}`) })
+      return
+    }
+    // выемка в торце — фрезеровка (Type 3) на торце по её форме (прямоугольник со скруглением углов r)
+    const rad = Math.max(0, Math.min(n0(g.r), width / 2, geo.length / 2))
+    const size = { key: `${r1(geo.length)}x${r1(width)}${rad > 0 ? 'r' + r1(rad) : ''}`, text: `${r1(geo.length)} × ${r1(width)}${rad > 0 ? ' R' + r1(rad) : ''}` }
+    const what = `выемка в торце ${size.text} × ${r1(depth)}`
+    const tool = toolOf('edgePocket', width, depth, what, size)
+    const m = edgePocketMill({ side: geo.side, a0: geo.a0, a1: geo.a1, f0: n0(g.fromFace), h: width, r: rad, depth, W, H, T, fr, face, tool,
+      step: n0(o6.ops.edgePocket.step) || 50 })
+    if (m.warn) warnings.push(`${what}: ${m.warn}`)
+    edgeMills.push(m)
   })
 
   const { mills, outline } = millPaths(raw, c, W, H, T, fr, { edgeDir: o6.ops.edge.dir, cutoutDir: o6.ops.cutout.dir, edgeLead: n0(o6.ops.edge.lead ?? 10), notch: o6.ops.edge.notch !== false, cutoutLead: n0(o6.ops.cutout.lead ?? 20) })
   const MILL_WHAT = { edge: 'фигурный край', cutout: 'вырез', pocket: 'выемка' }
-  mills.forEach(m => { m.tool = m.cat === 'decor' ? null : toolOf(m.cat, 0, m.cat === 'pocket' ? m.depth : 0, m.cat === 'pocket' ? `выемка глубиной ${r1(m.depth)}` : MILL_WHAT[m.cat]) })
+  mills.forEach(m => {
+    if (m.cat === 'decor') { m.tool = null; return }
+    if (m.cat !== 'pocket') { m.tool = toolOf(m.cat, 0, 0, MILL_WHAT[m.cat]); return }
+    const size = m.poly ? pocketSize(m.poly) : null
+    m.tool = toolOf('pocket', size?.min || 0, m.depth, `выемка ${size ? size.text + ' × ' : 'глубиной '}${r1(m.depth)}`, size)
+    // свой инструмент — выборку строим сами: от центра, по часовой, шаг — % от Ø; «авто» — выборку строит станок (Pocket 1)
+    const D = n0(m.tool?.d)
+    if (!m.poly || !m.tool || !(D > 0) || m.tool.kind === 'saw') return
+    const stp = Math.max(0.5, D * Math.min(100, Math.max(10, n0(o6.ops.pocket.step) || 50)) / 100)
+    const xs = m.poly.map(q => q[0]), ys = m.poly.map(q => q[1])
+    const sp = size?.key?.startsWith('d')
+      ? circlePocket((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2, (Math.max(...xs) - Math.min(...xs)) / 2, D / 2, stp)
+      : spiralPocket(m.poly, D / 2, stp)
+    if (!sp) { warnings.push(`выемка ${size?.text || ''}: ${isConvex(m.poly) ? 'фреза больше выемки' : 'контур не выпуклый'} — выборку строит станок`); return }
+    Object.assign(m, { start: sp.start, segs: sp.segs, closed: false, pocket: false, offset: '中' })
+  })
   mills.forEach(m => { if ((m.cat === 'cutout' || m.cat === 'edge') && !m.notch) layers.push({ key: m.cat, cat: m.cat }) })
-  const ops = top.length + bottom.length + edge.length + grooves.length + edgeGrooves.length + mills.length
+  const ops = top.length + bottom.length + edge.length + grooves.length + edgeGrooves.length + edgeMills.length + mills.length
   if (!ops && !post.d6All) return null
 
   // порядок — как в образце: пласть сверху (по Y, затем по X), торцы, пазы, пласть снизу
@@ -407,15 +587,19 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   const hole = h => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="2" IsGenCode="2" Face="${h.face}" X="${f3(h.X)}" Y="${f3(h.Y)}" Depth="${f3(h.depth)}" Diameter="${f3(h.dia)}" />`)
   top.forEach(hole)
   edge.forEach(h => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="1" IsGenCode="2" Face="${h.face}" X="${f3(h.X)}" Y="${f3(h.Y)}" Z="${f3(h.Z)}" Depth="${f3(h.depth)}" Diameter="${f3(h.dia)}" />`))
+  // фрезеровка; у выемки в торце (Face 1–4) точки трёхмерные: X, Y на торце и Z — высота от нижней пласти
   const mill = m => {
-    lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="3" IsGenCode="2" Face="${m.face}" Depth="${f3(m.depth)}" X="${f3(m.start[0])}" Y="${f3(m.start[1])}" Pocket="${m.pocket ? 1 : 0}" Closed="${m.closed ? 1 : 0}" ToolOffset="${m.offset}"${drillAttr(m.tool)}>`)
+    const z3 = m.start.length > 2
+    lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="3" IsGenCode="2" Face="${m.face}" Depth="${f3(m.depth)}" X="${f3(m.start[0])}" Y="${f3(m.start[1])}"${z3 ? ` Z="${f3(m.start[2])}"` : ''} Pocket="${m.pocket ? 1 : 0}" Closed="${m.closed ? 1 : 0}" ToolOffset="${m.offset}"${drillAttr(m.tool)}>`)
     lines.push(`\t\t\t\t\t\t<Lines${m.closed ? ' Closed="1"' : ''}>`)
-    m.segs.forEach((g, i) => lines.push(`\t\t\t\t\t\t\t<Line LineID="${i + 1}" EndX="${f3(g.to[0])}" EndY="${f3(g.to[1])}" Angle="${(Math.round(g.angle * 1e6) / 1e6).toFixed(6)}" />`))
+    m.segs.forEach((g, i) => lines.push(`\t\t\t\t\t\t\t<Line LineID="${i + 1}" EndX="${f3(g.to[0])}" EndY="${f3(g.to[1])}"${z3 ? ` EndZ="${f3(g.to[2])}"` : ''} Angle="${(Math.round(g.angle * 1e6) / 1e6).toFixed(6)}" />`))
     lines.push('\t\t\t\t\t\t</Lines>', '\t\t\t\t\t</Machining>')
   }
   mills.filter(m => m.face === fr.top).forEach(mill)
-  grooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" Width="${f3(g.width)}" Depth="${f3(g.depth)}"${drillAttr(g.tool)} />`))
-  edgeGrooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(g.Z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(g.Z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}"${drillAttr(g.tool)} />`))
+  // паз по спецификации: Z — на поверхности (Face 5 — толщина, Face 6 — 0), ToolOffset 中 (у пазов в торце обязательно)
+  grooves.forEach(g => { const z = g.face === 5 ? T : 0; lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" ToolOffset="中"${drillAttr(g.tool)} />`) })
+  edgeGrooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(g.Z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(g.Z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" ToolOffset="中"${drillAttr(g.tool)} />`))
+  edgeMills.forEach(mill)
   bottom.forEach(hole)
   mills.filter(m => m.face !== fr.top).forEach(mill)
 
@@ -443,7 +627,7 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
     '',
   ].join('\r\n')
   // сколько чего у детали (для списков деталей на рабочих постах): лицевая — сверху (fr.top), обратная — снизу
-  const counts = { top: top.length, bottom: bottom.length, edge: edge.length, edgeGrooves: edgeGrooves.length,
+  const counts = { top: top.length, bottom: bottom.length, edge: edge.length, edgeGrooves: edgeGrooves.length + edgeMills.length,
     groovesTop: grooves.filter(g => g.face === fr.top).length, groovesBottom: grooves.filter(g => g.face !== fr.top).length,
     millsTop: mills.filter(m => m.face === fr.top).length, millsBottom: mills.filter(m => m.face !== fr.top).length }
   return { xml, ops, warnings, counts, layers }
@@ -473,12 +657,13 @@ export function drill6Folders(post, ctx) {
 }
 
 /**
- * Слои обработки заказа для настроек шестистороннего станка: пазы в пласти и в торце (ширина × глубина), выемки (по глубине),
+ * Слои обработки заказа для настроек шестистороннего станка: пазы в пласти и в торце (ширина × глубина), выемки по пласти
+ * (размер: Ø или длина × ширина, и глубина), выемки в торце (длина × высота, глубина),
  * а также сколько вырезов и фигурных краёв. details — строки заказа, T — толщина материала.
  * -> { groove: [{ key, width, depth, count }], edgeGroove: [...], pocket: [...], cutout, edge }
  */
 export function drill6Layers(details, T, post = {}, types = {}) {
-  const out = { groove: new Map(), edgeGroove: new Map(), pocket: new Map(), cutout: 0, edge: 0 }
+  const out = { groove: new Map(), edgeGroove: new Map(), pocket: new Map(), edgePocket: new Map(), cutout: 0, edge: 0 }
   for (const d of details || []) {
     let r
     try { r = panelXml(d, { T: n0(T) || 16, id: 'x', post: { ...post, d6All: true }, types }) } catch { r = null }
@@ -491,7 +676,7 @@ export function drill6Layers(details, T, post = {}, types = {}) {
     }
   }
   const list = m => [...m.values()].sort((a, b) => a.width - b.width || a.depth - b.depth)
-  return { groove: list(out.groove), edgeGroove: list(out.edgeGroove), pocket: list(out.pocket), cutout: out.cutout, edge: out.edge }
+  return { groove: list(out.groove), edgeGroove: list(out.edgeGroove), pocket: list(out.pocket), edgePocket: list(out.edgePocket), cutout: out.cutout, edge: out.edge }
 }
 
 /**

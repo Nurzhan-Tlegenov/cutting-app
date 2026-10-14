@@ -514,7 +514,9 @@ function markPockets(marks, solid) {
         ].filter(s => s[0])
         if (sides.length !== 1) continue                   // спрятана в толще или задевает два торца — не выемка
         const e = sides[0][1]()
-        slot.edge.push({ ...e, z0: za, z1: zb, name: 'Выемка в торце' })
+        // радиус скругления углов выемки (в плоскости торца) — по дугам контура метки; у покупного изделия не известен
+        const r = ms.elems ? Math.max(0, ...ms.elems.filter(q => q.t === 'A').map(q => Math.hypot(q.a[0] - q.c[0], q.a[1] - q.c[1]))) : 0
+        slot.edge.push({ ...e, z0: za, z1: zb, name: 'Выемка в торце', kind: 'pocket', r: Math.min(r, (zb - za) / 2) })
       }
       res.set(sp.part, slot)
       hit = true
