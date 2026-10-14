@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
+import { serviceBadges, servicesKnown } from '../lib/productionServices'
 import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT, productionStats, productionArchive, productionExcludeStats, testOrderMinutes } from '../lib/productionApi'
 import { Results, usePeriod } from '../components/OrderStats'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -178,7 +179,7 @@ export default function ProductionPage() {
   // разделы экрана «Настройки»: [id, значок, название, пояснение, число]
   const activeStaff = (staff.data?.members || []).filter(m => m.active).length
   const settingsMenu = prod ? [
-    ['company', I.factory, prod.name || 'Производство', [prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Данные производства'],
+    ['company', I.factory, prod.name || 'Производство', servicesKnown(prod.services) ? ([prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Данные производства') : '⚠ Укажите услуги — их видят заказчики'],
     ['staff', I.users, 'Сотрудники', 'Рабочие места, приглашения, права', activeStaff],
     ['posts', I.posts, 'Рабочие посты', 'Техпроцесс: порядок постов, кто на них'],
     ['prices', I.tag, 'Прайс-лист', 'Распил плиты и ХДФ, кромление, присадка'],
@@ -263,6 +264,9 @@ export default function ProductionPage() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{prod.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
+                    {servicesKnown(prod.services)
+                      ? <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Услуги: {serviceBadges(prod.services).join(' · ') || '—'}</div>
+                      : <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 4 }}>Услуги не указаны — нажмите «Изменить» и ответьте на вопросы «да / нет». Заказчики видят их при выборе производства.</div>}
                   </div>
                   <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>
                 </div>

@@ -1,9 +1,13 @@
 import { useState } from 'react'
 import { registerProduction } from '../lib/productionApi'
+import ServicesForm from './ServicesForm'
+import { parseServices, servicesProblem, saveProductionServices } from '../lib/productionServices'
 
-// Форма «Моё производство»: название, страна, город, телефон — все поля обязательны. sheet — рез и отступы станка (берутся из текущего заказа).
+// Форма «Моё производство»: название, страна, город, телефон — все поля обязательны; услуги — «да / нет» (раскрой обязателен).
+// sheet — рез и отступы станка (берутся из текущего заказа).
 export default function ProductionForm({ initial = null, sheet = null, submitLabel = 'Зарегистрировать производство', onDone, onCancel }) {
   const [form, setForm] = useState({ name: initial?.name || '', phone: initial?.phone || '', city: initial?.city || '', country: initial?.country || '' })
+  const [services, setServices] = useState(() => parseServices(initial?.services))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -12,10 +16,14 @@ export default function ProductionForm({ initial = null, sheet = null, submitLab
     if (form.country.trim().length < 2) { setError('Укажите страну'); return }
     if (form.city.trim().length < 2) { setError('Укажите город'); return }
     if (form.phone.replace(/\D/g, '').length < 10) { setError('Укажите телефон для заказчиков полностью'); return }
+    const sp = servicesProblem(services)
+    if (sp) { setError(sp); return }
     setBusy(true); setError('')
     const r = await registerProduction(form, sheet || {})
+    if (r.error) { setBusy(false); setError(r.error); return }
+    const sv = await saveProductionServices(services)   // база ещё без услуг — производство всё равно зарегистрировано
     setBusy(false)
-    if (r.error) { setError(r.error); return }
+    if (sv.error && !sv.missing) { setError('Производство сохранено, а услуги — нет: ' + sv.error); return }
     onDone?.(r.id, form)
   }
   return (
@@ -28,6 +36,11 @@ export default function ProductionForm({ initial = null, sheet = null, submitLab
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}><label className="label">Телефон для заказчиков *</label><input type="tel" placeholder="+7 700 000 00 00" value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
+      </div>
+      <div style={{ marginTop: 4 }}>
+        <label className="label">Какие услуги вы оказываете *</label>
+        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 2px' }}>Заказчики увидят это при выборе производства. Потом можно поменять в настройках.</p>
+        <ServicesForm value={services} onChange={setServices} />
       </div>
       {sheet && <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Рез и отступы листа возьмём из этого заказа — потом их можно поменять в кабинете производства.</p>}
       {error && <p className="error-text">{error}</p>}

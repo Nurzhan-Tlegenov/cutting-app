@@ -1492,6 +1492,18 @@ export default function NestingPage() {
     ...allDetails.flatMap(d => [d.edge_left, d.edge_right, d.edge_top, d.edge_bottom]),
   ].filter(v => v && v !== 'default' && v !== 'false' && v !== true))], [order, allDetails])
   const details = useMemo(() => cutDetails(multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails, parseEdgeTypes(order?.edge_types)), [allDetails, multiMat, matKey, order])
+  // что нужно заказу от производства — для предупреждений в окне выбора производства
+  const orderNeeds = useMemo(() => {
+    try {
+      const et = edgeTotals(details.map(rawDetail))
+      const drill = details.some(d => {
+        if (!d.contour) return false
+        try { return getAllDrillPoints(JSON.parse(d.contour), Number(d.width) || 0, Number(d.length) || 0).length > 0 } catch { return false }
+      })
+      const shaped = details.some(d => parsePolygonFromDetail(d).custom || detailHoles(d).length > 0)
+      return { shaped, edge: et.total > 0, curvedEdge: et.curved > 0, drill, hdf: order?.material_kind === 'hdf' }
+    } catch { return {} }
+  }, [details, order?.material_kind])
   const { user, profile, refreshProfile, cabinet, isMaster } = useAuth()
   // кабинет производства: ЧПУ и бирки по принятому раскрою
   // ЧПУ и бирки из раскроя: владелец производства, начальник производства и сотрудник с этим полномочием
@@ -3454,7 +3466,7 @@ export default function NestingPage() {
       <BottomNav />
       {pickProd && (
         <ProductionPicker productions={productions} mine={pickProd.mine} lastId={getUserSettings(user).lastProductionId} profile={profile}
-          kerfOf={pr => prodVal(pr, 'kerf_width', order)}
+          kerfOf={pr => prodVal(pr, 'kerf_width', order)} needs={orderNeeds}
           sheet={{ kerf: order.kerf_width, ml: order.margin_left, mr: order.margin_right, mt: order.margin_top, mb: order.margin_bottom }}
           onPick={pickProductionAndRun}
           onSkip={() => { setNoProdOk(true); setPickProd(null) }}

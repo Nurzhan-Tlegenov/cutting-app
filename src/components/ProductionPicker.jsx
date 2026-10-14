@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import ProductionForm from './ProductionForm'
 import { countryCode, productionLabel } from '../lib/productionLabel'
+import { serviceBadges, missingServices } from '../lib/productionServices'
 
 // «Где будете резать?» — выбор производства ДО раскроя. Рез и отступы листа сразу берутся у производства,
 // поэтому раскрой не приходится переделывать при отправке заказа.
@@ -11,7 +12,7 @@ import { countryCode, productionLabel } from '../lib/productionLabel'
 const APP_URL = 'https://raskroypro.com'
 const inviteText = name => `Здравствуйте!${name ? ` Это ${name}.` : ''} Хочу отправлять вам заказы на раскрой через приложение RaskroyPro — карты раскроя будут сразу с вашим резом и отступами. Зарегистрируйте, пожалуйста, своё производство: ${APP_URL}`
 
-export default function ProductionPicker({ productions, mine, lastId, profile, kerfOf, sheet, onPick, onSkip, onClose, onRegistered }) {
+export default function ProductionPicker({ productions, mine, lastId, profile, kerfOf, sheet, needs = {}, onPick, onSkip, onClose, onRegistered }) {
   const approved = useMemo(() => productions.filter(pr => (pr.status ?? 'approved') === 'approved' && pr.id !== mine?.id), [productions, mine])
   const myLand = countryCode(profile?.country)
   // все страны, где есть производства, — и своя первой, даже если в ней пока ни одного (тогда сразу видно «пригласите»)
@@ -44,6 +45,15 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
           {kerfOf(pr) != null && `рез ${kerfOf(pr)} мм`}{pr.id === lastId && !note ? ' · выбирали в прошлый раз' : ''}
           {!note && myTown && !sameTown(pr) && <span style={{ color: 'var(--amber)' }}> · не в вашем городе</span>}
         </div>
+        {(() => {   // услуги производства значками; чего нет из нужного заказу — предупреждение
+          const b = serviceBadges(pr.services), miss = missingServices(pr.services, needs)
+          return <>
+            {b.length > 0 && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+              {b.map(x => <span key={x} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)' }}>{x}</span>)}
+            </div>}
+            {miss.length > 0 && <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>⚠ В заказе есть {miss.join(', ')} — это производство такого не делает</div>}
+          </>
+        })()}
       </div>
       <span style={{ color: 'var(--blue)', fontSize: 18 }}>›</span>
     </button>
