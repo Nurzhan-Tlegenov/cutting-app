@@ -116,13 +116,21 @@ const loopArea = els => els.reduce((A, e, i) => {
 function loopToMachine(poly, fr) {
   let els
   try { els = loopElements(poly, 0.02) } catch { els = [] }
-  // целая окружность распознаётся одной-двумя дугами — выводим её двумя полудугами по 180°
+  // целая окружность распознаётся одной-двумя дугами — выводим её четырьмя четвертями
   if (els.length < 3 && els.some(e => e.r)) {
     const e = els.find(q => q.r), { cx, cy, r, ccw } = e
-    const p0 = [cx + r, cy], p1 = [cx - r, cy], sw = Math.PI
-    els = [{ a: p0, b: p1, cx, cy, r, ccw, sweep: sw }, { a: p1, b: p0, cx, cy, r, ccw, sweep: sw }]
+    els = [{ a: [cx + r, cy], b: [cx + r, cy], cx, cy, r, ccw, sweep: 2 * Math.PI }]
   }
-  if (els.length < 2) els = poly.map((p, i) => ({ a: p, b: poly[(i + 1) % poly.length] }))
+  if (els.length < 2 && !els.some(e => e.r)) els = poly.map((p, i) => ({ a: p, b: poly[(i + 1) % poly.length] }))
+  // дуга больше 90° делится на равные части: полудугу 180° станок и его просмотрщик строят неоднозначно
+  // (центр по двум точкам и углу 180° лежит на хорде) — круг выходил овалом
+  els = els.flatMap(e => {
+    if (!e.r || !(e.sweep > Math.PI / 2 + 1e-6)) return [e]
+    const n = Math.ceil(e.sweep / (Math.PI / 2) - 1e-6), st = e.sweep / n, dir = e.ccw ? 1 : -1
+    const a0 = Math.atan2(e.a[1] - e.cy, e.a[0] - e.cx)
+    const pt = k => (k === 0 ? e.a : k === n ? e.b : [e.cx + e.r * Math.cos(a0 + dir * st * k), e.cy + e.r * Math.sin(a0 + dir * st * k)])
+    return Array.from({ length: n }, (_, k) => ({ ...e, a: pt(k), b: pt(k + 1), sweep: st }))
+  })
   return els.map(e => ({ a: fr.at(e.a[0], e.a[1]), b: fr.at(e.b[0], e.b[1]), angle: e.r ? (e.ccw ? -1 : 1) * e.sweep * DEG : 0, r: e.r || 0 }))
 }
 /**
@@ -134,6 +142,20 @@ function loopToMachine(poly, fr) {
  * 右 — фреза справа (остаётся то, что слева), 左 — слева. Обход против часовой: снаружи — справа, внутри — слева.
  * Ещё -> outline: точки контура детали для <Outline> (X, Y, Radius: > 0 — против часовой, < 0 — по часовой).
  */
+const LEAD = 10
+// касательная (единичный вектор по ходу) в начале или в конце элемента { a, b, angle, r } в координатах станка
+function tangentOf(e, atStart) {
+  const dx = e.b[0] - e.a[0], dy = e.b[1] - e.a[1], L = Math.hypot(dx, dy) || 1
+  if (!e.angle || !e.r) return [dx / L, dy / L]
+  const ccw = e.angle < 0, h = Math.sqrt(Math.max(0, e.r * e.r - (L / 2) ** 2))
+  const nx = (ccw ? -dy : dy) / L, ny = (ccw ? dx : -dx) / L          // к центру: влево от хорды при обходе против часовой
+  const sgn = Math.abs(e.angle) > 180 ? -1 : 1
+  const cx = (e.a[0] + e.b[0]) / 2 + nx * h * sgn, cy = (e.a[1] + e.b[1]) / 2 + ny * h * sgn
+  const p = atStart ? e.a : e.b, rx = p[0] - cx, ry = p[1] - cy, rl = Math.hypot(rx, ry) || 1
+  const t = ccw ? [-ry / rl, rx / rl] : [ry / rl, -rx / rl]
+  // дуга, подогнанная по точкам, даёт касательную чуть мимо оси — почти осевую выравниваем
+  return Math.abs(t[0]) < 0.01 ? [0, Math.sign(t[1])] : Math.abs(t[1]) < 0.01 ? [Math.sign(t[0]), 0] : t
+}
 function millPaths(raw, c, W, H, T, fr) {
   const out = [], through = T + 1
   let outline = null
@@ -158,7 +180,21 @@ function millPaths(raw, c, W, H, T, fr) {
       if (start == null) out.push(closedPath(els, { face: fr.top, depth: through, pocket: false, offset: off }))   // вся деталь фигурная
       else {
         let run = null
-        const flush = () => { if (run) out.push({ face: fr.top, start: run[0].a, segs: run.map(e => ({ to: e.b, angle: e.angle })), closed: false, depth: through, pocket: false, offset: off }); run = null }
+        // участок начинается и кончается на краю детали — фрезу заводим и выводим снаружи по касательной (LEAD мм),
+        // иначе станок не берёт фрезеровку, начатую ровно на границе контура (вырез на краю оставался необработанным)
+        const outside = ([x, y]) => x < -EPS || y < -EPS || x > fr.L + EPS || y > fr.Wm + EPS
+        const flush = () => {
+          if (!run) return
+          const segs = run.map(e => ({ to: e.b, angle: e.angle }))
+          let start = run[0].a
+          const t0 = tangentOf(run[0], true), t1 = tangentOf(run[run.length - 1], false)
+          const pre = [start[0] - t0[0] * LEAD, start[1] - t0[1] * LEAD]
+          if (onBox(start) && outside(pre)) { segs.unshift({ to: start, angle: 0 }); start = pre }
+          const end = run[run.length - 1].b, post = [end[0] + t1[0] * LEAD, end[1] + t1[1] * LEAD]
+          if (onBox(end) && outside(post)) segs.push({ to: post, angle: 0 })
+          out.push({ face: fr.top, start, segs, closed: false, depth: through, pocket: false, offset: off })
+          run = null
+        }
         for (let k = 1; k <= n; k++) { const i = (start + k) % n; if (cut(i)) (run ||= []).push(els[i]); else flush() }
         flush()
       }
