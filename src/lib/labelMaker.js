@@ -637,24 +637,27 @@ export function labelSeq(sheet, geo, mode = 'manual', tpl = null) {
     const xs = pts.map(q => q.x), ys = pts.map(q => q.y)
     return { pi, cx: geo.marginL + p.x + (Math.min(...xs) + Math.max(...xs)) / 2, cy: geo.marginB + p.y + (Math.min(...ys) + Math.max(...ys)) / 2, h: Math.max(...ys) - Math.min(...ys) }
   })
+  const offs = []
   if (tpl?.offcuts) (sheet.manualOffcuts || []).forEach((o, oi) => {
     if (!(o.w > 0 && o.h > 0)) return
     const at = offcutPoint(o, geo, tpl)
-    items.push({ oi, o: { w: Math.round(o.w), h: Math.round(o.h) }, at, cx: at[0], cy: at[1], h: 0 })
+    offs.push({ oi, o: { w: Math.round(o.w), h: Math.round(o.h) }, at, cx: at[0], cy: at[1], h: 0 })
   })
-  let out
-  if (mode === 'table') {
-    const left = items.slice().sort((a, b) => a.cy - b.cy || a.cx - b.cx)
-    out = []
-    for (let r = 0; left.length; r++) {
-      const band = left[0].cy + Math.max(150, left[0].h * 0.5)        // ряд: детали, центры которых примерно на одной высоте
-      const row = left.filter(q => q.cy <= band).sort((a, b) => (r % 2 ? b.cx - a.cx : a.cx - b.cx))
-      out.push(...row); row.forEach(q => left.splice(left.indexOf(q), 1))
+  const order = list => {
+    if (mode === 'table') {
+      const left = list.slice().sort((a, b) => a.cy - b.cy || a.cx - b.cx), out = []
+      for (let r = 0; left.length; r++) {
+        const band = left[0].cy + Math.max(150, left[0].h * 0.5)      // ряд: детали, центры которых примерно на одной высоте
+        const row = left.filter(q => q.cy <= band).sort((a, b) => (r % 2 ? b.cx - a.cx : a.cx - b.cx))
+        out.push(...row); row.forEach(q => left.splice(left.indexOf(q), 1))
+      }
+      return out
     }
-  } else {
     const half = geo.sheetW / 2
-    out = items.sort((a, b) => (a.cx >= half) - (b.cx >= half) || a.cy - b.cy || a.cx - b.cx)
+    return list.slice().sort((a, b) => (a.cx >= half) - (b.cx >= half) || a.cy - b.cy || a.cx - b.cx)
   }
+  // бирки на обрезки — всегда после всех деталей листа (лист, начатый с бирки обрезка, останавливал линию)
+  const out = [...order(items), ...order(offs)]
   return out.map(q => (q.pi != null ? { pi: q.pi } : { oi: q.oi, o: q.o, at: q.at }))
 }
 /** То же, только детали: номера уложенных деталей по порядку наклейки */
@@ -692,7 +695,7 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet), stem = `${si + 1}_${base}`
     const cyc = `Label_${stem}.cyc`, jpg = `${stem}.jpg`
     const cycles = []
-    labelSeq(sheet, geo, 'table', tpl).forEach(({ pi, o, at }, seq) => {   // файлы и точки наклейки — в порядке обхода стола; обрезки — тем же обходом
+    labelSeq(sheet, geo, 'table', tpl).forEach(({ pi, o, at }, seq) => {   // файлы и точки наклейки — в порядке обхода стола; обрезки — после всех деталей, тем же обходом
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h
       const bmp = `${stem}_${String(seq + 1).padStart(4, '0')}.bmp`
       if (o) {                                                             // бирка на обрезок: в углу обрезка с отступом (настройка шаблона)
