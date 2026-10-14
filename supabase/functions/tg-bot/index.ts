@@ -23,7 +23,15 @@ function serviceKey(): string {
     return all.default ?? Object.values(all)[0] ?? ''
   } catch { return '' }
 }
-const db = createClient(SB_URL, serviceKey(), { auth: { persistSession: false, autoRefreshToken: false } })
+// клиент создаётся при первом запросе — если ключа нет, функция ответит понятной ошибкой, а не упадёт при запуске
+let _db: ReturnType<typeof createClient> | null = null
+function getDb() {
+  if (_db) return _db
+  const key = serviceKey()
+  if (!SB_URL || !key) throw new Error('Нет SUPABASE_URL или серверного ключа в окружении функции')
+  _db = createClient(SB_URL, key, { auth: { persistSession: false, autoRefreshToken: false } })
+  return _db
+}
 
 const APP = 'raskroypro.com'
 const CORS = {
@@ -69,7 +77,7 @@ async function onUpdate(u: any) {
       await send(chat, 'Нужен ваш собственный номер. Нажмите кнопку «📱 Поделиться номером» внизу.', { reply_markup: SHARE_KB })
       return
     }
-    const { data, error } = await db.rpc('tg_contact', { p_chat: chat, p_phone: String(msg.contact.phone_number || '') })
+    const { data, error } = await getDb().rpc('tg_contact', { p_chat: chat, p_phone: String(msg.contact.phone_number || '') })
     if (error) { await send(chat, 'Не удалось проверить номер. Попробуйте позже.', { reply_markup: NO_KB }); return }
     if (data?.result === 'mismatch') {
       await send(chat, `⚠️ Номер этого Telegram не совпадает с номером в заявке (${data.expected}).\n\n` +
@@ -91,7 +99,7 @@ async function onUpdate(u: any) {
   const text = String(msg.text || '').trim()
   const start = text.match(/^\/start(?:\s+(\S+))?/)
   if (start?.[1]) {
-    const { data } = await db.rpc('tg_start', { p_token: start[1], p_chat: chat })
+    const { data } = await getDb().rpc('tg_start', { p_token: start[1], p_chat: chat })
     if (data === 'verified') { await send(chat, '✅ Номер уже подтверждён. Код придёт сюда, когда заявку одобрят.', { reply_markup: NO_KB }); return }
     if (data === 'ok') {
       await send(chat, '👋 Это бот <b>RaskroyPro</b>.\n\nЧтобы подтвердить номер телефона из заявки, нажмите кнопку <b>«📱 Поделиться номером»</b> внизу.',
@@ -110,10 +118,10 @@ async function onUpdate(u: any) {
 async function isMaster(req: Request): Promise<boolean> {
   const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
   if (!jwt) return false
-  const { data } = await db.auth.getUser(jwt)
+  const { data } = await getDb().auth.getUser(jwt)
   const uid = data?.user?.id
   if (!uid) return false
-  const { data: p } = await db.from('profiles').select('role').eq('id', uid).maybeSingle()
+  const { data: p } = await getDb().from('profiles').select('role').eq('id', uid).maybeSingle()
   return p?.role === 'admin'
 }
 
@@ -131,7 +139,7 @@ async function onApp(req: Request, body: any) {
   }
 
   if (body.action === 'send_code') {
-    const { data, error } = await db.rpc('svc_signup_code', { p_id: body.request_id })
+    const { data, error } = await getDb().rpc('svc_signup_code', { p_id: body.request_id })
     if (error) return json({ error: error.message })
     if (data?.error) return json({ error: data.error })
     const r = await send(data.chat, codeText(data.code))

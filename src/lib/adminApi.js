@@ -59,7 +59,9 @@ export async function tgBot(body) {
     if (error) {
       let msg = error.message
       try { const j = await error.context?.json?.(); if (j?.error) msg = j.error } catch { /* ответ не JSON */ }
-      return { error: /Failed to send|not found|404/i.test(msg) ? 'Функция бота ещё не установлена в Supabase (Edge Functions → tg-bot).' : msg }
+      if (/Failed to send/i.test(msg)) msg = 'Нет связи с функцией tg-bot: откройте её в Supabase → Logs и посмотрите ошибку'
+      else if (/404|not found/i.test(msg)) msg = 'Функция tg-bot не найдена в Supabase (Edge Functions)'
+      return { error: msg }
     }
     return data?.error ? { error: { no_telegram: 'Номер ещё не подтверждён в Telegram — отправьте код в WhatsApp.', not_approved: 'Заявка не одобрена.' }[data.error] || data.error } : data
   } catch (e) { return { error: String(e?.message || e) } }
