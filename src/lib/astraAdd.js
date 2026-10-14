@@ -27,6 +27,10 @@
 //     полкодерж.   — эксцентрик в своей пласти, штифт в ответной на e[3] от пласти полки;
 //     петля        — чашка и два самореза в двери, два отверстия планки на боковине в e[5] от её кромки.
 //   Детали считаются состыкованными только при плотном прилегании (зазор до 0,1 мм).
+//   Покупное изделие (CPartArt) — список сеток CGeomMesh. Грани бывают треугольные (вид 4)
+//   и четырёхугольные (вид 7, как GL_QUADS); за плоскими гранями CFacePlane идёт второй список
+//   граней CFace и короткий служебный хвост. Раньше читались только треугольники без хвоста —
+//   файл с заглушкой из четырёхугольников (заглушки навеса) обрывался с ошибкой.
 import { cfbStream, isCfb } from './cfb.js'
 import { buildItem, groupItems, applyP, applyV, inverse, pointInPoly } from './basisB3d.js'
 
@@ -108,6 +112,13 @@ class Ar {
 const V = s => s.obj('CVertex').v
 const fixBase = (s, o) => { o.type = s.u32(); s.u32(); o.b = s.dd(8); s.skip(2); o.s = [s.str(), s.str(), s.str()] }
 const edt = (s, o) => { s.skip(4); o.end = s.obj('CGeomPartend') }
+const FACE_N = { 4: 3, 7: 4 }
+const face = (s, o) => {
+  const mode = s.u32(), n = FACE_N[mode]
+  if (!n) throw new Stop(`неизвестный вид грани ${mode}`)
+  o.i = []; for (let k = 0; k < n; k++) o.i.push(s.u32())
+  s.skip(n)
+}
 
 function partBase(s, o) {
   o.pos = s.str(); o.name = s.str(); o.flags = s.u32()
@@ -220,12 +231,21 @@ const H = {
     s.skip(2 + 3); s.str(); s.str(); s.skip(8)
   },
   // покупное изделие сеткой треугольников (ножка, ручка): вершины уже в мировых координатах
-  CFacePlane(s, o) { s.u32(); o.i = [s.u32(), s.u32(), s.u32()]; s.skip(3 + 8) },
-  CGeomMesh(s, o) { o.v = s.list('CVertex').map(q => q.v); s.skip(2); s.list('CVector'); o.f = s.list('CFacePlane').map(q => q.i) },
+  // грань: вид примитива как в OpenGL (4 — треугольник, 7 — четырёхугольник), номера вершин, по байту на ребро;
+  // у плоской грани ещё число в конце
+  CFace: face,
+  CFacePlane(s, o) { face(s, o); s.f64() },
+  // сетка: вершины, нормали, плоские грани, остальные грани, служебный список чисел, 2 байта
+  CGeomMesh(s, o) {
+    o.v = s.list('CVertex').map(q => q.v); s.skip(2); s.list('CVector')
+    const fs = [...s.list('CFacePlane'), ...s.list('CFace')]
+    o.f = fs.flatMap(q => q.i.length === 4 ? [[q.i[0], q.i[1], q.i[2]], [q.i[0], q.i[2], q.i[3]]] : [q.i])
+    s.skip(4 * s.count()); s.skip(2)
+  },
   CPartArt(s, o) {
     o.pos = s.str(); o.name = s.str()
     o.mesh = s.list('CGeomMesh')
-    s.skip(18)
+    s.skip(8)
     o.mats = s.list()
     s.skip(6)
     s.obj('CPositionObject')
