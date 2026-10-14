@@ -190,6 +190,8 @@ const H = {
   },
   CGeomLineEdt(s, o) { o.a = V(s); o.b = V(s); edt(s, o) },
   CGeomDugaEdt(s, o) { edt(s, o); o.a = V(s); o.b = V(s); o.c = V(s); o.sag = s.f64(); o.r = s.f64() },
+  // дуга другого вида (скругление угла панели): как CGeomDugaEdt, в конце ещё точка и число (не нужны)
+  CGeomArc(s, o) { edt(s, o); o.a = V(s); o.b = V(s); o.c = V(s); o.sag = s.f64(); o.r = s.f64(); V(s); s.f64() },
   CBaseSizes(s) { s.dd(s.u32()) },
   // угловая вырубка: [снятый угол, внутренний угол, начало дуги, конец дуги, центр]
   CGeomRcut(s, o) {
@@ -282,7 +284,7 @@ const arc = (a, b, c) => {
 function expand(e) {
   const a = P2(e.a), b = P2(e.b)
   if (e._ === 'CGeomLineEdt') return [{ t: 'L', a, b }]
-  if (e._ === 'CGeomDugaEdt') return [{ t: 'A', c: P2(e.c), a, b, ccw: e.sag > 0 }]
+  if (e._ === 'CGeomDugaEdt' || e._ === 'CGeomArc') return [{ t: 'A', c: P2(e.c), a, b, ccw: e.sag > 0 }]
   const out = []
   const line = (p, q) => { if (!near2(p, q)) out.push({ t: 'L', a: p, b: q }) }
   if (e._ === 'CGeomRcut') {
