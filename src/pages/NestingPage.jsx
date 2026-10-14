@@ -2183,10 +2183,8 @@ export default function NestingPage() {
         return
       }
     }
-    if (multiMat) {
-      const missing = materials.filter(m => m.key !== matKey && !savedByMat[m.key])
-      if (missing.length && !window.confirm(`Раскрой ещё не выбран для материалов:\n${missing.map(m => '· ' + m.label).join('\n')}\n\nВсё равно оформить заказ?`)) return
-    }
+    // несколько материалов — на производство отдельными заявками, по одной на материал (см. submitByMaterial)
+    if (multiMat) { await submitByMaterial(cfg); return }
     setBusyId(cfg.id)
     // Хронология нужна только на время раскроя — после оформления очищается
     historyRef.current = {}
@@ -2203,6 +2201,82 @@ export default function NestingPage() {
       }
     } catch { /* не посчиталось — заказ всё равно оформлен, цена покажется по текущему прайсу */ }
     navigate(`/orders/${id}`)
+  }
+
+  // Заказ из нескольких материалов уходит на производство отдельными заявками — по одной на материал, с тем же названием
+  // (у каждой свой номер, только детали своего материала и его раскрой). Уходят материалы, для которых раскрой выбран
+  // (текущий — вместе с этим вариантом); остальные остаются в черновике и отправляются потом так же. Последний материал
+  // уходит самим заказом. Производство уже выбрано и проверено в submitOrder.
+  async function submitByMaterial(cfg) {
+    const sendKeys = materials.filter(m => m.key === matKey || savedByMat[m.key]).map(m => m.key)
+    const rest = materials.filter(m => !sendKeys.includes(m.key))
+    const lab = k => materials.find(m => m.key === k)?.label || k
+    if (!window.confirm(`В заказе ${materials.length} материала — на производство они уходят отдельными заявками, по одной на материал, с тем же названием заказа.\n\nСейчас уйдут:\n${sendKeys.map(k => '· ' + lab(k)).join('\n')}${rest.length ? `\n\nРаскрой ещё не выбран — останутся в черновике, их можно раскроить и отправить позже:\n${rest.map(m => '· ' + m.label).join('\n')}` : ''}\n\nОтправить?`)) return
+    setBusyId(cfg.id)
+    historyRef.current = {}
+    setConfigs(cs => cs.map(c => ({ ...c, history: null, histPos: -1 })))
+    try {
+      const byMat = await saveNesting(cfg)
+      const { data: src, error: e0 } = await supabase.from('orders').select('*').eq('id', id).single()
+      if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
+      const { data: rows } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+      const keyOf = r => detailMatKey(r, src)
+      const matCols = k => { const [n, t] = k.split('|'); return { material_name: n || src.material_name, material_thickness: t !== '' && t != null && isFinite(Number(t)) ? Number(t) : src.material_thickness } }
+      const fixQuote = async (o, list) => {
+        try {
+          const mats = savedNestings(o, cutDetails(list, parseEdgeTypes(o.edge_types)))
+          const st = sumStats(mats.map(mat => nestingStats({ order: o, mat, method: o.cutting_method || 'nesting' })))
+          if (st.parts) await fixOrderQuote(o.id, statsPayload(st))
+        } catch { /* цена покажется по текущему прайсу */ }
+      }
+      const keepKey = rest.length ? null : sendKeys[sendKeys.length - 1]       // всё уходит — последний материал остаётся этим заказом
+      const now = new Date().toISOString()
+      const made = []
+      let model = null
+      try { const { data: m } = await supabase.from('order_models').select('data').eq('order_id', id).maybeSingle(); model = m?.data || null } catch { model = null }
+      for (const k of sendKeys) {
+        if (k === keepKey) continue
+        const mine = (rows || []).filter(r => keyOf(r) === k)
+        if (!mine.length || !byMat[k]) continue
+        const row = {}
+        for (const [c, v] of Object.entries(src)) {
+          if (c === 'id' || c === 'order_number' || c === 'status' || c.endsWith('_at') || c === 'archived_by' || c === 'archived_sheets' || c === 'return_note' || c === 'nesting_result') continue
+          row[c] = v
+        }
+        Object.assign(row, matCols(k), { order_number: await getNextOrderNumber(supabase), status: 'new', submitted_at: now, nesting_result: JSON.stringify(byMat[k]) })
+        const { data: copy, error: e1 } = await supabase.from('orders').insert(row).select().single()
+        if (e1 || !copy) throw new Error(/limit/i.test(e1?.message || '') ? 'Достигнут предел бесплатного использования: заказов слишком много. Удалите или отправьте в архив ненужные.' : (e1?.message || 'не удалось создать заявку'))
+        const { error: e2 } = await supabase.from('order_details').insert(mine.map(r => { const { id: _i, created_at: _c, ...restCols } = r; void _i; void _c; return { ...restCols, order_id: copy.id } }))
+        if (e2) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e2.message) }
+        const { error: e3 } = await supabase.from('order_details').delete().in('id', mine.map(r => r.id))
+        if (e3) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e3.message) }
+        if (model) { try { await supabase.from('order_models').insert({ order_id: copy.id, data: model }) } catch { /* без модели */ } }
+        await fixQuote(copy, mine)
+        made.push({ key: k, number: copy.order_number })
+      }
+      if (keepKey) {
+        // последний материал — сам заказ: его раскрой, его материал, оформлен
+        await supabase.from('orders').update({ ...matCols(keepKey), nesting_result: JSON.stringify(byMat[keepKey]), status: 'new', submitted_at: now }).eq('id', id)
+        const { data: fresh } = await supabase.from('orders').select('*').eq('id', id).single()
+        if (fresh?.production_id) await fixQuote(fresh, (rows || []).filter(r => keyOf(r) === keepKey))
+        setBusyId(null)
+        if (made.length) window.alert(`Отправлено заявками: ${made.map(x => `№${x.number} — ${lab(x.key)}`).join('; ')}; ${lab(keepKey)} — этим заказом.`)
+        navigate(`/orders/${id}`)
+        return
+      }
+      // в черновике остаются материалы без раскроя
+      const left = Object.fromEntries(Object.entries(byMat).filter(([k]) => !made.some(x => x.key === k)))
+      const patch = { nesting_result: Object.keys(left).length ? JSON.stringify({ multi: true, byMat: left }) : null }
+      if (rest.length === 1) Object.assign(patch, matCols(rest[0].key))
+      await supabase.from('orders').update(patch).eq('id', id)
+      setBusyId(null)
+      await fetchOrder()
+      window.alert(`Отправлено на производство отдельными заявками:\n${made.map(x => `· №${x.number} — ${lab(x.key)}`).join('\n')}\n\nВ черновике осталось: ${rest.map(m => m.label).join(', ')} — выполните раскрой, выберите вариант и отправьте.`)
+    } catch (err) {
+      setBusyId(null)
+      await fetchOrder()
+      window.alert('Отправить не удалось: ' + (err?.message || err))
+    }
   }
 
   // Повторная отправка исполненного заказа: создаётся новый заказ — копия этого (детали, кромка, 3D-модель) с выбранным
@@ -3119,8 +3193,8 @@ export default function NestingPage() {
                       </>) :
                       // «Выбрать» только сохраняет раскладку за заказом. Отправка — отдельным действием и только у выбранного варианта
                       !cfg.saved ? null :
-                      <button onClick={() => { if (window.confirm('Отправить заказ на производство?\n\nПока производство не приняло заказ, его можно отозвать кнопкой «Редактировать».')) submitOrder(cfg) }} disabled={blocked}
-                        title="Отправить заказ с выбранным раскроем на производство"
+                      <button onClick={() => { if (multiMat || window.confirm('Отправить заказ на производство?\n\nПока производство не приняло заказ, его можно отозвать кнопкой «Редактировать».')) submitOrder(cfg) }} disabled={blocked}
+                        title={multiMat ? 'Материалы с выбранным раскроем уходят на производство отдельными заявками — по одной на материал' : 'Отправить заказ с выбранным раскроем на производство'}
                         style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
                           borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
                         {busyId === cfg.id ? 'Отправка…' : 'Отправить заказ'}
