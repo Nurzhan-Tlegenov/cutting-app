@@ -128,6 +128,13 @@ export default function Drill6Ops({ cnc, onChange, isMaster = false, layers = nu
       <Seg value={ops[cat].dir} options={[['ccw', '↺ Против часовой'], ['cw', '↻ По часовой']]} onChange={v => setOp(cat, { dir: v })} />
     </>
   )
+  const MmField = ({ cat, k, label, def }) => (
+    <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 10, maxWidth: 260 }}>{label}
+      <input type="text" inputMode="decimal" key={cat + k + (ops[cat][k] ?? def)} defaultValue={ops[cat][k] ?? def}
+        onBlur={e => { const v = Math.max(0, num(e.target.value)); if (v !== num(ops[cat][k] ?? def)) setOp(cat, { [k]: v }) }}
+        style={{ marginTop: 3, padding: '8px 10px', width: 90, textAlign: 'center' }} />
+    </label>
+  )
   const inOrder = n => (layers ? <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-hint)' }}> · в заказе {n} шт.</span> : null)
   const sum = l => (l || []).reduce((n, x) => n + x.count, 0)
   return (
@@ -153,13 +160,19 @@ export default function Drill6Ops({ cnc, onChange, isMaster = false, layers = nu
         <Title>4. Вырезы внутри детали{layers ? inOrder(layers.cutout) : null}</Title>
         {Mode({ cat: 'cutout' })}
         {Dir({ cat: 'cutout' })}
-        <Hint>Фреза всегда идёт внутри выреза, насквозь.</Hint>
+        {MmField({ cat: 'cutout', k: 'lead', label: 'Вход с отступа от контура, мм', def: 20 })}
+        <Hint>Фреза внутри выреза, насквозь. По умолчанию — по часовой (встречное фрезерование). Вход — изнутри выреза, по нормали к контуру; в узком вырезе отступ уменьшается сам. 0 — без отступа.</Hint>
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>5. Вырезы на краю детали{layers ? inOrder(layers.edge) : null}</Title>
         {Mode({ cat: 'edge' })}
         {Dir({ cat: 'edge' })}
-        <Hint>U-образный вырез, угловая вырубка, скругление угла — как вырез: замкнутый контур убираемого материала (по краю детали и габариту), фреза внутри, за габарит детали не выходит. Прямые края по габариту не фрезеруются.</Hint>
+        {MmField({ cat: 'edge', k: 'lead', label: 'Заход и выход за краем детали, мм', def: 10 })}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={ops.edge.notch !== false} onChange={e => setOp('edge', { notch: e.target.checked })} style={{ width: 18, height: 18 }} />
+          Надсечка на выходе
+        </label>
+        <Hint>U-образный вырез, угловая вырубка, радиус угла: фреза снаружи контура детали, по умолчанию против часовой. Заход и выход — за краем детали по касательной (станок может предупредить, что траектория за деталью). Надсечка: перед резом фреза снаружи врезается в край в точке выхода, потом режет вырез и выходит в надсечку — кромку на выходе не рвёт. Прямые края по габариту не фрезеруются.</Hint>
       </div>
       {nameOf('legacy') && <Hint>Инструмент {nameOf('legacy')} перенесён из прежней настройки.</Hint>}
       <SaveSnapshotButton cnc={cnc} onChange={onChange} />
