@@ -10,9 +10,10 @@ import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettin
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { routerPost, drillPosts, isDrill6, postView, postBack, secondRouter, secondPost, setSecondPost } from '../lib/cncSettings'
+import { routerPost, drillPosts, isDrill6, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
 import { useCnc } from '../hooks/useCnc'
-import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
+import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT, drill6Layers } from '../lib/drill6Xml'
+import Drill6Ops from '../components/Drill6Ops'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor } from '../lib/gcode'
@@ -94,6 +95,9 @@ export default function CncPage() {
   const r2view = useMemo(() => (r2 ? postView({ ...cnc, post: r2.id }) : null), [cnc, r2?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   // вкладки «Инструменты» и «Обработка» — для постпроцессора, открытого в настройках
   const tview = useMemo(() => postView(cnc), [cnc])
+  // открыт шестисторонний станок — на «Инструментах» и «Обработке» его настройки и слои этого заказа
+  const open6 = activePost(cnc), drill6Open = isDrill6(open6)
+  const layers6 = useMemo(() => (mat && drill6Open ? drill6Layers(mat.details, mat.thickness, open6, parseEdgeTypes(order?.edge_types)) : null), [mat, drill6Open, open6, order?.edge_types])
   const tchange = v => change(postBack(cnc, v))
   const sel = mat ? (picked ?? mat.sheets.map((_, i) => i)) : []
   const toggle = i => { setPicked(sel.includes(i) ? sel.filter(x => x !== i) : [...sel, i].sort((a, b) => a - b)); setBuilt(null) }
@@ -454,9 +458,10 @@ export default function CncPage() {
           {saved && built && <button type="button" className="btn-secondary" style={{ marginTop: 8 }} onClick={toOrders}>← Перейти к заказам</button>}
         </>
       ))}
-      {tab === 'ops' && <CncOps cnc={tview} onChange={tchange} layers={layers} />}
-      {tab === 'tools' && <CncTools cnc={tview} onChange={tchange} />}
-      {(tab === 'basic' || tab === 'cmd') && <PostPicker cnc={cnc} onChange={change} isMaster={isMaster} />}
+      {(tab === 'tools' || tab === 'ops') && drill6Open && <Drill6Ops cnc={cnc} onChange={change} isMaster={isMaster} part={tab} layers={layers6} />}
+      {tab === 'ops' && !drill6Open && <CncOps cnc={tview} onChange={tchange} layers={layers} />}
+      {tab === 'tools' && !drill6Open && <CncTools cnc={tview} onChange={tchange} />}
+      {tab !== 'sheets' && <PostPicker cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
 

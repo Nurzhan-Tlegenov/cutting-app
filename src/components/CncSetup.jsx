@@ -2,9 +2,10 @@ import { useKeptState } from '../hooks/useKeptState'
 import { CncBasic, CncCommands, CncTools, CncOps } from './CncSettings'
 import PostPicker from './PostPicker'
 import { useCnc } from '../hooks/useCnc'
-import { routerPost, drillPosts, secondRouter, postView, postBack } from '../lib/cncSettings'
+import { routerPost, drillPosts, secondRouter, postView, postBack, activePost, isDrill6 } from '../lib/cncSettings'
 
 import CncLoader from './CncLoader'
+import Drill6Ops from './Drill6Ops'
 
 // Настройки постпроцессора на главном экране производства — те же, что в заказе (ЧПУ), это дубль, не перенос:
 // настроить станки можно до заказов, а поправить — и здесь, и прямо при выпуске программ в заказе.
@@ -30,8 +31,10 @@ export default function CncSetup({ prodId = null }) {
       </div>
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
-      {tab === 'tools' && <CncTools cnc={view} onChange={vchange} />}
-      {tab === 'ops' && <CncOps cnc={view} onChange={vchange} layers={null} />}
+      {/* шестисторонний станок: свои инструменты и обработка (номера инструментов у всех станков разные) */}
+      {(tab === 'tools' || tab === 'ops') && isDrill6(activePost(cnc)) && <Drill6Ops cnc={cnc} onChange={change} isMaster={isMaster} part={tab} />}
+      {tab === 'tools' && !isDrill6(activePost(cnc)) && <CncTools cnc={view} onChange={vchange} />}
+      {tab === 'ops' && !isDrill6(activePost(cnc)) && <CncOps cnc={view} onChange={vchange} layers={null} />}
     </div>
   )
 }
