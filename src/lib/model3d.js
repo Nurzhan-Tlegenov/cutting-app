@@ -2,7 +2,7 @@
 // Детали заказа строятся из их текущего контура (contour.meta.local / inst) —
 // правки в редакторе видны и в 3D. Остальное (панели других материалов,
 // профили, фурнитура) берётся из сохранённой при импорте модели (scene).
-import { edgeGrooveGeom } from './edgeGrooves.js'
+import { edgeGrooveGeom, isEdgePocket, roundRect } from './edgeGrooves.js'
 import { verticesToPolygon } from './trueShapeNesting.js'
 import { detailHoles } from './partHoles.js'
 import { getDrillPoints } from './drillGeometry.js'
@@ -121,7 +121,24 @@ function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
     const geo = edgeGrooveGeom(g, W, L, 0.3)
     const wd = Math.min(num(g.width) || 0, T), ff = num(g.fromFace) || 0
     if (!geo || !(wd > 0)) continue
-    grooves.push({ poly: geo.rect.map(toLocal), zb: frontZ > 0 ? T - ff - wd : ff, depth: wd, edge: true })
+    const zb = frontZ > 0 ? T - ff - wd : ff
+    if (isEdgePocket(g)) {
+      // выемка в торце: форма (со скруглением углов) в плоскости торца, выдавлена внутрь детали на глубину
+      const side = geo.side
+      const appOf = u => (side === 'bottom' ? [u, 0] : side === 'top' ? [u, L] : side === 'left' ? [0, u] : [W, u])
+      const inApp = side === 'bottom' ? [0, 1] : side === 'top' ? [0, -1] : side === 'left' ? [1, 0] : [-1, 0]
+      const p0 = appOf(geo.a0), A = toLocal(p0), B = toLocal(appOf(geo.a0 + 1)), C = toLocal([p0[0] + inApp[0], p0[1] + inApp[1]])
+      const ex = [B[0] - A[0], B[1] - A[1], 0], ez = [C[0] - A[0], C[1] - A[1], 0]
+      // тройка (вдоль, вверх, внутрь) должна быть правой — иначе грани вывернутся: тогда «вверх» — вниз от верха выемки
+      const up = ex[0] * ez[1] - ex[1] * ez[0] < 0
+      const ey = up ? [0, 0, 1] : [0, 0, -1], oz = up ? zb : zb + wd
+      const sh = roundRect(0, geo.length, 0, wd, num(g.r))
+      if (sh && sh.length > 2) {
+        grooves.push({ shape: sh, basis: [...ex, ...ey, ...ez, A[0] - ez[0] * 0.3, A[1] - ez[1] * 0.3, oz], depth: num(g.depth) + 0.3, edge: true })
+        continue
+      }
+    }
+    grooves.push({ poly: geo.rect.map(toLocal), zb, depth: wd, edge: true })
   }
   // Фрезеровка фасада: если деталь прямоугольная — настоящий рельеф пласти по профилю фрезы
   let carve = null

@@ -346,6 +346,17 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
       }
       // пазы и фрезеровка: тёмная вставка в пласть
       for (const g of p.grooves) {
+        if (g.shape) {
+          // выемка в торце: форма в плоскости торца (basis — оси вдоль / вверх / внутрь и начало), выдавлена внутрь
+          const es = new THREE.Shape(g.shape.map(([x, y]) => new THREE.Vector2(x, y)))
+          const eg = new THREE.ExtrudeGeometry(es, { depth: g.depth, bevelEnabled: false, curveSegments: 6 })
+          const b = g.basis
+          eg.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(b[0], b[1], b[2]), new THREE.Vector3(b[3], b[4], b[5]), new THREE.Vector3(b[6], b[7], b[8])).setPosition(b[9], b[10], b[11]))
+          const em = new THREE.Mesh(eg, grooveMat)
+          em.applyMatrix4(mat4)
+          reg(em, 'groove', !p.inOrder, p.anim, p.material, pid); extraGeos.push(eg)
+          continue
+        }
         const gs = new THREE.Shape(g.poly.map(([x, y]) => new THREE.Vector2(x, y)))
         const gg = new THREE.ExtrudeGeometry(gs, { depth: g.depth + (g.zb != null ? 0 : 0.4), bevelEnabled: false })
         gg.translate(0, 0, g.zb != null ? g.zb : g.z > p.t / 2 ? p.t - g.depth : -0.4)      // zb — паз в торце: на своей высоте

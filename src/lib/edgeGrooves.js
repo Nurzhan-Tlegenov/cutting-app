@@ -58,3 +58,16 @@ export function trimEdgeGroove(g, k) {
   const lo = alongX(g.edgeSide) ? num(k.l) : num(k.b), hi = alongX(g.edgeSide) ? num(k.r) : num(k.t)
   return { ...g, gapLow: r1(Math.max(0, num(g.gapLow) - lo)), gapHigh: r1(Math.max(0, num(g.gapHigh) - hi)) }
 }
+
+// прямоугольник со скруглёнными углами в координатах (u, f) против часовой: u0..u1 × f0..f1, радиус r
+export function roundRect(u0, u1, f0, f1, r) {
+  const w = u1 - u0, h = f1 - f0
+  if (w < -1e-6 || h < -1e-6) return null
+  if (w < 1e-3 || h < 1e-3) return w < 1e-3 ? [[u0, f0], [u0, f1]] : [[u0, f0], [u1, f0]]     // выродился в отрезок
+  r = Math.max(0, Math.min(r, w / 2, h / 2))
+  if (r < 1e-3) return [[u0, f0], [u1, f0], [u1, f1], [u0, f1]]
+  const n = Math.max(2, Math.ceil(r / 1.5)), pts = []
+  const arc = (cx, cy, a0) => { for (let k = 0; k <= n; k++) { const a = a0 + (Math.PI / 2) * k / n; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]) } }
+  arc(u1 - r, f0 + r, -Math.PI / 2); arc(u1 - r, f1 - r, 0); arc(u0 + r, f1 - r, Math.PI / 2); arc(u0 + r, f0 + r, Math.PI)
+  return pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 1e-6)
+}

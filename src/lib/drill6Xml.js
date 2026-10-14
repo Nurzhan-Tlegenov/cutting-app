@@ -30,7 +30,7 @@
  * пласти, фигурный контур, вырезы, выемки): лишнее оператор отключает фильтром на стойке (например, обработку Face 5).
  */
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
-import { edgeGrooveGeom, isEdgePocket } from './edgeGrooves'
+import { edgeGrooveGeom, isEdgePocket, roundRect } from './edgeGrooves'
 import { rawDetail, parseEdgeTypes, edgeKey } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
@@ -259,18 +259,6 @@ function pocketSize(poly) {
   const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys)
   const round = Math.abs(w - h) < 0.2 && Math.abs(Math.abs(pArea(poly)) - Math.PI * w * h / 4) < 0.03 * w * h
   return round ? { key: `d${r1(w)}`, text: `Ø${r1(w)}`, min: w } : { key: `${r1(Math.max(w, h))}x${r1(Math.min(w, h))}`, text: `${r1(Math.max(w, h))} × ${r1(Math.min(w, h))}`, min: Math.min(w, h) }
-}
-// прямоугольник со скруглёнными углами в координатах (u, f) против часовой: u0..u1 × f0..f1, радиус r
-function roundRect(u0, u1, f0, f1, r) {
-  const w = u1 - u0, h = f1 - f0
-  if (w < -1e-6 || h < -1e-6) return null
-  if (w < 1e-3 || h < 1e-3) return w < 1e-3 ? [[u0, f0], [u0, f1]] : [[u0, f0], [u1, f0]]     // выродился в отрезок
-  r = Math.max(0, Math.min(r, w / 2, h / 2))
-  if (r < 1e-3) return [[u0, f0], [u1, f0], [u1, f1], [u0, f1]]
-  const n = Math.max(2, Math.ceil(r / 1.5)), pts = []
-  const arc = (cx, cy, a0) => { for (let k = 0; k <= n; k++) { const a = a0 + (Math.PI / 2) * k / n; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]) } }
-  arc(u1 - r, f0 + r, -Math.PI / 2); arc(u1 - r, f1 - r, 0); arc(u0 + r, f1 - r, Math.PI / 2); arc(u0 + r, f0 + r, Math.PI)
-  return pts.filter((p, i) => i === 0 || Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) > 1e-6)
 }
 /**
  * Выемка в торце -> фрезеровка на торце (Face 1–4) в трёхмерных точках станка.
