@@ -2,12 +2,47 @@
   "redirects": [
     {
       "source": "/:path*",
-      "has": [{ "type": "host", "value": "cutting-app-nine.vercel.app" }],
+      "has": [
+        {
+          "type": "host",
+          "value": "cutting-app-nine.vercel.app"
+        }
+      ],
       "destination": "https://raskroypro.com/:path*",
       "permanent": false
     }
   ],
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'none'"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(self), microphone=(), geolocation=(), payment=()"
+        }
+      ]
+    }
   ]
 }
