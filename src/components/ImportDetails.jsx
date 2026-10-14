@@ -53,7 +53,7 @@ const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocume
 const ALL = '__all__'
 
 // Файл модели: Базис (.b3d, 'BZ…'), Астра (.add, составной файл OLE2), PRO100 (.obj). Иначе — null (это таблица).
-async function readModelFile(file, faceRule) {
+async function readModelFile(file, faceRule, marks = null) {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
   const lower = file.name.toLowerCase()
   // PDF из SketchCut ('%PDF')
@@ -69,7 +69,7 @@ async function readModelFile(file, faceRule) {
   }
   const ole = head[0] === 0xD0 && head[1] === 0xCF && head[2] === 0x11 && head[3] === 0xE0
   if (lower.endsWith('.add') || (ole && !/\.xls$/.test(lower))) {
-    return { src: 'astra', res: await readAstraFile(file, { faceRule }) }
+    return { src: 'astra', res: await readAstraFile(file, { faceRule, ...(marks || {}) }) }
   }
   // XML-экспорт Астры
   const h = new TextDecoder('latin1').decode(head)
@@ -110,6 +110,8 @@ export default function ImportDetails({ hasDetails, onImport }) {
   useEffect(() => { let alive = true; myLimits().then(l => { if (alive) setMatCap(l?.limits?.import_mats?.limit ?? null) }); return () => { alive = false } }, [])
   const [mode, setMode] = useState('add')
   const [basis, setBasis] = useState(null)       // разобранная модель Базиса или Астры (вместо таблицы)
+  // выемки по объектам-меткам Астры: выключенные метки и включённые кандидаты (объекты без названия «viemka»)
+  const [marks, setMarks] = useState({ markOff: [], markOn: [] })
 
   const rows = useMemo(() => (sheets ? sheets[sheetIdx].rows : []), [sheets, sheetIdx])
 
@@ -136,6 +138,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     try {
       const lower = file.name.toLowerCase()
       const rule = savedFaceOrder(getUserSettings(user).basisFaceOrder || getUserSettings(user).basisFaceRule || faceRule)
+      setMarks({ markOff: [], markOn: [] })
       const model = await readModelFile(file, rule)
       if (model) {
         const { res } = model
@@ -184,6 +187,22 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const clashes = (basis?.clashes || []).filter(c => activeKey === ALL || c.a.groupKey === activeKey || c.b.groupKey === activeKey)
   const clashName = sd => [sd.des, sd.name].filter(Boolean).join(' ') || 'деталь'
 
+  // Выемку по метке выключили / объект без метки сделали выемкой — модель перечитывается с этим выбором
+  const toggleMark = async (id, on, named) => {
+    const next = named
+      ? { ...marks, markOff: on ? marks.markOff.filter(x => x !== id) : [...marks.markOff, id] }
+      : { ...marks, markOn: on ? [...marks.markOn, id] : marks.markOn.filter(x => x !== id) }
+    setMarks(next)
+    if (!basisFileRef.current) return
+    setBusy(true)
+    try {
+      const model = await readModelFile(basisFileRef.current, faceRule, next)
+      if (model) setBasis(model.res)
+    } catch (err) {
+      setError('Не удалось прочитать файл: ' + (err?.message || err))
+    } finally { setBusy(false) }
+  }
+
   // Другое правило лицевой стороны — пересчитываем детали и запоминаем выбор за аккаунтом
   const changeFaceRule = async (rule) => {
     setFaceRule(rule)
@@ -191,7 +210,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     if (!basisFileRef.current) return
     setBusy(true)
     try {
-      const model = await readModelFile(basisFileRef.current, rule)
+      const model = await readModelFile(basisFileRef.current, rule, marks)
       if (model) setBasis(model.res)
     } catch (err) {
       setError('Не удалось прочитать файл: ' + (err?.message || err))
@@ -457,6 +476,37 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 </div>
               )
             })()}
+
+            {/* Выемки по объектам-меткам Астры (viemka) и объекты без метки, врезанные в панели */}
+            {basis?.pockets && (basis.pockets.marks.length > 0 || basis.pockets.candidates.length > 0) && (
+              <div style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12 }}>
+                {basis.pockets.marks.length > 0 && <div style={{ fontWeight: 500, marginBottom: 4 }}>Выемки по меткам ({basis.pockets.marks.length})</div>}
+                {basis.pockets.marks.map(m => (
+                  <label key={'m' + m.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '4px 0', cursor: busy ? 'default' : 'pointer' }}>
+                    <input type="checkbox" checked={!m.off} disabled={busy} onChange={e => toggleMark(m.id, e.target.checked, m.named)} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
+                    <span style={{ minWidth: 0, color: m.off ? 'var(--text-hint)' : m.miss ? 'var(--amber)' : 'var(--text-muted)' }}>
+                      <b style={{ fontWeight: 500 }}>{m.obj}</b>{!m.named && ' (без метки, включён вами)'}
+                      {m.off ? ' — выключена, деталь остаётся целой'
+                        : m.miss ? ' — не попала ни в одну деталь'
+                          : m.hits.map((h, i) => <span key={i} style={{ display: 'block' }}>→ {h.part}: {h.text}</span>)}
+                    </span>
+                  </label>
+                ))}
+                {basis.pockets.candidates.length > 0 && (
+                  <>
+                    <div style={{ fontWeight: 500, margin: basis.pockets.marks.length ? '8px 0 2px' : '0 0 2px' }}>Врезаны в детали, но без метки «viemka» ({basis.pockets.candidates.length})</div>
+                    <div style={{ color: 'var(--text-hint)', marginBottom: 4 }}>Сейчас это просто объекты модели. Отметьте, если это выемка.</div>
+                    {basis.pockets.candidates.map(c => (
+                      <label key={'c' + c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '4px 0', cursor: busy ? 'default' : 'pointer' }}>
+                        <input type="checkbox" checked={false} disabled={busy} onChange={e => toggleMark(c.id, e.target.checked, false)} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
+                        <span style={{ minWidth: 0, color: 'var(--text-muted)' }}><b style={{ fontWeight: 500 }}>{c.obj}</b>
+                          {c.hits.map((h, i) => <span key={i} style={{ display: 'block' }}>→ {h.part}: {h.text}</span>)}</span>
+                      </label>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Что получится */}
             {basis && !basis.bare && !basis.skp && !basis.pdf && chosen.length > 0 && (

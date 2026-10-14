@@ -1,0 +1,93 @@
+{
+ "items": [
+  {
+   "des": "1(V1)",
+   "name": "Задняя стенка",
+   "size": "701x430x4",
+   "qty": 1,
+   "material": "PE 101",
+   "edges": "",
+   "drillings": 0,
+   "grooves": [],
+   "holes": [],
+   "edgeGrooves": []
+  },
+  {
+   "des": "2(V1)",
+   "name": "Верх",
+   "size": "450x330x16",
+   "qty": 1,
+   "material": "W1000 ST9",
+   "edges": "top,right,bottom,left",
+   "drillings": 8,
+   "grooves": [
+    "front vertical 450x4x8"
+   ],
+   "holes": [],
+   "edgeGrooves": [
+    "groove left 0/0 f8.7 3.5x10"
+   ]
+  },
+  {
+   "des": "6(V1)",
+   "name": "Бок",
+   "size": "688x330x16",
+   "qty": 1,
+   "material": "W1000 ST9",
+   "edges": "top,right,bottom,left",
+   "drillings": 18,
+   "grooves": [
+    "front vertical 688x4x8"
+   ],
+   "holes": [
+    "circle 100x100"
+   ],
+   "edgeGrooves": []
+  },
+  {
+   "des": "3(V1)",
+   "name": "Бок",
+   "size": "688x330x16",
+   "qty": 1,
+   "material": "W1000 ST9",
+   "edges": "top,right,bottom,left",
+   "drillings": 18,
+   "grooves": [
+    "front vertical 688x4x8"
+   ],
+   "holes": [
+    "rect 100x100"
+   ],
+   "edgeGrooves": []
+  },
+  {
+   "des": "4(V1)",
+   "name": "Дно",
+   "size": "450x330x16",
+   "qty": 1,
+   "material": "W1000 ST9",
+   "edges": "top,right,bottom,left",
+   "drillings": 8,
+   "grooves": [
+    "front vertical 450x4x8",
+    "back vertical 420x15.2x12"
+   ],
+   "holes": [],
+   "edgeGrooves": []
+  },
+  {
+   "des": "5(V1)",
+   "name": "Планка",
+   "size": "417x276x16",
+   "qty": 1,
+   "material": "W1000 ST9",
+   "edges": "top,right,bottom,left",
+   "drillings": 12,
+   "grooves": [],
+   "holes": [],
+   "edgeGrooves": []
+  }
+ ],
+ "marks": [],
+ "candidates": []
+}

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:astra": "node tests/astra/check.mjs"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",

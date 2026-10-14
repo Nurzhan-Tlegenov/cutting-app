@@ -1,0 +1,52 @@
+{
+ "items": [
+  {
+   "des": "1(P1)",
+   "name": "Выемка в пласть",
+   "size": "400x400x16",
+   "qty": 1,
+   "material": "K1",
+   "edges": "",
+   "drillings": 0,
+   "grooves": [],
+   "holes": [
+    "pocket front 100x100 d10"
+   ],
+   "edgeGrooves": []
+  },
+  {
+   "des": "1(T2)",
+   "name": "Выемка в торец",
+   "size": "400x400x18",
+   "qty": 1,
+   "material": "K1",
+   "edges": "",
+   "drillings": 0,
+   "grooves": [],
+   "holes": [],
+   "edgeGrooves": [
+    "pocket right 310/40 f4 10x30 R5"
+   ]
+  },
+  {
+   "des": "1(T3)",
+   "name": "Выемка в торец",
+   "size": "400x400x18",
+   "qty": 1,
+   "material": "K1",
+   "edges": "",
+   "drillings": 0,
+   "grooves": [],
+   "holes": [],
+   "edgeGrooves": [
+    "pocket right 155/195 f4 10x30"
+   ]
+  }
+ ],
+ "marks": [
+  "Viemka: 1(T3) Выемка в торец — выемка в торце 50 × 10, глубина 30",
+  "Viemka: 1(T2) Выемка в торец — выемка в торце 50 × 10 R5, глубина 30",
+  "viemka: 1(P1) Выемка в пласть — выемка на пласти Ø100, глубина 10"
+ ],
+ "candidates": []
+}
