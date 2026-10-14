@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom } from '../i18n'
-import { signupOpen, requestSignup, requestPasswordReset, confirmPasswordReset } from '../lib/adminApi'
+import { signupOpen, requestSignup2, confirmSignupCode, tgStartLink, requestPasswordReset, confirmPasswordReset } from '../lib/adminApi'
+import { PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, formatNational, fullPhone, phoneProblem } from '../lib/phoneCountries'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { pendingInvite } from '../lib/workplaces'
@@ -16,9 +17,9 @@ export default function AuthPage() {
   const navigate = useNavigate()
 
   const [showPass, setShowPass] = useState(false)
-  const [form, setForm] = useState({
-    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: '', country: '', city: ''
-  })
+  const [form, setForm] = useState(() => ({
+    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: '', country: phoneCountry(guessPhoneCountry()).name, city: ''
+  }))
   // Регистрация может быть закрыта: тогда новый человек оставляет заявку, а регистрируется после одобрения
   const [open, setOpen] = useState(true)
   const [approved, setApproved] = useState(false)   // заявка этого номера одобрена — можно задать пароль
@@ -27,6 +28,27 @@ export default function AuthPage() {
   const invite = pendingInvite()   // пришёл по ссылке-приглашению производства — регистрация сотрудника без заявки
   const byRequest = mode === 'register' && !open && !approved && !invite
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  // Номер при регистрации: страна (код) + номер нужной длины — номер с недостающей цифрой не уйдёт
+  const [pcIso, setPcIso] = useState(guessPhoneCountry)
+  const pc = phoneCountry(pcIso)
+  const [national, setNational] = useState('')
+  const [otherDial, setOtherDial] = useState('')
+  const regPhone = fullPhone(pc, national, otherDial)
+  const phoneErr = phoneProblem(pc, national, otherDial)
+  const [phoneTouched, setPhoneTouched] = useState(false)
+  // номер изменили — прежний ответ на заявку относится к другому номеру
+  const phoneChanged = () => { setReq(null); setApproved(false); setNote('') }
+  const pickCountry = iso => {
+    const c = phoneCountry(iso)
+    setPcIso(iso); setNational(n => nationalDigits(n, c)); phoneChanged()
+    // страна проживания по умолчанию — страна номера (если человек не вписал свою)
+    if (c.iso !== 'OTHER') setForm(f => (!f.country.trim() || PHONE_COUNTRIES.some(x => x.name === f.country) ? { ...f, country: c.name } : f))
+  }
+  // Куда прислать код: Telegram (бот подтверждает номер сразу) или WhatsApp (код пришлёт администратор)
+  const [messenger, setMessenger] = useState('telegram')
+  const [req, setReq] = useState(null)   // ответ на заявку: статус, метка для бота, подтверждён ли номер, выдан ли код
+  const needCode = approved && req && req.status === 'approved' && !req.legacy
 
   // Генерируем фейковый email из номера телефона
   function phoneToEmail(phone) {
@@ -61,25 +83,42 @@ export default function AuthPage() {
         await signIn(email, form.password)
       } else {
         if (!form.full_name.trim()) throw new Error('Введите имя и фамилию')
-        if (!form.phone.trim()) throw new Error('Введите контактный телефон')
+        setPhoneTouched(true)
+        if (phoneErr) throw new Error(phoneErr)
         if (!invite && form.country.trim().length < 2) throw new Error('Укажите страну')
         if (!invite && form.city.trim().length < 2) throw new Error('Укажите город')
         if (byRequest) {
-          const r = await requestSignup(form.full_name, form.phone, form.comment, form.country.trim(), form.city.trim())
+          const r = await requestSignup2(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), messenger)
           if (r.error) throw new Error(r.error)
-          if (r.status === 'approved' || r.status === 'open') { setApproved(true); setNote('Заявка одобрена. Остался один шаг: придумайте пароль и нажмите «Зарегистрироваться».') }
+          setReq(r)
+          const tgMode = r.messenger === 'telegram'
+          if (r.registered) setError('Этот номер уже зарегистрирован — войдите на вкладке «Вход».')
+          else if (r.status === 'open' || (r.status === 'approved' && r.legacy)) { setApproved(true); setNote('Остался один шаг: придумайте пароль и нажмите «Зарегистрироваться».') }
+          else if (r.status === 'approved') {
+            setApproved(true)
+            setNote(r.code_issued ? `Заявка одобрена. Введите код из ${tgMode && r.verified ? 'Telegram' : 'сообщения'} и придумайте пароль.`
+              : tgMode && !r.verified ? 'Заявка одобрена. Подтвердите номер в Telegram — бот сразу пришлёт код.'
+              : 'Заявка одобрена. Код ещё не отправлен — дождитесь сообщения от администратора.')
+          }
           else if (r.status === 'rejected') setError('Заявка для этого номера отклонена. Свяжитесь с нами.')
-          else setNote('Заявка отправлена. Мы свяжемся с вами. После одобрения откройте «Регистрация», введите этот же номер и нажмите «Продолжить» — появится создание пароля.')
+          else if (tgMode && !r.verified) setNote('Заявка отправлена. Остался один шаг: подтвердите номер в Telegram — нажмите кнопку ниже, затем «Поделиться номером» в боте. Код для регистрации придёт туда же после одобрения.')
+          else if (tgMode) setNote('Заявка отправлена, номер подтверждён ✓. Как только заявку одобрят, код для регистрации придёт в Telegram.')
+          else setNote('Заявка отправлена. После одобрения администратор пришлёт код в WhatsApp — откройте «Регистрация», введите этот же номер и код.')
           // написал на своём языке (имя, страна, город) — предложить переключить приложение на него
           if (r.status !== 'approved' && r.status !== 'open') offerLangFrom([form.full_name, form.country, form.city, form.comment].join(' '))
           return
         }
         if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
+        if (needCode) {
+          if (!form.code.trim()) throw new Error('Введите код из сообщения')
+          const c = await confirmSignupCode(regPhone, form.code)
+          if (c.error) throw new Error(c.error)
+        }
         if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) throw new Error('Проверьте адрес почты — или оставьте поле пустым')
-        const email = phoneToEmail(form.phone)
+        const email = phoneToEmail(regPhone)
         await signUp(email, form.password, {
           full_name: form.full_name,
-          phone: form.phone,
+          phone: regPhone,
           whatsapp: form.whatsapp,
           country: form.country.trim(), city: form.city.trim(),
           contact_email: form.email,
@@ -138,11 +177,31 @@ export default function AuthPage() {
               </div>
             )}
 
-            <div>
-              <label className="label">Телефон * (используется для входа)</label>
-              <input type="tel" placeholder="+7 700 000 00 00" value={form.phone}
-                onChange={e => set('phone', e.target.value)} required />
-            </div>
+            {mode === 'register' ? (
+              <div>
+                <label className="label">Телефон * (используется для входа)</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select value={pcIso} onChange={e => pickCountry(e.target.value)}
+                    style={{ width: pc.dial ? 104 : 150, flexShrink: 0 }} aria-label="Код страны">
+                    {PHONE_COUNTRIES.map(c => <option key={c.iso} value={c.iso}>{c.dial ? `${c.iso} +${c.dial}` : c.name}</option>)}
+                  </select>
+                  {!pc.dial && <input type="tel" inputMode="numeric" placeholder="+код" value={otherDial ? '+' + otherDial : ''} style={{ width: 70, flexShrink: 0 }}
+                    onChange={e => { setOtherDial(e.target.value.replace(/\D/g, '').slice(0, 4)); phoneChanged() }} aria-label="Код страны" />}
+                  <input type="tel" inputMode="numeric" autoComplete="tel-national" placeholder={pc.mask} value={formatNational(national, pc)}
+                    onChange={e => { setNational(nationalDigits(e.target.value, pc)); phoneChanged() }} onBlur={() => national && setPhoneTouched(true)}
+                    style={{ flex: 1, minWidth: 0, borderColor: phoneTouched && phoneErr ? 'var(--danger)' : undefined }} required />
+                </div>
+                <p style={{ fontSize: 11, marginTop: 3, color: phoneTouched && phoneErr ? 'var(--danger)' : 'var(--text-hint)' }}>
+                  {phoneTouched && phoneErr ? phoneErr : !phoneErr ? `✓ ${regPhone}` : `${pc.name}: ${pc.len[0] === pc.len[1] ? pc.len[0] : `${pc.len[0]}–${pc.len[1]}`} цифр после +${pc.dial || otherDial || '…'}`}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="label">Телефон * (используется для входа)</label>
+                <input type="tel" placeholder="+7 700 000 00 00" value={form.phone}
+                  onChange={e => set('phone', e.target.value)} required />
+              </div>
+            )}
 
             {mode === 'register' && (
               <div style={{ display: 'flex', gap: 8 }}>
@@ -162,6 +221,22 @@ export default function AuthPage() {
                 <label className="label">Комментарий (кто вы, чем занимаетесь)</label>
                 <input type="text" placeholder="Мебельный цех, город…" value={form.comment}
                   onChange={e => set('comment', e.target.value)} maxLength={300} />
+              </div>
+            )}
+            {byRequest && (
+              <div>
+                <label className="label">Куда прислать код подтверждения</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[['telegram', 'Telegram', 'быстро — номер подтверждается в 1 тап, код приходит сам'], ['whatsapp', 'WhatsApp', 'код пришлёт администратор после одобрения']].map(([k, title, sub]) => (
+                    <button key={k} type="button" onClick={() => setMessenger(k)}
+                      style={{ flex: 1, textAlign: 'left', padding: '10px 10px 8px', borderRadius: 'var(--radius)', cursor: 'pointer', position: 'relative',
+                        border: messenger === k ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)', background: messenger === k ? 'var(--blue-light, var(--bg2))' : 'transparent' }}>
+                      {k === 'telegram' && <span style={{ position: 'absolute', top: -8, right: 8, fontSize: 10, background: 'var(--teal)', color: 'white', borderRadius: 10, padding: '1px 7px' }}>рекомендуем</span>}
+                      <div style={{ fontSize: 14, fontWeight: 600, color: messenger === k ? 'var(--blue)' : 'var(--text)' }}>{messenger === k ? '● ' : '○ '}{title}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2, lineHeight: 1.3 }}>{sub}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {mode === 'register' && !byRequest && (
@@ -195,6 +270,14 @@ export default function AuthPage() {
               </>
             )}
 
+            {mode === 'register' && needCode && (
+              <div>
+                <label className="label">Код из {req.messenger === 'telegram' && req.verified ? 'Telegram' : 'сообщения'} *</label>
+                <input type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="6 цифр" maxLength={8} value={form.code}
+                  onChange={e => set('code', e.target.value.replace(/\D/g, ''))} />
+              </div>
+            )}
+
             {!byRequest && <div>
               <label className="label">{mode === 'forgot' ? 'Новый пароль *' : 'Пароль *'}</label>
               <div style={{ position: 'relative' }}>
@@ -210,6 +293,10 @@ export default function AuthPage() {
             </div>}
 
             {note && <p style={{ fontSize: 13, color: 'var(--teal)' }}>{note}</p>}
+            {mode === 'register' && req?.tg_token && !req.verified && !req.registered && (
+              <a href={tgStartLink(req.tg_token)} target="_blank" rel="noreferrer" className="btn-primary"
+                style={{ display: 'block', textAlign: 'center', textDecoration: 'none', background: '#229ED9' }}>📱 Подтвердить номер в Telegram</a>
+            )}
             {error && <p className="error-text">{error}</p>}
 
             <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: 4 }}>

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
-import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT } from '../lib/adminApi'
+import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
 import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
@@ -13,6 +13,15 @@ import { countryCode } from '../lib/productionLabel'
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—')
 const digits = v => String(v || '').replace(/\D/g, '')
+const codeMsg = code => `Ваша заявка в RaskroyPro одобрена. Код: ${code}. Откройте raskroypro.com → «Регистрация», введите тот же номер телефона, этот код и придумайте пароль. Код действует 3 дня.`
+
+// Как подтверждён номер заявки
+function VerifyBadge({ r }) {
+  if (r.phone_verified_at) return <span style={{ fontSize: 11, color: 'var(--teal)' }}>✓ номер подтверждён в Telegram</span>
+  if (r.messenger === 'telegram') return <span style={{ fontSize: 11, color: 'var(--amber)' }}>Telegram — номер ещё не подтверждён</span>
+  if (r.messenger === 'whatsapp') return <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>WhatsApp — код отправите вы</span>
+  return null
+}
 
 export default function UsersPage() {
   const { user } = useAuth()
@@ -29,6 +38,7 @@ export default function UsersPage() {
   const [land, setLand] = useState('')         // страна (обозначение) — фильтр списка
   const [town, setTown] = useState('')         // город — фильтр списка
   const [ready, setReady] = useState(false)   // база ответила: функции на месте и вы администратор
+  const [info, setInfo] = useState('')         // итог последнего действия (код отправлен, бот подключён…)
   const [lim, setLim] = useState(null)         // лимиты: { defaults, users } или { error } — в базе ещё нет лимитов
 
   const load = async () => {
@@ -46,13 +56,59 @@ export default function UsersPage() {
     if (!next && !window.confirm('Закрыть свободную регистрацию? Зарегистрироваться смогут только те, чьи заявки вы одобрите.')) return
     act(() => adminSetSignup(next))
   }
+  // Одобрить заявку: база выдаёт код; номер подтверждён в Telegram — бот сразу присылает его туда
+  const approve = r => act(async () => {
+    setInfo('')
+    const a = await adminApproveRequest(r.id)
+    if (a.missing) return adminSetRequest(r.id, 'approved')   // база ещё без подтверждения номера
+    if (a.error) return a
+    if (a.data?.telegram) {
+      const t = await tgBot({ action: 'send_code', request_id: r.id })
+      setInfo(t.error ? `Код не ушёл в Telegram: ${t.error}. Отправьте его в WhatsApp.` : `Код отправлен в Telegram — ${r.full_name || r.phone}.`)
+    } else setInfo(`Заявка одобрена. Отправьте код ${r.full_name || r.phone} в WhatsApp.`)
+    return {}
+  })
+  const sendTg = r => act(async () => {
+    const t = await tgBot({ action: 'send_code', request_id: r.id })
+    setInfo(t.error ? `Код не ушёл в Telegram: ${t.error}` : `Код отправлен в Telegram — ${r.full_name || r.phone}.`)
+    return {}
+  })
+  const setupBot = () => act(async () => {
+    const t = await tgBot({ action: 'setup' })
+    setInfo(t.error ? `Бот не подключён: ${t.error}` : `Бот @${t.bot || TG_BOT} подключён и отвечает.`)
+    return {}
+  })
+  // код по одобренной, но ещё не зарегистрированной заявке
+  const codeRow = r => {
+    if (r.registered || r.status !== 'approved') return null
+    const dead = !r.code || r.code_expired || r.code_attempts >= 5
+    return (
+      <div style={{ marginTop: 6 }}>
+        {r.code && <div style={{ fontSize: 13 }}>
+          Код: <b style={{ fontSize: 16, letterSpacing: 2 }}>{r.code}</b>
+          <span style={{ fontSize: 11, color: dead ? 'var(--danger)' : 'var(--text-hint)', marginLeft: 8 }}>
+            {r.code_expired ? 'срок вышел' : r.code_attempts >= 5 ? 'попытки исчерпаны' : r.code_sent_at ? 'отправлен в Telegram' : r.code_attempts ? `неверных попыток: ${r.code_attempts}` : 'ждёт ввода'}
+          </span>
+        </div>}
+        <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+          {dead ? <button type="button" disabled={busy} style={btn('main')} onClick={() => approve(r)}>{r.code ? 'Новый код' : 'Выдать код'}</button>
+            : <>
+              {r.tg_linked && <button type="button" disabled={busy} style={btn('main')} onClick={() => sendTg(r)}>В Telegram</button>}
+              <a href={`https://wa.me/${r.digits}?text=${encodeURIComponent(codeMsg(r.code))}`} target="_blank" rel="noreferrer" style={{ ...btn(r.tg_linked ? undefined : 'main'), textDecoration: 'none' }}>В WhatsApp</a>
+              <button type="button" disabled={busy} style={btn()} onClick={() => approve(r)}>Новый код</button>
+            </>}
+        </div>
+      </div>
+    )
+  }
   const allow = () => {
     if (digits(phone).length < 10) { setError('Введите номер телефона полностью'); return }
     act(async () => { const r = await adminAllowPhone(phone, name); if (!r.error) { setPhone(''); setName('') } return r })
   }
 
   const fresh = reqs.filter(r => r.status === 'new')
-  const rest = reqs.filter(r => r.status !== 'new')
+  const waiting = reqs.filter(r => r.status === 'approved' && !r.registered)   // одобрены — ждут регистрации по коду
+  const rest = reqs.filter(r => r.status !== 'new' && !waiting.includes(r))
   const q = find.trim().toLowerCase()
   const isProd = u => !!u.production_id && (u.production_status ?? 'approved') === 'approved'
   const prodCount = (users || []).filter(isProd).length
@@ -77,6 +133,7 @@ export default function UsersPage() {
         <h1 style={{ fontSize: 18, fontWeight: 500 }}>Пользователи</h1>
       </div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
+      {info && <p style={{ fontSize: 13, color: 'var(--teal)', marginBottom: 12 }} onClick={() => setInfo('')}>{info}</p>}
       {users === null ? <CncLoader label="Собираем список…" /> : !ready ? (
         <div className="card">
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>Список пользователей и переключатель регистрации появятся, когда база будет обновлена: откройте Supabase → SQL Editor, вставьте содержимое файла <b>migration_security_all.sql</b> и нажмите Run.</p>
@@ -94,6 +151,14 @@ export default function UsersPage() {
               </div>
               <button type="button" disabled={busy} onClick={toggle} style={btn(open ? 'danger' : 'main')}>{open ? 'Закрыть регистрацию' : 'Открыть для всех'}</button>
             </div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>Telegram-бот @{TG_BOT}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Подтверждает номера в заявках и присылает коды. Нажмите один раз после установки функции бота — и при её обновлении.</div>
+            </div>
+            <button type="button" disabled={busy} onClick={setupBot} style={btn()}>Подключить бота</button>
           </div>
 
           {resets === null && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 10 }}>{RESET_SQL_HINT}</p>}
@@ -139,10 +204,25 @@ export default function UsersPage() {
                 <div style={{ fontSize: 13 }}><a href={`tel:+${r.digits}`} style={{ color: 'var(--blue)' }}>{r.phone}</a> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· {date(r.created_at)}</span></div>
                 {(r.country || r.city) && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{[countryCode(r.country), r.city].filter(Boolean).join(' · ')}</div>}
                 {r.comment && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{r.comment}</div>}
+                <div style={{ marginTop: 2 }}><VerifyBadge r={r} /></div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                  <button type="button" disabled={busy} style={btn('main')} onClick={() => act(() => adminSetRequest(r.id, 'approved'))}>Одобрить</button>
+                  <button type="button" disabled={busy} style={btn('main')} onClick={() => approve(r)}>Одобрить</button>
                   <button type="button" disabled={busy} style={btn('danger')} onClick={() => act(() => adminSetRequest(r.id, 'rejected'))}>Отклонить</button>
                   <a href={`https://wa.me/${r.digits}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none' }}>WhatsApp</a>
+                </div>
+              </div>
+            ))}
+            {waiting.length > 0 && <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', margin: '10px 0 2px' }}>Одобрены — ждут регистрации · {waiting.length}</div>}
+            {waiting.map(r => (
+              <div key={r.id} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name || 'Без имени'}</span>
+                  <a href={`tel:+${r.digits}`} style={{ fontSize: 12, color: 'var(--blue)' }}>{r.phone}</a>
+                </div>
+                <VerifyBadge r={r} />
+                {codeRow(r)}
+                <div style={{ marginTop: 4 }}>
+                  <button type="button" disabled={busy} style={{ ...btn('danger'), padding: '3px 10px', fontSize: 11 }} onClick={() => act(() => adminSetRequest(r.id, 'rejected'))}>Отозвать</button>
                 </div>
               </div>
             ))}
@@ -159,7 +239,8 @@ export default function UsersPage() {
                   <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '0.5px solid var(--border)', fontSize: 12 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div>{r.full_name || 'Без имени'} · {r.phone}</div>
-                      <div style={{ color: r.status === 'rejected' ? 'var(--danger)' : 'var(--text-hint)' }}>{statusLabel(r)}</div>
+                      <div style={{ color: r.status === 'rejected' ? 'var(--danger)' : 'var(--text-hint)' }}>{statusLabel(r)} <VerifyBadge r={r} /></div>
+                      {codeRow(r)}
                     </div>
                     {!r.registered && r.status === 'approved' && <button type="button" disabled={busy} style={btn('danger')} onClick={() => act(() => adminSetRequest(r.id, 'rejected'))}>Отозвать</button>}
                     {r.status === 'rejected' && <button type="button" disabled={busy} style={btn()} onClick={() => act(() => adminSetRequest(r.id, 'approved'))}>Одобрить</button>}

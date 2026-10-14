@@ -28,6 +28,43 @@ export async function requestSignup(name, phone, comment, country = '', city = '
   return { status: r.data }
 }
 
+// ── Подтверждение номера (migration_phone_verify.sql, функция бота supabase/functions/tg-bot) ──
+export const TG_BOT = 'RaskroyProBot'
+export const tgStartLink = token => `https://t.me/${TG_BOT}?start=${token}`
+export const VERIFY_SQL_HINT = 'Подтверждение номера ещё не включено: выполните migration_phone_verify.sql в Supabase (SQL Editor) — один раз.'
+
+/** Заявка с выбором мессенджера. -> { status, registered, messenger, tg_token, verified, code_issued } | { error }
+ *  База ещё без новой функции — заявка уходит по-старому (без подтверждения), чтобы человек не застрял. */
+export async function requestSignup2(name, phone, comment, country, city, messenger) {
+  const r = await call('request_signup2', { p_name: name || '', p_phone: phone || '', p_comment: comment || '', p_country: country || '', p_city: city || '', p_messenger: messenger })
+  if (r.missing) { const old = await requestSignup(name, phone, comment, country, city); return old.error ? old : { status: old.status, legacy: true } }
+  if (r.error) return { error: /bad phone/.test(r.error) ? 'Проверьте номер телефона' : r.error }
+  return r.data || {}
+}
+/** Код из Telegram / WhatsApp перед регистрацией. -> { ok } | { error } */
+export async function confirmSignupCode(phone, code) {
+  const r = await call('confirm_signup_code', { p_phone: phone || '', p_code: code || '' })
+  if (r.missing) return { ok: true }   // база ещё старая — код не требуется
+  if (r.error) return { error: r.error }
+  const text = { bad: 'Код не подошёл. Проверьте номер телефона и код.', expired: 'Срок действия кода вышел. Попросите администратора выдать новый.',
+    blocked: 'Слишком много попыток. Попросите администратора выдать новый код.', nocode: 'Код ещё не выдан. Дождитесь сообщения с кодом.',
+    registered: 'Этот номер уже зарегистрирован — войдите на вкладке «Вход».' }[r.data]
+  return text ? { error: text } : { ok: true }
+}
+export const adminApproveRequest = id => call('admin_approve_request', { p_id: id })
+/** Вызов функции бота (только мастер): { action: 'setup' } | { action: 'send_code', request_id } */
+export async function tgBot(body) {
+  try {
+    const { data, error } = await supabase.functions.invoke('tg-bot', { body })
+    if (error) {
+      let msg = error.message
+      try { const j = await error.context?.json?.(); if (j?.error) msg = j.error } catch { /* ответ не JSON */ }
+      return { error: /Failed to send|not found|404/i.test(msg) ? 'Функция бота ещё не установлена в Supabase (Edge Functions → tg-bot).' : msg }
+    }
+    return data?.error ? { error: { no_telegram: 'Номер ещё не подтверждён в Telegram — отправьте код в WhatsApp.', not_approved: 'Заявка не одобрена.' }[data.error] || data.error } : data
+  } catch (e) { return { error: String(e?.message || e) } }
+}
+
 export const adminUsers = () => call('admin_users')
 export const adminRequests = () => call('admin_requests')
 export const adminSetSignup = open => call('admin_set_signup', { p_open: !!open })
