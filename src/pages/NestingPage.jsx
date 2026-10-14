@@ -23,6 +23,7 @@ import BottomNav from '../components/BottomNav'
 import ContourEditor from '../components/ContourEditor'
 import Model3DButton from '../components/Model3DButton'
 import ProductionForm from '../components/ProductionForm'
+import ProductionPicker from '../components/ProductionPicker'
 import { myProduction } from '../lib/productionApi'
 import { loadOrderModel } from '../lib/orderModel'
 import { hasModel } from '../lib/model3d'
@@ -1526,6 +1527,11 @@ export default function NestingPage() {
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
   const [productions, setProductions] = useState([])     // зарегистрированные производства (если есть)
   const [needProd, setNeedProd] = useState(null)         // «Оформить» без производства: { cfg, force, pick, own }
+  // «Где будете резать?» — производство выбирается до раскроя: { mine } пока окно открыто
+  const [pickProd, setPickProd] = useState(null)
+  const [noProdOk, setNoProdOk] = useState(false)        // «Пока раскроить со своими параметрами» — до конца работы с заказом
+  const runAfterRef = useRef(null)                       // какой раскрой запустить, когда производство выбрано
+  useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
   useBackClose(!!needProd, () => setNeedProd(null))
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
   const [offForm, setOffForm] = useState(() => parseOffcuts(null))
@@ -1784,8 +1790,8 @@ export default function NestingPage() {
     if (Number(order[col]) === v) return
     saveOrderPatch({ [col]: v })
   }
-  function chooseProduction(pid) {
-    const pr = productions.find(x => x.id === pid)
+  function chooseProduction(pid, list = productions) {
+    const pr = list.find(x => x.id === pid)
     saveUserSettings({ lastProductionId: pr ? pr.id : '' }, user)     // в следующем заказе это производство подставится само
     if (!pr) { saveOrderPatch({ production_id: null }); return }
     const patch = { production_id: pr.id }
@@ -1912,15 +1918,36 @@ export default function NestingPage() {
     })
   }
 
+  // Свой неотправленный заказ без производства — сначала «Где будете резать?», раскрой запустится после выбора
+  async function askProductionFirst(run) {
+    if (!order || order.user_id !== user?.id || (order.status && order.status !== 'draft') || order.production_id || noProdOk) return false
+    const mine = await myProduction(user?.id)
+    if (mine === undefined) return false                  // в базе ещё нет кабинета производства — как раньше
+    runAfterRef.current = run
+    setPickProd({ mine })
+    return true
+  }
+  async function pickProductionAndRun(pr) {
+    let list = productions
+    if (!list.some(x => x.id === pr.id)) { list = sortProductions([...productions, pr]); setProductions(list) }
+    setPickProd(null)
+    chooseProduction(pr.id, list)                          // рез и отступы производства — в заказ; раскрой стартует на следующем кадре
+  }
+
   function runCfg(cfgId, continueFrom = false) {
     const cfg = configsRef.current.find(c => c.id === cfgId)
     if (!cfg || !order || !details.length) return
     if (cfg.status === 'running' || cfg.status === 'stopping') return
+    if (!order.production_id && !noProdOk && order.user_id === user?.id) {
+      askProductionFirst({ id: cfgId, cont: continueFrom }).then(asked => { if (!asked) launch(cfg, continueFrom) })
+      return
+    }
     launch(cfg, continueFrom)
   }
 
   async function runAll() {
     if (!order || !details.length) return
+    if (await askProductionFirst({ all: true })) return
     const list = configsRef.current.filter(c => c.status !== 'running' && c.status !== 'stopping')
     if (!list.length) return
     if (parallel) {
@@ -1952,6 +1979,14 @@ export default function NestingPage() {
     if (job) { delete jobsRef.current[cfgId]; job.cancel() }
     updateCfg(cfgId, { status: 'idle' })
   }
+
+  // производство выбрано (или «пока со своими параметрами») — запускаем отложенный раскрой уже с новыми резом и отступами
+  useEffect(() => {
+    const r = runAfterRef.current
+    if (!r || pickProd || !(order?.production_id || noProdOk)) return
+    runAfterRef.current = null
+    if (r.all) runAll(); else runCfg(r.id, r.cont)
+  }, [order?.production_id, order?.kerf_width, noProdOk, pickProd])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Буфер деталей ────────────────────────────────────────────────────────
   // Деталь снимается с листа в буфер, затем кладётся на любой другой лист
@@ -2105,6 +2140,15 @@ export default function NestingPage() {
       // mine === undefined — в базе ещё нет кабинета производства: оформляем как раньше
     }
     setNeedProd(null)
+    {
+      const target = pid ? productions.find(x => x.id === pid) : null
+      if (target && (target.status ?? 'approved') !== 'approved') {
+        window.alert(target.owner_id === user?.id
+          ? `Ваше производство «${target.name}» ещё ждёт подтверждения администратора. Раскрой сохранён — отправить заказ можно будет после подтверждения.`
+          : `Производство «${target.name}» ещё не подтверждено — выберите другое в «Лист и обрезки».`)
+        return
+      }
+    }
     // Раскрой должен быть посчитан с резом и отступами не меньше, чем у производства, куда идёт заказ.
     // Если производство выбрали уже после раскроя и его рез шире — заказ не отправляется: нужен пересчёт.
     const pr = pid ? productions.find(x => x.id === pid) : null
@@ -3398,6 +3442,20 @@ export default function NestingPage() {
         </div>
       )}
       <BottomNav />
+      {pickProd && (
+        <ProductionPicker productions={productions} mine={pickProd.mine} lastId={getUserSettings(user).lastProductionId} profile={profile}
+          kerfOf={pr => prodVal(pr, 'kerf_width', order)}
+          sheet={{ kerf: order.kerf_width, ml: order.margin_left, mr: order.margin_right, mt: order.margin_top, mb: order.margin_bottom }}
+          onPick={pickProductionAndRun}
+          onSkip={() => { setNoProdOk(true); setPickProd(null) }}
+          onClose={() => { runAfterRef.current = null; setPickProd(null) }}
+          onRegistered={async () => {
+            await refreshProfile?.()
+            const mine = await myProduction(user?.id)
+            if (mine) pickProductionAndRun(mine)
+            else setPickProd(null)
+          }} />
+      )}
       {needProd && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 955, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setNeedProd(null)}>
           <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', overflowY: 'auto', background: 'var(--bg)', borderRadius: '16px 16px 0 0', padding: '16px 16px calc(16px + env(safe-area-inset-bottom))' }}>
