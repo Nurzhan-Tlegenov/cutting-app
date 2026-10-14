@@ -48,11 +48,13 @@ async function webhookSecret(): Promise<string> {
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 48)
 }
 
-async function tg(method: string, payload: Record<string, unknown>) {
-  const r = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-  })
-  return await r.json().catch(() => ({ ok: false }))
+async function tg(method: string, payload: Record<string, unknown>): Promise<any> {
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    })
+    return await r.json().catch(() => ({ ok: false, description: `Telegram ответил ${r.status}` }))
+  } catch (e) { return { ok: false, description: 'Нет связи с Telegram: ' + String((e as Error)?.message || e) } }
 }
 const send = (chat: number, text: string, extra: Record<string, unknown> = {}) =>
   tg('sendMessage', { chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true, ...extra })
@@ -114,6 +116,16 @@ async function onUpdate(u: any) {
     { reply_markup: SHARE_KB })
 }
 
+async function setupWebhook(): Promise<{ ok: boolean, bot?: string, error?: string }> {
+  const r = await tg('setWebhook', {
+    url: `${SB_URL}/functions/v1/tg-bot`, secret_token: await webhookSecret(),
+    allowed_updates: ['message'], drop_pending_updates: true,
+  })
+  if (!r.ok) return { ok: false, error: r.description || 'Telegram не принял вебхук' }
+  const me = await tg('getMe', {})
+  return { ok: true, bot: me?.result?.username }
+}
+
 // ── Запросы из приложения: только мастер-аккаунт ──
 async function isMaster(req: Request): Promise<boolean> {
   const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
@@ -130,12 +142,8 @@ async function onApp(req: Request, body: any) {
   if (!(await isMaster(req))) return json({ error: 'Только для мастер-аккаунта' })
 
   if (body.action === 'setup') {
-    const r = await tg('setWebhook', {
-      url: `${SB_URL}/functions/v1/tg-bot`, secret_token: await webhookSecret(),
-      allowed_updates: ['message'], drop_pending_updates: true,
-    })
-    const me = await tg('getMe', {})
-    return json(r.ok ? { ok: true, bot: me?.result?.username } : { error: r.description || 'Telegram не принял вебхук' })
+    const r = await setupWebhook()
+    return json(r.ok ? { ok: true, bot: r.bot } : { error: r.error })
   }
 
   if (body.action === 'send_code') {
@@ -149,7 +157,16 @@ async function onApp(req: Request, body: any) {
 }
 
 Deno.serve(async req => {
+  console.log('request', req.method, new URL(req.url).search)
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
+  // Подключение вебхука можно открыть и просто ссылкой в браузере: …/functions/v1/tg-bot?action=setup
+  // (безопасно — бот лишь указывает Telegram адрес этой же функции)
+  if (req.method === 'GET' && new URL(req.url).searchParams.get('action') === 'setup') {
+    if (!TOKEN) return new Response('Нет секрета TELEGRAM_BOT_TOKEN', { status: 200, headers: { ...CORS, 'Content-Type': 'text/plain; charset=utf-8' } })
+    const r = await setupWebhook()
+    return new Response(r.ok ? `Бот @${r.bot} подключён. Можно закрыть эту страницу.` : `Ошибка: ${r.error}`,
+      { headers: { ...CORS, 'Content-Type': 'text/plain; charset=utf-8' } })
+  }
   if (req.method !== 'POST') return new Response('RaskroyPro bot', { headers: CORS })
   const raw = await req.text().catch(() => '')
   let body: any = {}
