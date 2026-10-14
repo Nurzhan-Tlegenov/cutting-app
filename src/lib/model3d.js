@@ -65,8 +65,11 @@ function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
 
   const verts = Array.isArray(c.vertices) && c.vertices.length > 2 ? c.vertices : [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: L }, { x: 0, y: L }]
   const outline = verticesToPolygon(verts).map(toLocal)
-  const holes = detailHoles({ width: W, length: L, contour: JSON.stringify({ holes: c.holes || [] }) })
+  // вырезы — сквозь деталь; выемки (pocket) — углубление на своей пласти, рисуются как пазы
+  const allHoles = c.holes || []
+  const holes = detailHoles({ width: W, length: L, contour: JSON.stringify({ holes: allHoles.filter(h => h.type !== 'pocket') }) })
     .map(poly => poly.map(p => toLocal([p.x, p.y])))
+  const pocketPolys = allHoles.filter(h => h.type === 'pocket').map(h => ({ h, poly: detailHoles({ width: W, length: L, contour: JSON.stringify({ holes: [h] }) })[0] }))
 
   // торцы с кромкой: ломаные по контуру (для подсветки в 3D)
   const sides = d.edges || { top: d.edge_top, right: d.edge_right, bottom: d.edge_bottom, left: d.edge_left }
@@ -76,7 +79,7 @@ function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
     const side = segmentSide(seg, W, L)
     if ((side && on(sides[side])) || seg.edge) bands.push(seg.pts.map(toLocal))
   }
-  ;(c.holes || []).forEach((h, i) => { if (h.edge && holes[i]?.length > 2) bands.push([...holes[i], holes[i][0]]) })
+  allHoles.filter(h => h.type !== 'pocket').forEach((h, i) => { if (h.edge && holes[i]?.length > 2) bands.push([...holes[i], holes[i][0]]) })
   ;(c.holes || []).forEach(h => holeEdgeSegments(h).forEach(seg => bands.push(seg.pts.map(toLocal))))   // кромка на отдельных участках выреза
 
   const drills = []
@@ -108,6 +111,11 @@ function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
       z: front ? frontZ : T - frontZ, depth: Math.min(num(g.depth) || 0, T),
     }
   }).filter(g => g.depth > 0)
+  for (const { h, poly } of pocketPolys) {
+    if (!poly) continue
+    const front = h.face !== 'back'
+    grooves.push({ poly: poly.map(p => toLocal([p.x, p.y])), z: front ? frontZ : T - frontZ, depth: Math.min(num(h.depth) || 0, T) })
+  }
   // пазы в торце: полоса вглубь от торца на высоте паза (zb — низ, depth — ширина паза по толщине)
   for (const g of c.edgeGrooves || []) {
     const geo = edgeGrooveGeom(g, W, L, 0.3)

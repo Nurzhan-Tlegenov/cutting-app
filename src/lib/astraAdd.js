@@ -34,6 +34,11 @@
 import { cfbStream, isCfb } from './cfb.js'
 import { buildItem, groupItems, applyP, applyV, inverse, pointInPoly } from './basisB3d.js'
 
+// Объект-метка выемки: в Астре выемок нет, конструктор ставит объект (панель, тело или покупное изделие)
+// с названием латиницей «viemka…» / «vyemka…» и вдвигает его в деталь. Сам объект — не деталь.
+const MARK = /^(viemka|vyemka|vjemka|vemka)/i
+const isMark = p => MARK.test(String(p?.name || '').replace(/[\s_.-]+/g, ''))
+
 const r1 = v => Math.round(v * 10) / 10
 const r2 = v => Math.round(v * 100) / 100
 const utf16 = new TextDecoder('utf-16le')
@@ -117,7 +122,6 @@ const face = (s, o) => {
   const mode = s.u32(), n = FACE_N[mode]
   if (!n) throw new Stop(`неизвестный вид грани ${mode}`)
   o.i = []; for (let k = 0; k < n; k++) o.i.push(s.u32())
-  s.skip(n)
 }
 
 function partBase(s, o) {
@@ -233,14 +237,14 @@ const H = {
     s.skip(2 + 3); s.str(); s.str(); s.skip(8)
   },
   // покупное изделие сеткой треугольников (ножка, ручка): вершины уже в мировых координатах
-  // грань: вид примитива как в OpenGL (4 — треугольник, 7 — четырёхугольник), номера вершин, по байту на ребро;
-  // у плоской грани ещё число в конце
-  CFace: face,
-  CFacePlane(s, o) { face(s, o); s.f64() },
+  // грань: вид примитива как в OpenGL (4 — треугольник, 7 — четырёхугольник) и номера вершин;
+  // у плоской грани ещё по байту на ребро и число в конце
+  CFace(s, o) { face(s, o) },
+  CFacePlane(s, o) { face(s, o); s.skip(o.i.length); s.f64() },
   // сетка: вершины, нормали, плоские грани, остальные грани, служебный список чисел, 2 байта
   CGeomMesh(s, o) {
     o.v = s.list('CVertex').map(q => q.v); s.skip(2); s.list('CVector')
-    const fs = [...s.list('CFacePlane'), ...s.list('CFace')]
+    const fs = [...s.list('CFacePlane'), ...s.list('CFace')].filter(Boolean)
     o.f = fs.flatMap(q => q.i.length === 4 ? [[q.i[0], q.i[1], q.i[2]], [q.i[0], q.i[2], q.i[3]]] : [q.i])
     s.skip(4 * s.count()); s.skip(2)
   },
@@ -431,6 +435,94 @@ function furnitureHoles(part, T, M, out, plates, faceAt) {
   }
 }
 
+// ---------- Выемки по объектам-меткам ----------
+
+// Метка -> точки тела в мировых координатах просмотра и (у панели / тела Астры) точный контур с матрицей
+function markSolid(p) {
+  if (p._ === 'CPartArt') {
+    const pts = []
+    for (const m of p.mesh || []) for (const q of m.v || []) pts.push(up(q))
+    return pts.length ? { pts } : null
+  }
+  const T = p.dim?.t
+  if (!(T > 0)) return null
+  const M = matrixOf(p.cs, T)
+  const elems = (p.el || []).flatMap(expand)
+  const poly = polyOf(elems)
+  if (poly.length < 3) return null
+  const pts = []
+  for (const z of [0, T]) for (const q of poly) pts.push(applyP(M, [q[0], q[1], z]))
+  return { pts, elems, M }
+}
+
+// выпуклая оболочка точек на плоскости (для покупного изделия — форма выемки в плане)
+function hull(ps) {
+  const a = [...ps].sort((p, q) => p[0] - q[0] || p[1] - q[1])
+  const cr = (o, p, q) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+  const lo = [], hi = []
+  for (const p of a) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 1e-9) lo.pop(); lo.push(p) }
+  for (const p of [...a].reverse()) { while (hi.length >= 2 && cr(hi[hi.length - 2], hi[hi.length - 1], p) <= 1e-9) hi.pop(); hi.push(p) }
+  return lo.slice(0, -1).concat(hi.slice(0, -1))
+}
+
+// Где каждая метка входит в панели: Map(панель -> { face: [выемки на пласти], edge: [выемки в торце] }), used — сколько меток сработало.
+//   касается пласти (z = 0 или z = T) — выемка на пласти, глубина — сколько вошла; обеих — сквозной вырез;
+//   внутри толщины и выходит на торец — выемка в торце (как паз в торце: длина вдоль торца, высота, глубина).
+function markPockets(marks, solid) {
+  const res = new Map()
+  let used = 0
+  const tol = 0.3
+  for (const mk of marks) {
+    const ms = markSolid(mk)
+    if (!ms) continue
+    let hit = false
+    for (const sp of solid) {
+      const q = ms.pts.map(P => applyP(sp.Mi, P))
+      const xs = q.map(v => v[0]), ys = q.map(v => v[1]), zs = q.map(v => v[2])
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), z0 = Math.min(...zs), z1 = Math.max(...zs)
+      const za = Math.max(z0, 0), zb = Math.min(z1, sp.T)
+      if (zb - za < 0.2) continue
+      const pxs = sp.poly.map(v => v[0]), pys = sp.poly.map(v => v[1])
+      const px0 = Math.min(...pxs), px1 = Math.max(...pxs), py0 = Math.min(...pys), py1 = Math.max(...pys)
+      const ox0 = Math.max(x0, px0), ox1 = Math.min(x1, px1), oy0 = Math.max(y0, py0), oy1 = Math.min(y1, py1)
+      if (ox1 - ox0 < 0.2 || oy1 - oy0 < 0.2) continue
+      if (!pointInPoly([(ox0 + ox1) / 2, (oy0 + oy1) / 2], sp.poly)) continue
+      const slot = res.get(sp.part) || { face: [], edge: [] }
+      const top = z1 >= sp.T - tol, bottom = z0 <= tol
+      if (top || bottom) {
+        // форма в плане: у панели / тела — точный контур (если лежит параллельно пласти), иначе выпуклая оболочка
+        let elems
+        if (ms.elems && Math.abs(applyV(sp.Mi, applyV(ms.M, [0, 0, 1]))[2]) > 0.99) {
+          const map = v => { const w = applyP(sp.Mi, applyP(ms.M, [v[0], v[1], 0])); return [w[0], w[1]] }
+          const o = map([0, 0]), ux = map([1, 0]), uy = map([0, 1])
+          const flipArc = (ux[0] - o[0]) * (uy[1] - o[1]) - (ux[1] - o[1]) * (uy[0] - o[0]) < 0
+          elems = ms.elems.map(e => (e.t === 'A' ? { ...e, a: map(e.a), b: map(e.b), c: map(e.c), ccw: flipArc ? !e.ccw : e.ccw } : { ...e, a: map(e.a), b: map(e.b) }))
+        } else {
+          const h = hull(q.map(v => [v[0], v[1]]))
+          elems = h.map((v, i) => ({ t: 'L', a: v, b: h[(i + 1) % h.length] }))
+        }
+        slot.face.push({ elems, depth: zb - za, top, through: top && bottom, name: 'Выемка' })
+      } else {
+        // внутри толщины: на какой торец выходит (габарит панели)
+        const sides = [
+          [x0 <= px0 + tol, () => ({ a: [px0, oy0], b: [px0, oy1], depth: ox1 - px0 })],
+          [x1 >= px1 - tol, () => ({ a: [px1, oy0], b: [px1, oy1], depth: px1 - ox0 })],
+          [y0 <= py0 + tol, () => ({ a: [ox0, py0], b: [ox1, py0], depth: oy1 - py0 })],
+          [y1 >= py1 - tol, () => ({ a: [ox0, py1], b: [ox1, py1], depth: py1 - oy0 })],
+        ].filter(s => s[0])
+        if (sides.length !== 1) continue                   // спрятана в толще или задевает два торца — не выемка
+        const e = sides[0][1]()
+        slot.edge.push({ ...e, z0: za, z1: zb, name: 'Выемка в торце' })
+      }
+      res.set(sp.part, slot)
+      hit = true
+    }
+    if (hit) used++
+  }
+  res.used = used
+  return res
+}
+
 // ---------- Файл -> детали ----------
 
 export function isAstraFile(u8) { return isCfb(u8) }
@@ -470,6 +562,10 @@ export function parseAstra(u8, opts = {}) {
     art.subs.forEach(a => walk(a, here))
   }
   walk(root, [])
+  // объекты-метки выемок — не детали: убираем из списков
+  const marks = []
+  for (const list of [panels, bents]) for (let i = list.length - 1; i >= 0; i--) if (isMark(list[i].p)) { marks.push(list[i].p); list.splice(i, 1) }
+  for (let i = arts.length - 1; i >= 0; i--) if (isMark(arts[i])) { marks.push(arts[i]); arts.splice(i, 1) }
 
   // --- отверстия от крепежа (в мировых координатах) ---
   const holes = [], plates = []
@@ -500,6 +596,7 @@ export function parseAstra(u8, opts = {}) {
     const g = geo.get(p)
     if (g) furnitureHoles(p, g.T, g.M, holes, plates, faceAt)
   }
+  const markHits = markPockets(marks, solid)
   // ответные планки петель: ищем боковину, в которую упирается торец двери
   for (const pl of plates) {
     let best = null
@@ -604,11 +701,13 @@ export function parseAstra(u8, opts = {}) {
           for (const n of ns) edgeCutsRaw.push({ a: P2(e.a), b: P2(e.b), ...n, name: 'Паз в торце' })
         }
       }
+      const mh = markHits.get(p)
+      if (mh) edgeCutsRaw.push(...mh.edge)
       const product = path[path.length - 1] || ''
       const pos = (p.pos || '').trim(), name = (p.name || '').trim()
       const material = matName(mat)
       return buildItem({
-        T, elems, texDir: 1, M, butts, cutsRaw, edgeCutsRaw, decorRaw: [], warnCuts, tol: TOUCH, strict: true,
+        T, elems, texDir: 1, M, butts, cutsRaw, edgeCutsRaw, pocketsRaw: mh?.face || [], decorRaw: [], warnCuts, tol: TOUCH, strict: true,
         name, prefix: product, material, rotatable: p.grain === 0, anim: null,
         meta: {
           src: 'astra',
@@ -659,7 +758,9 @@ export function parseAstra(u8, opts = {}) {
     parts: items.filter(it => !/^free$/i.test(it.material)).map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
     extras, meshes, hardware, colors,
   }
-  return { orderName, scene, skipped, items, groups, ...(opts.debug ? { debug: { holes, plates, solid } } : {}) }
+  const marksUnused = marks.length - markHits.used
+  return { orderName, scene, skipped, items, groups, marks: { found: marks.length, unused: marksUnused },
+    ...(opts.debug ? { debug: { holes, plates, solid } } : {}) }
 }
 
 export async function readAstraFile(file, opts) {

@@ -469,6 +469,26 @@ export function buildItem(src, holes, faceRule) {
     }
   }
 
+  // --- выемки по объектам-меткам (Астра): на пласти — карман на свою глубину, насквозь — вырез ---
+  let pocketCount = 0
+  for (const pr of (src.pocketsRaw || [])) {
+    const { loops: pl } = buildLoops(pr.elems || [])
+    for (const lp of pl) {
+      let vs
+      if (lp.circle) {
+        const c = tf(lp.circle.c), r = lp.circle.r
+        vs = [{ x: r2(c[0] + r), y: r2(c[1]), r: 0 }, { x: r2(c[0]), y: r2(c[1] + r), r: 0, type: 'arc' }, { x: r2(c[0] - r), y: r2(c[1]), r: 0 }, { x: r2(c[0]), y: r2(c[1] - r), r: 0, type: 'arc' }]
+      } else vs = toVerts(lp)
+      const xs = vs.map(v => v.x), ys = vs.map(v => v.y)
+      const hx = Math.min(...xs), hy = Math.min(...ys), hw = Math.max(...xs) - hx, hh = Math.max(...ys) - hy
+      if (!(hw > 0.2) || !(hh > 0.2)) continue
+      const base = { hw: r1(hw), hh: r1(hh), ...sideOffsets(hx, hy, W, L, hw, hh), vertices: vs, _verticesEdited: true }
+      if (pr.through) cutouts.push({ type: 'rect', ...base })
+      else { cutouts.push({ type: 'pocket', ...base, face: pr.top !== flip ? 'front' : 'back', depth: r1(Math.min(pr.depth, T)), note: pr.name || 'Выемка' }); pocketCount++ }
+      cutoutSrc.push({})
+    }
+  }
+
   // --- кромка: Elem — номер элемента контура ---
   const edges = { top: null, right: null, bottom: null, left: null }
   const edgeInfo = {}
@@ -647,7 +667,7 @@ export function buildItem(src, holes, faceRule) {
     w: r1(L), h: r1(W), qty: 1, edges, material, thickness: T,
     rotatable: src.rotatable ?? texDir === 0, contour,
     groupKey: `${material}|${T}`,
-    info: { shaped: !isRect, cutouts: cutouts.length, holes: holeCount, grooves: grooves.length + edgeGrooves.length,
+    info: { shaped: !isRect, cutouts: cutouts.length - pocketCount, pockets: pocketCount, holes: holeCount, grooves: grooves.length + edgeGrooves.length,
       decor: decor.length, shapedEdges: vertices.filter(v => v.edge).length + cutouts.filter(h => h.edge).length,
       back: drillings.filter(d => d.kind === 'face' && d.face === 'back').length + grooves.filter(g => g.face === 'back').length },
     warn,
