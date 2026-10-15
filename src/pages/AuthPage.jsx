@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom } from '../i18n'
 import { signupOpen, requestSignup2, confirmSignupCode, tgStartLink, requestPasswordReset, confirmPasswordReset } from '../lib/adminApi'
-import { PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, formatNational, fullPhone, phoneProblem } from '../lib/phoneCountries'
+import { PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { pendingInvite } from '../lib/workplaces'
@@ -10,7 +10,10 @@ import { pendingInvite } from '../lib/workplaces'
 const COUNTRIES = ['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан']
 
 export default function AuthPage() {
-  const [mode, setMode] = useState('login')
+  // ссылка из сообщения с кодом (бот / WhatsApp): /auth?code=123456&tel=77011234567 — сразу экран «У меня есть код»
+  const linkCode = (() => { try { return new URLSearchParams(window.location.search).get('code') || '' } catch { return '' } })()
+  const linkTel = (() => { try { return (new URLSearchParams(window.location.search).get('tel') || '').replace(/\D/g, '') } catch { return '' } })()
+  const [mode, setMode] = useState(linkCode ? 'code' : 'login')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { signIn, signUp } = useAuth()
@@ -18,7 +21,7 @@ export default function AuthPage() {
 
   const [showPass, setShowPass] = useState(false)
   const [form, setForm] = useState(() => ({
-    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: '', country: phoneCountry(guessPhoneCountry()).name, city: ''
+    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: linkCode.replace(/\D/g, '').slice(0, 8), country: phoneCountry(guessPhoneCountry()).name, city: ''
   }))
   // Регистрация может быть закрыта: тогда новый человек оставляет заявку, а регистрируется после одобрения
   const [open, setOpen] = useState(true)
@@ -32,9 +35,9 @@ export default function AuthPage() {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   // Номер при регистрации: страна (код) + номер нужной длины — номер с недостающей цифрой не уйдёт
-  const [pcIso, setPcIso] = useState(guessPhoneCountry)
+  const [pcIso, setPcIso] = useState(() => (linkTel ? splitFullPhone(linkTel, guessPhoneCountry()).iso : guessPhoneCountry()))
   const pc = phoneCountry(pcIso)
-  const [national, setNational] = useState('')
+  const [national, setNational] = useState(() => (linkTel ? splitFullPhone(linkTel, guessPhoneCountry()).national : ''))
   const [otherDial, setOtherDial] = useState('')
   const regPhone = fullPhone(pc, national, otherDial)
   const phoneErr = phoneProblem(pc, national, otherDial)
@@ -80,6 +83,15 @@ export default function AuthPage() {
         const r = await confirmPasswordReset(form.phone, form.code, form.password)
         if (r.error) throw new Error(r.error)
         await signIn(phoneToEmail(form.phone), form.password)
+      } else if (mode === 'code') {
+        // «У меня есть код»: заявка одобрена, код пришёл в Telegram / WhatsApp — только номер, код и пароль
+        setPhoneTouched(true)
+        if (phoneErr) throw new Error(phoneErr)
+        if (!form.code.trim()) throw new Error('Введите код из сообщения — 6 цифр')
+        if (form.password.length < 6) throw new Error('Придумайте пароль — минимум 6 символов')
+        const c = await confirmSignupCode(regPhone, form.code)
+        if (c.error) throw new Error(c.error)
+        await signUp(phoneToEmail(regPhone), form.password, { full_name: '', phone: regPhone, country: '', city: '' })
       } else if (mode === 'login') {
         const email = phoneToEmail(form.phone)
         await signIn(email, form.password)
@@ -132,7 +144,7 @@ export default function AuthPage() {
       navigate('/')
     } catch (err) {
       const msg = err.message
-      if (msg.includes('Invalid login')) setError('Неверный телефон или пароль. Если вашу заявку одобрили, а пароль вы ещё не задавали — откройте вкладку «Регистрация».')
+      if (msg.includes('Invalid login')) setError('Неверный телефон или пароль. Если вашу заявку одобрили и пришёл код, а пароль вы ещё не задавали — нажмите «У меня есть код».')
       else if (msg.includes('already registered')) setError('Этот номер уже зарегистрирован')
       else if (/signup_closed|Database error saving new user|Signups not allowed/i.test(msg)) { setOpen(false); setApproved(false); setError('Регистрация сейчас только по запросу. Оставьте заявку.') }
       else setError(msg)
@@ -147,7 +159,7 @@ export default function AuthPage() {
       <div style={{ marginBottom: 32, textAlign: 'center' }}>
         <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--blue)', marginBottom: 4 }}>РаскройPro</div>
         <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>
-          {mode === 'forgot' ? 'Восстановление пароля' : mode === 'login' ? 'Войдите в личный кабинет' : byRequest && !open ? 'Регистрация по заявке' : 'Создайте аккаунт'}
+          {mode === 'code' ? 'Завершение регистрации' : mode === 'forgot' ? 'Восстановление пароля' : mode === 'login' ? 'Войдите в личный кабинет' : byRequest && !open ? 'Регистрация по заявке' : 'Создайте аккаунт'}
         </div>
       </div>
 
@@ -157,15 +169,30 @@ export default function AuthPage() {
             {['login','register'].map(m => (
               <button key={m} type="button" onClick={() => { setMode(m); setError(''); setNote('') }}
                 style={{ flex: 1, padding: '8px', border: 'none', borderRadius: 6,
-                  background: (mode === 'forgot' ? 'login' : mode) === m ? 'var(--bg)' : 'transparent',
-                  color: (mode === 'forgot' ? 'login' : mode) === m ? 'var(--blue)' : 'var(--text-hint)',
-                  fontWeight: (mode === 'forgot' ? 'login' : mode) === m ? 500 : 400, fontSize: 14 }}>
+                  background: (mode === 'forgot' ? 'login' : mode === 'code' ? 'register' : mode) === m ? 'var(--bg)' : 'transparent',
+                  color: (mode === 'forgot' ? 'login' : mode === 'code' ? 'register' : mode) === m ? 'var(--blue)' : 'var(--text-hint)',
+                  fontWeight: (mode === 'forgot' ? 'login' : mode === 'code' ? 'register' : mode) === m ? 500 : 400, fontSize: 14 }}>
                 {m === 'login' ? 'Вход' : 'Регистрация'}
               </button>
             ))}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* пришёл код в Telegram / WhatsApp — сразу сюда, без повторной заявки */}
+            {(mode === 'login' || (mode === 'register' && !approved && !invite)) && (
+              <div style={{ border: '1px solid var(--blue)', borderRadius: 'var(--radius)', padding: '10px 12px', background: 'var(--blue-light, var(--bg2))' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--blue)' }}>Пришёл код в Telegram или WhatsApp?</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
+                  {mode === 'register' ? 'Тогда заявку заполнять не нужно — введите номер, код и придумайте пароль. Кода нет — заполните заявку ниже.' : 'Ваша заявка одобрена — введите номер, код и придумайте пароль.'}
+                </div>
+                <button type="button" className="btn-primary" style={{ width: '100%', padding: '8px' }} onClick={() => { setMode('code'); setError(''); setNote('') }}>У меня есть код</button>
+              </div>
+            )}
+            {mode === 'code' && (
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
+                Введите <b>тот же номер</b>, что в заявке, <b>код из сообщения</b> (6 цифр) и <b>придумайте пароль</b> — им вы будете входить в приложение.
+              </p>
+            )}
             {byRequest && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
                 {open
@@ -182,7 +209,7 @@ export default function AuthPage() {
               </div>
             )}
 
-            {mode === 'register' ? (
+            {mode === 'register' || mode === 'code' ? (
               <div>
                 <label className="label">Телефон * (используется для входа)</label>
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -283,8 +310,16 @@ export default function AuthPage() {
               </div>
             )}
 
+            {mode === 'code' && (
+              <div>
+                <label className="label">Код из сообщения *</label>
+                <input type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="6 цифр" maxLength={8} value={form.code}
+                  onChange={e => set('code', e.target.value.replace(/\D/g, ''))} style={{ fontSize: 18, letterSpacing: 3 }} />
+              </div>
+            )}
+
             {!byRequest && <div>
-              <label className="label">{mode === 'forgot' ? 'Новый пароль *' : 'Пароль *'}</label>
+              <label className="label">{mode === 'code' ? 'Придумайте пароль *' : mode === 'forgot' ? 'Новый пароль *' : 'Пароль *'}</label>
               <div style={{ position: 'relative' }}>
                 <input type={showPass ? 'text' : 'password'} placeholder="Минимум 6 символов" value={form.password}
                   onChange={e => set('password', e.target.value)} required minLength={6}
@@ -309,6 +344,8 @@ export default function AuthPage() {
             </button>
             {mode === 'login' && <button type="button" onClick={() => { setMode('forgot'); setError(''); setNote('') }}
               style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>Забыли пароль?</button>}
+            {mode === 'code' && <button type="button" onClick={() => { setMode('register'); setError(''); setNote('') }}
+              style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>Кода нет — оставить заявку на регистрацию</button>}
             {mode === 'forgot' && <button type="button" onClick={() => { setMode('login'); setError(''); setNote('') }}
               style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>← Вернуться ко входу</button>}
           </div>

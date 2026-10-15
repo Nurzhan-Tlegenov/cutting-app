@@ -13,7 +13,9 @@ import { countryCode } from '../lib/productionLabel'
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—')
 const digits = v => String(v || '').replace(/\D/g, '')
-const codeMsg = code => `Ваша заявка в RaskroyPro одобрена. Код: ${code}. Откройте raskroypro.com → «Регистрация», введите тот же номер телефона, этот код и придумайте пароль. Код действует 3 дня.`
+// ссылка открывает «У меня есть код» с подставленными номером и кодом — остаётся придумать пароль
+const codeLink = (code, digits) => `${window.location.origin}/auth?code=${code}&tel=${digits}`
+const codeMsg = (code, digits) => `Ваша заявка в RaskroyPro одобрена. Код: ${code}\n\nЗавершите регистрацию по ссылке — номер и код уже подставлены, останется придумать пароль:\n${codeLink(code, digits)}\n\nИли откройте приложение → «У меня есть код». Код действует 3 дня.`
 
 // Как подтверждён номер заявки
 function VerifyBadge({ r }) {
@@ -63,13 +65,13 @@ export default function UsersPage() {
     if (a.missing) return adminSetRequest(r.id, 'approved')   // база ещё без подтверждения номера
     if (a.error) return a
     if (a.data?.telegram) {
-      const t = await tgBot({ action: 'send_code', request_id: r.id })
+      const t = await tgBot({ action: 'send_code', request_id: r.id, tel: r.digits, origin: window.location.origin })
       setInfo(t.error ? `Код не ушёл в Telegram: ${t.error}. Отправьте его в WhatsApp.` : `Код отправлен в Telegram — ${r.full_name || r.phone}.`)
     } else setInfo(`Заявка одобрена. Отправьте код ${r.full_name || r.phone} в WhatsApp.`)
     return {}
   })
   const sendTg = r => act(async () => {
-    const t = await tgBot({ action: 'send_code', request_id: r.id })
+    const t = await tgBot({ action: 'send_code', request_id: r.id, tel: r.digits, origin: window.location.origin })
     setInfo(t.error ? `Код не ушёл в Telegram: ${t.error}` : `Код отправлен в Telegram — ${r.full_name || r.phone}.`)
     return {}
   })
@@ -94,7 +96,7 @@ export default function UsersPage() {
           {dead ? <button type="button" disabled={busy} style={btn('main')} onClick={() => approve(r)}>{r.code ? 'Новый код' : 'Выдать код'}</button>
             : <>
               {r.tg_linked && <button type="button" disabled={busy} style={btn('main')} onClick={() => sendTg(r)}>В Telegram</button>}
-              <a href={`https://wa.me/${r.digits}?text=${encodeURIComponent(codeMsg(r.code))}`} target="_blank" rel="noreferrer" style={{ ...btn(r.tg_linked ? undefined : 'main'), textDecoration: 'none' }}>В WhatsApp</a>
+              <a href={`https://wa.me/${r.digits}?text=${encodeURIComponent(codeMsg(r.code, r.digits))}`} target="_blank" rel="noreferrer" style={{ ...btn(r.tg_linked ? undefined : 'main'), textDecoration: 'none' }}>В WhatsApp</a>
               <button type="button" disabled={busy} style={btn()} onClick={() => approve(r)}>Новый код</button>
             </>}
         </div>

@@ -62,9 +62,17 @@ const send = (chat: number, text: string, extra: Record<string, unknown> = {}) =
 const SHARE_KB = { keyboard: [[{ text: '📱 Поделиться номером', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true }
 const NO_KB = { remove_keyboard: true }
 
+// Кнопка открывает «У меня есть код» с подставленными номером и кодом — человеку остаётся придумать пароль.
+// origin — адрес, с которого работает мастер (raskroypro.com или зеркало); подставляем только свои адреса
+const siteOf = (origin?: string) => (/^https:\/\/([a-z0-9-]+\.)?raskroypro\.com$/i.test(String(origin || '')) ? String(origin) : `https://${APP}`)
+const codeLink = (code: string, tel: string, origin?: string) =>
+  `${siteOf(origin)}/auth?code=${encodeURIComponent(code)}&tel=${encodeURIComponent(String(tel || '').replace(/\D/g, ''))}`
 const codeText = (code: string) =>
   `✅ <b>Заявка в RaskroyPro одобрена.</b>\n\nКод: <code>${code}</code>\n\n` +
-  `Откройте ${APP} → «Регистрация», введите тот же номер телефона, этот код и придумайте пароль. Код действует 3 дня.`
+  `Нажмите кнопку ниже — откроется регистрация, номер и код уже подставлены, останется придумать пароль.\n` +
+  `Или откройте ${APP} → «У меня есть код». Код действует 3 дня.`
+const codeKb = (code: string, tel: string, origin?: string) =>
+  ({ inline_keyboard: [[{ text: '✅ Завершить регистрацию', url: codeLink(code, tel, origin) }]] })
 
 // ── Сообщения от Telegram ──
 async function onUpdate(u: any) {
@@ -92,7 +100,11 @@ async function onUpdate(u: any) {
         { reply_markup: NO_KB })
       return
     }
-    if (data.code) { await send(chat, '✅ Номер подтверждён.', { reply_markup: NO_KB }); await send(chat, codeText(data.code)); return }
+    if (data.code) {
+      await send(chat, '✅ Номер подтверждён.', { reply_markup: NO_KB })
+      await send(chat, codeText(data.code), { reply_markup: codeKb(data.code, String(msg.contact.phone_number || '')) })
+      return
+    }
     await send(chat, '✅ <b>Номер подтверждён.</b>\n\nЗаявка ждёт одобрения администратора. Как только её одобрят, код для регистрации придёт сюда.',
       { reply_markup: NO_KB })
     return
@@ -151,7 +163,7 @@ async function onApp(req: Request, body: any) {
     const { data, error } = await getDb().rpc('svc_signup_code', { p_id: body.request_id })
     if (error) return json({ error: error.message })
     if (data?.error) return json({ error: data.error })
-    const r = await send(data.chat, codeText(data.code))
+    const r = await send(data.chat, codeText(data.code), { reply_markup: codeKb(data.code, String(body.tel || ''), body.origin) })
     return json(r.ok ? { ok: true } : { error: r.description || 'Telegram не доставил сообщение' })
   }
   return json({ error: `Функция не поняла запрос (action: ${JSON.stringify(body?.action ?? null)})` })

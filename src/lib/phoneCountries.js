@@ -75,3 +75,15 @@ export function phoneProblem(c, national, otherDial = '') {
   if (n > c.len[1]) return 'Лишние цифры в номере'
   return ''
 }
+
+/** Полный номер цифрами (77011234567) -> { iso, national }; код страны угадывается по началу (7 6…/7 7… — Казахстан, иначе Россия) */
+export function splitFullPhone(digits, fallbackIso = 'KZ') {
+  const d = String(digits || '').replace(/\D/g, '')
+  if (!d) return { iso: fallbackIso, national: '' }
+  const byDial = PHONE_COUNTRIES.filter(c => c.dial && d.startsWith(c.dial) && d.length - c.dial.length >= c.len[0] && d.length - c.dial.length <= c.len[1])
+    .sort((a, b) => b.dial.length - a.dial.length)
+  if (!byDial.length) return { iso: fallbackIso, national: '' }
+  let c = byDial[0]
+  if (c.dial === '7') c = phoneCountry(/^[67]/.test(d.slice(1)) ? 'KZ' : 'RU')
+  return { iso: c.iso, national: d.slice(c.dial.length) }
+}
