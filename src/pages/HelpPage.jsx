@@ -1,9 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import { TOURS, setTour } from '../lib/tours'
 import { useAuth } from '../context/AuthContext'
+import { lazyRetry } from '../lib/lazyRetry'
+
+const DemoVideo = lazyRetry(() => import('../components/demo/DemoVideo'))
 
 // «Обучение»: интерактивные туры по настоящим экранам — для клиента и для производства.
 // Под каждым — краткий план шагов, чтобы можно было прочитать, не запуская тур.
@@ -21,11 +24,12 @@ export default function HelpPage() {
     navigate(g.to, g.tab ? { state: { tab: g.tab } } : undefined)
   }
   const [open, setOpen] = useState(null)
+  const [video, setVideo] = useState(null)
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Обучение</h1></div>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.45 }}>
-        Тур проходит по настоящим экранам приложения: подсвечивает кнопку и объясняет, что она делает. Подсвеченное можно нажимать — тур идёт следом. Закрыть можно в любой момент.
+        «Смотреть видео» — ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом. «Пройти самому» — подсказки на настоящих экранах, на своих заказах.
       </p>
       {COURSES.map(([id, ico]) => {
         const c = TOURS[id], shown = open === id
@@ -39,7 +43,8 @@ export default function HelpPage() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button type="button" className="btn-primary" style={{ flex: 1, padding: 9, fontSize: 14 }} onClick={() => start(id)}>▶ Начать тур</button>
+              <button type="button" className="btn-primary" style={{ flex: 1, padding: 9, fontSize: 14 }} onClick={() => setVideo(id)}>▶ Смотреть видео</button>
+              <button type="button" className="btn-secondary" style={{ flex: '0 0 auto', padding: '9px 12px', fontSize: 13 }} onClick={() => start(id)}>Пройти самому</button>
               <button type="button" className="btn-secondary" style={{ flex: '0 0 auto', padding: '9px 14px', fontSize: 13 }} onClick={() => setOpen(shown ? null : id)}>{shown ? 'Скрыть шаги' : 'Шаги'}</button>
             </div>
             {shown && (
@@ -51,6 +56,7 @@ export default function HelpPage() {
         )
       })}
       <BottomNav />
+      {video && <Suspense fallback={null}><DemoVideo id={video} onClose={() => setVideo(null)} /></Suspense>}
     </div>
   )
 }

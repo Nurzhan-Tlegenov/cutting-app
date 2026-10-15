@@ -268,6 +268,7 @@ src/
 - Шаги туров — src/lib/tours.js (path — экран, el — ключ data-tour, until — авто-переход, go — кнопка «Перейти», missing/wait — пояснения)
 - src/components/TourOverlay.jsx (в App): подсветка элемента [data-tour="…"] + пузырь; нажатия проходят к странице; состояние — sessionStorage 'tour'
 - При правке экранов не удалять атрибуты data-tour — на них держатся туры
+- Обучающее видео: src/components/demo/ — DemoVideo.jsx (плеер: палец-стрелка, нажатия, печать, субтитры, голос speechSynthesis, главы), demoScreens.jsx (копии экранов, цели — data-demo), demoScripts.js (сценарии клиента и производства). Открывается кнопкой «▶ Смотреть видео» на /help. При заметной смене интерфейса — обновить копии экранов
 
 ## Contour JSON структура
 ```json
