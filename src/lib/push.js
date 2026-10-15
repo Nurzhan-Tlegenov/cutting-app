@@ -1,6 +1,6 @@
 // Push-уведомления в шторку телефона: подписка этого телефона (браузера) и проверка.
 // Сообщения рассылает функция Supabase «push» (supabase/functions/push) по событиям в базе (migration_push.sql).
-import { supabase, SUPABASE_URL } from './supabase'
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase'
 
 export const PUSH_SQL_HINT = 'Push-уведомления ещё не включены в базе: установите функцию «push» и выполните migration_push.sql в Supabase (SQL Editor).'
 
@@ -20,12 +20,13 @@ const toB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/
 async function fn(body) {
   const { data: { session } } = await supabase.auth.getSession()
   const r = await fetch(`${SUPABASE_URL}/functions/v1/push`, {
-    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },   // «простой» запрос — без задержки шлюза
+    // шлюз Supabase требует открытый ключ проекта (apikey) — без него отвечает 401 MISSING_CREDENTIALS
+    method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY },
     body: JSON.stringify({ ...body, jwt: session?.access_token || '' }),
   })
   if (r.status === 404) return { error: 'Функция «push» не найдена в Supabase → Edge Functions (имя должно быть ровно push)' }
   const data = await r.json().catch(() => null)
-  if (r.status === 401) return { error: 'Функция push отвечает 401 — в её настройках выключите «Verify JWT» (как у tg-bot) и нажмите ещё раз' }
+  if (r.status === 401) return { error: `Функция push отвечает 401: ${String(data?.message || data?.msg || data?.code || '').slice(0, 160)}` }
   if (!data) return { error: `Функция push ответила ${r.status}` }
   if (!data.error && !data.key && !data.ok) return { error: `Функция push ответила ${r.status}: ${String(data.message || data.msg || JSON.stringify(data)).slice(0, 160)}` }
   return data

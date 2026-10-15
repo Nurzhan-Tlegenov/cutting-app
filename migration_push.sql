@@ -67,7 +67,8 @@ begin
   insert into push_outbox (user_id, title, body, url, tag) values (p_user, p_title, p_body, p_url, p_tag);
   begin
     perform net.http_post(url := 'https://bmcmyrdsxievaglpspcn.supabase.co/functions/v1/push',
-                          body := '{"action":"wake"}'::jsonb, headers := '{"Content-Type":"application/json"}'::jsonb);
+                          body := '{"action":"wake"}'::jsonb,
+                          headers := '{"Content-Type":"application/json","apikey":"sb_publishable_M1nC2YyHn_4zJI5QFAI9Cw_IaC6Ou7u"}'::jsonb);   -- открытый ключ: шлюз без него не пускает
   exception when others then null;
   end;
 end $$;
