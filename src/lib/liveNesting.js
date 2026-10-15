@@ -411,7 +411,37 @@ function seedInto(params, opts, sheetsIn) {
   }
 }
 
+// «По габаритам» (галочка в конфигурации раскроя): фигурные детали укладываются прямоугольником своего
+// габарита — обычный прямоугольный раскрой, без укладки по контуру и без деталей в вырезах соседей.
+// Нужно, когда станок режет только прямоугольники (постпроцессор, «Резать только прямоугольники»).
+// На карту, в проверку и в G-код идёт настоящий контур внутри габарита (как у черновика, roughLayout).
+const stripPolys = sheets => (sheets || []).map(sh => ({ ...sh, placed: (sh.placed || []).map(p => { const q = { ...p }; delete q.polygon; delete q.rotation; return q }) }))
+function withShapes(res, details) {
+  if (!res?.sheets) return res
+  const polys = {}
+  const sheets = res.sheets.map(sh => ({ ...sh, placed: sh.placed.map(p0 => {
+    const d = details[p0.detailIndex]
+    if (!d?.contour) return p0
+    try {
+      if (!polys[p0.detailIndex]) polys[p0.detailIndex] = roughShapePolygons(d)
+      const rot = placedRotation(p0, Number(d.width)), poly = polys[p0.detailIndex][rot]
+      return poly ? { ...p0, polygon: poly.map(([x, y]) => ({ x, y })), rotation: rot } : p0
+    } catch { return p0 }
+  }) }))
+  // соседним потокам — раскладка без контуров (их поиск прямоугольный)
+  return { ...res, sheets, rawSheets: res.rawSheets || res.sheets, byBox: true }
+}
+
 export async function runLiveNesting(params, opts = {}) {
+  if (!params.byBox || (params.cuttingMethod || 'nesting') === 'guillotine') return runLiveNestingRaw(params, opts)
+  const details = params.details
+  const plain = { ...params, details: details.map(d => ({ ...d, contour: null })), algo: 'raster' }
+  if (Array.isArray(plain.seed?.sheets)) plain.seed = { ...plain.seed, sheets: stripPolys(plain.seed.sheets) }
+  const onProgress = opts.onProgress ? res => opts.onProgress(withShapes(res, details)) : null
+  return withShapes(await runLiveNestingRaw(plain, { ...opts, onProgress }), details)
+}
+
+async function runLiveNestingRaw(params, opts = {}) {
   const offs = offcutInstances(params.offcuts)
   const seedSheets = Array.isArray(params.seed?.sheets) ? params.seed.sheets : null
   if (!offs.length) {

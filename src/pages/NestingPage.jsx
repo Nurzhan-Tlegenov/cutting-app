@@ -27,7 +27,7 @@ import ProductionPicker from '../components/ProductionPicker'
 import { myProduction } from '../lib/productionApi'
 import { loadOrderModel } from '../lib/orderModel'
 import { hasModel } from '../lib/model3d'
-import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
+import { parsePolygonFromDetail, needsTrueShape } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY } from '../lib/edgeCut'
 import { saveNestingPdf } from '../lib/nestingPdf'
@@ -1221,7 +1221,7 @@ const DIR_SHORT = { auto: 'Авто', along_y: 'Вдоль Y', along_x: 'Вдо�
 let CFG_SEQ = 0
 function newCfg(over = {}) {
   return {
-    id: ++CFG_SEQ, dir: 'auto', small: false, sq: '', area: '', side: '', edge: '100', end: '', secs: '12',
+    id: ++CFG_SEQ, dir: 'auto', box: false, small: false, sq: '', area: '', side: '', edge: '100', end: '', secs: '12',
     live: true,          // онлайн-раскрой: считать до «Стоп», показывая каждое улучшение
     open: true, status: 'idle', // idle | queued | running | stopping | done | error
     startedAt: 0, doneAt: 0, error: '',
@@ -1314,7 +1314,7 @@ function geoOf(order, result, sh) {
   }
 }
 // Отпечаток параметров листа — чтобы подсказать «пересчитайте», если их поменяли после расчёта
-const paramsKey = p => JSON.stringify([+p.sheetL, +p.sheetW, +p.kerf, +p.marginT, +p.marginR, +p.marginB, +p.marginL, p.offcuts?.items?.length ? p.offcuts : null])
+const paramsKey = p => JSON.stringify([!!p.byBox, +p.sheetL, +p.sheetW, +p.kerf, +p.marginT, +p.marginR, +p.marginB, +p.marginL, p.offcuts?.items?.length ? p.offcuts : null])
 // Лучше — меньше листов; при равенстве — меньше материала на последнем листе
 // (тот же критерий «фронтальной загрузки», что и в самом алгоритме)
 function betterSummary(a, b) {
@@ -1504,6 +1504,8 @@ export default function NestingPage() {
       return { shaped, edge: et.total > 0, curvedEdge: et.curved > 0, drill, hdf: order?.material_kind === 'hdf' }
     } catch { return {} }
   }, [details, order?.material_kind])
+  // есть детали с фигурным контуром — показываем галочку «по габаритам»
+  const hasShaped = useMemo(() => { try { return needsTrueShape(details) } catch { return false } }, [details])
   const { user, profile, refreshProfile, cabinet, isMaster } = useAuth()
   // кабинет производства: ЧПУ и бирки по принятому раскрою
   // ЧПУ и бирки из раскроя: владелец производства, начальник производства и сотрудник с этим полномочием
@@ -1625,7 +1627,7 @@ export default function NestingPage() {
       end: o.small_parts_end_side != null ? String(o.small_parts_end_side) : '',
       secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
       ...(saved ? {
-        dir: saved.config?.dir || 'auto',
+        dir: saved.config?.dir || 'auto', box: !!(saved.config?.box || saved.byBox),
         status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i })),
         startedAt: 0, doneAt: 0, saved: true,
       } : {}),
@@ -1821,7 +1823,7 @@ export default function NestingPage() {
     const last = configs[configs.length - 1]
     const used = new Set(configs.map(c => c.dir))
     const dir = ['auto', 'along_y', 'along_x'].find(d => !used.has(d)) || last.dir
-    const cfg = newCfg({ small: last.small, sq: last.sq, area: last.area, side: last.side, edge: last.edge, end: last.end, secs: last.secs, dir })
+    const cfg = newCfg({ box: last.box, small: last.small, sq: last.sq, area: last.area, side: last.side, edge: last.edge, end: last.end, secs: last.secs, dir })
     setConfigs(cs => [...cs.map(c => ({ ...c, open: false })), cfg])
   }
 
@@ -1854,6 +1856,7 @@ export default function NestingPage() {
       optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
       cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
+      byBox: !!cfg.box && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту
     }
     if (continueFrom && cfg.result && cfg.sheetsData?.length && !(cfg.buffer || []).length && cfg.result.paramsKey === paramsKey(params)) {
       params.seed = {
@@ -1864,6 +1867,7 @@ export default function NestingPage() {
     const stamp = res => {
       res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
       res.algo = params.algo // 'nfp' | 'raster' — чтобы на карте было видно, чем реально посчитано
+      res.byBox = !!params.byBox // фигурные детали уложены по габариту (станок режет только прямоугольники)
       res.paramsKey = paramsKey(params) // с какими параметрами листа считали
       return res
     }
@@ -2076,7 +2080,7 @@ export default function NestingPage() {
     delete result.rawSheets           // служебная копия раскладки до дозаполнения — в заказе не нужна
     const toSave = {
       ...result, sheets,
-      config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
+      config: { dir: cfg.dir, box: !!cfg.box, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
     }
     const next = multiMat ? { ...savedByMat, [matKey]: toSave } : {}
     if (multiMat) setSavedByMat(next)
@@ -2301,7 +2305,7 @@ export default function NestingPage() {
       const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
       const result = { ...cfg.result }
       delete result.rawSheets
-      const toSave = { ...result, sheets, config: { dir: cfg.dir, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
+      const toSave = { ...result, sheets, config: { dir: cfg.dir, box: !!cfg.box, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
       const nesting = multiMat ? JSON.stringify({ multi: true, byMat: { ...savedByMat, [matKey]: toSave } }) : JSON.stringify(toSave)
       const { data: src, error: e0 } = await supabase.from('orders').select('*').eq('id', id).single()
       if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
@@ -2703,7 +2707,7 @@ export default function NestingPage() {
               {cfg.saved && badge('✓ в заказе', '#e6f4ea', '#1e7e34')}
             </div>
             <div style={{ fontSize: 10.5, color: cfg.status === 'error' ? '#dc3545' : 'var(--text-hint)', marginTop: 1 }}>
-              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{cfg.small ? ' · мелкие в центр' : ''} · {statusLine}
+              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{cfg.box && hasShaped && cuttingMethod !== 'guillotine' ? ' · по габаритам' : ''}{cfg.small ? ' · мелкие в центр' : ''} · {statusLine}
             </div>
           </div>
           {(isRunning || isQueued) && (
@@ -2734,6 +2738,20 @@ export default function NestingPage() {
                 </button>
               ))}
             </div>
+
+            {/* Фигурные детали — по габаритам: для станков, которые режут только прямоугольники */}
+            {hasShaped && cuttingMethod !== 'guillotine' && (
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="checkbox" checked={!!cfg.box} onChange={e => updateCfg(cfg.id, { box: e.target.checked })}
+                    style={{ width: 17, height: 17, flexShrink: 0 }} />
+                  Фигурные детали — по габаритам
+                </label>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2, marginLeft: 23 }}>
+                  Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах. Включите, если производство режет только прямоугольники.
+                </div>
+              </div>
+            )}
 
             {/* Мелкие детали + время оптимизации — в одну строку */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
