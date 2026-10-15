@@ -711,3 +711,6 @@ git push
 - `parseAstra(u8, { markOff, markOn })`: `markOff` — id меток (`_i` объекта), выключенных в окне импорта (панель целая); `markOn` — объекты без названия «viemka», включённые как выемки. Результат `pockets: { marks: [{ id, obj, named, off, miss, hits }], candidates: [{ id, obj, hits }] }` — кандидаты: тела и покупные изделия, врезанные в панели (сами по себе выемкой не считаются). `ImportDetails.jsx`: блок «Выемки по меткам» (галочки, по умолчанию вкл.) и «Врезаны в детали, но без метки» (по умолчанию выкл.); переключение перечитывает файл.
 - Ошибка разбора называет объект, изделие и деталь (`Ar.where()`) и подсказывает, чем заменить незнакомую метку.
 - Образцы: `tests/astra/*.add` + итоги `*.json`; `npm run test:astra` (`node tests/astra/check.mjs`, `--update` — записать итоги заново, только если изменение ожидаемое). Прогонять после каждой правки импорта Астры.
+- Россия: адреса Vercel и Supabase из России без VPN заблокированы (окт. 2026). Зеркало ru.raskroypro.com — сервер-посредник
+  (deploy/mirror-setup.sh: nginx, / → cutting-app-nine.vercel.app с заголовком x-raskroy-mirror, /sb/ → Supabase).
+  src/lib/supabase.js на хосте ru.* ходит в базу через ${origin}/sb; vercel.json не переадресует vercel.app при этом заголовке

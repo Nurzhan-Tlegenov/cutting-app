@@ -9,7 +9,13 @@
         }
       ],
       "destination": "https://raskroypro.com/:path*",
-      "permanent": false
+      "permanent": false,
+      "missing": [
+        {
+          "type": "header",
+          "key": "x-raskroy-mirror"
+        }
+      ]
     }
   ],
   "rewrites": [
