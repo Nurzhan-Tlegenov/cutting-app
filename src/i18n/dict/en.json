@@ -2539,5 +2539,14 @@
 "Рез ХДФ": "HDF cut",
 "Раскрой листа ХДФ": "HDF sheet cutting",
 "Раскрой листа ХДФ (по числу деталей)": "HDF sheet cutting (by number of parts)",
-"Деталь ХДФ": "HDF part"
+"Деталь ХДФ": "HDF part",
+"Обучение": "Training",
+"видео и туры": "videos and tours",
+"Ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом.": "The video shows you where to tap: a pointer walks through the whole path on the screens, with subtitles and voice.",
+"▶ Смотреть видео": "▶ Watch video",
+"шагов": "steps",
+"Клиент: от заказа до отправки на производство": "Client: from order to sending it to production",
+"Производство: от заявки до управляющих программ": "Production: from request to CNC programs",
+"Новый заказ → детали → раскрой → выбор варианта → отправка": "New order → parts → nesting → choose a layout → send",
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Settings → request → accept → CNC → G-code → files and labels"
 }

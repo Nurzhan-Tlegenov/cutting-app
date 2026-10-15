@@ -5,6 +5,7 @@ import BottomNav from '../components/BottomNav'
 import { TOURS, setTour } from '../lib/tours'
 import { useAuth } from '../context/AuthContext'
 import { lazyRetry } from '../lib/lazyRetry'
+import { demoLang } from '../components/demo/demoLang'
 
 const DemoVideo = lazyRetry(() => import('../components/demo/DemoVideo'))
 
@@ -25,11 +26,14 @@ export default function HelpPage() {
   }
   const [open, setOpen] = useState(null)
   const [video, setVideo] = useState(null)
+  // туры по настоящим экранам пока только по-русски — на других языках остаётся видео (оно переведено полностью)
+  const ruOnly = demoLang() === 'ru'
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Обучение</h1></div>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.45 }}>
-        «Смотреть видео» — ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом. «Пройти самому» — подсказки на настоящих экранах, на своих заказах.
+        {ruOnly ? '«Смотреть видео» — ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом. «Пройти самому» — подсказки на настоящих экранах, на своих заказах.'
+          : 'Ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом.'}
       </p>
       {COURSES.map(([id, ico]) => {
         const c = TOURS[id], shown = open === id
@@ -39,13 +43,13 @@ export default function HelpPage() {
               <span style={{ fontSize: 26, lineHeight: 1 }}>{ico}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 15 }}>{c.title}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>{c.short} · {c.steps.length} шагов</div>
+                <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>{c.short}</div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
               <button type="button" className="btn-primary" style={{ flex: 1, padding: 9, fontSize: 14 }} onClick={() => setVideo(id)}>▶ Смотреть видео</button>
-              <button type="button" className="btn-secondary" style={{ flex: '0 0 auto', padding: '9px 12px', fontSize: 13 }} onClick={() => start(id)}>Пройти самому</button>
-              <button type="button" className="btn-secondary" style={{ flex: '0 0 auto', padding: '9px 14px', fontSize: 13 }} onClick={() => setOpen(shown ? null : id)}>{shown ? 'Скрыть шаги' : 'Шаги'}</button>
+              {ruOnly && <button type="button" className="btn-secondary" style={{ flex: '0 0 auto', padding: '9px 12px', fontSize: 13 }} onClick={() => start(id)}>Пройти самому</button>}
+              {ruOnly && <button type="button" className="btn-secondary" style={{ flex: '0 0 auto', padding: '9px 14px', fontSize: 13 }} onClick={() => setOpen(shown ? null : id)}>{shown ? 'Скрыть шаги' : 'Шаги'}</button>}
             </div>
             {shown && (
               <ol style={{ margin: '10px 0 0', paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.45 }}>

@@ -2539,5 +2539,14 @@
 "Рез ХДФ": "XDF kesik",
 "Раскрой листа ХДФ": "XDF listini kesish",
 "Раскрой листа ХДФ (по числу деталей)": "XDF listini kesish (detallar soni boʻyicha)",
-"Деталь ХДФ": "XDF detali"
+"Деталь ХДФ": "XDF detali",
+"Обучение": "Oʻqitish",
+"видео и туры": "video va turlar",
+"Ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом.": "Rolik qayerni bosishni oʻzi koʻrsatadi: strelkali barmoq ekranlar boʻylab butun yoʻlni subtitr va ovoz bilan oʻtadi.",
+"▶ Смотреть видео": "▶ Videoni koʻrish",
+"шагов": "qadam",
+"Клиент: от заказа до отправки на производство": "Mijoz: buyurtmadan ishlab chiqarishga yuborishgacha",
+"Производство: от заявки до управляющих программ": "Ishlab chiqarish: arizadan boshqaruv dasturlarigacha",
+"Новый заказ → детали → раскрой → выбор варианта → отправка": "Yangi buyurtma → detallar → bichish → variant tanlash → yuborish",
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Sozlamalar → ariza → qabul → ChPU → G-kod → fayllar va yorliqlar"
 }

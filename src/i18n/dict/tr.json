@@ -2539,5 +2539,14 @@
 "Рез ХДФ": "HDF kesim",
 "Раскрой листа ХДФ": "HDF levha kesimi",
 "Раскрой листа ХДФ (по числу деталей)": "HDF levha kesimi (parça sayısına göre)",
-"Деталь ХДФ": "HDF parça"
+"Деталь ХДФ": "HDF parça",
+"Обучение": "Eğitim",
+"видео и туры": "videolar ve turlar",
+"Ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом.": "Video nereye dokunacağınızı kendisi gösterir: ok işaretli parmak, altyazı ve sesle tüm yolu ekranlarda gezer.",
+"▶ Смотреть видео": "▶ Videoyu izle",
+"шагов": "adım",
+"Клиент: от заказа до отправки на производство": "Müşteri: siparişten üretime gönderime",
+"Производство: от заявки до управляющих программ": "Üretim: talepten CNC programlarına",
+"Новый заказ → детали → раскрой → выбор варианта → отправка": "Yeni sipariş → parçalar → kesim planı → seçim → gönderim",
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Ayarlar → talep → kabul → CNC → G-kodu → dosyalar ve etiketler"
 }

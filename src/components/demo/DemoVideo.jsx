@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SCREENS } from './demoScreens'
 import { DEMOS } from './demoScripts'
+import { demoLang, dt, speechText, UI, VOICE_LOCALE } from './demoLang'
 import { useBackClose } from '../../lib/backStack'
 
 // Обучающее «видео»: плеер сам проигрывает сценарий на копиях экранов приложения — палец со стрелкой
@@ -31,17 +32,37 @@ function applyBeat(st, b, typed) {
   return n
 }
 const typeTime = b => (b.type ? b.type.length * TYPE_MS : 0)
-const readTime = b => Math.max(2200, (b.say || '').length * 62)
+const readTime = text => Math.max(2200, (text || '').length * 62)
 
-// голос: русский, если есть в телефоне
-function speak(text, onEnd) {
+// Голоса телефона для языка ролика. Лучшие — нейросетевые и «онлайн» (Google, Microsoft Natural/Online, Siri
+// Enhanced/Premium): они ставят ударения и интонацию заметно естественнее встроенных «роботов».
+const voicesFor = l => {
+  const p = (VOICE_LOCALE[l] || l).slice(0, 2).toLowerCase()
+  return (window.speechSynthesis?.getVoices() || []).filter(v => String(v.lang).toLowerCase().replace('_', '-').startsWith(p))
+}
+const voiceScore = v => (/natural|neural|online|premium|enhanced|wavenet|studio/i.test(v.name) ? 4 : 0) + (/google/i.test(v.name) ? 3 : 0) + (v.localService === false ? 1 : 0) + (/compact|espeak/i.test(v.name) ? -3 : 0)
+const bestVoice = list => [...list].sort((a, b) => voiceScore(b) - voiceScore(a))[0] || null
+function useVoices(l) {
+  const [list, setList] = useState(() => voicesFor(l))
+  useEffect(() => {
+    const ss = window.speechSynthesis
+    if (!ss) return
+    const on = () => setList(voicesFor(l))
+    ss.addEventListener?.('voiceschanged', on)
+    const t = setTimeout(on, 700)                    // на части телефонов голоса приходят без события
+    return () => { ss.removeEventListener?.('voiceschanged', on); clearTimeout(t) }
+  }, [l])
+  return list
+}
+
+function speak(text, voice, l, onEnd) {
   const ss = window.speechSynthesis
   if (!ss || !text) { onEnd(); return () => {} }
   ss.cancel()
-  const u = new SpeechSynthesisUtterance(text)
-  u.lang = 'ru-RU'; u.rate = 1.05
-  const v = ss.getVoices().find(x => /^ru/i.test(x.lang))
-  if (v) u.voice = v
+  const u = new SpeechSynthesisUtterance(speechText(text, l))
+  u.lang = voice?.lang || VOICE_LOCALE[l] || 'ru-RU'
+  u.rate = 0.95; u.pitch = 1
+  if (voice) u.voice = voice
   let done = false
   const fin = () => { if (!done) { done = true; onEnd() } }
   u.onend = fin; u.onerror = fin
@@ -61,6 +82,14 @@ export default function DemoVideo({ id, onClose }) {
   const [voice, setVoice] = useState(() => { try { return localStorage.getItem('demoVoice') !== '0' } catch { return true } })
   const [ended, setEnded] = useState(false)
   const [scale, setScale] = useState(1)
+  const L = demoLang(), ui = UI[L] || UI.ru
+  const voices = useVoices(L)
+  const vKey = 'demoVoiceName:' + L
+  const [voiceName, setVoiceName] = useState(() => { try { return localStorage.getItem(vKey) || '' } catch { return '' } })
+  const [voiceMenu, setVoiceMenu] = useState(false)
+  const theVoice = voices.find(v => v.name === voiceName) || bestVoice(voices)
+  const canSpeak = !!window.speechSynthesis && voices.length > 0
+  const sayText = dt(beats[i].say, L)
   const frame = useRef(null)
   useBackClose(true, onClose)
 
@@ -96,7 +125,8 @@ export default function DemoVideo({ id, onClose }) {
     let alive = true
     const T = []
     const later = (ms, f) => T.push(setTimeout(() => { if (alive) f() }, ms))
-    let spoke = !voice, minDone = false
+    const talk = voice && canSpeak
+    let spoke = !talk, minDone = false
     const next = () => {
       if (!spoke || !minDone) return
       if (i + 1 < beats.length) setI(i + 1)
@@ -111,11 +141,11 @@ export default function DemoVideo({ id, onClose }) {
       })
       if (b.type) for (let c = 1; c <= b.type.length; c++) later(actAt + 200 + c * TYPE_MS, () => setPhase({ i, typed: c }))
     }
-    later(actAt + typeTime(b) + Math.max(700, readTime(b) - actAt), () => { minDone = true; next() })
+    later(actAt + typeTime(b) + Math.max(700, readTime(sayText) - actAt), () => { minDone = true; next() })
     let stop = () => {}
-    if (voice) later(120, () => { stop = speak(b.say, () => later(350, () => { spoke = true; next() })) })
+    if (talk) later(120, () => { stop = speak(sayText, theVoice, L, () => later(350, () => { spoke = true; next() })) })
     return () => { alive = false; T.forEach(clearTimeout); stop() }
-  }, [i, playing, voice])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [i, playing, voice, canSpeak, theVoice?.name])   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => window.speechSynthesis?.cancel(), [])
 
@@ -124,17 +154,18 @@ export default function DemoVideo({ id, onClose }) {
   const toggleVoice = () => { const v = !voice; setVoice(v); if (!v) window.speechSynthesis?.cancel(); try { localStorage.setItem('demoVoice', v ? '1' : '0') } catch { /* без памяти */ } }
   const chapters = beats.map((x, n) => [x.ch, n]).filter(([c]) => c)
   const curCh = chapters.filter(([, n]) => n <= i).pop()?.[0]
+  const pickVoice = name => { setVoiceName(name); setVoiceMenu(false); try { localStorage.setItem(vKey, name) } catch { /* без памяти */ } }
   const seek = e => { const r = e.currentTarget.getBoundingClientRect(); goTo(Math.floor(((e.clientX - r.left) / r.width) * beats.length)) }
   const ctl = { width: 44, height: 44, borderRadius: 22, border: 'none', background: 'rgba(255,255,255,.12)', color: '#fff', fontSize: 18, padding: 0, cursor: 'pointer' }
 
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1300, background: '#0f1218', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <div dir="ltr" data-no-i18n={L === 'ru' ? '' : undefined} style={{ position: 'fixed', inset: 0, zIndex: 1300, background: '#0f1218', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <style>{CSS}</style>
       {/* шапка */}
       <div style={{ width: '100%', maxWidth: 480, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px 8px', boxSizing: 'border-box' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{demo.title}</div>
-          <div style={{ fontSize: 11.5, opacity: 0.6 }}>{curCh} · {i + 1} из {beats.length}</div>
+        <div data-no-i18n="" dir={L === 'ar' ? 'rtl' : 'ltr'} style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dt(demo.title, L)}</div>
+          <div style={{ fontSize: 11.5, opacity: 0.6 }}>{dt(curCh, L)} · {i + 1} {ui.of} {beats.length}</div>
         </div>
         <button type="button" aria-label="Закрыть" onClick={onClose} style={{ ...ctl, width: 36, height: 36, fontSize: 20 }}>×</button>
       </div>
@@ -155,7 +186,7 @@ export default function DemoVideo({ id, onClose }) {
           </div>
           {/* субтитры: внизу; если палец показывает в нижнюю часть экрана — сверху, чтобы не закрывать кнопку */}
           <div style={{ position: 'absolute', left: 12, right: 12, ...(finger.show && finger.y > H0 * 0.55 ? { top: 58 } : { bottom: 64 }), zIndex: 6, pointerEvents: 'none', display: 'flex', justifyContent: 'center' }}>
-            <div key={i} className="demo-sub" style={{ background: 'rgba(15,18,24,.88)', color: '#fff', fontSize: 15, lineHeight: 1.4, padding: '8px 12px', borderRadius: 10, textAlign: 'center', maxWidth: 320 }}>{b.say}</div>
+            <div key={i} className="demo-sub" data-no-i18n="" dir={L === 'ar' ? 'rtl' : 'ltr'} style={{ background: 'rgba(15,18,24,.88)', color: '#fff', fontSize: 15, lineHeight: 1.4, padding: '8px 12px', borderRadius: 10, textAlign: 'center', maxWidth: 320 }}>{sayText}</div>
           </div>
           {(!playing || ended) && (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: ended ? 'rgba(15,18,24,.55)' : 'transparent', zIndex: 7 }}>
@@ -174,16 +205,28 @@ export default function DemoVideo({ id, onClose }) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginTop: 6 }}>
-          <button type="button" aria-label="Звук" onClick={toggleVoice} style={{ ...ctl, width: 38, height: 38, fontSize: 16, opacity: voice ? 1 : 0.55 }}>{voice ? '🔊' : '🔇'}</button>
+          <button type="button" aria-label="Звук" onClick={toggleVoice} disabled={!canSpeak} style={{ ...ctl, width: 38, height: 38, fontSize: 16, opacity: voice && canSpeak ? 1 : 0.45 }}>{voice && canSpeak ? '🔊' : '🔇'}</button>
           <button type="button" aria-label="Назад" onClick={() => goTo(i - 1)} style={ctl}>⏮</button>
           <button type="button" aria-label={playing ? 'Пауза' : 'Играть'} onClick={togglePlay} style={{ ...ctl, width: 56, height: 56, fontSize: 22, background: '#4fa3ff' }}>{playing ? '❚❚' : ended ? '↻' : '▶'}</button>
           <button type="button" aria-label="Вперёд" onClick={() => goTo(i + 1)} style={ctl}>⏭</button>
-          <span style={{ width: 38 }} />
+          {/* выбор голоса: какой из голосов телефона звучит естественнее — решает сам человек, выбор запоминается */}
+          <button type="button" aria-label={ui.voice} onClick={() => setVoiceMenu(v => !v)} disabled={!canSpeak} style={{ ...ctl, width: 38, height: 38, fontSize: 15, opacity: canSpeak ? 1 : 0.35 }}>🗣</button>
         </div>
+        {!canSpeak && <div data-no-i18n="" style={{ textAlign: 'center', fontSize: 11.5, opacity: 0.6, marginTop: 6 }}>{ui.noVoice}</div>}
+        {voiceMenu && canSpeak && (
+          <div data-no-i18n="" style={{ marginTop: 10, background: 'rgba(255,255,255,.08)', borderRadius: 12, padding: 6, maxHeight: 170, overflowY: 'auto' }}>
+            <div style={{ fontSize: 11.5, opacity: 0.6, padding: '2px 8px 4px' }}>{ui.voice}</div>
+            {[{ name: '', label: `${ui.auto} — ${bestVoice(voices)?.name || ''}` }, ...voices.map(v => ({ name: v.name, label: v.name }))].map(o => (
+              <button key={o.name || '_'} type="button" onClick={() => pickVoice(o.name)}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 8px', borderRadius: 8, border: 'none', fontSize: 13, cursor: 'pointer', color: '#fff',
+                  background: voiceName === o.name ? 'rgba(79,163,255,.35)' : 'transparent', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</button>
+            ))}
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', marginTop: 10 }}>
           {chapters.map(([c, n]) => (
             <button key={c} type="button" onClick={() => goTo(n)}
-              style={{ padding: '4px 10px', borderRadius: 14, border: 'none', fontSize: 12, cursor: 'pointer', background: c === curCh ? '#4fa3ff' : 'rgba(255,255,255,.1)', color: '#fff' }}>{c}</button>
+              data-no-i18n="" style={{ padding: '4px 10px', borderRadius: 14, border: 'none', fontSize: 12, cursor: 'pointer', background: c === curCh ? '#4fa3ff' : 'rgba(255,255,255,.1)', color: '#fff' }}>{dt(c, L)}</button>
           ))}
         </div>
       </div>

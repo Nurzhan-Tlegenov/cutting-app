@@ -2539,5 +2539,14 @@
 "Рез ХДФ": "Cięcie HDF",
 "Раскрой листа ХДФ": "Rozkrój arkusza HDF",
 "Раскрой листа ХДФ (по числу деталей)": "Rozkrój arkusza HDF (według liczby elementów)",
-"Деталь ХДФ": "Element HDF"
+"Деталь ХДФ": "Element HDF",
+"Обучение": "Szkolenie",
+"видео и туры": "filmy i przewodniki",
+"Ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом.": "Film sam pokazuje, gdzie dotknąć: wskaźnik przechodzi całą drogę po ekranach, z napisami i głosem.",
+"▶ Смотреть видео": "▶ Obejrzyj film",
+"шагов": "kroków",
+"Клиент: от заказа до отправки на производство": "Klient: od zamówienia do wysłania do zakładu",
+"Производство: от заявки до управляющих программ": "Zakład: od zgłoszenia do programów CNC",
+"Новый заказ → детали → раскрой → выбор варианта → отправка": "Nowe zamówienie → elementy → rozkrój → wybór wariantu → wysyłka",
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Ustawienia → zgłoszenie → przyjęcie → CNC → G-kod → pliki i etykiety"
 }

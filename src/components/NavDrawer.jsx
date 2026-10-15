@@ -272,7 +272,7 @@ export default function NavDrawer({ notices, unread }) {
               background: pathname === '/help' ? 'var(--blue-light)' : 'transparent', color: pathname === '/help' ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: pathname === '/help' ? 600 : 400 }}>
             <span style={{ width: 22, height: 22, borderRadius: 11, border: '1.6px solid currentColor', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>?</span>
             <span style={{ flex: 1 }}>Обучение</span>
-            <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>туры по приложению</span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>видео и туры</span>
           </button>
         </div>
       </nav>

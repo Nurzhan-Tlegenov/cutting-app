@@ -2539,5 +2539,14 @@
 "Рез ХДФ": "HDF-Schnitt",
 "Раскрой листа ХДФ": "HDF-Plattenzuschnitt",
 "Раскрой листа ХДФ (по числу деталей)": "HDF-Plattenzuschnitt (nach Teilezahl)",
-"Деталь ХДФ": "HDF-Teil"
+"Деталь ХДФ": "HDF-Teil",
+"Обучение": "Schulung",
+"видео и туры": "Videos und Touren",
+"Ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом.": "Das Video zeigt selbst, wohin man tippt: ein Zeiger geht den ganzen Weg durch die Bildschirme, mit Untertiteln und Stimme.",
+"▶ Смотреть видео": "▶ Video ansehen",
+"шагов": "Schritte",
+"Клиент: от заказа до отправки на производство": "Kunde: vom Auftrag bis zum Versand an die Fertigung",
+"Производство: от заявки до управляющих программ": "Fertigung: von der Anfrage bis zu den CNC-Programmen",
+"Новый заказ → детали → раскрой → выбор варианта → отправка": "Neuer Auftrag → Teile → Zuschnitt → Variante wählen → Senden",
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Einstellungen → Anfrage → Annehmen → CNC → G-Code → Dateien und Etiketten"
 }

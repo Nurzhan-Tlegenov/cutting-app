@@ -2539,5 +2539,14 @@
 "Рез ХДФ": "HDF kəsiyi",
 "Раскрой листа ХДФ": "HDF vərəqinin kəsimi",
 "Раскрой листа ХДФ (по числу деталей)": "HDF vərəqinin kəsimi (detalların sayına görə)",
-"Деталь ХДФ": "HDF detalı"
+"Деталь ХДФ": "HDF detalı",
+"Обучение": "Təlim",
+"видео и туры": "video və turlar",
+"Ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом.": "Video hara toxunmağı özü göstərir: oxlu barmaq altyazı və səslə ekranlarda bütün yolu keçir.",
+"▶ Смотреть видео": "▶ Videoya bax",
+"шагов": "addım",
+"Клиент: от заказа до отправки на производство": "Müştəri: sifarişdən istehsalata göndərilməyə qədər",
+"Производство: от заявки до управляющих программ": "İstehsalat: sorğudan idarəetmə proqramlarına qədər",
+"Новый заказ → детали → раскрой → выбор варианта → отправка": "Yeni sifariş → detallar → biçim → variant seçimi → göndərmə",
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Ayarlar → sorğu → qəbul → ÇPİ → G-kod → fayllar və etiketlər"
 }
