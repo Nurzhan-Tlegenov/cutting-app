@@ -36,6 +36,25 @@ export const sendDebugFile = (user, profile, { fileName, payload, comment, order
 export async function deleteMessage(id) {
   try { const { error } = await supabase.from('app_messages').delete().eq('id', id); return error ? fail(error) : { ok: true } } catch (e) { return fail(e) }
 }
+/** Файл (любой, в т. ч. двоичный: .b3d, .add, .xlsx, .pdf) — в текст для отправки: data:…;base64,… */
+export const REPORT_MAX_MB = 15
+export function fileToPayload(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onload = () => resolve(String(fr.result || ''))
+    fr.onerror = () => reject(fr.error || new Error('не удалось прочитать файл'))
+    fr.readAsDataURL(file)
+  })
+}
+/** Текст из сообщения обратно в файл: data:…;base64,… → двоичный, иначе — как текст */
+export function payloadBlob(payload) {
+  const m = /^data:([^;,]*)(;base64)?,/.exec(payload || '')
+  if (!m || !m[2]) return new Blob([payload || ''], { type: 'application/octet-stream' })
+  const bin = atob(payload.slice(m[0].length))
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new Blob([bytes], { type: m[1] || 'application/octet-stream' })
+}
 /** Содержимое приложенного файла */
 export async function messagePayload(id) {
   try {

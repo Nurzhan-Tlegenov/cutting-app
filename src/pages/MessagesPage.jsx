@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
-import { listMessages, sendAppeal, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming } from '../lib/messages'
+import { listMessages, sendAppeal, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob } from '../lib/messages'
 import { getUserSettings } from '../lib/userSettings'
 
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
@@ -14,7 +14,7 @@ const KIND = { news: ['Новость', 'var(--blue-light)', 'var(--blue-dark)']
 const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 1024 ? Math.round(n / 1024) + ' КБ' : (n || 0) + ' Б')
 
 function download(name, text) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/octet-stream' }))
+  const url = URL.createObjectURL(payloadBlob(text))   // импортированный файл (Базис, Астра, Excel…) приходит двоичным — восстанавливаем как был
   const a = document.createElement('a')
   a.href = url; a.download = name
   document.body.appendChild(a); a.click(); a.remove()

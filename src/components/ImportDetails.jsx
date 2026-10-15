@@ -13,6 +13,8 @@ import { useAuth } from '../context/AuthContext'
 import { myLimits, limitText } from '../lib/limits'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useBackClose } from '../lib/backStack'
+import SendToMaster from './SendToMaster'
+import { fileToPayload, REPORT_MAX_MB } from '../lib/messages'
 
 // Какую пласть считать лицевой при импорте модели — признаки по приоритету, порядок меняет пользователь
 // (копия списка из basisB3d — он грузится по требованию). Первый признак, который решает, — решает.
@@ -92,6 +94,9 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const fileRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
+  const lastFileRef = useRef(null)               // последний выбранный файл — для «Сообщить о проблеме»
+  const [reportable, setReportable] = useState(false)   // файл выбран — можно сообщить о проблеме
+  const [report, setReport] = useState(null)     // окно «Сообщить разработчику» (SendToMaster)
   const basisFileRef = useRef(null)              // выбранный файл модели — чтобы пересчитать при смене правила
   const [faceRule, setFaceRule] = useState(() => savedFaceOrder(getUserSettings(user).basisFaceOrder || getUserSettings(user).basisFaceRule))
   const [source, setSource] = useState(SOURCES[0])
@@ -134,6 +139,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    lastFileRef.current = file; setReportable(true)
     setBusy(true); setError('')
     try {
       const lower = file.name.toLowerCase()
@@ -217,6 +223,25 @@ export default function ImportDetails({ hasDetails, onImport }) {
     } finally { setBusy(false) }
   }
 
+  // Сообщить разработчику о проблеме импорта: файл, на котором она случилась, уходит мастер-аккаунту вместе с описанием
+  const reportProblem = () => {
+    const file = lastFileRef.current
+    if (!file) return
+    if (file.size > REPORT_MAX_MB * 1048576) { setError(`Файл слишком большой для отправки из приложения (${(file.size / 1048576).toFixed(1)} МБ, можно до ${REPORT_MAX_MB} МБ). Отправьте его разработчику в WhatsApp или Telegram.`); return }
+    setReport({
+      title: `Импорт · ${source.label}: ${file.name}${error ? ' — ' + error.replace(/^Не удалось прочитать файл: /, '') : ''}`.slice(0, 300),
+      fileName: file.name,
+      getPayload: () => fileToPayload(file),
+      placeholder: error ? 'Например: файл открывается в Базисе нормально, а здесь ошибка' : 'Например: в файле 42 детали, а импортировалось 38; у двух нет кромки',
+    })
+  }
+  const reportLink = (label = 'Сообщить о проблеме разработчику') => (
+    <button type="button" onClick={reportProblem}
+      style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--blue)', fontSize: 12.5, padding: 0, cursor: 'pointer', textAlign: 'left' }}>
+      ✉ {label} <span style={{ color: 'var(--text-hint)' }}>— файл уйдёт вместе с сообщением</span>
+    </button>
+  )
+
   const setRole = (ci, role) => setRoles(prev => prev.map((r, i) => (i === ci ? role : (role && r === role ? '' : r))))
 
   const close = () => { setSheets(null); setBasis(null) }
@@ -271,7 +296,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
         <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{busy ? 'читаю файл…' : open ? '' : 'Excel, Базис, Астра, PRO100, SketchCut'}</span>
         <span style={{ color: 'var(--text-hint)', fontSize: 12, transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
       </button>
-      {!open && error && <p className="error-text" style={{ marginTop: 6 }}>{error}</p>}
+      {!open && error && <><p className="error-text" style={{ marginTop: 6 }}>{error}</p>{reportable && reportLink()}</>}
       <div className="card" style={{ background: 'var(--bg2)', marginTop: 6, display: open ? 'block' : 'none' }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {SOURCES.map(s => (
@@ -285,8 +310,9 @@ export default function ImportDetails({ hasDetails, onImport }) {
         </div>
         <input ref={fileRef} type="file" accept={ACCEPT} onChange={onFile} style={{ display: 'none' }} />
         {busy && <p style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 8, textAlign: 'center' }}>Читаю файл…</p>}
-        {error && <p className="error-text" style={{ marginTop: 8 }}>{error}</p>}
+        {error && <><p className="error-text" style={{ marginTop: 8 }}>{error}</p>{reportable && reportLink()}</>}
       </div>
+      <SendToMaster job={report} onClose={() => setReport(null)} />
 
       {(sheets || basis) && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'var(--bg2)', display: 'flex', flexDirection: 'column' }}>
@@ -301,7 +327,8 @@ export default function ImportDetails({ hasDetails, onImport }) {
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
-            <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 12 }}>{source.hint}</p>
+            <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 4 }}>{source.hint}</p>
+            <div style={{ marginBottom: 12 }}>{reportLink('Что-то не так с деталями? Сообщить разработчику')}</div>
 
             {sheets && sheets.length > 1 && (
               <div style={{ marginBottom: 12 }}>

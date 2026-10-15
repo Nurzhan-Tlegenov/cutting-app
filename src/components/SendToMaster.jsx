@@ -41,7 +41,7 @@ export default function SendToMaster({ job, onClose }) {
             </p>
             <label className="label">Что не работает? Опишите замечание</label>
             <textarea value={comment} onChange={e => setComment(e.target.value)} rows={4} autoFocus
-              placeholder="Например: на листе 2 деталь наложилась на соседнюю после поворота" style={{ fontSize: 14, resize: 'vertical' }} />
+              placeholder={job.placeholder || 'Например: на листе 2 деталь наложилась на соседнюю после поворота'} style={{ fontSize: 14, resize: 'vertical' }} />
             {error && <p className="error-text" style={{ marginTop: 6 }}>{error}</p>}
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <button type="button" className="btn-primary" disabled={busy} onClick={send}>{busy ? 'Отправка…' : 'Отправить'}</button>
