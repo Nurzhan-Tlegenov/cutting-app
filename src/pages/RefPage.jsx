@@ -65,8 +65,8 @@ export default function RefPage() {
     <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
       Регистрация по этой ссылке — <b>без ожидания одобрения</b>: нужно только подтвердить номер телефона{isClient ? '' : ', а потом заполнить данные производства — оно подтвердится сразу'}.
     </p>
-    <button type="button" className="btn-primary" style={{ width: '100%' }} onClick={() => { savePendingRef(code); navigate('/auth?reg=1') }}>Зарегистрироваться</button>
-    <button type="button" onClick={() => { savePendingRef(code); navigate('/auth') }}
+    <button type="button" className="btn-primary" style={{ width: '100%' }} onClick={() => { savePendingRef(code); navigate(`/auth?reg=1&r=${code}`) }}>Зарегистрироваться</button>
+    <button type="button" onClick={() => { savePendingRef(code); navigate(`/auth?r=${code}`) }}
       style={{ marginTop: 12, background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>У меня уже есть аккаунт — войти</button>
   </>)
 

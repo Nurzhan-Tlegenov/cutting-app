@@ -1,5 +1,5 @@
 -- Пригласительные ссылки «Поделиться» (/r/<код>) — регистрация БЕЗ одобрения мастер-аккаунта.
--- Выполнить один раз в Supabase → SQL Editor целиком (можно повторно). После migration_signup_resubmit.sql и migration_push.sql.
+-- Выполнить в Supabase → SQL Editor целиком (можно повторно; после обновления этого файла — выполнить ещё раз). После migration_signup_resubmit.sql и migration_push.sql.
 --
 -- Как работает:
 --   • производство делится ссылкой «для клиентов» — клиент по ней регистрируется без заявки мастеру, нужно только
@@ -108,7 +108,12 @@ begin
     elsif r.status = 'approved' and r.ref_code is null then
       update signup_requests set ref_code = c.code, ref_by = c.owner_id where id = r.id returning * into r;
     end if;
-    -- код: Telegram-бот выдаст и пришлёт его сам, как только номер подтвердят; в WhatsApp его отправит пригласивший (ref_send_code)
+    -- код: Telegram-бот выдаст и пришлёт его сам, как только номер подтвердят; в WhatsApp его отправит пригласивший (ref_send_code).
+    -- Номер подтвердили в боте ещё ДО одобрения, а код в Telegram так и не ушёл — подтверждение сбрасываем:
+    -- человек ещё раз жмёт «Поделиться номером», и бот сразу присылает код (иначе код не придёт никогда).
+    if r.status = 'approved' and m = 'telegram' and r.phone_verified_at is not null and r.code_sent_at is null then
+      update signup_requests set phone_verified_at = null, tg_token = coalesce(tg_token, encode(gen_random_bytes(12), 'hex')) where id = r.id returning * into r;
+    end if;
   end if;
   j := request_signup2(p_name, p_phone, p_comment, p_country, p_city, p_messenger)::jsonb;
   -- пригласившему — уведомление: человеку в WhatsApp нужен код

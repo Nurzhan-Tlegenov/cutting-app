@@ -97,6 +97,16 @@ export default function AuthPage() {
     else setNote('Запрос отправлен. Мы пришлём вам код (обычно в WhatsApp) — введите его ниже вместе с новым паролем.')
   }
 
+  // приглашённый выбрал WhatsApp, но не хочет ждать код от пригласившего — переключаемся на Telegram (код придёт сам)
+  async function toTelegram() {
+    setError(''); setLoading(true)
+    const r = await requestSignupRef(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), 'telegram', refCode)
+    setLoading(false)
+    if (r.error || r.missing) { setError(r.error || 'Не получилось — попробуйте ещё раз'); return }
+    setMessenger('telegram'); setReq(r)
+    setNote(r.verified ? 'Номер уже подтверждён в Telegram — код придёт туда. Введите его ниже и придумайте пароль.' : 'Нажмите кнопку ниже, затем «Поделиться номером» в боте — код придёт сразу.')
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
@@ -141,7 +151,7 @@ export default function AuthPage() {
             const pre = r.auto || byRef ? '' : 'Заявка одобрена. '   // открытая регистрация или ссылка-приглашение — одобрять нечего, сразу подтверждение номера
             setNote(r.code_issued || (byRef && tgMode && r.verified) ? `${pre}Введите код из ${tgMode && r.verified ? 'Telegram' : 'сообщения'} и придумайте пароль.`
               : tgMode && !r.verified ? `${pre}Подтвердите номер в Telegram: нажмите кнопку ниже, затем «Поделиться номером» — бот сразу пришлёт код.`
-              : byRef ? `Код пришлёт в WhatsApp ${r.inviter || 'тот, кто вас пригласил'} — ему уже пришло уведомление. Введите код ниже и придумайте пароль.`
+              : byRef ? `Код пришлёт в WhatsApp ${r.inviter || 'тот, кто вас пригласил'} — ему уже пришло уведомление. Введите код ниже и придумайте пароль. Не хотите ждать — нажмите «Получить код в Telegram»: он придёт сразу.`
               : `${pre}Код ещё не отправлен — дождитесь сообщения от администратора.`)
           }
           else if (r.status === 'rejected') setError(
@@ -381,6 +391,9 @@ export default function AuthPage() {
             {mode === 'register' && req?.tg_token && !req.verified && !req.registered && (
               <a href={tgStartLink(req.tg_token)} target="_blank" rel="noreferrer" className="btn-primary"
                 style={{ display: 'block', textAlign: 'center', textDecoration: 'none', background: '#229ED9' }}>📱 Подтвердить номер в Telegram</a>
+            )}
+            {mode === 'register' && refI && req?.ref === 'ok' && req.messenger === 'whatsapp' && !req.registered && (
+              <button type="button" className="btn-primary" disabled={loading} style={{ background: '#229ED9' }} onClick={toTelegram}>📱 Получить код в Telegram</button>
             )}
             {error && <p className="error-text">{error}</p>}
 

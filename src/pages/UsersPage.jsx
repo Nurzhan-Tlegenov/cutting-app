@@ -208,7 +208,6 @@ export default function UsersPage() {
                 <div style={{ fontSize: 14, fontWeight: 500 }}>{r.full_name || 'Без имени'}
                   {r.resubmits > 0 && <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 9, fontSize: 10.5, fontWeight: 500, background: 'var(--amber-light)', color: 'var(--amber)' }}>повторная{r.resubmits > 1 ? ` ×${r.resubmits}` : ''}</span>}
                 </div>
-                {r.ref_by_name && <div style={{ fontSize: 11, color: 'var(--teal)' }}>по ссылке{r.ref_kind === 'production' ? ' для производства' : ''} от «{r.ref_by_name}» — одобрена сама</div>}
                 {r.resubmits > 0 && r.rejected_name && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>отклонена с именем «{r.rejected_name}»</div>}
                 <div style={{ fontSize: 13 }}><a href={`tel:+${r.digits}`} style={{ color: 'var(--blue)' }}>{r.phone}</a> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· {date(r.created_at)}</span></div>
                 {(r.country || r.city) && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{[countryCode(r.country), r.city].filter(Boolean).join(' · ')}</div>}
@@ -228,6 +227,7 @@ export default function UsersPage() {
                   <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name || 'Без имени'}</span>
                   <a href={`tel:+${r.digits}`} style={{ fontSize: 12, color: 'var(--blue)' }}>{r.phone}</a>
                 </div>
+                {r.ref_by_name && <div style={{ fontSize: 11, color: 'var(--teal)' }}>по ссылке{r.ref_kind === 'production' ? ' для производства' : ''} от «{r.ref_by_name}» — одобрена сама</div>}
                 <VerifyBadge r={r} />
                 {codeRow(r)}
                 <div style={{ marginTop: 4 }}>
