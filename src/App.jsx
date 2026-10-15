@@ -57,6 +57,20 @@ function GoPage() {
   return <CncLoader full label="Открываем…" />
 }
 
+// Приложение открыто по старому адресу (значок на телефоне ставили до raskroypro.com) — просим перейти на новый
+function OldDomain() {
+  if (!/cutting-app-nine\.vercel\.app$/i.test(window.location.hostname)) return null
+  const go = () => window.location.replace('https://raskroypro.com' + window.location.pathname + window.location.search)
+  return (
+    <div style={{ position: 'fixed', top: 'calc(6px + env(safe-area-inset-top))', left: 8, right: 8, zIndex: 1300, background: 'var(--amber-light)', border: '1px solid var(--amber)', borderRadius: 12, padding: '10px 12px', fontSize: 13, boxShadow: '0 4px 16px rgba(0,0,0,.15)' }}>
+      <b>Приложение открыто по старому адресу.</b> Откройте raskroypro.com и войдите заново, затем удалите старый значок и добавьте новый на главный экран (меню браузера → «Добавить на главный экран»).
+      <div style={{ textAlign: 'right', marginTop: 6 }}>
+        <button type="button" onClick={go} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 13, fontWeight: 500 }}>Открыть raskroypro.com</button>
+      </div>
+    </div>
+  )
+}
+
 // Нажали на push-уведомление, а приложение уже открыто — переходим в нём, без второй копии
 function PushBridge() {
   const navigate = useNavigate()
@@ -132,6 +146,7 @@ export default function App() {
         <ErrorBoundary>
           <AppRoutes />
           <PushBridge />
+          <OldDomain />
           <KeyboardNext />
           <Watermark />
           <TourOverlay />
