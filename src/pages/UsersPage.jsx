@@ -1,5 +1,5 @@
 import { MenuButton } from '../components/NavDrawer'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
@@ -10,6 +10,7 @@ import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/l
 import { countryCode } from '../lib/productionLabel'
 import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
@@ -38,6 +39,22 @@ export default function UsersPage() {
   const [phone, setPhone] = useState('')
   const [name, setName] = useState('')
   const [find, setFind] = useState('')
+  // карточки пользователей свёрнуты; нажатие раскрывает
+  const [openU, setOpenU] = useState(() => new Set())
+  const flip = id => setOpenU(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  // «Новые с прошлого просмотра»: кто зарегистрировался, пока мастера не было (по ссылкам, при открытой регистрации).
+  // Момент последнего просмотра хранится за аккаунтом; при уходе со страницы или по кнопке новые переходят в общий список.
+  const [seenAt, setSeenAt] = useState(() => getUserSettings(user).usersSeenAt || '')
+  const newCount = useRef(0)
+  const markSeen = () => {
+    const now = new Date().toISOString()
+    saveUserSettings({ usersSeenAt: now }, user); setSeenAt(now)
+    window.dispatchEvent(new Event('notices-seen'))
+  }
+  useEffect(() => {
+    if (!getUserSettings(user).usersSeenAt) saveUserSettings({ usersSeenAt: new Date().toISOString() }, user)   // первый раз — новых нет
+    return () => { if (newCount.current) { saveUserSettings({ usersSeenAt: new Date().toISOString() }, user); window.dispatchEvent(new Event('notices-seen')) } }
+  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
   const [kind, setKind] = useState('all')      // все / клиенты / производства
   const [land, setLand] = useState('')         // страна (обозначение) — фильтр списка
   const [town, setTown] = useState('')         // город — фильтр списка
@@ -130,13 +147,61 @@ export default function UsersPage() {
   const landOf = u => countryCode(u.country || u.production_country) || '—'
   const townOf = u => String(u.city || u.production_city || '').trim() || '—'
   const cmp = (a, b) => a.localeCompare(b, 'ru', { sensitivity: 'base' })
-  const inKind = (users || []).filter(u => kind === 'all' || (kind === 'prod' ? isProd(u) : !isProd(u)))
+  const isNew = u => !!seenAt && u.id !== user?.id && !!u.created_at && new Date(u.created_at) > new Date(seenAt)
+  const newUsers = (users || []).filter(isNew).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+  useEffect(() => { newCount.current = newUsers.length })
+  const inKind = (users || []).filter(u => !isNew(u)).filter(u => kind === 'all' || (kind === 'prod' ? isProd(u) : !isProd(u)))
   // сколько пользователей в каждой стране и городе — количество и доля
   const tally = (list, key) => { const m = new Map(); list.forEach(u => m.set(key(u), (m.get(key(u)) || 0) + 1)); return [...m.entries()].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0])) }
   const lands = tally(inKind, landOf), towns = land ? tally(inKind.filter(u => landOf(u) === land), townOf) : []
   const pct = (n, of) => (of ? Math.round(n / of * 100) : 0)
   const shown = inKind.filter(u => (!land || landOf(u) === land) && (!town || townOf(u) === town))
     .sort((a, b) => cmp(landOf(a), landOf(b)) || cmp(townOf(a), townOf(b)) || cmp(String(a.full_name || ''), String(b.full_name || ''))).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
+  // карточка пользователя: свёрнута — имя, «произв.», страна·город; нажатие — всё остальное
+  const userCard = u => {
+              const tel = digits(u.phone) || digits(String(u.email || '').split('@')[0])
+              const wa = digits(u.whatsapp) || tel
+    return (
+                <div key={u.id} className="card" data-focus={`nu:${u.id}`} style={{ padding: '8px 12px' }}>
+                  <button type="button" onClick={() => flip(u.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || 'Без имени'}{u.id === user?.id ? ' (вы)' : ''}</span>
+                    {isProd(u) && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>произв.</span>}
+                    <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{landOf(u) === '—' ? '—' : `${landOf(u)}${townOf(u) === '—' ? '' : ' · ' + townOf(u)}`}</span>
+                    <span style={{ color: 'var(--text-hint)', fontSize: 14, transform: openU.has(u.id) ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
+                  </button>
+                  {openU.has(u.id) && <div style={{ marginTop: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13 }}>
+                        {tel ? <a href={`tel:+${tel}`} style={{ color: 'var(--blue)' }}>{u.phone || `+${tel}`}</a> : <span style={{ color: 'var(--text-hint)' }}>{u.email}</span>}
+                        {wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 10, fontSize: 12 }}>WhatsApp</a>}
+                      </div>
+                    </div>
+                    <select value={u.role} disabled={busy || u.id === user?.id} onChange={e => act(() => adminSetRole(u.id, e.target.value))}
+                      style={{ width: 'auto', padding: '4px 6px', fontSize: 12, borderRadius: 20 }}>
+                      {ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </div>
+                  {u.production_id && !isProd(u) && (
+                    <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-hint)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ flex: 1 }}>Производство «{u.production_name}» — {u.production_status === 'rejected' ? 'отклонено' : 'ждёт подтверждения'}</span>
+                      {u.production_status === 'rejected' && <button type="button" disabled={busy} style={btn()} onClick={() => act(() => adminSetProduction(u.production_id, 'approved'))}>Подтвердить</button>}
+                    </div>
+                  )}
+                  {isProd(u) && (
+                    <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', background: 'var(--amber-light)', borderRadius: 'var(--radius)', color: 'var(--amber)' }}>
+                      Производство «{u.production_name}»{[u.production_country, u.production_city].filter(Boolean).length ? `, ${[u.production_country, u.production_city].filter(Boolean).join(', ')}` : ''}: заявок получено <b>{u.received}</b> · принято <b>{u.accepted}</b> · исполнено <b>{u.done}</b>
+                    </div>
+                  )}
+                  {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.defaults} isProd={isProd(u)} busy={busy}
+                    onSave={(id, unl, l) => act(() => adminSetUserLimits(id, unl, l))} />}
+                  <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+                    Регистрация {date(u.created_at)} · последний вход {date(u.last_sign_in_at)} · заказов создано {u.orders}{u.submitted != null ? `, оформлено ${u.submitted}` : ''}{u.last_order_at ? ` (последний ${date(u.last_order_at)})` : ''}
+                  </div>
+                  </div>}
+                </div>
+    )
+  }
   const btn = (kind) => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', border: kind === 'main' ? 'none' : `0.5px solid ${kind === 'danger' ? 'var(--danger)' : 'var(--border-md)'}`, background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : kind === 'danger' ? 'var(--danger)' : 'var(--text-muted)', whiteSpace: 'nowrap' })
   const statusLabel = r => (r.registered ? 'зарегистрирован' : r.status === 'approved' ? 'одобрена — ждём регистрации' : 'отклонена')
 
@@ -289,7 +354,17 @@ export default function UsersPage() {
           )}
           {lim?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{lim.error}</p>
             : lim && <DefaultLimits key={JSON.stringify(lim.defaults)} defaults={lim.defaults} busy={busy} onSave={v => act(() => adminSetDefaultLimits(v))} />}
-          <p className="section-title">Зарегистрированы ({users.length})</p>
+          {newUsers.length > 0 && (
+            <>
+              <p className="section-title" style={{ color: 'var(--teal)' }}>Новые с прошлого просмотра · {newUsers.length}</p>
+              <div style={{ border: '1px solid var(--teal)', borderRadius: 'var(--radius)', padding: 8, marginBottom: 12 }}>
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 6px' }}>Зарегистрировались без вашего одобрения — по ссылкам-приглашениям или при открытой регистрации. После просмотра они перейдут в общий список.</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{newUsers.map(userCard)}</div>
+                <button type="button" onClick={markSeen} style={{ ...btn('main'), width: '100%', marginTop: 8, background: 'var(--teal)' }}>Просмотрено ✓</button>
+              </div>
+            </>
+          )}
+          <p className="section-title">Зарегистрированы ({users.length - newUsers.length})</p>
           <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
             {[['all', `Все · ${users.length}`], ['client', `Клиенты · ${users.length - prodCount}`], ['prod', `Производства · ${prodCount}`]].map(([id, label]) => (
               <button key={id} type="button" onClick={() => setKind(id)} style={{ flex: 1, padding: '7px 4px', borderRadius: 20, border: 'none', fontSize: 12, background: kind === id ? 'var(--blue)' : 'var(--bg2)', color: kind === id ? 'white' : 'var(--text-muted)' }}>{label}</button>
@@ -319,44 +394,7 @@ export default function UsersPage() {
           </div>
           {users.length > 6 && <input type="text" placeholder="Поиск: имя или телефон" value={find} onChange={e => setFind(e.target.value)} style={{ marginBottom: 8 }} />}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {shown.map(u => {
-              const tel = digits(u.phone) || digits(String(u.email || '').split('@')[0])
-              const wa = digits(u.whatsapp) || tel
-              return (
-                <div key={u.id} className="card" style={{ padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || 'Без имени'}{u.id === user?.id ? ' (вы)' : ''}</div>
-                      <div style={{ fontSize: 12, color: landOf(u) === '—' ? 'var(--text-hint)' : 'var(--text-muted)' }}>{landOf(u) === '—' ? 'страна и город не указаны' : `${landOf(u)} · ${townOf(u) === '—' ? 'город не указан' : townOf(u)}`}</div>
-                      <div style={{ fontSize: 13 }}>
-                        {tel ? <a href={`tel:+${tel}`} style={{ color: 'var(--blue)' }}>{u.phone || `+${tel}`}</a> : <span style={{ color: 'var(--text-hint)' }}>{u.email}</span>}
-                        {wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 10, fontSize: 12 }}>WhatsApp</a>}
-                      </div>
-                    </div>
-                    <select value={u.role} disabled={busy || u.id === user?.id} onChange={e => act(() => adminSetRole(u.id, e.target.value))}
-                      style={{ width: 'auto', padding: '4px 6px', fontSize: 12, borderRadius: 20 }}>
-                      {ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
-                  </div>
-                  {u.production_id && !isProd(u) && (
-                    <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-hint)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ flex: 1 }}>Производство «{u.production_name}» — {u.production_status === 'rejected' ? 'отклонено' : 'ждёт подтверждения'}</span>
-                      {u.production_status === 'rejected' && <button type="button" disabled={busy} style={btn()} onClick={() => act(() => adminSetProduction(u.production_id, 'approved'))}>Подтвердить</button>}
-                    </div>
-                  )}
-                  {isProd(u) && (
-                    <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', background: 'var(--amber-light)', borderRadius: 'var(--radius)', color: 'var(--amber)' }}>
-                      Производство «{u.production_name}»{[u.production_country, u.production_city].filter(Boolean).length ? `, ${[u.production_country, u.production_city].filter(Boolean).join(', ')}` : ''}: заявок получено <b>{u.received}</b> · принято <b>{u.accepted}</b> · исполнено <b>{u.done}</b>
-                    </div>
-                  )}
-                  {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.defaults} isProd={isProd(u)} busy={busy}
-                    onSave={(id, unl, l) => act(() => adminSetUserLimits(id, unl, l))} />}
-                  <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-                    Регистрация {date(u.created_at)} · последний вход {date(u.last_sign_in_at)} · заказов создано {u.orders}{u.submitted != null ? `, оформлено ${u.submitted}` : ''}{u.last_order_at ? ` (последний ${date(u.last_order_at)})` : ''}
-                  </div>
-                </div>
-              )
-            })}
+            {shown.map(userCard)}
           </div>
         </>
       )}

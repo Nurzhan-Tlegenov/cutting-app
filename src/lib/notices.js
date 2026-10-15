@@ -1,3 +1,4 @@
+import { getUserSettings } from './userSettings'
 // Уведомления внутри приложения: что произошло, пока человек не смотрел.
 //   мастер-аккаунт — новые заявки на регистрацию, запросы на восстановление пароля, производства, ждущие подтверждения;
 //   производство   — новые заявки (заказы, оформленные на него);
@@ -51,7 +52,11 @@ export async function fetchNotices({ user, isMaster }) {
       const reqs = (rq.data || []).filter(r => r.status === 'new')
       const resets = (pr.data || []).filter(r => r.status === 'new')
       const prods = (us.data || []).filter(u => u.production_status === 'pending')
-      res.users = reqs.length + resets.length + prods.length
+      // кто зарегистрировался без одобрения (по ссылкам, при открытой регистрации), пока мастер не смотрел «Пользователи»
+      const seenAt = getUserSettings(user).usersSeenAt
+      const joined = seenAt ? (us.data || []).filter(u => u.id !== user.id && u.created_at && new Date(u.created_at) > new Date(seenAt)) : []
+      res.users = reqs.length + resets.length + prods.length + (joined.length ? 1 : 0)
+      if (joined.length) res.list.push({ key: `nu:${joined.length}:${seenAt}`, text: joined.length === 1 ? `Новый пользователь: ${joined[0].full_name || joined[0].phone || 'без имени'}` : `Новые пользователи: ${joined.length}`, to: goUrl('users', `nu:${joined[0].id}`), where: WHERE.users, src: 'users' })
       for (const r of reqs) res.list.push({ key: `rq:${r.id}`, text: `Новая заявка на регистрацию: ${r.full_name || r.phone || 'без имени'}`, to: goUrl('users', `rq:${r.id}`), where: WHERE.users, src: 'users' })
       for (const r of resets) res.list.push({ key: `pw:${r.id}`, text: `Просят восстановить пароль: ${r.full_name || r.phone || '+' + r.digits}`, to: goUrl('users', `pw:${r.id}`), where: WHERE.users, src: 'users' })
       for (const u of prods) res.list.push({ key: `pd:${u.production_id}`, text: `Производство ждёт подтверждения: ${u.production_name || u.full_name || ''}`, to: goUrl('users', `pd:${u.production_id}`), where: WHERE.users, src: 'users' })
