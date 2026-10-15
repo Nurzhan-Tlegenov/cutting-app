@@ -3,6 +3,7 @@
 //     в раскрое у него сразу выбрано это производство;
 //   • любой пользователь → производству (kind 'production'): приглашённое производство подтверждается сразу.
 import { supabase } from './supabase'
+import { siteOrigin } from './siteOrigin'
 
 export const REF_SQL_HINT = 'Пригласительные ссылки ещё не включены в базе: выполните migration_ref_links.sql в Supabase (SQL Editor) — один раз.'
 const isMissing = e => /PGRST202|42883|schema cache|Could not find the function/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
@@ -25,7 +26,7 @@ export const refInfo = code => call('ref_info', { p_code: code || '' })
 export const acceptRef = code => call('accept_ref', { p_code: code || '' })
 export const myRefPeople = () => call('my_ref_people')
 export const refSendCode = id => call('ref_send_code', { p_id: id })
-export const refUrl = code => `${window.location.origin}/r/${code}`
+export const refUrl = code => `${siteOrigin()}/r/${code}`
 
 /** Заявка по ссылке — одобряется сразу, остаётся подтвердить номер. Ответ как у requestSignup2 плюс ref ('ok' | 'bad'). */
 export async function requestSignupRef(name, phone, comment, country, city, messenger, code) {

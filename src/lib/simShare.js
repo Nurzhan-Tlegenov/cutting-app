@@ -2,10 +2,11 @@
 // Ссылка — снимок: G-код листа, лист, контуры деталей, диаметры инструментов. Повторное создание
 // для того же листа обновляет снимок, адрес остаётся прежним. Удалили — ссылка не открывается.
 import { supabase } from './supabase'
+import { siteOrigin } from './siteOrigin'
 
 const isMissing = e => /sim_shares|shared_sim|PGRST205|PGRST202|42P01|42883|schema cache/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
 export const SIM_SHARE_HINT = 'Ссылки на симуляцию пока не включены в базе: выполните migration_sim_shares.sql в Supabase (SQL Editor) — один раз.'
-export const simShareUrl = code => `${window.location.origin}/s/${code}`
+export const simShareUrl = code => `${siteOrigin()}/s/${code}`
 
 const KIND = { hole: 'h', groove: 'g', pocket: 'p', cutout: 'c', outer: 'o' }
 const KIND_BACK = Object.fromEntries(Object.entries(KIND).map(([k, v]) => [v, k]))

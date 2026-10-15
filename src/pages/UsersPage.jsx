@@ -9,13 +9,14 @@ import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
 import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
 import { countryCode } from '../lib/productionLabel'
 import { useNoticeFocus } from '../lib/noticeNav'
+import { siteOrigin } from '../lib/siteOrigin'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—')
 const digits = v => String(v || '').replace(/\D/g, '')
 // ссылка открывает «У меня есть код» с подставленными номером и кодом — остаётся придумать пароль
-const codeLink = (code, digits) => `${window.location.origin}/auth?code=${code}&tel=${digits}`
+const codeLink = (code, digits) => `${siteOrigin()}/auth?code=${code}&tel=${digits}`
 const codeMsg = (code, digits) => `Ваша заявка в RaskroyPro одобрена. Код: ${code}\n\nЗавершите регистрацию по ссылке — номер и код уже подставлены, останется придумать пароль:\n${codeLink(code, digits)}\n\nИли откройте приложение → «У меня есть код». Код действует 3 дня.`
 
 // Как подтверждён номер заявки
@@ -67,13 +68,13 @@ export default function UsersPage() {
     if (a.missing) return adminSetRequest(r.id, 'approved')   // база ещё без подтверждения номера
     if (a.error) return a
     if (a.data?.telegram) {
-      const t = await tgBot({ action: 'send_code', request_id: r.id, tel: r.digits, origin: window.location.origin })
+      const t = await tgBot({ action: 'send_code', request_id: r.id, tel: r.digits, origin: siteOrigin() })
       setInfo(t.error ? `Код не ушёл в Telegram: ${t.error}. Отправьте его в WhatsApp.` : `Код отправлен в Telegram — ${r.full_name || r.phone}.`)
     } else setInfo(`Заявка одобрена. Отправьте код ${r.full_name || r.phone} в WhatsApp.`)
     return {}
   })
   const sendTg = r => act(async () => {
-    const t = await tgBot({ action: 'send_code', request_id: r.id, tel: r.digits, origin: window.location.origin })
+    const t = await tgBot({ action: 'send_code', request_id: r.id, tel: r.digits, origin: siteOrigin() })
     setInfo(t.error ? `Код не ушёл в Telegram: ${t.error}` : `Код отправлен в Telegram — ${r.full_name || r.phone}.`)
     return {}
   })

@@ -1,5 +1,6 @@
 // Рабочие места производства (см. migration_workplaces.sql): сотрудники по приглашению, полномочия, назначение заказов.
 import { supabase } from './supabase'
+import { siteOrigin } from './siteOrigin'
 
 export const WP_SQL_HINT = 'Рабочие места ещё не включены в базе: выполните migration_workplaces.sql в Supabase (SQL Editor) — один раз.'
 // полномочия сотрудника: [ключ, название, пояснение]
@@ -35,7 +36,7 @@ export const cancelInvite = code => call('cancel_invite', { p_code: code })
 export const assignOrder = (orderId, userId, on) => call('assign_order', { p_order: orderId, p_user: userId, p_on: !!on })
 export const orderWorkers = orderId => call('order_workers_of', { p_order: orderId })
 export const myOrderPerms = orderId => call('my_order_perms', { p_order: orderId })
-export const inviteUrl = code => `${window.location.origin}/join/${code}`
+export const inviteUrl = code => `${siteOrigin()}/join/${code}`
 
 // приглашение, открытое до входа: запоминаем, чтобы после входа / регистрации вернуться на него
 const KEY = 'pendingInvite'

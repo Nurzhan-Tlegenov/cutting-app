@@ -6,6 +6,7 @@ import BottomNav from '../components/BottomNav'
 import RefShare from '../components/RefShare'
 import { myProduction } from '../lib/productionApi'
 import { myRefPeople, refSendCode } from '../lib/refLinks'
+import { siteOrigin } from '../lib/siteOrigin'
 
 // «Пригласить»: личные ссылки — клиентам (от своего производства) и производству (от любого пользователя).
 // По ссылке регистрируются без одобрения мастер-аккаунта, только с подтверждением номера: Telegram — код приходит сам,
@@ -32,7 +33,7 @@ export default function InvitePage() {
     const r = await refSendCode(p.id)
     if (r.error || r.data?.error) { setErr(r.data?.error === 'registered' ? 'Этот человек уже зарегистрировался.' : r.error || 'Не удалось получить код'); return }
     const { code, digits, ref } = r.data
-    const link = `${window.location.origin}/auth?code=${code}&tel=${digits}${ref ? `&r=${ref}` : ''}`
+    const link = `${siteOrigin()}/auth?code=${code}&tel=${digits}${ref ? `&r=${ref}` : ''}`
     const text = `Код для регистрации в RaskroyPro: ${code}\n\nОткройте ссылку — номер и код уже подставлены, останется придумать пароль:\n${link}\n\nКод действует 3 дня.`
     window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, '_blank')
     setSent(s => ({ ...s, [p.id]: true }))

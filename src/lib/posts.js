@@ -1,6 +1,7 @@
 // Рабочие посты производства (см. migration_posts.sql): техпроцесс, по которому заказ идёт как по канбану.
 import { supabase } from './supabase'
 import { ruleOf, defaultRule, stageParts, loadOrderParts } from './stageParts'
+import { siteOrigin } from './siteOrigin'
 
 export const POSTS_SQL_HINT = 'Рабочие посты ещё не включены в базе: выполните migration_posts.sql в Supabase (SQL Editor) — один раз.'
 export const POST_PRESETS = ['Раскрой', 'Кромление', 'Присадка', 'Сборка', 'Упаковка', 'Доставка']
@@ -34,7 +35,7 @@ export const orderStages = orderId => call('order_stages_of', { p_order: orderId
 export const myPostQueue = () => call('my_post_queue')
 /** Один пост по ссылке /post/<id>: { post, queue } — только своим (сотрудник поста, владелец, начальник) */
 export const postPage = id => call('post_page', { p_post: id })
-export const postLink = id => `${window.location.origin}/post/${id}`
+export const postLink = id => `${siteOrigin()}/post/${id}`
 export const productionStageMap = () => call('production_stage_map')
 
 // Операции заказа (migration_stage_ops.sql): галочки постов «по галочке» и пропуск постов без деталей

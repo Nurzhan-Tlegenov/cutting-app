@@ -3,13 +3,14 @@
 // Ссылка «живая»: показывает заказ в том виде, в каком он сохранён сейчас.
 // Закрыть доступ = удалить строку — ссылка сразу перестаёт работать.
 import { supabase } from './supabase'
+import { siteOrigin } from './siteOrigin'
 
 const isMissing = e => /model_shares|shared_model|PGRST205|PGRST202|42P01|42883|schema cache/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
 export const SHARE_TABLE_HINT = 'Ссылки пока не включены в базе: выполните migration_model_shares.sql в Supabase (SQL Editor) — один раз.'
 
 // Ключ ссылки — короткий код (migration_share_code.sql), а в старой базе — длинный токен
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-export const shareUrl = key => `${window.location.origin}/${UUID.test(key) ? 'view' : 'v'}/${key}`
+export const shareUrl = key => `${siteOrigin()}/${UUID.test(key) ? 'view' : 'v'}/${key}`
 // колонки code может ещё не быть — тогда читаем только token
 async function selectShares(build) {
   let r = await build('order_id,token,code')
