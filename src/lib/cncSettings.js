@@ -65,6 +65,8 @@ export const DEFAULT_OPS = () => ({
   grooves: {},                                                 // пазы по слоям (ширина × глубина): слой -> { tool }
   pockets: {},                                                 // выемки: слой -> { tool, mode: 'zigzag' | 'spiral', dir: 'cw' | 'ccw', entry, angle }
   holes: {},                                                   // отверстия: слой -> { tool, d, depth }
+  // что не выводить в программу: contour — вырезы (деталь режется прямоугольником габарита), face — пазы и выемки с лица, holes — отверстия
+  skip: { contour: false, face: false, holes: false },
 })
 
 // shared — общие постпроцессоры (мастер-аккаунт отметил «для всех»): видны каждому, в настройках пользователя не хранятся
@@ -94,7 +96,7 @@ export function normalizeCnc(raw, shared = []) {
 }
 export function normOps(raw) {
   const d = DEFAULT_OPS(), o = raw || {}
-  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes } }
+  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes }, skip: { ...d.skip, ...o.skip } }
 }
 export { postView, postBack, hasOwnTools } from './postTools'
 

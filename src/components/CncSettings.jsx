@@ -679,8 +679,13 @@ export function CncOps({ cnc, onChange, layers }) {
   const set = (k, patch) => onChange({ ...cnc, ops: { ...ops, [k]: { ...ops[k], ...patch } } })
   const setMap = (k, key, patch) => onChange({ ...cnc, ops: { ...ops, [k]: { ...ops[k], [key]: { ...ops[k]?.[key], ...patch } } } })
   const hasTool = id => (cnc.tools || []).some(t => t.id === id)
-  const Contour = ({ k, title, note, extra }) => (
-    <div className="card" style={{ marginBottom: 10 }}>
+  const skip = { contour: false, face: false, holes: false, ...ops.skip }
+  const setSkip = patch => onChange({ ...cnc, ops: { ...ops, skip: { ...skip, ...patch } } })
+  const offStyle = off => (off ? { opacity: 0.45 } : null)
+  const OffNote = ({ on }) => (on ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>Отключено — в программу не попадает (см. «Что выводить в программу»).</p> : null)
+  const Contour = ({ k, title, note, extra, off }) => (
+    <div className="card" style={{ marginBottom: 10, ...offStyle(off) }}>
+      <OffNote on={off} />
       <Title>{title}</Title>
       <label className="label">Инструмент</label>
       <ToolSelect cnc={cnc} only="mill" value={ops[k].tool} onChange={v => set(k, { tool: v })} />
@@ -751,9 +756,29 @@ export function CncOps({ cnc, onChange, layers }) {
   return (
     <>
       {!(cnc.tools || []).length && <p style={{ fontSize: 13, color: 'var(--amber)', marginBottom: 10 }}>Сначала создайте инструменты на вкладке «Инструменты».</p>}
-      {Contour({ k: 'outer', title: '1. Контур детали', note: 'Фреза идёт снаружи контура.', extra: outerExtra })}
-      {Contour({ k: 'cutout', title: '2. Контур выреза', note: 'Фреза всегда идёт внутри контура.' })}
       <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Что выводить в программу</Title>
+        {[
+          ['contour', 'Резать только прямоугольники', 'Вырезы внутренние и наружные, скругления и фигурный край не режутся — каждая деталь вырезается прямоугольником по своему габариту.'],
+          ['face', 'Без пазов и выемок с лица', 'Пазы и выемки с лицевой стороны в программу не попадают.'],
+          ['holes', 'Без отверстий (присадки)', 'Все отверстия в пласть в программу не попадают.'],
+        ].map(([k, label, hint]) => (
+          <div key={k} style={{ marginBottom: 8 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!skip[k]} onChange={e => setSkip({ [k]: e.target.checked })} style={{ width: 18, height: 18 }} />
+              {label}{layers && k === 'contour' && layers.cutouts ? <span style={{ fontSize: 12, color: 'var(--text-hint)' }}> · вырезов в заказе {layers.cutouts}</span> : null}
+              {layers && k === 'face' && (layers.grooves || layers.pockets.length) ? <span style={{ fontSize: 12, color: 'var(--text-hint)' }}> · пазов {layers.grooves}, выемок {layers.pockets.reduce((a, l) => a + l.count, 0)}</span> : null}
+              {layers && k === 'holes' && layers.holes.length ? <span style={{ fontSize: 12, color: 'var(--text-hint)' }}> · отверстий {layers.holes.reduce((a, l) => a + l.count, 0)}</span> : null}
+            </label>
+            <Hint>{hint}</Hint>
+          </div>
+        ))}
+        {skip.contour && <Hint>Раскрой должен быть сделан по габаритам: если фигурные детали уложены вплотную друг в друга, при создании программы будет предупреждение.</Hint>}
+      </div>
+      {Contour({ k: 'outer', title: '1. Контур детали', note: skip.contour ? 'Фреза идёт снаружи прямоугольника по габариту детали.' : 'Фреза идёт снаружи контура.', extra: outerExtra })}
+      {Contour({ k: 'cutout', title: '2. Контур выреза', note: 'Фреза всегда идёт внутри контура.', off: skip.contour })}
+      <div className="card" style={{ marginBottom: 10, ...offStyle(skip.face) }}>
+        <OffNote on={skip.face} />
         <Title>3. Пазы{layers ? <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-hint)' }}> · в заказе {layers.grooves} шт.</span> : null}</Title>
         <label className="label">Инструмент — общий для всех пазов</label>
         <ToolSelect cnc={cnc} only="mill" value={ops.groove.tool} onChange={v => set('groove', { tool: v })} />
@@ -769,7 +794,8 @@ export function CncOps({ cnc, onChange, layers }) {
           </div>
         ))}
       </div>
-      <div className="card" style={{ marginBottom: 10 }}>
+      <div className="card" style={{ marginBottom: 10, ...offStyle(skip.face) }}>
+        <OffNote on={skip.face} />
         <Title>4. Выемки</Title>
         {!layers && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Выемки настраиваются по глубине — в заказе, где видно, какие глубины в нём есть.</p>}
         {layers && !layers.pockets.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе выемок нет.</p>}
@@ -790,7 +816,8 @@ export function CncOps({ cnc, onChange, layers }) {
           </div>
         ))}
       </div>
-      <div className="card">
+      <div className="card" style={offStyle(skip.holes) || undefined}>
+        <OffNote on={skip.holes} />
         <Title>5. Отверстия</Title>
         {!layers && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Отверстия по диаметру и глубине настраиваются в заказе. Если сверло не назначено — берётся сверло того же диаметра из «Инструментов».</p>}
         {layers && !layers.holes.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе отверстий в пласть нет.</p>}

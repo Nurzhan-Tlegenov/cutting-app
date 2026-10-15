@@ -16,7 +16,7 @@ import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT, drill6Lay
 import Drill6Ops from '../components/Drill6Ops'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
-import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor } from '../lib/gcode'
+import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf } from '../lib/gcode'
 import { getLabelTpl, buildLabelFiles, labelInfo, labelQr } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
@@ -105,12 +105,12 @@ export default function CncPage() {
   // что не назначено — видно сразу, до создания программы
   const pre = useMemo(() => {
     if (!layers) return []
-    const w = [], has = t => (rview.tools || []).some(x => x.id === t)
+    const w = [], has = t => (rview.tools || []).some(x => x.id === t), sk = skipOf(rview.ops)
     if (!has(rview.ops.outer.tool)) w.push('контур детали')
-    if (layers.cutouts && !has(rview.ops.cutout.tool)) w.push(`контур выреза (${layers.cutouts} шт.)`)
-    layers.grooveLayers.forEach(l => { if (!has(grooveOpFor(rview.ops, l.key).tool)) w.push(`пазы ${l.width} × ${l.depth} (${l.count} шт.)`) })
-    layers.pockets.forEach(l => { if (!has(rview.ops.pockets?.[pocketKey(l.depth)]?.tool)) w.push(`выемки глубиной ${l.depth} (${l.count} шт.)`) })
-    layers.holes.forEach(l => { if (!holeToolFor(l, rview)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
+    if (layers.cutouts && !sk.contour && !has(rview.ops.cutout.tool)) w.push(`контур выреза (${layers.cutouts} шт.)`)
+    if (!sk.face) layers.grooveLayers.forEach(l => { if (!has(grooveOpFor(rview.ops, l.key).tool)) w.push(`пазы ${l.width} × ${l.depth} (${l.count} шт.)`) })
+    if (!sk.face) layers.pockets.forEach(l => { if (!has(rview.ops.pockets?.[pocketKey(l.depth)]?.tool)) w.push(`выемки глубиной ${l.depth} (${l.count} шт.)`) })
+    if (!sk.holes) layers.holes.forEach(l => { if (!holeToolFor(l, rview)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
     return w
   }, [layers, rview])
 
@@ -217,7 +217,7 @@ export default function CncPage() {
     if (!sim || !mat) return null
     const sheet = mat.sheets[sim.si], geo = sheetGeo(order, mat.result, sheet)
     const ox = num(post.originX), oy = num(post.originY)
-    const outlines = sheet.placed.map(p => partFeatures(p, mat.details[p.detailIndex], mat.thickness).outline.map(([x, y]) => [ox + geo.marginL + p.x + x, oy + geo.marginB + p.y + y]))
+    const outlines = sheet.placed.map(p => partFeatures(p, mat.details[p.detailIndex], mat.thickness, skipOf(rview.ops)).outline.map(([x, y]) => [ox + geo.marginL + p.x + x, oy + geo.marginB + p.y + y]))
     return { sheet: { x: ox, y: oy, w: geo.sheetW, l: geo.sheetL }, outlines }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sim])
