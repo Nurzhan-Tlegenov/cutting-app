@@ -125,7 +125,7 @@ export default function BottomNav() {
   return (
     <>
     <NavDrawer notices={notices} unread={unread} />
-    <PushAsk />
+    {pathname !== '/notices' && pathname !== '/profile' && <PushAsk />}
     {toast && (
       <div onClick={() => { setToast(null); navigate(toast.more > 0 ? '/notices' : toast.to) }}
         style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top))', left: 10, right: 10, zIndex: 1200, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',

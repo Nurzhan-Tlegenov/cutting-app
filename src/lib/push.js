@@ -23,9 +23,12 @@ async function fn(body) {
     method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' },   // «простой» запрос — без задержки шлюза
     body: JSON.stringify({ ...body, jwt: session?.access_token || '' }),
   })
-  if (r.status === 404) return { error: 'Функция «push» не установлена в Supabase (Edge Functions)' }
+  if (r.status === 404) return { error: 'Функция «push» не найдена в Supabase → Edge Functions (имя должно быть ровно push)' }
   const data = await r.json().catch(() => null)
-  return data || { error: `Функция push ответила ${r.status}` }
+  if (r.status === 401) return { error: 'Функция push отвечает 401 — в её настройках выключите «Verify JWT» (как у tg-bot) и нажмите ещё раз' }
+  if (!data) return { error: `Функция push ответила ${r.status}` }
+  if (!data.error && !data.key && !data.ok) return { error: `Функция push ответила ${r.status}: ${String(data.message || data.msg || JSON.stringify(data)).slice(0, 160)}` }
+  return data
 }
 
 async function publicKey() {
