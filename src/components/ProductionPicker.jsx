@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import ProductionForm from './ProductionForm'
+import RefShare from './RefShare'
 import { countryCode, productionLabel } from '../lib/productionLabel'
 import { serviceBadges, missingServices } from '../lib/productionServices'
 
@@ -10,7 +11,6 @@ import { serviceBadges, missingServices } from '../lib/productionServices'
 //   • «Моего производства нет» — приглашение цеху в WhatsApp / Telegram; до его регистрации можно раскроить
 //     со своими параметрами (с пометкой, что производство может пересчитать).
 const APP_URL = 'https://raskroypro.com'
-const inviteText = name => `Здравствуйте!${name ? ` Это ${name}.` : ''} Хочу отправлять вам заказы на раскрой через приложение RaskroyPro — карты раскроя будут сразу с вашим резом и отступами. Зарегистрируйте, пожалуйста, своё производство: ${APP_URL}`
 
 export default function ProductionPicker({ productions, mine, lastId, profile, kerfOf, sheet, needs = {}, onPick, onSkip, onClose, onRegistered }) {
   const approved = useMemo(() => productions.filter(pr => (pr.status ?? 'approved') === 'approved' && pr.id !== mine?.id), [productions, mine])
@@ -60,19 +60,13 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
   )
   const link = { width: '100%', marginTop: 8, padding: 10, border: '0.5px solid var(--blue-mid, var(--border-md))', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--blue)', fontSize: 14, cursor: 'pointer' }
   const chip = on => ({ padding: '4px 10px', borderRadius: 14, fontSize: 12, cursor: 'pointer', border: on ? 'none' : '0.5px solid var(--border-md)', background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text-muted)' })
-  const text = inviteText(String(profile?.full_name || '').trim())
-  const shareRow = (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-      <a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" className="btn-primary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', background: '#25D366', padding: '8px 6px' }}>WhatsApp</a>
-      <a href={`https://t.me/share/url?url=${encodeURIComponent(APP_URL)}&text=${encodeURIComponent(text.replace(' ' + APP_URL, ''))}`} target="_blank" rel="noreferrer" className="btn-primary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', background: '#229ED9', padding: '8px 6px' }}>Telegram</a>
-      {typeof navigator.share === 'function' && <button type="button" className="btn-secondary" style={{ flex: 1, padding: '8px 6px' }} onClick={() => navigator.share({ title: 'RaskroyPro', text }).catch(() => {})}>Ещё…</button>}
-    </div>
-  )
+  // личная ссылка-приглашение: производство регистрируется по ней без ожидания подтверждения (до миграции — общий адрес)
+  const shareRow = <RefShare kind="production" name={String(profile?.full_name || '').trim()} compact fallback={APP_URL} />
   // приглашение цеха — на виду: сверху, если в городе клиента производств нет, иначе под списком
   const inviteCard = (
     <div style={{ background: 'var(--bg)', border: '1px dashed var(--blue)', borderRadius: 'var(--radius)', padding: '10px 12px', margin: '4px 0 10px' }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{nearby ? 'Режете в другом месте?' : 'Пригласите своё производство'}</div>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Отправьте цеху, где вы режете, ссылку на приложение. Когда он зарегистрируется, он появится в этом списке.</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Отправьте цеху, где вы режете, свою ссылку. По ней он зарегистрируется без ожидания подтверждения и сразу появится в этом списке.</div>
       {shareRow}
     </div>
   )
@@ -120,13 +114,8 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
         </>}
 
         {view === 'invite' && <>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>Отправьте приглашение цеху, где вы режете. Когда он зарегистрируется и мы его подтвердим, он появится в этом списке.</p>
-          <div style={{ fontSize: 13, background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 8 }}>{text}</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" className="btn-primary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', background: '#25D366' }}>WhatsApp</a>
-            <a href={`https://t.me/share/url?url=${encodeURIComponent(APP_URL)}&text=${encodeURIComponent(text.replace(' ' + APP_URL, ''))}`} target="_blank" rel="noreferrer" className="btn-primary" style={{ flex: 1, textAlign: 'center', textDecoration: 'none', background: '#229ED9' }}>Telegram</a>
-            {typeof navigator.share === 'function' && <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={() => navigator.share({ title: 'RaskroyPro', text }).catch(() => {})}>Ещё…</button>}
-          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>Отправьте приглашение цеху, где вы режете. По вашей ссылке он зарегистрируется без ожидания подтверждения и сразу появится в этом списке.</p>
+          <RefShare kind="production" name={String(profile?.full_name || '').trim()} fallback={APP_URL} />
           <button type="button" style={{ ...link, color: 'var(--text-muted)', borderColor: 'var(--border-md)', marginTop: 14 }} onClick={onSkip}>Пока раскроить со своими параметрами</button>
           <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Рез и отступы — как в заказе сейчас. Когда выберете производство, раскрой, возможно, придётся пересчитать под его рез.</p>
         </>}

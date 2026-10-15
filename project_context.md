@@ -723,3 +723,9 @@ git push
 - Россия: адреса Vercel и Supabase из России без VPN заблокированы (окт. 2026). Зеркало ru.raskroypro.com — сервер-посредник
   (deploy/mirror-setup.sh: nginx, / → cutting-app-nine.vercel.app с заголовком x-raskroy-mirror, /sb/ → Supabase).
   src/lib/supabase.js на хосте ru.* ходит в базу через ${origin}/sb; vercel.json не переадресует vercel.app при этом заголовке
+
+## Пригласительные ссылки (migration_ref_links.sql)
+- `/r/<код>` — личная ссылка: производство → клиентам (kind client), любой → производству (kind production). Меню: «Пригласить клиентов» / «Пригласить производство» → `/invite`
+- По ссылке заявка сразу одобрена (`request_signup_ref`), нужно только подтвердить номер: Telegram — бот шлёт код сам; WhatsApp — код отправляет пригласивший со страницы `/invite` (`ref_send_code`)
+- kind client: у клиента lastProductionId = производство пригласившего; kind production: `register_production` подтверждает сразу (`ref_production_ok`), уже существующий аккаунт — `accept_ref` (ждущее производство подтверждается)
+- Мастер видит в заявках «по ссылке от …»; отклонённую мастером заявку ссылка не обходит

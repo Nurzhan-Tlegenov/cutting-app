@@ -6,6 +6,7 @@ import { PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, forma
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { pendingInvite } from '../lib/workplaces'
+import { pendingRef, savePendingRef, clearPendingRef, refInfo, requestSignupRef } from '../lib/refLinks'
 
 const COUNTRIES = ['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан']
 
@@ -26,7 +27,18 @@ export default function AuthPage() {
   // ссылка из сообщения с кодом (бот / WhatsApp): /auth?code=123456&tel=77011234567 — сразу экран «У меня есть код»
   const linkCode = (() => { try { return new URLSearchParams(window.location.search).get('code') || '' } catch { return '' } })()
   const linkTel = (() => { try { return (new URLSearchParams(window.location.search).get('tel') || '').replace(/\D/g, '') } catch { return '' } })()
-  const [mode, setMode] = useState(linkCode ? 'code' : 'login')
+  const qs = (() => { try { return new URLSearchParams(window.location.search) } catch { return new URLSearchParams() } })()
+  // пригласительная ссылка (/r/код → «Зарегистрироваться», или код от пригласившего в WhatsApp с &r=код)
+  const [refCode] = useState(() => { const r = (qs.get('r') || '').replace(/[^0-9a-f]/gi, ''); if (r) savePendingRef(r); return r || pendingRef() })
+  const [refI, setRefI] = useState(null)   // { kind, inviter, production_name } — действующая ссылка
+  useEffect(() => {
+    if (!refCode) return
+    let alive = true
+    refInfo(refCode).then(r => { if (!alive) return; if (r.data) setRefI(r.data); else if (!r.error) clearPendingRef() })
+    return () => { alive = false }
+  }, [refCode])
+  const refBy = refI ? (refI.kind === 'client' ? refI.production_name : refI.inviter) || '' : ''
+  const [mode, setMode] = useState(linkCode ? 'code' : qs.get('reg') ? 'register' : 'login')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { signIn, signUp } = useAuth()
@@ -116,17 +128,20 @@ export default function AuthPage() {
         if (!invite && form.country.trim().length < 2) throw new Error('Укажите страну')
         if (!invite && form.city.trim().length < 2) throw new Error('Укажите город')
         if (byRequest) {
-          const r = await requestSignup2(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), messenger)
+          let r = refI ? await requestSignupRef(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), messenger, refCode) : null
+          if (!r || r.missing) r = await requestSignup2(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), messenger)
           if (r.error) throw new Error(r.error)
+          const byRef = r.ref === 'ok'
           setReq(r)
           const tgMode = r.messenger === 'telegram'
           if (r.registered) setError('Этот номер уже зарегистрирован — войдите на вкладке «Вход».')
           else if (r.status === 'open' || (r.status === 'approved' && r.legacy)) { setApproved(true); setNote('Остался один шаг: придумайте пароль и нажмите «Зарегистрироваться».') }
           else if (r.status === 'approved') {
             setApproved(true)
-            const pre = r.auto ? '' : 'Заявка одобрена. '   // открытая регистрация — одобрять нечего, сразу подтверждение номера
-            setNote(r.code_issued ? `${pre}Введите код из ${tgMode && r.verified ? 'Telegram' : 'сообщения'} и придумайте пароль.`
+            const pre = r.auto || byRef ? '' : 'Заявка одобрена. '   // открытая регистрация или ссылка-приглашение — одобрять нечего, сразу подтверждение номера
+            setNote(r.code_issued || (byRef && tgMode && r.verified) ? `${pre}Введите код из ${tgMode && r.verified ? 'Telegram' : 'сообщения'} и придумайте пароль.`
               : tgMode && !r.verified ? `${pre}Подтвердите номер в Telegram: нажмите кнопку ниже, затем «Поделиться номером» — бот сразу пришлёт код.`
+              : byRef ? `Код пришлёт в WhatsApp ${r.inviter || 'тот, кто вас пригласил'} — ему уже пришло уведомление. Введите код ниже и придумайте пароль.`
               : `${pre}Код ещё не отправлен — дождитесь сообщения от администратора.`)
           }
           else if (r.status === 'rejected') setError(
@@ -159,9 +174,9 @@ export default function AuthPage() {
           contact_email: form.email,
           invite
         })
-        if (offerLangFrom([form.full_name, form.country, form.city].join(' '), '/')) return
+        if (offerLangFrom([form.full_name, form.country, form.city].join(' '), pendingRef() ? `/r/${pendingRef()}` : '/')) return
       }
-      navigate('/')
+      navigate(pendingRef() ? `/r/${pendingRef()}` : '/')
     } catch (err) {
       const msg = err.message
       if (msg.includes('Invalid login')) setError('Неверный телефон или пароль. Если вашу заявку одобрили и пришёл код, а пароль вы ещё не задавали — нажмите «У меня есть код».')
@@ -179,7 +194,7 @@ export default function AuthPage() {
       <div style={{ marginBottom: 32, textAlign: 'center' }}>
         <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--blue)', marginBottom: 4 }}>РаскройPro</div>
         <div style={{ color: 'var(--text-muted)', fontSize: 14 }}>
-          {mode === 'code' ? 'Завершение регистрации' : mode === 'forgot' ? 'Восстановление пароля' : mode === 'login' ? 'Войдите в личный кабинет' : byRequest && !open ? 'Регистрация по заявке' : 'Создайте аккаунт'}
+          {mode === 'code' ? 'Завершение регистрации' : mode === 'forgot' ? 'Восстановление пароля' : mode === 'login' ? 'Войдите в личный кабинет' : byRequest && !open && !refI ? 'Регистрация по заявке' : 'Создайте аккаунт'}
         </div>
       </div>
 
@@ -198,6 +213,14 @@ export default function AuthPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {refI && mode !== 'login' && mode !== 'forgot' && (
+              <div style={{ border: '1px solid var(--teal)', borderRadius: 'var(--radius)', padding: '10px 12px', background: 'var(--bg2)' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--teal)' }}>Приглашение{refBy ? ` от «${refBy}»` : ''}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Регистрация без ожидания одобрения — нужно только подтвердить номер телефона{refI.kind === 'production' ? '. Ваше производство подтвердится сразу' : ''}.
+                </div>
+              </div>
+            )}
             {/* пришёл код в Telegram / WhatsApp — сразу сюда, без повторной заявки */}
             {(mode === 'login' || (mode === 'register' && !approved && !invite)) && (
               <div style={{ border: '1px solid var(--blue)', borderRadius: 'var(--radius)', padding: '10px 12px', background: 'var(--blue-light, var(--bg2))' }}>
@@ -215,7 +238,9 @@ export default function AuthPage() {
             )}
             {byRequest && (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
-                {open
+                {refI
+                  ? <>Подтвердим номер телефона: через Telegram — сразу, в один тап; через WhatsApp — код пришлёт {refBy ? `«${refBy}»` : 'тот, кто вас пригласил'}. Потом — пароль.</>
+                  : open
                   ? <>Сначала подтвердим номер телефона: через Telegram — сразу, в один тап; через WhatsApp — код пришлёт администратор. Потом — пароль.</>
                   : <>Регистрация сейчас по запросу. <b>Заявка уже одобрена?</b> Введите имя и тот же номер телефона, нажмите «Продолжить» — и откроется ввод кода и пароля.
                     Заявки ещё не было — она отправится этим же шагом, и мы с вами свяжемся.</>}
@@ -268,7 +293,7 @@ export default function AuthPage() {
                 </div>
               </div>
             )}
-            {byRequest && !open && (
+            {byRequest && !open && !refI && (
               <div>
                 <label className="label">Комментарий (кто вы, чем занимаетесь)</label>
                 <input type="text" placeholder="Мебельный цех, город…" value={form.comment}
@@ -279,7 +304,7 @@ export default function AuthPage() {
               <div>
                 <label className="label">Куда прислать код подтверждения</label>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  {[['telegram', 'Telegram', open ? 'сразу — номер подтверждается в 1 тап, код приходит сам' : 'быстро — номер подтверждается в 1 тап, код приходит сам'], ['whatsapp', 'WhatsApp', open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения']].map(([k, title, sub]) => (
+                  {[['telegram', 'Telegram', open ? 'сразу — номер подтверждается в 1 тап, код приходит сам' : 'быстро — номер подтверждается в 1 тап, код приходит сам'], ['whatsapp', 'WhatsApp', refI ? 'код пришлёт тот, кто вас пригласил' : open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения']].map(([k, title, sub]) => (
                     <button key={k} type="button" onClick={() => setMessenger(k)}
                       style={{ flex: 1, textAlign: 'left', padding: '10px 10px 8px', borderRadius: 'var(--radius)', cursor: 'pointer', position: 'relative',
                         border: messenger === k ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)', background: messenger === k ? 'var(--blue-light, var(--bg2))' : 'transparent' }}>

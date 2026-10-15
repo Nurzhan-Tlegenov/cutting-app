@@ -37,10 +37,13 @@ import MessagesPage from './pages/MessagesPage'
 import NoticesPage from './pages/NoticesPage'
 import ScanPage from './pages/ScanPage'
 import JoinPage from './pages/JoinPage'
+import RefPage from './pages/RefPage'
+import InvitePage from './pages/InvitePage'
 import PostPage from './pages/PostPage'
 import HelpPage from './pages/HelpPage'
 import TourOverlay from './components/TourOverlay'
 import { pendingInvite } from './lib/workplaces'
+import { pendingRef } from './lib/refLinks'
 import CncLoader from './components/CncLoader'
 import Watermark from './components/Watermark'
 import { resolveGo } from './lib/noticeNav'
@@ -94,8 +97,10 @@ function AppRoutes() {
       <Route path="/v/:code" element={<SharedModelPage />} />
       {/* симуляция обработки листа по ссылке — без входа */}
       <Route path="/s/:code" element={<SharedSimPage />} />
-      <Route path="/auth" element={user ? <Navigate to={pendingInvite() ? `/join/${pendingInvite()}` : (afterLogin() || home)} /> : <AuthPage />} />
+      <Route path="/auth" element={user ? <Navigate to={pendingInvite() ? `/join/${pendingInvite()}` : pendingRef() ? `/r/${pendingRef()}` : (afterLogin() || home)} /> : <AuthPage />} />
       <Route path="/join/:code" element={<JoinPage />} />
+      <Route path="/r/:code" element={<RefPage />} />
+      <Route path="/invite" element={<ProtectedRoute><InvitePage /></ProtectedRoute>} />
       <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
       <Route path="/orders/new" element={<ProtectedRoute><NewOrderPage /></ProtectedRoute>} />
       <Route path="/orders/:id" element={<ProtectedRoute><OrderPage /></ProtectedRoute>} />

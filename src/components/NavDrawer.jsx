@@ -41,7 +41,7 @@ const setTabKey = (key, v) => { try { sessionStorage.setItem(`keep:/production#$
 export default function NavDrawer({ notices, unread }) {
   const { user, profile, cabinet, setCabinet, isMaster } = useAuth()
   const navigate = useNavigate()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   const [open, setOpen] = useState(false)
   const [drag, setDrag] = useState(null)               // px, насколько панель выдвинута, пока её ведёт палец
   const [data, setData] = useState(cache)
@@ -175,6 +175,7 @@ export default function NavDrawer({ notices, unread }) {
         { icon: I.orders, label: 'Заказы', badge: n.ownNew || 0, on: isOwn('orders'), act: () => goOwn('orders') },
         { icon: I.board, label: 'Техпроцесс', badge: ownPosts, on: isOwn('board'), act: () => goOwn('board') },
         { icon: I.gear, label: 'Настройки', on: isOwn('settings'), act: () => goOwn('settings') },
+        { icon: I.share, label: 'Пригласить клиентов', on: pathname === '/invite' && search !== '?k=production', act: () => go('/invite?k=client') },
       ] }
     : { id: 'own', icon: I.factory, title: own ? own.name || 'Производство' : wps.length ? 'Своё производство' : 'Производство', sub: own ? 'Ждёт подтверждения' : 'Ещё не создано', items: [
         { icon: own ? I.factory : I.plus, label: own ? 'Открыть' : wps.length ? 'Создать своё производство' : 'Зарегистрировать производство', on: onProd && !workView, act: () => goOwn(null) },
@@ -195,6 +196,7 @@ export default function NavDrawer({ notices, unread }) {
     { icon: I.msg, label: 'Уведомления', badge: fresh.length, on: pathname === '/notices', act: () => go('/notices') },
     { icon: I.scan, label: 'Сканер бирки', on: pathname === '/scan', act: () => go('/scan') },
     { icon: I.msg, label: 'Сообщения', badge: unread || 0, on: pathname === '/messages', act: () => go('/messages') },
+    { icon: I.share, label: ownOk ? 'Пригласить производство' : 'Пригласить своё производство', on: pathname === '/invite' && (!ownOk || search === '?k=production'), act: () => go('/invite?k=production') },
     { icon: I.user, label: 'Профиль', badge: 0, on: pathname === '/profile', act: () => go('/profile') },
   ] }
   sections.push(common)
