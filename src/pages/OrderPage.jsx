@@ -213,7 +213,7 @@ export default function OrderPage() {
         <button onClick={() => navigate(`/orders/${id}/nesting`)} style={{ ...actBtn(true), width: '100%', marginBottom: 16 }}>▶ Выполнить раскрой</button>
       )}
       {nest && (
-        <div style={{ marginBottom: 16 }}>
+        <div data-tour="order-maps" style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6 }}>
             <p className="section-title" style={{ marginBottom: 0 }}>Карты раскроя · листов {nest.sheets.length}<span style={{ display: 'block', textTransform: 'none', fontSize: 14, fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>{nest.label}</span></p>
             {nestings.length > 1 && (
@@ -229,7 +229,7 @@ export default function OrderPage() {
           {order.status !== 'draft' && (
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button onClick={() => navigate(`/orders/${id}/nesting`)} style={actBtn(false)}>{canProduce ? 'Открыть / перекроить' : 'Открыть раскрой'}</button>
-              {canCnc && <button onClick={() => navigate(`/orders/${id}/cnc`)} style={actBtn(true)}>ЧПУ</button>}
+              {canCnc && <button data-tour="order-cnc" onClick={() => navigate(`/orders/${id}/cnc`)} style={actBtn(true)}>ЧПУ</button>}
               {canLabels && <button onClick={() => navigate(`/orders/${id}/labels`)} style={actBtn(false)}>Бирки</button>}
             </div>
           )}

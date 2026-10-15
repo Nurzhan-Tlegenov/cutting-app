@@ -114,7 +114,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
         {/* Номер + кнопка контура */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>#{index + 1}</div>
-          <button type="button" onClick={() => setShowContour(v => !v)}
+          <button type="button" data-tour="det-contour" onClick={() => setShowContour(v => !v)}
             title="Редактор контура"
             style={{ background: hasContour ? 'var(--teal-light)' : 'var(--bg2)',
               border: `0.5px solid ${hasContour ? 'var(--teal)' : 'var(--border-md)'}`,
@@ -134,7 +134,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
         </div>
 
         {/* Размеры */}
-        <div style={{ display: 'flex', gap: 3, flex: 1 }}>
+        <div data-tour="det-size" style={{ display: 'flex', gap: 3, flex: 1 }}>
           <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} onEnter={() => widthRef.current?.focus()} hint="next" />
           <NumInput value={detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: v })} inputRef={widthRef} onEnter={() => qtyRef.current?.focus()} hint="next" />
           <div style={{ width: 56, flexShrink: 0 }}>
@@ -562,7 +562,7 @@ export default function NewOrderPage() {
         <button type="button" onClick={() => navigate('/orders')}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
         <h1 style={{ fontSize: 18, fontWeight: 500, flex:1 }}>Новый заказ</h1>
-        <button type="button" className="btn-primary" onClick={handleSave}
+        <button type="button" data-tour="order-save" className="btn-primary" onClick={handleSave}
           disabled={saving || !validCount}
           style={{ padding:'7px 16px', fontSize:13, whiteSpace:'nowrap' }}>
           {saving ? 'Сохранение...' : `Сохранить заказ (${validCount} дет.)`}
@@ -571,7 +571,7 @@ export default function NewOrderPage() {
 
       {/* Название + материал компактно */}
       <div style={{ marginBottom: 10 }}>
-        <div className="card" style={{ padding: '8px 12px' }}>
+        <div className="card" data-tour="order-head" style={{ padding: '8px 12px' }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
               <label className="label">Название заказа</label>
@@ -615,7 +615,7 @@ export default function NewOrderPage() {
       </div>
 
       <div style={{ marginBottom: 10 }}>
-        <div className="card" style={{ padding: '8px 12px' }}>
+        <div className="card" data-tour="order-edges" style={{ padding: '8px 12px' }}>
           <details>
             <summary style={{ fontSize: 12, color: 'var(--text-hint)', cursor: 'pointer', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>
@@ -634,9 +634,11 @@ export default function NewOrderPage() {
       </div>
 
       {/* Импорт */}
+      <div data-tour="order-import">
       <ImportDetails
         hasDetails={details.some(d => Number(d.w) > 0 || Number(d.h) > 0)}
         onImport={handleImport} />
+      </div>
 
       {/* Детали */}
       <div style={{ marginBottom: 14 }}>
@@ -654,7 +656,7 @@ export default function NewOrderPage() {
             <option value="">Сортировать…</option>
             {SORT_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
-          <button type="button" onClick={() => setShowEdge(v => !v)}
+          <button type="button" data-tour="det-edge" onClick={() => setShowEdge(v => !v)}
             style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: '0.5px solid var(--blue-mid)', borderRadius: 20, padding: '3px 10px', cursor: 'pointer' }}>
             {showEdge ? 'Скрыть кромку' : 'Показать кромку'}
           </button>

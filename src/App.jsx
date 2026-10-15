@@ -38,6 +38,8 @@ import NoticesPage from './pages/NoticesPage'
 import ScanPage from './pages/ScanPage'
 import JoinPage from './pages/JoinPage'
 import PostPage from './pages/PostPage'
+import HelpPage from './pages/HelpPage'
+import TourOverlay from './components/TourOverlay'
 import { pendingInvite } from './lib/workplaces'
 import CncLoader from './components/CncLoader'
 import Watermark from './components/Watermark'
@@ -109,6 +111,7 @@ function AppRoutes() {
       <Route path="/notices" element={<ProtectedRoute><NoticesPage /></ProtectedRoute>} />
       <Route path="/go" element={<ProtectedRoute><GoPage /></ProtectedRoute>} />
       <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
+      <Route path="/help" element={<ProtectedRoute><HelpPage /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
       {/* рабочий пост по ссылке — окно одного поста (настольный компьютер со сканером); видят только свои */}
       <Route path="/post/:id" element={<ProtectedRoute><PostPage /></ProtectedRoute>} />
@@ -126,6 +129,7 @@ export default function App() {
           <PushBridge />
           <KeyboardNext />
           <Watermark />
+          <TourOverlay />
         </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>

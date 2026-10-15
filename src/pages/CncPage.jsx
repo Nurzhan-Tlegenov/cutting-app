@@ -270,7 +270,7 @@ export default function CncPage() {
         {order && <div style={{ display: 'flex', gap: 4, flex: '0 0 auto' }}>{orderMarks(order).map(m => <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>)}</div>}
         <button type="button" onClick={toOrders} style={{ flex: '0 0 auto', padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
       </div>
-      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 2 }}>
+      <div data-tour="cnc-tabs" style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 12, paddingBottom: 2 }}>
         {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} style={chip(tab === k)}>{l}{k === 'ops' && pre.length ? ' ⚠' : ''}</button>)}
       </div>
 
@@ -287,7 +287,7 @@ export default function CncPage() {
               </select>
             </div>
           )}
-          <div className="card" style={{ marginBottom: 10, padding: '10px 12px' }}>
+          <div className="card" data-tour="cnc-post" style={{ marginBottom: 10, padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)' }}>
                 <div>Постпроцессор: <b style={{ color: 'var(--text)' }}>{post.name}</b></div>
@@ -342,7 +342,7 @@ export default function CncPage() {
               <button type="button" style={{ ...small, marginTop: 6 }} onClick={() => setTab((cnc.tools || []).length ? 'ops' : 'tools')}>{(cnc.tools || []).length ? 'Назначить' : 'Создать инструменты'}</button>
             </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+          <div data-tour="cnc-sheets" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
             <p className="section-title" style={{ marginBottom: 0, flex: 1 }}>Листы ({sel.length} из {mat.sheets.length})</p>
             <button type="button" style={{ ...small, marginRight: 6 }} title="Карты раскроя: листы с деталями, размерами и кромкой; на последней странице — статистика раскроя и стоимость работ (что выводить, выбираете сами)"
               onClick={() => setPdfAsk(true)}>PDF карт</button>
@@ -410,7 +410,7 @@ export default function CncPage() {
               <button type="button" className="btn-secondary" style={{ marginTop: 6 }} onClick={() => navigate(`/orders/${id}/nesting`)}>Открыть раскрой</button>
             </div>
           )}
-          <button className="btn-primary" disabled={!sel.length || faults.length > 0} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{built ? (drills.length || r2 ? '↻ Создать программы заново' : '↻ Создать G-код заново') : r2 ? `Создать программы (${post.name} + ${r2.name})` : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
+          <button data-tour="cnc-build" className="btn-primary" disabled={!sel.length || faults.length > 0} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{built ? (drills.length || r2 ? '↻ Создать программы заново' : '↻ Создать G-код заново') : r2 ? `Создать программы (${post.name} + ${r2.name})` : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
           {labelBusy && <CncLoader compact label="Рисуем бирки…" />}
           {built?.labels?.length > 0 && (
             <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
@@ -446,7 +446,7 @@ export default function CncPage() {
           ))}
           {built && allCount() > 1 && (
             <>
-              <button className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({allCount()})</button>
+              <button data-tour="cnc-save" className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({allCount()})</button>
               {((built.drill || []).some(r => r.files.length) || built.second) && (
                 <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                   Папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}{built.second && <span>; <b style={{ fontFamily: 'monospace' }}>{pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`).join('/')}</b> — {built.second.post.name}</span>}

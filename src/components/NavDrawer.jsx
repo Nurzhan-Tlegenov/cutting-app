@@ -263,6 +263,16 @@ export default function NavDrawer({ notices, unread }) {
             )
           })}
         </div>
+        {/* внизу меню — обучение: интерактивные туры для клиента и производства */}
+        <div style={{ padding: '6px 10px 10px', borderTop: '0.5px solid var(--border)', opacity: k }}>
+          <button type="button" onClick={() => go('/help')} className="nav-item"
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, border: 'none', textAlign: 'left', cursor: 'pointer',
+              background: pathname === '/help' ? 'var(--blue-light)' : 'transparent', color: pathname === '/help' ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: pathname === '/help' ? 600 : 400 }}>
+            <span style={{ width: 22, height: 22, borderRadius: 11, border: '1.6px solid currentColor', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>?</span>
+            <span style={{ flex: 1 }}>Обучение</span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>туры по приложению</span>
+          </button>
+        </div>
       </nav>
     </div>,
     document.body,

@@ -2705,7 +2705,7 @@ export default function NestingPage() {
     const persist = patch => saveSmallPartsSettings(patch)
 
     return (
-      <div key={cfg.id} className="card"
+      <div key={cfg.id} className="card" data-tour={idx === 0 ? 'nest-cfg' : undefined}
         style={{ marginBottom: 8, padding: 0, overflow: 'hidden', border: idx === bestIdx ? '1px solid var(--teal)' : undefined }}>
         {/* Заголовок — виден всегда, по нажатию раскрывает конфигурацию */}
         <div onClick={() => { updateCfg(cfg.id, { open: !cfg.open }); if (!cfg.open && cfg.result) setFocusId(cfg.id) }}
@@ -3190,7 +3190,7 @@ export default function NestingPage() {
                         ⬇ DXF
                       </button>}
                       {/* исполненный заказ клиента не перезаписывается: перекроенный вариант уходит копией («Отправить повторно») */}
-                      {!(cabinet !== 'production' && order.status === 'done' && order.user_id === user?.id) && <button onClick={() => chooseCfg(cfg)} disabled={blocked || cfg.saved}
+                      {!(cabinet !== 'production' && order.status === 'done' && order.user_id === user?.id) && <button data-tour="nest-pick" onClick={() => chooseCfg(cfg)} disabled={blocked || cfg.saved}
                         title="Сохранить этот раскрой за заказом (заказ при этом не отправляется); остальные варианты остаются на экране"
                         style={{ flex: 1, padding: 9, borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500,
                           cursor: (blocked || cfg.saved) ? 'default' : 'pointer',
@@ -3228,7 +3228,7 @@ export default function NestingPage() {
                       </>) :
                       // «Выбрать» только сохраняет раскладку за заказом. Отправка — отдельным действием и только у выбранного варианта
                       !cfg.saved ? null :
-                      <button onClick={() => { if (multiMat || window.confirm('Отправить заказ на производство?\n\nПока производство не приняло заказ, его можно отозвать кнопкой «Редактировать».')) submitOrder(cfg) }} disabled={blocked}
+                      <button data-tour="nest-send" onClick={() => { if (multiMat || window.confirm('Отправить заказ на производство?\n\nПока производство не приняло заказ, его можно отозвать кнопкой «Редактировать».')) submitOrder(cfg) }} disabled={blocked}
                         title={multiMat ? 'Материалы с выбранным раскроем уходят на производство отдельными заявками — по одной на материал' : 'Отправить заказ с выбранным раскроем на производство'}
                         style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
                           borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>
@@ -3271,7 +3271,7 @@ export default function NestingPage() {
       )}
 
       {/* Статистика */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: focus && configs.length > 1 ? 3 : 8 }}>
+      <div data-tour="nest-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: focus && configs.length > 1 ? 3 : 8 }}>
         {[[offcutCount ? 'Листов + обр.' : 'Листов', sheetsData.length ? (offcutCount ? `${sheetsCount}+${offcutCount}` : sheetsCount) : '—'],['Деталей', totalQty],['Кромка, м', totalEdge.toFixed(2)],['Площадь, м²', totalArea ? totalArea.toFixed(2) : '—']].map(([label, val]) => (
           <div key={label} style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '5px 8px' }}>
             <div style={{ fontSize: 10, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{label}</div>
@@ -3323,7 +3323,7 @@ export default function NestingPage() {
         const summary = `${order.sheet_length}×${order.sheet_width} · рез ${order.kerf_width} · отступы ${order.margin_left}/${order.margin_right}/${order.margin_top}/${order.margin_bottom}`
           + (offN ? ` · обрезков ${offN}` : '') + (prod ? ` · ${prod.name}` : '')
         return (
-          <div className="card" style={{ marginBottom: 8, padding: 0, overflow: 'hidden' }}>
+          <div className="card" data-tour="nest-sheet" style={{ marginBottom: 8, padding: 0, overflow: 'hidden' }}>
             <div onClick={() => setSheetOpen(v => !v)}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', cursor: 'pointer' }}>
               <span style={{ fontSize: 12, color: 'var(--text-hint)', width: 12 }}>{sheetOpen ? '▼' : '▶'}</span>
@@ -3432,7 +3432,7 @@ export default function NestingPage() {
       )}
 
       {/* Тип станка — общий для всех конфигураций */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+      <div data-tour="nest-machine" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)']].map(([val, label]) => (
           <div key={val} onClick={() => { if (val === 'nesting' && order.material_kind === 'hdf') return; setCuttingMethod(val); saveSmallPartsSettings({ cutting_method: val }) }}
             title={val === 'nesting' && order.material_kind === 'hdf' ? 'Материал заказа — ХДФ / ДВП: он режется только на пиле' : val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
@@ -3458,7 +3458,7 @@ export default function NestingPage() {
             background: 'transparent', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer' }}>
           + Новая конфигурация
         </button>
-        <button onClick={runAll} disabled={anyRunning || !details.length}
+        <button data-tour="nest-run" onClick={runAll} disabled={anyRunning || !details.length}
           style={{ flex: 1, padding: 8, borderRadius: 'var(--radius)', border: 'none', fontSize: 13, fontWeight: 500,
             background: (anyRunning || !details.length) ? 'var(--bg2)' : 'var(--blue)',
             color: (anyRunning || !details.length) ? 'var(--text-hint)' : 'white',

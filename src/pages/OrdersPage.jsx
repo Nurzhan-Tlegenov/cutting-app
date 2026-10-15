@@ -159,7 +159,7 @@ export default function OrdersPage() {
         ) : (
           <>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Мои заказы</h1></span>
-            <button onClick={newOrder}
+            <button data-tour="orders-new" onClick={newOrder}
               style={{ background: 'var(--blue)', color: 'white', border: 'none',
                 borderRadius: 'var(--radius)', padding: '8px 16px', fontSize: 14, fontWeight: 500 }}>
               + Новый

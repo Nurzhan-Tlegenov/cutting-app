@@ -235,9 +235,9 @@ export default function ProductionPage() {
         <>
           {/* вкладки кабинета: заказы, техпроцесс (доска постов), настройки — небольшие, чтобы беречь экран телефона */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center' }}>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 4, background: 'var(--bg2)', borderRadius: 18, padding: 3 }}>
+          <div data-tour="prod-tabs" style={{ flex: 1, minWidth: 0, display: 'flex', gap: 4, background: 'var(--bg2)', borderRadius: 18, padding: 3 }}>
             {[['orders', `Заказы${count.all ? ` · ${count.all}` : ''}`], ['board', `Техпроцесс${Object.keys(stages).length ? ` · ${Object.keys(stages).length}` : ''}`], ['settings', '⚙ Настройки']].map(([k, l]) => (
-              <button key={k} type="button" onClick={() => setTab(k)}
+              <button key={k} type="button" data-tour={`prod-tab-${k}`} onClick={() => setTab(k)}
                 style={{ flex: 1, padding: '5px 6px', borderRadius: 15, border: 'none', fontSize: 12.5, fontWeight: tab === k ? 600 : 400, whiteSpace: 'nowrap',
                   background: tab === k ? 'var(--bg)' : 'transparent', color: tab === k ? 'var(--blue)' : 'var(--text-muted)', boxShadow: tab === k ? '0 1px 2px rgba(0,0,0,0.12)' : 'none' }}>{l}</button>
             ))}
@@ -252,7 +252,7 @@ export default function ProductionPage() {
             </div>
           ) : !setSec ? (
             // разделы настроек — кнопками-строками, как в боковом меню: значок, название, пояснение, ›
-            <div className="card" style={{ marginBottom: 12, padding: 4 }}>
+            <div className="card" data-tour="prod-settings" style={{ marginBottom: 12, padding: 4 }}>
               {settingsMenu.map(([id, icon, title, sub, cnt], i) => (
                 <button key={id} type="button" onClick={() => (id === 'prices' ? setPrices(true) : id === 'xml' ? setXmlView(true) : id === 'gsim' ? setGsim(true) : setSetSec(id))}
                   style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 10px', border: 'none', borderTop: i ? '0.5px solid var(--border)' : 'none',
@@ -342,11 +342,11 @@ export default function ProductionPage() {
           {orders.length > 0 && !('gcode_at' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{MARKS_SQL_HINT}</p>}
           {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {shown.map(o => {
+            {shown.map((o, oi) => {
               const tel = digits(o.client_phone), wa = digits(o.client_whatsapp) || tel
               const isOpen = open.has(o.id)
               return (
-                <div key={o.id} data-focus={o.id} className="card" style={{ padding: isOpen ? '8px 12px 10px' : '7px 12px' }}>
+                <div key={o.id} data-focus={o.id} data-tour={oi === 0 ? 'prod-order' : undefined} className="card" style={{ padding: isOpen ? '8px 12px 10px' : '7px 12px' }}>
                   {/* свёрнуто — только строка заказа со статусом и пометками; нажатие разворачивает: заказчик и действия */}
                   <div onClick={() => toggle(o.id)} style={{ cursor: 'pointer' }}>
                     {/* слева — заказ, справа — статус и под ним короткие пометки (G-код, Файлы): серые — не сделано, синие — сделано */}
@@ -393,7 +393,7 @@ export default function ProductionPage() {
                     {/* отменить своё «Принять»: пока ни один пост заказ не взял — заказ снова новый */}
                     {o.status === 'inwork' && (!stages[o.id] || (stages[o.id].status === 'queued' && !stages[o.id].done)) && <button type="button" disabled={busy === o.id} style={btn()}
                       onClick={() => { if (window.confirm(`Отменить принятие заказа «${orderTitle(o)}»?\nОн снова станет новой заявкой${stages[o.id] ? ', маршрут по постам сбросится' : ''}.`)) setStatus(o, 'new') }}>✕ Отменить принятие</button>}
-                    <button type="button" style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
+                    <button type="button" data-tour={oi === 0 ? 'prod-open' : undefined} style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
                     {!o.own && wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none', color: 'var(--teal)', borderColor: 'var(--teal)' }}>WhatsApp</a>}
                     {o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть на доработку</button>}
                   </div>
