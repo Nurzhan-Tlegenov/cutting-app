@@ -79,5 +79,13 @@ export function placedHoles(p, detail) {
   if (!holes.length) return []
   const W = Number(detail.width) || 0, H = Number(detail.length) || 0
   const t = placedTurns(p, detail)
-  return holes.map(poly => poly.map(pt => rotatePointTimes(pt.x, pt.y, W, H, t)))
+  const out = holes.map(poly => poly.map(pt => rotatePointTimes(pt.x, pt.y, W, H, t)))
+  return p?.box ? out.filter(hp => !edgeHole(hp, p)) : out
+}
+
+/** Вырез выходит на край детали (угловой, П-образный) — часть её наружного контура. У детали, уложенной
+ *  «по габаритам» (p.box), его нет: деталь — настоящий прямоугольник. */
+export function edgeHole(hp, p) {
+  const e = 0.3, w = Number(p.origX) || 0, h = Number(p.origY) || 0
+  return hp.some(q => q.x <= e || q.y <= e || q.x >= w - e || q.y >= h - e)
 }

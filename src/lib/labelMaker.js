@@ -12,7 +12,7 @@ import { getUserSettings, saveUserSettings } from './userSettings'
 import { loadLabelImages, saveLabelImage } from './materialTextures'
 import { detailMeta } from './partLabel'
 import { isTwoSided } from './partInfo'
-import { placedTurns, placedHoles } from './partHoles'
+import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
@@ -363,8 +363,9 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
   poly(outline.map(q => S(q[0], q[1]))); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); ctx.fillStyle = '#000'
   if (c) {
     // вырезы — сплошной линией с крестом (сквозные), выемки — штриховой
-    const holes = placedHoles(p, d), src = c.holes || []
+    const holes = placedHoles({ ...p, box: false }, d), src = c.holes || []
     holes.forEach((hp, i) => {
+      if (p.box && edgeHole(hp, p)) return          // «по габаритам»: угловых и краевых вырезов у детали нет
       const hole = src.length === holes.length ? src[i] : null
       if (hole?.type === 'pocket' && hole.face === 'back') return
       const pts = hp.map(q => S(q.x, q.y))
