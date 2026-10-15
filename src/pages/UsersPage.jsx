@@ -202,7 +202,10 @@ export default function UsersPage() {
             {!fresh.length && <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 8 }}>Новых заявок нет.</p>}
             {fresh.map(r => (
               <div key={r.id} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
-                <div style={{ fontSize: 14, fontWeight: 500 }}>{r.full_name || 'Без имени'}</div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{r.full_name || 'Без имени'}
+                  {r.resubmits > 0 && <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 9, fontSize: 10.5, fontWeight: 500, background: 'var(--amber-light)', color: 'var(--amber)' }}>повторная{r.resubmits > 1 ? ` ×${r.resubmits}` : ''}</span>}
+                </div>
+                {r.resubmits > 0 && r.rejected_name && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>отклонена с именем «{r.rejected_name}»</div>}
                 <div style={{ fontSize: 13 }}><a href={`tel:+${r.digits}`} style={{ color: 'var(--blue)' }}>{r.phone}</a> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· {date(r.created_at)}</span></div>
                 {(r.country || r.city) && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{[countryCode(r.country), r.city].filter(Boolean).join(' · ')}</div>}
                 {r.comment && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{r.comment}</div>}

@@ -9,6 +9,19 @@ import { pendingInvite } from '../lib/workplaces'
 
 const COUNTRIES = ['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан']
 
+// Имя и фамилия похожи на настоящие (как name_looks_real в migration_signup_resubmit.sql):
+// два слова от 2 букв, без цифр, «тест», «test» и одинаковых слов; одно слово — только у имён без латиницы и кириллицы
+function nameLooksReal(v) {
+  const s = String(v || '').trim().toLowerCase()
+  const w = s.split(/\s+/).filter(Boolean)
+  if (w.some(x => /^(тест|test|qwe|qwerty|asd|йцу|йцукен|фыв|xxx|ххх)$/.test(x.replace(/[\p{P}\p{S}]/gu, '')))) return false
+  if (w.some(x => /\d/.test(x))) return false
+  const n = w.filter(x => x.replace(/[\p{P}\p{S}]/gu, '').length >= 2).length
+  if (n < 2 && (n < 1 || /[a-zа-яё]/.test(s))) return false
+  if (w.length === 2 && w[0] === w[1]) return false
+  return true
+}
+
 export default function AuthPage() {
   // ссылка из сообщения с кодом (бот / WhatsApp): /auth?code=123456&tel=77011234567 — сразу экран «У меня есть код»
   const linkCode = (() => { try { return new URLSearchParams(window.location.search).get('code') || '' } catch { return '' } })()
@@ -97,6 +110,7 @@ export default function AuthPage() {
         await signIn(email, form.password)
       } else {
         if (!form.full_name.trim()) throw new Error('Введите имя и фамилию')
+        if (byRequest && !nameLooksReal(form.full_name)) throw new Error('Укажите настоящие имя и фамилию (например: Иван Петров) — заявки без имени не одобряются')
         setPhoneTouched(true)
         if (phoneErr) throw new Error(phoneErr)
         if (!invite && form.country.trim().length < 2) throw new Error('Укажите страну')
@@ -115,7 +129,13 @@ export default function AuthPage() {
               : tgMode && !r.verified ? `${pre}Подтвердите номер в Telegram: нажмите кнопку ниже, затем «Поделиться номером» — бот сразу пришлёт код.`
               : `${pre}Код ещё не отправлен — дождитесь сообщения от администратора.`)
           }
-          else if (r.status === 'rejected') setError('Заявка для этого номера отклонена. Свяжитесь с нами.')
+          else if (r.status === 'rejected') setError(
+            r.resubmit === 'same_name' ? 'Заявка для этого номера была отклонена. Чтобы подать её повторно, укажите настоящие имя и фамилию — не те, что в прошлой заявке.'
+            : r.resubmit === 'bad_name' ? 'Заявка для этого номера была отклонена. Укажите настоящие имя и фамилию и отправьте заявку ещё раз.'
+            : r.resubmit === 'limit' ? 'Заявка для этого номера отклонена несколько раз. Свяжитесь с нами.'
+            : 'Заявка для этого номера отклонена. Исправьте данные (имя и фамилия, страна, город) и отправьте заявку ещё раз.')
+          else if (r.resubmit === 'ok' && tgMode && r.verified) setNote('Повторная заявка отправлена, номер подтверждён ✓. Как только её одобрят, код для регистрации придёт в Telegram.')
+          else if (r.resubmit === 'ok' && !tgMode) setNote('Повторная заявка отправлена. После одобрения администратор пришлёт код в WhatsApp.')
           else if (tgMode && !r.verified) setNote('Заявка отправлена. Остался один шаг: подтвердите номер в Telegram — нажмите кнопку ниже, затем «Поделиться номером» в боте. Код для регистрации придёт туда же после одобрения.')
           else if (tgMode) setNote('Заявка отправлена, номер подтверждён ✓. Как только заявку одобрят, код для регистрации придёт в Telegram.')
           else setNote('Заявка отправлена. После одобрения администратор пришлёт код в WhatsApp — откройте «Регистрация», введите этот же номер и код.')
