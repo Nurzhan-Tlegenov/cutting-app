@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNoticeFocus } from '../lib/noticeNav'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { productionOrders, productionSetStatus, productionReturnOrder, orderMarks } from '../lib/productionApi'
 import { orderFaults, faultText } from '../lib/nestingCheck'
@@ -39,6 +40,7 @@ export default function WorkerProduction({ wps }) {
   const [wtab, setWtab] = useKeptState('wTab', 'posts')
   const loc = useLocation()
   useEffect(() => { const t = loc.state?.wtab; if (t) Promise.resolve().then(() => setWtab(t)) }, [loc.key])   // eslint-disable-line react-hooks/exhaustive-deps
+  useNoticeFocus(() => Promise.resolve().then(() => setFilter('new')))   // по уведомлению: новый заказ на посту — раздел «Новые», строка подсвечена
   const [tick, setTick] = useState(0)
   const [parts, setParts] = useKeptState('wParts', null)       // открыт список деталей поста: { stage, orderId } — после обновления страницы открыт снова
   const load = async () => {
@@ -144,7 +146,7 @@ export default function WorkerProduction({ wps }) {
             {queue.filter(q => q.post_id === postId).map(q => {
               const isNew = q.status === 'queued'
               return (
-                <div key={q.stage_id} className="card" style={{ padding: '9px 12px', border: isNew ? '1px solid var(--amber)' : undefined }}>
+                <div key={q.stage_id} data-focus={q.stage_id} className="card" style={{ padding: '9px 12px', border: isNew ? '1px solid var(--amber)' : undefined }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(q)}</div>

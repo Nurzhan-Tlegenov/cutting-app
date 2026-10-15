@@ -1,4 +1,5 @@
 import { MenuButton } from '../components/NavDrawer'
+import PushSettings from '../components/PushSettings'
 import { fetchNotices } from '../lib/notices'
 import LangPicker from '../components/LangPicker'
 import { useState, useEffect } from 'react'
@@ -179,6 +180,8 @@ export default function ProfilePage() {
         </div>
         </>}
       </div>
+
+      <PushSettings />
 
       {/* Кабинеты: клиент и производство — переключаются здесь */}
       <p className="section-title">Кабинет</p>

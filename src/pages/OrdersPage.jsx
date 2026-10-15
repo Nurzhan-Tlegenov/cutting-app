@@ -2,6 +2,7 @@ import { MenuButton } from '../components/NavDrawer'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useKeptState } from '../hooks/useKeptState'
 import { changedOrders, markOrdersSeen } from '../lib/notices'
+import { useNoticeFocus } from '../lib/noticeNav'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -44,6 +45,7 @@ export default function OrdersPage() {
   })), [orders])
 
   const [changed, setChanged] = useState(() => new Set())   // заказы, у которых сменился статус
+  useNoticeFocus()   // пришли по уведомлению — заказ подсвечен
   const [showArchive, setShowArchive] = useKeptState('archive', false)
   const [archBusy, setArchBusy] = useState('')
   const toArchive = async order => {
@@ -191,7 +193,7 @@ export default function OrdersPage() {
             {[...orders.filter(o => !o.archived_at), ...(showArchive ? orders.filter(o => o.archived_at) : [])].map(order => {
               const isSelected = selected.has(order.id)
               return (
-                <div key={order.id}
+                <div key={order.id} data-focus={order.id}
                   onClick={() => handleTap(order.id)}
                   onMouseDown={() => startHold(order.id)}
                   onMouseUp={() => cancelHold(order.id)}

@@ -28,6 +28,7 @@ import { planStages } from '../lib/posts'
 import { sendAppeal } from '../lib/messages'
 import { membersList, myWorkplaces, prodView, workPid } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
+import { flashFocus } from '../lib/noticeNav'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
 import Drill6Viewer from '../components/Drill6Viewer'
 import GcodeFileSim from '../components/GcodeFileSim'
@@ -70,6 +71,19 @@ export default function ProductionPage() {
   // переход из бокового меню: сразу нужная вкладка
   const loc = useLocation()
   useEffect(() => { const t = loc.state?.tab; if (t) Promise.resolve().then(() => setTab(t)) }, [loc.key])   // eslint-disable-line react-hooks/exhaustive-deps
+  // пришли по уведомлению о новой заявке: нужный раздел, карточка развёрнута и подсвечена
+  const [focusId, setFocusId] = useState(null)
+  useEffect(() => { const f = loc.state?.focus; if (f) Promise.resolve().then(() => setFocusId(f)) }, [loc.key])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const o = focusId && orders.find(x => x.id === focusId)
+    if (!o) return
+    Promise.resolve().then(() => {
+      setFilter(o.status === 'new' ? 'new' : o.status === 'done' ? 'done' : o.status === 'draft' ? 'all' : 'work')
+      setOpenIds(prev => (prev.includes(o.id) ? prev : [...prev, o.id]))
+      setFocusId(null)
+      flashFocus(o.id)
+    })
+  }, [focusId, orders])   // eslint-disable-line react-hooks/exhaustive-deps
   useBackClose(tab === 'settings' && !!setSec && !edit, () => setSetSec(null))   // «Назад» телефона — к списку разделов
   const [hasPosts, setHasPosts] = useState(false)       // есть посты — принятый, но не пущенный заказ помечается
   useEffect(() => { let alive = true; postsList().then(r => { if (alive) setHasPosts((r.data || []).some(p => p.active !== false)) }); return () => { alive = false } }, [])
@@ -332,7 +346,7 @@ export default function ProductionPage() {
               const tel = digits(o.client_phone), wa = digits(o.client_whatsapp) || tel
               const isOpen = open.has(o.id)
               return (
-                <div key={o.id} className="card" style={{ padding: isOpen ? '8px 12px 10px' : '7px 12px' }}>
+                <div key={o.id} data-focus={o.id} className="card" style={{ padding: isOpen ? '8px 12px 10px' : '7px 12px' }}>
                   {/* свёрнуто — только строка заказа со статусом и пометками; нажатие разворачивает: заказчик и действия */}
                   <div onClick={() => toggle(o.id)} style={{ cursor: 'pointer' }}>
                     {/* слева — заказ, справа — статус и под ним короткие пометки (G-код, Файлы): серые — не сделано, синие — сделано */}

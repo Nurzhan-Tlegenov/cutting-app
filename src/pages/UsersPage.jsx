@@ -8,6 +8,7 @@ import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
 import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
 import { countryCode } from '../lib/productionLabel'
+import { useNoticeFocus } from '../lib/noticeNav'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
@@ -51,6 +52,7 @@ export default function UsersPage() {
     setError(''); setReady(true); setUsers(u.data || []); setReqs(r.data || []); setOpen(o)
   }
   useEffect(() => { Promise.resolve().then(load) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
+  useNoticeFocus()   // пришли по уведомлению — нужная заявка подсвечена
 
   const act = async fn => { setBusy(true); const r = await fn(); setBusy(false); if (r?.error) setError(r.error); else await load() }
   const toggle = () => {
@@ -174,7 +176,7 @@ export default function UsersPage() {
                   const dead = r.status === 'issued' && (r.expired || r.attempts >= 5)
                   const msg = `Код для смены пароля в RaskroyPro: ${r.code}. Откройте вход → «Забыли пароль?», введите код и новый пароль.`
                   return (
-                    <div key={r.id} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
+                    <div key={r.id} data-focus={`pw:${r.id}`} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name || 'Без имени'}</span>
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.phone || '+' + r.digits}</span>
@@ -201,7 +203,7 @@ export default function UsersPage() {
           <div className="card" style={{ marginBottom: 12 }}>
             {!fresh.length && <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 8 }}>Новых заявок нет.</p>}
             {fresh.map(r => (
-              <div key={r.id} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
+              <div key={r.id} data-focus={`rq:${r.id}`} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
                 <div style={{ fontSize: 14, fontWeight: 500 }}>{r.full_name || 'Без имени'}
                   {r.resubmits > 0 && <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 9, fontSize: 10.5, fontWeight: 500, background: 'var(--amber-light)', color: 'var(--amber)' }}>повторная{r.resubmits > 1 ? ` ×${r.resubmits}` : ''}</span>}
                 </div>
@@ -261,7 +263,7 @@ export default function UsersPage() {
               <p className="section-title">Производства ждут подтверждения · {users.filter(u => u.production_status === 'pending').length}</p>
               <div className="card" style={{ marginBottom: 12, border: '1px solid var(--amber)' }}>
                 {users.filter(u => u.production_status === 'pending').map(u => (
-                  <div key={u.production_id} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
+                  <div key={u.production_id} data-focus={`pd:${u.production_id}`} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{u.production_name}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[u.production_country, u.production_city, u.production_phone].filter(Boolean).join(' · ') || 'страна не указана'}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Владелец: {u.full_name || 'без имени'}{u.phone ? ` · ${u.phone}` : ''}</div>

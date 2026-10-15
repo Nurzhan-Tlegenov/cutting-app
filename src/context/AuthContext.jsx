@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import { forgetPush } from '../lib/push'
 import { supabase } from '../lib/supabase'
 import { purgeArchived } from '../lib/orderArchive'
 
@@ -102,6 +103,7 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    await forgetPush()   // этот телефон больше не получает уведомления этого аккаунта
     await supabase.auth.signOut()
   }
 

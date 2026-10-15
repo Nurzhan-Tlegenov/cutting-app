@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Component } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Component, useEffect } from 'react'
 
 class ErrorBoundary extends Component {
   state = { error: null }
@@ -34,12 +34,38 @@ import ProductionPage from './pages/ProductionPage'
 import CncPage from './pages/CncPage'
 import LabelsPage from './pages/LabelsPage'
 import MessagesPage from './pages/MessagesPage'
+import NoticesPage from './pages/NoticesPage'
 import ScanPage from './pages/ScanPage'
 import JoinPage from './pages/JoinPage'
 import PostPage from './pages/PostPage'
 import { pendingInvite } from './lib/workplaces'
 import CncLoader from './components/CncLoader'
 import Watermark from './components/Watermark'
+import { resolveGo } from './lib/noticeNav'
+
+// Переход по уведомлению (/go?t=…&f=…): переключить кабинет и открыть нужную страницу с подсветкой строки
+function GoPage() {
+  const { setCabinet } = useAuth()
+  const loc = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => { const [to, state] = resolveGo(loc.search, setCabinet); navigate(to, { replace: true, state }) }, [loc.key])   // eslint-disable-line react-hooks/exhaustive-deps
+  return <CncLoader full label="Открываем…" />
+}
+
+// Нажали на push-уведомление, а приложение уже открыто — переходим в нём, без второй копии
+function PushBridge() {
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const on = e => {
+      if (e.data?.type === 'open-url') { const u = new URL(e.data.url, window.location.origin); navigate(u.pathname + u.search) }
+      if (e.data?.type === 'notices-refresh') window.dispatchEvent(new Event('notices-seen'))
+    }
+    navigator.serviceWorker.addEventListener('message', on)
+    return () => navigator.serviceWorker.removeEventListener('message', on)
+  }, [navigate])
+  return null
+}
 
 // Куда вернуться после входа: открыли ссылку (например, на рабочий пост) без входа — после входа попадаем туда же
 const AFTER_LOGIN = 'afterLogin'
@@ -80,6 +106,8 @@ function AppRoutes() {
       <Route path="/all-orders" element={<ProtectedRoute><AllOrdersPage /></ProtectedRoute>} />
       <Route path="/all-productions" element={<ProtectedRoute><AllProductionsPage /></ProtectedRoute>} />
       <Route path="/production" element={<ProtectedRoute><ProductionPage /></ProtectedRoute>} />
+      <Route path="/notices" element={<ProtectedRoute><NoticesPage /></ProtectedRoute>} />
+      <Route path="/go" element={<ProtectedRoute><GoPage /></ProtectedRoute>} />
       <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
       {/* рабочий пост по ссылке — окно одного поста (настольный компьютер со сканером); видят только свои */}
@@ -95,6 +123,7 @@ export default function App() {
       <AuthProvider>
         <ErrorBoundary>
           <AppRoutes />
+          <PushBridge />
           <KeyboardNext />
           <Watermark />
         </ErrorBoundary>

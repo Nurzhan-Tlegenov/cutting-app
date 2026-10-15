@@ -115,3 +115,10 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 .nav-item:active { transform: scale(.97); background-color: var(--bg2) !important; }
 
 @keyframes peek-in { from { opacity: 0; transform: scale(.92) } to { opacity: 1; transform: scale(1) } }
+
+/* переход по уведомлению: нужная строка мигает янтарной рамкой */
+@keyframes notice-flash {
+  0%, 55% { box-shadow: 0 0 0 3px var(--amber); background-color: var(--amber-light); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.notice-flash { animation: notice-flash 3s ease-out; border-radius: var(--radius); }

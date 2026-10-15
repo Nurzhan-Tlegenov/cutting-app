@@ -4,6 +4,39 @@ import { useAuth } from '../context/AuthContext'
 import { unreadCount } from '../lib/messages'
 import { fetchNotices } from '../lib/notices'
 import NavDrawer, { setMenuBadge } from './NavDrawer'
+import { pushStatus, enablePush, syncPush, playNoticeSound } from '../lib/push'
+
+// Предложение включить уведомления на телефоне: показывается, пока не включены; «Позже» — снова через неделю
+const ASK = 'pushAskLater'
+const askLater = () => { try { return Date.now() < Number(localStorage.getItem(ASK) || 0) } catch { return false } }
+function PushAsk() {
+  const [st, setSt] = useState(null)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { let alive = true; pushStatus().then(v => { if (alive) setSt(v) }); return () => { alive = false } }, [])
+  if (!(st === 'off' || st === 'ios-home') || askLater()) return null
+  const later = () => { try { localStorage.setItem(ASK, String(Date.now() + 7 * 864e5)) } catch { /* без памяти */ } setSt('later') }
+  const on = async () => { setMsg('Включаем…'); const r = await enablePush(); if (r.error) setMsg(r.error); else { setMsg(''); setSt('on') } }
+  return (
+    <div style={{ position: 'fixed', left: 10, right: 10, bottom: 'calc(66px + env(safe-area-inset-bottom))', zIndex: 101, background: 'var(--bg)', border: '1px solid var(--blue)', borderRadius: 12, boxShadow: '0 4px 16px rgba(0,0,0,.15)', padding: '10px 12px', fontSize: 13 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 18 }}>🔔</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b>Уведомления на телефон</b>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            {st === 'ios-home'
+              ? 'На iPhone: Поделиться → «На экран Домой», откройте RaskroyPro с экрана Домой и включите здесь — заявки и статусы будут приходить в шторку со звуком.'
+              : 'Новые заявки и статусы заказов будут приходить в шторку со звуком — даже когда приложение закрыто.'}
+          </div>
+          {msg && <div style={{ fontSize: 12, color: msg === 'Включаем…' ? 'var(--text-hint)' : 'var(--danger)', marginTop: 4 }}>{msg}</div>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 8, justifyContent: 'flex-end' }}>
+        <button type="button" onClick={later} style={{ padding: '6px 12px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text-muted)', fontSize: 13 }}>Позже</button>
+        {st === 'off' && <button type="button" onClick={on} style={{ padding: '6px 14px', borderRadius: 8, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 13, fontWeight: 500 }}>Включить</button>}
+      </div>
+    </div>
+  )
+}
 
 const IconOrders = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -56,6 +89,7 @@ export default function BottomNav() {
   const [notices, setNotices] = useState({ users: 0, production: 0, orders: 0, list: [] })
   const [toast, setToast] = useState(null)
   const known = useRef(null)                          // события, о которых уже сообщали
+  useEffect(() => { if (user?.id) syncPush() }, [user?.id])   // телефон с включёнными уведомлениями — за вошедшим аккаунтом
   useEffect(() => {
     if (!user?.id) return
     let alive = true, hide = null
@@ -70,6 +104,7 @@ export default function BottomNav() {
       if (fresh.length) {
         setToast({ ...fresh[0], more: fresh.length - 1 })
         try { navigator.vibrate?.(120) } catch { /* без вибрации */ }
+        playNoticeSound()
         clearTimeout(hide); hide = setTimeout(() => { if (alive) setToast(null) }, 9000)
       }
     }
@@ -90,12 +125,16 @@ export default function BottomNav() {
   return (
     <>
     <NavDrawer notices={notices} unread={unread} />
+    <PushAsk />
     {toast && (
-      <div onClick={() => { setToast(null); navigate(toast.to) }}
+      <div onClick={() => { setToast(null); navigate(toast.more > 0 ? '/notices' : toast.to) }}
         style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top))', left: 10, right: 10, zIndex: 1200, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
           background: 'var(--blue)', color: 'white', borderRadius: 12, boxShadow: '0 4px 16px rgba(0,0,0,.25)', cursor: 'pointer', fontSize: 13 }}>
         <span style={{ fontSize: 16 }}>🔔</span>
-        <span style={{ flex: 1, minWidth: 0 }}>{toast.text}{toast.more > 0 ? ` · и ещё ${toast.more}` : ''}</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: 'block' }}>{toast.text}</span>
+          <span style={{ display: 'block', fontSize: 11.5, opacity: 0.85, marginTop: 2 }}>{toast.more > 0 ? `и ещё ${toast.more} · нажмите — все новые` : `Нажмите → ${toast.where || 'открыть'}`}</span>
+        </span>
         <span onClick={e => { e.stopPropagation(); setToast(null) }} style={{ fontSize: 18, padding: '0 4px', opacity: 0.8 }}>×</span>
       </div>
     )}

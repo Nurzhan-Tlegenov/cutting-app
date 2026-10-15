@@ -185,7 +185,14 @@ export default function NavDrawer({ notices, unread }) {
   ] }
   // сотруднику — сначала рабочее место, потом клиент, потом своё производство; остальным — производство, клиент
   if (wps.length) sections.push(clientSec, prodSec); else sections.unshift(prodSec, clientSec)
+  // новые события — в самом верху: что случилось и куда ведёт, нажатие — сразу к нужной строке
+  const fresh = n.list || []
+  if (fresh.length) sections.unshift({ id: 'new', icon: I.msg, title: `Новое · ${fresh.length}`, badge: fresh.length, items: [
+    ...fresh.slice(0, 4).map(x => ({ key: x.key, icon: I.msg, label: x.text, sub: x.where ? '→ ' + x.where : '', hot: true, act: () => go(x.to) })),
+    ...(fresh.length > 4 ? [{ icon: I.msg, label: `Все уведомления (${fresh.length})`, act: () => go('/notices') }] : []),
+  ] })
   const common = { id: 'common', icon: I.user, title: 'Общее', items: [
+    { icon: I.msg, label: 'Уведомления', badge: fresh.length, on: pathname === '/notices', act: () => go('/notices') },
     { icon: I.scan, label: 'Сканер бирки', on: pathname === '/scan', act: () => go('/scan') },
     { icon: I.msg, label: 'Сообщения', badge: unread || 0, on: pathname === '/messages', act: () => go('/messages') },
     { icon: I.user, label: 'Профиль', badge: 0, on: pathname === '/profile', act: () => go('/profile') },
@@ -239,11 +246,14 @@ export default function NavDrawer({ notices, unread }) {
                 <div style={{ display: 'grid', gridTemplateRows: closed ? '0fr' : '1fr', transition: `grid-template-rows .34s ${EASE}` }}>
                   <div style={{ overflow: 'hidden' }}>
                     {s.items.map(it => (
-                      <button key={it.label} type="button" onClick={it.act} className="nav-item"
+                      <button key={it.key || it.label} type="button" onClick={it.act} className="nav-item"
                         style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', margin: '1px 0', borderRadius: 12, border: 'none', textAlign: 'left', cursor: 'pointer',
-                          background: it.on ? 'var(--blue-light)' : 'transparent', color: it.on ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: it.on ? 600 : 400 }}>
+                          background: it.on ? 'var(--blue-light)' : it.hot ? 'var(--amber-light)' : 'transparent', color: it.on ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: it.on ? 600 : 400 }}>
                         <Ico d={it.icon} />
-                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: it.sub ? 'normal' : 'nowrap', fontSize: it.sub ? 14 : undefined, fontWeight: it.hot ? 500 : undefined }}>{it.label}</span>
+                          {it.sub && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-hint)', fontWeight: 400, marginTop: 1 }}>{it.sub}</span>}
+                        </span>
                         {pill(it.badge)}
                       </button>
                     ))}
