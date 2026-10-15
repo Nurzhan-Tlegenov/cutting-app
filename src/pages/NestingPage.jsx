@@ -1473,6 +1473,17 @@ function smallDetailsOf(details, sq, side) {
   })
 }
 
+// «Мелкие — в центр» не применяется, если под пороги попадают все или почти все детали (от 80% штук):
+// правило «мелкие не у края» тогда держит у края весь заказ и ломает раскладку — например, «вдоль Y»
+// не получается (история 261015_002: все детали 330 мм при «узкая сторона до 350»)
+const SMALL_ALL_SHARE = 0.8
+function smallRuleOff(details, cfg) {
+  if (!cfg.small) return false
+  const total = details.reduce((a, d) => a + (Number(d.qty) || 1), 0)
+  const n = smallDetailsOf(details, cfg.sq, cfg.side).reduce((a, d) => a + (Number(d.qty) || 1), 0)
+  return total > 0 && n >= total * SMALL_ALL_SHARE
+}
+
 export default function NestingPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -1847,7 +1858,7 @@ export default function NestingPage() {
       marginB: order.margin_bottom, marginL: order.margin_left,
       kerf: order.kerf_width,
       offcuts: offcutsValue(offForm),
-      smallPartsToCenter: cfg.small,
+      smallPartsToCenter: cfg.small && !smallRuleOff(details, cfg),
       smallPartsMaxSquareSide: cfg.sq === '' ? 0 : Number(cfg.sq),
       smallPartsMaxSide: cfg.side === '' ? 0 : Number(cfg.side),
       smallPartsEdgeGap: cfg.edge === '' ? 100 : Number(cfg.edge),
@@ -2670,7 +2681,7 @@ export default function NestingPage() {
     const s = sums[idx]
     const secs = cfgSecs(cfg)
     // «Мелкие — в центр»: сколько мелких деталей всё же у края листа
-    const edgeN = cfg.small && cfg.result && cfg.sheetsData.length
+    const edgeN = cfg.small && !smallRuleOff(details, cfg) && cfg.result && cfg.sheetsData.length
       ? smallAtEdge(cfg.sheetsData, cfg.result.usableX, cfg.result.usableY, true) : null
     const smallTxt = edgeN === null ? '' : edgeN > 0 ? ` · мелкие у края: ${edgeN}` : ' · мелкие в центре ✓'
     let statusLine = 'не считался'
@@ -2707,7 +2718,7 @@ export default function NestingPage() {
               {cfg.saved && badge('✓ в заказе', '#e6f4ea', '#1e7e34')}
             </div>
             <div style={{ fontSize: 10.5, color: cfg.status === 'error' ? '#dc3545' : 'var(--text-hint)', marginTop: 1 }}>
-              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{cfg.box && hasShaped && cuttingMethod !== 'guillotine' ? ' · по габаритам' : ''}{cfg.small ? ' · мелкие в центр' : ''} · {statusLine}
+              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{cfg.box && hasShaped && cuttingMethod !== 'guillotine' ? ' · по габаритам' : ''}{cfg.small && !smallRuleOff(details, cfg) ? ' · мелкие в центр' : ''} · {statusLine}
             </div>
           </div>
           {(isRunning || isQueued) && (
@@ -2826,6 +2837,12 @@ export default function NestingPage() {
               const list = smallDetailsOf(details, cfg.sq, cfg.side)
               const n = list.reduce((a, d) => a + (Number(d.qty) || 1), 0)
               const total = details.reduce((a, d) => a + (Number(d.qty) || 1), 0)
+              if (smallRuleOff(details, cfg)) return (
+                <p style={{ fontSize: 10.5, color: '#b45309', margin: '-4px 0 8px', lineHeight: 1.4 }}>
+                  Мелкими получаются {n === total ? 'все' : 'почти все'} детали ({n} из {total}) — правило «мелкие — в центр» в этом раскрое не применяется,
+                  иначе весь заказ пришлось бы держать подальше от краёв листа. Чтобы оно работало, уменьшите площадь или узкую сторону.
+                </p>
+              )
               if (!list.length) return (
                 <p style={{ fontSize: 10.5, color: '#b45309', margin: '-4px 0 8px' }}>
                   При таких порогах мелких деталей нет — увеличьте площадь или сторону.
