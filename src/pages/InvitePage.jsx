@@ -78,7 +78,7 @@ export default function InvitePage() {
                 <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.full_name || 'без имени'} <span style={{ color: 'var(--text-hint)', fontWeight: 400 }}>+{p.digits}</span></div>
                 <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                   {p.kind === 'production' ? 'производство · ' : ''}
-                  {p.messenger === 'telegram' ? (p.verified ? 'Telegram — код пришёл в бот, ждём регистрацию' : 'Telegram — ещё не подтвердил номер в боте') : sent[p.id] || p.code_sent_at ? 'WhatsApp — код отправлен' : 'WhatsApp — отправьте ему код'}
+                  {p.messenger === 'telegram' ? (p.verified ? '✓ Telegram — бот прислал код сам, вам делать ничего не нужно' : '⏳ Telegram — подтверждает номер в боте, код придёт сам; вам делать ничего не нужно') : sent[p.id] || p.code_sent_at ? 'WhatsApp — код отправлен' : 'WhatsApp — отправьте ему код'}
                 </div>
               </div>
               <button type="button" onClick={() => sendCode(p)} className={p.messenger === 'whatsapp' && !sent[p.id] && !p.code_sent_at ? 'btn-primary' : 'btn-secondary'}

@@ -87,16 +87,25 @@ export default function UsersPage() {
   const codeRow = r => {
     if (r.registered || r.status !== 'approved') return null
     const dead = !r.code || r.code_expired || r.code_attempts >= 5
+    // что делать мастеру — одной строкой: в Telegram код уходит сам, в WhatsApp — отправляете вы
+    const tgWait = r.messenger === 'telegram' && !r.phone_verified_at
+    const tgSent = !!r.phone_verified_at && !!r.code_sent_at && !dead
+    const todo = tgSent ? ['✓ Код отправлен ботом в Telegram автоматически — ничего делать не нужно, ждём, когда человек его введёт.', 'var(--teal)']
+      : tgWait ? ['⏳ Ничего делать не нужно: человек подтверждает номер в Telegram, бот пришлёт код сам. Если он пишет, что не получается, — отправьте код в WhatsApp.', 'var(--text-muted)']
+      : r.phone_verified_at ? ['Номер подтверждён в Telegram — нажмите «В Telegram», бот отправит код.', 'var(--amber)']
+      : r.code_sent_at ? ['✓ Код отправлен в WhatsApp — ждём, когда человек его введёт.', 'var(--teal)']
+      : ['👉 Отправьте код в WhatsApp — кнопка ниже.', 'var(--amber)']
     return (
       <div style={{ marginTop: 6 }}>
+        <div style={{ fontSize: 12, color: todo[1], marginBottom: 4, lineHeight: 1.35 }}>{todo[0]}</div>
         {r.code && <div style={{ fontSize: 13 }}>
           Код: <b style={{ fontSize: 16, letterSpacing: 2 }}>{r.code}</b>
           <span style={{ fontSize: 11, color: dead ? 'var(--danger)' : 'var(--text-hint)', marginLeft: 8 }}>
-            {r.code_expired ? 'срок вышел' : r.code_attempts >= 5 ? 'попытки исчерпаны' : r.code_sent_at ? 'отправлен в Telegram' : r.code_attempts ? `неверных попыток: ${r.code_attempts}` : 'ждёт ввода'}
+            {r.code_expired ? 'срок вышел' : r.code_attempts >= 5 ? 'попытки исчерпаны' : r.code_sent_at ? (r.phone_verified_at ? 'отправлен ботом в Telegram' : 'отправлен в WhatsApp') : r.code_attempts ? `неверных попыток: ${r.code_attempts}` : 'ждёт ввода'}
           </span>
         </div>}
         <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-          {dead ? <button type="button" disabled={busy} style={btn('main')} onClick={() => approve(r)}>{r.code ? 'Новый код' : 'Выдать код'}</button>
+          {dead ? <button type="button" disabled={busy} style={btn(tgWait ? undefined : 'main')} onClick={() => approve(r)}>{tgWait ? 'Выдать код для WhatsApp' : r.code ? 'Новый код' : 'Выдать код'}</button>
             : <>
               {r.tg_linked && <button type="button" disabled={busy} style={btn('main')} onClick={() => sendTg(r)}>В Telegram</button>}
               <a href={`https://wa.me/${r.digits}?text=${encodeURIComponent(codeMsg(r.code, r.digits))}`} target="_blank" rel="noreferrer" style={{ ...btn(r.tg_linked ? undefined : 'main'), textDecoration: 'none' }}>В WhatsApp</a>
