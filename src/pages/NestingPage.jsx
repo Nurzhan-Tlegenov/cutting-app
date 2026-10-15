@@ -1484,6 +1484,11 @@ function smallRuleOff(details, cfg) {
   return total > 0 && n >= total * SMALL_ALL_SHARE
 }
 
+// Сколько места экрана (пиксели) оставить вокруг обзора листов: сверху «Стоп» и переключатели, снизу подсказка,
+// «Выбрать» (нижнее меню SheetsOverview вычитает само) — тогда при «Стоп» наверху экрана карта и «Выбрать» видны целиком.
+// Подогнано по замерам на экранах 360×640, 393×780, 412×870
+const OVERVIEW_RESERVE = 232
+
 export default function NestingPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -2002,6 +2007,16 @@ export default function NestingPage() {
     }
   }
 
+  // Запустили раскрой — экран прокручивается так, чтобы «Стоп» был наверху: под ним карта листов и «Выбрать» —
+  // всё сразу на экране (окно карты подогнано по высоте экрана, см. SheetsOverview reserve)
+  function stopToTop(cfgId) {
+    setTimeout(() => {
+      const el = document.querySelector(`[data-cfg-stop="${cfgId}"]`)
+      if (!el) return
+      const top = el.getBoundingClientRect().top
+      if (Math.abs(top - 8) > 4) window.scrollBy({ top: top - 8, behavior: 'smooth' })
+    }, 120)   // настройки конфигурации уже свернулись — считаем по новой раскладке
+  }
   // «Стоп»: идущий расчёт останавливается мягко — лучший найденный вариант
   // доводится до финала и остаётся на экране. Из очереди — просто снимается.
   function stopCfg(cfgId) {
@@ -2862,7 +2877,7 @@ export default function NestingPage() {
             </>)}
 
             <div style={{ display: 'flex', gap: 6, marginBottom: cfg.error || cfg.result ? 8 : 0 }}>
-              <button onClick={() => (isRunning || isQueued) ? stopCfg(cfg.id) : runCfg(cfg.id)} disabled={!details.length || isStopping}
+              <button data-cfg-stop={cfg.id} onClick={() => { if (isRunning || isQueued) stopCfg(cfg.id); else { runCfg(cfg.id); stopToTop(cfg.id) } }} disabled={!details.length || isStopping}
                 style={{ flex: 1, padding: 8, background: isRunning && !isStopping ? '#dc3545' : (isQueued || isStopping) ? 'var(--bg2)' : 'var(--blue)',
                   color: (isQueued || isStopping) ? 'var(--text-muted)' : 'white', border: 'none', borderRadius: 'var(--radius)',
                   fontSize: 13, fontWeight: 500, cursor: isStopping ? 'default' : 'pointer' }}>
@@ -2872,7 +2887,7 @@ export default function NestingPage() {
               </button>
               {/* «Продолжить» — поиск идёт дальше с раскладки на экране (после «Стоп» / выбранного варианта / ручных правок), а не с нуля */}
               {cfg.result && !isRunning && !isQueued && !isStopping && (
-                <button onClick={() => runCfg(cfg.id, true)} disabled={!details.length || (cfg.buffer || []).length > 0}
+                <button onClick={() => { runCfg(cfg.id, true); stopToTop(cfg.id) }} disabled={!details.length || (cfg.buffer || []).length > 0}
                   title={(cfg.buffer || []).length ? 'Сначала положите детали из буфера на листы' : 'Продолжить поиск с этой раскладки — детали остаются на местах, поиск ищет, как уложить плотнее'}
                   style={{ flex: 1, padding: 8, background: 'var(--teal)', color: 'white', border: 'none', borderRadius: 'var(--radius)',
                     fontSize: 13, fontWeight: 500, cursor: 'pointer', opacity: (cfg.buffer || []).length ? 0.5 : 1 }}>
@@ -2974,10 +2989,10 @@ export default function NestingPage() {
                     )}
                   </div>
                   {/* Что писать на деталях — отдельной строкой, чтобы не закрывать кнопки */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6, fontSize: 11, color: 'var(--text-hint)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6, fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>
                     Подпись на деталях:
                     <select value={labelMode} onChange={e => setLabelMode(e.target.value)}
-                      style={{ width: 'auto', padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)' }}>
+                      style={{ width: 'auto', minWidth: 0, maxWidth: 150, flex: '0 1 auto', padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)', textOverflow: 'ellipsis' }}>
                       {LABEL_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '0 0 0 6px', fontSize: 11, color: 'var(--text-hint)' }}>
@@ -2997,10 +3012,11 @@ export default function NestingPage() {
                         onPickSheet={locked || hEvent ? null : openSheet}
                         running={isRunning} bufferCount={cfg.buffer.length}
                         details={details} labelMode={labelMode}
+                        reserve={OVERVIEW_RESERVE}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {isRunning
-                          ? 'Идёт поиск: при более плотной укладке детали переезжают на новые места · «Стоп» — зафиксировать лучший вариант'
+                          ? 'Идёт поиск — при более плотной укладке детали переезжают · «Стоп» — зафиксировать'
                           : hEvent ? 'Просмотр хронологии — правка недоступна' : 'Тап по листу — открыть для правки · щипок или −/+ — больше/меньше листов в ряд'}
                       </p>
                       {hist && hEvents.length > 0 && renderTimeline(cfg, idx, hEvents, hPos, hLast, hEvent)}

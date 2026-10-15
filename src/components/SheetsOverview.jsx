@@ -39,6 +39,7 @@ const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 export default function SheetsOverview({
   sheets, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf,
   activeSheet = -1, onPickSheet, running = false, bufferCount = 0, details = null, labelMode = 'name',
+  reserve = null,   // сколько пикселей экрана оставить под кнопки над и под картой («Стоп», «Выбрать»); null — окно до 60% экрана
 }) {
   const canvasRef = useRef(null)
   const scrollRef = useRef(null)
@@ -69,17 +70,24 @@ export default function SheetsOverview({
   const rowMM = CAPTION_MM + cellL + GAP_MM
   const totalH = rows * rowMM - GAP_MM
   const PADDING = 6
-  // Во всю ширину блока — сколько листов в ряд, столько и делят ширину
-  const sc = Math.max(0.001, (boxW - PADDING * 2) / totalW)
+  // Окно просмотра: экран минус место под кнопки («Стоп» сверху, «Выбрать» снизу) — чтобы всё было видно сразу
+  const winH = typeof window !== 'undefined' ? window.innerHeight : 800
+  // нижнее меню (на iPhone выше — с отступом под полоску жестов) тоже вычитаем: меряем его, а не угадываем
+  const navH = typeof document !== 'undefined' ? (document.querySelector('.bottom-nav')?.offsetHeight || 0) : 0
+  const maxViewH = reserve != null ? Math.max(260, Math.round(winH - reserve - navH)) : Math.max(260, Math.round(winH * 0.6))
+  // Во всю ширину блока — сколько листов в ряд, столько и делят ширину; но ряд листов (подпись + лист) целиком
+  // помещается в окно по высоте — крупный лист (1 в ряд) уменьшается до высоты окна и встаёт по центру
+  const scW = (boxW - PADDING * 2) / totalW
+  const scH = (maxViewH - PADDING * 2) / (CAPTION_MM + cellL)
+  const sc = Math.max(0.001, Math.min(scW, scH))
+  const offX = Math.max(0, ((boxW - PADDING * 2) / sc - totalW) / 2)   // мм: сетка по центру, если уже окна
   const contentH = Math.round(totalH * sc) + PADDING * 2
-  // Окно просмотра — не выше ~60% экрана: над ним время и «Стоп», под ним переключатель листов
-  const maxViewH = typeof window !== 'undefined' ? Math.max(260, Math.round(window.innerHeight * 0.6)) : 480
   const viewH = Math.min(contentH, maxViewH)
   const canvasW = boxW
   const DPR = Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, 2.5)
 
   const origin = si => ({
-    x: (si % cols) * (cellW + GAP_MM),
+    x: offX + (si % cols) * (cellW + GAP_MM),
     y: Math.floor(si / cols) * rowMM + CAPTION_MM,
   })
 
@@ -281,7 +289,7 @@ export default function SheetsOverview({
     if (animRef.current) { cancelAnimationFrame(animRef.current); animRef.current = null }
     curRef.current = targets()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cols, boxW])
+  }, [cols, boxW, Math.round(offX)])
 
   // Перерисовка при масштабе/выборе листа (без анимации)
   useLayoutEffect(() => { drawRef.current = draw; draw(curRef.current) })
