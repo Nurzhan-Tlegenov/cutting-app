@@ -154,7 +154,15 @@ export default function DemoVideo({ id, onClose }) {
   const toggleVoice = () => { const v = !voice; setVoice(v); if (!v) window.speechSynthesis?.cancel(); try { localStorage.setItem('demoVoice', v ? '1' : '0') } catch { /* без памяти */ } }
   const chapters = beats.map((x, n) => [x.ch, n]).filter(([c]) => c)
   const curCh = chapters.filter(([, n]) => n <= i).pop()?.[0]
-  const pickVoice = name => { setVoiceName(name); setVoiceMenu(false); try { localStorage.setItem(vKey, name) } catch { /* без памяти */ } }
+  // выбор голоса: ролик на паузе, нажатие на голос — он сразу читает текущую фразу (послушать), «Готово» — продолжить
+  const wasPlaying = useRef(false)
+  const openVoices = () => { wasPlaying.current = playing; setPlaying(false); window.speechSynthesis?.cancel(); setVoiceMenu(true) }
+  const closeVoices = () => { window.speechSynthesis?.cancel(); setVoiceMenu(false); if (wasPlaying.current) setPlaying(true) }
+  const pickVoice = name => {
+    setVoiceName(name)
+    try { localStorage.setItem(vKey, name) } catch { /* без памяти */ }
+    speak(sayText, voices.find(v => v.name === name) || bestVoice(voices), L, () => {})
+  }
   const seek = e => { const r = e.currentTarget.getBoundingClientRect(); goTo(Math.floor(((e.clientX - r.left) / r.width) * beats.length)) }
   const ctl = { width: 44, height: 44, borderRadius: 22, border: 'none', background: 'rgba(255,255,255,.12)', color: '#fff', fontSize: 18, padding: 0, cursor: 'pointer' }
 
@@ -210,17 +218,31 @@ export default function DemoVideo({ id, onClose }) {
           <button type="button" aria-label={playing ? 'Пауза' : 'Играть'} onClick={togglePlay} style={{ ...ctl, width: 56, height: 56, fontSize: 22, background: '#4fa3ff' }}>{playing ? '❚❚' : ended ? '↻' : '▶'}</button>
           <button type="button" aria-label="Вперёд" onClick={() => goTo(i + 1)} style={ctl}>⏭</button>
           {/* выбор голоса: какой из голосов телефона звучит естественнее — решает сам человек, выбор запоминается */}
-          <button type="button" aria-label={ui.voice} onClick={() => setVoiceMenu(v => !v)} disabled={!canSpeak} style={{ ...ctl, width: 38, height: 38, fontSize: 15, opacity: canSpeak ? 1 : 0.35 }}>🗣</button>
+          <button type="button" aria-label={ui.voice} onClick={() => (voiceMenu ? closeVoices() : openVoices())} disabled={!canSpeak} style={{ ...ctl, width: 38, height: 38, fontSize: 15, opacity: canSpeak ? 1 : 0.35 }}>🗣</button>
         </div>
         {!canSpeak && <div data-no-i18n="" style={{ textAlign: 'center', fontSize: 11.5, opacity: 0.6, marginTop: 6 }}>{ui.noVoice}</div>}
+        {/* список голосов — панелью снизу поверх ролика, открывается вверх и листается внутри: всё помещается в экран */}
         {voiceMenu && canSpeak && (
-          <div data-no-i18n="" style={{ marginTop: 10, background: 'rgba(255,255,255,.08)', borderRadius: 12, padding: 6, maxHeight: 170, overflowY: 'auto' }}>
-            <div style={{ fontSize: 11.5, opacity: 0.6, padding: '2px 8px 4px' }}>{ui.voice}</div>
-            {[{ name: '', label: `${ui.auto} — ${bestVoice(voices)?.name || ''}` }, ...voices.map(v => ({ name: v.name, label: v.name }))].map(o => (
-              <button key={o.name || '_'} type="button" onClick={() => pickVoice(o.name)}
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 8px', borderRadius: 8, border: 'none', fontSize: 13, cursor: 'pointer', color: '#fff',
-                  background: voiceName === o.name ? 'rgba(79,163,255,.35)' : 'transparent', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</button>
-            ))}
+          <div data-no-i18n="" onClick={closeVoices} style={{ position: 'fixed', inset: 0, zIndex: 10, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+            <div onClick={e => e.stopPropagation()} className="demo-sheet"
+              style={{ width: '100%', maxWidth: 480, maxHeight: '70vh', display: 'flex', flexDirection: 'column', background: '#1c222c', borderRadius: '18px 18px 0 0', paddingBottom: 'env(safe-area-inset-bottom)', boxShadow: '0 -8px 30px rgba(0,0,0,.4)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px 8px', gap: 10 }}>
+                <span style={{ flex: 1, fontSize: 15, fontWeight: 600 }}>🗣 {ui.voice}</span>
+                <button type="button" onClick={closeVoices} style={{ padding: '7px 16px', borderRadius: 16, border: 'none', background: '#4fa3ff', color: '#fff', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{ui.done}</button>
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.6, padding: '0 14px 6px' }}>{ui.listen}</div>
+              <div style={{ overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', padding: '0 8px 10px' }}>
+                {[{ name: '', label: `${ui.auto} — ${bestVoice(voices)?.name || ''}` }, ...voices.map(v => ({ name: v.name, label: v.name }))].map(o => (
+                  <button key={o.name || '_'} type="button" onClick={() => pickVoice(o.name)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '11px 10px', borderRadius: 10, border: 'none', fontSize: 14, cursor: 'pointer', color: '#fff',
+                      background: voiceName === o.name ? 'rgba(79,163,255,.35)' : 'transparent' }}>
+                    <span style={{ width: 18, flexShrink: 0, color: '#4fa3ff' }}>{voiceName === o.name ? '✓' : ''}</span>
+                    <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
+                    <span style={{ opacity: 0.5, fontSize: 13 }}>▶</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', marginTop: 10 }}>
@@ -249,6 +271,8 @@ const CSS = `
 @keyframes demo-press { 50% { transform: scale(.82) translate(2px, 3px) } }
 .demo-part { animation: demo-part 2.6s ease-in-out infinite both }
 @keyframes demo-part { 0% { opacity: 0; transform: translate(6px, -8px) } 25%, 80% { opacity: 1; transform: none } 100% { opacity: .35 } }
+.demo-sheet { animation: demo-sheet .28s cubic-bezier(.32,.72,0,1) both }
+@keyframes demo-sheet { from { transform: translateY(100%) } to { transform: none } }
 .demo-pop { animation: demo-pop .35s ease both }
 @keyframes demo-pop { from { opacity: 0; transform: scale(.92) } to { opacity: 1; transform: none } }
 .demo-spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--blue-mid); border-top-color: var(--blue); animation: demo-spin .8s linear infinite }

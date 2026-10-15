@@ -15,16 +15,16 @@ export const VOICE_LOCALE = { ru: 'ru-RU', en: 'en-GB', uk: 'uk-UA', tr: 'tr-TR'
 
 // надписи плеера
 export const UI = {
-  ru: { of: 'из', voice: 'Голос', noVoice: 'В телефоне нет голоса для этого языка — только субтитры', auto: 'авто' },
-  en: { of: 'of', voice: 'Voice', noVoice: 'No voice for this language on the phone — subtitles only', auto: 'auto' },
-  uk: { of: 'з', voice: 'Голос', noVoice: 'У телефоні немає голосу для цієї мови — лише субтитри', auto: 'авто' },
-  tr: { of: '/', voice: 'Ses', noVoice: 'Telefonda bu dil için ses yok — yalnızca altyazı', auto: 'otomatik' },
-  uz: { of: '/', voice: 'Ovoz', noVoice: 'Telefonda bu til uchun ovoz yoʻq — faqat subtitrlar', auto: 'avto' },
-  az: { of: '/', voice: 'Səs', noVoice: 'Telefonda bu dil üçün səs yoxdur — yalnız altyazılar', auto: 'avto' },
-  zh: { of: '/', voice: '语音', noVoice: '手机上没有该语言的语音 — 仅显示字幕', auto: '自动' },
-  de: { of: 'von', voice: 'Stimme', noVoice: 'Keine Stimme für diese Sprache auf dem Telefon — nur Untertitel', auto: 'auto' },
-  pl: { of: 'z', voice: 'Głos', noVoice: 'Brak głosu dla tego języka w telefonie — tylko napisy', auto: 'auto' },
-  ar: { of: 'من', voice: 'الصوت', noVoice: 'لا يوجد صوت لهذه اللغة في الهاتف — الترجمة فقط', auto: 'تلقائي' },
+  ru: { of: 'из', voice: 'Голос', noVoice: 'В телефоне нет голоса для этого языка — только субтитры', auto: 'авто', done: 'Готово', listen: 'Нажмите на голос — он прочитает фразу. Выберите тот, что звучит естественнее.' },
+  en: { of: 'of', voice: 'Voice', noVoice: 'No voice for this language on the phone — subtitles only', auto: 'auto', done: 'Done', listen: 'Tap a voice to hear it read the line. Pick the one that sounds most natural.' },
+  uk: { of: 'з', voice: 'Голос', noVoice: 'У телефоні немає голосу для цієї мови — лише субтитри', auto: 'авто', done: 'Готово', listen: 'Натисніть на голос — він прочитає фразу. Оберіть той, що звучить природніше.' },
+  tr: { of: '/', voice: 'Ses', noVoice: 'Telefonda bu dil için ses yok — yalnızca altyazı', auto: 'otomatik', done: 'Tamam', listen: 'Bir sese dokunun, cümleyi okusun. En doğal geleni seçin.' },
+  uz: { of: '/', voice: 'Ovoz', noVoice: 'Telefonda bu til uchun ovoz yoʻq — faqat subtitrlar', auto: 'avto', done: 'Tayyor', listen: 'Ovozni bosing — u jumlani oʻqiydi. Eng tabiiy eshitiladiganini tanlang.' },
+  az: { of: '/', voice: 'Səs', noVoice: 'Telefonda bu dil üçün səs yoxdur — yalnız altyazılar', auto: 'avto', done: 'Hazır', listen: 'Səsə toxunun — cümləni oxuyacaq. Ən təbii səslənəni seçin.' },
+  zh: { of: '/', voice: '语音', noVoice: '手机上没有该语言的语音 — 仅显示字幕', auto: '自动', done: '完成', listen: '点击一个语音试听当前句子，选择听起来最自然的。' },
+  de: { of: 'von', voice: 'Stimme', noVoice: 'Keine Stimme für diese Sprache auf dem Telefon — nur Untertitel', auto: 'auto', done: 'Fertig', listen: 'Tippen Sie auf eine Stimme, um den Satz zu hören. Wählen Sie die natürlichste.' },
+  pl: { of: 'z', voice: 'Głos', noVoice: 'Brak głosu dla tego języka w telefonie — tylko napisy', auto: 'auto', done: 'Gotowe', listen: 'Dotknij głosu, a przeczyta zdanie. Wybierz ten, który brzmi najnaturalniej.' },
+  ar: { of: 'من', voice: 'الصوت', noVoice: 'لا يوجد صوت لهذه اللغة في الهاتف — الترجمة فقط', auto: 'تلقائي', done: 'تم', listen: 'اضغط على صوت ليقرأ الجملة. اختر الأكثر طبيعية.' },
 }
 
 const KEYS = []
