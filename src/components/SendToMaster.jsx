@@ -15,7 +15,7 @@ export default function SendToMaster({ job, onClose }) {
   const [done, setDone] = useState(false)
   if (!job) return null
   const send = async () => {
-    if (comment.trim().length < 5) { setError('Опишите, что не работает — хотя бы пару слов.'); return }
+    if (comment.trim().length < 5) { setError(job.need || 'Опишите, что не работает — хотя бы пару слов.'); return }
     setBusy(true); setError('')
     let payload = ''
     try { payload = await job.getPayload() } catch (e) { setBusy(false); setError('Не удалось собрать файл: ' + (e?.message || e)); return }
@@ -39,7 +39,7 @@ export default function SendToMaster({ job, onClose }) {
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
               Разработчику уйдёт: <b>{job.title}</b>. Файл на устройство не скачивается.
             </p>
-            <label className="label">Что не работает? Опишите замечание</label>
+            <label className="label">{job.label || 'Что не работает? Опишите замечание'}</label>
             <textarea value={comment} onChange={e => setComment(e.target.value)} rows={4} autoFocus
               placeholder={job.placeholder || 'Например: на листе 2 деталь наложилась на соседнюю после поворота'} style={{ fontSize: 14, resize: 'vertical' }} />
             {error && <p className="error-text" style={{ marginTop: 6 }}>{error}</p>}

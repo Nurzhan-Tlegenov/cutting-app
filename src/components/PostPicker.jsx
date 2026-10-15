@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import SendToMaster from './SendToMaster'
+import { fileToPayload, REPORT_MAX_MB } from '../lib/messages'
 import { DEFAULT_POST, DEFAULT_DRILL6, isDrill6, activePost, routerPost, pickPost, toggleUse6, applySnapshot, removeSnapshot, renameSnapshot, sameName } from '../lib/cncSettings'
 
 // Выбор постпроцессора — строка сверху настроек ЧПУ: «Постпроцессор: <имя> ▾». Тап — окно снизу:
@@ -16,6 +18,25 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
     if (open) { const t = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(t) }
   }, [open])
   const close = () => { setShown(false); setTimeout(() => setOpen(false), 280) }
+  // «Нет постпроцессора для моего станка» — УП с этого станка уходит разработчику (мастер-аккаунту) с описанием станка;
+  // по ней добавляется постпроцессор. Файл на телефон не скачивается.
+  const upFile = useRef(null)
+  const [ask, setAsk] = useState(null)
+  const pickUp = e => {
+    const f = e.target.files?.[0]
+    e.target.value = ''
+    if (!f) return
+    if (f.size > REPORT_MAX_MB * 1048576) { window.alert(`Файл слишком большой (${(f.size / 1048576).toFixed(1)} МБ, можно до ${REPORT_MAX_MB} МБ). Хватит программы одного листа — или отправьте её разработчику в WhatsApp / Telegram.`); return }
+    close()
+    setAsk({
+      title: `Запрос постпроцессора · УП: ${f.name}`,
+      fileName: f.name,
+      getPayload: () => fileToPayload(f),
+      label: 'Какой у вас станок? Производитель, модель, система ЧПУ',
+      need: 'Напишите, какой у вас станок — хотя бы производитель и модель.',
+      placeholder: 'Например: Woodtec H 2040, стойка Syntec, есть присадочная голова, датчик длины инструмента',
+    })
+  }
   const post = activePost(cnc), router = routerPost(cnc)
   const used = id => id === router?.id || (cnc.use6 || []).includes(id)
 
@@ -120,6 +141,17 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
                 <button type="button" onClick={() => add('drill6')} style={{ flex: 1, padding: '9px 8px', borderRadius: 12, border: '1px dashed var(--amber)', background: 'transparent', color: 'var(--amber)', fontSize: 13 }}>+ Присадочный 6-стор.</button>
               </div>
 
+              {!isMaster && (
+                <div style={{ padding: '10px 12px', borderRadius: 12, border: '1px dashed var(--teal)', background: 'var(--bg2)', margin: '0 0 14px' }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>Нет постпроцессора для вашего станка?</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
+                    Пришлите разработчику управляющую программу (G-код), сделанную для вашего станка — лучше лист, где есть и раскрой, и сверление. По ней мы добавим ваш постпроцессор. Файл уйдёт сразу разработчику, на телефон ничего не скачивается.
+                  </div>
+                  <input ref={upFile} type="file" style={{ display: 'none' }} onChange={pickUp} />
+                  <button type="button" onClick={() => upFile.current?.click()} style={{ width: '100%', padding: '9px 8px', borderRadius: 12, border: 'none', background: 'var(--teal)', color: 'white', fontSize: 13, cursor: 'pointer' }}>📂 Выбрать УП и попросить добавить</button>
+                </div>
+              )}
+
               <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', margin: '4px 4px 2px' }}>Сохранённые варианты</div>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 4px 6px' }}>
                 {saved.length ? `Варианты под другими именами. Тап — применить к открытому «${post.name}» (если тот же тип станка), «+» — отдельным станком.` : 'Сохранённые настройки станка — у самого станка, кнопка ↺. Под другим именем вариант появится здесь.'}
@@ -144,6 +176,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
         </div>,
         document.body,
       )}
+      <SendToMaster job={ask} onClose={() => setAsk(null)} />
     </>
   )
 }
