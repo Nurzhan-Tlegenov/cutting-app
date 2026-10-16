@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { BEAM_DEFAULTS, beamSettings, maxPartIn } from '../lib/beamSaw'
 
 // β Пильный центр — настройки производства. Все значения меняются в любую сторону, без потолков:
-// станки и системы управления у всех разные. Пустое поле — значение по умолчанию (оно показано серым).
+// станки и системы управления у всех разные. В полях — сами значения (по умолчанию — как у Asai / KDT),
+// их правят как обычные числа; «Вернуть значения по умолчанию» — сбросить всё.
 export const BEAM_SQL_HINT = 'Настройки пильного центра ещё не включены в базе: выполните migration_beam_saw.sql в Supabase (SQL Editor) — один раз.'
 
 const str = v => (v == null ? '' : String(v))
@@ -11,7 +12,9 @@ const clean = v => v.replace(/[^0-9.,]/g, '')
 
 export default function BeamSawSettings({ prod, onSaved }) {
   const raw = prod?.beam_saw_settings && typeof prod.beam_saw_settings === 'object' ? prod.beam_saw_settings : {}
-  const [v, setV] = useState(() => ({ ...raw, levelTrims: Array.isArray(raw.levelTrims) ? raw.levelTrims.map(str) : [] }))
+  // в полях — настоящие значения (сохранённые или по умолчанию), а не серые подсказки: их можно просто исправить
+  const filled = r => { const f = beamSettings(r); return { ...f, rotations: f.rotations == null ? '' : f.rotations, levelTrims: f.levelTrims.map(str) } }
+  const [v, setV] = useState(() => filled(raw))
   const [msg, setMsg] = useState('')
   const s = beamSettings(v)
 
@@ -31,13 +34,24 @@ export default function BeamSawSettings({ prod, onSaved }) {
     onSaved?.(out)
   }
   const set = (k, x) => setV(o => ({ ...o, [k]: x }))
+  // поле стёрли и ушли — в нём снова значение по умолчанию (кроме «поворотов»: пусто — без ограничения)
+  const blur = k => {
+    let next = v
+    if (k !== 'rotations' && str(v[k]).trim() === '' && BEAM_DEFAULTS[k] != null) { next = { ...v, [k]: BEAM_DEFAULTS[k] }; setV(next) }
+    save(next)
+  }
+  const reset = () => {
+    if (!window.confirm('Вернуть все настройки пильного центра к значениям по умолчанию?')) return
+    const next = filled({}); setV(next); save(next)
+  }
   const pick = (k, x) => { const next = { ...v, [k]: x }; setV(next); save(next) }
 
   const field = (k, label, hint, intOnly) => (
     <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 5 }}>
       <span style={{ flex: 1, minWidth: 0 }}>{label}{hint && <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-hint)' }}>{hint}</span>}</span>
-      <input type="text" inputMode={intOnly ? 'numeric' : 'decimal'} value={str(v[k])} placeholder={str(BEAM_DEFAULTS[k] ?? 'без огр.')}
-        onChange={e => set(k, intOnly ? e.target.value.replace(/[^0-9]/g, '') : clean(e.target.value))} onBlur={() => save()}
+      <input type="text" inputMode={intOnly ? 'numeric' : 'decimal'} value={str(v[k])} placeholder={k === 'rotations' ? 'без огр.' : ''}
+        onFocus={e => e.target.select?.()}
+        onChange={e => set(k, intOnly ? e.target.value.replace(/[^0-9]/g, '') : clean(e.target.value))} onBlur={() => blur(k)}
         style={{ width: 84, padding: '5px 8px', fontSize: 13, textAlign: 'center' }} />
     </label>
   )
@@ -61,7 +75,7 @@ export default function BeamSawSettings({ prod, onSaved }) {
   return (
     <div>
       <p style={{ fontSize: 11.5, color: 'var(--blue)', margin: '0 0 6px', lineHeight: 1.4 }}>
-        β Бета-тест. Эти настройки подставляются в раскрой «Пильный центр β» у заказчиков, выбравших ваше производство. Все значения можно увеличить или уменьшить под ваш станок. Пустое поле — значение по умолчанию (серым).
+        β Бета-тест. Эти настройки подставляются в раскрой «Пильный центр β» у заказчиков, выбравших ваше производство. Все значения можно увеличить или уменьшить под ваш станок: нажмите на число и впишите своё. Сохраняется само.
       </p>
       {msg && <p style={{ fontSize: 12, color: msg === 'Сохранено' ? 'var(--teal)' : 'var(--amber)', margin: '0 0 6px' }}>{msg}</p>}
 
@@ -71,7 +85,7 @@ export default function BeamSawSettings({ prod, onSaved }) {
       <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
         {[['trimLeft', '←'], ['trimRight', '→'], ['trimTop', '↑'], ['trimBottom', '↓']].map(([k, l]) => (
           <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'var(--text-hint)', textAlign: 'center' }}>{l}
-            <input type="text" inputMode="decimal" value={str(v[k])} placeholder={str(BEAM_DEFAULTS[k])} onChange={e => set(k, clean(e.target.value))} onBlur={() => save()} style={{ padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
+            <input type="text" inputMode="decimal" value={str(v[k])} onFocus={e => e.target.select?.()} onChange={e => set(k, clean(e.target.value))} onBlur={() => blur(k)} style={{ padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
           </label>
         ))}
       </div>
@@ -79,13 +93,18 @@ export default function BeamSawSettings({ prod, onSaved }) {
       {head('Уровни резов и повороты')}
       {field('levels', 'Уровней резов, не больше', 'Лист → полосы → поперёк → … Каждый следующий уровень — поворот заготовки на 90°', true)}
       {field('rotations', 'Поворотов заготовки, не больше', 'Пусто — сколько позволяют уровни', true)}
-      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 3 }}>Торцовка в начале заготовки по уровням, мм<span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-hint)' }}>1-й и 2-й уровни режут от краёв листа — там торцовка = обрезка листа (выше). Пустое поле — как на предыдущем уровне</span></div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 3 }}>Торцовка в начале заготовки по уровням, мм<span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-hint)' }}>1-й и 2-й уровни режут от краёв листа — там торцовка = обрезка листа (выше). Уровней больше — новые поля берут значение предыдущего</span></div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
         {s.levelTrims.map((def, i) => (
           <label key={i} style={{ width: 62, fontSize: 10.5, color: 'var(--text-hint)', textAlign: 'center' }}>{i + 3}-й
-            <input type="text" inputMode="decimal" value={str(v.levelTrims?.[i])} placeholder={str(def)}
-              onChange={e => { const a = [...(v.levelTrims || [])]; while (a.length <= i) a.push(''); a[i] = clean(e.target.value); set('levelTrims', a) }}
-              onBlur={() => save()} style={{ padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
+            <input type="text" inputMode="decimal" value={str(v.levelTrims?.[i] ?? def)} onFocus={e => e.target.select?.()}
+              onChange={e => { const a = s.levelTrims.map((d, j) => str(v.levelTrims?.[j] ?? d)); a[i] = clean(e.target.value); set('levelTrims', a) }}
+              onBlur={() => {
+                // стёрли — как на предыдущем уровне (на первом из них — по умолчанию)
+                const a = s.levelTrims.map((d, j) => str(v.levelTrims?.[j] ?? d))
+                if (a[i].trim() === '') a[i] = i ? a[i - 1] : str(BEAM_DEFAULTS.levelTrims[0])
+                const next = { ...v, levelTrims: a }; setV(next); save(next)
+              }} style={{ padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
           </label>
         ))}
       </div>
@@ -108,11 +127,14 @@ export default function BeamSawSettings({ prod, onSaved }) {
       <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
         {[['offcutMinL', 'длина'], ['offcutMinW', 'ширина']].map(([k, l]) => (
           <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'var(--text-hint)', textAlign: 'center' }}>{l}
-            <input type="text" inputMode="decimal" value={str(v[k])} placeholder={str(BEAM_DEFAULTS[k])} onChange={e => set(k, clean(e.target.value))} onBlur={() => save()} style={{ padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
+            <input type="text" inputMode="decimal" value={str(v[k])} onFocus={e => e.target.select?.()} onChange={e => set(k, clean(e.target.value))} onBlur={() => blur(k)} style={{ padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
           </label>
         ))}
       </div>
       {check('mergeSame', 'Одинаковые карты — одной картой «× N листов»')}
+      <button type="button" onClick={reset} style={{ marginTop: 8, padding: '6px 12px', borderRadius: 16, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
+        Вернуть значения по умолчанию
+      </button>
     </div>
   )
 }
