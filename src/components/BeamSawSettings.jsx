@@ -79,10 +79,10 @@ export default function BeamSawSettings({ prod, onSaved }) {
       {head('Уровни резов и повороты')}
       {field('levels', 'Уровней резов, не больше', 'Лист → полосы → поперёк → … Каждый следующий уровень — поворот заготовки на 90°', true)}
       {field('rotations', 'Поворотов заготовки, не больше', 'Пусто — сколько позволяют уровни', true)}
-      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 3 }}>Торцовка в начале полосы по уровням, мм</div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 3 }}>Торцовка в начале заготовки по уровням, мм<span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-hint)' }}>1-й и 2-й уровни режут от краёв листа — там торцовка = обрезка листа (выше). Пустое поле — как на предыдущем уровне</span></div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
         {s.levelTrims.map((def, i) => (
-          <label key={i} style={{ width: 62, fontSize: 10.5, color: 'var(--text-hint)', textAlign: 'center' }}>{i + 1}-й
+          <label key={i} style={{ width: 62, fontSize: 10.5, color: 'var(--text-hint)', textAlign: 'center' }}>{i + 3}-й
             <input type="text" inputMode="decimal" value={str(v.levelTrims?.[i])} placeholder={str(def)}
               onChange={e => { const a = [...(v.levelTrims || [])]; while (a.length <= i) a.push(''); a[i] = clean(e.target.value); set('levelTrims', a) }}
               onBlur={() => save()} style={{ padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
@@ -93,13 +93,13 @@ export default function BeamSawSettings({ prod, onSaved }) {
       {head('Захват и узкие детали')}
       {field('grip', 'Мин. остаток для захвата, мм', `Деталь уже полосы — остаток не меньше этого. Сейчас: в полосу 600 — деталь не больше ${ex} (или ровно 600)`)}
       {check('gripWithKerf', 'Остаток считается вместе с пропилом')}
-      {field('narrowMin', 'Узкая деталь — уже, мм', 'Такие детали пилятся с запасом')}
+      {field('narrowMin', 'Узкая деталь — до, мм (включительно)', 'Такие детали пилятся с запасом. 0 — выключено')}
       {field('narrowCut', 'Пилить узкую деталь шириной, мм', 'Потом подрезается до своего размера — на карте и бирке будет «подрезать до …»')}
 
       {head('Полосы')}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Направление полос</div>
       {seg('direction', [['y', 'Вдоль длинной (Y)'], ['x', 'Вдоль короткой (X)'], ['auto', 'Авто']])}
-      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>С текстурой полосы всегда идут вдоль волокон.</div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Авто: есть детали с текстурой — вдоль волокон (Y), нет — пробуются оба направления. Детали с текстурой не поворачиваются при любом направлении.</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Порядок полос</div>
       {seg('stripOrder', [['desc', 'От большой к малой'], ['wnw', 'Б → М → Б']])}
 

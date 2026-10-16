@@ -50,6 +50,7 @@ import SendToMaster from '../components/SendToMaster'
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
+import { beamSettings } from '../lib/beamSaw'
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
 const COLORS = [
@@ -1332,6 +1333,9 @@ function readOwnParams(id) { try { return localStorage.getItem(ownParamsKey(id))
 function writeOwnParams(id, on) { try { if (on) localStorage.setItem(ownParamsKey(id), '1'); else localStorage.removeItem(ownParamsKey(id)) } catch { /* без памяти */ } }
 // рез и отступы производства для материала заказа: у ХДФ / ДВП — свои (если производство их задало), иначе общие
 const prodVal = (pr, col, order) => (order?.material_kind === 'hdf' && pr['hdf_' + col] != null ? pr['hdf_' + col] : pr[col])
+// Что требует производство для этого раскроя: у пильного центра β — его пропил и обрезка листа из настроек пильного центра
+const BEAM_COL = { kerf_width: 'kerf', margin_left: 'trimLeft', margin_right: 'trimRight', margin_top: 'trimTop', margin_bottom: 'trimBottom' }
+const prodNeed = (pr, col, order, result) => (result?.beamSaw ? beamSettings(pr.beam_saw_settings)[BEAM_COL[col]] : prodVal(pr, col, order))
 const SHEET_FIELDS = [
   ['L', 'sheet_length'], ['W', 'sheet_width'], ['kerf', 'kerf_width'],
   ['ml', 'margin_left'], ['mr', 'margin_right'], ['mt', 'margin_top'], ['mb', 'margin_bottom'],
@@ -1983,6 +1987,13 @@ export default function NestingPage() {
       algo: useNfp ? 'nfp' : 'raster',
       byBox: !!cfg.box && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту
     }
+    // β Пильный центр: свой алгоритм (src/lib/beamSawNesting.js) и настройки пильного центра производства —
+    // выбранного в заказе, иначе своего; пропил и обрезка листа берутся оттуда же
+    if (beamSaw) {
+      const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id) || null
+      const bs = beamSettings(pr?.beam_saw_settings)
+      Object.assign(params, { beamSaw: pr?.beam_saw_settings || {}, kerf: bs.kerf, marginL: bs.trimLeft, marginR: bs.trimRight, marginT: bs.trimTop, marginB: bs.trimBottom, byBox: false })
+    }
     if (continueFrom && cfg.result && cfg.sheetsData?.length && !(cfg.buffer || []).length && cfg.result.paramsKey === paramsKey(params)) {
       params.seed = {
         sheets: cfg.sheetsData.filter(sh => sh.placed?.length).map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p })) })),   // листы целиком: у обрезков свои размеры и stock
@@ -2316,9 +2327,9 @@ export default function NestingPage() {
     const pr = pid ? productions.find(x => x.id === pid) : null
     if (pr) {
       const g = geoOf(order, cfg.result)
-      const less = (have, col) => { const need = prodVal(pr, col, order); return need != null && need !== '' && Number(have) < Number(need) - 0.01 }
+      const less = (have, col) => { const need = prodNeed(pr, col, order, cfg.result); return need != null && need !== '' && Number(have) < Number(need) - 0.01 }
       if (less(g.kerf, 'kerf_width') || less(g.marginL, 'margin_left') || less(g.marginR, 'margin_right') || less(g.marginT, 'margin_top') || less(g.marginB, 'margin_bottom')) {
-        const pv = col => prodVal(pr, col, order)
+        const pv = col => prodNeed(pr, col, order, cfg.result)
         const again = window.confirm(`Этот раскрой посчитан на ваших параметрах: рез ${g.kerf} мм, отступы ${g.marginL}/${g.marginR}/${g.marginT}/${g.marginB} мм.\n`
           + `У производства «${pr.name}»: рез ${pv('kerf_width')} мм, отступы ${pv('margin_left')}/${pv('margin_right')}/${pv('margin_top')}/${pv('margin_bottom')} мм — `
           + `по такому раскрою оно резать не сможет.\n\nПерекроить заказ под это производство? Раскрой запустится заново, после него заказ можно отправить.`)
@@ -2438,10 +2449,10 @@ export default function NestingPage() {
     if (!order.production_id) { window.alert('У заказа не выбрано производство.'); return }
     if (pr) {
       const g = geoOf(order, cfg.result)
-      const less = (have, col) => { const need = prodVal(pr, col, order); return need != null && need !== '' && Number(have) < Number(need) - 0.01 }
+      const less = (have, col) => { const need = prodNeed(pr, col, order, cfg.result); return need != null && need !== '' && Number(have) < Number(need) - 0.01 }
       if (less(g.kerf, 'kerf_width') || less(g.marginL, 'margin_left') || less(g.marginR, 'margin_right') || less(g.marginT, 'margin_top') || less(g.marginB, 'margin_bottom')) {
         chooseProduction(order.production_id)
-        window.alert(`Раскрой посчитан с резом ${g.kerf} мм или отступами меньше, чем сейчас у производства «${pr.name}» (рез ${prodVal(pr, 'kerf_width', order)} мм).\n\nПараметры производства подставлены — выполните раскрой заново и отправьте повторно.`)
+        window.alert(`Раскрой посчитан с резом ${g.kerf} мм или отступами меньше, чем сейчас у производства «${pr.name}» (рез ${prodNeed(pr, 'kerf_width', order, cfg.result)} мм).\n\nПараметры производства подставлены — выполните раскрой заново и отправьте повторно.`)
         return
       }
     }
@@ -3612,7 +3623,17 @@ export default function NestingPage() {
       </div>
       {beamSaw && (
         <p style={{ fontSize: 11, color: 'var(--blue)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
-          β Бета-тест. Пока раскрой под пильный центр считается как для форматника (сквозные резы). Правила пильного центра — уровни резов, остаток для захвата, узкие детали с запасом, порядок полос — подключаются следующим этапом; их настраивает производство.
+          β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Пропил, обрезка листа и правила — из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); return pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)' })()}.
+          {!isMaster && (
+            <button type="button" onClick={() => setSendJob({
+              title: 'Замечание по пильному центру β', fileName: `beamsaw_${orderFileName(order)}.json`, orderId: id,
+              need: 'Опишите замечание: что не так на карте или чего не хватает — хотя бы пару слов.',
+              getPayload: () => JSON.stringify({ kind: 'beam_saw_feedback', order: { id, sheet_length: order.sheet_length, sheet_width: order.sheet_width, production_id: order.production_id },
+                details, configs: configs.map(c => ({ dir: c.dir, secs: c.secs, result: c.result ? { ...c.result, sheets: c.sheetsData || c.result.sheets } : null })) }),
+            })} style={{ display: 'block', marginTop: 4, padding: '4px 10px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>
+              β Замечание по пильному центру
+            </button>
+          )}
         </p>
       )}
 

@@ -7,10 +7,10 @@ export const BEAM_DEFAULTS = {
   trimLeft: 18, trimRight: 18, trimTop: 18, trimBottom: 18,   // обрезка кромки листа, мм
   levels: 4,                 // уровней резов не больше (каждый следующий — поворот заготовки на 90°)
   rotations: null,           // поворотов заготовки не больше; пусто — сколько позволяют уровни
-  levelTrims: [18, 18, 18, 18],   // торцовка в начале полосы на каждом уровне, мм; уровней больше — берётся последнее значение
+  levelTrims: [18, 18],      // торцовка в начале заготовки на уровнях 3, 4, …, мм (1-й и 2-й уровни — обрезка листа); пусто — как на предыдущем
   grip: 18,                  // мин. остаток для захвата, мм: деталь уже полосы — остаток не меньше этого
   gripWithKerf: true,        // остаток считается вместе с пропилом (полоса 600 → деталь до 582)
-  narrowMin: 50,             // деталь уже этого — узкая
+  narrowMin: 50,             // деталь с шириной до этого (включительно) — узкая; 0 — правило выключено
   narrowCut: 120,            // узкая деталь пилится шириной не меньше этой, потом подрезается до своего размера
   direction: 'y',            // полосы: 'y' — вдоль длинной стороны, 'x' — вдоль короткой, 'auto' — как выгоднее (без текстуры)
   stripOrder: 'desc',        // порядок полос: 'desc' — от большой к малой, 'wnw' — большая → малая к середине → большая у края
@@ -29,7 +29,7 @@ export function beamSettings(raw) {
   const lt = Array.isArray(s.levelTrims) ? s.levelTrims.map(v => num(v, null)) : []
   // пустой уровень — как предыдущий заполненный; до первого заполненного — по умолчанию
   const levelTrims = []
-  for (let i = 0; i < levels; i++) levelTrims.push(lt[i] ?? (i ? levelTrims[i - 1] : D.levelTrims[0]))
+  for (let i = 0; i < levels - 2; i++) levelTrims.push(lt[i] ?? (i ? levelTrims[i - 1] : D.levelTrims[0]))
   return {
     kerf: num(s.kerf, D.kerf),
     trimLeft: num(s.trimLeft, D.trimLeft), trimRight: num(s.trimRight, D.trimRight), trimTop: num(s.trimTop, D.trimTop), trimBottom: num(s.trimBottom, D.trimBottom),
@@ -46,6 +46,12 @@ export function beamSettings(raw) {
     mergeSame: s.mergeSame == null ? D.mergeSame : !!s.mergeSame,
   }
 }
+
+/** Сколько уровней резов реально можно: уровни и повороты (каждый следующий уровень — поворот на 90°) */
+export const maxLevels = s => Math.max(1, s.rotations == null ? s.levels : Math.min(s.levels, s.rotations + 1))
+/** Торцовка в начале заготовки на уровне lvl. 1-й и 2-й уровни режут от краёв листа — там это обрезка листа (отступы), здесь 0.
+ *  С 3-го уровня заготовка начинается от реза, и торцовка — отдельная (как у Asai / KDT: 18, у GibLab 9). */
+export const trimAt = (s, lvl) => (lvl <= 2 || !s.levelTrims.length ? 0 : s.levelTrims[Math.min(lvl - 3, s.levelTrims.length - 1)] ?? 0)
 
 /** Наибольшая деталь, которая ещё ложится в полосу шириной w (правило захвата). Ровно по ширине — всегда можно. */
 export function maxPartIn(w, s) {
