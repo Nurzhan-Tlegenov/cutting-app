@@ -33,6 +33,7 @@ import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from 
 // Настройки (постпроцессор, инструменты, обработка контуров, команды) идут за аккаунтом.
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
+import { saveBeamSawXml } from '../lib/beamSawXml'
 const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -348,6 +349,10 @@ export default function CncPage() {
             <p className="section-title" style={{ marginBottom: 0, flex: 1 }}>Листы ({sel.length} из {mat.sheets.length})</p>
             <button type="button" style={{ ...small, marginRight: 6 }} title="Карты раскроя: листы с деталями, размерами и кромкой; на последней странице — статистика раскроя и стоимость работ (что выводить, выбираете сами)"
               onClick={() => setPdfAsk(true)}>PDF карт</button>
+            {mat.result?.beamSaw && (
+              <button type="button" style={{ ...small, marginRight: 6 }} title="β Программа для пильного центра KDT: XML с деревом резов (как у Asai) — по всем листам этого материала"
+                onClick={() => saveBeamSawXml({ order, mat, geoOf: sh => sheetGeo(order, mat.result, sh) }).catch(e => window.alert('Не удалось собрать XML для пилы: ' + (e?.message || e)))}>XML пилы</button>
+            )}
             <button type="button" style={small} onClick={() => { setPicked(sel.length === mat.sheets.length ? [] : null); setBuilt(null) }}>{sel.length === mat.sheets.length ? 'Снять все' : 'Выбрать все'}</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>

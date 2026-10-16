@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.1'
+export const BEAM_SAW_VERSION = 'β0.2'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -169,6 +169,14 @@ function layout(node, ox, oy, s, out) {
     if (node.A - pos > EPS) out.cuts++      // рез после слота (последний по краю заготовки не нужен)
     out.maxLevel = Math.max(out.maxLevel, node.level)
   }
+  // остаток в конце заготовки — деловой обрезок, если не меньше заданного (размеры без пропила)
+  const r = node.A - pos, k = out.kerf
+  if (r - k > EPS && node.slots.length) {
+    const w = node.axis === 'x' ? r - k : node.B - k, h = node.axis === 'x' ? node.B - k : r - k
+    const big = Math.max(w, h), small = Math.min(w, h)
+    if (big >= Math.max(s.offcutMinL, s.offcutMinW) - EPS && small >= Math.min(s.offcutMinL, s.offcutMinW) - EPS)
+      out.offcuts.push({ x: node.axis === 'x' ? ox + pos : ox, y: node.axis === 'x' ? oy : oy + pos, w, h })
+  }
 }
 
 // Дерево для хранения: без ссылок на детали — только размеры и id
@@ -202,10 +210,12 @@ function packAll(pieces, s, kerf, X, Y, axes, opts) {
     }
     ctx.used = bestUsed
     if (ctx.used.size === before) break     // остальные детали не помещаются ни на какой лист
-    const out = { placed: [], cuts: 0, maxLevel: 1 }
+    const out = { placed: [], cuts: 0, maxLevel: 1, offcuts: [], kerf }
     layout(root, 0, 0, s, out)
     cuts += out.cuts
-    sheets.push({ index: sheets.length, placed: out.placed, freeRects: [], family: 'guillotine', beamTree: plainTree(root), beamAxis: axis, beamCuts: out.cuts, beamLevels: out.maxLevel })
+    // обрезки — как выбранные вручную (manualOffcuts): Y снизу вверх, как их хранит карта
+    const manualOffcuts = out.offcuts.map(o => ({ x: +o.x.toFixed(1), y: +(Y - kerf - o.y - o.h).toFixed(1), w: +o.w.toFixed(1), h: +o.h.toFixed(1) }))
+    sheets.push({ index: sheets.length, placed: out.placed, freeRects: [], family: 'guillotine', manualOffcuts, beamTree: plainTree(root), beamAxis: axis, beamCuts: out.cuts, beamLevels: out.maxLevel })
   }
   const unplaced = pieces.filter(p => !ctx.used.has(p.id)).map(p => p.id)
   return { sheets, cuts, unplaced }

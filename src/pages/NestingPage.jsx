@@ -50,7 +50,8 @@ import SendToMaster from '../components/SendToMaster'
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
-import { beamSettings } from '../lib/beamSaw'
+import { beamSettings, sameMaps, sameMapTag } from '../lib/beamSaw'
+import { saveBeamSawXml } from '../lib/beamSawXml'
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
 const COLORS = [
@@ -2253,6 +2254,15 @@ export default function NestingPage() {
   const [pdfBusy, setPdfBusy] = useState(null)
   const [pdfEstimate, setPdfEstimateState] = useState(() => !!getUserSettings(user).pdfEstimate)   // галочка «Смета» под кнопкой PDF
   const setPdfEstimate = on => { setPdfEstimateState(on); saveUserSettings({ pdfEstimate: on }, user) }
+  // β Пильный центр: программа для пилы KDT (XML как у Asai) — по текущей карте, с ручными правками и обрезками
+  async function xmlCfg(cfg) {
+    try {
+      const m = materials.find(x => x.key === matKey) || materials[0] || {}
+      const [name, thick] = String(m.key || '|').split('|')
+      const mat = { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details }
+      await saveBeamSawXml({ order, mat, geoOf: sh => geoOf(order, cfg.result, sh) })
+    } catch (e) { window.alert('Не удалось собрать XML для пилы: ' + (e?.message || e)) }
+  }
   async function pdfCfg(cfg, idx) {
     setPdfBusy(cfg.id)
     try {
@@ -3217,12 +3227,12 @@ export default function NestingPage() {
                 {/* Переключатель листов — под картой, чтобы палец не закрывал карту */}
                 {!locked && (
                   <div style={{ display: 'flex', gap: 5, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
-                    {cfg.sheetsData.map((sh, i) => (
-                      <button key={i} onClick={() => openSheet(i)}
+                    {(() => { const same = cfg.result?.beamSaw && cfg.result.beamSettings?.mergeSame !== false ? sameMaps(cfg.sheetsData) : null; return cfg.sheetsData.map((sh, i) => (
+                      <button key={i} onClick={() => openSheet(i)} title={same && same[i].first !== i ? `Такая же карта, как лист ${same[i].first + 1}` : same && same[i].count > 1 ? `Эта карта режется ${same[i].count} раза` : undefined}
                         style={chip(view === 'sheet' && cfg.activeSheet === i, 'var(--blue)')}>
-                        {sh.stock === 'offcut' ? 'Обр.' : 'Лист'} {i + 1} · {sh.placed.length ? sh.placed.length : 'пусто'}
+                        {sh.stock === 'offcut' ? 'Обр.' : 'Лист'} {i + 1}{sameMapTag(same, i)} · {sh.placed.length ? sh.placed.length : 'пусто'}
                       </button>
-                    ))}
+                    )) })()}
                   </div>
                 )}
 
@@ -3360,6 +3370,10 @@ export default function NestingPage() {
                           style={{ padding: '9px 12px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: pdfBusy ? 'default' : 'pointer' }}>
                           {pdfBusy === cfg.id ? '…' : 'PDF'}
                         </button>
+                        {cfg.result?.beamSaw && (
+                          <button onClick={() => xmlCfg(cfg)} title="β Программа для пильного центра KDT: XML с деревом резов, как у Asai"
+                            style={{ padding: '4px 10px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 11.5, cursor: 'pointer' }}>XML пилы</button>
+                        )}
                         {cabinet === 'production' && (
                           <label title="Добавить в PDF страницу со статистикой раскроя и сметой: операция, количество, цена, сумма" style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10.5, color: pdfEstimate ? 'var(--blue)' : 'var(--text-hint)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                             <input type="checkbox" checked={pdfEstimate} onChange={e => setPdfEstimate(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />Смета

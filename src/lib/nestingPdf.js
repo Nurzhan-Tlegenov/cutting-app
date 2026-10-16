@@ -12,6 +12,7 @@ import { detailEdgeList, holeEdgeSegments } from './edgeLength'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { insetEdgeLines } from './edgeLines'
 import { computeCutLines } from './cutLines'
+import { sameMaps } from './beamSaw'
 
 const K = 1654 / 210                     // точек на мм
 const PW = 1654, PH = 2339
@@ -363,11 +364,13 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
     rule(ctx, x, y + 5.5, x + 7, y + 5.5, 0.38, EDGE); rule(ctx, x, y + 6.5, x + 7, y + 6.5, 0.38, EDGE)
     text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', x + 9, y + 7, { size: 2.5, color: MUTED })
   }
+  // β Пильный центр: одинаковые карты подписываются («карта ×3», «карта как лист 1»)
+  const same = mat?.result?.beamSaw && mat.result.beamSettings?.mergeSame !== false ? sameMaps(sheets) : null
   const pageValues = si => {
     const geo = geos[si], sheet = sheets[si], area = geo.usableX * geo.usableY
     return {
       title: ['', `Карта раскроя · ${orderTitle(order)}`], order: ['Заказ', orderTitle(order)],
-      sheetNo: ['', `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}`],
+      sheetNo: ['', `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${same && same[si].first !== si ? ` · карта как лист ${same[si].first + 1}` : same && same[si].count > 1 ? ` · карта ×${same[si].count}` : ''}`],
       material: ['Материал', matName], date: ['Дата', new Date().toLocaleDateString('ru-RU')],
       used: ['Использовано материала', `${Math.round(area > 0 ? used[si] / area * 100 : 0)} %`],
       sheetSize: ['Лист, мм', `${fmt(geo.sheetL)} × ${fmt(geo.sheetW)}`], usable: ['Рабочая область, мм', `${fmt(geo.usableY)} × ${fmt(geo.usableX)}`],

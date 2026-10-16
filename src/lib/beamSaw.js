@@ -12,7 +12,7 @@ export const BEAM_DEFAULTS = {
   gripWithKerf: true,        // остаток считается вместе с пропилом (полоса 600 → деталь до 582)
   narrowMin: 50,             // деталь с шириной до этого (включительно) — узкая; 0 — правило выключено
   narrowCut: 120,            // узкая деталь пилится шириной не меньше этой, потом подрезается до своего размера
-  direction: 'y',            // полосы: 'y' — вдоль длинной стороны, 'x' — вдоль короткой, 'auto' — как выгоднее (без текстуры)
+  direction: 'auto',         // полосы: 'y' — вдоль длинной стороны, 'x' — вдоль короткой, 'auto' — как выгоднее (без текстуры)
   stripOrder: 'desc',        // порядок полос: 'desc' — от большой к малой, 'wnw' — большая → малая к середине → большая у края
   offcutMinL: 300, offcutMinW: 300,   // деловой обрезок — не меньше, мм
   mergeSame: true,           // одинаковые карты — одной картой «× N листов»
@@ -57,3 +57,20 @@ export const trimAt = (s, lvl) => (lvl <= 2 || !s.levelTrims.length ? 0 : s.leve
 export function maxPartIn(w, s) {
   return w - s.grip - (s.gripWithKerf ? 0 : s.kerf)
 }
+
+/** Одинаковые карты: детали тех же размеров на тех же местах. -> [{ first, count }] по каждому листу:
+ *  first — номер первого такого листа (0…), count — сколько всего таких листов (у первого) */
+export function sameMaps(sheets) {
+  const sig = sh => (sh?.placed || []).map(p => `${(+p.x).toFixed(1)},${(+p.y).toFixed(1)},${(+p.w).toFixed(1)},${(+p.h).toFixed(1)}`).sort().join(';')
+    + '|' + (sh?.stock || '') + '|' + (sh?.sheetL || '') + 'x' + (sh?.sheetW || '')
+  const firstBy = new Map(), out = []
+  ;(sheets || []).forEach((sh, i) => {
+    const k = sig(sh)
+    if (!sh?.placed?.length || !firstBy.has(k)) { firstBy.set(k, i); out.push({ first: i, count: 1 }); return }
+    const f = firstBy.get(k)
+    out.push({ first: f, count: 1 }); out[f].count++
+  })
+  return out
+}
+/** Подпись листа с учётом одинаковых карт: «×3» у первого, «= 1» у повторов */
+export const sameMapTag = (same, i) => (!same?.[i] ? '' : same[i].first !== i ? ` = ${same[i].first + 1}` : same[i].count > 1 ? ` ×${same[i].count}` : '')
