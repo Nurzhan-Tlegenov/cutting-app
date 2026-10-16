@@ -1321,6 +1321,12 @@ const countTxt = s => `${s.count} л.${s.offcuts ? ` + ${s.offcuts} обр.` : '
 // Производство задаёт только рез и отступы (это его станок); формат листа
 // пользователь меняет всегда — вдруг привезёт свой материал
 const PROD_LOCKED = ['kerf', 'ml', 'mr', 'mt', 'mb']
+// «Производство — не выбрано (свои параметры)»: пользователь хочет раскроить заказ на своём резе и отступах
+// (потестить, сравнить с другой программой). Выбор помнится за заказом на этом устройстве — раскрой больше не
+// подставляет производство сам; при отправке, если параметры не совпадают с производством, предлагается перекроить.
+const ownParamsKey = id => 'ownParams:' + id
+function readOwnParams(id) { try { return localStorage.getItem(ownParamsKey(id)) === '1' } catch { return false } }
+function writeOwnParams(id, on) { try { if (on) localStorage.setItem(ownParamsKey(id), '1'); else localStorage.removeItem(ownParamsKey(id)) } catch { /* без памяти */ } }
 // рез и отступы производства для материала заказа: у ХДФ / ДВП — свои (если производство их задало), иначе общие
 const prodVal = (pr, col, order) => (order?.material_kind === 'hdf' && pr['hdf_' + col] != null ? pr['hdf_' + col] : pr[col])
 const SHEET_FIELDS = [
@@ -1606,7 +1612,10 @@ export default function NestingPage() {
   const [needProd, setNeedProd] = useState(null)         // «Оформить» без производства: { cfg, force, pick, own }
   // «Где будете резать?» — производство выбирается до раскроя: { mine } пока окно открыто
   const [pickProd, setPickProd] = useState(null)
-  const [noProdOk, setNoProdOk] = useState(false)        // «Пока раскроить со своими параметрами» — до конца работы с заказом
+  const [noProdOk, setNoProdOkState] = useState(() => readOwnParams(id))   // «Свои параметры» — производство само не подставляется
+  const setNoProdOk = on => { setNoProdOkState(on); writeOwnParams(id, on) }
+  const [ownFor, setOwnFor] = useState(id)   // другой заказ на той же странице — его собственный выбор
+  if (ownFor !== id) { setOwnFor(id); setNoProdOkState(readOwnParams(id)) }
   const runAfterRef = useRef(null)                       // какой раскрой запустить, когда производство выбрано
   const [prodsReady, setProdsReady] = useState(false)    // список производств загружен (и последнее выбранное подставлено)
   const askedOnOpenRef = useRef(false)
@@ -1867,7 +1876,7 @@ export default function NestingPage() {
     // Производство не выбрано — подставляем последнее, которое клиент выбирал (запоминается за аккаунтом).
     // Только в своём ещё не отправленном заказе, где раскроя пока нет: готовый раскрой не пересчитывается от чужого реза.
     const last = getUserSettings(user).lastProductionId
-    const lp = last && !o?.production_id && o?.user_id === user?.id && (!o.status || o.status === 'draft') && !o.nesting_result
+    const lp = last && !o?.production_id && o?.user_id === user?.id && (!o.status || o.status === 'draft') && !o.nesting_result && !readOwnParams(o.id)
       ? list.find(x => x.id === last && (x.status ?? 'approved') === 'approved') : null
     if (lp) {
       const patch = { production_id: lp.id }
@@ -1915,6 +1924,7 @@ export default function NestingPage() {
   function chooseProduction(pid, list = productions) {
     const pr = list.find(x => x.id === pid)
     saveUserSettings({ lastProductionId: pr ? pr.id : '' }, user)     // в следующем заказе это производство подставится само
+    setNoProdOk(!pr)                                                 // «не выбрано» — раскрой идёт на своих резе и отступах
     if (!pr) { saveOrderPatch({ production_id: null }); return }
     const patch = { production_id: pr.id }
     SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(pr, col, order); if (PROD_LOCKED.includes(k) && v != null) patch[col] = Number(v) }) // формат листа не трогаем
@@ -2128,7 +2138,7 @@ export default function NestingPage() {
     if (!r || pickProd || !(order?.production_id || noProdOk)) return
     runAfterRef.current = null
     if (r.all) runAll(); else runCfg(r.id, r.cont)
-  }, [order?.production_id, order?.kerf_width, noProdOk, pickProd])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [order?.production_id, order?.kerf_width, order?.margin_left, order?.margin_right, order?.margin_top, order?.margin_bottom, noProdOk, pickProd])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Буфер деталей ────────────────────────────────────────────────────────
   // Деталь снимается с листа в буфер, затем кладётся на любой другой лист
@@ -2268,6 +2278,7 @@ export default function NestingPage() {
   // остальным предлагаем выбрать производство или зарегистрировать своё.
   async function submitOrder(cfg, force = false, prodId = null) {
     if (!checkCfg(cfg)) return
+    const wasPid = order.production_id || null
     let pid = prodId || order.production_id || null
     if (prodId) { await saveOrderPatch({ production_id: prodId }, false); saveUserSettings({ lastProductionId: prodId }, user) }     // раскрой уже посчитан — параметры листа не трогаем; производство запоминается для следующих заказов
     else if (!order.production_id) {
@@ -2298,8 +2309,19 @@ export default function NestingPage() {
       const g = geoOf(order, cfg.result)
       const less = (have, col) => { const need = prodVal(pr, col, order); return need != null && need !== '' && Number(have) < Number(need) - 0.01 }
       if (less(g.kerf, 'kerf_width') || less(g.marginL, 'margin_left') || less(g.marginR, 'margin_right') || less(g.marginT, 'margin_top') || less(g.marginB, 'margin_bottom')) {
-        chooseProduction(pid)                 // рез и отступы производства — в заказ, чтобы новый расчёт шёл уже с ними
-        window.alert(`Раскрой посчитан с резом ${g.kerf} мм и отступами, которые меньше, чем у производства «${pr.name}» (рез ${prodVal(pr, 'kerf_width', order)} мм).\n\nЗаказ не отправлен. Параметры производства подставлены — выполните раскрой заново и отправьте заказ.`)
+        const pv = col => prodVal(pr, col, order)
+        const again = window.confirm(`Этот раскрой посчитан на ваших параметрах: рез ${g.kerf} мм, отступы ${g.marginL}/${g.marginR}/${g.marginT}/${g.marginB} мм.\n`
+          + `У производства «${pr.name}»: рез ${pv('kerf_width')} мм, отступы ${pv('margin_left')}/${pv('margin_right')}/${pv('margin_top')}/${pv('margin_bottom')} мм — `
+          + `по такому раскрою оно резать не сможет.\n\nПерекроить заказ под это производство? Раскрой запустится заново, после него заказ можно отправить.`)
+        if (again) {
+          // параметры производства уже стоят в заказе (раскрой просто старый) — запускаем сразу,
+          // иначе — когда рез и отступы производства встанут в заказ (см. отложенный запуск ниже)
+          const already = SHEET_FIELDS.every(([k, col]) => !PROD_LOCKED.includes(k) || pv(col) == null || Number(pv(col)) === Number(order[col]))
+          if (already) { chooseProduction(pid); runCfg(cfg.id) }
+          else { runAfterRef.current = { id: cfg.id }; chooseProduction(pid) }
+        } else if (!wasPid) {
+          await saveOrderPatch({ production_id: null }, false)   // остаёмся на своих параметрах — производство не закрепляется
+        }
         return
       }
     }
