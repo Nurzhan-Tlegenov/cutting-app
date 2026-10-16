@@ -15,7 +15,7 @@ const esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').
 // ── дерево резов по карте ────────────────────────────────────────────────
 // items — куски в координатах рабочей зоны (Y сверху вниз), размеры с пропилом справа/снизу (как p.w/p.h у деталей).
 // Регион: по оси axis длина A, поперёк B (тоже с пропилом). Куски группируются в слоты сквозными резами поперёк оси.
-function derive(items, axis, ox, oy, A, B, depth = 1) {
+export function derive(items, axis, ox, oy, A, B, depth = 1) {
   if (depth > 40) throw new Error('карта не раскладывается на сквозные резы')
   const st = it => (axis === 'x' ? it.x : it.y), ln = it => (axis === 'x' ? it.w : it.h)
   const ac = it => (axis === 'x' ? it.h : it.w), as = it => (axis === 'x' ? it.y : it.x)
@@ -55,7 +55,7 @@ function deriveGroups(items, axis) {
   }
   return out
 }
-const depthOf = n => 1 + Math.max(0, ...n.slots.map(s => (s.child ? depthOf(s.child) : 0)))
+export const depthOf = n => 1 + Math.max(0, ...n.slots.map(s => (s.child ? depthOf(s.child) : 0)))
 
 /** Дерево резов листа: ось 1-го уровня — как посчитал раскрой (sheet.beamAxis), иначе та, где уровней меньше */
 export function sheetCutTree(sheet, geo) {
