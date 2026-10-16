@@ -11,11 +11,12 @@ import { rawDetail, overMm, parseEdgeTypes } from './edgeCut'
 import { detailEdgeList, holeEdgeSegments } from './edgeLength'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { insetEdgeLines } from './edgeLines'
+import { computeCutLines } from './cutLines'
 
 const K = 1654 / 210                     // точек на мм
 const PW = 1654, PH = 2339
 const mm = v => v * K
-const INK = '#1F1F1D', MUTED = '#6B6A66', LINE = '#B9B7B0', EDGE = '#E8590C', FILL = '#F3F0E8', BRAND = '#009BDE'
+const INK = '#1F1F1D', MUTED = '#6B6A66', DIM = '#3A3936', CUT = '#7B1FA2', LINE = '#B9B7B0', EDGE = '#E8590C', FILL = '#F3F0E8', BRAND = '#009BDE'
 const r1 = v => Math.round(v * 10) / 10
 const fmt = v => String(r1(v)).replace('.', ',')
 
@@ -93,7 +94,7 @@ function sheetRows(sheet, details) {
   return { rows, noOf: new Map(rows.map(r => [r.di, r.no])) }
 }
 
-function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
+function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
   const s = Math.min(bw / geo.sheetW, bh / geo.sheetL)                    // мм бумаги на мм листа
   const x0 = bx + (bw - geo.sheetW * s) / 2, y0 = by
   const X = v => mm(x0 + v * s), Y = v => mm(y0 + (geo.sheetL - v) * s)   // v — от левого нижнего угла листа
@@ -102,11 +103,19 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
   // деловые обрезки
   for (const o of sheet.manualOffcuts || []) {
     const ox = Math.max(0, geo.marginL + o.x), oy = Math.max(0, geo.marginB + o.y), ow = Math.min(geo.sheetW, geo.marginL + o.x + o.w) - ox, oh = Math.min(geo.sheetL, geo.marginB + o.y + o.h) - oy
-    ctx.fillStyle = 'rgba(232,89,12,0.08)'; ctx.fillRect(X(ox), Y(oy + oh), mm(ow * s), mm(oh * s))
-    ctx.strokeStyle = EDGE; ctx.lineWidth = mm(0.25); ctx.setLineDash([mm(1.4), mm(1)]); ctx.strokeRect(X(ox), Y(oy + oh), mm(ow * s), mm(oh * s)); ctx.setLineDash([])
-    if (ow * s > 16 && oh * s > 8) {
-      text(ctx, 'обрезок', x0 + (ox + ow / 2) * s, y0 + (geo.sheetL - oy - oh / 2) * s - 0.6, { size: 2.4, color: EDGE, align: 'center' })
-      text(ctx, `${Math.round(o.h)} × ${Math.round(o.w)}`, x0 + (ox + ow / 2) * s, y0 + (geo.sheetL - oy - oh / 2) * s + 2.6, { size: 2.6, bold: true, color: EDGE, align: 'center' })
+    // деловой обрезок — заметно: заливка, косая штриховка, рамка и размер (на маленьком — только размер)
+    ctx.fillStyle = 'rgba(232,89,12,0.14)'; ctx.fillRect(X(ox), Y(oy + oh), mm(ow * s), mm(oh * s))
+    ctx.save(); ctx.beginPath(); ctx.rect(X(ox), Y(oy + oh), mm(ow * s), mm(oh * s)); ctx.clip()
+    ctx.strokeStyle = 'rgba(232,89,12,0.35)'; ctx.lineWidth = mm(0.15)
+    for (let t = -oh * s; t < ow * s; t += 2.2) { ctx.beginPath(); ctx.moveTo(X(ox) + mm(t), Y(oy)); ctx.lineTo(X(ox) + mm(t + oh * s), Y(oy + oh)); ctx.stroke() }
+    ctx.restore()
+    ctx.strokeStyle = EDGE; ctx.lineWidth = mm(0.4); ctx.setLineDash([mm(1.4), mm(1)]); ctx.strokeRect(X(ox), Y(oy + oh), mm(ow * s), mm(oh * s)); ctx.setLineDash([])
+    const ocx = x0 + (ox + ow / 2) * s, ocy = y0 + (geo.sheetL - oy - oh / 2) * s, dimTxt = `${Math.round(o.h)} × ${Math.round(o.w)}`
+    if (ow * s > 16 && oh * s > 9) {
+      text(ctx, 'обрезок', ocx, ocy - 0.8, { size: 2.8, color: EDGE, align: 'center' })
+      text(ctx, dimTxt, ocx, ocy + 3, { size: 3.2, bold: true, color: EDGE, align: 'center' })
+    } else if (ow * s > 9 && oh * s > 3.5) {
+      text(ctx, dimTxt, ocx, ocy, { size: Math.min(2.6, oh * s * 0.6), bold: true, color: EDGE, align: 'center', base: 'middle' })
     }
   }
   for (const p of sheet.placed) {
@@ -194,16 +203,16 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
     }
     let placed = false
     for (const k of [1, 0.85, 0.72, 0.6, 0.5]) {
-      const ds = Math.max(1.3, Math.min(2.6, Math.min(pw, ph) * 0.16) * k)
+      const ds = Math.max(1.5, Math.min(3.6, Math.min(pw, ph) * 0.2) * k)   // размеры на детали — крупнее, читаются на распечатке
       const ns = Math.max(1.8, Math.min(5, Math.min(pw, ph) * 0.42) * k)
       const eL = p.edgeLeft ? 0.9 : 0, eT = p.edgeTop ? 0.9 : 0           // размер не наезжает на полоску кромки
       const bandL = ds + 1.2 + eL, bandT = ds + 1.2 + eT                  // полосы под размер у левой и верхней стороны
-      const fitTop = tw(sw, ds) <= pw - bandL - 0.8, fitLeft = tw(sh, ds) <= ph - bandT - 0.8
+      const fitTop = tw(sw, ds, true) <= pw - bandL - 0.8, fitLeft = tw(sh, ds, true) <= ph - bandT - 0.8
       const fitNo = ph / 2 - ns / 2 >= bandT + 0.3 && pw / 2 - tw(no, ns, true) / 2 >= bandL + 0.3
       if (!(fitTop && fitLeft && fitNo)) continue
       text(ctx, no, cx, cy, { size: ns, bold: true, align: 'center', base: 'middle' })
-      text(ctx, sw, cx, y0 + (geo.sheetL - py - h) * s + ds + 0.9 + eT, { size: ds, color: MUTED, align: 'center' })
-      vtext(sh, x0 + px * s + ds + 0.8 + eL, cy, ds, { color: MUTED })
+      text(ctx, sw, cx, y0 + (geo.sheetL - py - h) * s + ds + 0.9 + eT, { size: ds, bold: true, color: DIM, align: 'center' })
+      vtext(sh, x0 + px * s + ds + 0.8 + eL, cy, ds, { bold: true, color: DIM })
       placed = true
       break
     }
@@ -216,27 +225,52 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf) {
       const cx = x0 + px * s + il + iw / 2, cy = y0 + (geo.sheetL - py - h) * s + it + ih / 2
       const dims = d ? `${fmt(d.length)}×${fmt(d.width)}` : `${sh}×${sw}`
       const long = Math.max(iw, ih), short = Math.min(iw, ih), vert = ih > iw
-      const one = Math.min(2.6, (short - 0.4) * 0.8, (long - 0.8) / Math.max(0.1, tw(`${no}  ${dims}`, 1, true)))
-      const two = Math.min(2.6, (short - 0.4) / 2.3, (long - 0.8) / Math.max(0.1, tw(dims, 1), tw(no, 1.15, true)))
+      const one = Math.min(3.2, (short - 0.4) * 0.8, (long - 0.8) / Math.max(0.1, tw(`${no}  ${dims}`, 1.05, true)))
+      const two = Math.min(3.2, (short - 0.4) / 2.3, (long - 0.8) / Math.max(0.1, tw(dims, 1, true), tw(no, 1.15, true)))
       if (one >= two) {
-        const size = Math.max(0.9, one), wn = tw(no, size, true), gap = size * 0.5, total = wn + gap + tw(dims, size)
+        const size = Math.max(0.9, one), wn = tw(no, size, true), gap = size * 0.5, total = wn + gap + tw(dims, size, true)
         if (vert) {
           vtext(no, cx, cy + total / 2 - wn / 2, size, { bold: true, base: 'middle' })
-          vtext(dims, cx, cy - total / 2 + (total - wn - gap) / 2, size, { color: MUTED, base: 'middle' })
+          vtext(dims, cx, cy - total / 2 + (total - wn - gap) / 2, size, { bold: true, color: DIM, base: 'middle' })
         } else {
           text(ctx, no, cx - total / 2 + wn / 2, cy, { size, bold: true, align: 'center', base: 'middle' })
-          text(ctx, dims, cx + total / 2 - (total - wn - gap) / 2, cy, { size, color: MUTED, align: 'center', base: 'middle' })
+          text(ctx, dims, cx + total / 2 - (total - wn - gap) / 2, cy, { size, bold: true, color: DIM, align: 'center', base: 'middle' })
         }
       } else {
         const size = Math.max(0.9, two), off = size * 0.6
         if (vert) {
           vtext(no, cx - off, cy, size * 1.15, { bold: true, base: 'middle' })
-          vtext(dims, cx + off, cy, size, { color: MUTED, base: 'middle' })
+          vtext(dims, cx + off, cy, size, { bold: true, color: DIM, base: 'middle' })
         } else {
           text(ctx, no, cx, cy - off, { size: size * 1.15, bold: true, align: 'center', base: 'middle' })
-          text(ctx, dims, cx, cy + off, { size, color: MUTED, align: 'center', base: 'middle' })
+          text(ctx, dims, cx, cy + off, { size, bold: true, color: DIM, align: 'center', base: 'middle' })
         }
       }
+    }
+  }
+  // Пила (форматник): линии реза — те же, что на карте в приложении (сквозные резы по центру пропила, до края листа)
+  if (opt.cuts) {
+    const kerf = Number(geo.kerf) || 0, uy = geo.usableY
+    const items = sheet.placed.map(p => ({ x: p.x, y: uy - p.y - (p.h - kerf), w: p.w, h: p.h }))
+    const offs = (sheet.manualOffcuts || []).map(o => ({ ...o, y: uy - o.y - o.h }))
+    let res = null
+    try { res = computeCutLines(items, geo.usableX, uy, kerf, offs) } catch { res = null }
+    if (res) {
+      ctx.save(); ctx.strokeStyle = CUT; ctx.lineWidth = mm(0.4); ctx.setLineDash([mm(1.6), mm(0.9)])
+      const toY = sy => geo.marginB + (uy - sy)                       // экранная Y рабочей зоны -> от низа листа
+      for (const l of res.lines) {
+        let a = l.from, b = l.to
+        if (l.v) {
+          if (a <= 0.5) a -= geo.marginT; if (b >= uy - 0.5) b += geo.marginB
+          const xx = geo.marginL + l.pos
+          ctx.beginPath(); ctx.moveTo(X(xx), Y(toY(a))); ctx.lineTo(X(xx), Y(toY(b))); ctx.stroke()
+        } else {
+          if (a <= 0.5) a -= geo.marginL; if (b >= geo.usableX - 0.5) b += geo.marginR
+          const yy = toY(l.pos)
+          ctx.beginPath(); ctx.moveTo(X(geo.marginL + a), Y(yy)); ctx.lineTo(X(geo.marginL + b), Y(yy)); ctx.stroke()
+        }
+      }
+      ctx.restore()
     }
   }
   ctx.strokeStyle = INK; ctx.lineWidth = mm(0.4); ctx.strokeRect(X(0), Y(geo.sheetL), mm(geo.sheetW * s), mm(geo.sheetL * s))
@@ -290,6 +324,8 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
   const boxes = []                                   // где оказались элементы на странице — для рамок в конструкторе
   const matName = [mat.name || mat.label || order?.material_name || '', mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · ')
   const geos = sheets.map(sh => sheetGeo(order, mat.result, sh))
+  // пила: на листе — линии реза (по ним пилят)
+  const cuts = (mat.method || mat.result?.method || order?.cutting_method) === 'guillotine'
   const used = sheets.map(sh => sh.placed.reduce((a, p) => a + partArea(p), 0))
   const totalUsed = used.reduce((a, b) => a + b, 0), totalArea = geos.reduce((a, g) => a + g.usableX * g.usableY, 0)
   const totalParts = sheets.reduce((a, sh) => a + sh.placed.length, 0)
@@ -353,7 +389,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
         const turned = Math.abs(rot) % 180 === 90, bw = turned ? it.h : it.w, bh = turned ? it.w : it.h
         const sc = Math.min(bw / geo.sheetW, bh / geo.sheetL)
         ctx.save(); ctx.translate(mm(it.x + it.w / 2), mm(it.y + it.h / 2)); ctx.rotate(rot * Math.PI / 180)
-        drawSheet(ctx, -bw / 2, -geo.sheetL * sc / 2, bw, bh, sheet, geo, details, noOf)
+        drawSheet(ctx, -bw / 2, -geo.sheetL * sc / 2, bw, bh, sheet, geo, details, noOf, { cuts })
         ctx.restore()
         boxes.push({ id: it.id, x: it.x, y: it.y, w: it.w, h: it.h, rot: 0, kind: 'box' })
       } else if (it.type === 'list') {
@@ -390,7 +426,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
     pages.push(custom ? () => drawCustom(si, { sheet, geo, rows, noOf, first }) : () => {
       header(si, false)
       // схема листа — слева, на всю ширину до списка
-      const box = drawSheet(ctx, 10, LIST_TOP, 142, 214, sheet, geo, details, noOf)
+      const box = drawSheet(ctx, 10, LIST_TOP, 142, 214, sheet, geo, details, noOf, { cuts })
       // список деталей листа — колонкой справа
       const lx = 200 - LW
       let ly = listHead(ctx, lx, LIST_TOP)

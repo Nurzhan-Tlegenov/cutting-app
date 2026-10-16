@@ -3,6 +3,7 @@
 //   файлы для отладки с комментарием (уходят мастер-аккаунту, пользователю не скачиваются).
 import { supabase } from './supabase'
 import { getUserSettings, saveUserSettings } from './userSettings'
+import { APP_VERSION } from './version'
 
 const isMissing = e => /app_messages|shared_posts|PGRST205|PGRST202|42P01|schema cache/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
 export const MSG_SQL_HINT = 'Сообщения пока не включены в базе: выполните migration_messages_posts.sql в Supabase (SQL Editor) — один раз.'
@@ -31,7 +32,7 @@ export const sendNews = (user, profile, title, body) => insert({ from_id: user.i
 export const sendReply = (user, profile, toId, body) => insert({ from_id: user.id, from_name: nameOf(profile), to_id: toId, kind: 'reply', body })
 /** Файл для отладки с комментарием — мастер-аккаунту */
 export const sendDebugFile = (user, profile, { fileName, payload, comment, orderId, title }) =>
-  insert({ from_id: user.id, from_name: nameOf(profile), kind: 'debug', title: title || '', body: comment, file_name: fileName, file_size: String(payload || '').length, payload: String(payload || ''), order_id: orderId || null })
+  insert({ from_id: user.id, from_name: nameOf(profile), kind: 'debug', title: `${title || ''}${title ? ' · ' : ''}v${APP_VERSION}`, body: comment, file_name: fileName, file_size: String(payload || '').length, payload: String(payload || ''), order_id: orderId || null })
 
 export async function deleteMessage(id) {
   try { const { error } = await supabase.from('app_messages').delete().eq('id', id); return error ? fail(error) : { ok: true } } catch (e) { return fail(e) }

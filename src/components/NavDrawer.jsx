@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { myWorkplaces, openWorkplace, openOwnProduction, prodView, workPid } from '../lib/workplaces'
 import { myProduction } from '../lib/productionApi'
 import { I } from '../lib/navIcons'
+import { APP_COMMIT, appVersionText, NESTING_VERSION } from '../lib/version'
 
 // Боковое меню (кнопка ☰ слева вверху или свайп от левого края): все кабинеты и их разделы в одном месте —
 // производство (заказы, техпроцесс, настройки), рабочие места, клиент (заказы, новый заказ), мастер-аккаунт.
@@ -274,6 +275,9 @@ export default function NavDrawer({ notices, unread }) {
             <span style={{ flex: 1 }}>Обучение</span>
             <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>видео и туры</span>
           </button>
+          <div title={APP_COMMIT ? `сборка ${APP_COMMIT}` : undefined} style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4 }}>
+            RaskroyPro · {appVersionText()} · раскрой {NESTING_VERSION}
+          </div>
         </div>
       </nav>
     </div>,

@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { pendingInvite } from '../lib/workplaces'
 import { pendingRef, savePendingRef, clearPendingRef, refInfo, requestSignupRef } from '../lib/refLinks'
+import { appVersionText } from '../lib/version'
 
 const COUNTRIES = ['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан']
 
@@ -409,6 +410,7 @@ export default function AuthPage() {
           </div>
         </form>
       </div>
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', textAlign: 'center', margin: '4px 0 16px' }}>RaskroyPro · {appVersionText()}</p>
     </div>
   )
 }

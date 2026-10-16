@@ -1604,6 +1604,8 @@ export default function NestingPage() {
   const anyRunning = configs.some(c => c.status === 'running' || c.status === 'queued' || c.status === 'stopping')
 
   useEffect(() => { fetchOrder(true) }, [id])
+  // Пила (форматник): линии реза на листе видны сразу — по ним пилят (их же печатает PDF)
+  useEffect(() => { if (cuttingMethod === 'guillotine') { setShowOffcuts(true); setOffcutMode('cuts') } }, [cuttingMethod])   // eslint-disable-line react-hooks/exhaustive-deps
   // 3D-вид детали подгружаем сразу, пока версия приложения на сервере та же: иначе после обновления приложения
   // первое удержание детали перезагружало страницу (и сбрасывало выбранный вариант раскроя)
   useEffect(() => { const t = setTimeout(() => { import('../components/Model3D').catch(() => {}) }, 1500); return () => clearTimeout(t) }, [])
@@ -1755,6 +1757,20 @@ export default function NestingPage() {
     const ep = editPart
     setEditPart(null)
     if (ep) savePartDraft(ep)
+  }
+  // «Вращать все»: всем деталям этого материала разрешается поворот (как галочка вращения в бланке заказа).
+  // Готовые варианты остаются верными (ограничение только снимается) — новый раскрой уже сможет поворачивать детали
+  const [rotBusy, setRotBusy] = useState(false)
+  async function allowRotateAll() {
+    const fixed = details.filter(d => !d.rotatable && d.id)
+    if (!fixed.length) return
+    if (!window.confirm(`Разрешить вращение всем деталям (${fixed.length} поз.)?\n\nЕсли у материала есть рисунок или направление волокон — повёрнутые детали пойдут поперёк него.\nПосле этого выполните раскрой заново.`)) return
+    setRotBusy(true)
+    const ids = fixed.map(d => d.id)
+    const { error } = await supabase.from('order_details').update({ rotatable: true }).in('id', ids)
+    setRotBusy(false)
+    if (error) { window.alert('Не удалось включить вращение: ' + error.message); return }
+    setAllDetails(ds => ds.map(x => (ids.includes(x.id) ? { ...x, rotatable: true } : x)))
   }
   async function savePartDraft(ep) {
     const d = rawDetail(details[ep.index]), dr = ep.draft
@@ -2180,7 +2196,7 @@ export default function NestingPage() {
     try {
       const m = materials.find(x => x.key === matKey) || materials[0] || {}
       const [name, thick] = String(m.key || '|').split('|')
-      const mat = { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details }
+      const mat = { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details, method: cuttingMethod }
       // кабинет производства: своё оформление листа, а с галочкой «Смета» — ещё страница со статистикой раскроя и сметой
       let summary = null
       if (cabinet === 'production' && pdfEstimate) {
@@ -3514,6 +3530,23 @@ export default function NestingPage() {
       </div>
 
       {order.material_kind === 'hdf' && <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Материал заказа — ХДФ / ДВП: раскрой только под пилу{order.production_id ? ', рез и отступы — как задало производство для этого материала' : ''}.</p>}
+
+      {/* Забыли включить вращение при вводе / импорте — включить всем деталям прямо отсюда */}
+      {(() => {
+        const fixed = details.filter(d => !d.rotatable)
+        if (!details.length || !fixed.length || anyRunning) return null
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', borderRadius: 'var(--radius)', background: 'var(--bg2)', fontSize: 12 }}>
+            <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)' }}>
+              Вращение выключено: {fixed.length === details.length ? 'у всех деталей' : `у ${fixed.length} из ${details.length} позиций`}
+            </span>
+            <button type="button" disabled={rotBusy} onClick={allowRotateAll}
+              style={{ flexShrink: 0, padding: '5px 10px', borderRadius: 16, border: '0.5px solid var(--teal)', background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+              {rotBusy ? '…' : '↻ Вращать все'}
+            </button>
+          </div>
+        )
+      })()}
 
       {/* Конфигурации раскроя */}
       <p className="section-title" style={{ margin: '0 0 6px' }}>Конфигурации раскроя</p>

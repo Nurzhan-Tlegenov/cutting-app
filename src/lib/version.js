@@ -93,3 +93,9 @@ export const NESTING_CHANGELOG = {
     + 'лучшая раскладка бывает смешанной. 261011_002: 5 листов, последний 2,94 м² с парами (было: либо все пары и последний 3,41 м², '
     + 'либо россыпь без пар). Снова передаётся порог «Торцом к краю до, мм» (потерялся 2.10).',
 }
+
+/** Версия приложения — дата и время сборки (ГГММДД.ЧЧММ, Алматы); commit — коротко, если собрано на Vercel */
+/* global __APP_VERSION__, __APP_COMMIT__ */
+export const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
+export const APP_COMMIT = typeof __APP_COMMIT__ !== 'undefined' ? __APP_COMMIT__ : ''
+export const appVersionText = () => `версия ${APP_VERSION}`
