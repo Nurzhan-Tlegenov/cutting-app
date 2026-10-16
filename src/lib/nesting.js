@@ -276,7 +276,10 @@ export async function runNesting({
     const now = Date.now()
     if (!force && now - lastReport < 300) return
     lastReport = now; dirty = false
-    const sheets = cuttingMethod !== 'guillotine' ? wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY) : best.sheets
+    // Перестановка полос (широкая → узкая ← широкая) двигает полосы целиком вместе с пустым местом внутри
+    // них — на неполном листе детали разъезжались к краям с пустой серединой. Поэтому после неё — ещё одна
+    // стяжка к нулю листа: на экране та же собранная раскладка, что и в итоге после «Стоп».
+    const sheets = cuttingMethod !== 'guillotine' ? gravityAll(wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY)) : best.sheets
     // genome — порядок деталей + режим: по нему соседние потоки воспроизводят вариант у себя
     const genome = best.order ? { ids: best.order.map(p => p.id), mode: best.mode } : null
     onProgress({ sheets, iter, genome, ...(seedSheets && best.sheets === seedSheets ? { seeded: true } : {}) })
@@ -537,7 +540,7 @@ export async function runNesting({
   // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
   // узкие детали — от края: переукладка каждого листа (тот же состав, тот же лист)
   if (cuttingMethod !== 'guillotine') best.sheets = best.sheets.map((sh, i, all) => relayoutForEdges(sh, scoringModes.filter(m => !m.startsWith('g-')), direction, usableX, usableY, BIG_ORDER ? 40 : 300, i === all.length - 1))
-  if (cuttingMethod !== 'guillotine') best.sheets = wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY)
+  if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY))
   // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
   if (cuttingMethod !== 'guillotine') best.sheets = stripPermuteAll(rowSwapAll(best.sheets, usableX, usableY), usableX, usableY)
   // Страховка: шаги выше (узкие — от края, стяжка, перестановки) не должны были уменьшить обрезок
@@ -547,7 +550,7 @@ export async function runNesting({
     if (lastOffcutArea(cur, direction, usableX, usableY) < lastOffcutArea(lastKeep, direction, usableX, usableY) - Math.min(usableX, usableY)
       && smallAtEdge([lastKeep], usableX, usableY) <= smallAtEdge([cur], usableX, usableY)
       && lastKeep.placed.length === cur.placed.length) {
-      const keep = cuttingMethod !== 'guillotine' ? wideNarrowWide(lastKeep, usableX, usableY) : lastKeep
+      const keep = cuttingMethod !== 'guillotine' ? gravityAll([wideNarrowWide(lastKeep, usableX, usableY)])[0] : lastKeep
       best.sheets = best.sheets.slice()
       best.sheets[n] = { ...(lastOffcutArea(keep, direction, usableX, usableY) >= lastOffcutArea(lastKeep, direction, usableX, usableY) - 1 ? keep : lastKeep), index: cur.index }
     }

@@ -499,10 +499,13 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
   // useLayoutEffect: при смене масштаба холст пересоздаётся — перерисовываем
   // до показа на экране, чтобы не мигал пустым
+  // canvasW/canvasH/DPR — тоже: размер холста считается от окна, и если он сменился (вернулись из 3D-вида,
+  // из другого приложения, повернули телефон), React переставляет width/height холста, а браузер при этом
+  // очищает картинку — карта оставалась белой, пока не перелистнёшь лист.
   useLayoutEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, canvasW, canvasH, DPR])
 
   const PADDING = 8
   // Лист не выше ~⅔ экрана — над ним остаются кнопки, под ним буфер и листы
@@ -1091,6 +1094,31 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     const canvas = canvasRef.current
     if (!canvas) return
     redraw(placedRef.current)
+  }, [])
+
+  // Телефон может сбросить картинку холста, пока приложение свёрнуто или открыт тяжёлый 3D-вид (память).
+  // Возвращаемся на страницу / холст восстановлен / сменился размер окна — рисуем лист заново (если деталь
+  // сейчас не тащат — тогда перерисовка идёт сама от пальца).
+  const redrawRef = useRef(null)
+  redrawRef.current = () => { if (!draggingRef.current?.active) redraw(placedRef.current) }
+  useEffect(() => {
+    const canvas = canvasRef.current
+    let raf = 0
+    const again = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => redrawRef.current?.()) }
+    const onVis = () => { if (document.visibilityState === 'visible') again() }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pageshow', again)
+    window.addEventListener('focus', again)
+    window.addEventListener('resize', again)
+    canvas?.addEventListener('contextrestored', again)
+    return () => {
+      cancelAnimationFrame(raf)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pageshow', again)
+      window.removeEventListener('focus', again)
+      window.removeEventListener('resize', again)
+      canvas?.removeEventListener('contextrestored', again)
+    }
   }, [])
 
   // При увеличении холст прокручивается пальцем. Когда деталь "взята"
