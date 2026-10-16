@@ -520,6 +520,14 @@ export async function runNesting({
   maybeStats(true)
   best.sheets = await intensifyCompaction(best.sheets, direction, usableX, usableY)
 
+  // Последний лист: тот же состав — так, чтобы цельный обрезок был наибольшим
+  // (вдоль Y — справа, вдоль X — сверху, авто — бóльшая полоса). Остальные листы не трогаются.
+  const settleOne = sh => (cuttingMethod === 'guillotine' ? sh : gravityAll([sh])[0])
+  best.sheets = maximizeLastOffcut(best.sheets, {
+    modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: BIG_ORDER ? 500 : 800,
+  })
+  const lastKeep = best.sheets[best.sheets.length - 1]
+
   // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
   // Для форматно-раскроечного станка не применяется: там раскладка обязана
   // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
@@ -528,6 +536,18 @@ export async function runNesting({
   if (cuttingMethod !== 'guillotine') best.sheets = wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY)
   // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
   if (cuttingMethod !== 'guillotine') best.sheets = stripPermuteAll(rowSwapAll(best.sheets, usableX, usableY), usableX, usableY)
+  // Страховка: шаги выше (узкие — от края, стяжка, перестановки) не должны были уменьшить обрезок
+  // последнего листа; если уменьшили, а мелких у края от этого не меньше — лист возвращается к раскладке с бóльшим обрезком
+  if (lastKeep && best.sheets.length) {
+    const n = best.sheets.length - 1, cur = best.sheets[n]
+    if (lastOffcutArea(cur, direction, usableX, usableY) < lastOffcutArea(lastKeep, direction, usableX, usableY) - Math.min(usableX, usableY)
+      && smallAtEdge([lastKeep], usableX, usableY) <= smallAtEdge([cur], usableX, usableY)
+      && lastKeep.placed.length === cur.placed.length) {
+      const keep = cuttingMethod !== 'guillotine' ? wideNarrowWide(lastKeep, usableX, usableY) : lastKeep
+      best.sheets = best.sheets.slice()
+      best.sheets[n] = { ...(lastOffcutArea(keep, direction, usableX, usableY) >= lastOffcutArea(lastKeep, direction, usableX, usableY) - 1 ? keep : lastKeep), index: cur.index }
+    }
+  }
   // Страховка: признаки «мелкая» и её пороги — заново из исходных деталей (по id),
   // чтобы ни один шаг укладки не мог их потерять (на них держатся проверка и подсветка)
   best.sheets = best.sheets.map(sh => ({
@@ -620,6 +640,103 @@ function rebuildFree(sheet, usableX, usableY) {
   updateFreeBounds(next)
   return next
 }
+// ─── Цельный остаток на последнем листе ─────────────────────────────────────
+// Правило: на последнем листе детали встают так, чтобы обрезок был максимально
+// большим — при укладке «вдоль Y» это полоса во всю высоту справа (детали
+// прижаты влево как можно уже), «вдоль X» — полоса во всю ширину сверху (детали
+// прижаты вниз как можно ниже), «авто» — бóльшая из двух полос. Вращение
+// деталей не трогаем: если оно выключено, деталь стоит строго как задана.
+function sheetExtent(sheet) {
+  let mx = 0, my = 0
+  for (const p of sheet.placed) { if (p.x + p.w > mx) mx = p.x + p.w; if (p.y + p.h > my) my = p.y + p.h }
+  return { mx, my }
+}
+export function lastOffcutArea(sheet, direction, usableX, usableY) {
+  const { mx, my } = sheetExtent(sheet)
+  const right = Math.max(0, usableX - mx) * usableY  // полоса справа, во всю высоту
+  const top = Math.max(0, usableY - my) * usableX    // полоса сверху, во всю ширину
+  if (direction === 'along_y') return right
+  if (direction === 'along_x') return top
+  return Math.max(right, top)
+}
+// Тот же состав последнего листа укладывается заново в «урезанный» лист:
+// уже (вдоль Y) или ниже (вдоль X) — делением пополам ищется самая узкая
+// полоса, в которую детали ещё входят одним листом. Остальные листы, число
+// листов и плотность не меняются; мелких у края не прибавляется.
+// settle — финальная стяжка листа (как в итоге раскроя), чтобы сравнивать то,
+// что увидит пользователь.
+function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle = sh => sh, budgetMs = 400 }) {
+  if (!sheets.length) return sheets
+  const n = sheets.length - 1
+  const last = sheets[n]
+  if (!last?.placed?.length) return sheets
+  const base = last.placed.map(placedToPiece)
+  const small0 = smallAtEdge([last], usableX, usableY)
+  let best = settle(last)
+  if (smallAtEdge([best], usableX, usableY) > small0) best = last
+  let bestSc = lastOffcutArea(best, direction, usableX, usableY)
+  const minGain = Math.min(usableX, usableY) * 1   // выигрыш хотя бы на 1 мм полосы
+  const end = Date.now() + budgetMs
+  const consider = cand => {
+    const sc = lastOffcutArea(cand, direction, usableX, usableY)
+    if (sc > bestSc + minGain) { best = cand; bestSc = sc; return true }
+    return false
+  }
+  const tryPack = (order, mode, dir, bx, by) => {
+    const res = packAttempt(order, mode, dir, bx, by)
+    if (res.length !== 1 || res[0].placed.length !== base.length) return null
+    let cand = rebuildFree({ ...res[0], index: last.index }, usableX, usableY)
+    const settled = settle(cand)
+    if (smallAtEdge([settled], usableX, usableY) <= smallAtEdge([cand], usableX, usableY)) cand = settled
+    if (smallAtEdge([cand], usableX, usableY) > small0) return null
+    return cand
+  }
+  const axes = direction === 'along_y' ? ['x'] : direction === 'along_x' ? ['y'] : ['x', 'y']
+  for (const axis of axes) {
+    const own = axis === 'x' ? 'along_y' : 'along_x'          // колонки влево / ряды вниз
+    const dirs = direction === 'auto' ? [own, 'auto'] : [direction, 'auto']
+    const cross = p => (axis === 'x' ? p.pw : p.ph)
+    const crossMin = p => (p.rotatable && p.pw !== p.ph ? Math.min(p.pw, p.ph) : cross(p))
+    const along = p => (axis === 'x' ? p.ph : p.pw)
+    const sorts = [
+      (a, b) => along(b) - along(a) || cross(b) - cross(a),    // длинные вдоль полосы — первыми
+      (a, b) => cross(b) - cross(a) || along(b) - along(a),    // широкие поперёк — первыми
+      (a, b) => b.pw * b.ph - a.pw * a.ph,
+      (a, b) => Math.max(b.pw, b.ph) - Math.max(a.pw, a.ph),
+    ]
+    const makeOrder = t => {
+      const s = base.slice().sort(sorts[t % sorts.length])
+      return t < sorts.length * 2 ? s : t % 3 === 0 ? shuffle(base.slice()) : perturbOrder(s, t % 2 === 0)
+    }
+    const span = axis === 'x' ? usableX : usableY, other = axis === 'x' ? usableY : usableX
+    const area = base.reduce((a, p) => a + p.pw * p.ph, 0)
+    let lo = Math.max(Math.max(...base.map(crossMin)), area / other) - 0.5
+    let hi = axis === 'x' ? sheetExtent(best).mx : sheetExtent(best).my
+    // сначала — тот же лист целиком разными порядками (вдруг выходит уже без урезания)
+    for (let t = 0; t < 8 && Date.now() < end; t++) {
+      const c = tryPack(makeOrder(t), modes[t % modes.length], dirs[t % dirs.length], usableX, usableY)
+      if (c && consider(c)) hi = Math.min(hi, axis === 'x' ? sheetExtent(c).mx : sheetExtent(c).my)
+    }
+    let rounds = 0
+    while (hi - lo > 4 && Date.now() < end && rounds++ < 30) {
+      const target = Math.min(span, (lo + hi) / 2)
+      let found = null
+      for (let t = 0; t < 32 && !found && Date.now() < end; t++) {
+        found = tryPack(makeOrder(t), modes[t % modes.length], dirs[(t >> 1) % dirs.length],
+          axis === 'x' ? target : usableX, axis === 'y' ? target : usableY)
+      }
+      if (found) {
+        consider(found)
+        hi = Math.min(target, axis === 'x' ? sheetExtent(found).mx : sheetExtent(found).my)
+      } else lo = target
+    }
+  }
+  if (best === last) return sheets
+  const out = sheets.slice()
+  out[n] = best
+  return out
+}
+
 function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf') {
   if (sheets.length < 2) return sheets
   const n = sheets.length - 1
@@ -882,6 +999,8 @@ function relayoutForEdges(sheet, modes, direction, usableX, usableY, tries = 40,
   let bestScore = narrowEdgeScore(best, usableX, usableY)
   if (bestScore < 1) return best
   const small0 = smallAtEdge([best], usableX, usableY), env0 = env(best) * 1.02
+  // последний лист: цельный обрезок (см. lastOffcutArea) переукладка не уменьшает
+  const off0 = keepEnv ? lastOffcutArea(best, direction, usableX, usableY) : 0
   const base = sheet.placed.map(placedToPiece)
   for (let t = 0; t < tries && bestScore >= 1; t++) {
     const r = Math.random()
@@ -895,7 +1014,7 @@ function relayoutForEdges(sheet, modes, direction, usableX, usableY, tries = 40,
     const cand = wideNarrowWide(res[0], usableX, usableY)
     const sc = narrowEdgeScore(cand, usableX, usableY)
     if (sc >= bestScore - 1) continue
-    if (smallAtEdge([cand], usableX, usableY) > small0 || (keepEnv && env(cand) > env0)) continue
+    if (smallAtEdge([cand], usableX, usableY) > small0 || (keepEnv && (env(cand) > env0 || lastOffcutArea({ placed: gravityRects(cand.placed, direction) }, direction, usableX, usableY) < off0 - 1))) continue
     best = { ...cand, index: sheet.index }; bestScore = sc
   }
   return best

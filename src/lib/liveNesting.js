@@ -11,7 +11,7 @@
 //
 // Обычный (не онлайн) режим тоже идёт через этот модуль: тот же поиск, но с
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
-import { runNesting, smallAtEdge } from './nesting'
+import { runNesting, smallAtEdge, lastOffcutArea } from './nesting'
 import { needsTrueShape, roughShapePolygons, placedRotation, buildHybridPlan } from './trueShapeNesting'
 import { fillConcavities } from './fillConcavities'
 import { validateNesting } from './validateNesting'
@@ -190,17 +190,27 @@ function envelope(sheets) {
   }
   return env
 }
-export function liveScore(sheets, usableX, usableY) {
+// direction (необязательно) — направление укладки: тогда в счёт идёт и цельный обрезок последнего листа
+// (вдоль Y — справа, вдоль X — сверху, авто — бóльшая полоса; см. lastOffcutArea)
+export function liveScore(sheets, usableX, usableY, direction = null) {
   if (!sheets?.length) return { count: Infinity, edge: Infinity, last: Infinity, env: Infinity }
   let edge = 0
   if (usableX && usableY) edge = smallAtEdge(sheets, usableX, usableY, true)
-  return { count: sheets.length, edge, last: sheets[sheets.length - 1].placed.reduce((a, p) => a + partArea(p), 0), env: envelope(sheets) }
+  const lastSh = sheets[sheets.length - 1]
+  let off = null
+  if (direction && usableX && usableY) {
+    const k = Number(lastSh.placed[0]?.kf) || 0   // габарит детали включает рез — зона тоже (как в укладке)
+    off = lastOffcutArea(lastSh, direction, (lastSh.usableX ?? usableX) + k, (lastSh.usableY ?? usableY) + k)
+  }
+  return { count: sheets.length, edge, last: lastSh.placed.reduce((a, p) => a + partArea(p), 0), env: envelope(sheets), off }
 }
 export function liveBetter(a, b) {
   if (!b) return true
   if (a.count !== b.count) return a.count < b.count
   if ((a.edge || 0) !== (b.edge || 0)) return (a.edge || 0) < (b.edge || 0)
   if (Math.abs(a.last - b.last) > 1) return a.last < b.last
+  // последний лист тот же — больше ли цельный обрезок на нём (от 0,01 м²)
+  if (a.off != null && b.off != null && Math.abs(a.off - b.off) > 1e4) return a.off > b.off
   // последний лист тот же — компактнее ли раскладка (на 1% и больше)
   return a.env != null && b.env != null && a.env < b.env * 0.99
 }

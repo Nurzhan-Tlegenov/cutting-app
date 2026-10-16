@@ -1389,7 +1389,7 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   const consider = (res, fromIdx) => {
     const raw = res.rawSheets || res.sheets      // раскладка самого поиска — для соседних потоков
     if (res.rawSheets) { res = { ...res }; delete res.rawSheets }
-    const sc = liveScore(res.sheets, res.usableX, res.usableY)
+    const sc = liveScore(res.sheets, res.usableX, res.usableY, params.direction)
     const global = liveBetter(sc, bestScore)
     if (!cancelled && !finished) onIslandProgress?.(res, fromIdx, global)
     if (!global) return
@@ -1402,7 +1402,7 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   }
   const pickBest = list => {
     let top = null, topScore = null
-    list.forEach(r => { const sc = liveScore(r.sheets, r.usableX, r.usableY); if (liveBetter(sc, topScore)) { top = r; topScore = sc } })
+    list.forEach(r => { const sc = liveScore(r.sheets, r.usableX, r.usableY, params.direction); if (liveBetter(sc, topScore)) { top = r; topScore = sc } })
     return top
   }
   // Все живые острова отчитались — итог = лучший из их итогов
