@@ -11,6 +11,7 @@ import { countryCode } from '../lib/productionLabel'
 import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
+import { adminBeta, adminSetBeta, BETA_FEATURES } from '../lib/beta'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
@@ -62,9 +63,11 @@ export default function UsersPage() {
   const [info, setInfo] = useState('')         // итог последнего действия (код отправлен, бот подключён…)
   const [lim, setLim] = useState(null)         // лимиты: { defaults, users } или { error } — в базе ещё нет лимитов
   const [helps, setHelps] = useState(null)     // «Не получается войти» с экрана входа; null — в базе ещё нет этой части
+  const [beta, setBeta] = useState(null)       // бета-тест: Map(user_id -> [функции]) или { error } — в базе ещё нет
 
   const load = async () => {
-    const [u, r, o, pr, lm, lh] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp()])
+    const [u, r, o, pr, lm, lh, bt] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta()])
+    setBeta(bt.error ? { error: bt.error } : bt.data)
     setHelps(lh.error ? null : lh.data || [])
     setLim(lm.error ? { error: lm.error } : { defaults: lm.data?.defaults || {}, users: new Map((lm.data?.users || []).map(x => [x.user_id, x])) })
     setResets(pr.error ? null : pr.data || [])
@@ -144,6 +147,7 @@ export default function UsersPage() {
   const rest = reqs.filter(r => r.status !== 'new' && !waiting.includes(r))
   const q = find.trim().toLowerCase()
   const isProd = u => !!u.production_id && (u.production_status ?? 'approved') === 'approved'
+  const betaOf = u => (beta instanceof Map ? beta.get(u.id) || [] : [])
   const prodCount = (users || []).filter(isProd).length
   // страна и город пользователя: свои, а у производства без них — из данных производства
   const landOf = u => countryCode(u.country || u.production_country) || '—'
@@ -175,6 +179,7 @@ export default function UsersPage() {
                   <button type="button" onClick={() => flip(u.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || 'Без имени'}{u.id === user?.id ? ' (вы)' : ''}</span>
                     {isProd(u) && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>произв.</span>}
+                    {betaOf(u).length > 0 && <span title="Бета-тестер" style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)', flexShrink: 0 }}>β</span>}
                     <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{landOf(u) === '—' ? '—' : `${landOf(u)}${townOf(u) === '—' ? '' : ' · ' + townOf(u)}`}</span>
                     <span style={{ color: 'var(--text-hint)', fontSize: 14, transform: openU.has(u.id) ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
                   </button>
@@ -200,6 +205,20 @@ export default function UsersPage() {
                   {isProd(u) && (
                     <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', background: 'var(--amber-light)', borderRadius: 'var(--radius)', color: 'var(--amber)' }}>
                       Производство «{u.production_name}»{[u.production_country, u.production_city].filter(Boolean).length ? `, ${[u.production_country, u.production_city].filter(Boolean).join(', ')}` : ''}: заявок получено <b>{u.received}</b> · принято <b>{u.accepted}</b> · исполнено <b>{u.done}</b>
+                    </div>
+                  )}
+                  {beta instanceof Map && u.role !== 'admin' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Бета-тест:</span>
+                      {BETA_FEATURES.map(([f, label]) => {
+                        const on = betaOf(u).includes(f)
+                        return (
+                          <button key={f} type="button" disabled={busy} onClick={() => act(() => adminSetBeta(u.id, f, !on))}
+                            style={{ padding: '3px 10px', borderRadius: 14, fontSize: 11.5, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text-muted)' }}>
+                            β {label}{on ? ' ✓' : ''}
+                          </button>
+                        )
+                      })}
                     </div>
                   )}
                   {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.defaults} isProd={isProd(u)} busy={busy}
@@ -394,6 +413,22 @@ export default function UsersPage() {
           )}
           {lim?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{lim.error}</p>
             : lim && <DefaultLimits key={JSON.stringify(lim.defaults)} defaults={lim.defaults} busy={busy} onSave={v => act(() => adminSetDefaultLimits(v))} />}
+          {beta?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{beta.error}</p> : beta instanceof Map && (
+            <details className="card" style={{ marginBottom: 12, padding: '10px 12px' }}>
+              <summary style={{ fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Бета-тест · {(users || []).filter(u => betaOf(u).length).length}</summary>
+              <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 8px' }}>
+                Новые функции видят только вы и выбранные пользователи — клиенты или производства. Включить: откройте карточку пользователя ниже → «β …».
+              </p>
+              {BETA_FEATURES.map(([f, label]) => {
+                const who = (users || []).filter(u => betaOf(u).includes(f))
+                return (
+                  <div key={f} style={{ fontSize: 12.5, marginBottom: 4 }}>
+                    <b>β {label}</b>: {who.length ? who.map(u => u.full_name || u.phone || 'без имени').join(', ') : <span style={{ color: 'var(--text-hint)' }}>пока только вы</span>}
+                  </div>
+                )
+              })}
+            </details>
+          )}
           {newUsers.length > 0 && (
             <>
               <p className="section-title" style={{ color: 'var(--teal)' }}>Новые с прошлого просмотра · {newUsers.length}</p>

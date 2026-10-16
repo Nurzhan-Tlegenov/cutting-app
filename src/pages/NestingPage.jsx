@@ -49,6 +49,7 @@ import CncLoader from '../components/CncLoader'
 import SendToMaster from '../components/SendToMaster'
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
+import { hasBeta } from '../lib/beta'
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
 const COLORS = [
@@ -1608,6 +1609,11 @@ export default function NestingPage() {
   const [resultCopyStatus, setResultCopyStatus] = useState('')
   const [busyId, setBusyId] = useState(null)     // конфигурация, которая сейчас сохраняется / оформляется
   const [cuttingMethod, setCuttingMethod] = useState('nesting')
+  // β Пильный центр: режет сквозными резами (cuttingMethod 'guillotine'), а сам выбор — отдельный флаг заказа orders.beam_saw.
+  // Кнопку видят мастер-аккаунт и выбранные им бета-тестеры (migration_beta.sql).
+  const [beamSaw, setBeamSaw] = useState(false)
+  const [betaBeam, setBetaBeam] = useState(false)
+  useEffect(() => { let alive = true; hasBeta('beam_saw').then(v => { if (alive) setBetaBeam(v) }); return () => { alive = false } }, [])
   const [showOffcuts, setShowOffcuts] = useKeptState('offcuts', false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
   const [productions, setProductions] = useState([])     // зарегистрированные производства (если есть)
@@ -1690,6 +1696,7 @@ export default function NestingPage() {
       setOffForm(parseOffcuts(o.offcuts))
       fetchProductions(o).then(() => setProdsReady(true))   // после этого — «Где будете резать?», если производство не выбрано
       setCuttingMethod(o.material_kind === 'hdf' ? 'guillotine' : (o.cutting_method || 'nesting'))   // ХДФ / ДВП режется только на пиле
+      setBeamSaw(!!o.beam_saw && (o.material_kind === 'hdf' || (o.cutting_method || 'nesting') === 'guillotine'))
       let store = null
       if (o.nesting_result) { try { store = JSON.parse(o.nesting_result) } catch { store = null } }
       // несколько материалов — раскрой хранится по каждому отдельно: { multi: true, byMat: { ключ: результат } }
@@ -3581,18 +3588,33 @@ export default function NestingPage() {
 
       {/* Тип станка — общий для всех конфигураций */}
       <div data-tour="nest-machine" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)']].map(([val, label]) => (
-          <div key={val} onClick={() => { if (val === 'nesting' && order.material_kind === 'hdf') return; setCuttingMethod(val); saveSmallPartsSettings({ cutting_method: val }) }}
-            title={val === 'nesting' && order.material_kind === 'hdf' ? 'Материал заказа — ХДФ / ДВП: он режется только на пиле' : val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
+        {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)'], ...(betaBeam || beamSaw ? [['beamsaw', 'Пильный центр β']] : [])].map(([val, label]) => {
+          const active = val === 'beamsaw' ? beamSaw : !beamSaw && cuttingMethod === val
+          const off = val === 'nesting' && order.material_kind === 'hdf'
+          return (
+          <div key={val} onClick={() => {
+            if (off) return
+            const beam = val === 'beamsaw', method = beam ? 'guillotine' : val
+            setCuttingMethod(method); setBeamSaw(beam)
+            saveSmallPartsSettings({ cutting_method: method })
+            if (beam !== !!order.beam_saw) supabase.from('orders').update({ beam_saw: beam }).eq('id', id).then(({ error }) => { if (!error) setOrder(o => (o ? { ...o, beam_saw: beam } : o)) })   // база ещё без migration_beta.sql — выбор живёт до перезагрузки
+          }}
+            title={off ? 'Материал заказа — ХДФ / ДВП: он режется только на пиле' : val === 'beamsaw' ? 'Бета-тест: раскрой под пильный центр — полосы и сквозные резы' : val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
             style={{ flex: 1, padding: '6px 4px', borderRadius: 'var(--radius)', textAlign: 'center',
-              opacity: val === 'nesting' && order.material_kind === 'hdf' ? 0.4 : 1,
+              opacity: off ? 0.4 : 1,
               fontSize: 12, cursor: 'pointer',
-              background: cuttingMethod === val ? 'var(--blue)' : 'var(--bg2)',
-              color: cuttingMethod === val ? 'white' : 'var(--text-muted)', fontWeight: cuttingMethod === val ? 500 : 400 }}>
+              background: active ? 'var(--blue)' : 'var(--bg2)',
+              color: active ? 'white' : 'var(--text-muted)', fontWeight: active ? 500 : 400 }}>
             {label}
           </div>
-        ))}
+          )
+        })}
       </div>
+      {beamSaw && (
+        <p style={{ fontSize: 11, color: 'var(--blue)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
+          β Бета-тест. Пока раскрой под пильный центр считается как для форматника (сквозные резы). Правила пильного центра — уровни резов, остаток для захвата, узкие детали с запасом, порядок полос — подключаются следующим этапом; их настраивает производство.
+        </p>
+      )}
 
       {order.material_kind === 'hdf' && <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Материал заказа — ХДФ / ДВП: раскрой только под пилу{order.production_id ? ', рез и отступы — как задало производство для этого материала' : ''}.</p>}
 
