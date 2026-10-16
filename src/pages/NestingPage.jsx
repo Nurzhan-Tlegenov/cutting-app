@@ -497,15 +497,6 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   const longPressRef = useRef(null)
   const emptyTapRef = useRef(null) // касание пустого места — снять выделение детали
 
-  // useLayoutEffect: при смене масштаба холст пересоздаётся — перерисовываем
-  // до показа на экране, чтобы не мигал пустым
-  // canvasW/canvasH/DPR — тоже: размер холста считается от окна, и если он сменился (вернулись из 3D-вида,
-  // из другого приложения, повернули телефон), React переставляет width/height холста, а браузер при этом
-  // очищает картинку — карта оставалась белой, пока не перелистнёшь лист.
-  useLayoutEffect(() => {
-    placedRef.current = flipY(sheet.placed)
-    redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, canvasW, canvasH, DPR])
 
   const PADDING = 8
   // Лист не выше ~⅔ экрана — над ним остаются кнопки, под ним буфер и листы
@@ -517,6 +508,17 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   const canvasH = Math.round(sc * sheetL) + PADDING * 2
   // При увеличении холст большой — ограничиваем плотность пикселей, чтобы не упереться в лимит памяти телефона
   const DPR = pinching ? 1 : Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, Math.sqrt(12e6 / (canvasW * canvasH)))
+
+  // useLayoutEffect: при смене масштаба холст пересоздаётся — перерисовываем
+  // до показа на экране, чтобы не мигал пустым
+  // (стоит после расчёта canvasW/canvasH/DPR — до него они ещё не объявлены)
+  // canvasW/canvasH/DPR — тоже: размер холста считается от окна, и если он сменился (вернулись из 3D-вида,
+  // из другого приложения, повернули телефон), React переставляет width/height холста, а браузер при этом
+  // очищает картинку — карта оставалась белой, пока не перелистнёшь лист.
+  useLayoutEffect(() => {
+    placedRef.current = flipY(sheet.placed)
+    redraw(placedRef.current)
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, canvasW, canvasH, DPR])
 
   const toC = v => v * sc
   const fromC = v => v / sc
