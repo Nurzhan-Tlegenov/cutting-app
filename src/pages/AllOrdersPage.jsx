@@ -9,6 +9,7 @@ import { productionLabel } from '../lib/productionLabel'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { archiveOrder, restoreOrder, deleteOrder } from '../lib/orderArchive'
+import { productionReturnOrder } from '../lib/productionApi'
 
 // Мастер-аккаунт: заказы всех пользователей — чтобы по обращению открыть чужой заказ и разобраться с ошибкой.
 // Обычный список «Мои заказы» остаётся только своим. Доступ — только у администратора (так же решает и база).
@@ -54,6 +55,13 @@ export default function AllOrdersPage() {
   const owner = o => users.get(o.user_id)
   const patch = (id, p) => setOrders(list => (p ? list.map(x => (x.id === id ? { ...x, ...p } : x)) : list.filter(x => x.id !== id)))
   const act = async (fn, id, done) => { const r = await fn(); if (!r) return; if (r.error) { setError(r.error); return } setError(''); done(r) }
+  // Мастер вместо производства возвращает заказ заказчику (отправлен не туда, производство ещё не заходит и т.п.) —
+  // та же функция базы, что у производства: заказ снова черновик, причина видна заказчику, производство его больше не видит.
+  const returnOrder = o => {
+    const note = window.prompt(`Вернуть заказ «${orderTitle(o)}» заказчику вместо производства?\nПричина (увидит заказчик):`, '')
+    if (note === null) return
+    act(() => productionReturnOrder(o.id, note), o.id, () => patch(o.id, { status: 'draft', returned_at: new Date().toISOString() }))
+  }
   const tel = u => digits(u?.phone) || digits(String(u?.email || '').split('@')[0])
   const stateOf = o => sendState(o, nested.has(o.id))
   const shown = useMemo(() => {
@@ -123,6 +131,7 @@ export default function AllOrdersPage() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ flex: 1, fontSize: 11, color: 'var(--amber)' }}>{o.archived_at ? 'В архиве' : ''}</span>
+                {!o.archived_at && o.status && o.status !== 'draft' && o.status !== 'done' && <button style={{ ...LINK, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => returnOrder(o)}>↩ Вернуть заказчику</button>}
                 {o.archived_at
                   ? <button style={{ ...LINK, color: 'var(--text-muted)', borderColor: 'var(--border-md)' }} onClick={() => act(() => restoreOrder(o.id), o.id, () => patch(o.id, { archived_at: null }))}>↩ Восстановить</button>
                   : (o.status === 'done' || o.status === 'draft') && <button style={{ ...LINK, color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => act(() => archiveOrder(o, orderTitle(o)), o.id, r => patch(o.id, { archived_at: r.at }))}>📦 В архив</button>}
