@@ -558,13 +558,14 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 Проверьте эти детали в редакторе контура или импортируйте файл проекта (.add) — там это однозначно.
               </div>
             )}
-            {basis && (sumWarn('open') + sumWarn('edges') + sumWarn('edgeHoles') + sumWarn('cuts') > 0) && (
+            {basis && (sumWarn('open') + sumWarn('edges') + sumWarn('edgeHoles') + sumWarn('cuts') + sumWarn('offPart') > 0) && (
               <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
                 Не всё удалось перенести — проверьте эти детали в редакторе контура:
                 {sumWarn('open') > 0 && <div>· незамкнутый контур: {sumWarn('open')}</div>}
                 {sumWarn('edges') > 0 && <div>· кромка, для которой не нашёлся участок контура: {sumWarn('edges')}</div>}
                 {sumWarn('edgeHoles') > 0 && <div>· торцевые отверстия не на прямой стороне: {sumWarn('edgeHoles')}</div>}
                 {sumWarn('cuts') > 0 && <div>· обработка, которую не удалось прочитать: {sumWarn('cuts')}</div>}
+                {sumWarn('offPart') > 0 && <div>· выемка в модели лежит мимо детали — не перенесена (поставьте её на место в Базисе): {chosen.filter(it => it.warn?.offPart).map(it => it.name).join(', ')}</div>}
               </div>
             )}
             {chosen.length > 0 && (

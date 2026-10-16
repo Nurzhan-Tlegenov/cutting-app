@@ -318,7 +318,7 @@ function edgeCutOf(prof, traj, T, name) {
   if (!(prof.length === 4 && prof.every(e => e.t === 'L'))) return null
   const pp = prof.flatMap(e => [e.a, e.b])
   // профиль — прямоугольник со сторонами вдоль осей
-  if (!prof.every(e => Math.abs(e.a[0] - e.b[0]) < 1e-6 || Math.abs(e.a[1] - e.b[1]) < 1e-6)) return null
+  if (!prof.every(e => Math.abs(e.a[0] - e.b[0]) < 0.01 || Math.abs(e.a[1] - e.b[1]) < 0.01)) return null   // в Базисе координаты с «шумом» 1e-5
   const us = pp.map(q => q[0]), zs = pp.map(q => q[1])
   const u0 = Math.min(...us), u1 = Math.max(...us), z0 = Math.min(...zs), z1 = Math.max(...zs)
   if (!(z0 > EPS && z1 < T - EPS)) return null                       // выходит на пласть — это не торец
@@ -329,6 +329,28 @@ function edgeCutOf(prof, traj, T, name) {
   const left = [-(b[1] - a[1]) / len, (b[0] - a[0]) / len]
   const sgn = Math.abs(u1) >= Math.abs(u0) ? Math.sign(u1) : Math.sign(u0)   // в какую сторону от траектории уходит профиль
   return { a, b, z0, z1, depth: u1 - u0, kind: 'auto', name: name || 'Паз в торце', dirIn: [left[0] * sgn, left[1] * sgn] }
+}
+
+// Выемка в торце, заданная «наоборот» (так её делает многофункциональный вырез Базиса): профиль — сама
+// форма выемки в плоскости торца (u — вдоль края, высота Z), траектория — отрезок от края вглубь детали.
+function edgeSweepOf(prof, traj, T, name) {
+  if (traj.length !== 1 || traj[0].t !== 'L' || !prof.length || prof.some(e => e.t === 'C')) return null
+  const { loops } = buildLoops(prof)
+  if (loops.length !== 1 || loops[0].circle) return null
+  const pts = loops[0].fine
+  const us = pts.map(q => q[0]), zs = pts.map(q => q[1])
+  const u0 = Math.min(...us), u1 = Math.max(...us), z0 = Math.min(...zs), z1 = Math.max(...zs)
+  if (!(z0 > EPS && z1 < T - EPS) || !(u1 - u0 > 0.5)) return null
+  const { a: A, b: B } = traj[0]
+  const len = Math.hypot(B[0] - A[0], B[1] - A[1])
+  if (len < 0.3) return null
+  const d = [(B[0] - A[0]) / len, (B[1] - A[1]) / len], n = [-d[1], d[0]]
+  let r = 0
+  for (const e of prof) if (e.t === 'A') r = Math.max(r, Math.hypot(e.a[0] - e.c[0], e.a[1] - e.c[1]))
+  return {
+    a: [A[0] + n[0] * u0, A[1] + n[1] * u0], b: [A[0] + n[0] * u1, A[1] + n[1] * u1],
+    z0, z1, depth: len, kind: 'pocket', r, name: name || 'Выемка в торце', dirIn: d,
+  }
 }
 
 // Отверстие крепежа с фигурным контуром (DrillMode 2: паз-отверстие, выемка под петлю) -> выемка
@@ -419,7 +441,7 @@ function basisSrc(panel) {
     }
     // Паз/выемка в торце: прямоугольный профиль внутри толщины (не выходит на пласти), траектория — отрезок
     // по краю детали, профиль уходит от него вглубь. На всю длину края — паз, на часть — выемка в торце.
-    const ec = edgeCutOf(prof, traj, T, name)
+    const ec = edgeCutOf(prof, traj, T, name) || edgeSweepOf(prof, traj, T, name)
     if (ec) { edgeCutsRaw.push(ec); continue }
     const pp = prof.flatMap(e => (e.t === 'C' ? [] : [e.a, e.b]))
     if (!pp.length) { warnCuts++; continue }
@@ -532,7 +554,7 @@ export function buildItem(src, holes, faceRule) {
   const texDir = src.texDir || 0
   const rot = texDir === 1          // текстура вдоль X детали -> это её длина
   const W = rot ? dy : dx, L = rot ? dx : dy
-  const warn = { open, edgeHoles: 0, edges: 0, cuts: src.warnCuts || 0, foreign: 0, clash: 0 }
+  const warn = { open, edgeHoles: 0, edges: 0, cuts: src.warnCuts || 0, offPart: 0, foreign: 0, clash: 0 }
 
   // --- отверстия крепежа в системе панели (до выбора лицевой стороны) ---
   const Mi = inverse(src.M)
@@ -659,6 +681,8 @@ export function buildItem(src, holes, faceRule) {
       const xs = vs.map(v => v.x), ys = vs.map(v => v.y)
       const hx = Math.min(...xs), hy = Math.min(...ys), hw = Math.max(...xs) - hx, hh = Math.max(...ys) - hy
       if (!(hw > 0.2) || !(hh > 0.2)) continue
+      // выемка целиком мимо детали (в модели она «висит» в стороне) — не переносим, только предупреждаем
+      if (hx >= W - EPS || hy >= L - EPS || hx + hw <= EPS || hy + hh <= EPS) { warn.offPart++; continue }
       const base = { hw: r1(hw), hh: r1(hh), ...sideOffsets(hx, hy, W, L, hw, hh), vertices: vs, _verticesEdited: true }
       if (pr.through) cutouts.push({ type: 'rect', ...base })
       else { cutouts.push({ type: 'pocket', ...base, face: pr.top !== flip ? 'front' : 'back', depth: r1(Math.min(pr.depth, T)), note: pr.name || 'Выемка' }); pocketCount++ }
@@ -792,7 +816,6 @@ export function buildItem(src, holes, faceRule) {
 
   // --- пазы в торце: отрезок торца в системе панели, высота z0…z1 от пласти z = 0, глубина вглубь детали ---
   const edgeGrooves = []
-  const edgeKeys = new Set()
   for (const c of [...(src.edgeCutsRaw || []), ...shapedEdge]) {
     const a = tf(c.a), b = tf(c.b)
     let side = null
@@ -817,9 +840,10 @@ export function buildItem(src, holes, faceRule) {
       fromFace: r1(flip ? c.z0 : T - c.z1), width: r1(c.z1 - c.z0), depth: r1(c.depth), note: c.name || (kind ? 'Выемка в торце' : 'Паз в торце'),
       ...(kind ? { kind } : {}), ...(c.r > 0 ? { r: r1(c.r) } : {}),
     }
-    const gk = JSON.stringify(g)
-    if (edgeKeys.has(gk)) continue
-    edgeKeys.add(gk)
+    // одна и та же выемка дважды (в Базисе вырез часто лежит парой — в обе стороны траектории)
+    const same = edgeGrooves.some(o => o.edgeSide === g.edgeSide && (o.kind || '') === (g.kind || '') &&
+      ['gapLow', 'gapHigh', 'fromFace', 'width', 'depth'].every(k => Math.abs((o[k] || 0) - (g[k] || 0)) <= 0.3))
+    if (same) continue
     edgeGrooves.push(g)
   }
 
