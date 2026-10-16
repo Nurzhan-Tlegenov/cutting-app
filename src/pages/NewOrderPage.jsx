@@ -29,8 +29,9 @@ const SHEET_DEFAULTS = {
   // Мелкие детали — в середину листа (защита от сдвига при резке фрезером).
   // Правь эти значения при необходимости — они применяются ко всем новым заказам.
   smallPartsToCenter: true,
-  smallPartsMaxSquareSideMm: 400, // сторона квадрата, мм; деталь мелкая, если её площадь помещается в такой квадрат. 0 — критерий выключен
-  smallPartsMaxSideMm: 350,       // меньшая сторона детали, мм; 0 — критерий выключен
+  smallPartsMaxSquareSideMm: 346, // сторона квадрата, мм (346² ≈ 0,12 м²); деталь мелкая, если её площадь помещается в такой квадрат. 0 — критерий выключен
+  smallPartsMaxSideMm: 0,         // «узкая полоса» (меньшая сторона детали), мм; 0 — критерий выключен (было 350 — мешало укладке)
+  smallPartsEdgeGapMm: 50,        // мелкую деталь не ближе этого к краю листа, мм
   optimizeSeconds: 12,            // время доп. оптимизации плотности раскроя, сек; 0 — без неё
   cuttingMethod: 'nesting',       // 'nesting' (фрезер) | 'guillotine' (форматно-раскроечный станок)
 }
@@ -450,6 +451,8 @@ export default function NewOrderPage() {
       const mine = (await fetchUserSettings(user)).orderDefaults || {}
       const remembered = {}
       ORDER_DEFAULT_COLS.forEach(col => { if (mine[col] !== undefined && mine[col] !== null) remembered[col] = mine[col] })
+      // 350 мм «узкой полосы» — прежнее значение приложения по умолчанию (запоминалось само) — больше не переносим в новые заказы
+      if (Number(remembered.small_parts_max_side) === 350) remembered.small_parts_max_side = 0
       const baseOrder = {
         user_id: user.id,
         order_number: orderNumber,
@@ -467,6 +470,7 @@ export default function NewOrderPage() {
         small_parts_to_center: SHEET_DEFAULTS.smallPartsToCenter,
         small_parts_max_square_side: SHEET_DEFAULTS.smallPartsMaxSquareSideMm,
         small_parts_max_side: SHEET_DEFAULTS.smallPartsMaxSideMm,
+        small_parts_edge_gap: SHEET_DEFAULTS.smallPartsEdgeGapMm,
         optimize_seconds: SHEET_DEFAULTS.optimizeSeconds,
         cutting_method: SHEET_DEFAULTS.cuttingMethod,
         status: 'draft'
