@@ -1,0 +1,53 @@
+// β Пильный центр: настройки производства (productions.beam_saw_settings, migration_beam_saw.sql).
+// Все значения задаёт производство — в большую или меньшую сторону, без потолков: станки и системы управления разные.
+// Значения по умолчанию — как в картах Asai / KDT, которые прислал Нуржан.
+
+export const BEAM_DEFAULTS = {
+  kerf: 4.4,                 // пропил пилы, мм
+  trimLeft: 18, trimRight: 18, trimTop: 18, trimBottom: 18,   // обрезка кромки листа, мм
+  levels: 4,                 // уровней резов не больше (каждый следующий — поворот заготовки на 90°)
+  rotations: null,           // поворотов заготовки не больше; пусто — сколько позволяют уровни
+  levelTrims: [18, 18, 18, 18],   // торцовка в начале полосы на каждом уровне, мм; уровней больше — берётся последнее значение
+  grip: 18,                  // мин. остаток для захвата, мм: деталь уже полосы — остаток не меньше этого
+  gripWithKerf: true,        // остаток считается вместе с пропилом (полоса 600 → деталь до 582)
+  narrowMin: 50,             // деталь уже этого — узкая
+  narrowCut: 120,            // узкая деталь пилится шириной не меньше этой, потом подрезается до своего размера
+  direction: 'y',            // полосы: 'y' — вдоль длинной стороны, 'x' — вдоль короткой, 'auto' — как выгоднее (без текстуры)
+  stripOrder: 'desc',        // порядок полос: 'desc' — от большой к малой, 'wnw' — большая → малая к середине → большая у края
+  offcutMinL: 300, offcutMinW: 300,   // деловой обрезок — не меньше, мм
+  mergeSame: true,           // одинаковые карты — одной картой «× N листов»
+}
+
+const num = (v, d) => { const n = Number(String(v ?? '').replace(',', '.')); return v === '' || v == null || !isFinite(n) || n < 0 ? d : n }
+const int = (v, d) => { const n = Math.floor(num(v, d)); return n >= 1 ? n : d }
+
+/** Настройки производства -> полный набор с подставленными значениями по умолчанию */
+export function beamSettings(raw) {
+  const s = raw && typeof raw === 'object' ? raw : {}
+  const D = BEAM_DEFAULTS
+  const levels = int(s.levels, D.levels)
+  const lt = Array.isArray(s.levelTrims) ? s.levelTrims.map(v => num(v, null)) : []
+  // пустой уровень — как предыдущий заполненный; до первого заполненного — по умолчанию
+  const levelTrims = []
+  for (let i = 0; i < levels; i++) levelTrims.push(lt[i] ?? (i ? levelTrims[i - 1] : D.levelTrims[0]))
+  return {
+    kerf: num(s.kerf, D.kerf),
+    trimLeft: num(s.trimLeft, D.trimLeft), trimRight: num(s.trimRight, D.trimRight), trimTop: num(s.trimTop, D.trimTop), trimBottom: num(s.trimBottom, D.trimBottom),
+    levels,
+    rotations: s.rotations === '' || s.rotations == null ? null : int(s.rotations, null),
+    levelTrims,
+    grip: num(s.grip, D.grip),
+    gripWithKerf: s.gripWithKerf == null ? D.gripWithKerf : !!s.gripWithKerf,
+    narrowMin: num(s.narrowMin, D.narrowMin),
+    narrowCut: num(s.narrowCut, D.narrowCut),
+    direction: ['y', 'x', 'auto'].includes(s.direction) ? s.direction : D.direction,
+    stripOrder: ['desc', 'wnw'].includes(s.stripOrder) ? s.stripOrder : D.stripOrder,
+    offcutMinL: num(s.offcutMinL, D.offcutMinL), offcutMinW: num(s.offcutMinW, D.offcutMinW),
+    mergeSame: s.mergeSame == null ? D.mergeSame : !!s.mergeSame,
+  }
+}
+
+/** Наибольшая деталь, которая ещё ложится в полосу шириной w (правило захвата). Ровно по ширине — всегда можно. */
+export function maxPartIn(w, s) {
+  return w - s.grip - (s.gripWithKerf ? 0 : s.kerf)
+}

@@ -34,6 +34,8 @@ import { flashFocus } from '../lib/noticeNav'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
 import Drill6Viewer from '../components/Drill6Viewer'
 import GcodeFileSim from '../components/GcodeFileSim'
+import BeamSawSettings from '../components/BeamSawSettings'
+import { hasBeta } from '../lib/beta'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -88,6 +90,8 @@ export default function ProductionPage() {
   }, [focusId, orders])   // eslint-disable-line react-hooks/exhaustive-deps
   useBackClose(tab === 'settings' && !!setSec && !edit, () => setSetSec(null))   // «Назад» телефона — к списку разделов
   const [hasPosts, setHasPosts] = useState(false)       // есть посты — принятый, но не пущенный заказ помечается
+  const [betaBeam, setBetaBeam] = useState(false)       // β Пильный центр: раздел настроек — мастеру и бета-тестерам
+  useEffect(() => { let alive = true; hasBeta('beam_saw').then(v => { if (alive) setBetaBeam(v) }); return () => { alive = false } }, [])
   useEffect(() => { let alive = true; postsList().then(r => { if (alive) setHasPosts((r.data || []).some(p => p.active !== false)) }); return () => { alive = false } }, [])
   const loadStaff = () => membersList().then(r => setStaff({ data: r.data || null, error: r.error || '' }))
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
@@ -206,6 +210,7 @@ export default function ProductionPage() {
     ['posts', I.posts, 'Рабочие посты', 'Техпроцесс: порядок постов, кто на них'],
     ['prices', I.tag, 'Прайс-лист', 'Распил плиты и ХДФ, кромление, присадка'],
     ['sheet', I.sliders, 'Параметры станка', 'Рез и отступы листа — по типу материала'],
+    ...(betaBeam ? [['beamsaw', I.sliders, 'Пильный центр β', 'Уровни резов, повороты, захват, узкие детали, полосы']] : []),
     ['post', I.cnc, 'Постпроцессоры', 'Станки ЧПУ, инструменты, обработка'],
     ['xml', I.file, 'Просмотр XML присадки', 'Программы присадочного станка'],
     ['gsim', I.cnc, 'Симуляция G-кода', 'Любая УП — в том числе из других программ'],
@@ -313,6 +318,7 @@ export default function ProductionPage() {
               </>}
               {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
               {setSec === 'post' && <CncSetup prodId={prod.id} />}
+              {setSec === 'beamsaw' && <BeamSawSettings key={prod.id} prod={prod} onSaved={v => setProd(p => ({ ...p, beam_saw_settings: v }))} />}
             </div>
           ))}
 
