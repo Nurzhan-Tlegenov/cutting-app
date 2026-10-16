@@ -526,6 +526,10 @@ export async function runNesting({
   best.sheets = maximizeLastOffcut(best.sheets, {
     modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: BIG_ORDER ? 500 : 800,
   })
+  // и состав: крупные поперёк детали — на заполненные листы, на последний — узкие
+  best.sheets = composeLastForOffcut(best.sheets, {
+    modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: BIG_ORDER ? 1000 : 1500,
+  })
   const lastKeep = best.sheets[best.sheets.length - 1]
 
   // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
@@ -735,6 +739,73 @@ function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle
   const out = sheets.slice()
   out[n] = best
   return out
+}
+
+// ─── Состав последнего листа под цельный обрезок ────────────────────────────
+// При выключенном вращении ширину полосы на последнем листе задаёт самая
+// «поперечная» деталь (вдоль Y — самая широкая, вдоль X — самая высокая):
+// переукладка того же состава её не уберёт. Здесь последний лист и 1–2
+// заполненных листа перекладываются вместе так, что крупные поперёк детали
+// уходят на заполненные листы, а на последний — те, что встают узкой полосой.
+// Число листов не меняется, последний лист по площади не тяжелеет больше чем
+// на 0,5% листа (плотность заполненных листов не страдает), мелких у края не прибавляется.
+function offcutBound(placedLike, direction, usableX, usableY) {
+  // оценка сверху цельного обрезка для состава: полоса не уже самой широкой поперёк детали и не меньше площади
+  let area = 0, cx = 0, cy = 0
+  for (const p of placedLike) {
+    const w = p.pw ?? p.w, h = p.ph ?? p.h
+    area += w * h
+    const turn = p.rotatable && w !== h
+    cx = Math.max(cx, turn ? Math.min(w, h) : w)
+    cy = Math.max(cy, turn ? Math.min(w, h) : h)
+  }
+  const right = Math.max(0, usableX - Math.max(cx, area / usableY)) * usableY
+  const top = Math.max(0, usableY - Math.max(cy, area / usableX)) * usableX
+  return direction === 'along_y' ? right : direction === 'along_x' ? top : Math.max(right, top)
+}
+const countParts = list => new Set(list.flatMap(sh => sh.placed.map(p => p.id))).size + list.reduce((a, sh) => a + sh.placed.length, 0) * 1e6
+function composeLastForOffcut(sheets, { modes, direction, usableX, usableY, settle, budgetMs = 1500 }) {
+  if (sheets.length < 2) return sheets
+  const end = Date.now() + budgetMs
+  const tol = usableX * usableY * 0.005
+  const minGain = Math.min(usableX, usableY) * 5    // выигрыш полосы — от 5 мм
+  let cur = maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle, budgetMs: 250 })
+  let curOff = lastOffcutArea(cur[cur.length - 1], direction, usableX, usableY)
+  const cross = p => {
+    const turn = p.rotatable && p.pw !== p.ph
+    const cxv = turn ? Math.min(p.pw, p.ph) : p.pw, cyv = turn ? Math.min(p.pw, p.ph) : p.ph
+    return direction === 'along_y' ? cxv : direction === 'along_x' ? cyv : Math.min(cxv, cyv)
+  }
+  // Перекладка последнего с 1–2 заполненными листами (крупные поперёк — первыми)
+  for (let a = 0; Date.now() < end; a++) {
+    const n = cur.length - 1
+    const k = Math.min(n, Math.random() < 0.6 ? 1 : 2)
+    const idx = []
+    for (let g = 0; idx.length < k && g < 12; g++) { const j = Math.floor(Math.random() * n); if (!idx.includes(j)) idx.push(j) }
+    const oldSheets = idx.map(j => cur[j]).concat([cur[n]])
+    const pool = oldSheets.flatMap(sh => sh.placed).map(placedToPiece)
+    // крупные поперёк — первыми: они заполняют первые листы, на последний уходят узкие
+    const sorted = pool.slice().sort((x, y) => cross(y) - cross(x) || y.pw * y.ph - x.pw * x.ph)
+    const order = a % 3 === 0 ? sorted : perturbOrder(sorted, a % 3 === 2)
+    const res = packAttempt(order, modes[a % modes.length], direction, usableX, usableY)
+    if (res.length !== idx.length + 1) continue   // листов столько же (idx мог набраться меньше k)
+    if (smallAtEdge(res, usableX, usableY) > smallAtEdge(oldSheets, usableX, usableY)) continue
+    // последний — лист с наибольшим обрезком среди тех, что не тяжелее прежнего последнего
+    const limit = sheetArea(cur[n]) + tol
+    let li = -1, lb = -1
+    res.forEach((sh, i) => { if (sheetArea(sh) <= limit) { const b = offcutBound(sh.placed, direction, usableX, usableY); if (b > lb) { lb = b; li = i } } })
+    if (li < 0 || lb <= curOff + minGain) continue
+    const others = res.filter((_, i) => i !== li)
+    const next = cur.slice()
+    idx.forEach((j, t) => { next[j] = rebuildFree({ ...others[t], index: cur[j].index }, usableX, usableY) })
+    next[n] = rebuildFree({ ...res[li], index: cur[n].index }, usableX, usableY)
+    const tried = maximizeLastOffcut(next, { modes, direction, usableX, usableY, settle, budgetMs: 200 })
+    // страховка: ни одна деталь не потеряна и не задвоена
+    if (tried.length !== cur.length || countParts(tried) !== countParts(cur)) continue
+    const off = lastOffcutArea(tried[n], direction, usableX, usableY)
+    if (off > curOff + minGain) { cur = tried; curOff = off }
+  }
+  return cur
 }
 
 function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf') {
