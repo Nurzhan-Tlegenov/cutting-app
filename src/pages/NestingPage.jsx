@@ -1240,6 +1240,24 @@ function newCfg(over = {}) {
   }
 }
 
+// ─── Рабочее состояние раскроя на случай перезагрузки страницы ─────────────────────────────────────
+// После обновления приложения открытая страница может перезагрузиться сама (подгрузка 3D-вида), а телефон —
+// выгрузить вкладку из памяти. Чтобы не терять выбранный вариант (из хронологии, правки, обрезки, открытый лист),
+// конфигурации держим в памяти вкладки (sessionStorage) и при новой загрузке того же заказа возвращаем.
+const workKey = orderId => `nestWork:${orderId}`
+const detailsSig = list => (list || []).map(d => `${d.id}:${d.qty}:${d.length}:${d.width}`).join('|')
+function stashWork(orderId, data) {
+  const slim = data.cfgs.map(c => ({ ...c, check: null, status: c.result ? 'done' : 'idle', startedAt: 0, doneAt: 0 }))
+  const put = cfgs => { sessionStorage.setItem(workKey(orderId), JSON.stringify({ ...data, cfgs, at: Date.now() })) }
+  try { put(slim) } catch {
+    try { put(slim.map(c => ({ ...c, history: null, histPos: -1 }))) } catch { /* не поместилось — без запаса */ }   // хронология большая — без неё
+  }
+}
+function takeWork(orderId) {
+  try { const v = JSON.parse(sessionStorage.getItem(workKey(orderId)) || 'null'); return v && Date.now() - v.at < 6 * 3600e3 ? v : null } catch { return null }
+}
+const dropWork = orderId => { try { sessionStorage.removeItem(workKey(orderId)) } catch { /* без памяти */ } }
+
 function polyAreaMm(pts) {
   let a = 0
   for (let i = 0; i < pts.length; i++) {
@@ -1585,7 +1603,17 @@ export default function NestingPage() {
 
   const anyRunning = configs.some(c => c.status === 'running' || c.status === 'queued' || c.status === 'stopping')
 
-  useEffect(() => { fetchOrder() }, [id])
+  useEffect(() => { fetchOrder(true) }, [id])
+  // 3D-вид детали подгружаем сразу, пока версия приложения на сервере та же: иначе после обновления приложения
+  // первое удержание детали перезагружало страницу (и сбрасывало выбранный вариант раскроя)
+  useEffect(() => { const t = setTimeout(() => { import('../components/Model3D').catch(() => {}) }, 1500); return () => clearTimeout(t) }, [])
+  // Рабочее состояние — в память вкладки (не во время расчёта: там результат меняется каждую секунду)
+  const workSigRef = useRef(null)
+  useEffect(() => {
+    if (anyRunning || !workSigRef.current || !configs.some(c => c.result)) return
+    const t = setTimeout(() => stashWork(id, { ...workSigRef.current, matKey, focusId, cfgs: configsRef.current }), 700)
+    return () => clearTimeout(t)
+  }, [configs, matKey, focusId, anyRunning, id])
   // Остановить проигрывание хронологии при уходе со страницы
   useEffect(() => () => { if (playRef.current) clearInterval(playRef.current) }, [])
   useEffect(() => () => {
@@ -1608,11 +1636,14 @@ export default function NestingPage() {
     setConfigs(cs => cs.map(c => c.id === cfgId ? { ...c, ...(typeof patch === 'function' ? patch(c) : patch) } : c))
   }
 
-  async function fetchOrder() {
+  async function fetchOrder(initial = false) {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
     setOrder(o); setAllDetails(d || [])
     if (o) {
+      const sig = { status: o.status || 'draft', details: detailsSig(d), result: String(o.nesting_result || '').length }
+      workSigRef.current = sig
+      if (!initial) dropWork(id)   // заказ перечитан после отправки / изменения — прежний запас уже не про него
       setSheetForm(sheetFormOf(o))
       setOffForm(parseOffcuts(o.offcuts))
       fetchProductions(o).then(() => setProdsReady(true))   // после этого — «Где будете резать?», если производство не выбрано
@@ -1625,6 +1656,17 @@ export default function NestingPage() {
       const key = mats.length > 1 ? (mats.find(m => byMat[m.key]) || mats[0]).key : ''
       const saved = mats.length > 1 ? (byMat[key] || null) : (store && !store.multi ? store : null)
       setSavedByMat(byMat); setMatKey(key)
+      // Страница перезагрузилась, а заказ тот же (статус, детали, сохранённый раскрой) — возвращаем рабочее состояние:
+      // выбранный вариант, правки, обрезки, открытый лист
+      const w = initial ? takeWork(id) : null
+      if (w && w.status === sig.status && w.details === sig.details && w.result === sig.result && w.cfgs?.length
+          && (mats.length > 1 ? mats.some(m => m.key === w.matKey) : true)) {
+        CFG_SEQ = Math.max(CFG_SEQ, ...w.cfgs.map(c => Number(c.id) || 0))
+        if (mats.length > 1) setMatKey(w.matKey)
+        setConfigs(w.cfgs.map(c => newCfg(c)))
+        setFocusId(w.cfgs.some(c => c.id === w.focusId) ? w.focusId : w.cfgs[0].id)
+        return
+      }
       // Первая конфигурация — настройки заказа (и уже сохранённый раскрой, если он есть)
       const first = cfgFromOrder(o, saved)
       setConfigs([first])
@@ -2657,12 +2699,21 @@ export default function NestingPage() {
           </span>
           <div style={{ flex: 1 }} />
           <button onClick={() => playing ? (stopPlay(), updateCfg(cfg.id, {})) : playHistory(cfg.id, pos, last)} style={btn}>
-            {playing ? '❚❚' : '▶'}
+            {playing ? '❚❚' : '⏵ Пуск'}
           </button>
         </div>
-        <input type="range" min={0} max={last} step={1} value={pos}
-          onChange={e => { stopPlay(); updateCfg(cfg.id, { histPos: Number(e.target.value) }) }}
-          style={{ width: '100%', margin: '2px 0' }} />
+        {/* ползунок и шаг на один момент назад / вперёд — точно попасть в нужный вариант */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button type="button" aria-label="Шаг назад" disabled={pos <= 0}
+            onClick={() => { stopPlay(); updateCfg(cfg.id, { histPos: Math.max(0, pos - 1) }) }}
+            style={{ ...btn, padding: 0, width: 30, height: 28, flexShrink: 0, fontSize: 13, opacity: pos <= 0 ? 0.4 : 1 }}>◀</button>
+          <input type="range" min={0} max={last} step={1} value={pos}
+            onChange={e => { stopPlay(); updateCfg(cfg.id, { histPos: Number(e.target.value) }) }}
+            style={{ flex: 1, minWidth: 0, margin: '2px 0' }} />
+          <button type="button" aria-label="Шаг вперёд" disabled={pos >= last}
+            onClick={() => { stopPlay(); updateCfg(cfg.id, { histPos: Math.min(last, pos + 1) }) }}
+            style={{ ...btn, padding: 0, width: 30, height: 28, flexShrink: 0, fontSize: 13, opacity: pos >= last ? 0.4 : 1 }}>▶</button>
+        </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {cur.count - (cur.offcuts || 0)} л.{cur.offcuts ? ` + ${cur.offcuts} обр.` : ''} · загрузка {pctv(cur.util)} · на последнем {pctv(cur.lastFill)}
           {cur.island >= 0 && cfg.history.islands > 1 ? ` · поток ${cur.island + 1}` : ''}
