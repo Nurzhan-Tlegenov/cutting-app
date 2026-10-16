@@ -260,6 +260,110 @@ function groupRows(drillings, W, L) {
 let drillSeq = 0
 const drillId = () => 'b' + Date.now().toString(36) + (drillSeq++).toString(36)
 
+// ---------- Выемки и пазы в своей системе координат ----------
+
+// Transform выреза: 16 double, матрица 4×4 по строкам: строки 0–2 — оси X, Y, Z выреза в системе панели,
+// строка 3 — начало координат. -> M (как у transOf) или null, если системы совпадают.
+function cutTransform(b) {
+  if (!b || b.length < 128) return null
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength)
+  const m = Array.from({ length: 16 }, (_, i) => dv.getFloat64(i * 8, true))
+  const M = [m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10], m[12], m[13], m[14]]
+  const I = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+  return M.every((v, i) => Math.abs(v - I[i]) < 1e-9) ? null : M
+}
+
+// Элементы контура в плоскости XY системы M -> в плоскость XY панели (M переводит Z в ±Z)
+function mapElems(elems, M) {
+  const f = q => { const p = applyP(M, [q[0], q[1], 0]); return [p[0], p[1]] }
+  const mirror = M[0] * M[4] - M[1] * M[3] < 0
+  return elems.map(e => (e.t === 'L' ? { t: 'L', a: f(e.a), b: f(e.b) }
+    : e.t === 'C' ? { t: 'C', c: f(e.c), r: e.r }
+      : { t: 'A', c: f(e.c), a: f(e.a), b: f(e.b), ccw: mirror ? !e.ccw : e.ccw }))
+}
+
+// Выемка в торце из петель контура, лежащих в плоскости торца.
+// to3(u, v) — точка контура в системе панели; dirIn — направление вглубь детали (в плоскости панели).
+// -> { a, b, z0, z1, depth, kind: 'pocket', r, name } для buildItem (edgeCutsRaw) или null
+function edgePocketOf(loops, to3, dirIn, T, depth, name, arcs) {
+  const dl = Math.hypot(dirIn[0], dirIn[1])
+  if (!(dl > 0.5) || !loops.length) return null
+  const n = [dirIn[0] / dl, dirIn[1] / dl], t = [-n[1], n[0]]
+  let s0 = Infinity, s1 = -Infinity, z0 = Infinity, z1 = -Infinity, e = null, r = 0
+  for (const lp of loops) {
+    const pts = lp.circle
+      ? Array.from({ length: 24 }, (_, i) => [lp.circle.c[0] + lp.circle.r * Math.cos(i * Math.PI / 12), lp.circle.c[1] + lp.circle.r * Math.sin(i * Math.PI / 12)])
+      : lp.fine
+    if (lp.circle) r = Math.max(r, lp.circle.r)
+    for (const q of pts) {
+      const p = to3(q[0], q[1])
+      const s = p[0] * t[0] + p[1] * t[1], w = p[0] * n[0] + p[1] * n[1]
+      if (e === null) e = w
+      else if (Math.abs(w - e) > 0.1) return null                  // контур не в плоскости торца
+      s0 = Math.min(s0, s); s1 = Math.max(s1, s); z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2])
+    }
+  }
+  // радиус скругления углов — по дугам контура (в своих координатах радиус тот же)
+  for (const e of arcs || []) if (e.t === 'A') r = Math.max(r, Math.hypot(e.a[0] - e.c[0], e.a[1] - e.c[1]))
+  z0 =Math.max(0, z0); z1 = Math.min(T, z1)
+  if (!(s1 - s0 > 0.5) || !(z1 - z0 > 0.3)) return null
+  const at = s => [e * n[0] + s * t[0], e * n[1] + s * t[1]]
+  return { a: at(s0), b: at(s1), z0, z1, depth, kind: 'pocket', r, name: name || 'Выемка в торце', dirIn: n }
+}
+
+// Паз с траекторией по краю детали и прямоугольным профилем внутри толщины -> паз/выемка в торце.
+// prof — [смещение влево от траектории, высота Z в панели], traj — в плоскости панели.
+function edgeCutOf(prof, traj, T, name) {
+  if (traj.length !== 1 || traj[0].t !== 'L') return null
+  if (!(prof.length === 4 && prof.every(e => e.t === 'L'))) return null
+  const pp = prof.flatMap(e => [e.a, e.b])
+  // профиль — прямоугольник со сторонами вдоль осей
+  if (!prof.every(e => Math.abs(e.a[0] - e.b[0]) < 1e-6 || Math.abs(e.a[1] - e.b[1]) < 1e-6)) return null
+  const us = pp.map(q => q[0]), zs = pp.map(q => q[1])
+  const u0 = Math.min(...us), u1 = Math.max(...us), z0 = Math.min(...zs), z1 = Math.max(...zs)
+  if (!(z0 > EPS && z1 < T - EPS)) return null                       // выходит на пласть — это не торец
+  if (Math.min(Math.abs(u0), Math.abs(u1)) > 0.5) return null           // профиль не начинается от траектории
+  const { a, b } = traj[0]
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1])
+  if (len < 0.5) return null
+  const left = [-(b[1] - a[1]) / len, (b[0] - a[0]) / len]
+  const sgn = Math.abs(u1) >= Math.abs(u0) ? Math.sign(u1) : Math.sign(u0)   // в какую сторону от траектории уходит профиль
+  return { a, b, z0, z1, depth: u1 - u0, kind: 'auto', name: name || 'Паз в торце', dirIn: [left[0] * sgn, left[1] * sgn] }
+}
+
+// Отверстие крепежа с фигурным контуром (DrillMode 2: паз-отверстие, выемка под петлю) -> выемка
+// на пласти или в торце той панели, в которую оно входит. h.shape — элементы контура в плоскости
+// отверстия (оси ex, ey крепежа), от точки отверстия.
+function shapedHolePocket(h, Mi, T, outerBox, tol) {
+  const q = applyP(Mi, h.P), d = applyV(Mi, h.D), ex = applyV(Mi, h.ex), ey = applyV(Mi, h.ey)
+  const to3 = (u, v) => [q[0] + ex[0] * u + ey[0] * v, q[1] + ex[1] * u + ey[1] * v, q[2] + ex[2] * u + ey[2] * v]
+  const { loops } = buildLoops(h.shape)
+  if (!loops.length) return null
+  const { x0, y0, x1, y1 } = outerBox
+  if (Math.abs(d[2]) > 0.99) {
+    // на пласти: начинается на пласти и идёт внутрь
+    const start = q[2], end = q[2] + d[2] * h.depth
+    const top = Math.abs(start - T) <= tol && d[2] < 0, bottom = Math.abs(start) <= tol && d[2] > 0
+    if (!top && !bottom) return null
+    const M2 = [ex[0], ey[0], 0, ex[1], ey[1], 0, 0, 0, 1, q[0], q[1], 0]
+    const elems = mapElems(h.shape, M2)
+    const pts = buildLoops(elems).loops.flatMap(lp => (lp.circle ? [lp.circle.c] : lp.fine))
+    if (!pts.some(p => p[0] > x0 + EPS && p[0] < x1 - EPS && p[1] > y0 + EPS && p[1] < y1 - EPS)) return null
+    const depth = Math.min(h.depth, top ? T - Math.max(0, end) : Math.min(T, end))
+    return { face: { elems, depth, top, through: depth >= T - EPS, name: h.name || 'Выемка' } }
+  }
+  if (Math.abs(d[2]) < 0.01) {
+    const ep = edgePocketOf(loops, to3, [d[0], d[1]], T, h.depth, h.name, h.shape)
+    if (!ep) return null
+    // начало — на крае габарита этой детали, направление — внутрь
+    const n = ep.dirIn, m = [(ep.a[0] + ep.b[0]) / 2, (ep.a[1] + ep.b[1]) / 2]
+    const onEdge = (Math.abs(m[0] - x0) <= tol && n[0] > 0.99) || (Math.abs(m[0] - x1) <= tol && n[0] < -0.99)
+      || (Math.abs(m[1] - y0) <= tol && n[1] > 0.99) || (Math.abs(m[1] - y1) <= tol && n[1] < -0.99)
+    return onEdge ? { edge: ep } : null
+  }
+  return null
+}
+
 // ---------- Панель -> деталь ----------
 
 // Панель Базиса -> нейтральное описание для buildItem
@@ -269,23 +373,54 @@ function basisSrc(panel) {
   const elems = contourElems(val(o, 'Contour'))
   let warnCuts = 0
   // --- пазы (Cuts с прямоугольным профилем по прямой) и фрезеровка «для вида» ---
-  const cutsRaw = [], decorRaw = []
+  const cutsRaw = [], decorRaw = [], pocketsRaw = [], edgeCutsRaw = []
   for (const cut of (kid(o, 'Cuts')?.c || [])) {
     let prof, traj
     try { prof = contourElems(val(cut, 'Contour')); traj = contourElems(val(cut, 'Trajectory')) } catch { warnCuts++; continue }
     const name = cleanName(val(cut, 'Name')), sign = cleanName(val(cut, 'Sign'))
+    const Mc = cutTransform(val(cut, 'Transform'))      // система выреза -> система панели (нет — совпадают)
     if (!traj.length) {
-      // выемка: контур — область на пласти, глубина — в названии (G=10)
-      const { loops: pl } = buildLoops(prof)
-      const gm = /G\s*=\s*([\d.,]+)/i.exec(name)
-      const depth = Math.min(gm ? parseFloat(gm[1].replace(',', '.')) : Math.abs(val(cut, 'Thickness', 0)), T)
-      const polys = pl.map(lp => (lp.circle
-        ? Array.from({ length: 24 }, (_, i) => [lp.circle.c[0] + lp.circle.r * Math.cos(i * Math.PI / 12), lp.circle.c[1] + lp.circle.r * Math.sin(i * Math.PI / 12)])
-        : lp.pts.map(v => v.p))).filter(pp => pp.length > 2)
-      if (polys.length && depth > 0) decorRaw.push({ kind: 'pocket', name, sign, depth, top: val(cut, 'Front', true) !== false, polys })
-      else warnCuts++
+      // Выемка (Type 2): контур — область в плоскости XY выреза, выдавленная вдоль его оси Z на Thickness.
+      // Название у неё любое («Выемка G=10», «Выемка В=12», своё) — смотрим только на геометрию.
+      const th = val(cut, 'Thickness', 0)
+      const nm = /(?:^|[\s(])[GВ]\s*=\s*([\d.,]+)/i.exec(name)
+      const depthAbs = Math.abs(th) > EPS ? Math.abs(th) : (nm ? parseFloat(nm[1].replace(',', '.')) : 0)
+      if (!(depthAbs > 0) || !prof.length) { warnCuts++; continue }
+      const zAx = Mc ? [Mc[2], Mc[5], Mc[8]] : [0, 0, 1]
+      if (Math.abs(zAx[2]) > 0.99) {
+        // на пласти
+        let elems = prof, top = val(cut, 'Front', true) !== false
+        if (Mc) {
+          elems = mapElems(prof, Mc)
+          const zs = [Mc[11], Mc[11] + zAx[2] * (th || depthAbs * (top ? -1 : 1))]
+          const lo = Math.min(...zs), hi = Math.max(...zs)
+          if (hi >= T - 0.5) top = true; else if (lo <= 0.5) top = false
+        }
+        pocketsRaw.push({ elems, depth: Math.min(depthAbs, T), top, through: depthAbs >= T - EPS, name: name || 'Выемка' })
+        continue
+      }
+      if (Mc && Math.abs(zAx[2]) < 0.01) {
+        // в торце: плоскость выемки — плоскость торца, ось Z выреза смотрит вглубь детали (знак — у Thickness)
+        const s = th < 0 ? -1 : 1
+        const ep = edgePocketOf(buildLoops(prof).loops, (u, v) => applyP(Mc, [u, v, 0]), [zAx[0] * s, zAx[1] * s], T, depthAbs, name, prof)
+        if (ep) { edgeCutsRaw.push(ep); continue }
+      }
+      warnCuts++
       continue
     }
+    if (Mc && !(Math.abs(Mc[8]) > 0.99)) { warnCuts++; continue }     // наклонная система паза — пока не умеем
+    if (Mc) {
+      // паз в своей системе: траектория — в XY выреза, профиль [смещение, высота по Z выреза]
+      traj = mapElems(traj, Mc)
+      const zs = Mc[8]
+      prof = prof.map(e => (e.t === 'L' ? { ...e, a: [e.a[0], Mc[11] + zs * e.a[1]], b: [e.b[0], Mc[11] + zs * e.b[1]] }
+        : e.t === 'A' ? { ...e, c: [e.c[0], Mc[11] + zs * e.c[1]], a: [e.a[0], Mc[11] + zs * e.a[1]], b: [e.b[0], Mc[11] + zs * e.b[1]], ccw: zs < 0 ? !e.ccw : e.ccw }
+          : { ...e, c: [e.c[0], Mc[11] + zs * e.c[1]] }))
+    }
+    // Паз/выемка в торце: прямоугольный профиль внутри толщины (не выходит на пласти), траектория — отрезок
+    // по краю детали, профиль уходит от него вглубь. На всю длину края — паз, на часть — выемка в торце.
+    const ec = edgeCutOf(prof, traj, T, name)
+    if (ec) { edgeCutsRaw.push(ec); continue }
     const pp = prof.flatMap(e => (e.t === 'C' ? [] : [e.a, e.b]))
     if (!pp.length) { warnCuts++; continue }
     const us = pp.map(q => q[0]), zs = pp.map(q => q[1])
@@ -329,7 +464,7 @@ function basisSrc(panel) {
   // 0 — лицевая пласть «сверху» панели (Z = толщина, как без переворота), 1 — противоположная.
   const ff = val(o, 'FrontFace', null)
   return {
-    T, elems, texDir, M: panel.M, butts, cutsRaw, decorRaw, warnCuts,
+    T, elems, texDir, M: panel.M, butts, cutsRaw, decorRaw, pocketsRaw, edgeCutsRaw, warnCuts,
     frontFace: ff === 0 || ff === 1 ? ff : null,
     name: cleanName(val(o, 'Name')), prefix: panel.ctx.product || '', material: cleanName(val(o, 'Mat')),
     rotatable: texDir === 0, anim: panel.ctx.anim || null,
@@ -366,7 +501,7 @@ function glueLayers(o, src) {
     out.push({
       ...src, T, texDir, rotatable: texDir === 0,
       M: mul(src.M, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, z]),
-      butts: [], cutsRaw: [], decorRaw: [], warnCuts: 0, frontFace: null,
+      butts: [], cutsRaw: [], decorRaw: [], pocketsRaw: [], edgeCutsRaw: [], warnCuts: 0, frontFace: null,
       material: cleanName(val(pl, 'Mat')) || src.material,
       meta: {
         ...src.meta, ids: [`${id}/${i + 2}`], glue: { n: i + 2, of, id }, note: `Склейка ${i + 2}/${of}`,
@@ -404,7 +539,14 @@ export function buildItem(src, holes, faceRule) {
   const face = [], edge = []
   const outerLocal = outer.circle ? null : outer.pts.map(v => v.p)
   const tol = src.tol ?? 0.5        // насколько отверстие может не доходить до пласти и всё же считаться её отверстием
+  const shapedFace = [], shapedEdge = []
   for (const h of holes) {
+    if (h.shape) {                       // фигурное отверстие крепежа — выемка, а не сверловка
+      const sp = shapedHolePocket(h, Mi, T, outerBox, Math.max(tol, 0.5))
+      if (sp?.face) shapedFace.push(sp.face)
+      if (sp?.edge) shapedEdge.push(sp.edge)
+      continue
+    }
     const q = applyP(Mi, h.P), d = applyV(Mi, h.D)
     if (Math.abs(d[2]) > 0.99) {
       if (h.only === 'edge') continue
@@ -502,7 +644,11 @@ export function buildItem(src, holes, faceRule) {
 
   // --- выемки по объектам-меткам (Астра): на пласти — карман на свою глубину, насквозь — вырез ---
   let pocketCount = 0
-  for (const pr of (src.pocketsRaw || [])) {
+  const pocketKeys = new Set()
+  for (const pr of [...(src.pocketsRaw || []), ...shapedFace]) {
+    const pk = JSON.stringify([pr.elems, pr.depth, pr.top])
+    if (pocketKeys.has(pk)) continue                 // один и тот же вырез дважды (бывает в Базисе)
+    pocketKeys.add(pk)
     const { loops: pl } = buildLoops(pr.elems || [])
     for (const lp of pl) {
       let vs
@@ -646,7 +792,8 @@ export function buildItem(src, holes, faceRule) {
 
   // --- пазы в торце: отрезок торца в системе панели, высота z0…z1 от пласти z = 0, глубина вглубь детали ---
   const edgeGrooves = []
-  for (const c of (src.edgeCutsRaw || [])) {
+  const edgeKeys = new Set()
+  for (const c of [...(src.edgeCutsRaw || []), ...shapedEdge]) {
     const a = tf(c.a), b = tf(c.b)
     let side = null
     if (Math.abs(a[0]) <= EPS && Math.abs(b[0]) <= EPS) side = 'left'
@@ -654,14 +801,26 @@ export function buildItem(src, holes, faceRule) {
     else if (Math.abs(a[1]) <= EPS && Math.abs(b[1]) <= EPS) side = 'bottom'
     else if (Math.abs(a[1] - L) <= EPS && Math.abs(b[1] - L) <= EPS) side = 'top'
     if (!side) { warn.cuts++; continue }                 // торец не на габарите детали (ступенька) — пока не умеем
+    if (c.dirIn) {                                       // профиль должен уходить внутрь детали, а не наружу
+      const [ix, iy] = tfv(c.dirIn[0], c.dirIn[1])
+      const inward = side === 'left' ? ix : side === 'right' ? -ix : side === 'bottom' ? iy : -iy
+      if (!(inward > 0.99)) { warn.cuts++; continue }
+    }
     const hor = side === 'bottom' || side === 'top'
     const lo = Math.min(hor ? a[0] : a[1], hor ? b[0] : b[1]), hi = Math.max(hor ? a[0] : a[1], hor ? b[0] : b[1])
     const total = hor ? W : L
-    edgeGrooves.push({
-      edgeSide: side, gapLow: r1(Math.max(0, lo)), gapHigh: r1(Math.max(0, total - hi)),
-      fromFace: r1(flip ? c.z0 : T - c.z1), width: r1(c.z1 - c.z0), depth: r1(c.depth), note: c.name || 'Паз в торце',
-      ...(c.kind ? { kind: c.kind } : {}), ...(c.r > 0 ? { r: r1(c.r) } : {}),
-    })
+    const gapLow = r1(Math.max(0, lo)), gapHigh = r1(Math.max(0, total - hi))
+    // паз Базиса по краю: на всю длину — паз в торце, на часть длины — выемка в торце
+    const kind = c.kind === 'auto' ? (gapLow < 0.5 && gapHigh < 0.5 ? null : 'pocket') : c.kind
+    const g = {
+      edgeSide: side, gapLow, gapHigh,
+      fromFace: r1(flip ? c.z0 : T - c.z1), width: r1(c.z1 - c.z0), depth: r1(c.depth), note: c.name || (kind ? 'Выемка в торце' : 'Паз в торце'),
+      ...(kind ? { kind } : {}), ...(c.r > 0 ? { r: r1(c.r) } : {}),
+    }
+    const gk = JSON.stringify(g)
+    if (edgeKeys.has(gk)) continue
+    edgeKeys.add(gk)
+    edgeGrooves.push(g)
   }
 
   // фрезеровка для вида (на раскрой и присадку не влияет)
@@ -758,7 +917,9 @@ export function findClashes(srcs, minDepth = 0.3) {
       const q = applyP(s.M, [x, y, z])
       for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], q[k]); hi[k] = Math.max(hi[k], q[k]) }
     }
-    solids.push({ s, T: s.T, box, outer, cut: loops.filter(l => l !== outer), Mi: inverse(s.M), lo, hi })
+    // выемки на пласти — тоже не материал (в выемку может заходить соседняя деталь)
+    const pockets = (s.pocketsRaw || []).map(pr => { try { return { top: pr.top, depth: pr.depth, polys: buildLoops(pr.elems).loops } } catch { return null } }).filter(Boolean)
+    solids.push({ s, T: s.T, box, outer, cut: loops.filter(l => l !== outer), pockets, Mi: inverse(s.M), lo, hi })
   }
   const inLoop = (lp, x, y) => (lp.circle ? Math.hypot(x - lp.circle.c[0], y - lp.circle.c[1]) < lp.circle.r : pointInPoly([x, y], lp.fine))
   const m = 0.05
@@ -772,6 +933,9 @@ export function findClashes(srcs, minDepth = 0.3) {
     }
     for (const dc of (S.s.decorRaw || [])) {
       if (dc.kind === 'pocket' && (dc.top ? q[2] >= S.T - dc.depth : q[2] <= dc.depth) && dc.polys.some(pl => pointInPoly([q[0], q[1]], pl))) return false
+    }
+    for (const pk of S.pockets) {
+      if ((pk.top ? q[2] >= S.T - pk.depth : q[2] <= pk.depth) && pk.polys.some(lp => inLoop(lp, q[0], q[1]))) return false
     }
     return true
   }
@@ -880,11 +1044,17 @@ export function parseBasis(u8, opts = {}) {
       for (const h of (kid(f, 'Holes')?.c || [])) {
         const r = val(h, 'Radius', 0), depth = val(h, 'Depth', 0)
         if (!(r > 0) || !(depth > 0)) continue
-        holes.push({
-          P: applyP(Mo, [val(h, 'X', 0), val(h, 'Y', 0), val(h, 'Z', 0)]),
-          D: applyV(Mo, [val(h, 'DirX', 0), val(h, 'DirY', 0), val(h, 'DirZ', 0)]),
-          r, depth, name: val(f, 'Name', ''),
-        })
+        const dir = [val(h, 'DirX', 0), val(h, 'DirY', 0), val(h, 'DirZ', 0)]
+        const base = { P: applyP(Mo, [val(h, 'X', 0), val(h, 'Y', 0), val(h, 'Z', 0)]), D: applyV(Mo, dir), r, depth, name: val(f, 'Name', '') }
+        // фигурное отверстие (паз-отверстие, выемка под петлю): Contour — форма в плоскости XY крепежа,
+        // Radius у него — половина габарита, а не радиус сверла
+        let shape = null
+        try { shape = contourElems(val(h, 'Contour')) } catch { shape = null }
+        if (shape && shape.length && !(shape.length === 1 && shape[0].t === 'C')) {
+          if (Math.abs(dir[2]) > 0.99) holes.push({ ...base, shape, ex: applyV(Mo, [1, 0, 0]), ey: applyV(Mo, [0, 1, 0]) })
+          continue                       // форма в другой плоскости — пропускаем, но не сверлим её как круг
+        }
+        holes.push(base)
       }
     }
     // анимация блока: 1 — поворот вокруг оси (дверь, Limit — угол), 2 — сдвиг вдоль оси (ящик)
