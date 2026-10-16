@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.6'
+export const BEAM_SAW_VERSION = 'β0.7'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -285,10 +285,21 @@ function rng(seed) { let x = seed >>> 0 || 1; return () => { x ^= x << 13; x ^= 
 
 /**
  * Раскрой под пильный центр. params — как у runNesting + beamSaw (сырые настройки производства).
- * Отступы листа = обрезка листа, рез = пропил из настроек.
+ * Рез и отступы листа (= обрезка листа) — из параметров заказа (у производства — «Параметры станка»), как у пилы
+ * и фрезера: один источник. Пропил / обрезка из настроек пильного центра — только если параметров заказа нет.
  */
 export async function runBeamSaw(params, { live = false, shouldStop = () => false, onProgress = null, onStats = null, island = 0 } = {}) {
-  const s = beamSettings(params.beamSaw)
+  // направление полос: выбор в конфигурации раскроя («вдоль X» / «вдоль Y») главнее настройки производства;
+  // «авто» в конфигурации — как задано у производства. Вдоль Y — полосы вдоль длинной стороны, остаток справа;
+  // вдоль X — полосы поперёк, остаток сверху
+  const cfgDir = params.direction === 'along_x' ? 'x' : params.direction === 'along_y' ? 'y' : null
+  const has = v => v !== '' && v != null && isFinite(Number(v))
+  const fromOrder = {
+    ...(has(params.kerf) ? { kerf: Number(params.kerf) } : {}),
+    ...(has(params.marginL) ? { trimLeft: Number(params.marginL) } : {}), ...(has(params.marginR) ? { trimRight: Number(params.marginR) } : {}),
+    ...(has(params.marginT) ? { trimTop: Number(params.marginT) } : {}), ...(has(params.marginB) ? { trimBottom: Number(params.marginB) } : {}),
+  }
+  const s = { ...beamSettings({ ...(params.beamSaw || {}), ...fromOrder }), ...(cfgDir ? { direction: cfgDir } : {}) }
   const kerf = s.kerf
   const sheetL = Number(params.sheetL) || 0, sheetW = Number(params.sheetW) || 0
   const marginL = s.trimLeft, marginR = s.trimRight, marginT = s.trimTop, marginB = s.trimBottom

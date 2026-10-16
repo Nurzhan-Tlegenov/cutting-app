@@ -318,7 +318,7 @@ export default function ProductionPage() {
               </>}
               {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
               {setSec === 'post' && <CncSetup prodId={prod.id} />}
-              {setSec === 'beamsaw' && <BeamSawSettings key={prod.id} prod={prod} onSaved={v => setProd(p => ({ ...p, beam_saw_settings: v }))} />}
+              {setSec === 'beamsaw' && <BeamSawSettings key={prod.id} prod={prod} onSaved={v => setProd(p => ({ ...p, beam_saw_settings: v }))} onOpenSheet={() => setSetSec('sheet')} />}
             </div>
           ))}
 

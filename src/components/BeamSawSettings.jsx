@@ -10,18 +10,20 @@ export const BEAM_SQL_HINT = 'Настройки пильного центра �
 const str = v => (v == null ? '' : String(v))
 const clean = v => v.replace(/[^0-9.,]/g, '')
 
-export default function BeamSawSettings({ prod, onSaved }) {
+export default function BeamSawSettings({ prod, onSaved, onOpenSheet }) {
   const raw = prod?.beam_saw_settings && typeof prod.beam_saw_settings === 'object' ? prod.beam_saw_settings : {}
   // в полях — настоящие значения (сохранённые или по умолчанию), а не серые подсказки: их можно просто исправить
   const filled = r => { const f = beamSettings(r); return { ...f, rotations: f.rotations == null ? '' : f.rotations, levelTrims: f.levelTrims.map(str) } }
   const [v, setV] = useState(() => filled(raw))
   const [msg, setMsg] = useState('')
-  const s = beamSettings(v)
+  // пример «в полосу 600» — с резом «Параметров станка»
+  const s = { ...beamSettings(v), ...(prod?.kerf_width != null && prod.kerf_width !== '' ? { kerf: Number(prod.kerf_width) } : {}) }
 
   const save = async next => {
     const val = next || v
     const out = {}
     for (const [k, x] of Object.entries(val)) {
+      if (['kerf', 'trimLeft', 'trimRight', 'trimTop', 'trimBottom'].includes(k)) continue   // рез и отступы — в «Параметрах станка»
       if (k === 'levelTrims') { const a = (x || []).map(t => (str(t).trim() === '' ? null : Number(str(t).replace(',', '.')))); if (a.some(t => t != null)) out[k] = a; continue }
       if (typeof x === 'boolean') { out[k] = x; continue }
       if (str(x).trim() === '') continue
@@ -80,14 +82,9 @@ export default function BeamSawSettings({ prod, onSaved }) {
       {msg && <p style={{ fontSize: 12, color: msg === 'Сохранено' ? 'var(--teal)' : 'var(--amber)', margin: '0 0 6px' }}>{msg}</p>}
 
       {head('Пила и лист')}
-      {field('kerf', 'Пропил, мм')}
-      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 3 }}>Обрезка кромки листа, мм</div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-        {[['trimLeft', '←'], ['trimRight', '→'], ['trimTop', '↑'], ['trimBottom', '↓']].map(([k, l]) => (
-          <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'var(--text-hint)', textAlign: 'center' }}>{l}
-            <input type="text" inputMode="decimal" value={str(v[k])} onFocus={e => e.target.select?.()} onChange={e => set(k, clean(e.target.value))} onBlur={() => blur(k)} style={{ padding: '4px 6px', fontSize: 13, textAlign: 'center' }} />
-          </label>
-        ))}
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 8px', background: 'var(--bg2)', borderRadius: 'var(--radius)', marginBottom: 6, lineHeight: 1.45 }}>
+        Рез и обрезка листа — из «Параметров станка» (как у пилы и фрезера): рез <b>{prod?.kerf_width ?? '—'}</b> мм, отступы ←{prod?.margin_left ?? '—'} →{prod?.margin_right ?? '—'} ↑{prod?.margin_top ?? '—'} ↓{prod?.margin_bottom ?? '—'} мм.
+        {onOpenSheet && <> <button type="button" onClick={onOpenSheet} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--blue)', fontSize: 12, cursor: 'pointer' }}>Изменить →</button></>}
       </div>
 
       {head('Уровни резов и повороты')}
