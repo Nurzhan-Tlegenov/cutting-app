@@ -436,7 +436,18 @@ function asBoxes(res) {
 
 export async function runLiveNesting(params, opts = {}) {
   if (params.beamSaw) return runBeamSaw(params, opts)   // β Пильный центр — свой алгоритм уровнями резов (island, onStats — для потоков и хронологии)
-  // Пила (форматник): детали на картах — в порядке готовности на всех уровнях (src/lib/readyOrder.js)
+  // Пила (форматник): полосами, как пильный центр — ширину полосы задаёт деталь, полосы от большой к малой, внутри —
+  // по готовности, на последнем листе один крупный обрезок. Свои рез и отступы заказа, без захвата, торцовки уровней,
+  // предела уровней и автоматических обрезков. Склад обрезков (раскрой и на обрезки) полосы пока не умеют — там прежний
+  // форматник с порядком по готовности (src/lib/readyOrder.js).
+  if ((params.cuttingMethod || 'nesting') === 'guillotine' && !params.offcuts?.items?.length) {
+    const dir = params.direction === 'along_x' ? 'x' : params.direction === 'along_y' ? 'y' : 'auto'
+    const fs = { kerf: Number(params.kerf) || 0, trimLeft: Number(params.marginL) || 0, trimRight: Number(params.marginR) || 0, trimTop: Number(params.marginT) || 0, trimBottom: Number(params.marginB) || 0,
+      levels: 20, levelTrims: [0], grip: 0, narrowMin: 0, direction: dir, stripOrder: 'desc', offcutMinL: 1e9, offcutMinW: 1e9 }
+    const mark = res => (res ? { ...res, beamSaw: false, formatStrips: true, beamSettings: undefined } : res)
+    const onProgress = opts.onProgress ? res => opts.onProgress(mark(res)) : null
+    return mark(await runBeamSaw({ ...params, beamSaw: fs }, { ...opts, onProgress }))
+  }
   if ((params.cuttingMethod || 'nesting') === 'guillotine') {
     const onProgress = opts.onProgress ? res => opts.onProgress(readyOrderResult(res)) : null
     return readyOrderResult(await runLiveNestingRaw(params, { ...opts, onProgress }))

@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.5'
+export const BEAM_SAW_VERSION = 'β0.6'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -166,7 +166,8 @@ function orderByReady(slots) {
 // Обход дерева: координаты деталей и линии/счёт резов. 1-й уровень (полосы) — по настройке «Порядок полос»,
 // глубже — по готовности.
 function layout(node, ox, oy, s, out) {
-  node.slots = node.level === 1 ? orderSlots(node.slots, s.stripOrder) : orderByReady(node.slots)
+  // 1-й уровень: «от большой к малой» — тоже по готовности (полоса из одной детали во всю длину — готова сразу); Б→М→Б — как задано
+  node.slots = node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(node.slots, 'wnw') : orderByReady(node.slots)
   let pos = node.trim
   if (node.trim > EPS) out.cuts++
   for (const sl of node.slots) {
