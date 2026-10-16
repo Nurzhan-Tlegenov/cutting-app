@@ -62,8 +62,8 @@ export function sheetCutTree(sheet, geo) {
   const k = geo.kerf, X = geo.usableX + k, Y = geo.usableY + k
   const items = (sheet.placed || []).map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h, part: p }))
   for (const o of sheet.manualOffcuts || []) {
-    // обрезок хранится с Y снизу вверх и может заходить в отступ — берём его часть в рабочей зоне, с пропилом как у детали
-    const y = geo.usableY - o.y - o.h
+    // обрезок — в тех же координатах, что детали; может заходить в отступ — берём его часть в рабочей зоне, с пропилом как у детали
+    const y = o.y
     const x0 = Math.max(0, o.x), y0 = Math.max(0, y), x1 = Math.min(geo.usableX, o.x + o.w), y1 = Math.min(geo.usableY, y + o.h)
     if (x1 - x0 > EPS && y1 - y0 > EPS) items.push({ x: x0, y: y0, w: x1 - x0 + k, h: y1 - y0 + k, offcut: true })
   }

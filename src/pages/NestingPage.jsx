@@ -50,7 +50,7 @@ import SendToMaster from '../components/SendToMaster'
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
-import { sameMaps, sameMapTag } from '../lib/beamSaw'
+import { beamSettings, sameMaps, sameMapTag } from '../lib/beamSaw'
 import { saveBeamSawXml } from '../lib/beamSawXml'
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
@@ -1334,8 +1334,9 @@ function readOwnParams(id) { try { return localStorage.getItem(ownParamsKey(id))
 function writeOwnParams(id, on) { try { if (on) localStorage.setItem(ownParamsKey(id), '1'); else localStorage.removeItem(ownParamsKey(id)) } catch { /* без памяти */ } }
 // рез и отступы производства для материала заказа: у ХДФ / ДВП — свои (если производство их задало), иначе общие
 const prodVal = (pr, col, order) => (order?.material_kind === 'hdf' && pr['hdf_' + col] != null ? pr['hdf_' + col] : pr[col])
-// Что требует производство для этого раскроя — рез и отступы его «Параметров станка» (у пильного центра β тоже)
-const prodNeed = (pr, col, order) => prodVal(pr, col, order)   // и у пильного центра рез и отступы — «Параметры станка»
+// Что требует производство для этого раскроя: у пильного центра β — его собственные пропил и обрезка листа
+const BEAM_COL = { kerf_width: 'kerf', margin_left: 'trimLeft', margin_right: 'trimRight', margin_top: 'trimTop', margin_bottom: 'trimBottom' }
+const prodNeed = (pr, col, order, result) => (result?.beamSaw ? beamSettings(pr.beam_saw_settings)[BEAM_COL[col]] : prodVal(pr, col, order))
 const SHEET_FIELDS = [
   ['L', 'sheet_length'], ['W', 'sheet_width'], ['kerf', 'kerf_width'],
   ['ml', 'margin_left'], ['mr', 'margin_right'], ['mt', 'margin_top'], ['mb', 'margin_bottom'],
@@ -1987,12 +1988,13 @@ export default function NestingPage() {
       algo: useNfp ? 'nfp' : 'raster',
       byBox: !!cfg.box && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту
     }
-    // β Пильный центр: свой алгоритм (src/lib/beamSawNesting.js) и настройки пильного центра производства —
-    // выбранного в заказе, иначе своего. Рез и отступы — заказа (у производства — «Параметры станка»), как у пилы;
+    // β Пильный центр: свой алгоритм (src/lib/beamSawNesting.js) и свои настройки пильного центра производства —
+    // выбранного в заказе, иначе своего: пропил и обрезка листа тоже свои (не «Параметры станка» пилы / фрезера);
     // направление «вдоль X / вдоль Y» конфигурации главнее, «авто» — как задано у производства
     if (beamSaw) {
       const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id) || null
-      Object.assign(params, { beamSaw: pr?.beam_saw_settings || {}, byBox: false })
+      const bs = beamSettings(pr?.beam_saw_settings)
+      Object.assign(params, { beamSaw: pr?.beam_saw_settings || {}, kerf: bs.kerf, marginL: bs.trimLeft, marginR: bs.trimRight, marginT: bs.trimTop, marginB: bs.trimBottom, byBox: false })
     }
     if (continueFrom && cfg.result && cfg.sheetsData?.length && !(cfg.buffer || []).length && cfg.result.paramsKey === paramsKey(params)) {
       params.seed = {
@@ -3636,7 +3638,7 @@ export default function NestingPage() {
       </div>
       {beamSaw && (
         <p style={{ fontSize: 11, color: 'var(--blue)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
-          β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Рез и отступы — как у заказа («Параметры станка» производства), направление — как выбрано в конфигурации («авто» — как у производства), остальные правила — из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); return pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)' })()}.
+          β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Направление — как выбрано в конфигурации («авто» — как у производства); пропил, обрезка листа и остальные правила — свои, из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); return pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)' })()}.
           {!isMaster && (
             <button type="button" onClick={() => setSendJob({
               title: 'Замечание по пильному центру β', fileName: `beamsaw_${orderFileName(order)}.json`, orderId: id,
