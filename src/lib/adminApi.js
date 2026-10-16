@@ -105,3 +105,26 @@ export async function adminProductionOrders() {
     return { data: data || [] }   // тестовые (excluded) — в суммы не идут, это решает страница
   } catch (e) { return { error: String(e?.message || e) } }
 }
+
+// ── Помощь со входом и удаление аккаунта (migration_login_help.sql) ──
+export const HELP_SQL_HINT = 'Помощь со входом и удаление аккаунта ещё не включены: выполните migration_login_help.sql в Supabase (SQL Editor) — один раз.'
+/** С экрана входа: «Не получается войти?» — сообщение мастер-аккаунту. -> {} | { error } */
+export async function loginHelpRequest(phone, name, text) {
+  const r = await call('login_help_request', { p_phone: phone || '', p_name: name || '', p_text: text || '' })
+  if (r.missing) {   // база ещё без этой функции — хотя бы запрос на смену пароля
+    const x = await requestPasswordReset(phone)
+    return x.error ? x : {}
+  }
+  if (r.error) return { error: /bad phone/.test(r.error) ? 'Проверьте номер телефона' : r.error }
+  if (r.data === 'limit') return { error: 'Вы уже писали сегодня несколько раз — мы ответим в WhatsApp.' }
+  return {}
+}
+export async function adminLoginHelp() { const r = await call('admin_login_help'); return r.missing ? { error: HELP_SQL_HINT, missing: true } : r }
+export const adminCloseLoginHelp = id => call('admin_close_login_help', { p_id: id })
+export async function adminDeleteUser(id) {
+  const r = await call('admin_delete_user', { p_id: id })
+  if (r.missing) return { error: HELP_SQL_HINT }
+  if (r.error) return { error: /self/.test(r.error) ? 'Свой аккаунт удалить нельзя.' : /admin/.test(r.error) ? 'Аккаунт администратора удалить нельзя.' : r.error }
+  if (r.data && r.data !== 'ok') return { error: r.data === 'not found' ? 'Аккаунт уже удалён.' : `Удалить не получилось: ${r.data}` }
+  return {}
+}

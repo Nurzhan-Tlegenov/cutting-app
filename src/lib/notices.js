@@ -7,7 +7,7 @@ import { getUserSettings } from './userSettings'
 // всё берётся из уже существующих списков; «какой статус заказа я уже видел» хранится на этом устройстве.
 import { supabase } from './supabase'
 import { myPostQueue } from './posts'
-import { adminRequests, adminPasswordResets, adminUsers } from './adminApi'
+import { adminRequests, adminPasswordResets, adminUsers, adminLoginHelp } from './adminApi'
 import { myProduction, productionOrders } from './productionApi'
 import { STATUS_LABELS, orderTitle } from './orderUtils'
 import { goUrl, WHERE } from './noticeNav'
@@ -48,14 +48,16 @@ export async function fetchNotices({ user, isMaster }) {
   if (!user?.id) return res
   const jobs = []
   if (isMaster) {
-    jobs.push(Promise.all([adminRequests(), adminPasswordResets(), adminUsers()]).then(([rq, pr, us]) => {
+    jobs.push(Promise.all([adminRequests(), adminPasswordResets(), adminUsers(), adminLoginHelp()]).then(([rq, pr, us, lh]) => {
       const reqs = (rq.data || []).filter(r => r.status === 'new')
       const resets = (pr.data || []).filter(r => r.status === 'new')
       const prods = (us.data || []).filter(u => u.production_status === 'pending')
       // кто зарегистрировался без одобрения (по ссылкам, при открытой регистрации), пока мастер не смотрел «Пользователи»
       const seenAt = getUserSettings(user).usersSeenAt
       const joined = seenAt ? (us.data || []).filter(u => u.id !== user.id && u.created_at && new Date(u.created_at) > new Date(seenAt)) : []
-      res.users = reqs.length + resets.length + prods.length + (joined.length ? 1 : 0)
+      const helps = (lh?.data || []).filter(h => h.status === 'new')
+      res.users = reqs.length + resets.length + prods.length + (joined.length ? 1 : 0) + helps.length
+      for (const h of helps) res.list.push({ key: `lh:${h.id}`, text: `Не получается войти: ${h.name || '+' + h.digits}`, to: goUrl('users', 'lh'), where: WHERE.users, src: 'users' })
       if (joined.length) res.list.push({ key: `nu:${joined.length}:${seenAt}`, text: joined.length === 1 ? `Новый пользователь: ${joined[0].full_name || joined[0].phone || 'без имени'}` : `Новые пользователи: ${joined.length}`, to: goUrl('users', `nu:${joined[0].id}`), where: WHERE.users, src: 'users' })
       for (const r of reqs) res.list.push({ key: `rq:${r.id}`, text: `Новая заявка на регистрацию: ${r.full_name || r.phone || 'без имени'}`, to: goUrl('users', `rq:${r.id}`), where: WHERE.users, src: 'users' })
       for (const r of resets) res.list.push({ key: `pw:${r.id}`, text: `Просят восстановить пароль: ${r.full_name || r.phone || '+' + r.digits}`, to: goUrl('users', `pw:${r.id}`), where: WHERE.users, src: 'users' })

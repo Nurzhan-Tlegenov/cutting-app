@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
-import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT } from '../lib/adminApi'
+import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
 import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
@@ -61,9 +61,11 @@ export default function UsersPage() {
   const [ready, setReady] = useState(false)   // база ответила: функции на месте и вы администратор
   const [info, setInfo] = useState('')         // итог последнего действия (код отправлен, бот подключён…)
   const [lim, setLim] = useState(null)         // лимиты: { defaults, users } или { error } — в базе ещё нет лимитов
+  const [helps, setHelps] = useState(null)     // «Не получается войти» с экрана входа; null — в базе ещё нет этой части
 
   const load = async () => {
-    const [u, r, o, pr, lm] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits()])
+    const [u, r, o, pr, lm, lh] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp()])
+    setHelps(lh.error ? null : lh.data || [])
     setLim(lm.error ? { error: lm.error } : { defaults: lm.data?.defaults || {}, users: new Map((lm.data?.users || []).map(x => [x.user_id, x])) })
     setResets(pr.error ? null : pr.data || [])
     if (u.error) { setError(u.error); setReady(false); setUsers([]); return }
@@ -157,6 +159,13 @@ export default function UsersPage() {
   const pct = (n, of) => (of ? Math.round(n / of * 100) : 0)
   const shown = inKind.filter(u => (!land || landOf(u) === land) && (!town || townOf(u) === town))
     .sort((a, b) => cmp(landOf(a), landOf(b)) || cmp(townOf(a), townOf(b)) || cmp(String(a.full_name || ''), String(b.full_name || ''))).filter(u => !q || `${u.full_name || ''} ${u.phone || ''} ${u.email || ''}`.toLowerCase().includes(q) || (digits(q) && digits(u.phone || u.email).includes(digits(q))))
+  // Удалить аккаунт целиком — номер освобождается, человек регистрируется заново
+  const delUser = u => {
+    const who = `${u.full_name || 'без имени'}${u.phone ? ' · ' + u.phone : ''}`
+    if (!window.confirm(`Удалить аккаунт «${who}»?\n\nУдалятся вход, профиль и все его заказы (в том числе отправленные на производство). Восстановить нельзя.\nПосле этого он сможет зарегистрироваться заново с этим номером.`)) return
+    if (!window.confirm('Точно удалить? Это действие необратимо.')) return
+    act(async () => { const r = await adminDeleteUser(u.id); if (!r.error) setInfo(`Аккаунт «${who}» удалён — номер свободен для новой регистрации.`); return r })
+  }
   // карточка пользователя: свёрнута — имя, «произв.», страна·город; нажатие — всё остальное
   const userCard = u => {
               const tel = digits(u.phone) || digits(String(u.email || '').split('@')[0])
@@ -195,6 +204,11 @@ export default function UsersPage() {
                   )}
                   {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.defaults} isProd={isProd(u)} busy={busy}
                     onSave={(id, unl, l) => act(() => adminSetUserLimits(id, unl, l))} />}
+                  {u.id !== user?.id && u.role !== 'admin' && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                      <button type="button" disabled={busy} onClick={() => delUser(u)} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11 }}>Удалить аккаунт</button>
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                     Регистрация {date(u.created_at)} · последний вход {date(u.last_sign_in_at)} · заказов создано {u.orders}{u.submitted != null ? `, оформлено ${u.submitted}` : ''}{u.last_order_at ? ` (последний ${date(u.last_order_at)})` : ''}
                   </div>
@@ -241,6 +255,32 @@ export default function UsersPage() {
           </div>
 
           {resets === null && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 10 }}>{RESET_SQL_HINT}</p>}
+          {helps?.some(h => h.status === 'new') && (
+            <>
+              <p className="section-title">Не получается войти · {helps.filter(h => h.status === 'new').length}</p>
+              <div className="card" data-focus="lh" style={{ marginBottom: 12, border: '1px solid var(--amber)' }}>
+                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Написали с экрана входа. Аккаунт есть — ниже, в «Восстановлении пароля», уже есть запрос: выдайте код и отправьте в WhatsApp. Аккаунта нет — свяжитесь с человеком или разрешите регистрацию его номеру.</p>
+                {helps.filter(h => h.status === 'new').map(h => (
+                  <div key={h.id} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.name || 'Без имени'}</span>
+                      <a href={`tel:+${h.digits}`} style={{ fontSize: 12, color: 'var(--blue)' }}>+{h.digits}</a>
+                    </div>
+                    <div style={{ fontSize: 11, color: h.registered ? 'var(--teal)' : 'var(--amber)' }}>
+                      {h.registered ? 'аккаунт есть — нужен новый пароль' : h.request_status ? `аккаунта нет · заявка: ${h.request_status === 'approved' ? 'одобрена' : h.request_status === 'new' ? 'ждёт' : 'отклонена'}` : 'аккаунта нет'} · {date(h.created_at)}
+                    </div>
+                    {h.body && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{h.body}</div>}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                      <a href={`https://wa.me/${h.digits}`} target="_blank" rel="noreferrer" style={{ ...btn('main'), textDecoration: 'none', background: '#25D366' }}>WhatsApp</a>
+                      {!h.registered && <button type="button" disabled={busy} style={btn()} onClick={() => act(() => adminAllowPhone('+' + h.digits, h.name || ''))}>Разрешить регистрацию</button>}
+                      {h.registered && h.user_id && <button type="button" disabled={busy} style={btn('danger')} onClick={() => { const u = (users || []).find(x => x.id === h.user_id); if (u) delUser(u) }}>Удалить аккаунт</button>}
+                      <button type="button" disabled={busy} style={btn()} onClick={() => act(() => adminCloseLoginHelp(h.id))}>Решено</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           {resets?.some(r => r.status !== 'done') && (
             <>
               <p className="section-title">Восстановление пароля · {resets.filter(r => r.status !== 'done').length}</p>

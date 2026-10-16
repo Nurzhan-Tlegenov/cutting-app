@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom } from '../i18n'
-import { signupOpen, requestSignup2, confirmSignupCode, tgStartLink, requestPasswordReset, confirmPasswordReset } from '../lib/adminApi'
+import { signupOpen, requestSignup2, confirmSignupCode, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
 import { PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -87,6 +87,36 @@ export default function AuthPage() {
     return `${digits}@raskoypro.local`
   }
 
+  // Вход по номеру: аккаунт записан полным номером с кодом страны (7701…). Человек мог ввести 8 701… или 701… —
+  // пробуем и такие варианты, иначе зарегистрированный человек «не может войти»
+  function loginEmails(phone) {
+    const d = String(phone || '').replace(/\D/g, '')
+    const out = [d]
+    if (d.length === 11 && d[0] === '8') out.push('7' + d.slice(1))
+    if (d.length === 10) out.push('7' + d)
+    return [...new Set(out)].map(x => `${x}@raskoypro.local`)
+  }
+  async function signInAny(phone, password) {
+    let last = null
+    for (const em of loginEmails(phone)) {
+      try { await signIn(em, password); return } catch (e) { last = e; if (!/Invalid login/i.test(String(e?.message || e))) throw e }
+    }
+    throw last || new Error('Invalid login credentials')
+  }
+  // «Не получается войти?» — сообщение мастер-аккаунту с этого номера (на экране входа, без аккаунта)
+  const [help, setHelp] = useState(null)        // null | { name, text, sent }
+  const [loginFails, setLoginFails] = useState(0)
+  async function sendHelp() {
+    setError('')
+    const tel = mode === 'register' ? regPhone : form.phone
+    if (String(tel || '').replace(/\D/g, '').length < 10) { setError('Введите номер телефона, с которым вы регистрировались или пытаетесь войти'); return }
+    setLoading(true)
+    const r = await loginHelpRequest(tel, help?.name || '', help?.text || '')
+    setLoading(false)
+    if (r.error) setError(r.error)
+    else setHelp(h => ({ ...h, sent: true }))
+  }
+
   // «Забыли пароль?»: человек просит код, администратор сообщает его (WhatsApp), здесь вводится код и новый пароль
   async function askCode() {
     setError(''); setNote('')
@@ -118,7 +148,7 @@ export default function AuthPage() {
         if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
         const r = await confirmPasswordReset(form.phone, form.code, form.password)
         if (r.error) throw new Error(r.error)
-        await signIn(phoneToEmail(form.phone), form.password)
+        await signInAny(form.phone, form.password)
       } else if (mode === 'code') {
         // «У меня есть код»: заявка одобрена, код пришёл в Telegram / WhatsApp — только номер, код и пароль
         setPhoneTouched(true)
@@ -129,8 +159,7 @@ export default function AuthPage() {
         if (c.error) throw new Error(c.error)
         await signUp(phoneToEmail(regPhone), form.password, { full_name: '', phone: regPhone, country: '', city: '' })
       } else if (mode === 'login') {
-        const email = phoneToEmail(form.phone)
-        await signIn(email, form.password)
+        await signInAny(form.phone, form.password)
       } else {
         if (!form.full_name.trim()) throw new Error('Введите имя и фамилию')
         if (byRequest && !nameLooksReal(form.full_name)) throw new Error('Укажите настоящие имя и фамилию (например: Иван Петров) — заявки без имени не одобряются')
@@ -145,7 +174,7 @@ export default function AuthPage() {
           const byRef = r.ref === 'ok'
           setReq(r)
           const tgMode = r.messenger === 'telegram'
-          if (r.registered) setError('Этот номер уже зарегистрирован — войдите на вкладке «Вход».')
+          if (r.registered) setError('Этот номер уже зарегистрирован — войдите на вкладке «Вход». Не помните пароль — «Забыли пароль?» или напишите разработчику ниже.')
           else if (r.status === 'open' || (r.status === 'approved' && r.legacy)) { setApproved(true); setNote('Остался один шаг: придумайте пароль и нажмите «Зарегистрироваться».') }
           else if (r.status === 'approved') {
             setApproved(true)
@@ -190,8 +219,9 @@ export default function AuthPage() {
       navigate(pendingRef() ? `/r/${pendingRef()}` : '/')
     } catch (err) {
       const msg = err.message
+      if (msg.includes('Invalid login')) setLoginFails(n => n + 1)
       if (msg.includes('Invalid login')) setError('Неверный телефон или пароль. Если вашу заявку одобрили и пришёл код, а пароль вы ещё не задавали — нажмите «У меня есть код».')
-      else if (msg.includes('already registered')) setError('Этот номер уже зарегистрирован')
+      else if (msg.includes('already registered')) setError('Этот номер уже зарегистрирован — войдите на вкладке «Вход». Не помните пароль — «Забыли пароль?» или напишите разработчику ниже.')
       else if (/signup_closed|Database error saving new user|Signups not allowed/i.test(msg)) { setOpen(false); setApproved(false); setError('Регистрация сейчас только по запросу. Оставьте заявку.') }
       else setError(msg)
     } finally {
@@ -403,6 +433,33 @@ export default function AuthPage() {
             </button>
             {mode === 'login' && <button type="button" onClick={() => { setMode('forgot'); setError(''); setNote('') }}
               style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>Забыли пароль?</button>}
+            {/* Не получается войти или зарегистрироваться — написать разработчику прямо отсюда, с этого номера */}
+            {(mode === 'login' || mode === 'register' || mode === 'forgot') && (
+              <div style={{ border: `1px solid ${loginFails > 0 || /уже зарегистрирован/.test(error) ? 'var(--amber)' : 'var(--border-md)'}`, borderRadius: 'var(--radius)', padding: '10px 12px', marginTop: 4 }}>
+                {help?.sent ? (
+                  <p style={{ fontSize: 13, color: 'var(--teal)', margin: 0 }}>✓ Сообщение отправлено разработчику. Мы пришлём код в WhatsApp на этот номер — введите его в «Забыли пароль?» и придумайте новый пароль.</p>
+                ) : help ? (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Написать разработчику</div>
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 8px' }}>Номер телефона — тот, что вы ввели выше{mode === 'register' ? '' : ' (поле «Телефон»)'}. Ответ и код придут в WhatsApp.</p>
+                    <input type="text" placeholder="Имя (необязательно)" value={help.name || ''} onChange={e => setHelp(h => ({ ...h, name: e.target.value }))} maxLength={120} style={{ marginBottom: 6 }} />
+                    <textarea rows={2} placeholder="Что не получается? Например: зарегистрировался, а войти не могу" value={help.text || ''} onChange={e => setHelp(h => ({ ...h, text: e.target.value }))}
+                      maxLength={1000} style={{ fontSize: 14, resize: 'vertical', width: '100%' }} />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button type="button" className="btn-primary" disabled={loading} onClick={sendHelp} style={{ flex: 1 }}>Отправить</button>
+                      <button type="button" className="btn-secondary" onClick={() => setHelp(null)}>Отмена</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>Не получается войти или зарегистрироваться?</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 8px' }}>Напишите разработчику — он поможет и пришлёт код для входа в WhatsApp.</div>
+                    <button type="button" className="btn-secondary" style={{ width: '100%', padding: 8 }}
+                      onClick={() => setHelp({ name: form.full_name || '', text: '' })}>✉ Написать разработчику</button>
+                  </>
+                )}
+              </div>
+            )}
             {mode === 'code' && <button type="button" onClick={() => { setMode('register'); setError(''); setNote('') }}
               style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>Кода нет — оставить заявку на регистрацию</button>}
             {mode === 'forgot' && <button type="button" onClick={() => { setMode('login'); setError(''); setNote('') }}
