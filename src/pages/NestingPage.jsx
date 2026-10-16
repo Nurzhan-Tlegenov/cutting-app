@@ -1758,19 +1758,22 @@ export default function NestingPage() {
     setEditPart(null)
     if (ep) savePartDraft(ep)
   }
-  // «Вращать все»: всем деталям этого материала разрешается поворот (как галочка вращения в бланке заказа).
-  // Готовые варианты остаются верными (ограничение только снимается) — новый раскрой уже сможет поворачивать детали
+  // «Вращать все» / «Выключить всем»: поворот деталей этого материала (как галочка вращения в бланке заказа).
+  // Включение не портит готовые варианты (ограничение только снимается) — новый раскрой уже сможет поворачивать детали
   const [rotBusy, setRotBusy] = useState(false)
-  async function allowRotateAll() {
-    const fixed = details.filter(d => !d.rotatable && d.id)
-    if (!fixed.length) return
-    if (!window.confirm(`Разрешить вращение всем деталям (${fixed.length} поз.)?\n\nЕсли у материала есть рисунок или направление волокон — повёрнутые детали пойдут поперёк него.\nПосле этого выполните раскрой заново.`)) return
+  async function setRotateAll(on) {
+    const list = details.filter(d => !!d.rotatable !== on && d.id)
+    if (!list.length) return
+    const msg = on
+      ? `Разрешить вращение всем деталям (${list.length} поз.)?\n\nЕсли у материала есть рисунок или направление волокон — повёрнутые детали пойдут поперёк него.\nПосле этого выполните раскрой заново.`
+      : `Запретить вращение всем деталям (${list.length} поз.)?\nДетали будут уложены строго по рисунку / волокнам. После этого выполните раскрой заново.`
+    if (!window.confirm(msg)) return
     setRotBusy(true)
-    const ids = fixed.map(d => d.id)
-    const { error } = await supabase.from('order_details').update({ rotatable: true }).in('id', ids)
+    const ids = list.map(d => d.id)
+    const { error } = await supabase.from('order_details').update({ rotatable: on }).in('id', ids)
     setRotBusy(false)
-    if (error) { window.alert('Не удалось включить вращение: ' + error.message); return }
-    setAllDetails(ds => ds.map(x => (ids.includes(x.id) ? { ...x, rotatable: true } : x)))
+    if (error) { window.alert('Не удалось изменить вращение: ' + error.message); return }
+    setAllDetails(ds => ds.map(x => (ids.includes(x.id) ? { ...x, rotatable: on } : x)))
   }
   async function savePartDraft(ep) {
     const d = rawDetail(details[ep.index]), dr = ep.draft
@@ -3531,18 +3534,21 @@ export default function NestingPage() {
 
       {order.material_kind === 'hdf' && <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Материал заказа — ХДФ / ДВП: раскрой только под пилу{order.production_id ? ', рез и отступы — как задало производство для этого материала' : ''}.</p>}
 
-      {/* Забыли включить вращение при вводе / импорте — включить всем деталям прямо отсюда */}
-      {(() => {
+      {/* Вращение деталей — всегда на виду: забыли включить при вводе / импорте — включить всем прямо отсюда */}
+      {details.length > 0 && (() => {
         const fixed = details.filter(d => !d.rotatable)
-        if (!details.length || !fixed.length || anyRunning) return null
+        const all = !fixed.length
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', borderRadius: 'var(--radius)', background: 'var(--bg2)', fontSize: 12 }}>
+          <div data-tour="nest-rotate" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', borderRadius: 'var(--radius)',
+            background: all ? 'var(--bg2)' : 'var(--amber-light, var(--bg2))', border: all ? 'none' : '0.5px solid var(--amber)', fontSize: 12 }}>
+            <span style={{ fontSize: 15, color: all ? 'var(--teal)' : 'var(--amber)' }}>↻</span>
             <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)' }}>
-              Вращение выключено: {fixed.length === details.length ? 'у всех деталей' : `у ${fixed.length} из ${details.length} позиций`}
+              {all ? 'Вращение деталей: включено у всех' : `Вращение выключено ${fixed.length === details.length ? 'у всех деталей' : `у ${fixed.length} из ${details.length} позиций`}`}
             </span>
-            <button type="button" disabled={rotBusy} onClick={allowRotateAll}
-              style={{ flexShrink: 0, padding: '5px 10px', borderRadius: 16, border: '0.5px solid var(--teal)', background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
-              {rotBusy ? '…' : '↻ Вращать все'}
+            <button type="button" disabled={rotBusy || anyRunning} onClick={() => setRotateAll(!all)}
+              style={{ flexShrink: 0, padding: '5px 10px', borderRadius: 16, fontSize: 12, fontWeight: 500, cursor: 'pointer', opacity: anyRunning ? 0.5 : 1,
+                border: `0.5px solid ${all ? 'var(--border-md)' : 'var(--teal)'}`, background: all ? 'transparent' : 'var(--teal)', color: all ? 'var(--text-muted)' : 'white' }}>
+              {rotBusy ? '…' : all ? 'Выключить всем' : 'Вращать все'}
             </button>
           </div>
         )

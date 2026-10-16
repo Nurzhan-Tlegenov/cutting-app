@@ -202,9 +202,10 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
       ctx.textAlign = 'center'; ctx.textBaseline = opt.base || 'alphabetic'; ctx.fillText(str, 0, 0); ctx.restore()
     }
     let placed = false
-    for (const k of [1, 0.85, 0.72, 0.6, 0.5]) {
-      const ds = Math.max(1.5, Math.min(3.6, Math.min(pw, ph) * 0.2) * k)   // размеры на детали — крупнее, читаются на распечатке
-      const ns = Math.max(1.8, Math.min(5, Math.min(pw, ph) * 0.42) * k)
+    for (const k of [1, 0.88, 0.76, 0.65, 0.55, 0.45]) {
+      // размеры по сторонам — главное на распечатке (по ним режут): крупно; номер позиции — скромнее
+      const ds = Math.max(1.5, Math.min(5.2, Math.min(pw, ph) * 0.26) * k)
+      const ns = Math.max(1.8, Math.min(4, Math.min(pw, ph) * 0.3) * k)
       const eL = p.edgeLeft ? 0.9 : 0, eT = p.edgeTop ? 0.9 : 0           // размер не наезжает на полоску кромки
       const bandL = ds + 1.2 + eL, bandT = ds + 1.2 + eT                  // полосы под размер у левой и верхней стороны
       const fitTop = tw(sw, ds, true) <= pw - bandL - 0.8, fitLeft = tw(sh, ds, true) <= ph - bandT - 0.8
@@ -225,8 +226,8 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
       const cx = x0 + px * s + il + iw / 2, cy = y0 + (geo.sheetL - py - h) * s + it + ih / 2
       const dims = d ? `${fmt(d.length)}×${fmt(d.width)}` : `${sh}×${sw}`
       const long = Math.max(iw, ih), short = Math.min(iw, ih), vert = ih > iw
-      const one = Math.min(3.2, (short - 0.4) * 0.8, (long - 0.8) / Math.max(0.1, tw(`${no}  ${dims}`, 1.05, true)))
-      const two = Math.min(3.2, (short - 0.4) / 2.3, (long - 0.8) / Math.max(0.1, tw(dims, 1, true), tw(no, 1.15, true)))
+      const one = Math.min(3.8, (short - 0.4) * 0.8, (long - 0.8) / Math.max(0.1, tw(`${no}  ${dims}`, 1.05, true)))
+      const two = Math.min(3.8, (short - 0.4) / 2.3, (long - 0.8) / Math.max(0.1, tw(dims, 1, true), tw(no, 1.15, true)))
       if (one >= two) {
         const size = Math.max(0.9, one), wn = tw(no, size, true), gap = size * 0.5, total = wn + gap + tw(dims, size, true)
         if (vert) {
