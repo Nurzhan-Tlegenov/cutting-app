@@ -41,6 +41,19 @@ export const STATUS_LABELS = {
   done: 'Исполнен'
 }
 
+// Отправлен ли заказ на производство — для мастер-аккаунта (и шапки заказа).
+// «Выбрать» на раскрое только сохраняет карту у клиента (status остаётся draft) — отправку делает «Отправить заказ»
+// (status → new, submitted_at). Поэтому черновик делим на «не раскроен», «раскрой выбран, не отправлен» и «возвращён».
+const dt = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '')
+export function sendState(order, hasNesting = !!order?.nesting_result) {
+  const st = order?.status || 'draft'
+  if (st !== 'draft') return { key: 'sent', label: STATUS_LABELS[st] || st, badge: STATUS_BADGE[st] || 'badge-new',
+    note: order?.submitted_at ? `Отправлен ${dt(order.submitted_at)}` : 'Отправлен' }
+  if (order?.returned_at) return { key: 'returned', label: 'Возвращён на доработку', badge: 'badge-picked', note: `Возвращён ${dt(order.returned_at)} · не отправлен` }
+  if (hasNesting) return { key: 'picked', label: 'Раскрой выбран, не отправлен', badge: 'badge-picked', note: '«Отправить заказ» не нажат' }
+  return { key: 'none', label: 'Не отправлен', badge: 'badge-draft', note: 'Раскрой не выбран' }
+}
+
 export const STATUS_BADGE = {
   new: 'badge-new',
   discussion: 'badge-discussion',

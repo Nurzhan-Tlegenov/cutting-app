@@ -4,14 +4,15 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { adminUsers } from '../lib/adminApi'
-import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
+import { orderTitle, sendState } from '../lib/orderUtils'
+import { productionLabel } from '../lib/productionLabel'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { archiveOrder, restoreOrder, deleteOrder } from '../lib/orderArchive'
 
 // Мастер-аккаунт: заказы всех пользователей — чтобы по обращению открыть чужой заказ и разобраться с ошибкой.
 // Обычный список «Мои заказы» остаётся только своим. Доступ — только у администратора (так же решает и база).
-const FILTERS = [['all', 'Все'], ['draft', 'Черновики'], ['new', 'Отправлены'], ['discussion', 'Обсуждение'], ['inwork', 'В работе'], ['done', 'Исполнены']]
+const FILTERS = [['all', 'Все'], ['unsent', 'Не отправлены'], ['picked', 'Выбран, не отправлен'], ['new', 'Отправлены'], ['discussion', 'Обсуждение'], ['inwork', 'В работе'], ['done', 'Исполнены']]
 const digits = v => String(v || '').replace(/\D/g, '')
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '')
 const LINK = { background: 'none', border: '0.5px solid var(--blue)', color: 'var(--blue)', borderRadius: 'var(--radius)', padding: '4px 10px', fontSize: 12, cursor: 'pointer' }
@@ -21,6 +22,8 @@ export default function AllOrdersPage() {
   const { user, isMaster } = useAuth()
   const [orders, setOrders] = useState(null)
   const [users, setUsers] = useState(() => new Map())
+  const [prods, setProds] = useState(() => new Map())
+  const [nested, setNested] = useState(() => new Set())   // черновики с выбранной картой раскроя (саму карту не тянем — только id)
   const [find, setFind] = useState(() => sessionStorage.getItem('allOrdersFind') || '')
   const [status, setStatus] = useState(() => sessionStorage.getItem('allOrdersStatus') || 'all')
   const [error, setError] = useState('')
@@ -30,14 +33,19 @@ export default function AllOrdersPage() {
     let alive = true
     // тяжёлые поля (карта раскроя) не тянем; пока в базе нет архива — список без пометки архива
     const q = cols => supabase.from('orders').select(cols).order('created_at', { ascending: false }).limit(1000)
+    const base = 'id, user_id, order_name, order_number, status, material_name, material_thickness, created_at'
     Promise.all([
-      q('id, user_id, order_name, order_number, status, material_name, material_thickness, created_at, archived_at').then(r => (r.error ? q('id, user_id, order_name, order_number, status, material_name, material_thickness, created_at') : r)),
+      q(`${base}, archived_at, submitted_at, returned_at, production_id`).then(r => (r.error ? q(`${base}, submitted_at, production_id`) : r)).then(r => (r.error ? q(base) : r)),
       adminUsers(),
-    ]).then(([o, u]) => {
+      supabase.from('orders').select('id').eq('status', 'draft').not('nesting_result', 'is', null).limit(1000),
+      supabase.from('productions').select('id, name, country, city'),
+    ]).then(([o, u, n, p]) => {
       if (!alive) return
       if (o.error) setError(o.error.message)
       setOrders(o.data || [])
       setUsers(new Map((u.data || []).map(x => [x.id, x])))
+      setNested(new Set((n.data || []).map(x => x.id)))
+      setProds(new Map((p.data || []).map(x => [x.id, x])))
     })
     return () => { alive = false }
   }, [isMaster])
@@ -47,14 +55,21 @@ export default function AllOrdersPage() {
   const patch = (id, p) => setOrders(list => (p ? list.map(x => (x.id === id ? { ...x, ...p } : x)) : list.filter(x => x.id !== id)))
   const act = async (fn, id, done) => { const r = await fn(); if (!r) return; if (r.error) { setError(r.error); return } setError(''); done(r) }
   const tel = u => digits(u?.phone) || digits(String(u?.email || '').split('@')[0])
+  const stateOf = o => sendState(o, nested.has(o.id))
   const shown = useMemo(() => {
     const q = find.trim().toLowerCase(), qd = digits(q)
-    return (orders || []).filter(o => status === 'all' || o.status === status).filter(o => {
+    return (orders || []).filter(o => {
+      if (status === 'all') return true
+      const k = sendState(o, nested.has(o.id)).key
+      if (status === 'unsent') return k !== 'sent'
+      if (status === 'picked') return k === 'picked' || k === 'returned'
+      return o.status === status
+    }).filter(o => {
       if (!q) return true
       const u = users.get(o.user_id)
       return `${orderTitle(o)} ${o.order_number || ''} ${o.material_name || ''} ${u?.full_name || ''}`.toLowerCase().includes(q) || (qd.length > 2 && tel(u).includes(qd))
     })
-  }, [orders, users, find, status])
+  }, [orders, users, nested, find, status])
 
   if (!isMaster) return (
     <div className="page" style={{ paddingBottom: 100 }}>
@@ -85,12 +100,15 @@ export default function AllOrdersPage() {
       {shown.length === 0 && <p style={{ color: 'var(--text-hint)', textAlign: 'center', padding: '40px 20px' }}>Ничего не найдено</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {shown.map(o => {
-          const u = owner(o), t = tel(u)
+          const u = owner(o), t = tel(u), ss = stateOf(o), pr = o.production_id ? prods.get(o.production_id) : null
           return (
             <div key={o.id} className="card" style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ flex: 1, minWidth: 0, fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</span>
-                <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{STATUS_LABELS[o.status] || (o.status === 'draft' ? 'Черновик' : o.status)}</span>
+                <span className={`badge ${ss.badge}`} style={{ flex: '0 0 auto' }}>{ss.label}</span>
+              </div>
+              <div style={{ fontSize: 12, color: ss.key === 'sent' ? 'var(--success)' : ss.key === 'none' ? 'var(--danger)' : 'var(--amber)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {ss.key === 'sent' ? '✓ ' : '✕ '}{ss.note}{pr ? ` · ${ss.key === 'sent' ? '→' : 'выбрано:'} ${productionLabel(pr) || pr.name}` : ss.key !== 'sent' ? ' · производство не выбрано' : ''}
               </div>
               <div style={{ fontSize: 13, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {o.user_id === user?.id ? 'Вы' : u?.full_name || 'Без имени'}

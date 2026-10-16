@@ -87,6 +87,8 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 .badge-discussion { background: var(--amber-light); color: var(--amber); }
 .badge-inwork { background: var(--blue-light); color: var(--blue-dark); }
 .badge-done { background: var(--success-light); color: var(--success); }
+.badge-draft { background: var(--danger-light); color: var(--danger); }
+.badge-picked { background: var(--amber-light); color: var(--amber); }
 
 .error-text { color: var(--danger); font-size: 13px; margin-top: 6px; }
 

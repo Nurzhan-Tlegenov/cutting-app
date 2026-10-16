@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { STATUS_LABELS, STATUS_BADGE, orderTitle } from '../lib/orderUtils'
+import { STATUS_LABELS, orderTitle, sendState } from '../lib/orderUtils'
 import BottomNav from '../components/BottomNav'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import MaterialFilter from '../components/MaterialFilter'
@@ -135,9 +135,10 @@ export default function OrderPage() {
         {!inProduction && canEditOrder(order, user, profile) && order.status !== 'done' && <button type="button" onClick={() => openOrderEdit(order, navigate)} style={EDIT_BTN}>✎ Редактировать</button>}
         {inProduction && order.status !== 'draft' && <button type="button" onClick={() => navigate('/production')} style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
-          <span className={`badge ${STATUS_BADGE[order.status] || 'badge-new'}`}>
-            {STATUS_LABELS[order.status] || order.status}
+          <span className={`badge ${sendState(order).badge}`} title={sendState(order).note}>
+            {sendState(order).label}
           </span>
+          {(order.status === 'draft' || !order.status) && <span style={{ fontSize: 10, color: 'var(--text-hint)', maxWidth: 150, textAlign: 'right' }}>{sendState(order).note}</span>}
           {inProduction && (order.status === 'inwork' || order.status === 'done' || order.gcode_at || order.files_saved_at) && (
             <div style={{ display: 'flex', gap: 4 }}>
               {orderMarks(order).map(m => <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>)}
