@@ -1,4 +1,5 @@
 import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
+import ShareBadge from '../components/ShareBadge'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { lazyRetry } from '../lib/lazyRetry'
@@ -591,6 +592,7 @@ export default function LabelsPage() {
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 500 }}>Бирки</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>{orderTitle(order)}</span> · {total} шт. · {tpl.w}×{tpl.h} мм</div>
+          <ShareBadge orderId={order.id} style={{ marginTop: 3 }} />
         </div>
         <button onClick={() => navigate(cabinet === 'production' ? '/production' : '/orders')} style={{ padding: '7px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
         {mat && <button onClick={savePdf} disabled={!!pdf} style={{ ...pill, background: 'var(--teal)' }}>{pdf || '⬇ PDF'}</button>}

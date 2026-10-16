@@ -1,4 +1,5 @@
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
+import ShareBadge from '../components/ShareBadge'
 import { useKeptState } from '../hooks/useKeptState'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -3340,6 +3341,7 @@ export default function NestingPage() {
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 500 }}>Раскрой</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{orderTitle(order)}</div>
+          <ShareBadge orderId={id} style={{ marginTop: 3 }} />
         </div>
         {/* черновик можно править: название, материал, детали, кромку */}
         {cabinet !== 'production' && canEditOrder(order, user, profile) && order.status !== 'done' && (

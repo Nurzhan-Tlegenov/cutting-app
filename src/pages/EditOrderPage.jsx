@@ -1,4 +1,5 @@
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
+import ShareBadge from '../components/ShareBadge'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -469,7 +470,8 @@ export default function EditOrderPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingTop: 8 }}>
         <button type="button" onClick={() => navigate(`/orders/${id}`)}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
-        <h1 style={{ fontSize: 18, fontWeight: 500 }}>Редактирование заказа</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Редактирование заказа</h1>
+        <ShareBadge orderId={id} />
       </div>
       <div style={{ marginBottom: 14 }}>
         <p className="section-title">Название заказа</p>

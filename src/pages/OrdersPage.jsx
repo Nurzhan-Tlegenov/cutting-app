@@ -1,4 +1,5 @@
 import { MenuButton } from '../components/NavDrawer'
+import ShareBadge from '../components/ShareBadge'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useKeptState } from '../hooks/useKeptState'
 import { changedOrders, markOrdersSeen } from '../lib/notices'
@@ -85,7 +86,7 @@ export default function OrdersPage() {
     const mine = (data || []).filter(o => o.user_id === user.id)
     setChanged(changedOrders(user.id, mine))
     markOrdersSeen(user.id, mine)
-    listShares().then(setShares)      // у каких заказов открыта ссылка на 3D-модель
+    listShares((data || []).map(o => o.id)).then(setShares)      // у каких заказов открыта ссылка на 3D-модель
     simShareOrders().then(setSimShares)
   }
 
@@ -239,12 +240,8 @@ export default function OrdersPage() {
                       ↩ Производство вернуло заказ на доработку{order.return_note ? `: ${order.return_note}` : ''}
                     </div>
                   )}
-                  {shares.has(order.id) && (
-                    <div title="По ссылке 3D-модель этого заказа открыта для просмотра. Закрыть доступ можно в заказе."
-                      style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px' }}>
-                      🔗 открыта ссылка на 3D-модель
-                    </div>
-                  )}
+                  {/* ссылка на 3D: нажать — скопировать или закрыть доступ */}
+                  {shares.has(order.id) && <ShareBadge orderId={order.id} known />}
                   {simShares.has(order.id) && (
                     <div title="По ссылке открыта симуляция обработки этого заказа. Закрыть доступ можно в заказе."
                       style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', border: '0.5px solid var(--teal)', borderRadius: 10, padding: '1px 8px', marginTop: 2 }}>

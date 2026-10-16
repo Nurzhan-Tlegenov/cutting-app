@@ -26,9 +26,21 @@ const emit = () => subs.forEach(fn => { try { fn() } catch { /* подписчи
 export function onShareChange(fn) { subs.add(fn); return () => subs.delete(fn) }
 export const cachedShare = orderId => cache.get(orderId)
 
+// Через функцию order_shares (migration_share_close.sql) ссылку видит и производство заказа, не только автор.
+// Функции ещё нет в базе — null, тогда читаем таблицу напрямую, как раньше.
+async function sharesRpc(ids) {
+  try {
+    const { data, error } = await supabase.rpc('order_shares', { p_orders: ids })
+    if (error) return null
+    return new Map((data || []).map(r => [r.order_id, r.code]))
+  } catch { return null }
+}
+
 /** -> { token } | { token: null } | { error, missing } */
 export async function getShare(orderId) {
   if (!orderId) return { token: null }
+  const viaRpc = await sharesRpc([orderId])
+  if (viaRpc) { const t = viaRpc.get(orderId) || null; cache.set(orderId, t); emit(); return { token: t } }
   try {
     const { data, error } = await selectShares(cols => supabase.from('model_shares').select(cols).eq('order_id', orderId).maybeSingle())
     if (error) return { token: null, error: error.message, missing: isMissing(error) }
@@ -53,6 +65,10 @@ export async function createShare(orderId) {
 /** Закрыть доступ: ссылка перестаёт открываться */
 export async function deleteShare(orderId) {
   try {
+    // заказчик, производство заказа или мастер — через функцию; её нет — удаляем строку сами (своя ссылка)
+    const r = await supabase.rpc('close_order_share', { p_order: orderId })
+    if (!r.error) { cache.set(orderId, null); emit(); return { ok: true } }
+    if (!/close_order_share|PGRST202|42883|schema cache/i.test(String(r.error.message || '') + ' ' + String(r.error.code || ''))) return { ok: false, error: /not allowed/.test(r.error.message) ? 'Закрыть эту ссылку может заказчик, производство заказа или мастер-аккаунт.' : r.error.message }
     const { error } = await supabase.from('model_shares').delete().eq('order_id', orderId)
     if (error) return { ok: false, error: error.message }
     cache.set(orderId, null); emit()
@@ -60,8 +76,12 @@ export async function deleteShare(orderId) {
   } catch (e) { return { ok: false, error: String(e?.message || e) } }
 }
 
-/** Заказы, у которых открыта ссылка: Map id заказа -> токен */
-export async function listShares() {
+/** Заказы, у которых открыта ссылка: Map id заказа -> токен. ids — заказы на экране (для производства). */
+export async function listShares(ids) {
+  if (ids?.length) {
+    const viaRpc = await sharesRpc(ids)
+    if (viaRpc) { ids.forEach(id => cache.set(id, viaRpc.get(id) || null)); emit(); return viaRpc }
+  }
   try {
     const { data, error } = await selectShares(cols => supabase.from('model_shares').select(cols))
     if (error) return new Map()

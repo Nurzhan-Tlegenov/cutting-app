@@ -1,4 +1,6 @@
 import { MenuButton, Ico } from '../components/NavDrawer'
+import ShareBadge from '../components/ShareBadge'
+import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 import { I } from '../lib/navIcons'
 import { useBackClose } from '../lib/backStack'
 import { orderFaults, faultText } from '../lib/nestingCheck'
@@ -89,6 +91,12 @@ export default function ProductionPage() {
   useEffect(() => { let alive = true; postsList().then(r => { if (alive) setHasPosts((r.data || []).some(p => p.active !== false)) }); return () => { alive = false } }, [])
   const loadStaff = () => membersList().then(r => setStaff({ data: r.data || null, error: r.error || '' }))
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
+  const [shares, setShares] = useState(() => new Map())         // у каких заявок открыта ссылка на 3D-модель
+  useEffect(() => onShareChange(() => setShares(prev => {
+    const next = new Map(prev)
+    for (const o of orders) { const t = cachedShare(o.id); if (t) next.set(o.id, t); else if (t === null) next.delete(o.id) }
+    return next
+  })), [orders])
   const [archived, setArchived] = useState(() => new Map())     // заказы в архиве: id -> когда отправлен
   const [stats, setStats] = useState(null)                       // строки статистики (вместе с удалёнными заказами); null — в базе её ещё нет
   const [statsHint, setStatsHint] = useState('')
@@ -144,7 +152,7 @@ export default function ProductionPage() {
     if (p && (p.status ?? 'approved') === 'approved') {
       setSheet(Object.fromEntries([...MARGINS, ...HDF_MARGINS].map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
-      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []); loadStats() }
+      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []); loadStats(); listShares((r.data || []).map(o => o.id)).then(setShares) }
       simShareOrders().then(setSimShares)
     }
   }
@@ -365,6 +373,7 @@ export default function ProductionPage() {
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
                         <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{archived.has(o.id) ? 'В архиве' : STATUS_LABELS[o.status] || o.status}</span>
+                        {shares.has(o.id) && <ShareBadge orderId={o.id} known style={{ alignSelf: 'flex-end', lineHeight: '14px' }} />}
                         {hasPosts && o.status === 'inwork' && !stages[o.id] && <span title="Принят, но ещё не пущен в работу по постам" style={{ fontSize: 11, lineHeight: '16px', color: 'var(--amber)', whiteSpace: 'nowrap' }}>▶ не пущен в работу</span>}
                         {stages[o.id]?.name && <span title="Пост, на котором сейчас заказ" style={{ fontSize: 11, lineHeight: '16px', color: stages[o.id].status === 'queued' ? 'var(--amber)' : 'var(--blue)', whiteSpace: 'nowrap' }}>📍 {stages[o.id].name} · {stages[o.id].done}/{stages[o.id].total}</span>}
                         {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (

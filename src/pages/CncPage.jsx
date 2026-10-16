@@ -1,4 +1,5 @@
 import { nestingFaults, FAULT_TITLE } from '../lib/nestingCheck'
+import ShareBadge from '../components/ShareBadge'
 import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
@@ -266,6 +267,7 @@ export default function CncPage() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 500 }}>ЧПУ</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>{orderTitle(order)}</span>{mat ? ` · ${mat.label}` : ''}</div>
+          <ShareBadge orderId={order.id} style={{ marginTop: 3 }} />
         </div>
         {order && <div style={{ display: 'flex', gap: 4, flex: '0 0 auto' }}>{orderMarks(order).map(m => <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>)}</div>}
         <button type="button" onClick={toOrders} style={{ flex: '0 0 auto', padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
