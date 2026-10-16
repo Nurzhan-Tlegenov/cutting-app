@@ -434,7 +434,7 @@ function asBoxes(res) {
 }
 
 export async function runLiveNesting(params, opts = {}) {
-  if (params.beamSaw) return runBeamSaw(params, opts)   // β Пильный центр — свой алгоритм уровнями резов
+  if (params.beamSaw) return runBeamSaw(params, opts)   // β Пильный центр — свой алгоритм уровнями резов (island, onStats — для потоков и хронологии)
   if (!params.byBox || (params.cuttingMethod || 'nesting') === 'guillotine') return runLiveNestingRaw(params, opts)
   const plain = { ...params, details: params.details.map(d => ({ ...d, contour: null })), algo: 'raster' }
   if (Array.isArray(plain.seed?.sheets)) plain.seed = { ...plain.seed, sheets: stripPolys(plain.seed.sheets) }

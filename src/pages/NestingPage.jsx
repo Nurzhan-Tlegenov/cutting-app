@@ -3643,7 +3643,8 @@ export default function NestingPage() {
               title: 'Замечание по пильному центру β', fileName: `beamsaw_${orderFileName(order)}.json`, orderId: id,
               need: 'Опишите замечание: что не так на карте или чего не хватает — хотя бы пару слов.',
               getPayload: () => JSON.stringify({ kind: 'beam_saw_feedback', order: { id, sheet_length: order.sheet_length, sheet_width: order.sheet_width, production_id: order.production_id },
-                details, configs: configs.map(c => ({ dir: c.dir, secs: c.secs, result: c.result ? { ...c.result, sheets: c.sheetsData || c.result.sheets } : null })) }),
+                details, configs: configs.map((c, i) => ({ dir: c.dir, secs: c.secs, result: c.result ? { ...c.result, sheets: c.sheetsData || c.result.sheets } : null,
+                  history: c.history ? buildHistoryExport(c.history, { order, details, cfgIdx: i }) : null })) }),
             })} style={{ display: 'block', marginTop: 4, padding: '4px 10px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>
               β Замечание по пильному центру
             </button>

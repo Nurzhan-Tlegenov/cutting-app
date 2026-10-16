@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.2'
+export const BEAM_SAW_VERSION = 'β0.3'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -255,7 +255,7 @@ function rng(seed) { let x = seed >>> 0 || 1; return () => { x ^= x << 13; x ^= 
  * Раскрой под пильный центр. params — как у runNesting + beamSaw (сырые настройки производства).
  * Отступы листа = обрезка листа, рез = пропил из настроек.
  */
-export async function runBeamSaw(params, { live = false, shouldStop = () => false, onProgress = null } = {}) {
+export async function runBeamSaw(params, { live = false, shouldStop = () => false, onProgress = null, onStats = null, island = 0 } = {}) {
   const s = beamSettings(params.beamSaw)
   const kerf = s.kerf
   const sheetL = Number(params.sheetL) || 0, sheetW = Number(params.sheetW) || 0
@@ -271,26 +271,45 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   const axes = s.direction === 'x' ? ['y'] : s.direction === 'y' || pieces.some(p => !p.rotatable) ? ['x'] : ['x', 'y']
   const budget = (live ? 3600 : Math.max(1, Number(params.optimizeSeconds) || 5)) * 1000
   const t0 = now()
-  let best = null, lastShow = 0, iter = 0
-  const consider = r => {
+  let best = null, lastShow = 0, iter = 0, improved = 0, lastStats = 0, statsIter = 0
+  const byAxis = {}   // для хронологии: сколько раз какой набор направлений дал улучшение
+  // «пульс» поиска раз в ~1 с — в хронологию раскроя (как у основного раскроя): видно, где поиск буксует
+  const pulse = (force = false) => {
+    if (!onStats) return
+    const t = now()
+    if (!force && t - lastStats < 1000) return
+    const dt = Math.max(1, t - (lastStats || t0))
+    const last = best?.sheets.length ? best.sheets[best.sheets.length - 1].placed.reduce((a, p) => a + p.w * p.h, 0) : 0
+    onStats({
+      t: Math.round(t - t0), phase: 'beam', iter, gen: 0, ips: Math.round((iter - statsIter) * 1000 / dt),
+      best: best ? { count: best.sheets.length, last: Math.round(last), util: 0, mode: 'beam', cuts: best.cuts, unplaced: best.unplaced.length } : null,
+      popBest: null, modes: { ...byAxis }, diversity: improved, pop: 0, migrantsIn: 0,
+    })
+    lastStats = t; statsIter = iter
+  }
+  const consider = (r, tag) => {
     if (!better(r, best)) return
-    best = r
-    if (onProgress && now() - lastShow > 300) { lastShow = now(); onProgress({ ...finish(best), iter }) }
+    best = r; improved++
+    byAxis[tag] = (byAxis[tag] || 0) + 1
+    if (onProgress && now() - lastShow > 300) { lastShow = now(); onProgress({ ...finish(best), iter, genome: { mode: `beam-${tag}` } }) }
   }
   // детерминированные варианты, потом случайные возмущения лучших порядков — до лимита времени или «Стоп»
   const orders = []
   for (const srt of SORTS) orders.push(pieces.slice().sort(srt))
   const axisSets = axes.length > 1 ? [axes, ['x'], ['y']] : [axes]
-  for (const ax of axisSets) for (const ord of orders) for (const orient of ['long', 'fit']) { iter++; consider(packAll(ord, s, kerf, X, Y, ax, { orient })) }
-  const rnd = rng(pieces.length * 7919 + 17)
+  for (const ax of axisSets) for (const ord of orders) for (const orient of ['long', 'fit']) { iter++; consider(packAll(ord, s, kerf, X, Y, ax, { orient }), ax.join('')) }
+  pulse(true)
+  const rnd = rng(pieces.length * 7919 + 17 + island * 104729)   // у каждого потока свои варианты
   let tick = now()
   while (now() - t0 < budget && !shouldStop()) {
     iter++
     const base = orders[Math.floor(rnd() * orders.length)]
     const ord = perturb(base, rnd, 0.02 + rnd() * 0.15)
     const ax = axisSets[Math.floor(rnd() * axisSets.length)]
-    consider(packAll(ord, s, kerf, X, Y, ax, { orient: rnd() < 0.5 ? 'long' : 'fit' }))
+    consider(packAll(ord, s, kerf, X, Y, ax, { orient: rnd() < 0.5 ? 'long' : 'fit' }), ax.join(''))
+    pulse()
     if (now() - tick > 40) { tick = now(); await pause() }
   }
-  return finish(best)
+  pulse(true)
+  return { ...finish(best), iter }
 }

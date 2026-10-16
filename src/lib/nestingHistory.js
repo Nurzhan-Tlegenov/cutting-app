@@ -1,5 +1,6 @@
 import { NESTING_VERSION } from './version'
 import { liveScore } from './liveNesting'
+import { BEAM_SAW_VERSION } from './beamSawNesting'
 
 function polyAreaMm(pts) {
   let a = 0
@@ -30,6 +31,7 @@ export function newHistory(cfg, islands, params) {
       marginT: params.marginT, marginR: params.marginR, marginB: params.marginB, marginL: params.marginL,
       cuttingMethod: params.cuttingMethod, algo: params.algo,
       offcuts: params.offcuts || null,
+      beamSaw: params.beamSaw ? { settings: params.beamSaw } : null,   // β Пильный центр: сырые настройки производства
     },
     // «Продолжить»: с какой раскладки стартовал поиск (для отладки — видно, что было исходным, а что нашёл поиск)
     seed: params.seed?.sheets ? {
@@ -93,6 +95,7 @@ export function buildHistoryExport(hist, { order, details, cfgIdx }) {
   return {
     format: 'raskroy-nesting-history', formatVersion: 1,
     algoVersion: NESTING_VERSION, exportedAt: new Date().toISOString(),
+    ...(hist.params?.beamSaw ? { algo: 'beam-saw', beamVersion: BEAM_SAW_VERSION } : {}),
     order: { number: order?.order_number || '', configuration: cfgIdx + 1 },
     device: {
       cores: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || null,
