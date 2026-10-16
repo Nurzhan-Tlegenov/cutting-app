@@ -3501,6 +3501,14 @@ export default function NestingPage() {
         )
       })()}
 
+      {/* Материал — всегда на виду: что сейчас раскраиваем */}
+      {!multiMat && materials.length === 1 && (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, padding: '7px 10px', borderRadius: 'var(--radius)', background: 'var(--bg)', border: '0.5px solid var(--border-md)' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0 }}>Материал</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{materials[0].label}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0 }}>{materials[0].pieces} шт.</span>
+        </div>
+      )}
       {/* Материал: в заказе несколько листовых материалов — раскраиваем по одному */}
       {multiMat && (
         <div style={{ marginBottom: 8 }}>
