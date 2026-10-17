@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState, useRef } from 'react'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
-import { normOps, sameName, secondPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
+import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -96,9 +96,10 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
   const del = () => {
     if (foreign || cnc.posts.length < 2) return
     if (!isDrill6(post) && !cnc.posts.some(p => p.id !== post.id && !isDrill6(p))) { window.alert('Это единственный раскроечный станок — его удалить нельзя.'); return }
-    if (!window.confirm(`Удалить постпроцессор «${post.name}»?`)) return
-    const posts = cnc.posts.filter(p => p.id !== post.id)
-    onChange({ ...toggleUse6(cnc, post.id, false), posts, post: posts[0].id, router: cnc.router === post.id ? '' : cnc.router })
+    if (!window.confirm(`Удалить постпроцессор «${post.name}»?\nЕго настройки останутся в «Мои постпроцессоры» — их можно вернуть.`)) return
+    const kept = backupPost(cnc, 'удаления')           // копия настроек — в «Мои постпроцессоры»
+    const posts = kept.posts.filter(p => p.id !== post.id)
+    onChange({ ...toggleUse6(kept, post.id, false), posts, post: posts[0].id, router: cnc.router === post.id ? '' : cnc.router })
   }
   const small = { padding: '6px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }
   return (
@@ -435,7 +436,7 @@ function LearnFromProgram({ post, onApply, tools = [] }) {
     } catch (x) { setErr(`Файл не прочитался: ${x?.message || x}`) }
   }
   const apply = () => {
-    if (!window.confirm(`Настроить «${post.name}» по программе «${res.fileName}»?\nКоманды, инструменты этого постпроцессора и обработка заменятся. Инструменты других станков не тронутся.`)) return
+    if (!window.confirm(`Настроить «${post.name}» по программе «${res.fileName}»?\nКоманды и инструменты этого постпроцессора заменятся. Обработка (проходы, мелкие детали, пазы, отверстия) и заглубление сохранятся, меняются только инструменты и угол врезания. Инструменты других станков не тронутся.\nТекущие настройки станка сохранятся в «Мои постпроцессоры».`)) return
     onApply({
       cmdStart: res.cmdStart, cmdToolStart: res.cmdToolStart, cmdToolEnd: res.cmdToolEnd, cmdEnd: res.cmdEnd,
       ...(res.arcs ? { arcs: res.arcs } : {}),
@@ -445,7 +446,9 @@ function LearnFromProgram({ post, onApply, tools = [] }) {
       ...(res.head ? { drillHead: true, cmdHeadStart: res.head.cmdHeadStart, cmdHeadEnd: res.head.cmdHeadEnd } : { drillHead: false }),
       ...(res.learned?.post.safeZ != null ? { safeZ: res.learned.post.safeZ } : {}),
       ...(res.learned?.post.zRef ? { zRef: res.learned.post.zRef } : {}),
-      ...(res.learned?.post.millOver != null ? { millOver: res.learned.post.millOver } : {}),
+      // заглубление в стол — только если программа действительно режет ниже стола: рез «до Z0» не значит, что
+      // заглубление 0 (раньше так затиралось уже заданное значение, и сквозной рез выходил на Z0)
+      ...(res.learned?.post.millOver > 0 ? { millOver: res.learned.post.millOver } : {}),
       learnedFrom: res.fileName, learnedAt: Date.now(),
     }, res.learned)
     setRes(null)
@@ -507,6 +510,7 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
   // Настроить постпроцессор по программе — одним изменением: команды и режимы станка, свои инструменты
   // (привязаны к этому постпроцессору, у других станков не видны) и своя обработка контуров
   const applyLearned = (patch, learned) => {
+    const c0 = backupPost(cnc, 'самонастройки')        // копия как было — в «Мои постпроцессоры»
     const lt = learned?.tools || []
     const made = lt.map(x => {
       const base = x.type === 'mill' ? DEFAULT_MILL() : DEFAULT_DRILL()
@@ -518,15 +522,23 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
         ...(x.type === 'mill' ? { inFeed: pick(x.inFeed, base.inFeed), maxPass: pick(x.maxPass, base.maxPass) } : { inHead: !!x.head }),
       }
     })
-    const keep = (cnc.tools || []).filter(t => t.postId !== post.id)
+    const keep = (c0.tools || []).filter(t => t.postId !== post.id)
     const main = made.find(t => t.type === 'mill' && Math.round(num(t.t)) === learned?.ops.mainT) || made.find(t => t.type === 'mill')
     const ang = learned?.ops.angle
+    // Обработка станка — от уже настроенной (своей у станка или общей), а не с нуля: проходы, мелкие детали,
+    // направления, пазы, выемки, отверстия, «что выводить» сохраняются. Меняются только инструменты (у станка теперь
+    // свои — назначения по слоям, указывавшие на чужие инструменты, сбрасываются на «авто») и угол врезания из программы.
+    const base = normOps(post.ownOps || c0.ops)
+    const ids = new Set(made.map(t => t.id))
+    const keepTool = m => Object.fromEntries(Object.entries(m || {}).map(([k, v]) => [k, v && v.tool && !ids.has(v.tool) ? { ...v, tool: '' } : v]))
     const own = !made.length ? post.ownOps : normOps({
-      outer: { tool: main?.id || '', ...(ang ? { entry: 'ramp', angle: ang } : {}) },
-      cutout: { tool: main?.id || '', ...(ang ? { entry: 'ramp', angle: ang } : {}) },
-      groove: { tool: main?.id || '' },
+      ...base,
+      outer: { ...base.outer, tool: main?.id || '', ...(ang ? { entry: 'ramp', angle: ang } : {}) },
+      cutout: { ...base.cutout, tool: main?.id || '', ...(ang ? { entry: 'ramp', angle: ang } : {}) },
+      groove: { ...base.groove, tool: main?.id || '' },
+      grooves: keepTool(base.grooves), pockets: keepTool(base.pockets), holes: keepTool(base.holes),
     })
-    onChange({ ...cnc, tools: made.length ? [...keep, ...made] : cnc.tools, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch, ...(own ? { ownOps: own } : {}) } : p)) })
+    onChange({ ...c0, tools: made.length ? [...keep, ...made] : c0.tools, posts: c0.posts.map(p => (p.id === post.id ? { ...p, ...patch, ...(own ? { ownOps: own } : {}) } : p)) })
   }
   const Box = ({ k, label, rows = 3 }) => (
     <div style={{ marginBottom: 10 }}>

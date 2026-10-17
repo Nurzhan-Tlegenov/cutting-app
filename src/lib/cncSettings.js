@@ -135,7 +135,10 @@ const strip = p => { const q = { ...p }; delete q.id; delete q.shared; delete q.
 export function saveSnapshot(cnc, name) {
   const post = activePost(cnc)
   const nm = String(name || post.name).trim() || post.name
-  const snap = { id: uid(), name: nm, kind: isDrill6(post) ? 'drill6' : 'router', at: Date.now(), post: strip(post), ...(isDrill6(post) ? {} : { ops: cnc.ops }) }
+  // свои инструменты станка (настроенного по чужой программе) — тоже в сохранённое: без них его обработка (ownOps)
+  // ссылается в пустоту, и после самонастройки или удаления их было бы не вернуть
+  const own = (cnc.tools || []).filter(t => t.postId === post.id).map(t => ({ ...t }))
+  const snap = { id: uid(), name: nm, kind: isDrill6(post) ? 'drill6' : 'router', at: Date.now(), post: strip(post), ...(isDrill6(post) ? {} : { ops: cnc.ops }), ...(own.length ? { tools: own } : {}) }
   // то же имя — тот же сохранённый вариант: перезаписывается, а не копится второй с тем же именем
   const list = cnc.saved || [], same = list.find(x => sameName(x.name, nm))
   return { ...cnc, saved: same ? list.map(x => (x === same ? { ...snap, id: same.id } : x)) : [...list, snap] }
@@ -155,7 +158,22 @@ export function applySnapshot(cnc, snapId, asNew = false) {
     if (snap.kind === 'drill6') next = toggleUse6(next, p.id, true)
   }
   if (snap.ops && snap.kind === 'router') next = { ...next, ops: { ...DEFAULT_OPS(), ...snap.ops } }
+  // свои инструменты станка: вместо текущих своих — сохранённые (с новыми id, ссылки в его обработке — на них)
+  if (Array.isArray(snap.tools) && snap.tools.length) {
+    const target = activePost(next)
+    const map = new Map(snap.tools.map(t => [t.id, uid()]))
+    const tools = [...(next.tools || []).filter(t => t.postId !== target.id), ...snap.tools.map(t => ({ ...t, id: map.get(t.id), postId: target.id }))]
+    const fix = o => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k, k === 'tool' && map.has(v) ? map.get(v) : (v && typeof v === 'object' ? fix(v) : v)])) : o)
+    next = { ...next, tools, posts: next.posts.map(p => (p.id === target.id && p.ownOps ? { ...p, ownOps: fix(p.ownOps) } : p)) }
+  }
   return next
+}
+/** Автокопия перед изменением, которое перезаписывает настройки станка (самонастройка, удаление): в «Мои постпроцессоры»
+ *  под именем «<станок> · до <чего> <дата время>» — чтобы уже настроенное можно было вернуть кнопкой «Применить». */
+export function backupPost(cnc, what) {
+  const post = activePost(cnc)
+  const when = new Date().toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  return saveSnapshot(cnc, `${post.name} · до ${what} ${when}`)
 }
 export const removeSnapshot = (cnc, snapId) => ({ ...cnc, saved: (cnc.saved || []).filter(s => s.id !== snapId) })
 export const renameSnapshot = (cnc, snapId, name) => ({ ...cnc, saved: (cnc.saved || []).map(s => (s.id === snapId ? { ...s, name } : s)) })
