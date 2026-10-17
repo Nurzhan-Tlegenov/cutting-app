@@ -163,11 +163,34 @@ function orderByReady(slots) {
   return [...slots].sort((p, q) => slotDepth(p) - slotDepth(q) || q.a - p.a)
 }
 
+// Сколько полосы 1-го уровня занято по её длине: деталь во всю длину — вся полоса, иначе — уложенное в ней
+const slotFill = (sl, B) => (sl.piece ? B : sl.child.used)
+// «Ступенька» (только форматник, последний лист): полосы — от самой заполненной по длине к самой короткой, чтобы
+// длинные полосы стояли рядом, а свободное место над короткими сливалось с остатком в конце листа в один крупный обрезок.
+// Полосы одной длины — по готовности, как раньше.
+function orderStair(slots, B) {
+  return [...slots].sort((p, q) => {
+    const d = slotFill(q, B) - slotFill(p, B)
+    return Math.abs(d) > 1 ? d : (slotDepth(p) - slotDepth(q) || q.a - p.a)
+  })
+}
+// Самый крупный обрезок в «ступеньке»: остаток в конце листа вместе с местом над самыми короткими полосами
+function stairFree(node) {
+  const F = Math.max(0, node.A - node.used), B = node.B
+  let best = F * B, width = F
+  for (let i = node.slots.length - 1; i >= 0; i--) {
+    width += node.slots[i].a
+    best = Math.max(best, Math.max(0, B - slotFill(node.slots[i], B)) * width)
+  }
+  return best
+}
+
 // Обход дерева: координаты деталей и линии/счёт резов. 1-й уровень (полосы) — по настройке «Порядок полос»,
-// глубже — по готовности.
-function layout(node, ox, oy, s, out) {
+// глубже — по готовности. stair — 1-й уровень «ступенькой» (форматник, последний лист).
+function layout(node, ox, oy, s, out, stair = false) {
   // 1-й уровень: «от большой к малой» — тоже по готовности (полоса из одной детали во всю длину — готова сразу); Б→М→Б — как задано
-  node.slots = node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(node.slots, 'wnw') : orderByReady(node.slots)
+  node.slots = node.level === 1 && stair ? orderStair(node.slots, node.B)
+    : node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(node.slots, 'wnw') : orderByReady(node.slots)
   let pos = node.trim
   if (node.trim > EPS) out.cuts++
   for (const sl of node.slots) {
@@ -204,6 +227,7 @@ const pieceArea = (ctx, ids) => { let a = 0; for (const p of ctx.order) if (ids.
 function packAll(pieces, s, kerf, X, Y, axes, opts) {
   const ctx = makeCtx(pieces, s, kerf, { ...opts, edge: { x: Math.min(s.trimLeft, s.trimRight), y: Math.min(s.trimTop, s.trimBottom) } })
   const sheets = []
+  const roots = []
   let cuts = 0
   for (;;) {
     if (ctx.used.size >= pieces.length) break
@@ -224,11 +248,21 @@ function packAll(pieces, s, kerf, X, Y, axes, opts) {
     const out = { placed: [], cuts: 0, maxLevel: 1, offcuts: [], kerf }
     layout(root, 0, 0, s, out)
     cuts += out.cuts
+    roots.push(root)
     // обрезки — как выбранные вручную (manualOffcuts): в тех же координатах, что детали (данные карты: Y от низа рабочей
     // зоны, на экране переворачиваются вместе — flipY / flipRects), размеры без пропила
     const manualOffcuts = out.offcuts.map(o => ({ x: +o.x.toFixed(1), y: +o.y.toFixed(1), w: +o.w.toFixed(1), h: +o.h.toFixed(1) }))
     // beamFree — цельный остаток в конце листа (после последней полосы), мм² с пропилом: по нему сравнивается последний лист
     sheets.push({ index: sheets.length, placed: out.placed, freeRects: [], family: 'guillotine', manualOffcuts, beamTree: plainTree(root), beamAxis: axis, beamCuts: out.cuts, beamLevels: out.maxLevel, beamFree: Math.max(0, root.A - root.used) * root.B })
+  }
+  // Форматник: последний лист — полосы «ступенькой» (см. orderStair); состав и полосы те же, меняется только их порядок
+  if (s.stairLast && sheets.length) {
+    const n = sheets.length - 1, root = roots[n]
+    const out = { placed: [], cuts: 0, maxLevel: 1, offcuts: [], kerf }
+    layout(root, 0, 0, s, out, true)
+    cuts += out.cuts - sheets[n].beamCuts
+    const manualOffcuts = out.offcuts.map(o => ({ x: +o.x.toFixed(1), y: +o.y.toFixed(1), w: +o.w.toFixed(1), h: +o.h.toFixed(1) }))
+    sheets[n] = { ...sheets[n], placed: out.placed, manualOffcuts, beamTree: plainTree(root), beamCuts: out.cuts, beamLevels: out.maxLevel, stairFree: stairFree(root) }
   }
   const unplaced = pieces.filter(p => !ctx.used.has(p.id)).map(p => p.id)
   return { sheets, cuts, unplaced }
@@ -246,6 +280,9 @@ function better(a, b) {
   if (Math.abs(la - lb) > 1) return la < lb
   const fa = lastOf(a).beamFree || 0, fb = lastOf(b).beamFree || 0
   if (Math.abs(fa - fb) > 1) return fa > fb
+  // форматник: остаток в конце листа тот же — больше ли обрезок «ступенькой» (у пильного центра stairFree нет)
+  const sa = lastOf(a).stairFree, sb = lastOf(b).stairFree
+  if (sa != null && sb != null && Math.abs(sa - sb) > 1) return sa > sb
   return a.cuts < b.cuts
 }
 
@@ -295,6 +332,8 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   // вдоль X — полосы поперёк, остаток сверху
   const cfgDir = params.direction === 'along_x' ? 'x' : params.direction === 'along_y' ? 'y' : null
   const s = { ...beamSettings(params.beamSaw), ...(cfgDir ? { direction: cfgDir } : {}) }
+  // «ступенька» на последнем листе — только у форматника (liveNesting передаёт её сам; в настройках пильного центра её нет)
+  s.stairLast = !!params.beamSaw?.stairLast
   const kerf = s.kerf
   const sheetL = Number(params.sheetL) || 0, sheetW = Number(params.sheetW) || 0
   const marginL = s.trimLeft, marginR = s.trimRight, marginT = s.trimTop, marginB = s.trimBottom
