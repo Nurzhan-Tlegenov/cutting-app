@@ -230,8 +230,8 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           <Num label="Высота безопасности Z" unit="мм" value={post.safeZ} onChange={v => set({ safeZ: v })} hint={post.zRef === 'top' ? 'над верхней пластью листа' : 'от жертвенного стола'} />
           <Num label="Холостые перемещения" unit="мм/мин" value={post.rapid} onChange={v => set({ rapid: v })} hint="для расчёта времени" />
         </div>
+        {/* заглубление фрезы (сквозной рез контура) — не здесь, а во вкладке «Обработка» → «Контур детали», рядом с остальной обработкой контура */}
         <div className="row2" style={{ marginTop: 8 }}>
-          <SignedNum label="Заглубление фрезы в стол" unit="мм" value={-Math.abs(Number(post.millOver) || 0)} onChange={v => set({ millOver: Math.abs(v) })} />
           <SignedNum label="Заглубление сверла в стол" unit="мм" value={-Math.abs(Number(post.drillOver) || 0)} onChange={v => set({ drillOver: Math.abs(v) })} />
         </div>
         {/* название управляющей программы — собирается из частей */}
@@ -436,7 +436,7 @@ function LearnFromProgram({ post, onApply, tools = [] }) {
     } catch (x) { setErr(`Файл не прочитался: ${x?.message || x}`) }
   }
   const apply = () => {
-    if (!window.confirm(`Настроить «${post.name}» по программе «${res.fileName}»?\nКоманды и инструменты этого постпроцессора заменятся. Обработка (проходы, мелкие детали, пазы, отверстия) и заглубление сохранятся, меняются только инструменты и угол врезания. Инструменты других станков не тронутся.\nТекущие настройки станка сохранятся в «Мои постпроцессоры».`)) return
+    if (!window.confirm(`Настроить «${post.name}» по программе «${res.fileName}»?\nКоманды и инструменты этого постпроцессора заменятся. Обработка (проходы, вход фрезы, глубина реза, мелкие детали, пазы, отверстия) не меняется — её настраиваете вы во вкладке «Обработка». Инструменты других станков не тронутся.\nТекущие настройки станка сохранятся в «Мои постпроцессоры».`)) return
     onApply({
       cmdStart: res.cmdStart, cmdToolStart: res.cmdToolStart, cmdToolEnd: res.cmdToolEnd, cmdEnd: res.cmdEnd,
       ...(res.arcs ? { arcs: res.arcs } : {}),
@@ -446,9 +446,7 @@ function LearnFromProgram({ post, onApply, tools = [] }) {
       ...(res.head ? { drillHead: true, cmdHeadStart: res.head.cmdHeadStart, cmdHeadEnd: res.head.cmdHeadEnd } : { drillHead: false }),
       ...(res.learned?.post.safeZ != null ? { safeZ: res.learned.post.safeZ } : {}),
       ...(res.learned?.post.zRef ? { zRef: res.learned.post.zRef } : {}),
-      // заглубление в стол — только если программа действительно режет ниже стола: рез «до Z0» не значит, что
-      // заглубление 0 (раньше так затиралось уже заданное значение, и сквозной рез выходил на Z0)
-      ...(res.learned?.post.millOver > 0 ? { millOver: res.learned.post.millOver } : {}),
+      // заглубление фрезы (глубину реза контура) самонастройка не трогает: его задают во вкладке «Обработка»
       learnedFrom: res.fileName, learnedAt: Date.now(),
     }, res.learned)
     setRes(null)
@@ -524,17 +522,17 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
     })
     const keep = (c0.tools || []).filter(t => t.postId !== post.id)
     const main = made.find(t => t.type === 'mill' && Math.round(num(t.t)) === learned?.ops.mainT) || made.find(t => t.type === 'mill')
-    const ang = learned?.ops.angle
-    // Обработка станка — от уже настроенной (своей у станка или общей), а не с нуля: проходы, мелкие детали,
-    // направления, пазы, выемки, отверстия, «что выводить» сохраняются. Меняются только инструменты (у станка теперь
-    // свои — назначения по слоям, указывавшие на чужие инструменты, сбрасываются на «авто») и угол врезания из программы.
+    // Самонастройка берёт команды и инструменты станка (и высоты Z). Обработку она не настраивает: проходы, вход
+    // фрезы и угол, глубина, мелкие детали, пазы, выемки, отверстия, «что выводить» — как задал пользователь во вкладке
+    // «Обработка». Меняется только, КАКИМ инструментом: у станка теперь свои инструменты (назначения по слоям,
+    // указывавшие на прежние инструменты, — на «авто»).
     const base = normOps(post.ownOps || c0.ops)
     const ids = new Set(made.map(t => t.id))
     const keepTool = m => Object.fromEntries(Object.entries(m || {}).map(([k, v]) => [k, v && v.tool && !ids.has(v.tool) ? { ...v, tool: '' } : v]))
     const own = !made.length ? post.ownOps : normOps({
       ...base,
-      outer: { ...base.outer, tool: main?.id || '', ...(ang ? { entry: 'ramp', angle: ang } : {}) },
-      cutout: { ...base.cutout, tool: main?.id || '', ...(ang ? { entry: 'ramp', angle: ang } : {}) },
+      outer: { ...base.outer, tool: main?.id || '' },
+      cutout: { ...base.cutout, tool: main?.id || '' },
       groove: { ...base.groove, tool: main?.id || '' },
       grooves: keepTool(base.grooves), pockets: keepTool(base.pockets), holes: keepTool(base.holes),
     })
@@ -691,7 +689,7 @@ export function CncTools({ cnc, onChange }) {
 export function CncOps({ cnc, onChange, layers }) {
   const ops = cnc.ops
   // Глубина сквозного реза контура — заглубление фрезы ниже стола у раскроечного станка, которым выпускается G-код.
-  // Та же настройка, что «Заглубление фрезы в стол» на вкладке «Основные»; здесь — рядом с контуром, где её ищут.
+  // Задаётся только здесь (на «Основных» её нет), рядом с остальной обработкой контура; самонастройка её не трогает.
   const rp = routerPost(cnc)
   const setRouter = patch => {
     if (!rp) return

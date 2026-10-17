@@ -202,7 +202,7 @@ export function learnFromProgram(text) {
     report.push('У станка включится «Присадочная голова», её команды встанут в свой блок, а свёрла с этими номерами в базе инструментов будут отмечены «в присадочной голове».')
   }
   if (learned.tools.length) report.push(`Инструменты: ${learned.tools.map(t => `T${t.t} ${t.type === 'mill' ? 'фреза' : 'сверло'}${t.d ? ' Ø' + t.d : ''}${t.rpm ? ' S' + t.rpm : ''}${t.feed ? ' F' + t.feed : ''}${t.head ? ' (голова)' : ''}`).join('; ')}.`)
-  if (learned.post.safeZ != null) report.push(`Высота безопасности Z${learned.post.safeZ}; Z считается ${learned.post.zRef === 'top' ? 'от верхней пласти' : 'от стола'}${learned.post.millOver != null ? `, заглубление фрезы в стол ${learned.post.millOver} мм` : ''}.`)
+  if (learned.post.safeZ != null) report.push(`Высота безопасности Z${learned.post.safeZ}; Z считается ${learned.post.zRef === 'top' ? 'от верхней пласти' : 'от стола'}${learned.post.millOver != null ? `; в программе фреза уходит ниже стола на ${learned.post.millOver} мм — глубину реза задайте сами во вкладке «Обработка»` : ''}.`)
   if (learned.ops.angle) report.push(`Врезание фрезы под углом ~${learned.ops.angle}°${learned.ops.passes > 1 ? `, контур в ${learned.ops.passes} прохода` : ', контур в один проход на всю глубину'}.`)
   if (dropped) report.push(`Комментарии отброшены (${dropped} строк) — у каждой программы они свои.`)
   if (numbered) report.push('В программе были номера строк (N…) — они убраны: наша программа их не ставит.')
