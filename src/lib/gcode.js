@@ -760,7 +760,10 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   if (safeZ < T + 5) { warn.add(`Высота безопасности Z${num(safeZ)} ниже верха материала ${num(T)} мм + 5 мм — в программе поднята до Z${num(T + 5)}.`); safeZ = T + 5 }
   if (n0(post.fieldX) && n0(post.originX) + geo.sheetW > n0(post.fieldX) + EPS) warn.add(`Лист по X (${num(n0(post.originX) + geo.sheetW)} мм) выходит за рабочее поле станка ${num(post.fieldX)} мм.`)
   if (n0(post.fieldY) && n0(post.originY) + geo.sheetL > n0(post.fieldY) + EPS) warn.add(`Лист по Y (${num(n0(post.originY) + geo.sheetL)} мм) выходит за рабочее поле станка ${num(post.fieldY)} мм.`)
-  const millOver = Math.max(0, n0(post.millOver)), drillOver = Math.max(0, n0(post.drillOver))
+  // заглубление ниже стола: в настройках его вводят и «0,5», и «−0,5» (как Z) — знак не важен.
+  // Раньше минус отбрасывался (max(0, …)) и сквозной рез выходил на Z0 — деталь не прорезалась.
+  const millOver = Math.abs(n0(post.millOver)), drillOver = Math.abs(n0(post.drillOver))
+  if (!millOver) warn.add('Заглубление фрезы в стол — 0: сквозной рез идёт ровно до стола, деталь может не прорезаться. Задайте его в ЧПУ → Обработка → «Контур детали» (обычно 0,2–0,5 мм).')
   const ops = cnc.ops
   const arcs = post.arcs === 'ij'                        // дуги — командами G2 / G3 (иначе — мелкими отрезками, см. smoothLoop)
   const smallArea = n0(ops.outer?.smallArea) > 0 ? n0(ops.outer.smallArea) : 0.12      // мельче — «мелкая деталь», режется первой

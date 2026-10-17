@@ -31,7 +31,9 @@ function Num({ label, value, onChange, unit, hint }) {
   )
 }
 // число со знаком: на телефонной цифровой клавиатуре минуса часто нет — знак меняется кнопкой «±»
-function SignedNum({ label, value, onChange, unit }) {
+// empty — пустое поле — отдельное значение '' (например, «не уходить» в конце программы), а не 0
+function SignedNum({ label, value, onChange, unit, empty = false }) {
+  const blank = empty && (value === '' || value == null)
   const v = Number(value) || 0
   return (
     <div style={{ minWidth: 0 }}>
@@ -39,8 +41,8 @@ function SignedNum({ label, value, onChange, unit }) {
       <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
         <button type="button" title="Сменить знак" onClick={() => onChange(-v)}
           style={{ flex: '0 0 40px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: v < 0 ? 'var(--amber-light)' : 'var(--bg2)', color: 'var(--text)', fontSize: 16, cursor: 'pointer' }}>{v < 0 ? '−' : '+'}</button>
-        <input type="text" inputMode="decimal" key={String(v)} defaultValue={v ? String(Math.abs(v)).replace('.', ',') : ''} placeholder="0"
-          onBlur={e => { const s = e.target.value.replace(',', '.').trim(); const n = s === '' || !isFinite(Number(s)) ? 0 : Number(s); const out = s.startsWith('-') ? n : (v < 0 ? -Math.abs(n) : Math.abs(n)); if (out !== v) onChange(out) }}
+        <input type="text" inputMode="decimal" key={blank ? 'blank' : String(v)} defaultValue={blank ? '' : v ? String(Math.abs(v)).replace('.', ',') : (empty ? '0' : '')} placeholder={empty ? '' : '0'}
+          onBlur={e => { const s = e.target.value.replace(',', '.').replace('−', '-').trim(); if (empty && s === '') { if (!blank) onChange(''); return } const n = s === '' || !isFinite(Number(s)) ? 0 : Number(s); const out = s.startsWith('-') ? n : (v < 0 ? -Math.abs(n) : Math.abs(n)); if (out !== v || blank) onChange(out) }}
           style={{ flex: 1, minWidth: 0, padding: '8px 10px' }} />
       </div>
     </div>
@@ -198,13 +200,13 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           <Num label="Поле Y" unit="мм" value={post.fieldY} onChange={v => set({ fieldY: v })} />
         </div>
         <div className="row2" style={{ marginTop: 8 }}>
-          <Num label="Начало X" unit="мм" value={post.originX} onChange={v => set({ originX: v })} />
-          <Num label="Начало Y" unit="мм" value={post.originY} onChange={v => set({ originY: v })} />
+          <SignedNum label="Начало X" unit="мм" value={post.originX} onChange={v => set({ originX: v })} />
+          <SignedNum label="Начало Y" unit="мм" value={post.originY} onChange={v => set({ originY: v })} />
         </div>
         <Hint>Начало — где на станке лежит левый нижний угол листа. X — ширина листа, Y — длина. Обработка идёт от этой точки в пределах поля.</Hint>
         <div className="row2" style={{ marginTop: 8 }}>
-          <Num label="Конечное положение X" unit="мм" value={post.endX} onChange={v => set({ endX: v })} />
-          <Num label="Конечное положение Y" unit="мм" value={post.endY} onChange={v => set({ endY: v })} />
+          <SignedNum empty label="Конечное положение X" unit="мм" value={post.endX} onChange={v => set({ endX: v })} />
+          <SignedNum empty label="Конечное положение Y" unit="мм" value={post.endY} onChange={v => set({ endY: v })} />
         </div>
         <Hint>Куда уходит шпиндель в конце программы (на высоте безопасности). По умолчанию X0 Y0. Пустое поле — не уходить.</Hint>
       </div>
@@ -228,8 +230,8 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           <Num label="Холостые перемещения" unit="мм/мин" value={post.rapid} onChange={v => set({ rapid: v })} hint="для расчёта времени" />
         </div>
         <div className="row2" style={{ marginTop: 8 }}>
-          <Num label="Заглубление фрезы в стол" unit="мм" value={post.millOver} onChange={v => set({ millOver: v })} />
-          <Num label="Заглубление сверла в стол" unit="мм" value={post.drillOver} onChange={v => set({ drillOver: v })} />
+          <SignedNum label="Заглубление фрезы в стол" unit="мм" value={-Math.abs(Number(post.millOver) || 0)} onChange={v => set({ millOver: Math.abs(v) })} />
+          <SignedNum label="Заглубление сверла в стол" unit="мм" value={-Math.abs(Number(post.drillOver) || 0)} onChange={v => set({ drillOver: Math.abs(v) })} />
         </div>
         {/* название управляющей программы — собирается из частей */}
         <div style={{ marginTop: 10 }}>
@@ -676,6 +678,30 @@ export function CncTools({ cnc, onChange }) {
 // ─── Обработка контуров ─────────────────────────────────────────────────────
 export function CncOps({ cnc, onChange, layers }) {
   const ops = cnc.ops
+  // Глубина сквозного реза контура — заглубление фрезы ниже стола у раскроечного станка, которым выпускается G-код.
+  // Та же настройка, что «Заглубление фрезы в стол» на вкладке «Основные»; здесь — рядом с контуром, где её ищут.
+  const rp = routerPost(cnc)
+  const setRouter = patch => {
+    if (!rp) return
+    if (rp.shared) {                       // общий постпроцессор не правим — делаем свою копию (как на «Основных»)
+      const p = { ...rp, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: rp.name + ' (мой)' }
+      onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id, router: p.id }); return
+    }
+    onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === rp.id ? { ...p, ...patch } : p)) })
+  }
+  const T0 = 16
+  const cutDepth = (
+    <div style={{ marginTop: 8 }}>
+      <SignedNum label="Сквозной рез — ниже стола (заглубление)" unit="мм" value={-Math.abs(Number(rp?.millOver) || 0)} onChange={v => setRouter({ millOver: Math.abs(v) })} />
+      <Hint>{(() => {
+        const m = Math.abs(Number(rp?.millOver) || 0), top = rp?.zRef === 'top'
+        const z = top ? -(T0 + m) : -m
+        return `Низ реза в программе: Z${String(Math.round(z * 100) / 100).replace('-', '−')}${top ? ` (Z0 — верх листа; пример для листа ${T0} мм)` : ' (Z0 — стол)'}. `
+          + (m ? 'Фреза уходит в жертвенный стол — деталь прорезается насквозь.' : 'Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.')
+          + ` Станок: ${rp?.name || '—'}.`
+      })()}</Hint>
+    </div>
+  )
   const set = (k, patch) => onChange({ ...cnc, ops: { ...ops, [k]: { ...ops[k], ...patch } } })
   const setMap = (k, key, patch) => onChange({ ...cnc, ops: { ...ops, [k]: { ...ops[k], [key]: { ...ops[k]?.[key], ...patch } } } })
   const hasTool = id => (cnc.tools || []).some(t => t.id === id)
@@ -725,6 +751,7 @@ export function CncOps({ cnc, onChange, layers }) {
   const o = ops.outer, twoPass = (Number(o.passes) || 1) > 1
   const outerExtra = (
     <>
+      {cutDepth}
       <div className="divider" />
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
         <input type="checkbox" checked={o.smallFirst !== false} onChange={e => set('outer', { smallFirst: e.target.checked })} style={{ width: 18, height: 18 }} />
@@ -776,7 +803,7 @@ export function CncOps({ cnc, onChange, layers }) {
         {skip.contour && <Hint>Раскрой должен быть сделан по габаритам: если фигурные детали уложены вплотную друг в друга, при создании программы будет предупреждение.</Hint>}
       </div>
       {Contour({ k: 'outer', title: '1. Контур детали', note: skip.contour ? 'Фреза идёт снаружи прямоугольника по габариту детали.' : 'Фреза идёт снаружи контура.', extra: outerExtra })}
-      {Contour({ k: 'cutout', title: '2. Контур выреза', note: 'Фреза всегда идёт внутри контура.', off: skip.contour })}
+      {Contour({ k: 'cutout', title: '2. Контур выреза', note: 'Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.', off: skip.contour, extra: cutDepth })}
       <div className="card" style={{ marginBottom: 10, ...offStyle(skip.face) }}>
         <OffNote on={skip.face} />
         <Title>3. Пазы{layers ? <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-hint)' }}> · в заказе {layers.grooves} шт.</span> : null}</Title>

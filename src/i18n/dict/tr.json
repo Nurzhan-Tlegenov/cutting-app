@@ -2548,5 +2548,9 @@
 "Клиент: от заказа до отправки на производство": "Müşteri: siparişten üretime gönderime",
 "Производство: от заявки до управляющих программ": "Üretim: talepten CNC programlarına",
 "Новый заказ → детали → раскрой → выбор варианта → отправка": "Yeni sipariş → parçalar → kesim planı → seçim → gönderim",
-"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Ayarlar → talep → kabul → CNC → G-kodu → dosyalar ve etiketler"
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Ayarlar → talep → kabul → CNC → G-kodu → dosyalar ve etiketler",
+"Сквозной рез — ниже стола (заглубление)": "Tam kesim — tablanın altına (dalma)",
+"Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.": "Freze her zaman konturun içinde gider. Tam kesik derinliği parça konturu ile aynıdır.",
+"Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.": "Şu an 0 — freze tam tablaya kadar iner: parça kesilmeyebilir. Genelde 0,2–0,5 mm.",
+"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Freze kurban tablasına girer — parça tamamen kesilir."
 }

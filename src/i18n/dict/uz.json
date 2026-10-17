@@ -2548,5 +2548,9 @@
 "Клиент: от заказа до отправки на производство": "Mijoz: buyurtmadan ishlab chiqarishga yuborishgacha",
 "Производство: от заявки до управляющих программ": "Ishlab chiqarish: arizadan boshqaruv dasturlarigacha",
 "Новый заказ → детали → раскрой → выбор варианта → отправка": "Yangi buyurtma → detallar → bichish → variant tanlash → yuborish",
-"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Sozlamalar → ariza → qabul → ChPU → G-kod → fayllar va yorliqlar"
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Sozlamalar → ariza → qabul → ChPU → G-kod → fayllar va yorliqlar",
+"Сквозной рез — ниже стола (заглубление)": "Teshib o‘tuvchi kesish — stoldan pastga (chuqurlash)",
+"Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.": "Freza har doim kontur ichida yuradi. Teshib o‘tuvchi o‘yiq chuqurligi detal konturi bilan bir xil.",
+"Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.": "Hozir 0 — freza aynan stolgacha boradi: detal kesilmasligi mumkin. Odatda 0,2–0,5 mm.",
+"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Freza qurbon stoliga kiradi — detal butunlay kesiladi."
 }

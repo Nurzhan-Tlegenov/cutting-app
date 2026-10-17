@@ -2548,5 +2548,9 @@
 "Клиент: от заказа до отправки на производство": "Müştəri: sifarişdən istehsalata göndərilməyə qədər",
 "Производство: от заявки до управляющих программ": "İstehsalat: sorğudan idarəetmə proqramlarına qədər",
 "Новый заказ → детали → раскрой → выбор варианта → отправка": "Yeni sifariş → detallar → biçim → variant seçimi → göndərmə",
-"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Ayarlar → sorğu → qəbul → ÇPİ → G-kod → fayllar və etiketlər"
+"Настройки → заявка → принять → ЧПУ → G-код → файлы и бирки": "Ayarlar → sorğu → qəbul → ÇPİ → G-kod → fayllar və etiketlər",
+"Сквозной рез — ниже стола (заглубление)": "Keçid kəsim — masadan aşağı (dərinləşmə)",
+"Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.": "Freza həmişə konturun daxilində gedir. Keçid kəsiyin dərinliyi detal konturu ilə eynidir.",
+"Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.": "İndi 0 — freza düz masaya qədər gedir: detal kəsilməyə bilər. Adətən 0,2–0,5 mm.",
+"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Freza qurban masasına girir — detal tam kəsilir."
 }
