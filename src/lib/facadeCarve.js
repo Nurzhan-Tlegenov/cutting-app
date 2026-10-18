@@ -29,7 +29,8 @@ export function profileDepth(profile, u) {
 
 // Обработки детали, которые можно показать объёмно
 function carveItems(decor) {
-  return (decor || []).filter(d => (d.kind === 'pocket' ? d.polys?.length && d.depth > 0 : d.profile?.length > 2 && d.path?.length > 1))
+  // паз с плоским дном по траектории (flat) — не рельеф: показывается точной полосой, как обычный паз (см. model3d.js)
+  return (decor || []).filter(d => !d.flat && (d.kind === 'pocket' ? d.polys?.length && d.depth > 0 : d.profile?.length > 2 && d.path?.length > 1))
 }
 
 /**

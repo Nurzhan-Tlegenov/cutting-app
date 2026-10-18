@@ -165,11 +165,13 @@ function partsOfDetail(d, inOrder, skipIds, di = -1, pidOf = null) {
     carve = { pos: new Float32Array(pos), maxD, top: zFace > T / 2 }
   }
   // иначе фрезеровка «для вида» (выемка, V-паз) — тёмной вставкой в пласть
-  for (const dc of (carve ? [] : c.decor || [])) {
+  // паз с плоским дном по траектории (flat) — всегда точной полосой, как обычный паз: прямые стенки, ровные углы и дуги
+  for (const dc of c.decor || []) {
+    if (carve && !dc.flat) continue
     const front = dc.face !== 'back'
     for (const pl of dc.polys || []) {
       if (pl.length < 3) continue
-      grooves.push({ poly: pl.map(toLocal), z: front ? frontZ : T - frontZ, depth: Math.max(0.6, Math.min(num(dc.depth) || 1, T - 0.5)), decor: true })
+      grooves.push({ poly: pl.map(toLocal), z: front ? frontZ : T - frontZ, depth: Math.max(0.6, Math.min(num(dc.depth) || 1, T - 0.5)), decor: !dc.flat })
     }
   }
 
