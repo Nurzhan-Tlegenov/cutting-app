@@ -13,6 +13,7 @@
 //   (u32 число символов), 7 блоб (u32 длина), 8 пусто, 9 дата (double).
 //   Контур — блоб: u32 n, элементы: 0x10 отрезок (x1 y1 x2 y2),
 //   0x11 и 0x14 окружность (cx cy r), 0x12 дуга (центр, начало, конец, u8 ccw).
+import { bandPolygon } from './pathBand.js'
 import { inflateSync, gzipSync, gunzipSync, strToU8, strFromU8 } from 'fflate'
 
 const EPS = 0.05
@@ -140,6 +141,35 @@ function arcInfo(e) {
   if (Math.abs(sweep) < 1e-9) sweep = e.ccw ? 2 * Math.PI : -2 * Math.PI
   const at = k => [e.c[0] + r * Math.cos(a0 + sweep * k), e.c[1] + r * Math.sin(a0 + sweep * k)]
   return { r, at }
+}
+
+// Незамкнутая траектория (паз по траектории: отрезки и дуги, концы — внутри детали или на краю) -> одна ломаная
+// по порядку хода (дуги — по точкам). Элементы в файле идут в любом порядке и направлении. Не одна цепочка — null.
+function chainOpen(elems) {
+  const segs = []
+  for (const e of elems) {
+    if (e.t === 'C') return null
+    if (e.t === 'L') { if (!near(e.a, e.b, 1e-6)) segs.push({ a: e.a, b: e.b, pts: [e.a, e.b] }) }
+    else { const ai = arcInfo(e); segs.push({ a: e.a, b: e.b, pts: Array.from({ length: 65 }, (_, k) => ai.at(k / 64)) }) }   // дуга — частыми точками (стрелка < 0,05 мм при R до 300)
+  }
+  if (segs.length < 1) return null
+  const deg = p => segs.filter(s => near(s.a, p) || near(s.b, p)).length
+  // начало — конец, у которого нет соседа
+  let first = segs.findIndex(s => deg(s.a) === 1 || deg(s.b) === 1)
+  if (first < 0) return null                        // замкнута — это петля
+  const used = new Array(segs.length).fill(false)
+  const s0 = segs[first]
+  let pts = deg(s0.a) === 1 ? [...s0.pts] : [...s0.pts].reverse()
+  used[first] = true
+  for (let guard = 0; guard < segs.length; guard++) {
+    const cur = pts[pts.length - 1]
+    const j = segs.findIndex((s, k) => !used[k] && (near(s.a, cur) || near(s.b, cur)))
+    if (j < 0) break
+    used[j] = true
+    const seg = near(segs[j].a, cur) ? segs[j].pts : [...segs[j].pts].reverse()
+    pts = pts.concat(seg.slice(1))
+  }
+  return used.every(Boolean) ? pts : null
 }
 
 // Элементы -> замкнутые петли. Петля: { pts: [{p, arc}], circle? }
@@ -463,16 +493,21 @@ function basisSrc(panel) {
     }
     // всё остальное (V-паз по контуру, скругление кромки, наклонный паз) — только для показа
     const round = prof.some(e => e.t === 'A')
-    const polys = round ? [] : lines.map(l => band(l.a, l.b, u0, u1)).filter(Boolean)
-      .map(bd => [[bd.a[0] + bd.n[0] * u0, bd.a[1] + bd.n[1] * u0], [bd.b[0] + bd.n[0] * u0, bd.b[1] + bd.n[1] * u0], bd.q, [bd.a[0] + bd.n[0] * u1, bd.a[1] + bd.n[1] * u1]])
     const isTop = top || !bottom
     // профиль фрезы: [смещение от траектории влево, глубина от пласти]
     const pl = buildLoops(prof).loops.find(lp => !lp.circle)
     const profile = pl ? pl.fine.map(q => [r2(q[0]), r2(Math.max(0, isTop ? T - q[1] : q[1]))]) : null
-    // траектория: замкнутая петля или один отрезок
+    // траектория: замкнутая петля, один отрезок или незамкнутая цепочка отрезков и дуг (паз по траектории)
     const tl = buildLoops(traj).loops.find(lp => !lp.circle)
-    const path = tl ? tl.fine : (lines.length === 1 ? [lines[0].a, lines[0].b] : null)
-    decorRaw.push({ kind: round ? 'round' : 'mill', name, sign, depth: Math.max(0, z1 - z0), top: isTop, polys, profile, path, closed: !!tl })
+    const open = tl ? null : chainOpen(traj)
+    const path = tl ? tl.fine : open
+    // паз с плоским дном (прямоугольный профиль) по незамкнутой траектории — его можно фрезеровать: ширина u0…u1
+    const flat = !tl && open && rectProfile && top !== bottom ? { lo: r2(u0), hi: r2(u1) } : null
+    const polys = round ? []
+      : open ? [bandPolygon(open, u0, u1)].filter(Boolean)
+      : lines.map(l => band(l.a, l.b, u0, u1)).filter(Boolean)
+        .map(bd => [[bd.a[0] + bd.n[0] * u0, bd.a[1] + bd.n[1] * u0], [bd.b[0] + bd.n[0] * u0, bd.b[1] + bd.n[1] * u0], bd.q, [bd.a[0] + bd.n[0] * u1, bd.a[1] + bd.n[1] * u1]])
+    decorRaw.push({ kind: round ? 'round' : 'mill', name, sign, depth: Math.max(0, z1 - z0), top: isTop, polys, profile, path, closed: !!tl, ...(flat ? { flat } : {}) })
   }
 
   const butts = (kid(o, 'Butts')?.c || []).map(butt => ({
@@ -852,6 +887,8 @@ export function buildItem(src, holes, faceRule) {
     kind: dc.kind, name: dc.name, sign: dc.sign, depth: r1(dc.depth), face: dc.top !== flip ? 'front' : 'back',
     polys: dc.polys.map(pl => pl.map(q => { const t = tf(q); return [r1(t[0]), r1(t[1])] })),
     // для объёмного показа: профиль фрезы и траектория (левая сторона траектории — та же, что в Базисе)
+    // паз по траектории с плоским дном: края полосы от траектории (по левой нормали); при перевороте путь идёт обратно — лево то же
+    ...(dc.flat ? { flat: dc.flat } : {}),
     ...(dc.profile && dc.path ? {
       profile: dc.profile, closed: dc.closed,
       path: (flip ? [...dc.path].reverse() : dc.path).map(q => { const t = tf(q); return [r1(t[0]), r1(t[1])] }),

@@ -31,6 +31,7 @@
  */
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
 import { edgeGrooveGeom, isEdgePocket, roundRect } from './edgeGrooves'
+import { bandPolygon, extendEnd } from './pathBand'
 import { rawDetail, parseEdgeTypes, edgeKey } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
@@ -396,6 +397,25 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
   // 3) фрезеровка фасада из импорта (выборки и профильные траектории)
   ;(c.decor || []).forEach(dc => {
     const face = dc.face === 'back' ? fr.bottom : fr.top
+    // паз по траектории с плоским дном (Базис: отрезки и дуги, незамкнутый) — замкнутый контур полосы с выборкой внутри,
+    // как паз с концом внутри детали: станок держит фрезу внутри при любом её диаметре. Конец траектории на краю детали
+    // продлеваем за край на половину ширины — фреза доходит центром до края.
+    if (dc.flat && !dc.closed && Array.isArray(dc.path) && dc.path.length > 1 && n0(dc.depth) > 0) {
+      const lo = n0(dc.flat.lo), hi = n0(dc.flat.hi), width = Math.abs(hi - lo)
+      const reach = width / 2 + 0.5
+      const onEdge = q => q[0] <= reach || q[1] <= reach || q[0] >= W - reach || q[1] >= H - reach
+      let path = dc.path
+      if (onEdge(path[0])) path = extendEnd(path, 0, width / 2)
+      if (onEdge(path[path.length - 1])) path = extendEnd(path, 1, width / 2)
+      const band = bandPolygon(path, lo, hi)
+      const els = band ? loopToMachine(band, fr) : []
+      if (els.length > 2) {
+        let e2 = els
+        if (loopArea(e2) > 0) e2 = reverseEls(e2)               // по часовой
+        out.push({ ...closedPath(e2, { face, depth: Math.min(n0(dc.depth), T), pocket: true, offset: sideOf(e2, false), cat: 'groovePath' }), width, name: dc.sign || dc.name })
+      }
+      return
+    }
     if (dc.kind === 'pocket') {
       ;(dc.polys || []).forEach(pl => {
         const els = pl.length > 2 ? loopToMachine(pl, fr) : []
@@ -561,6 +581,7 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   const MILL_WHAT = { edge: 'фигурный край', cutout: 'вырез', pocket: 'выемка' }
   mills.forEach(m => {
     if (m.cat === 'decor') { m.tool = null; return }
+    if (m.cat === 'groovePath') { m.tool = toolOf('groove', m.width, m.depth, `паз по траектории ${r1(m.width)} × ${r1(m.depth)}`); return }
     if (m.cat !== 'pocket') { m.tool = toolOf(m.cat, 0, 0, MILL_WHAT[m.cat]); return }
     const size = m.poly ? pocketSize(m.poly) : null
     m.tool = toolOf('pocket', size?.min || 0, m.depth, `выемка ${size ? size.text + ' × ' : 'глубиной '}${r1(m.depth)}`, size)
