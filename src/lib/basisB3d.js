@@ -891,7 +891,8 @@ export function buildItem(src, holes, faceRule) {
     ...(dc.flat ? { flat: dc.flat } : {}),
     ...(dc.profile && dc.path ? {
       profile: dc.profile, closed: dc.closed,
-      path: (flip ? [...dc.path].reverse() : dc.path).map(q => { const t = tf(q); return [r1(t[0]), r1(t[1])] }),
+      // путь — с точностью 0,01 мм: по нему потом находятся дуги (при 0,1 мм хорды «пляшут» и дуга не узнаётся)
+      path: (flip ? [...dc.path].reverse() : dc.path).map(q => { const t = tf(q); return [r2(t[0]), r2(t[1])] }),
     } : {}),
   }))
 
