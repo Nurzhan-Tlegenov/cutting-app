@@ -28,7 +28,8 @@ const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажат�
 async function roughLayout(params) {
   try {
     const plain = params.details.map(d => ({ ...d, contour: null }))
-    const res = await runNesting({ ...params, details: plain, optimizeSeconds: 0, algo: 'raster', cuttingMethod: 'nesting' })
+    const res = await runNesting({ ...params, details: plain, optimizeSeconds: 0, algo: 'raster', cuttingMethod: 'nesting', probe: true,
+      finishBudget: { maxMs: 100, composeMs: 0, relayout: 0 } })
     const polys = {}
     res.sheets.forEach(sh => sh.placed.forEach(p => {
       const d = params.details[p.detailIndex]
@@ -142,7 +143,7 @@ async function chooseHybridPlan(params, meta) {
     try {
       // быстрая проба: доводка итога короткая (обрезок последнего листа — 0,1 с, без перекомпоновки и «узкие — от края») —
       // сравниваются число листов и последний лист; полная доводка на каждое из 16 сочетаний отнимала секунды до первой картинки
-      const r = await runNesting({ ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting', optimizeSeconds: 0, onProgress: null, shouldStop: null, takeMigrant: null, onStats: null,
+      const r = await runNesting({ ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting', optimizeSeconds: 0, onProgress: null, shouldStop: null, takeMigrant: null, onStats: null, probe: true,
         finishBudget: { maxMs: 100, composeMs: 0, relayout: 0 } })
       const sc = liveScore(plan.expand({ ...meta, ...r }).sheets, meta.usableX, meta.usableY)
       if (liveBetter(sc, bestScore)) { best = plan; bestScore = sc }
@@ -188,8 +189,10 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       seed: Array.isArray(params.seed) ? (seedToHybrid({ seed: true, sheets: params.seed }, plan.singles)?.sheets || null) : null,
       shouldStop, takeMigrant: takeMigrant ? () => seedToHybrid(takeMigrant(), plan.singles) : null,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
-      onProgress: onProgress ? ({ sheets, iter, genome, seeded }) => {
-        const out = withFilled(plan.expand({ ...meta, sheets }), params, false)
+      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded }) => {
+        let out = withFilled(plan.expand({ ...meta, sheets }), params, false)
+        // соседним потокам — раскладка самого поиска (без доводки показа и без дозаполнения вырезов)
+        if (searchSheets && searchSheets !== sheets) out = { ...out, rawSheets: plan.expand({ ...meta, sheets: searchSheets }).sheets }
         lastRaw = sheets; lastOut = out
         onProgress({ ...out, iter, genome, hybrid: true, ...(seeded ? { seeded } : {}) })
       } : null,
@@ -288,7 +291,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
       ...params,
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
       shouldStop, takeMigrant, onStats,
-      onProgress: onProgress ? ({ sheets, iter, genome, seeded }) => onProgress({ ...meta, sheets, iter, genome, ...(seeded ? { seeded } : {}) }) : null,
+      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded }) => onProgress({ ...meta, sheets, ...(searchSheets && searchSheets !== sheets ? { rawSheets: searchSheets } : {}), iter, genome, ...(seeded ? { seeded } : {}) }) : null,
     })
   }
 
@@ -306,10 +309,13 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
     onProgress({ ...rough, iter: 0, round: 0 })
   }
   // Роли потоков для фигурных деталей: чётные — точная укладка по контурам
-  // раундами, нечётные — гибрид (пары → прямоугольники, быстрый непрерывный
+  // раундами, остальные — гибрид (пары → прямоугольники, быстрый непрерывный
   // поиск). Один поток — чередует. Лучший результат выбирает страница.
   const hybridAllowed = params.algo !== 'nfp' // экспериментальный NFP сравниваем в чистом виде
-  const hybridRole = hybridAllowed && islands > 1 && island % 2 === 1
+  // Точной укладкой по контурам раундами занимается только поток 0 (он же переходит на гибрид, если гибрид выигрывает),
+  // остальные — сразу гибрид: раньше половина потоков первые ~35 с считала раунды точной укладки, а на заказах с
+  // Г-образными деталями почти всегда выигрывает гибрид (261010_Timur_k1: 11 листов перестали находиться за 5 мин)
+  const hybridRole = hybridAllowed && islands > 1 && (islands >= 3 ? island !== 0 : island % 2 === 1)
   if (hybridRole) {
     const r = await runHybrid(params, meta, { live, shouldStop, onProgress, takeMigrant, onStats, t0 })
     if (r) return rough && liveBetter(scoreOf(rough.sheets, meta.usableX, meta.usableY), scoreOf(r.sheets, meta.usableX, meta.usableY)) ? rough : r

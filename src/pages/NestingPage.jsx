@@ -1427,6 +1427,7 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   let rejectFn = null, resolveFn = null
   let cancelled = false, finished = false, stopFlag = false
   let best = null, bestScore = null      // лучший промежуточный результат со всех островов
+  let searchScore = null                 // лучший по счёту поиска (для обмена между потоками)
   // фрезер: при равных листах лучше тот, у кого больше цельный обрезок последнего листа (liveBetter, offFirst)
   const offFirst = (params.cuttingMethod || 'nesting') === 'nesting' && !params.beamSaw
   // «Стоп» на фрезере (кроме больших заказов, где потоки ещё доводят итог): итог — ровно то, что на экране,
@@ -1443,12 +1444,19 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     if (exactStop && stopFlag) return             // после «Стоп» на экране ничего не меняется
     const sc = liveScore(res.sheets, res.usableX, res.usableY, params.direction, offFirst)
     const global = liveBetter(sc, bestScore)
+    // соседям — и порядок деталей, и саму раскладку (дожатую, «починенную»). Уходит раскладка самого поиска
+    // (rawSheets), а не дозаполненная вырезами и не доведённая для показа: для прямоугольного поиска деталь в вырезе
+    // фигурной детали — наложение (см. withFilled в liveNesting.js). На экран и в историю rawSheets не идёт — лишний вес.
+    // Какую раскладку слать соседям, решает счёт самого поиска (листы → мелкие у края → меньше на последнем листе),
+    // а не обрезок: иначе вариант, который ближе к листу меньше, не доходил до соседей (261010_Timur_k1: 11 листов
+    // перестали находиться)
+    const ss = liveScore(raw, res.usableX, res.usableY)
+    if (liveBetter(ss, searchScore)) {
+      searchScore = ss
+      if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome, sheets: raw }) })
+    }
     if (!cancelled && !finished) onIslandProgress?.(res, fromIdx, global)
     if (!global) return
-    // соседям — и порядок деталей, и саму раскладку (дожатую, «починенную»). Уходит раскладка самого поиска
-    // (rawSheets), а не дозаполненная вырезами: для прямоугольного поиска деталь в вырезе фигурной детали —
-    // наложение (см. withFilled в liveNesting.js). На экран и в историю rawSheets не идёт — лишний вес.
-    if (res.genome) workers.forEach((w, i) => { if (i !== fromIdx) w.postMessage({ type: 'migrant', genome: res.genome, sheets: raw }) })
     best = res; bestScore = sc
     if (!cancelled && !finished) onProgress?.(res, fromIdx)
   }

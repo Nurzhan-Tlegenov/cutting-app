@@ -131,6 +131,7 @@ export async function runNesting({
   onStats = null,                 // хронология раскроя: «пульс» поиска раз в ~1 с (итерации, поколение, режимы в популяции, разнообразие)
   seed = null,                    // «Продолжить»: листы готовой раскладки (как в результате) — поиск начинается с неё, а не с нуля
   finishBudget = null,            // { maxMs, composeMs, relayout } — своё время на итоговую доводку (быстрые пробы гибрида — короче)
+  probe = false,                  // быстрая проба (черновик, выбор плана пар гибрида): короткая случайная фаза, без интенсификации
 }) {
   const realX = sheetW - marginL - marginR  // рабочая зона: горизонталь = 1830 - отступы
   const realY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
@@ -321,11 +322,14 @@ export async function runNesting({
   // Онлайн-показ «как в итоге» (фрезер, кроме больших заказов — там доводка всех листов на каждом шаге дорога):
   // shown — доведённая раскладка лучшего варианта (src — от какого best.sheets), reported — последняя ушедшая на экран
   const exactShow = !!onProgress && cuttingMethod !== 'guillotine' && !BIG_ORDER
-  // «узкие — от края» — попыток на лист, всего на раскладку не больше ~60 (быстро) / ~900 (на застое)
-  const showQuick = n => ({ maxMs: 150, composeMs: 300, relayout: Math.max(5, Math.min(30, Math.round(60 / n))) })
+  // Доводка показа отнимает время у поиска. В 4.0–4.1 на неё уходила треть времени (261010_Timur_k1: 18 из 53 с),
+  // и 11 листов вместо 12 перестали находиться. Теперь: быстрая — только обрезок последнего листа (без перекомпоновки
+  // и «узкие — от края»), показ не чаще раза в секунду; полная — только на застое поиска (5 с) и всего не больше
+  // POLISH_SHARE времени. Поиск (меньше листов) — главнее
+  const POLISH_SHARE = 0.08
+  const showQuick = () => ({ maxMs: 80, composeMs: 0, relayout: 0 })
   const showDeep = n => ({ maxMs: 800, composeMs: 1500, relayout: Math.max(40, Math.min(300, Math.round(900 / n))), stoppable: true })
   let shown = null, reported = null
-  // Время доводки показа — не больше трети времени расчёта: иначе поиск (листы, мелкие у края) голодает
   let polishMs = 0
   const timedFinish = (sheetsIn, b) => { const t = Date.now(); try { return finishLayout(sheetsIn, b) } finally { polishMs += Date.now() - t } }
   // Какую из двух доводок одного варианта показывать: меньше мелких у края → больше цельный обрезок последнего листа
@@ -343,8 +347,8 @@ export async function runNesting({
   // Поиск встал — доводим показанный вариант с полным временем (как итог), до 6 раз: доводка случайная,
   // повтор часто находит обрезок больше. На экран — только если лучше уже показанного
   const polishShown = () => {
-    if (!exactShow || !shown || shown.src !== best.sheets || shown.deep >= 6 || Date.now() - lastGain < 2000) return
-    if (polishMs > (Date.now() - runStart) / 3) return
+    if (!exactShow || !shown || shown.src !== best.sheets || shown.deep >= 6 || Date.now() - lastGain < 5000) return
+    if (polishMs > (Date.now() - runStart) * POLISH_SHARE) return
     shown.deep++
     const cand = timedFinish(best.sheets, showDeep(best.sheets.length))
     if (stopNow()) return   // доводку прервал «Стоп» — на экране остаётся то, что было
@@ -355,13 +359,13 @@ export async function runNesting({
     if (!onProgress || !best || (!dirty && !force)) return
     if (exactShow && reported && stopNow()) return     // после «Стоп» экран не меняется
     const now = Date.now()
-    if (!force && now - lastReport < 300) return
+    if (!force && now - lastReport < (exactShow ? 1000 : 300)) return
     lastReport = now; dirty = false
     let sheets
     if (exactShow) {
       // фрезер: на экран — раскладка, доведённая как итог (обрезок последнего листа, узкие — от края, стяжка);
       // «Стоп» вернёт ровно её (см. phase = 'final')
-      if (shown?.src !== best.sheets) shown = { src: best.sheets, sheets: timedFinish(best.sheets, showQuick(best.sheets.length)), deep: 0 }
+      if (shown?.src !== best.sheets) shown = { src: best.sheets, sheets: timedFinish(best.sheets, showQuick()), deep: 0 }
       // новый лучший вариант поиска (меньше материала на последнем листе) после быстрой доводки бывает с обрезком
       // меньше уже показанного — такой не показываем (экран не «откатывается»), его догонит доводка на застое
       if (reported && shown.sheets !== reported && !shownBetter(shown.sheets, reported)) return
@@ -375,7 +379,9 @@ export async function runNesting({
     }
     // genome — порядок деталей + режим: по нему соседние потоки воспроизводят вариант у себя
     const genome = best.order ? { ids: best.order.map(p => p.id), mode: best.mode } : null
-    onProgress({ sheets, iter, genome, ...(seedSheets && best.sheets === seedSheets ? { seeded: true } : {}) })
+    // searchSheets — раскладка самого поиска (без доводки показа): её получают соседние потоки. Доведённая раскладка
+    // для поиска хуже (перекомпоновка утяжеляет последний лист), и соседи её отвергали — обмен раскладками не работал
+    onProgress({ sheets, searchSheets: best.sheets, iter, genome, ...(seedSheets && best.sheets === seedSheets ? { seeded: true } : {}) })
   }
   const bestPerMode = {}     // лучший порядок ОТДЕЛЬНО по каждому режиму — не только глобальный лидер
   const bestStatPerMode = {}
@@ -457,7 +463,9 @@ export async function runNesting({
   // укладка ~0,14 с, и 80×8 попыток съедали первые ~90 с (а случайный порядок
   // почти никогда не лучше сортировок и генетического поиска)
   const randomStart = Date.now()
-  for (let i = 0; i < RANDOM_ATTEMPTS; i++) {
+  // Проба — 6 случайных порядков вместо 80 (до 3 с): черновик и выбор плана пар (до 16 проб) занимали на телефоне
+  // ~10 с, и гибридный поиск начинался только на 12-й с (261010_Timur_k1)
+  for (let i = 0; i < (probe ? 6 : RANDOM_ATTEMPTS); i++) {
     const shuffled = shuffle(basePieces.slice())
     for (const mode of scoringModes) tryAttempt(shuffled, mode)
     if (i % 20 === 0 || BIG_ORDER) { maybeReport(); maybeStats(); await new Promise(r => setTimeout(r, 0)) }
@@ -619,7 +627,7 @@ export async function runNesting({
   // «Стоп» в онлайн-раскрое: итог — ровно та раскладка, что была на экране (она уже доведена finishLayout).
   // Раньше после «Стоп» шла ещё одна доводка и пользователь получал не то, на чём остановил
   if (exactShow && stopNow() && reported) return { sheets: reported, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
-  best.sheets = await intensifyCompaction(best.sheets, direction, usableX, usableY)
+  if (!probe) best.sheets = await intensifyCompaction(best.sheets, direction, usableX, usableY)
 
   best.sheets = finishLayout(best.sheets, finishBudget || { maxMs: BIG_ORDER ? 500 : 800, composeMs: BIG_ORDER ? 1000 : 1500, relayout: BIG_ORDER ? 40 : 300 })
 
@@ -912,14 +920,35 @@ function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf') {
   const last = sheets[n]
   const movers = last.placed.slice().sort((a, b) => b.w * b.h - a.w * a.h)
   let cur = null, left = last.placed
+  // Свободное место листа часто разбито на щели между деталями; стяжка к нулю (по направлению укладки и по
+  // другой оси) сливает их у края — тогда деталь с последнего листа входит (261010_Timur_k1: две полосы 83×541
+  // держали 12-й лист, а на листах 9–11 щели шире 90 мм)
+  const settledVariants = sh => {
+    const out = []
+    const e0 = smallAtEdge([sh], usableX, usableY)
+    for (const d of [direction, 'along_x', 'along_y']) {
+      const g = gravityRects(sh.placed, d)
+      if (g === sh.placed) continue
+      const v = rebuildFree({ ...sh, placed: g }, usableX, usableY)
+      if (smallAtEdge([v], usableX, usableY) > e0) continue
+      out.push(v)
+    }
+    return out
+  }
   for (const p of movers) {
     const piece = placedToPiece(p)
     for (let j = 0; j < n; j++) {
       const sh = (cur || sheets)[j]
       if (!sh.freeRects?.length || sh.maxFreeW === undefined) { if (!cur) cur = sheets.slice(); cur[j] = rebuildFree(sh, usableX, usableY) }
-      const target = (cur || sheets)[j]
-      if (cannotFit(target, piece)) continue
-      const spot = chooseSpot(target.freeRects, piece, direction, usableX, usableY, mode, target.placed)
+      let target = (cur || sheets)[j]
+      let spot = cannotFit(target, piece) ? null : chooseSpot(target.freeRects, piece, direction, usableX, usableY, mode, target.placed)
+      if (!spot && sheetArea(target) + piece.pw * piece.ph <= usableX * usableY) {
+        for (const v of settledVariants(target)) {
+          if (cannotFit(v, piece)) continue
+          spot = chooseSpot(v.freeRects, piece, direction, usableX, usableY, mode, v.placed)
+          if (spot) { target = v; break }
+        }
+      }
       if (!spot) continue
       // «мелкие — в центр» не ухудшаем
       if (spot.isSmall && smallEdgeSides(spot, target.placed, usableX, usableY) > 0) continue
