@@ -31,7 +31,7 @@
  */
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
 import { edgeGrooveGeom, isEdgePocket, roundRect } from './edgeGrooves'
-import { bandPolygon, bandElements, extendEnd } from './pathBand'
+import { bandPolygon, bandElements } from './pathBand'
 import { rawDetail, parseEdgeTypes, edgeKey } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
@@ -401,40 +401,18 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
   // 3) фрезеровка фасада из импорта (выборки и профильные траектории)
   ;(c.decor || []).forEach(dc => {
     const face = dc.face === 'back' ? fr.bottom : fr.top
-    // паз по траектории с плоским дном (Базис: отрезки и дуги, незамкнутый) — замкнутый контур полосы с выборкой внутри,
-    // как паз с концом внутри детали: станок держит фрезу внутри при любом её диаметре. Конец траектории на краю детали
-    // продлеваем за край на половину ширины — фреза доходит центром до края.
+    // паз по траектории с плоским дном (Базис: отрезки и дуги, незамкнутый) — замкнутый контур полосы с выборкой внутри:
+    // станок держит фрезу внутри при любом её диаметре. Контур — точно как в модели, ничего не дорисовываем.
     if (dc.flat && !dc.closed && Array.isArray(dc.path) && dc.path.length > 1 && n0(dc.depth) > 0) {
       const lo = n0(dc.flat.lo), hi = n0(dc.flat.hi), width = Math.abs(hi - lo)
-      const reach = width / 2 + 0.5
-      const onEdge = q => q[0] <= reach || q[1] <= reach || q[0] >= W - reach || q[1] >= H - reach
       const path = dc.path
-      // на сколько продлить конец за край: траектория может выходить на край наискось — оба угла полосы должны
-      // уйти за край не меньше чем на полширины (иначе у острого угла остаётся недорез)
-      const extOf = (p, q) => {                        // p — конец, q — соседняя точка
-        if (!onEdge(p)) return 0
-        const tl = Math.hypot(p[0] - q[0], p[1] - q[1]) || 1, t = [(p[0] - q[0]) / tl, (p[1] - q[1]) / tl], nl = [-t[1], t[0]]
-        // ближайший край и его внешняя нормаль: «за краем» = (точка − край)·N > 0
-        const sides = [[p[0], [-1, 0], 0], [W - p[0], [1, 0], W], [p[1], [0, -1], 0], [H - p[1], [0, 1], H]]
-        const [, N, e] = sides.sort((a, b) => a[0] - b[0])[0]
-        const out = pt => (N[0] ? (pt[0] - e) * N[0] : (pt[1] - e) * N[1])
-        const tn = t[0] * N[0] + t[1] * N[1]
-        if (!(tn > 0.2)) return width / 2
-        const need = [lo, hi].map(u => (width / 2 - out([p[0] + nl[0] * u, p[1] + nl[1] * u])) / tn)
-        return Math.max(width / 2, ...need)
-      }
-      const k = path.length - 1
-      // направление: в начале траектории «наружу» — от второй точки к первой; для продления нужен ход наружу
-      const ext0 = extOf(path[0], path[1]), ext1 = extOf(path[k], path[k - 1])
+      // траектория из модели — как есть: полоса заканчивается там же, где в исходнике (на контуре детали), без продления за край
       // края полосы — настоящими дугами (одна строка XML на дугу, станок идёт быстрее и ровнее); не вышло — ломаной
       let bandEls
-      try { bandEls = bandElements(path, lo, hi, ext0, ext1) } catch { bandEls = null }
+      try { bandEls = bandElements(path, lo, hi) } catch { bandEls = null }
       let els = bandEls ? elsToMachine(bandEls, fr) : []
       if (els.length < 3) {
-        let p2 = path
-        if (ext0) p2 = extendEnd(p2, 0, ext0)
-        if (ext1) p2 = extendEnd(p2, 1, ext1)
-        const band = bandPolygon(p2, lo, hi)
+        const band = bandPolygon(path, lo, hi)
         els = band ? loopToMachine(band, fr) : []
       }
       if (els.length > 2) {
