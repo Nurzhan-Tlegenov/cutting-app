@@ -452,7 +452,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   const axes = s.direction === 'x' ? ['y'] : s.direction === 'y' || pieces.some(p => !p.rotatable) ? ['x'] : ['x', 'y']
   const budget = (live ? 3600 : Math.max(1, Number(params.optimizeSeconds) || 5)) * 1000
   const t0 = now()
-  let best = null, lastShow = 0, iter = 0, improved = 0, lastStats = 0, statsIter = 0
+  let best = null, lastShow = 0, pendingTag = null, iter = 0, improved = 0, lastStats = 0, statsIter = 0
   const byAxis = {}   // для хронологии: сколько раз какой набор направлений дал улучшение
   // «пульс» поиска раз в ~1 с — в хронологию раскроя (как у основного раскроя): видно, где поиск буксует
   const pulse = (force = false) => {
@@ -472,7 +472,15 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
     if (!better(r, best)) return
     best = r; improved++
     byAxis[tag] = (byAxis[tag] || 0) + 1
-    if (onProgress && now() - lastShow > 300) { lastShow = now(); onProgress({ ...finish(best), iter, genome: { mode: `beam-${tag}` } }) }
+    pendingTag = tag
+    show()
+  }
+  // Показ на экране — не чаще раза в 300 мс, но улучшение не теряется: если оно пришло раньше срока, оно показывается,
+  // как только срок вышел (раньше оно ждало следующего улучшения, а если его не было — до «Стоп»: экран стоял на первой картинке)
+  function show(force = false) {
+    if (!onProgress || !pendingTag || !best) return
+    if (!force && now() - lastShow <= 300) return
+    lastShow = now(); onProgress({ ...finish(best), iter, genome: { mode: `beam-${pendingTag}` } }); pendingTag = null
   }
   // детерминированные варианты, потом случайные возмущения лучших порядков — до лимита времени или «Стоп»
   const orders = []
@@ -481,6 +489,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   for (const ax of axisSets) for (const ord of orders) for (const orient of ['long', 'fit']) { iter++; consider(packAll(ord, s, kerf, X, Y, ax, { orient }), ax.join('')) }
   const rnd = rng(pieces.length * 7919 + 17 + island * 104729)   // у каждого потока свои варианты
   if (s.stairLast) for (const ord of orders) { iter++; consider(packAllGen(ord, s, kerf, X, Y, axes, rnd, 8), 'gen') }
+  show(true)   // первая картинка — сразу лучшая из готовых вариантов
   pulse(true)
   let tick = now()
   while (now() - t0 < budget && !shouldStop()) {
@@ -496,17 +505,21 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
       if (rnd() < 0.25) { iter++; consider(packAllGen(perturb(base, rnd, rnd() * 0.3), s, kerf, X, Y, axes, rnd), 'gen') }
       for (let j = 0; j < 4; j++) { const c = compactLastGen(best, pieces, s, kerf, X, Y, axes, rnd); if (c) consider(c, 'stair') }
     }
+    show()
     pulse()
     if (now() - tick > 40) { tick = now(); await pause() }
   }
+  show(true)
   // напоследок — ещё раз последний лист, отдельно (после «Стоп» — коротко)
-  const tEnd = now() + (live ? 400 : 700)
+  // форматник онлайн: «Стоп» отдаёт ровно то, что на экране — без доводки после «Стоп» (пильный центр — как раньше)
+  const tEnd = live && s.stairLast ? 0 : now() + (live ? 400 : 700)
   for (let j = 0; j < 3000 && now() < tEnd; j++) {
     iter++
     const c = compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (c) consider(c, 'last')
     if (s.stairLast) { const g = compactLastGen(best, pieces, s, kerf, X, Y, axes, rnd); if (g) consider(g, 'stair') }
     if (now() - tick > 40) { tick = now(); await pause() }
   }
+  show(true)
   pulse(true)
   return { ...finish(best), iter }
 }
