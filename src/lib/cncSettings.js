@@ -49,7 +49,8 @@ export const DEFAULT_DRILL6 = () => ({
 })
 export const isDrill6 = p => p?.kind === 'drill6'
 // Пильный центр (KDT): одна программа XML на материал — дерево резов по всем листам (см. beamSawXml.js).
-// Есть у всех по умолчанию (id постоянный — не плодится при каждом открытии), идёт после своих постпроцессоров.
+// β: только у мастер-аккаунта и бета-тестеров «Пильный центр» (normalizeCnc(…, { beam: true })) — у них есть
+// по умолчанию (id постоянный — не плодится при каждом открытии), после своих постпроцессоров; у остальных его нет вовсе.
 export const BEAM_POST_ID = 'kdt-beam'
 export const DEFAULT_BEAMSAW = () => ({
   ...DEFAULT_POST(), id: BEAM_POST_ID, kind: 'beamsaw', name: 'Пильный центр KDT (XML)', ext: 'xml',
@@ -84,13 +85,15 @@ export const DEFAULT_OPS = () => ({
 })
 
 // shared — общие постпроцессоры (мастер-аккаунт отметил «для всех»): видны каждому, в настройках пользователя не хранятся
-export function normalizeCnc(raw, shared = []) {
+export function normalizeCnc(raw, shared = [], { beam = false } = {}) {
   const c = raw && typeof raw === 'object' ? raw : {}
   const own = (Array.isArray(c.posts) ? c.posts : []).filter(p => p && !p.shared).map(p => ({ ...kindDefault(p), ...p }))
   const mine = own.length ? own : (shared.length ? [] : [DEFAULT_POST()])
   let posts = [...mine, ...shared.filter(p => !mine.some(q => q.id === p.id)).map(p => ({ ...kindDefault(p), ...p, shared: true }))]
   if (!posts.some(isRouterPost)) posts = [DEFAULT_POST(), ...posts]   // раскроечный станок есть всегда
-  if (!posts.some(isBeamSaw)) posts = [...posts, DEFAULT_BEAMSAW()]   // пильный центр KDT — у всех, после своих
+  // пильный центр KDT — только с бета-доступом (после своих станков); без него — не показывается вовсе
+  if (!beam) posts = posts.filter(p => !isBeamSaw(p))
+  else if (!posts.some(isBeamSaw)) posts = [...posts, DEFAULT_BEAMSAW()]
   const tools = Array.isArray(c.tools) ? c.tools : []
   // своя обработка постпроцессора, настроенного по чужой программе (см. postTools.js)
   posts = posts.map(p => (p.ownOps && !p.shared ? { ...p, ownOps: normOps(p.ownOps) } : p))
@@ -117,7 +120,7 @@ export { postView, postBack, hasOwnTools } from './postTools'
 
 export const getCnc = user => normalizeCnc(getUserSettings(user).cnc)
 export const fetchCnc = async user => normalizeCnc((await fetchUserSettings(user)).cnc)
-export const withShared = (cnc, shared) => normalizeCnc(cnc, shared)
+export const withShared = (cnc, shared, opts) => normalizeCnc(cnc, shared, opts)
 export const saveCnc = (cnc, user) => saveUserSettings({ cnc: { ...cnc, posts: cnc.posts.filter(p => !p.shared) } }, user)
 /** Постпроцессор, открытый в настройках (его правят вкладки «Основные» и «Команды») */
 export const activePost = cnc => cnc.posts.find(p => p.id === cnc.post) || cnc.posts[0]

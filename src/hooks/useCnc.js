@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { getCnc, fetchCnc, saveCnc, withShared, normalizeCnc } from '../lib/cncSettings'
 import { listSharedPosts, saveSharedPost, removeSharedPost, sendNews } from '../lib/messages'
 import { productionCnc, saveProductionCnc } from '../lib/productionApi'
+import { hasBeta } from '../lib/beta'
 
 // Настройки ЧПУ (постпроцессоры, инструменты, обработка) — одни и те же в кабинете производства и в заказе:
 // поправили в одном месте — в другом уже так же. onSaved — что сделать после изменения (например, сбросить созданные программы).
@@ -18,15 +19,17 @@ export function useCnc(onSaved, prodId = null) {
   useEffect(() => {
     let alive = true
     // свои настройки + общие постпроцессоры (мастер-аккаунт отметил «для всех») + настройки производства
-    Promise.all([fetchCnc(user), listSharedPosts(), productionCnc(prodId)]).then(([c, sh, pc]) => {
+    // β Пильный центр: постпроцессор пилы — только у мастер-аккаунта и бета-тестеров
+    Promise.all([fetchCnc(user), listSharedPosts(), productionCnc(prodId), hasBeta('beam_saw')]).then(([c, sh, pc, beam]) => {
       if (!alive) return
       const shared = sh.data || []
+      const opts = { beam: !!beam }
       if (pc && !pc.own && pc.cnc) {
         mode.current = { prod: prodId, staff: true, edit: !!pc.edit }
-        setCnc(withShared(normalizeCnc(pc.cnc), shared)); setStaff(true)
+        setCnc(withShared(normalizeCnc(pc.cnc, [], opts), shared, opts)); setStaff(true)
       } else {
         mode.current = { prod: pc?.own ? prodId : null, staff: false, edit: false }
-        const mine = withShared(c, shared)
+        const mine = withShared(c, shared, opts)
         setCnc(mine); setStaff(false)
         if (pc?.own) saveProductionCnc(prodId, forStore(mine))            // сотрудники сразу получают актуальные настройки
       }

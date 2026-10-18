@@ -89,7 +89,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
   const router = routerPost(cnc)
   const setKind = kind => {
     if (kind === (post.kind || 'router')) return
-    if (isRouterPost(post) && routers.length < 2) { window.alert('Это единственный раскроечный станок. Чтобы добавить другой: «Выбрать ▾» → «+ Присадочный 6-стор.» или «+ Пильный центр».'); return }
+    if (isRouterPost(post) && routers.length < 2) { window.alert(`Это единственный раскроечный станок. Чтобы добавить другой: «Выбрать ▾» → «+ Присадочный 6-стор.»${cnc.posts.some(isBeamSaw) ? ' или «+ Пильный центр»' : ''}.`); return }
     if (saw && cnc.posts.filter(isBeamSaw).length < 2) { window.alert('Это единственный пильный центр. Чтобы добавить другой станок: «Выбрать ▾» → «+ Раскроечный станок» или «+ Присадочный 6-стор.».'); return }
     set(kind === 'drill6' ? { kind, ext: 'XML', nameTpl: '{NOMER}_{ZAKAZ}' } : kind === 'beamsaw' ? { kind, ext: 'xml', nameTpl: '{ZAKAZ}_{MAT}' } : { kind: 'router', ext: 'nc', nameTpl: NAME_TPL_DEFAULT })
   }
@@ -110,7 +110,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         <Title>Постпроцессор</Title>
         <SaveSnapshotButton cnc={cnc} onChange={onChange} />
         <label className="label">Тип станка</label>
-        <div style={{ marginBottom: 8 }}><Seg value={post.kind || 'router'} options={KINDS.map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : k === 'beamsaw' ? 'Пильный центр' : 'Раскроечный'])} onChange={setKind} /></div>
+        <div style={{ marginBottom: 8 }}><Seg value={post.kind || 'router'} options={KINDS.filter(([k]) => k !== 'beamsaw' || cnc.posts.some(isBeamSaw)).map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : k === 'beamsaw' ? 'Пильный центр' : 'Раскроечный'])} onChange={setKind} /></div>
         <label className="label">Название</label>
         <input type="text" key={post.id} defaultValue={post.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== post.name) set({ name: v }) }} />
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>

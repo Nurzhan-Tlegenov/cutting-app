@@ -146,7 +146,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
               <div style={{ display: 'flex', gap: 6, margin: '6px 0 14px' }}>
                 <button type="button" onClick={() => add('router')} style={{ flex: 1, padding: '9px 8px', borderRadius: 12, border: '1px dashed var(--blue)', background: 'transparent', color: 'var(--blue)', fontSize: 13 }}>+ Раскроечный станок</button>
                 <button type="button" onClick={() => add('drill6')} style={{ flex: 1, padding: '9px 8px', borderRadius: 12, border: '1px dashed var(--amber)', background: 'transparent', color: 'var(--amber)', fontSize: 13 }}>+ Присадочный 6-стор.</button>
-                <button type="button" onClick={() => add('beamsaw')} style={{ flex: 1, padding: '9px 8px', borderRadius: 12, border: '1px dashed var(--teal)', background: 'transparent', color: 'var(--teal)', fontSize: 13 }}>+ Пильный центр</button>
+                {cnc.posts.some(isBeamSaw) && <button type="button" onClick={() => add('beamsaw')} style={{ flex: 1, padding: '9px 8px', borderRadius: 12, border: '1px dashed var(--teal)', background: 'transparent', color: 'var(--teal)', fontSize: 13 }}>+ Пильный центр</button>}
               </div>
 
               {!isMaster && (
