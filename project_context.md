@@ -259,6 +259,13 @@ src/
   UI: значения-подсказки при включении «мелкие — в центр» (0,12 / 200 / 100), «до края» по умолчанию 100
 - v3.1: relayoutForEdges в финале runNesting (фрезер, любые заказы): лист переукладывается packAttempt (300 попыток,
   для BIG_ORDER 40), берётся раскладка с меньшим narrowEdgeScore; последний лист — без роста занятой части
+- v4.0 (фрезер, онлайн): runNesting.finishLayout — доводка итога (maximizeLastOffcut → composeLastForOffcut → relayoutForEdges
+  → стяжка/полосы → страховки) и в итоге, и в показе: exactShow (фрезер, ≤300 дет.) — maybeReport шлёт finishLayout(best, showQuick),
+  на застое polishShown (showDeep, ≤1/3 времени, до 6 раз); на экран — только если shownBetter. «Стоп» → runNesting возвращает
+  reported (тот же массив), runHybrid — тот же развёрнутый результат; страница (exactStop) сразу берёт показанный вариант.
+  liveScore(…, direction, offFirst): у фрезера при равных листах/мелких решает обрезок последнего листа. packAttempt(…, edgeX, edgeY,
+  edgeShift): мелкие — по настоящему краю листа, могут встать в edgeMin от края (только в maximizeLastOffcut); хвост поиска полосы
+  (до 400 неудач). runNesting.finishBudget — короткая доводка для проб гибрида (chooseHybridPlan)
 - Буфер: тап по детали → «В буфер» → открыть лист → «На лист N» (первое свободное место,
   поворот только если rotatable) или «На новый лист». С непустым буфером сохранить нельзя;
   пустые листы при сохранении выкидываются
