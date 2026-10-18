@@ -1,10 +1,10 @@
 import { MenuButton } from '../components/NavDrawer'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
-import { listMessages, sendAppeal, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob } from '../lib/messages'
+import { listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob } from '../lib/messages'
 import { getUserSettings } from '../lib/userSettings'
 
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
@@ -30,6 +30,8 @@ export default function MessagesPage() {
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  const [files, setFiles] = useState([])            // файлы к обращению (модели Базиса, Астры, К3 и т. п.)
+  const fileRef = useRef(null)
   const [replyTo, setReplyTo] = useState(null)      // сообщение, на которое отвечает мастер-аккаунт
   const [replyText, setReplyText] = useState('')
   const [seenAt] = useState(() => getUserSettings(user).msgSeenAt || '')   // что было непрочитанным на момент открытия
@@ -44,13 +46,13 @@ export default function MessagesPage() {
   useEffect(() => { Promise.resolve().then(load) }, [user?.id])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const post = async () => {
-    const body = text.trim()
+    const body = text.trim() || (files.length ? 'Файлы во вложении' : '')
     if (!body) return
-    setBusy(true)
-    const r = isMaster ? await sendNews(user, profile, title.trim(), body) : await sendAppeal(user, profile, body)
+    setBusy(true); setError('')
+    const r = isMaster ? await sendNews(user, profile, title.trim(), body) : files.length ? await sendAppealFiles(user, profile, body, files) : await sendAppeal(user, profile, body)
     setBusy(false)
     if (r.error) { setError(r.error); return }
-    setText(''); setTitle(''); load()
+    setText(''); setTitle(''); setFiles([]); load()
   }
   const reply = async () => {
     const body = replyText.trim()
@@ -87,8 +89,29 @@ export default function MessagesPage() {
         {isMaster && <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Заголовок (необязательно)" style={{ marginBottom: 6, fontSize: 14 }} />}
         <textarea value={text} onChange={e => setText(e.target.value)} rows={3} style={{ fontSize: 14, resize: 'vertical' }}
           placeholder={isMaster ? 'Что нового в приложении…' : 'Вопрос, замечание или пожелание…'} />
-        <button type="button" className="btn-primary" style={{ marginTop: 8 }} disabled={busy || !text.trim()} onClick={post}>
-          {busy ? 'Отправка…' : isMaster ? 'Опубликовать новость' : 'Отправить обращение'}
+        {!isMaster && (
+          <div style={{ marginTop: 8 }}>
+            <input ref={fileRef} type="file" multiple style={{ display: 'none' }}
+              onChange={e => { const add = [...(e.target.files || [])]; e.target.value = ''; setFiles(fs => [...fs, ...add.filter(f => !fs.some(x => x.name === f.name && x.size === f.size))]) }} />
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
+              style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }}>📎 Прикрепить файлы</button>
+            <span style={{ fontSize: 11, color: 'var(--text-hint)', marginLeft: 8 }}>модель, проект, Excel, фото — до {REPORT_MAX_MB} МБ вместе</span>
+            {files.length > 0 && (
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {files.map((f, i) => (
+                  <div key={f.name + i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, background: 'var(--bg2)', borderRadius: 8, padding: '4px 8px' }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📎 {f.name}</span>
+                    <span style={{ color: 'var(--text-hint)', flexShrink: 0 }}>{sizeTxt(f.size)}</span>
+                    <button type="button" onClick={() => setFiles(fs => fs.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 15, padding: 0 }}>×</button>
+                  </div>
+                ))}
+                <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>Файлы уйдут разработчику вместе с сообщением{files.length > 1 ? ' (одним архивом)' : ''}.</span>
+              </div>
+            )}
+          </div>
+        )}
+        <button type="button" className="btn-primary" style={{ marginTop: 8 }} disabled={busy || (!text.trim() && !files.length)} onClick={post}>
+          {busy ? 'Отправка…' : isMaster ? 'Опубликовать новость' : files.length ? `Отправить обращение и файлы (${files.length})` : 'Отправить обращение'}
         </button>
       </div>
 

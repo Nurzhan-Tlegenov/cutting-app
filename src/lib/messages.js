@@ -26,6 +26,31 @@ async function insert(row) {
 }
 /** Обращение пользователя к мастер-аккаунту */
 export const sendAppeal = (user, profile, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', body })
+/** Обращение с файлами: один файл уходит как есть, несколько — одним архивом .zip (мастер скачивает и распаковывает) */
+export async function sendAppealFiles(user, profile, body, files) {
+  const list = [...(files || [])]
+  if (!list.length) return sendAppeal(user, profile, body)
+  const total = list.reduce((a, f) => a + (f.size || 0), 0)
+  if (total > REPORT_MAX_MB * 1048576) return { error: `Файлы слишком большие (${(total / 1048576).toFixed(1)} МБ, можно до ${REPORT_MAX_MB} МБ вместе). Отправьте часть файлов или пришлите их в WhatsApp / Telegram.` }
+  let fileName, payload
+  try {
+    if (list.length === 1) { fileName = list[0].name; payload = await fileToPayload(list[0]) }
+    else {
+      const { zipSync } = await import('fflate')
+      const entries = {}
+      for (const f of list) {
+        let name = f.name || 'file', k = 1
+        while (entries[name]) name = (f.name || 'file').replace(/(\.[^.]*)?$/, m => `_${++k}${m}`)
+        entries[name] = [new Uint8Array(await f.arrayBuffer()), { level: 6 }]
+      }
+      const zip = zipSync(entries)
+      fileName = `Файлы_${list.length}_шт.zip`
+      payload = await fileToPayload(new Blob([zip], { type: 'application/zip' }))
+    }
+  } catch (e) { return { error: 'Не удалось прочитать файл: ' + (e?.message || e) } }
+  return insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', title: list.length > 1 ? list.map(f => f.name).join(', ').slice(0, 300) : null,
+    body, file_name: fileName, file_size: payload.length, payload })
+}
 /** Новость от мастер-аккаунта всем пользователям */
 export const sendNews = (user, profile, title, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'news', title, body })
 /** Ответ мастер-аккаунта пользователю */
