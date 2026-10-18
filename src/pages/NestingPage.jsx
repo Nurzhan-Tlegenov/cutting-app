@@ -2255,7 +2255,7 @@ export default function NestingPage() {
   const [pdfBusy, setPdfBusy] = useState(null)
   const [pdfEstimate, setPdfEstimateState] = useState(() => !!getUserSettings(user).pdfEstimate)   // галочка «Смета» под кнопкой PDF
   const setPdfEstimate = on => { setPdfEstimateState(on); saveUserSettings({ pdfEstimate: on }, user) }
-  // β Пильный центр: программа для пилы KDT (XML как у Asai) — по текущей карте, с ручными правками и обрезками
+  // β Пильный центр: программа для пилы KDT (XML) — по текущей карте, с ручными правками и обрезками
   async function xmlCfg(cfg) {
     try {
       const m = materials.find(x => x.key === matKey) || materials[0] || {}
@@ -3372,7 +3372,7 @@ export default function NestingPage() {
                           {pdfBusy === cfg.id ? '…' : 'PDF'}
                         </button>
                         {cfg.result?.beamSaw && (
-                          <button onClick={() => xmlCfg(cfg)} title="β Программа для пильного центра KDT: XML с деревом резов, как у Asai"
+                          <button onClick={() => xmlCfg(cfg)} title="β Программа для пильного центра KDT: XML с деревом резов"
                             style={{ padding: '4px 10px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 11.5, cursor: 'pointer' }}>XML пилы</button>
                         )}
                         {cabinet === 'production' && (

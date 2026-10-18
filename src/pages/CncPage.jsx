@@ -350,7 +350,7 @@ export default function CncPage() {
             <button type="button" style={{ ...small, marginRight: 6 }} title="Карты раскроя: листы с деталями, размерами и кромкой; на последней странице — статистика раскроя и стоимость работ (что выводить, выбираете сами)"
               onClick={() => setPdfAsk(true)}>PDF карт</button>
             {mat.result?.beamSaw && (
-              <button type="button" style={{ ...small, marginRight: 6 }} title="β Программа для пильного центра KDT: XML с деревом резов (как у Asai) — по всем листам этого материала"
+              <button type="button" style={{ ...small, marginRight: 6 }} title="β Программа для пильного центра KDT: XML с деревом резов — по всем листам этого материала"
                 onClick={() => saveBeamSawXml({ order, mat, geoOf: sh => sheetGeo(order, mat.result, sh) }).catch(e => window.alert('Не удалось собрать XML для пилы: ' + (e?.message || e)))}>XML пилы</button>
             )}
             <button type="button" style={small} onClick={() => { setPicked(sel.length === mat.sheets.length ? [] : null); setBuilt(null) }}>{sel.length === mat.sheets.length ? 'Снять все' : 'Выбрать все'}</button>

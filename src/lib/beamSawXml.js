@@ -1,10 +1,10 @@
-// β Пильный центр: программа для пилы KDT — XML того же вида, что выгружают Asai и GibLab.
+// β Пильный центр: программа для пилы KDT — XML с деревом резов.
 //   <panelN l w trimS/E… saw material thickness mcode texture>  — лист
 //     <no.K l w trim x y layer id>                                  — заготовка (узел дерева резов)
 //       <part cut type id code />  type 1 — деталь, 2 — полоса (режется дальше), 3 — деловой обрезок
 //   l — длина, вдоль которой идут резы этого узла, w — поперёк; trim — торцовка в начале; cut — размер куска.
-//   Каждый кусок (деталь, полоса, обрезок) — ещё и свой узел no.K с id = id куска; узлы — в глубину, соседи с конца (как у Asai).
-//   В конце — таблица деталей для бирок (<table name="label">, колонки как у Asai).
+//   Каждый кусок (деталь, полоса, обрезок) — ещё и свой узел no.K с id = id куска; узлы — в глубину, соседи с конца.
+//   В конце — таблица деталей для бирок (<table name="label">).
 // Дерево резов строится по ТЕКУЩЕЙ карте (после ручных правок тоже): сквозные резы, оси по уровням чередуются.
 import { orderTitle, toLatin } from './orderUtils'
 
@@ -113,10 +113,10 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
       no++
       const ax = node.axis
       const trim = layer <= 2 ? startMargin(ax) + node.trim : node.trim
-      // координаты: y — вдоль оси 1-го уровня, x — поперёк (как у Asai), от угла листа
+      // координаты: y — вдоль оси 1-го уровня, x — поперёк, от угла листа
       const sx = geo.marginL + node.x, sy = geo.marginT + node.y
       const [cy, cx] = tree.axis === 'x' ? [sx, sy] : [sy, sx]
-      // 2-й уровень: полоса идёт от края листа — по своей оси от 0 (как у Asai)
+      // 2-й уровень: полоса идёт от края листа — по своей оси от 0
       const head = `    <no.${no} l="${r1(lReal)}" w="${r1(wReal)}" trim="${r1(trim)}" x="${r1(layer <= 2 ? 0 : cx)}" y="${r1(layer === 1 ? 0 : cy)}" layer="${layer}" id="${id}"`
       const kids = []
       const partLines = node.slots.map(sl => {
@@ -139,7 +139,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
       })
       lines.push(partLines.length ? `${head}>` : `${head} />`)
       if (partLines.length) { lines.push(...partLines); lines.push(`    </no.${no}>`) }
-      // соседи — с конца, в глубину (как у Asai)
+      // соседи — с конца, в глубину
       for (const c of kids.slice().reverse()) {
         if (c.leaf) {
           no++
@@ -155,7 +155,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
     out.push(...lines)
     out.push(`  </panel${si + 1}>`)
   })
-  // таблица деталей для бирок — колонки как у Asai
+  // таблица деталей для бирок
   const COLS = ['Выбор', 'Наименование материала', 'Толщ.', 'Наименование детали', 'Длина', 'Ширина', 'Кол.', 'Текстура', 'Кромка', 'Штрих код', 'Припуск', 'Заказ', 'Примечание', 'Информация о детали',
     'Табл.сопост.кромка лев.', 'Табл.сопост.кромка прав', 'Табл.сопост.кромка верх', 'Табл.сопост.кромка низ', 'паз верх', 'паз низ', 'паз лево', 'паз право',
     'длина пильны', 'ширина пильный', 'длина готовая', 'ширина готовая', 'Наименование файла', 'Номер готовой детали', '№ карты', 'Общ.№ карты', 'Поворот', 'Текущее значение']
