@@ -127,7 +127,7 @@ function tryPlace(sh, p, kerf, uX, uY) {
  * (исходный не меняется) или null, если ничего не переложено.
  */
 export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usableY }) {
-  if (!sheets?.length || sheets.length < 2) return null
+  if (!sheets?.length) return null
   // есть ли вообще вырезы/фигуры — иначе раскрой уже прямоугольный, нечего дозаполнять
   if (!sheets.some(sh => sh.placed.some(p => !isRect(p)))) return null
   const out = sheets.map(sh => ({ ...sh, placed: sh.placed.slice() }))
@@ -135,7 +135,10 @@ export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usabl
   let moved = 0
   // с последнего листа к первому; на листе — крупные первыми. Второй круг —
   // в пустоты, освободившиеся на средних листах.
-  for (let pass = 0; pass < 2; pass++) for (let si = out.length - 1; si > 0; si--) {
+  // Последний лист — ещё и в вырезы фигурных деталей его самого (Г-образная деталь на последнем листе с пустым
+  // вырезом, а рядом лежит деталь, которая туда входит; 261018_002 вдоль X): освободившееся место потом стягивается к нулю
+  const lastI = out.length - 1
+  for (let pass = 0; pass < 2; pass++) for (let si = out.length - 1; si >= 0; si--) {
     const src = out[si]
     const order = src.placed.map((p, i) => i).filter(i => src._shapes[i].rect)
       .sort((a, b) => { const [wa, ha] = sizeOf(src.placed[a], kerf), [wb, hb] = sizeOf(src.placed[b], kerf); return wb * hb - wa * ha })
@@ -146,8 +149,15 @@ export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usabl
       const variants = [p]
       if (d?.rotatable) variants.push(turned(p))
       let done = false
-      for (let ti = 0; ti < si && !done; ti++) {
-        const dst = out[ti]
+      for (let ti = 0; ti <= si && !done; ti++) {
+        if (ti === si && si !== lastI) break
+        let dst = out[ti]
+        // тот же лист: сама деталь (и уже переложенные) — не помеха
+        const self = ti === si
+        if (self) {
+          const keep = (_, j) => j !== i && !gone.has(j)
+          dst = { ...dst, placed: dst.placed.filter(keep), _shapes: dst._shapes.filter(keep), _free: null }
+        }
         // обрезки и листы другого размера не трогаем
         if (dst.stock === 'offcut' || src.stock === 'offcut') continue
         const uX = dst.usableX ?? usableX, uY = dst.usableY ?? usableY
@@ -158,7 +168,9 @@ export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usabl
         for (const v of variants) {
           const q = tryPlace(dst, v, kerf, uX, uY)
           if (!q) continue
-          dst.placed.push(q); dst._shapes.push(shapeOf(q, kerf)); dst._free = null
+          if (self && v === p && Math.abs(q.x - p.x) < 0.01 && Math.abs(q.y - p.y) < 0.01) { done = true; break }   // уже стоит в вырезе
+          const real = out[ti]
+          real.placed.push(q); real._shapes.push(shapeOf(q, kerf)); real._free = null
           gone.add(i); moved++; done = true
           break
         }

@@ -742,9 +742,31 @@ function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle
   let bestSc = lastOffcutArea(best, direction, usableX, usableY)
   const minGain = Math.min(usableX, usableY) * 1   // выигрыш хотя бы на 1 мм полосы
   const end = Date.now() + budgetMs
+  // Внутри занятой полосы свободное место — к краю обрезка, а не дырами между деталями: при той же полосе лучше
+  // раскладка, где детали в среднем ближе к нулю (меньше «момент» площади по оси обрезка). Тогда пустоты сливаются
+  // ступенькой с обрезком, а не остаются карманами внутри (261018_002: дыры между деталями последнего листа)
+  const offAxis = sh => {
+    if (direction === 'along_y') return 'x'
+    if (direction === 'along_x') return 'y'
+    const { mx, my } = sheetExtent(sh)
+    return Math.max(0, usableX - mx) * usableY >= Math.max(0, usableY - my) * usableX ? 'x' : 'y'
+  }
+  const moment = sh => {
+    const ax = offAxis(sh)
+    let m = 0
+    for (const p of sh.placed) m += p.w * p.h * (ax === 'x' ? p.x + p.w / 2 : p.y + p.h / 2)
+    return m
+  }
+  let bestMom = moment(best)
+  // пила (только сквозные резы): как до 4.0 — без поиска «плотнее к нулю» и без хвоста поиска полосы
+  const saw = modes.every(m => m.startsWith('g-'))
   const consider = cand => {
     const sc = lastOffcutArea(cand, direction, usableX, usableY)
-    if (sc > bestSc + minGain) { best = cand; bestSc = sc; return true }
+    if (sc > bestSc + minGain) { best = cand; bestSc = sc; bestMom = moment(cand); return true }
+    if (!saw && sc >= bestSc - 1) {
+      const m = moment(cand)
+      if (m < bestMom * 0.995) { best = cand; bestSc = Math.max(bestSc, sc); bestMom = m }
+    }
     return false
   }
   const tryPack = (order, mode, dir, bx, by) => {
@@ -801,9 +823,11 @@ function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle
     // 32 неудачных попыток, а полоса на 1–2% уже часто находится с сотой (261018_002: 1884 → ~1610 мм)
     const axisEnd = axes.length > 1 && axis === axes[0] ? Date.now() + (end - Date.now()) / 2 : end
     // (не дольше 400 неудач подряд — иначе время уходило бы всегда целиком, даже когда ниже уже не уложить)
-    for (let t = 0, fails = 0; Date.now() < axisEnd && fails < 400 && !stop(); t++) {
-      const target = Math.min(span, hi - Math.max(4, hi * 0.005))
-      if (target <= lo0) break
+    // каждая третья попытка — на той же полосе: ищем раскладку плотнее к нулю (см. moment)
+    for (let t = 0, fails = 0; !saw && Date.now() < axisEnd && fails < 400 && !stop(); t++) {
+      const same = t % 3 === 2
+      const target = same ? Math.min(span, hi) : Math.min(span, hi - Math.max(4, hi * 0.005))
+      if (!same && target <= lo0) continue
       const found = tryPack(t % 4 === 0 ? perturbOrder(base.slice().sort(sorts[t % sorts.length]), t % 8 === 0) : shuffle(base.slice()),
         modes[t % modes.length], dirs[(t >> 1) % dirs.length], axis === 'x' ? target : usableX, axis === 'y' ? target : usableY)
       if (found && consider(found)) { hi = Math.min(target, axis === 'x' ? sheetExtent(found).mx : sheetExtent(found).my); fails = 0 } else fails++
@@ -1551,7 +1575,9 @@ function compactPass(sheets, direction, usableX, usableY) {
         for (const o of orientations) {
           if (target.maxFreeW !== undefined && (o.w > target.maxFreeW || o.h > target.maxFreeH)) continue
           const makePlaced = () => o.flip
-            ? { ...piece, x: 0, y: 0, w: o.w, h: o.h, rotated: !piece.rotated, rotation: ((piece.rotation ?? (piece.rotated ? 90 : 0)) + 90) % 360,
+            // origX/origY поворачиваются вместе с деталью — раньше оставались прежними, и проверка/карта видели деталь
+            // стоящей поперёк («заходит на отступ», мнимые пересечения)
+            ? { ...piece, x: 0, y: 0, w: o.w, h: o.h, origX: piece.origY, origY: piece.origX, rotated: !piece.rotated, rotation: ((piece.rotation ?? (piece.rotated ? 90 : 0)) + 90) % 360,
                 edgeTop: piece.edgeLeft, edgeRight: piece.edgeTop, edgeBottom: piece.edgeRight, edgeLeft: piece.edgeBottom }
             : { ...piece, x: 0, y: 0 }
 
@@ -2564,4 +2590,65 @@ export function repairSmallSoft(sheets, { details, kerf, usableX, usableY, small
     }
   }
   return cur
+}
+
+// ─── Последний лист после дозаполнения вырезов ─────────────────────────────
+// Дозаполнение (fillConcavities, фигурные детали) уносит детали в вырезы — и с других листов, и в вырезы деталей
+// самого последнего листа. На последнем листе остаются дыры, а верх (обрезок) рваный. Здесь последний лист
+// перекладывается заново под наибольший цельный обрезок (как maximizeLastOffcut): деталь с вырезом и всё, что лежит
+// в её габарите (деталь в вырезе, сцепленная пара), — один жёсткий блок без поворота; отдельная прямоугольная деталь
+// поворачивается, если можно. Блоки двигаются целиком — контуры внутри не меняются, зазоры между габаритами — рез.
+// usableX/usableY — зона укладки с резом (как внутри runNesting). Возвращает новый лист или null (не лучше).
+export function repackLastForOffcut(sheet, { direction = 'auto', usableX, usableY, budgetMs = 300 }) {
+  const placed = sheet?.placed
+  if (!placed?.length) return null
+  // блоки: детали, чьи габариты перекрываются (вложенная деталь, пара)
+  const parent = placed.map((_, i) => i)
+  const find = i => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+  for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+    const a = placed[i], b = placed[j]
+    if (a.x < b.x + b.w - 0.01 && b.x < a.x + a.w - 0.01 && a.y < b.y + b.h - 0.01 && b.y < a.y + a.h - 0.01) parent[find(i)] = find(j)
+  }
+  const groups = new Map()
+  placed.forEach((p, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(p) })
+  const blocks = [...groups.values()].map((members, bi) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const p of members) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.h) }
+    const one = members.length === 1 ? members[0] : null
+    const rotatable = !!(one && one.rotatable && !(Array.isArray(one.polygon) && one.polygon.length > 4))
+    return {
+      members, x0, y0,
+      placed: {
+        id: 'blk' + bi, detailIndex: one ? one.detailIndex : -1, x: x0, y: y0, w: x1 - x0, h: y1 - y0, rotatable,
+        origX: x1 - x0, origY: y1 - y0, rotation: 0, isSmall: members.some(p => p.isSmall), edgeOkMax: one?.edgeOkMax || 0,
+        edgeMin: Math.max(0, ...members.map(p => p.edgeMin || 0)), kf: one?.kf || 0,
+      },
+    }
+  })
+  const base = rebuildFree({ index: 0, placed: blocks.map(b => b.placed) }, usableX, usableY)
+  const settle = sh => {
+    const g = gravityRects(sh.placed, direction)
+    if (g === sh.placed || smallAtEdge([{ placed: g }], usableX, usableY) > smallAtEdge([sh], usableX, usableY)) return sh
+    return rebuildFree({ ...sh, placed: g }, usableX, usableY)
+  }
+  const modes = ['bssf', 'baf', 'blsf', 'bl', 'cp']
+  const out = maximizeLastOffcut([base], { modes, direction, usableX, usableY, settle, budgetMs })[0]
+  if (out === base || lastOffcutArea(out, direction, usableX, usableY) <= lastOffcutArea(base, direction, usableX, usableY) + Math.min(usableX, usableY)) return null
+  const byId = new Map(blocks.map(b => [b.placed.id, b]))
+  const res = []
+  for (const q of out.placed) {
+    const b = byId.get(q.id)
+    if (!b) return null
+    const turned = Math.abs(q.w - b.placed.w) > 0.01
+    if (!turned) { for (const p of b.members) res.push({ ...p, x: p.x - b.x0 + q.x, y: p.y - b.y0 + q.y }); continue }
+    const p = b.members[0]
+    res.push({
+      ...p, x: q.x, y: q.y, w: p.h, h: p.w, origX: p.origY, origY: p.origX, rotated: !p.rotated,
+      rotation: ((p.rotation ?? (p.rotated ? 90 : 0)) + 90) % 360,
+      edgeTop: p.edgeLeft, edgeRight: p.edgeTop, edgeBottom: p.edgeRight, edgeLeft: p.edgeBottom,
+      ...(Array.isArray(p.polygon) ? { polygon: [{ x: 0, y: 0 }, { x: p.origY, y: 0 }, { x: p.origY, y: p.origX }, { x: 0, y: p.origX }] } : {}),
+    })
+  }
+  if (res.length !== placed.length) return null
+  return { ...sheet, placed: res }
 }

@@ -11,11 +11,12 @@
 //
 // Обычный (не онлайн) режим тоже идёт через этот модуль: тот же поиск, но с
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
-import { runNesting, smallAtEdge, lastOffcutArea } from './nesting'
+import { runNesting, smallAtEdge, lastOffcutArea, repackLastForOffcut } from './nesting'
 import { runBeamSaw } from './beamSawNesting'
 import { readyOrderResult } from './readyOrder'
 import { needsTrueShape, roughShapePolygons, placedRotation, buildHybridPlan } from './trueShapeNesting'
 import { fillConcavities } from './fillConcavities'
+import { gravityPolygons } from './gravity'
 import { validateNesting } from './validateNesting'
 
 const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажатия «Стоп»
@@ -57,12 +58,38 @@ let lastFillAt = 0
 function withFilled(res, params, final = true) {
   try {
     if (!res?.sheets?.length || (params.cuttingMethod || 'nesting') === 'guillotine') return res
-    if (!final) { const now = Date.now(); if (now - lastFillAt < 1000) return res; lastFillAt = now }
+    // промежуточный показ: на небольших заказах — каждый раз (иначе на экране то с пустыми вырезами, то без),
+    // на больших — не чаще раза в секунду
+    const small = params.details.reduce((t, d) => t + (Number(d.qty) || 0), 0) <= 300
+    if (!final && !small) { const now = Date.now(); if (now - lastFillAt < 1000) return res; lastFillAt = now }
     const usableX = res.usableX ?? (params.sheetW - params.marginL - params.marginR)
     const usableY = res.usableY ?? (params.sheetL - params.marginT - params.marginB)
     const kerf = params.kerf || 0
-    const sheets = fillConcavities({ sheets: res.sheets, details: params.details, kerf, usableX, usableY })
+    let sheets = fillConcavities({ sheets: res.sheets, details: params.details, kerf, usableX, usableY })
     if (!sheets) return res
+    // Детали ушли в вырезы — на листах, откуда их забрали, остались дыры. Стягиваем такие листы к нулю (по настоящим
+    // контурам, зазор — рез; порядок осей — по направлению укладки), если мелких у края от этого не больше
+    // (261018_002 авто: на последнем листе после дозаполнения висели детали над пустотой)
+    const idsOf = sh => sh.placed.map(p => p.id).join(',')
+    const before = new Set(res.sheets.map(idsOf))
+    sheets = sheets.map(sh => {
+      if (sh.stock === 'offcut' || before.has(idsOf(sh))) return sh
+      const ux = sh.usableX ?? usableX, uy = sh.usableY ?? usableY
+      const placed = gravityPolygons(sh.placed, params.direction || 'auto', kerf)
+      if (placed === sh.placed) return sh
+      if (smallAtEdge([{ placed }], ux, uy, true) > smallAtEdge([sh], ux, uy, true)) return sh
+      return { ...sh, placed }
+    })
+    // Последний лист потерял детали — перекладываем его под наибольший цельный обрезок (блоками: деталь с вырезом
+    // вместе с тем, что в нём лежит), иначе дыры и рваный верх остаются (261018_002 вдоль X: дыра на месте 373×310)
+    const li = sheets.length - 1, lastSh = sheets[li]
+    if (lastSh && lastSh.stock !== 'offcut' && !before.has(idsOf(lastSh)) && (params.cuttingMethod || 'nesting') === 'nesting') {
+      const ux = (lastSh.usableX ?? usableX) + kerf, uy = (lastSh.usableY ?? usableY) + kerf
+      const rp = repackLastForOffcut(lastSh, { direction: params.direction || 'auto', usableX: ux, usableY: uy, budgetMs: final ? 400 : 150 })
+      if (rp && smallAtEdge([rp], ux - kerf, uy - kerf, true) <= smallAtEdge([lastSh], ux - kerf, uy - kerf, true)) {
+        sheets = sheets.slice(); sheets[li] = rp
+      }
+    }
     if (liveBetter(liveScore(res.sheets, usableX, usableY), liveScore(sheets, usableX, usableY))) return res
     if (final) {
       const chk = sh => validateNesting({ sheets: sh, details: params.details, usableX, usableY, kerf }).errors.length
