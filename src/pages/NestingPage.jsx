@@ -1338,6 +1338,8 @@ const prodVal = (pr, col, order) => (order?.material_kind === 'hdf' && pr['hdf_'
 // Что требует производство для этого раскроя: у пильного центра β — его собственные пропил и обрезка листа
 const BEAM_COL = { kerf_width: 'kerf', margin_left: 'trimLeft', margin_right: 'trimRight', margin_top: 'trimTop', margin_bottom: 'trimBottom' }
 const prodNeed = (pr, col, order, result) => (result?.beamSaw ? beamSettings(pr.beam_saw_settings)[BEAM_COL[col]] : prodVal(pr, col, order))
+// Рез и отступы, которые подставляются в поля листа: выбран пильный центр β — его настройки, иначе «Параметры станка»
+const machineVal = (pr, col, order) => (order?.beam_saw && BEAM_COL[col] ? beamSettings(pr.beam_saw_settings)[BEAM_COL[col]] : prodVal(pr, col, order))
 const SHEET_FIELDS = [
   ['L', 'sheet_length'], ['W', 'sheet_width'], ['kerf', 'kerf_width'],
   ['ml', 'margin_left'], ['mr', 'margin_right'], ['mt', 'margin_top'], ['mb', 'margin_bottom'],
@@ -1640,6 +1642,18 @@ export default function NestingPage() {
   if (ownFor !== id) { setOwnFor(id); setNoProdOkState(readOwnParams(id)) }
   const runAfterRef = useRef(null)                       // какой раскрой запустить, когда производство выбрано
   const [prodsReady, setProdsReady] = useState(false)    // список производств загружен (и последнее выбранное подставлено)
+  // Сменили станок — в поля листа подставляются рез и отступы этого станка выбранного производства
+  // (фрезер / пила — «Параметры станка», пильный центр β — настройки пильного центра)
+  function setMachine(method, beam) {
+    setCuttingMethod(method); setBeamSaw(beam)
+    saveSmallPartsSettings({ cutting_method: method })
+    if (beam !== !!order.beam_saw) supabase.from('orders').update({ beam_saw: beam }).eq('id', id).then(({ error }) => { if (!error) setOrder(o => (o ? { ...o, beam_saw: beam } : o)) })   // база ещё без migration_beta.sql — выбор живёт до перезагрузки
+    const pr = order.production_id ? productions.find(x => x.id === order.production_id) : null
+    if (!pr) return
+    const o2 = { ...order, beam_saw: beam }, patch = {}
+    SHEET_FIELDS.forEach(([k, col]) => { const v = machineVal(pr, col, o2); if (PROD_LOCKED.includes(k) && v != null && Number(v) !== Number(order[col])) patch[col] = Number(v) })
+    if (Object.keys(patch).length) saveOrderPatch(patch, false)
+  }
   // Производство указало, на чём режет (Услуги), а выбран способ, которого у него нет, — переключаемся на тот, что есть
   // (ЧПУ → пила → пильный центр β). Параметры подставляются по способу: ЧПУ и пила — «Параметры станка», пильный центр — свои.
   useEffect(() => {
@@ -1652,9 +1666,7 @@ export default function NestingPage() {
     const next = ['nesting', 'guillotine', 'beamsaw'].find(k => m[k] && (k !== 'beamsaw' || betaBeam) && !(k === 'nesting' && order.material_kind === 'hdf'))
     if (!next) return
     const beam = next === 'beamsaw', method = beam ? 'guillotine' : next
-    Promise.resolve().then(() => { setCuttingMethod(method); setBeamSaw(beam) })
-    saveSmallPartsSettings({ cutting_method: method })
-    if (beam !== !!order.beam_saw) supabase.from('orders').update({ beam_saw: beam }).eq('id', id).then(({ error }) => { if (!error) setOrder(o => (o ? { ...o, beam_saw: beam } : o)) })
+    Promise.resolve().then(() => setMachine(method, beam))
   }, [prodsReady, order?.production_id, productions, betaBeam])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedOnOpenRef = useRef(false)
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
@@ -1908,7 +1920,7 @@ export default function NestingPage() {
     const pr = o?.production_id ? list.find(x => x.id === o.production_id) : null
     if (pr) {
       const patch = {}
-      SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(pr, col, o); if (PROD_LOCKED.includes(k) && v != null && Number(v) !== Number(o[col])) patch[col] = Number(v) })
+      SHEET_FIELDS.forEach(([k, col]) => { const v = machineVal(pr, col, o); if (PROD_LOCKED.includes(k) && v != null && Number(v) !== Number(o[col])) patch[col] = Number(v) })
       if (Object.keys(patch).length) await saveOrderPatch(patch, false)
       return
     }
@@ -1919,7 +1931,7 @@ export default function NestingPage() {
       ? list.find(x => x.id === last && (x.status ?? 'approved') === 'approved') : null
     if (lp) {
       const patch = { production_id: lp.id }
-      SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(lp, col, o); if (PROD_LOCKED.includes(k) && v != null) patch[col] = Number(v) })
+      SHEET_FIELDS.forEach(([k, col]) => { const v = machineVal(lp, col, o); if (PROD_LOCKED.includes(k) && v != null) patch[col] = Number(v) })
       await saveOrderPatch(patch, false)
     }
   }
@@ -1966,7 +1978,7 @@ export default function NestingPage() {
     setNoProdOk(!pr)                                                 // «не выбрано» — раскрой идёт на своих резе и отступах
     if (!pr) { saveOrderPatch({ production_id: null }); return }
     const patch = { production_id: pr.id }
-    SHEET_FIELDS.forEach(([k, col]) => { const v = prodVal(pr, col, order); if (PROD_LOCKED.includes(k) && v != null) patch[col] = Number(v) }) // формат листа не трогаем
+    SHEET_FIELDS.forEach(([k, col]) => { const v = machineVal(pr, col, order); if (PROD_LOCKED.includes(k) && v != null) patch[col] = Number(v) }) // формат листа не трогаем
     saveOrderPatch(patch)
   }
   function commitOffcuts(form = offForm) {
@@ -3650,9 +3662,7 @@ export default function NestingPage() {
             if (notOffered) { window.alert(`Производство «${prc.name}» не режет на этом станке (${label.replace(' β', '')}). Выберите другой способ или другое производство.`); return }
             if (off) return
             const beam = val === 'beamsaw', method = beam ? 'guillotine' : val
-            setCuttingMethod(method); setBeamSaw(beam)
-            saveSmallPartsSettings({ cutting_method: method })
-            if (beam !== !!order.beam_saw) supabase.from('orders').update({ beam_saw: beam }).eq('id', id).then(({ error }) => { if (!error) setOrder(o => (o ? { ...o, beam_saw: beam } : o)) })   // база ещё без migration_beta.sql — выбор живёт до перезагрузки
+            setMachine(method, beam)
           }}
             title={notOffered ? `Производство «${prc.name}» так не режет` : off ? 'Материал заказа — ХДФ / ДВП: он режется только на пиле' : val === 'beamsaw' ? 'Бета-тест: раскрой под пильный центр — полосы и сквозные резы' : val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
             style={{ flex: 1, padding: '6px 4px', borderRadius: 'var(--radius)', textAlign: 'center',
@@ -3667,7 +3677,7 @@ export default function NestingPage() {
       </div>
       {beamSaw && (
         <p style={{ fontSize: 11, color: 'var(--blue)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
-          β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Направление — как выбрано в конфигурации («авто» — как у производства); пропил, обрезка листа и остальные правила — свои, из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); const bs = beamSettings(pr?.beam_saw_settings); return <>{pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)'}: <b>рез {bs.kerf} мм, отступы ←{bs.trimLeft} →{bs.trimRight} ↑{bs.trimTop} ↓{bs.trimBottom}</b> (параметры листа выше для пильного центра не используются)</> })()}.
+          β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Направление — как выбрано в конфигурации («авто» — как у производства); пропил, обрезка листа и остальные правила — свои, из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); const bs = beamSettings(pr?.beam_saw_settings); return <>{pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)'}: <b>рез {bs.kerf} мм, отступы ←{bs.trimLeft} →{bs.trimRight} ↑{bs.trimTop} ↓{bs.trimBottom}</b> {order.production_id ? '— подставлены в рез и отступы выше' : '(рез и отступы выше для пильного центра не используются)'}</> })()}.
           {!isMaster && (
             <button type="button" onClick={() => setSendJob({
               title: 'Замечание по пильному центру β', fileName: `beamsaw_${orderFileName(order)}.json`, orderId: id,
