@@ -427,7 +427,7 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
       // направление: в начале траектории «наружу» — от второй точки к первой; для продления нужен ход наружу
       const ext0 = extOf(path[0], path[1]), ext1 = extOf(path[k], path[k - 1])
       // края полосы — настоящими дугами (одна строка XML на дугу, станок идёт быстрее и ровнее); не вышло — ломаной
-      let bandEls = null
+      let bandEls
       try { bandEls = bandElements(path, lo, hi, ext0, ext1) } catch { bandEls = null }
       let els = bandEls ? elsToMachine(bandEls, fr) : []
       if (els.length < 3) {
