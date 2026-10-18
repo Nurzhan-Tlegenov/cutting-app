@@ -11,7 +11,7 @@
 //
 // Обычный (не онлайн) режим тоже идёт через этот модуль: тот же поиск, но с
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
-import { runNesting, smallAtEdge, lastOffcutArea, repackLastForOffcut } from './nesting'
+import { runNesting, smallAtEdge, lastOffcutArea, repackLastForOffcut, sweepLast } from './nesting'
 import { runBeamSaw } from './beamSawNesting'
 import { readyOrderResult } from './readyOrder'
 import { needsTrueShape, roughShapePolygons, placedRotation, buildHybridPlan } from './trueShapeNesting'
@@ -56,6 +56,41 @@ const ROUND_SECONDS = [3, 6, 10, 15, 20, 30]
 // final — итог (дозаполняем всегда и проверяем раскладку); промежуточные улучшения — не чаще раза в секунду,
 // без тяжёлой проверки: геометрия дозаполнения точная, а проверка всего заказа на каждом шаге подвешивала телефон
 let lastFillAt = 0
+// Закономерный «съём» последнего листа по НАСТОЯЩИМ деталям (после развёртки гибрида): каждая деталь — прямоугольник
+// своего габарита (контур внутри, зазор — рез), сцепленные пары разбираются. Внутри гибридного поиска пара — один
+// жёсткий блок, и там съём часто не проходит, а по отдельным деталям — проходит (261010_Timur_k1: 5 из 10 итогов с 12
+// листами перекладываются в 11 за <1 с). Поворот — как разрешено у детали; контур поворачивается вместе с ней.
+// См. sweepLast в nesting.js
+const SWEEP_MODES = ['bssf', 'baf', 'blsf', 'bl', 'cp', 'g-bssf', 'g-baf', 'g-blsf']
+function sweepExpanded(sheets, params, usableX, usableY, kerf, budgetMs) {
+  if ((params.cuttingMethod || 'nesting') !== 'nesting' || !sheets || sheets.length < 2) return sheets
+  if (sheets.some(sh => sh.stock === 'offcut')) return sheets
+  const byId = new Map()
+  const isRectPoly = p => {
+    if (!Array.isArray(p.polygon) || p.polygon.length < 3) return true
+    if (p.polygon.length !== 4) return false
+    const xs = new Set(p.polygon.map(q => Math.round(q.x * 10))), ys = new Set(p.polygon.map(q => Math.round(q.y * 10)))
+    return xs.size === 2 && ys.size === 2
+  }
+  const prep = sheets.map((sh, si) => ({ ...sh, placed: sh.placed.map((p, i) => {
+    const id = `s${si}_${i}`
+    byId.set(id, p)
+    const d = params.details[p.detailIndex]
+    return { ...p, id, rotatable: !!d?.rotatable, kf: kerf }
+  }) }))
+  const out = sweepLast(prep, SWEEP_MODES, params.direction || 'auto', usableX + kerf, usableY + kerf, budgetMs)
+  if (out === prep) return sheets
+  return out.map(sh => ({ ...sh, placed: sh.placed.map(q => {
+    const o = byId.get(q.id)
+    if (!o) return q
+    const turned = !!q.rotated   // поворот при укладке — относительно исходного положения детали
+    const res = { ...o, x: q.x, y: q.y, w: q.w, h: q.h, origX: q.origX, origY: q.origY, rotated: turned ? !o.rotated : o.rotated, rotation: q.rotation,
+      edgeTop: q.edgeTop, edgeRight: q.edgeRight, edgeBottom: q.edgeBottom, edgeLeft: q.edgeLeft }
+    // контур поворачивается на 90° вместе с деталью (та же формула, что rotate90 в trueShapeNesting: [y, w − x])
+    if (turned && Array.isArray(o.polygon)) res.polygon = isRectPoly(o) ? [{ x: 0, y: 0 }, { x: q.origX, y: 0 }, { x: q.origX, y: q.origY }, { x: 0, y: q.origY }] : o.polygon.map(v => ({ x: v.y, y: o.origX - v.x }))
+    return res
+  }) }))
+}
 function withFilled(res, params, final = true) {
   try {
     if (!res?.sheets?.length || (params.cuttingMethod || 'nesting') === 'guillotine') return res
@@ -67,7 +102,16 @@ function withFilled(res, params, final = true) {
     const usableY = res.usableY ?? (params.sheetL - params.marginT - params.marginB)
     const kerf = params.kerf || 0
     let sheets = fillConcavities({ sheets: res.sheets, details: params.details, kerf, usableX, usableY })
-    if (!sheets) return res
+    if (!sheets) {
+      // вырезов не дозаполнили — но закономерный съём последнего листа по настоящим деталям всё равно пробуем
+      const swept = sweepExpanded(res.sheets, params, usableX, usableY, kerf, final ? 1500 : 0)
+      if (swept === res.sheets) return res
+      if (final) {
+        const chk = sh => validateNesting({ sheets: sh, details: params.details, usableX, usableY, kerf }).errors.length
+        if (chk(swept) > chk(res.sheets)) return res
+      }
+      return { ...res, sheets: swept, filled: true, rawSheets: res.rawSheets || res.sheets }
+    }
     // Детали ушли в вырезы — на листах, откуда их забрали, остались дыры. Стягиваем такие листы к нулю (по настоящим
     // контурам, зазор — рез; порядок осей — по направлению укладки), если мелких у края от этого не больше
     // (261018_002 авто: на последнем листе после дозаполнения висели детали над пустотой)
@@ -91,6 +135,7 @@ function withFilled(res, params, final = true) {
         sheets = sheets.slice(); sheets[li] = rp
       }
     }
+    sheets = sweepExpanded(sheets, params, usableX, usableY, kerf, final ? 1500 : 0)
     if (liveBetter(liveScore(res.sheets, usableX, usableY), liveScore(sheets, usableX, usableY))) return res
     if (final) {
       const chk = sh => validateNesting({ sheets: sh, details: params.details, usableX, usableY, kerf }).errors.length
@@ -197,7 +242,16 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
         onProgress({ ...out, iter, genome, hybrid: true, ...(seeded ? { seeded } : {}) })
       } : null,
     })
-    if (lastRaw && res.sheets === lastRaw) return { ...lastOut, hybrid: true }
+    if (lastRaw && res.sheets === lastRaw) {
+      // «Стоп»: показанное — итог; плюс закономерный съём последнего листа по настоящим деталям (≤1,5 с)
+      const kerf = Number(params.kerf) || 0
+      const sw = sweepExpanded(lastOut.sheets, params, meta.usableX, meta.usableY, kerf, 1500)
+      if (sw !== lastOut.sheets) {
+        const chk = sh => validateNesting({ sheets: sh, details: params.details, usableX: meta.usableX, usableY: meta.usableY, kerf }).errors.length
+        if (chk(sw) <= chk(lastOut.sheets)) return { ...lastOut, sheets: sw, filled: true, rawSheets: lastOut.rawSheets || lastRaw, hybrid: true }
+      }
+      return { ...lastOut, hybrid: true }
+    }
     return { ...withFilled(plan.expand(res), params), hybrid: true }
   } catch (e) {
     console.warn('Гибрид не удался:', e)

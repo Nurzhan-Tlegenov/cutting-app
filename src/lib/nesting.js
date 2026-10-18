@@ -235,6 +235,21 @@ export async function runNesting({
         out[n] = { ...(lastOffcutArea(keep, direction, usableX, usableY) >= lastOffcutArea(lastKeep, direction, usableX, usableY) - 1 ? keep : lastKeep), index: cur.index }
       }
     }
+    // Детали последнего листа — в свободные места предыдущих, по раскладке КАК ОНА ПОКАЗАНА (свободные места
+    // заново): доводка (узкие — от края, стяжка, полосы) двигает детали и открывает щели, которых в раскладке поиска
+    // не было. 261010_Timur_k1_history_1: на 11-м листе справа от детали 100×744 была щель 137×755, а на 12-м лежала
+    // одна деталь 83×541 — поиск её не видел, пользователь переложил вручную. Это закономерный, не случайный шаг:
+    // если деталь входит — она переносится, число листов уменьшается. Перенос может открыть новые щели — ещё круг
+    if (cuttingMethod !== 'guillotine' && out.length >= 2 && (b.leftovers ?? true)) {
+      for (let pass = 0; pass < 3 && out.length >= 2; pass++) {
+        const moved = insertLeftovers(out, direction, usableX, usableY, scoringModes.includes('baf') ? 'baf' : scoringModes[0], true)
+        if (moved === out) break
+        out = gravityAll(moved)
+      }
+      // полный перебор «лист + остаток» (и пары листов, если есть время) — см. sweepLast
+      const swept = sweepLast(out, scoringModes, direction, usableX, usableY, b.sweepMs || 0, stop)
+      if (swept !== out) out = gravityAll(swept)
+    }
     // Страховка: признаки «мелкая» и её пороги — заново из исходных деталей (по id),
     // чтобы ни один шаг укладки не мог их потерять (на них держатся проверка и подсветка)
     return out.map(sh => ({
@@ -327,8 +342,8 @@ export async function runNesting({
   // и «узкие — от края»), показ не чаще раза в секунду; полная — только на застое поиска (5 с) и всего не больше
   // POLISH_SHARE времени. Поиск (меньше листов) — главнее
   const POLISH_SHARE = 0.08
-  const showQuick = () => ({ maxMs: 80, composeMs: 0, relayout: 0 })
-  const showDeep = n => ({ maxMs: 800, composeMs: 1500, relayout: Math.max(40, Math.min(300, Math.round(900 / n))), stoppable: true })
+  const showQuick = () => ({ maxMs: 80, composeMs: 0, relayout: 0, sweepMs: 0 })
+  const showDeep = n => ({ maxMs: 800, composeMs: 1500, relayout: Math.max(40, Math.min(300, Math.round(900 / n))), stoppable: true, sweepMs: 2000 })
   let shown = null, reported = null
   let polishMs = 0
   const timedFinish = (sheetsIn, b) => { const t = Date.now(); try { return finishLayout(sheetsIn, b) } finally { polishMs += Date.now() - t } }
@@ -626,10 +641,19 @@ export async function runNesting({
   maybeStats(true)
   // «Стоп» в онлайн-раскрое: итог — ровно та раскладка, что была на экране (она уже доведена finishLayout).
   // Раньше после «Стоп» шла ещё одна доводка и пользователь получал не то, на чём остановил
-  if (exactShow && stopNow() && reported) return { sheets: reported, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+  if (exactShow && stopNow() && reported) {
+    // …кроме закономерного «съёма» последнего листа (sweepLast, ≤1,5 с): на экране он мог ещё не отработать,
+    // а лист меньше — это всегда лучше того, что на экране
+    let sheets = reported
+    if (cuttingMethod !== 'guillotine' && sheets.length >= 2) {
+      const swept = sweepLast(sheets, scoringModes, direction, usableX, usableY, 1500)
+      if (swept !== sheets) sheets = finishLayout(gravityAll(swept), { maxMs: 300, composeMs: 0, relayout: 0, leftovers: false })
+    }
+    return { sheets, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+  }
   if (!probe) best.sheets = await intensifyCompaction(best.sheets, direction, usableX, usableY)
 
-  best.sheets = finishLayout(best.sheets, finishBudget || { maxMs: BIG_ORDER ? 500 : 800, composeMs: BIG_ORDER ? 1000 : 1500, relayout: BIG_ORDER ? 40 : 300 })
+  best.sheets = finishLayout(best.sheets, finishBudget || { maxMs: BIG_ORDER ? 500 : 800, composeMs: BIG_ORDER ? 1000 : 1500, relayout: BIG_ORDER ? 40 : 300, sweepMs: BIG_ORDER ? 1500 : 3000 })
 
   return { sheets: best.sheets, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }
@@ -914,8 +938,68 @@ function composeLastForOffcut(sheets, { modes, direction, usableX, usableY, sett
   return cur
 }
 
-function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf') {
+// ─── Закономерный «съём» последнего листа ────────────────────────────────────
+// Когда на последнем листе остались 1–3 детали, перебор не случайный, а полный: каждый заполненный лист вместе с
+// остатком перекладывается заново всеми сортировками × всеми эвристиками места (4 × 8 = 32 укладки на лист).
+// Вошло в один лист (мелких у края не больше) — лист снят. budgetMs > 0: затем то же для пар листов (две + остаток →
+// два листа), пока есть время. Результат не зависит от случая: один и тот же порядок перебора при каждом запуске
+const LEFTOVER_SWEEP_MAX = 3
+const SWEEP_SORTS = [
+  (a, b) => (b.pw * b.ph) - (a.pw * a.ph),
+  (a, b) => (b.pw + b.ph) - (a.pw + a.ph),
+  (a, b) => Math.max(b.pw, b.ph) - Math.max(a.pw, a.ph),
+  (a, b) => Math.min(a.pw, a.ph) - Math.min(b.pw, b.ph),
+  (a, b) => b.ph - a.ph || b.pw - a.pw,                    // высокие первыми
+  (a, b) => b.pw - a.pw || b.ph - a.ph,                    // широкие первыми
+]
+export function sweepLast(sheets, modes, direction, usableX, usableY, budgetMs = 0, stop = () => false) {
+  const n = sheets.length - 1
+  if (n < 1) return sheets
+  const last = sheets[n]
+  // остаток: до 3 деталей, или до 8, если по площади это меньше 15% листа
+  if (!last.placed.length || (last.placed.length > LEFTOVER_SWEEP_MAX && (last.placed.length > 8 || sheetArea(last) > 0.15 * usableX * usableY))) return sheets
+  const rest = last.placed.map(placedToPiece)
+  const end = Date.now() + budgetMs
+  const tryGroup = idx => {
+    const old = idx.map(j => sheets[j]).concat([last])
+    const pool = idx.flatMap(j => sheets[j].placed).map(placedToPiece).concat(rest)
+    const e0 = smallAtEdge(old, usableX, usableY)
+    for (const sort of SWEEP_SORTS) {
+      const order = pool.slice().sort(sort)
+      for (const mode of modes) {
+        const res = packAttempt(order, mode, direction, usableX, usableY)
+        if (res.length !== idx.length) continue
+        if (smallAtEdge(res, usableX, usableY) > e0) continue
+        const out = sheets.slice()
+        idx.forEach((j, t) => { out[j] = rebuildFree({ ...res[t], index: sheets[j].index }, usableX, usableY) })
+        out.splice(n, 1)
+        return out
+      }
+    }
+    return null
+  }
+  for (let j = 0; j < n; j++) { if (stop()) return sheets; const r = tryGroup([j]); if (r) return r }
+  if (budgetMs <= 0) return sheets
+  // пары, затем тройки листов — от самых свободных (на 12 листах: 55 пар ≈ 0,15 с, 165 троек ≈ 0,5 с)
+  const order = [...Array(n).keys()].sort((a, b) => sheetArea(sheets[a]) - sheetArea(sheets[b]))
+  for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) {
+    if (Date.now() > end || stop()) return sheets
+    const r = tryGroup([order[a], order[b]])
+    if (r) return r
+  }
+  for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) for (let c = b + 1; c < n; c++) {
+    if (Date.now() > end || stop()) return sheets
+    const r = tryGroup([order[a], order[b], order[c]])
+    if (r) return r
+  }
+  return sheets
+}
+
+// fresh — свободные места каждого листа строятся заново по его деталям (раскладка после доводки: переукладка
+// «узкие — от края», стяжка и перестановка полос двигают детали, а freeRects листа остаются от укладки)
+function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf', fresh = false) {
   if (sheets.length < 2) return sheets
+  if (fresh) sheets = sheets.map(sh => rebuildFree(sh, usableX, usableY))
   const n = sheets.length - 1
   const last = sheets[n]
   const movers = last.placed.slice().sort((a, b) => b.w * b.h - a.w * a.h)

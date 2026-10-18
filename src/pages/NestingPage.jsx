@@ -1520,7 +1520,8 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     stop: () => {
       stopFlag = true
       workers.forEach(w => w.postMessage({ type: 'stop' }))
-      if (exactStop && best) { finish(best); return }
+      // (фрезер: итог потока — ровно показанное либо показанное минус лист, если закономерный «съём» последнего листа
+      // (sweepLast, ≤1,5 с) успел; поэтому итогов потоков ждём — до STOP_GRACE_MS)
       setTimeout(() => {
         if (finished || cancelled) return
         // Итоги не успели — берём лучшее из того, что уже есть
