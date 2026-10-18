@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState, useRef } from 'react'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
-import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
+import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -84,18 +84,20 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
     if (foreign) { const p = { ...post, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: patch.name || post.name + ' (мой)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }); return }
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
   }
-  const drill = isDrill6(post)
-  const routers = cnc.posts.filter(p => !isDrill6(p))
+  const drill = isDrill6(post), saw = isBeamSaw(post)
+  const routers = cnc.posts.filter(isRouterPost)
   const router = routerPost(cnc)
   const setKind = kind => {
-    if (kind === post.kind || (kind === 'drill6') === drill) return
-    if (!drill && routers.length < 2) { window.alert('Это единственный раскроечный станок. Чтобы добавить присадочный: «Выбрать ▾» → «+ Присадочный 6-стор.».'); return }
-    set(kind === 'drill6' ? { kind, ext: 'XML', nameTpl: '{NOMER}_{ZAKAZ}' } : { kind: 'router', ext: 'nc', nameTpl: NAME_TPL_DEFAULT })
+    if (kind === (post.kind || 'router')) return
+    if (isRouterPost(post) && routers.length < 2) { window.alert('Это единственный раскроечный станок. Чтобы добавить другой: «Выбрать ▾» → «+ Присадочный 6-стор.» или «+ Пильный центр».'); return }
+    if (saw && cnc.posts.filter(isBeamSaw).length < 2) { window.alert('Это единственный пильный центр. Чтобы добавить другой станок: «Выбрать ▾» → «+ Раскроечный станок» или «+ Присадочный 6-стор.».'); return }
+    set(kind === 'drill6' ? { kind, ext: 'XML', nameTpl: '{NOMER}_{ZAKAZ}' } : kind === 'beamsaw' ? { kind, ext: 'xml', nameTpl: '{ZAKAZ}_{MAT}' } : { kind: 'router', ext: 'nc', nameTpl: NAME_TPL_DEFAULT })
   }
   const copy = () => { const p = { ...post, id: newId(), shared: false, forAll: false, ownerId: undefined, name: post.name + ' (копия)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }) }
   const del = () => {
     if (foreign || cnc.posts.length < 2) return
-    if (!isDrill6(post) && !cnc.posts.some(p => p.id !== post.id && !isDrill6(p))) { window.alert('Это единственный раскроечный станок — его удалить нельзя.'); return }
+    if (isRouterPost(post) && !cnc.posts.some(p => p.id !== post.id && isRouterPost(p))) { window.alert('Это единственный раскроечный станок — его удалить нельзя.'); return }
+    if (saw && !cnc.posts.some(p => p.id !== post.id && isBeamSaw(p))) { window.alert('Это единственный пильный центр — его удалить нельзя (можно переименовать и настроить).'); return }
     if (!window.confirm(`Удалить постпроцессор «${post.name}»?\nЕго настройки останутся в «Мои постпроцессоры» — их можно вернуть.`)) return
     const kept = backupPost(cnc, 'удаления')           // копия настроек — в «Мои постпроцессоры»
     const posts = kept.posts.filter(p => p.id !== post.id)
@@ -108,7 +110,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         <Title>Постпроцессор</Title>
         <SaveSnapshotButton cnc={cnc} onChange={onChange} />
         <label className="label">Тип станка</label>
-        <div style={{ marginBottom: 8 }}><Seg value={drill ? 'drill6' : 'router'} options={KINDS.map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : 'Раскроечный'])} onChange={setKind} /></div>
+        <div style={{ marginBottom: 8 }}><Seg value={post.kind || 'router'} options={KINDS.map(([k]) => [k, k === 'drill6' ? 'Присадочный 6-стор.' : k === 'beamsaw' ? 'Пильный центр' : 'Раскроечный'])} onChange={setKind} /></div>
         <label className="label">Название</label>
         <input type="text" key={post.id} defaultValue={post.name} onBlur={e => { const v = e.target.value.trim(); if (v && v !== post.name) set({ name: v }) }} />
         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
@@ -129,7 +131,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           «Создать программы» в заказе выпускает оба, «Сохранить все файлы» — одним архивом, у каждого своя папка */}
       {(() => {
         const sec = secondPost(cnc)
-        const others = cnc.posts.filter(p => p.id !== router?.id)
+        const others = cnc.posts.filter(p => p.id !== router?.id && !isBeamSaw(p))
         const sel = { width: '100%', padding: '7px 8px', fontSize: 14 }
         return (
           <div className="card" style={{ marginBottom: 10 }}>
@@ -155,7 +157,8 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         )
       })()}
       {drill && <Drill6Basic post={post} set={set} router={router} />}
-      {!drill && <>
+      {saw && <BeamSawPostBasic post={post} set={set} />}
+      {!drill && !saw && <>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Присадочная голова</Title>
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
@@ -289,6 +292,41 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
   )
 }
 
+// ─── Пильный центр (XML для KDT) ─────────────────────────────────────────────
+// Одна программа на материал: дерево резов по всем листам раскроя «Пильный центр β». Выпускается в окне ЧПУ заказа,
+// когда раскрой посчитан под пильный центр. Бирки — галочкой там же (у пилы нет маркировочного стола).
+const BEAM_NAME_DEFAULT = '{ZAKAZ}_{MAT}'
+const BEAM_DIR_DEFAULT = '{ZAKAZ}/{MAT}'
+function BeamSawPostBasic({ post, set }) {
+  const ex = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
+  const dirPreview = v => String(v || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, ex)).join(' / ')
+  const dir = post.dirPath ?? BEAM_DIR_DEFAULT
+  return (
+    <div className="card" style={{ marginBottom: 10 }}>
+      <Title>Пильный центр · программа XML</Title>
+      <Hint>Программа для пильного центра KDT: дерево резов по всем листам материала — полосы, поперечные резы, детали, деловые обрезки, таблица деталей для бирок. Выпускается в окне ЧПУ заказа, если раскрой посчитан как «Пильный центр β».</Hint>
+      <div style={{ marginTop: 10 }}>
+        <label className="label">Название программы</label>
+        <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || BEAM_NAME_DEFAULT}
+          onBlur={e => { const v = e.target.value.trim() || BEAM_NAME_DEFAULT; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
+          {NAME_PARTS.filter(([code]) => code !== '{N}').map(([code, label]) => (
+            <button key={code} type="button" onClick={() => { const cur = (post.nameTpl || BEAM_NAME_DEFAULT).replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
+              style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
+          ))}
+          <button type="button" onClick={() => set({ nameTpl: BEAM_NAME_DEFAULT })} style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ как было</button>
+        </div>
+        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null })}.{post.ext || 'xml'}</b> — латиницей, один файл на материал.</Hint>
+      </div>
+      <div style={{ marginTop: 10 }}>
+        <label className="label">📁 Папки для программы пилы</label>
+        <DirPathEditor value={dir} def={BEAM_DIR_DEFAULT} preview={dirPreview(dir)} onChange={x => set({ dirPath: x })} />
+        <Hint>Бирки (если отмечено «Бирки вместе с программами») ложатся рядом — в папку с тем же названием и словом «Etiketki» в конце.</Hint>
+      </div>
+    </div>
+  )
+}
+
 // ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
 function Drill6Basic({ post, set, router }) {
   const { user } = useAuth()
@@ -380,8 +418,8 @@ export function SaveSnapshotButton({ cnc, onChange }) {
 // Вкладка «Мои постпроцессоры»: сохранённые настройки — применить к открытому постпроцессору, добавить новым, переименовать, удалить
 export function CncSaved({ cnc, onChange }) {
   const post = activePost(cnc)
-  const kindOf = s => (s.kind === 'drill6' ? 'Присадочный 6-стор.' : 'Раскроечный')
-  const same = s => (isDrill6(post) ? 'drill6' : 'router') === s.kind && !post.shared
+  const kindOf = s => (s.kind === 'drill6' ? 'Присадочный 6-стор.' : s.kind === 'beamsaw' ? 'Пильный центр' : 'Раскроечный')
+  const same = s => (post.kind || 'router') === (s.kind || 'router') && !post.shared
   const when = t => (t ? new Date(t).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '')
   const small = { padding: '6px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }
   const apply = (s, asNew) => {
@@ -394,7 +432,7 @@ export function CncSaved({ cnc, onChange }) {
       <Title>Мои постпроцессоры</Title>
       {!list.length ? <Hint>Пока пусто. Настройте постпроцессор и нажмите «Сохранить настройки» — вариант появится здесь.</Hint> : (
         <>
-          <Hint>{`Открыт: ${post.name} (${isDrill6(post) ? 'присадочный' : 'раскроечный'}).`}</Hint>
+          <Hint>{`Открыт: ${post.name} (${isDrill6(post) ? 'присадочный' : isBeamSaw(post) ? 'пильный центр' : 'раскроечный'}).`}</Hint>
           <Hint>«Применить» — настройки варианта станут настройками открытого постпроцессора (имя остаётся). «Новым» — добавить отдельным постпроцессором.</Hint>
           {list.map(s => (
             <div key={s.id} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
@@ -546,6 +584,12 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
         style={{ fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }} />
     </div>
   )
+  if (isBeamSaw(post)) return (
+    <div className="card">
+      <Title>Команды · {post.name}</Title>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Пильный центр читает программу в XML — команды G-кода ему не нужны. Настройки — на вкладке «Основные», правила раскроя пильного центра — в кабинете производства.</p>
+    </div>
+  )
   if (isDrill6(post)) return (
     <div className="card">
       <Title>Команды · {post.name}</Title>
@@ -578,7 +622,7 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
 export function CncTools({ cnc, onChange }) {
   const [edit, setEdit] = useState(null)       // инструмент в форме
   const tools = cnc.tools || []
-  const headPost = cnc.posts.find(p => !isDrill6(p) && p.drillHead)     // станок с присадочной головой (если есть)
+  const headPost = cnc.posts.find(p => isRouterPost(p) && p.drillHead)     // станок с присадочной головой (если есть)
   const ap = activePost(cnc)
   const ownSet = tools.length > 0 && tools.every(t => t.postId && t.postId === ap?.id)   // свои инструменты постпроцессора (см. postTools.js)
   const save = () => {

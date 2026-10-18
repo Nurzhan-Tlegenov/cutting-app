@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import SendToMaster from './SendToMaster'
 import { fileToPayload, REPORT_MAX_MB } from '../lib/messages'
-import { DEFAULT_POST, DEFAULT_DRILL6, isDrill6, activePost, routerPost, pickPost, toggleUse6, applySnapshot, removeSnapshot, renameSnapshot, sameName } from '../lib/cncSettings'
+import { DEFAULT_POST, DEFAULT_DRILL6, DEFAULT_BEAMSAW, isBeamSaw, isRouterPost, newId, isDrill6, activePost, routerPost, pickPost, toggleUse6, applySnapshot, removeSnapshot, renameSnapshot, sameName } from '../lib/cncSettings'
 
 // Выбор постпроцессора — строка сверху настроек ЧПУ: «Постпроцессор: <имя> ▾». Тап — окно снизу:
 //   • станки текущей настройки — открыть, переименовать, удалить (лишний, добавленный случайно);
@@ -50,13 +50,16 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
   }
   const openPost = id => { onChange(pickPost(cnc, id)); close() }
   const add = kind => {
-    const p = kind === 'drill6' ? { ...DEFAULT_DRILL6(), name: `Шестисторонний ${cnc.posts.filter(isDrill6).length + 1}` } : { ...DEFAULT_POST(), name: `Постпроцессор ${cnc.posts.filter(q => !isDrill6(q)).length + 1}` }
+    const p = kind === 'drill6' ? { ...DEFAULT_DRILL6(), name: `Шестисторонний ${cnc.posts.filter(isDrill6).length + 1}` }
+      : kind === 'beamsaw' ? { ...DEFAULT_BEAMSAW(), id: newId(), name: `Пильный центр ${cnc.posts.filter(isBeamSaw).length + 1}` }
+        : { ...DEFAULT_POST(), name: `Постпроцессор ${cnc.posts.filter(isRouterPost).length + 1}` }
     onChange({ ...(kind === 'drill6' ? toggleUse6(cnc, p.id, true) : cnc), posts: [...cnc.posts, p], post: p.id })
     close()
   }
   const del = p => {
     if (p.shared) { window.alert('Этот постпроцессор удалить нельзя.'); return }
-    if (!isDrill6(p) && !cnc.posts.some(q => q.id !== p.id && !isDrill6(q))) { window.alert('Это единственный раскроечный станок — его удалить нельзя.'); return }
+    if (isRouterPost(p) && !cnc.posts.some(q => q.id !== p.id && isRouterPost(q))) { window.alert('Это единственный раскроечный станок — его удалить нельзя.'); return }
+    if (isBeamSaw(p) && !cnc.posts.some(q => q.id !== p.id && isBeamSaw(q))) { window.alert('Это единственный пильный центр — его удалить нельзя (можно переименовать и настроить).'); return }
     if (!window.confirm(`Удалить постпроцессор «${p.name}»?\nЕго настройки пропадут (сохранённые в «Мои постпроцессоры» останутся).`)) return
     const posts = cnc.posts.filter(q => q.id !== p.id)
     // свои инструменты постпроцессора (срисованные с программы) уходят вместе с ним — другим станкам они не видны
@@ -68,7 +71,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
   }
   // сохранённый: к открытому станку того же типа — заменить его настройки; другого типа — добавить новым
   const applySaved = s => {
-    const same = (isDrill6(post) ? 'drill6' : 'router') === s.kind && !post.shared
+    const same = (post.kind || 'router') === (s.kind || 'router') && !post.shared
     if (same) {
       if (!window.confirm(`Применить «${s.name}» к «${post.name}»?\nТекущие настройки «${post.name}» заменятся.`)) return
       onChange(applySnapshot(cnc, s.id, false))
@@ -77,7 +80,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
   }
   // сохранённый вариант с именем станка — это «точка сохранения» самого станка: показывается у станка кнопкой ↺,
   // отдельной строкой — только варианты, для которых станка с таким именем нет
-  const kindOf = p => (isDrill6(p) ? 'drill6' : 'router')
+  const kindOf = p => p.kind || 'router'
   const snapOf = p => (cnc.saved || []).find(x => sameName(x.name, p.name) && x.kind === kindOf(p))
   const restore = (p, sn) => {
     if (!window.confirm(`Вернуть «${p.name}» к сохранённым настройкам от ${new Date(sn.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}?\nТекущие настройки этого станка заменятся.`)) return
@@ -85,7 +88,11 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
   }
   const saved = [...(cnc.saved || [])].filter(x => !cnc.posts.some(p => sameName(p.name, x.name) && kindOf(p) === x.kind)).sort((a, b) => (b.at || 0) - (a.at || 0))
 
-  const kindTag = p => <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: isDrill6(p) || p.kind === 'drill6' ? 'var(--amber-light)' : 'var(--blue-light)', color: isDrill6(p) || p.kind === 'drill6' ? 'var(--amber)' : 'var(--blue-dark)', whiteSpace: 'nowrap' }}>{isDrill6(p) || p.kind === 'drill6' ? 'присадка 6-стор.' : 'раскрой'}</span>
+  const kindTag = p => {
+    const k = p.kind || 'router'
+    const [bg, fg, txt] = k === 'drill6' ? ['var(--amber-light)', 'var(--amber)', 'присадка 6-стор.'] : k === 'beamsaw' ? ['var(--teal-light)', 'var(--teal)', 'пильный центр'] : ['var(--blue-light)', 'var(--blue-dark)', 'раскрой']
+    return <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: bg, color: fg, whiteSpace: 'nowrap' }}>{txt}</span>
+  }
   const icon = { width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 15, cursor: 'pointer', flex: '0 0 auto' }
 
   return (
@@ -139,6 +146,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
               <div style={{ display: 'flex', gap: 6, margin: '6px 0 14px' }}>
                 <button type="button" onClick={() => add('router')} style={{ flex: 1, padding: '9px 8px', borderRadius: 12, border: '1px dashed var(--blue)', background: 'transparent', color: 'var(--blue)', fontSize: 13 }}>+ Раскроечный станок</button>
                 <button type="button" onClick={() => add('drill6')} style={{ flex: 1, padding: '9px 8px', borderRadius: 12, border: '1px dashed var(--amber)', background: 'transparent', color: 'var(--amber)', fontSize: 13 }}>+ Присадочный 6-стор.</button>
+                <button type="button" onClick={() => add('beamsaw')} style={{ flex: 1, padding: '9px 8px', borderRadius: 12, border: '1px dashed var(--teal)', background: 'transparent', color: 'var(--teal)', fontSize: 13 }}>+ Пильный центр</button>
               </div>
 
               {!isMaster && (

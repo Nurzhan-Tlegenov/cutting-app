@@ -11,14 +11,15 @@ import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettin
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
-import { routerPost, drillPosts, isDrill6, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
+import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useCnc } from '../hooks/useCnc'
 import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT, drill6Layers } from '../lib/drill6Xml'
 import Drill6Ops from '../components/Drill6Ops'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf } from '../lib/gcode'
-import { getLabelTpl, buildLabelFiles, labelInfo, labelQr } from '../lib/labelMaker'
+import { getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
 import { orderClient } from '../lib/productionApi'
@@ -33,7 +34,7 @@ import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from 
 // Настройки (постпроцессор, инструменты, обработка контуров, команды) идут за аккаунтом.
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
-import { saveBeamSawXml } from '../lib/beamSawXml'
+import { saveBeamSawXml, buildBeamSawXml } from '../lib/beamSawXml'
 const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -56,6 +57,10 @@ export default function CncPage() {
   const toOrders = () => navigate(cabinet === 'production' ? '/production' : '/orders')   // «К заказам» — в список своего кабинета
   const labelTpl = useMemo(() => getLabelTpl(user), [user])
   const [labelBusy, setLabelBusy] = useState(false)
+  // «Бирки вместе с программами» — для станков без маркировочного стола: файлы бирок (как у стола) и PDF всех бирок
+  // ложатся отдельной папкой рядом с программами (имя папки программ + «_Etiketki»). Запоминается за аккаунтом.
+  const [withLabels, setWithLabelsState] = useState(() => !!getUserSettings(user).cncWithLabels)
+  const setWithLabels = on => { setWithLabelsState(on); saveUserSettings({ cncWithLabels: on }, user); setBuilt(null) }
   const [order, setOrder] = useState(null)
   const [clientName, setClientName] = useState('')   // имя заказчика — для названий программ и папки
   useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }); return () => { alive = false } }, [id])
@@ -93,7 +98,12 @@ export default function CncPage() {
   const drills = drillPosts(cnc)                     // присадочные станки, выпускающие программы вместе с ним
   // инструменты и обработка, которые видит раскроечный станок (у настроенного по чужой программе — свои, см. postTools.js)
   const rview = useMemo(() => postView({ ...cnc, post: post.id }), [cnc, post.id])
-  const r2 = secondRouter(cnc)                       // второй раскроечный станок: его G-код — вместе с основным, в свою папку
+  const r2raw = secondRouter(cnc)                    // второй раскроечный станок: его G-код — вместе с основным, в свою папку
+  // раскрой под пильный центр β: программа — XML для пилы (постпроцессор «Пильный центр»), а не G-код по листам
+  const beamMat = !!mat?.result?.beamSaw
+  const saw = sawPost(cnc)
+  const r2 = beamMat ? null : r2raw
+  const machine = beamMat && saw ? saw : post        // чем выпускаются программы этого раскроя
   const r2view = useMemo(() => (r2 ? postView({ ...cnc, post: r2.id }) : null), [cnc, r2?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   // вкладки «Инструменты» и «Обработка» — для постпроцессора, открытого в настройках
   const tview = useMemo(() => postView(cnc), [cnc])
@@ -120,8 +130,10 @@ export default function CncPage() {
   const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName })
   const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для архива, бирок, PDF
   const fileName = si => `${programName(post.nameTpl, nameCtx(si + 1))}.${post.ext || 'nc'}`
+  const beamName = () => `${programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', nameCtx(null))}.${saw?.ext || 'xml'}`
   const build = () => {
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
+    if (beamMat && saw) return buildBeam()
     const files = sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: post.id } })
@@ -138,13 +150,32 @@ export default function CncPage() {
     setBuilt({ files, drill, second }); setSaved('')
     // маркировка: файлы маркировочного стола для тех же листов (на линии сначала бирки, потом раскрой)
     const ok = files.filter(f => !f.empty)
-    if (post.labelTable && ok.length) {                  // маркировочный стол включён у постпроцессора (вкладка «Основные»)
-      setLabelBusy(true)
-      buildLabelFiles({ order, mat, base: baseName(), post, tpl: labelTpl, sheets: ok.map(f => ({ si: f.si, nc: f.name })) })
-        .then(labels => setBuilt(b => (b && b.files === files ? { ...b, labels } : b)))
-        .catch(() => {})
-        .finally(() => setLabelBusy(false))
-    }
+    makeLabels(files, ok.map(f => ({ si: f.si, nc: f.name })))
+  }
+  // Бирки к программам: у станка с маркировочным столом — файлы стола рядом с G-кодом (как было);
+  // у станка без него, если отмечено «Бирки вместе с программами», — те же файлы и PDF всех бирок, отдельной папкой
+  const makeLabels = (files, sheets) => {
+    const table = !!machine?.labelTable
+    if (!sheets.length || (!table && !withLabels)) return
+    setLabelBusy(true)
+    const m = { ...mat }
+    Promise.all([
+      buildLabelFiles({ order, mat: m, base: baseName(), post: machine, tpl: labelTpl, sheets }),
+      table ? Promise.resolve(null) : buildLabelsPdf({ order, mat: m, tpl: labelTpl }).catch(() => null),
+    ])
+      .then(([labels, pdf]) => setBuilt(b => (b && b.files === files ? { ...b, labels: pdf ? [...labels, { name: `Birki_${baseName()}.pdf`, data: pdf }] : labels, labelsOwnDir: !table } : b)))
+      .catch(() => {})
+      .finally(() => setLabelBusy(false))
+  }
+  // Пильный центр: одна программа XML на материал по выбранным листам (дерево резов), бирки — по галочке
+  const buildBeam = () => {
+    const sub = { ...mat, sheets: sel.map(si => mat.sheets[si]) }
+    let text = '', error = ''
+    try { text = buildBeamSawXml({ order, mat: sub, geoOf: sh => sheetGeo(order, mat.result, sh) }).text } catch (e) { error = String(e?.message || e) }
+    const files = [{ si: -1, beam: true, name: beamName(), text: text ? '\uFEFF' + text : '', kinds: [], opIds: [], lines: 0, warnings: error ? [`Программа пилы не собрана: ${error}`] : [], empty: !text, time: 0 }]
+    const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
+    setBuilt({ files, drill, second: null, beam: true }); setSaved('')
+    if (text) makeLabels(files, sel.map(si => ({ si, nc: files[0].name })))
   }
   // Созданные программы не теряются при выходе из заказа и приложения: запоминаем, какие листы были созданы,
   // и при возвращении создаём их заново теми же настройками (программа однозначно получается из раскроя и настроек).
@@ -204,12 +235,14 @@ export default function CncPage() {
   // второй раскроечный: по умолчанию «<заказ>_CNC_2/<материал>» — чтобы не смешаться с файлами основного станка
   const r2Def = () => `${r2?.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`
   const r2Dir = () => pathOf(r2?.dirPath ?? r2Def())
-  const routerDir = () => pathOf(post.dirPath ?? routerDef())
+  const routerDir = () => (beamMat && saw ? pathOf(saw.dirPath ?? '{ZAKAZ}/{MAT}') : pathOf(post.dirPath ?? routerDef()))
+  // папка бирок для станка без маркировочного стола: та же, что у программ, со словом «Etiketki» в конце
+  const labelsDir = () => { const d = routerDir(); return d.length ? [...d.slice(0, -1), `${d[d.length - 1]}_${folderName('Этикетки', nameCtx(null))}`] : [folderName('Этикетки', nameCtx(null))] }
   const drillDir = r => pathOf(r.post.dirPath ?? DRILL_DIR_DEFAULT)
   const setPostPath = (id, v) => change({ ...cnc, posts: cnc.posts.map(q => (q.id === id ? { ...q, dirPath: v } : q)) })
   const saveAll = () => {
     const rd = routerDir()
-    const files = [...labelFiles(), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text }))].map(f => ({ ...f, dir: rd }))
+    const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
     if (built.second) { const d2 = pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`); files.push(...built.second.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: d2 }))) }
     setSaveAsk({ files, zipName: `${baseName()}.zip` })
@@ -293,20 +326,25 @@ export default function CncPage() {
           <div className="card" data-tour="cnc-post" style={{ marginBottom: 10, padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--text-muted)' }}>
-                <div>Постпроцессор: <b style={{ color: 'var(--text)' }}>{post.name}</b></div>
-                <div>Материал: {mat.name || '—'} · {mat.thickness} мм · поле {post.fieldX}×{post.fieldY}</div>
+                {beamMat ? <>
+                  <div>Раскрой под пильный центр — постпроцессор: <b style={{ color: 'var(--text)' }}>{saw?.name || '—'}</b></div>
+                  <div>Материал: {mat.name || '—'} · {mat.thickness} мм · программа XML на все листы</div>
+                </> : <>
+                  <div>Постпроцессор: <b style={{ color: 'var(--text)' }}>{post.name}</b></div>
+                  <div>Материал: {mat.name || '—'} · {mat.thickness} мм · поле {post.fieldX}×{post.fieldY}</div>
+                </>}
               </div>
-              <button type="button" style={small} onClick={() => setTab('basic')}>Настроить</button>
+              <button type="button" style={small} onClick={() => { if (beamMat && saw) change({ ...cnc, post: saw.id }); setTab('basic') }}>Настроить</button>
             </div>
-            {/* второй постпроцессор — выбирается прямо здесь, при выпуске программ: любой из своих станков */}
-            {cnc.posts.some(p => p.id !== post.id) && (() => {
+            {/* второй постпроцессор — выбирается прямо здесь, при выпуске программ: любой из своих станков (не для пильного центра) */}
+            {!beamMat && cnc.posts.some(p => p.id !== post.id && !isBeamSaw(p)) && (() => {
               const sec = secondPost(cnc)
               return (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
                   <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Вместе с ним — второй постпроцессор:</label>
                   <select value={sec?.id || ''} onChange={e => change(setSecondPost(cnc, e.target.value))} style={{ width: '100%', padding: '6px 8px', fontSize: 13 }}>
                     <option value="">— нет —</option>
-                    {cnc.posts.filter(p => p.id !== post.id).map(p => <option key={p.id} value={p.id}>{p.name} — {isDrill6(p) ? 'шестисторонний, XML' : p.drillHead ? 'с присадочной головой, G-код' : 'раскроечный, G-код'}</option>)}
+                    {cnc.posts.filter(p => p.id !== post.id && !isBeamSaw(p)).map(p => <option key={p.id} value={p.id}>{p.name} — {isDrill6(p) ? 'шестисторонний, XML' : p.drillHead ? 'с присадочной головой, G-код' : 'раскроечный, G-код'}</option>)}
                   </select>
                   {/* что выйдет для шестистороннего станка: расширение и имя файла (= код QR бирки); папки — матрёшка, собирается здесь */}
                   {drills.map(p => {
@@ -337,7 +375,7 @@ export default function CncPage() {
             })()}
           </div>
           <SimLinksBox orderId={id} refresh={linksTick} style={{ marginBottom: 10, padding: '10px 12px' }} />
-          {pre.length > 0 && (
+          {pre.length > 0 && !beamMat && (
             <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)', background: 'var(--amber-light)', padding: '10px 12px' }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--amber)', marginBottom: 4 }}>⚠ Не назначен инструмент</div>
               {pre.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)' }}>· {w}</div>)}
@@ -402,7 +440,7 @@ export default function CncPage() {
               {warnings.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
             </div>
           )}
-          {post.labelTable && (
+          {machine?.labelTable && (
             <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10 }}>
               🏷 Вместе с G-кодом будут созданы файлы маркировочного стола (бирка {labelTpl.w}×{labelTpl.h} мм).{' '}
               <span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={() => navigate(`/orders/${id}/labels`)}>Шаблон бирки</span>
@@ -417,15 +455,35 @@ export default function CncPage() {
               <button type="button" className="btn-secondary" style={{ marginTop: 6 }} onClick={() => navigate(`/orders/${id}/nesting`)}>Открыть раскрой</button>
             </div>
           )}
-          <button data-tour="cnc-build" className="btn-primary" disabled={!sel.length || faults.length > 0} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{built ? (drills.length || r2 ? '↻ Создать программы заново' : '↻ Создать G-код заново') : r2 ? `Создать программы (${post.name} + ${r2.name})` : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
+          {/* у станка без маркировочного стола — бирки вместе с программами, отдельной папкой */}
+          {!machine?.labelTable && (
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
+              <input type="checkbox" checked={withLabels} onChange={e => setWithLabels(e.target.checked)} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
+              <span>🏷 Бирки вместе с программами
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>Файлы бирок и PDF всех бирок для печати — отдельной папкой рядом с программами: <b style={{ fontFamily: 'monospace' }}>{labelsDir().join(' / ')}</b>. <span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={e => { e.preventDefault(); navigate(`/orders/${id}/labels`) }}>Шаблон бирки</span></span>
+              </span>
+            </label>
+          )}
+          <button data-tour="cnc-build" className="btn-primary" disabled={!sel.length || faults.length > 0 || (beamMat && !saw)} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{beamMat ? (built ? '↻ Создать программу пилы заново' : `Создать программу пилы (XML${drills.length ? ' + присадка' : ''})`) : built ? (drills.length || r2 ? '↻ Создать программы заново' : '↻ Создать G-код заново') : r2 ? `Создать программы (${post.name} + ${r2.name})` : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
+          {built?.beam && built.files.map(f => (
+            <div key={f.name} className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>🪚 {saw?.name || 'Пильный центр'}</div>
+              <div style={{ fontSize: 11, color: f.empty ? 'var(--danger)' : 'var(--text-hint)', marginBottom: 6 }}>
+                {f.empty ? f.warnings.join(' ') : `Программа XML: листов ${sel.length}, файл ${f.name}. Папка: ${routerDir().join(' / ') || '—'}.`}
+              </div>
+              {!f.empty && <button type="button" onClick={() => { download(f.name, f.text, 'application/xml'); mark('files') }} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ {f.name}</button>}
+            </div>
+          ))}
           {labelBusy && <CncLoader compact label="Рисуем бирки…" />}
           {built?.labels?.length > 0 && (
             <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>Маркировочный стол</div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{built.labelsOwnDir ? 'Бирки' : 'Маркировочный стол'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
-                Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт маркировка, затем раскрой.
+                {built.labelsOwnDir
+                  ? <>Файлов: {built.labels.length} — картинки бирок, бирки по листам, список листов и PDF всех бирок для печати. Папка: <b style={{ fontFamily: 'monospace' }}>{labelsDir().join(' / ')}</b>.</>
+                  : <>Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт маркировка, затем раскрой.</>}
               </div>
-              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${baseName()}.zip` })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
+              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${baseName()}.zip`, ...(built.labelsOwnDir ? { folders: labelsDir() } : {}) })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
             </div>
           )}
           {built?.drill?.map(r => (

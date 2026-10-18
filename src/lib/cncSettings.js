@@ -48,7 +48,21 @@ export const DEFAULT_DRILL6 = () => ({
   d6Folder: '{ZAKAZ}/XML',        // папка для XML, вложенные через «/»
 })
 export const isDrill6 = p => p?.kind === 'drill6'
-export const KINDS = [['router', 'Раскроечный фрезер (G-код)'], ['drill6', 'Шестисторонний присадочный (XML)']]
+// Пильный центр (KDT): одна программа XML на материал — дерево резов по всем листам (см. beamSawXml.js).
+// Есть у всех по умолчанию (id постоянный — не плодится при каждом открытии), идёт после своих постпроцессоров.
+export const BEAM_POST_ID = 'kdt-beam'
+export const DEFAULT_BEAMSAW = () => ({
+  ...DEFAULT_POST(), id: BEAM_POST_ID, kind: 'beamsaw', name: 'Пильный центр KDT (XML)', ext: 'xml',
+  nameTpl: '{ZAKAZ}_{MAT}',       // название программы (латиницей, см. programName)
+  folderTpl: '{ZAKAZ}',
+})
+export const isBeamSaw = p => p?.kind === 'beamsaw'
+/** Раскроечный фрезер (G-код по листам) — не шестисторонний и не пильный центр */
+export const isRouterPost = p => !!p && !isDrill6(p) && !isBeamSaw(p)
+const kindDefault = p => (isDrill6(p) ? DEFAULT_DRILL6() : isBeamSaw(p) ? DEFAULT_BEAMSAW() : DEFAULT_POST())
+export const KINDS = [['router', 'Раскроечный фрезер (G-код)'], ['drill6', 'Шестисторонний присадочный (XML)'], ['beamsaw', 'Пильный центр (XML KDT)']]
+/** Пильный центр, которым выпускается XML: открытый в настройках, иначе первый */
+export const sawPost = cnc => cnc.posts.find(p => p.id === cnc.post && isBeamSaw(p)) || cnc.posts.find(isBeamSaw) || null
 
 export const DEFAULT_MILL = () => ({
   id: uid(), type: 'mill', name: 'Компрессионная 6 мм', t: 1, d: 6, maxPass: 20, rpm: 18000, feed: 8000,
@@ -72,10 +86,11 @@ export const DEFAULT_OPS = () => ({
 // shared — общие постпроцессоры (мастер-аккаунт отметил «для всех»): видны каждому, в настройках пользователя не хранятся
 export function normalizeCnc(raw, shared = []) {
   const c = raw && typeof raw === 'object' ? raw : {}
-  const own = (Array.isArray(c.posts) ? c.posts : []).filter(p => p && !p.shared).map(p => ({ ...(isDrill6(p) ? DEFAULT_DRILL6() : DEFAULT_POST()), ...p }))
+  const own = (Array.isArray(c.posts) ? c.posts : []).filter(p => p && !p.shared).map(p => ({ ...kindDefault(p), ...p }))
   const mine = own.length ? own : (shared.length ? [] : [DEFAULT_POST()])
-  let posts = [...mine, ...shared.filter(p => !mine.some(q => q.id === p.id)).map(p => ({ ...(isDrill6(p) ? DEFAULT_DRILL6() : DEFAULT_POST()), ...p, shared: true }))]
-  if (!posts.some(p => !isDrill6(p))) posts = [DEFAULT_POST(), ...posts]   // раскроечный станок есть всегда
+  let posts = [...mine, ...shared.filter(p => !mine.some(q => q.id === p.id)).map(p => ({ ...kindDefault(p), ...p, shared: true }))]
+  if (!posts.some(isRouterPost)) posts = [DEFAULT_POST(), ...posts]   // раскроечный станок есть всегда
+  if (!posts.some(isBeamSaw)) posts = [...posts, DEFAULT_BEAMSAW()]   // пильный центр KDT — у всех, после своих
   const tools = Array.isArray(c.tools) ? c.tools : []
   // своя обработка постпроцессора, настроенного по чужой программе (см. postTools.js)
   posts = posts.map(p => (p.ownOps && !p.shared ? { ...p, ownOps: normOps(p.ownOps) } : p))
@@ -87,10 +102,10 @@ export function normalizeCnc(raw, shared = []) {
       .sort((a, b) => (b.at || 0) - (a.at || 0))
       .filter((s, i, a) => a.findIndex(x => x.kind === s.kind && String(x.name || '').trim().toLowerCase() === String(s.name || '').trim().toLowerCase()) === i),
     // какими постпроцессорами выпускать программы одновременно: раскроечный (один — G-код по листам) и присадочные (сколько угодно)
-    router: posts.some(p => p.id === c.router && !isDrill6(p)) ? c.router : '',
+    router: posts.some(p => p.id === c.router && isRouterPost(p)) ? c.router : '',
     use6: (Array.isArray(c.use6) ? c.use6 : []).filter(id => posts.some(p => p.id === id && isDrill6(p))),
     // второй раскроечный станок — его G-код выпускается вместе с G-кодом основного, в свою папку
-    router2: posts.some(p => p.id === c.router2 && !isDrill6(p)) ? c.router2 : '',
+    router2: posts.some(p => p.id === c.router2 && isRouterPost(p)) ? c.router2 : '',
     ops: normOps(c.ops),
   }
 }
@@ -107,22 +122,22 @@ export const saveCnc = (cnc, user) => saveUserSettings({ cnc: { ...cnc, posts: c
 /** Постпроцессор, открытый в настройках (его правят вкладки «Основные» и «Команды») */
 export const activePost = cnc => cnc.posts.find(p => p.id === cnc.post) || cnc.posts[0]
 /** Раскроечный станок, которым выпускается G-код по листам: выбранный для выпуска, иначе открытый в настройках, иначе первый */
-export const routerPost = cnc => cnc.posts.find(p => p.id === cnc.router && !isDrill6(p))
-  || cnc.posts.find(p => p.id === cnc.post && !isDrill6(p)) || cnc.posts.find(p => !isDrill6(p)) || cnc.posts[0]
+export const routerPost = cnc => cnc.posts.find(p => p.id === cnc.router && isRouterPost(p))
+  || cnc.posts.find(p => p.id === cnc.post && isRouterPost(p)) || cnc.posts.find(isRouterPost) || cnc.posts[0]
 /** Второй раскроечный станок (G-код вместе с основным) — если выбран и это не тот же, что основной */
-export const secondRouter = cnc => { const r = routerPost(cnc), p = cnc.posts.find(q => q.id === cnc.router2 && !isDrill6(q)); return p && p.id !== r?.id ? p : null }
+export const secondRouter = cnc => { const r = routerPost(cnc), p = cnc.posts.find(q => q.id === cnc.router2 && isRouterPost(q)); return p && p.id !== r?.id ? p : null }
 /** Второй постпроцессор для выпуска: второй раскроечный или (первый отмеченный) шестисторонний */
 export const secondPost = cnc => secondRouter(cnc) || drillPosts(cnc)[0] || null
 /** Выбрать второй постпроцессор: раскроечный — G-код вторым станком, шестисторонний — файлы по деталям; '' — выключить */
 export const setSecondPost = (cnc, id) => {
   const p = cnc.posts.find(q => q.id === id)
-  if (!p) return { ...cnc, router2: '', use6: [] }
+  if (!p || isBeamSaw(p)) return { ...cnc, router2: '', use6: [] }
   return isDrill6(p) ? { ...cnc, router2: '', use6: [p.id] } : { ...cnc, router2: p.id, use6: [] }
 }
 /** Присадочные станки, которые выпускают программы вместе с G-кодом */
 export const drillPosts = cnc => cnc.posts.filter(p => isDrill6(p) && (cnc.use6 || []).includes(p.id))
 /** Выбрать постпроцессор в настройках: раскроечный сразу становится станком для G-кода (как раньше) */
-export const pickPost = (cnc, id) => { const p = cnc.posts.find(q => q.id === id); return { ...cnc, post: id, ...(p && !isDrill6(p) ? { router: id } : {}) } }
+export const pickPost = (cnc, id) => { const p = cnc.posts.find(q => q.id === id); return { ...cnc, post: id, ...(p && isRouterPost(p) ? { router: id } : {}) } }
 /** Включить / выключить выпуск программ присадочным станком */
 export const toggleUse6 = (cnc, id, on) => ({ ...cnc, use6: on ? [...new Set([...(cnc.use6 || []), id])] : (cnc.use6 || []).filter(x => x !== id) })
 export const newId = uid
@@ -138,7 +153,7 @@ export function saveSnapshot(cnc, name) {
   // свои инструменты станка (настроенного по чужой программе) — тоже в сохранённое: без них его обработка (ownOps)
   // ссылается в пустоту, и после самонастройки или удаления их было бы не вернуть
   const own = (cnc.tools || []).filter(t => t.postId === post.id).map(t => ({ ...t }))
-  const snap = { id: uid(), name: nm, kind: isDrill6(post) ? 'drill6' : 'router', at: Date.now(), post: strip(post), ...(isDrill6(post) ? {} : { ops: cnc.ops }), ...(own.length ? { tools: own } : {}) }
+  const snap = { id: uid(), name: nm, kind: post.kind || 'router', at: Date.now(), post: strip(post), ...(isRouterPost(post) ? { ops: cnc.ops } : {}), ...(own.length ? { tools: own } : {}) }
   // то же имя — тот же сохранённый вариант: перезаписывается, а не копится второй с тем же именем
   const list = cnc.saved || [], same = list.find(x => sameName(x.name, nm))
   return { ...cnc, saved: same ? list.map(x => (x === same ? { ...snap, id: same.id } : x)) : [...list, snap] }
@@ -148,13 +163,13 @@ export function applySnapshot(cnc, snapId, asNew = false) {
   const snap = (cnc.saved || []).find(s => s.id === snapId)
   if (!snap) return cnc
   const cur = activePost(cnc)
-  const same = (isDrill6(cur) ? 'drill6' : 'router') === snap.kind && !cur.shared
+  const same = (cur.kind || 'router') === (snap.kind || 'router') && !cur.shared
   let next
   if (same && !asNew) {
     next = { ...cnc, posts: cnc.posts.map(p => (p.id === cur.id ? { ...p, ...snap.post, id: p.id, name: p.name, shared: false, forAll: p.forAll } : p)) }
   } else {
-    const p = { ...(snap.kind === 'drill6' ? DEFAULT_DRILL6() : DEFAULT_POST()), ...snap.post, id: uid(), name: snap.name, shared: false, forAll: false }
-    next = { ...cnc, posts: [...cnc.posts, p], post: p.id, ...(snap.kind === 'drill6' ? {} : { router: p.id }) }
+    const p = { ...kindDefault({ kind: snap.kind }), ...snap.post, id: uid(), name: snap.name, shared: false, forAll: false }
+    next = { ...cnc, posts: [...cnc.posts, p], post: p.id, ...(isRouterPost(p) ? { router: p.id } : {}) }
     if (snap.kind === 'drill6') next = toggleUse6(next, p.id, true)
   }
   if (snap.ops && snap.kind === 'router') next = { ...next, ops: { ...DEFAULT_OPS(), ...snap.ops } }
