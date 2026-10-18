@@ -69,11 +69,23 @@ export function missingServices(raw, needs = {}) {
 }
 
 export const SERVICES_SQL_HINT = 'Услуги производства ещё не сохраняются: выполните migration_production_services.sql в Supabase (SQL Editor) — один раз.'
+export const SERVICES_BEAM_SQL_HINT = 'Ответ «Пильный центр» не сохранился: выполните migration_services_beamsaw.sql в Supabase (SQL Editor) — один раз.'
 /** Сохранить услуги своего производства. -> {} | { error, missing } */
 export async function saveProductionServices(s) {
   try {
-    const { error } = await supabase.rpc('production_set_services', { p_services: cleanServices(s) })
-    if (!error) return {}
+    const clean = cleanServices(s)
+    const { error } = await supabase.rpc('production_set_services', { p_services: clean })
+    if (!error) {
+      // база могла отбросить ответ, которого не знает (старая версия функции) — проверяем, что всё записалось
+      const { data } = await supabase.auth.getUser()
+      const uid = data?.user?.id
+      if (uid) {
+        const { data: row } = await supabase.from('productions').select('services').eq('owner_id', uid).maybeSingle()
+        const got = parseServices(row?.services)
+        if (row && Object.keys(clean).some(k => got[k] !== clean[k])) return { error: SERVICES_BEAM_SQL_HINT }
+      }
+      return {}
+    }
     const missing = /PGRST202|42883|schema cache|Could not find the function/i.test(`${error.message} ${error.code}`)
     return { error: missing ? SERVICES_SQL_HINT : error.message, missing }
   } catch (e) { return { error: String(e?.message || e) } }
