@@ -145,6 +145,110 @@ function fillRegion(ctx, axis, A, B, L, first = null) {
   return node
 }
 
+// ── форматник: гибкая гильотина (полоса шире одной детали) ───────────────────
+// fillRegion открывает слот ровно по первой детали — раскладку «две узкие рядом под широкой» (слот 813 = 406 + 407 под
+// деталью 767) он построить не может, и последний лист форматника оставлял обрезок кусками (заказ 261018_006).
+// Здесь слот открывается деталью, а его толщина — она сама или она + ещё одна деталь рядом; внутри слот режется дальше
+// тем же правилом. Только форматник (s.stairLast): у пильного центра свои пределы уровней, захват и торцовки.
+// forced — деталь, с которой слот начат уровнем выше: по оси укладки её длина forced.a, поперёк forced.b (≤ B).
+function genOptions(ctx, axis, freeA, B, L) {
+  const out = []
+  for (const p of ctx.order) {
+    if (ctx.used.has(p.id)) continue
+    for (const o of orients(p, axis)) {
+      if (o.a > freeA + 1e-6 || o.b > B + 1e-6) continue
+      if (!remOk(ctx, freeA - o.a, extraAt(ctx, axis, L))) continue
+      if (B - o.b >= EPS && L + 1 > ctx.maxL) continue
+      out.push({ p, ...o })
+    }
+  }
+  return out
+}
+function fillGen(ctx, axis, A, B, L, forced = null) {
+  const t = trimAt(ctx.s, L)
+  const node = { axis, A, B, level: L, trim: t, slots: [], used: t }
+  const perp = axis === 'x' ? 'y' : 'x'
+  const put = (c, T) => {
+    // слот толщиной T: деталь ровно по слоту — готова; иначе слот режется дальше (деталь в нём первая)
+    if (Math.abs(T - c.a) < EPS && B - c.b < EPS) node.slots.push({ a: T, piece: { p: c.p, rot: c.rot }, child: null })
+    else node.slots.push({ a: T, piece: null, child: fillGen(ctx, perp, B, T, L + 1, { p: c.p, rot: c.rot, a: c.b, b: c.a }) })
+    node.used += T
+  }
+  if (forced) { ctx.used.add(forced.p.id); put(forced, forced.a) }
+  const rnd = ctx.rnd
+  for (;;) {
+    const freeA = A - node.used
+    const opts = genOptions(ctx, axis, freeA, B, L)
+    if (!opts.length) break
+    // первая деталь слота: ровно по ширине заготовки — в первую очередь (готова сразу), дальше крупнее — раньше, со случайностью
+    const ignoreExact = rnd() < 0.15
+    let c = null, ck = Infinity
+    for (const o of opts) {
+      const k = (!ignoreExact && B - o.b < EPS ? -1e12 : 0) - o.p.pw * o.p.ph * (0.5 + rnd())
+      if (k < ck) { ck = k; c = o }
+    }
+    ctx.used.add(c.p.id)
+    // толщина слота: деталь сама или она + соседняя деталь (поперёк обе ≤ B)
+    let T = c.a
+    if (rnd() < 0.35) {
+      const sums = []
+      for (const o of opts) if (o.p.id !== c.p.id && c.a + o.a <= freeA + 1e-6 && remOk(ctx, freeA - c.a - o.a, extraAt(ctx, axis, L))) sums.push(c.a + o.a)
+      if (sums.length) T = sums[Math.floor(rnd() * sums.length)]
+    }
+    put(c, T)
+  }
+  return node
+}
+// Один лист гибкой гильотиной; axes — допустимые направления 1-го уровня. Детали — ctx.order (порядок = приоритет)
+function genSheet(ctx, X, Y, axes) {
+  const ax = axes[Math.floor(ctx.rnd() * axes.length)]
+  const A = ax === 'x' ? X : Y, B = ax === 'x' ? Y : X
+  return { root: fillGen(ctx, ax, A, B, 1), axis: ax }
+}
+function sheetFrom(root, axis, s, kerf, index, stair) {
+  const out = { placed: [], cuts: 0, maxLevel: 1, offcuts: [], kerf }
+  layout(root, 0, 0, s, out, stair)
+  const manualOffcuts = out.offcuts.map(o => ({ x: +o.x.toFixed(1), y: +o.y.toFixed(1), w: +o.w.toFixed(1), h: +o.h.toFixed(1) }))
+  return { index, placed: out.placed, freeRects: [], family: 'guillotine', manualOffcuts, beamTree: plainTree(root), beamAxis: axis, beamCuts: out.cuts, beamLevels: out.maxLevel,
+    beamFree: Math.max(0, root.A - root.used) * root.B, ...(stair ? { stairFree: stairFree(root) } : {}) }
+}
+// Все листы гибкой гильотиной (форматник): лист за листом, на каждый — лучший из нескольких случайных заполнений
+function packAllGen(pieces, s, kerf, X, Y, axes, rnd, tries = 4) {
+  const ctx = makeCtx(pieces, s, kerf, { rnd, edge: { x: Math.min(s.trimLeft, s.trimRight), y: Math.min(s.trimTop, s.trimBottom) } })
+  const sheets = [], roots = []
+  let cuts = 0
+  while (ctx.used.size < pieces.length) {
+    const before = new Set(ctx.used)
+    let best = null, bestA = -1, bestFree = -1, bestUsed = null
+    for (let k = 0; k < tries; k++) {
+      ctx.used = new Set(before)
+      const g = genSheet(ctx, X, Y, axes)
+      const got = new Set([...ctx.used].filter(id => !before.has(id)))
+      const area = pieceArea(ctx, got), free = Math.max(0, g.root.A - g.root.used) * g.root.B
+      if (area > bestA + 1 || (Math.abs(area - bestA) <= 1 && free > bestFree)) { bestA = area; bestFree = free; best = g; bestUsed = ctx.used }
+    }
+    ctx.used = bestUsed
+    if (ctx.used.size === before.size) break
+    roots.push(best)
+    sheets.push(null)
+  }
+  roots.forEach((g, i) => { sheets[i] = sheetFrom(g.root, g.axis, s, kerf, i, i === roots.length - 1); cuts += sheets[i].beamCuts })
+  return { sheets, cuts, unplaced: pieces.filter(p => !ctx.used.has(p.id)).map(p => p.id) }
+}
+// Последний лист заново гибкой гильотиной — под цельный обрезок (остальные листы не трогаются)
+function compactLastGen(best, pieces, s, kerf, X, Y, axes, rnd) {
+  if (!best?.sheets.length) return null
+  const last = lastOf(best)
+  const ids = new Set(last.placed.map(p => p.id))
+  const base = SORTS[Math.floor(rnd() * SORTS.length)]
+  const sub = perturb(pieces.filter(p => ids.has(p.id)).sort(base), rnd, rnd() * 0.5)
+  const ctx = makeCtx(sub, s, kerf, { rnd, edge: { x: Math.min(s.trimLeft, s.trimRight), y: Math.min(s.trimTop, s.trimBottom) } })
+  const g = genSheet(ctx, X, Y, axes)
+  if (ctx.used.size !== sub.length) return null
+  const sh = sheetFrom(g.root, g.axis, s, kerf, best.sheets.length - 1, true)
+  return { sheets: best.sheets.slice(0, -1).concat([sh]), cuts: best.cuts - (last.beamCuts || 0) + sh.beamCuts, unplaced: best.unplaced }
+}
+
 // ── порядок слотов и координаты ────────────────────────────────────────────
 function orderSlots(slots, mode) {
   const by = [...slots].sort((p, q) => q.a - p.a)
@@ -375,8 +479,9 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   for (const srt of SORTS) orders.push(pieces.slice().sort(srt))
   const axisSets = axes.length > 1 ? [axes, ['x'], ['y']] : [axes]
   for (const ax of axisSets) for (const ord of orders) for (const orient of ['long', 'fit']) { iter++; consider(packAll(ord, s, kerf, X, Y, ax, { orient }), ax.join('')) }
-  pulse(true)
   const rnd = rng(pieces.length * 7919 + 17 + island * 104729)   // у каждого потока свои варианты
+  if (s.stairLast) for (const ord of orders) { iter++; consider(packAllGen(ord, s, kerf, X, Y, axes, rnd, 8), 'gen') }
+  pulse(true)
   let tick = now()
   while (now() - t0 < budget && !shouldStop()) {
     iter++
@@ -386,6 +491,11 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
     consider(packAll(ord, s, kerf, X, Y, ax, { orient: rnd() < 0.5 ? 'long' : 'fit' }), ax.join(''))
     // попутно — плотнее последний лист лучшего варианта (дёшево: деталей на нём немного)
     for (let j = 0; j < 3; j++) { const c = compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (c) consider(c, 'last') }
+    // форматник: гибкая гильотина — весь заказ (иногда) и последний лист под цельный обрезок (каждый ход)
+    if (s.stairLast) {
+      if (rnd() < 0.25) { iter++; consider(packAllGen(perturb(base, rnd, rnd() * 0.3), s, kerf, X, Y, axes, rnd), 'gen') }
+      for (let j = 0; j < 4; j++) { const c = compactLastGen(best, pieces, s, kerf, X, Y, axes, rnd); if (c) consider(c, 'stair') }
+    }
     pulse()
     if (now() - tick > 40) { tick = now(); await pause() }
   }
@@ -394,6 +504,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   for (let j = 0; j < 3000 && now() < tEnd; j++) {
     iter++
     const c = compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (c) consider(c, 'last')
+    if (s.stairLast) { const g = compactLastGen(best, pieces, s, kerf, X, Y, axes, rnd); if (g) consider(g, 'stair') }
     if (now() - tick > 40) { tick = now(); await pause() }
   }
   pulse(true)
