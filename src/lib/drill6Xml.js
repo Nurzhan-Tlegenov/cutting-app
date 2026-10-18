@@ -438,6 +438,7 @@ export function d6OpsOf(post) {
 }
 export const layerKey = (cat, width, depth, size = '') => (cat === 'pocket' ? `p${size}x${r1(depth)}` : cat === 'edgePocket' ? `ep${size}x${r1(depth)}` : `${cat === 'edgeGroove' ? 'e' : 'g'}${r1(width)}x${r1(depth)}`)
 const r1 = v => Math.round(n0(v) * 10) / 10
+const GROOVE_EDGE = 0.5                  // конец паза ближе 0,5 мм к краю детали — паз выходит на край
 /** Какой инструмент у обработки: { tool (null — авто), how: 'layer' | 'tool' | 'width' | 'auto', missing } */
 export function resolveD6Tool(o6, cat, width, key) {
   const byId = id => o6.tools.find(t => t.id === id) || null
@@ -515,7 +516,20 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
     const width = n0(g.width) || Math.min(x1 - x0, y1 - y0)
     const line = alongX ? [x1, (y0 + y1) / 2, x0, (y0 + y1) / 2] : [(x0 + x1) / 2, y0, (x0 + x1) / 2, y1]
     const gd = n0(g.depth) > 0 ? n0(g.depth) : T
-    grooves.push({ face: g.back ? fr.bottom : fr.top, line, width, depth: gd, tool: toolOf('groove', width, gd, `паз ${r1(width)} × ${r1(gd)}`) })
+    const face = g.back ? fr.bottom : fr.top, tool = toolOf('groove', width, gd, `паз ${r1(width)} × ${r1(gd)}`)
+    // Паз Type 4 станок фрезерует по средней линии от точки до точки — центр фрезы доходит до концов линии, и паз
+    // удлиняется на радиус фрезы с каждой стороны (120 мм -> 124 / 126 мм при Ø4 / Ø6). Это нужно, только когда паз
+    // выходит на край детали. Паз с концом внутри детали — замкнутый контур с выборкой внутри (Type 3, Pocket 1):
+    // станок держит фрезу внутри контура при любом её диаметре (фрезу можно сменить на стойке). Открытый конец такого
+    // паза продлеваем за край на половину ширины — фреза (не шире паза) всё равно доходит центром до края.
+    const ends = alongX ? [x0 <= GROOVE_EDGE, x1 >= fr.L - GROOVE_EDGE] : [y0 <= GROOVE_EDGE, y1 >= fr.Wm - GROOVE_EDGE]
+    if (ends[0] && ends[1]) { grooves.push({ face, line, width, depth: gd, tool }); return }
+    const ext = width / 2
+    let a0 = x0, a1 = x1, b0 = y0, b1 = y1
+    if (alongX) { if (ends[0]) a0 -= ext; if (ends[1]) a1 += ext } else { if (ends[0]) b0 -= ext; if (ends[1]) b1 += ext }
+    // по часовой (вид сверху), выборка внутри — фреза справа от хода
+    const loop = [[a0, b1], [a1, b1], [a1, b0], [a0, b0]]
+    grooves.push({ face, width, depth: gd, tool, mill: { face, start: loop[0], segs: [...loop.slice(1), loop[0]].map(to => ({ to, angle: 0 })), closed: true, depth: gd, pocket: true, offset: '右', tool } })
   })
 
   // пазы в торце — на торец Face 1–4, высота от нижней пласти (лицевая сверху)
@@ -585,7 +599,7 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   }
   mills.filter(m => m.face === fr.top).forEach(mill)
   // паз по спецификации: Z — на поверхности (Face 5 — толщина, Face 6 — 0), ToolOffset 中 (у пазов в торце обязательно)
-  grooves.forEach(g => { const z = g.face === 5 ? T : 0; lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" ToolOffset="中"${drillAttr(g.tool)} />`) })
+  grooves.forEach(g => { if (g.mill) { mill(g.mill); return } const z = g.face === 5 ? T : 0; lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" ToolOffset="中"${drillAttr(g.tool)} />`) })
   edgeGrooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(g.Z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(g.Z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" ToolOffset="中"${drillAttr(g.tool)} />`))
   edgeMills.forEach(mill)
   bottom.forEach(hole)
