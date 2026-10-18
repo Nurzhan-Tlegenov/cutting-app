@@ -113,7 +113,10 @@ async function chooseHybridPlan(params, meta) {
     const plan = Object.values(c).some(Boolean) || lim ? buildHybridPlan(params, c, lim) : base
     if (!plan) continue
     try {
-      const r = await runNesting({ ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting', optimizeSeconds: 0, onProgress: null, shouldStop: null, takeMigrant: null, onStats: null })
+      // быстрая проба: доводка итога короткая (обрезок последнего листа — 0,1 с, без перекомпоновки и «узкие — от края») —
+      // сравниваются число листов и последний лист; полная доводка на каждое из 16 сочетаний отнимала секунды до первой картинки
+      const r = await runNesting({ ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting', optimizeSeconds: 0, onProgress: null, shouldStop: null, takeMigrant: null, onStats: null,
+        finishBudget: { maxMs: 100, composeMs: 0, relayout: 0 } })
       const sc = liveScore(plan.expand({ ...meta, ...r }).sheets, meta.usableX, meta.usableY)
       if (liveBetter(sc, bestScore)) { best = plan; bestScore = sc }
     } catch { /* пробуем следующее сочетание */ }
@@ -148,6 +151,9 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       HYBRID_PLANS.set(key, plan)
     }
     if (!plan) return null
+    // последний показанный вариант: «Стоп» возвращает раскладку, ровно ту же, что на экране (runNesting отдаёт тот же
+    // массив листов, что последним ушёл в onProgress) — без повторной развёртки и дозаполнения вырезов
+    let lastRaw = null, lastOut = null
     const res = await runNesting({
       ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting',
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
@@ -155,8 +161,13 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       seed: Array.isArray(params.seed) ? (seedToHybrid({ seed: true, sheets: params.seed }, plan.singles)?.sheets || null) : null,
       shouldStop, takeMigrant: takeMigrant ? () => seedToHybrid(takeMigrant(), plan.singles) : null,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
-      onProgress: onProgress ? ({ sheets, iter, genome, seeded }) => onProgress({ ...withFilled(plan.expand({ ...meta, sheets }), params, false), iter, genome, hybrid: true, ...(seeded ? { seeded } : {}) }) : null,
+      onProgress: onProgress ? ({ sheets, iter, genome, seeded }) => {
+        const out = withFilled(plan.expand({ ...meta, sheets }), params, false)
+        lastRaw = sheets; lastOut = out
+        onProgress({ ...out, iter, genome, hybrid: true, ...(seeded ? { seeded } : {}) })
+      } : null,
     })
+    if (lastRaw && res.sheets === lastRaw) return { ...lastOut, hybrid: true }
     return { ...withFilled(plan.expand(res), params), hybrid: true }
   } catch (e) {
     console.warn('Гибрид не удался:', e)
@@ -194,8 +205,10 @@ function envelope(sheets) {
 }
 // direction (необязательно) — направление укладки: тогда в счёт идёт и цельный обрезок последнего листа
 // (вдоль Y — справа, вдоль X — сверху, авто — бóльшая полоса; см. lastOffcutArea)
-export function liveScore(sheets, usableX, usableY, direction = null) {
-  if (!sheets?.length) return { count: Infinity, edge: Infinity, last: Infinity, env: Infinity }
+// offFirst — фрезер: при равных листах и мелких у края решает цельный обрезок последнего листа (а не площадь деталей
+// на нём): пользователю нужен большой неразорванный остаток. Пила и пильный центр — как раньше
+export function liveScore(sheets, usableX, usableY, direction = null, offFirst = false) {
+  if (!sheets?.length) return { count: Infinity, edge: Infinity, last: Infinity, env: Infinity, off: -Infinity, offFirst }
   let edge = 0
   if (usableX && usableY) edge = smallAtEdge(sheets, usableX, usableY, true)
   const lastSh = sheets[sheets.length - 1]
@@ -204,12 +217,13 @@ export function liveScore(sheets, usableX, usableY, direction = null) {
     const k = Number(lastSh.placed[0]?.kf) || 0   // габарит детали включает рез — зона тоже (как в укладке)
     off = lastOffcutArea(lastSh, direction, (lastSh.usableX ?? usableX) + k, (lastSh.usableY ?? usableY) + k)
   }
-  return { count: sheets.length, edge, last: lastSh.placed.reduce((a, p) => a + partArea(p), 0), env: envelope(sheets), off }
+  return { count: sheets.length, edge, last: lastSh.placed.reduce((a, p) => a + partArea(p), 0), env: envelope(sheets), off, offFirst: !!(offFirst && off != null) }
 }
 export function liveBetter(a, b) {
   if (!b) return true
   if (a.count !== b.count) return a.count < b.count
   if ((a.edge || 0) !== (b.edge || 0)) return (a.edge || 0) < (b.edge || 0)
+  if (a.offFirst && b.offFirst && Math.abs(a.off - b.off) > 1e4) return a.off > b.off
   if (Math.abs(a.last - b.last) > 1) return a.last < b.last
   // последний лист тот же — больше ли цельный обрезок на нём (от 0,01 м²)
   if (a.off != null && b.off != null && Math.abs(a.off - b.off) > 1e4) return a.off > b.off
@@ -230,6 +244,10 @@ function isRasterPath(p) {
  * в том же формате, что и итог runNesting (+ iter, round).
  */
 async function runCore(params, { live = false, shouldStop = () => false, onProgress = null, takeMigrant = null, onStats = null, island = 0, islands = 1 } = {}) {
+  // счёт вариантов — как у страницы (обрезок последнего листа по направлению укладки), иначе поток возвращал «Стопом»
+  // не тот вариант, что страница считает лучшим
+  const offFirst = (params.cuttingMethod || 'nesting') === 'nesting'
+  const scoreOf = (sheets, ux, uy) => liveScore(sheets, ux, uy, params.direction, offFirst)
   const meta = {
     usableX: params.sheetW - params.marginL - params.marginR,
     usableY: params.sheetL - params.marginT - params.marginB,
@@ -256,7 +274,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
     rough = { ...meta, sheets: params.seed.map((sh, i) => ({ ...sh, index: i, placed: sh.placed.map(p => ({ ...p })) })), seeded: true }
   } else if (onProgress) rough = withFilled(await roughLayout(params), params)
   if (rough && onProgress) {
-    const sc = liveScore(rough.sheets, meta.usableX, meta.usableY)
+    const sc = scoreOf(rough.sheets, meta.usableX, meta.usableY)
     onStats?.({ t: Date.now() - t0, phase: 'rough', result: { count: sc.count, last: Math.round(sc.last) }, improved: true })
     onProgress({ ...rough, iter: 0, round: 0 })
   }
@@ -267,19 +285,19 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
   const hybridRole = hybridAllowed && islands > 1 && island % 2 === 1
   if (hybridRole) {
     const r = await runHybrid(params, meta, { live, shouldStop, onProgress, takeMigrant, onStats, t0 })
-    if (r) return rough && liveBetter(liveScore(rough.sheets, meta.usableX, meta.usableY), liveScore(r.sheets, meta.usableX, meta.usableY)) ? rough : r
+    if (r) return rough && liveBetter(scoreOf(rough.sheets, meta.usableX, meta.usableY), scoreOf(r.sheets, meta.usableX, meta.usableY)) ? rough : r
   }
   if (!live) {
     let res = withFilled(await runNesting(params), params)
     if (islands <= 1 && hybridAllowed) {
       // один поток: дополнительно гибрид с тем же временем — берём лучший
       const hy = await runHybrid(params, meta, { live: false, shouldStop, onProgress: null, takeMigrant: null, onStats, t0 })
-      if (hy && liveBetter(liveScore(hy.sheets, meta.usableX, meta.usableY), liveScore(res.sheets, meta.usableX, meta.usableY))) res = hy
+      if (hy && liveBetter(scoreOf(hy.sheets, meta.usableX, meta.usableY), scoreOf(res.sheets, meta.usableX, meta.usableY))) res = hy
     }
-    const sc = liveScore(res.sheets, meta.usableX, meta.usableY)
+    const sc = scoreOf(res.sheets, meta.usableX, meta.usableY)
     onStats?.({ t: Date.now() - t0, phase: 'shape', round: 1, roundSeconds: params.optimizeSeconds, best: { count: sc.count, last: Math.round(sc.last) }, improved: true })
     // итог не хуже уже показанного черновика
-    if (rough && liveBetter(liveScore(rough.sheets, meta.usableX, meta.usableY), sc)) return rough
+    if (rough && liveBetter(scoreOf(rough.sheets, meta.usableX, meta.usableY), sc)) return rough
     return res
   }
 
@@ -288,10 +306,10 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
   // лучше лучшего результата точной укладки — поток переходит на непрерывный гибридный поиск (как нечётные потоки):
   // раньше половина ядер телефона до самого «Стоп» считала то, что заведомо проигрывало
   // (261010_Timur_k1: все улучшения — от гибрида, 11 листов нашлись только на 72-й с).
-  let best = rough, bestScore = rough ? liveScore(rough.sheets, meta.usableX, meta.usableY) : null, round = 0
+  let best = rough, bestScore = rough ? scoreOf(rough.sheets, meta.usableX, meta.usableY) : null, round = 0
   let shapeBest = null, hybridBest = null     // лучший счёт каждого пути
   const take = (res, tag) => {
-    const sc = liveScore(res.sheets, meta.usableX, meta.usableY)
+    const sc = scoreOf(res.sheets, meta.usableX, meta.usableY)
     if (tag === 'hybrid') { if (liveBetter(sc, hybridBest)) hybridBest = sc } else if (liveBetter(sc, shapeBest)) shapeBest = sc
     const improved = liveBetter(sc, bestScore)
     if (improved) { best = res; bestScore = sc }

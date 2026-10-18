@@ -1424,6 +1424,11 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   let rejectFn = null, resolveFn = null
   let cancelled = false, finished = false, stopFlag = false
   let best = null, bestScore = null      // лучший промежуточный результат со всех островов
+  // фрезер: при равных листах лучше тот, у кого больше цельный обрезок последнего листа (liveBetter, offFirst)
+  const offFirst = (params.cuttingMethod || 'nesting') === 'nesting' && !params.beamSaw
+  // «Стоп» на фрезере (кроме больших заказов, где потоки ещё доводят итог): итог — ровно то, что на экране,
+  // сразу, без ожидания потоков и без «ещё одного шага» укладки
+  const exactStop = offFirst && live && params.details.reduce((a, d) => a + (Number(d.qty) || 0), 0) <= 300
   const finals = []                       // итоги островов
   let expected = 0
   const killAll = () => { workers.forEach(w => w.terminate()); workers.length = 0 }
@@ -1432,7 +1437,8 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   const consider = (res, fromIdx) => {
     const raw = res.rawSheets || res.sheets      // раскладка самого поиска — для соседних потоков
     if (res.rawSheets) { res = { ...res }; delete res.rawSheets }
-    const sc = liveScore(res.sheets, res.usableX, res.usableY, params.direction)
+    if (exactStop && stopFlag) return             // после «Стоп» на экране ничего не меняется
+    const sc = liveScore(res.sheets, res.usableX, res.usableY, params.direction, offFirst)
     const global = liveBetter(sc, bestScore)
     if (!cancelled && !finished) onIslandProgress?.(res, fromIdx, global)
     if (!global) return
@@ -1445,13 +1451,14 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
   }
   const pickBest = list => {
     let top = null, topScore = null
-    list.forEach(r => { const sc = liveScore(r.sheets, r.usableX, r.usableY, params.direction); if (liveBetter(sc, topScore)) { top = r; topScore = sc } })
+    list.forEach(r => { const sc = liveScore(r.sheets, r.usableX, r.usableY, params.direction, offFirst); if (liveBetter(sc, topScore)) { top = r; topScore = sc } })
     return top
   }
   // Все живые острова отчитались — итог = лучший из их итогов
   // лучший показанный промежуточный результат участвует в выборе итога: итог потока после «финальной» обработки
   // бывает хуже того, что уже было на экране (261010_Timur_k1_history_2: показано 0,05 м², итог 0,09 м²)
-  const checkDone = () => { if (expected > 0 && finals.length >= expected) finish(pickBest(best ? [...finals, best] : finals)) }
+  // показанный — первым: итог потока заменяет его, только если строго лучше (при равенстве остаётся то, что на экране)
+  const checkDone = () => { if (expected > 0 && finals.length >= expected) finish(pickBest(best ? [best, ...finals] : finals)) }
   const onFinal = res => { if (res?.rawSheets) { res = { ...res }; delete res.rawSheets } finals.push(res); checkDone() }
   // Остров упал: если остались другие — считаем без него, если нет — ошибка
   const onIslandFail = (msg, fallback) => {
@@ -1502,10 +1509,11 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     stop: () => {
       stopFlag = true
       workers.forEach(w => w.postMessage({ type: 'stop' }))
+      if (exactStop && best) { finish(best); return }
       setTimeout(() => {
         if (finished || cancelled) return
         // Итоги не успели — берём лучшее из того, что уже есть
-        const pool = best ? [...finals, best] : finals
+        const pool = best ? [best, ...finals] : finals
         if (pool.length) finish(pickBest(pool))
         else fail(new Error('stopped')) // ещё ничего не найдено — просто останавливаем
       }, STOP_GRACE_MS)

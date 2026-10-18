@@ -130,6 +130,7 @@ export async function runNesting({
   takeMigrant = null,             // параллельный поиск («острова»): () => { ids, mode } — лучший вариант соседнего потока, вливается в популяцию
   onStats = null,                 // хронология раскроя: «пульс» поиска раз в ~1 с (итерации, поколение, режимы в популяции, разнообразие)
   seed = null,                    // «Продолжить»: листы готовой раскладки (как в результате) — поиск начинается с неё, а не с нуля
+  finishBudget = null,            // { maxMs, composeMs, relayout } — своё время на итоговую доводку (быстрые пробы гибрида — короче)
 }) {
   const realX = sheetW - marginL - marginR  // рабочая зона: горизонталь = 1830 - отступы
   const realY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
@@ -197,6 +198,52 @@ export async function runNesting({
     updateFreeBounds(next)
     return next
   })
+
+  // ─── Доводка раскладки до итогового вида ──────────────────────────────────
+  // Последний лист — под наибольший цельный обрезок (тот же состав, затем состав вместе с 1–2 заполненными листами),
+  // узкие — от края, стяжка к нулю, перестановка полос, страховки. Та же доводка и в итоге (полные бюджеты), и в
+  // онлайн-показе фрезера (короткие бюджеты, а на застое поиска — полные): на экране всегда то, что получится в итоге.
+  // b: { maxMs, composeMs, relayout } — время на обрезок последнего листа, на перекомпоновку, попыток «узкие — от края»
+  const finishLayout = (sheetsIn, b) => {
+    let out = sheetsIn
+    // Последний лист: тот же состав — так, чтобы цельный обрезок был наибольшим
+    // (вдоль Y — справа, вдоль X — сверху, авто — бóльшая полоса). Остальные листы не трогаются.
+    const settleOne = sh => (cuttingMethod === 'guillotine' ? sh : gravityAll([sh])[0])
+    const stop = b.stoppable ? stopNow : () => false   // онлайн-доводка на застое прерывается «Стопом»
+    out = maximizeLastOffcut(out, { modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: b.maxMs, stop })
+    // и состав: крупные поперёк детали — на заполненные листы, на последний — узкие
+    if (b.composeMs && !stop()) out = composeLastForOffcut(out, { modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: b.composeMs, stop })
+    const lastKeep = out[out.length - 1]
+    // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
+    // Для форматно-раскроечного станка не применяется: там раскладка обязана
+    // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
+    // узкие детали — от края: переукладка каждого листа (тот же состав, тот же лист)
+    if (cuttingMethod !== 'guillotine' && b.relayout) out = out.map((sh, i, all) => relayoutForEdges(sh, scoringModes.filter(m => !m.startsWith('g-')), direction, usableX, usableY, b.relayout, i === all.length - 1))
+    if (cuttingMethod !== 'guillotine') out = gravityAll(wideNarrowWideAll(gravityAll(out), usableX, usableY))
+    // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
+    if (cuttingMethod !== 'guillotine') out = stripPermuteAll(rowSwapAll(out, usableX, usableY), usableX, usableY)
+    // Страховка: шаги выше (узкие — от края, стяжка, перестановки) не должны были уменьшить обрезок
+    // последнего листа; если уменьшили, а мелких у края от этого не меньше — лист возвращается к раскладке с бóльшим обрезком
+    if (lastKeep && out.length) {
+      const n = out.length - 1, cur = out[n]
+      if (lastOffcutArea(cur, direction, usableX, usableY) < lastOffcutArea(lastKeep, direction, usableX, usableY) - Math.min(usableX, usableY)
+        && smallAtEdge([lastKeep], usableX, usableY) <= smallAtEdge([cur], usableX, usableY)
+        && lastKeep.placed.length === cur.placed.length) {
+        const keep = cuttingMethod !== 'guillotine' ? gravityAll([wideNarrowWide(lastKeep, usableX, usableY)])[0] : lastKeep
+        out = out.slice()
+        out[n] = { ...(lastOffcutArea(keep, direction, usableX, usableY) >= lastOffcutArea(lastKeep, direction, usableX, usableY) - 1 ? keep : lastKeep), index: cur.index }
+      }
+    }
+    // Страховка: признаки «мелкая» и её пороги — заново из исходных деталей (по id),
+    // чтобы ни один шаг укладки не мог их потерять (на них держатся проверка и подсветка)
+    return out.map(sh => ({
+      ...sh,
+      placed: sh.placed.map(p => {
+        const src = pieceById.get(p.id)
+        return src ? { ...p, isSmall: src.isSmall, edgeOkMax: src.edgeOkMax || 0, edgeMin: src.edgeMin || 0, kf: src.kf || 0 } : p
+      }),
+    }))
+  }
 
   basePieces.forEach(p => {
     const area = p.origX * p.origY
@@ -271,15 +318,61 @@ export async function runNesting({
     lastStats = now; statsIter = iter
   }
   const stopNow = () => !!(shouldStop && shouldStop())
+  // Онлайн-показ «как в итоге» (фрезер, кроме больших заказов — там доводка всех листов на каждом шаге дорога):
+  // shown — доведённая раскладка лучшего варианта (src — от какого best.sheets), reported — последняя ушедшая на экран
+  const exactShow = !!onProgress && cuttingMethod !== 'guillotine' && !BIG_ORDER
+  // «узкие — от края» — попыток на лист, всего на раскладку не больше ~60 (быстро) / ~900 (на застое)
+  const showQuick = n => ({ maxMs: 150, composeMs: 300, relayout: Math.max(5, Math.min(30, Math.round(60 / n))) })
+  const showDeep = n => ({ maxMs: 800, composeMs: 1500, relayout: Math.max(40, Math.min(300, Math.round(900 / n))), stoppable: true })
+  let shown = null, reported = null
+  // Время доводки показа — не больше трети времени расчёта: иначе поиск (листы, мелкие у края) голодает
+  let polishMs = 0
+  const timedFinish = (sheetsIn, b) => { const t = Date.now(); try { return finishLayout(sheetsIn, b) } finally { polishMs += Date.now() - t } }
+  // Какую из двух доводок одного варианта показывать: меньше мелких у края → больше цельный обрезок последнего листа
+  // (от 0,01 м²) → меньше материала на последнем листе → меньше узких деталей у края
+  const shownBetter = (a, b) => {
+    if (a.length !== b.length) return a.length < b.length
+    const ea = smallAtEdge(a, usableX, usableY), eb = smallAtEdge(b, usableX, usableY)
+    if (ea !== eb) return ea < eb
+    const oa = lastOffcutArea(a[a.length - 1], direction, usableX, usableY), ob = lastOffcutArea(b[b.length - 1], direction, usableX, usableY)
+    if (Math.abs(oa - ob) > 1e4) return oa > ob
+    const la = sheetArea(a[a.length - 1]), lb = sheetArea(b[b.length - 1])
+    if (Math.abs(la - lb) > 1) return la < lb
+    return a.reduce((t, sh) => t + narrowEdgeScore(sh, usableX, usableY), 0) < b.reduce((t, sh) => t + narrowEdgeScore(sh, usableX, usableY), 0)
+  }
+  // Поиск встал — доводим показанный вариант с полным временем (как итог), до 6 раз: доводка случайная,
+  // повтор часто находит обрезок больше. На экран — только если лучше уже показанного
+  const polishShown = () => {
+    if (!exactShow || !shown || shown.src !== best.sheets || shown.deep >= 6 || Date.now() - lastGain < 2000) return
+    if (polishMs > (Date.now() - runStart) / 3) return
+    shown.deep++
+    const cand = timedFinish(best.sheets, showDeep(best.sheets.length))
+    if (stopNow()) return   // доводку прервал «Стоп» — на экране остаётся то, что было
+    if (shownBetter(cand, shown.sheets)) shown.sheets = cand
+    if (shown.sheets !== reported && (!reported || shownBetter(shown.sheets, reported))) dirty = true
+  }
   const maybeReport = (force = false) => {
     if (!onProgress || !best || (!dirty && !force)) return
+    if (exactShow && reported && stopNow()) return     // после «Стоп» экран не меняется
     const now = Date.now()
     if (!force && now - lastReport < 300) return
     lastReport = now; dirty = false
-    // Перестановка полос (широкая → узкая ← широкая) двигает полосы целиком вместе с пустым местом внутри
-    // них — на неполном листе детали разъезжались к краям с пустой серединой. Поэтому после неё — ещё одна
-    // стяжка к нулю листа: на экране та же собранная раскладка, что и в итоге после «Стоп».
-    const sheets = cuttingMethod !== 'guillotine' ? gravityAll(wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY)) : best.sheets
+    let sheets
+    if (exactShow) {
+      // фрезер: на экран — раскладка, доведённая как итог (обрезок последнего листа, узкие — от края, стяжка);
+      // «Стоп» вернёт ровно её (см. phase = 'final')
+      if (shown?.src !== best.sheets) shown = { src: best.sheets, sheets: timedFinish(best.sheets, showQuick(best.sheets.length)), deep: 0 }
+      // новый лучший вариант поиска (меньше материала на последнем листе) после быстрой доводки бывает с обрезком
+      // меньше уже показанного — такой не показываем (экран не «откатывается»), его догонит доводка на застое
+      if (reported && shown.sheets !== reported && !shownBetter(shown.sheets, reported)) return
+      sheets = shown.sheets
+      reported = sheets
+    } else {
+      // Перестановка полос (широкая → узкая ← широкая) двигает полосы целиком вместе с пустым местом внутри
+      // них — на неполном листе детали разъезжались к краям с пустой серединой. Поэтому после неё — ещё одна
+      // стяжка к нулю листа: на экране та же собранная раскладка, что и в итоге после «Стоп».
+      sheets = cuttingMethod !== 'guillotine' ? gravityAll(wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY)) : best.sheets
+    }
     // genome — порядок деталей + режим: по нему соседние потоки воспроизводят вариант у себя
     const genome = best.order ? { ids: best.order.map(p => p.id), mode: best.mode } : null
     onProgress({ sheets, iter, genome, ...(seedSheets && best.sheets === seedSheets ? { seeded: true } : {}) })
@@ -493,6 +586,8 @@ export async function runNesting({
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
     }
+    // онлайн-показ: на застое — доводка показанного варианта с полным временем (обрезок последнего листа и т. д.)
+    polishShown()
     // Пул шаблонов: листы каждой новой лучшей раскладки — в пул; раз в ~6 с
     // (если пул пополнился) — ЛП по пулу и целое решение. Перекомбинация лучших
     // листов разных раскладок часто даёт лист меньше, чем дожим одной раскладки.
@@ -521,49 +616,12 @@ export async function runNesting({
   // но может дожать последний лист чуть плотнее.
   phase = 'final'
   maybeStats(true)
+  // «Стоп» в онлайн-раскрое: итог — ровно та раскладка, что была на экране (она уже доведена finishLayout).
+  // Раньше после «Стоп» шла ещё одна доводка и пользователь получал не то, на чём остановил
+  if (exactShow && stopNow() && reported) return { sheets: reported, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
   best.sheets = await intensifyCompaction(best.sheets, direction, usableX, usableY)
 
-  // Последний лист: тот же состав — так, чтобы цельный обрезок был наибольшим
-  // (вдоль Y — справа, вдоль X — сверху, авто — бóльшая полоса). Остальные листы не трогаются.
-  const settleOne = sh => (cuttingMethod === 'guillotine' ? sh : gravityAll([sh])[0])
-  best.sheets = maximizeLastOffcut(best.sheets, {
-    modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: BIG_ORDER ? 500 : 800,
-  })
-  // и состав: крупные поперёк детали — на заполненные листы, на последний — узкие
-  best.sheets = composeLastForOffcut(best.sheets, {
-    modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: BIG_ORDER ? 1000 : 1500,
-  })
-  const lastKeep = best.sheets[best.sheets.length - 1]
-
-  // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
-  // Для форматно-раскроечного станка не применяется: там раскладка обязана
-  // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
-  // узкие детали — от края: переукладка каждого листа (тот же состав, тот же лист)
-  if (cuttingMethod !== 'guillotine') best.sheets = best.sheets.map((sh, i, all) => relayoutForEdges(sh, scoringModes.filter(m => !m.startsWith('g-')), direction, usableX, usableY, BIG_ORDER ? 40 : 300, i === all.length - 1))
-  if (cuttingMethod !== 'guillotine') best.sheets = gravityAll(wideNarrowWideAll(gravityAll(best.sheets), usableX, usableY))
-  // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
-  if (cuttingMethod !== 'guillotine') best.sheets = stripPermuteAll(rowSwapAll(best.sheets, usableX, usableY), usableX, usableY)
-  // Страховка: шаги выше (узкие — от края, стяжка, перестановки) не должны были уменьшить обрезок
-  // последнего листа; если уменьшили, а мелких у края от этого не меньше — лист возвращается к раскладке с бóльшим обрезком
-  if (lastKeep && best.sheets.length) {
-    const n = best.sheets.length - 1, cur = best.sheets[n]
-    if (lastOffcutArea(cur, direction, usableX, usableY) < lastOffcutArea(lastKeep, direction, usableX, usableY) - Math.min(usableX, usableY)
-      && smallAtEdge([lastKeep], usableX, usableY) <= smallAtEdge([cur], usableX, usableY)
-      && lastKeep.placed.length === cur.placed.length) {
-      const keep = cuttingMethod !== 'guillotine' ? gravityAll([wideNarrowWide(lastKeep, usableX, usableY)])[0] : lastKeep
-      best.sheets = best.sheets.slice()
-      best.sheets[n] = { ...(lastOffcutArea(keep, direction, usableX, usableY) >= lastOffcutArea(lastKeep, direction, usableX, usableY) - 1 ? keep : lastKeep), index: cur.index }
-    }
-  }
-  // Страховка: признаки «мелкая» и её пороги — заново из исходных деталей (по id),
-  // чтобы ни один шаг укладки не мог их потерять (на них держатся проверка и подсветка)
-  best.sheets = best.sheets.map(sh => ({
-    ...sh,
-    placed: sh.placed.map(p => {
-      const src = pieceById.get(p.id)
-      return src ? { ...p, isSmall: src.isSmall, edgeOkMax: src.edgeOkMax || 0, edgeMin: src.edgeMin || 0, kf: src.kf || 0 } : p
-    }),
-  }))
+  best.sheets = finishLayout(best.sheets, finishBudget || { maxMs: BIG_ORDER ? 500 : 800, composeMs: BIG_ORDER ? 1000 : 1500, relayout: BIG_ORDER ? 40 : 300 })
 
   return { sheets: best.sheets, usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
 }
@@ -672,7 +730,7 @@ export function lastOffcutArea(sheet, direction, usableX, usableY) {
 // листов и плотность не меняются; мелких у края не прибавляется.
 // settle — финальная стяжка листа (как в итоге раскроя), чтобы сравнивать то,
 // что увидит пользователь.
-function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle = sh => sh, budgetMs = 400 }) {
+function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle = sh => sh, budgetMs = 400, stop = () => false }) {
   if (!sheets.length) return sheets
   const n = sheets.length - 1
   const last = sheets[n]
@@ -690,7 +748,8 @@ function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle
     return false
   }
   const tryPack = (order, mode, dir, bx, by) => {
-    const res = packAttempt(order, mode, dir, bx, by)
+    // мелкие — по настоящему краю листа: верх урезанной полосы (под обрезок) краем не считается
+    const res = packAttempt(order, mode, dir, bx, by, usableX, usableY, true)
     if (res.length !== 1 || res[0].placed.length !== base.length) return null
     let cand = rebuildFree({ ...res[0], index: last.index }, usableX, usableY)
     const settled = settle(cand)
@@ -718,6 +777,7 @@ function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle
     const span = axis === 'x' ? usableX : usableY, other = axis === 'x' ? usableY : usableX
     const area = base.reduce((a, p) => a + p.pw * p.ph, 0)
     let lo = Math.max(Math.max(...base.map(crossMin)), area / other) - 0.5
+    const lo0 = lo
     let hi = axis === 'x' ? sheetExtent(best).mx : sheetExtent(best).my
     // сначала — тот же лист целиком разными порядками (вдруг выходит уже без урезания)
     for (let t = 0; t < 8 && Date.now() < end; t++) {
@@ -725,7 +785,7 @@ function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle
       if (c && consider(c)) hi = Math.min(hi, axis === 'x' ? sheetExtent(c).mx : sheetExtent(c).my)
     }
     let rounds = 0
-    while (hi - lo > 4 && Date.now() < end && rounds++ < 30) {
+    while (hi - lo > 4 && Date.now() < end && !stop() && rounds++ < 30) {
       const target = Math.min(span, (lo + hi) / 2)
       let found = null
       for (let t = 0; t < 32 && !found && Date.now() < end; t++) {
@@ -736,6 +796,17 @@ function maximizeLastOffcut(sheets, { modes, direction, usableX, usableY, settle
         consider(found)
         hi = Math.min(target, axis === 'x' ? sheetExtent(found).mx : sheetExtent(found).my)
       } else lo = target
+    }
+    // Остаток времени — чуть ниже лучшей найденной полосы, случайными порядками: деление пополам сдаётся после
+    // 32 неудачных попыток, а полоса на 1–2% уже часто находится с сотой (261018_002: 1884 → ~1610 мм)
+    const axisEnd = axes.length > 1 && axis === axes[0] ? Date.now() + (end - Date.now()) / 2 : end
+    // (не дольше 400 неудач подряд — иначе время уходило бы всегда целиком, даже когда ниже уже не уложить)
+    for (let t = 0, fails = 0; Date.now() < axisEnd && fails < 400 && !stop(); t++) {
+      const target = Math.min(span, hi - Math.max(4, hi * 0.005))
+      if (target <= lo0) break
+      const found = tryPack(t % 4 === 0 ? perturbOrder(base.slice().sort(sorts[t % sorts.length]), t % 8 === 0) : shuffle(base.slice()),
+        modes[t % modes.length], dirs[(t >> 1) % dirs.length], axis === 'x' ? target : usableX, axis === 'y' ? target : usableY)
+      if (found && consider(found)) { hi = Math.min(target, axis === 'x' ? sheetExtent(found).mx : sheetExtent(found).my); fails = 0 } else fails++
     }
   }
   if (best === last) return sheets
@@ -767,7 +838,7 @@ function offcutBound(placedLike, direction, usableX, usableY) {
   return direction === 'along_y' ? right : direction === 'along_x' ? top : Math.max(right, top)
 }
 const countParts = list => new Set(list.flatMap(sh => sh.placed.map(p => p.id))).size + list.reduce((a, sh) => a + sh.placed.length, 0) * 1e6
-function composeLastForOffcut(sheets, { modes, direction, usableX, usableY, settle, budgetMs = 1500 }) {
+function composeLastForOffcut(sheets, { modes, direction, usableX, usableY, settle, budgetMs = 1500, stop = () => false }) {
   if (sheets.length < 2) return sheets
   const end = Date.now() + budgetMs
   const tol = usableX * usableY * 0.005
@@ -780,7 +851,7 @@ function composeLastForOffcut(sheets, { modes, direction, usableX, usableY, sett
     return direction === 'along_y' ? cxv : direction === 'along_x' ? cyv : Math.min(cxv, cyv)
   }
   // Перекладка последнего с 1–2 заполненными листами (крупные поперёк — первыми)
-  for (let a = 0; Date.now() < end; a++) {
+  for (let a = 0; Date.now() < end && !stop(); a++) {
     const n = cur.length - 1
     const k = Math.min(n, Math.random() < 0.6 ? 1 : 2)
     const idx = []
@@ -1426,15 +1497,15 @@ function rotatePiece(p) {
 
 // Один полный проход укладки: заданный порядок деталей + заданная эвристика выбора места.
 // mode: 'bssf'/'baf' → семья MaxRects; 'g-bssf'/'g-baf' → семья Guillotine.
-function packAttempt(sortedPieces, mode, direction, usableX, usableY) {
+function packAttempt(sortedPieces, mode, direction, usableX, usableY, edgeX = usableX, edgeY = usableY, edgeShift = false) {
   const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
   const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
 
   const place = (sheet, piece) => {
     if (cannotFit(sheet, piece)) return false
     const result = family === 'guillotine'
-      ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
-      : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed)
+      ? chooseSpotGuillotine(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed, edgeX, edgeY)
+      : chooseSpot(sheet.freeRects, piece, direction, usableX, usableY, scoreMode, sheet.placed, edgeX, edgeY, edgeShift)
     if (!result) return false
     sheet.placed.push(result)
     if (family === 'guillotine') { splitGuillotine(sheet, result); delete result._freeRectIdx }
@@ -1655,7 +1726,7 @@ function better(a, b) {
 //
 // contact=0 по умолчанию (компакция, fitFixed) — там направление уже
 // обеспечивается anchor, контакт не пересчитывается для скорости.
-function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall, contact = 0) {
+function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall, contact = 0, edgeX = usableX, edgeY = usableY) {
   const short = Math.min(rect.w - w, rect.h - h)
   const long_ = Math.max(rect.w - w, rect.h - h)
   // Эвристики выбора места (гены «режима» в генетическом поиске):
@@ -1692,8 +1763,8 @@ function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall, conta
     let borderTouch = 0
     if (rect.x <= EPS) borderTouch++
     if (rect.y <= EPS) borderTouch++
-    if (Math.abs(rect.x + w - usableX) <= EPS) borderTouch++
-    if (Math.abs(rect.y + h - usableY) <= EPS) borderTouch++
+    if (Math.abs(rect.x + w - edgeX) <= EPS) borderTouch++
+    if (Math.abs(rect.y + h - edgeY) <= EPS) borderTouch++
     if (along) {
       // мелкие детали: край листа важнее привязки (не запрет, а сильный штраф).
       // Штраф больше любой оценки места при укладке «вдоль»: anchor·(maxContact+1)·(span+1) + … < (span+1)²·(maxContact+2).
@@ -1748,7 +1819,12 @@ function updateFreeBounds(sheet) {
   sheet.maxFreeW = mw; sheet.maxFreeH = mh
 }
 
-function chooseSpot(freeRects, piece, direction, usableX, usableY, mode, placed = []) {
+// edgeX/edgeY — настоящий край листа для правила «мелкие — в центр», когда укладка идёт в урезанную полосу
+// (обрезок последнего листа, см. maximizeLastOffcut): верх полосы — не край листа
+// edgeShift — мелкой детали можно встать не вплотную к краю листа, а в «до края» мм от него (правило выполнено:
+// между деталью и краем — отход не уже порога). Без этого мелкая деталь ставится только в угол свободного места
+// и на неполном последнем листе ей часто некуда встать, кроме как высоко над остальными (обрезок рвётся)
+function chooseSpot(freeRects, piece, direction, usableX, usableY, mode, placed = [], edgeX = usableX, edgeY = usableY, edgeShift = false) {
   let bestRect = null, bestRot = false, bestScore = Infinity
   const canRot = piece.rotatable && piece.pw !== piece.ph
   const needContact = direction === 'along_y' || direction === 'along_x' || mode === 'cp'
@@ -1761,9 +1837,26 @@ function chooseSpot(freeRects, piece, direction, usableX, usableY, mode, placed 
       const contact = needContact
         ? computeContactLength(rect.x, rect.y, pw, ph, placed, usableX, usableY)
         : 0
-      let score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
-      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, placed, usableX, usableY) * SMALL_NEAR_PENALTY
+      let score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact, edgeX, edgeY)
+      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, placed, edgeX, edgeY) * SMALL_NEAR_PENALTY
       if (score < bestScore) { bestScore = score; bestRect = rect; bestRot = k === 1 }
+      if (edgeShift && piece.isSmall) {
+        const gap = (piece.edgeMin || SMALL_EDGE_MIN) + 0.5
+        const xs = [rect.x], ys = [rect.y]
+        if (rect.x <= EPS) xs.push(rect.x + gap)
+        if (rect.x + rect.w >= edgeX - EPS) xs.push(rect.x + rect.w - pw - gap)
+        if (rect.y <= EPS) ys.push(rect.y + gap)
+        if (rect.y + rect.h >= edgeY - EPS) ys.push(rect.y + rect.h - ph - gap)
+        for (const cx of xs) for (const cy of ys) {
+          if (cx === rect.x && cy === rect.y) continue
+          if (cx < rect.x - 0.01 || cy < rect.y - 0.01 || cx + pw > rect.x + rect.w + 0.01 || cy + ph > rect.y + rect.h + 0.01) continue
+          const sub = { x: cx, y: cy, w: rect.x + rect.w - cx, h: rect.y + rect.h - cy }
+          const c2 = needContact ? computeContactLength(cx, cy, pw, ph, placed, usableX, usableY) : 0
+          let sc = scoreSpot(sub, pw, ph, direction, mode, usableX, usableY, true, c2, edgeX, edgeY)
+          sc += smallEdgeSides({ x: cx, y: cy, w: pw, h: ph, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, placed, edgeX, edgeY) * SMALL_NEAR_PENALTY
+          if (sc < bestScore) { bestScore = sc; bestRect = sub; bestRot = k === 1 }
+        }
+      }
     }
   }
   if (!bestRect) return null
@@ -1787,7 +1880,7 @@ function split(sheet, p) {
 // после вставки остаток режется РОВНО ОДНИМ разрезом на 2 части. Дешевле
 // считать (нет merge/prune), меньше фрагментация на узкие полосы.
 
-function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mode, placed = []) {
+function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mode, placed = [], edgeX = usableX, edgeY = usableY) {
   let bestIdx = -1, bestRot = false, bestScore = Infinity
   const canRot = piece.rotatable && piece.pw !== piece.ph
   const needContact = direction === 'along_y' || direction === 'along_x' || mode === 'cp'
@@ -1800,8 +1893,8 @@ function chooseSpotGuillotine(freeRects, piece, direction, usableX, usableY, mod
       const contact = needContact
         ? computeContactLength(rect.x, rect.y, pw, ph, placed, usableX, usableY)
         : 0
-      let score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact)
-      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, placed, usableX, usableY) * SMALL_NEAR_PENALTY
+      let score = scoreSpot(rect, pw, ph, direction, mode, usableX, usableY, piece.isSmall, contact, edgeX, edgeY)
+      if (piece.isSmall) score += smallEdgeSides({ x: rect.x, y: rect.y, w: pw, h: ph, edgeOkMax: piece.edgeOkMax, edgeMin: piece.edgeMin }, placed, edgeX, edgeY) * SMALL_NEAR_PENALTY
       if (score < bestScore) { bestScore = score; bestIdx = idx; bestRot = k === 1 }
     }
   }
