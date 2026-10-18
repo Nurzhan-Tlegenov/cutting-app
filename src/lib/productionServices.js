@@ -7,6 +7,8 @@ import { supabase } from './supabase'
 export const SERVICE_QUESTIONS = [
   { key: 'saw', group: 'Раскрой', q: 'Режете на форматно-раскроечном станке (пила)?', short: 'Пила' },
   { key: 'cnc', group: 'Раскрой', q: 'Есть фрезер с ЧПУ (нестинг)?', short: 'ЧПУ' },
+  // β: вопрос и значок — только мастер-аккаунту и бета-тестерам «Пильный центр»
+  { key: 'beamsaw', group: 'Раскрой', q: 'Есть пильный центр (раскрой по программе)?', short: 'Пильный центр', beta: 'beam_saw' },
   { key: 'shaped', group: 'Раскрой', q: 'Режете фигурные детали — радиусы, вырезы, произвольный контур?', short: 'Фигурные', parent: 'cnc' },
   { key: 'hdf', group: 'Раскрой', q: 'Режете ХДФ / ДВП (задние стенки)?', short: 'ХДФ' },
   { key: 'edge', group: 'Кромка', q: 'Кромите прямолинейные детали?', short: 'Кромка' },
@@ -36,15 +38,22 @@ export function cleanServices(s) {
 /** Что не отвечено из обязательного (раскрой) -> текст ошибки или '' */
 export function servicesProblem(s) {
   if (typeof s.saw !== 'boolean' || typeof s.cnc !== 'boolean') return 'Ответьте на вопросы о раскрое: пила и ЧПУ'
-  if (!s.saw && !s.cnc) return 'Отметьте, на чём режете: пила или ЧПУ'
+  if (!s.saw && !s.cnc && !s.beamsaw) return 'Отметьте, на чём режете: пила, ЧПУ или пильный центр'
   if (s.cnc && typeof s.shaped !== 'boolean') return 'Ответьте, режете ли фигурные детали'
   return ''
 }
 /** Значки услуг: ['Пила', 'ЧПУ', 'Фигурные', …] */
-export function serviceBadges(raw) {
+export function serviceBadges(raw, beta = []) {
   const s = parseServices(raw)
-  return [...SERVICE_QUESTIONS.filter(q => visible(s, q) && s[q.key] === true).map(q => q.short),
+  return [...SERVICE_QUESTIONS.filter(q => (!q.beta || beta.includes(q.beta)) && visible(s, q) && s[q.key] === true).map(q => q.short),
     ...EXTRA_SERVICES.filter(([k]) => s[k] === true).map(([, l]) => l)]
+}
+/** Какими способами режет производство (для раскроя): { nesting: ЧПУ, guillotine: пила, beamsaw: пильный центр }.
+ *  Услуги не указаны — считаем, что всеми (не знаем — не ограничиваем). */
+export function cutMethods(raw) {
+  const s = parseServices(raw)
+  if (!servicesKnown(s)) return { nesting: true, guillotine: true, beamsaw: true, known: false }
+  return { nesting: s.cnc === true, guillotine: s.saw === true, beamsaw: s.beamsaw === true, known: true }
 }
 /** Чего производство не делает из нужного заказу. needs: { shaped, edge, curvedEdge, drill, hdf } -> ['фигурные детали', …] */
 export function missingServices(raw, needs = {}) {

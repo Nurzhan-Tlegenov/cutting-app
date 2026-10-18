@@ -110,7 +110,9 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
       // 4. Размеры и поворот
       if (d) {
         const W = Number(d.width), H = Number(d.length)
-        const sameDims = (Math.abs(p.origX - W) <= EPS && Math.abs(p.origY - H) <= EPS)
+        // пильный центр: узкая деталь пилится с запасом (trimTo — её размер по заказу, «подрезать до …»)
+        const fit = (a, b) => (Math.abs(a - W) <= EPS && Math.abs(b - H) <= EPS) || (Math.abs(a - H) <= EPS && Math.abs(b - W) <= EPS)
+        const sameDims = (Math.abs(p.origX - W) <= EPS && Math.abs(p.origY - H) <= EPS) || (p.trimTo && fit(p.trimTo.width, p.trimTo.length))
         const turned = (Math.abs(p.origX - H) <= EPS && Math.abs(p.origY - W) <= EPS)
         if (!sameDims && !turned) push(`${L}: «${name(p)}» ${Math.round(p.origY)}×${Math.round(p.origX)} не совпадает с заказом ${H}×${W}`)
         // повёрнута против текстуры — это решение заказчика (например, чтобы сэкономить лист): не ошибка, только предупреждение

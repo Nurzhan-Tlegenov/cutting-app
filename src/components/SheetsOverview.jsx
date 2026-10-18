@@ -416,8 +416,11 @@ export default function SheetsOverview({
         if (scrollRaf.current) return
         scrollRaf.current = requestAnimationFrame(() => { scrollRaf.current = 0; drawRef.current?.(curRef.current) })
       }}
+        // место под полосу прокрутки — всегда (scrollbarGutter): на компьютере полоса занимает ~15 px; когда она то
+        // появлялась, то пропадала (листов во время расчёта то больше, то меньше), ширина скакала, масштаб пересчитывался,
+        // и обзор мерцал. На телефоне полоса поверх содержимого — там ничего не меняется
         style={{ height: viewH, overflowY: contentH > viewH ? 'auto' : 'hidden', overflowX: 'hidden', borderRadius: 8,
-          touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
+          scrollbarGutter: 'stable', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ height: contentH, position: 'relative' }}>
           <canvas ref={canvasRef} onClick={onClick}
             width={Math.round(canvasW * DPR)} height={Math.round(viewH * DPR)}

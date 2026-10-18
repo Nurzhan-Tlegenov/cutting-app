@@ -292,7 +292,7 @@ export default function ProductionPage() {
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{prod.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{[prod.country, prod.city, prod.phone].filter(Boolean).join(' · ') || 'Страна и телефон не указаны'}</div>
                     {servicesKnown(prod.services)
-                      ? <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Услуги: {serviceBadges(prod.services).join(' · ') || '—'}</div>
+                      ? <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Услуги: {serviceBadges(prod.services, betaBeam ? ['beam_saw'] : []).join(' · ') || '—'}</div>
                       : <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 4 }}>Услуги не указаны — нажмите «Изменить» и ответьте на вопросы «да / нет». Заказчики видят их при выборе производства.</div>}
                   </div>
                   <button type="button" style={btn()} onClick={() => setEdit(true)}>Изменить</button>

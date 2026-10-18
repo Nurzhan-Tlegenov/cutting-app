@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.8'
+export const BEAM_SAW_VERSION = 'β0.9'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -386,6 +386,34 @@ function better(a, b) {
   return a.cuts < b.cuts
 }
 
+// Обмен деталями с последним листом: последний лист перекраивается вместе с 1–2 заполненными — порядок «крупные
+// вперёд», чтобы заполненные листы забились плотнее, а на последний ушло меньше и он сложился узкой полосой (больше
+// цельный обрезок). Число листов не растёт; что лучше — решает better().
+function squeezeLast(best, pieces, s, kerf, X, Y, axisSets, rnd) {
+  const n = best?.sheets.length || 0
+  if (n < 2) return null
+  const k = Math.min(n - 1, rnd() < 0.6 ? 1 : 2)
+  const idx = []
+  for (let g = 0; idx.length < k && g < 20; g++) {
+    // чаще берём листы, где свободнее: туда проще забрать детали с последнего
+    let j = Math.floor(rnd() * (n - 1))
+    if (rnd() < 0.5) { const j2 = Math.floor(rnd() * (n - 1)); if (areaOf(best.sheets[j2]) < areaOf(best.sheets[j])) j = j2 }
+    if (!idx.includes(j)) idx.push(j)
+  }
+  const ids = new Set([...idx.flatMap(j => best.sheets[j].placed.map(p => p.id)), ...lastOf(best).placed.map(p => p.id)])
+  const sub = pieces.filter(p => ids.has(p.id))
+  const base = SORTS[Math.floor(rnd() * SORTS.length)]
+  const ord = rnd() < 0.25 ? sub.slice().sort(base) : perturb(sub.slice().sort(base), rnd, 0.05 + rnd() * 0.4)
+  const ax = axisSets[Math.floor(rnd() * axisSets.length)]
+  const r = packAll(ord, s, kerf, X, Y, ax, { orient: rnd() < 0.5 ? 'long' : 'fit' })
+  if (r.unplaced.length || r.sheets.length > k + 1) return null
+  const sheets = best.sheets.slice()
+  idx.sort((a, b) => a - b).forEach((j, t) => { sheets[j] = { ...r.sheets[t], index: j } })
+  if (r.sheets.length === k + 1) sheets[n - 1] = { ...r.sheets[k], index: n - 1 }
+  else sheets.splice(n - 1, 1)                     // последний лист опустел — листов меньше
+  return { sheets, cuts: sheets.reduce((a, sh) => a + (sh.beamCuts || 0), 0), unplaced: best.unplaced }
+}
+
 // Последний лист — отдельно: его детали перекладываются заново (порядок, повороты, направление полос),
 // чтобы они легли плотно, а цельный остаток (деловой обрезок) был как можно больше. Остальные листы не трогаются.
 function compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd) {
@@ -496,6 +524,8 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
     consider(packAll(ord, s, kerf, X, Y, ax, { orient: rnd() < 0.5 ? 'long' : 'fit' }), ax.join(''))
     // попутно — плотнее последний лист лучшего варианта (дёшево: деталей на нём немного)
     for (let j = 0; j < 3; j++) { const c = compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (c) consider(c, 'last') }
+    // обмен деталями последнего листа с заполненными — на последний меньше, обрезок больше
+    for (let j = 0; j < 2; j++) { const c = squeezeLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (c) consider(c, 'swap') }
     // форматник: гибкая гильотина — весь заказ (иногда) и последний лист под цельный обрезок (каждый ход)
     if (s.stairLast) {
       if (rnd() < 0.25) { iter++; consider(packAllGen(perturb(base, rnd, rnd() * 0.3), s, kerf, X, Y, axes, rnd), 'gen') }
@@ -512,6 +542,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   for (let j = 0; j < 3000 && now() < tEnd; j++) {
     iter++
     const c = compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (c) consider(c, 'last')
+    if (!s.stairLast) { const w = squeezeLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (w) consider(w, 'swap') }
     if (s.stairLast) { const g = compactLastGen(best, pieces, s, kerf, X, Y, axes, rnd); if (g) consider(g, 'stair') }
     if (now() - tick > 40) { tick = now(); await pause() }
   }

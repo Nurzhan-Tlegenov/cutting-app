@@ -1,7 +1,13 @@
-import { SERVICE_QUESTIONS, EXTRA_SERVICES } from '../lib/productionServices'
+import { useEffect, useState } from 'react'
+import { SERVICE_QUESTIONS as ALL_QUESTIONS, EXTRA_SERVICES } from '../lib/productionServices'
+import { myBeta } from '../lib/beta'
 
 // Вопросы об услугах производства — «да / нет» в одно касание. Уточняющий вопрос появляется только после «да».
 export default function ServicesForm({ value, onChange }) {
+  // β-вопросы (пильный центр) — только мастер-аккаунту и бета-тестерам
+  const [beta, setBeta] = useState([])
+  useEffect(() => { let alive = true; myBeta().then(b => { if (alive) setBeta(b) }); return () => { alive = false } }, [])
+  const SERVICE_QUESTIONS = ALL_QUESTIONS.filter(q => !q.beta || beta.includes(q.beta))
   const set = (k, v) => onChange({ ...value, [k]: v })
   const groups = [...new Set(SERVICE_QUESTIONS.map(q => q.group))]
   const yn = (on, yes) => ({

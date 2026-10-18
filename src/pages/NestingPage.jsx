@@ -51,6 +51,7 @@ import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { beamSettings, sameMaps, sameMapTag } from '../lib/beamSaw'
+import { cutMethods } from '../lib/productionServices'
 import { saveBeamSawXml } from '../lib/beamSawXml'
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
@@ -1639,6 +1640,22 @@ export default function NestingPage() {
   if (ownFor !== id) { setOwnFor(id); setNoProdOkState(readOwnParams(id)) }
   const runAfterRef = useRef(null)                       // какой раскрой запустить, когда производство выбрано
   const [prodsReady, setProdsReady] = useState(false)    // список производств загружен (и последнее выбранное подставлено)
+  // Производство указало, на чём режет (Услуги), а выбран способ, которого у него нет, — переключаемся на тот, что есть
+  // (ЧПУ → пила → пильный центр β). Параметры подставляются по способу: ЧПУ и пила — «Параметры станка», пильный центр — свои.
+  useEffect(() => {
+    if (!prodsReady || !order?.production_id) return
+    const pr = productions.find(x => x.id === order.production_id)
+    if (!pr) return
+    const m = cutMethods(pr.services)
+    const cur = beamSaw ? 'beamsaw' : cuttingMethod
+    if (m[cur]) return
+    const next = ['nesting', 'guillotine', 'beamsaw'].find(k => m[k] && (k !== 'beamsaw' || betaBeam) && !(k === 'nesting' && order.material_kind === 'hdf'))
+    if (!next) return
+    const beam = next === 'beamsaw', method = beam ? 'guillotine' : next
+    Promise.resolve().then(() => { setCuttingMethod(method); setBeamSaw(beam) })
+    saveSmallPartsSettings({ cutting_method: method })
+    if (beam !== !!order.beam_saw) supabase.from('orders').update({ beam_saw: beam }).eq('id', id).then(({ error }) => { if (!error) setOrder(o => (o ? { ...o, beam_saw: beam } : o)) })
+  }, [prodsReady, order?.production_id, productions, betaBeam])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedOnOpenRef = useRef(false)
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
   useBackClose(!!needProd, () => setNeedProd(null))
@@ -3624,16 +3641,20 @@ export default function NestingPage() {
       <div data-tour="nest-machine" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)'], ...(betaBeam || beamSaw ? [['beamsaw', 'Пильный центр β']] : [])].map(([val, label]) => {
           const active = val === 'beamsaw' ? beamSaw : !beamSaw && cuttingMethod === val
-          const off = val === 'nesting' && order.material_kind === 'hdf'
+          // производство выбрано и указало, на чём режет (Услуги) — только эти способы; не указало — любые
+          const prc = order.production_id ? productions.find(x => x.id === order.production_id) : null
+          const notOffered = !!prc && !cutMethods(prc.services)[val]
+          const off = (val === 'nesting' && order.material_kind === 'hdf') || notOffered
           return (
           <div key={val} onClick={() => {
+            if (notOffered) { window.alert(`Производство «${prc.name}» не режет на этом станке (${label.replace(' β', '')}). Выберите другой способ или другое производство.`); return }
             if (off) return
             const beam = val === 'beamsaw', method = beam ? 'guillotine' : val
             setCuttingMethod(method); setBeamSaw(beam)
             saveSmallPartsSettings({ cutting_method: method })
             if (beam !== !!order.beam_saw) supabase.from('orders').update({ beam_saw: beam }).eq('id', id).then(({ error }) => { if (!error) setOrder(o => (o ? { ...o, beam_saw: beam } : o)) })   // база ещё без migration_beta.sql — выбор живёт до перезагрузки
           }}
-            title={off ? 'Материал заказа — ХДФ / ДВП: он режется только на пиле' : val === 'beamsaw' ? 'Бета-тест: раскрой под пильный центр — полосы и сквозные резы' : val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
+            title={notOffered ? `Производство «${prc.name}» так не режет` : off ? 'Материал заказа — ХДФ / ДВП: он режется только на пиле' : val === 'beamsaw' ? 'Бета-тест: раскрой под пильный центр — полосы и сквозные резы' : val === 'guillotine' ? 'Только сквозные резы через весь лист/полосу' : 'Свободная укладка для резки фрезой по любому контуру'}
             style={{ flex: 1, padding: '6px 4px', borderRadius: 'var(--radius)', textAlign: 'center',
               opacity: off ? 0.4 : 1,
               fontSize: 12, cursor: 'pointer',
@@ -3646,7 +3667,7 @@ export default function NestingPage() {
       </div>
       {beamSaw && (
         <p style={{ fontSize: 11, color: 'var(--blue)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
-          β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Направление — как выбрано в конфигурации («авто» — как у производства); пропил, обрезка листа и остальные правила — свои, из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); return pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)' })()}.
+          β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Направление — как выбрано в конфигурации («авто» — как у производства); пропил, обрезка листа и остальные правила — свои, из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); const bs = beamSettings(pr?.beam_saw_settings); return <>{pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)'}: <b>рез {bs.kerf} мм, отступы ←{bs.trimLeft} →{bs.trimRight} ↑{bs.trimTop} ↓{bs.trimBottom}</b> (параметры листа выше для пильного центра не используются)</> })()}.
           {!isMaster && (
             <button type="button" onClick={() => setSendJob({
               title: 'Замечание по пильному центру β', fileName: `beamsaw_${orderFileName(order)}.json`, orderId: id,
