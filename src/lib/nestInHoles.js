@@ -3,9 +3,10 @@
 // Кольцо борта 1088×2388 с вырезом 936×2236 — внутрь входит основание 920×2220; кольцо поменьше — в кольцо побольше.
 // Раскрой сам такого не видит: деталь для него — её наружный контур, вырез — не свободное место. Здесь это делается
 // закономерно, до поиска: для каждого выреза (от большого к малому) подбирается самая крупная деталь заказа, которая
-// входит в него с зазором не меньше реза (поворот 0°, а если деталь можно вращать — и 90°; деталь ставится в центр
-// выреза). Вложенная деталь выбывает из раскроя, а к детали-хозяину «пристёгивается» и после укладки встаёт внутрь её
-// выреза (с тем же поворотом). Цепочки — тоже: кольцо → полоса → панель. Один вырез — одна деталь.
+// входит в него с зазором не меньше реза (поворот 0°, а если деталь можно вращать — и 90°), и так по кругу, пока
+// в вырез что-то входит: каждая деталь — как можно ближе к нулю выреза (ниже, затем левее), с зазором ≥ реза до
+// выреза и до соседей. Вложенная деталь выбывает из раскроя, а к детали-хозяину «пристёгивается» и после укладки встаёт
+// внутрь её выреза (с тем же поворотом). Цепочки — тоже: кольцо → полоса → панель.
 //
 // Проверка и ручные правки (validateNesting, карта): деталь внутри выреза другой — не пересечение, если контур целиком в
 // вырезе с зазором ≥ реза (nestedInHole). G-код: сначала контур вложенной детали, потом вырез хозяина, потом его контур.
@@ -107,68 +108,97 @@ export function nestedInHole(inner, host, details, kerf) {
 
 // ─── План вложения до раскроя ───────────────────────────────────────────────
 // Возвращает null, если вкладывать нечего, иначе { details: детали для раскроя (qty вложенных уменьшено),
-// plan: Map<detailIndex, [{ hole, child, rot, ox, oy, count }]> } — для каждой детали-хозяина: в какой вырез, какая
-// деталь, с каким поворотом (0/90 — относительно хозяина) и на каком месте (левый нижний угол габарита в «родных»
-// координатах хозяина), и сколько экземпляров хозяина получают вложение (остальные — пустые).
+// plan: Map<detailIndex, [{ hole, slots: [{ child, rot, ox, oy, count }] }]> } — для каждой детали-хозяина и каждого её
+// выреза: раскладка вложений (деталь, поворот 0/90 относительно хозяина, левый нижний угол габарита в «родных»
+// координатах хозяина) и сколько экземпляров хозяина получают это место (остальные — пустые).
+// В один вырез кладётся несколько деталей: от крупной к мелкой, каждая — как можно ближе к нулю выреза (ниже, затем
+// левее), внутри контура выреза и с зазором ≥ реза до выреза и до соседей по вырезу.
+const polyAreaXY = P => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p.x * q.y - q.x * p.y } return Math.abs(a) / 2 }
+// минимальный зазор между двумя контурами (0 — пересекаются / один в другом)
+function polyGap(A, B) {
+  for (let i = 0; i < A.length; i++) for (let j = 0; j < B.length; j++) if (segsCross(A[i], A[(i + 1) % A.length], B[j], B[(j + 1) % B.length])) return 0
+  if (inPoly(A[0], B) || inPoly(B[0], A)) return 0
+  let m = Infinity
+  for (const p of A) for (let j = 0; j < B.length; j++) m = Math.min(m, segDist(p, B[j], B[(j + 1) % B.length]))
+  for (const p of B) for (let j = 0; j < A.length; j++) m = Math.min(m, segDist(p, A[j], A[(j + 1) % A.length]))
+  return m
+}
+// Место для контура poly (локальные [x,y], габарит cw×ch) в вырезе hole рядом с уже положенными taken (абсолютные контуры
+// в координатах хозяина): кандидаты — угол выреза, у правых/верхних сторон соседей, центр, сетка; берётся самый нижний,
+// потом самый левый
+function spotInHole(poly, pb, cw, ch, hole, taken, k) {
+  const { bb } = hole
+  const xs = new Set([bb.x0 + k, (bb.x0 + bb.x1) / 2 - cw / 2]), ys = new Set([bb.y0 + k, (bb.y0 + bb.y1) / 2 - ch / 2])
+  for (const t of taken) { const tb = bboxOf(t); xs.add(tb.x1 + k); ys.add(tb.y1 + k); xs.add(tb.x0); ys.add(tb.y0) }
+  const stepX = Math.max(8, (bb.x1 - bb.x0 - cw) / 24), stepY = Math.max(8, (bb.y1 - bb.y0 - ch) / 24)
+  for (let x = bb.x0 + k; x + cw <= bb.x1 - k + TOL; x += stepX) xs.add(x)
+  for (let y = bb.y0 + k; y + ch <= bb.y1 - k + TOL; y += stepY) ys.add(y)
+  const X = [...xs].filter(x => x >= bb.x0 + k - TOL && x + cw <= bb.x1 - k + TOL).sort((a, b) => a - b)
+  const Y = [...ys].filter(y => y >= bb.y0 + k - TOL && y + ch <= bb.y1 - k + TOL).sort((a, b) => a - b)
+  for (const y of Y) for (const x of X) {
+    // быстрый отсев по габаритам соседей
+    let clash = false
+    for (const t of taken) { const tb = t._bb; if (x < tb.x1 + k - TOL && tb.x0 < x + cw + k - TOL && y < tb.y1 + k - TOL && tb.y0 < y + ch + k - TOL) { clash = true; break } }
+    const abs = poly.map(([px, py]) => ({ x: x + (px - pb.x0), y: y + (py - pb.y0) }))
+    if (!polyInsideWithGap(abs, hole.poly, k)) continue
+    if (clash && taken.some(t => polyGap(abs, t) < k - TOL)) continue
+    return { ox: x, oy: y, abs }
+  }
+  return null
+}
 export function planNestInHoles(details, kerf) {
   const k = Number(kerf) || 0
   const qty = details.map(d => Math.max(0, Math.floor(Number(d.qty) || 0)))
+  const inst = details.map(d => Math.max(0, Math.floor(Number(d.qty) || 0)))   // экземпляров — по заказу (хозяин сам мог быть вложен)
   const polys = details.map(d => { try { return roughShapePolygons(d) } catch { return null } })
-  const area = P => { let a = 0; for (let i = 0; i < P.length; i++) { const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length]; a += x1 * y2 - x2 * y1 } return Math.abs(a) / 2 }
-  const polyArea = P => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p.x * q.y - q.x * p.y } return Math.abs(a) / 2 }
+  const areaOf = P => polyAreaXY(P.map(([x, y]) => ({ x, y })))
   // все вырезы всех деталей — от большого к малому
   const holes = []
-  details.forEach((d, di) => { if (qty[di] > 0) throughHoles(d).forEach(h => holes.push({ di, idx: h.idx, poly: h.poly, area: polyArea(h.poly), bb: bboxOf(h.poly) })) })
+  details.forEach((d, di) => { if (qty[di] > 0) throughHoles(d).forEach(h => holes.push({ di, idx: h.idx, poly: h.poly, area: polyAreaXY(h.poly), bb: bboxOf(h.poly) })) })
   if (!holes.length) return null
   holes.sort((a, b) => b.area - a.area)
   // кандидаты — от крупной к мелкой (по площади контура)
-  const cands = details.map((d, di) => ({ di, area: polys[di] ? area(polys[di][0]) : 0 })).filter(c => c.area > 0).sort((a, b) => b.area - a.area)
+  const cands = details.map((d, di) => ({ di, area: polys[di] ? areaOf(polys[di][0]) : 0 })).filter(c => c.area > 0).sort((a, b) => b.area - a.area)
   const plan = new Map()
-  // сколько экземпляров хозяина ещё без вложения в этом вырезе
-  const freeInst = new Map()   // `${di}|${idx}` → число
   // кто в кого вложен — чтобы не получить кольцо (A в B, B в A); цепочки разрешены
   const parentOf = new Map()
   const ancestorIs = (di, anc) => { let x = di; for (let g = 0; g < 50 && x != null; g++) { x = parentOf.get(x); if (x === anc) return true } return false }
   for (const h of holes) {
-    const key = `${h.di}|${h.idx}`
-    if (!freeInst.has(key)) freeInst.set(key, Math.max(0, Math.floor(Number(details[h.di].qty) || 0)))   // экземпляров хозяина — по заказу (сам он мог быть вложен)
-    let free = freeInst.get(key)
-    if (free <= 0) continue
-    for (const c of cands) {
-      if (c.di === h.di || qty[c.di] <= 0 || free <= 0) continue
-      if (c.area >= h.area) continue
-      if (ancestorIs(h.di, c.di)) continue   // хозяин уже лежит внутри кандидата (или его потомка)
-      const P = polys[c.di]
-      if (!P) continue
-      const rots = details[c.di].rotatable ? [0, 90] : [0]
-      let fit = null
-      for (const rot of rots) {
-        const poly = P[rot]
-        if (!poly) continue
-        const pb = bboxOf(poly.map(([x, y]) => ({ x, y })))
-        const cw = pb.x1 - pb.x0, ch = pb.y1 - pb.y0
-        if (cw + 2 * k > h.bb.x1 - h.bb.x0 + TOL || ch + 2 * k > h.bb.y1 - h.bb.y0 + TOL) continue
-        // по центру выреза, затем по углам (левый нижний, правый верхний и т. д.) с зазором на рез
-        const anchors = [
-          [(h.bb.x0 + h.bb.x1) / 2 - cw / 2, (h.bb.y0 + h.bb.y1) / 2 - ch / 2],
-          [h.bb.x0 + k, h.bb.y0 + k], [h.bb.x1 - k - cw, h.bb.y0 + k], [h.bb.x0 + k, h.bb.y1 - k - ch], [h.bb.x1 - k - cw, h.bb.y1 - k - ch],
-        ]
-        for (const [ox, oy] of anchors) {
-          const abs = poly.map(([x, y]) => ({ x: ox + (x - pb.x0), y: oy + (y - pb.y0) }))
-          if (polyInsideWithGap(abs, h.poly, k)) { fit = { rot, ox, oy }; break }
+    if (inst[h.di] <= 0) continue
+    const slots = [], taken = []
+    // по кругу: каждый раз — самая крупная деталь, которая ещё входит (одна и та же деталь — сколько влезет)
+    for (let guard = 0; guard < 200; guard++) {
+      let put = false
+      for (const c of cands) {
+        if (c.di === h.di || qty[c.di] <= 0 || c.area >= h.area) continue
+        if (ancestorIs(h.di, c.di)) continue   // хозяин уже лежит внутри кандидата (или его потомка)
+        const P = polys[c.di]
+        if (!P) continue
+        const rots = details[c.di].rotatable ? [0, 90] : [0]
+        let fit = null
+        for (const rot of rots) {
+          const poly = P[rot]
+          if (!poly) continue
+          const pb = bboxOf(poly.map(([x, y]) => ({ x, y })))
+          const cw = pb.x1 - pb.x0, ch = pb.y1 - pb.y0
+          if (cw + 2 * k > h.bb.x1 - h.bb.x0 + TOL || ch + 2 * k > h.bb.y1 - h.bb.y0 + TOL) continue
+          const sp = spotInHole(poly, pb, cw, ch, h, taken, k)
+          if (sp) { fit = { rot, ...sp }; break }
         }
-        if (fit) break
+        if (!fit) continue
+        const count = Math.min(inst[h.di], qty[c.di])
+        slots.push({ child: c.di, rot: fit.rot, ox: fit.ox, oy: fit.oy, count })
+        const abs = fit.abs; abs._bb = bboxOf(abs); taken.push(abs)
+        qty[c.di] -= count
+        parentOf.set(c.di, h.di)
+        put = true
+        break
       }
-      if (!fit) continue
-      const count = Math.min(free, qty[c.di])
-      if (!plan.has(h.di)) plan.set(h.di, [])
-      plan.get(h.di).push({ hole: h.idx, child: c.di, rot: fit.rot, ox: fit.ox, oy: fit.oy, count })
-      qty[c.di] -= count
-      free -= count
-      freeInst.set(key, free)
-      parentOf.set(c.di, h.di)
-      break   // один вырез — одна деталь
+      if (!put) break
     }
+    if (!slots.length) continue
+    if (!plan.has(h.di)) plan.set(h.di, [])
+    plan.get(h.di).push({ hole: h.idx, slots })
   }
   if (!plan.size) return null
   // Вложенная деталь поворачивается вместе с хозяином. Если её вращать нельзя (текстура), хозяин в раскрое тоже
@@ -178,7 +208,7 @@ export function planNestInHoles(details, kerf) {
     let changed = false
     for (const [di, list] of plan) {
       if (locked.has(di)) continue
-      if (list.some(e => !details[e.child].rotatable || locked.has(e.child))) { locked.add(di); changed = true }
+      if (list.some(e => e.slots.some(sl => !details[sl.child].rotatable || locked.has(sl.child)))) { locked.add(di); changed = true }
     }
     if (!changed) break
   }
@@ -203,8 +233,8 @@ const turnEdges = (p, times) => {
 export function expandNested(sheets, details, plan, kerf) {
   if (!plan?.size || !sheets?.length) return sheets
   const k = Number(kerf) || 0
-  const left = new Map()   // `${di}|${hole}` → сколько ещё вложить
-  for (const [di, list] of plan) list.forEach(e => left.set(`${di}|${e.hole}`, e.count))
+  const left = new Map()   // `${di}|${hole}|${slot}` → сколько ещё вложить
+  for (const [di, list] of plan) list.forEach(e => e.slots.forEach((sl, si) => left.set(`${di}|${e.hole}|${si}`, sl.count)))
   let seq = 0
   const polyCache = new Map()
   const polysOf = di => { if (!polyCache.has(di)) { try { polyCache.set(di, roughShapePolygons(details[di])) } catch { polyCache.set(di, null) } } return polyCache.get(di) }
@@ -214,21 +244,21 @@ export function expandNested(sheets, details, plan, kerf) {
     const hd = details[host.detailIndex]
     const W = Number(hd.width) || 0, H = Number(hd.length) || 0
     const t = host.rotation != null ? ((Math.round(Number(host.rotation) / 90) % 4) + 4) % 4 : (host.rotated ? 1 : 0)
-    for (const e of list) {
-      const key = `${host.detailIndex}|${e.hole}`
+    for (const e of list) for (const [si, sl] of e.slots.entries()) {
+      const key = `${host.detailIndex}|${e.hole}|${si}`
       if (!(left.get(key) > 0)) continue
-      const cd = details[e.child], P = polysOf(e.child)
+      const cd = details[sl.child], P = polysOf(sl.child)
       if (!P) continue
-      const rot = (e.rot + 90 * t) % 360
+      const rot = (sl.rot + 90 * t) % 360
       const poly = P[rot]
       if (!poly) continue
-      const cw0 = e.rot % 180 ? Number(cd.length) : Number(cd.width), ch0 = e.rot % 180 ? Number(cd.width) : Number(cd.length)
+      const cw0 = sl.rot % 180 ? Number(cd.length) : Number(cd.width), ch0 = sl.rot % 180 ? Number(cd.width) : Number(cd.length)
       // габарит вложения в «родных» координатах хозяина → поворот вместе с хозяином
-      const corners = [[e.ox, e.oy], [e.ox + cw0, e.oy], [e.ox + cw0, e.oy + ch0], [e.ox, e.oy + ch0]].map(([x, y]) => rotatePointTimes(x, y, W, H, t))
+      const corners = [[sl.ox, sl.oy], [sl.ox + cw0, sl.oy], [sl.ox + cw0, sl.oy + ch0], [sl.ox, sl.oy + ch0]].map(([x, y]) => rotatePointTimes(x, y, W, H, t))
       const nx = Math.min(...corners.map(q => q.x)), ny = Math.min(...corners.map(q => q.y))
       const origX = rot % 180 ? Number(cd.length) : Number(cd.width), origY = rot % 180 ? Number(cd.width) : Number(cd.length)
       const child = {
-        id: `${e.child}_n${seq++}`, detailIndex: e.child, label: cd.display_name || cd.name, prefix: cd.prefix,
+        id: `${sl.child}_n${seq++}`, detailIndex: sl.child, label: cd.display_name || cd.name, prefix: cd.prefix,
         x: host.x + nx, y: host.y + ny, w: origX + k, h: origY + k, origX, origY,
         rotated: rot % 180 !== 0, rotation: rot, rotatable: !!cd.rotatable, isSmall: false, kf: k,
         polygon: poly.map(([x, y]) => ({ x, y })),
