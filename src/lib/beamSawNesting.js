@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.9'
+export const BEAM_SAW_VERSION = 'β0.10'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -21,7 +21,7 @@ const pause = () => new Promise(r => setTimeout(r, 0))
 
 // ── детали ────────────────────────────────────────────────────────────────
 // id `${индекс детали}_${номер}` — как в nesting.js: по нему карта находит детали заказа
-function buildPieces(details, kerf, s) {
+export function buildPieces(details, kerf, s) {
   const out = []
   details.forEach((d, di) => {
     const L0 = Number(d.length) || 0, W0 = Number(d.width) || 0
@@ -70,6 +70,7 @@ function makeCtx(pieces, s, kerf, opts) {
     s, kerf, maxL: maxLevels(s),
     grip: s.grip + (s.gripWithKerf ? 0 : kerf),     // остаток с пропилом: 0 или не меньше этого
     used: new Set(), order: pieces, orient: opts.orient, rnd: opts.rnd || null,
+    pickBest: !!opts.pickBest, look: opts.look || 0, byId: new Map(pieces.map(p => [p.id, p])),
     edge: opts.edge || { x: 0, y: 0 },               // обрезка листа у дальнего края по оси
   }
 }
@@ -99,6 +100,11 @@ function fits(ctx, axis, o, freeA, B, L) {
 // Выбор следующей детали: первая по приоритету, которая подходит. Ориентация: ровно по B — лучше всего;
 // иначе по правилу варианта (длинной стороной вдоль полосы или плотнее по B).
 function pick(ctx, axis, freeA, B, L, onlyExact = false) {
+  // pickBest — не первая по приоритету, а самая подходящая из всех: меньше остаток поперёк заготовки (B − b), при равном —
+  // крупнее. Первая по приоритету («от большого к малому») даёт полосы под самые большие детали; «самая подходящая»
+  // плотнее добирает заготовку. Поиск пробует оба — лучше решает better()
+  const all = ctx.pickBest && !onlyExact && L > 1
+  let out = null, outK = Infinity
   for (const p of ctx.order) {
     if (ctx.used.has(p.id)) continue
     let best = null, bestK = Infinity
@@ -109,9 +115,12 @@ function pick(ctx, axis, freeA, B, L, onlyExact = false) {
       const k = exact ? -1e9 : ctx.orient === 'long' && L === 1 ? -o.b : (B - o.b)
       if (k < bestK) { bestK = k; best = o }
     }
-    if (best) return { p, ...best }
+    if (!best) continue
+    if (!all) return { p, ...best }
+    const k = bestK * 1e6 - best.a * best.b
+    if (k < outK) { outK = k; out = { p, ...best } }
   }
-  return null
+  return out
 }
 
 // Укладка региона. first — деталь, с которой слот начат уровнем выше (она обязана встать первой).
@@ -137,12 +146,48 @@ function fillRegion(ctx, axis, A, B, L, first = null) {
   }
   // сначала детали ровно по заготовке (та же ширина полосы — без лишнего реза), потом остальные по приоритету
   for (;;) {
-    const c = pick(ctx, axis, A - used, B, L, true) || pick(ctx, axis, A - used, B, L)
+    let c = pick(ctx, axis, A - used, B, L, true)
+    if (!c && ctx.look && L === 1) c = lookahead(ctx, axis, A - used, B, L)
+    if (!c) c = pick(ctx, axis, A - used, B, L)
     if (!c) break
     take(c)
   }
   node.used = used
   return node
+}
+// Выбор полосы с заглядыванием вперёд: несколько первых по приоритету деталей, которые могут задать полосу, — для каждой
+// полоса заполняется начерно и берётся та, где заполнение плотнее (доля площади деталей в полосе). Без этого полосу
+// задаёт просто самая большая деталь, и в полосе под неё может оказаться много пустого
+function lookahead(ctx, axis, freeA, B, L) {
+  const cands = [], seen = new Set()
+  for (const p of ctx.order) {
+    if (ctx.used.has(p.id)) continue
+    for (const o of orients(p, axis)) {
+      if (!fits(ctx, axis, o, freeA, B, L)) continue
+      const key = o.a.toFixed(1) + (o.b.toFixed(1))
+      if (seen.has(key)) continue
+      seen.add(key); cands.push({ p, ...o })
+    }
+    if (cands.length >= ctx.look) break
+  }
+  if (cands.length < 2) return cands[0] || null
+  const saved = new Set(ctx.used), look = ctx.look
+  ctx.look = 0   // внутри пробы — без вложенного заглядывания
+  let best = null, bestK = -1
+  for (const c of cands) {
+    ctx.used = new Set(saved)
+    ctx.used.add(c.p.id)
+    let area = c.a * c.b
+    if (B - c.b >= EPS) {
+      const child = fillRegion(ctx, axis === 'x' ? 'y' : 'x', B, c.a, L + 1, { p: c.p, rot: c.rot, a: c.b, b: c.a })
+      area = 0; for (const id of ctx.used) if (!saved.has(id)) { const q = ctx.byId.get(id); area += q.pw * q.ph }
+      void child
+    }
+    const k = area / (c.a * B)
+    if (k > bestK + 1e-9) { bestK = k; best = c }
+  }
+  ctx.used = saved; ctx.look = look
+  return best
 }
 
 // ── форматник: гибкая гильотина (полоса шире одной детали) ───────────────────
@@ -324,7 +369,7 @@ function plainTree(node) {
 // axes — направления 1-го уровня, из которых выбирается для КАЖДОГО листа своё (в «Авто» — оба:
 // одни листы режутся вдоль, другие поперёк); берётся то, где на лист легло больше
 const pieceArea = (ctx, ids) => { let a = 0; for (const p of ctx.order) if (ids.has(p.id)) a += p.pw * p.ph; return a }
-function packAll(pieces, s, kerf, X, Y, axes, opts) {
+export function packAll(pieces, s, kerf, X, Y, axes, opts) {
   const ctx = makeCtx(pieces, s, kerf, { ...opts, edge: { x: Math.min(s.trimLeft, s.trimRight), y: Math.min(s.trimTop, s.trimBottom) } })
   const sheets = []
   const roots = []
@@ -392,20 +437,21 @@ function better(a, b) {
 function squeezeLast(best, pieces, s, kerf, X, Y, axisSets, rnd) {
   const n = best?.sheets.length || 0
   if (n < 2) return null
-  const k = Math.min(n - 1, rnd() < 0.6 ? 1 : 2)
+  const want = Math.min(n - 1, rnd() < 0.6 ? 1 : 2)
   const idx = []
-  for (let g = 0; idx.length < k && g < 20; g++) {
+  for (let g = 0; idx.length < want && g < 20; g++) {
     // чаще берём листы, где свободнее: туда проще забрать детали с последнего
     let j = Math.floor(rnd() * (n - 1))
     if (rnd() < 0.5) { const j2 = Math.floor(rnd() * (n - 1)); if (areaOf(best.sheets[j2]) < areaOf(best.sheets[j])) j = j2 }
     if (!idx.includes(j)) idx.push(j)
   }
+  const k = idx.length   // могло набраться меньше задуманного (листов мало, случайность) — считаем по факту, иначе детали терялись
   const ids = new Set([...idx.flatMap(j => best.sheets[j].placed.map(p => p.id)), ...lastOf(best).placed.map(p => p.id)])
   const sub = pieces.filter(p => ids.has(p.id))
   const base = SORTS[Math.floor(rnd() * SORTS.length)]
   const ord = rnd() < 0.25 ? sub.slice().sort(base) : perturb(sub.slice().sort(base), rnd, 0.05 + rnd() * 0.4)
   const ax = axisSets[Math.floor(rnd() * axisSets.length)]
-  const r = packAll(ord, s, kerf, X, Y, ax, { orient: rnd() < 0.5 ? 'long' : 'fit' })
+  const r = packAll(ord, s, kerf, X, Y, ax, rndOpts(rnd))
   if (r.unplaced.length || r.sheets.length > k + 1) return null
   const sheets = best.sheets.slice()
   idx.sort((a, b) => a - b).forEach((j, t) => { sheets[j] = { ...r.sheets[t], index: j } })
@@ -424,14 +470,14 @@ function compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd) {
   const base = SORTS[Math.floor(rnd() * SORTS.length)]
   const ord = rnd() < 0.3 ? sub.slice().sort(base) : perturb(sub.slice().sort(base), rnd, 0.1 + rnd() * 0.5)
   const ax = axisSets[Math.floor(rnd() * axisSets.length)]
-  const r = packAll(ord, s, kerf, X, Y, ax, { orient: rnd() < 0.5 ? 'long' : 'fit' })
+  const r = packAll(ord, s, kerf, X, Y, ax, rndOpts(rnd))
   if (r.sheets.length !== 1 || r.unplaced.length) return null
   const sheets = best.sheets.slice(0, -1).concat([{ ...r.sheets[0], index: best.sheets.length - 1 }])
   return { sheets, cuts: best.cuts - (last.beamCuts || 0) + r.sheets[0].beamCuts, unplaced: best.unplaced }
 }
 
 // порядки деталей: «от большого к малому» в нескольких смыслах + случайные возмущения
-const SORTS = [
+export const SORTS = [
   (p, q) => Math.max(q.pw, q.ph) - Math.max(p.pw, p.ph) || q.pw * q.ph - p.pw * p.ph,
   (p, q) => q.pw * q.ph - p.pw * p.ph,
   (p, q) => Math.min(q.pw, q.ph) - Math.min(p.pw, p.ph) || Math.max(q.pw, q.ph) - Math.max(p.pw, p.ph),
@@ -447,6 +493,8 @@ function perturb(list, rnd, strength) {
   }
   return a
 }
+// случайные параметры жадной укладки для одного прохода: ориентация, «самая подходящая» деталь, заглядывание по полосам
+const rndOpts = rnd => ({ orient: rnd() < 0.5 ? 'long' : 'fit', pickBest: rnd() < 0.5, look: rnd() < 0.5 ? 0 : 2 + Math.floor(rnd() * 4) })
 function rng(seed) { let x = seed >>> 0 || 1; return () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) / 4294967296 } }
 
 /**
@@ -493,6 +541,8 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
     lastStats = t; statsIter = iter
   }
   const consider = (r, tag) => {
+    // страховка: вариант, где детали потерялись или задвоились, не принимается
+    if (r.sheets.reduce((a, sh) => a + sh.placed.length, 0) + r.unplaced.length !== pieces.length) return
     if (!better(r, best)) return
     best = r; improved++
     byAxis[tag] = (byAxis[tag] || 0) + 1
@@ -510,7 +560,10 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   const orders = []
   for (const srt of SORTS) orders.push(pieces.slice().sort(srt))
   const axisSets = axes.length > 1 ? [axes, ['x'], ['y']] : [axes]
-  for (const ax of axisSets) for (const ord of orders) for (const orient of ['long', 'fit']) { iter++; consider(packAll(ord, s, kerf, X, Y, ax, { orient }), ax.join('')) }
+  for (const ax of axisSets) for (const ord of orders) for (const orient of ['long', 'fit']) for (const pickBest of [false, true]) for (const look of [0, 3]) {
+    iter++; consider(packAll(ord, s, kerf, X, Y, ax, { orient, pickBest, look }), ax.join(''))
+    if (shouldStop()) break
+  }
   const rnd = rng(pieces.length * 7919 + 17 + island * 104729)   // у каждого потока свои варианты
   if (s.stairLast) for (const ord of orders) { iter++; consider(packAllGen(ord, s, kerf, X, Y, axes, rnd, 8), 'gen') }
   show(true)   // первая картинка — сразу лучшая из готовых вариантов
@@ -521,7 +574,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
     const base = orders[Math.floor(rnd() * orders.length)]
     const ord = perturb(base, rnd, 0.02 + rnd() * 0.15)
     const ax = axisSets[Math.floor(rnd() * axisSets.length)]
-    consider(packAll(ord, s, kerf, X, Y, ax, { orient: rnd() < 0.5 ? 'long' : 'fit' }), ax.join(''))
+    consider(packAll(ord, s, kerf, X, Y, ax, rndOpts(rnd)), ax.join(''))
     // попутно — плотнее последний лист лучшего варианта (дёшево: деталей на нём немного)
     for (let j = 0; j < 3; j++) { const c = compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (c) consider(c, 'last') }
     // обмен деталями последнего листа с заполненными — на последний меньше, обрезок больше
