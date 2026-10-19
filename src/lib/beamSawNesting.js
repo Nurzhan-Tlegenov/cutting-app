@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.10'
+export const BEAM_SAW_VERSION = 'β0.11'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -303,9 +303,14 @@ function orderSlots(slots, mode) {
 // Порядок кусков внутри отпиленной заготовки (2-й уровень и глубже) — «по готовности»: сначала детали, готовые сразу
 // после реза (ровно по ширине заготовки), от большой к малой; в конце — куски, которые ещё подрезаются, сначала те,
 // где доработки меньше. Полосу 500 режут: 500, 500, 500, потом 350 (её ещё подрезать) — а не 500, 350, 500.
+// Со 2-го уровня куски, которые ещё подрезаются, идут группами по размеру следующего реза (ступеньками): первый рез
+// задаёт размер, за ним — все куски с тем же резом, потом следующая группа. Оператор не переставляет упор на каждом куске:
+// 482, 482, 482, 482, потом 480, 480, потом 451 — а не 482, 480, 482, 451 вперемешку (261018_003, лист 1).
 const slotDepth = sl => (sl.piece ? 0 : 1 + Math.max(0, ...sl.child.slots.map(slotDepth)))
-function orderByReady(slots) {
-  return [...slots].sort((p, q) => slotDepth(p) - slotDepth(q) || q.a - p.a)
+const firstCut = (sl, level) => (sl.piece ? sl.a : orderByReady(sl.child.slots, level + 1)[0]?.a || 0)
+function orderByReady(slots, level = 2) {
+  const key = new Map(slots.map(sl => [sl, firstCut(sl, level)]))
+  return [...slots].sort((p, q) => slotDepth(p) - slotDepth(q) || (level >= 2 ? key.get(q) - key.get(p) : 0) || q.a - p.a)
 }
 
 // Сколько полосы 1-го уровня занято по её длине: деталь во всю длину — вся полоса, иначе — уложенное в ней
@@ -335,7 +340,7 @@ function stairFree(node) {
 function layout(node, ox, oy, s, out, stair = false) {
   // 1-й уровень: «от большой к малой» — тоже по готовности (полоса из одной детали во всю длину — готова сразу); Б→М→Б — как задано
   node.slots = node.level === 1 && stair ? orderStair(node.slots, node.B)
-    : node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(node.slots, 'wnw') : orderByReady(node.slots)
+    : node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(node.slots, 'wnw') : orderByReady(node.slots, node.level)
   let pos = node.trim
   if (node.trim > EPS) out.cuts++
   for (const sl of node.slots) {
