@@ -1419,10 +1419,17 @@ let mainThreadQueue = Promise.resolve()
 
 // Сколько потоков («островов») дать одной конфигурации: ядра телефона
 // минус одно под интерфейс, поровну между одновременно идущими конфигурациями.
+// На телефоне — не больше 4: половина ядер там слабые, и 6 потоков отнимают время у экрана — показ раскладки
+// подтормаживает, а поиску лишние потоки почти ничего не дают.
+const isTouch = () => typeof window !== 'undefined' && (navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)')?.matches)
 function islandsFor(concurrentJobs = 1) {
   const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4
-  return Math.max(1, Math.min(6, Math.floor((cores - 1) / Math.max(1, concurrentJobs))))
+  return Math.max(1, Math.min(isTouch() ? 4 : 6, Math.floor((cores - 1) / Math.max(1, concurrentJobs))))
 }
+// Показ улучшений на экране — не чаще раза в LIVE_SHOW_MS: улучшения от нескольких потоков приходят пачками, а каждое —
+// перерисовка страницы и новый переезд деталей; на телефоне это дёргалось. Последнее улучшение не теряется — показывается
+// по таймеру
+const LIVE_SHOW_MS = 450
 
 // Параллельный поиск «островами»: несколько воркеров считают один и тот же
 // заказ независимо (у каждого свой случайный поиск), а лучший найденный вариант
@@ -2100,6 +2107,14 @@ export default function NestingPage() {
       onProgress: (res, island) => {
         if (jobsRef.current[cfg.id] !== job) return
         recordEvent(hist, res, island, res.seeded ? 'seed' : res.rough ? 'rough' : 'improve')
+        showLater(res)
+      },
+    })
+    // показ — с ограничением частоты (см. LIVE_SHOW_MS); итог (ниже) показывается сразу и отменяет отложенный показ
+    let showTimer = 0, pending = null, lastShown = 0
+    const showNow = res => {
+        pending = null; lastShown = Date.now()
+        if (jobsRef.current[cfg.id] !== job) return
         updateCfg(cfg.id, c => {
           const sheetsData = toSheets(res)
           return {
@@ -2109,10 +2124,16 @@ export default function NestingPage() {
           }
         })
         setFocusId(f => (configsRef.current.some(c => c.id === f && c.result) ? f : cfg.id))
-      },
-    })
+    }
+    const showLater = res => {
+      pending = res
+      if (showTimer) return
+      const wait = Math.max(0, LIVE_SHOW_MS - (Date.now() - lastShown))
+      showTimer = setTimeout(() => { showTimer = 0; if (pending) showNow(pending) }, wait)
+    }
     jobsRef.current[cfg.id] = job
     return job.promise.then(res => {
+      if (showTimer) { clearTimeout(showTimer); showTimer = 0; pending = null }
       if (jobsRef.current[cfg.id] !== job) return // отменена или заменена
       delete jobsRef.current[cfg.id]
       recordEvent(hist, res, -1, 'final')
