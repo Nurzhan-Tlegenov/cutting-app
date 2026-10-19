@@ -370,9 +370,9 @@ export async function runNesting({
     if (shownBetter(cand, shown.sheets)) shown.sheets = cand
     if (shown.sheets !== reported && (!reported || shownBetter(shown.sheets, reported))) dirty = true
   }
-  // «Боковой» ход дожима — та же оценка (листы, мелкие у края, последний лист), другой состав листов. На экран — раз в
-  // ~1,2 с, чтобы было видно, как идёт перекладка (как у пильного центра); страница показывает его, только если он не
-  // хуже показанного. Это не находка — соседям не уходит (genome: null)
+  // «Боковой» ход дожима — та же оценка (листы, мелкие у края, последний лист), другой состав последнего листа.
+  // На экран — раз в ~1,2 с, чтобы было видно, как идёт перекладка (как у пильного центра); страница показывает его,
+  // только если он не хуже показанного. Это не находка — соседям не уходит (genome: null)
   let lastLateral = 0
   const maybeLateral = (sheets, stat) => {
     if (!exactShow || !onProgress || !reported || stopNow()) return
@@ -382,6 +382,11 @@ export async function runNesting({
     lastLateral = now
     const out = timedFinish(sheets, showQuick())
     if (out.length !== reported.length) return
+    // Показываем только ход, который меняет последний лист (состав или цельный обрезок): перекладка внутри уже
+    // заполненных листов при том же последнем — холостая «тусовка» на экране, её не показываем
+    const ids = sh => sh.placed.map(p => p.id).sort().join(',')
+    const lastOut = out[out.length - 1], lastRep = reported[reported.length - 1]
+    if (ids(lastOut) === ids(lastRep) && lastOffcutArea(lastOut, direction, usableX, usableY) <= lastOffcutArea(lastRep, direction, usableX, usableY) + 1e4) return
     onProgress({ sheets: out, iter, genome: null, lateral: true })
   }
   const maybeReport = (force = false) => {
@@ -693,6 +698,8 @@ function placedToPiece(p) {
   }
 }
 const sheetArea = sh => sh.placed.reduce((a, p) => a + p.w * p.h, 0)
+// лист «полный» — площадь деталей (с резом) не меньше этой доли рабочей зоны: дожим его не перекладывает
+const FULL_SHEET = 0.955
 function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allowEqual = false, deadline = 0, onAccept = null) {
   let cur = sheets
   let improved = false
@@ -703,16 +710,22 @@ function squeezeLast(sheets, modes, direction, usableX, usableY, attempts, allow
     // (туда проще «впихнуть» детали с последнего).
     const rk = Math.random()
     const k = Math.min(n, rk < 0.4 ? 1 : rk < 0.8 ? 2 : 3)
+    // Заполненные листы (≥ FULL_SHEET площади) не трогаем: перекладывать их бесполезно — только «тусовка» деталей
+    // на экране. Перекладываются листы, где ещё есть место; если все полные — самый свободный
+    // (каждая пятая попытка — по всем листам: иногда лист худеет только через перекладку полного соседа)
+    const open = []
+    for (let j = 0; j < n; j++) if (a % 5 === 4 || sheetArea(cur[j]) < FULL_SHEET * usableX * usableY) open.push(j)
+    if (!open.length) { let b = 0; for (let j = 1; j < n; j++) if (sheetArea(cur[j]) < sheetArea(cur[b])) b = j; open.push(b) }
     const pick = () => {
-      let j = Math.floor(Math.random() * n)
+      let j = open[Math.floor(Math.random() * open.length)]
       if (Math.random() < 0.5) {
-        const j2 = Math.floor(Math.random() * n)
+        const j2 = open[Math.floor(Math.random() * open.length)]
         if (sheetArea(cur[j2]) < sheetArea(cur[j])) j = j2
       }
       return j
     }
     const idx = [pick()]
-    for (let g = 0; idx.length < k && g < 12; g++) { const j = pick(); if (!idx.includes(j)) idx.push(j) }
+    for (let g = 0; idx.length < Math.min(k, open.length) && g < 12; g++) { const j = pick(); if (!idx.includes(j)) idx.push(j) }
     const pool = idx.flatMap(j => cur[j].placed).concat(cur[n].placed).map(placedToPiece)
     const r = Math.random()
     const order = r < 0.3 ? pool.sort((x, y) => y.pw * y.ph - x.pw * x.ph)
