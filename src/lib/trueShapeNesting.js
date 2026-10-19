@@ -476,19 +476,30 @@ function dilateOffsets(offsets, pad) {
   return out
 }
 
+// Растр (cols, rows, offsets, boundary, boundarySet, dilated) строится лениво — при первом обращении. Гибридному
+// раскрою растр нужен только у вогнутых деталей с парами; остальным (130 видов в 261010_Timur_k1) он не нужен, а
+// растеризация всех занимала ~5 с на каждом потоке до первой картинки гибрида
 function buildVariant(polygon, w, h, cellSize, padCells, angle) {
-  const { cols, rows, offsets } = rasterize(polygon, w, h, cellSize)
-  // Для оценки прилегания (contactScore) достаточно ячеек НА ГРАНИЦЕ силуэта
-  // (у которых хоть один из 4 соседей не входит в саму деталь) — внутренние
-  // ячейки крупной детали никогда ни с чем не соприкасаются, перебирать их на
-  // каждой из тысяч проверяемых позиций смысла нет и это на порядки дороже.
-  const set = new Set(offsets.map(([dx, dy]) => dx + ',' + dy))
-  const boundary = offsets.filter(([dx, dy]) =>
-    !set.has((dx + 1) + ',' + dy) || !set.has((dx - 1) + ',' + dy) ||
-    !set.has(dx + ',' + (dy + 1)) || !set.has(dx + ',' + (dy - 1))
-  )
-  const boundarySet = new Set(boundary.map(([dx, dy]) => dx + ',' + dy))
-  return { angle, w, h, polygon, cols, rows, offsets, boundary, boundarySet, dilated: dilateOffsets(offsets, padCells) }
+  const v = { angle, w, h, polygon }
+  let r = null
+  const raster = () => {
+    if (r) return r
+    const { cols, rows, offsets } = rasterize(polygon, w, h, cellSize)
+    // Для оценки прилегания (contactScore) достаточно ячеек НА ГРАНИЦЕ силуэта
+    // (у которых хоть один из 4 соседей не входит в саму деталь) — внутренние
+    // ячейки крупной детали никогда ни с чем не соприкасаются, перебирать их на
+    // каждой из тысяч проверяемых позиций смысла нет и это на порядки дороже.
+    const set = new Set(offsets.map(([dx, dy]) => dx + ',' + dy))
+    const boundary = offsets.filter(([dx, dy]) =>
+      !set.has((dx + 1) + ',' + dy) || !set.has((dx - 1) + ',' + dy) ||
+      !set.has(dx + ',' + (dy + 1)) || !set.has(dx + ',' + (dy - 1))
+    )
+    const boundarySet = new Set(boundary.map(([dx, dy]) => dx + ',' + dy))
+    r = { cols, rows, offsets, boundary, boundarySet, dilated: dilateOffsets(offsets, padCells) }
+    return r
+  }
+  for (const k of ['cols', 'rows', 'offsets', 'boundary', 'boundarySet', 'dilated']) Object.defineProperty(v, k, { get: () => raster()[k], enumerable: true })
+  return v
 }
 
 // 0° и 180° — всегда (не трогают направление текстуры). 90° и 270° — только

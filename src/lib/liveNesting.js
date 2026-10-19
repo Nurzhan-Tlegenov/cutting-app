@@ -183,7 +183,12 @@ async function chooseHybridPlan(params, meta) {
   }
   if (combos.length < 2) return base
   let best = null, bestScore = null
+  // не дольше PLAN_BUDGET_MS: первые сочетания — самые важные (все пары, на одну меньше); остальное — пока есть время
+  const PLAN_BUDGET_MS = 2500
+  const t0 = Date.now()
   for (const { c, lim } of combos) {
+    if (best && Date.now() - t0 > PLAN_BUDGET_MS) break
+    const tp = Date.now()
     const plan = Object.values(c).some(Boolean) || lim ? buildHybridPlan(params, c, lim) : base
     if (!plan) continue
     try {
@@ -193,8 +198,10 @@ async function chooseHybridPlan(params, meta) {
         finishBudget: { maxMs: 100, composeMs: 0, relayout: 0 } })
       const sc = liveScore(plan.expand({ ...meta, ...r }).sheets, meta.usableX, meta.usableY)
       if (liveBetter(sc, bestScore)) { best = plan; bestScore = sc }
+      if (globalThis.__DBG) console.log('probe', Date.now() - tp, 'ms', JSON.stringify(c), JSON.stringify(lim), r.sheets.length)
     } catch { /* пробуем следующее сочетание */ }
   }
+  if (globalThis.__DBG) console.log('plan total', Date.now() - t0)
   return best || base
 }
 // Готовая раскладка (seed) в терминах гибридных деталей: настоящие номера деталей → гибридные. Детали из
@@ -235,8 +242,9 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       seed: Array.isArray(params.seed) ? (seedToHybrid({ seed: true, sheets: params.seed }, plan.singles)?.sheets || null) : null,
       shouldStop, takeMigrant: takeMigrant ? () => seedToHybrid(takeMigrant(), plan.singles) : null,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
-      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded }) => {
+      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded, lateral }) => {
         let out = withFilled(plan.expand({ ...meta, sheets }), params, false)
+        if (lateral) { onProgress({ ...out, iter, genome: null, hybrid: true, lateral: true }); return }
         // соседним потокам — раскладка самого поиска (без доводки показа и без дозаполнения вырезов)
         if (searchSheets && searchSheets !== sheets) out = { ...out, rawSheets: plan.expand({ ...meta, sheets: searchSheets }).sheets }
         lastRaw = sheets; lastOut = out
@@ -346,7 +354,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
       ...params,
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
       shouldStop, takeMigrant, onStats,
-      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded }) => onProgress({ ...meta, sheets, ...(searchSheets && searchSheets !== sheets ? { rawSheets: searchSheets } : {}), iter, genome, ...(seeded ? { seeded } : {}) }) : null,
+      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded, lateral }) => onProgress({ ...meta, sheets, ...(searchSheets && searchSheets !== sheets ? { rawSheets: searchSheets } : {}), iter, genome, ...(seeded ? { seeded } : {}), ...(lateral ? { lateral: true } : {}) }) : null,
     })
   }
 

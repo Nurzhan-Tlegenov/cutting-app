@@ -283,6 +283,7 @@ src/
   NestingPage.piecesConflict(…, details) и nestedFlipped (экранные координаты), дети едут с хозяином при перетаскивании
   (drag.kids). gcode: parts[].cutouts.holds / contour.ownHeld, withNestedOrder — контур вложенной → вырез хозяина → контур хозяина
 - v4.8: plan: Map<di, [{ hole, slots: [{ child, rot, ox, oy, count }] }]> — несколько деталей в вырезе (spotInHole: к нулю выреза, зазор до выреза и соседей)
+- v4.9: trueShapeNesting.buildVariant — растр лениво (геттеры cols/rows/offsets/boundary/dilated); nesting.maybeLateral → onProgress({ lateral: true }) → NestingPage.consider показывает при равной оценке (onProgress(res, i, true) — без хронологии)
 - Буфер: тап по детали → «В буфер» → открыть лист → «На лист N» (первое свободное место,
   поворот только если rotatable) или «На новый лист». С непустым буфером сохранить нельзя;
   пустые листы при сохранении выкидываются

@@ -370,11 +370,25 @@ export async function runNesting({
     if (shownBetter(cand, shown.sheets)) shown.sheets = cand
     if (shown.sheets !== reported && (!reported || shownBetter(shown.sheets, reported))) dirty = true
   }
+  // «Боковой» ход дожима — та же оценка (листы, мелкие у края, последний лист), другой состав листов. На экран — раз в
+  // ~1,2 с, чтобы было видно, как идёт перекладка (как у пильного центра); страница показывает его, только если он не
+  // хуже показанного. Это не находка — соседям не уходит (genome: null)
+  let lastLateral = 0
+  const maybeLateral = (sheets, stat) => {
+    if (!exactShow || !onProgress || !reported || stopNow()) return
+    if (stat.sheetCount !== best.stat.sheetCount || stat.smallEdge !== best.stat.smallEdge || Math.abs(stat.lastSheetArea - best.stat.lastSheetArea) > 1) return
+    const now = Date.now()
+    if (now - lastLateral < 1200 || now - lastReport < 400) return
+    lastLateral = now
+    const out = timedFinish(sheets, showQuick())
+    if (out.length !== reported.length) return
+    onProgress({ sheets: out, iter, genome: null, lateral: true })
+  }
   const maybeReport = (force = false) => {
     if (!onProgress || !best || (!dirty && !force)) return
     if (exactShow && reported && stopNow()) return     // после «Стоп» экран не меняется
     const now = Date.now()
-    if (!force && now - lastReport < (exactShow ? 1000 : 300)) return
+    if (!force && now - lastReport < (exactShow ? 400 : 300)) return
     lastReport = now; dirty = false
     let sheets
     if (exactShow) {
@@ -519,14 +533,18 @@ export async function runNesting({
     population.push({ order: shuffle(basePieces.slice()), mode: scoringModes[Math.floor(Math.random() * scoringModes.length)] })
   }
 
-  evaluated = population.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
-  evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
-  if (better(evaluated[0].stat, best.stat)) { best = evaluated[0]; dirty = true }
+  // проба (черновик, выбор плана пар гибрида): без популяции — это ещё 40 укладок на каждую из 16 проб
+  // (261010_Timur_k1: гибридный поиск на телефоне начинался на 12-й с, из них ~10 с — выбор плана)
+  if (!probe) {
+    evaluated = population.map(ind => ({ ...ind, ...packAndEval(ind.order, ind.mode) }))
+    evaluated.sort((a, b) => better(a.stat, b.stat) ? -1 : 1)
+    if (better(evaluated[0].stat, best.stat)) { best = evaluated[0]; dirty = true }
+  }
 
   const startTime = Date.now()
   // Онлайн-режим (shouldStop задан): бюджет времени задаёт вызывающий
   // (обычно «бесконечный»), поиск идёт до нажатия «Стоп»
-  while (Date.now() - startTime < HILL_CLIMB_BUDGET_MS && !stopNow()) {
+  while (!probe && Date.now() - startTime < HILL_CLIMB_BUDGET_MS && !stopNow()) {
     gen++
     const genStart = Date.now()
     // Элитизм: лучшие особи переходят в следующее поколение без изменений (вместе со своим режимом).
@@ -608,6 +626,7 @@ export async function runNesting({
       if (cuttingMethod !== 'guillotine') sqCur = insertLeftovers(sqCur, direction, usableX, usableY, scoringModes.includes('baf') ? 'baf' : scoringModes[0])
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
+      else maybeLateral(sqCur, stat)
     }
     // онлайн-показ: на застое — доводка показанного варианта с полным временем (обрезок последнего листа и т. д.)
     polishShown()

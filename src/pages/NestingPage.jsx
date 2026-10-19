@@ -1468,7 +1468,16 @@ function startNestingJob(params, { live = false, onProgress = null, onStats = nu
     if (res.rawSheets) { res = { ...res }; delete res.rawSheets }
     if (exactStop && stopFlag) return             // после «Стоп» на экране ничего не меняется
     const sc = liveScore(res.sheets, res.usableX, res.usableY, params.direction, offFirst)
-    const global = liveBetter(sc, bestScore)
+    let global = liveBetter(sc, bestScore)
+    // «боковой» ход (см. maybeLateral в nesting.js): та же оценка — показываем, чтобы перекладка была видна вживую,
+    // но соседям не шлём и за улучшение не считаем
+    if (res.lateral) {
+      if (global || !bestScore || sc.count !== bestScore.count || (sc.edge || 0) !== (bestScore.edge || 0) || Math.abs(sc.last - bestScore.last) > 1
+        || (sc.off != null && bestScore.off != null && sc.off < bestScore.off - 1e4)) return
+      best = res; bestScore = sc
+      if (!cancelled && !finished) onProgress?.(res, fromIdx, true)
+      return
+    }
     // соседям — и порядок деталей, и саму раскладку (дожатую, «починенную»). Уходит раскладка самого поиска
     // (rawSheets), а не дозаполненная вырезами и не доведённая для показа: для прямоугольного поиска деталь в вырезе
     // фигурной детали — наложение (см. withFilled в liveNesting.js). На экран и в историю rawSheets не идёт — лишний вес.
@@ -2104,32 +2113,35 @@ export default function NestingPage() {
         setParamsWarn('Потоки расчёта не поднялись — считаю в основном потоке (медленнее, экран может притормаживать). Обновите приложение: потяните страницу вниз или закройте и откройте его.')
       },
       onIslandProgress: (res, island, global) => { if (jobsRef.current[cfg.id] === job) recordIsland(hist, res, island, global) },
-      onProgress: (res, island) => {
+      onProgress: (res, island, lateral = false) => {
         if (jobsRef.current[cfg.id] !== job) return
-        recordEvent(hist, res, island, res.seeded ? 'seed' : res.rough ? 'rough' : 'improve')
-        showLater(res)
+        // «боковой» ход (та же оценка, другой состав листов) — на экран, но не в хронологию и не в счёт улучшений
+        if (!lateral) recordEvent(hist, res, island, res.seeded ? 'seed' : res.rough ? 'rough' : 'improve')
+        showLater(res, lateral)
       },
     })
     // показ — с ограничением частоты (см. LIVE_SHOW_MS); итог (ниже) показывается сразу и отменяет отложенный показ
     let showTimer = 0, pending = null, lastShown = 0
-    const showNow = res => {
+    const showNow = (res, lateral = false) => {
         pending = null; lastShown = Date.now()
         if (jobsRef.current[cfg.id] !== job) return
         updateCfg(cfg.id, c => {
           const sheetsData = toSheets(res)
           return {
             result: stamp(res), sheetsData, saved: false, rough: !!res.rough,
-            improvements: c.improvements + 1, iter: res.iter || c.iter, lastImproveAt: Date.now(),
+            improvements: c.improvements + (lateral ? 0 : 1), iter: res.iter || c.iter, lastImproveAt: lateral ? c.lastImproveAt : Date.now(),
             activeSheet: Math.min(c.activeSheet, sheetsData.length - 1),
           }
         })
         setFocusId(f => (configsRef.current.some(c => c.id === f && c.result) ? f : cfg.id))
     }
-    const showLater = res => {
-      pending = res
+    const showLater = (res, lateral = false) => {
+      // боковой ход не вытесняет ждущее показа улучшение
+      if (lateral && pending && !pending.lateral) return
+      pending = res; pending.lateral = lateral
       if (showTimer) return
       const wait = Math.max(0, LIVE_SHOW_MS - (Date.now() - lastShown))
-      showTimer = setTimeout(() => { showTimer = 0; if (pending) showNow(pending) }, wait)
+      showTimer = setTimeout(() => { showTimer = 0; if (pending) showNow(pending, !!pending.lateral) }, wait)
     }
     jobsRef.current[cfg.id] = job
     return job.promise.then(res => {
