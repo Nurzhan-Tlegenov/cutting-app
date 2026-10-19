@@ -25,7 +25,7 @@ export default function BeamSawSettings({ prod, onSaved }) {
       if (k === 'levelTrims') { const a = (x || []).map(t => (str(t).trim() === '' ? null : Number(str(t).replace(',', '.')))); if (a.some(t => t != null)) out[k] = a; continue }
       if (typeof x === 'boolean') { out[k] = x; continue }
       if (str(x).trim() === '') continue
-      out[k] = ['direction', 'stripOrder'].includes(k) ? x : Number(str(x).replace(',', '.'))
+      out[k] = ['direction', 'stripOrder', 'lastDir'].includes(k) ? x : Number(str(x).replace(',', '.'))
     }
     if (JSON.stringify(out) === JSON.stringify(prod?.beam_saw_settings || {})) return
     const { error } = await supabase.from('productions').update({ beam_saw_settings: out }).eq('id', prod.id)
@@ -120,6 +120,11 @@ export default function BeamSawSettings({ prod, onSaved }) {
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Направление полос</div>
       {seg('direction', [['y', 'Вдоль длинной (Y)'], ['x', 'Вдоль короткой (X)'], ['auto', 'Авто']])}
       <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Авто: есть детали с текстурой — вдоль волокон (Y), нет — пробуются оба направления. Детали с текстурой не поворачиваются при любом направлении.</div>
+      {s.direction === 'auto' && <>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Последний лист — обрезок вдоль</div>
+        {seg('lastDir', [['y', 'Длинной (Y)'], ['x', 'Короткой (X)'], ['any', 'Как выгоднее']])}
+        <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Только для последнего листа: его полосы идут вдоль выбранной стороны, чтобы цельный остаток был вдоль неё. Остальные листы — как выгоднее.</div>
+      </>}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Порядок полос</div>
       {seg('stripOrder', [['desc', 'От большой к малой'], ['wnw', 'Б → М → Б']])}
 

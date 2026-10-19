@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.11'
+export const BEAM_SAW_VERSION = 'β0.12'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -251,7 +251,7 @@ function sheetFrom(root, axis, s, kerf, index, stair) {
   layout(root, 0, 0, s, out, stair)
   const manualOffcuts = out.offcuts.map(o => ({ x: +o.x.toFixed(1), y: +o.y.toFixed(1), w: +o.w.toFixed(1), h: +o.h.toFixed(1) }))
   return { index, placed: out.placed, freeRects: [], family: 'guillotine', manualOffcuts, beamTree: plainTree(root), beamAxis: axis, beamCuts: out.cuts, beamLevels: out.maxLevel,
-    beamFree: Math.max(0, root.A - root.used) * root.B, ...(stair ? { stairFree: stairFree(root) } : {}) }
+    beamFree: Math.max(0, root.A - root.used) * root.B, beamMaxFree: out.maxFree || 0, ...(stair ? { stairFree: stairFree(root) } : {}) }
 }
 // Все листы гибкой гильотиной (форматник): лист за листом, на каждый — лучший из нескольких случайных заполнений
 function packAllGen(pieces, s, kerf, X, Y, axes, rnd, tries = 4) {
@@ -354,6 +354,8 @@ function layout(node, ox, oy, s, out, stair = false) {
   }
   // остаток в конце заготовки — деловой обрезок, если не меньше заданного (размеры без пропила)
   const r = node.A - pos, k = out.kerf
+  // самый крупный цельный остаток на листе (на любом уровне), мм² с пропилом — по нему сравнивается последний лист
+  if (r > EPS) out.maxFree = Math.max(out.maxFree || 0, r * node.B)
   if (r - k > EPS && node.slots.length) {
     const w = node.axis === 'x' ? r - k : node.B - k, h = node.axis === 'x' ? node.B - k : r - k
     const big = Math.max(w, h), small = Math.min(w, h)
@@ -382,15 +384,18 @@ export function packAll(pieces, s, kerf, X, Y, axes, opts) {
   for (;;) {
     if (ctx.used.size >= pieces.length) break
     const before = ctx.used.size
-    let root = null, axis = axes[0], bestUsed = null, bestA = -1, bestFree = -1
+    let root = null, axis = axes[0], bestUsed = null, bestA = -1, bestFree = -1, bestPref = -1
     for (const ax of axes) {
       const saved = new Set(ctx.used)
       const A = ax === 'x' ? X : Y, B = ax === 'x' ? Y : X
       const r = fillRegion(ctx, ax, A, B, 1)
       const got = new Set([...ctx.used].filter(id => !saved.has(id)))
       const area = pieceArea(ctx, got), free = (A - r.used) * B
-      // больше деталей на лист; поровну (последний лист — легли все) — где цельный остаток больше
-      if (area > bestA + 1 || (Math.abs(area - bestA) <= 1 && free > bestFree)) { bestA = area; bestFree = free; root = r; axis = ax; bestUsed = ctx.used }
+      // больше деталей на лист; поровну (последний лист — легли все) — где цельный остаток больше.
+      // Последний лист (легли все) с заданным направлением обрезка (lastAxis) — это направление, если на него тоже легли все
+      const all = ctx.used.size >= pieces.length
+      const pref = all && opts.lastAxis ? (ax === opts.lastAxis ? 1 : 0) : 0
+      if (pref > bestPref || (pref === bestPref && (area > bestA + 1 || (Math.abs(area - bestA) <= 1 && free > bestFree)))) { bestA = area; bestFree = free; bestPref = pref; root = r; axis = ax; bestUsed = ctx.used }
       ctx.used = saved
     }
     ctx.used = bestUsed
@@ -403,7 +408,7 @@ export function packAll(pieces, s, kerf, X, Y, axes, opts) {
     // зоны, на экране переворачиваются вместе — flipY / flipRects), размеры без пропила
     const manualOffcuts = out.offcuts.map(o => ({ x: +o.x.toFixed(1), y: +o.y.toFixed(1), w: +o.w.toFixed(1), h: +o.h.toFixed(1) }))
     // beamFree — цельный остаток в конце листа (после последней полосы), мм² с пропилом: по нему сравнивается последний лист
-    sheets.push({ index: sheets.length, placed: out.placed, freeRects: [], family: 'guillotine', manualOffcuts, beamTree: plainTree(root), beamAxis: axis, beamCuts: out.cuts, beamLevels: out.maxLevel, beamFree: Math.max(0, root.A - root.used) * root.B })
+    sheets.push({ index: sheets.length, placed: out.placed, freeRects: [], family: 'guillotine', manualOffcuts, beamTree: plainTree(root), beamAxis: axis, beamCuts: out.cuts, beamLevels: out.maxLevel, beamFree: Math.max(0, root.A - root.used) * root.B, beamMaxFree: out.maxFree || 0 })
   }
   // Форматник: последний лист — полосы «ступенькой» (см. orderStair); состав и полосы те же, меняется только их порядок
   if (s.stairLast && sheets.length) {
@@ -419,13 +424,24 @@ export function packAll(pieces, s, kerf, X, Y, axes, opts) {
 }
 
 const areaOf = sh => sh.placed.reduce((a, p) => a + p.w * p.h, 0)
-// лучше: меньше листов → меньше занято на последнем листе → на последнем листе детали собраны плотнее
-// (цельный остаток после последней полосы больше — один крупный деловой обрезок) → меньше резов
+// лучше: меньше листов → (пильный центр: обрезок последнего листа вдоль заданной стороны → самый крупный цельный
+// остаток на последнем листе больше) → меньше занято на последнем листе → цельный остаток после последней полосы
+// больше → меньше резов. Задача последнего листа — один максимально большой обрезок, а не меньше деталей на нём:
+// 261010_Timur — меньше деталей, но остаток раздроблен на два (1,6 + 1,1 м²) хуже, чем один 2,6 м²
 const lastOf = r => r.sheets[r.sheets.length - 1] || { placed: [], beamFree: 0 }
+let CMP = { maxFree: false, lastAxis: null }   // режим сравнения — задаётся в runBeamSaw
 function better(a, b) {
   if (!b) return true
   if (a.unplaced.length !== b.unplaced.length) return a.unplaced.length < b.unplaced.length
   if (a.sheets.length !== b.sheets.length) return a.sheets.length < b.sheets.length
+  if (CMP.lastAxis) {
+    const xa = lastOf(a).beamAxis === CMP.lastAxis, xb = lastOf(b).beamAxis === CMP.lastAxis
+    if (xa !== xb) return xa
+  }
+  if (CMP.maxFree) {
+    const ma = lastOf(a).beamMaxFree || 0, mb = lastOf(b).beamMaxFree || 0
+    if (Math.abs(ma - mb) > 1) return ma > mb
+  }
   const la = areaOf(lastOf(a)), lb = areaOf(lastOf(b))
   if (Math.abs(la - lb) > 1) return la < lb
   const fa = lastOf(a).beamFree || 0, fb = lastOf(b).beamFree || 0
@@ -456,7 +472,7 @@ function squeezeLast(best, pieces, s, kerf, X, Y, axisSets, rnd) {
   const base = SORTS[Math.floor(rnd() * SORTS.length)]
   const ord = rnd() < 0.25 ? sub.slice().sort(base) : perturb(sub.slice().sort(base), rnd, 0.05 + rnd() * 0.4)
   const ax = axisSets[Math.floor(rnd() * axisSets.length)]
-  const r = packAll(ord, s, kerf, X, Y, ax, rndOpts(rnd))
+  const r = packAll(ord, s, kerf, X, Y, ax, CMP.lastAxis ? { ...rndOpts(rnd), lastAxis: CMP.lastAxis } : rndOpts(rnd))
   if (r.unplaced.length || r.sheets.length > k + 1) return null
   const sheets = best.sheets.slice()
   idx.sort((a, b) => a - b).forEach((j, t) => { sheets[j] = { ...r.sheets[t], index: j } })
@@ -474,7 +490,7 @@ function compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd) {
   const sub = pieces.filter(p => ids.has(p.id))
   const base = SORTS[Math.floor(rnd() * SORTS.length)]
   const ord = rnd() < 0.3 ? sub.slice().sort(base) : perturb(sub.slice().sort(base), rnd, 0.1 + rnd() * 0.5)
-  const ax = axisSets[Math.floor(rnd() * axisSets.length)]
+  const ax = CMP.lastAxis ? [CMP.lastAxis] : axisSets[Math.floor(rnd() * axisSets.length)]
   const r = packAll(ord, s, kerf, X, Y, ax, rndOpts(rnd))
   if (r.sheets.length !== 1 || r.unplaced.length) return null
   const sheets = best.sheets.slice(0, -1).concat([{ ...r.sheets[0], index: best.sheets.length - 1 }])
@@ -527,6 +543,11 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   // направление полос: y — вдоль длинной стороны листа (1-й уровень режет по X), x — наоборот, auto — оба
   // (есть детали с текстурой — только вдоль волокон, Y)
   const axes = s.direction === 'x' ? ['y'] : s.direction === 'y' || pieces.some(p => !p.rotatable) ? ['x'] : ['x', 'y']
+  // последний лист при «авто»: обрезок вдоль заданной стороны (ось 1-го уровня — поперёк неё); пильный центр сравнивает
+  // последние листы по самому крупному цельному остатку (форматник — как раньше: у него своя «ступенька»)
+  const lastAxis = axes.length > 1 && s.lastDir !== 'any' ? (s.lastDir === 'x' ? 'y' : 'x') : null
+  CMP = { maxFree: !s.stairLast, lastAxis }
+  const withLast = o => (lastAxis ? { ...o, lastAxis } : o)
   const budget = (live ? 3600 : Math.max(1, Number(params.optimizeSeconds) || 5)) * 1000
   const t0 = now()
   let best = null, lastShow = 0, pendingTag = null, iter = 0, improved = 0, lastStats = 0, statsIter = 0
@@ -566,7 +587,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   for (const srt of SORTS) orders.push(pieces.slice().sort(srt))
   const axisSets = axes.length > 1 ? [axes, ['x'], ['y']] : [axes]
   for (const ax of axisSets) for (const ord of orders) for (const orient of ['long', 'fit']) for (const pickBest of [false, true]) for (const look of [0, 3]) {
-    iter++; consider(packAll(ord, s, kerf, X, Y, ax, { orient, pickBest, look }), ax.join(''))
+    iter++; consider(packAll(ord, s, kerf, X, Y, ax, withLast({ orient, pickBest, look })), ax.join(''))
     if (shouldStop()) break
   }
   const rnd = rng(pieces.length * 7919 + 17 + island * 104729)   // у каждого потока свои варианты
@@ -579,7 +600,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
     const base = orders[Math.floor(rnd() * orders.length)]
     const ord = perturb(base, rnd, 0.02 + rnd() * 0.15)
     const ax = axisSets[Math.floor(rnd() * axisSets.length)]
-    consider(packAll(ord, s, kerf, X, Y, ax, rndOpts(rnd)), ax.join(''))
+    consider(packAll(ord, s, kerf, X, Y, ax, withLast(rndOpts(rnd))), ax.join(''))
     // попутно — плотнее последний лист лучшего варианта (дёшево: деталей на нём немного)
     for (let j = 0; j < 3; j++) { const c = compactLast(best, pieces, s, kerf, X, Y, axisSets, rnd); if (c) consider(c, 'last') }
     // обмен деталями последнего листа с заполненными — на последний меньше, обрезок больше

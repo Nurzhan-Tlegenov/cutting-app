@@ -13,6 +13,7 @@ export const BEAM_DEFAULTS = {
   narrowMin: 50,             // деталь с шириной до этого (включительно) — узкая; 0 — правило выключено
   narrowCut: 120,            // узкая деталь пилится шириной не меньше этой, потом подрезается до своего размера
   direction: 'auto',         // полосы: 'y' — вдоль длинной стороны, 'x' — вдоль короткой, 'auto' — как выгоднее (без текстуры)
+  lastDir: 'any',            // последний лист при «авто»: обрезок вдоль 'y' / 'x' / 'any' — как выгоднее (остальные листы — как выгоднее всегда)
   stripOrder: 'desc',        // порядок полос: 'desc' — от большой к малой, 'wnw' — большая → малая к середине → большая у края
   offcutMinL: 300, offcutMinW: 300,   // деловой обрезок — не меньше, мм
   mergeSame: true,           // одинаковые карты — одной картой «× N листов»
@@ -41,6 +42,7 @@ export function beamSettings(raw) {
     narrowMin: num(s.narrowMin, D.narrowMin),
     narrowCut: num(s.narrowCut, D.narrowCut),
     direction: ['y', 'x', 'auto'].includes(s.direction) ? s.direction : D.direction,
+    lastDir: ['y', 'x', 'any'].includes(s.lastDir) ? s.lastDir : D.lastDir,
     stripOrder: ['desc', 'wnw'].includes(s.stripOrder) ? s.stripOrder : D.stripOrder,
     offcutMinL: num(s.offcutMinL, D.offcutMinL), offcutMinW: num(s.offcutMinW, D.offcutMinW),
     mergeSame: s.mergeSame == null ? D.mergeSame : !!s.mergeSame,
