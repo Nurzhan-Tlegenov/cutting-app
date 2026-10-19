@@ -242,9 +242,8 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       seed: Array.isArray(params.seed) ? (seedToHybrid({ seed: true, sheets: params.seed }, plan.singles)?.sheets || null) : null,
       shouldStop, takeMigrant: takeMigrant ? () => seedToHybrid(takeMigrant(), plan.singles) : null,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
-      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded, lateral }) => {
+      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded }) => {
         let out = withFilled(plan.expand({ ...meta, sheets }), params, false)
-        if (lateral) { onProgress({ ...out, iter, genome: null, hybrid: true, lateral: true }); return }
         // соседним потокам — раскладка самого поиска (без доводки показа и без дозаполнения вырезов)
         if (searchSheets && searchSheets !== sheets) out = { ...out, rawSheets: plan.expand({ ...meta, sheets: searchSheets }).sheets }
         lastRaw = sheets; lastOut = out
@@ -354,7 +353,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
       ...params,
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
       shouldStop, takeMigrant, onStats,
-      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded, lateral }) => onProgress({ ...meta, sheets, ...(searchSheets && searchSheets !== sheets ? { rawSheets: searchSheets } : {}), iter, genome, ...(seeded ? { seeded } : {}), ...(lateral ? { lateral: true } : {}) }) : null,
+      onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded }) => onProgress({ ...meta, sheets, ...(searchSheets && searchSheets !== sheets ? { rawSheets: searchSheets } : {}), iter, genome, ...(seeded ? { seeded } : {}) }) : null,
     })
   }
 

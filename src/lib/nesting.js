@@ -116,7 +116,7 @@ const MAX_COMPACT_PASSES = 3
 
 export async function runNesting({
   details, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf,
-  direction = 'auto',
+  direction: wantDir = 'auto',
   smallPartsToCenter = false,     // галочка "мелкие детали в середину" из настроек раскроя
   smallPartsMaxSquareSide = 0,    // сторона квадрата (мм); деталь мелкая, если её площадь <= side*side. 0 = критерий выключен
   smallPartsMaxSide = 0,          // порог меньшей стороны детали (мм). 0 = критерий выключен
@@ -133,6 +133,13 @@ export async function runNesting({
   finishBudget = null,            // { maxMs, composeMs, relayout } — своё время на итоговую доводку (быстрые пробы гибрида — короче)
   probe = false,                  // быстрая проба (черновик, выбор плана пар гибрида): короткая случайная фаза, без интенсификации
 }) {
+  // Фрезер: «вдоль X / вдоль Y» — это желаемый обрезок на ПОСЛЕДНЕМ листе (вдоль Y — справа, вдоль X — сверху), а не
+  // способ укладки всех листов: заполненные листы укладываются как плотнее (авто), и только последний — под обрезок
+  // (lastDir: maximizeLastOffcut, composeLastForOffcut, счёт обрезка). Один лист — он же последний. Пила — как было:
+  // направление задаёт укладку (сквозные резы)
+  const lastOnlyDir = cuttingMethod === 'nesting' && (wantDir === 'along_x' || wantDir === 'along_y')
+  const direction = lastOnlyDir ? 'auto' : wantDir
+  const lastDir = wantDir
   const realX = sheetW - marginL - marginR  // рабочая зона: горизонталь = 1830 - отступы
   const realY = sheetL - marginT - marginB  // вертикаль   = 2750 - отступы
   // Габарит детали здесь включает рез справа и сверху (p.w = ширина + kerf). У
@@ -211,15 +218,15 @@ export async function runNesting({
     // (вдоль Y — справа, вдоль X — сверху, авто — бóльшая полоса). Остальные листы не трогаются.
     const settleOne = sh => (cuttingMethod === 'guillotine' ? sh : gravityAll([sh])[0])
     const stop = b.stoppable ? stopNow : () => false   // онлайн-доводка на застое прерывается «Стопом»
-    out = maximizeLastOffcut(out, { modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: b.maxMs, stop })
+    out = maximizeLastOffcut(out, { modes: scoringModes, direction: lastDir, usableX, usableY, settle: settleOne, budgetMs: b.maxMs, stop })
     // и состав: крупные поперёк детали — на заполненные листы, на последний — узкие
-    if (b.composeMs && !stop()) out = composeLastForOffcut(out, { modes: scoringModes, direction, usableX, usableY, settle: settleOne, budgetMs: b.composeMs, stop })
+    if (b.composeMs && !stop()) out = composeLastForOffcut(out, { modes: scoringModes, direction: lastDir, usableX, usableY, settle: settleOne, budgetMs: b.composeMs, stop })
     const lastKeep = out[out.length - 1]
     // Финальная стяжка к нулю листа с зазором ровно kerf между деталями.
     // Для форматно-раскроечного станка не применяется: там раскладка обязана
     // оставаться набором сквозных резов, а сдвиг отдельной детали их ломает.
     // узкие детали — от края: переукладка каждого листа (тот же состав, тот же лист)
-    if (cuttingMethod !== 'guillotine' && b.relayout) out = out.map((sh, i, all) => relayoutForEdges(sh, scoringModes.filter(m => !m.startsWith('g-')), direction, usableX, usableY, b.relayout, i === all.length - 1))
+    if (cuttingMethod !== 'guillotine' && b.relayout) out = out.map((sh, i, all) => relayoutForEdges(sh, scoringModes.filter(m => !m.startsWith('g-')), i === all.length - 1 ? lastDir : direction, usableX, usableY, b.relayout, i === all.length - 1))
     if (cuttingMethod !== 'guillotine') out = gravityAll(wideNarrowWideAll(gravityAll(out), usableX, usableY))
     // стяжка могла открыть новые случаи «мелкая у края, сосед того же размера внутри»
     if (cuttingMethod !== 'guillotine') out = stripPermuteAll(rowSwapAll(out, usableX, usableY), usableX, usableY)
@@ -227,12 +234,12 @@ export async function runNesting({
     // последнего листа; если уменьшили, а мелких у края от этого не меньше — лист возвращается к раскладке с бóльшим обрезком
     if (lastKeep && out.length) {
       const n = out.length - 1, cur = out[n]
-      if (lastOffcutArea(cur, direction, usableX, usableY) < lastOffcutArea(lastKeep, direction, usableX, usableY) - Math.min(usableX, usableY)
+      if (lastOffcutArea(cur, lastDir, usableX, usableY) < lastOffcutArea(lastKeep, lastDir, usableX, usableY) - Math.min(usableX, usableY)
         && smallAtEdge([lastKeep], usableX, usableY) <= smallAtEdge([cur], usableX, usableY)
         && lastKeep.placed.length === cur.placed.length) {
         const keep = cuttingMethod !== 'guillotine' ? gravityAll([wideNarrowWide(lastKeep, usableX, usableY)])[0] : lastKeep
         out = out.slice()
-        out[n] = { ...(lastOffcutArea(keep, direction, usableX, usableY) >= lastOffcutArea(lastKeep, direction, usableX, usableY) - 1 ? keep : lastKeep), index: cur.index }
+        out[n] = { ...(lastOffcutArea(keep, lastDir, usableX, usableY) >= lastOffcutArea(lastKeep, lastDir, usableX, usableY) - 1 ? keep : lastKeep), index: cur.index }
       }
     }
     // Детали последнего листа — в свободные места предыдущих, по раскладке КАК ОНА ПОКАЗАНА (свободные места
@@ -342,10 +349,14 @@ export async function runNesting({
   // и «узкие — от края»), показ не чаще раза в секунду; полная — только на застое поиска (5 с) и всего не больше
   // POLISH_SHARE времени. Поиск (меньше листов) — главнее
   const POLISH_SHARE = 0.08
-  const showQuick = () => ({ maxMs: 80, composeMs: 0, relayout: 0, sweepMs: 0 })
+  let polishMs = 0   // сколько времени ушло на доводку показа
+  // новый лучший вариант — сразу с закономерным съёмом последнего листа (sweepLast: лист, пары, тройки, ≤1 с):
+  // на экране не должно быть 12 листов, когда 11 уже достижимы перебором (261010_Timur_k1: 11 листов появлялись только на «Стоп»)
+  // (съём — пока на него ушло не больше четверти времени расчёта: в начале поиска новые лучшие идут каждую секунду,
+  // и секунда съёма на каждый остановила бы сам поиск; дальше — только по одному листу, это миллисекунды)
+  const showQuick = () => ({ maxMs: 80, composeMs: 0, relayout: 0, sweepMs: polishMs < (Date.now() - runStart) * 0.25 ? 1000 : 0 })
   const showDeep = n => ({ maxMs: 800, composeMs: 1500, relayout: Math.max(40, Math.min(300, Math.round(900 / n))), stoppable: true, sweepMs: 2000 })
   let shown = null, reported = null
-  let polishMs = 0
   const timedFinish = (sheetsIn, b) => { const t = Date.now(); try { return finishLayout(sheetsIn, b) } finally { polishMs += Date.now() - t } }
   // Какую из двух доводок одного варианта показывать: меньше мелких у края → больше цельный обрезок последнего листа
   // (от 0,01 м²) → меньше материала на последнем листе → меньше узких деталей у края
@@ -353,7 +364,7 @@ export async function runNesting({
     if (a.length !== b.length) return a.length < b.length
     const ea = smallAtEdge(a, usableX, usableY), eb = smallAtEdge(b, usableX, usableY)
     if (ea !== eb) return ea < eb
-    const oa = lastOffcutArea(a[a.length - 1], direction, usableX, usableY), ob = lastOffcutArea(b[b.length - 1], direction, usableX, usableY)
+    const oa = lastOffcutArea(a[a.length - 1], lastDir, usableX, usableY), ob = lastOffcutArea(b[b.length - 1], lastDir, usableX, usableY)
     if (Math.abs(oa - ob) > 1e4) return oa > ob
     const la = sheetArea(a[a.length - 1]), lb = sheetArea(b[b.length - 1])
     if (Math.abs(la - lb) > 1) return la < lb
@@ -369,25 +380,6 @@ export async function runNesting({
     if (stopNow()) return   // доводку прервал «Стоп» — на экране остаётся то, что было
     if (shownBetter(cand, shown.sheets)) shown.sheets = cand
     if (shown.sheets !== reported && (!reported || shownBetter(shown.sheets, reported))) dirty = true
-  }
-  // «Боковой» ход дожима — та же оценка (листы, мелкие у края, последний лист), другой состав последнего листа.
-  // На экран — раз в ~1,2 с, чтобы было видно, как идёт перекладка (как у пильного центра); страница показывает его,
-  // только если он не хуже показанного. Это не находка — соседям не уходит (genome: null)
-  let lastLateral = 0
-  const maybeLateral = (sheets, stat) => {
-    if (!exactShow || !onProgress || !reported || stopNow()) return
-    if (stat.sheetCount !== best.stat.sheetCount || stat.smallEdge !== best.stat.smallEdge || Math.abs(stat.lastSheetArea - best.stat.lastSheetArea) > 1) return
-    const now = Date.now()
-    if (now - lastLateral < 1200 || now - lastReport < 400) return
-    lastLateral = now
-    const out = timedFinish(sheets, showQuick())
-    if (out.length !== reported.length) return
-    // Показываем только ход, который меняет последний лист (состав или цельный обрезок): перекладка внутри уже
-    // заполненных листов при том же последнем — холостая «тусовка» на экране, её не показываем
-    const ids = sh => sh.placed.map(p => p.id).sort().join(',')
-    const lastOut = out[out.length - 1], lastRep = reported[reported.length - 1]
-    if (ids(lastOut) === ids(lastRep) && lastOffcutArea(lastOut, direction, usableX, usableY) <= lastOffcutArea(lastRep, direction, usableX, usableY) + 1e4) return
-    onProgress({ sheets: out, iter, genome: null, lateral: true })
   }
   const maybeReport = (force = false) => {
     if (!onProgress || !best || (!dirty && !force)) return
@@ -631,7 +623,6 @@ export async function runNesting({
       if (cuttingMethod !== 'guillotine') sqCur = insertLeftovers(sqCur, direction, usableX, usableY, scoringModes.includes('baf') ? 'baf' : scoringModes[0])
       const stat = evaluate(sqCur, usableX, usableY)
       if (better(stat, best.stat)) { best = { ...best, sheets: sqCur, stat }; sqBase = best; dirty = true; lastGain = Date.now() }
-      else maybeLateral(sqCur, stat)
     }
     // онлайн-показ: на застое — доводка показанного варианта с полным временем (обрезок последнего листа и т. д.)
     polishShown()
