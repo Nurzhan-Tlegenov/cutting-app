@@ -277,6 +277,11 @@ src/
   листов + остаток, все сортировки × режимы, детерминированно; b.sweepMs); на «Стоп» (exactShow) — sweepLast ≤1,5 с;
   liveNesting.sweepExpanded — то же по развёрнутым деталям (в withFilled и в runHybrid при «Стоп»). NestingPage: «Стоп» ждёт
   итогов потоков до STOP_GRACE_MS
+- v4.7: src/lib/nestInHoles.js — вложение деталей в сквозные вырезы (planNestInHoles до поиска → qty вложенных = 0, хозяин
+  с невращаемым вложением не вращается; expandNested после (дети: nestedIn = id хозяина, поворот и положение от хозяина);
+  stripNested для seed). nestedInHole / polyInsideWithGap — проверка «внутри выреза с зазором ≥ реза»: validateNesting,
+  NestingPage.piecesConflict(…, details) и nestedFlipped (экранные координаты), дети едут с хозяином при перетаскивании
+  (drag.kids). gcode: parts[].cutouts.holds / contour.ownHeld, withNestedOrder — контур вложенной → вырез хозяина → контур хозяина
 - Буфер: тап по детали → «В буфер» → открыть лист → «На лист N» (первое свободное место,
   поворот только если rotatable) или «На новый лист». С непустым буфером сохранить нельзя;
   пустые листы при сохранении выкидываются

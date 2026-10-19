@@ -13,6 +13,7 @@ import { NESTING_VERSION } from '../lib/version'
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes, rotateEdgesTimes } from '../lib/drillGeometry'
 import { buildNestingDxf } from '../lib/dxfExport'
 import { placedHoles, placedTurns } from '../lib/partHoles'
+import { placedThroughHoles, polyInsideWithGap } from '../lib/nestInHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
 import { edgeTotals, detailEdgeList, holeEdgeSegments } from '../lib/edgeLength'
 import { backSide } from '../lib/partInfo'
@@ -253,15 +254,26 @@ const hasShapeOf = p => Array.isArray(p.polygon) && p.polygon.length > 2
 // заложен в размеры). Если хотя бы одна деталь фигурная (Г, П...) —
 // требуем зазор НЕ МЕНЬШЕ ширины реза по самому контуру, в том числе во
 // внутренней части (вложенные друг в друга детали).
-function piecesConflict(a, b, kerf) {
+// Деталь внутри сквозного выреза другой (вложение, см. nestInHoles.js) — в экранных координатах (тот же переворот
+// по Y, что и в absolutePoly): не конфликт, если контур целиком в вырезе с зазором ≥ реза
+function nestedFlipped(inner, host, details, kerf) {
+  const hd = details?.[host.detailIndex]
+  if (!hd?.contour) return false
+  if (inner.x < host.x - 0.5 || inner.y < host.y - 0.5 || inner.x + inner.w > host.x + host.w + 0.5 || inner.y + inner.h > host.y + host.h + 0.5) return false
+  const ip = absolutePoly(inner, kerf)
+  return placedThroughHoles(host, hd).some(hp => polyInsideWithGap(ip, hp.map(q => ({ x: host.x + q.x, y: host.y + (host.origY - q.y) })), kerf))
+}
+function piecesConflict(a, b, kerf, details = null) {
   if (!hasShapeOf(a) && !hasShapeOf(b)) {
     if (a.x >= b.x + b.w - kerf || b.x >= a.x + a.w - kerf ||
         a.y >= b.y + b.h - kerf || b.y >= a.y + a.h - kerf) return false
-    return polygonsOverlap(absolutePoly(a, kerf), absolutePoly(b, kerf))
+    if (!polygonsOverlap(absolutePoly(a, kerf), absolutePoly(b, kerf))) return false
+    return !(details && (nestedFlipped(a, b, details, kerf) || nestedFlipped(b, a, details, kerf)))
   }
   // габариты (с учётом kerf) разнесены дальше kerf — конфликта нет
   if (a.x >= b.x + b.w || b.x >= a.x + a.w || a.y >= b.y + b.h || b.y >= a.y + a.h) return false
-  return polyGap(absolutePoly(a, kerf), absolutePoly(b, kerf)) < kerf - 0.5
+  if (polyGap(absolutePoly(a, kerf), absolutePoly(b, kerf)) >= kerf - 0.5) return false
+  return !(details && (nestedFlipped(a, b, details, kerf) || nestedFlipped(b, a, details, kerf)))
 }
 
 // Магнит по контуру: фигурная деталь притягивается к соседям так, чтобы зазор
@@ -342,12 +354,12 @@ function outOfSheet(p, usableX, usableY, kerf) {
 }
 
 // Индексы деталей, которые пересекаются с другой деталью или вылезли за лист
-function conflictSet(items, kerf, usableX, usableY) {
+function conflictSet(items, kerf, usableX, usableY, details = null) {
   const bad = new Set()
   for (let i = 0; i < items.length; i++) {
     if (outOfSheet(items[i], usableX, usableY, kerf)) bad.add(i)
     for (let j = i + 1; j < items.length; j++) {
-      if (piecesConflict(items[i], items[j], kerf)) { bad.add(i); bad.add(j) }
+      if (piecesConflict(items[i], items[j], kerf, details)) { bad.add(i); bad.add(j) }
     }
   }
   return bad
@@ -573,7 +585,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     // нарисованная позже, может закрасить своей заливкой подпись соседней,
     // нарисованной раньше — раньше это было незаметно, пока детали не
     // начали по-настоящему стыковаться вплотную.
-    const conflicts = conflictSet(items, kerf, usableX, usableY)
+    const conflicts = conflictSet(items, kerf, usableX, usableY, details)
     // «Мелкие — в центр»: мелкие/узкие детали у края листа (через отход) — оранжевым.
     // Считаем в координатах данных (flipY — обратимое преобразование).
     const dataItems = flipY(items)
@@ -972,8 +984,10 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     }
     e.preventDefault()
     const p = placedRef.current[idx]
-    const wasConflict = conflictSet(placedRef.current, kerf, usableX, usableY).has(idx)
-    const drag = { idx, startX: x, startY: y, origX: p.x, origY: p.y, wasConflict, active: false, moved: false, startTime: Date.now() }
+    const wasConflict = conflictSet(placedRef.current, kerf, usableX, usableY, details).has(idx)
+    // вложенные в вырезы этой детали (nestInHoles) — едут вместе с ней
+    const kids = placedRef.current.map((o, j) => (j !== idx && nestedFlipped(o, p, details, kerf) ? j : -1)).filter(j => j >= 0)
+    const drag = { idx, startX: x, startY: y, origX: p.x, origY: p.y, wasConflict, active: false, moved: false, startTime: Date.now(), kids, kidsOrig: kids.map(j => [placedRef.current[j].x, placedRef.current[j].y]) }
     draggingRef.current = drag
     // Двигать деталь можно только после удержания пальца на ней
     clearLongPress()
@@ -1022,12 +1036,16 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     const dx = fromC(x - startX), dy = fromC(y - startY)
     let nx = Math.max(0, Math.min(usableX + kerf - p.w, origX + dx))
     let ny = Math.max(0, Math.min(usableY + kerf - p.h, origY + dy))
-    const snapped = applyMagnet(nx, ny, p.w, p.h, idx, placedRef.current)
+    // вложенные в эту деталь едут вместе с ней — к ним не притягиваемся
+    const others = drag0.kids.length ? placedRef.current.map((o, i) => (drag0.kids.includes(i) ? { ...o, x: -1e6, y: -1e6, polygon: undefined } : o)) : placedRef.current
+    const snapped = applyMagnet(nx, ny, p.w, p.h, idx, others)
     // Точный магнит по контуру для фигурных деталей: зазор ровно kerf, в том числе внутри Г-образной
-    const refined = snapPolygonGap(p, snapped.x, snapped.y, placedRef.current, idx, kerf, 50)
+    const refined = snapPolygonGap(p, snapped.x, snapped.y, others, idx, kerf, 50)
     nx = Math.max(0, Math.min(usableX + kerf - p.w, refined.x))
     ny = Math.max(0, Math.min(usableY + kerf - p.h, refined.y))
-    const updated = placedRef.current.map((item, i) => i === idx ? { ...item, x: nx, y: ny } : item)
+    const kidAt = i => drag0.kids.indexOf(i)
+    const updated = placedRef.current.map((item, i) => (i === idx ? { ...item, x: nx, y: ny }
+      : kidAt(i) >= 0 ? { ...item, x: drag0.kidsOrig[kidAt(i)][0] + (nx - origX), y: drag0.kidsOrig[kidAt(i)][1] + (ny - origY) } : item))
     placedRef.current = updated
     redraw(updated, idx)
   }
@@ -1077,15 +1095,15 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
     // Проверяем коллизии — если есть, возвращаем на место (по полигону, а не
     // по прямоугольнику — см. причину выше)
-    const p = placedRef.current[drag.idx]
-    const hasCollision = placedRef.current.some((o, j) => j !== drag.idx &&
-      piecesConflict(p, o, kerf))
+    const group = [drag.idx, ...drag.kids]
+    const hasCollision = group.some(g => placedRef.current.some((o, j) => !group.includes(j) && piecesConflict(placedRef.current[g], o, kerf, details)))
 
     // Возвращаем на место только если до перетаскивания деталь стояла
     // корректно. Если она уже была "в красном" (после поворота) — оставляем
     // где отпустили, красная подсветка покажет, что конфликт остался.
     if (hasCollision && !drag.wasConflict) {
-      const restored = placedRef.current.map((item, i) => i === drag.idx ? { ...item, x: drag.origX, y: drag.origY } : item)
+      const restored = placedRef.current.map((item, i) => (i === drag.idx ? { ...item, x: drag.origX, y: drag.origY }
+        : drag.kids.includes(i) ? { ...item, x: drag.kidsOrig[drag.kids.indexOf(i)][0], y: drag.kidsOrig[drag.kids.indexOf(i)][1] } : item))
       placedRef.current = restored
       redraw(restored)
       if (onMove) onMove(sheet.index, flipY(restored))

@@ -676,6 +676,30 @@ function lastCutToSupport(route, rect, extra = []) {
  *  • smallFirst: мелкая деталь режется раньше своих соседей — пока лист вокруг неё цел и её держит вакуум;
  *  • затем маршрут укорачивается разворотами участков (2-opt), не нарушая этих правил.
  */
+// Вложенные детали в маршруте контуров: контур вложенной → вырез хозяина (как только все его вложенные вырезаны) →
+// контур хозяина (не раньше его вырезов с вложениями). Остальной порядок маршрута сохраняется.
+// Вырез режется до контура хозяина, пока хозяин ещё цел и держится на листе; вложенная деталь — первой, пока её держит
+// материал хозяина вокруг
+// state — { done, cutoutsDone } общее на все вызовы (контуры разных инструментов идут отдельными маршрутами)
+export function withNestedOrder(route, heldCutouts, state = { done: new Set(), cutoutsDone: new Set() }) {
+  if (!heldCutouts?.size) return route
+  const { done, cutoutsDone } = state
+  const out = [], deferred = []
+  const tryCutouts = () => {
+    for (const c of heldCutouts) if (!cutoutsDone.has(c) && c.holds.every(j => done.has(j))) { cutoutsDone.add(c); out.push(c) }
+  }
+  const ready = j => (j.ownHeld || []).every(c => cutoutsDone.has(c))   // контур хозяина — после его вырезов с вложениями
+  const emit = j => { out.push(j); done.add(j); tryCutouts() }
+  const flush = () => { let moved = true; while (moved) { moved = false; for (let i = 0; i < deferred.length; i++) if (ready(deferred[i])) { emit(deferred.splice(i, 1)[0]); moved = true; break } } }
+  for (const j of route) {
+    if (!ready(j)) { deferred.push(j); continue }
+    emit(j); flush()
+  }
+  // осталось — контуры, чьи вырезы ждут вложений с другого маршрута (другой инструмент): как есть
+  out.push(...deferred)
+  return out
+}
+
 export function routeContours(list, from, sheetRect, smallFirst = true) {
   const n = list.length
   if (n < 2) return list.slice()
@@ -777,8 +801,13 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
 
   const skip = skipOf(ops)
   const boxes = []                   // габариты деталей на листе — для проверки «только прямоугольники»
+  // Вложенные детали (деталь лежит в сквозном вырезе другой — см. nestInHoles.js): для каждой детали — её контур на
+  // листе, её вырезы и работы по ним. Порядок резов для них: контур вложенной детали → вырез хозяина → контур хозяина
+  const parts = []                   // { outline: [[x,y]] на листе, contour: job|null, cutouts: [{ job, pts }] }
   for (const p of sheet.placed || []) {
     const f = partFeatures(p, details?.[p.detailIndex], T, skip)
+    const part = { outline: f.outline.map(([x, y]) => [ox + p.x + x, oy + p.y + y]), contour: null, cutouts: [] }
+    parts.push(part)
     if (skip.contour) { const b = bboxOf(f.outline); boxes.push({ x0: p.x + b.x0, y0: p.y + b.y0, x1: p.x + b.x1, y1: p.y + b.y1, boxed: f.boxed }) }
     const bx = ox + p.x, by = oy + p.y
     const G = ([x, y]) => [bx + x, by + y]
@@ -868,7 +897,9 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       if (!loop) { warn.add(`Фреза Ø${num(t.d)} не проходит в вырез — он пропущен.`); continue }
       const L = orientLoop(loop.map(G), ops.cutout.dir)
       const zs = levels(T, -millOver, n0(t.maxPass))
-      jobs.push({ stage: 1, rank: 4, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.cutout, safeZ, arcs) })
+      const job = { stage: 1, rank: 4, tool: t, at: L[0], holds: [], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.cutout, safeZ, arcs) }
+      jobs.push(job)
+      part.cutouts.push({ job, pts: c.circle ? circleLoop(c.circle.cx, c.circle.cy, c.circle.r).map(G) : c.pts.map(G) })
     }
     // контур детали — фреза идёт снаружи
     {
@@ -904,10 +935,17 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
             },
             run: out => cutLoop(out, job.passes, T, t, o, safeZ, arcs) }
           jobs.push(job)
+          part.contour = job
         }
       }
     }
   }
+  // Кто в чьём вырезе: контур детали j целиком внутри выреза детали i → вырез «держит» j (режется после её контура)
+  for (let i = 0; i < parts.length; i++) for (const c of parts[i].cutouts) for (let j = 0; j < parts.length; j++) {
+    if (j === i || !parts[j].contour || !parts[j].outline.length) continue
+    if (parts[j].outline.every(q => pointInPoly(q, c.pts))) { c.job.holds.push(parts[j].contour); if (parts[i].contour) parts[i].contour.ownHeld = [...(parts[i].contour.ownHeld || []), c.job] }
+  }
+  const heldCutouts = new Set(jobs.filter(j => j.rank === 4 && j.holds?.length))
   // Деловые обрезки, отмеченные в раскрое: режутся прямоугольником, фреза идёт снаружи. По краю листа инструмент
   // не идёт — только по сторонам внутри листа; обрезок, окружённый деталями, обходится по всему периметру.
   for (const of of sheet.manualOffcuts || []) {
@@ -977,9 +1015,10 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   const stage1 = jobs.filter(j => j.stage === 1)
   const prevTool = seq[seq.length - 1]?.tool
   const cutTools = [...new Set(stage1.map(j => j.tool))].sort((a, b) => (b === prevTool) - (a === prevTool))
-  cutTools.forEach(t => add(stage1.filter(j => j.tool === t && j.rank === 4)))
+  cutTools.forEach(t => add(stage1.filter(j => j.tool === t && j.rank === 4 && !heldCutouts.has(j))))
   // Контуры деталей — одним кратчайшим маршрутом, см. routeContours
   const smallFirst = ops.outer?.smallFirst !== false
+  const nestedState = { done: new Set(), cutoutsDone: new Set() }
   cutTools.forEach(t => {
     const own = stage1.filter(j => j.tool === t && j.rank === 5)
     const offcuts = (sheet.manualOffcuts || []).map(of => ({ box: [ox + of.x, oy + of.y, ox + of.x + of.w, oy + of.y + of.h], area: of.w * of.h / 1e6 }))
@@ -990,8 +1029,11 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       r = routeContours(own, cur, sheetRect, smallFirst)
       lastCutToSupport(r, sheetRect, offcuts)
     }
+    r = withNestedOrder(r, heldCutouts, nestedState)
     if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
+  // вырезы с вложениями, которые так и не вышли (вложенная деталь без контура в программе) — в конце
+  add([...heldCutouts].filter(c => !nestedState.cutoutsDone.has(c)))
 
   // обрезки отрезаются последними — когда все детали уже вырезаны
   cutTools.forEach(t => add(jobs.filter(j => j.stage === 2 && j.tool === t)))

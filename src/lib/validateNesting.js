@@ -12,6 +12,7 @@
 // p.w/p.h включают ширину реза (справа и сверху), контур polygon — локальный.
 
 import { smallAtEdge, SMALL_EDGE_MIN } from './nesting'
+import { nestedInHole } from './nestInHoles'
 
 const EPS = 0.5 // мм — допуск на округления
 
@@ -129,6 +130,8 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
         const b = sh.placed[j], B = box[j]
         const gx = Math.max(B.x0 - A.x1, A.x0 - B.x1), gy = Math.max(B.y0 - A.y1, A.y0 - B.y1)   // зазоры между габаритами
         if (gx >= kerf - TOL || gy >= kerf - TOL) continue                                        // разнесены на рез — ок
+        // деталь внутри сквозного выреза другой (вложение, см. nestInHoles) — не пересечение, если зазор до выреза ≥ реза
+        if (nestedInHole(a, b, details, kerf) || nestedInHole(b, a, details, kerf)) continue
         if (!hasShape(a) && !hasShape(b)) {
           if (gx < -0.01 && gy < -0.01) push(`${L}: пересекаются «${name(a)}» и «${name(b)}»`)
           else push(`${L}: между «${name(a)}» и «${name(b)}» зазор ${Math.max(0, Math.max(gx, gy)).toFixed(1)} мм — меньше реза ${kerf} мм`)

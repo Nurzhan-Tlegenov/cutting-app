@@ -17,6 +17,7 @@ import { readyOrderResult } from './readyOrder'
 import { needsTrueShape, roughShapePolygons, placedRotation, buildHybridPlan } from './trueShapeNesting'
 import { fillConcavities } from './fillConcavities'
 import { gravityPolygons } from './gravity'
+import { planNestInHoles, expandNested, stripNested } from './nestInHoles'
 import { validateNesting } from './validateNesting'
 
 const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажатия «Стоп»
@@ -557,7 +558,21 @@ export async function runLiveNesting(params, opts = {}) {
     const onProgress = opts.onProgress ? res => opts.onProgress(readyOrderResult(res)) : null
     return readyOrderResult(await runLiveNestingRaw(params, { ...opts, onProgress }))
   }
-  if (!params.byBox) return runLiveNestingRaw(params, opts)
+  // Вложение деталей в сквозные вырезы других (кольцо → основание): закономерно, до поиска — см. nestInHoles.js.
+  // Только фрезер по контуру: «по габаритам» вырез не режется, и класть в него нечего
+  if (!params.byBox) {
+    let plan = null
+    try { plan = planNestInHoles(params.details, params.kerf) } catch (e) { console.warn('Вложение в вырезы не удалось:', e) }
+    if (plan) {
+      const inner = { ...params, details: plan.details }
+      if (Array.isArray(inner.seed?.sheets)) inner.seed = { ...inner.seed, sheets: stripNested(inner.seed.sheets) }
+      // соседним потокам (rawSheets) — раскладка без вложений: внутренний поиск их не знает
+      const expand = res => (res?.sheets ? { ...res, rawSheets: res.rawSheets || res.sheets, sheets: expandNested(res.sheets, params.details, plan.plan, params.kerf), nestedInHoles: true } : res)
+      const onProgress = opts.onProgress ? res => opts.onProgress(expand(res)) : null
+      return expand(await runLiveNestingRaw(inner, { ...opts, onProgress }))
+    }
+    return runLiveNestingRaw(params, opts)
+  }
   const plain = { ...params, details: params.details.map(d => ({ ...d, contour: null })), algo: 'raster' }
   if (Array.isArray(plain.seed?.sheets)) plain.seed = { ...plain.seed, sheets: stripPolys(plain.seed.sheets) }
   const onProgress = opts.onProgress ? res => opts.onProgress(asBoxes(res)) : null
