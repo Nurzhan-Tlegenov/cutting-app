@@ -4,7 +4,7 @@
 // в порядке списка, с зазором реза между ними. Пильный центр и форматник без склада знают группы сами (beamSawNesting).
 // part_group_dir: 'y' — друг над другом (вдоль длины), 'x' — рядом (вдоль ширины).
 import { roughShapePolygons } from './trueShapeNesting'
-import { groupLinesOnSheet } from './partGroups'
+import { groupLinesOnSheet, posOfInstance } from './partGroups'
 
 export function groupBlocks(params) {
   const det = params.details || []
@@ -20,7 +20,7 @@ export function groupBlocks(params) {
   const blockOf = new Map()                     // имя группы -> блок
   for (const [g, idx] of groups) {
     const members = []
-    idx.forEach(i => { for (let q = 0; q < (Number(det[i].qty) || 0); q++) members.push({ key: { i, q, width: Number(det[i].width) || 0, length: Number(det[i].length) || 0 }, pos: det[i].part_group_pos, ord: i }) })
+    idx.forEach(i => { for (let q = 0; q < (Number(det[i].qty) || 0); q++) members.push({ key: { i, q, width: Number(det[i].width) || 0, length: Number(det[i].length) || 0 }, pos: posOfInstance(det[i].part_group_pos, q), ord: i }) })
     const stack = det[idx[0]].part_group_dir === 'x' ? 'x' : 'y'
     // ряды (part_group_pos): ряд — подблок поперёк; размеры блока — рекурсивно: вдоль направления сумма с резом, поперёк максимум
     const perp = stack === 'x' ? 'y' : 'x'

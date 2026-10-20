@@ -11,7 +11,7 @@
 // Результат — в том же формате, что у runNesting (листы с placed), поэтому карты, линии реза, PDF и бирки
 // работают как у форматника. Дерево резов каждого листа — sheet.beamTree (для программы станка).
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
-import { groupLinesOnSheet } from './partGroups'
+import { groupLinesOnSheet, posOfInstance } from './partGroups'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
 export const BEAM_SAW_VERSION = 'β0.16'
@@ -65,7 +65,7 @@ function buildUnits(pieces, details) {
     const g = d && typeof d.part_group === 'string' ? d.part_group.trim() : ''
     if (!g) { out.push(p); continue }
     if (!groups.has(g)) { groups.set(g, { id: 'g:' + g, group: g, stack: d.part_group_dir === 'x' ? 'x' : 'y', members: [], rotatable: false, label: g }); out.push(groups.get(g)) }
-    groups.get(g).members.push({ key: { ...p, rotatable: false, group: g, label: `${p.label} ⧉${g}` }, pos: d.part_group_pos, ord: p.detailIndex })
+    groups.get(g).members.push({ key: { ...p, rotatable: false, group: g, label: `${p.label} ⧉${g}` }, pos: posOfInstance(d.part_group_pos, Number(String(p.id).split('_')[1]) || 0), ord: p.detailIndex })
   }
   for (const u of groups.values()) {
     if (u.members.length === 1) { const i = out.indexOf(u); out[i] = u.members[0].key; delete u.members; continue }   // одна деталь — обычная

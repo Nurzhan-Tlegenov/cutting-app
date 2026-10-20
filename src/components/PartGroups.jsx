@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { groupsOf, groupDir, groupColor, groupRows } from '../lib/partGroups'
+import { groupsOf, groupDir, groupColor, groupRows, posOfInstance } from '../lib/partGroups'
 import { useBackClose } from '../lib/backStack'
 
 // Группы деталей с общей текстурой (фасады одного шкафа): детали группы раскрой кладёт в одну полосу подряд, в порядке
@@ -105,10 +105,13 @@ export function GroupChip({ detail, groups, active, onChange }) {
 // Зазор на рез добавит сам раскрой — по инструменту выбранного станка.
 function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
   const vert = dir !== 'x'
+  // элементы — экземпляры деталей (деталь ×2 — два отдельных фасада, каждый двигается сам)
   const mine = details.map((d, i) => ({ d, i })).filter(({ d }) => (d.part_group || '').trim() === group)
-  const rows = groupRows(mine.map(({ d, i }) => ({ key: d.uid, d, pos: d.part_group_pos, ord: i })))
-  const W = m => Number(m.d.w) || 0, L = m => Number(m.d.h) || 0, Q = m => Math.max(1, Number(m.d.qty) || 1)
-  const ext = m => (vert ? { w: W(m) * Q(m), h: L(m) } : { w: W(m), h: L(m) * Q(m) })   // прямоугольник детали с экземплярами
+    .flatMap(({ d, i }) => Array.from({ length: Math.max(1, Number(d.qty) || 1) }, (_, q) => ({ key: `${d.uid}#${q}`, uid: d.uid, q, d, i, pos: posOfInstance(d.part_group_pos, q), ord: i })))
+  const rows = groupRows(mine)
+  const W = m => Number(m.d.w) || 0, L = m => Number(m.d.h) || 0
+  // текстура — вдоль длины (Y): деталь стоит длиной по вертикали, как на карте раскроя
+  const ext = m => ({ w: W(m), h: L(m) })
   // плотная раскладка рядов -> прямоугольники (мм, Y вниз — как на экране)
   const tidy = rs => {
     const out = new Map()
@@ -124,16 +127,21 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
   const base = tidy(rows)
   const [drag, setDrag] = useState(null)      // { key, dx, dy, x, y } — что тащим и где оно сейчас
   const svgRef = useRef(null)
-  const rects = mine.map(m => ({ m, ...(drag?.key === m.d.uid ? { ...base.get(m.d.uid), x: drag.x, y: drag.y } : base.get(m.d.uid)) }))
+  const rects = mine.map(m => ({ m, ...(drag?.key === m.key ? { ...base.get(m.key), x: drag.x, y: drag.y } : base.get(m.key)) }))
   const bw = Math.max(1, ...rects.map(r => r.x + r.w)), bl = Math.max(1, ...rects.map(r => r.y + r.h))
   const field = Math.max(bw, bl) * 1.5 + 100
   const toMm = e => { const b = svgRef.current.getBoundingClientRect(); return { x: (e.clientX - b.left) / b.width * field - 50, y: (e.clientY - b.top) / b.height * field - 50 } }
   const apply = newRows => {
+    // позиция каждого экземпляра -> у детали строка «ряд.место» по экземплярам через «;»
     const pos = new Map()
     newRows.filter(r => r.length).forEach((r, ri) => r.forEach((m, ci) => pos.set(m.key, `${ri + 1}.${ci + 1}`)))
-    setDetails(ds => ds.map(x => (pos.has(x.uid) ? { ...x, part_group_pos: pos.get(x.uid) } : x)))
+    setDetails(ds => ds.map(x => {
+      const n = Math.max(1, Number(x.qty) || 1)
+      if (!pos.has(`${x.uid}#0`)) return x
+      return { ...x, part_group_pos: Array.from({ length: n }, (_, q) => pos.get(`${x.uid}#${q}`) || '').join(';') }
+    }))
   }
-  const start = (e, r) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); const p = toMm(e); setDrag({ key: r.m.d.uid, dx: p.x - r.x, dy: p.y - r.y, x: r.x, y: r.y }) }
+  const start = (e, r) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); const p = toMm(e); setDrag({ key: r.m.key, dx: p.x - r.x, dy: p.y - r.y, x: r.x, y: r.y }) }
   const move = e => { if (!drag) return; const p = toMm(e); setDrag(d => ({ ...d, x: p.x - d.dx, y: p.y - d.dy })) }
   const end = () => {
     if (!drag) return
@@ -147,11 +155,13 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
       const g = groups.find(gr => along(it) >= gr.lo && along(it) <= gr.hi)
       if (g) { g.items.push(it); g.lo = Math.min(g.lo, lo(it)); g.hi = Math.max(g.hi, hi(it)) } else groups.push({ items: [it], lo: lo(it), hi: hi(it) })
     }
-    const newRows = groups.sort((a, b) => a.lo - b.lo).map(gr => gr.items.sort((a, b) => across(a) - across(b)).map(it => ({ key: it.m.d.uid })))
+    const newRows = groups.sort((a, b) => a.lo - b.lo).map(gr => gr.items.sort((a, b) => across(a) - across(b)).map(it => ({ key: it.m.key })))
     setDrag(null)
     apply(newRows)
   }
   const btn = { padding: '2px 6px', border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', lineHeight: 1.2 }
+  const fs = field / 42                                   // размер шрифта в мм поля — как подписи на карте
+  const lab = m => (m.d.name ? m.d.name.slice(0, 14) : `#${m.i + 1}`)
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '14px 14px 0 0', width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', padding: '12px 14px 18px' }}>
@@ -160,25 +170,22 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
           <button type="button" onClick={onClose} style={{ ...btn, fontSize: 16 }}>✕</button>
         </div>
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>
-          Двигайте детали пальцем, как на карте раскроя. Отпустили — они складываются {vert ? 'в ряды друг над другом (верхний ряд — верх фасада)' : 'в колонки слева направо'} без зазоров; зазор на рез добавит раскрой. Куда положили — там и останется: в том же ряду или в новом.
+          Фасады стоят как на карте раскроя: текстура (длина) по вертикали, Y. Двигайте каждый пальцем; отпустили — они складываются {vert ? 'в ряды друг над другом (верхний ряд — верх фасада)' : 'в колонки слева направо'} без зазоров; зазор на рез добавит раскрой. Деталь «2 шт.» — два отдельных фасада.
         </p>
         <svg ref={svgRef} viewBox={`-50 -50 ${field} ${field}`} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
-          style={{ width: '100%', aspectRatio: '1 / 1', display: 'block', touchAction: 'none', background: 'var(--bg2)', borderRadius: 10, border: '0.5px solid var(--border)', userSelect: 'none' }}>
+          style={{ width: '100%', aspectRatio: '1 / 1', display: 'block', touchAction: 'none', background: '#f4f4f2', borderRadius: 10, border: '0.5px solid var(--border)', userSelect: 'none' }}>
           {rects.map(r => (
-            <g key={r.m.d.uid} onPointerDown={e => start(e, r)} style={{ cursor: 'grab' }}>
-              <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={color} fillOpacity={drag?.key === r.m.d.uid ? 0.35 : 0.16} stroke={color} strokeWidth={field / 300} />
-              {Q(r.m) > 1 && Array.from({ length: Q(r.m) - 1 }, (_, k) => (vert
-                ? <line key={k} x1={r.x + W(r.m) * (k + 1)} y1={r.y} x2={r.x + W(r.m) * (k + 1)} y2={r.y + r.h} stroke={color} strokeWidth={field / 500} strokeDasharray={`${field / 120} ${field / 120}`} />
-                : <line key={k} x1={r.x} y1={r.y + L(r.m) * (k + 1)} x2={r.x + r.w} y2={r.y + L(r.m) * (k + 1)} stroke={color} strokeWidth={field / 500} strokeDasharray={`${field / 120} ${field / 120}`} />))}
-              <text x={r.x + r.w / 2} y={r.y + r.h / 2} textAnchor="middle" dominantBaseline="middle" fontSize={Math.max(field / 40, Math.min(r.w, r.h) / 4)} fill="var(--text)" style={{ pointerEvents: 'none' }}>
-                {r.m.d.name ? r.m.d.name.slice(0, 14) : `#${r.m.i + 1}`}
-                <tspan x={r.x + r.w / 2} dy="1.15em" fill="var(--text-muted)">{W(r.m)}×{L(r.m)}{Q(r.m) > 1 ? ` ×${Q(r.m)}` : ''}</tspan>
-              </text>
+            <g key={r.m.key} onPointerDown={e => start(e, r)} style={{ cursor: 'grab' }}>
+              <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={drag?.key === r.m.key ? '#dfe9f5' : '#eceae4'} stroke="#333" strokeWidth={field / 400} />
+              {/* размеры по сторонам, как на карте: по горизонтали — сверху, по вертикали — слева, повёрнуто */}
+              <text x={r.x + r.w / 2} y={r.y + fs * 1.1} textAnchor="middle" fontSize={fs} fill="#222" style={{ pointerEvents: 'none' }}>{Math.round(r.w)}</text>
+              <text x={r.x + fs * 1.1} y={r.y + r.h / 2} textAnchor="middle" fontSize={fs} fill="#222" transform={`rotate(-90 ${r.x + fs * 1.1} ${r.y + r.h / 2})`} style={{ pointerEvents: 'none' }}>{Math.round(r.h)}</text>
+              <text x={r.x + r.w / 2} y={r.y + r.h / 2} textAnchor="middle" dominantBaseline="middle" fontSize={fs * 0.9} fill="#444" style={{ pointerEvents: 'none' }}>{lab(r.m)}{r.m.q || (Number(r.m.d.qty) || 1) > 1 ? ` (${r.m.q + 1})` : ''}</text>
             </g>
           ))}
         </svg>
         <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
-          {rows.map((r, ri) => `${vert ? 'ряд' : 'колонка'} ${ri + 1}: ${r.map(m => m.d.name || `#${m.ord + 1}`).join(' · ')}`).join('  |  ')}. Порядок сохраняется с заказом и соблюдается в раскрое на любом станке.
+          {rows.map((r, ri) => `${vert ? 'ряд' : 'колонка'} ${ri + 1}: ${r.map(m => `${lab(m)}${(Number(m.d.qty) || 1) > 1 ? ` (${m.q + 1})` : ''} ${W(m)}×${L(m)}`).join(' · ')}`).join('  |  ')}. Порядок сохраняется с заказом и соблюдается в раскрое на любом станке.
         </p>
       </div>
     </div>

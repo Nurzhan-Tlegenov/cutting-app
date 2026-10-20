@@ -11,6 +11,8 @@ export const groupColor = (groups, g) => GROUP_COLORS[Math.max(0, groups.indexOf
 // ряд 1 — верхний, как на фасаде шкафа; ↔ — ряды это колонки слева направо, место 1 — верхнее), в ряду детали рядом.
 // Без позиции — деталь (каждый экземпляр) своим рядом после размеченных, в порядке списка. Экземпляры одной детали
 // (qty > 1) идут подряд на её месте.
+/** Позиция экземпляра q детали: part_group_pos — «1.1» (все экземпляры подряд на одном месте) или «1.1;1.2;2.1» (по экземплярам) */
+export const posOfInstance = (pos, q) => { const a = String(pos ?? '').split(';').map(x => x.trim()).filter(Boolean); return a.length <= 1 ? a[0] || '' : a[q] || '' }
 export const parsePos = s => { const m = /^\s*(\d+)(?:[.,:](\d+))?\s*$/.exec(String(s ?? '')); return m ? [+m[1], m[2] ? +m[2] : 1] : null }
 /** Ряды группы для бланка: members [{ key, pos, ord }] -> [[member…]…] в порядке редактора (ряд 1 — первый) */
 export function groupRows(members) {
