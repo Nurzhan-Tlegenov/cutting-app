@@ -323,6 +323,20 @@ function BeamSawPostBasic({ post, set }) {
         <DirPathEditor value={dir} def={BEAM_DIR_DEFAULT} preview={dirPreview(dir)} onChange={x => set({ dirPath: x })} />
         <Hint>Бирки (если отмечено «Бирки вместе с программами») ложатся рядом — в папку с тем же названием и словом «Etiketki» в конце.</Hint>
       </div>
+      <div style={{ marginTop: 10 }}>
+        <label className="label">Бирки — по готовности деталей</label>
+        <Hint>Порядок бирок — как детали выходят со станка: полоса режется поперёк, готовая деталь — бирка сразу, кусок с подрезкой откладывается и дорезается после полосы. На бирке эскиз, кромки и размеры — как деталь лежит на выходе; для этого нужно знать, в какую сторону станок поворачивает заготовку между уровнями.</Hint>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+          {[['cw', 'Поворот по часовой'], ['ccw', 'Против часовой']].map(([v, l]) => (
+            <button key={v} type="button" onClick={() => set({ labelTurn: v })}
+              style={{ padding: '5px 10px', borderRadius: 16, fontSize: 12, border: `1px solid ${(post.labelTurn || 'cw') === v ? 'var(--blue)' : 'var(--border-md)'}`, background: (post.labelTurn || 'cw') === v ? 'var(--blue-light)' : 'transparent', color: (post.labelTurn || 'cw') === v ? 'var(--blue)' : 'var(--text-muted)' }}>{l}</button>
+          ))}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+            <input type="checkbox" checked={!!post.labelFlip} onChange={e => set({ labelFlip: e.target.checked })} /> ещё на 180°
+          </label>
+        </div>
+        <Hint>Если бирки выходят вверх ногами или боком — переключите сторону поворота или добавьте 180°. Проверяется на первом листе.</Hint>
+      </div>
     </div>
   )
 }

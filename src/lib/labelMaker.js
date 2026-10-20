@@ -268,8 +268,9 @@ const edgeName = v => (!v || v === 'false' ? '' : v === 'default' || v === true 
 const r1 = v => String(Math.round((Number(v) || 0) * 10) / 10)
 
 /** Все свойства детали для бирки. mat — материал из savedNestings, si / pi — лист и деталь на нём */
-export function labelInfo(order, mat, si, pi) {
-  const sh = mat.sheets[si], p = sh.placed[pi], d = mat.details[p.detailIndex] || {}, m = detailMeta(d) || {}
+export function labelInfo(order, mat, si, pi, part = null) {
+  // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
+  const sh = mat.sheets[si], p = part || sh.placed[pi], d = mat.details[p.detailIndex] || {}, m = detailMeta(d) || {}
   let c = d.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   // стороны бирки — как деталь лежит на листе
@@ -523,7 +524,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
     } else if (it.type === 'map') {
       if (sheetCtx) drawSheetMap(ctx, x, y, w, it.h * mm, sheetCtx.sheet, sheetCtx.geo, sheetCtx.index, line, rot)
     } else if (it.type === 'part') {
-      const p = sheetCtx?.sheet.placed[sheetCtx.index]
+      const p = sheetCtx?.part || sheetCtx?.sheet.placed[sheetCtx.index]
       if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0,
         tpl.part ? { contour: tpl.part.contour * mm, inner: tpl.part.contour * mm * 0.7, holeMin: tpl.part.hole * mm, ring: tpl.part.ring } : {})
     } else {
@@ -684,7 +685,8 @@ export function labelPoint(x0, x1, y0, y1, pos, tpl) {
  * sheets: [{ si, nc }] — номер листа и имя его программы раскроя; base — общая часть имени (заказ); post — постпроцессор (начало обработки).
  * -> [{ name, data: Uint8Array }]
  */
-export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
+export async function buildLabelFiles({ order, mat, sheets, base, post, tpl, seqOf = null, partOf = null }) {
+  // seqOf(sheet, geo, tpl) — свой порядок бирок (пильный центр: по готовности); partOf(sheet, pi) — деталь в положении выхода
   const files = [], list = [], { w, h } = labelPx(tpl)
   await preloadLabelImages(tpl)
   if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)   // для QR со ссылкой на 3D
@@ -696,7 +698,7 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet), stem = `${si + 1}_${base}`
     const cyc = `Label_${stem}.cyc`, jpg = `${stem}.jpg`
     const cycles = []
-    labelSeq(sheet, geo, 'table', tpl).forEach(({ pi, o, at }, seq) => {   // файлы и точки наклейки — в порядке обхода стола; обрезки — после всех деталей, тем же обходом
+    ;(seqOf ? seqOf(sheet, geo, tpl) : labelSeq(sheet, geo, 'table', tpl)).forEach(({ pi, o, at }, seq) => {   // файлы и точки наклейки — в порядке обхода стола; обрезки — после всех деталей, тем же обходом
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h
       const bmp = `${stem}_${String(seq + 1).padStart(4, '0')}.bmp`
       if (o) {                                                             // бирка на обрезок: в углу обрезка с отступом (настройка шаблона)
@@ -705,8 +707,8 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl }) {
         cycles.push(['Cycle_Label', [['LabelName', bmp], ['X', r1(ox + at[0])], ['Y', r1(oy + at[1])], ['R', 0]]])
         return
       }
-      const p = sheet.placed[pi]
-      drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[p.detailIndex] })
+      const p = sheet.placed[pi], part = partOf ? partOf(sheet, pi) : null
+      drawLabel(cv, tpl, labelInfo(order, mat, si, pi, part), { sheet, geo, index: pi, detail: mat.details[p.detailIndex], part })
       files.push({ name: bmp, data: canvasToBmp(cv, tpl.dpi) })
       // точка наклейки — центр детали; бирки клеятся в одном положении (R = 0), как в образцах
       const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
@@ -732,7 +734,7 @@ export const zipFiles = files => zipSync(Object.fromEntries(files.map(f => [f.na
  * Бирка на странице — чёрно-белая картинка в разрешении печати (не меньше 300 dpi).
  * onProgress(сделано, всего) — для счётчика. -> Uint8Array
  */
-export async function buildLabelsPdf({ order, mat, tpl, onProgress }) {
+export async function buildLabelsPdf({ order, mat, tpl, onProgress, seqOf = null, partOf = null }) {
   await preloadLabelImages(tpl)
   if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)
   const k = Math.max(12, pxMm(tpl)), W = Math.round(tpl.w * k), H = Math.round(tpl.h * k)
@@ -749,10 +751,10 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress }) {
   for (let si = 0; si < mat.sheets.length; si++) {
     const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
     // страницы — в порядке ручной наклейки; после деталей листа — бирки на его обрезки (если включено)
-    const pages = labelSeq(sheet, geo, 'manual', tpl)
+    const pages = seqOf ? seqOf(sheet, geo, tpl) : labelSeq(sheet, geo, 'manual', tpl)
     for (const { pi, o } of pages) {
       if (o) drawOffcutLabel(cv, tpl, { order, mat, si, o })
-      else drawLabel(cv, tpl, labelInfo(order, mat, si, pi), { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex] })
+      else { const part = partOf ? partOf(sheet, pi) : null; drawLabel(cv, tpl, labelInfo(order, mat, si, pi, part), { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex], part }) }
       const px = cv.getContext('2d').getImageData(0, 0, W, H).data, bits = new Uint8Array(row * H)
       for (let y = 0; y < H; y++) for (let x = 0, i = y * W * 4; x < W; x++, i += 4) if ((px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10 >= 140) bits[y * row + (x >> 3)] |= 0x80 >> (x & 7)
       const img = zlibSync(bits, { level: 6 }), content = `q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`

@@ -35,6 +35,7 @@ import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from 
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { saveBeamSawXml, buildBeamSawXml } from '../lib/beamSawXml'
+import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -159,9 +160,11 @@ export default function CncPage() {
     if (!sheets.length || (!table && !withLabels)) return
     setLabelBusy(true)
     const m = { ...mat }
+    // пильный центр: бирки по готовности деталей и в положении выхода со станка (beamSawLabels.js)
+    const beamOpts = beamMat && saw ? { seqOf: beamLabelSeq, partOf: (sheet, pi) => beamExitPart(sheet.placed[pi], sheet, saw) } : {}
     Promise.all([
-      buildLabelFiles({ order, mat: m, base: baseName(), post: machine, tpl: labelTpl, sheets }),
-      table ? Promise.resolve(null) : buildLabelsPdf({ order, mat: m, tpl: labelTpl }).catch(() => null),
+      buildLabelFiles({ order, mat: m, base: baseName(), post: machine, tpl: labelTpl, sheets, ...beamOpts }),
+      table ? Promise.resolve(null) : buildLabelsPdf({ order, mat: m, tpl: labelTpl, ...beamOpts }).catch(() => null),
     ])
       .then(([labels, pdf]) => setBuilt(b => (b && b.files === files ? { ...b, labels: pdf ? [...labels, { name: `Birki_${baseName()}.pdf`, data: pdf }] : labels, labelsOwnDir: !table } : b)))
       .catch(() => {})
