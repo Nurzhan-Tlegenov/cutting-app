@@ -10,7 +10,7 @@ begin
   if not found or not (is_admin() or o.user_id = auth.uid() or (o.status <> 'draft' and is_my_production(o.production_id))) then
     raise exception 'not allowed';
   end if;
-  foreach k in array array['sheet_length', 'sheet_width', 'kerf_width', 'margin_left', 'margin_right', 'margin_top', 'margin_bottom', 'offcuts'] loop
+  foreach k in array array['sheet_length', 'sheet_width', 'kerf_width', 'margin_left', 'margin_right', 'margin_top', 'margin_bottom', 'offcuts', 'edge_types'] loop
     if p_patch ? k then
       execute format('update orders set %I = %L where id = %L', k, p_patch ->> k, p_order);
     end if;

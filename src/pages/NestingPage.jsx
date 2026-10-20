@@ -1702,23 +1702,44 @@ export default function NestingPage() {
     const beam = next === 'beamsaw', method = beam ? 'guillotine' : next
     Promise.resolve().then(() => setMachine(method, beam))
   }, [prodsReady, order?.production_id, productions, betaBeam])   // eslint-disable-line react-hooks/exhaustive-deps
-  // Прифуговка из настроек пильного центра производства: когда выбран пильный центр и заказ свой — у видов кромки заказа
-  // без своей прифуговки ставится производственная (один раз; в бланке её потом можно поправить). Так все места, где
-  // деталь пересчитывается в заготовку (раскрой, карта, бирки, программа), видят одно и то же
-  useEffect(() => {
-    if (!beamSaw || !prodsReady || !order || order.user_id !== user?.id) return
+  // Прифуговка из настроек пильного центра производства. Её определяет производство (кромка без сколов): когда выбран
+  // пильный центр, у видов кромки заказа без своей прифуговки ставится производственная — и в своём заказе, и в заказе
+  // клиента, который режет это производство (запись через production_order_sheet). Если клиент задал другую — не
+  // перебивается молча: предлагается кнопкой «поставить прифуговку производства». Заготовка везде считается одинаково
+  // (раскрой, карта, бирки, программа) — через существующий edgeCut
+  const [jointOffer, setJointOffer] = useState(null)   // { j } — у кромок заказа другая прифуговка, можно заменить на производственную
+  const jointProd = () => {
+    if (!beamSaw || !order) return 0
     const pr = order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)
-    const j = beamSettings(pr?.beam_saw_settings).joint
-    if (!(j > 0)) return
+    return beamSettings(pr?.beam_saw_settings).joint || 0
+  }
+  const canSetJoint = () => !!order && (order.user_id === user?.id || profile?.role === 'admin' || (cabinet === 'production' && order.status !== 'draft'))
+  async function writeEdgeTypes(next, msg) {
+    setOrder(o => (o ? { ...o, edge_types: next } : o))
+    const own = order.user_id === user?.id || profile?.role === 'admin'
+    const r = own ? await supabase.from('orders').update({ edge_types: next }).eq('id', id) : await productionOrderSheet(id, { edge_types: JSON.stringify(next) })
+    if (r?.error) setParamsWarn(own ? 'Не удалось записать прифуговку: ' + (r.error.message || r.error) : 'Прифуговка производства не записалась в заказ клиента: выполните migration_production_sheet_edges.sql в Supabase (SQL Editor) — один раз.')
+    else setParamsWarn(msg)
+  }
+  const applyJoint = (j, all) => {
     const types = parseEdgeTypes(order.edge_types)
     const keys = new Set(allDetails.flatMap(d => [d.edge_left, d.edge_right, d.edge_top, d.edge_bottom]).map(edgeKey).filter(Boolean))
     const next = { ...types }
     let changed = false
-    for (const k of keys) { const t = types[k] || blankType(); if (!(Number(t.joint) > 0)) { next[k] = { ...t, t: Number(t.t) || 0, joint: j }; changed = true } }
-    if (!changed) return
-    Promise.resolve().then(() => setOrder(o => (o ? { ...o, edge_types: next } : o)))
-    supabase.from('orders').update({ edge_types: next }).eq('id', id).then(({ error }) => { if (!error) setParamsWarn(`Прифуговка ${j} мм из настроек пильного центра добавлена к кромкам заказа — пересчитайте раскрой.`) })
-  }, [beamSaw, prodsReady, order?.production_id, allDetails.length])   // eslint-disable-line react-hooks/exhaustive-deps
+    for (const k of keys) { const t = types[k] || blankType(); if (all ? Math.abs(Number(t.joint) - j) > 0.001 : !(Number(t.joint) > 0)) { next[k] = { ...t, t: Number(t.t) || 0, joint: j }; changed = true } }
+    return changed ? next : null
+  }
+  useEffect(() => {
+    const j = jointProd()
+    const offer = v => Promise.resolve().then(() => setJointOffer(v))
+    if (!(j > 0) || !prodsReady || !canSetJoint() || !allDetails.length) { offer(null); return }
+    const types = parseEdgeTypes(order.edge_types)
+    const keys = [...new Set(allDetails.flatMap(d => [d.edge_left, d.edge_right, d.edge_top, d.edge_bottom]).map(edgeKey).filter(Boolean))]
+    const differ = keys.some(k => Number(types[k]?.joint) > 0 && Math.abs(Number(types[k].joint) - j) > 0.001)
+    offer(differ ? { j } : null)
+    const next = applyJoint(j, false)
+    if (next) Promise.resolve().then(() => writeEdgeTypes(next, `Прифуговка ${j} мм из настроек пильного центра добавлена к кромкам заказа — пересчитайте раскрой.`))
+  }, [beamSaw, prodsReady, order?.production_id, allDetails.length, order?.edge_types])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedOnOpenRef = useRef(false)
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
   useBackClose(!!needProd, () => setNeedProd(null))
@@ -3743,6 +3764,13 @@ export default function NestingPage() {
       {beamSaw && (
         <p style={{ fontSize: 11, color: 'var(--blue)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
           β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Направление — как выбрано в конфигурации («авто» — как у производства); пропил, обрезка листа и остальные правила — свои, из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); const bs = beamSettings(pr?.beam_saw_settings); return <>{pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)'}: <b>рез {bs.kerf} мм, отступы ←{bs.trimLeft} →{bs.trimRight} ↑{bs.trimTop} ↓{bs.trimBottom}</b> {order.production_id ? '— подставлены в рез и отступы выше' : '(рез и отступы выше для пильного центра не используются)'}</> })()}.
+          {jointOffer && (
+            <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>
+              У кромок заказа своя прифуговка, у производства — {jointOffer.j} мм.{' '}
+              <button type="button" onClick={() => { const next = applyJoint(jointOffer.j, true); if (next) writeEdgeTypes(next, `Прифуговка ${jointOffer.j} мм производства поставлена всем кромкам — пересчитайте раскрой.`); setJointOffer(null) }}
+                style={{ padding: '2px 8px', borderRadius: 12, fontSize: 11, border: '0.5px solid var(--amber)', background: 'transparent', color: 'var(--amber)', cursor: 'pointer' }}>Поставить прифуговку производства</button>
+            </span>
+          )}
           {!isMaster && (
             <button type="button" onClick={() => setSendJob({
               title: 'Замечание по пильному центру β', fileName: `beamsaw_${orderFileName(order)}.json`, orderId: id,
