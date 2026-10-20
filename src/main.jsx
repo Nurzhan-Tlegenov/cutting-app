@@ -18,15 +18,15 @@ startI18n().finally(() => createRoot(document.getElementById('root')).render(
   </StrictMode>,
 ))
 
-// iPhone (Safari) не слушает user-scalable=no — запрещаем масштаб страницы жестом двумя пальцами явно.
-// Карты раскроя и редакторы масштабируются своими обработчиками касаний — их это не касается
+// Масштаб СТРАНИЦЫ жестом двумя пальцами запрещён на всех телефонах (Android — Chrome, Samsung Internet; iPhone):
+// user-scalable=no слушают не все браузеры (у Chrome есть «принудительное масштабирование» в спец. возможностях, Safari
+// его не слушает вовсе). Карты раскроя и редакторы масштабируются своими обработчиками касаний — их это не касается
 if (typeof document !== 'undefined') {
   const stop = e => e.preventDefault()
   document.addEventListener('gesturestart', stop, { passive: false })
   document.addEventListener('gesturechange', stop, { passive: false })
   document.addEventListener('gestureend', stop, { passive: false })
-  // Два пальца на странице (список деталей, статистика, меню) — масштаб страницы запрещён везде: в установленном
-  // приложении iPhone gesture-события приходят не всегда. Карты раскроя и редакторы масштабируют себя сами, своими
-  // обработчиками касаний — им запрет масштаба СТРАНИЦЫ не мешает (события до них доходят как обычно)
+  // Два пальца на странице (список деталей, статистика, меню) — браузер страницу не масштабирует. Прокрутка одним пальцем
+  // не затронута. Карты раскроя и редакторы масштабируют себя сами — события касаний до них доходят как обычно
   document.addEventListener('touchmove', e => { if (e.touches && e.touches.length > 1 && e.cancelable) e.preventDefault() }, { passive: false })
 }
