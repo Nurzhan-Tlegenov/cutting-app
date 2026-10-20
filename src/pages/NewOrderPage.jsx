@@ -45,7 +45,7 @@ const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => 
       type="text" inputMode="numeric" pattern="[0-9]*"
       value={value} placeholder={placeholder}
       enterKeyHint={hint || (onEnter ? 'next' : 'done')}
-      style={{ fontSize: 14, padding: '5px 6px' }}
+      style={{ fontSize: 14, padding: '6px 2px', textAlign: 'center', minWidth: 0, flex: '1 1 0', width: '100%' }}
       onChange={e => {
         const v = e.target.value.replace(/[^0-9]/g, '')
         onChange(v === '' ? '' : Number(v))

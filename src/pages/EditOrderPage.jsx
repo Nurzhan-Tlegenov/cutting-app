@@ -31,7 +31,7 @@ const SHEET_DEFAULTS = {
 function NumInput({ value, onChange, placeholder, inputRef }) {
   return (
     <input ref={inputRef} type="text" inputMode="numeric" pattern="[0-9]*"
-      value={value} placeholder={placeholder}
+      value={value} placeholder={placeholder} style={{ fontSize: 14, padding: '6px 2px', textAlign: 'center', minWidth: 0, flex: '1 1 0', width: '100%' }}
       onChange={e => {
         const v = e.target.value.replace(/[^0-9]/g, '')
         onChange(v === '' ? '' : Number(v))
@@ -507,16 +507,37 @@ export default function EditOrderPage() {
           <MaterialKind value={materialKind} onChange={setMaterialKind} style={{ marginTop: 8 }} />
         </div>
       </div>
-      <div style={{ marginBottom: 14 }}>
-        <p className="section-title">Префиксы групп</p>
-        <div className="card">
-          <PrefixManager prefixes={prefixes} active={activePrefix} onChange={setPrefixes} onSetActive={setActivePrefix} />
+      {/* префиксы и виды кромки — свёрнуты (как в новом заказе): до списка деталей меньше листать */}
+      <div style={{ marginBottom: 10 }}>
+        <div className="card" style={{ padding: '8px 12px' }}>
+          <details>
+            <summary style={{ fontSize: 13, color: 'var(--text-hint)', cursor: 'pointer', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 28 }}>
+              <span>
+                <span style={{ fontWeight: 500, color: prefixes.length ? 'var(--blue)' : 'var(--text-hint)' }}>Префиксы групп {prefixes.length ? `(${prefixes.length})` : ''}</span>
+                {activePrefix && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--blue)' }}>· активный: {activePrefix}</span>}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>▼</span>
+            </summary>
+            <div style={{ marginTop: 8 }}>
+              <PrefixManager prefixes={prefixes} active={activePrefix} onChange={setPrefixes} onSetActive={setActivePrefix} />
+            </div>
+          </details>
         </div>
       </div>
-      <div style={{ marginBottom: 14 }}>
-        <p className="section-title">Виды кромки</p>
-        <div className="card">
-          <EdgeTypes edgeNames={edgeNames} edgeTypes={edgeTypes} activeEdge={activeEdge} onNames={setEdgeNames} onTypes={setEdgeTypes} onSetActive={setActiveEdge} />
+      <div style={{ marginBottom: 10 }}>
+        <div className="card" style={{ padding: '8px 12px' }}>
+          <details>
+            <summary style={{ fontSize: 13, color: 'var(--text-hint)', cursor: 'pointer', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 28 }}>
+              <span>
+                <span style={{ fontWeight: 500, color: edgeNames.length ? 'var(--blue)' : 'var(--text-hint)' }}>Виды кромки {edgeNames.length ? `(${edgeNames.length})` : ''}</span>
+                {activeEdge && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--blue)' }}>· активная: {activeEdge}</span>}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>▼</span>
+            </summary>
+            <div style={{ marginTop: 8 }}>
+              <EdgeTypes edgeNames={edgeNames} edgeTypes={edgeTypes} activeEdge={activeEdge} onNames={setEdgeNames} onTypes={setEdgeTypes} onSetActive={setActiveEdge} />
+            </div>
+          </details>
         </div>
       </div>
       <ImportDetails
