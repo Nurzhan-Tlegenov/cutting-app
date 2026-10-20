@@ -21,6 +21,8 @@ import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
 import { useBackClose } from '../lib/backStack'
+import PartGroups, { GroupChip } from '../components/PartGroups'
+import { groupsOf, groupDir, PART_GROUPS_SQL_HINT } from '../lib/partGroups'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -57,7 +59,7 @@ function Toggle({ on }) {
     </div>
   )
 }
-function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, edgeTypes, autoFocus, onEditContour, siblings, onCopyFrom }) {
+function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, edgeTypes, autoFocus, onEditContour, siblings, onCopyFrom, groupUi }) {
   const SIDES = ['Дл','Дп','Шв','Шн']
   const KEYS = ['left','right','top','bottom']
   const lengthRef = useRef(null)
@@ -124,6 +126,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
             <NumInput value={detail.qty} placeholder="Кол" onChange={v => onUpdate({ ...detail, qty: v })} />
           </div>
         </div>
+        {groupUi && <GroupChip detail={detail} groups={groupUi.groups} active={groupUi.active} onChange={g => groupUi.assign(detail.uid, g)} />}
         <button type="button" onClick={onRemove}
           style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1, flexShrink: 0 }}>✕</button>
       </div>
@@ -254,6 +257,7 @@ function makeDetail(d) {
     name: d?.name && !/^Деталь \d+$/.test(d.name) ? d.name : null,
     edges: { top: d?.edge_top || null, right: d?.edge_right || null, bottom: d?.edge_bottom || null, left: d?.edge_left || null },
     rotatable: d?.rotatable || false,
+    part_group: d?.part_group || null, part_group_dir: d?.part_group_dir || null,
     contour: d?.contour ? JSON.parse(d.contour) : null
   }
 }
@@ -284,6 +288,15 @@ export default function EditOrderPage() {
   })
   const [details, setDetails] = useState([])
   const [showEdge, setShowEdge] = useState(true)
+  // группы деталей с общей текстурой: activeGroup — идёт отбор деталей в эту группу; extraGroups — созданные, пока пустые
+  const [activeGroup, setActiveGroup] = useState(null)
+  const [extraGroups, setExtraGroups] = useState([])
+  const groupNames = [...groupsOf(details), ...extraGroups.map(g => g.name).filter(g => !groupsOf(details).includes(g))]
+  const assignGroup = (u, g) => setDetails(ds => {
+    const dir = g ? (groupsOf(ds).includes(g) ? groupDir(ds, g) : extraGroups.find(x => x.name === g)?.dir || 'y') : null
+    return ds.map(x => (x.uid === u ? { ...x, part_group: g, part_group_dir: dir, ...(g ? { rotatable: false } : {}) } : x))
+  })
+  const groupUi = { groups: groupNames, active: activeGroup, assign: assignGroup }
   const [lastAddedUid, setLastAddedUid] = useState(null)
   const [editingContourUid, setEditingContourUid] = useState(null)
   useBackClose(!!editingContourUid, () => setEditingContourUid(null))   // «Назад» телефона — закрыть редактор контура
@@ -450,10 +463,16 @@ export default function EditOrderPage() {
           edge_top: d.edges.top || null, edge_right: d.edges.right || null,
           edge_bottom: d.edges.bottom || null, edge_left: d.edges.left || null,
           rotatable: d.rotatable, sort_order: sortIdx - 1,
-          contour: d.contour ? JSON.stringify(d.contour) : null
+          contour: d.contour ? JSON.stringify(d.contour) : null,
+          part_group: (d.part_group || '').trim() || null, part_group_dir: d.part_group ? (d.part_group_dir === 'x' ? 'x' : 'y') : null,
         }
       })
-      const { error: iErr } = await supabase.from('order_details').insert(rows)
+      let { error: iErr } = await supabase.from('order_details').insert(rows)
+      if (iErr && /part_group/.test(String(iErr.message || ''))) {
+        // база ещё без групп — детали сохраняются без них, с подсказкой
+        ;({ error: iErr } = await supabase.from('order_details').insert(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; return c })))
+        if (!iErr && rows.some(r => r.part_group)) window.alert(PART_GROUPS_SQL_HINT)
+      }
       if (iErr) throw new Error('Ошибка сохранения деталей: ' + iErr.message)
       if (model3d) { const r = await saveOrderModel(id, model3d); if (!r.ok) window.alert(r.missing ? MODEL_TABLE_HINT : 'Заказ сохранён, но 3D-модель сохранить не удалось: ' + r.message) }
       navigate(`/orders/${id}/nesting`)   // сразу к делу: статистика и детали есть и в раскрое
@@ -527,6 +546,7 @@ export default function EditOrderPage() {
           <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: true })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Вкл</button>
           <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: false })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Выкл</button>
         </div>
+        <PartGroups details={details} setDetails={setDetails} active={activeGroup} onActive={setActiveGroup} extra={extraGroups} setExtra={setExtraGroups} />
         <div style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Длина</div>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>
@@ -539,7 +559,7 @@ export default function EditOrderPage() {
             {dets.map((d) => {
               const globalIndex = details.findIndex(x => x.uid === d.uid)
               return (
-                <DetailCard key={d.uid} detail={d} index={globalIndex}
+                <DetailCard key={d.uid} detail={d} index={globalIndex} groupUi={groupUi}
                   onUpdate={u => updateDetail(d.uid, u)}
                   onRemove={() => removeDetail(d.uid)}
                   activeEdgeName={activeEdge} edgeTypes={edgeTypes} showEdge={showEdge}
