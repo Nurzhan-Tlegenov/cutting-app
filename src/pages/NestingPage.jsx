@@ -1716,7 +1716,7 @@ export default function NestingPage() {
     let changed = false
     for (const k of keys) { const t = types[k] || blankType(); if (!(Number(t.joint) > 0)) { next[k] = { ...t, t: Number(t.t) || 0, joint: j }; changed = true } }
     if (!changed) return
-    setOrder(o => (o ? { ...o, edge_types: next } : o))
+    Promise.resolve().then(() => setOrder(o => (o ? { ...o, edge_types: next } : o)))
     supabase.from('orders').update({ edge_types: next }).eq('id', id).then(({ error }) => { if (!error) setParamsWarn(`Прифуговка ${j} мм из настроек пильного центра добавлена к кромкам заказа — пересчитайте раскрой.`) })
   }, [beamSaw, prodsReady, order?.production_id, allDetails.length])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedOnOpenRef = useRef(false)
