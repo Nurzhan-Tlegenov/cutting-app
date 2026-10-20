@@ -5,11 +5,15 @@ import './index.css'
 import App from './App.jsx'
 import { startI18n } from './i18n'
 import { registerSW } from './lib/push'
+import { initUiScale } from './lib/uiScale'
 
 registerSW()   // только для push-уведомлений, ничего не кэширует
 
 // По ссылке для клиента (/v/…, /view/…) название приложения не показывается
 if (!/^\/(v|view)\//.test(window.location.pathname)) document.title = 'РаскройPro'
+
+// масштаб интерфейса (текст и кнопки) — до первого показа, чтобы не прыгало
+initUiScale()
 
 // язык интерфейса: словарь загружается до первого показа, чтобы русский текст не мелькал
 startI18n().finally(() => createRoot(document.getElementById('root')).render(

@@ -6,6 +6,7 @@ import { myWorkplaces, openWorkplace, openOwnProduction, prodView, workPid } fro
 import { myProduction } from '../lib/productionApi'
 import { I } from '../lib/navIcons'
 import { APP_COMMIT, appVersionText, NESTING_VERSION } from '../lib/version'
+import { getUiScale, setUiScale, isTouchDevice, UI_SCALE_MIN, UI_SCALE_MAX } from '../lib/uiScale'
 
 // Боковое меню (кнопка ☰ слева вверху или свайп от левого края): все кабинеты и их разделы в одном месте —
 // производство (заказы, техпроцесс, настройки), рабочие места, клиент (заказы, новый заказ), мастер-аккаунт.
@@ -268,6 +269,7 @@ export default function NavDrawer({ notices, unread }) {
         </div>
         {/* внизу меню — обучение: интерактивные туры для клиента и производства */}
         <div style={{ padding: '6px 10px 10px', borderTop: '0.5px solid var(--border)', opacity: k }}>
+          <UiScaleRow />
           <button type="button" onClick={() => go('/help')} className="nav-item"
             style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, border: 'none', textAlign: 'left', cursor: 'pointer',
               background: pathname === '/help' ? 'var(--blue-light)' : 'transparent', color: pathname === '/help' ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: pathname === '/help' ? 600 : 400 }}>
@@ -282,5 +284,30 @@ export default function NavDrawer({ notices, unread }) {
       </nav>
     </div>,
     document.body,
+  )
+}
+
+// «Размер текста и кнопок» — ползунок масштаба интерфейса под свой телефон (src/lib/uiScale.js)
+function UiScaleRow() {
+  const [v, setV] = useState(() => getUiScale())
+  if (!isTouchDevice()) return null                 // на компьютере — Ctrl + / Ctrl −
+  const pct = Math.round(v * 100)
+  const step = d => setV(setUiScale(v + d))
+  const b = { width: 40, height: 40, borderRadius: 20, border: '0.5px solid var(--border-md)', background: 'var(--bg2)', color: 'var(--text)', fontSize: 18, padding: 0, cursor: 'pointer', flexShrink: 0 }
+  return (
+    <div style={{ padding: '6px 12px 8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, color: 'var(--text-muted)', marginBottom: 4 }}>
+        <span style={{ flex: 1 }}>Размер текста и кнопок</span>
+        <span style={{ fontWeight: 600, color: 'var(--text)' }}>{pct}%</span>
+        {pct !== 100 && <button type="button" onClick={() => setV(setUiScale(1))} style={{ marginLeft: 8, border: 'none', background: 'transparent', color: 'var(--blue)', fontSize: 12, cursor: 'pointer', padding: 0 }}>сброс</button>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button type="button" aria-label="Мельче" onClick={() => step(-0.05)} disabled={v <= UI_SCALE_MIN + 0.001} style={{ ...b, fontSize: 13 }}>A−</button>
+        <input type="range" min={UI_SCALE_MIN * 100} max={UI_SCALE_MAX * 100} step={5} value={pct}
+          onChange={e => setV(Number(e.target.value) / 100)} onPointerUp={e => setV(setUiScale(Number(e.target.value) / 100))} onTouchEnd={e => setV(setUiScale(Number(e.target.value) / 100))} onKeyUp={e => setV(setUiScale(Number(e.target.value) / 100))}
+          style={{ flex: 1, minWidth: 0 }} />
+        <button type="button" aria-label="Крупнее" onClick={() => step(0.05)} disabled={v >= UI_SCALE_MAX - 0.001} style={b}>A+</button>
+      </div>
+    </div>
   )
 }
