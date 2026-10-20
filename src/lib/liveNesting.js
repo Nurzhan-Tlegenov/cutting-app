@@ -14,6 +14,7 @@
 import { runNesting, smallAtEdge, lastOffcutArea, repackLastForOffcut, sweepLast } from './nesting'
 import { runBeamSaw } from './beamSawNesting'
 import { readyOrderResult } from './readyOrder'
+import { groupBlocks } from './partGroupBlocks'
 import { needsTrueShape, roughShapePolygons, placedRotation, buildHybridPlan } from './trueShapeNesting'
 import { fillConcavities } from './fillConcavities'
 import { gravityPolygons } from './gravity'
@@ -549,6 +550,19 @@ function asBoxes(res) {
 
 export async function runLiveNesting(params, opts = {}) {
   if (params.beamSaw) return runBeamSaw(params, opts)   // β Пильный центр — свой алгоритм уровнями резов (island, onStats — для потоков и хронологии)
+  // Группы деталей с общей текстурой: фрезер и форматник со складом обрезков — группа одним блоком на входе, детали на
+  // выходе (partGroupBlocks.js); форматник без склада знает группы сам (полосами, beamSawNesting)
+  const stripsPath = (params.cuttingMethod || 'nesting') === 'guillotine' && !params.offcuts?.items?.length
+  if (!stripsPath) {
+    const gb = groupBlocks(params)
+    if (gb) {
+      const onProgress = opts.onProgress ? res => opts.onProgress(gb.expand(res)) : null
+      return gb.expand(await runLiveNestingPlain(gb.params, { ...opts, onProgress }))
+    }
+  }
+  return runLiveNestingPlain(params, opts)
+}
+async function runLiveNestingPlain(params, opts = {}) {
   // Пила (форматник): полосами, как пильный центр — ширину полосы задаёт деталь, полосы от большой к малой, внутри —
   // по готовности, на последнем листе один крупный обрезок. Свои рез и отступы заказа, без захвата, торцовки уровней,
   // предела уровней и автоматических обрезков. Склад обрезков (раскрой и на обрезки) полосы пока не умеют — там прежний
