@@ -125,15 +125,24 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
     })
     return out
   }
-  const base = tidy(rows)
-  const [drag, setDrag] = useState(null)      // { key, dx, dy, x, y } — что тащим и где оно сейчас
+  const tidyRects = tidy(rows)
+  // Свободная раскладка: фасад остаётся там, где его отпустили (с прилипанием к соседям) — ничего не сдвигается в угол.
+  // Ряды для раскроя («ряд.место») считаются по тому, как фасады лежат. Открыли заново — плотная раскладка по рядам
+  const [pts, setPts] = useState(() => new Map([...tidyRects].map(([k, r]) => [k, { x: r.x, y: r.y }])))
+  const posOf = k => pts.get(k) || tidyRects.get(k) || { x: 0, y: 0 }
+  const [drag, setDrag] = useState(null)      // { key, dx, dy, x, y, view } — что тащим, где оно сейчас, вид на момент захвата
   const svgRef = useRef(null)
-  const rects = mine.map(m => ({ m, ...(drag?.key === m.key ? { ...base.get(m.key), x: drag.x, y: drag.y } : base.get(m.key)) }))
-  // масштаб поля — по раскладке без перетаскивания и не меняется, пока фасад тащат (иначе превью «уезжало» и мельчало)
-  const baseRects = [...base.values()]
-  const fieldNow = Math.max(1, ...baseRects.map(r => r.x + r.w), ...baseRects.map(r => r.y + r.h)) * 1.5 + 100
-  const field = drag?.field || fieldNow
-  const toMm = e => { const b = svgRef.current.getBoundingClientRect(); return { x: (e.clientX - b.left) / b.width * field - 50, y: (e.clientY - b.top) / b.height * field - 50 } }
+  const rects = mine.map(m => { const e = ext(m), p = drag?.key === m.key ? drag : posOf(m.key); return { m, x: p.x, y: p.y, w: e.w, h: e.h } })
+  // вид — по всем фасадам с запасом вокруг (есть куда тащить); пока фасад тащат — не меняется, после — подстраивается
+  const viewNow = (() => {
+    const x0 = Math.min(...rects.map(r => r.x)), y0 = Math.min(...rects.map(r => r.y))
+    const x1 = Math.max(...rects.map(r => r.x + r.w)), y1 = Math.max(...rects.map(r => r.y + r.h))
+    const size = Math.max(x1 - x0, y1 - y0, 1), pad = size * 0.35 + 60
+    return { x: (x0 + x1) / 2 - size / 2 - pad, y: (y0 + y1) / 2 - size / 2 - pad, size: size + 2 * pad }
+  })()
+  const view = drag?.view || viewNow
+  const field = view.size
+  const toMm = e => { const b = svgRef.current.getBoundingClientRect(); return { x: view.x + (e.clientX - b.left) / b.width * view.size, y: view.y + (e.clientY - b.top) / b.height * view.size } }
   const apply = newRows => {
     // позиция каждого экземпляра -> у детали строка «ряд.место» по экземплярам через «;»
     const pos = new Map()
@@ -144,29 +153,31 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
       return { ...x, part_group_pos: Array.from({ length: n }, (_, q) => pos.get(`${x.uid}#${q}`) || '').join(';') }
     }))
   }
-  const start = (e, r) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); const p = toMm(e); setDrag({ key: r.m.key, dx: p.x - r.x, dy: p.y - r.y, x: r.x, y: r.y, field }) }
+  const start = (e, r) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); const p = toMm(e); setDrag({ key: r.m.key, dx: p.x - r.x, dy: p.y - r.y, x: r.x, y: r.y, view }) }
   // прилипание: края фасада притягиваются к краям соседей (вплотную и вровень), как на карте раскроя
   const snap = (key, x, y, w, h) => {
     const th = field / 30
     let bx = null, by = null, dxBest = th, dyBest = th
-    for (const [k, o] of base) {
-      if (k === key) continue
-      for (const [cand, d] of [[o.x + o.w, 0], [o.x - w, 0], [o.x, 0], [o.x + o.w - w, 0]]) { const dd = Math.abs(x - cand) + d; if (dd < dxBest) { dxBest = dd; bx = cand } }
-      for (const [cand, d] of [[o.y + o.h, 0], [o.y - h, 0], [o.y, 0], [o.y + o.h - h, 0]]) { const dd = Math.abs(y - cand) + d; if (dd < dyBest) { dyBest = dd; by = cand } }
+    for (const r of rects) {
+      if (r.m.key === key) continue
+      for (const cand of [r.x + r.w, r.x - w, r.x, r.x + r.w - w]) { const dd = Math.abs(x - cand); if (dd < dxBest) { dxBest = dd; bx = cand } }
+      for (const cand of [r.y + r.h, r.y - h, r.y, r.y + r.h - h]) { const dd = Math.abs(y - cand); if (dd < dyBest) { dyBest = dd; by = cand } }
     }
     return { x: bx ?? x, y: by ?? y }
   }
   const move = e => {
     if (!drag) return
-    const p = toMm(e), r = base.get(drag.key)
+    const p = toMm(e), r = rects.find(q => q.m.key === drag.key)
     const s = snap(drag.key, p.x - drag.dx, p.y - drag.dy, r.w, r.h)
     setDrag(d => ({ ...d, x: s.x, y: s.y }))
   }
   const end = () => {
     if (!drag) return
-    // ряды — по положению центров: деталь попадает в ряд, с которым её центр перекрывается по высоте (↕) / ширине (↔);
-    // внутри ряда — по центру слева направо (↕) / сверху вниз (↔)
-    const items = rects.map(r => ({ ...r, cx: r.x + r.w / 2, cy: r.y + r.h / 2 }))
+    const next = new Map(pts); next.set(drag.key, { x: drag.x, y: drag.y })
+    setPts(next); setDrag(null)
+    // ряды — по положению: фасад попадает в ряд, с которым перекрывается по высоте (↕) / ширине (↔);
+    // внутри ряда — слева направо (↕) / сверху вниз (↔)
+    const items = mine.map(m => { const e = ext(m), p = next.get(m.key) || posOf(m.key); return { m, x: p.x, y: p.y, w: e.w, h: e.h, cx: p.x + e.w / 2, cy: p.y + e.h / 2 } })
     const along = r => (vert ? r.cy : r.cx), lo = r => (vert ? r.y : r.x), hi = r => (vert ? r.y + r.h : r.x + r.w), across = r => (vert ? r.cx : r.cy)
     items.sort((a, b) => along(a) - along(b))
     const groups = []
@@ -174,10 +185,9 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
       const g = groups.find(gr => along(it) >= gr.lo && along(it) <= gr.hi)
       if (g) { g.items.push(it); g.lo = Math.min(g.lo, lo(it)); g.hi = Math.max(g.hi, hi(it)) } else groups.push({ items: [it], lo: lo(it), hi: hi(it) })
     }
-    const newRows = groups.sort((a, b) => a.lo - b.lo).map(gr => gr.items.sort((a, b) => across(a) - across(b)).map(it => ({ key: it.m.key })))
-    setDrag(null)
-    apply(newRows)
+    apply(groups.sort((a, b) => a.lo - b.lo).map(gr => gr.items.sort((a, b) => across(a) - across(b)).map(it => ({ key: it.m.key }))))
   }
+  const tidyNow = () => setPts(new Map([...tidyRects].map(([k, r]) => [k, { x: r.x, y: r.y }])))
   const btn = { padding: '2px 6px', border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', lineHeight: 1.2 }
   const fs = field / 42                                   // размер шрифта в мм поля — как подписи на карте
   const lab = m => (m.d.name ? m.d.name.slice(0, 14) : `#${m.i + 1}`)
@@ -186,12 +196,13 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
       <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '14px 14px 0 0', width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', padding: '12px 14px 18px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <b style={{ color, fontSize: 15, flex: 1 }}>⧉ {group} — раскладка</b>
+          <button type="button" onClick={tidyNow} style={btn} title="Собрать фасады плотно по рядам">Собрать</button>
           <button type="button" onClick={onClose} style={{ ...btn, fontSize: 16 }}>✕</button>
         </div>
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>
-          Фасады стоят как на карте раскроя: текстура (длина) по вертикали, Y. Двигайте каждый пальцем; отпустили — они складываются {vert ? 'в ряды друг над другом (верхний ряд — верх фасада)' : 'в колонки слева направо'} без зазоров; зазор на рез добавит раскрой. Деталь «2 шт.» — два отдельных фасада.
+          Фасады стоят как на карте раскроя: текстура (длина) по вертикали. Двигайте каждый пальцем куда нужно — он остаётся там, где отпустили, и прилипает к соседям. Раскрой возьмёт порядок {vert ? 'рядами сверху вниз' : 'колонками слева направо'}; зазор на рез добавит сам. Деталь «2 шт.» — два отдельных фасада.
         </p>
-        <svg ref={svgRef} viewBox={`-50 -50 ${field} ${field}`} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+        <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.size} ${view.size}`} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
           style={{ width: '100%', aspectRatio: '1 / 1', display: 'block', touchAction: 'none', background: '#f4f4f2', borderRadius: 10, border: '0.5px solid var(--border)', userSelect: 'none' }}>
           {rects.map(r => (
             <g key={r.m.key} onPointerDown={e => start(e, r)} style={{ cursor: 'grab' }}>
