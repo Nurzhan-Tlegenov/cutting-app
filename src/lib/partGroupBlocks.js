@@ -4,6 +4,7 @@
 // в порядке списка, с зазором реза между ними. Пильный центр и форматник без склада знают группы сами (beamSawNesting).
 // part_group_dir: 'y' — друг над другом (вдоль длины), 'x' — рядом (вдоль ширины).
 import { roughShapePolygons } from './trueShapeNesting'
+import { groupLinesOnSheet } from './partGroups'
 
 export function groupBlocks(params) {
   const det = params.details || []
@@ -19,11 +20,21 @@ export function groupBlocks(params) {
   const blockOf = new Map()                     // имя группы -> блок
   for (const [g, idx] of groups) {
     const members = []
-    idx.forEach(i => { for (let q = 0; q < (Number(det[i].qty) || 0); q++) members.push({ i, q, width: Number(det[i].width) || 0, length: Number(det[i].length) || 0 }) })
+    idx.forEach(i => { for (let q = 0; q < (Number(det[i].qty) || 0); q++) members.push({ key: { i, q, width: Number(det[i].width) || 0, length: Number(det[i].length) || 0 }, pos: det[i].part_group_pos, ord: i }) })
     const stack = det[idx[0]].part_group_dir === 'x' ? 'x' : 'y'
-    const width = stack === 'x' ? members.reduce((a, m) => a + m.width, 0) + kerf * (members.length - 1) : Math.max(...members.map(m => m.width))
-    const length = stack === 'y' ? members.reduce((a, m) => a + m.length, 0) + kerf * (members.length - 1) : Math.max(...members.map(m => m.length))
-    const block = { group: g, stack, members, width, length, i2: details.length }
+    // ряды (part_group_pos): ряд — подблок поперёк; размеры блока — рекурсивно: вдоль направления сумма с резом, поперёк максимум
+    const perp = stack === 'x' ? 'y' : 'x'
+    const dims = node => {
+      if (!node.items) return node
+      node.items.forEach(dims)
+      node.width = node.stack === 'x' ? node.items.reduce((a, m) => a + m.width, 0) + kerf * (node.items.length - 1) : Math.max(...node.items.map(m => m.width))
+      node.length = node.stack === 'y' ? node.items.reduce((a, m) => a + m.length, 0) + kerf * (node.items.length - 1) : Math.max(...node.items.map(m => m.length))
+      return node
+    }
+    const root = dims({ stack, items: groupLinesOnSheet(members, stack).map(row => (row.length === 1 ? row[0].key : { stack: perp, items: row.map(m => m.key) })) })
+    const flat = members.map(m => m.key)
+    const { width, length } = root
+    const block = { group: g, stack, members: flat, root, width, length, i2: details.length }
     blockOf.set(g, block); back.push({ block })
     details.push({ ...det[idx[0]], id: null, name: `⧉ ${g}`, display_name: `⧉ ${g}`, width, length, qty: 1, rotatable: false, contour: null, _raw: undefined, _cut: undefined,
       part_group: null, part_group_dir: null, edge_top: null, edge_right: null, edge_bottom: null, edge_left: null })
@@ -36,21 +47,30 @@ export function groupBlocks(params) {
     if (!b) return [{ ...p, detailIndex: back[p.detailIndex]?.i ?? p.detailIndex, id: `${back[p.detailIndex]?.i ?? p.detailIndex}_${String(p.id || '').split('_')[1] || 0}` }]
     const rot = !!p.rotated || (p.rotation || 0) % 180 === 90
     const out = []
-    let pos = 0
-    b.members.forEach(m => {
-      const ww = rot ? m.length : m.width, hh = rot ? m.width : m.length     // габарит детали на листе (без реза)
-      const alongX = (b.stack === 'x') !== rot                               // детали идут по X листа
-      const x = alongX ? p.x + pos : p.x, y = alongX ? p.y : p.y + pos
-      const d = det[m.i], poly = rot ? null : polyOf(m.i)
-      out.push({
-        ...p, id: `${m.i}_${m.q}`, detailIndex: m.i, label: `${d.display_name || d.name || ''} ⧉${b.group}`, prefix: d.prefix,
-        x, y, w: ww + kerf, h: hh + kerf, origX: ww, origY: hh, rotated: rot, rotation: rot ? 90 : 0, rotatable: false,
-        edgeTop: rot ? d.edge_left : d.edge_top, edgeRight: rot ? d.edge_top : d.edge_right, edgeBottom: rot ? d.edge_right : d.edge_bottom, edgeLeft: rot ? d.edge_bottom : d.edge_left,
-        ...(poly ? { polygon: poly } : {}), group: b.group,
-      })
-      if (out.at(-1).polygon == null) delete out.at(-1).polygon
-      pos += (alongX ? ww : hh) + kerf
-    })
+    // обход блока: элементы ряда друг за другом вдоль его направления (с резом между), подблок — рекурсивно
+    const place = (node, x, y) => {
+      if (!node.items) {
+        const m = node, ww = rot ? m.length : m.width, hh = rot ? m.width : m.length   // габарит детали на листе (без реза)
+        const d = det[m.i], poly = rot ? null : polyOf(m.i)
+        const q = {
+          ...p, id: `${m.i}_${m.q}`, detailIndex: m.i, label: `${d.display_name || d.name || ''} ⧉${b.group}`, prefix: d.prefix,
+          x, y, w: ww + kerf, h: hh + kerf, origX: ww, origY: hh, rotated: rot, rotation: rot ? 90 : 0, rotatable: false,
+          edgeTop: rot ? d.edge_left : d.edge_top, edgeRight: rot ? d.edge_top : d.edge_right, edgeBottom: rot ? d.edge_right : d.edge_bottom, edgeLeft: rot ? d.edge_bottom : d.edge_left,
+          ...(poly ? { polygon: poly } : {}), group: b.group,
+        }
+        if (q.polygon == null) delete q.polygon
+        out.push(q)
+        return
+      }
+      const alongX = (node.stack === 'x') !== rot                            // элементы идут по X листа
+      let pos = 0
+      for (const it of node.items) {
+        place(it, alongX ? x + pos : x, alongX ? y : y + pos)
+        const ext = alongX ? (rot ? it.length : it.width) : (rot ? it.width : it.length)
+        pos += ext + kerf
+      }
+    }
+    place(b.root, p.x, p.y)
     return out
   }
   const fixIds = sheets => {

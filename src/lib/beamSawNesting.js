@@ -11,9 +11,10 @@
 // Результат — в том же формате, что у runNesting (листы с placed), поэтому карты, линии реза, PDF и бирки
 // работают как у форматника. Дерево резов каждого листа — sheet.beamTree (для программы станка).
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
+import { groupLinesOnSheet } from './partGroups'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.14'
+export const BEAM_SAW_VERSION = 'β0.15'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -47,23 +48,33 @@ export function buildPieces(details, kerf, s) {
 // без поворота. Группа — один «блок» в поиске: stack 'y' — детали друг над другом (вдоль длины, Y), блок шириной
 // с самую широкую и длиной в сумму; 'x' — рядом (вдоль ширины, X). Деталь группы уже блока — дорезается на следующем уровне.
 // detail.part_group — имя группы, detail.part_group_dir — 'y' (по умолчанию) | 'x'
-const unitOf = u => u.pieces || [u]
-const unitArea = u => (u.pieces ? u.area : u.pw * u.ph)
+const unitPieces = u => (u.items ? u.items.flatMap(unitPieces) : [u])
+const unitOf = u => (u.items ? unitPieces(u) : [u])
+const unitArea = u => (u.items ? u.area : u.pw * u.ph)
+// размеры блока: вдоль направления — сумма (размеры деталей уже с пропилом), поперёк — максимум
+function unitDims(u) {
+  u.items.forEach(it => { if (it.items) unitDims(it) })
+  u.pw = u.stack === 'x' ? u.items.reduce((a, q) => a + q.pw, 0) : Math.max(...u.items.map(q => q.pw))
+  u.ph = u.stack === 'y' ? u.items.reduce((a, q) => a + q.ph, 0) : Math.max(...u.items.map(q => q.ph))
+  u.area = unitPieces(u).reduce((a, q) => a + q.pw * q.ph, 0)
+}
 function buildUnits(pieces, details) {
   const groups = new Map(), out = []
   for (const p of pieces) {
     const d = details[p.detailIndex]
     const g = d && typeof d.part_group === 'string' ? d.part_group.trim() : ''
     if (!g) { out.push(p); continue }
-    if (!groups.has(g)) { groups.set(g, { id: 'g:' + g, group: g, stack: d.part_group_dir === 'x' ? 'x' : 'y', pieces: [], rotatable: false, label: g }); out.push(groups.get(g)) }
-    groups.get(g).pieces.push({ ...p, rotatable: false, group: g, label: `${p.label} ⧉${g}` })
+    if (!groups.has(g)) { groups.set(g, { id: 'g:' + g, group: g, stack: d.part_group_dir === 'x' ? 'x' : 'y', members: [], rotatable: false, label: g }); out.push(groups.get(g)) }
+    groups.get(g).members.push({ key: { ...p, rotatable: false, group: g, label: `${p.label} ⧉${g}` }, pos: d.part_group_pos, ord: p.detailIndex })
   }
   for (const u of groups.values()) {
-    if (u.pieces.length === 1) { const i = out.indexOf(u); out[i] = u.pieces[0]; continue }   // одна деталь — обычная
-    u.pw = u.stack === 'x' ? u.pieces.reduce((a, q) => a + q.pw, 0) : Math.max(...u.pieces.map(q => q.pw))
-    u.ph = u.stack === 'y' ? u.pieces.reduce((a, q) => a + q.ph, 0) : Math.max(...u.pieces.map(q => q.ph))
-    u.area = u.pieces.reduce((a, q) => a + q.pw * q.ph, 0)
-    u.detailIndex = u.pieces[0].detailIndex
+    if (u.members.length === 1) { const i = out.indexOf(u); out[i] = u.members[0].key; delete u.members; continue }   // одна деталь — обычная
+    // ряды (part_group_pos): ряд из одной детали — сама деталь, из нескольких — подблок поперёк
+    const perp = u.stack === 'x' ? 'y' : 'x'
+    u.items = groupLinesOnSheet(u.members, u.stack).map(row => (row.length === 1 ? row[0].key : { id: u.id + ':' + row.map(m => m.key.id).join(','), stack: perp, items: row.map(m => m.key), rotatable: false, group: u.group }))
+    delete u.members
+    unitDims(u)
+    u.detailIndex = unitPieces(u)[0].detailIndex
   }
   return out
 }
@@ -116,41 +127,37 @@ function orients(p, axis) {
 function fits(ctx, axis, o, freeA, B, L, p = null) {
   if (o.a > freeA + 1e-6 || o.b > B + 1e-6) return false
   if (!remOk(ctx, freeA - o.a, extraAt(ctx, axis, L))) return false
-  if (p?.pieces) return unitFits(ctx, axis, p, B, L)
+  if (p?.items) return unitFits(ctx, axis, p, B, L)
   if (B - o.b < EPS) return true
   if (L + 1 > ctx.maxL) return false
   const t = trimAt(ctx.s, L + 1), ax2 = axis === 'x' ? 'y' : 'x'
   return o.b + t <= B + 1e-6 && remOk(ctx, B - t - o.b, extraAt(ctx, ax2, L + 1))
 }
-// Деталь группы в регионе оси axis: по оси — её a, поперёк — b (детали группы не поворачиваются)
+// Элемент блока (деталь или подблок) в регионе оси axis: по оси — a, поперёк — b (детали групп не поворачиваются)
 const pieceAB = (q, axis) => (axis === 'x' ? { a: q.pw, b: q.ph } : { a: q.ph, b: q.pw })
-// Блок помещается: детали подряд вдоль оси региона (stack === axis) — каждая ровно по B или дорезается уровнем ниже;
-// поперёк оси — блок уходит слотом в дочерний регион, где детали идут подряд, а там — то же правило
+// Блок помещается в регион оси axis шириной B на уровне L:
+//  • элементы блока идут вдоль оси региона (stack === axis): деталь — ровно по B или дорезается уровнем ниже (захват);
+//    подблок — как блок поперёк (ниже);
+//  • блок поперёк оси: он уходит одним слотом толщиной a (максимум по оси) в дочерний регион оси ax2 (длина B, ширина a),
+//    где его элементы идут уже вдоль оси — и там то же правило
 function unitFits(ctx, axis, u, B, L) {
   const ax2 = axis === 'x' ? 'y' : 'x'
-  if (u.stack === axis) {
-    for (const q of u.pieces) {
-      const { b } = pieceAB(q, axis)
-      if (b > B + 1e-6) return false
-      if (B - b < EPS) continue
-      if (L + 1 > ctx.maxL) return false
-      const t = trimAt(ctx.s, L + 1)
-      if (!(b + t <= B + 1e-6 && remOk(ctx, B - t - b, extraAt(ctx, ax2, L + 1)))) return false
-    }
-    return true
+  if (u.stack !== axis) {
+    if (L + 1 > ctx.maxL) return false
+    const a = Math.max(...u.items.map(q => pieceAB(q, axis).a))
+    const t = trimAt(ctx.s, L + 1)
+    const sum = u.items.reduce((s, q) => s + pieceAB(q, axis).b, 0)
+    if (sum + t > B + 1e-6 || !remOk(ctx, B - t - sum, extraAt(ctx, ax2, L + 1))) return false
+    return unitFits(ctx, ax2, u, a, L + 1)
   }
-  // блок поперёк: дочерний регион оси ax2 длиной B, толщиной a = max по оси; в нём детали подряд
-  if (L + 1 > ctx.maxL) return false
-  const a = Math.max(...u.pieces.map(q => pieceAB(q, axis).a))
-  const t = trimAt(ctx.s, L + 1)
-  const sum = u.pieces.reduce((s, q) => s + pieceAB(q, axis).b, 0)
-  if (sum + t > B + 1e-6 || !remOk(ctx, B - t - sum, extraAt(ctx, ax2, L + 1))) return false
-  for (const q of u.pieces) {
-    const qa = pieceAB(q, axis).a            // поперёк дочернего региона
-    if (a - qa < EPS) continue
-    if (L + 2 > ctx.maxL) return false
-    const t2 = trimAt(ctx.s, L + 2)
-    if (!(qa + t2 <= a + 1e-6 && remOk(ctx, a - t2 - qa, extraAt(ctx, axis, L + 2)))) return false
+  for (const q of u.items) {
+    const { b } = pieceAB(q, axis)
+    if (b > B + 1e-6) return false
+    if (q.items) { if (!unitFits(ctx, axis, q, B, L)) return false; continue }
+    if (B - b < EPS) continue
+    if (L + 1 > ctx.maxL) return false
+    const t = trimAt(ctx.s, L + 1)
+    if (!(b + t <= B + 1e-6 && remOk(ctx, B - t - b, extraAt(ctx, ax2, L + 1)))) return false
   }
   return true
 }
@@ -187,29 +194,35 @@ function fillRegion(ctx, axis, A, B, L, first = null) {
   const node = { axis, A, B, level: L, trim: t, slots: [] }
   let used = t
   const perp = axis === 'x' ? 'y' : 'x'
+  // слоты блока группы помечаются (grp): при упорядочивании слотов (layout) они остаются рядом и в своём порядке
+  let curGrp = null
+  const push = sl => { if (curGrp) sl.grp = curGrp; node.slots.push(sl) }
   // одна деталь слотом: ровно по B — готова, иначе дорезается в дочернем регионе (там она первая)
   const putPiece = (p, rot, a, b) => {
     const exact = B - b < EPS
     const slot = { a, piece: exact ? { p, rot } : null, child: null }
     if (!exact) slot.child = fillRegion(ctx, perp, B, a, L + 1, { p, rot, a: b, b: a })
-    node.slots.push(slot)
+    push(slot)
     used += a
   }
   // блок группы: детали подряд вдоль оси — каждая своим слотом; поперёк — один слот с дочерним регионом, где они подряд
   const putUnit = u => {
-    if (u.stack === axis) { for (const q of u.pieces) { const { a, b } = pieceAB(q, axis); putPiece(q, false, a, b) } return }
-    const a = Math.max(...u.pieces.map(q => pieceAB(q, axis).a))
-    node.slots.push({ a, piece: null, child: fillRegion(ctx, perp, B, a, L + 1, { p: u, unit: true }) })
-    used += a
+    const prev = curGrp; curGrp = u.group
+    if (u.stack === axis) { for (const q of u.items) { if (q.items) putUnit(q); else { const { a, b } = pieceAB(q, axis); putPiece(q, false, a, b) } } } else {
+      const a = Math.max(...u.items.map(q => pieceAB(q, axis).a))
+      push({ a, piece: null, child: fillRegion(ctx, perp, B, a, L + 1, { p: u, unit: true }) })
+      used += a
+    }
+    curGrp = prev
   }
   const take = c => {
     ctx.used.add(c.p.id)
-    if (c.p.pieces) putUnit(c.p); else putPiece(c.p, c.rot, c.a, c.b)
+    if (c.p.items) putUnit(c.p); else putPiece(c.p, c.rot, c.a, c.b)
   }
   if (first) {
     // в дочернем регионе первая деталь: по оси укладки её длина first.a, поперёк — ровно толщина слота
     if (first.unit) putUnit(first.p)
-    else node.slots.push({ a: first.a, piece: { p: first.p, rot: first.rot }, child: null }), used += first.a
+    else push({ a: first.a, piece: { p: first.p, rot: first.rot }, child: null }), used += first.a
   }
   // сначала детали ровно по заготовке (та же ширина полосы — без лишнего реза), потом остальные по приоритету
   for (;;) {
@@ -245,7 +258,7 @@ function lookahead(ctx, axis, freeA, B, L) {
     ctx.used = new Set(saved)
     ctx.used.add(c.p.id)
     let area = unitArea(c.p)
-    if (B - c.b >= EPS && !c.p.pieces) {
+    if (B - c.b >= EPS && !c.p.items) {
       const child = fillRegion(ctx, axis === 'x' ? 'y' : 'x', B, c.a, L + 1, { p: c.p, rot: c.rot, a: c.b, b: c.a })
       area = 0; for (const id of ctx.used) if (!saved.has(id)) area += unitArea(ctx.byId.get(id))
       void child
@@ -265,7 +278,7 @@ function lookahead(ctx, axis, freeA, B, L) {
 function genOptions(ctx, axis, freeA, B, L) {
   const out = []
   for (const p of ctx.order) {
-    if (ctx.used.has(p.id) || p.pieces) continue     // группы — только обычной укладкой (fillRegion)
+    if (ctx.used.has(p.id) || p.items) continue      // группы — только обычной укладкой (fillRegion)
     for (const o of orients(p, axis)) {
       if (o.a > freeA + 1e-6 || o.b > B + 1e-6) continue
       if (!remOk(ctx, freeA - o.a, extraAt(ctx, axis, L))) continue
@@ -373,15 +386,28 @@ function orderSlots(slots, mode) {
 // Со 2-го уровня куски, которые ещё подрезаются, идут группами по размеру следующего реза (ступеньками): первый рез
 // задаёт размер, за ним — все куски с тем же резом, потом следующая группа. Оператор не переставляет упор на каждом куске:
 // 482, 482, 482, 482, потом 480, 480, потом 451 — а не 482, 480, 482, 451 вперемешку (261018_003, лист 1).
-const slotDepth = sl => (sl.piece ? 0 : 1 + Math.max(0, ...sl.child.slots.map(slotDepth)))
-const firstCut = (sl, level) => (sl.piece ? sl.a : orderByReady(sl.child.slots, level + 1)[0]?.a || 0)
+const slotDepth = sl => (sl.depth != null ? sl.depth : sl.piece ? 0 : 1 + Math.max(0, ...sl.child.slots.map(slotDepth)))
+const firstCut = (sl, level) => (sl.cut != null ? sl.cut : sl.piece ? sl.a : orderByReady(sl.child.slots, level + 1)[0]?.a || 0)
+// Слоты одной группы (блок деталей с общей текстурой) идут подряд и в своём порядке: при упорядочивании они — один
+// составной слот (толщина — сумма, готовность — по худшему, следующий рез — по первому), потом разворачиваются обратно
+function packGroups(slots, B) {
+  const out = []
+  for (const sl of slots) {
+    const last = out[out.length - 1]
+    if (sl.grp && last?.grp === sl.grp && last.parts) { last.parts.push(sl); last.a += sl.a; last.depth = Math.max(last.depth, slotDepth(sl)); last.fill = Math.max(last.fill, slotFill(sl, B)) }
+    else if (sl.grp) out.push({ grp: sl.grp, parts: [sl], a: sl.a, depth: slotDepth(sl), cut: firstCut(sl, 2), fill: slotFill(sl, B), piece: null, child: null })
+    else out.push(sl)
+  }
+  return out
+}
+const unpackGroups = slots => slots.flatMap(sl => sl.parts || [sl])
 function orderByReady(slots, level = 2) {
   const key = new Map(slots.map(sl => [sl, firstCut(sl, level)]))
   return [...slots].sort((p, q) => slotDepth(p) - slotDepth(q) || (level >= 2 ? key.get(q) - key.get(p) : 0) || q.a - p.a)
 }
 
 // Сколько полосы 1-го уровня занято по её длине: деталь во всю длину — вся полоса, иначе — уложенное в ней
-const slotFill = (sl, B) => (sl.piece ? B : sl.child.used)
+const slotFill = (sl, B) => (sl.fill != null ? sl.fill : sl.piece ? B : sl.child.used)
 // «Ступенька» (только форматник, последний лист): полосы — от самой заполненной по длине к самой короткой, чтобы
 // длинные полосы стояли рядом, а свободное место над короткими сливалось с остатком в конце листа в один крупный обрезок.
 // Полосы одной длины — по готовности, как раньше.
@@ -406,8 +432,9 @@ function stairFree(node) {
 // глубже — по готовности. stair — 1-й уровень «ступенькой» (форматник, последний лист).
 function layout(node, ox, oy, s, out, stair = false) {
   // 1-й уровень: «от большой к малой» — тоже по готовности (полоса из одной детали во всю длину — готова сразу); Б→М→Б — как задано
-  node.slots = node.level === 1 && stair ? orderStair(node.slots, node.B)
-    : node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(node.slots, 'wnw') : orderByReady(node.slots, node.level)
+  const packed = packGroups(node.slots, node.B)
+  node.slots = unpackGroups(node.level === 1 && stair ? orderStair(packed, node.B)
+    : node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(packed, 'wnw') : orderByReady(packed, node.level))
   let pos = node.trim
   if (node.trim > EPS) out.cuts++
   for (const sl of node.slots) {

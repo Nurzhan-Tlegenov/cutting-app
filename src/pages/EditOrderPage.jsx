@@ -257,7 +257,7 @@ function makeDetail(d) {
     name: d?.name && !/^Деталь \d+$/.test(d.name) ? d.name : null,
     edges: { top: d?.edge_top || null, right: d?.edge_right || null, bottom: d?.edge_bottom || null, left: d?.edge_left || null },
     rotatable: d?.rotatable || false,
-    part_group: d?.part_group || null, part_group_dir: d?.part_group_dir || null,
+    part_group: d?.part_group || null, part_group_dir: d?.part_group_dir || null, part_group_pos: d?.part_group_pos || null,
     contour: d?.contour ? JSON.parse(d.contour) : null
   }
 }
@@ -294,7 +294,7 @@ export default function EditOrderPage() {
   const groupNames = [...groupsOf(details), ...extraGroups.map(g => g.name).filter(g => !groupsOf(details).includes(g))]
   const assignGroup = (u, g) => setDetails(ds => {
     const dir = g ? (groupsOf(ds).includes(g) ? groupDir(ds, g) : extraGroups.find(x => x.name === g)?.dir || 'y') : null
-    return ds.map(x => (x.uid === u ? { ...x, part_group: g, part_group_dir: dir, ...(g ? { rotatable: false } : {}) } : x))
+    return ds.map(x => (x.uid === u ? { ...x, part_group: g, part_group_dir: dir, part_group_pos: g && g === x.part_group ? x.part_group_pos : null, ...(g ? { rotatable: false } : {}) } : x))
   })
   const groupUi = { groups: groupNames, active: activeGroup, assign: assignGroup }
   const [lastAddedUid, setLastAddedUid] = useState(null)
@@ -464,13 +464,13 @@ export default function EditOrderPage() {
           edge_bottom: d.edges.bottom || null, edge_left: d.edges.left || null,
           rotatable: d.rotatable, sort_order: sortIdx - 1,
           contour: d.contour ? JSON.stringify(d.contour) : null,
-          part_group: (d.part_group || '').trim() || null, part_group_dir: d.part_group ? (d.part_group_dir === 'x' ? 'x' : 'y') : null,
+          part_group: (d.part_group || '').trim() || null, part_group_dir: d.part_group ? (d.part_group_dir === 'x' ? 'x' : 'y') : null, part_group_pos: d.part_group ? (d.part_group_pos || null) : null,
         }
       })
       let { error: iErr } = await supabase.from('order_details').insert(rows)
       if (iErr && /part_group/.test(String(iErr.message || ''))) {
         // база ещё без групп — детали сохраняются без них, с подсказкой
-        ;({ error: iErr } = await supabase.from('order_details').insert(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; return c })))
+        ;({ error: iErr } = await supabase.from('order_details').insert(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; delete c.part_group_pos; return c })))
         if (!iErr && rows.some(r => r.part_group)) window.alert(PART_GROUPS_SQL_HINT)
       }
       if (iErr) throw new Error('Ошибка сохранения деталей: ' + iErr.message)
