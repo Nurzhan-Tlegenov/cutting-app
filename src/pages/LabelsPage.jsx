@@ -18,6 +18,7 @@ import CncLoader from '../components/CncLoader'
 import { orderTitle, orderFileName, toLatin, programName, folderName } from '../lib/orderUtils'
 import { orderClient } from '../lib/productionApi'
 import SaveFilesDialog from '../components/SaveFilesDialog'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 
 // Бирки деталей по принятому раскрою. Бирку собирает пользователь: размер и какие параметры детали на ней есть.
 // На бирке — карта раскроя, где эта деталь закрашена чёрным. Шаблон идёт за аккаунтом; с ним же ЧПУ делает
@@ -536,6 +537,7 @@ export default function LabelsPage() {
   const [saveAsk, setSaveAsk] = useState(null)       // файлы маркировочного стола: вопрос «по отдельности или архивом»
   const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
   const [savedT, setSavedT] = useState(() => getLabelSaved(user))   // «Мои шаблоны бирок»
+  const [curSaved, setCurSaved] = useState(() => getUserSettings(user).labelSavedCur || '')   // какой сохранённый шаблон открыт
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -554,13 +556,21 @@ export default function LabelsPage() {
   const apply = t => { setHist(h => [...h.slice(-39), tpl]); setTpl(t); saveLabelTpl(t, user) }
   const change = patch => apply(normalizeLabel({ ...tpl, ...patch, enabled: true }))
   const putSaved = list => { setSavedT(list); saveLabelSaved(list, user) }
+  // Текущий шаблон: открыли сохранённый — правки сохраняются в него же («Сохранить» перезаписывает, а не плодит копии);
+  // то же имя при сохранении — перезапись существующего. Новый шаблон — под новым именем
+  const cur = savedT.find(x => x.id === curSaved) || null
+  const setCur = id => { setCurSaved(id); saveUserSettings({ labelSavedCur: id || '' }, user) }
   const saveTpl = () => {
-    const def = `Бирка ${tpl.w}×${tpl.h}`
-    const name = window.prompt('Сохранить шаблон бирки под именем:', def)
+    const def = cur ? cur.name : `Бирка ${tpl.w}×${tpl.h}`
+    const name = window.prompt(cur ? `Сохранить шаблон (то же имя — перезаписать «${cur.name}», другое — новый шаблон):` : 'Сохранить шаблон бирки под именем:', def)
     if (name === null) return
-    putSaved([...savedT, { id: Math.random().toString(36).slice(2, 10), name: name.trim() || def, at: Date.now(), tpl: { ...tpl, enabled: true } }])
+    const nm = name.trim() || def
+    const same = savedT.find(x => x.name.trim().toLowerCase() === nm.toLowerCase())
+    if (same) { putSaved(savedT.map(x => (x.id === same.id ? { ...x, name: nm, tpl: { ...tpl, enabled: true }, at: Date.now() } : x))); setCur(same.id); return }
+    const id = Math.random().toString(36).slice(2, 10)
+    putSaved([...savedT, { id, name: nm, at: Date.now(), tpl: { ...tpl, enabled: true } }]); setCur(id)
   }
-  const applySaved = sv => { if (window.confirm(`Применить шаблон «${sv.name}» (${sv.tpl.w}×${sv.tpl.h} мм)?\nТекущая раскладка заменится — её можно вернуть кнопкой «Отменить».`)) apply(normalizeLabel({ ...sv.tpl, enabled: true })) }
+  const applySaved = sv => { if (window.confirm(`Открыть шаблон «${sv.name}» (${sv.tpl.w}×${sv.tpl.h} мм)?\nТекущая раскладка заменится — её можно вернуть кнопкой «Отменить».`)) { apply(normalizeLabel({ ...sv.tpl, enabled: true })); setCur(sv.id) } }
   const undo = () => { const prev = hist[hist.length - 1]; if (!prev) return; setHist(h => h.slice(0, -1)); setTpl(prev); saveLabelTpl(prev, user) }
   const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { apply({ ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }) } }
   // файлы маркировочного стола — тем же набором, что делает ЧПУ вместе с G-кодом
@@ -621,21 +631,21 @@ export default function LabelsPage() {
             {/* мои шаблоны бирок: сохранить текущий, применить сохранённый (другой размер, другая раскладка) */}
             <div style={{ margin: '0 0 10px', padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: savedT.length ? 6 : 0 }}>
-                <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>Мои шаблоны{savedT.length ? ` · ${savedT.length}` : ''}</div>
-                <button type="button" onClick={saveTpl} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: 'none', background: 'var(--blue)', color: 'white' }}>💾 Сохранить шаблон</button>
+                <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>Мои шаблоны{savedT.length ? ` · ${savedT.length}` : ''}{cur && <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--text-hint)' }}>Открыт: {cur.name}</span>}</div>
+                <button type="button" onClick={saveTpl} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: 'none', background: 'var(--blue)', color: 'white' }}>💾 {cur ? 'Сохранить' : 'Сохранить шаблон'}</button>
               </div>
               {!savedT.length && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Настройте бирку и сохраните — потом можно переключаться между шаблонами одним тапом.</div>}
               {[...savedT].sort((a, b) => (b.at || 0) - (a.at || 0)).map(sv => (
                 <div key={sv.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
                   <div onClick={() => applySaved(sv)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
-                    <div style={{ fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--blue-dark)' }}>{sv.name}</div>
+                    <div style={{ fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--blue-dark)', fontWeight: sv.id === curSaved ? 600 : 400 }}>{sv.id === curSaved ? '● ' : ''}{sv.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{sv.tpl.w}×{sv.tpl.h} мм · элементов {sv.tpl.items?.length || 0}{sv.at ? ` · ${new Date(sv.at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}` : ''}</div>
                   </div>
                   <button type="button" title="Перезаписать текущим" onClick={() => { if (window.confirm(`Перезаписать «${sv.name}» текущей биркой (${tpl.w}×${tpl.h} мм)?`)) putSaved(savedT.map(x => (x.id === sv.id ? { ...x, tpl: { ...tpl, enabled: true }, at: Date.now() } : x))) }}
                     style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13 }}>💾</button>
                   <button type="button" title="Переименовать" onClick={() => { const n = window.prompt('Название шаблона', sv.name); if (n && n.trim()) putSaved(savedT.map(x => (x.id === sv.id ? { ...x, name: n.trim() } : x))) }}
                     style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13 }}>✎</button>
-                  <button type="button" title="Удалить" onClick={() => { if (window.confirm(`Удалить шаблон «${sv.name}»?`)) putSaved(savedT.filter(x => x.id !== sv.id)) }}
+                  <button type="button" title="Удалить" onClick={() => { if (window.confirm(`Удалить шаблон «${sv.name}»?`)) { putSaved(savedT.filter(x => x.id !== sv.id)); if (curSaved === sv.id) setCur('') } }}
                     style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13, color: 'var(--danger)' }}>🗑</button>
                 </div>
               ))}
