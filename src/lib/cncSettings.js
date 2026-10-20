@@ -195,3 +195,11 @@ export function backupPost(cnc, what) {
 }
 export const removeSnapshot = (cnc, snapId) => ({ ...cnc, saved: (cnc.saved || []).filter(s => s.id !== snapId) })
 export const renameSnapshot = (cnc, snapId, name) => ({ ...cnc, saved: (cnc.saved || []).map(s => (s.id === snapId ? { ...s, name } : s)) })
+
+/** Правка общего постпроцессора (не мастер-аккаунт): своя копия с правкой, и выпуск программ переходит на неё —
+ *  иначе копия есть, а программы по-прежнему выпускаются общим станком (переименовали — «не сохранилось»). */
+export function forkShared(cnc, post, patch = {}) {
+  const p = { ...post, ...patch, id: uid(), shared: false, forAll: false, ownerId: undefined, name: patch.name || post.name + ' (мой)' }
+  const swap = id => (id === post.id ? p.id : id)
+  return { ...cnc, posts: [...cnc.posts, p], post: p.id, router: swap(cnc.router), router2: swap(cnc.router2), use6: (cnc.use6 || []).map(swap) }
+}

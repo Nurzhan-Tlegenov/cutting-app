@@ -2,7 +2,7 @@
 // у всех разные. Для каждого вида обработки — «авто» (инструмент выбирает система управления станка), один инструмент
 // или (пазы) по ширине паза; у слоя заказа (паз ширина × глубина, выемка по глубине) — своё назначение.
 // Направление обхода — у вырезов и фигурного края. Данные — в постпроцессоре: post.d6Tools, post.d6Ops (см. drill6Xml.js).
-import { activePost, newId } from '../lib/cncSettings'
+import { activePost, newId, forkShared } from '../lib/cncSettings'
 import { d6OpsOf, resolveD6Tool } from '../lib/drill6Xml'
 import { SaveSnapshotButton } from './CncSettings'
 
@@ -41,7 +41,7 @@ export default function Drill6Ops({ cnc, onChange, isMaster = false, layers = nu
   const foreign = !!post.shared && !isMaster          // общий постпроцессор: правка делает свою копию
   const { ops, tools } = d6OpsOf(post)
   const set = patch => {
-    if (foreign) { const p = { ...post, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: post.name + ' (мой)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }); return }
+    if (foreign) { onChange(forkShared(cnc, post, patch)); return }       // своя копия общего станка, выпуск — ею
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
   }
   const setTools = list => set({ d6Tools: list, d6Ops: ops })

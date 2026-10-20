@@ -4,9 +4,9 @@ import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
-import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot } from '../lib/cncSettings'
+import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot, forkShared } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
@@ -81,8 +81,9 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
   const post = activePost(cnc)
   const foreign = !!post.shared && !isMaster          // общий постпроцессор: правка делает свою копию
   const set = patch => {
-    if (foreign) { const p = { ...post, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: patch.name || post.name + ' (мой)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }); return }
-    onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
+    // от последних настроек (onChange(prev => …)): правки подряд не затирают друг друга
+    if (foreign) { onChange(c => (c.posts.some(q => q.id === post.id && q.shared) ? forkShared(c, post, patch) : { ...c, posts: c.posts.map(q => (q.id === c.post ? { ...q, ...patch } : q)) })); return }
+    onChange(c => ({ ...c, posts: c.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) }))
   }
   const drill = isDrill6(post), saw = isBeamSaw(post)
   const routers = cnc.posts.filter(isRouterPost)
@@ -411,15 +412,23 @@ function Drill6Basic({ post, set, router }) {
 export function SaveSnapshotButton({ cnc, onChange }) {
   const post = activePost(cnc)
   const [done, setDone] = useState('')
+  // свежие настройки: ввели новое название и сразу нажали «Сохранить» — переименование применяется при уходе из поля,
+  // а нажатие видело бы ещё старые настройки и записало их поверх (новое имя и своя копия общего станка терялись)
+  const cur = useRef({ cnc, onChange })
+  useEffect(() => { cur.current = { cnc, onChange } })
   const save = () => {
-    const def = post.name
-    const name = window.prompt('Сохранить настройки постпроцессора под именем:\n(то же имя — сохранённое перезапишется)', def)
-    if (name === null) return
-    const nm = (name || def).trim()
-    const over = (cnc.saved || []).some(x => sameName(x.name, nm))
-    onChange(saveSnapshot(cnc, nm))
-    setDone(over ? `Перезаписано: «${nm}»` : `Сохранено: «${nm}»`)
-    setTimeout(() => setDone(''), 4000)
+    if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur()
+    setTimeout(() => {
+      const { cnc: c, onChange: ch } = cur.current, p = activePost(c)
+      const def = p.name
+      const name = window.prompt('Сохранить настройки постпроцессора под именем:\n(то же имя — сохранённое перезапишется)', def)
+      if (name === null) return
+      const nm = (name || def).trim()
+      const over = (c.saved || []).some(x => sameName(x.name, nm))
+      ch(prev => saveSnapshot(prev, nm))
+      setDone(over ? `Перезаписано: «${nm}»` : `Сохранено: «${nm}»`)
+      setTimeout(() => setDone(''), 4000)
+    }, 60)
   }
   return (
     <div style={{ marginBottom: 8 }}>
@@ -752,8 +761,7 @@ export function CncOps({ cnc, onChange, layers }) {
   const setRouter = patch => {
     if (!rp) return
     if (rp.shared) {                       // общий постпроцессор не правим — делаем свою копию (как на «Основных»)
-      const p = { ...rp, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: rp.name + ' (мой)' }
-      onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id, router: p.id }); return
+      onChange(forkShared(cnc, rp, patch)); return
     }
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === rp.id ? { ...p, ...patch } : p)) })
   }

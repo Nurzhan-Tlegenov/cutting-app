@@ -13,6 +13,9 @@ const forStore = cnc => ({ ...cnc, posts: cnc.posts.filter(p => !p.shared) })
 export function useCnc(onSaved, prodId = null) {
   const { user, profile, isMaster } = useAuth()
   const [cnc, setCnc] = useState(() => getCnc(user))
+  // последние настройки — сразу, без ожидания перерисовки: две правки подряд (ушли из поля «Название» и нажали кнопку)
+  // не должны затирать друг друга
+  const latest = useRef(cnc)
   const [ready, setReady] = useState(false)
   const [staff, setStaff] = useState(false)
   const mode = useRef({ prod: null, staff: false, edit: false })    // staff — настройки производства, а не свои
@@ -26,11 +29,12 @@ export function useCnc(onSaved, prodId = null) {
       const opts = { beam: !!beam }
       if (pc && !pc.own && pc.cnc) {
         mode.current = { prod: prodId, staff: true, edit: !!pc.edit }
-        setCnc(withShared(normalizeCnc(pc.cnc, [], opts), shared, opts)); setStaff(true)
+        const v = withShared(normalizeCnc(pc.cnc, [], opts), shared, opts)
+        latest.current = v; setCnc(v); setStaff(true)
       } else {
         mode.current = { prod: pc?.own ? prodId : null, staff: false, edit: false }
         const mine = withShared(c, shared, opts)
-        setCnc(mine); setStaff(false)
+        latest.current = mine; setCnc(mine); setStaff(false)
         if (pc?.own) saveProductionCnc(prodId, forStore(mine))            // сотрудники сразу получают актуальные настройки
       }
       setReady(true)
@@ -38,8 +42,11 @@ export function useCnc(onSaved, prodId = null) {
     return () => { alive = false }
   }, [user?.id, prodId])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const change = next => {
-    const prev = cnc
+  // next — новые настройки или функция от последних (prev => next)
+  const change = arg => {
+    const prev = latest.current
+    const next = typeof arg === 'function' ? arg(prev) : arg
+    latest.current = next
     setCnc(next); onSaved?.(next)
     const md = mode.current
     if (md.staff) { if (md.edit) saveProductionCnc(md.prod, forStore(next)); return }   // сотрудник без права менять — только на время
