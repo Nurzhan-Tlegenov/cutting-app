@@ -122,7 +122,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
         <div style={{ display: 'flex', gap: 4, flex: 1 }}>
           <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} />
           <NumInput value={detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: v })} />
-          <div style={{ width: 60, flexShrink: 0 }}>
+          <div style={{ width: 44, flexShrink: 0 }}>
             <NumInput value={detail.qty} placeholder="Кол" onChange={v => onUpdate({ ...detail, qty: v })} />
           </div>
         </div>
@@ -571,7 +571,7 @@ export default function EditOrderPage() {
         <div style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Длина</div>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>
-          <div style={{ width: 60, fontSize: 11, color: 'var(--text-hint)' }}>Кол-во</div>
+          <div style={{ width: 44, fontSize: 11, color: 'var(--text-hint)' }}>Кол.</div>
         </div>
         <MaterialFilter details={details} order={matOrder} value={matFilter} onChange={setMatFilter} />
         {grouped.map(([pfx, dets]) => (

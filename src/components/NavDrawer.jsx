@@ -49,7 +49,14 @@ export default function NavDrawer({ notices, unread }) {
   const [data, setData] = useState(cache)
   const [shut, setShut] = useState({})                 // свёрнутые разделы
   const panel = useRef(null)
-  const w = W()
+  // ширина панели — по окну; после смены «Размера текста и кнопок» окно в CSS-пикселях другое — пересчитываем.
+  // Обработчики жестов читают её через ref: раньше они переподписывались посреди жеста (ширина менялась), отпускание
+  // пальца терялось, панель «залипала» — ни крестик, ни смахивание её не закрывали
+  const [w, setW] = useState(W)
+  const wRef = useRef(w)
+  useEffect(() => { wRef.current = w }, [w])
+  useEffect(() => { const on = () => setW(W()); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on) }, [])
+  const close = () => { setDrag(null); setOpen(false) }
 
   const refresh = () => Promise.all([myWorkplaces(), myProduction(user?.id)]).then(([r, p]) => { cache = { wps: r.data || [], own: p || null }; setData(cache) })
   useEffect(() => {
@@ -67,20 +74,21 @@ export default function NavDrawer({ notices, unread }) {
       const t = e.touches[0], dx = t.clientX - st.x, dy = t.clientY - st.y
       if (!st.on) { if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) { st = null; return } if (dx > 10) { st.on = true; refresh() } else return }
       e.preventDefault()
-      setDrag(Math.max(0, Math.min(w, dx)))
+      setDrag(Math.max(0, Math.min(wRef.current, dx)))
     }
     const up = e => {
       if (!st) return
       const on = st.on; st = null
       if (!on) return
       const x = e.changedTouches[0].clientX
-      setDrag(null); setOpen(x > w * 0.33)
+      setDrag(null); setOpen(x > wRef.current * 0.33)
     }
     document.addEventListener('touchstart', down, { passive: true })
     document.addEventListener('touchmove', move, { passive: false })
     document.addEventListener('touchend', up)
-    return () => { document.removeEventListener('touchstart', down); document.removeEventListener('touchmove', move); document.removeEventListener('touchend', up) }
-  }, [open, w])   // eslint-disable-line react-hooks/exhaustive-deps
+    document.addEventListener('touchcancel', up)
+    return () => { document.removeEventListener('touchstart', down); document.removeEventListener('touchmove', move); document.removeEventListener('touchend', up); document.removeEventListener('touchcancel', up) }
+  }, [open])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // открытая панель закрывается свайпом влево в любом месте экрана (панель или затемнение, сверху или снизу) —
   // панель идёт за пальцем; отпустили дальше трети или смахнули быстро — закрылась. Свои обработчики (не пассивные):
@@ -100,7 +108,8 @@ export default function NavDrawer({ notices, unread }) {
       }
       e.preventDefault()
       const now = Date.now(); s.v = (t.clientX - s.lx) / Math.max(1, now - s.lt); s.lx = t.clientX; s.lt = now
-      setDrag(Math.max(0, Math.min(w, w + Math.min(0, dx))))
+      const ww = wRef.current
+      setDrag(Math.max(0, Math.min(ww, ww + Math.min(0, dx))))
     }
     const up = e => {
       if (!s) return
@@ -108,7 +117,7 @@ export default function NavDrawer({ notices, unread }) {
       if (!st.on) return
       swallow = true; setTimeout(() => { swallow = false }, 350)   // после смахивания тап по пункту не срабатывает
       const dx = (e.changedTouches[0]?.clientX ?? st.lx) - st.x
-      setDrag(null); setOpen(!(st.v < -0.35 || dx < -w * 0.33))
+      setDrag(null); setOpen(!(st.v < -0.35 || dx < -wRef.current * 0.33))
     }
     const click = e => { if (swallow) { e.stopPropagation(); e.preventDefault() } }
     el.addEventListener('touchstart', down, { passive: true })
@@ -117,14 +126,14 @@ export default function NavDrawer({ notices, unread }) {
     el.addEventListener('touchcancel', up)
     el.addEventListener('click', click, true)
     return () => { el.removeEventListener('touchstart', down); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', up); el.removeEventListener('touchcancel', up); el.removeEventListener('click', click, true) }
-  }, [open, w])
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     try { navigator.vibrate?.(6) } catch { /* без вибрации */ }
-    const esc = e => { if (e.key === 'Escape') setOpen(false) }
+    const esc = e => { if (e.key === 'Escape') close() }
     window.addEventListener('keydown', esc)
     return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', esc) }
   }, [open])
@@ -148,7 +157,7 @@ export default function NavDrawer({ notices, unread }) {
   const n = notices || {}
 
   // переходы
-  const go = (to, state) => { setOpen(false); navigate(to, state ? { state } : undefined) }
+  const go = (to, state) => { close(); navigate(to, state ? { state } : undefined) }
   const goOwn = tab => { openOwnProduction(); if (tab) setTabKey('prodTab', tab); if (tab === 'settings') setTabKey('setSec', null); setCabinet('production'); go('/production', { tab }) }
   const goWork = (pid, wtab) => { openWorkplace(pid); if (wtab) setTabKey('wTab', wtab); setCabinet('production'); go('/production', { wtab }) }
   const goClient = to => { setCabinet('client'); go(to) }
@@ -214,9 +223,18 @@ export default function NavDrawer({ notices, unread }) {
   const pill = c => c > 0 ? <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10, background: 'var(--danger)', color: '#fff', fontSize: 11.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{c > 99 ? '99+' : c}</span> : null
   const tr = drag != null ? 'none' : `transform .42s ${EASE}`
 
-  return createPortal(
+  // закладка у левого края: видно, что слева есть меню (нажать — откроется, или потянуть от края)
+  const tab = !moving && !vis && (
+    <button type="button" aria-label="Меню" onClick={() => { setOpen(true); refresh() }}
+      style={{ position: 'fixed', left: 0, top: '42%', zIndex: 1050, width: 14, height: 56, padding: 0, border: 'none', borderRadius: '0 10px 10px 0',
+        background: 'var(--blue)', opacity: 0.55, boxShadow: '1px 0 6px rgba(0,0,0,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><path d="M9 6l6 6-6 6" /></svg>
+    </button>
+  )
+  return createPortal(<>
+    {tab}
     <div ref={root} style={{ position: 'fixed', inset: 0, zIndex: 1100, pointerEvents: moving ? 'auto' : 'none', visibility: moving || vis ? 'visible' : 'hidden' }}>
-      <div onClick={() => setOpen(false)} style={{ position: 'absolute', inset: 0, background: '#000', opacity: k * 0.38, transition: drag != null ? 'none' : `opacity .42s ${EASE}`, WebkitTapHighlightColor: 'transparent' }} />
+      <div onClick={close} style={{ position: 'absolute', inset: 0, background: '#000', opacity: k * 0.38, transition: drag != null ? 'none' : `opacity .42s ${EASE}`, WebkitTapHighlightColor: 'transparent' }} />
       <nav ref={panel}
         style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: w, transform: `translate3d(${shown - w}px,0,0)`, transition: tr, willChange: 'transform',
           background: 'var(--bg)', boxShadow: k > 0 ? '8px 0 32px rgba(0,0,0,.18)' : 'none', display: 'flex', flexDirection: 'column',
@@ -228,7 +246,7 @@ export default function NavDrawer({ notices, unread }) {
             <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile?.full_name || 'Пользователь'}</div>
             <div style={{ fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Сейчас: {where}</div>
           </div>
-          <button type="button" aria-label="Закрыть" onClick={() => setOpen(false)} style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 18, padding: 0, cursor: 'pointer' }}>×</button>
+          <button type="button" aria-label="Закрыть" onClick={close} style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 18, padding: 0, cursor: 'pointer' }}>×</button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', padding: '0 10px 16px' }}>
           {!data && <div style={{ fontSize: 12, color: 'var(--text-hint)', padding: '6px 8px' }}>Загружаем…</div>}
@@ -282,7 +300,8 @@ export default function NavDrawer({ notices, unread }) {
           </div>
         </div>
       </nav>
-    </div>,
+    </div>
+  </>,
     document.body,
   )
 }
