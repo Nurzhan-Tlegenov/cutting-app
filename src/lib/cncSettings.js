@@ -66,10 +66,14 @@ export const KINDS = [['router', 'Раскроечный фрезер (G-код)
 export const sawPost = cnc => cnc.posts.find(p => p.id === cnc.post && isBeamSaw(p)) || cnc.posts.find(isBeamSaw) || null
 
 export const DEFAULT_MILL = () => ({
-  id: uid(), type: 'mill', name: 'Компрессионная 6 мм', t: 1, d: 6, maxPass: 20, rpm: 18000, feed: 8000,
+  id: uid(), type: 'mill', name: 'Компрессионная 6 мм', t: 1, d: 6, maxPass: 20, edgeH: 25, rpm: 18000, feed: 8000,
   inFeed: 3000, inLen: 30, outFeed: 2000, outLen: 50, step: 5,
 })
-export const DEFAULT_DRILL = () => ({ id: uid(), type: 'drill', name: 'Сверло 8 мм', t: 2, d: 8, rpm: 3500, feed: 2500 })
+// edgeH — высота режущей кромки фрезы: глубже неё фреза резать не может (проверяется при выпуске программы);
+// пусто/0 — без ограничения (у инструментов, заведённых раньше, поля нет — как было).
+// У сверла inFeed/inLen — подача врезания и глубина врезания: первые inLen мм сверло идёт на подаче врезания,
+// плавно разгоняясь до основной, чтобы не сколоть пласть; без них — сразу на основной (как было).
+export const DEFAULT_DRILL = () => ({ id: uid(), type: 'drill', name: 'Сверло 8 мм', t: 2, d: 8, rpm: 3500, feed: 2500, inFeed: 500, inLen: 3 })
 
 export const DEFAULT_OPS = () => ({
   // контур детали: smallArea — мелкая деталь (м²), режется первой; passes — число проходов;

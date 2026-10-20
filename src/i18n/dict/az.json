@@ -2552,5 +2552,8 @@
 "Сквозной рез — ниже стола (заглубление)": "Keçid kəsim — masadan aşağı (dərinləşmə)",
 "Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.": "Freza həmişə konturun daxilində gedir. Keçid kəsiyin dərinliyi detal konturu ilə eynidir.",
 "Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.": "İndi 0 — freza düz masaya qədər gedir: detal kəsilməyə bilər. Adətən 0,2–0,5 mm.",
-"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Freza qurban masasına girir — detal tam kəsilir."
+"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Freza qurban masasına girir — detal tam kəsilir.",
+"Высота режущей кромки": "Kəsici kənarın hündürlüyü",
+"6. Подача врезания": "6. Giriş verilməsi",
+"Глубина врезания": "Giriş dərinliyi"
 }

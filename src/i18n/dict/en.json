@@ -2552,5 +2552,10 @@
 "Сквозной рез — ниже стола (заглубление)": "Through cut — below the table (overcut)",
 "Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.": "The cutter always runs inside the contour. The through-cutout depth is the same as for the part contour.",
 "Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.": "Now 0 — the cutter goes exactly to the table: the part may not be cut through. Usually 0.2–0.5 mm.",
-"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "The cutter goes into the spoilboard — the part is cut through."
+"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "The cutter goes into the spoilboard — the part is cut through.",
+"Высота режущей кромки": "Cutting edge length",
+"6. Подача врезания": "6. Plunge feed",
+"Глубина врезания": "Plunge depth",
+"Глубина за проход больше высоты режущей кромки.": "Depth per pass exceeds the cutting edge length.",
+"Подача врезания не меньше основной — разгона не будет.": "Plunge feed is not lower than the main feed — no ramp-up."
 }

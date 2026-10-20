@@ -680,10 +680,17 @@ export function CncTools({ cnc, onChange }) {
         </div>
         {dupT && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>Номер T{edit.t} уже занят: {dupT.name}</p>}
         {mill && (
-          <div style={{ marginTop: 8 }}>
-            <Num label="4. Максимальная глубина за один проход" unit="мм" value={edit.maxPass} onChange={v => e('maxPass', v)}
-              hint="Глубже — обработка делится на несколько проходов." />
-          </div>
+          <>
+            <div style={{ marginTop: 8 }}>
+              <Num label="4. Максимальная глубина за один проход" unit="мм" value={edit.maxPass} onChange={v => e('maxPass', v)}
+                hint="Глубже — обработка делится на несколько проходов." />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Num label="Высота режущей кромки" unit="мм" value={edit.edgeH ?? ''} onChange={v => e('edgeH', v)}
+                hint="Ограничение глубины фрезы: глубже кромки она не режет. Если материал с заглублением глубже — при выпуске программы будет предупреждение. Пусто — без ограничения." />
+              {num(edit.edgeH) > 0 && num(edit.maxPass) > num(edit.edgeH) && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>Глубина за проход больше высоты режущей кромки.</p>}
+            </div>
+          </>
         )}
         {!mill && headPost && (
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
@@ -695,6 +702,16 @@ export function CncTools({ cnc, onChange }) {
           <Num label={`${mill ? 5 : 4}. Обороты шпинделя`} unit="об/мин" value={edit.rpm} onChange={v => e('rpm', v)} />
           <Num label={`${mill ? 6 : 5}. Основная подача`} unit="мм/мин" value={edit.feed} onChange={v => e('feed', v)} hint="в материале" />
         </div>
+        {!mill && (
+          <>
+            <div className="row2" style={{ marginTop: 8 }}>
+              <Num label="6. Подача врезания" unit="мм/мин" value={edit.inFeed ?? ''} onChange={v => e('inFeed', v)} />
+              <Num label="Глубина врезания" unit="мм" value={edit.inLen ?? ''} onChange={v => e('inLen', v)} />
+            </div>
+            <Hint>Сверло входит в материал на подаче врезания и на глубине врезания плавно разгоняется до основной — так пласть не скалывается. Пусто — сразу на основной подаче.</Hint>
+            {num(edit.inFeed) > 0 && num(edit.inFeed) >= num(edit.feed) && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>Подача врезания не меньше основной — разгона не будет.</p>}
+          </>
+        )}
         {mill && (
           <>
             <div className="row2" style={{ marginTop: 8 }}>
@@ -738,7 +755,7 @@ export function CncTools({ cnc, onChange }) {
                   <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 13, background: 'var(--blue-light)', color: 'var(--blue-dark)', padding: '3px 7px', borderRadius: 6 }}>T{t.t}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{t.name}{headPost && t.type === 'drill' && t.inHead ? <span style={{ fontSize: 10.5, fontWeight: 500, marginLeft: 6, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)' }}>голова</span> : null}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Ø{r1(t.d)} · {t.rpm} об/мин · подача {t.feed}{type === 'mill' ? ` · проход до ${r1(t.maxPass)} мм` : ''}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Ø{r1(t.d)} · {t.rpm} об/мин · подача {t.feed}{type === 'mill' ? ` · проход до ${r1(t.maxPass)} мм${num(t.edgeH) > 0 ? ` · кромка ${r1(t.edgeH)} мм` : ''}` : (num(t.inFeed) > 0 ? ` · врезание ${t.inFeed}` : '')}</div>
                   </div>
                   <span style={{ color: 'var(--text-hint)' }}>›</span>
                 </div>

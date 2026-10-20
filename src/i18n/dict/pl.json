@@ -2552,5 +2552,8 @@
 "Сквозной рез — ниже стола (заглубление)": "Cięcie na wylot — poniżej stołu (zagłębienie)",
 "Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.": "Frez zawsze idzie wewnątrz konturu. Głębokość wycięcia na wylot jest taka sama jak konturu elementu.",
 "Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.": "Teraz 0 — frez dochodzi dokładnie do stołu: element może nie zostać przecięty. Zwykle 0,2–0,5 mm.",
-"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Frez wchodzi w stół ofiarny — element jest przecięty na wylot."
+"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Frez wchodzi w stół ofiarny — element jest przecięty na wylot.",
+"Высота режущей кромки": "Długość krawędzi skrawającej",
+"6. Подача врезания": "6. Posuw wejścia",
+"Глубина врезания": "Głębokość wejścia"
 }

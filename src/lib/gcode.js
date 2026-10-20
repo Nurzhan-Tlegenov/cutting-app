@@ -371,6 +371,20 @@ export function headOrder(list, from = [0, 0], budgetMs = 1500) {
   }
   return best
 }
+/**
+ * Заглубление сверла от безопасной высоты до z. Если у сверла задана подача врезания (inFeed) меньше основной и
+ * глубина врезания (inLen): до верха материала — на основной, первые inLen мм в материале — ступенями от подачи
+ * врезания к основной (чтобы не сколоть пласть), остальное — на основной. Без них — одним ходом на основной (как было).
+ */
+function drillPlunge(out, t, T, z) {
+  const feed = n0(t.feed) || 1000, fIn = n0(t.inFeed), lIn = n0(t.inLen)
+  if (!(fIn > 0 && fIn < feed && lIn > 0 && T - z > EPS)) { out.g1(null, null, z, feed); return }
+  out.g1(null, null, T, feed)                                   // до пласти — по воздуху, на основной
+  const L = Math.min(lIn, T - z), n = Math.max(2, Math.min(5, Math.round(L)))
+  for (let k = 0; k < n; k++) out.g1(null, null, T - L * (k + 1) / n, Math.round(fIn + (feed - fIn) * k / n))
+  if (z < T - L - EPS) out.g1(null, null, z, feed)
+}
+
 // сверло стоит в присадочной голове станка (у постпроцессора включена голова, у сверла — «в присадочной голове»)
 export const inHead = (post, t) => !!post?.drillHead && t?.type === 'drill' && !!t.inHead
 const tpl = (s, tool) => String(s || '').replace(/\{T\}/gi, String(Math.round(n0(tool.t)))).replace(/\{S\}/gi, String(Math.round(n0(tool.rpm))))
@@ -794,6 +808,12 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   const smallSide = ops.outer?.smallSide === '' || ops.outer?.smallSide == null ? 150 : Math.max(0, n0(ops.outer.smallSide))   // уже — тоже «мелкая»
   const sheetRect = { x0: n0(post.originX), y0: n0(post.originY), x1: n0(post.originX) + geo.sheetW, y1: n0(post.originY) + geo.sheetL }
   const tool = id => toolById(cnc, id)
+  // Высота режущей кромки фрезы (tool.edgeH): глубже неё фреза не режет — хвостовик трётся о материал. Проверяем
+  // каждую обработку; программа всё равно выпускается, пользователь видит предупреждение. Пусто/0 — без проверки.
+  const edgeOk = (t, depth, what) => {
+    const h = n0(t.edgeH)
+    if (h > 0 && depth > h + EPS) warn.add(`Фреза «${t.name}» (T${Math.round(n0(t.t))}): высота режущей кромки ${num(h)} мм, а ${what} — ${num(depth)} мм. Глубже кромки фреза не режет.`)
+  }
   const jobs = []                    // { stage, rank, tool, at: [x, y], area, run(out) }
   const miss = {}                    // на что не назначен инструмент -> сколько раз
   const noTool = what => { miss[what] = (miss[what] || 0) + 1 }
@@ -825,7 +845,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       if (t.type === 'drill') {
         if (Math.abs(n0(t.d) - d) > EPS) warn.add(`На ${label} назначено сверло Ø${num(t.d)} — диаметр не совпадает.`)
         const z = through ? -drillOver : T - depth
-        jobs.push({ stage: 0, rank: 0, tool: t, at: c, run: out => { out.g0(c[0], c[1], safeZ); out.g1(null, null, z, n0(t.feed) || 1000); out.g0(null, null, safeZ) } })
+        jobs.push({ stage: 0, rank: 0, tool: t, at: c, run: out => { out.g0(c[0], c[1], safeZ); drillPlunge(out, t, T, z); out.g0(null, null, safeZ) } })
       } else {
         // Отверстие фрезой. Фреза не сверло — прямо вниз не врезается (горит), поэтому вход по спирали: на диаметре
         // на 2 мм меньше отверстия (по 1 мм на сторону), но не меньше «фреза + 1 мм»; дошла до низа — разбивает
@@ -834,6 +854,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
         if (R < -EPS) { warn.add(`Фреза Ø${num(dt)} больше отверстия Ø${num(d)} — ${label} пропущены.`); continue }
         if (!o.tool) warn.add(`Сверла Ø${num(d)} нет — ${label} делает фреза Ø${num(dt)} (T${Math.round(n0(t.t))}): вход по спирали и разбивка до диаметра.`)
         const zBot = through ? -millOver : T - depth
+        edgeOk(t, T - zBot, label)
         const de = Math.min(d, Math.max(dt + 1, d - 2))
         const Re = Math.max(0, Math.min(R, (de - dt) / 2))           // радиус спирали входа (по центру фрезы)
         const st = Math.max(0.3, Math.min(n0(t.step) || dt / 2, dt * 0.9))
@@ -884,6 +905,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       if (k.t.type !== 'mill') { warn.add(`На ${k.label} назначено сверло — нужна фреза.`); continue }
       const paths = rectPaths(bx + k.x0, by + k.y0, bx + k.x1, by + k.y1, k.open, n0(k.t.d) / 2, n0(k.t.step), k.spiral)
       if (!paths) { warn.add(`Фреза Ø${num(k.t.d)} шире, чем ${k.label} (${num(Math.min(k.x1 - k.x0, k.y1 - k.y0))} мм) — пропущено.`); continue }
+      edgeOk(k.t, k.depth >= T - EPS ? T + millOver : k.depth, k.label)
       const zs = levels(T, k.depth >= T - EPS ? -millOver : T - k.depth, n0(k.t.maxPass))
       jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: [bx + k.x0, by + k.y0], run: out => cutRect(out, paths, zs, k.t, safeZ, T, k.op) })
     }
@@ -896,6 +918,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       const loop = c.circle ? (c.circle.r - r > 0.2 ? circleLoop(c.circle.cx, c.circle.cy, c.circle.r - r) : null) : offsetLoop(smoothLoop(c.pts), -r)
       if (!loop) { warn.add(`Фреза Ø${num(t.d)} не проходит в вырез — он пропущен.`); continue }
       const L = orientLoop(loop.map(G), ops.cutout.dir)
+      edgeOk(t, T + millOver, 'сквозной рез выреза')
       const zs = levels(T, -millOver, n0(t.maxPass))
       const job = { stage: 1, rank: 4, tool: t, at: L[0], holds: [], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.cutout, safeZ, arcs) }
       jobs.push(job)
@@ -907,6 +930,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       if (!t) noTool('контур детали')
       else if (t.type !== 'mill') warn.add('На контур детали назначено сверло — нужна фреза.')
       else {
+        edgeOk(t, T + millOver, 'сквозной рез контура детали')
         const r = n0(t.d) / 2, smooth = smoothLoop(f.outline), base = offsetLoop(smooth, r)
         if (!base) warn.add('Не удалось построить обход контура одной из деталей — она пропущена.')
         else {

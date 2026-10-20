@@ -2552,5 +2552,8 @@
 "Сквозной рез — ниже стола (заглубление)": "Durchschnitt — unter den Tisch (Überschnitt)",
 "Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.": "Der Fräser läuft immer innerhalb der Kontur. Die Tiefe des durchgehenden Ausschnitts ist dieselbe wie bei der Teilkontur.",
 "Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.": "Jetzt 0 — der Fräser geht genau bis zum Tisch: das Teil wird evtl. nicht durchgeschnitten. Üblich sind 0,2–0,5 mm.",
-"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Der Fräser geht in die Opferplatte — das Teil wird durchgeschnitten."
+"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Der Fräser geht in die Opferplatte — das Teil wird durchgeschnitten.",
+"Высота режущей кромки": "Schneidenlänge",
+"6. Подача врезания": "6. Eintauchvorschub",
+"Глубина врезания": "Eintauchtiefe"
 }

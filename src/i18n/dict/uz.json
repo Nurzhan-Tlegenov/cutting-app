@@ -2552,5 +2552,8 @@
 "Сквозной рез — ниже стола (заглубление)": "Teshib o‘tuvchi kesish — stoldan pastga (chuqurlash)",
 "Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.": "Freza har doim kontur ichida yuradi. Teshib o‘tuvchi o‘yiq chuqurligi detal konturi bilan bir xil.",
 "Сейчас 0 — фреза доходит ровно до стола: деталь может не прорезаться. Обычно 0,2–0,5 мм.": "Hozir 0 — freza aynan stolgacha boradi: detal kesilmasligi mumkin. Odatda 0,2–0,5 mm.",
-"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Freza qurbon stoliga kiradi — detal butunlay kesiladi."
+"Фреза уходит в жертвенный стол — деталь прорезается насквозь.": "Freza qurbon stoliga kiradi — detal butunlay kesiladi.",
+"Высота режущей кромки": "Kesuvchi qirra balandligi",
+"6. Подача врезания": "6. Kirish surishi",
+"Глубина врезания": "Kirish chuqurligi"
 }
