@@ -133,14 +133,17 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
   const [drag, setDrag] = useState(null)      // { key, dx, dy, x, y, view } — что тащим, где оно сейчас, вид на момент захвата
   const svgRef = useRef(null)
   const rects = mine.map(m => { const e = ext(m), p = drag?.key === m.key ? drag : posOf(m.key); return { m, x: p.x, y: p.y, w: e.w, h: e.h } })
-  // вид — по всем фасадам с запасом вокруг (есть куда тащить); пока фасад тащат — не меняется, после — подстраивается
+  // вид — по фасадам группы, крупно (небольшой запас по краям); пока фасад тащат — не меняется, после — подстраивается.
+  // Двумя пальцами (колёсиком на компьютере) — увеличить / уменьшить, одним по пустому месту — сдвинуть, как карту раскроя
+  const [zoom, setZoom] = useState({ z: 1, px: 0, py: 0 })
   const viewNow = (() => {
     const x0 = Math.min(...rects.map(r => r.x)), y0 = Math.min(...rects.map(r => r.y))
     const x1 = Math.max(...rects.map(r => r.x + r.w)), y1 = Math.max(...rects.map(r => r.y + r.h))
-    const size = Math.max(x1 - x0, y1 - y0, 1), pad = size * 0.35 + 60
-    return { x: (x0 + x1) / 2 - size / 2 - pad, y: (y0 + y1) / 2 - size / 2 - pad, size: size + 2 * pad }
+    const fit = Math.max(x1 - x0, y1 - y0, 1) * 1.08 + 30, size = fit / zoom.z
+    return { x: (x0 + x1) / 2 - size / 2 + zoom.px, y: (y0 + y1) / 2 - size / 2 + zoom.py, size }
   })()
   const view = drag?.view || viewNow
+  const ptrs = useRef(new Map()), gesture = useRef(null)   // касания: id -> {x, y}; жест: pinch | pan
   const field = view.size
   const toMm = e => { const b = svgRef.current.getBoundingClientRect(); return { x: view.x + (e.clientX - b.left) / b.width * view.size, y: view.y + (e.clientY - b.top) / b.height * view.size } }
   const apply = newRows => {
@@ -165,7 +168,34 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
     }
     return { x: bx ?? x, y: by ?? y }
   }
+  const pxToMm = d => (svgRef.current ? d / svgRef.current.getBoundingClientRect().width * view.size : 0)
+  const down = e => {
+    ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (ptrs.current.size === 2) {                         // второй палец — масштаб; перетаскивание фасада отменяется
+      setDrag(null)
+      const [a, b] = [...ptrs.current.values()]
+      gesture.current = { kind: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: zoom.z }
+    } else if (ptrs.current.size === 1 && !e.target.closest?.('[data-facade]')) {
+      e.currentTarget.setPointerCapture?.(e.pointerId)
+      gesture.current = { kind: 'pan', x: e.clientX, y: e.clientY, px: zoom.px, py: zoom.py }
+    }
+  }
+  const up = e => {
+    ptrs.current.delete(e.pointerId)
+    if (ptrs.current.size < 2 && gesture.current?.kind === 'pinch') gesture.current = null
+    if (!ptrs.current.size) { gesture.current = null; end() }
+  }
+  const wheel = e => { const k = e.deltaY < 0 ? 1.15 : 1 / 1.15; setZoom(zm => ({ ...zm, z: Math.min(8, Math.max(0.3, zm.z * k)) })) }
   const move = e => {
+    if (ptrs.current.has(e.pointerId)) ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const g = gesture.current
+    if (g?.kind === 'pinch' && ptrs.current.size === 2) {
+      const [a, b] = [...ptrs.current.values()]
+      const z = Math.min(8, Math.max(0.3, g.z0 * (Math.hypot(a.x - b.x, a.y - b.y) / g.d0)))
+      setZoom(zm => ({ ...zm, z }))
+      return
+    }
+    if (g?.kind === 'pan') { const k = pxToMm(1); setZoom(zm => ({ ...zm, px: g.px - (e.clientX - g.x) * k, py: g.py - (e.clientY - g.y) * k })); return }
     if (!drag) return
     const p = toMm(e), r = rects.find(q => q.m.key === drag.key)
     const s = snap(drag.key, p.x - drag.dx, p.y - drag.dy, r.w, r.h)
@@ -187,7 +217,7 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
     }
     apply(groups.sort((a, b) => a.lo - b.lo).map(gr => gr.items.sort((a, b) => across(a) - across(b)).map(it => ({ key: it.m.key }))))
   }
-  const tidyNow = () => setPts(new Map([...tidyRects].map(([k, r]) => [k, { x: r.x, y: r.y }])))
+  const tidyNow = () => { setPts(new Map([...tidyRects].map(([k, r]) => [k, { x: r.x, y: r.y }]))); setZoom({ z: 1, px: 0, py: 0 }) }
   const btn = { padding: '2px 6px', border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', lineHeight: 1.2 }
   const fs = field / 42                                   // размер шрифта в мм поля — как подписи на карте
   const lab = m => (m.d.name ? m.d.name.slice(0, 14) : `#${m.i + 1}`)
@@ -202,10 +232,10 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>
           Фасады стоят как на карте раскроя: текстура (длина) по вертикали. Двигайте каждый пальцем куда нужно — он остаётся там, где отпустили, и прилипает к соседям. Раскрой возьмёт порядок {vert ? 'рядами сверху вниз' : 'колонками слева направо'}; зазор на рез добавит сам. Деталь «2 шт.» — два отдельных фасада.
         </p>
-        <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.size} ${view.size}`} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+        <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${view.size} ${view.size}`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onWheel={wheel}
           style={{ width: '100%', aspectRatio: '1 / 1', display: 'block', touchAction: 'none', background: '#f4f4f2', borderRadius: 10, border: '0.5px solid var(--border)', userSelect: 'none' }}>
           {rects.map(r => (
-            <g key={r.m.key} onPointerDown={e => start(e, r)} style={{ cursor: 'grab' }}>
+            <g key={r.m.key} data-facade="1" onPointerDown={e => { if (ptrs.current.size === 0) start(e, r) }} style={{ cursor: 'grab' }}>
               <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={drag?.key === r.m.key ? '#dfe9f5' : '#eceae4'} stroke="#333" strokeWidth={field / 400} />
               {/* размеры по сторонам, как на карте: по горизонтали — сверху, по вертикали — слева, повёрнуто */}
               <text x={r.x + r.w / 2} y={r.y + fs * 1.1} textAnchor="middle" fontSize={fs} fill="#222" style={{ pointerEvents: 'none' }}>{Math.round(r.w)}</text>
