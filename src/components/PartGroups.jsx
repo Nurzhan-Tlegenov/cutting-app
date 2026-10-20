@@ -42,32 +42,32 @@ export default function PartGroups({ details, setDetails, active, onActive, extr
         <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{shown ? '▴' : '▾'}</span>
       </div>
       {shown && <>
-      <div style={{ display: 'flex', gap: 5, margin: '4px 0', marginBottom: groups.length ? 6 : 2 }}>
-        <input type="text" placeholder="Новая группа: Ф1, Ящики…" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} style={{ flex: 1, minWidth: 0, padding: '4px 7px', fontSize: 12.5 }} />
-        <select value={dir} onChange={e => setDir(e.target.value)} style={{ width: 'auto', padding: '2px 3px', fontSize: 12 }} title="Как детали идут друг за другом">
-          <option value="y">↕</option>
-          <option value="x">↔</option>
+      <div style={{ display: 'flex', gap: 6, margin: '6px 0', marginBottom: groups.length ? 8 : 4 }}>
+        <input type="text" placeholder="Новая группа: Ф1, Ящики…" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} style={{ flex: 1, minWidth: 0, padding: '8px 10px', fontSize: 14 }} />
+        <select value={dir} onChange={e => setDir(e.target.value)} style={{ width: 'auto', padding: '6px 6px', fontSize: 14 }} title="Как детали идут друг за другом">
+          <option value="y">↕ друг над другом</option>
+          <option value="x">↔ рядом</option>
         </select>
-        <button type="button" onClick={add} style={{ padding: '0 11px', background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 17, lineHeight: 1 }}>+</button>
+        <button type="button" onClick={add} style={{ minWidth: 44, padding: '0 12px', background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 22, lineHeight: 1 }}>+</button>
       </div>
       {groups.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           {groups.map(g => {
             const on = active === g, c = groupColor(groups, g)
             return (
-              <div key={g} style={{ display: 'flex', alignItems: 'center', border: `1px solid ${c}`, borderRadius: 16, overflow: 'hidden', background: on ? c : 'transparent' }}>
+              <div key={g} style={{ display: 'flex', alignItems: 'center', border: `1px solid ${c}`, borderRadius: 20, overflow: 'hidden', background: on ? c : 'transparent' }}>
                 <button type="button" onClick={() => onActive(on ? null : g)} title={on ? 'Закончить отбор деталей' : 'Отметить детали этой группы'}
-                  style={{ padding: '4px 10px', border: 'none', background: 'transparent', color: on ? 'white' : c, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+                  style={{ padding: '8px 12px', border: 'none', background: 'transparent', color: on ? 'white' : c, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
                   {on ? '✓ ' : ''}{g} · {count(g)}
                 </button>
                 <button type="button" onClick={() => setDirOf(g, dirOf(g) === 'x' ? 'y' : 'x')} title="Друг над другом / рядом"
-                  style={{ padding: '4px 6px', border: 'none', borderLeft: `1px solid ${on ? 'rgba(255,255,255,0.5)' : c}`, background: 'transparent', color: on ? 'white' : c, fontSize: 12, cursor: 'pointer' }}>
+                  style={{ padding: '8px 10px', border: 'none', borderLeft: `1px solid ${on ? 'rgba(255,255,255,0.5)' : c}`, background: 'transparent', color: on ? 'white' : c, fontSize: 14, cursor: 'pointer' }}>
                   {dirOf(g) === 'x' ? '↔' : '↕'}
                 </button>
                 <button type="button" onClick={() => setLayoutOf(g)} title="Раскладка: порядок и ряды деталей в группе"
-                  style={{ padding: '4px 7px', border: 'none', borderLeft: `1px solid ${on ? 'rgba(255,255,255,0.5)' : c}`, background: 'transparent', color: on ? 'white' : c, fontSize: 12, cursor: 'pointer' }}>⊞</button>
+                  style={{ padding: '8px 10px', border: 'none', borderLeft: `1px solid ${on ? 'rgba(255,255,255,0.5)' : c}`, background: 'transparent', color: on ? 'white' : c, fontSize: 14, cursor: 'pointer' }}>⊞</button>
                 <button type="button" onClick={() => remove(g)} title="Распустить группу"
-                  style={{ padding: '4px 7px', border: 'none', borderLeft: `1px solid ${on ? 'rgba(255,255,255,0.5)' : c}`, background: 'transparent', color: on ? 'white' : c, fontSize: 12, cursor: 'pointer' }}>✕</button>
+                  style={{ padding: '8px 10px', border: 'none', borderLeft: `1px solid ${on ? 'rgba(255,255,255,0.5)' : c}`, background: 'transparent', color: on ? 'white' : c, fontSize: 14, cursor: 'pointer' }}>✕</button>
               </div>
             )
           })}
@@ -89,8 +89,8 @@ export function GroupChip({ detail, groups, active, onChange }) {
     const on = g === active
     return (
       <button type="button" onClick={() => onChange(on ? null : active)} title={on ? `Убрать из группы «${active}»` : `В группу «${active}»`}
-        style={{ padding: '4px 7px', border: `1.5px solid ${on ? groupColor(groups, active) : 'var(--border-md)'}`, borderRadius: 'var(--radius)',
-          background: on ? groupColor(groups, active) : 'transparent', color: on ? 'white' : 'var(--text-hint)', fontSize: 11, cursor: 'pointer', flexShrink: 0, lineHeight: 1.2 }}>
+        style={{ minWidth: 40, minHeight: 34, padding: '6px 9px', border: `1.5px solid ${on ? groupColor(groups, active) : 'var(--border-md)'}`, borderRadius: 'var(--radius)',
+          background: on ? groupColor(groups, active) : 'transparent', color: on ? 'white' : 'var(--text-hint)', fontSize: 13, cursor: 'pointer', flexShrink: 0, lineHeight: 1.2 }}>
         ⧉{on ? ' ✓' : g ? ` ${g}` : ''}
       </button>
     )
