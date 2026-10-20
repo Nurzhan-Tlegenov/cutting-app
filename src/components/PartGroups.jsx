@@ -11,6 +11,7 @@ export default function PartGroups({ details, setDetails, active, onActive, extr
   const [name, setName] = useState('')
   const [dir, setDir] = useState('y')
   const [layoutOf, setLayoutOf] = useState(null)   // группа, у которой открыта раскладка
+  const [open, setOpen] = useState(false)          // блок свёрнут: группами пользуются не всегда
   useBackClose(!!layoutOf, () => setLayoutOf(null))
   const used = groupsOf(details)
   const groups = [...used, ...(extra || []).map(g => g.name).filter(g => !used.includes(g))]
@@ -32,19 +33,22 @@ export default function PartGroups({ details, setDetails, active, onActive, extr
     if (active === g) onActive(null)
   }
   const count = g => details.filter(x => (x.part_group || '').trim() === g).length
+  const shown = open || !!active                    // идёт отбор деталей — блок открыт
   return (
-    <div style={{ padding: '8px 12px', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>⧉ Группы с общей текстурой</span>
-        <span style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>фасады одного шкафа — из одной полосы подряд</span>
+    <div style={{ padding: '5px 10px', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 8 }}>
+      <div onClick={() => { if (!active) setOpen(o => !o) }} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: 26 }}>
+        <span style={{ fontSize: 12.5, color: 'var(--text-muted)', flex: 1 }}>⧉ Группы с общей текстурой{groups.length ? ` · ${groups.length}` : ''}</span>
+        {!shown && groups.map(g => <span key={g} style={{ fontSize: 11, color: groupColor(groups, g), border: `0.5px solid ${groupColor(groups, g)}`, borderRadius: 10, padding: '0 6px' }}>{g}</span>)}
+        <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{shown ? '▴' : '▾'}</span>
       </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: groups.length ? 8 : 0 }}>
-        <input type="text" placeholder="Название группы: Ф1, Ящики…" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} style={{ flex: 1, minWidth: 0, padding: '5px 8px', fontSize: 13 }} />
-        <select value={dir} onChange={e => setDir(e.target.value)} style={{ width: 'auto', padding: '3px 4px', fontSize: 12 }} title="Как детали идут друг за другом">
-          <option value="y">↕ друг над другом</option>
-          <option value="x">↔ рядом</option>
+      {shown && <>
+      <div style={{ display: 'flex', gap: 5, margin: '4px 0', marginBottom: groups.length ? 6 : 2 }}>
+        <input type="text" placeholder="Новая группа: Ф1, Ящики…" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} style={{ flex: 1, minWidth: 0, padding: '4px 7px', fontSize: 12.5 }} />
+        <select value={dir} onChange={e => setDir(e.target.value)} style={{ width: 'auto', padding: '2px 3px', fontSize: 12 }} title="Как детали идут друг за другом">
+          <option value="y">↕</option>
+          <option value="x">↔</option>
         </select>
-        <button type="button" onClick={add} style={{ padding: '0 12px', background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>+</button>
+        <button type="button" onClick={add} style={{ padding: '0 11px', background: 'var(--blue)', color: 'white', border: 'none', borderRadius: 'var(--radius)', cursor: 'pointer', fontSize: 17, lineHeight: 1 }}>+</button>
       </div>
       {groups.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -71,6 +75,7 @@ export default function PartGroups({ details, setDetails, active, onActive, extr
       )}
       {layoutOf && <PartGroupLayout group={layoutOf} dir={dirOf(layoutOf)} color={groupColor(groups, layoutOf)} details={details} setDetails={setDetails} onClose={() => setLayoutOf(null)} />}
       {active && <p style={{ fontSize: 11, color: 'var(--blue)', margin: '6px 0 0' }}>Отбор в группу «{active}»: нажимайте ⧉ на деталях. Детали группы не поворачиваются и режутся из одной полосы подряд, в порядке списка.</p>}
+      </>}
     </div>
   )
 }
