@@ -15,7 +15,7 @@ export default function DirPathEditor({ value, def, preview, onChange }) {
   const chip = { padding: '2px 8px', borderRadius: 12, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }
   return (
     <div style={{ marginTop: 3 }}>
-      <div>Папки: <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{preview.join(' / ') || '— без папок —'}</b></div>
+      <div>Папки: <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{(Array.isArray(preview) ? preview.join(' / ') : String(preview || '')) || '— без папок —'}</b></div>
       {levels.map((lv, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3, paddingLeft: i * 12 }}>
           <span style={{ color: 'var(--text-hint)' }}>{i ? '└' : '📁'}</span>

@@ -299,7 +299,7 @@ const BEAM_NAME_DEFAULT = '{ZAKAZ}_{MAT}'
 const BEAM_DIR_DEFAULT = '{ZAKAZ}/{MAT}'
 function BeamSawPostBasic({ post, set }) {
   const ex = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
-  const dirPreview = v => String(v || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, ex)).join(' / ')
+  const dirPreview = v => String(v || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, ex))   // массив уровней (DirPathEditor сам соединяет)
   const dir = post.dirPath ?? BEAM_DIR_DEFAULT
   return (
     <div className="card" style={{ marginBottom: 10 }}>
