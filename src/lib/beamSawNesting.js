@@ -13,7 +13,7 @@
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.12'
+export const BEAM_SAW_VERSION = 'β0.13'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -410,17 +410,25 @@ export function packAll(pieces, s, kerf, X, Y, axes, opts) {
     // beamFree — цельный остаток в конце листа (после последней полосы), мм² с пропилом: по нему сравнивается последний лист
     sheets.push({ index: sheets.length, placed: out.placed, freeRects: [], family: 'guillotine', manualOffcuts, beamTree: plainTree(root), beamAxis: axis, beamCuts: out.cuts, beamLevels: out.maxLevel, beamFree: Math.max(0, root.A - root.used) * root.B, beamMaxFree: out.maxFree || 0 })
   }
-  // Форматник: последний лист — полосы «ступенькой» (см. orderStair); состав и полосы те же, меняется только их порядок
-  if (s.stairLast && sheets.length) {
-    const n = sheets.length - 1, root = roots[n]
-    const out = { placed: [], cuts: 0, maxLevel: 1, offcuts: [], kerf }
-    layout(root, 0, 0, s, out, true)
-    cuts += out.cuts - sheets[n].beamCuts
-    const manualOffcuts = out.offcuts.map(o => ({ x: +o.x.toFixed(1), y: +o.y.toFixed(1), w: +o.w.toFixed(1), h: +o.h.toFixed(1) }))
-    sheets[n] = { ...sheets[n], placed: out.placed, manualOffcuts, beamTree: plainTree(root), beamCuts: out.cuts, beamLevels: out.maxLevel, stairFree: stairFree(root) }
+  // Последний лист — полосы «ступенькой» (см. orderStair): самая заполненная полоса у нуля, самая пустая — последняя,
+  // чтобы детали были собраны к углу листа, а обрезок — с дальней стороны (пильный центр: обрезок формировался у нуля,
+  // а детали — за ним). Состав и полосы те же, меняется только их порядок. opts.noStair — лист не последний в заказе
+  if (sheets.length && !opts.noStair) {
+    const n = sheets.length - 1
+    sheets[n] = relayout(roots[n], sheets[n], s, kerf, true)
+    cuts = sheets.reduce((a, sh) => a + sh.beamCuts, 0)
   }
   const unplaced = pieces.filter(p => !ctx.used.has(p.id)).map(p => p.id)
-  return { sheets, cuts, unplaced }
+  return { sheets, cuts, unplaced, roots }
+}
+// Тот же лист с другим порядком полос 1-го уровня (stair — «ступенькой» для последнего листа, иначе — по настройке)
+function relayout(root, sheet, s, kerf, stair) {
+  const out = { placed: [], cuts: 0, maxLevel: 1, offcuts: [], kerf }
+  layout(root, 0, 0, s, out, stair)
+  const manualOffcuts = out.offcuts.map(o => ({ x: +o.x.toFixed(1), y: +o.y.toFixed(1), w: +o.w.toFixed(1), h: +o.h.toFixed(1) }))
+  const sh = { ...sheet, placed: out.placed, manualOffcuts, beamTree: plainTree(root), beamCuts: out.cuts, beamLevels: out.maxLevel, beamMaxFree: out.maxFree || 0 }
+  if (stair && s.stairLast) sh.stairFree = stairFree(root); else delete sh.stairFree
+  return sh
 }
 
 const areaOf = sh => sh.placed.reduce((a, p) => a + p.w * p.h, 0)
@@ -477,7 +485,11 @@ function squeezeLast(best, pieces, s, kerf, X, Y, axisSets, rnd) {
   const sheets = best.sheets.slice()
   idx.sort((a, b) => a - b).forEach((j, t) => { sheets[j] = { ...r.sheets[t], index: j } })
   if (r.sheets.length === k + 1) sheets[n - 1] = { ...r.sheets[k], index: n - 1 }
-  else sheets.splice(n - 1, 1)                     // последний лист опустел — листов меньше
+  else {                                           // последний лист опустел — листов меньше
+    const j = idx[k - 1]                           // последний лист подбора стал обычным — полосы по настройке, не «ступенькой»
+    sheets[j] = relayout(r.roots[k - 1], sheets[j], s, kerf, false)
+    sheets.splice(n - 1, 1)
+  }
   return { sheets, cuts: sheets.reduce((a, sh) => a + (sh.beamCuts || 0), 0), unplaced: best.unplaced }
 }
 
