@@ -90,6 +90,19 @@ export function programName(tpl, ctx) {
 export const FOLDER_PARTS = NAME_PARTS.filter(([code]) => code !== '{N}' && code !== '{MAT}')
 export const FOLDER_TPL_DEFAULT = '{ZAKAZ}'
 export const folderName = (tpl, ctx) => fillName(String(tpl || '').trim() || FOLDER_TPL_DEFAULT, { ...ctx, n: null }) || fillName(FOLDER_TPL_DEFAULT, { ...ctx, n: null }) || 'zakaz'
+/** Вставить часть имени ({KLIENT} и т. п.) в шаблон на позицию курсора pos (null — в конец), с «_» по краям, где нужно */
+export function insertPart(value, pos, code) {
+  const v = String(value || '')
+  const at = pos == null || pos < 0 || pos > v.length ? v.length : pos
+  const sep = ch => !ch || /[_.\-/]/.test(ch)
+  const before = v.slice(0, at), after = v.slice(at)
+  return before + (sep(before.slice(-1)) ? '' : '_') + code + (sep(after.charAt(0)) ? '' : '_') + after
+}
+// ─── Имена файлов: карты PDF и архив — шаблоны из тех же частей (настраиваются пользователем) ────────
+export const FILE_NAME_PARTS = NAME_PARTS.filter(([code]) => code !== '{N}')
+export const FILE_NAME_DEFAULTS = { maps: '{ZAKAZ}_{KLIENT}_{MAT}', zip: '{ZAKAZ}_{KLIENT}' }
+/** Имя файла по шаблону (без расширения): tpl — шаблон или пусто (по умолчанию для kind), ctx — как у programName */
+export const fileNameOf = (kind, tpl, ctx) => fillName(String(tpl || '').trim() || FILE_NAME_DEFAULTS[kind] || '{ZAKAZ}', { ...ctx, n: null }) || fillName(FILE_NAME_DEFAULTS[kind], { ...ctx, n: null }) || 'zakaz'
 function fillName(t, ctx) {
   const d = new Date(), date = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')
   const val = { N: ctx.n == null ? '' : String(ctx.n), ZAKAZ: String(ctx.order?.order_name || '').trim() || ctx.order?.order_number || '', NOMER: ctx.order?.order_number || '',

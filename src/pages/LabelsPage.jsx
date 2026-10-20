@@ -15,7 +15,8 @@ import QrPartsEditor from '../components/QrPartsEditor'
 import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, routerPost } from '../lib/cncSettings'
 import CncLoader from '../components/CncLoader'
-import { orderTitle, orderFileName, toLatin, programName, folderName } from '../lib/orderUtils'
+import { orderTitle, orderFileName, toLatin, programName, folderName, fileNameOf } from '../lib/orderUtils'
+import { fileNamesOf } from '../lib/fileNames'
 import { orderClient } from '../lib/productionApi'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -590,7 +591,7 @@ export default function LabelsPage() {
     try {
       const post = routerPost(getCnc(user)), base = programName(post.nameTpl, { n: null, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })   // как у программ ЧПУ
       const files = await buildLabelFiles({ order, mat, base, post, tpl, sheets: mat.sheets.map((_, si) => ({ si, nc: `${programName(post.nameTpl, { n: si + 1, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })}.${post.ext || 'nc'}` })) })
-      setSaveAsk({ files, zipName: `Birki_${base}.zip` })
+      setSaveAsk({ files, zipName: `Birki_${fileNameOf('zip', fileNamesOf(user).zip, { total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })}.zip` })
     } finally { setBusy(false) }
   }
   const pill = { padding: '8px 14px', borderRadius: 20, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 13 }

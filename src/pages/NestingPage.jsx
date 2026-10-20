@@ -19,7 +19,7 @@ import { edgeTotals, detailEdgeList, holeEdgeSegments } from '../lib/edgeLength'
 import { backSide } from '../lib/partInfo'
 import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
-import { productionSaveNesting, productionOrderSheet } from '../lib/productionApi'
+import { productionSaveNesting, productionOrderSheet, orderClient } from '../lib/productionApi'
 import { myOrderPerms } from '../lib/workplaces'
 import BottomNav from '../components/BottomNav'
 import ContourEditor from '../components/ContourEditor'
@@ -43,7 +43,8 @@ import { savedNestings } from '../lib/savedNesting'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
-import { orderTitle, orderFileName, getNextOrderNumber } from '../lib/orderUtils'
+import { orderTitle, orderFileName, getNextOrderNumber, fileNameOf } from '../lib/orderUtils'
+import { fileNamesOf } from '../lib/fileNames'
 import { productionLabel, sortProductions } from '../lib/productionLabel'
 import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import CncLoader from '../components/CncLoader'
@@ -1629,6 +1630,8 @@ export default function NestingPage() {
   // есть детали с фигурным контуром — показываем галочку «по габаритам»
   const hasShaped = useMemo(() => { try { return needsTrueShape(details) } catch { return false } }, [details])
   const { user, profile, refreshProfile, cabinet, isMaster } = useAuth()
+  const [clientName, setClientName] = useState('')   // имя заказчика — для имени PDF карт (настройка «Имена файлов»)
+  useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }).catch(() => {}); return () => { alive = false } }, [id])
   // кабинет производства: ЧПУ и бирки по принятому раскрою
   // ЧПУ и бирки из раскроя: владелец производства, начальник производства и сотрудник с этим полномочием
   const [wperms, setWperms] = useState(null)
@@ -2392,7 +2395,7 @@ export default function NestingPage() {
         const { stats, quote } = await statsAndQuote({ order, mats: [mat], method: cuttingMethod })
         summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {})
       }
-      await saveNestingPdf({ order, fileName: `Karty_${orderFileName(order)}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`, mat,
+      await saveNestingPdf({ order, fileName: `${fileNameOf('maps', fileNamesOf(user).maps, { total: mat.sheets.length, order, material: mat.name, thickness: mat.thickness, client: clientName })}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`, mat,
         summary, tpl: cabinet === 'production' ? userPdfTpl(user) : null })
     } catch (e) { window.alert('Не удалось собрать PDF: ' + (e?.message || e)) } finally { setPdfBusy(null) }
   }

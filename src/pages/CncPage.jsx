@@ -36,6 +36,8 @@ import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { saveBeamSawXml, buildBeamSawXml } from '../lib/beamSawXml'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
+import { fileNamesOf } from '../lib/fileNames'
+import { fileNameOf } from '../lib/orderUtils'
 const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -129,7 +131,8 @@ export default function CncPage() {
 
   // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
   const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName })
-  const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для архива, бирок, PDF
+  const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для бирок
+  const fileBase = kind => fileNameOf(kind, fileNamesOf(user)[kind], nameCtx(null))   // имена PDF карт и архивов — по настройке аккаунта («Имена файлов»)
   const fileName = si => `${programName(post.nameTpl, nameCtx(si + 1))}.${post.ext || 'nc'}`
   const beamName = () => `${programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', nameCtx(null))}.${saw?.ext || 'xml'}`
   const build = () => {
@@ -248,7 +251,7 @@ export default function CncPage() {
     const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
     if (built.second) { const d2 = pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`); files.push(...built.second.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: d2 }))) }
-    setSaveAsk({ files, zipName: `${baseName()}.zip` })
+    setSaveAsk({ files, zipName: `${fileBase('zip')}.zip` })
   }
   const allCount = () => built.files.filter(f => !f.empty).length + (built.labels?.length || 0) + (built.drill || []).reduce((a, r) => a + r.files.length, 0) + (built.second?.files.filter(f => !f.empty).length || 0)
   const simView = useMemo(() => {
@@ -486,7 +489,7 @@ export default function CncPage() {
                   ? <>Файлов: {built.labels.length} — картинки бирок, бирки по листам, список листов и PDF всех бирок для печати. Папка: <b style={{ fontFamily: 'monospace' }}>{labelsDir().join(' / ')}</b>.</>
                   : <>Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт маркировка, затем раскрой.</>}
               </div>
-              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${baseName()}.zip`, ...(built.labelsOwnDir ? { folders: labelsDir() } : {}) })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
+              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${fileBase('zip')}.zip`, ...(built.labelsOwnDir ? { folders: labelsDir() } : {}) })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
             </div>
           )}
           {built?.drill?.map(r => (
@@ -505,7 +508,7 @@ export default function CncPage() {
               {r.files.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => setXmlView({ title: r.post.name, files: r.files })} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>👁 Просмотр</button>
-                  <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${baseName()}.zip`, folders: drillDir(r) })}
+                  <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${fileBase('zip')}.zip`, folders: drillDir(r) })}
                     style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы ({r.files.length})</button>
                   {r.files.length === 1 && <button type="button" onClick={() => { download(r.files[0].name, r.files[0].data, 'text/xml'); mark('files') }} style={small}>⬇ {r.files[0].name}</button>}
                 </div>
@@ -572,7 +575,7 @@ export default function CncPage() {
         </div>, document.body
       )}
       {xmlView && <Drill6Viewer title={xmlView.title} files={xmlView.files} onClose={() => setXmlView(null)} />}
-      {pdfAsk && mat && <PdfSetup order={order} mat={mat} method={order?.cutting_method || 'nesting'} fileName={`Karty_${baseName()}.pdf`} onClose={() => setPdfAsk(false)} />}
+      {pdfAsk && mat && <PdfSetup order={order} mat={mat} method={order?.cutting_method || 'nesting'} fileName={`${fileBase('maps')}.pdf`} onClose={() => setPdfAsk(false)} />}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={savedDone}
         folders={saveAsk.folders || routerDir()} />}
       <BottomNav />

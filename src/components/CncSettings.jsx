@@ -2,6 +2,8 @@ import { LABEL_POS, getLabelTpl, QR_PARTS, labelQr } from '../lib/labelMaker'
 import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
+import TplInput from './TplInput'
+import FileNamesSettings from './FileNamesSettings'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState, useRef, useEffect } from 'react'
@@ -159,6 +161,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
       })()}
       {drill && <Drill6Basic post={post} set={set} router={router} />}
       {saw && <BeamSawPostBasic post={post} set={set} />}
+      <FileNamesSettings />
       {!drill && !saw && <>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Присадочная голова</Title>
@@ -241,16 +244,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         {/* название управляющей программы — собирается из частей */}
         <div style={{ marginTop: 10 }}>
           <label className="label">Название управляющей программы</label>
-          <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || NAME_TPL_DEFAULT} id={'nameTpl' + post.id}
-            onBlur={e => { const v = e.target.value.trim() || NAME_TPL_DEFAULT; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
-            {NAME_PARTS.map(([code, label]) => (
-              <button key={code} type="button" title={`Добавить в название: ${label}`}
-                onClick={() => { const cur = (post.nameTpl || NAME_TPL_DEFAULT).replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
-                style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
-            ))}
-            <button type="button" onClick={() => set({ nameTpl: NAME_TPL_DEFAULT })} style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ как было</button>
-          </div>
+          <TplInput value={post.nameTpl || NAME_TPL_DEFAULT} def={NAME_TPL_DEFAULT} parts={NAME_PARTS} onChange={v => set({ nameTpl: v })} />
           <Hint>
             Части в фигурных скобках подставляются сами, между ними можно писать свой текст. Получится, например:{' '}
             <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' })}.{post.ext || 'nc'}</b>.
@@ -308,15 +302,7 @@ function BeamSawPostBasic({ post, set }) {
       <Hint>Программа для пильного центра KDT: дерево резов по всем листам материала — полосы, поперечные резы, детали, деловые обрезки, таблица деталей для бирок. Выпускается в окне ЧПУ заказа, если раскрой посчитан как «Пильный центр β».</Hint>
       <div style={{ marginTop: 10 }}>
         <label className="label">Название программы</label>
-        <input type="text" key={post.id + (post.nameTpl || '')} defaultValue={post.nameTpl || BEAM_NAME_DEFAULT}
-          onBlur={e => { const v = e.target.value.trim() || BEAM_NAME_DEFAULT; if (v !== post.nameTpl) set({ nameTpl: v }) }} style={{ fontFamily: 'monospace', fontSize: 13 }} />
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
-          {NAME_PARTS.filter(([code]) => code !== '{N}').map(([code, label]) => (
-            <button key={code} type="button" onClick={() => { const cur = (post.nameTpl || BEAM_NAME_DEFAULT).replace(/_+$/, ''); set({ nameTpl: cur + (cur ? '_' : '') + code }) }}
-              style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue-mid)', background: 'transparent', color: 'var(--blue)' }}>+ {label}</button>
-          ))}
-          <button type="button" onClick={() => set({ nameTpl: BEAM_NAME_DEFAULT })} style={{ padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ как было</button>
-        </div>
+        <TplInput value={post.nameTpl || BEAM_NAME_DEFAULT} def={BEAM_NAME_DEFAULT} parts={NAME_PARTS.filter(([code]) => code !== '{N}')} onChange={v => set({ nameTpl: v })} />
         <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null })}.{post.ext || 'xml'}</b> — латиницей, один файл на материал.</Hint>
       </div>
       <div style={{ marginTop: 10 }}>
