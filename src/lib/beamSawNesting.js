@@ -14,7 +14,7 @@ import { beamSettings, maxLevels, trimAt } from './beamSaw'
 import { groupLinesOnSheet } from './partGroups'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.15'
+export const BEAM_SAW_VERSION = 'β0.16'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -451,10 +451,18 @@ function layout(node, ox, oy, s, out, stair = false) {
   // самый крупный цельный остаток на листе (на любом уровне), мм² с пропилом — по нему сравнивается последний лист
   if (r > EPS) out.maxFree = Math.max(out.maxFree || 0, r * node.B)
   if (r - k > EPS && node.slots.length) {
-    const w = node.axis === 'x' ? r - k : node.B - k, h = node.axis === 'x' ? node.B - k : r - k
+    let w = node.axis === 'x' ? r - k : node.B - k, h = node.axis === 'x' ? node.B - k : r - k
+    let x = node.axis === 'x' ? ox + pos : ox, y = node.axis === 'x' ? oy : oy + pos
+    // Обрезок — целиком, как он остаётся на станке (как у фрезера): стороны у края листа, где реза не было, — вместе
+    // с обрезкой листа. Остаток 1-го уровня: дальний край по оси и обе стороны поперёк — кромки листа без реза;
+    // остаток в конце полосы (2-й уровень): дальний край по оси (начало полосы — рез обрезки листа). Глубже — всё резы
+    if (node.level <= 2) {
+      if (node.axis === 'x') w += s.trimRight; else h += s.trimTop
+      if (node.level === 1) { if (node.axis === 'x') { y -= s.trimBottom; h += s.trimBottom + s.trimTop } else { x -= s.trimLeft; w += s.trimLeft + s.trimRight } }
+    }
     const big = Math.max(w, h), small = Math.min(w, h)
     if (big >= Math.max(s.offcutMinL, s.offcutMinW) - EPS && small >= Math.min(s.offcutMinL, s.offcutMinW) - EPS)
-      out.offcuts.push({ x: node.axis === 'x' ? ox + pos : ox, y: node.axis === 'x' ? oy : oy + pos, w, h })
+      out.offcuts.push({ x, y, w, h })
   }
 }
 
