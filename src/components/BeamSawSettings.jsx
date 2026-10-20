@@ -138,6 +138,9 @@ export default function BeamSawSettings({ prod, onSaved }) {
         ))}
       </div>
       {check('mergeSame', 'Одинаковые карты — одной картой «× N листов»')}
+
+      {head('Прифуговка')}
+      {field('joint', 'Прифуговка, мм (0 — нет)', 'Когда выбран пильный центр, в заказе у всех кромок без своей прифуговки ставится эта: деталь в раскрой больше на столько с каждой закромленной стороны. Не нужно указывать вручную при каждом импорте.')}
       <button type="button" onClick={reset} style={{ marginTop: 8, padding: '6px 12px', borderRadius: 16, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
         Вернуть значения по умолчанию
       </button>

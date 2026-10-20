@@ -31,7 +31,7 @@ import { loadOrderModel } from '../lib/orderModel'
 import { hasModel } from '../lib/model3d'
 import { parsePolygonFromDetail, needsTrueShape } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
-import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY } from '../lib/edgeCut'
+import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY, edgeKey, blankType } from '../lib/edgeCut'
 import { saveNestingPdf } from '../lib/nestingPdf'
 import { computeCutLines } from '../lib/cutLines'
 import { insetEdgeLines } from '../lib/edgeLines'
@@ -1702,6 +1702,23 @@ export default function NestingPage() {
     const beam = next === 'beamsaw', method = beam ? 'guillotine' : next
     Promise.resolve().then(() => setMachine(method, beam))
   }, [prodsReady, order?.production_id, productions, betaBeam])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Прифуговка из настроек пильного центра производства: когда выбран пильный центр и заказ свой — у видов кромки заказа
+  // без своей прифуговки ставится производственная (один раз; в бланке её потом можно поправить). Так все места, где
+  // деталь пересчитывается в заготовку (раскрой, карта, бирки, программа), видят одно и то же
+  useEffect(() => {
+    if (!beamSaw || !prodsReady || !order || order.user_id !== user?.id) return
+    const pr = order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)
+    const j = beamSettings(pr?.beam_saw_settings).joint
+    if (!(j > 0)) return
+    const types = parseEdgeTypes(order.edge_types)
+    const keys = new Set(allDetails.flatMap(d => [d.edge_left, d.edge_right, d.edge_top, d.edge_bottom]).map(edgeKey).filter(Boolean))
+    const next = { ...types }
+    let changed = false
+    for (const k of keys) { const t = types[k] || blankType(); if (!(Number(t.joint) > 0)) { next[k] = { ...t, t: Number(t.t) || 0, joint: j }; changed = true } }
+    if (!changed) return
+    setOrder(o => (o ? { ...o, edge_types: next } : o))
+    supabase.from('orders').update({ edge_types: next }).eq('id', id).then(({ error }) => { if (!error) setParamsWarn(`Прифуговка ${j} мм из настроек пильного центра добавлена к кромкам заказа — пересчитайте раскрой.`) })
+  }, [beamSaw, prodsReady, order?.production_id, allDetails.length])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedOnOpenRef = useRef(false)
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
   useBackClose(!!needProd, () => setNeedProd(null))
