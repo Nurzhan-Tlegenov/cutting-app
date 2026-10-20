@@ -109,8 +109,9 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
   const mine = details.map((d, i) => ({ d, i })).filter(({ d }) => (d.part_group || '').trim() === group)
     .flatMap(({ d, i }) => Array.from({ length: Math.max(1, Number(d.qty) || 1) }, (_, q) => ({ key: `${d.uid}#${q}`, uid: d.uid, q, d, i, pos: posOfInstance(d.part_group_pos, q), ord: i })))
   const rows = groupRows(mine)
-  const W = m => Number(m.d.w) || 0, L = m => Number(m.d.h) || 0
-  // текстура — вдоль длины (Y): деталь стоит длиной по вертикали, как на карте раскроя
+  // в бланке поле w — «Длина», h — «Ширина». Текстура идёт вдоль длины, как на карте раскроя: длина — по вертикали (Y),
+  // ширина — по горизонтали
+  const W = m => Number(m.d.h) || 0, L = m => Number(m.d.w) || 0
   const ext = m => ({ w: W(m), h: L(m) })
   // плотная раскладка рядов -> прямоугольники (мм, Y вниз — как на экране)
   const tidy = rs => {
@@ -128,8 +129,10 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
   const [drag, setDrag] = useState(null)      // { key, dx, dy, x, y } — что тащим и где оно сейчас
   const svgRef = useRef(null)
   const rects = mine.map(m => ({ m, ...(drag?.key === m.key ? { ...base.get(m.key), x: drag.x, y: drag.y } : base.get(m.key)) }))
-  const bw = Math.max(1, ...rects.map(r => r.x + r.w)), bl = Math.max(1, ...rects.map(r => r.y + r.h))
-  const field = Math.max(bw, bl) * 1.5 + 100
+  // масштаб поля — по раскладке без перетаскивания и не меняется, пока фасад тащат (иначе превью «уезжало» и мельчало)
+  const baseRects = [...base.values()]
+  const fieldNow = Math.max(1, ...baseRects.map(r => r.x + r.w), ...baseRects.map(r => r.y + r.h)) * 1.5 + 100
+  const field = drag?.field || fieldNow
   const toMm = e => { const b = svgRef.current.getBoundingClientRect(); return { x: (e.clientX - b.left) / b.width * field - 50, y: (e.clientY - b.top) / b.height * field - 50 } }
   const apply = newRows => {
     // позиция каждого экземпляра -> у детали строка «ряд.место» по экземплярам через «;»
@@ -141,8 +144,24 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
       return { ...x, part_group_pos: Array.from({ length: n }, (_, q) => pos.get(`${x.uid}#${q}`) || '').join(';') }
     }))
   }
-  const start = (e, r) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); const p = toMm(e); setDrag({ key: r.m.key, dx: p.x - r.x, dy: p.y - r.y, x: r.x, y: r.y }) }
-  const move = e => { if (!drag) return; const p = toMm(e); setDrag(d => ({ ...d, x: p.x - d.dx, y: p.y - d.dy })) }
+  const start = (e, r) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); const p = toMm(e); setDrag({ key: r.m.key, dx: p.x - r.x, dy: p.y - r.y, x: r.x, y: r.y, field }) }
+  // прилипание: края фасада притягиваются к краям соседей (вплотную и вровень), как на карте раскроя
+  const snap = (key, x, y, w, h) => {
+    const th = field / 30
+    let bx = null, by = null, dxBest = th, dyBest = th
+    for (const [k, o] of base) {
+      if (k === key) continue
+      for (const [cand, d] of [[o.x + o.w, 0], [o.x - w, 0], [o.x, 0], [o.x + o.w - w, 0]]) { const dd = Math.abs(x - cand) + d; if (dd < dxBest) { dxBest = dd; bx = cand } }
+      for (const [cand, d] of [[o.y + o.h, 0], [o.y - h, 0], [o.y, 0], [o.y + o.h - h, 0]]) { const dd = Math.abs(y - cand) + d; if (dd < dyBest) { dyBest = dd; by = cand } }
+    }
+    return { x: bx ?? x, y: by ?? y }
+  }
+  const move = e => {
+    if (!drag) return
+    const p = toMm(e), r = base.get(drag.key)
+    const s = snap(drag.key, p.x - drag.dx, p.y - drag.dy, r.w, r.h)
+    setDrag(d => ({ ...d, x: s.x, y: s.y }))
+  }
   const end = () => {
     if (!drag) return
     // ряды — по положению центров: деталь попадает в ряд, с которым её центр перекрывается по высоте (↕) / ширине (↔);
@@ -185,7 +204,7 @@ function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
           ))}
         </svg>
         <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
-          {rows.map((r, ri) => `${vert ? 'ряд' : 'колонка'} ${ri + 1}: ${r.map(m => `${lab(m)}${(Number(m.d.qty) || 1) > 1 ? ` (${m.q + 1})` : ''} ${W(m)}×${L(m)}`).join(' · ')}`).join('  |  ')}. Порядок сохраняется с заказом и соблюдается в раскрое на любом станке.
+          {rows.map((r, ri) => `${vert ? 'ряд' : 'колонка'} ${ri + 1}: ${r.map(m => `${lab(m)}${(Number(m.d.qty) || 1) > 1 ? ` (${m.q + 1})` : ''} ${L(m)}×${W(m)}`).join(' · ')}`).join('  |  ')}. Порядок сохраняется с заказом и соблюдается в раскрое на любом станке.
         </p>
       </div>
     </div>
