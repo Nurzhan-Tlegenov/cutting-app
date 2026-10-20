@@ -3,6 +3,7 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 // у открытой страницы адреса подгружаемых частей устаревают, и импорт падал с «Failed to fetch dynamically imported module».
 import { readBasisFile, packScene } from '../lib/basisB3d'
 import { readAstraFile } from '../lib/astraAdd'
+import { isK3File, readK3File } from '../lib/k3Mdb'
 import { readAstraXmlFile, looksLikeAstraXml } from '../lib/astraXml'
 import { readPro100Obj } from '../lib/pro100Obj'
 import { readSkpFile, isSkp } from '../lib/skpImport'
@@ -31,7 +32,7 @@ function savedFaceOrder(v) {
   return [...list, ...FACE_ORDER_DEFAULT.filter(c => !list.includes(c))]
 }
 
-// Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, Астра, PRO100, SketchCut (PDF).
+// Импорт деталей в карточку заказа: Excel/CSV, Базис-Мебельщик, Астра, К3-Мебель, PRO100, SketchCut (PDF).
 // Базис-Мебельщик (.b3d) и Астра Конструктор Мебели (.add) читаются напрямую
 // из файла модели — с контуром, кромкой, пазами и присадкой.
 // onImport({ items, mode: 'add' | 'replace', material, thickness, orderName })
@@ -43,6 +44,8 @@ const SOURCES = [
     hint: 'Выберите файл модели Базиса (.b3d) — возьмём детали с контуром, кромкой, пазами и присадкой. Подойдёт и таблица деталей из Базиса в Excel/CSV.' },
   { id: 'astra', icon: '🧩', label: 'Астра',
     hint: 'Выберите файл проекта «Астра Конструктор Мебели» (.add) — возьмём детали с контуром, кромкой, пазами, присадкой и 3D-моделью. Если проект не читается — подойдёт XML из Астры (Файл → Экспорт XML), но без 3D.' },
+  { id: 'k3', icon: '🗄️', label: 'К3-Мебель',
+    hint: 'Выберите базу заказа из К3-Мебель (.mdb — К3 сохраняет её рядом со сценой .k3) — возьмём детали с контуром, кромкой по сторонам и фигурным участкам, пазами, присадкой и 3D-моделью. Сам файл сцены .k3 не нужен.' },
   { id: 'pro100', icon: '🪑', label: 'PRO100',
     hint: 'Выберите модель, сохранённую из PRO100 в формате OBJ (Файл → Экспорт) — возьмём панели с размерами и 3D-модель; названия, кромку и присадку нужно будет добавить в приложении. Подойдёт и отчёт со списком деталей в Excel или CSV.' },
   { id: 'sketchup', icon: '🏠', label: 'SketchUp',
@@ -54,7 +57,7 @@ const SOURCES = [
 const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain'
 const ALL = '__all__'
 
-// Файл модели: Базис (.b3d, 'BZ…'), Астра (.add, составной файл OLE2), PRO100 (.obj). Иначе — null (это таблица).
+// Файл модели: Базис (.b3d, 'BZ…'), Астра (.add, составной файл OLE2), К3-Мебель (.mdb), PRO100 (.obj). Иначе — null (это таблица).
 async function readModelFile(file, faceRule, marks = null) {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
   const lower = file.name.toLowerCase()
@@ -68,6 +71,11 @@ async function readModelFile(file, faceRule, marks = null) {
   }
   if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
     return { src: 'basis', res: await readBasisFile(file, { faceRule }) }
+  }
+  // К3-Мебель: база Access ('Standard Jet DB' со смещения 4)
+  const head20 = new Uint8Array(await file.slice(0, 20).arrayBuffer())
+  if (isK3File(head20) || lower.endsWith('.mdb') || lower.endsWith('.accdb')) {
+    return { src: 'k3', res: await readK3File(file, { faceRule }) }
   }
   const ole = head[0] === 0xD0 && head[1] === 0xCF && head[2] === 0x11 && head[3] === 0xE0
   if (lower.endsWith('.add') || (ole && !/\.xls$/.test(lower))) {
@@ -452,6 +460,12 @@ export default function ImportDetails({ hasDetails, onImport }) {
               <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
                 Из SketchUp взяты панели мебельного плагина: название, размер, материал, кромка по сторонам, направление текстуры и присадка (конфирматы, шканты, эксцентрики, полкодержатели, чашки петель) — {sumInfo('holes')} отв.
                 {basis.other > 0 && ` Фурнитура и прочие объекты (${basis.other}) — в 3D, упрощённо.`}{basis.hidden > 0 && ` Скрытые в модели объекты не взяты (${basis.hidden}).`}
+              </div>
+            )}
+            {basis?.k3 && (
+              <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                Из К3 взяты детали с контуром, кромкой, пазами и присадкой ({sumInfo('holes')} отв.). Размер детали — габарит с кромкой, как в К3;
+                у каждой кромки из номенклатуры К3 взяты толщина, подрезка и прифуговка — после импорта проверьте их в видах кромки бланка: размер пила считается по ним.
               </div>
             )}
             {basis && !basis.bare && !basis.skp && !basis.pdf && (

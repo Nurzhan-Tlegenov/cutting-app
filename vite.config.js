@@ -11,6 +11,13 @@ const APP_COMMIT = String(process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7)
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: [
+      // mdb-reader (импорт К3-Мебель): шифрование Access не нужно, а его зависимости тянут Node-потоки и process
+      { find: /^browserify-aes(\/.*)?$/, replacement: '/src/lib/shims/mdbCrypto.js' },
+      { find: /^create-hash(\/.*)?$/, replacement: '/src/lib/shims/mdbCrypto.js' },
+    ],
+  },
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
     __APP_COMMIT__: JSON.stringify(APP_COMMIT),

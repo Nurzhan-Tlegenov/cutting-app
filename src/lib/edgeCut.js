@@ -126,7 +126,7 @@ export const rawDetail = d => d?._raw || d
 export const EDGE_TYPES_HINT = 'Заказ сохранён, но толщину кромки, подрезку и прифуговку сохранить не удалось: в базе нет колонки. Выполните migration_edge_types.sql в Supabase (SQL Editor) и сохраните заказ ещё раз.'
 export const blankType = () => ({ t: '', trim: false, joint: 0 })
 
-/** Толщина кромок из импортированной модели (Базис пишет её в свойствах детали) -> { название: { t, trim, joint } } */
+/** Толщина кромок из импортированной модели (Базис пишет её в свойствах детали; К3 — ещё подрезку и прифуговку) -> { название: { t, trim, joint } } */
 export function typesFromItems(items) {
   const out = {}
   for (const it of items || []) {
@@ -134,7 +134,7 @@ export function typesFromItems(items) {
     if (!info) continue
     for (const side of SIDES) {
       const name = edgeKey(it.edges?.[side]), t = num(info[side]?.thick)
-      if (name && t > 0 && !out[name]) out[name] = { t, trim: false, joint: 0 }
+      if (name && t > 0 && !out[name]) out[name] = { t, trim: !!info[side]?.trim, joint: num(info[side]?.joint) || 0 }
     }
   }
   return out

@@ -1,0 +1,392 @@
+{
+ "order": "№115 пр.70 лет 69-8",
+ "items": [
+  {
+   "name": "Изделие № 1 / Стенка",
+   "size": "2008x70x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 2,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "front Ø7x16 [left+bottom] {\"left\":35,\"bottom\":1004} Конфирмат",
+    "edge bottom Ø5x35 @35 z8 Конфирмат",
+    "edge top Ø5x35 @35 z8 Конфирмат"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стойка",
+   "size": "330x858x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "front Ø2x12 x3 [left+top] {\"left\":405,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [right+top] {\"right\":261,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [right+top] {\"right\":101,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [right+top] {\"right\":37,\"top\":158} Саморез 3.5х16"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стойка",
+   "size": "330x858x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "front Ø2x12 x3 [right+top] {\"right\":405,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [left+top] {\"left\":261,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [left+top] {\"left\":101,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [left+top] {\"left\":37,\"top\":158} Саморез 3.5х16"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Полка",
+   "size": "2004x904x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стойка",
+   "size": "60x850x16",
+   "qty": 2,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стенка",
+   "size": "2008x801x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 2,
+   "shaped": false,
+   "edges": "right:Кромка АБС 19х1 Орех Каминный",
+   "edgeSegs": [],
+   "edgeInfo": {
+    "right": "1/trim/1"
+   },
+   "drillings": [
+    "front Ø7x16 [left+bottom] {\"left\":50,\"bottom\":1004} Конфирмат",
+    "front Ø7x16 [left+bottom] {\"left\":280,\"bottom\":1004} Конфирмат",
+    "edge bottom Ø5x35 @50 z8 Конфирмат",
+    "edge bottom Ø5x35 @750 z8 Конфирмат",
+    "edge top Ø5x35 @50 z8 Конфирмат",
+    "edge top Ø5x35 @750 z8 Конфирмат"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стенка",
+   "size": "2008x131x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 2,
+   "shaped": false,
+   "edges": "right:Кромка АБС 19х1 Орех Каминный",
+   "edgeSegs": [],
+   "edgeInfo": {
+    "right": "1/trim/1"
+   },
+   "drillings": [
+    "front Ø7x16 [left+bottom] {\"left\":30,\"bottom\":1004} Конфирмат",
+    "edge bottom Ø5x35 @65 z8 Конфирмат",
+    "edge top Ø5x35 @65 z8 Конфирмат"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стенка задняя",
+   "size": "160x922x16",
+   "qty": 2,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "edge right Ø5x35 @50 z8 Конфирмат",
+    "edge right Ø5x35 @110 z8 Конфирмат",
+    "edge left Ø5x35 @50 z8 Конфирмат",
+    "edge left Ø5x35 @110 z8 Конфирмат"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стенка передняя",
+   "size": "160x922x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "front Ø5x16 [left+bottom] {\"left\":223,\"bottom\":78} Винт М4х22",
+    "front Ø5x16 [left+bottom] {\"left\":95,\"bottom\":78} Винт М4х22",
+    "front Ø5x16 [right+bottom] {\"right\":101,\"bottom\":78} Винт М4х22",
+    "front Ø5x16 [right+bottom] {\"right\":229,\"bottom\":78} Винт М4х22",
+    "edge right Ø5x35 @50 z8 Конфирмат",
+    "edge right Ø5x35 @110 z8 Конфирмат",
+    "edge left Ø5x35 @50 z8 Конфирмат",
+    "edge left Ø5x35 @110 z8 Конфирмат"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Дно",
+   "size": "546x950x3",
+   "qty": 2,
+   "material": "ДВП 3 мм Белая",
+   "tex": 0,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стенка боковая правая",
+   "size": "160x550x16",
+   "qty": 2,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "front Ø7x16 [right+bottom] {\"right\":8,\"bottom\":50} Конфирмат",
+    "front Ø7x16 [right+top] {\"right\":8,\"top\":50} Конфирмат",
+    "front Ø7x16 [left+bottom] {\"left\":8,\"bottom\":50} Конфирмат",
+    "front Ø7x16 [left+top] {\"left\":8,\"top\":50} Конфирмат",
+    "front Ø2x12 [right+bottom] {\"right\":33,\"bottom\":80} Саморез 3.5х16",
+    "front Ø2x12 [left+bottom] {\"left\":261,\"bottom\":80} Саморез 3.5х16",
+    "front Ø2x12 [left+bottom] {\"left\":37,\"bottom\":80} Саморез 3.5х16"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стенка боковая левая",
+   "size": "160x550x16",
+   "qty": 2,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "front Ø7x16 [left+bottom] {\"left\":8,\"bottom\":50} Конфирмат",
+    "front Ø7x16 [left+top] {\"left\":8,\"top\":50} Конфирмат",
+    "front Ø7x16 [right+bottom] {\"right\":8,\"bottom\":50} Конфирмат",
+    "front Ø7x16 [right+top] {\"right\":8,\"top\":50} Конфирмат",
+    "front Ø2x12 [left+bottom] {\"left\":33,\"bottom\":80} Саморез 3.5х16",
+    "front Ø2x12 [right+bottom] {\"right\":261,\"bottom\":80} Саморез 3.5х16",
+    "front Ø2x12 [right+bottom] {\"right\":37,\"bottom\":80} Саморез 3.5х16"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Полотно фасада",
+   "size": "998x192x16",
+   "qty": 2,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 2,
+   "shaped": false,
+   "edges": "top:Кромка АБС 19х1 Орех Каминный, right:Кромка АБС 19х1 Орех Каминный, bottom:Кромка АБС 19х1 Орех Каминный, left:Кромка АБС 19х1 Орех Каминный",
+   "edgeSegs": [],
+   "edgeInfo": {
+    "right": "1/trim/1",
+    "top": "1/trim/1",
+    "left": "1/trim/1",
+    "bottom": "1/trim/1"
+   },
+   "drillings": [
+    "front Ø5x16 [left+top] {\"left\":96,\"top\":264} Винт М4х22",
+    "front Ø5x16 [left+top] {\"left\":96,\"top\":136} Винт М4х22",
+    "front Ø5x16 [left+bottom] {\"left\":96,\"bottom\":136} Винт М4х22",
+    "front Ø5x16 [left+bottom] {\"left\":96,\"bottom\":264} Винт М4х22"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стенка передняя",
+   "size": "160x922x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "front Ø5x16 [left+bottom] {\"left\":229,\"bottom\":78} Винт М4х22",
+    "front Ø5x16 [left+bottom] {\"left\":101,\"bottom\":78} Винт М4х22",
+    "front Ø5x16 [right+bottom] {\"right\":95,\"bottom\":78} Винт М4х22",
+    "front Ø5x16 [right+bottom] {\"right\":223,\"bottom\":78} Винт М4х22",
+    "edge right Ø5x35 @50 z8 Конфирмат",
+    "edge right Ø5x35 @110 z8 Конфирмат",
+    "edge left Ø5x35 @50 z8 Конфирмат",
+    "edge left Ø5x35 @110 z8 Конфирмат"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стойка",
+   "size": "330x908x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "",
+   "edgeSegs": [],
+   "edgeInfo": {},
+   "drillings": [
+    "back Ø2x12 x3 [left+top] {\"left\":453,\"top\":158} Саморез 3.5х16",
+    "back Ø2x12 [left+top] {\"left\":261,\"top\":158} Саморез 3.5х16",
+    "back Ø2x12 [left+top] {\"left\":101,\"top\":158} Саморез 3.5х16",
+    "back Ø2x12 [left+top] {\"left\":37,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 x3 [left+top] {\"left\":453,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [left+top] {\"left\":261,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [left+top] {\"left\":101,\"top\":158} Саморез 3.5х16",
+    "front Ø2x12 [left+top] {\"left\":37,\"top\":158} Саморез 3.5х16",
+    "edge right Ø5x35 @50 z8 Конфирмат",
+    "edge right Ø5x35 @280 z8 Конфирмат",
+    "edge left Ø5x35 @300 z8 Конфирмат",
+    "edge left Ø5x35 @35 z8 Конфирмат"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стойка",
+   "size": "951x801x16",
+   "qty": 2,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 2,
+   "shaped": true,
+   "edges": "top:Кромка АБС 19х1 Орех Каминный, right:Кромка АБС 19х1 Орех Каминный",
+   "edgeSegs": [
+    "line@801,650:Кромка АБС 19х1 Орех Каминный"
+   ],
+   "edgeInfo": {
+    "right": "1/trim/1",
+    "seg2": "1/trim/1",
+    "top": "1/trim/1"
+   },
+   "drillings": [
+    "front Ø7x16 [left+top] {\"left\":35,\"top\":19} Конфирмат",
+    "front Ø7x16 [left+bottom] {\"left\":50,\"bottom\":8} Конфирмат",
+    "front Ø7x16 [right+bottom] {\"right\":51,\"bottom\":8} Конфирмат",
+    "front Ø7x16 [left+top] {\"left\":335,\"top\":19} Конфирмат"
+   ],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стойка",
+   "size": "60.8x850.8x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "top:Кромка АБС 19х0.4 Дуб Эндгрей Элегантный K 107 PW, right:Кромка АБС 19х0.4 Дуб Эндгрей Элегантный K 107 PW, bottom:Кромка АБС 19х0.4 Дуб Эндгрей Элегантный K 107 PW, left:Кромка АБС 19х0.4 Дуб Эндгрей Элегантный K 107 PW",
+   "edgeSegs": [],
+   "edgeInfo": {
+    "top": "0.4/trim/0.4",
+    "left": "0.4/trim/0.4",
+    "bottom": "0.4/trim/0.4",
+    "right": "0.4/trim/0.4"
+   },
+   "drillings": [],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  },
+  {
+   "name": "Изделие № 1 / Стойка",
+   "size": "64x854x16",
+   "qty": 1,
+   "material": "Орех Селект Темный K009PW Kronospan",
+   "tex": 1,
+   "shaped": false,
+   "edges": "top:Кромка АБС 19х2 Гранит бежево-голубой Мария, right:Кромка АБС 19х2 Гранит бежево-голубой Мария, bottom:Кромка АБС 19х2 Гранит бежево-голубой Мария, left:Кромка АБС 19х2 Гранит бежево-голубой Мария",
+   "edgeSegs": [],
+   "edgeInfo": {
+    "top": "2/trim/2",
+    "left": "2/trim/2",
+    "bottom": "2/trim/2",
+    "right": "2/trim/2"
+   },
+   "drillings": [],
+   "grooves": [],
+   "holes": [],
+   "warn": {}
+  }
+ ],
+ "groups": [
+  "Орех Селект Темный K009PW Kronospan 16: 17 поз., 23 шт",
+  "ДВП 3 мм Белая 3: 1 поз., 2 шт"
+ ],
+ "skipped": 0
+}
