@@ -17,3 +17,11 @@ startI18n().finally(() => createRoot(document.getElementById('root')).render(
     <App />
   </StrictMode>,
 ))
+
+// iPhone (Safari) не слушает user-scalable=no — запрещаем масштаб страницы жестом двумя пальцами явно.
+// Карты раскроя и редакторы масштабируются своими обработчиками касаний — их это не касается
+if (typeof document !== 'undefined') {
+  const stop = e => e.preventDefault()
+  document.addEventListener('gesturestart', stop, { passive: false })
+  document.addEventListener('gesturechange', stop, { passive: false })
+}
