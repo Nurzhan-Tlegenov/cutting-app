@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { groupsOf, groupDir, groupColor, groupRows } from '../lib/partGroups'
 import { useBackClose } from '../lib/backStack'
 
@@ -99,79 +99,87 @@ export function GroupChip({ detail, groups, active, onChange }) {
   )
 }
 
-// Раскладка группы: ряды (↕ — друг над другом, ряд 1 сверху, как на фасаде; ↔ — колонки слева направо) и порядок в ряду.
-// Деталь с qty > 1 — одним элементом (экземпляры идут подряд на её месте). Записывается в part_group_pos = «ряд.место».
+// Раскладка группы: детали двигаются пальцем, как на карте раскроя. Отпустили — раскладка «схлопывается» в ряды
+// без зазоров (↕ — ряды друг над другом, ряд 1 сверху, как на фасаде; ↔ — колонки слева направо), порядок пишется
+// в part_group_pos = «ряд.место». Деталь с qty > 1 — одним прямоугольником «×N» (экземпляры идут подряд на её месте).
+// Зазор на рез добавит сам раскрой — по инструменту выбранного станка.
 function PartGroupLayout({ group, dir, color, details, setDetails, onClose }) {
+  const vert = dir !== 'x'
   const mine = details.map((d, i) => ({ d, i })).filter(({ d }) => (d.part_group || '').trim() === group)
   const rows = groupRows(mine.map(({ d, i }) => ({ key: d.uid, d, pos: d.part_group_pos, ord: i })))
-  const vert = dir !== 'x'
+  const W = m => Number(m.d.w) || 0, L = m => Number(m.d.h) || 0, Q = m => Math.max(1, Number(m.d.qty) || 1)
+  const ext = m => (vert ? { w: W(m) * Q(m), h: L(m) } : { w: W(m), h: L(m) * Q(m) })   // прямоугольник детали с экземплярами
+  // плотная раскладка рядов -> прямоугольники (мм, Y вниз — как на экране)
+  const tidy = rs => {
+    const out = new Map()
+    let off = 0
+    rs.forEach(r => {
+      const size = vert ? Math.max(...r.map(m => ext(m).h)) : Math.max(...r.map(m => ext(m).w))
+      let inner = 0
+      r.forEach(m => { const e = ext(m); out.set(m.key, vert ? { x: inner, y: off, ...e } : { x: off, y: inner, ...e }); inner += vert ? e.w : e.h })
+      off += size
+    })
+    return out
+  }
+  const base = tidy(rows)
+  const [drag, setDrag] = useState(null)      // { key, dx, dy, x, y } — что тащим и где оно сейчас
+  const svgRef = useRef(null)
+  const rects = mine.map(m => ({ m, ...(drag?.key === m.d.uid ? { ...base.get(m.d.uid), x: drag.x, y: drag.y } : base.get(m.d.uid)) }))
+  const bw = Math.max(1, ...rects.map(r => r.x + r.w)), bl = Math.max(1, ...rects.map(r => r.y + r.h))
+  const field = Math.max(bw, bl) * 1.5 + 100
+  const toMm = e => { const b = svgRef.current.getBoundingClientRect(); return { x: (e.clientX - b.left) / b.width * field - 50, y: (e.clientY - b.top) / b.height * field - 50 } }
   const apply = newRows => {
     const pos = new Map()
     newRows.filter(r => r.length).forEach((r, ri) => r.forEach((m, ci) => pos.set(m.key, `${ri + 1}.${ci + 1}`)))
     setDetails(ds => ds.map(x => (pos.has(x.uid) ? { ...x, part_group_pos: pos.get(x.uid) } : x)))
   }
-  const move = (ri, ci, dr, dc) => {
-    const next = rows.map(r => r.slice())
-    const [m] = next[ri].splice(ci, 1)
-    if (dr) {                                   // в соседний ряд (за краем — новый ряд)
-      const to = ri + dr
-      if (to < 0) next.unshift([m]); else if (to >= next.length) next.push([m]); else next[to].push(m)
-    } else next[ri].splice(Math.max(0, Math.min(next[ri].length, ci + dc)), 0, m)
-    apply(next.filter(r => r.length))
+  const start = (e, r) => { e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); const p = toMm(e); setDrag({ key: r.m.d.uid, dx: p.x - r.x, dy: p.y - r.y, x: r.x, y: r.y }) }
+  const move = e => { if (!drag) return; const p = toMm(e); setDrag(d => ({ ...d, x: p.x - d.dx, y: p.y - d.dy })) }
+  const end = () => {
+    if (!drag) return
+    // ряды — по положению центров: деталь попадает в ряд, с которым её центр перекрывается по высоте (↕) / ширине (↔);
+    // внутри ряда — по центру слева направо (↕) / сверху вниз (↔)
+    const items = rects.map(r => ({ ...r, cx: r.x + r.w / 2, cy: r.y + r.h / 2 }))
+    const along = r => (vert ? r.cy : r.cx), lo = r => (vert ? r.y : r.x), hi = r => (vert ? r.y + r.h : r.x + r.w), across = r => (vert ? r.cx : r.cy)
+    items.sort((a, b) => along(a) - along(b))
+    const groups = []
+    for (const it of items) {
+      const g = groups.find(gr => along(it) >= gr.lo && along(it) <= gr.hi)
+      if (g) { g.items.push(it); g.lo = Math.min(g.lo, lo(it)); g.hi = Math.max(g.hi, hi(it)) } else groups.push({ items: [it], lo: lo(it), hi: hi(it) })
+    }
+    const newRows = groups.sort((a, b) => a.lo - b.lo).map(gr => gr.items.sort((a, b) => across(a) - across(b)).map(it => ({ key: it.m.d.uid })))
+    setDrag(null)
+    apply(newRows)
   }
-  // эскиз блока: размеры по деталям (экземпляры подряд), без пропила — просто пропорции
-  const W = ({ d }) => Number(d.w) || 0, L = ({ d }) => Number(d.h) || 0, Q = ({ d }) => Math.max(1, Number(d.qty) || 1)
-  const rowW = r => (vert ? r.reduce((a, m) => a + W(m) * Q(m), 0) : Math.max(...r.map(W)))
-  const rowL = r => (vert ? Math.max(...r.map(L)) : r.reduce((a, m) => a + L(m) * Q(m), 0))
-  const bw = vert ? Math.max(...rows.map(rowW), 1) : rows.reduce((a, r) => a + rowW(r), 0), bl = vert ? rows.reduce((a, r) => a + rowL(r), 0) : Math.max(...rows.map(rowL), 1)
-  const sc = 220 / Math.max(bw, bl, 1)
-  const rects = []
-  let off = 0
-  rows.forEach((r, ri) => {
-    let inner = 0
-    r.forEach((m, ci) => { for (let q = 0; q < Q(m); q++) {
-      const x = vert ? inner : off, y = vert ? off : inner
-      rects.push({ x, y, w: W(m), h: L(m), t: `${ri + 1}.${ci + 1}` })
-      inner += vert ? W(m) : L(m)
-    } })
-    off += vert ? rowL(r) : rowW(r)
-  })
   const btn = { padding: '2px 6px', border: '0.5px solid var(--border-md)', borderRadius: 6, background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', lineHeight: 1.2 }
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '14px 14px 0 0', width: '100%', maxWidth: 560, maxHeight: '88vh', overflowY: 'auto', padding: '12px 14px 18px' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', borderRadius: '14px 14px 0 0', width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', padding: '12px 14px 18px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <b style={{ color, fontSize: 15, flex: 1 }}>⧉ {group} — раскладка</b>
           <button type="button" onClick={onClose} style={{ ...btn, fontSize: 16 }}>✕</button>
         </div>
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>
-          {vert ? 'Ряды — друг над другом, ряд 1 сверху (как смотрите на фасад). В ряду детали рядом, слева направо.' : 'Ряды — это колонки слева направо. В колонке детали сверху вниз.'} Стрелки ▲▼ переносят деталь в соседний ряд (за краем — новый ряд), ◀▶ двигают в ряду.
+          Двигайте детали пальцем, как на карте раскроя. Отпустили — они складываются {vert ? 'в ряды друг над другом (верхний ряд — верх фасада)' : 'в колонки слева направо'} без зазоров; зазор на рез добавит раскрой. Куда положили — там и останется: в том же ряду или в новом.
         </p>
-        <svg viewBox={`-4 -4 ${bw * sc + 8} ${bl * sc + 8}`} style={{ width: '100%', maxHeight: 230, display: 'block', margin: '0 auto 10px' }}>
-          {rects.map((r, i) => (
-            <g key={i}>
-              <rect x={r.x * sc} y={r.y * sc} width={r.w * sc} height={r.h * sc} fill={color} fillOpacity="0.15" stroke={color} strokeWidth="1" />
-              <text x={(r.x + r.w / 2) * sc} y={(r.y + r.h / 2) * sc} textAnchor="middle" dominantBaseline="middle" fontSize="9" fill="var(--text)">{r.t} · {r.w}×{r.h}</text>
+        <svg ref={svgRef} viewBox={`-50 -50 ${field} ${field}`} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+          style={{ width: '100%', aspectRatio: '1 / 1', display: 'block', touchAction: 'none', background: 'var(--bg2)', borderRadius: 10, border: '0.5px solid var(--border)', userSelect: 'none' }}>
+          {rects.map(r => (
+            <g key={r.m.d.uid} onPointerDown={e => start(e, r)} style={{ cursor: 'grab' }}>
+              <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={color} fillOpacity={drag?.key === r.m.d.uid ? 0.35 : 0.16} stroke={color} strokeWidth={field / 300} />
+              {Q(r.m) > 1 && Array.from({ length: Q(r.m) - 1 }, (_, k) => (vert
+                ? <line key={k} x1={r.x + W(r.m) * (k + 1)} y1={r.y} x2={r.x + W(r.m) * (k + 1)} y2={r.y + r.h} stroke={color} strokeWidth={field / 500} strokeDasharray={`${field / 120} ${field / 120}`} />
+                : <line key={k} x1={r.x} y1={r.y + L(r.m) * (k + 1)} x2={r.x + r.w} y2={r.y + L(r.m) * (k + 1)} stroke={color} strokeWidth={field / 500} strokeDasharray={`${field / 120} ${field / 120}`} />))}
+              <text x={r.x + r.w / 2} y={r.y + r.h / 2} textAnchor="middle" dominantBaseline="middle" fontSize={Math.max(field / 40, Math.min(r.w, r.h) / 4)} fill="var(--text)" style={{ pointerEvents: 'none' }}>
+                {r.m.d.name ? r.m.d.name.slice(0, 14) : `#${r.m.i + 1}`}
+                <tspan x={r.x + r.w / 2} dy="1.15em" fill="var(--text-muted)">{W(r.m)}×{L(r.m)}{Q(r.m) > 1 ? ` ×${Q(r.m)}` : ''}</tspan>
+              </text>
             </g>
           ))}
         </svg>
-        {rows.map((r, ri) => (
-          <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-hint)', minWidth: 46 }}>{vert ? 'ряд' : 'колонка'} {ri + 1}</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flex: 1 }}>
-              {r.map((m, ci) => (
-                <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 3, border: `1px solid ${color}`, borderRadius: 8, padding: '3px 5px' }}>
-                  <span style={{ fontSize: 12, color: 'var(--text)' }}>{m.d.name || `#${m.ord + 1}`} <span style={{ color: 'var(--text-hint)' }}>{m.d.w}×{m.d.h}{Q(m) > 1 ? ` ×${Q(m)}` : ''}</span></span>
-                  <button type="button" style={btn} disabled={ci === 0} onClick={() => move(ri, ci, 0, -1)}>◀</button>
-                  <button type="button" style={btn} disabled={ci === r.length - 1} onClick={() => move(ri, ci, 0, 1)}>▶</button>
-                  <button type="button" style={btn} onClick={() => move(ri, ci, -1, 0)}>▲</button>
-                  <button type="button" style={btn} onClick={() => move(ri, ci, 1, 0)}>▼</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>Порядок сохраняется с заказом (поле «ряд.место» у детали) и соблюдается в раскрое на любом станке.</p>
+        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+          {rows.map((r, ri) => `${vert ? 'ряд' : 'колонка'} ${ri + 1}: ${r.map(m => m.d.name || `#${m.ord + 1}`).join(' · ')}`).join('  |  ')}. Порядок сохраняется с заказом и соблюдается в раскрое на любом станке.
+        </p>
       </div>
     </div>
   )
