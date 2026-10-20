@@ -312,17 +312,20 @@ function BeamSawPostBasic({ post, set }) {
       </div>
       <div style={{ marginTop: 10 }}>
         <label className="label">Бирки — по готовности деталей</label>
-        <Hint>Порядок бирок — как детали выходят со станка: полоса режется поперёк, готовая деталь — бирка сразу, кусок с подрезкой откладывается и дорезается после полосы. На бирке эскиз, кромки и размеры — как деталь лежит на выходе; для этого нужно знать, в какую сторону станок поворачивает заготовку между уровнями.</Hint>
-        <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-          {[['cw', 'Поворот по часовой'], ['ccw', 'Против часовой']].map(([v, l]) => (
-            <button key={v} type="button" onClick={() => set({ labelTurn: v })}
-              style={{ padding: '5px 10px', borderRadius: 16, fontSize: 12, border: `1px solid ${(post.labelTurn || 'cw') === v ? 'var(--blue)' : 'var(--border-md)'}`, background: (post.labelTurn || 'cw') === v ? 'var(--blue-light)' : 'transparent', color: (post.labelTurn || 'cw') === v ? 'var(--blue)' : 'var(--text-muted)' }}>{l}</button>
-          ))}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
-            <input type="checkbox" checked={!!post.labelFlip} onChange={e => set({ labelFlip: e.target.checked })} /> ещё на 180°
-          </label>
-        </div>
-        <Hint>Если бирки выходят вверх ногами или боком — переключите сторону поворота или добавьте 180°. Проверяется на первом листе.</Hint>
+        <Hint>Всё делается само: бирка выходит в момент, когда деталь стала готовой (полоса → рез → готовая деталь — бирка; кусок с подрезкой — после полосы), а эскиз, кромки и размеры на ней повёрнуты так, как деталь лежит на выходе со станка. Оператор клеит бирку как есть, ничего не вращая.</Hint>
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 12, color: 'var(--text-hint)', cursor: 'pointer' }}>Калибровка под станок (один раз, если нужно)</summary>
+          <Hint>Разные пильные центры поворачивают заготовку между уровнями в разную сторону. Если на первом листе бирки выходят боком или вверх ногами относительно детали — поправьте здесь один раз, дальше всё будет само.</Hint>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            {[['cw', 'Станок поворачивает по часовой'], ['ccw', 'Против часовой']].map(([v, l]) => (
+              <button key={v} type="button" onClick={() => set({ labelTurn: v })}
+                style={{ padding: '6px 10px', borderRadius: 16, fontSize: 12, border: `1px solid ${(post.labelTurn || 'cw') === v ? 'var(--blue)' : 'var(--border-md)'}`, background: (post.labelTurn || 'cw') === v ? 'var(--blue-light)' : 'transparent', color: (post.labelTurn || 'cw') === v ? 'var(--blue)' : 'var(--text-muted)' }}>{l}</button>
+            ))}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+              <input type="checkbox" checked={!!post.labelFlip} onChange={e => set({ labelFlip: e.target.checked })} /> бирки вверх ногами — перевернуть
+            </label>
+          </div>
+        </details>
       </div>
     </div>
   )
