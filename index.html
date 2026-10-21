@@ -15,10 +15,42 @@
   </head>
   <body>
     <div id="root">
-      <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#fff">
-        <img src="/app-icon.svg" alt="RaskroyPro" style="width:min(46vw,220px);height:auto" />
+      <div id="boot" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#222;padding:16px;text-align:center">
+        <img src="/app-icon.svg" alt="" style="width:min(46vw,220px);height:auto" onerror="this.style.display='none'" />
+        <div style="font-size:22px;font-weight:600;color:#009BDE">RaskroyPro</div>
+        <div id="boot-msg" style="font-size:14px;color:#888">Загрузка…</div>
       </div>
     </div>
+    <script>
+      // Если приложение не запустилось (не догрузились файлы, старый браузер) — вместо белого экрана объясняем, что делать.
+      // React при запуске сам заменит этот экран, поэтому сообщение видно только при сбое.
+      (function () {
+        var shown = false
+        var onMirror = /^ru\./i.test(location.hostname)
+        function fail(reason) {
+          if (shown || !document.getElementById('boot')) return
+          shown = true
+          var m = document.getElementById('boot-msg')
+          var path = location.pathname + location.search
+          var html = '<div style="font-size:16px;font-weight:600;color:#222;margin-bottom:8px">Приложение не загрузилось</div>'
+          if (reason === 'old') {
+            html += '<div style="max-width:420px;line-height:1.45">Браузер устарел. Обновите Chrome (меню ⋮ → Справка → О браузере) или откройте сайт в другом браузере.</div>'
+          } else if (onMirror) {
+            html += '<div style="max-width:420px;line-height:1.45">Проверьте интернет и обновите страницу.</div>'
+          } else {
+            html += '<div style="max-width:420px;line-height:1.45">Проверьте интернет и обновите страницу.<br><br><b>Вы в России?</b> Откройте зеркало приложения — оно работает без VPN:</div>' +
+              '<a href="https://ru.raskroypro.com' + path + '" style="display:inline-block;margin-top:12px;padding:10px 18px;border-radius:10px;background:#009BDE;color:#fff;text-decoration:none;font-weight:600">Открыть ru.raskroypro.com</a>'
+          }
+          html += '<div style="margin-top:12px"><a href="' + path + '" style="color:#009BDE">Обновить страницу</a></div>'
+          m.style.color = '#444'
+          m.innerHTML = html
+        }
+        window.addEventListener('error', function (e) {
+          if (e && e.error && e.error.name === 'SyntaxError') fail('old')
+        })
+        setTimeout(function () { fail('net') }, 15000)
+      })()
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
