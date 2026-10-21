@@ -727,6 +727,73 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl, seq
   return files
 }
 
+// ─── Бирки пильного центра: формат, как у программ раскроя для KDT — одна бирка = один файл EMF с именем по коду детали
+// из программы XML («1.emf», «2.emf», …; деловые обрезки — «OC1.emf»), рядом с программой. Станок печатает бирку,
+// когда выдаёт деталь с этим кодом. Внутри EMF — картинка бирки (как в PDF) в размер бирки, мм.
+/** canvas -> EMF (Uint8Array): одна чёрно-белая картинка во весь размер wMm × hMm */
+export function canvasToEmf(canvas, wMm, hMm) {
+  const w = canvas.width, h = canvas.height, px = canvas.getContext('2d').getImageData(0, 0, w, h).data
+  const row = Math.ceil(w / 32) * 4, bits = row * h
+  const HDR = 108, SDB = 80, BMI = 48, EOF = 20
+  const total = HDR + SDB + BMI + bits + EOF
+  const buf = new ArrayBuffer(total), dv = new DataView(buf), u8 = new Uint8Array(buf)
+  const i32 = (o, v) => dv.setInt32(o, v, true), u32 = (o, v) => dv.setUint32(o, v >>> 0, true)
+  // EMR_HEADER
+  u32(0, 1); u32(4, HDR)
+  i32(8, 0); i32(12, 0); i32(16, w - 1); i32(20, h - 1)                                     // bounds, точки
+  i32(24, 0); i32(28, 0); i32(32, Math.round(wMm * 100)); i32(36, Math.round(hMm * 100))  // frame, 0,01 мм
+  u32(40, 0x464D4520); u32(44, 0x10000); u32(48, total); u32(52, 3)                         // подпись, версия, размер, записей
+  dv.setUint16(56, 1, true); dv.setUint16(58, 0, true); u32(60, 0); u32(64, 0); u32(68, 0)  // handles, reserved, описание, палитра
+  i32(72, w); i32(76, h); i32(80, Math.max(1, Math.round(wMm))); i32(84, Math.max(1, Math.round(hMm)))   // устройство: точки и мм
+  u32(88, 0); u32(92, 0); u32(96, 0)                                                        // pixel format, OpenGL
+  i32(100, Math.round(wMm * 1000)); i32(104, Math.round(hMm * 1000))                        // микрометры
+  // EMR_STRETCHDIBITS
+  let o = HDR
+  u32(o, 81); u32(o + 4, SDB + BMI + bits)
+  i32(o + 8, 0); i32(o + 12, 0); i32(o + 16, w - 1); i32(o + 20, h - 1)
+  i32(o + 24, 0); i32(o + 28, 0); i32(o + 32, 0); i32(o + 36, 0); i32(o + 40, w); i32(o + 44, h)
+  u32(o + 48, SDB); u32(o + 52, BMI); u32(o + 56, SDB + BMI); u32(o + 60, bits)
+  u32(o + 64, 0); u32(o + 68, 0x00CC0020); i32(o + 72, w); i32(o + 76, h)
+  // BITMAPINFO: 1 бит, палитра чёрный / белый; строки снизу вверх
+  const b = o + SDB
+  u32(b, 40); i32(b + 4, w); i32(b + 8, h); dv.setUint16(b + 12, 1, true); dv.setUint16(b + 14, 1, true)
+  u32(b + 16, 0); u32(b + 20, bits); i32(b + 24, 0); i32(b + 28, 0); u32(b + 32, 2); u32(b + 36, 2)
+  u32(b + 40, 0x00000000); u32(b + 44, 0x00FFFFFF)
+  const bo = b + BMI
+  for (let y = 0; y < h; y++) {
+    const r = bo + (h - 1 - y) * row
+    for (let x = 0, i = y * w * 4; x < w; x++, i += 4) if ((px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10 >= 140) u8[r + (x >> 3)] |= 0x80 >> (x & 7)
+  }
+  // EMR_EOF
+  o = HDR + SDB + BMI + bits
+  u32(o, 14); u32(o + 4, EOF); u32(o + 8, 0); u32(o + 12, 16); u32(o + 16, EOF)
+  return u8
+}
+/**
+ * Бирки пильного центра файлами EMF: rows / offRows — из buildBeamSawXml (коды деталей и обрезков программы),
+ * sheetIdx(si) — номер листа в материале по номеру листа в программе; partOf(sheet, pi) — деталь в положении выхода со станка.
+ */
+export async function buildBeamEmfLabels({ order, mat, tpl, rows, offRows = [], sheetIdx = si => si, partOf = null }) {
+  await preloadLabelImages(tpl)
+  if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)
+  const { w, h } = labelPx(tpl)
+  const files = []
+  for (const r of rows || []) {
+    const si = sheetIdx(r.si), sheet = mat.sheets[si], pi = sheet?.placed.indexOf(r.p) ?? -1
+    if (pi < 0) continue
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+    const part = partOf ? partOf(sheet, pi) : null
+    drawLabel(cv, tpl, labelInfo(order, mat, si, pi, part), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex], part })
+    files.push({ name: `${r.code}.emf`, data: canvasToEmf(cv, tpl.w, tpl.h) })
+  }
+  for (const o of offRows) {
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h
+    drawOffcutLabel(cv, tpl, { order, mat, si: sheetIdx(o.si), o: { w: o.w, h: o.h } })
+    files.push({ name: `${o.code}.emf`, data: canvasToEmf(cv, tpl.w, tpl.h) })
+  }
+  return files
+}
+
 export const zipFiles = files => zipSync(Object.fromEntries(files.map(f => [f.name, typeof f.data === 'string' ? strToU8(f.data) : f.data])), { level: 6 })
 
 /**

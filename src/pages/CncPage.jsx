@@ -19,7 +19,7 @@ import Drill6Ops from '../components/Drill6Ops'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf } from '../lib/gcode'
-import { getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr } from '../lib/labelMaker'
+import { getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
 import { orderClient } from '../lib/productionApi'
@@ -176,12 +176,20 @@ export default function CncPage() {
   // Пильный центр: одна программа XML на материал по выбранным листам (дерево резов), бирки — по галочке
   const buildBeam = () => {
     const sub = { ...mat, sheets: sel.map(si => mat.sheets[si]) }
-    let text = '', error = ''
-    try { text = buildBeamSawXml({ order, mat: sub, geoOf: sh => sheetGeo(order, mat.result, sh) }).text } catch (e) { error = String(e?.message || e) }
+    let text = '', error = '', xml = null
+    try { xml = buildBeamSawXml({ order, mat: sub, geoOf: sh => sheetGeo(order, mat.result, sh) }); text = xml.text } catch (e) { error = String(e?.message || e) }
     const files = [{ si: -1, beam: true, name: beamName(), text: text ? '\uFEFF' + text : '', kinds: [], opIds: [], lines: 0, warnings: error ? [`Программа пилы не собрана: ${error}`] : [], empty: !text, time: 0 }]
     const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
     setBuilt({ files, drill, second: null, beam: true }); setSaved('')
-    if (text) makeLabels(files, sel.map(si => ({ si, nc: files[0].name })))
+    // бирки — файлами EMF с именами по кодам деталей программы, рядом с программой (как у программ KDT): станок печатает
+    // бирку, когда выдаёт деталь с этим кодом; порядок и положение — как деталь выходит (beamSawLabels.js)
+    if (text && withLabels) {
+      setLabelBusy(true)
+      buildBeamEmfLabels({ order, mat, tpl: labelTpl, rows: xml.rows, offRows: xml.offRows, sheetIdx: i => sel[i], partOf: (sheet, pi) => beamExitPart(sheet.placed[pi], sheet, saw) })
+        .then(labels => setBuilt(b => (b && b.files === files ? { ...b, labels, labelsOwnDir: false } : b)))
+        .catch(() => {})
+        .finally(() => setLabelBusy(false))
+    }
   }
   // Созданные программы не теряются при выходе из заказа и приложения: запоминаем, какие листы были созданы,
   // и при возвращении создаём их заново теми же настройками (программа однозначно получается из раскроя и настроек).
@@ -466,7 +474,7 @@ export default function CncPage() {
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
               <input type="checkbox" checked={withLabels} onChange={e => setWithLabels(e.target.checked)} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
               <span>🏷 Бирки вместе с программами
-                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>Файлы бирок и PDF всех бирок для печати — отдельной папкой рядом с программами: <b style={{ fontFamily: 'monospace' }}>{labelsDir().join(' / ')}</b>. <span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={e => { e.preventDefault(); navigate(`/orders/${id}/labels`) }}>Шаблон бирки</span></span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>{beamMat && saw ? <>Пильный центр: бирка на каждую деталь файлом EMF с именем по коду детали (1.emf, 2.emf …) — в папке программы: <b style={{ fontFamily: 'monospace' }}>{routerDir().join(' / ')}</b>.</> : <>Файлы бирок и PDF всех бирок для печати — отдельной папкой рядом с программами: <b style={{ fontFamily: 'monospace' }}>{labelsDir().join(' / ')}</b>.</>} <span style={{ color: 'var(--blue)', cursor: 'pointer' }} onClick={e => { e.preventDefault(); navigate(`/orders/${id}/labels`) }}>Шаблон бирки</span></span>
               </span>
             </label>
           )}
@@ -483,13 +491,15 @@ export default function CncPage() {
           {labelBusy && <CncLoader compact label="Рисуем бирки…" />}
           {built?.labels?.length > 0 && (
             <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{built.labelsOwnDir ? 'Бирки' : 'Маркировочный стол'}</div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{built.beam || built.labelsOwnDir ? 'Бирки' : 'Маркировочный стол'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
-                {built.labelsOwnDir
+                {built.beam
+                  ? <>Файлов: {built.labels.length} — бирка на каждую деталь (1.emf, 2.emf … по коду детали в программе) и на деловые обрезки (OC1.emf …), рядом с программой пилы: <b style={{ fontFamily: 'monospace' }}>{routerDir().join(' / ')}</b>. Станок печатает бирку, когда выдаёт деталь.</>
+                  : built.labelsOwnDir
                   ? <>Файлов: {built.labels.length} — картинки бирок, бирки по листам, список листов и PDF всех бирок для печати. Папка: <b style={{ fontFamily: 'monospace' }}>{labelsDir().join(' / ')}</b>.</>
                   : <>Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт маркировка, затем раскрой.</>}
               </div>
-              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${fileBase('zip')}.zip`, ...(built.labelsOwnDir ? { folders: labelsDir() } : {}) })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
+              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${fileBase('zip')}.zip`, ...(built.beam ? { folders: routerDir() } : built.labelsOwnDir ? { folders: labelsDir() } : {}) })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
             </div>
           )}
           {built?.drill?.map(r => (

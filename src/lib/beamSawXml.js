@@ -95,7 +95,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
   const thick = mat.thickness || order?.material_thickness || 16
   const texture = (mat.details || []).some(d => !d.rotatable)
   const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<project>']
-  const rows = []
+  const rows = [], offRows = []      // детали и деловые обрезки с их кодами — для бирок (код = имя файла бирки)
   let code = 0, oc = 0
   mat.sheets.forEach((sheet, si) => {
     const geo = geoOf(sheet)
@@ -131,6 +131,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
         }
         if (sl.item?.offcut) {
           oc++
+          offRows.push({ code: `OC${oc}`, si, w: Math.round(sl.item.w - k), h: Math.round(sl.item.h - k) })
           kids.push({ leaf: true, id: myId, l: wReal, w: cut, layer: layer + 1, sl })
           return `      <part cut="${r1(cut)}" type="3" id="${myId}" code="OC${oc}" print_code="" />`
         }
@@ -174,7 +175,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
   }
   out.push('  </table>', '</project>', '')
   const base = toLatin(`${title}_${material}_${thick}`).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '') || 'beamsaw'
-  return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length }
+  return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length, rows, offRows }
 }
 
 /** Сохранить XML: на телефоне — «Поделиться», иначе скачать */
