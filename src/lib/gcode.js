@@ -1004,7 +1004,8 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
     }
   }
   // Шинковка отходов: надсечки по отходам листа (не по деталям и не по деловым обрезкам) одной прямой на глубину
-  // «толщина − недорез» — крупные куски отхода потом ломаются руками (см. scoreWaste.js). Идёт в самом конце программы.
+  // «толщина − недорез» — крупные куски отхода потом ломаются руками (см. scoreWaste.js). Идёт ПЕРВОЙ из резов фрезой —
+  // до вырезов и контуров деталей, пока лист цел: после контуров мелкие куски отхода вакуум уже не держит.
   let scored = 0
   const sc = ops.score
   if (sc?.on) {
@@ -1024,7 +1025,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       edgeOk(t, T - leave, 'шинковка отходов')
       for (const s of lines) {
         const pts = [[X0 + s.a[0], Y0 + s.a[1]], [X0 + s.b[0], Y0 + s.b[1]]]
-        // конец в резе детали / обрезка или за краем листа — фреза опускается прямо в пустоту; оба конца в материале — под наклоном, как контур
+        // начало за краем листа — фреза опускается прямо, в воздухе; иначе — под наклоном, как контур (реза там ещё нет)
         const job = { stage: 3, rank: 7, tool: t, at: pts[0], pts, open: [!!s.openA, !!s.openB],
           run: out => cutOpen(out, job.pts, zs, t, safeZ, T, job.open[0] ? { entry: 'straight' } : { entry: 'ramp', angle: n0(ops.outer?.angle) || 45 }) }
         jobs.push(job)
@@ -1067,6 +1068,25 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   ;[...new Set(stage0.map(j => j.tool))].sort((a, b) => toolRank(a) - toolRank(b)).forEach(t => {
     add(stage0.filter(j => j.tool === t))          // инструмент проходит всё своё одним кратчайшим маршрутом, потом — смена
   })
+  // шинковка отходов — сразу после обработки внутри деталей, до вырезов и контуров (лист ещё цел и держится вакуумом);
+  // каждая надсечка начинается с ближайшего к фрезе конца, конец за краем листа — в первую очередь (прямой вход)
+  {
+    const rest = jobs.filter(j => j.stage === 3)
+    while (rest.length) {
+      let bi = 0, bd = Infinity, flip = false
+      rest.forEach((j, i) => {
+        // начинать с конца за краем листа (прямой вход в воздухе); если такой конец один — только с него
+        const d0 = Math.hypot(j.pts[0][0] - cur[0], j.pts[0][1] - cur[1]), d1 = Math.hypot(j.pts[1][0] - cur[0], j.pts[1][1] - cur[1])
+        const ok0 = j.open[0] || !j.open[1], ok1 = j.open[1] || !j.open[0]
+        if (ok0 && d0 < bd) { bd = d0; bi = i; flip = false }
+        if (ok1 && d1 < bd) { bd = d1; bi = i; flip = true }
+      })
+      const j = rest.splice(bi, 1)[0]
+      if (flip) { j.pts.reverse(); j.open.reverse() }
+      j.at = j.pts[0]; seq.push(j); cur = j.pts[1]
+    }
+  }
+
   const stage1 = jobs.filter(j => j.stage === 1)
   const prevTool = seq[seq.length - 1]?.tool
   const cutTools = [...new Set(stage1.map(j => j.tool))].sort((a, b) => (b === prevTool) - (a === prevTool))
@@ -1093,24 +1113,6 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   // обрезки отрезаются последними — когда все детали уже вырезаны
   cutTools.forEach(t => add(jobs.filter(j => j.stage === 2 && j.tool === t)))
   add(jobs.filter(j => j.stage === 2 && !cutTools.includes(j.tool)))
-  // шинковка отходов — самой последней: каждая надсечка начинается с ближайшего к фрезе конца
-  {
-    const rest = jobs.filter(j => j.stage === 3)
-    while (rest.length) {
-      let bi = 0, bd = Infinity, flip = false
-      rest.forEach((j, i) => {
-        // начинать с конца, который в резе (прямой вход); если открыт только один — только с него
-        const d0 = Math.hypot(j.pts[0][0] - cur[0], j.pts[0][1] - cur[1]), d1 = Math.hypot(j.pts[1][0] - cur[0], j.pts[1][1] - cur[1])
-        const ok0 = j.open[0] || !j.open[1], ok1 = j.open[1] || !j.open[0]
-        if (ok0 && d0 < bd) { bd = d0; bi = i; flip = false }
-        if (ok1 && d1 < bd) { bd = d1; bi = i; flip = true }
-      })
-      const j = rest.splice(bi, 1)[0]
-      if (flip) { j.pts.reverse(); j.open.reverse() }
-      j.at = j.pts[0]; seq.push(j); cur = j.pts[1]
-    }
-  }
-
   const out = new Out(zTop ? T : 0)
   out.raw(post.cmdStart)
   let active = null, opId = 0
