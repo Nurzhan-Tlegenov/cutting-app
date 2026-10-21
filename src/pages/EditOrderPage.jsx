@@ -16,7 +16,7 @@ import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided, backSide } from '../lib/partInfo'
 import { saveOrderModel, loadOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import EdgeTypes from '../components/EdgeTypes'
-import { cutSize, parseEdgeTypes, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
+import { cutSize, listSize, parseEdgeTypes, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
@@ -60,6 +60,8 @@ function Toggle({ on }) {
   )
 }
 function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdge, edgeTypes, autoFocus, onEditContour, siblings, onCopyFrom, groupUi }) {
+  // деталь из модели с подрезкой — в полях размер в раскрой (хранится готовая, см. listSize)
+  const ls = listSize(detail, edgeTypes)
   const SIDES = ['Дл','Дп','Шв','Шн']
   const KEYS = ['left','right','top','bottom']
   const lengthRef = useRef(null)
@@ -120,8 +122,8 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
           )}
         </div>
         <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-          <NumInput value={detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: v })} inputRef={lengthRef} />
-          <NumInput value={detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: v })} />
+          <NumInput value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} />
+          <NumInput value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} />
           <div style={{ width: 44, flexShrink: 0 }}>
             <NumInput value={detail.qty} placeholder="Кол" onChange={v => onUpdate({ ...detail, qty: v })} />
           </div>
@@ -163,6 +165,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
 
       {/* размер в раскрой — когда у кромки включена подрезка или прифуговка */}
       {(() => {
+        if (ls.cut) return <div style={{ marginTop: 4, fontSize: 10, color: 'var(--teal)' }}>Размер в раскрой (подрезка под кромку из модели) · готовая с кромкой: {detail.w} × {detail.h}</div>
         const cs = Number(detail.w) > 0 && Number(detail.h) > 0 ? cutSize(detail.w, detail.h, detail.edges, edgeTypes, detail.contour) : null
         return cs ? <div style={{ marginTop: 4, fontSize: 10, color: 'var(--teal)' }}>В раскрой с учётом кромки: {cs[0]} × {cs[1]}</div> : null
       })()}

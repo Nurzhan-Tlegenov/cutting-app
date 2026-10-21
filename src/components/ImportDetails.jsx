@@ -11,6 +11,7 @@ import { readSketchCutPdf } from '../lib/sketchcutPdf'
 import { millsFromItems, mergeMills } from '../lib/facadeCarve'
 import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importDetails'
 import { useAuth } from '../context/AuthContext'
+import { typesFromItems, listSize } from '../lib/edgeCut'
 import { myLimits, limitText } from '../lib/limits'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useBackClose } from '../lib/backStack'
@@ -193,6 +194,8 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const allowAll = matCap == null || result.groups.length <= matCap
   const activeKey = result.groups.some(g => g.key === groupKey) ? groupKey : (allowAll || !result.groups.length ? ALL : result.groups[0].key)
   const chosen = activeKey === ALL ? result.items : result.items.filter(it => it.groupKey === activeKey)
+  // подрезка под кромку из модели: в списке проверки — размер в раскрой (толщина кромки — из модели)
+  const modelTypes = typesFromItems(result.items)
   const pieces = chosen.reduce((s, it) => s + it.qty, 0)
   const hasDims = !!basis || (roles.includes('length') && roles.includes('width')) || roles.includes('size')
   const sumInfo = k => chosen.reduce((s, it) => s + (it.info?.[k] || 0) * (k === 'shaped' ? 1 : it.qty), 0)
@@ -603,7 +606,12 @@ export default function ImportDetails({ hasDetails, onImport }) {
                         </span>
                         {it.contour?.meta?.glue && <span style={{ color: 'var(--blue)', whiteSpace: 'nowrap' }}>{it.contour.meta.note}</span>}
                         {clash && <span style={{ color: 'var(--danger)', whiteSpace: 'nowrap' }}>пересечение</span>}
-                        <span style={{ whiteSpace: 'nowrap' }}>{it.w}×{it.h} — {it.qty} шт.</span>
+                        {(() => {
+                          const ls = listSize(it, modelTypes)
+                          return ls.cut
+                            ? <span style={{ whiteSpace: 'nowrap' }} title={`Готовая с кромкой ${it.w}×${it.h}`}>{ls.l}×{ls.w} <span style={{ fontSize: 10, color: 'var(--teal)' }}>подрезка</span> — {it.qty} шт.</span>
+                            : <span style={{ whiteSpace: 'nowrap' }}>{it.w}×{it.h} — {it.qty} шт.</span>
+                        })()}
                       </div>
                       {(edgeTxt || extra) && (
                         <div style={{ display: 'flex', gap: 8, fontSize: 11 }}>

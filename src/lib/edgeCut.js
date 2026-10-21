@@ -58,6 +58,24 @@ export function sideDeltas(edges, types, trim) {
   return any ? d : null
 }
 
+/** Деталь из модели с подрезкой хотя бы одной стороны — в списке задания у неё показывается размер в раскрой */
+export const modelTrimmed = contour => Object.values(edgeTrimOf(contour) || {}).some(v => v === true)
+
+/**
+ * Что показывать в полях длины/ширины списка задания. У детали с подрезкой из модели — размер в раскрой
+ * (как пойдёт на станок), а хранится по-прежнему готовая деталь: toFinished переводит введённое обратно.
+ * -> { cut: true, l, w, dl, dw, toL(v), toW(v) } или { cut: false }
+ */
+export function listSize(detail, types) {
+  const L = num(detail?.w), W = num(detail?.h)
+  if (!(L > 0) || !(W > 0) || !modelTrimmed(detail?.contour)) return { cut: false }
+  const cs = cutSize(L, W, detail.edges, types, detail.contour)
+  if (!cs) return { cut: false }
+  const dl = r2(L - cs[0]), dw = r2(W - cs[1])
+  const back = d => v => (v === '' ? '' : r2(num(v) + d))
+  return { cut: true, l: cs[0], w: cs[1], dl, dw, toL: back(dl), toW: back(dw) }
+}
+
 /** Размер в раскрой: [длина, ширина] (кромка слева/справа идёт вдоль длины и уменьшает ширину); contour — для подрезки из модели */
 export function cutSize(length, width, edges, types, contour) {
   const k = sideDeltas(edges, types, edgeTrimOf(contour))
