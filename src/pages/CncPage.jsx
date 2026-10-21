@@ -351,14 +351,15 @@ export default function CncPage() {
               <button type="button" style={small} onClick={() => { if (beamMat && saw) change({ ...cnc, post: saw.id }); setTab('basic') }}>Настроить</button>
             </div>
             {/* второй постпроцессор — выбирается прямо здесь, при выпуске программ: любой из своих станков (не для пильного центра) */}
-            {!beamMat && cnc.posts.some(p => p.id !== post.id && !isBeamSaw(p)) && (() => {
+            {/* пильный центр — вторым только шестисторонний (файлы по деталям); раскроечный — любой из своих */}
+            {cnc.posts.some(p => (beamMat ? isDrill6(p) : p.id !== post.id && !isBeamSaw(p))) && (() => {
               const sec = secondPost(cnc)
               return (
                 <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
                   <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>Вместе с ним — второй постпроцессор:</label>
                   <select value={sec?.id || ''} onChange={e => change(setSecondPost(cnc, e.target.value))} style={{ width: '100%', padding: '6px 8px', fontSize: 13 }}>
                     <option value="">— нет —</option>
-                    {cnc.posts.filter(p => p.id !== post.id && !isBeamSaw(p)).map(p => <option key={p.id} value={p.id}>{p.name} — {isDrill6(p) ? 'шестисторонний, XML' : p.drillHead ? 'с присадочной головой, G-код' : 'раскроечный, G-код'}</option>)}
+                    {cnc.posts.filter(p => (beamMat ? isDrill6(p) : p.id !== post.id && !isBeamSaw(p))).map(p => <option key={p.id} value={p.id}>{p.name} — {isDrill6(p) ? 'шестисторонний, XML' : p.drillHead ? 'с присадочной головой, G-код' : 'раскроечный, G-код'}</option>)}
                   </select>
                   {/* что выйдет для шестистороннего станка: расширение и имя файла (= код QR бирки); папки — матрёшка, собирается здесь */}
                   {drills.map(p => {

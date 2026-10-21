@@ -160,7 +160,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         )
       })()}
       {drill && <Drill6Basic post={post} set={set} router={router} />}
-      {saw && <BeamSawPostBasic post={post} set={set} />}
+      {saw && <BeamSawPostBasic post={post} set={set} cnc={cnc} onChange={onChange} />}
       <FileNamesSettings />
       {!drill && !saw && <>
       <div className="card" style={{ marginBottom: 10 }}>
@@ -292,7 +292,8 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
 // когда раскрой посчитан под пильный центр. Бирки — галочкой там же (у пилы нет маркировочного стола).
 const BEAM_NAME_DEFAULT = '{ZAKAZ}_{MAT}'
 const BEAM_DIR_DEFAULT = '{ZAKAZ}/{MAT}'
-function BeamSawPostBasic({ post, set }) {
+function BeamSawPostBasic({ post, set, cnc, onChange }) {
+  const d6 = (cnc?.posts || []).filter(isDrill6), on6 = d6.find(p => (cnc.use6 || []).includes(p.id))
   const ex = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
   const dirPreview = v => String(v || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, ex))   // массив уровней (DirPathEditor сам соединяет)
   const dir = post.dirPath ?? BEAM_DIR_DEFAULT
@@ -308,7 +309,16 @@ function BeamSawPostBasic({ post, set }) {
       <div style={{ marginTop: 10 }}>
         <label className="label">📁 Папки для программы пилы</label>
         <DirPathEditor value={dir} def={BEAM_DIR_DEFAULT} preview={dirPreview(dir)} onChange={x => set({ dirPath: x })} />
-        <Hint>Бирки (если отмечено «Бирки вместе с программами») ложатся рядом — в папку с тем же названием и словом «Etiketki» в конце.</Hint>
+        <Hint>Бирки (если отмечено «Бирки вместе с программами») — файлами EMF по кодам деталей, в эту же папку.</Hint>
+      </div>
+      {/* вместе с программой пилы — программы шестистороннего присадочного станка (файлы по деталям) */}
+      <div style={{ marginTop: 10 }}>
+        <label className="label">Вместе с программой пилы — шестисторонний станок</label>
+        <select value={on6?.id || ''} onChange={e => onChange(setSecondPost(cnc, e.target.value))} style={{ width: '100%', padding: '7px 8px', fontSize: 14 }} disabled={!d6.length}>
+          <option value="">— нет —</option>
+          {d6.map(p => <option key={p.id} value={p.id}>{p.name} — шестисторонний (XML по деталям)</option>)}
+        </select>
+        <Hint>{d6.length ? '«Создать программу пилы» в заказе выпустит и файлы по деталям для этого станка; «Сохранить все файлы» — одним архивом, у каждого станка своя папка.' : 'Шестистороннего станка пока нет — добавьте его: «Выбрать ▾» сверху → «+ Присадочный 6-стор.».'}</Hint>
       </div>
       <div style={{ marginTop: 10 }}>
         <label className="label">Бирки — по готовности деталей</label>
