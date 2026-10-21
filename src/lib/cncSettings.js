@@ -86,6 +86,9 @@ export const DEFAULT_OPS = () => ({
   holes: {},                                                   // отверстия: слой -> { tool, d, depth }
   // что не выводить в программу: contour — вырезы (деталь режется прямоугольником габарита), face — пазы и выемки с лица, holes — отверстия
   skip: { contour: false, face: false, holes: false },
+  // шинковка отходов (см. scoreWaste.js): надсечки по отходам листа одной прямой на глубину «толщина − недорез»,
+  // чтобы крупные куски отхода ломались руками; stepX / stepY — на какие куски делить, tool — пусто: фреза контура детали
+  score: { on: false, stepX: 400, stepY: 400, leave: 2, tool: '' },
 })
 
 // shared — общие постпроцессоры (мастер-аккаунт отметил «для всех»): видны каждому, в настройках пользователя не хранятся
@@ -118,7 +121,7 @@ export function normalizeCnc(raw, shared = [], { beam = false } = {}) {
 }
 export function normOps(raw) {
   const d = DEFAULT_OPS(), o = raw || {}
-  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes }, skip: { ...d.skip, ...o.skip } }
+  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes }, skip: { ...d.skip, ...o.skip }, score: { ...d.score, ...o.score } }
 }
 export { postView, postBack, hasOwnTools } from './postTools'
 

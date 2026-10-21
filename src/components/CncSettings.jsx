@@ -875,6 +875,33 @@ export function CncOps({ cnc, onChange, layers }) {
   return (
     <>
       {!(cnc.tools || []).length && <p style={{ fontSize: 13, color: 'var(--amber)', marginBottom: 10 }}>Сначала создайте инструменты на вкладке «Инструменты».</p>}
+      {(() => {
+        const sc = { on: false, stepX: 400, stepY: 400, leave: 2, tool: '', ...ops.score }
+        const setSc = patch => onChange({ ...cnc, ops: { ...ops, score: { ...sc, ...patch } } })
+        return (
+          <div className="card" style={{ marginBottom: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!sc.on} onChange={e => setSc({ on: e.target.checked })} style={{ width: 18, height: 18 }} />
+              <span style={{ fontWeight: 600 }}>Шинковка отходов</span>
+            </label>
+            <Hint>Отходы листа (не детали и не деловые обрезки) надсекаются одной прямой не на всю глубину — крупные куски потом легко доломать руками и уложить в корзину. Каждый кусок отхода длиннее шага делится на равные части. Надсечки идут в самом конце программы.</Hint>
+            {sc.on && (
+              <>
+                <div className="row2" style={{ marginTop: 8 }}>
+                  <Num label="Шаг по X (ширина листа)" unit="мм" value={sc.stepX} onChange={v => setSc({ stepX: v })} />
+                  <Num label="Шаг по Y (длина листа)" unit="мм" value={sc.stepY} onChange={v => setSc({ stepY: v })} />
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <Num label="Сколько не дорезать" unit="мм" value={sc.leave} onChange={v => setSc({ leave: v })} />
+                </div>
+                <Hint>Надсечка идёт на глубину «толщина листа − недорез»: при листе 16 мм и недорезе 2 мм — 14 мм (одним резом, если это не больше максимальной глубины прохода фрезы). Отходы уже 40 мм не шинкуются.</Hint>
+                <label className="label" style={{ marginTop: 8 }}>Инструмент</label>
+                <ToolSelect cnc={cnc} only="mill" value={sc.tool} empty="Как контур детали" onChange={v => setSc({ tool: v })} />
+              </>
+            )}
+          </div>
+        )
+      })()}
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Что выводить в программу</Title>
         {[

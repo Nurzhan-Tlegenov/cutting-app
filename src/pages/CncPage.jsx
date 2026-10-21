@@ -147,7 +147,7 @@ export default function CncPage() {
     const files = sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: post.id } })
-      return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
+      return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, scored: r.scored || 0, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
     })
     // второй раскроечный станок — свой G-код тех же листов (свои инструменты, команды, имя файла)
     const second = r2 ? { post: r2, files: sel.map(si => {
@@ -436,7 +436,7 @@ export default function CncPage() {
                   {f && (
                     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
                       <div style={{ fontSize: 12, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>{f.empty ? 'пусто — нет назначенных инструментов' : `${f.lines} строк · ≈ ${fmtTime(f.time)}`}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>{f.empty ? 'пусто — нет назначенных инструментов' : `${f.lines} строк · ≈ ${fmtTime(f.time)}${f.scored ? ` · шинковка: ${f.scored} надс.` : ''}`}</div>
                       {!f.empty && (
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button type="button" onClick={() => openSim(f)} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>▶ Симулятор</button>

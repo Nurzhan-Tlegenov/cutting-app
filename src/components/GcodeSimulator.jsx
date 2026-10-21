@@ -24,11 +24,12 @@ const LAYERS = [
   { id: 'cutout', label: 'Вырезы', groups: ['cutout'], css: '#7B1FA2' },
   { id: 'pocket', label: 'Пазы и выемки', groups: ['pocket'], css: '#1D9E75' },
   { id: 'hole', label: 'Отверстия', groups: ['hole'], css: '#D9480F' },
+  { id: 'score', label: 'Шинковка отходов', groups: ['score'], css: '#B85C00' },
   { id: 'io', label: 'Входы и выходы', groups: ['entry', 'exit'], css: '#2E9E3F' },
   { id: 'rapid', label: 'Холостые', groups: ['rapid'], css: '#888780' },
 ]
 const GROUP = {
-  outer: [0x185FA5, 'контур детали'], cutout: [0x7B1FA2, 'вырез'], pocket: [0x1D9E75, 'паз / выемка'], hole: [0xD9480F, 'отверстие'],
+  outer: [0x185FA5, 'контур детали'], cutout: [0x7B1FA2, 'вырез'], pocket: [0x1D9E75, 'паз / выемка'], hole: [0xD9480F, 'отверстие'], score: [0xB85C00, 'шинковка отхода'],
   entry: [0x2E9E3F, 'вход'], exit: [0xE24B4A, 'выход'], rapid: [0x888780, 'холостой ход'],
 }
 const LAYER_OF = Object.fromEntries(LAYERS.flatMap(l => l.groups.map(g => [g, l.id])))
@@ -40,6 +41,7 @@ function groupOf(m, kind) {
   if (m.rapid) return vert && m.z1 > m.z0 ? 'exit' : 'rapid'
   if (m.z1 < m.z0 - 1e-6) return 'entry'
   if (kind === 'groove' || kind === 'pocket') return 'pocket'
+  if (kind === 'score') return 'score'
   return kind === 'cutout' ? 'cutout' : 'outer'
 }
 

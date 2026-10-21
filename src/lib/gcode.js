@@ -16,6 +16,7 @@ import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeom
 import { detailHoles, placedTurns } from './partHoles'
 import { smoothLoop, arcRuns } from './arcFit'
 import { postView } from './postTools'
+import { scoreLines } from './scoreWaste'
 
 const EPS = 0.05
 const ROUGH_ALLOWANCE = 2        // черновые проходы выборки не доходят до контура на 2 мм — их подчищает обход по периметру
@@ -1002,6 +1003,31 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       chain.push(clamp(s.b))
     }
   }
+  // Шинковка отходов: надсечки по отходам листа (не по деталям и не по деловым обрезкам) одной прямой на глубину
+  // «толщина − недорез» — крупные куски отхода потом ломаются руками (см. scoreWaste.js). Идёт в самом конце программы.
+  let scored = 0
+  const sc = ops.score
+  if (sc?.on) {
+    const t = tool(sc.tool) || tool(ops.outer?.tool)
+    const leave = n0(sc.leave)
+    if (!t) noTool('шинковка отходов')
+    else if (t.type !== 'mill') warn.add('На шинковку отходов назначено сверло — нужна фреза.')
+    else if (!(leave > 0) || leave >= T - 0.5) warn.add(`Шинковка отходов: недорез ${num(leave)} мм при толщине ${num(T)} мм — надсечки не делаются (недорез должен быть больше 0 и меньше толщины).`)
+    else {
+      const r = n0(t.d) / 2, gap = r + 2            // линия не ближе 2 мм (плюс клетка сетки) к детали и обрезку
+      const X0 = n0(post.originX), Y0 = n0(post.originY)
+      const outlines = parts.map(pt => offsetLoop(smoothLoop(pt.outline.map(([x, y]) => [x - X0, y - Y0])), gap) || pt.outline.map(([x, y]) => [x - X0, y - Y0]))
+      const lines = scoreLines({ geo, outlines, offcuts: sheet.manualOffcuts || [], gap, stepX: n0(sc.stepX), stepY: n0(sc.stepY) })
+      const zs = levels(T, leave, n0(t.maxPass))
+      edgeOk(t, T - leave, 'шинковка отходов')
+      for (const s of lines) {
+        const pts = [[X0 + s.a[0], Y0 + s.a[1]], [X0 + s.b[0], Y0 + s.b[1]]]
+        jobs.push({ stage: 3, rank: 7, tool: t, at: pts[0], pts, run: out => cutOpen(out, pts, zs, t, safeZ, T, { entry: 'straight' }) })
+      }
+      scored = lines.length
+      if (!lines.length) warn.add('Шинковка отходов включена, но на листе нет отходов крупнее заданного шага.')
+    }
+  }
   // «Резать только прямоугольники» на раскрое, сделанном по контуру: сцепленные фигурные детали вписаны друг
   // в друга, их габариты перекрываются — прямоугольный рез заденет соседа
   if (skip.contour && boxes.some(b => b.boxed)) {
@@ -1062,11 +1088,26 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   // обрезки отрезаются последними — когда все детали уже вырезаны
   cutTools.forEach(t => add(jobs.filter(j => j.stage === 2 && j.tool === t)))
   add(jobs.filter(j => j.stage === 2 && !cutTools.includes(j.tool)))
+  // шинковка отходов — самой последней: каждая надсечка начинается с ближайшего к фрезе конца
+  {
+    const rest = jobs.filter(j => j.stage === 3)
+    while (rest.length) {
+      let bi = 0, bd = Infinity, flip = false
+      rest.forEach((j, i) => {
+        const d0 = Math.hypot(j.pts[0][0] - cur[0], j.pts[0][1] - cur[1]), d1 = Math.hypot(j.pts[1][0] - cur[0], j.pts[1][1] - cur[1])
+        if (d0 < bd) { bd = d0; bi = i; flip = false }
+        if (d1 < bd) { bd = d1; bi = i; flip = true }
+      })
+      const j = rest.splice(bi, 1)[0]
+      if (flip) j.pts.reverse()
+      j.at = j.pts[0]; seq.push(j); cur = j.pts[1]
+    }
+  }
 
   const out = new Out(zTop ? T : 0)
   out.raw(post.cmdStart)
   let active = null, opId = 0
-  const KIND = ['hole', 'hole', 'groove', 'pocket', 'cutout', 'outer', 'outer']
+  const KIND = ['hole', 'hole', 'groove', 'pocket', 'cutout', 'outer', 'outer', 'score']
   const used = []
   for (const j of seq) {
     if (j.tool !== active) {
@@ -1084,5 +1125,5 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   if (seq.length && post.endX !== '' && post.endY !== '' && post.endX != null && post.endY != null) { out.g0(null, null, safeZ); out.g0(n0(post.endX), n0(post.endY), null) }
   out.raw(post.cmdEnd)
   if (!seq.length) warn.add('На листе нечего обрабатывать: не назначены инструменты.')
-  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds }
+  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds, scored }
 }
