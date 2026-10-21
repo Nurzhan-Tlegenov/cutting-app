@@ -117,6 +117,8 @@ export function normalizeCnc(raw, shared = [], { beam = false } = {}) {
     // второй раскроечный станок — его G-код выпускается вместе с G-кодом основного, в свою папку
     router2: posts.some(p => p.id === c.router2 && isRouterPost(p)) ? c.router2 : '',
     ops: normOps(c.ops),
+    // прифуговка производства под кромку, мм: при раскрое на фрезере ставится всем кромкам заказа (см. NestingPage, edgeCut.js)
+    joint: Math.max(0, Number(String(c.joint ?? '').replace(',', '.')) || 0),
   }
 }
 export function normOps(raw) {

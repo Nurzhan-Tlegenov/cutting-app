@@ -1,4 +1,5 @@
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
+import { getCnc } from '../lib/cncSettings'
 import ShareBadge from '../components/ShareBadge'
 import { useKeptState } from '../hooks/useKeptState'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react'
@@ -1709,10 +1710,15 @@ export default function NestingPage() {
   // пильный центр, всем видам кромки заказа ставится производственная прифуговка — и в своём заказе, и в заказе клиента,
   // который режет это производство (запись через production_order_sheet); своя прифуговка клиента заменяется.
   // Заготовка везде считается одинаково (раскрой, карта, бирки, программа) — через существующий edgeCut
+  // Так же и на фрезере ЧПУ: прифуговка из настроек ЧПУ производства («Обработка» → «Прифуговка под кромку», productions.cnc.joint).
+  // На ручном форматнике производственной прифуговки нет — остаётся та, что в заказе.
   const jointProd = () => {
-    if (!beamSaw || !order) return 0
+    if (!order) return 0
     const pr = order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)
-    return beamSettings(pr?.beam_saw_settings).joint || 0
+    if (beamSaw) return beamSettings(pr?.beam_saw_settings).joint || 0
+    if (cuttingMethod !== 'nesting') return 0
+    const own = pr && pr.owner_id === user?.id                       // своё производство — свои настройки ЧПУ (самые свежие)
+    return Math.max(0, Number(String((own ? getCnc(user).joint : null) ?? pr?.cnc?.joint ?? '').replace(',', '.')) || 0)
   }
   const canSetJoint = () => !!order && (order.user_id === user?.id || profile?.role === 'admin' || (cabinet === 'production' && order.status !== 'draft'))
   async function writeEdgeTypes(next, msg) {
@@ -1734,8 +1740,8 @@ export default function NestingPage() {
     const j = jointProd()
     if (!(j > 0) || !prodsReady || !canSetJoint() || !allDetails.length) return
     const next = applyJoint(j, true)
-    if (next) Promise.resolve().then(() => writeEdgeTypes(next, `Прифуговка ${j} мм из настроек пильного центра поставлена кромкам заказа — пересчитайте раскрой.`))
-  }, [beamSaw, prodsReady, order?.production_id, allDetails.length, order?.edge_types])   // eslint-disable-line react-hooks/exhaustive-deps
+    if (next) Promise.resolve().then(() => writeEdgeTypes(next, `Прифуговка ${j} мм из настроек ${beamSaw ? 'пильного центра' : 'фрезера ЧПУ'} производства поставлена кромкам заказа — пересчитайте раскрой.`))
+  }, [beamSaw, cuttingMethod, prodsReady, order?.production_id, allDetails.length, order?.edge_types])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedOnOpenRef = useRef(false)
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
   useBackClose(!!needProd, () => setNeedProd(null))

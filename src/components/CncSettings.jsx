@@ -76,6 +76,29 @@ function ToolSelect({ cnc, value, onChange, only, auto, maxD, empty }) {
 const Hint = ({ children }) => <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>{children}</p>
 const Title = ({ children }) => <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 8 }}>{children}</div>
 
+// Карточка «Обработки», свёрнутая по умолчанию: заголовок и короткая сводка; нажал — развернулась, выставил настройки.
+// Свёрнуто/развёрнуто запоминается на устройстве.
+const FOLD_KEY = 'cncOpsOpen'
+const readFolds = () => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {} } catch { return {} } }
+function Fold({ id, title, summary, style, children }) {
+  const [open, setOpen] = useState(() => !!readFolds()[id])
+  const toggle = () => setOpen(v => {
+    const next = !v
+    try { localStorage.setItem(FOLD_KEY, JSON.stringify({ ...readFolds(), [id]: next })) } catch { /* без хранилища — просто не запомним */ }
+    return next
+  })
+  return (
+    <div className="card" style={{ marginBottom: 10, ...style }}>
+      <button type="button" onClick={toggle} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: 0, border: 'none', background: 'transparent', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-hint)', width: 12 }}>{open ? '▾' : '▸'}</span>
+        <span style={{ fontWeight: 500, fontSize: 14, flex: 1, minWidth: 0 }}>{title}</span>
+        {summary ? <span style={{ fontSize: 12, color: 'var(--text-hint)', flexShrink: 0 }}>{summary}</span> : null}
+      </button>
+      {open && <div style={{ marginTop: 10 }}>{children}</div>}
+    </div>
+  )
+}
+
 // ─── А. Основные ────────────────────────────────────────────────────────────
 export function CncBasic({ cnc, onChange, isMaster = false }) {
   const { user } = useAuth()
@@ -801,10 +824,10 @@ export function CncOps({ cnc, onChange, layers }) {
   const setSkip = patch => onChange({ ...cnc, ops: { ...ops, skip: { ...skip, ...patch } } })
   const offStyle = off => (off ? { opacity: 0.45 } : null)
   const OffNote = ({ on }) => (on ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>Отключено — в программу не попадает (см. «Что выводить в программу»).</p> : null)
+  const toolName = id => { const t = (cnc.tools || []).find(x => x.id === id); return t ? `T${t.t} Ø${r1(t.d)}` : '' }
   const Contour = ({ k, title, note, extra, off }) => (
-    <div className="card" style={{ marginBottom: 10, ...offStyle(off) }}>
+    <Fold id={k} title={title} summary={off ? 'отключено' : toolName(ops[k].tool) || 'авто'} style={offStyle(off)}>
       <OffNote on={off} />
-      <Title>{title}</Title>
       <label className="label">Инструмент</label>
       <ToolSelect cnc={cnc} only="mill" value={ops[k].tool} onChange={v => set(k, { tool: v })} />
       {note && <Hint>{note}</Hint>}
@@ -822,7 +845,7 @@ export function CncOps({ cnc, onChange, layers }) {
         )}
       </div>
       {extra}
-    </div>
+    </Fold>
   )
   // вход фрезы: под наклоном (с углом) или прямо
   const Entry = (op, def, onSet) => {
@@ -875,14 +898,20 @@ export function CncOps({ cnc, onChange, layers }) {
   return (
     <>
       {!(cnc.tools || []).length && <p style={{ fontSize: 13, color: 'var(--amber)', marginBottom: 10 }}>Сначала создайте инструменты на вкладке «Инструменты».</p>}
+      {/* прифуговка — важная настройка производства: всегда наверху и не сворачивается */}
+      <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Прифуговка под кромку</Title>
+        <Num label="Прифуговка (0 — нет)" unit="мм" value={cnc.joint ?? 0} onChange={v => onChange({ ...cnc, joint: Math.max(0, num(v)) })} />
+        <Hint>Сколько снимает ваш кромкооблицовочный станок перед кромкой. Деталь в раскрой больше на столько с каждой закромленной стороны. Когда заказ режется на фрезере вашего производства, эта прифуговка ставится всем кромкам заказа — и перебивает прифуговку из модели (Базис, К3) или из бланка клиента.</Hint>
+      </div>
       {(() => {
         const sc = { on: false, stepX: 400, stepY: 400, leave: 2, tool: '', ...ops.score }
         const setSc = patch => onChange({ ...cnc, ops: { ...ops, score: { ...sc, ...patch } } })
         return (
-          <div className="card" style={{ marginBottom: 10 }}>
+          <Fold id="score" title="Шинковка отходов" summary={sc.on ? `вкл · ${r1(sc.stepX)}×${r1(sc.stepY)}` : 'выкл'}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, cursor: 'pointer' }}>
               <input type="checkbox" checked={!!sc.on} onChange={e => setSc({ on: e.target.checked })} style={{ width: 18, height: 18 }} />
-              <span style={{ fontWeight: 600 }}>Шинковка отходов</span>
+              <span style={{ fontWeight: 600 }}>Шинковать отходы</span>
             </label>
             <Hint>Отходы листа (не детали и не деловые обрезки) надсекаются одной прямой не на всю глубину — крупные куски потом легко доломать руками и уложить в корзину. Каждый кусок отхода длиннее шага делится на равные части. Надсечки идут первыми из резов фрезой — до вырезов и контуров деталей, пока лист цел и держится вакуумом. Г-образных кусков не остаётся — по стыку тоже надсечка. Вход под наклоном, как у контура; если надсечка начинается за краем листа — прямо, в воздухе.</Hint>
             {sc.on && (
@@ -899,11 +928,10 @@ export function CncOps({ cnc, onChange, layers }) {
                 <ToolSelect cnc={cnc} only="mill" value={sc.tool} empty="Как контур детали" onChange={v => setSc({ tool: v })} />
               </>
             )}
-          </div>
+          </Fold>
         )
       })()}
-      <div className="card" style={{ marginBottom: 10 }}>
-        <Title>Что выводить в программу</Title>
+      <Fold id="skip" title="Что выводить в программу" summary={[skip.contour && 'прямоугольники', skip.face && 'без пазов', skip.holes && 'без отверстий'].filter(Boolean).join(', ') || 'всё'}>
         {[
           ['contour', 'Резать только прямоугольники', 'Вырезы внутренние и наружные, скругления и фигурный край не режутся — каждая деталь вырезается прямоугольником по своему габариту.'],
           ['face', 'Без пазов и выемок с лица', 'Пазы и выемки с лицевой стороны в программу не попадают.'],
@@ -920,12 +948,11 @@ export function CncOps({ cnc, onChange, layers }) {
           </div>
         ))}
         {skip.contour && <Hint>Раскрой должен быть сделан по габаритам: если фигурные детали уложены вплотную друг в друга, при создании программы будет предупреждение.</Hint>}
-      </div>
+      </Fold>
       {Contour({ k: 'outer', title: '1. Контур детали', note: skip.contour ? 'Фреза идёт снаружи прямоугольника по габариту детали.' : 'Фреза идёт снаружи контура.', extra: outerExtra })}
       {Contour({ k: 'cutout', title: '2. Контур выреза', note: 'Фреза всегда идёт внутри контура. Глубина сквозного выреза — та же, что у контура детали.', off: skip.contour, extra: cutDepth })}
-      <div className="card" style={{ marginBottom: 10, ...offStyle(skip.face) }}>
+      <Fold id="groove" title="3. Пазы" summary={skip.face ? 'отключено' : [layers ? `${layers.grooves} шт.` : '', toolName(ops.groove.tool)].filter(Boolean).join(' · ') || 'авто'} style={offStyle(skip.face)}>
         <OffNote on={skip.face} />
-        <Title>3. Пазы{layers ? <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-hint)' }}> · в заказе {layers.grooves} шт.</span> : null}</Title>
         <label className="label">Инструмент — общий для всех пазов</label>
         <ToolSelect cnc={cnc} only="mill" value={ops.groove.tool} onChange={v => set('groove', { tool: v })} />
         <label className="label" style={{ marginTop: 8 }}>Вход фрезы</label>
@@ -939,10 +966,9 @@ export function CncOps({ cnc, onChange, layers }) {
             )}
           </div>
         ))}
-      </div>
-      <div className="card" style={{ marginBottom: 10, ...offStyle(skip.face) }}>
+      </Fold>
+      <Fold id="pockets" title="4. Выемки" summary={skip.face ? 'отключено' : layers ? `${layers.pockets.reduce((a, l) => a + l.count, 0)} шт.` : ''} style={offStyle(skip.face)}>
         <OffNote on={skip.face} />
-        <Title>4. Выемки</Title>
         {!layers && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Выемки настраиваются по глубине — в заказе, где видно, какие глубины в нём есть.</p>}
         {layers && !layers.pockets.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе выемок нет.</p>}
         {layers?.pockets.map(l => (
@@ -961,10 +987,9 @@ export function CncOps({ cnc, onChange, layers }) {
             {Entry(ops.pockets?.[l.key] || {}, 'straight', patch => setMap('pockets', l.key, patch))}
           </div>
         ))}
-      </div>
-      <div className="card" style={offStyle(skip.holes) || undefined}>
+      </Fold>
+      <Fold id="holes" title="5. Отверстия" summary={skip.holes ? 'отключено' : layers ? `${layers.holes.reduce((a, l) => a + l.count, 0)} шт.` : ''} style={offStyle(skip.holes)}>
         <OffNote on={skip.holes} />
-        <Title>5. Отверстия</Title>
         {!layers && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Отверстия по диаметру и глубине настраиваются в заказе. Если сверло не назначено — берётся сверло того же диаметра из «Инструментов».</p>}
         {layers && !layers.holes.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе отверстий в пласть нет.</p>}
         {layers?.holes.map((l, i) => {
@@ -987,7 +1012,7 @@ export function CncOps({ cnc, onChange, layers }) {
             </div>
           )
         })}
-      </div>
+      </Fold>
     </>
   )
 }
