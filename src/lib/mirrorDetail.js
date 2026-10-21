@@ -86,7 +86,17 @@ export function mirrorContour(contour, panelWidthX) {
     ...(Array.isArray(contour.edgeGrooves) ? { edgeGrooves: contour.edgeGrooves.map(mirrorEdgeGroove) } : {}),
     drillings: (contour.drillings || []).map(dr => mirrorDrilling(dr, panelWidthX, contour.layout)),
     layout: (contour.layout || []).map(g => mirrorLayoutGuide(g, panelWidthX)),
+    // подрезка под кромку по сторонам из модели — меняется местами вместе с кромкой
+    ...(contour.edgeTrim ? { edgeTrim: mirrorEdgeTrim(contour.edgeTrim) } : {}),
   }
+}
+
+function mirrorEdgeTrim(t) {
+  const out = { ...t }
+  delete out.left; delete out.right
+  if (t.right !== undefined) out.left = t.right
+  if (t.left !== undefined) out.right = t.left
+  return out
 }
 
 // Кромка (Дв/Дн/Шл/Шп): при зеркалировании лево/право меняются местами, верх/низ — нет

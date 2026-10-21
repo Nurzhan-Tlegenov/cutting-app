@@ -16,7 +16,7 @@ import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided, backSide } from '../lib/partInfo'
 import { saveOrderModel, loadOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import EdgeTypes from '../components/EdgeTypes'
-import { cutSize, parseEdgeTypes, typesFromItems, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
+import { cutSize, parseEdgeTypes, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
@@ -163,7 +163,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
 
       {/* размер в раскрой — когда у кромки включена подрезка или прифуговка */}
       {(() => {
-        const cs = Number(detail.w) > 0 && Number(detail.h) > 0 ? cutSize(detail.w, detail.h, detail.edges, edgeTypes) : null
+        const cs = Number(detail.w) > 0 && Number(detail.h) > 0 ? cutSize(detail.w, detail.h, detail.edges, edgeTypes, detail.contour) : null
         return cs ? <div style={{ marginTop: 4, fontSize: 10, color: 'var(--teal)' }}>В раскрой с учётом кромки: {cs[0]} × {cs[1]}</div> : null
       })()}
 
@@ -382,7 +382,7 @@ export default function EditOrderPage() {
     if (newPrefixes.length) setPrefixes(prev => [...new Set([...prev, ...newPrefixes])])
     const newEdges = [...new Set(imported.flatMap(d => Object.values(d.edges)).filter(v => v && v !== 'default'))]
     const fromModel = { ...typesFromItems(items), ...(importedTypes || {}) }                       // толщина кромок из модели — только для тех, что ещё не заданы
-    if (Object.keys(fromModel).length) setEdgeTypes(prev => ({ ...fromModel, ...prev }))
+    if (Object.keys(fromModel).length) setEdgeTypes(prev => mergeModelTypes(prev, fromModel))   // заданное раньше остаётся; пустая толщина — из модели
     if (newEdges.length) setEdgeNames(prev => [...new Set([...prev, ...newEdges])])
     if (material && (!materialName.trim() || mode === 'replace')) {
       setMaterialName(material)

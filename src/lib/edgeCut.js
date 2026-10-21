@@ -32,22 +32,35 @@ export function edgeDelta(type) {
   return r2((type.trim ? num(type.t) : 0) - num(type.joint))
 }
 
-/** edges — { left, right, top, bottom }: название кромки | 'default' | null. -> { l, r, b, t } или null, если размер не меняется */
-export function sideDeltas(edges, types) {
+/** Подрезка по сторонам, заданная самой моделью при импорте (contour.edgeTrim: { left: true, top: false, … }) */
+export function edgeTrimOf(contour) {
+  let c = contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { return null } }
+  const t = c?.edgeTrim
+  return t && typeof t === 'object' ? t : null
+}
+
+/**
+ * edges — { left, right, top, bottom }: название кромки | 'default' | null. -> { l, r, b, t } или null, если размер не меняется.
+ * trim — подрезка по сторонам из модели (edgeTrimOf): где она задана, решает она, а не галочка вида кромки —
+ * в Базисе одна и та же кромка у фасада с подрезкой, а у корпуса без. Толщина и прифуговка — из вида кромки.
+ */
+export function sideDeltas(edges, types, trim) {
   if (!edges || !types) return null
   const d = {}
   let any = false
   for (const s of SIDES) {
     const k = edgeKey(edges[s])
-    d[s[0]] = k ? edgeDelta(types[k]) : 0
+    const type = k ? types[k] : null
+    d[s[0]] = !k ? 0 : typeof trim?.[s] === 'boolean' ? edgeDelta(type && { ...type, trim: trim[s] }) : edgeDelta(type)
     if (d[s[0]]) any = true
   }
   return any ? d : null
 }
 
-/** Размер в раскрой: [длина, ширина] (кромка слева/справа идёт вдоль длины и уменьшает ширину) */
-export function cutSize(length, width, edges, types) {
-  const k = sideDeltas(edges, types)
+/** Размер в раскрой: [длина, ширина] (кромка слева/справа идёт вдоль длины и уменьшает ширину); contour — для подрезки из модели */
+export function cutSize(length, width, edges, types, contour) {
+  const k = sideDeltas(edges, types, edgeTrimOf(contour))
   if (!k) return null
   return [r2(num(length) - k.b - k.t), r2(num(width) - k.l - k.r)]
 }
@@ -109,12 +122,12 @@ export function cutContour(c, W, L, k) {
  */
 export function cutDetail(row, types) {
   if (!row || !types) return row
-  const k = sideDeltas({ left: row.edge_left, right: row.edge_right, top: row.edge_top, bottom: row.edge_bottom }, types)
+  let c = row.contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  const k = sideDeltas({ left: row.edge_left, right: row.edge_right, top: row.edge_top, bottom: row.edge_bottom }, types, edgeTrimOf(c))
   if (!k) return row
   const W = num(row.width), L = num(row.length)
   if (!(W - k.l - k.r > 1) || !(L - k.b - k.t > 1)) return row
-  let c = row.contour
-  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const cc = cutContour(c || {}, W, L, k)
   return { ...row, width: r2(W - k.l - k.r), length: r2(L - k.b - k.t), contour: JSON.stringify(cc), _parsedContour: undefined, _raw: row, _cut: k }
 }
@@ -127,6 +140,8 @@ export const EDGE_TYPES_HINT = 'Заказ сохранён, но толщину
 export const blankType = () => ({ t: '', trim: false, joint: 0 })
 
 /** Толщина кромок из импортированной модели (Базис пишет её в свойствах детали; К3 — ещё подрезку и прифуговку) -> { название: { t, trim, joint } } */
+// Галочка «подрезка» у вида — только если в модели подрезаны все стороны с этой кромкой (у самих импортированных деталей
+// подрезка всё равно идёт по сторонам — contour.edgeTrim); галочка — это то, что получат детали, добавленные потом вручную.
 export function typesFromItems(items) {
   const out = {}
   for (const it of items || []) {
@@ -134,8 +149,20 @@ export function typesFromItems(items) {
     if (!info) continue
     for (const side of SIDES) {
       const name = edgeKey(it.edges?.[side]), t = num(info[side]?.thick)
-      if (name && t > 0 && !out[name]) out[name] = { t, trim: !!info[side]?.trim, joint: num(info[side]?.joint) || 0 }
+      if (!name || !(t > 0)) continue
+      if (!out[name]) out[name] = { t, trim: !!info[side]?.trim, joint: num(info[side]?.joint) || 0 }
+      else if (!info[side]?.trim) out[name].trim = false
     }
+  }
+  return out
+}
+
+/** Импорт: виды кромки, уже заданные в заказе/аккаунте, остаются как есть; но если у такого вида не указана толщина — берётся из модели */
+export function mergeModelTypes(prev, fromModel) {
+  const out = { ...fromModel, ...(prev || {}) }
+  for (const [k, m] of Object.entries(fromModel || {})) {
+    const p = prev?.[k]
+    if (p && !(num(String(p.t ?? '').replace(',', '.')) > 0) && num(m.t) > 0) out[k] = { ...p, t: m.t }
   }
   return out
 }

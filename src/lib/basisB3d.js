@@ -513,7 +513,9 @@ function basisSrc(panel) {
   const butts = (kid(o, 'Butts')?.c || []).map(butt => ({
     e: elems[val(butt, 'Elem', -1)] || null,
     name: cleanName(val(butt, 'Mat')) || cleanName(val(butt, 'Sign')) || 'default',
-    info: { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width') },
+    // Clip — «подрезка» в свойствах кромки Базиса: контур панели уже с кромкой, в раскрой она меньше на толщину кромки.
+    // Задаётся на каждой стороне каждой детали (у фасадов есть, у корпуса той же кромкой — нет), поэтому идёт в деталь по сторонам.
+    info: { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width'), trim: val(butt, 'Clip') === true },
   }))
   const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
   const texDir = val(o, 'TexDir', 0)
@@ -762,6 +764,9 @@ export function buildItem(src, holes, faceRule) {
     if (k >= 0) { cutouts[k].edge = name; edgeInfo['hole' + k] = info; continue }
     warn.edges++
   }
+  // подрезка под кромку по сторонам — как задано в модели (Базис, К3); у деталей без неё решает галочка вида кромки
+  const edgeTrim = {}
+  for (const s of ['left', 'right', 'bottom', 'top']) if (edges[s] && typeof edgeInfo[s]?.trim === 'boolean') edgeTrim[s] = edgeInfo[s].trim
 
   // --- присадка ---
   const drillings = []
@@ -913,6 +918,7 @@ export function buildItem(src, holes, faceRule) {
   }
   if (edgeGrooves.length) contour.edgeGrooves = edgeGrooves
   if (decor.length) contour.decor = decor
+  if (Object.keys(edgeTrim).length) contour.edgeTrim = edgeTrim
 
   const material = src.material
   return {
