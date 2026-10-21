@@ -8,16 +8,16 @@
  *      фрезы + зазор) и деловые обрезки (тоже с зазором); остальное — отход.
  *   2. Тонкие полоски отхода (уже MIN_W) убираются «открытием» маски: они и так ломаются рукой, а главное — без
  *      этого узкая полоска отступа по периметру сцепляла бы все отходы листа в один кусок.
- *   3. Отход раскладывается на прямоугольники (самый большой — первым); каждый делится на равные части: по X, если его габарит длиннее шага по X
- *      (вертикальные линии), по Y — горизонтальные. Линия идёт только по отходу (по исходной маске, т.е. и через
+ *   3. Каждый связный кусок отхода (полоса любой формы) длиннее шага делится на равные части по своему габариту:
+ *      по X — вертикальными линиями, по Y — горизонтальными. Линия идёт только по отходу (по исходной маске, т.е. и через
  *      тонкую полоску отступа до самого края листа) и прерывается на деталях и обрезках.
  *
  * Координаты: как на карте и в G-коде — (0,0) — левый нижний угол ЛИСТА, X — ширина, Y — длина, Y вверх.
  * -> [{ a: [x, y], b: [x, y], dir: 'v' | 'h' }]
  */
 const CELL = 5          // мм — клетка маски
-const MIN_W = 40        // мм — отход уже этого не шинкуется
-const MIN_LEN = 60      // мм — короче этого надсечка не делается
+const MIN_W = 15        // мм — отход уже этого не шинкуется (полоска отступа по краю листа)
+const MIN_LEN = 15        // мм — короче этого надсечка не делается
 
 function pointInPoly(x, y, P) {
   let inside = false
@@ -58,8 +58,9 @@ export function scoreLines({ geo, outlines = [], offcuts = [], gap = 4, stepX = 
       if (cx(i) > x0 && cx(i) < x1 && cy(j) > y0 && cy(j) < y1) free[j * nx + i] = 0
     }
   }
-  // «открытие»: убираем полоски уже MIN_W (эрозия + дилатация квадратом)
-  const K = Math.max(1, Math.round(MIN_W / CELL / 2))
+  // «открытие»: убираем полоски уже MIN_W (эрозия + дилатация квадратом) — это узкая полоска отступа по краю листа,
+  // она сама отламывается и без неё не сцепляет все отходы листа в один кусок
+  const K = Math.max(1, Math.round((MIN_W / CELL - 1) / 2))
   const erode = (src, val) => {                          // val = 1: эрозия единиц; val = 0: дилатация (эрозия нулей)
     const t = new Uint8Array(nx * ny), out = new Uint8Array(nx * ny)
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {        // по X
@@ -75,78 +76,66 @@ export function scoreLines({ geo, outlines = [], offcuts = [], gap = 4, stepX = 
     return out
   }
   const opened = erode(erode(free, 1), 0)
-  // куски отхода — прямоугольники: из маски по очереди вынимается самый большой прямоугольник (гистограммный поиск),
-  // пока остаются куски шире MIN_W. Так Г-образный отход делится как две полосы, а не по общему габариту
-  const work = Uint8Array.from(opened)
-  const rects = []
-  const minCells = Math.max(1, Math.round(MIN_W / CELL))
-  const hgt = new Int32Array(nx)
-  for (let iter = 0; iter < 400; iter++) {
-    let best = null
-    hgt.fill(0)
-    for (let j = 0; j < ny; j++) {
-      for (let i = 0; i < nx; i++) hgt[i] = work[j * nx + i] ? hgt[i] + 1 : 0
-      const st = []                                        // стек индексов с возрастающей высотой
-      for (let i = 0; i <= nx; i++) {
-        const h = i < nx ? hgt[i] : 0
-        while (st.length && hgt[st[st.length - 1]] >= h) {
-          const top = st.pop(), hh = hgt[top], left = st.length ? st[st.length - 1] + 1 : 0, ww = i - left
-          if (hh >= minCells && ww >= minCells && (!best || ww * hh > best.area)) best = { area: ww * hh, i0: left, i1: i - 1, j0: j - hh + 1, j1: j }
-        }
-        st.push(i)
-      }
+  // связные куски отхода (полоса любой формы — один кусок)
+  const reg = new Int32Array(nx * ny).fill(-1)
+  const regions = [], stack = []
+  for (let s0 = 0; s0 < nx * ny; s0++) {
+    if (!opened[s0] || reg[s0] >= 0) continue
+    const id = regions.length, R = { i0: nx, i1: -1, j0: ny, j1: -1 }
+    regions.push(R); reg[s0] = id; stack.push(s0)
+    while (stack.length) {
+      const c = stack.pop(), i = c % nx, j = (c - i) / nx
+      if (i < R.i0) R.i0 = i; if (i > R.i1) R.i1 = i; if (j < R.j0) R.j0 = j; if (j > R.j1) R.j1 = j
+      if (i > 0 && opened[c - 1] && reg[c - 1] < 0) { reg[c - 1] = id; stack.push(c - 1) }
+      if (i < nx - 1 && opened[c + 1] && reg[c + 1] < 0) { reg[c + 1] = id; stack.push(c + 1) }
+      if (j > 0 && opened[c - nx] && reg[c - nx] < 0) { reg[c - nx] = id; stack.push(c - nx) }
+      if (j < ny - 1 && opened[c + nx] && reg[c + nx] < 0) { reg[c + nx] = id; stack.push(c + nx) }
     }
-    if (!best) break
-    rects.push(best)
-    for (let j = best.j0; j <= best.j1; j++) for (let i = best.i0; i <= best.i1; i++) work[j * nx + i] = 0
   }
-  const owner = new Int32Array(nx * ny).fill(-1)
-  rects.forEach((R, n) => { R.n = n; for (let j = R.j0; j <= R.j1; j++) for (let i = R.i0; i <= R.i1; i++) owner[j * nx + i] = n })
   const sx = Number(stepX) || 0, sy = Number(stepY) || 0
   const out = []
-  const push = (vertical, idx, a, b) => { if (b - a >= MIN_LEN) out.push(vertical ? { a: [cx(idx), a], b: [cx(idx), b], dir: 'v' } : { a: [a, cy(idx)], b: [b, cy(idx)], dir: 'h' }) }
-  // линия по столбцу idx (vertical) / строке idx через прямоугольник R: по всему R и дальше по отходу, не занятому
-  // другими прямоугольниками (тонкие полоски отступа — до самого края листа); в соседний прямоугольник не заходит
-  const line = (idx, vertical, R) => {
-    const n = vertical ? ny : nx, lo = vertical ? R.j0 : R.i0, hi = vertical ? R.j1 : R.i1
-    const at = k => (vertical ? k * nx + idx : idx * nx + k)
-    const ok = k => free[at(k)] && (owner[at(k)] < 0 || owner[at(k)] === R.n)
-    let k = lo, e = hi + 1
-    while (k > 0 && ok(k - 1)) k--
-    while (e < n && ok(e)) e++
-    // концы: до края листа, если пробег упирается в край сетки, иначе — на клетку короче (запас до детали)
-    push(vertical, idx, k === 0 ? 0 : (k + 1) * CELL, e === n ? (vertical ? L : W) : (e - 1) * CELL)
+  // протяжённость куска id поперёк линии в клетке (i, j): длина сплошного отхода этого куска вдоль оси деления
+  const span = (i, j, id, alongX) => {
+    let a = alongX ? i : j, b = a
+    const at = k => (alongX ? j * nx + k : k * nx + i), n = alongX ? nx : ny
+    while (a > 0 && reg[at(a - 1)] === id) a--
+    while (b < n - 1 && reg[at(b + 1)] === id) b++
+    return (b - a + 1) * CELL
   }
-  for (const R of rects) {
+  // линия по столбцу idx (vertical) / строке idx через кусок id: каждый отрезок свободного отхода, задевающий кусок,
+  // если в этом месте кусок длиннее шага (маленький выступ большого куска лишний раз не режется)
+  const runs = (idx, vertical, id, step) => {
+    const n = vertical ? ny : nx
+    const at = k => (vertical ? k * nx + idx : idx * nx + k)
+    let k = 0
+    while (k < n) {
+      if (!free[at(k)]) { k++; continue }
+      let e = k, best = 0
+      while (e < n && free[at(e)]) {
+        if (reg[at(e)] === id) best = Math.max(best, vertical ? span(idx, e, id, true) : span(e, idx, id, false))
+        e++
+      }
+      if (best > step + 1e-6) {
+        // концы: до края листа, если отрезок упирается в край сетки, иначе — на клетку короче (запас до детали)
+        const a = k === 0 ? 0 : (k + 1) * CELL, b = e === n ? (vertical ? L : W) : (e - 1) * CELL
+        if (b - a >= MIN_LEN) out.push(vertical ? { a: [cx(idx), a], b: [cx(idx), b], dir: 'v' } : { a: [a, cy(idx)], b: [b, cy(idx)], dir: 'h' })
+      }
+      k = e
+    }
+  }
+  // каждый кусок длиннее шага делится на равные части по своему габариту: по X — вертикальными линиями, по Y — горизонтальными
+  regions.forEach((R, id) => {
     const w = (R.i1 - R.i0 + 1) * CELL, h = (R.j1 - R.j0 + 1) * CELL
     if (sx > 0 && w > sx + 1e-6) {
       const n = Math.ceil(w / sx - 1e-9)
-      for (let k = 1; k < n; k++) line(Math.min(R.i1, Math.max(R.i0, Math.round(R.i0 + (R.i1 - R.i0 + 1) * k / n - 0.5))), true, R)
+      for (let k = 1; k < n; k++) runs(Math.min(R.i1, Math.max(R.i0, Math.round(R.i0 + (R.i1 - R.i0 + 1) * k / n - 0.5))), true, id, sx)
     }
     if (sy > 0 && h > sy + 1e-6) {
       const n = Math.ceil(h / sy - 1e-9)
-      for (let k = 1; k < n; k++) line(Math.min(R.j1, Math.max(R.j0, Math.round(R.j0 + (R.j1 - R.j0 + 1) * k / n - 0.5))), false, R)
+      for (let k = 1; k < n; k++) runs(Math.min(R.j1, Math.max(R.j0, Math.round(R.j0 + (R.j1 - R.j0 + 1) * k / n - 0.5))), false, id, sy)
     }
-    // граница с соседним прямоугольником отхода (Г-образный отход): надсечка по стыку, иначе две полосы останутся
-    // одним куском. Правая и верхняя стороны — каждый стык один раз
-    const side = (vertical, idx, nbr, lo, hi) => {
-      let k = lo
-      while (k <= hi) {
-        const o = owner[vertical ? k * nx + nbr : nbr * nx + k]
-        if (o < 0 || o === R.n) { k++; continue }
-        let e = k
-        while (e <= hi && owner[vertical ? e * nx + nbr : nbr * nx + e] === o) e++
-        // оба куска вместе короче шага — ломаются как один, стык не нужен
-        const Q = rects[o], span = vertical ? (R.i1 - R.i0 + Q.i1 - Q.i0 + 2) * CELL : (R.j1 - R.j0 + Q.j1 - Q.j0 + 2) * CELL, step = vertical ? sx : sy
-        if (step > 0 && span <= step + 1e-6) { k = e; continue }
-        push(vertical, idx, k === 0 ? 0 : (k + 1) * CELL, e === (vertical ? ny : nx) ? (vertical ? L : W) : (e - 1) * CELL)
-        k = e
-      }
-    }
-    if (R.i1 + 1 < nx) side(true, R.i1, R.i1 + 1, R.j0, R.j1)
-    if (R.j1 + 1 < ny) side(false, R.j1, R.j1 + 1, R.i0, R.i1)
-  }
-  // одна и та же линия из двух прямоугольников — один раз
+  })
+  // одна и та же линия — один раз
   const uniq = new Map()
   for (const s of out) {
     const key = `${s.dir}:${s.a[0].toFixed(1)},${s.a[1].toFixed(1)}-${s.b[0].toFixed(1)},${s.b[1].toFixed(1)}`

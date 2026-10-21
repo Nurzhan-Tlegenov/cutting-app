@@ -894,7 +894,7 @@ export function CncOps({ cnc, onChange, layers }) {
                 <div style={{ marginTop: 8 }}>
                   <Num label="Сколько не дорезать" unit="мм" value={sc.leave} onChange={v => setSc({ leave: v })} />
                 </div>
-                <Hint>Надсечка идёт на глубину «толщина листа − недорез»: при листе 16 мм и недорезе 2 мм — 14 мм (одним резом, если это не больше максимальной глубины прохода фрезы). Отходы уже 40 мм не шинкуются.</Hint>
+                <Hint>Надсечка идёт на глубину «толщина листа − недорез»: при листе 16 мм и недорезе 2 мм — 14 мм (одним резом, если это не больше максимальной глубины прохода фрезы). Полоски уже 15 мм (отступ по краю листа) не шинкуются.</Hint>
                 <label className="label" style={{ marginTop: 8 }}>Инструмент</label>
                 <ToolSelect cnc={cnc} only="mill" value={sc.tool} empty="Как контур детали" onChange={v => setSc({ tool: v })} />
               </>
