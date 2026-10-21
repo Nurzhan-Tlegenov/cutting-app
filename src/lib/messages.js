@@ -25,7 +25,16 @@ async function insert(row) {
   } catch (e) { return fail(e) }
 }
 /** Обращение пользователя к мастер-аккаунту */
-export const sendAppeal = (user, profile, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', body })
+export const sendAppeal = (user, profile, body, extra = {}) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', body, ...(extra.orderId ? { order_id: extra.orderId } : {}), ...(extra.title ? { title: extra.title } : {}) })
+/** Обращение «убрать тестовый заказ из итогов»: заказ, номер и производство — для кнопок мастер-аккаунта в «Сообщениях».
+ *  Старые обращения без order_id узнаются по тексту (номер в «(№ …)», производство в «производства «…»»). */
+export function excludeRequest(m) {
+  if (!m || m.kind !== 'appeal' || !/убрать из итогов/i.test(m.body || '')) return null
+  const num = (m.body.match(/\(№\s*([^)\s]+)\)/) || [])[1] || ''
+  const prod = (m.body.match(/производства «([^»]*)»/) || [])[1] || ''
+  if (!m.order_id && !num) return null
+  return { orderId: m.order_id || '', num, prod }
+}
 /** Обращение с файлами: один файл уходит как есть, несколько — одним архивом .zip (мастер скачивает и распаковывает) */
 export async function sendAppealFiles(user, profile, body, files) {
   const list = [...(files || [])]

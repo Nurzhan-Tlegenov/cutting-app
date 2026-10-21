@@ -4,8 +4,11 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
-import { listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob } from '../lib/messages'
+import { excludeRequest, listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob } from '../lib/messages'
 import { getUserSettings } from '../lib/userSettings'
+import { adminProductionOrders } from '../lib/adminApi'
+import { productionExcludeStats } from '../lib/productionApi'
+import { orderTitle } from '../lib/orderUtils'
 
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
 // у мастер-аккаунта — обращения и файлы для отладки от пользователей (видно, от кого), новости для всех.
@@ -74,6 +77,35 @@ export default function MessagesPage() {
     if (r.error) setError(r.error); else setList(l => l.filter(x => x.id !== m.id))
   }
 
+  // мастер-аккаунт: обращения «убрать тестовый заказ из итогов» — кнопка прямо в сообщении
+  const [allOrders, setAllOrders] = useState(null)   // заказы всех производств (для таких обращений)
+  const hasExcl = isMaster && (list || []).some(m => excludeRequest(m))
+  useEffect(() => {
+    if (!hasExcl || allOrders) return
+    let alive = true
+    adminProductionOrders().then(r => { if (alive) setAllOrders(r.data || []) })
+    return () => { alive = false }
+  }, [hasExcl])   // eslint-disable-line react-hooks/exhaustive-deps
+  const findOrder = req => {
+    if (!allOrders) return null
+    if (req.orderId) return allOrders.find(o => o.id === req.orderId) || null
+    const same = allOrders.filter(o => o.order_number === req.num)
+    return same.length === 1 ? same[0] : same.find(o => o.status === 'done') || same[0] || null
+  }
+  const doExclude = async (m, o, on) => {
+    if (!o) return
+    if (on && !window.confirm(`Убрать заказ «${orderTitle(o)}»${o.order_number ? ` (№ ${o.order_number})` : ''} из итогов как тестовый?\nЕго сумма, листы и работы не будут считаться.`)) return
+    setBusy(true)
+    const r = await productionExcludeStats(o.id, on)
+    setBusy(false)
+    if (r.error) { setError(r.error); return }
+    setAllOrders(l => (l || []).map(x => (x.id === o.id ? { ...x, excluded: on } : x)))
+    if (on && m.from_id && window.confirm('Готово. Сообщить пользователю ответом?')) {
+      const a = await sendReply(user, profile, m.from_id, `Тестовый заказ «${orderTitle(o)}»${o.order_number ? ` (№ ${o.order_number})` : ''} убран из итогов.`)
+      if (a.error) setError(a.error); else load()
+    }
+  }
+
   const FILTERS = isMaster ? [['all', 'Все'], ['appeal', 'Обращения'], ['debug', 'Файлы'], ['news', 'Новости']] : [['all', 'Все'], ['news', 'Новости'], ['mine', 'Мои обращения']]
   const shown = (list || []).filter(m => filter === 'all' || (filter === 'mine' ? m.from_id === user?.id || m.kind === 'reply' : m.kind === filter))
   const chip = on => ({ flex: '0 0 auto', padding: '6px 12px', borderRadius: 20, border: 'none', fontSize: 12, background: on ? 'var(--blue)' : 'var(--bg)', color: on ? 'white' : 'var(--text-muted)' })
@@ -127,6 +159,8 @@ export default function MessagesPage() {
             const [kl, bg, fg] = KIND[m.kind] || KIND.news
             const mine = m.from_id === user?.id
             const fresh = isIncoming(m, user?.id, isMaster) && (!seenAt || m.created_at > seenAt)
+            const excl = isMaster && !mine ? excludeRequest(m) : null
+            const exclOrder = excl ? findOrder(excl) : null
             return (
               <div key={m.id} className="card" style={{ padding: '10px 12px', borderColor: fresh ? 'var(--blue)' : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
@@ -139,11 +173,20 @@ export default function MessagesPage() {
                 {isMaster && !mine && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>От: <b style={{ color: 'var(--text)' }}>{m.from_name || 'пользователь'}</b></div>}
                 {!isMaster && mine && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Вы писали</div>}
                 {m.title && <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>{m.title}</div>}
-                {m.body && <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</div>}
+                {m.body && <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body.replace(/\n?Сделать: Профиль → Заказы всех производств[^\n]*/, '')}</div>}
                 {m.file_name && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace', wordBreak: 'break-all' }}>📎 {m.file_name} · {sizeTxt(m.file_size)}</div>}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                   {isMaster && m.file_name && <button type="button" style={{ ...small, color: 'var(--teal)', borderColor: 'var(--teal)' }} onClick={() => getFile(m)}>⬇ Скачать файл</button>}
-                  {isMaster && m.order_id && <button type="button" style={small} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>Открыть заказ</button>}
+                  {excl && (() => {
+                    if (!allOrders) return <span style={{ fontSize: 12, color: 'var(--text-hint)', alignSelf: 'center' }}>ищем заказ…</span>
+                    if (!exclOrder) return <button type="button" style={small} onClick={() => navigate(`/all-productions?num=${encodeURIComponent(excl.num)}`)}>Заказ не найден — открыть итоги</button>
+                    return exclOrder.excluded
+                      ? <><span style={{ fontSize: 12, color: 'var(--teal)', alignSelf: 'center' }}>✓ Уже не в итогах</span>
+                          <button type="button" style={small} disabled={busy} onClick={() => doExclude(m, exclOrder, false)}>Вернуть в итоги</button></>
+                      : <button type="button" style={{ ...small, color: 'white', background: 'var(--amber)', borderColor: 'var(--amber)' }} disabled={busy} onClick={() => doExclude(m, exclOrder, true)}>Убрать из итогов</button>
+                  })()}
+                  {excl && exclOrder && <button type="button" style={small} onClick={() => navigate(`/all-productions?order=${exclOrder.id}`)}>Итоги производства</button>}
+                  {isMaster && m.order_id && !excl && <button type="button" style={small} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>Открыть заказ</button>}
                   {isMaster && !mine && (m.kind === 'appeal' || m.kind === 'debug') && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => { setReplyTo(m); setReplyText('') }}>Ответить</button>}
                   {(isMaster || mine) && <button type="button" style={small} onClick={() => remove(m)}>Удалить</button>}
                 </div>

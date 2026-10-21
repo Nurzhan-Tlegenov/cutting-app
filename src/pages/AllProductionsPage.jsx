@@ -1,6 +1,6 @@
 import { MenuButton } from '../components/NavDrawer'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { adminProductionOrders } from '../lib/adminApi'
@@ -29,6 +29,10 @@ export default function AllProductionsPage() {
   const per = usePeriod('allProds_')
   const [filter, setFilter] = useState(() => keep('filter', 'all'))
   const [open, setOpen] = useState(() => keep('open', ''))
+  // переход из обращения «убрать из итогов»: ?order=<id> или ?num=<номер> — этот заказ показываем сверху, без учёта периода
+  const [params] = useSearchParams()
+  const focusId = params.get('order') || '', focusNum = params.get('num') || ''
+  const focus = useMemo(() => (focusId || focusNum ? orders.filter(o => (focusId ? o.id === focusId : o.order_number === focusNum)) : []), [orders, focusId, focusNum])
 
   useEffect(() => {
     if (!isMaster) return
@@ -75,6 +79,29 @@ export default function AllProductionsPage() {
         <h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Заказы всех производств</h1>
       </div>
       {error && <div className="card" style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 10 }}>{error}</div>}
+      {(focusId || focusNum) && (
+        <div className="card" style={{ marginBottom: 10, padding: '10px 12px', borderColor: 'var(--amber)' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 4 }}>Заказ из обращения</div>
+          {focus.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Заказ{focusNum ? ` № ${focusNum}` : ''} не найден среди заказов производств.</p>}
+          {focus.map(o => {
+            const pr = prods.find(p => p.id === o.production_id)
+            return (
+              <div key={o.id} style={{ padding: '6px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</span>
+                  {o.excluded && <span style={{ fontSize: 11, color: 'var(--amber)' }}>тест · не в итогах</span>}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{pr ? productionLabel(pr) : 'Производство'} · {o.order_number ? `№ ${o.order_number} · ` : ''}{date(orderDate(o))} · {o.total != null ? money(o.total, o.currency) : 'цена не зафиксирована'}</div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                  <button style={{ ...LINK, color: o.excluded ? 'var(--amber)' : 'white', background: o.excluded ? 'none' : 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => exclude(o, !o.excluded)}>{o.excluded ? 'Вернуть в итоги' : 'Убрать из итогов'}</button>
+                  {!o.deleted && <button style={LINK} onClick={() => navigate(`/orders/${o.id}`)}>Заказ</button>}
+                  {pr && <button style={LINK} onClick={() => setOpen(pr.id)}>Все заказы производства</button>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ flex: 1, fontSize: 12.5 }}>Тестовые заказы — время прохождения всех этапов, мин

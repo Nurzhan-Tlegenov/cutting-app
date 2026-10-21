@@ -130,8 +130,8 @@ export default function ProductionPage() {
   const askExclude = async o => {
     const note = window.prompt(`Попросить мастер-аккаунт убрать тестовый заказ «${orderTitle(o)}» из итогов производства?\nКомментарий (необязательно):`, '')
     if (note === null) return
-    const body = `Прошу убрать из итогов тестовый заказ «${orderTitle(o)}»${o.order_number ? ` (№ ${o.order_number})` : ''} производства «${prod?.name || ''}».${note.trim() ? ` ${note.trim()}` : ''}\nСделать: Профиль → Заказы всех производств → «${prod?.name || ''}» → заказ → «Не в итоги».`
-    const r = await sendAppeal(user, profile, body)
+    const body = `Прошу убрать из итогов тестовый заказ «${orderTitle(o)}»${o.order_number ? ` (№ ${o.order_number})` : ''} производства «${prod?.name || ''}».${note.trim() ? ` ${note.trim()}` : ''}`
+    const r = await sendAppeal(user, profile, body, { orderId: o.id })
     window.alert(r.error ? `Не отправилось: ${r.error}` : 'Обращение отправлено мастер-аккаунту.')
   }
   // тестовый заказ — убрать из итогов / вернуть
