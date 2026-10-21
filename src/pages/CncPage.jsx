@@ -26,6 +26,8 @@ import { orderClient } from '../lib/productionApi'
 import SaveFilesDialog from '../components/SaveFilesDialog'
 import { productionMark, orderMarks } from '../lib/productionApi'
 import PdfSetup from '../components/PdfSetup'
+import { buildNestingPdf } from '../lib/nestingPdf'
+import { userPdfTpl } from '../lib/pdfSummary'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
 import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from '../lib/simShare'
@@ -64,6 +66,10 @@ export default function CncPage() {
   // ложатся отдельной папкой рядом с программами (имя папки программ + «_Etiketki»). Запоминается за аккаунтом.
   const [withLabels, setWithLabelsState] = useState(() => !!getUserSettings(user).cncWithLabels)
   const setWithLabels = on => { setWithLabelsState(on); saveUserSettings({ cncWithLabels: on }, user); setBuilt(null) }
+  // карты раскроя PDF — вместе с программами (в папку программ): кто-то до сих пор печатает карты
+  const [withMaps, setWithMapsState] = useState(() => !!getUserSettings(user).cncWithMaps)
+  const setWithMaps = on => { setWithMapsState(on); saveUserSettings({ cncWithMaps: on }, user) }
+  const [mapsBusy, setMapsBusy] = useState('')
   const [order, setOrder] = useState(null)
   const [clientName, setClientName] = useState('')   // имя заказчика — для названий программ и папки
   useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }); return () => { alive = false } }, [id])
@@ -254,11 +260,18 @@ export default function CncPage() {
   const labelsDir = () => { const d = routerDir(); return d.length ? [...d.slice(0, -1), `${d[d.length - 1]}_${folderName('Этикетки', nameCtx(null))}`] : [folderName('Этикетки', nameCtx(null))] }
   const drillDir = r => pathOf(r.post.dirPath ?? DRILL_DIR_DEFAULT)
   const setPostPath = (id, v) => change({ ...cnc, posts: cnc.posts.map(q => (q.id === id ? { ...q, dirPath: v } : q)) })
-  const saveAll = () => {
+  const saveAll = async () => {
     const rd = routerDir()
+    let maps = null
+    if (withMaps && mat) {
+      // PDF карт по листам этого материала — тем же оформлением, что «PDF карт» (шаблон листа аккаунта), без сметы
+      setMapsBusy('Готовим карты PDF…')
+      try { maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, tpl: userPdfTpl(user), onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: rd } } catch { maps = null } finally { setMapsBusy('') }
+    }
     const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
     if (built.second) { const d2 = pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`); files.push(...built.second.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: d2 }))) }
+    if (maps) files.push(maps)
     setSaveAsk({ files, zipName: `${fileBase('zip')}.zip` })
   }
   const allCount = () => built.files.filter(f => !f.empty).length + (built.labels?.length || 0) + (built.drill || []).reduce((a, r) => a + r.files.length, 0) + (built.second?.files.filter(f => !f.empty).length || 0)
@@ -479,6 +492,13 @@ export default function CncPage() {
               </span>
             </label>
           )}
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={withMaps} onChange={e => setWithMaps(e.target.checked)} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
+            <span>📄 Карты раскроя (PDF) вместе с программами
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>При «Сохранить все файлы» — PDF карт всех листов материала в папку программ: <b style={{ fontFamily: 'monospace' }}>{fileBase('maps')}.pdf</b>. Для тех, кто печатает карты.</span>
+            </span>
+          </label>
+          {mapsBusy && <CncLoader compact label={mapsBusy} />}
           <button data-tour="cnc-build" className="btn-primary" disabled={!sel.length || faults.length > 0 || (beamMat && !saw)} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{beamMat ? (built ? '↻ Создать программу пилы заново' : `Создать программу пилы (XML${drills.length ? ' + присадка' : ''})`) : built ? (drills.length || r2 ? '↻ Создать программы заново' : '↻ Создать G-код заново') : r2 ? `Создать программы (${post.name} + ${r2.name})` : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
           {built?.beam && built.files.map(f => (
             <div key={f.name} className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
@@ -528,7 +548,7 @@ export default function CncPage() {
           ))}
           {built && allCount() > 1 && (
             <>
-              <button data-tour="cnc-save" className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll}>⬇ Сохранить все файлы ({allCount()})</button>
+              <button data-tour="cnc-save" className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll} disabled={!!mapsBusy}>⬇ Сохранить все файлы ({allCount() + (withMaps ? 1 : 0)})</button>
               {((built.drill || []).some(r => r.files.length) || built.second) && (
                 <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                   Папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}{built.second && <span>; <b style={{ fontFamily: 'monospace' }}>{pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`).join('/')}</b> — {built.second.post.name}</span>}
