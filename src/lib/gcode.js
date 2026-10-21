@@ -1016,13 +1016,18 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
     else {
       const r = n0(t.d) / 2, gap = r + 2            // линия не ближе 2 мм (плюс клетка сетки) к детали и обрезку
       const X0 = n0(post.originX), Y0 = n0(post.originY)
-      const outlines = parts.map(pt => offsetLoop(smoothLoop(pt.outline.map(([x, y]) => [x - X0, y - Y0])), gap) || pt.outline.map(([x, y]) => [x - X0, y - Y0]))
-      const lines = scoreLines({ geo, outlines, offcuts: sheet.manualOffcuts || [], gap, stepX: n0(sc.stepX), stepY: n0(sc.stepY) })
+      const local = parts.map(pt => smoothLoop(pt.outline.map(([x, y]) => [x - X0, y - Y0])))
+      const outlines = local.map(P => offsetLoop(P, gap) || P)
+      const paths = local.map(P => offsetLoop(P, r)).filter(Boolean)        // резы контуров деталей (по центру фрезы)
+      const lines = scoreLines({ geo, outlines, paths, offcuts: sheet.manualOffcuts || [], r, gap, stepX: n0(sc.stepX), stepY: n0(sc.stepY) })
       const zs = levels(T, leave, n0(t.maxPass))
       edgeOk(t, T - leave, 'шинковка отходов')
       for (const s of lines) {
         const pts = [[X0 + s.a[0], Y0 + s.a[1]], [X0 + s.b[0], Y0 + s.b[1]]]
-        jobs.push({ stage: 3, rank: 7, tool: t, at: pts[0], pts, run: out => cutOpen(out, pts, zs, t, safeZ, T, { entry: 'straight' }) })
+        // конец в резе детали / обрезка или за краем листа — фреза опускается прямо в пустоту; оба конца в материале — под наклоном, как контур
+        const job = { stage: 3, rank: 7, tool: t, at: pts[0], pts, open: [!!s.openA, !!s.openB],
+          run: out => cutOpen(out, job.pts, zs, t, safeZ, T, job.open[0] ? { entry: 'straight' } : { entry: 'ramp', angle: n0(ops.outer?.angle) || 45 }) }
+        jobs.push(job)
       }
       scored = lines.length
       if (!lines.length) warn.add('Шинковка отходов включена, но на листе нет отходов крупнее заданного шага.')
@@ -1094,12 +1099,14 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
     while (rest.length) {
       let bi = 0, bd = Infinity, flip = false
       rest.forEach((j, i) => {
+        // начинать с конца, который в резе (прямой вход); если открыт только один — только с него
         const d0 = Math.hypot(j.pts[0][0] - cur[0], j.pts[0][1] - cur[1]), d1 = Math.hypot(j.pts[1][0] - cur[0], j.pts[1][1] - cur[1])
-        if (d0 < bd) { bd = d0; bi = i; flip = false }
-        if (d1 < bd) { bd = d1; bi = i; flip = true }
+        const ok0 = j.open[0] || !j.open[1], ok1 = j.open[1] || !j.open[0]
+        if (ok0 && d0 < bd) { bd = d0; bi = i; flip = false }
+        if (ok1 && d1 < bd) { bd = d1; bi = i; flip = true }
       })
       const j = rest.splice(bi, 1)[0]
-      if (flip) j.pts.reverse()
+      if (flip) { j.pts.reverse(); j.open.reverse() }
       j.at = j.pts[0]; seq.push(j); cur = j.pts[1]
     }
   }
