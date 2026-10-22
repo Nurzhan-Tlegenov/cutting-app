@@ -396,6 +396,31 @@ const flipPlaced = (list, usableY, kerf) => list.map(p => ({ ...p, y: usableY - 
 // которые с продолжением до края листа не меньше этого, отмечаются обрезками сами: крупные первыми, без наложений.
 // Отмеченный обрезок не шинкуется и попадает на бирки обрезков; снять или добавить можно вручную, как обычно.
 // sheet — в координатах данных (Y от низа); -> manualOffcuts в тех же координатах
+// Свободный прямоугольник от точки: крест через точку, потом подрезка углов — до конца (на плотном листе
+// подрезок бывает много), и проверка, что прямоугольник не задевает ни одной детали
+function freeRectAt(px, py, parts, usableX, usableY) {
+  if (parts.some(o => px >= o.x && px <= o.x + o.w && py >= o.y && py <= o.y + o.h)) return null
+  let x0 = 0, x1 = usableX, y0 = 0, y1 = usableY
+  for (const o of parts) if (o.y < py && o.y + o.h > py) { if (o.x + o.w <= px) x0 = Math.max(x0, o.x + o.w); if (o.x >= px) x1 = Math.min(x1, o.x) }
+  for (const o of parts) if (o.x < px && o.x + o.w > px) { if (o.y + o.h <= py) y0 = Math.max(y0, o.y + o.h); if (o.y >= py) y1 = Math.min(y1, o.y) }
+  const overlaps = o => x0 < o.x + o.w - 0.01 && x1 > o.x + 0.01 && y0 < o.y + o.h - 0.01 && y1 > o.y + 0.01
+  for (let iter = 0; iter < 400; iter++) {
+    const hit = parts.find(overlaps)
+    if (!hit) break
+    // подрезаем ту сторону, что оставляет больше площади, но точка должна остаться внутри
+    const w = x1 - x0, h = y1 - y0
+    const opts = [
+      hit.x > px ? { area: (hit.x - x0) * h, f: () => { x1 = hit.x } } : null,
+      hit.x + hit.w < px ? { area: (x1 - hit.x - hit.w) * h, f: () => { x0 = hit.x + hit.w } } : null,
+      hit.y > py ? { area: w * (hit.y - y0), f: () => { y1 = hit.y } } : null,
+      hit.y + hit.h < py ? { area: w * (y1 - hit.y - hit.h), f: () => { y0 = hit.y + hit.h } } : null,
+    ].filter(o => o && o.area > 0.01)
+    if (!opts.length) return null
+    opts.sort((a, b) => b.area - a.area)[0].f()
+  }
+  if (parts.some(overlaps) || x1 - x0 < 5 || y1 - y0 < 5) return null
+  return { x: Math.round(x0 * 10) / 10, y: Math.round(y0 * 10) / 10, w: Math.round((x1 - x0) * 10) / 10, h: Math.round((y1 - y0) * 10) / 10 }
+}
 function autoOffcuts(sheet, g, minL, minW) {
   const { usableX, usableY, kerf, marginL, marginT, sheetW, sheetL } = g
   if (!(usableX > 0 && usableY > 0)) return []
@@ -420,7 +445,7 @@ function autoOffcuts(sheet, g, minL, minW) {
     if (x <= 0 || x >= usableX) continue
     for (const y of ys) {
       if (y <= 0 || y >= usableY) continue
-      const r = computeOffcutAtPoint(x, y, busy, usableX, usableY)
+      const r = freeRectAt(x, y, busy, usableX, usableY)
       if (!r) continue
       const key = `${r.x},${r.y},${r.w},${r.h}`
       if (cand.has(key)) continue
@@ -3420,6 +3445,14 @@ export default function NestingPage() {
                               style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
                                 background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
                               Очистить ({canvasSheet.manualOffcuts.length})
+                            </button>
+                          )}
+                          {offcutMode === 'manual' && !beamSaw && (offMinL > 0 || offMinW > 0) && (
+                            <button title="Отметить свободные куски по правилу производства («Деловой обрезок»)"
+                              onClick={() => onManualOffcutsCfg(cfg.id, cfg.activeSheet, autoOffcuts(canvasSheet, geoOf(order, cfg.result, canvasSheet), offMinL, offMinW))}
+                              style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
+                                background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
+                              По правилу
                             </button>
                           )}
                         </div>
