@@ -419,7 +419,7 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null, canSwipe = null }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, dimScale = 1, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null, canSwipe = null }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   // Перелистывание как в галерее телефона: карта едет за пальцем, при отпускании уходит за край, а соседний
@@ -536,7 +536,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   useLayoutEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, canvasW, canvasH, DPR])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, dimScale, canvasW, canvasH, DPR])
 
   const toC = v => v * sc
   const fromC = v => v / sc
@@ -816,15 +816,16 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // Размеры — по сторонам: Ширина (X) вдоль верхней стороны,
       // Длина (Y) вдоль левой стороны (текст повёрнут вдоль стороны)
       ctx.fillStyle = 'rgba(0,0,0,0.7)'
-      ctx.font = '8px sans-serif'
+      const fs = Math.round(8 * (dimScale || 1) * 10) / 10   // размер шрифта размеров — настраивается «Размеры − / +»
+      ctx.font = `${fs}px sans-serif`
       const wTxt = String(Math.round(p.origX)), lTxt = String(Math.round(p.origY))
       const wPx = ctx.measureText(wTxt).width, lPx = ctx.measureText(lTxt).width
       if (hasShape) {
         // Фигурная деталь: размеры ставим на сам материал внутри контура
-        const key = `${sc}|${wTxt}|${lTxt}`
+        const key = `${sc}|${fs}|${wTxt}|${lTxt}`
         let cached = dimSpotCache.get(p.polygon)
         if (!cached || cached.key !== key) {
-          cached = { key, spots: findDimSpots(p.polygon, p.origX, p.origY, wPx / sc, lPx / sc, 10 / sc) }
+          cached = { key, spots: findDimSpots(p.polygon, p.origX, p.origY, wPx / sc, lPx / sc, (fs + 2) / sc) }
           dimSpotCache.set(p.polygon, cached)
         }
         const { top, left } = cached.spots
@@ -837,10 +838,11 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
           ctx.restore()
         }
       } else {
-        if (h > 16 && wPx < w - 6) ctx.fillText(wTxt, x + w / 2, y + 7)
-        if (w > 16 && lPx < h - 6) {
+        const off = 3 + fs / 2   // отступ подписи от стороны растёт вместе со шрифтом
+        if (h > 2 * fs && wPx < w - 6) ctx.fillText(wTxt, x + w / 2, y + off)
+        if (w > 2 * fs && lPx < h - 6) {
           ctx.save()
-          ctx.translate(x + 7, y + h / 2)
+          ctx.translate(x + off, y + h / 2)
           ctx.rotate(-Math.PI / 2)
           ctx.fillText(lTxt, 0, 0)
           ctx.restore()
@@ -1653,6 +1655,9 @@ export default function NestingPage() {
   // показывать ли кромку на картах (без неё карта читается легче) — тоже за аккаунтом
   const [showEdges, setShowEdges] = useState(() => getUserSettings(user).nestShowEdges !== false)
   const toggleEdges = v => { setShowEdges(v); saveUserSettings({ nestShowEdges: v }, user) }
+  // Размер цифр-размеров по сторонам деталей на карте (только они, остальное не меняется); идёт за аккаунтом
+  const [dimScale, setDimScale] = useState(() => { const v = Number(getUserSettings(user).nestDimScale); return v >= 0.75 && v <= 2.5 ? v : 1 })
+  const stepDim = d => setDimScale(v => { const n = Math.round(Math.min(2.5, Math.max(0.75, v + d)) * 100) / 100; saveUserSettings({ nestDimScale: n }, user); return n })
   const [configs, setConfigs] = useState(() => [newCfg()])
   const [focusId, setFocusId] = useState(null)   // конфигурация, по которой считается шапка со статистикой
   const [parallel, setParallel] = useState(true) // считать конфигурации одновременно или по очереди
@@ -3266,7 +3271,7 @@ export default function NestingPage() {
                     )}
                   </div>
                   {/* Что писать на деталях — отдельной строкой, чтобы не закрывать кнопки */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6, fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginBottom: 6, fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap', flexWrap: 'wrap', rowGap: 4 }}>
                     Подпись на деталях:
                     <select value={labelMode} onChange={e => setLabelMode(e.target.value)}
                       style={{ width: 'auto', minWidth: 0, maxWidth: 150, flex: '0 1 auto', padding: '2px 4px', fontSize: 11, color: 'var(--text-muted)', textOverflow: 'ellipsis' }}>
@@ -3276,6 +3281,16 @@ export default function NestingPage() {
                       <input type="checkbox" checked={showEdges} onChange={e => toggleEdges(e.target.checked)} style={{ width: 'auto' }} />
                       Кромка
                     </label>
+                    {view !== 'all' && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 3, marginLeft: 6 }} title="Размер цифр по сторонам деталей">
+                        Размеры:
+                        <button type="button" onClick={() => stepDim(-0.25)} disabled={dimScale <= 0.75}
+                          style={{ width: 22, height: 20, padding: 0, borderRadius: 6, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, cursor: 'pointer' }}>−</button>
+                        <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--text-muted)' }}>{Math.round(dimScale * 100)}%</span>
+                        <button type="button" onClick={() => stepDim(0.25)} disabled={dimScale >= 2.5}
+                          style={{ width: 22, height: 20, padding: 0, borderRadius: 6, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, cursor: 'pointer' }}>+</button>
+                      </span>
+                    )}
                   </div>
 
                   {view === 'all' ? (
@@ -3329,7 +3344,7 @@ export default function NestingPage() {
                         usableX={cgeo.usableX} usableY={cgeo.usableY}
                         sheetL={cgeo.sheetL} sheetW={cgeo.sheetW}
                         marginL={cgeo.marginL} marginT={cgeo.marginT}
-                        kerf={cgeo.kerf} colorMap={colorMap} details={details} labelMode={labelMode} showEdges={showEdges}
+                        kerf={cgeo.kerf} colorMap={colorMap} details={details} labelMode={labelMode} showEdges={showEdges} dimScale={dimScale}
                         onMove={(si, np) => onMoveCfg(cfg.id, si, np)} interactive={true} showOffcuts={showOffcuts}
                         offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
                         onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}

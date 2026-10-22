@@ -486,6 +486,7 @@
 "Потяните вверх или вниз": "Drag up or down",
 "Просмотр XML присадки": "Drilling XML viewer",
 "Размеры": "Dimensions",
+"Размеры:": "Dimensions:",
 "Размеры: цепные (между осями, от обоих краёв) → от нуля → скрыть": "Dimensions: chain (between axes, from both edges) → from zero → hide",
 "Сверху · 5": "Top · 5",
 "Снизу · 6": "Bottom · 6",
