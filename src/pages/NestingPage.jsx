@@ -1864,7 +1864,12 @@ export default function NestingPage() {
   // чтобы шинковка ЧПУ их не порезала. Один раз на лист (offAuto): снятые вручную обрезки не возвращаются.
   // Пильный центр отмечает обрезки сам по своим настройкам.
   const offRulePr = order ? (order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)) : null
-  const offMinL = Number(offRulePr?.offcut_min_length) || 0, offMinW = Number(offRulePr?.offcut_min_width) || 0
+  // По умолчанию у фрезера (там есть шинковка) — 400 × 400; 0 в настройке производства — выключено.
+  // Форматник — только если производство задало размер само
+  const OFFCUT_DEFAULT = 400
+  const offVal = v => (v == null || v === '' ? null : Math.max(0, Number(v) || 0))
+  const offDef = cuttingMethod === 'nesting' ? OFFCUT_DEFAULT : 0
+  const offMinL = offVal(offRulePr?.offcut_min_length) ?? offDef, offMinW = offVal(offRulePr?.offcut_min_width) ?? offDef
   useEffect(() => {
     if (!order || beamSaw || !(offMinL > 0 || offMinW > 0)) return
     const need = c => c.status === 'done' && (c.sheetsData || []).some(sh => !sh.offAuto && sh.placed?.length)

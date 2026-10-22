@@ -324,7 +324,7 @@ export default function ProductionPage() {
                   <div style={{ display: 'flex', gap: 6 }}>
                     {OFFCUT_KEYS.map(([k, l]) => (
                       <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
-                        <input type="text" inputMode="decimal" value={sheet[k] ?? ''} placeholder="выкл."
+                        <input type="text" inputMode="decimal" value={sheet[k] ?? ''} placeholder="400"
                           onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
                       </label>
                     ))}
@@ -332,7 +332,7 @@ export default function ProductionPage() {
                   <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>
                     На готовом раскрое (фрезер ЧПУ и форматно-раскроечный станок) свободный кусок листа, который не меньше этих размеров, сам отмечается деловым обрезком:
                     шинковка ЧПУ его не режет, на него печатается бирка обрезка. Снять обрезок или отметить другой можно вручную на карте («Обрезки» → «Вручную»).
-                    Пусто в обоих полях — выключено. У пильного центра свой размер обрезка — в его настройках.
+                    Пусто — по умолчанию 400 × 400 мм у фрезера ЧПУ (у форматника — выключено); 0 в обоих полях — выключено везде. У пильного центра свой размер обрезка — в его настройках.
                   </p>
                 </div>
               </>}
