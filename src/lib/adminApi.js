@@ -128,3 +128,12 @@ export async function adminDeleteUser(id) {
   if (r.data && r.data !== 'ok') return { error: r.data === 'not found' ? 'Аккаунт уже удалён.' : `Удалить не получилось: ${r.data}` }
   return {}
 }
+
+/** Мастер: исправить страну и город пользователя (например, указал не ту страну при регистрации) */
+export async function adminSetLocation(userId, country, city) {
+  try {
+    const { data, error } = await supabase.from('profiles').update({ country: String(country || '').trim(), city: String(city || '').trim() }).eq('id', userId).select('id')
+    if (error) return { error: error.message }
+    return data?.length ? { ok: true } : { error: 'Профиль не найден или нет прав на изменение' }
+  } catch (e) { return { error: String(e?.message || e) } }
+}

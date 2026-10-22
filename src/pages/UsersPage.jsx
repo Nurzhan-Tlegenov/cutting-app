@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
-import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser } from '../lib/adminApi'
+import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
 import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
@@ -13,6 +13,7 @@ import { siteOrigin } from '../lib/siteOrigin'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { adminBeta, adminSetBeta, BETA_FEATURES } from '../lib/beta'
 import { sendReply } from '../lib/messages'
+import { COUNTRY_NAMES } from '../lib/phoneCountries'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
@@ -34,6 +35,7 @@ export default function UsersPage() {
   const { user, profile } = useAuth()
   const [writeTo, setWriteTo] = useState(null)   // кому мастер пишет личное сообщение (id пользователя)
   const [draft, setDraft] = useState('')
+  const [locEdit, setLocEdit] = useState(null)   // { id, country, city } — мастер правит страну и город пользователя
   const [users, setUsers] = useState(null)
   const [reqs, setReqs] = useState([])
   const [resets, setResets] = useState(null)   // запросы на восстановление пароля; null — в базе ещё нет этой части
@@ -201,6 +203,31 @@ export default function UsersPage() {
                       {ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </div>
+                  {locEdit?.id === u.id ? (
+                    <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Страна</div>
+                        <input type="text" list="admin-countries" value={locEdit.country} onChange={e => setLocEdit({ ...locEdit, country: e.target.value })} maxLength={60} style={{ fontSize: 13, padding: '6px 8px' }} />
+                        <datalist id="admin-countries">{COUNTRY_NAMES.map(c => <option key={c} value={c} />)}</datalist>
+                      </div>
+                      <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Город</div>
+                        <input type="text" value={locEdit.city} onChange={e => setLocEdit({ ...locEdit, city: e.target.value })} maxLength={80} style={{ fontSize: 13, padding: '6px 8px' }} />
+                      </div>
+                      <button type="button" style={btn()} onClick={() => setLocEdit(null)}>Отмена</button>
+                      <button type="button" style={btn('main')} disabled={busy || !locEdit.country.trim()} onClick={() => act(async () => {
+                        const r = await adminSetLocation(u.id, locEdit.country, locEdit.city)
+                        if (!r.error) { setLocEdit(null); setInfo(`Страна и город изменены: ${u.full_name || u.phone || 'пользователь'}.`) }
+                        return r
+                      })}>Сохранить</button>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>{[u.country, u.city].map(v => String(v || '').trim()).filter(Boolean).join(', ') || 'Страна и город не указаны'}</span>
+                      <button type="button" onClick={() => setLocEdit({ id: u.id, country: String(u.country || ''), city: String(u.city || '') })}
+                        style={{ fontSize: 12, color: 'var(--blue)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>✎ Изменить</button>
+                    </div>
+                  )}
                   {writeTo === u.id && (
                     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Личное сообщение — увидит только {u.full_name || 'этот пользователь'} (в «Сообщениях» и уведомлением на телефон)</div>
