@@ -10,7 +10,7 @@ import qrcode from 'qrcode-generator'
 import { zipSync, zlibSync, strToU8 } from 'fflate'
 import { getUserSettings, saveUserSettings } from './userSettings'
 import { loadLabelImages, saveLabelImage } from './materialTextures'
-import { detailMeta } from './partLabel'
+import { detailMeta, metaPos, metaDes } from './partLabel'
 import { isTwoSided } from './partInfo'
 import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
@@ -340,7 +340,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
   return {
     order: orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
     num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
-    name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
+    name: d.name || p.label || 'Деталь', des: metaDes(m), pos: metaPos(m), prefix: d.prefix || p.prefix || '',
     // толщина почти всегда уже есть в названии материала («ЛДСП белый 16 мм») — второй раз не дописываем;
     // нет её в названии — дописываем. Отдельно толщину можно поставить элементом «Толщина»
     material: (() => { const nm = String(mat.name || '').trim(), t = Number(mat.thickness) || 0

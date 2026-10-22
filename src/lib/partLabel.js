@@ -22,6 +22,17 @@ export function detailMeta(detail) {
   return meta
 }
 
+// Позиция / обозначение: из модели (Базис, Астра — meta.pos / meta.des), а у импорта из Excel/CSV —
+// из колонки, назначенной «Свойство (на бирку)» с похожим названием («Позиция детали», «Поз.», «Обозначение»)
+const userProp = (m, re) => {
+  const u = m?.user
+  if (!u || typeof u !== 'object') return ''
+  const k = Object.keys(u).find(x => re.test(String(x).trim()))
+  return k ? String(u[k] ?? '').trim() : ''
+}
+export const metaPos = m => (m?.pos != null && String(m.pos).trim() ? String(m.pos).trim() : userProp(m, /^(позиц|поз\.?$|поз\b|pos\b|pos\.|position)/i))
+export const metaDes = m => (m?.des != null && String(m.des).trim() ? String(m.des).trim() : userProp(m, /^(обознач|designation)/i))
+
 /** Подпись уложенной детали p по выбранному режиму; short — префикс до 3 букв (для карты) */
 export function partLabel(p, details, mode, short = false) {
   if (mode === 'none') return ''
@@ -35,8 +46,8 @@ export function partLabel(p, details, mode, short = false) {
   const base = (showPfx ? (short ? pfx.slice(0, 3) : pfx) + ' ' : '') + name
   if (!mode || mode === 'name') return base
   const m = detailMeta(details?.[p.detailIndex])
-  if (mode === 'des') return m?.des || base
-  if (mode === 'des_name') return m?.des ? `${m.des} ${name}` : base
-  if (mode === 'pos') return m?.pos ? String(m.pos) : base
+  if (mode === 'des') return metaDes(m) || base
+  if (mode === 'des_name') { const des = metaDes(m); return des ? `${des} ${name}` : base }
+  if (mode === 'pos') return metaPos(m) || base
   return base
 }
