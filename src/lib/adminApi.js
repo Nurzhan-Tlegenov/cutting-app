@@ -129,11 +129,9 @@ export async function adminDeleteUser(id) {
   return {}
 }
 
-/** Мастер: исправить страну и город пользователя (например, указал не ту страну при регистрации) */
+/** Мастер: исправить страну и город пользователя (например, указал не ту страну при регистрации) — migration_admin_location.sql */
 export async function adminSetLocation(userId, country, city) {
-  try {
-    const { data, error } = await supabase.from('profiles').update({ country: String(country || '').trim(), city: String(city || '').trim() }).eq('id', userId).select('id')
-    if (error) return { error: error.message }
-    return data?.length ? { ok: true } : { error: 'Профиль не найден или нет прав на изменение' }
-  } catch (e) { return { error: String(e?.message || e) } }
+  const r = await call('admin_set_location', { p_user: userId, p_country: String(country || '').trim(), p_city: String(city || '').trim() })
+  if (r.missing) return { error: 'Нужно один раз обновить базу: Supabase → SQL Editor → вставьте файл migration_admin_location.sql → Run.' }
+  return r
 }
