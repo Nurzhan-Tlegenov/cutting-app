@@ -32,6 +32,9 @@ export const LABEL_ITEMS = [
   ['des', 'Обозначение', 'text'],
   ['pos', 'Позиция', 'text'],
   ['prefix', 'Изделие (префикс)', 'text'],
+  ['block', 'Блок (изделие) из модели', 'text'],
+  ['group', 'Группа в блоке из модели', 'text'],
+  ['blockPath', 'Блок / группа — полностью', 'text'],
   ['size', 'Размер и количество', 'text'],
   ['curved', 'Криволинейная кромка', 'text'],
   ['work', 'Вся обработка одной строкой', 'text'],
@@ -299,6 +302,16 @@ export function demoLabelSample() {
   return { order, mat }
 }
 
+/** Блоки модели, в которые вложена деталь, от внешнего к внутреннему: [блок (изделие), группа, подгруппа…].
+ *  Базис, К3, SketchUp: product — верхний блок, path — вложенные; Астра: path — внешние сборки, product — ближайшая */
+export function blockChain(m) {
+  if (!m) return []
+  const path = (Array.isArray(m.path) ? m.path : []).map(x => String(x ?? '').trim())
+  const prod = String(m.product ?? '').trim()
+  const chain = m.src === 'astra' ? [...path, prod] : [prod, ...path]
+  return chain.filter(Boolean).filter((x, i, a) => x !== a[i - 1])   // без пустых и без повтора подряд
+}
+
 /** Все свойства детали для бирки. mat — материал из savedNestings, si / pi — лист и деталь на нём */
 export function labelInfo(order, mat, si, pi, part = null) {
   // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
@@ -334,7 +347,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
       const has = t > 0 && new RegExp(`(^|[^0-9.,])${String(t).replace('.', '[.,]')}([^0-9]|$)`).test(nm)
       return [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · ') })(),
     length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: Number(d.qty) || 1,
-    faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m,
+    faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
@@ -531,6 +544,9 @@ export function labelText(type, info, tpl = null) {
     case 'des': return info.des
     case 'pos': return info.pos ? `Поз. ${info.pos}` : ''
     case 'prefix': return info.prefix
+    case 'block': return info.chain?.[0] || ''
+    case 'group': return info.chain?.length > 1 ? info.chain[info.chain.length - 1] : ''
+    case 'blockPath': return (info.chain || []).join(' / ')
     case 'size': return `${r1(info.length)} x ${r1(info.width)} x ${info.qty} шт`
     case 'curved': return info.curved.length ? `Крив. кромка: ${info.curved.join('; ')}` : ''
     case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
