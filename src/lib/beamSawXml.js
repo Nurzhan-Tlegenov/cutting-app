@@ -109,12 +109,17 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
   const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<project>']
   const rows = [], offRows = []      // детали и деловые обрезки с их кодами — для бирок (код = имя файла бирки)
   let code = 0, oc = 0, dropped = 0
+  // максимальная ширина полосы (настройка пильного центра): раскрой её соблюдает; если карту правили вручную
+  // (сдвинули детали, отметили обрезки) и полоса вышла шире — программа собирается, но с предупреждением
+  const maxStrip = Number(mat.result?.beamSettings?.maxStrip) || 0
+  const wide = []
   mat.sheets.forEach((sheet, si) => {
     const geo = geoOf(sheet)
     const k = geo.kerf
     let tree
-    try { tree = sheetCutTree(sheet, geo) } catch (e) { throw new Error(`лист ${si + 1}: ${e?.message || e}`) }
+    try { tree = sheetCutTree(sheet, geo) } catch (e) { throw new Error(`лист ${si + 1}: ${e?.message || e}`, { cause: e }) }
     dropped += tree.droppedOffcuts || 0
+    if (maxStrip > 0) for (const sl of tree.slots || []) if (sl.a - k > maxStrip + 0.5) wide.push(`лист ${si + 1}: полоса ${Math.round(sl.a - k)} мм`)
     const mcode = `T${ts}${si + 1}`
     out.push(`  <panel${si + 1} l="${r1(geo.sheetL)}" w="${r1(geo.sheetW)}" trimSLength="${r1(geo.marginT)}" trimSWidth="${r1(geo.marginL)}" trimELength="${r1(geo.marginB)}" trimEWidth="${r1(geo.marginR)}" num="1" material="${esc(material)}" thickness="${r1(thick)}" saw="${r1(k)}" mcode="${mcode}" texture="${texture ? 'True' : 'False'}">`)
     // узлы: номер no.K по порядку вывода, id узла = id куска в родителе (у листа 0)
@@ -189,7 +194,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
   }
   out.push('  </table>', '</project>', '')
   const base = toLatin(`${title}_${material}_${thick}`).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '') || 'beamsaw'
-  return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length, rows, offRows, droppedOffcuts: dropped }
+  return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length, rows, offRows, droppedOffcuts: dropped, wideStrips: wide, maxStrip }
 }
 
 /** Сохранить XML: на телефоне — «Поделиться», иначе скачать */

@@ -14,7 +14,7 @@ import { beamSettings, maxLevels, trimAt } from './beamSaw'
 import { groupLinesOnSheet, posOfInstance } from './partGroups'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.16'
+export const BEAM_SAW_VERSION = 'β0.17'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -124,8 +124,20 @@ function orients(p, axis) {
 
 // Подходит ли деталь в слот региона: поместится, остаток после неё по оси — 0 или ≥ захвата,
 // а если она короче B — нужен ещё уровень и в нём тоже соблюдается захват.
+// Максимальная ширина полосы (1-й уровень): слот толщиной a (с пропилом) — не шире предела. Деталь, которая шире предела
+// обеими сторонами, — исключение (иначе её не уложить вовсе)
+const stripOk = (ctx, L, a, p) => {
+  const m = ctx.s.maxStrip
+  if (L !== 1 || !(m > 0) || a - ctx.kerf <= m + EPS) return true
+  return !!p && !p.items && Math.min(p.pw, p.ph) - ctx.kerf > m + EPS
+}
 function fits(ctx, axis, o, freeA, B, L, p = null) {
   if (o.a > freeA + 1e-6 || o.b > B + 1e-6) return false
+  if (L === 1 && ctx.s.maxStrip > 0) {
+    // блок группы вдоль оси уходит несколькими слотами — каждый свой; иначе — один слот толщиной o.a
+    const slots = p?.items && p.stack === axis ? p.items.map(q => pieceAB(q, axis).a) : [o.a]
+    if (!slots.every(a => stripOk(ctx, L, a, p?.items ? null : p))) return false
+  }
   if (!remOk(ctx, freeA - o.a, extraAt(ctx, axis, L))) return false
   if (p?.items) return unitFits(ctx, axis, p, B, L)
   if (B - o.b < EPS) return true
@@ -658,7 +670,14 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
 
   // направление полос: y — вдоль длинной стороны листа (1-й уровень режет по X), x — наоборот, auto — оба
   // (есть детали с текстурой — только вдоль волокон, Y)
-  const axes = s.direction === 'x' ? ['y'] : s.direction === 'y' || pieces.some(p => !p.rotatable) ? ['x'] : ['x', 'y']
+  let axes = s.direction === 'x' ? ['y'] : s.direction === 'y' || pieces.some(p => !p.rotatable) ? ['x'] : ['x', 'y']
+  // максимальная ширина полосы главнее направления: если в заданном направлении деталь даёт полосу шире предела
+  // (деталь 2600×600, полосы поперёк — 2600), а в другом укладывается — разрешаем и другое направление
+  if (s.maxStrip > 0 && axes.length === 1) {
+    const ax = axes[0], B = ax === 'x' ? Y : X
+    const wide = p => orients(p, ax).filter(o => o.b <= B + 1e-6).every(o => o.a - kerf > s.maxStrip + EPS) && Math.min(p.pw, p.ph) - kerf <= s.maxStrip + EPS
+    if (pieces.some(u => unitOf(u).some(wide))) axes = ['x', 'y']
+  }
   // последний лист при «авто»: обрезок вдоль заданной стороны (ось 1-го уровня — поперёк неё); пильный центр сравнивает
   // последние листы по самому крупному цельному остатку (форматник — как раньше: у него своя «ступенька»)
   const lastAxis = axes.length > 1 && s.lastDir !== 'any' ? (s.lastDir === 'x' ? 'y' : 'x') : null

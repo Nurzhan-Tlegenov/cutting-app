@@ -16,6 +16,7 @@ export const BEAM_DEFAULTS = {
   lastDir: 'any',            // последний лист при «авто»: обрезок вдоль 'y' / 'x' / 'any' — как выгоднее (остальные листы — как выгоднее всегда)
   stripOrder: 'desc',        // порядок полос: 'desc' — от большой к малой, 'wnw' — большая → малая к середине → большая у края
   offcutMinL: 300, offcutMinW: 300,   // деловой обрезок — не меньше, мм
+  maxStrip: 0,               // максимальная ширина полосы 1-го уровня, мм (сколько берёт станок); 0 — без ограничения
   mergeSame: true,           // одинаковые карты — одной картой «× N листов»
   joint: 0,                  // прифуговка, мм: добавляется к детали с каждой закромленной стороны (0 — выключено); см. edgeCut.js
 }
@@ -46,6 +47,7 @@ export function beamSettings(raw) {
     lastDir: ['y', 'x', 'any'].includes(s.lastDir) ? s.lastDir : D.lastDir,
     stripOrder: ['desc', 'wnw'].includes(s.stripOrder) ? s.stripOrder : D.stripOrder,
     offcutMinL: num(s.offcutMinL, D.offcutMinL), offcutMinW: num(s.offcutMinW, D.offcutMinW),
+    maxStrip: num(s.maxStrip, D.maxStrip),
     mergeSame: s.mergeSame == null ? D.mergeSame : !!s.mergeSame,
     joint: num(s.joint, D.joint),
   }
