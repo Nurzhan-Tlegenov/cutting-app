@@ -56,6 +56,7 @@ import { hasBeta } from '../lib/beta'
 import { beamSettings, sameMaps, sameMapTag } from '../lib/beamSaw'
 import { cutMethods } from '../lib/productionServices'
 import { saveBeamSawXml } from '../lib/beamSawXml'
+import { mm } from '../lib/mmFmt'
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
 const COLORS = [
@@ -818,7 +819,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       ctx.fillStyle = 'rgba(0,0,0,0.7)'
       const fs = Math.round(8 * (dimScale || 1) * 10) / 10   // размер шрифта размеров — настраивается «Размеры − / +»
       ctx.font = `${fs}px sans-serif`
-      const wTxt = String(Math.round(p.origX)), lTxt = String(Math.round(p.origY))
+      const wTxt = mm(p.origX), lTxt = mm(p.origY)
       const wPx = ctx.measureText(wTxt).width, lPx = ctx.measureText(lTxt).width
       if (hasShape) {
         // Фигурная деталь: размеры ставим на сам материал внутри контура
@@ -2766,7 +2767,7 @@ export default function NestingPage() {
           if (seg) { labelLX = (seg[0] + seg[1]) / 2; labelLY = scanY }
         }
       }
-      const label = (partLabel(p, details, labelMode) + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`).trim()
+      const label = (partLabel(p, details, labelMode) + ` ${mm(p.origY)}x${mm(p.origX)}`).trim()
       const textHeight = Math.max(15, Math.min(40, Math.min(p.origX, p.origY) / 8))
       // Тот же переворот по Y, что и у контура выше — иначе подпись у
       // контурных деталей уедет не туда (для прямоугольных labelLY=origY/2,
@@ -3148,7 +3149,7 @@ export default function NestingPage() {
               return (
                 <p style={{ fontSize: 10.5, color: 'var(--text-muted)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
                   Мелкие — {n} из {total} дет.: {list.slice(0, 5).map(d =>
-                    `${d.display_name || d.name} ${Math.round(d.length)}×${Math.round(d.width)}${Number(d.qty) > 1 ? ` (${d.qty})` : ''}`).join(', ')}
+                    `${d.display_name || d.name} ${mm(d.length)}×${mm(d.width)}${Number(d.qty) > 1 ? ` (${d.qty})` : ''}`).join(', ')}
                   {list.length > 5 ? ` и ещё ${list.length - 5} вид.` : ''}
                   <br />Их не ставим ближе {cfg.edge || 50} мм к краю листа, если между ними и краем нет другой детали.
                   {cfg.side !== '' ? `Узкие полосы (сторона до ${cfg.side} мм включительно) — в середину листа: длинной стороной к краю не ставим, в угол — никогда.` : 'В угол листа — никогда.'}
@@ -3196,7 +3197,7 @@ export default function NestingPage() {
               const locked = isRunning || isQueued
               const selPartObj = cfg.selPart >= 0 ? canvasSheet.placed[cfg.selPart] : null
               const selBufObj = cfg.selBuf >= 0 ? cfg.buffer[cfg.selBuf] : null
-              const partName = p => `${(p.prefix ? p.prefix + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д')} ${Math.round(p.origY)}×${Math.round(p.origX)}`
+              const partName = p => `${(p.prefix ? p.prefix + ' ' : '') + String(p.label || '').replace(/Деталь\s*/, 'Д')} ${mm(p.origY)}×${mm(p.origX)}`
               const chip = (active, color) => ({
                 flexShrink: 0, padding: '4px 10px', borderRadius: 16, border: 'none', fontSize: 12, cursor: 'pointer',
                 background: active ? color : 'var(--bg2)', color: active ? 'white' : 'var(--text-muted)',
@@ -3436,7 +3437,7 @@ export default function NestingPage() {
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '2px 0', borderBottom: '0.5px solid var(--border)' }}>
                         <div style={{ width: 10, height: 10, borderRadius: 3, background: colorMap[p.detailIndex], flexShrink: 0 }} />
                         <span style={{ flex: 1 }}>{labelMode === 'name' || labelMode === 'none' ? p.label : `${partLabel(p, details, labelMode)}${labelMode === 'des_name' ? '' : ' · ' + p.label}`}</span>
-                        <span style={{ color: 'var(--text-hint)' }}>{Math.round(p.origY)}×{Math.round(p.origX)}</span>
+                        <span style={{ color: 'var(--text-hint)' }}>{mm(p.origY)}×{mm(p.origX)}</span>
                         {(p.rotation || p.rotated) && <span style={{ color: 'var(--teal)', fontSize: 11 }}>↻{p.rotation ?? 90}°</span>}
                       </div>
                     ))}

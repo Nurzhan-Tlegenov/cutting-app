@@ -94,7 +94,7 @@ export function parsePro100Obj(text, opts = {}) {
       return
     }
     makers.push(() => {
-      const T = r1(b.T), L = r1(Math.round(b.du * 2) / 2), W = r1(Math.round(b.dv * 2) / 2)
+      const T = r1(b.T), L = r1(b.du), W = r1(b.dv)   // до десятых, как в модели (раньше — до 0,5 мм)
       const { u, v, n, o } = b
       const M = [u[0], v[0], n[0], u[1], v[1], n[1], u[2], v[2], n[2], o[0], o[1], o[2]]
       const c = [[0, 0], [L, 0], [L, W], [0, W]]

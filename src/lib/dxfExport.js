@@ -24,6 +24,7 @@ import { placedHoles, placedTurns } from './partHoles'
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeometry'
 import { contourSegments, segmentSide, holeEdgeSegments } from './edgeLength'
 import { loopElements } from './arcFit'
+import { mm } from './mmFmt'
 
 const GAP_BETWEEN_SHEETS = 200 // мм, зазор между листами на чертеже
 const EDGE_INSET = 3           // мм, линия кромки — с отступом внутрь, чтобы не лежала на контуре
@@ -179,7 +180,7 @@ export function buildNestingDxf(sheetsData, order, details = [], labelMode = 'na
         })
       }
 
-      const label = (partLabel(p, details, labelMode) + ` ${Math.round(p.origY)}x${Math.round(p.origX)}`).trim()
+      const label = (partLabel(p, details, labelMode) + ` ${mm(p.origY)}x${mm(p.origX)}`).trim()
       put(NAME_LAYER, text(baseX + outline[0][0] + 10, baseY + outline[0][1] + 10, label, NAME_LAYER, 25))
     })
   })

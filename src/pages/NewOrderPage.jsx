@@ -39,18 +39,29 @@ const SHEET_DEFAULTS = {
   cuttingMethod: 'nesting',       // 'nesting' (фрезер) | 'guillotine' (форматно-раскроечный станок)
 }
 
-const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint }) => {
+// Поле размера. decimal — длина/ширина: можно дробные (точка или запятая), размер хранится как пришёл,
+// без округления до целого. Количество — только целое.
+const cleanNum = (s, decimal) => {
+  if (!decimal) return s.replace(/[^0-9]/g, '')
+  const t = s.replace(',', '.').replace(/[^0-9.]/g, ''), i = t.indexOf('.')
+  return i < 0 ? t : t.slice(0, i + 1) + t.slice(i + 1).replace(/\./g, '')
+}
+const NumInput = ({ value, onChange, placeholder, inputRef, onEnter, hint, decimal }) => {
+  const [raw, setRaw] = useState(null)   // что набрано, пока поле в фокусе («485.» — точка не пропадает при наборе)
+  const shown = raw != null && Number(raw.replace(/\.$/, '')) === Number(value) ? raw : (value ?? '')
   return (
     <input
       ref={inputRef}
-      type="text" inputMode="numeric" pattern="[0-9]*"
-      value={value} placeholder={placeholder}
+      type="text" inputMode={decimal ? 'decimal' : 'numeric'} pattern={decimal ? undefined : '[0-9]*'}
+      value={shown} placeholder={placeholder}
       enterKeyHint={hint || (onEnter ? 'next' : 'done')}
       style={{ fontSize: 14, padding: '6px 2px', textAlign: 'center', minWidth: 0, flex: '1 1 0', width: '100%' }}
       onChange={e => {
-        const v = e.target.value.replace(/[^0-9]/g, '')
-        onChange(v === '' ? '' : Number(v))
+        const v = cleanNum(e.target.value, decimal)
+        setRaw(v)
+        onChange(v === '' || v === '.' ? '' : Number(v.replace(/\.$/, '')))
       }}
+      onBlur={() => setRaw(null)}
       onKeyDown={e => {
         if (e.key === 'Enter') {
           e.preventDefault()
@@ -141,8 +152,8 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
 
         {/* Размеры */}
         <div data-tour="det-size" style={{ display: 'flex', gap: 3, flex: 1 }}>
-          <NumInput value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} onEnter={() => widthRef.current?.focus()} hint="next" />
-          <NumInput value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} inputRef={widthRef} onEnter={() => qtyRef.current?.focus()} hint="next" />
+          <NumInput decimal value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} onEnter={() => widthRef.current?.focus()} hint="next" />
+          <NumInput decimal value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} inputRef={widthRef} onEnter={() => qtyRef.current?.focus()} hint="next" />
           <div style={{ width: 44, flexShrink: 0 }}>
             <NumInput value={detail.qty} placeholder="Кол"
               onChange={v => onUpdate({ ...detail, qty: v })}

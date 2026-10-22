@@ -28,14 +28,24 @@ const SHEET_DEFAULTS = {
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
   kerf: 4
 }
-function NumInput({ value, onChange, placeholder, inputRef }) {
+// Поле размера: decimal — длина/ширина (дробные, как пришли, без округления), количество — целое
+const cleanNum = (s, decimal) => {
+  if (!decimal) return s.replace(/[^0-9]/g, '')
+  const t = s.replace(',', '.').replace(/[^0-9.]/g, ''), i = t.indexOf('.')
+  return i < 0 ? t : t.slice(0, i + 1) + t.slice(i + 1).replace(/\./g, '')
+}
+function NumInput({ value, onChange, placeholder, inputRef, decimal }) {
+  const [raw, setRaw] = useState(null)
+  const shown = raw != null && Number(raw.replace(/\.$/, '')) === Number(value) ? raw : (value ?? '')
   return (
-    <input ref={inputRef} type="text" inputMode="numeric" pattern="[0-9]*"
-      value={value} placeholder={placeholder} style={{ fontSize: 14, padding: '6px 2px', textAlign: 'center', minWidth: 0, flex: '1 1 0', width: '100%' }}
+    <input ref={inputRef} type="text" inputMode={decimal ? 'decimal' : 'numeric'} pattern={decimal ? undefined : '[0-9]*'}
+      value={shown} placeholder={placeholder} style={{ fontSize: 14, padding: '6px 2px', textAlign: 'center', minWidth: 0, flex: '1 1 0', width: '100%' }}
       onChange={e => {
-        const v = e.target.value.replace(/[^0-9]/g, '')
-        onChange(v === '' ? '' : Number(v))
-      }} />
+        const v = cleanNum(e.target.value, decimal)
+        setRaw(v)
+        onChange(v === '' || v === '.' ? '' : Number(v.replace(/\.$/, '')))
+      }}
+      onBlur={() => setRaw(null)} />
   )
 }
 function EdgeBtn({ active, label, onClick, vertical, flipText }) {
@@ -122,8 +132,8 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
           )}
         </div>
         <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-          <NumInput value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} />
-          <NumInput value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} />
+          <NumInput decimal value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} />
+          <NumInput decimal value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} />
           <div style={{ width: 44, flexShrink: 0 }}>
             <NumInput value={detail.qty} placeholder="Кол" onChange={v => onUpdate({ ...detail, qty: v })} />
           </div>

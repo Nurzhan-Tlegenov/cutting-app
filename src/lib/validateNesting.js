@@ -13,6 +13,7 @@
 
 import { smallAtEdge, SMALL_EDGE_MIN } from './nesting'
 import { nestedInHole } from './nestInHoles'
+import { mm } from './mmFmt'
 
 const EPS = 0.5 // мм — допуск на округления
 
@@ -115,7 +116,7 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
         const fit = (a, b) => (Math.abs(a - W) <= EPS && Math.abs(b - H) <= EPS) || (Math.abs(a - H) <= EPS && Math.abs(b - W) <= EPS)
         const sameDims = (Math.abs(p.origX - W) <= EPS && Math.abs(p.origY - H) <= EPS) || (p.trimTo && fit(p.trimTo.width, p.trimTo.length))
         const turned = (Math.abs(p.origX - H) <= EPS && Math.abs(p.origY - W) <= EPS)
-        if (!sameDims && !turned) push(`${L}: «${name(p)}» ${Math.round(p.origY)}×${Math.round(p.origX)} не совпадает с заказом ${H}×${W}`)
+        if (!sameDims && !turned) push(`${L}: «${name(p)}» ${mm(p.origY)}×${mm(p.origX)} не совпадает с заказом ${H}×${W}`)
         // повёрнута против текстуры — это решение заказчика (например, чтобы сэкономить лист): не ошибка, только предупреждение
         else if (!d.rotatable && !sameDims && W !== H && warnings.length < cap) warnings.push(`⚠ ${L}: «${name(p)}» повёрнута против текстуры`)
       }

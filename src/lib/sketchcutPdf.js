@@ -296,7 +296,7 @@ export function parseSketchCut(pages) {
     for (const band of rowBands(pg, cols, fromY)) {
       const lenTxt = cellText(pg, cols.length, band), widTxt = cellText(pg, cols.width, band)
       if (!lenTxt && !widTxt) continue
-      const w = Math.round(num(lenTxt)), h = Math.round(num(widTxt))
+      const w = Math.round(num(lenTxt) * 100) / 100, h = Math.round(num(widTxt) * 100) / 100
       if (!(w > 0) || !(h > 0)) { skipped++; continue }
       let qty = cols.qty ? Math.round(num(cellText(pg, cols.qty, band))) : 1
       if (!(qty > 0)) qty = 1

@@ -323,7 +323,7 @@ export function buildDetails(rows, headerRow, roles) {
       const nums = (String(r[iSize]).match(/\d+(?:[.,]\d+)?/g) || []).map(x => parseFloat(x.replace(',', '.')))
       if (nums.length >= 2) { w = nums[0]; h = nums[1]; if (Number.isNaN(thk) && nums.length >= 3) thk = nums[2] }
     }
-    w = Math.round(w); h = Math.round(h)
+    w = Math.round(w * 100) / 100; h = Math.round(h * 100) / 100   // десятые/сотые как в файле, без округления до целого
     if (!(w > 0) || !(h > 0)) { skipped++; continue }
     let qty = iQty >= 0 ? Math.round(toNumber(r[iQty])) : 1
     if (!(qty > 0)) qty = 1
