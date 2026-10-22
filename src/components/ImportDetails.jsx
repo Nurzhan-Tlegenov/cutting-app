@@ -321,7 +321,9 @@ export default function ImportDetails({ hasDetails, onImport }) {
       mode: hasDetails ? mode : 'replace',
       material: g?.material || '',
       thickness: g?.thickness || null,
-      orderName: basis?.orderName || '',
+      // название заказа: из файла модели, а если его нет — имя файла без расширения
+      // (подставляется, только если в бланке название ещё пустое)
+      orderName: basis?.orderName || String(fileName || '').replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim().slice(0, 120),
       model3d,                                   // вся модель для 3D-просмотра (упакована)
       edgeTypes: basis?.edgeTypes || null,       // толщина видов кромки, если она есть в файле (SketchCut)
     })
