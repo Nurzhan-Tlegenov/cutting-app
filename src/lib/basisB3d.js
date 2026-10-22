@@ -519,7 +519,8 @@ function basisSrc(panel) {
   }))
   const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
   const texDir = val(o, 'TexDir', 0)
-  const user = userProps(o)
+  // свои свойства панели + унаследованные от блоков/изделия/модели; при одинаковом названии берётся ближайшее
+  const user = (panel.ctx.user || userProps(o)) ? { ...(panel.ctx.user || {}), ...(userProps(o) || {}) } : null
   // Лицевая сторона, назначенная конструктором в Базисе: поле есть, только если её задали вручную.
   // 0 — лицевая пласть «сверху» панели (Z = толщина, как без переворота), 1 — противоположная.
   const ff = val(o, 'FrontFace', null)
@@ -1170,21 +1171,26 @@ export function parseBasis(u8, opts = {}) {
       const pt = k => { const q = kid(an, k); return applyP(Mo, [val(q, 'x', 0), val(q, 'y', 0), val(q, 'z', 0)]).map(r1) }
       anim = { g: ++animSeq, t: at, a: pt('AxisStart'), b: pt('AxisEnd'), lim: val(an, 'Limit', at === 1 ? 90 : 0) }
     }
+    // пользовательские свойства блока/изделия наследуют все детали внутри (своё свойство детали — главнее)
+    const own = type !== TYPE_PANEL ? userProps(obj) : null
     for (const c of (obj.c || [])) {
       if (!c.c) continue
       const list = c.k === 'Obj' ? [c] : c.c
       const sub = type === 1005 && ctx.depth > 0 ? { ...ctx, path: [...ctx.path, cleanName(val(obj, 'Name'))], depth: ctx.depth + 1 } : { ...ctx, depth: ctx.depth + 1 }
       if (anim) sub.anim = anim
+      if (own) sub.user = { ...(ctx.user || {}), ...own }
       for (const cc of list) if (cc.c && cc.k === 'Obj' && kid(cc, 'Type')) walk(cc, Mo, sub)
     }
   }
   const I = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+  // свойства всей модели (Параметры модели → пользовательские) — у всех деталей
+  const modelUser = userProps(kid(doc, 'ModelParams')) || null
   for (const top of model.c) {
     if (top.k !== 'Obj' || !top.c) continue
     // изделие — только блок верхнего уровня; панель, лежащая прямо в модели, сама себе не изделие
     // (иначе её имя становится префиксом: «БОК» с префиксом «БОК» → на карте «БОК БОК»)
     const blk = val(top, 'Type') !== TYPE_PANEL
-    walk(top, I, { product: blk ? cleanName(val(top, 'Name')) : '', productDes: blk ? cleanName(val(top, 'Des')) : '', productPos: blk ? cleanName(val(top, 'ArtPos')) : '', path: [], depth: 0 })
+    walk(top, I, { product: blk ? cleanName(val(top, 'Name')) : '', productDes: blk ? cleanName(val(top, 'Des')) : '', productPos: blk ? cleanName(val(top, 'ArtPos')) : '', path: [], depth: 0, user: modelUser })
   }
 
   const srcs = panels.flatMap(p => { try { return glueLayers(p.obj, basisSrc(p)) } catch { return [null] } })
