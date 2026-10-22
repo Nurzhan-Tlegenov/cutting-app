@@ -328,7 +328,11 @@ export function labelInfo(order, mat, si, pi, part = null) {
     order: orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
     num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
     name: d.name || p.label || 'Деталь', des: m.des || '', pos: m.pos != null ? String(m.pos) : '', prefix: d.prefix || p.prefix || '',
-    material: [mat.name, mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · '),
+    // толщина почти всегда уже есть в названии материала («ЛДСП белый 16 мм») — второй раз не дописываем;
+    // нет её в названии — дописываем. Отдельно толщину можно поставить элементом «Толщина»
+    material: (() => { const nm = String(mat.name || '').trim(), t = Number(mat.thickness) || 0
+      const has = t > 0 && new RegExp(`(^|[^0-9.,])${String(t).replace('.', '[.,]')}([^0-9]|$)`).test(nm)
+      return [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · ') })(),
     length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: Number(d.qty) || 1,
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m,
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
@@ -485,15 +489,6 @@ export function drawSheetMap(ctx, x, y, w, h, sheet, geo, hi = -1, line = 1, rot
   ctx.restore()
 }
 
-function fitText(ctx, text, maxW, size, weight = '') {
-  let s = size
-  const set = () => { ctx.font = `${weight} ${Math.round(s)}px Arial, Helvetica, sans-serif`.trim() }
-  set()
-  while (s > size * 0.6 && ctx.measureText(text).width > maxW) { s -= 1; set() }
-  let t = text
-  while (t.length > 1 && ctx.measureText(t).width > maxW) t = t.slice(0, -2) + '…'
-  return t
-}
 
 // Перенос текста по строкам в рамке шириной maxW (шрифт не уменьшается). Слово длиннее рамки рвётся по буквам.
 // Строк больше, чем помещается (maxLines), — последняя обрезается с «…». -> массив строк
@@ -506,7 +501,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
     for (let word of para.split(/\s+/).filter(Boolean)) {
       const tryLine = cur ? cur + ' ' + word : word
       if (fits(tryLine)) { cur = tryLine; continue }
-      if (cur) { lines.push(cur); cur = '' }
+      if (cur) lines.push(cur)
       while (!fits(word) && word.length > 1) {             // слово не влезает целиком — по буквам
         let k = word.length - 1
         while (k > 1 && !fits(word.slice(0, k))) k--
@@ -615,28 +610,25 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
       }
       let sz = it.size * mm, LH = sz * 1.25
       const weight = it.bold ? 'bold' : ''
-      // Рамка выше одной строки, а текст в длину не влезает — переносим на следующие строки (шрифт тот же);
-      // влезает — одна строка, как раньше. Рамка в одну строку — как раньше: уменьшаем шрифт, потом «…»
-      const room = Math.max(1, Math.floor((textThick(it) * mm + 0.01) / LH))
-      ctx.font = `${weight} ${Math.round(sz)}px Arial, Helvetica, sans-serif`.trim()
-      let lines = room > 1 && ctx.measureText(text).width > w ? wrapText(ctx, text, w, sz, weight, room) : [fitText(ctx, text, w, sz, weight)]
-      // «По рамке»: текст целиком помещается — шрифт увеличивается на всю рамку (с переносом, если так крупнее);
-      // меньше заданного — никогда
-      if (it.fill && !ghost) {
-        const frame = textThick(it) * mm
-        const okAt = s0 => {
-          ctx.font = `${weight} ${Math.round(s0)}px Arial, Helvetica, sans-serif`.trim()
-          if (String(text).split(/\s+/).some(wd => ctx.measureText(wd).width > w)) return null   // слово не рвём
-          const ls = wrapText(ctx, text, w, s0, weight, 999)
-          return ls.length * s0 * 1.25 <= frame + 0.01 ? ls : null
-        }
-        if (okAt(sz)) {
-          let lo = sz, hi = frame / 1.25
-          for (let k = 0; k < 14 && hi - lo > 0.5; k++) { const mid = (lo + hi) / 2; if (okAt(mid)) lo = mid; else hi = mid }
-          sz = lo; LH = sz * 1.25; lines = okAt(sz)
-        }
-        ctx.font = `${weight} ${Math.round(sz)}px Arial, Helvetica, sans-serif`.trim()
+      // Работа с текстом в рамке — у всех текстовых элементов (название, материал, кромка, свойства, свой текст):
+      // заданный шрифт — наименьший, меньше не бывает. Текст целиком помещается в рамку — шрифт растёт на всю рамку
+      // (по ширине и высоте, с переносом, если так крупнее). Не помещается — перенос по строкам заданным шрифтом,
+      // что не вошло по высоте — «…»
+      const frame = textThick(it) * mm
+      const okAt = s0 => {
+        ctx.font = `${weight} ${Math.round(s0)}px Arial, Helvetica, sans-serif`.trim()
+        if (String(text).split(/\s+/).some(wd => ctx.measureText(wd).width > w)) return null   // слово не рвём
+        const ls = wrapText(ctx, text, w, s0, weight, 999)
+        return ls.length * s0 * 1.25 <= frame + 0.01 ? ls : null
       }
+      let lines = okAt(sz)
+      if (lines && !ghost) {
+        let lo = sz, hi = Math.max(sz, frame / 1.25)
+        for (let k = 0; k < 14 && hi - lo > 0.5; k++) { const mid = (lo + hi) / 2; if (okAt(mid)) lo = mid; else hi = mid }
+        sz = lo; LH = sz * 1.25; lines = okAt(sz) || lines
+      }
+      if (!lines) lines = wrapText(ctx, text, w, sz, weight, Math.max(1, Math.floor((frame + 0.01) / LH)))
+      ctx.font = `${weight} ${Math.round(sz)}px Arial, Helvetica, sans-serif`.trim()
       const ax = it.align === 'right' ? w : it.align === 'center' ? w / 2 : 0
       ctx.textAlign = it.align === 'right' ? 'right' : it.align === 'center' ? 'center' : 'left'
       ctx.save()
