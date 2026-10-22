@@ -60,23 +60,35 @@ export const depthOf = n => 1 + Math.max(0, ...n.slots.map(s => (s.child ? depth
 /** Дерево резов листа: ось 1-го уровня — как посчитал раскрой (sheet.beamAxis), иначе та, где уровней меньше */
 export function sheetCutTree(sheet, geo) {
   const k = geo.kerf, X = geo.usableX + k, Y = geo.usableY + k
-  const items = (sheet.placed || []).map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h, part: p }))
+  const parts = (sheet.placed || []).map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h, part: p }))
+  const offs = []
   for (const o of sheet.manualOffcuts || []) {
     // обрезок — в тех же координатах, что детали; может заходить в отступ — берём его часть в рабочей зоне, с пропилом как у детали
     const y = o.y
     const x0 = Math.max(0, o.x), y0 = Math.max(0, y), x1 = Math.min(geo.usableX, o.x + o.w), y1 = Math.min(geo.usableY, y + o.h)
-    if (x1 - x0 > EPS && y1 - y0 > EPS) items.push({ x: x0, y: y0, w: x1 - x0 + k, h: y1 - y0 + k, offcut: true })
+    if (x1 - x0 > EPS && y1 - y0 > EPS) offs.push({ x: x0, y: y0, w: x1 - x0 + k, h: y1 - y0 + k, offcut: true })
   }
   const axes = sheet.beamAxis ? [sheet.beamAxis, sheet.beamAxis === 'x' ? 'y' : 'x'] : ['x', 'y']
-  let best = null, err = null
-  for (const ax of axes) {
-    try {
-      const t = derive(items, ax, 0, 0, ax === 'x' ? X : Y, ax === 'x' ? Y : X)
-      if (!best || depthOf(t) < depthOf(best)) best = t
-      if (sheet.beamAxis) break
-    } catch (e) { err = e }
+  const tryTree = items => {
+    let best = null
+    for (const ax of axes) {
+      try {
+        const t = derive(items, ax, 0, 0, ax === 'x' ? X : Y, ax === 'x' ? Y : X)
+        if (!best || depthOf(t) < depthOf(best)) best = t
+        if (sheet.beamAxis) break
+      } catch { /* другая ось */ }
+    }
+    return best
   }
-  if (!best) throw err || new Error('карта не раскладывается на сквозные резы')
+  let best = tryTree([...parts, ...offs])
+  if (best) return best
+  // Деловой обрезок, отмеченный вручную («Вручную» на карте), может лечь поперёк реза — тогда его не вырезать насквозь.
+  // Программа собирается без таких обрезков (они остаются просто остатком листа), остальные — как были
+  if (!tryTree(parts)) throw new Error('карта не раскладывается на сквозные резы — детали сдвинуты вручную так, что их не разрезать пилой насквозь; пересчитайте раскрой или верните детали в ряд')
+  const kept = []
+  for (const o of offs) if (tryTree([...parts, ...kept, o])) kept.push(o)
+  best = tryTree([...parts, ...kept])
+  best.droppedOffcuts = offs.length - kept.length
   return best
 }
 
@@ -96,11 +108,13 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
   const texture = (mat.details || []).some(d => !d.rotatable)
   const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<project>']
   const rows = [], offRows = []      // детали и деловые обрезки с их кодами — для бирок (код = имя файла бирки)
-  let code = 0, oc = 0
+  let code = 0, oc = 0, dropped = 0
   mat.sheets.forEach((sheet, si) => {
     const geo = geoOf(sheet)
     const k = geo.kerf
-    const tree = sheetCutTree(sheet, geo)
+    let tree
+    try { tree = sheetCutTree(sheet, geo) } catch (e) { throw new Error(`лист ${si + 1}: ${e?.message || e}`) }
+    dropped += tree.droppedOffcuts || 0
     const mcode = `T${ts}${si + 1}`
     out.push(`  <panel${si + 1} l="${r1(geo.sheetL)}" w="${r1(geo.sheetW)}" trimSLength="${r1(geo.marginT)}" trimSWidth="${r1(geo.marginL)}" trimELength="${r1(geo.marginB)}" trimEWidth="${r1(geo.marginR)}" num="1" material="${esc(material)}" thickness="${r1(thick)}" saw="${r1(k)}" mcode="${mcode}" texture="${texture ? 'True' : 'False'}">`)
     // узлы: номер no.K по порядку вывода, id узла = id куска в родителе (у листа 0)
@@ -175,7 +189,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
   }
   out.push('  </table>', '</project>', '')
   const base = toLatin(`${title}_${material}_${thick}`).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '') || 'beamsaw'
-  return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length, rows, offRows }
+  return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length, rows, offRows, droppedOffcuts: dropped }
 }
 
 /** Сохранить XML: на телефоне — «Поделиться», иначе скачать */

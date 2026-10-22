@@ -184,7 +184,7 @@ export default function CncPage() {
     const sub = { ...mat, sheets: sel.map(si => mat.sheets[si]) }
     let text = '', error = '', xml = null
     try { xml = buildBeamSawXml({ order, mat: sub, geoOf: sh => sheetGeo(order, mat.result, sh) }); text = xml.text } catch (e) { error = String(e?.message || e) }
-    const files = [{ si: -1, beam: true, name: beamName(), text: text ? '\uFEFF' + text : '', kinds: [], opIds: [], lines: 0, warnings: error ? [`Программа пилы не собрана: ${error}`] : [], empty: !text, time: 0 }]
+    const files = [{ si: -1, beam: true, name: beamName(), text: text ? '\uFEFF' + text : '', kinds: [], opIds: [], lines: 0, warnings: error ? [`Программа пилы не собрана: ${error}`] : xml?.droppedOffcuts ? [`Деловых обрезков, отмеченных вручную поперёк реза, — ${xml.droppedOffcuts}: в программу они не вошли (останутся остатком листа)`] : [], empty: !text, time: 0 }]
     const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
     setBuilt({ files, drill, second: null, beam: true }); setSaved('')
     // бирки — файлами EMF с именами по кодам деталей программы, рядом с программой (как у программ KDT): станок печатает
