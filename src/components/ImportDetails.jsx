@@ -14,6 +14,7 @@ import { useAuth } from '../context/AuthContext'
 import { typesFromItems, listSize } from '../lib/edgeCut'
 import { myLimits, limitText } from '../lib/limits'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
+import { makePreset, applyPreset, bestPreset } from '../lib/importPresets'
 import { useBackClose } from '../lib/backStack'
 import SendToMaster from './SendToMaster'
 import { fileToPayload, REPORT_MAX_MB } from '../lib/messages'
@@ -118,6 +119,11 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const [sheetIdx, setSheetIdx] = useState(0)
   const [headerRow, setHeaderRow] = useState(-1)
   const [roles, setRoles] = useState([])
+  // сохранённые настройки колонок (за аккаунтом): какая применена и меняли ли колонки после этого
+  const [presets, setPresets] = useState(() => getUserSettings(user).importPresets || [])
+  const [presetId, setPresetId] = useState('')
+  const [presetDirty, setPresetDirty] = useState(false)
+  const autoRolesRef = useRef([])                // как колонки распознало само приложение — для «без настройки»
   const [groupKey, setGroupKey] = useState(ALL)
   // лимит бесплатного использования: сколько материалов можно взять за один импорт (null — сколько угодно)
   const [matCap, setMatCap] = useState(null)
@@ -131,8 +137,14 @@ export default function ImportDetails({ hasDetails, onImport }) {
 
   const applySheet = (allSheets, idx, forcedHeader) => {
     const a = analyzeTable(allSheets[idx].rows, forcedHeader)
-    setSheetIdx(idx); setHeaderRow(a.headerRow); setRoles(a.roles)
-    const res = buildDetails(allSheets[idx].rows, a.headerRow, a.roles)
+    // подходящая сохранённая настройка колонок применяется сама — повторно назначать колонки не нужно
+    const list = getUserSettings(user).importPresets || []
+    const best = bestPreset(list, allSheets[idx].rows, a.headerRow)
+    const useRoles = best ? applyPreset(best, allSheets[idx].rows, a.headerRow, a.roles) : a.roles
+    autoRolesRef.current = a.roles
+    setPresets(list); setPresetId(best ? best.id : ''); setPresetDirty(false)
+    setSheetIdx(idx); setHeaderRow(a.headerRow); setRoles(useRoles)
+    const res = buildDetails(allSheets[idx].rows, a.headerRow, useRoles)
     setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
   }
 
@@ -253,7 +265,34 @@ export default function ImportDetails({ hasDetails, onImport }) {
     </button>
   )
 
-  const setRole = (ci, role) => setRoles(prev => prev.map((r, i) => (i === ci ? role : (role && r === role && !MULTI_ROLES.has(role) ? '' : r))))
+  const setRole = (ci, role) => { setPresetDirty(true); setRoles(prev => prev.map((r, i) => (i === ci ? role : (role && r === role && !MULTI_ROLES.has(role) ? '' : r)))) }
+
+  // ── Сохранённые настройки колонок ──
+  const storePresets = list => { setPresets(list); saveUserSettings({ importPresets: list }, user) }
+  const choosePreset = id => {
+    const p = presets.find(x => x.id === id)
+    setPresetId(p ? p.id : ''); setPresetDirty(false)
+    setRoles(p ? applyPreset(p, rows, headerRow, autoRolesRef.current) : autoRolesRef.current)
+    if (p) storePresets(presets.map(x => (x.id === p.id ? { ...x, at: Date.now() } : x)))   // последняя применённая — первой при равенстве
+  }
+  const savePresetAs = () => {
+    const def = presets.find(x => x.id === presetId)?.name || fileName.replace(/\.[^.]+$/, '')
+    const name = window.prompt('Название настройки колонок (например, по программе или заказчику):', def)
+    if (name == null) return
+    const p = makePreset(name, rows, headerRow, roles)
+    storePresets([...presets.filter(x => x.name !== p.name), p]); setPresetId(p.id); setPresetDirty(false)
+  }
+  const updatePreset = () => {
+    const old = presets.find(x => x.id === presetId)
+    if (!old) return
+    const p = { ...makePreset(old.name, rows, headerRow, roles), id: old.id }
+    storePresets(presets.map(x => (x.id === old.id ? p : x))); setPresetDirty(false)
+  }
+  const deletePreset = () => {
+    const old = presets.find(x => x.id === presetId)
+    if (!old || !window.confirm(`Удалить настройку «${old.name}»?`)) return
+    storePresets(presets.filter(x => x.id !== old.id)); setPresetId('')
+  }
 
   const close = () => { setSheets(null); setBasis(null) }
   useBackClose(!!(sheets || basis), close)   // «Назад» телефона — закрыть окно импорта
@@ -361,6 +400,21 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 <option value={-1}>без шапки</option>
                 {rows.slice(0, 40).map((_, i) => <option key={i} value={i}>шапка: строка {i + 1}</option>)}
               </select>
+            </div>
+            {/* Сохранённые настройки колонок — чтобы при следующем импорте не назначать их заново */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 8, padding: '8px 10px', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Настройка колонок:</span>
+              <select value={presetId} onChange={e => choosePreset(e.target.value)} style={{ width: 'auto', minWidth: 120, maxWidth: 220, padding: '4px 6px', fontSize: 12 }}>
+                <option value="">{presets.length ? '— как распознало приложение —' : 'сохранённых нет'}</option>
+                {presets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              {presetId && presetDirty && <button type="button" style={chip(true)} onClick={updatePreset}>💾 Сохранить изменения</button>}
+              <button type="button" style={chip(false)} onClick={savePresetAs}>{presetId ? '＋ Сохранить как новую' : '💾 Сохранить настройку'}</button>
+              {presetId && <button type="button" style={{ ...chip(false), color: 'var(--danger)' }} onClick={deletePreset}>🗑</button>}
+              <div style={{ flex: '1 1 100%', fontSize: 11, color: 'var(--text-hint)' }}>
+                {presetId && !presetDirty ? 'Колонки назначены по сохранённой настройке. Подходящая настройка подставляется сама при следующем импорте.'
+                  : 'Назначьте колонки (в т.ч. «Свойство (на бирку)») и сохраните — в следующий раз они подставятся сами. Колонки узнаются по названию в шапке.'}
+              </div>
             </div>
             {roles.includes('prop') && (
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
