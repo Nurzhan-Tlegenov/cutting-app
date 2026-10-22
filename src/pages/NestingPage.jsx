@@ -886,6 +886,23 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     ctx.lineWidth = 1
     ctx.setLineDash([])
     ctx.strokeRect(PADDING, PADDING, toC(sheetW), toC(sheetL))
+
+    // Формат листа — небольшими «плашками» по сторонам: ширина (X) — у верхнего края, длина (Y) — у левого.
+    // Видно сразу, если забыли поменять формат перед резкой
+    {
+      const pill = (txt, cx, cy, vert) => {
+        ctx.save()
+        ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        const tw = ctx.measureText(txt).width + 8, th = 13
+        ctx.translate(cx, cy); if (vert) ctx.rotate(-Math.PI / 2)
+        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.strokeStyle = '#888780'; ctx.lineWidth = 0.8
+        ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-tw / 2, -th / 2, tw, th, 6) : ctx.rect(-tw / 2, -th / 2, tw, th); ctx.fill(); ctx.stroke()
+        ctx.fillStyle = '#444441'; ctx.fillText(txt, 0, 0.5)
+        ctx.restore()
+      }
+      pill(`${mm(sheetW)}`, PADDING + toC(sheetW) / 2, PADDING, false)
+      pill(`${mm(sheetL)}`, PADDING, PADDING + toC(sheetL) / 2, true)
+    }
   }
 
   function getPointer(e) {

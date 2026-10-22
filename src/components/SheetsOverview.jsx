@@ -183,7 +183,7 @@ export default function SheetsOverview({
       const cellPx = cellW * sc
       const name = `${D.offcut ? 'Обр.' : 'Лист'} ${si + 1}`
       if (cellPx > 150) {
-        ctx.fillText(`${name} · ${s.placed.length} дет. · ${Math.round(fill * 100)}%`, X(o.x), Y(o.y) - 2)
+        ctx.fillText(`${name} · ${Math.round(D.sl)}×${Math.round(D.sw)} · ${s.placed.length} дет. · ${Math.round(fill * 100)}%`, X(o.x), Y(o.y) - 2)
       } else {
         // мелкие листы — номер «бейджем» внутри листа, иначе непонятно, к какому листу подпись
         badges.push({ t: cellPx > 80 ? `${si + 1} · ${Math.round(fill * 100)}%` : `${si + 1}`, x: X(o.x), y: Y(o.y), active, fs: Math.max(8, Math.min(11, cellPx / 6)) })
