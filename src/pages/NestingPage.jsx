@@ -390,6 +390,52 @@ function rotatePart(p) {
 // преобразование — инволюция, как flipY внутри SheetCanvas
 const flipPlaced = (list, usableY, kerf) => list.map(p => ({ ...p, y: usableY - p.y - (p.h - kerf) }))
 
+// ─── Деловые обрезки по правилу производства ───────────────────────────────
+// В настройках производства задаётся «деловой обрезок — от L мм вдоль текстуры (Y) × W мм поперёк (X)».
+// Свободные прямоугольники листа (как при выборе обрезка удержанием пальца — от точек у краёв деталей и листа),
+// которые с продолжением до края листа не меньше этого, отмечаются обрезками сами: крупные первыми, без наложений.
+// Отмеченный обрезок не шинкуется и попадает на бирки обрезков; снять или добавить можно вручную, как обычно.
+// sheet — в координатах данных (Y от низа); -> manualOffcuts в тех же координатах
+function autoOffcuts(sheet, g, minL, minW) {
+  const { usableX, usableY, kerf, marginL, marginT, sheetW, sheetL } = g
+  if (!(usableX > 0 && usableY > 0)) return []
+  const items = flipPlaced(sheet.placed || [], usableY, kerf)          // экранные координаты (Y сверху)
+  const busy = items.flatMap(p => partObstacles(p, kerf))
+  const marginR = sheetW - usableX - marginL, marginB = sheetL - usableY - marginT
+  const ext = r => {
+    const e = 0.5
+    let { x, y, w, h } = r
+    const atL = x <= e, atR = x + w >= usableX - e, atT = y <= e, atB = y + h >= usableY - e
+    if (atL) { x -= marginL; w += marginL }
+    if (atR) w += marginR
+    if (atT) { y -= marginT; h += marginT }
+    if (atB) h += marginB
+    return { x, y, w, h }
+  }
+  // точки, от которых растут кандидаты: у краёв листа и вплотную к деталям
+  const xs = new Set([1, usableX - 1]), ys = new Set([1, usableY - 1])
+  busy.forEach(o => { xs.add(o.x - 1); xs.add(o.x + o.w + 1); ys.add(o.y - 1); ys.add(o.y + o.h + 1) })
+  const cand = new Map()
+  for (const x of xs) {
+    if (x <= 0 || x >= usableX) continue
+    for (const y of ys) {
+      if (y <= 0 || y >= usableY) continue
+      const r = computeOffcutAtPoint(x, y, busy, usableX, usableY)
+      if (!r) continue
+      const key = `${r.x},${r.y},${r.w},${r.h}`
+      if (cand.has(key)) continue
+      const e = ext(r)
+      if (e.h + 0.01 >= minL && e.w + 0.01 >= minW) cand.set(key, { r, e })
+    }
+  }
+  const chosen = []
+  ;[...cand.values()].sort((a, b) => b.e.w * b.e.h - a.e.w * a.e.h).forEach(c => {
+    const hit = chosen.some(o => c.r.x < o.r.x + o.r.w + kerf && c.r.x + c.r.w + kerf > o.r.x && c.r.y < o.r.y + o.r.h + kerf && c.r.y + c.r.h + kerf > o.r.y)
+    if (!hit && chosen.length < 12) chosen.push(c)
+  })
+  return chosen.map(c => ({ x: c.e.x, y: usableY - c.e.y - c.e.h, w: c.e.w, h: c.e.h }))
+}
+
 // ─── Буфер: найти свободное место на листе для детали из буфера ─────────────
 // Кандидаты — углы у краёв листа и у соседних деталей (x: 0 / правее соседа /
 // у правого края; y — аналогично). Берём место ниже всего и левее (как укладка —
@@ -1788,6 +1834,28 @@ export default function NestingPage() {
 
   const anyRunning = configs.some(c => c.status === 'running' || c.status === 'queued' || c.status === 'stopping')
 
+  // Деловые обрезки по правилу производства (Настройки производства → Лист и рез → «Деловой обрезок»):
+  // на готовом раскрое фрезера и форматника свободные куски не меньше заданного отмечаются обрезками сами —
+  // чтобы шинковка ЧПУ их не порезала. Один раз на лист (offAuto): снятые вручную обрезки не возвращаются.
+  // Пильный центр отмечает обрезки сам по своим настройкам.
+  const offRulePr = order ? (order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)) : null
+  const offMinL = Number(offRulePr?.offcut_min_length) || 0, offMinW = Number(offRulePr?.offcut_min_width) || 0
+  useEffect(() => {
+    if (!order || beamSaw || !(offMinL > 0 || offMinW > 0)) return
+    const need = c => c.status === 'done' && (c.sheetsData || []).some(sh => !sh.offAuto && sh.placed?.length)
+    if (!configs.some(need)) return
+    setConfigs(cs => cs.map(c => (!need(c) ? c : {
+      ...c,
+      sheetsData: c.sheetsData.map(sh => {
+        if (sh.offAuto || !sh.placed?.length) return sh
+        if (sh.manualOffcuts?.length) return { ...sh, offAuto: true }        // уже отмечены — не трогаем
+        let list
+        try { list = autoOffcuts(sh, geoOf(order, c.result, sh), offMinL, offMinW) } catch { list = [] }
+        return { ...sh, offAuto: true, manualOffcuts: list }
+      }),
+    })))
+  }, [configs, order, beamSaw, offMinL, offMinW])
+
   useEffect(() => { fetchOrder(true) }, [id])
   // Пила (форматник): линии реза на листе видны сразу — по ним пилят (их же печатает PDF)
   useEffect(() => { if (cuttingMethod === 'guillotine') { setShowOffcuts(true); setOffcutMode('cuts') } }, [cuttingMethod])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -1874,7 +1942,7 @@ export default function NestingPage() {
       secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
       ...(saved ? {
         dir: saved.config?.dir || 'auto', box: !!(saved.config?.box || saved.byBox),
-        status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i })),
+        status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i, offAuto: sh.offAuto ?? true })),   // сохранённые раскладки — как сохранены, без авто-обрезков
         startedAt: 0, doneAt: 0, saved: true,
       } : {}),
     })

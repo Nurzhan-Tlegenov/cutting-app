@@ -45,6 +45,8 @@ const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['all', 'В
 const MARGINS = [['kerf_width', 'Рез / фреза'], ['margin_left', 'Отступ ←'], ['margin_right', 'Отступ →'], ['margin_top', 'Отступ ↑'], ['margin_bottom', 'Отступ ↓']]
 // то же для ХДФ / ДВП (задние стенки): тонкий материал режется на пиле — рез и отступы свои
 const HDF_MARGINS = MARGINS.map(([k, l]) => ['hdf_' + k, k === 'kerf_width' ? 'Рез (пила)' : l])
+const OFFCUT_KEYS = [['offcut_min_length', 'Вдоль текстуры (длина), от, мм'], ['offcut_min_width', 'Поперёк текстуры (ширина), от, мм']]
+const OFFCUT_HINT = 'Чтобы включить авто-обрезки, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists offcut_min_length numeric;\nalter table productions add column if not exists offcut_min_width numeric;'
 const KIND_HINT = 'Чтобы задать параметры для ХДФ и видеть число листов в заявках, выполните migration_material_kind.sql в Supabase (SQL Editor) — один раз.'
 
 export default function ProductionPage() {
@@ -154,7 +156,7 @@ export default function ProductionPage() {
     setProd(p)
     if (p && (p.status ?? 'approved') === 'approved') { loadStaff(); loadStages() }
     if (p && (p.status ?? 'approved') === 'approved') {
-      setSheet(Object.fromEntries([...MARGINS, ...HDF_MARGINS].map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
+      setSheet(Object.fromEntries([...MARGINS, ...HDF_MARGINS, ...OFFCUT_KEYS].map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
       if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []); loadStats(); listShares((r.data || []).map(o => o.id)).then(setShares) }
       simShareOrders().then(setSimShares)
@@ -194,7 +196,7 @@ export default function ProductionPage() {
     if (v != null && (!isFinite(v) || v < 0)) return
     if ((prod[key] ?? null) === v) return
     const { error: e } = await supabase.from('productions').update({ [key]: v }).eq('id', prod.id)
-    if (e) setError(/hdf_/.test(String(e.message)) ? KIND_HINT : e.message); else setProd(p => ({ ...p, [key]: v }))
+    if (e) setError(/offcut_min/.test(String(e.message)) ? OFFCUT_HINT : /hdf_/.test(String(e.message)) ? KIND_HINT : e.message); else setProd(p => ({ ...p, [key]: v }))
   }
 
   // заказы в архиве — в своём разделе; в остальных разделах и счётчиках их нет
@@ -316,6 +318,23 @@ export default function ProductionPage() {
                   </div>
                 ))}
                 <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
+                {/* деловой обрезок: свободные куски не меньше этого отмечаются обрезками сами — шинковка их не трогает */}
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>Деловой обрезок — отмечать автоматически</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {OFFCUT_KEYS.map(([k, l]) => (
+                      <label key={k} style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--text-muted)' }}>{l}
+                        <input type="text" inputMode="decimal" value={sheet[k] ?? ''} placeholder="выкл."
+                          onChange={e => setSheet(s => ({ ...s, [k]: e.target.value.replace(/[^0-9.,]/g, '') }))} onBlur={() => saveSheet(k)} style={{ padding: '4px 6px', fontSize: 13 }} />
+                      </label>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>
+                    На готовом раскрое (фрезер ЧПУ и форматно-раскроечный станок) свободный кусок листа, который не меньше этих размеров, сам отмечается деловым обрезком:
+                    шинковка ЧПУ его не режет, на него печатается бирка обрезка. Снять обрезок или отметить другой можно вручную на карте («Обрезки» → «Вручную»).
+                    Пусто в обоих полях — выключено. У пильного центра свой размер обрезка — в его настройках.
+                  </p>
+                </div>
               </>}
               {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
               {setSec === 'post' && <CncSetup prodId={prod.id} />}
