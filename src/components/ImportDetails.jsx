@@ -9,7 +9,7 @@ import { readPro100Obj } from '../lib/pro100Obj'
 import { readSkpFile, isSkp } from '../lib/skpImport'
 import { readSketchCutPdf } from '../lib/sketchcutPdf'
 import { millsFromItems, mergeMills } from '../lib/facadeCarve'
-import { readTableFile, analyzeTable, buildDetails, ROLES } from '../lib/importDetails'
+import { readTableFile, analyzeTable, buildDetails, ROLES, MULTI_ROLES } from '../lib/importDetails'
 import { useAuth } from '../context/AuthContext'
 import { typesFromItems, listSize } from '../lib/edgeCut'
 import { myLimits, limitText } from '../lib/limits'
@@ -253,7 +253,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     </button>
   )
 
-  const setRole = (ci, role) => setRoles(prev => prev.map((r, i) => (i === ci ? role : (role && r === role ? '' : r))))
+  const setRole = (ci, role) => setRoles(prev => prev.map((r, i) => (i === ci ? role : (role && r === role && !MULTI_ROLES.has(role) ? '' : r))))
 
   const close = () => { setSheets(null); setBasis(null) }
   useBackClose(!!(sheets || basis), close)   // «Назад» телефона — закрыть окно импорта
@@ -362,6 +362,11 @@ export default function ImportDetails({ hasDetails, onImport }) {
                 {rows.slice(0, 40).map((_, i) => <option key={i} value={i}>шапка: строка {i + 1}</option>)}
               </select>
             </div>
+            {roles.includes('prop') && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+                «Свойство (на бирку)» — значение колонки сохранится в детали под названием колонки; его можно вывести на бирку.
+              </div>
+            )}
             <div style={{ overflowX: 'auto', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 12 }}>
               <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>

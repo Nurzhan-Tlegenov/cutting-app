@@ -12,7 +12,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -277,6 +277,17 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
   const edit = patch => onChange({ ...tpl, items: tpl.items.map(i => (i.id === sel ? { ...i, ...patch } : i)) })
   const chip = on => ({ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid ' + (on ? 'var(--blue)' : 'var(--border-md)'), background: on ? 'var(--blue-light)' : 'transparent', color: on ? 'var(--blue-dark)' : 'var(--text-muted)', whiteSpace: 'nowrap' })
   const used = new Set(t.items.map(i => i.type))
+  // кнопка «+ параметр»: любой параметр можно поставить несколько раз (копия — чуть в стороне)
+  const addChip = (k, label) => {
+    const n = t.items.filter(i => i.type === k).length
+    return (
+      <button key={k} type="button" style={chip(n > 0)} onClick={() => {
+        let it = newLabelItem(k, tpl)
+        if (n) { const [bw, bh] = itemBox(it); it = { ...it, x: Math.min(tpl.w - bw, it.x + 3 * n), y: Math.min(tpl.h - bh, it.y + 3 * n) } }
+        onChange({ ...tpl, items: [...tpl.items, it] }); setSel(it.id)
+      }}>+ {label}{n ? ` · ${n}` : ''}</button>
+    )
+  }
   return (
     <div>
       <div ref={wrapRef} onPointerDown={bgDown} onPointerMove={bgMove} onPointerUp={bgUp} onPointerCancel={bgUp}
@@ -435,17 +446,22 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на бирку</div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         {/* любой параметр можно поставить несколько раз: например, один раз текстом, другой — картинкой в другом месте */}
-        {[...LABEL_ITEMS, ...metaItems(mat?.details)].map(([k, label]) => {
-          const n = t.items.filter(i => i.type === k).length
-          return (
-            <button key={k} type="button" style={chip(n > 0)} onClick={() => {
-              let it = newLabelItem(k, tpl)
-              if (n) { const [bw, bh] = itemBox(it); it = { ...it, x: Math.min(tpl.w - bw, it.x + 3 * n), y: Math.min(tpl.h - bh, it.y + 3 * n) } }   // копия — чуть в стороне
-              onChange({ ...tpl, items: [...tpl.items, it] }); setSel(it.id)
-            }}>+ {label}{n ? ` · ${n}` : ''}</button>
-          )
-        })}
+        {[...LABEL_ITEMS, ...metaItems(mat?.details)].map(([k, label]) => addChip(k, label))}
       </div>
+      {/* пользовательские параметры деталей: колонки таблицы при импорте Excel/CSV и пользовательские свойства из Базиса —
+          под теми же названиями, что в источнике; на бирке — значение у каждой детали */}
+      {(() => {
+        const list = userItems(mat?.details)
+        t.items.forEach(i => { if (i.type.startsWith('user:') && !list.some(([k]) => k === i.type)) list.push([i.type, itemTitle(i.type)]) })
+        return (
+          <>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Параметры деталей — колонки таблицы, свойства из Базиса</div>
+            {list.length
+              ? <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>{list.map(([k, label]) => addChip(k, label))}</div>
+              : <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 10 }}>У деталей этого материала своих параметров нет. Они появляются после импорта таблицы (колонки «Свойство (на бирку)») или модели Базиса с пользовательскими свойствами.</div>}
+          </>
+        )
+      })()}
       {imgEdit && <LabelImageEditor src={imgEdit.src} onDone={putImage} onCancel={() => setImgEdit(null)} />}
     </div>
   )

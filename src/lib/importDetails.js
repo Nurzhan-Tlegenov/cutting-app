@@ -20,7 +20,20 @@ export const ROLES = [
   { id: 'edgeW2', label: 'Кромка Шн' },
   { id: 'edgeLn', label: 'Кромок по длине (0–2)' },
   { id: 'edgeWn', label: 'Кромок по ширине (0–2)' },
+  // Любая другая колонка с заголовком: значение уходит в свойства детали (contour.meta.user) под названием
+  // колонки — его можно вывести на бирку. Таких колонок может быть сколько угодно.
+  { id: 'prop', label: 'Свойство (на бирку)' },
 ]
+export const MULTI_ROLES = new Set(['prop'])
+const headerText = (rows, headerRow, i) => {
+  const t = v => (v == null ? '' : String(v).replace(/\s+/g, ' ').trim())
+  return (t(rows[headerRow]?.[i]) || t(rows[headerRow - 1]?.[i])).slice(0, 40)
+}
+// Нераспознанные колонки, у которых есть заголовок и хоть одно значение, — свойства детали для бирки
+function propRoles(rows, headerRow, roles) {
+  if (headerRow < 0) return roles
+  return roles.map((r, i) => (r || !headerText(rows, headerRow, i) || !rows.slice(headerRow + 1).some(x => String(x?.[i] ?? '').trim()) ? r : 'prop'))
+}
 
 // ---------- Чтение файла ----------
 
@@ -244,7 +257,7 @@ export function analyzeTable(rows, forcedHeaderRow) {
   if (forcedHeaderRow != null) {
     if (forcedHeaderRow < 0) return { headerRow: -1, roles: guessWithoutHeader(rows) || Array(width).fill('') }
     const roles = resolveRoles(headerRolesAt(rows, forcedHeaderRow))
-    return { headerRow: forcedHeaderRow, roles: fixEdgeCounts(rows, forcedHeaderRow, roles) }
+    return { headerRow: forcedHeaderRow, roles: propRoles(rows, forcedHeaderRow, fixEdgeCounts(rows, forcedHeaderRow, roles)) }
   }
   let best = { headerRow: -1, roles: null, score: 0 }
   for (let r = 0; r < Math.min(rows.length, 40); r++) {
@@ -252,7 +265,7 @@ export function analyzeTable(rows, forcedHeaderRow) {
     const score = scoreOf(roles)
     if (score > best.score) best = { headerRow: r, roles, score }
   }
-  if (best.roles) return { headerRow: best.headerRow, roles: fixEdgeCounts(rows, best.headerRow, best.roles) }
+  if (best.roles) return { headerRow: best.headerRow, roles: propRoles(rows, best.headerRow, fixEdgeCounts(rows, best.headerRow, best.roles)) }
   return { headerRow: -1, roles: guessWithoutHeader(rows) || Array(width).fill('') }
 }
 
@@ -283,6 +296,14 @@ export function buildDetails(rows, headerRow, roles) {
   const edgeCols = { left: col('edgeL1'), right: col('edgeL2'), top: col('edgeW1'), bottom: col('edgeW2') }
   const iLn = col('edgeLn'), iWn = col('edgeWn')
   const data = rows.slice(headerRow + 1)
+  // колонки-свойства: [индекс, название колонки]; одинаковые названия различаются номером
+  const propCols = [], seen = {}
+  roles.forEach((r, i) => {
+    if (r !== 'prop' || headerRow < 0) return
+    let h = headerText(rows, headerRow, i) || `Колонка ${i + 1}`
+    if (seen[h]) h = `${h} (${++seen[h]})`; else seen[h] = 1
+    propCols.push([i, h])
+  })
 
   // В колонке кромки только 0/1 — это отметки «есть/нет», а не толщина
   const marksOnly = {}
@@ -314,7 +335,10 @@ export function buildDetails(rows, headerRow, roles) {
 
     const material = iMat >= 0 ? String(r[iMat] ?? '').trim() : ''
     const thickness = thk > 0 ? thk : null
+    const user = {}
+    for (const [i, h] of propCols) { const v = String(r[i] ?? '').trim(); if (v) user[h] = v.slice(0, 120) }
     items.push({
+      ...(Object.keys(user).length ? { contour: { meta: { src: 'table', user } } } : {}),
       name: iName >= 0 ? String(r[iName] ?? '').trim().slice(0, 80) : '',
       w, h, qty, edges, material, thickness,
       prefix: iPfx >= 0 ? String(r[iPfx] ?? '').trim().slice(0, 40) : '',

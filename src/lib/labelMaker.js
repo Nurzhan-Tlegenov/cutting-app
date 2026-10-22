@@ -87,13 +87,22 @@ export function labelQr(tpl, info) {
 export const itemKind = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
 // свойства детали из импорта (contour.meta) — элементы вида «meta:<имя>»
 const META_NAMES = { des: 'Обозначение', pos: 'Позиция', material: 'Материал детали', product: 'Изделие', block: 'Блок', thickness: 'Толщина детали', id: 'ID детали', texDir: 'Направление текстуры', comment: 'Комментарий', note: 'Примечание' }
-export const itemTitle = type => (type.startsWith('meta:') ? `Свойство: ${META_NAMES[type.slice(5)] || type.slice(5)}` : (LABEL_ITEMS.find(x => x[0] === type) || [])[1] || type)
-const knownType = type => typeof type === 'string' && (type.startsWith('meta:') || LABEL_ITEMS.some(x => x[0] === type))
+// «user:<название>» — пользовательское свойство детали: колонка таблицы Excel/CSV при импорте или
+// пользовательское свойство панели из Базис-Мебельщика (contour.meta.user). Называется так же, как в источнике.
+export const itemTitle = type => (type.startsWith('user:') ? type.slice(5)
+  : type.startsWith('meta:') ? `Свойство: ${META_NAMES[type.slice(5)] || type.slice(5)}` : (LABEL_ITEMS.find(x => x[0] === type) || [])[1] || type)
+const knownType = type => typeof type === 'string' && (type.startsWith('meta:') || type.startsWith('user:') || LABEL_ITEMS.some(x => x[0] === type))
 /** Свойства, вшитые в детали заказа, — их тоже можно вывести на бирку: [[тип, название]] */
 export function metaItems(details) {
   const keys = new Set()
   for (const d of details || []) { const m = detailMeta(d); if (m) for (const [k, v] of Object.entries(m)) if ((typeof v === 'string' && v.trim()) || typeof v === 'number') keys.add(k) }
   return [...keys].filter(k => !['des', 'pos'].includes(k)).map(k => ['meta:' + k, itemTitle('meta:' + k)])
+}
+/** Пользовательские свойства деталей заказа (колонки таблицы, свойства из Базиса): [[тип, название]] */
+export function userItems(details) {
+  const keys = new Set()
+  for (const d of details || []) { const u = detailMeta(d)?.user; if (u && typeof u === 'object') for (const [k, v] of Object.entries(u)) if (String(v ?? '').trim()) keys.add(k) }
+  return [...keys].map(k => ['user:' + k, k])
 }
 /** Элемент рисуется прямоугольником с высотой (картинка), а не строкой текста */
 /** Текст идёт вдоль бирки по вертикали (кромка слева и справа) */
@@ -497,7 +506,7 @@ export function labelText(type, info, tpl = null) {
     case 'thickness': return info.thickness ? `${r1(info.thickness)} мм` : ''
     case 'qty': return `${info.qty} шт`
     case 'image': return ' '
-    default: { const v = type.startsWith('meta:') ? info.meta?.[type.slice(5)] : ''; return v == null ? '' : String(v) }
+    default: { const v = type.startsWith('user:') ? info.meta?.user?.[type.slice(5)] : type.startsWith('meta:') ? info.meta?.[type.slice(5)] : ''; return v == null || typeof v === 'object' ? '' : String(v) }
   }
 }
 

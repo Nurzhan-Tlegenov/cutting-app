@@ -519,6 +519,7 @@ function basisSrc(panel) {
   }))
   const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
   const texDir = val(o, 'TexDir', 0)
+  const user = userProps(o)
   // Лицевая сторона, назначенная конструктором в Базисе: поле есть, только если её задали вручную.
   // 0 — лицевая пласть «сверху» панели (Z = толщина, как без переворота), 1 — противоположная.
   const ff = val(o, 'FrontFace', null)
@@ -537,8 +538,40 @@ function basisSrc(panel) {
       path: panel.ctx.path,                      // блоки, в которые вложена деталь
       material: matFull[0] || '', materialCode: matFull.slice(1).join(' / '),
       ...(val(o, 'Color') != null ? { color: val(o, 'Color') } : {}),
+      ...(user ? { user } : {}),                 // пользовательские свойства панели — на бирку
     },
   }
+}
+
+// Пользовательские свойства панели (Базис: «Пользовательские свойства» объекта) -> { название: значение } | null.
+// Узел ищется по имени (User…/Prop…/Attr…); внутри — либо элементы списка с полями «имя» и «значение»,
+// либо пары «ключ — значение». Служебные поля геометрии сюда не попадают — смотрим только такие узлы.
+const PROP_NODE = /user|prop|attr|param/i
+const NAME_KEY = /^(name|caption|title|key|n)$/i
+const VALUE_KEY = /^(value|val|v|text|data)$/i
+function propValue(v) {
+  if (v == null || v instanceof Uint8Array) return ''
+  if (typeof v === 'number') return String(Math.round(v * 1000) / 1000)
+  if (typeof v === 'boolean') return v ? 'да' : 'нет'
+  return String(v).replace(/[\r\n]+/g, ' ').trim().slice(0, 120)
+}
+function userProps(o) {
+  const out = {}
+  const add = (k, v) => { const name = String(k || '').trim().slice(0, 40), s = propValue(v); if (name && s && Object.keys(out).length < 40) out[name] = s }
+  const walk = (n, depth) => {
+    if (!n?.c || depth > 3) return
+    for (const ch of n.c) {
+      if (ch.c) {
+        // элемент списка «имя — значение»
+        const nm = ch.c.find(x => !x.c && NAME_KEY.test(x.k) && typeof x.v === 'string')
+        const vl = ch.c.find(x => !x.c && VALUE_KEY.test(x.k))
+        if (nm && vl) add(nm.v, vl.v)
+        else walk(ch, depth + 1)
+      } else if (ch.k && !NAME_KEY.test(ch.k) && !VALUE_KEY.test(ch.k)) add(ch.k, ch.v)
+    }
+  }
+  for (const ch of o?.c || []) if (ch.c && PROP_NODE.test(ch.k)) walk(ch, 0)
+  return Object.keys(out).length ? out : null
 }
 
 // Склейка: облицовка пласти листовым материалом (Plastics, толщина от 3 мм — плита, а не HPL-пластик)
