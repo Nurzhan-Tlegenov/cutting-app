@@ -12,7 +12,8 @@ exec > /var/log/raskroy-mirror.log 2>&1
 set -x
 
 export DEBIAN_FRONTEND=noninteractive
-for i in 1 2 3 4 5; do apt-get update -y && apt-get install -y nginx certbot python3-certbot-nginx dnsutils && break; sleep 30; done
+# в первые минуты после создания сервера apt занят фоновыми обновлениями — ждём освобождения до 10 минут
+for i in 1 2 3 4 5; do apt-get -o DPkg::Lock::Timeout=600 update -y && apt-get -o DPkg::Lock::Timeout=600 install -y nginx certbot python3-certbot-nginx dnsutils && command -v certbot && break; sleep 30; done
 
 # Oracle Cloud: в образе Ubuntu встроенный файрвол закрывает всё, кроме SSH — открываем 80 и 443
 if command -v iptables >/dev/null; then
