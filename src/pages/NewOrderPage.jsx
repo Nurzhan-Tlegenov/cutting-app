@@ -186,16 +186,16 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
             const val = detail.edges[key]
             const isActive = !!val
             return (
-              <button key={key} type="button" onClick={() => toggleEdge(key)}
+              <button key={key} type="button" title={val && val !== 'default' ? val : undefined} onClick={() => toggleEdge(key)}
                 onMouseDown={e => e.preventDefault()} onPointerDown={e => e.preventDefault()}  /* фокус остаётся в поле размера: клавиатура не прячется, экран не прыгает */
                 style={{
-                  flex: 1, padding: '5px 2px', border: isActive ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                  flex: 1, minWidth: 0, padding: '5px 2px', border: isActive ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
                   borderRadius: 'var(--radius)', background: isActive ? 'var(--blue-light)' : 'transparent',
                   fontSize: 10, color: isActive ? 'var(--blue-dark)' : 'var(--text-hint)',
                   cursor: 'pointer', textAlign: 'center', lineHeight: 1.3
                 }}>
                 <div>{side}</div>
-                {isActive && <div style={{ fontSize: 9, fontWeight: 500, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {isActive && <div style={{ fontSize: 9, fontWeight: 500, marginTop: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', lineHeight: 1.15 }}>
                   {val === 'default' ? '✓' : val}
                 </div>}
               </button>
