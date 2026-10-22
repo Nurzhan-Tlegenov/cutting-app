@@ -494,6 +494,37 @@ function fitText(ctx, text, maxW, size, weight = '') {
   return t
 }
 
+// Перенос текста по строкам в рамке шириной maxW (шрифт не уменьшается). Слово длиннее рамки рвётся по буквам.
+// Строк больше, чем помещается (maxLines), — последняя обрезается с «…». -> массив строк
+function wrapText(ctx, text, maxW, size, weight, maxLines) {
+  ctx.font = `${weight} ${Math.round(size)}px Arial, Helvetica, sans-serif`.trim()
+  const fits = t => ctx.measureText(t).width <= maxW
+  const lines = []
+  let cur = ''
+  for (const para of String(text).split('\n')) {
+    for (let word of para.split(/\s+/).filter(Boolean)) {
+      const tryLine = cur ? cur + ' ' + word : word
+      if (fits(tryLine)) { cur = tryLine; continue }
+      if (cur) { lines.push(cur); cur = '' }
+      while (!fits(word) && word.length > 1) {             // слово не влезает целиком — по буквам
+        let k = word.length - 1
+        while (k > 1 && !fits(word.slice(0, k))) k--
+        lines.push(word.slice(0, k)); word = word.slice(k)
+      }
+      cur = word
+    }
+    if (cur) { lines.push(cur); cur = '' }
+  }
+  if (lines.length > maxLines) {
+    const keep = lines.slice(0, maxLines)
+    let last = lines.slice(maxLines - 1).join(' ')
+    while (last.length > 1 && !fits(last + '…')) last = last.slice(0, -1)
+    keep[maxLines - 1] = last + '…'
+    return keep
+  }
+  return lines
+}
+
 /** Текст элемента бирки */
 export function labelText(type, info, tpl = null) {
   switch (type) {
@@ -581,7 +612,12 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
         }
         continue
       }
-      const t = fitText(ctx, text, w, it.size * mm, it.bold ? 'bold' : ''), sz = it.size * mm
+      const sz = it.size * mm, weight = it.bold ? 'bold' : '', LH = sz * 1.25
+      // Рамка выше одной строки, а текст в длину не влезает — переносим на следующие строки (шрифт тот же);
+      // влезает — одна строка, как раньше. Рамка в одну строку — как раньше: уменьшаем шрифт, потом «…»
+      const room = Math.max(1, Math.floor((textThick(it) * mm + 0.01) / LH))
+      ctx.font = `${weight} ${Math.round(sz)}px Arial, Helvetica, sans-serif`.trim()
+      const lines = room > 1 && ctx.measureText(text).width > w ? wrapText(ctx, text, w, sz, weight, room) : [fitText(ctx, text, w, sz, weight)]
       const ax = it.align === 'right' ? w : it.align === 'center' ? w / 2 : 0
       ctx.textAlign = it.align === 'right' ? 'right' : it.align === 'center' ? 'center' : 'left'
       ctx.save()
@@ -592,10 +628,13 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
       else if (r === 270) { ctx.translate(x, y + w); ctx.rotate(-Math.PI / 2) }
       else ctx.translate(x, y)
       // по высоте рамки: сверху, по центру или снизу
-      if (it.valign === 'middle') ctx.translate(0, (th - sz * 1.25) / 2); else if (it.valign === 'bottom') ctx.translate(0, th - sz * 1.25)
+      const blockH = LH * lines.length
+      if (it.valign === 'middle') ctx.translate(0, (th - blockH) / 2); else if (it.valign === 'bottom') ctx.translate(0, th - blockH)
       if (ghost) ctx.fillStyle = '#9aa3ad'
-      ctx.fillText(t, ax, sz * 0.62)
-      if (it.ul === 'below' || it.ul === 'above') { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? w - tw : it.align === 'center' ? (w - tw) / 2 : 0, th = Math.max(1, Math.round(sz * 0.09)); ctx.fillRect(x0, it.ul === 'below' ? sz * 1.16 : 0, tw, th) }
+      lines.forEach((t, li) => {
+        ctx.fillText(t, ax, li * LH + sz * 0.62)
+        if (it.ul === 'below' || it.ul === 'above') { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? w - tw : it.align === 'center' ? (w - tw) / 2 : 0, uh = Math.max(1, Math.round(sz * 0.09)); ctx.fillRect(x0, li * LH + (it.ul === 'below' ? sz * 1.16 : 0), tw, uh) }
+      })
       ctx.restore()
       ctx.fillStyle = '#000'
     }
