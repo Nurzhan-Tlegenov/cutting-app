@@ -238,6 +238,7 @@ export function normalizeLabel(raw) {
     if (itemKind(i.type) !== 'pic') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
     if (!pic) {
       if ([0, 90, 180, 270].includes(Number(i.trot))) o.trot = Number(i.trot)
+      if (i.fill) o.fill = true   // «По рамке»: шрифт увеличивается на всю рамку, если текст помещается
       if (['middle', 'bottom'].includes(i.valign)) o.valign = i.valign
       const vert = textRot(o) % 180 !== 0
       o.w = Math.max(3, Math.min(vert ? h : w, Number(i.w) || 20))
@@ -612,12 +613,30 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
         }
         continue
       }
-      const sz = it.size * mm, weight = it.bold ? 'bold' : '', LH = sz * 1.25
+      let sz = it.size * mm, LH = sz * 1.25
+      const weight = it.bold ? 'bold' : ''
       // Рамка выше одной строки, а текст в длину не влезает — переносим на следующие строки (шрифт тот же);
       // влезает — одна строка, как раньше. Рамка в одну строку — как раньше: уменьшаем шрифт, потом «…»
       const room = Math.max(1, Math.floor((textThick(it) * mm + 0.01) / LH))
       ctx.font = `${weight} ${Math.round(sz)}px Arial, Helvetica, sans-serif`.trim()
-      const lines = room > 1 && ctx.measureText(text).width > w ? wrapText(ctx, text, w, sz, weight, room) : [fitText(ctx, text, w, sz, weight)]
+      let lines = room > 1 && ctx.measureText(text).width > w ? wrapText(ctx, text, w, sz, weight, room) : [fitText(ctx, text, w, sz, weight)]
+      // «По рамке»: текст целиком помещается — шрифт увеличивается на всю рамку (с переносом, если так крупнее);
+      // меньше заданного — никогда
+      if (it.fill && !ghost) {
+        const frame = textThick(it) * mm
+        const okAt = s0 => {
+          ctx.font = `${weight} ${Math.round(s0)}px Arial, Helvetica, sans-serif`.trim()
+          if (String(text).split(/\s+/).some(wd => ctx.measureText(wd).width > w)) return null   // слово не рвём
+          const ls = wrapText(ctx, text, w, s0, weight, 999)
+          return ls.length * s0 * 1.25 <= frame + 0.01 ? ls : null
+        }
+        if (okAt(sz)) {
+          let lo = sz, hi = frame / 1.25
+          for (let k = 0; k < 14 && hi - lo > 0.5; k++) { const mid = (lo + hi) / 2; if (okAt(mid)) lo = mid; else hi = mid }
+          sz = lo; LH = sz * 1.25; lines = okAt(sz)
+        }
+        ctx.font = `${weight} ${Math.round(sz)}px Arial, Helvetica, sans-serif`.trim()
+      }
       const ax = it.align === 'right' ? w : it.align === 'center' ? w / 2 : 0
       ctx.textAlign = it.align === 'right' ? 'right' : it.align === 'center' ? 'center' : 'left'
       ctx.save()

@@ -352,6 +352,8 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
                 <button type="button" style={chip(false)} onClick={() => edit({ th: Math.max(cur.size * 1.25, textThick(cur) - 1) })}>−</button>
                 <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{textThick(cur).toFixed(1)} мм</span>
                 <button type="button" style={chip(false)} onClick={() => edit({ th: textThick(cur) + 1 })}>+</button>
+                <button type="button" style={chip(!!cur.fill)} title="Текст помещается — шрифт растёт на всю рамку; не помещается — перенос на строки ниже. Меньше заданного шрифт не становится"
+                  onClick={() => edit(cur.fill ? { fill: undefined } : { fill: true, ...(textThick(cur) <= cur.size * 1.25 + 0.01 ? { th: Math.min(isVert(cur) ? tpl.w : tpl.h, cur.size * 1.25 * 2) } : {}) })}>{cur.fill ? '✓ ' : ''}⤢ По рамке</button>
               </div>
               <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 62 }}>Поворот:</span>
