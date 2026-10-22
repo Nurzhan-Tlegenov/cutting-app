@@ -538,7 +538,7 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared }) {
             </div>
             {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} />
               : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
-            {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же']].map(([k, label]) => (
+            {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же'], ['edgeDims', 'Размер стороны у кромки (например «ПВХ 2 мм · 720»)']].map(([k, label]) => (
               <label key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
                 <input type="checkbox" checked={!!tpl[k]} onChange={e => change({ [k]: e.target.checked })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
                 {label}

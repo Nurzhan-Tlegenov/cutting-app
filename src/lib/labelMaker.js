@@ -251,7 +251,7 @@ export function normalizeLabel(raw) {
   return { enabled: !!t.enabled, w, h, edges: false, offcuts: !!t.offcuts,
     // бирка на обрезок: в каком углу обрезка клеить и на сколько отступить от его сторон, мм
     offcut: { corner: ['bl', 'br', 'tl', 'tr', 'center'].includes(t.offcut?.corner) ? t.offcut.corner : 'bl', dx: Math.max(0, Math.min(1000, Number(t.offcut?.dx ?? 100) || 0)), dy: Math.max(0, Math.min(1000, Number(t.offcut?.dy ?? 100) || 0)) },
-    rot: t.rot !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
+    rot: t.rot !== false, edgeDims: t.edgeDims !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
     // строка «Заказ»: своя подпись, номер от приложения и название заказа включаются отдельно
     order: { prefix: typeof t.order?.prefix === 'string' ? t.order.prefix.slice(0, 30) : 'Заказ', number: t.order?.number !== false, name: t.order?.name !== false },
     // чертёж детали: размеры торцевых отверстий от края и высота их цифр (мм)
@@ -513,7 +513,9 @@ export function labelText(type, info, tpl = null) {
       // сторона бирки = сторона детали на карте (карта и деталь на бирке повёрнуты одинаково)
       const rot = tpl ? tpl.rot !== false : true, side = type.slice(4).toLowerCase(), name = (rot ? info.sidesCw : info.sides)[side]
       const horiz = side === 'top' || side === 'bottom'
-      return name ? `${name} · ${r1(horiz === rot ? info.sizeY : info.sizeX)}` : ''
+      if (!name) return ''
+      // размер стороны с кромкой — по выбору в шаблоне («Размер стороны у кромки»), по умолчанию есть
+      return tpl && tpl.edgeDims === false ? name : `${name} · ${r1(horiz === rot ? info.sizeY : info.sizeX)}`
     }
     case 'faceHoles': return info.faceHoles ? `Отв. в пласть: ${info.faceHoles}` : ''
     case 'backHoles': return info.backHoles ? `Нижняя присадка: ${info.backHoles}` : ''
