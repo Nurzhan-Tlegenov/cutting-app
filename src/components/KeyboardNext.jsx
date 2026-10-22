@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { keyboardHeight } from '../lib/keyboard'
 
 // Цифровая клавиатура iPhone / iPad не имеет кнопки «Далее» (на Android она есть), и по полям приходится
 // переходить пальцем. Пока открыта цифровая клавиатура, над ней показывается своя полоса: «Далее» и «Готово».
@@ -56,7 +57,7 @@ export default function KeyboardNext() {
   useEffect(() => {
     const vv = window.visualViewport
     if (!el || !vv) return
-    const place = () => setTop(vv.height < window.innerHeight - 80 ? vv.offsetTop + vv.height - H : null)   // полоса — только пока клавиатура открыта
+    const place = () => setTop(keyboardHeight() > 80 ? vv.offsetTop + vv.height - H : null)   // полоса — только пока клавиатура открыта
     place()
     vv.addEventListener('resize', place); vv.addEventListener('scroll', place); window.addEventListener('scroll', place, { passive: true })
     const t = setInterval(place, 400)                      // клавиатура выезжает с анимацией — событие приходит не всегда

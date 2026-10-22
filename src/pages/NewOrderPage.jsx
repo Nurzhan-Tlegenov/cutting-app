@@ -23,6 +23,7 @@ import { fetchUserSettings, ORDER_DEFAULT_COLS, getUserSettings, saveUserSetting
 import { useBackClose } from '../lib/backStack'
 import PartGroups, { GroupChip } from '../components/PartGroups'
 import { groupsOf, groupDir, PART_GROUPS_SQL_HINT } from '../lib/partGroups'
+import { keyboardHeight, fullHeight } from '../lib/keyboard'
 
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
@@ -383,7 +384,7 @@ export default function NewOrderPage() {
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
-    const handler = () => setKeyboardOpen(vv.height / window.innerHeight < 0.75)
+    const handler = () => setKeyboardOpen(keyboardHeight() > 0.25 * fullHeight())
     vv.addEventListener('resize', handler)
     return () => vv.removeEventListener('resize', handler)
   }, [])
