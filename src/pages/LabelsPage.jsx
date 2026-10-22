@@ -12,7 +12,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -237,7 +237,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
     const { w, h } = labelPx(t, true)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[0]
-    const draw = () => drawLabel(cv, t, labelInfo(order, mat, 0, 0), { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] })
+    const draw = () => drawLabel(cv, t, labelInfo(order, mat, 0, 0), { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] }, { preview: true })
     draw(); if (t.items.some(i => i.img)) preloadLabelImages(t).then(draw)
   }, [t, order, mat])
   const fileRef = useRef(null)
@@ -456,14 +456,136 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
         return (
           <>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Параметры деталей — колонки таблицы, свойства из Базиса</div>
-            {list.length
-              ? <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>{list.map(([k, label]) => addChip(k, label))}</div>
-              : <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 10 }}>У деталей этого материала своих параметров нет. Они появляются после импорта таблицы (колонки «Свойство (на бирку)») или модели Базиса с пользовательскими свойствами.</div>}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: list.length ? 10 : 4 }}>
+              {list.map(([k, label]) => addChip(k, label))}
+              {/* параметр можно поставить заранее, ещё до импорта: по названию колонки таблицы или свойства из Базиса */}
+              <button type="button" style={{ ...chip(false), borderStyle: 'dashed' }} onClick={() => {
+                const n = (window.prompt('Название параметра — точно как колонка в таблице или пользовательское свойство в Базисе:', '') || '').trim().slice(0, 40)
+                if (!n) return
+                const it = newLabelItem('user:' + n, tpl)
+                onChange({ ...tpl, items: [...tpl.items, it] }); setSel(it.id)
+              }}>+ Свой параметр…</button>
+            </div>
+            {!list.length && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 10 }}>Параметры появляются после импорта таблицы (колонки «Свойство (на бирку)») или модели Базиса с пользовательскими свойствами. Можно добавить заранее — по названию.</div>}
           </>
         )
       })()}
       {imgEdit && <LabelImageEditor src={imgEdit.src} onDone={putImage} onCancel={() => setImgEdit(null)} />}
     </div>
+  )
+}
+
+// Настройка шаблона бирки: размер, мои шаблоны, расстановка элементов, чертёж детали, разрешение.
+// Одна и та же — в бирках заказа и в «Настройки производства → Бирки» (там — на образцовой детали, без заказа).
+export function LabelSetup({ tpl, setTpl, user, order, mat, shared }) {
+  const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
+  const [savedT, setSavedT] = useState(() => getLabelSaved(user))   // «Мои шаблоны бирок»
+  const [curSaved, setCurSaved] = useState(() => getUserSettings(user).labelSavedCur || '')   // какой сохранённый шаблон открыт
+  const apply = t => { setHist(h => [...h.slice(-39), tpl]); setTpl(t); saveLabelTpl(t, user) }
+  const change = patch => apply(normalizeLabel({ ...tpl, ...patch, enabled: true }))
+  const putSaved = list => { setSavedT(list); saveLabelSaved(list, user) }
+  // Текущий шаблон: открыли сохранённый — правки сохраняются в него же («Сохранить» перезаписывает, а не плодит копии);
+  // то же имя при сохранении — перезапись существующего. Новый шаблон — под новым именем
+  const cur = savedT.find(x => x.id === curSaved) || null
+  const setCur = id => { setCurSaved(id); saveUserSettings({ labelSavedCur: id || '' }, user) }
+  const saveTpl = () => {
+    const def = cur ? cur.name : `Бирка ${tpl.w}×${tpl.h}`
+    const name = window.prompt(cur ? `Сохранить шаблон (то же имя — перезаписать «${cur.name}», другое — новый шаблон):` : 'Сохранить шаблон бирки под именем:', def)
+    if (name === null) return
+    const nm = name.trim() || def
+    const same = savedT.find(x => x.name.trim().toLowerCase() === nm.toLowerCase())
+    if (same) { putSaved(savedT.map(x => (x.id === same.id ? { ...x, name: nm, tpl: { ...tpl, enabled: true }, at: Date.now() } : x))); setCur(same.id); return }
+    const id = Math.random().toString(36).slice(2, 10)
+    putSaved([...savedT, { id, name: nm, at: Date.now(), tpl: { ...tpl, enabled: true } }]); setCur(id)
+  }
+  const applySaved = sv => { if (window.confirm(`Открыть шаблон «${sv.name}» (${sv.tpl.w}×${sv.tpl.h} мм)?\nТекущая раскладка заменится — её можно вернуть кнопкой «Отменить».`)) { apply(normalizeLabel({ ...sv.tpl, enabled: true })); setCur(sv.id) } }
+  const undo = () => { const prev = hist[hist.length - 1]; if (!prev) return; setHist(h => h.slice(0, -1)); setTpl(prev); saveLabelTpl(prev, user) }
+  const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { apply({ ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }) } }
+  return (
+    <>
+            <div className="row2" style={{ marginTop: 8 }}>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ширина, мм
+                <input type="text" inputMode="decimal" key={'w' + tpl.w} defaultValue={tpl.w} onBlur={e => size('w', e.target.value)} style={{ marginTop: 3, padding: '8px 10px' }} /></label>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Высота, мм
+                <input type="text" inputMode="decimal" key={'h' + tpl.h} defaultValue={tpl.h} onBlur={e => size('h', e.target.value)} style={{ marginTop: 3, padding: '8px 10px' }} /></label>
+            </div>
+            <div style={{ height: 10 }} />
+            <button type="button" disabled={!hist.length} onClick={undo}
+              style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, marginBottom: 8, border: '0.5px solid ' + (hist.length ? 'var(--blue)' : 'var(--border-md)'), background: 'transparent', color: hist.length ? 'var(--blue)' : 'var(--text-hint)' }}>
+              ↶ Отменить{hist.length ? ` (${hist.length})` : ''}
+            </button>
+            {/* мои шаблоны бирок: сохранить текущий, применить сохранённый (другой размер, другая раскладка) */}
+            <div style={{ margin: '0 0 10px', padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: savedT.length ? 6 : 0 }}>
+                <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>Мои шаблоны{savedT.length ? ` · ${savedT.length}` : ''}{cur && <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--text-hint)' }}>Открыт: {cur.name}</span>}</div>
+                <button type="button" onClick={saveTpl} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: 'none', background: 'var(--blue)', color: 'white' }}>💾 {cur ? 'Сохранить' : 'Сохранить шаблон'}</button>
+              </div>
+              {!savedT.length && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Настройте бирку и сохраните — потом можно переключаться между шаблонами одним тапом.</div>}
+              {[...savedT].sort((a, b) => (b.at || 0) - (a.at || 0)).map(sv => (
+                <div key={sv.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
+                  <div onClick={() => applySaved(sv)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                    <div style={{ fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--blue-dark)', fontWeight: sv.id === curSaved ? 600 : 400 }}>{sv.id === curSaved ? '● ' : ''}{sv.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{sv.tpl.w}×{sv.tpl.h} мм · элементов {sv.tpl.items?.length || 0}{sv.at ? ` · ${new Date(sv.at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}` : ''}</div>
+                  </div>
+                  <button type="button" title="Перезаписать текущим" onClick={() => { if (window.confirm(`Перезаписать «${sv.name}» текущей биркой (${tpl.w}×${tpl.h} мм)?`)) putSaved(savedT.map(x => (x.id === sv.id ? { ...x, tpl: { ...tpl, enabled: true }, at: Date.now() } : x))) }}
+                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13 }}>💾</button>
+                  <button type="button" title="Переименовать" onClick={() => { const n = window.prompt('Название шаблона', sv.name); if (n && n.trim()) putSaved(savedT.map(x => (x.id === sv.id ? { ...x, name: n.trim() } : x))) }}
+                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13 }}>✎</button>
+                  <button type="button" title="Удалить" onClick={() => { if (window.confirm(`Удалить шаблон «${sv.name}»?`)) { putSaved(savedT.filter(x => x.id !== sv.id)); if (curSaved === sv.id) setCur('') } }}
+                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13, color: 'var(--danger)' }}>🗑</button>
+                </div>
+              ))}
+            </div>
+            {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} />
+              : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
+            {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же']].map(([k, label]) => (
+              <label key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
+                <input type="checkbox" checked={!!tpl[k]} onChange={e => change({ [k]: e.target.checked })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
+                {label}
+              </label>
+            ))}
+            <div style={{ fontSize: 12.5, fontWeight: 500, margin: '4px 0 6px' }}>Чертёж детали</div>
+            {[['contour', 'Линия контура', 0.02, 2], ['hole', 'Точка отверстия', 0.05, 2]].map(([k, label, step, dg]) => (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                <span style={{ flex: 1 }}>{label}</span>
+                <button type="button" onClick={() => change({ part: { ...tpl.part, [k]: tpl.part[k] - step } })} style={{ padding: '5px 14px', borderRadius: 20, fontSize: 14, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>−</button>
+                <span style={{ minWidth: 58, textAlign: 'center' }}>{tpl.part[k].toFixed(dg)} мм</span>
+                <button type="button" onClick={() => change({ part: { ...tpl.part, [k]: tpl.part[k] + step } })} style={{ padding: '5px 14px', borderRadius: 20, fontSize: 14, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>+</button>
+              </div>
+            ))}
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
+              <input type="checkbox" checked={!!tpl.part.ring} onChange={e => change({ part: { ...tpl.part, ring: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
+              Отверстия кружком, без заливки
+            </label>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
+              <input type="checkbox" checked={!!tpl.part.dims} onChange={e => change({ part: { ...tpl.part, dims: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
+              Показывать размеры торцевых отверстий от края
+            </label>
+            {tpl.part.dims && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px 24px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                Высота цифр
+                {[['A−', -0.2], ['A+', 0.2]].map(([t, d], i) => (
+                  <button key={t} type="button" onClick={() => change({ part: { ...tpl.part, dimSize: tpl.part.dimSize + d } })}
+                    style={{ order: i ? 3 : 1, padding: '5px 12px', borderRadius: 20, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>{t}</button>
+                ))}
+                <span style={{ order: 2 }}>{tpl.part.dimSize.toFixed(1)} мм</span>
+              </div>
+            )}
+            {!tpl.items.some(i => i.type === 'part') && tpl.part.dims && <p style={{ fontSize: 11, color: 'var(--amber)', margin: '0 0 8px 24px' }}>Чертежа детали на бирке сейчас нет — добавьте его кнопкой «+ Чертёж детали».</p>}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Разрешение печати
+              <select value={tpl.dpi} onChange={e => change({ dpi: Number(e.target.value) })} style={{ width: 'auto', padding: '5px 8px', fontSize: 13 }}>
+                <option value={203}>203 dpi (обычный принтер бирок)</option>
+                <option value={300}>300 dpi</option>
+                <option value={600}>600 dpi</option>
+              </select>
+            </label>
+            <button type="button" onClick={() => { if (window.confirm('Вернуть раскладку по образцу?')) change(resizeLabel({ ...DEFAULT_LABEL(), rot: tpl.rot }, tpl.w, tpl.h)) }}
+              style={{ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ Раскладка по образцу</button>
+            <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+              Шаблон сохраняется в аккаунте. Когда он настроен, в разделе ЧПУ при создании G-кода появляется галочка «Программа для маркировочного стола».
+            </p>
+    </>
   )
 }
 
@@ -561,9 +683,6 @@ export default function LabelsPage() {
     return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); el.removeEventListener('touchcancel', end) }
   }, [gridEl])
   const [saveAsk, setSaveAsk] = useState(null)       // файлы маркировочного стола: вопрос «по отдельности или архивом»
-  const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
-  const [savedT, setSavedT] = useState(() => getLabelSaved(user))   // «Мои шаблоны бирок»
-  const [curSaved, setCurSaved] = useState(() => getUserSettings(user).labelSavedCur || '')   // какой сохранённый шаблон открыт
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -580,26 +699,7 @@ export default function LabelsPage() {
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
   const total = mat ? mat.sheets.reduce((a, s) => a + s.placed.length, 0) : 0
   const allLabels = mat ? mat.sheets.flatMap((sh, si) => (isBeamMat(mat) ? beamLabelSeq(sh, sheetGeo(order, mat.result, sh), null).map(q => q.pi) : labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual')).map(pi => ({ si, pi }))).map((q, n) => ({ ...q, n })) : []
-  const apply = t => { setHist(h => [...h.slice(-39), tpl]); setTpl(t); saveLabelTpl(t, user) }
-  const change = patch => apply(normalizeLabel({ ...tpl, ...patch, enabled: true }))
-  const putSaved = list => { setSavedT(list); saveLabelSaved(list, user) }
-  // Текущий шаблон: открыли сохранённый — правки сохраняются в него же («Сохранить» перезаписывает, а не плодит копии);
-  // то же имя при сохранении — перезапись существующего. Новый шаблон — под новым именем
-  const cur = savedT.find(x => x.id === curSaved) || null
-  const setCur = id => { setCurSaved(id); saveUserSettings({ labelSavedCur: id || '' }, user) }
-  const saveTpl = () => {
-    const def = cur ? cur.name : `Бирка ${tpl.w}×${tpl.h}`
-    const name = window.prompt(cur ? `Сохранить шаблон (то же имя — перезаписать «${cur.name}», другое — новый шаблон):` : 'Сохранить шаблон бирки под именем:', def)
-    if (name === null) return
-    const nm = name.trim() || def
-    const same = savedT.find(x => x.name.trim().toLowerCase() === nm.toLowerCase())
-    if (same) { putSaved(savedT.map(x => (x.id === same.id ? { ...x, name: nm, tpl: { ...tpl, enabled: true }, at: Date.now() } : x))); setCur(same.id); return }
-    const id = Math.random().toString(36).slice(2, 10)
-    putSaved([...savedT, { id, name: nm, at: Date.now(), tpl: { ...tpl, enabled: true } }]); setCur(id)
-  }
-  const applySaved = sv => { if (window.confirm(`Открыть шаблон «${sv.name}» (${sv.tpl.w}×${sv.tpl.h} мм)?\nТекущая раскладка заменится — её можно вернуть кнопкой «Отменить».`)) { apply(normalizeLabel({ ...sv.tpl, enabled: true })); setCur(sv.id) } }
-  const undo = () => { const prev = hist[hist.length - 1]; if (!prev) return; setHist(h => h.slice(0, -1)); setTpl(prev); saveLabelTpl(prev, user) }
-  const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { apply({ ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }) } }
+  const apply = t => { setTpl(t); saveLabelTpl(t, user) }   // настройки бирок на обрезки
   // файлы маркировочного стола — тем же набором, что делает ЧПУ вместе с G-кодом
   // все бирки одним PDF: бирка — страница, страница размером с бирку
   const savePdf = async () => {
@@ -644,88 +744,7 @@ export default function LabelsPage() {
         </div>
         {setup && (
           <div style={{ padding: '4px 12px 12px', borderTop: '0.5px solid var(--border)' }}>
-            <div className="row2" style={{ marginTop: 8 }}>
-              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ширина, мм
-                <input type="text" inputMode="decimal" key={'w' + tpl.w} defaultValue={tpl.w} onBlur={e => size('w', e.target.value)} style={{ marginTop: 3, padding: '8px 10px' }} /></label>
-              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Высота, мм
-                <input type="text" inputMode="decimal" key={'h' + tpl.h} defaultValue={tpl.h} onBlur={e => size('h', e.target.value)} style={{ marginTop: 3, padding: '8px 10px' }} /></label>
-            </div>
-            <div style={{ height: 10 }} />
-            <button type="button" disabled={!hist.length} onClick={undo}
-              style={{ padding: '7px 14px', borderRadius: 20, fontSize: 13, marginBottom: 8, border: '0.5px solid ' + (hist.length ? 'var(--blue)' : 'var(--border-md)'), background: 'transparent', color: hist.length ? 'var(--blue)' : 'var(--text-hint)' }}>
-              ↶ Отменить{hist.length ? ` (${hist.length})` : ''}
-            </button>
-            {/* мои шаблоны бирок: сохранить текущий, применить сохранённый (другой размер, другая раскладка) */}
-            <div style={{ margin: '0 0 10px', padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: savedT.length ? 6 : 0 }}>
-                <div style={{ flex: 1, fontSize: 13, fontWeight: 500 }}>Мои шаблоны{savedT.length ? ` · ${savedT.length}` : ''}{cur && <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--text-hint)' }}>Открыт: {cur.name}</span>}</div>
-                <button type="button" onClick={saveTpl} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: 'none', background: 'var(--blue)', color: 'white' }}>💾 {cur ? 'Сохранить' : 'Сохранить шаблон'}</button>
-              </div>
-              {!savedT.length && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Настройте бирку и сохраните — потом можно переключаться между шаблонами одним тапом.</div>}
-              {[...savedT].sort((a, b) => (b.at || 0) - (a.at || 0)).map(sv => (
-                <div key={sv.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
-                  <div onClick={() => applySaved(sv)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
-                    <div style={{ fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--blue-dark)', fontWeight: sv.id === curSaved ? 600 : 400 }}>{sv.id === curSaved ? '● ' : ''}{sv.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{sv.tpl.w}×{sv.tpl.h} мм · элементов {sv.tpl.items?.length || 0}{sv.at ? ` · ${new Date(sv.at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}` : ''}</div>
-                  </div>
-                  <button type="button" title="Перезаписать текущим" onClick={() => { if (window.confirm(`Перезаписать «${sv.name}» текущей биркой (${tpl.w}×${tpl.h} мм)?`)) putSaved(savedT.map(x => (x.id === sv.id ? { ...x, tpl: { ...tpl, enabled: true }, at: Date.now() } : x))) }}
-                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13 }}>💾</button>
-                  <button type="button" title="Переименовать" onClick={() => { const n = window.prompt('Название шаблона', sv.name); if (n && n.trim()) putSaved(savedT.map(x => (x.id === sv.id ? { ...x, name: n.trim() } : x))) }}
-                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13 }}>✎</button>
-                  <button type="button" title="Удалить" onClick={() => { if (window.confirm(`Удалить шаблон «${sv.name}»?`)) { putSaved(savedT.filter(x => x.id !== sv.id)); if (curSaved === sv.id) setCur('') } }}
-                    style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--bg)', fontSize: 13, color: 'var(--danger)' }}>🗑</button>
-                </div>
-              ))}
-            </div>
-            {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} />
-              : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
-            {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же']].map(([k, label]) => (
-              <label key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
-                <input type="checkbox" checked={!!tpl[k]} onChange={e => change({ [k]: e.target.checked })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
-                {label}
-              </label>
-            ))}
-            <div style={{ fontSize: 12.5, fontWeight: 500, margin: '4px 0 6px' }}>Чертёж детали</div>
-            {[['contour', 'Линия контура', 0.02, 2], ['hole', 'Точка отверстия', 0.05, 2]].map(([k, label, step, dg]) => (
-              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                <span style={{ flex: 1 }}>{label}</span>
-                <button type="button" onClick={() => change({ part: { ...tpl.part, [k]: tpl.part[k] - step } })} style={{ padding: '5px 14px', borderRadius: 20, fontSize: 14, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>−</button>
-                <span style={{ minWidth: 58, textAlign: 'center' }}>{tpl.part[k].toFixed(dg)} мм</span>
-                <button type="button" onClick={() => change({ part: { ...tpl.part, [k]: tpl.part[k] + step } })} style={{ padding: '5px 14px', borderRadius: 20, fontSize: 14, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>+</button>
-              </div>
-            ))}
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
-              <input type="checkbox" checked={!!tpl.part.ring} onChange={e => change({ part: { ...tpl.part, ring: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
-              Отверстия кружком, без заливки
-            </label>
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
-              <input type="checkbox" checked={!!tpl.part.dims} onChange={e => change({ part: { ...tpl.part, dims: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
-              Показывать размеры торцевых отверстий от края
-            </label>
-            {tpl.part.dims && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px 24px', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                Высота цифр
-                {[['A−', -0.2], ['A+', 0.2]].map(([t, d], i) => (
-                  <button key={t} type="button" onClick={() => change({ part: { ...tpl.part, dimSize: tpl.part.dimSize + d } })}
-                    style={{ order: i ? 3 : 1, padding: '5px 12px', borderRadius: 20, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>{t}</button>
-                ))}
-                <span style={{ order: 2 }}>{tpl.part.dimSize.toFixed(1)} мм</span>
-              </div>
-            )}
-            {!tpl.items.some(i => i.type === 'part') && tpl.part.dims && <p style={{ fontSize: 11, color: 'var(--amber)', margin: '0 0 8px 24px' }}>Чертежа детали на бирке сейчас нет — добавьте его кнопкой «+ Чертёж детали».</p>}
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
-              Разрешение печати
-              <select value={tpl.dpi} onChange={e => change({ dpi: Number(e.target.value) })} style={{ width: 'auto', padding: '5px 8px', fontSize: 13 }}>
-                <option value={203}>203 dpi (обычный принтер бирок)</option>
-                <option value={300}>300 dpi</option>
-                <option value={600}>600 dpi</option>
-              </select>
-            </label>
-            <button type="button" onClick={() => { if (window.confirm('Вернуть раскладку по образцу?')) change(resizeLabel({ ...DEFAULT_LABEL(), rot: tpl.rot }, tpl.w, tpl.h)) }}
-              style={{ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ Раскладка по образцу</button>
-            <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
-              Шаблон сохраняется в аккаунте. Когда он настроен, в разделе ЧПУ при создании G-кода появляется галочка «Программа для маркировочного стола».
-            </p>
+            <LabelSetup tpl={tpl} setTpl={setTpl} user={user} order={order} mat={mat} shared={shared} />
             {mat && <button type="button" className="btn-secondary" style={{ marginTop: 10 }} disabled={busy} onClick={exportFiles}>{busy ? 'Собираем файлы…' : '⬇ Файлы для маркировочного стола'}</button>}
           </div>
         )}
@@ -811,6 +830,31 @@ export default function LabelsPage() {
       })()}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)}
         folders={[folderName(routerPost(getCnc(user)).folderTpl, { total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName }), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
+    </div>
+  )
+}
+
+// «Настройки производства → Бирки»: тот же шаблон бирки, но без заказа — на образцовой детали,
+// чтобы настроить бирку сразу, не проходя заказ до раскроя
+export function LabelSettingsPage() {
+  const navigate = useNavigate()
+  const { user } = useAuth()
+  const [tpl, setTpl] = useState(() => getLabelTpl(user))
+  const sample = useMemo(() => demoLabelSample(), [])
+  return (
+    <div className="page" style={{ paddingBottom: 40 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingTop: 4 }}>
+        <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 500 }}>Шаблон бирки</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{tpl.w}×{tpl.h} мм · {tpl.enabled ? '✓ настроен' : 'не настроен'}</div>
+        </div>
+        <button onClick={() => navigate('/production')} style={{ padding: '7px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
+      </div>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 4px' }}>Бирка показана на образцовой детали. Шаблон тот же, что в бирках заказа: настроили здесь — он сразу работает во всех заказах.</p>
+        <LabelSetup tpl={tpl} setTpl={setTpl} user={user} order={sample.order} mat={sample.mat} shared={false} />
+      </div>
     </div>
   )
 }

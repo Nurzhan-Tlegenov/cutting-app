@@ -32,7 +32,7 @@ import AllProductionsPage from './pages/AllProductionsPage'
 import KeyboardNext from './components/KeyboardNext'
 import ProductionPage from './pages/ProductionPage'
 import CncPage from './pages/CncPage'
-import LabelsPage from './pages/LabelsPage'
+import LabelsPage, { LabelSettingsPage } from './pages/LabelsPage'
 import MessagesPage from './pages/MessagesPage'
 import NoticesPage from './pages/NoticesPage'
 import ScanPage from './pages/ScanPage'
@@ -122,6 +122,7 @@ function AppRoutes() {
       <Route path="/orders/:id/edit" element={<ProtectedRoute><EditOrderPage /></ProtectedRoute>} />
       <Route path="/orders/:id/cnc" element={<ProtectedRoute><CncPage /></ProtectedRoute>} />
       <Route path="/orders/:id/labels" element={<ProtectedRoute><LabelsPage /></ProtectedRoute>} />
+      <Route path="/label-settings" element={<ProtectedRoute><LabelSettingsPage /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
       <Route path="/users" element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
       <Route path="/all-orders" element={<ProtectedRoute><AllOrdersPage /></ProtectedRoute>} />

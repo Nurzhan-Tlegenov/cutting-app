@@ -276,6 +276,28 @@ const pxMm = tpl => ({ 300: 12, 600: 24 })[tpl?.dpi] || LABEL_PX_MM
 const edgeName = v => (!v || v === 'false' ? '' : v === 'default' || v === true ? 'Кромка' : String(v))
 const r1 = v => String(Math.round((Number(v) || 0) * 10) / 10)
 
+/**
+ * Образец для настройки бирки без заказа (Настройки производства → Бирки): лист 2750×1830 с несколькими деталями,
+ * бирка показывается на первой — с кромкой, обозначением и позицией. -> { order, mat }
+ */
+export function demoLabelSample() {
+  const E = 'ПВХ 0,4', E2 = 'ПВХ 2'
+  const det = (name, prefix, L, W, edges, des, pos) => ({ name, prefix, length: L, width: W, qty: 1, edge_top: edges[0] || null, edge_right: edges[1] || null, edge_bottom: edges[2] || null, edge_left: edges[3] || null,
+    contour: JSON.stringify({ vertices: [{ x: 0, y: 0, r: 0 }, { x: W, y: 0, r: 0 }, { x: W, y: L, r: 0 }, { x: 0, y: L, r: 0 }], holes: [], grooves: [], drillings: [], layout: [], meta: { des, pos } }) })
+  const details = [
+    det('Бок левый', 'Шкаф', 720, 560, [E2, E, E, E], '01.01', '1'),
+    det('Бок правый', 'Шкаф', 720, 560, [E2, E, E, E], '01.02', '2'),
+    det('Полка', 'Шкаф', 764, 540, [E2, null, null, null], '01.03', '3'),
+    det('Крышка', 'Шкаф', 800, 560, [E2, E, E, E], '01.04', '4'),
+    det('Цоколь', 'Шкаф', 764, 100, [E, null, null, null], '01.05', '5'),
+  ]
+  const at = [[0, 0], [564, 0], [1128, 0], [0, 724], [568, 724]]
+  const placed = details.map((d, i) => ({ detailIndex: i, x: at[i][0], y: at[i][1], origX: d.width, origY: d.length, label: d.name, prefix: d.prefix }))
+  const order = { id: null, order_number: '261022_001', order_name: 'Образец', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: 4 }
+  const mat = { key: 'demo', label: 'ЛДСП Белый', name: 'ЛДСП Белый', thickness: 16, result: null, sheets: [{ placed }], details, all: details }
+  return { order, mat }
+}
+
 /** Все свойства детали для бирки. mat — материал из savedNestings, si / pi — лист и деталь на нём */
 export function labelInfo(order, mat, si, pi, part = null) {
   // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
@@ -514,7 +536,9 @@ export function labelText(type, info, tpl = null) {
  * Нарисовать бирку. canvas — уже нужного размера (мм × LABEL_PX_MM); info — labelInfo();
  * sheetCtx — { sheet, geo, index, detail } для карты и чертежа детали.
  */
-export function drawLabel(canvas, tpl, info, sheetCtx = null) {
+// opts.preview — шаблон в редакторе: картинка показывается всегда (даже если у образцовой детали этого параметра нет),
+// а пустой текстовый параметр — серым названием, чтобы было видно, что стоит в рамке
+export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height
   const mm = W / tpl.w, line = Math.max(1, mm * 0.17), rot = tpl.rot !== false
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
@@ -537,8 +561,11 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0,
         tpl.part ? { contour: tpl.part.contour * mm, inner: tpl.part.contour * mm * 0.7, holeMin: tpl.part.hole * mm, ring: tpl.part.ring } : {})
     } else {
-      const text = labelText(it.type, info, tpl)
-      if (!text) continue                                   // параметра у детали нет — ни текста, ни картинки
+      let text = labelText(it.type, info, tpl), ghost = false
+      if (!text) {
+        if (!opts.preview) continue                         // параметра у детали нет — ни текста, ни картинки
+        if (!it.img) { text = itemTitle(it.type); ghost = true }
+      }
       if (it.img || it.type === 'image') {
         const im = IMAGES.get(it.img)
         if (im?.complete && im.naturalWidth) {
@@ -564,9 +591,11 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null) {
       else ctx.translate(x, y)
       // по высоте рамки: сверху, по центру или снизу
       if (it.valign === 'middle') ctx.translate(0, (th - sz * 1.25) / 2); else if (it.valign === 'bottom') ctx.translate(0, th - sz * 1.25)
+      if (ghost) ctx.fillStyle = '#9aa3ad'
       ctx.fillText(t, ax, sz * 0.62)
       if (it.ul === 'below' || it.ul === 'above') { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? w - tw : it.align === 'center' ? (w - tw) / 2 : 0, th = Math.max(1, Math.round(sz * 0.09)); ctx.fillRect(x0, it.ul === 'below' ? sz * 1.16 : 0, tw, th) }
       ctx.restore()
+      ctx.fillStyle = '#000'
     }
   }
   return canvas
