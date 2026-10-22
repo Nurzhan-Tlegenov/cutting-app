@@ -63,7 +63,8 @@ export async function sendAppealFiles(user, profile, body, files) {
 /** Новость от мастер-аккаунта всем пользователям */
 export const sendNews = (user, profile, title, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'news', title, body })
 /** Ответ мастер-аккаунта пользователю */
-export const sendReply = (user, profile, toId, body) => insert({ from_id: user.id, from_name: nameOf(profile), to_id: toId, kind: 'reply', body })
+// toName — кому (личное сообщение из списка пользователей): мастер видит адресата у своих сообщений; пользователю from_name не показывается
+export const sendReply = (user, profile, toId, body, toName = '') => insert({ from_id: user.id, from_name: nameOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply', body })
 /** Файл для отладки с комментарием — мастер-аккаунту */
 export const sendDebugFile = (user, profile, { fileName, payload, comment, orderId, title }) =>
   insert({ from_id: user.id, from_name: nameOf(profile), kind: 'debug', title: `${title || ''}${title ? ' · ' : ''}v${APP_VERSION}`, body: comment, file_name: fileName, file_size: String(payload || '').length, payload: String(payload || ''), order_id: orderId || null })

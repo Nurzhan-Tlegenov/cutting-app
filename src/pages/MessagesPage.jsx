@@ -13,7 +13,7 @@ import { orderTitle } from '../lib/orderUtils'
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
 // у мастер-аккаунта — обращения и файлы для отладки от пользователей (видно, от кого), новости для всех.
 const when = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
-const KIND = { news: ['Новость', 'var(--blue-light)', 'var(--blue-dark)'], appeal: ['Обращение', 'var(--amber-light)', 'var(--amber)'], reply: ['Ответ', 'var(--teal-light)', 'var(--teal)'], debug: ['Файл для отладки', '#F3E5F5', '#7B1FA2'] }
+const KIND = { news: ['Новость', 'var(--blue-light)', 'var(--blue-dark)'], appeal: ['Обращение', 'var(--amber-light)', 'var(--amber)'], reply: ['Сообщение', 'var(--teal-light)', 'var(--teal)'], debug: ['Файл для отладки', '#F3E5F5', '#7B1FA2'] }
 const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 1024 ? Math.round(n / 1024) + ' КБ' : (n || 0) + ' Б')
 
 function download(name, text) {
@@ -171,6 +171,7 @@ export default function MessagesPage() {
                 </div>
                 {/* мастер-аккаунт видит, от кого пришло */}
                 {isMaster && !mine && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>От: <b style={{ color: 'var(--text)' }}>{m.from_name || 'пользователь'}</b></div>}
+                {isMaster && mine && m.kind === 'reply' && / → /.test(m.from_name || '') && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Кому: <b style={{ color: 'var(--text)' }}>{(m.from_name || '').split(' → ').pop()}</b></div>}
                 {!isMaster && mine && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Вы писали</div>}
                 {m.title && <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>{m.title}</div>}
                 {m.body && <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body.replace(/\n?Сделать: Профиль → Заказы всех производств[^\n]*/, '')}</div>}

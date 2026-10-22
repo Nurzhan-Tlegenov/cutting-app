@@ -12,6 +12,7 @@ import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { adminBeta, adminSetBeta, BETA_FEATURES } from '../lib/beta'
+import { sendReply } from '../lib/messages'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
@@ -30,7 +31,9 @@ function VerifyBadge({ r }) {
 }
 
 export default function UsersPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
+  const [writeTo, setWriteTo] = useState(null)   // кому мастер пишет личное сообщение (id пользователя)
+  const [draft, setDraft] = useState('')
   const [users, setUsers] = useState(null)
   const [reqs, setReqs] = useState([])
   const [resets, setResets] = useState(null)   // запросы на восстановление пароля; null — в базе ещё нет этой части
@@ -189,6 +192,8 @@ export default function UsersPage() {
                       <div style={{ fontSize: 13 }}>
                         {tel ? <a href={`tel:+${tel}`} style={{ color: 'var(--blue)' }}>{u.phone || `+${tel}`}</a> : <span style={{ color: 'var(--text-hint)' }}>{u.email}</span>}
                         {wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 10, fontSize: 12 }}>WhatsApp</a>}
+                        {u.id !== user?.id && <button type="button" onClick={() => { setWriteTo(writeTo === u.id ? null : u.id); setDraft('') }}
+                          style={{ marginLeft: 10, fontSize: 12, color: 'var(--blue)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>✉ Написать</button>}
                       </div>
                     </div>
                     <select value={u.role} disabled={busy || u.id === user?.id} onChange={e => act(() => adminSetRole(u.id, e.target.value))}
@@ -196,6 +201,20 @@ export default function UsersPage() {
                       {ROLES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </div>
+                  {writeTo === u.id && (
+                    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Личное сообщение — увидит только {u.full_name || 'этот пользователь'} (в «Сообщениях» и уведомлением на телефон)</div>
+                      <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={3} autoFocus placeholder="Текст сообщения…" style={{ fontSize: 14 }} />
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <button type="button" style={btn()} onClick={() => setWriteTo(null)}>Отмена</button>
+                        <button type="button" style={btn('main')} disabled={busy || !draft.trim()} onClick={() => act(async () => {
+                          const r = await sendReply(user, profile, u.id, draft.trim(), u.full_name || u.phone || '')
+                          if (!r.error) { setWriteTo(null); setDraft(''); setInfo(`Сообщение отправлено: ${u.full_name || u.phone || 'пользователю'}.`) }
+                          return r
+                        })}>Отправить</button>
+                      </div>
+                    </div>
+                  )}
                   {u.production_id && !isProd(u) && (
                     <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-hint)', display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ flex: 1 }}>Производство «{u.production_name}» — {u.production_status === 'rejected' ? 'отклонено' : 'ждёт подтверждения'}</span>
