@@ -12,7 +12,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, qrHasLink, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -432,14 +432,14 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
       {used.has('qr') && (
         <div style={{ marginBottom: 10, padding: '8px 10px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)' }}>
           <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Что зашито в QR-код</div>
-          {tpl.qr.parts.includes('link') && (
+          {qrHasLink(tpl.qr) && (
             <p style={{ fontSize: 11, margin: '0 0 6px', color: shared ? 'var(--teal)' : 'var(--amber)' }}>
               {shared ? '✓ У заказа открыта ссылка на 3D-модель: по QR-коду откроется эта деталь, дальше — вверх по структуре (блок, изделие, вся модель). В коде только ссылка, остальные части не добавляются.'
                 : 'Ссылка на 3D-модель у этого заказа не открыта — в код пойдут обычные части ниже. Откройте ссылку в заказе: «3D-модель» → «Ссылка».'}
             </p>
           )}
           {/* тот же конструктор — у имени файла присадочного станка (ЧПУ → постпроцессор присадки) */}
-          <QrPartsEditor value={tpl.qr} onChange={qr => onChange({ ...tpl, qr })} preview={mat ? labelQr(tpl, labelInfo(order, mat, 0, 0)) : null} />
+          <QrPartsEditor value={tpl.qr} props={userItems(mat?.details)} onChange={qr => onChange({ ...tpl, qr })} preview={mat ? labelQr(tpl, labelInfo(order, mat, 0, 0)) : null} />
           <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6 }}>Этот же код может быть именем файла программы шестистороннего станка: на станке бирку сканируют — открывается программа детали (настройка в постпроцессоре присадки).</div>
         </div>
       )}

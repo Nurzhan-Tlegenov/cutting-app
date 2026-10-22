@@ -677,7 +677,7 @@ const BAD_CHARS = /[\\/:*?"<>|]/g                      // в имени файл
 /** Настройки кода для имени файла: код бирки или свой конструктор (ссылка на 3D в имени файла невозможна) */
 export function drill6Qr(post, labelTpl) {
   const q = post?.d6Name === 'own' ? { ...D6_QR_DEFAULT, ...post.d6Qr } : { ...D6_QR_DEFAULT, ...labelTpl?.qr }
-  return { ...q, parts: (q.parts || []).filter(k => k !== 'link') }
+  return { ...q, parts: (q.parts || []).filter(k => k !== 'link'), ...(typeof q.tpl === 'string' ? { tpl: q.tpl.replace(/\{SSYLKA(:-?\d+)?\}/g, '') } : {}) }
 }
 /** Вложенные папки для сохранения: шаблон «{ZAKAZ}/XML» -> ['Kuhnya', 'XML'] */
 export function drill6Folders(post, ctx) {

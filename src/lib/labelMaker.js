@@ -77,15 +77,96 @@ export const QR_PARTS = [
 ]
 // по умолчанию — название заказа и обозначение детали: по ним и сканер станка находит файл, и заказчик — деталь в 3D-модели
 const QR_DEFAULT = { parts: ['order', 'des'], sep: '_', text: '', latin: true }
+// ─── Конструктор кода (QR бирки, имя файла присадки) ───
+// Шаблон: части в фигурных скобках, между ними — свой текст и разделители, порядок и повторы — какие нужны.
+// {ЧАСТЬ} — целиком, {ЧАСТЬ:8} — первые 8 символов, {ЧАСТЬ:-4} — последние 4. {S:Название} — свойство детали
+// (колонка Excel «на бирку», свойство панели Базиса). Пустая часть убирается вместе с разделителем рядом.
+export const QR_TOKENS = [
+  ['SSYLKA', 'Ссылка на 3D-модель'],
+  ['ZAKAZ', 'Заказ'],
+  ['NAZV', 'Название заказа'],
+  ['NOMER', 'Номер заказа'],
+  ['OBOZ', 'Обозначение'],
+  ['NAIM', 'Наименование'],
+  ['POZ', 'Позиция'],
+  ['PREF', 'Изделие (префикс)'],
+  ['BLOK', 'Блок'],
+  ['GRUPPA', 'Группа в блоке'],
+  ['MAT', 'Материал'],
+  ['RAZMER', 'Размер'],
+  ['DL', 'Длина'],
+  ['SH', 'Ширина'],
+  ['T', 'Толщина'],
+  ['KARTA', 'Номер карты'],
+  ['NOM', 'Номер детали на листе'],
+]
+export const QR_TOKEN_RE = /\{((?:S:)?[^{}:]+)(?::(-?\d+))?\}/g
+const LEGACY_TOKEN = { link: '{SSYLKA}', order: '{ZAKAZ}', des: '{OBOZ}', name: '{NAIM}', pos: '{POZ}', prefix: '{PREF}', material: '{MAT}', size: '{RAZMER}', sheet: 'L{KARTA}', num: 'N{NOM}' }
+const hasTpl = q => typeof q?.tpl === 'string' && q.tpl.trim() !== ''
+/** Шаблон из прежнего выбора галочками (части в порядке списка, через разделитель) */
+export function qrTemplateOf(q) {
+  if (hasTpl(q)) return q.tpl
+  const parts = q?.parts || []
+  return QR_PARTS.filter(([k]) => parts.includes(k)).map(([k]) => (k === 'text' ? String(q.text || '') : LEGACY_TOKEN[k])).filter(Boolean).join(q?.sep ?? '_')
+}
+/** Есть ли в коде ссылка на 3D-модель */
+export const qrHasLink = q => (hasTpl(q) ? /\{SSYLKA(:-?\d+)?\}/.test(q.tpl) : (q?.parts || []).includes('link'))
+const SEP_ONLY = /^[\s_.\-;:,|/\\+#=*~]+$/
+function qrValue(code, info) {
+  if (code.startsWith('S:')) { const v = info.meta?.user?.[code.slice(2)]; return v == null || typeof v === 'object' ? '' : String(v) }
+  switch (code) {
+    case 'ZAKAZ': return info.order
+    case 'NAZV': return info.orderName
+    case 'NOMER': return info.orderNumber
+    case 'OBOZ': return info.des
+    case 'NAIM': return info.name
+    case 'POZ': return info.pos
+    case 'PREF': return info.prefix
+    case 'BLOK': return info.chain?.[0]
+    case 'GRUPPA': return info.chain?.length > 1 ? info.chain[info.chain.length - 1] : ''
+    case 'MAT': return info.materialName
+    case 'RAZMER': return `${r1(info.length)}x${r1(info.width)}x${info.thickness || ''}`
+    case 'DL': return r1(info.length)
+    case 'SH': return r1(info.width)
+    case 'T': return info.thickness ? r1(info.thickness) : ''
+    case 'KARTA': return info.sheet
+    case 'NOM': return info.num
+    default: return ''
+  }
+}
 export function labelQr(tpl, info) {
   const q = tpl.qr || QR_DEFAULT
   // ссылка на 3D: по коду открывается модель заказа сразу на этой детали. Работает, пока у заказа открыта ссылка
   // на 3D-модель; в коде тогда только адрес (иначе телефон не распознает его как ссылку). Ссылки нет — обычный текст.
-  if (q.parts.includes('link') && info.share) return `${shareUrl(info.share)}?n=${info.di}${info.des ? '&des=' + encodeURIComponent(info.des) : ''}`
-  const val = { text: q.text, order: info.order, des: info.des, name: info.name, pos: info.pos, prefix: info.prefix, material: info.materialName,
-    size: `${r1(info.length)}x${r1(info.width)}x${info.thickness || ''}`, sheet: `L${info.sheet}`, num: `N${info.num}` }
-  const out = QR_PARTS.filter(([k]) => q.parts.includes(k)).map(([k]) => String(val[k] ?? '').trim()).filter(Boolean).join(q.sep)
-  return (q.latin ? toLatin(out) : out).replace(/\s+/g, '_')        // пробелов в коде нет — вместо них прочерк
+  if (qrHasLink(q) && info.share) return `${shareUrl(info.share)}?n=${info.di}${info.des ? '&des=' + encodeURIComponent(info.des) : ''}`
+  if (!hasTpl(q)) {                                          // прежний выбор галочками — как было
+    const val = { text: q.text, order: info.order, des: info.des, name: info.name, pos: info.pos, prefix: info.prefix, material: info.materialName,
+      size: `${r1(info.length)}x${r1(info.width)}x${info.thickness || ''}`, sheet: `L${info.sheet}`, num: `N${info.num}` }
+    const out = QR_PARTS.filter(([k]) => (q.parts || []).includes(k)).map(([k]) => String(val[k] ?? '').trim()).filter(Boolean).join(q.sep)
+    return (q.latin ? toLatin(out) : out).replace(/\s+/g, '_')        // пробелов в коде нет — вместо них прочерк
+  }
+  const lat = t => (q.latin ? toLatin(t) : t)
+  // шаблон -> куски: текст, часть, текст, часть…
+  const seg = []
+  let last = 0
+  for (const m of q.tpl.matchAll(QR_TOKEN_RE)) {
+    seg.push({ lit: q.tpl.slice(last, m.index) })
+    let v = lat(String(qrValue(m[1].trim(), info) ?? '').trim())
+    const n = m[2] != null ? Number(m[2]) : 0
+    if (n > 0) v = v.slice(0, n); else if (n < 0) v = v.slice(n)
+    seg.push({ val: v })
+    last = m.index + m[0].length
+  }
+  seg.push({ lit: q.tpl.slice(last) })
+  // пустая часть — вместе с разделителем рядом (чтобы не было «А__Б» и прочерка в начале/конце)
+  for (let i = 1; i < seg.length; i += 2) {
+    if (seg[i].val) continue
+    const after = seg[i + 1], before = seg[i - 1]
+    const hasLeft = seg.slice(0, i).some(x => x.val || (x.lit && !SEP_ONLY.test(x.lit)))
+    if (after.lit && SEP_ONLY.test(after.lit) && (!hasLeft || !(before.lit && SEP_ONLY.test(before.lit)))) after.lit = ''
+    else if (before.lit && SEP_ONLY.test(before.lit)) before.lit = ''
+  }
+  return seg.map(x => (x.lit != null ? lat(x.lit) : x.val)).join('').replace(/\s+/g, '_')
 }
 export const itemKind = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
 // свойства детали из импорта (contour.meta) — элементы вида «meta:<имя>»
@@ -262,7 +343,7 @@ export function normalizeLabel(raw) {
     // contour — толщина линии контура, мм; hole — наименьший размер точки отверстия, мм; ring — отверстия кружком, без заливки
     part: { dims: !!t.part?.dims, dimSize: Math.max(1, Math.min(6, Number(t.part?.dimSize) || 2)),
       contour: Math.max(0.08, Math.min(0.8, Number(t.part?.contour) || 0.18)), hole: Math.max(0.15, Math.min(2, Number(t.part?.hole) || 0.35)), ring: !!t.part?.ring },
-    qr: { parts: Array.isArray(t.qr?.parts) ? [...new Set(t.qr.parts.map(k => (k === 'number' ? 'order' : k)))].filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin } }
+    qr: { parts: Array.isArray(t.qr?.parts) ? [...new Set(t.qr.parts.map(k => (k === 'number' ? 'order' : k)))].filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin, ...(typeof t.qr?.tpl === 'string' && t.qr.tpl.trim() ? { tpl: t.qr.tpl.slice(0, 300) } : {}) } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
 export function resizeLabel(tpl, w, h) {
@@ -339,7 +420,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
   const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
     order: orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
-    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
+    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, orderName: String(order?.order_name || '').trim(), orderNumber: order?.order_number || '',
     name: d.name || p.label || 'Деталь', des: metaDes(m), pos: metaPos(m), prefix: d.prefix || p.prefix || '',
     // толщина почти всегда уже есть в названии материала («ЛДСП белый 16 мм») — второй раз не дописываем;
     // нет её в названии — дописываем. Отдельно толщину можно поставить элементом «Толщина»
@@ -795,7 +876,7 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl, seq
   // seqOf(sheet, geo, tpl) — свой порядок бирок (пильный центр: по готовности); partOf(sheet, pi) — деталь в положении выхода
   const files = [], list = [], { w, h } = labelPx(tpl)
   await preloadLabelImages(tpl)
-  if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)   // для QR со ссылкой на 3D
+  if (order?.id && qrHasLink(tpl.qr) && cachedShare(order.id) === undefined) await getShare(order.id)   // для QR со ссылкой на 3D
   // коррекция наклейки: стол клеит со сдвигом — все точки наклейки смещаются на заданную величину (плюс и минус).
   // На программу раскроя (G-код) коррекция не влияет.
   const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -881,7 +962,7 @@ export function canvasToEmf(canvas, wMm, hMm) {
  */
 export async function buildBeamEmfLabels({ order, mat, tpl, rows, offRows = [], sheetIdx = si => si, partOf = null }) {
   await preloadLabelImages(tpl)
-  if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)
+  if (order?.id && qrHasLink(tpl.qr) && cachedShare(order.id) === undefined) await getShare(order.id)
   const { w, h } = labelPx(tpl)
   const files = []
   for (const r of rows || []) {
@@ -909,7 +990,7 @@ export const zipFiles = files => zipSync(Object.fromEntries(files.map(f => [f.na
  */
 export async function buildLabelsPdf({ order, mat, tpl, onProgress, seqOf = null, partOf = null }) {
   await preloadLabelImages(tpl)
-  if (order?.id && tpl.qr?.parts?.includes('link') && cachedShare(order.id) === undefined) await getShare(order.id)
+  if (order?.id && qrHasLink(tpl.qr) && cachedShare(order.id) === undefined) await getShare(order.id)
   const k = Math.max(12, pxMm(tpl)), W = Math.round(tpl.w * k), H = Math.round(tpl.h * k)
   const pw = (tpl.w * 72 / 25.4).toFixed(2), ph = (tpl.h * 72 / 25.4).toFixed(2)
   const total = mat.sheets.reduce((a, sh) => a + sh.placed.length + (tpl.offcuts ? sheetOffcuts(sh).length : 0), 0)

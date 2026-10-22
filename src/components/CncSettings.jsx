@@ -1,4 +1,4 @@
-import { LABEL_POS, getLabelTpl, QR_PARTS, labelQr } from '../lib/labelMaker'
+import { LABEL_POS, getLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
 import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
@@ -369,11 +369,12 @@ function Drill6Basic({ post, set, router }) {
   const { user } = useAuth()
   // код с бирки: что в нём сейчас (шаблон бирок аккаунта)
   const ltpl = getLabelTpl(user)
-  const labelQrSet = { ...D6_QR_DEFAULT, ...ltpl.qr, parts: (ltpl.qr?.parts || []).filter(k => k !== 'link') }
-  const labelQrParts = QR_PARTS.filter(([k]) => labelQrSet.parts.includes(k)).map(([, l]) => l.toLowerCase()).join(' + ')
+  const noLink = q => ({ ...q, parts: (q.parts || []).filter(k => k !== 'link'), ...(typeof q.tpl === 'string' ? { tpl: q.tpl.replace(/\{SSYLKA(:-?\d+)?\}/g, '') } : {}) })
+  const labelQrSet = noLink({ ...D6_QR_DEFAULT, ...ltpl.qr })
+  const labelQrParts = typeof labelQrSet.tpl === 'string' && labelQrSet.tpl.trim() ? qrTemplateOf(labelQrSet) : QR_PARTS.filter(([k]) => labelQrSet.parts.includes(k)).map(([, l]) => l.toLowerCase()).join(' + ')
   const labelHasQr = (ltpl.items || []).some(i => i.type === 'qr')
-  const exampleInfo = { order: 'Кухня Ивановых', des: 'КБ.01.003', name: 'Боковина', pos: '3', prefix: 'Шкаф', materialName: 'ЛДСП Белый', length: 720, width: 560, thickness: 16, sheet: 2, num: 5 }
-  const example = q => labelQr({ qr: { ...q, parts: (q.parts || []).filter(k => k !== 'link') } }, exampleInfo)
+  const exampleInfo = { orderName: 'Кухня Ивановых', orderNumber: '261007_005', order: 'Кухня Ивановых', des: 'КБ.01.003', name: 'Боковина', pos: '3', prefix: 'Шкаф', materialName: 'ЛДСП Белый', length: 720, width: 560, thickness: 16, sheet: 2, num: 5 }
+  const example = q => labelQr({ qr: noLink(q) }, exampleInfo)
   return (
     <>
       <div className="card" style={{ marginBottom: 10 }}>
@@ -403,7 +404,7 @@ function Drill6Basic({ post, set, router }) {
             <span style={{ display: 'block', marginTop: 4 }}>Сейчас в QR бирки: <b>{labelQrParts || '— ничего не выбрано —'}</b>{labelQrSet.latin ? ', латиницей' : ''}. Например: <b style={{ fontFamily: 'monospace' }}>{example(labelQrSet)}.{post.ext || 'XML'}</b></span>
             {!labelHasQr && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>На бирке сейчас нет QR-кода — добавьте его в шаблоне бирок, иначе сканировать будет нечего.</span>}
             {!labelQrSet.latin && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>По спецификации станка код — только латиница и цифры: в шаблоне бирок включите «Перевести в латиницу».</span>}
-            {!(labelQrSet.parts || []).some(k => k === 'des' || k === 'pos' || k === 'num') && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>В коде нет обозначения детали — у разных деталей он совпадёт. Добавьте в QR бирки «Обозначение детали».</span>}
+            {!(typeof labelQrSet.tpl === 'string' && labelQrSet.tpl.trim() ? /\{(OBOZ|POZ|NOM)(:-?\d+)?\}/.test(labelQrSet.tpl) : (labelQrSet.parts || []).some(k => k === 'des' || k === 'pos' || k === 'num')) && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>В коде нет обозначения детали — у разных деталей он совпадёт. Добавьте в QR бирки «Обозначение детали».</span>}
             <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Код меняется в шаблоне бирок (заказ → Бирки → «Что зашито в QR-код»). Файл выпускается на каждую деталь с биркой.</span>
           </div>
         ) : (
