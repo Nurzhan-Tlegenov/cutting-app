@@ -7,7 +7,7 @@
 DOMAIN=ru.raskroypro.com
 SITE=cutting-app-nine.vercel.app
 DB=bmcmyrdsxievaglpspcn.supabase.co
-EMAIL=nurzhyk.kz1@gmail.com
+
 exec > /var/log/raskroy-mirror.log 2>&1
 set -x
 
@@ -62,7 +62,7 @@ cat > /usr/local/bin/raskroy-cert.sh <<CERT
 MYIP=\$(curl -s -4 https://ifconfig.me || curl -s -4 https://api.ipify.org)
 for i in \$(seq 1 576); do
   if [ "\$(dig +short $DOMAIN A @1.1.1.1 | tail -1)" = "\$MYIP" ]; then
-    certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m $EMAIL --redirect && { echo "сертификат получен"; exit 0; }
+    certbot --nginx -d $DOMAIN --non-interactive --agree-tos --register-unsafely-without-email --redirect && { echo "сертификат получен"; exit 0; }
   fi
   sleep 300
 done
