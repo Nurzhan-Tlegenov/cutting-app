@@ -21,6 +21,7 @@ server {
   listen 80;
   server_name $DOMAIN;
   client_max_body_size 60m;
+  large_client_header_buffers 8 64k;   # после входа браузер шлёт длинный токен — со стандартными 8k nginx отвечал 400
 
   # база: /sb/... -> Supabase (вход, данные, файлы, функции, обновления в реальном времени)
   location /sb/ {
