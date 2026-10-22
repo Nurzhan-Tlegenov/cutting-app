@@ -544,6 +544,7 @@ function basisSrc(panel) {
 }
 
 // Пользовательские свойства панели (Базис: «Пользовательские свойства» объекта) -> { название: значение } | null.
+// В бирку идёт значение (Value); список вариантов (Variants) — нет.
 // Узел ищется по имени (User…/Prop…/Attr…); внутри — либо элементы списка с полями «имя» и «значение»,
 // либо пары «ключ — значение». Служебные поля геометрии сюда не попадают — смотрим только такие узлы.
 const PROP_NODE = /user|prop|attr|param/i
@@ -558,6 +559,10 @@ function propValue(v) {
 function userProps(o) {
   const out = {}
   const add = (k, v) => { const name = String(k || '').trim().slice(0, 40), s = propValue(v); if (name && s && Object.keys(out).length < 40) out[name] = s }
+  // Формат Базиса 2025 (проверено на модели): Params → User → Var { Name, Value, Variants } — по одному Var на свойство
+  for (const v of kid(kid(o, 'Params'), 'User')?.c || []) if (v.c) add(val(v, 'Name'), val(v, 'Value'))
+  if (Object.keys(out).length) return out
+  // запасной путь — другие версии файла
   const walk = (n, depth) => {
     if (!n?.c || depth > 3) return
     for (const ch of n.c) {
