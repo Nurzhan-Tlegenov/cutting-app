@@ -1,3 +1,4 @@
+import { COUNTRY_NAMES } from '../lib/phoneCountries'
 import { useState } from 'react'
 import { registerProduction } from '../lib/productionApi'
 import ServicesForm from './ServicesForm'
@@ -31,7 +32,7 @@ export default function ProductionForm({ initial = null, sheet = null, submitLab
       <div><label className="label">Название производства *</label><input type="text" placeholder="Мебельный цех «…»" value={form.name} onChange={e => set('name', e.target.value)} maxLength={80} /></div>
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}><label className="label">Страна *</label><input type="text" list="countries" placeholder="Казахстан" value={form.country} onChange={e => set('country', e.target.value)} maxLength={60} />
-          <datalist id="countries">{['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан'].map(c => <option key={c} value={c} />)}</datalist></div>
+          <datalist id="countries">{COUNTRY_NAMES.map(c => <option key={c} value={c} />)}</datalist></div>
         <div style={{ flex: 1, minWidth: 0 }}><label className="label">Город *</label><input type="text" value={form.city} onChange={e => set('city', e.target.value)} maxLength={80} /></div>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>

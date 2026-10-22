@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom } from '../i18n'
 import { signupOpen, requestSignup2, confirmSignupCode, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
-import { PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
+import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { pendingInvite } from '../lib/workplaces'
 import { pendingRef, savePendingRef, clearPendingRef, refInfo, requestSignupRef } from '../lib/refLinks'
 import { appVersionText } from '../lib/version'
 
-const COUNTRIES = ['Казахстан', 'Россия', 'Узбекистан', 'Кыргызстан', 'Беларусь', 'Таджикистан', 'Азербайджан', 'Армения', 'Грузия', 'Туркменистан']
+const COUNTRIES = COUNTRY_NAMES
 
 // Имя и фамилия похожи на настоящие (как name_looks_real в migration_signup_resubmit.sql):
 // два слова от 2 букв, без цифр, «тест», «test» и одинаковых слов; одно слово — только у имён без латиницы и кириллицы
@@ -327,6 +327,7 @@ export default function AuthPage() {
                   <label className="label">Страна *</label>
                   <input type="text" list="reg-countries" placeholder="Казахстан" value={form.country} onChange={e => set('country', e.target.value)} maxLength={60} required={!invite} />
                   <datalist id="reg-countries">{COUNTRIES.map(c => <option key={c} value={c} />)}</datalist>
+                  <p style={{ fontSize: 11, marginTop: 3, color: 'var(--text-hint)' }}>Выберите из списка или впишите свою</p>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <label className="label">Город *</label>

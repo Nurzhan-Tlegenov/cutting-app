@@ -23,6 +23,11 @@ export const PHONE_COUNTRIES = [
   { iso: 'OTHER', name: 'Другая страна', dial: '', len: [6, 13], mask: 'номер без кода страны' },
 ]
 
+// Страны для поля «Страна» (регистрация, производство): все страны из кодов телефона и ещё несколько.
+// Список — только подсказка: любую страну можно вписать вручную.
+export const COUNTRY_NAMES = [...new Set([...PHONE_COUNTRIES.filter(c => c.iso !== 'OTHER').map(c => c.name),
+  'Латвия', 'Литва', 'Эстония', 'Израиль', 'ОАЭ', 'Чехия', 'Казахстан'])]
+
 export const phoneCountry = iso => PHONE_COUNTRIES.find(c => c.iso === iso) || PHONE_COUNTRIES[0]
 
 // Страна по часовому поясу телефона — чтобы сразу подставить код
