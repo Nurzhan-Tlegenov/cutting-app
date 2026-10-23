@@ -20,6 +20,7 @@ export const emptyStats = () => ({
   edgeByType: {},   // кромка по видам заказа: { название: м } (виды — из Excel или из бланка заказа; толщина — edgeTypeT)
   edgeTypeT: {},
   holes: 0, edgeHoles: 0, grooves: 0, grooveM: 0, pockets: 0, cutouts: 0, shapedParts: 0,
+  drillM2: 0, drillParts: 0,   // детали с присадкой (отверстия в пласть, с изнанки, в торец): их площадь — для цены «присадка за м²»
   hdf: false,   // материал заказа — ХДФ / ДВП: распил в прайс-листе по своим ценам
 })
 
@@ -52,6 +53,7 @@ export function nestingStats({ order, mat, method }) {
       for (const c of f.cutouts) { contourM += (c.circle ? 2 * Math.PI * c.circle.r : loopLen(c.pts)) / 1000; contours++; st.cutouts++ }
       if (Array.isArray(p.polygon) && p.polygon.length > 2 && !(f.outline.length === 4 && Math.abs(loopArea(f.outline) - p.origX * p.origY) < 1)) st.shapedParts++
       st.holes += f.holes.length; st.edgeHoles += f.skipped.edge
+      if (f.holes.length || f.skipped.edge || f.skipped.back) { st.drillM2 += loopArea(f.outline) / 1e6; st.drillParts++ }
       st.pockets += f.pockets.length
       for (const g of f.grooves) { st.grooves++; st.grooveM += Math.max(g.x1 - g.x0, g.y1 - g.y0) / 1000 }
       // кромка этой детали
@@ -111,7 +113,7 @@ export function statsPayload(st) {
     sheets: st.sheets.map(s => ({ parts: s.parts })),
     parts: st.parts, cut_m: r2(st.cutM),
     edge_thin_m: r2(st.edgeThinM), edge_thick_m: r2(st.edgeThickM), edge_curved_m: r2(st.edgeCurvedM), edge_curved_parts: st.edgeCurvedParts,
-    holes: st.holes, edge_holes: st.edgeHoles, groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
+    holes: st.holes, edge_holes: st.edgeHoles, drill_m2: r2(st.drillM2), drill_parts: st.drillParts, groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
     ...(st.hdf ? { hdf: true } : {}),   // ХДФ / ДВП — база берёт цены распила ХДФ (migration_hdf_prices.sql)
   }
 }
@@ -138,6 +140,7 @@ export function statsRows(st) {
     ['edgeCurved', 'Кромка криволинейная', `${n2(st.edgeCurvedM)} м · ${st.edgeCurvedParts} дет.`, st.edgeCurvedM > 0],
     ['holes', 'Отверстий в пласть', st.holes, st.holes > 0],
     ['edgeHoles', 'Отверстий в торец', st.edgeHoles, st.edgeHoles > 0],
+    ['drillM2', 'Площадь деталей с присадкой', `${n2(st.drillM2)} м² · ${st.drillParts} дет.`, st.drillM2 > 0],
     ['grooves', 'Пазы', `${st.grooves} шт. · ${n2(st.grooveM)} м`, st.grooves > 0],
     ['pockets', 'Выемок', st.pockets, st.pockets > 0],
   ]
