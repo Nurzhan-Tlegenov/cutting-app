@@ -2531,7 +2531,7 @@ export default function NestingPage() {
         summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {})
       }
       await saveNestingPdf({ order, fileName: `${fileNameOf('maps', fileNamesOf(user).maps, { total: mat.sheets.length, order, material: mat.name, thickness: mat.thickness, client: clientName })}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`, mat,
-        summary, tpl: cabinet === 'production' ? userPdfTpl(user) : null })
+        summary, tpl: cabinet === 'production' ? userPdfTpl(user) : null, same: showSame ? sameAlpha : 0 })
     } catch (e) { window.alert('Не удалось собрать PDF: ' + (e?.message || e)) } finally { setPdfBusy(null) }
   }
 

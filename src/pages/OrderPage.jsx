@@ -27,6 +27,7 @@ import NestingCost from '../components/NestingCost'
 import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
+import { sameColorMap, userSameAlpha } from '../lib/sameParts'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
 import { useLabelMode } from '../lib/userSettings'
@@ -226,6 +227,7 @@ export default function OrderPage() {
             )}
           </div>
           <SheetsOverview sheets={nest.sheets} details={nest.details} labelMode={labelMode}
+            sameFill={userSameAlpha(user) ? sameColorMap(nest.details) : null} sameAlpha={userSameAlpha(user)}
             usableX={nestGeo.usableX} usableY={nestGeo.usableY} sheetL={nestGeo.sheetL} sheetW={nestGeo.sheetW}
             marginL={nestGeo.marginL} marginT={nestGeo.marginT} kerf={nestGeo.kerf}
             onPickSheet={() => navigate(`/orders/${id}/nesting`)} />

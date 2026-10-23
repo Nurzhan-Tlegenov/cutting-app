@@ -3,6 +3,7 @@
 // одна черта — закромлена одна сторона, две — обе), под схемой — сведения о листе, процент использования и метраж кромки.
 // Страница рисуется на canvas (так кириллица и линии получаются чёткими без встраивания шрифтов) и кладётся
 // в PDF картинкой A4, 200 точек на дюйм.
+import { sameColorMap } from './sameParts'
 import { zlibSync, strToU8 } from 'fflate'
 import { sheetGeo } from './savedNesting'
 import { placedHoles, placedTurns } from './partHoles'
@@ -122,7 +123,8 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
   for (const p of sheet.placed) {
     const w = Number(p.origX) || 0, h = Number(p.origY) || 0
     const px = geo.marginL + p.x, py = geo.marginB + p.y                  // левый нижний угол детали на листе
-    ctx.fillStyle = FILL; ctx.strokeStyle = INK; ctx.lineWidth = mm(0.28); ctx.lineJoin = 'round'
+    const sameRgb = opt.sameFill && opt.sameFill[p.detailIndex]          // одинаковые детали — своим цветом (галочка «Одинаковые»)
+    ctx.fillStyle = sameRgb ? `rgba(${sameRgb},${opt.sameAlpha})` : FILL; ctx.strokeStyle = INK; ctx.lineWidth = mm(0.28); ctx.lineJoin = 'round'
     const path = pts => { ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(X(px + q.x), Y(py + q.y)) : ctx.moveTo(X(px + q.x), Y(py + q.y)))); ctx.closePath() }
     const shaped = Array.isArray(p.polygon) && p.polygon.length > 2
     path(shaped ? p.polygon : [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }])
@@ -319,9 +321,10 @@ const PER_COL = Math.floor((LIST_BOTTOM - LIST_TOP - 6) / LROW)
  * tpl (необязательно) — своё оформление листа из конструктора (normalizePdfTpl); без него — стандартный вид.
  * -> Uint8Array (PDF, A4)
  */
-function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
+function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha = 0 }) {
   const sheets = (mat.sheets || []).filter(sh => sh?.placed?.length)
   const details = mat.details || []
+  const sameOpt = sameAlpha > 0 ? { sameFill: sameColorMap(details), sameAlpha } : {}
   const custom = tpl?.custom && Array.isArray(tpl.items) && tpl.items.length ? tpl : null   // своё оформление листа (конструктор)
   const boxes = []                                   // где оказались элементы на странице — для рамок в конструкторе
   const matName = [mat.name || mat.label || order?.material_name || '', mat.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · ')
@@ -393,7 +396,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
         const turned = Math.abs(rot) % 180 === 90, bw = turned ? it.h : it.w, bh = turned ? it.w : it.h
         const sc = Math.min(bw / geo.sheetW, bh / geo.sheetL)
         ctx.save(); ctx.translate(mm(it.x + it.w / 2), mm(it.y + it.h / 2)); ctx.rotate(rot * Math.PI / 180)
-        drawSheet(ctx, -bw / 2, -geo.sheetL * sc / 2, bw, bh, sheet, geo, details, noOf, { cuts })
+        drawSheet(ctx, -bw / 2, -geo.sheetL * sc / 2, bw, bh, sheet, geo, details, noOf, { cuts, ...sameOpt })
         ctx.restore()
         boxes.push({ id: it.id, x: it.x, y: it.y, w: it.w, h: it.h, rot: 0, kind: 'box' })
       } else if (it.type === 'list') {
@@ -430,7 +433,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx }) {
     pages.push(custom ? () => drawCustom(si, { sheet, geo, rows, noOf, first }) : () => {
       header(si, false)
       // схема листа — слева, на всю ширину до списка
-      const box = drawSheet(ctx, 10, LIST_TOP, 142, 214, sheet, geo, details, noOf, { cuts })
+      const box = drawSheet(ctx, 10, LIST_TOP, 142, 214, sheet, geo, details, noOf, { cuts, ...sameOpt })
       // список деталей листа — колонкой справа
       const lx = 200 - LW
       let ly = listHead(ctx, lx, LIST_TOP)
@@ -549,10 +552,10 @@ export function drawPdfPreview(canvas, { order, mat, tpl }) {
   return boxes
 }
 
-export async function buildNestingPdf({ order, mat, onProgress, summary = null, tpl = null }) {
+export async function buildNestingPdf({ order, mat, onProgress, summary = null, tpl = null, same = 0 }) {
   const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
   const ctx = cv.getContext('2d')
-  const { pages } = preparePages({ order, mat, summary, tpl, ctx })
+  const { pages } = preparePages({ order, mat, summary, tpl, ctx, sameAlpha: same })
   // PDF: страница — картинка A4
   const chunks = [], offsets = []
   let size = 0
@@ -626,8 +629,8 @@ function askShare(file, title) {
  * PDF карт раскроя: на телефоне сразу открывается «Поделиться» (мессенджер, почта, облако) — файл уходит клиенту
  * без скачивания. Где так нельзя (компьютер, старый браузер) — файл скачивается, как раньше.
  */
-export async function saveNestingPdf({ order, mat, fileName, onProgress, summary = null, tpl = null }) {
-  const data = await buildNestingPdf({ order, mat, onProgress, summary, tpl })
+export async function saveNestingPdf({ order, mat, fileName, onProgress, summary = null, tpl = null, same = 0 }) {
+  const data = await buildNestingPdf({ order, mat, onProgress, summary, tpl, same })
   const file = new File([data], fileName, { type: 'application/pdf' })
   const title = `Карта раскроя · ${orderTitle(order)}`
   let can

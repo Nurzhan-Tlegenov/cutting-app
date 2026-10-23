@@ -5,6 +5,7 @@ import { useNestingQuote } from '../hooks/useNestingQuote'
 import { statsRows } from '../lib/nestingStats'
 import { money } from '../lib/pricing'
 import { saveNestingPdf } from '../lib/nestingPdf'
+import { userSameAlpha } from '../lib/sameParts'
 import { quoteLines, pdfSummaryOf, userPdfTpl } from '../lib/pdfSummary'
 import PdfLayoutEditor from './PdfLayoutEditor'
 import { useBackClose } from '../lib/backStack'
@@ -32,7 +33,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
     setBusy('…'); setError('')
     try {
       const summary = pdfSummaryOf(stats, quote, cfg)
-      await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), onProgress: (a, b) => setBusy(`${a}/${b}`) })
+      await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), onProgress: (a, b) => setBusy(`${a}/${b}`) })
       onClose()
     } catch (e) { setError('Не удалось собрать PDF: ' + (e?.message || e)); setBusy('') }
   }

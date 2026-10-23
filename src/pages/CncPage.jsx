@@ -27,6 +27,7 @@ import SaveFilesDialog from '../components/SaveFilesDialog'
 import { productionMark, orderMarks } from '../lib/productionApi'
 import PdfSetup from '../components/PdfSetup'
 import { buildNestingPdf } from '../lib/nestingPdf'
+import { userSameAlpha } from '../lib/sameParts'
 import { userPdfTpl } from '../lib/pdfSummary'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
@@ -269,7 +270,7 @@ export default function CncPage() {
     if (withMaps && mat) {
       // PDF карт по листам этого материала — тем же оформлением, что «PDF карт» (шаблон листа аккаунта), без сметы
       setMapsBusy('Готовим карты PDF…')
-      try { maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, tpl: userPdfTpl(user), onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: rd } } catch { maps = null } finally { setMapsBusy('') }
+      try { maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, tpl: userPdfTpl(user), same: userSameAlpha(user), onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: rd } } catch { maps = null } finally { setMapsBusy('') }
     }
     const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
