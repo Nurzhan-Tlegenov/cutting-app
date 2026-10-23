@@ -321,7 +321,9 @@ const PER_COL = Math.floor((LIST_BOTTOM - LIST_TOP - 6) / LROW)
  * tpl (необязательно) — своё оформление листа из конструктора (normalizePdfTpl); без него — стандартный вид.
  * -> Uint8Array (PDF, A4)
  */
-function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha = 0 }) {
+// statsPage — «Статистика отдельно»: на странице листа только карта, список и условные обозначения (карта крупнее),
+// сведения по листам и итог по материалу — отдельной страницей после карт
+function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha = 0, statsPage = false }) {
   const sheets = (mat.sheets || []).filter(sh => sh?.placed?.length)
   const details = mat.details || []
   const sameOpt = sameAlpha > 0 ? { sameFill: sameColorMap(details), sameAlpha } : {}
@@ -425,11 +427,31 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
     }
     drawBrand(ctx, true)          // знак приложения — всегда вверху, поверх всего, что на него поставили
   }
+  // условные обозначения — внизу страницы листа
+  const legendBottom = () => {
+    let y = 282
+    rule(ctx, 10, y - 0.9, 17, y - 0.9, 0.7, EDGE); text(ctx, 'сторона с кромкой', 19, y, { size: 2.5, color: MUTED })
+    text(ctx, '12', 53, y + 0.1, { size: 3, bold: true, align: 'center' }); text(ctx, 'позиция по бланку заказа', 57, y, { size: 2.5, color: MUTED })
+    drillLegend(ctx, 102, y)
+    y = 286.5
+    rule(ctx, 10, y - 1.5, 17, y - 1.5, 0.38, EDGE); rule(ctx, 10, y - 0.5, 17, y - 0.5, 0.38, EDGE)
+    text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', 19, y, { size: 2.5, color: MUTED })
+  }
   const listItem = custom ? custom.items.find(i => i.type === 'list') : null
   sheets.forEach((sheet, si) => {
     const geo = geos[si], { rows, noOf } = sheetRows(sheet, details)
     const perCol = !custom ? PER_COL : listItem ? Math.max(1, Math.floor((listItem.h - 6) / LROW)) : rows.length
     const first = Math.min(rows.length, perCol)
+    if (statsPage && !custom) {
+      // «Статистика отдельно»: на странице листа — только карта на всю ширину и обозначения; список деталей листа
+      // и сведения — на страницах статистики в конце
+      pages.push(() => {
+        header(si, false)
+        drawSheet(ctx, 10, LIST_TOP, 190, 249, sheet, geo, details, noOf, { cuts, ...sameOpt })
+        legendBottom()
+      })
+      return
+    }
     pages.push(custom ? () => drawCustom(si, { sheet, geo, rows, noOf, first }) : () => {
       header(si, false)
       // схема листа — слева, на всю ширину до списка
@@ -458,14 +480,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
       y = edgeBlock(c3, y, sheets.length > 1 ? `Кромка всего, ${sheets.length} лист.` : 'Кромка всего', edgeAll, 46)
       text(ctx, over > 0 ? `со свесами ${fmt(over)} мм на сторону` : 'без свесов', c3, y, { size: 2.5, color: MUTED }); y += 3.6
       if (rows.some(r => r.cut)) text(ctx, 'Размеры в списке — заготовки (с учётом кромки).', c3, y, { size: 2.5, color: MUTED, max: 46 })
-      // условные обозначения — внизу страницы
-      y = 282
-      rule(ctx, 10, y - 0.9, 17, y - 0.9, 0.7, EDGE); text(ctx, 'сторона с кромкой', 19, y, { size: 2.5, color: MUTED })
-      text(ctx, '12', 53, y + 0.1, { size: 3, bold: true, align: 'center' }); text(ctx, 'позиция по бланку заказа', 57, y, { size: 2.5, color: MUTED })
-      drillLegend(ctx, 102, y)
-      y = 286.5
-      rule(ctx, 10, y - 1.5, 17, y - 1.5, 0.38, EDGE); rule(ctx, 10, y - 0.5, 17, y - 0.5, 0.38, EDGE)
-      text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', 19, y, { size: 2.5, color: MUTED })
+      legendBottom()
     })
     if (custom && !listItem) return                  // список деталей на лист не вынесен — страниц продолжения нет
     for (let from = first; from < rows.length; from += PER_COL * 4) {
@@ -481,6 +496,83 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
       })
     }
   })
+  // «Статистика отдельно»: сведения по каждому листу таблицей и итог по материалу — страницей после карт
+  if (statsPage && !custom && sheets.length) {
+    const ROW = 6.2, TOP = 58, PER = Math.floor((278 - TOP) / ROW)
+    const cols = [['Лист', 12, 'left'], ['Размер, мм', 58, 'right'], ['Использовано', 84, 'right'], ['Деталей', 104, 'right'], ['Площадь, м²', 128, 'right'], ['Кромка, м', 150, 'right'], ['Обрезки, мм', 154, 'left']]
+    for (let from = 0; from < sheets.length; from += PER) {
+      pages.push(() => {
+        pageNo++
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
+        const tx = drawBrand(ctx) + 4
+        text(ctx, `Статистика листов · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
+        text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
+        text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+        rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
+        text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
+        text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
+        // итог по материалу
+        const pctAll = Math.round(totalArea > 0 ? totalUsed / totalArea * 100 : 0)
+        text(ctx, 'Использовано материала', 10, 34, { size: 2.6, color: MUTED })
+        text(ctx, `${pctAll} %`, 10, 41.5, { size: 5.6, bold: true })
+        text(ctx, `листов ${sheets.length}, деталей ${totalParts}, рез ${fmt(geos[0].kerf)} мм`, 10, 47, { size: 2.8, color: MUTED })
+        edgeBlock(104, 34, sheets.length > 1 ? `Кромка всего, ${sheets.length} лист.` : 'Кромка всего', edgeAll, 96)
+        text(ctx, over > 0 ? `со свесами ${fmt(over)} мм на сторону` : 'без свесов', 104, 47, { size: 2.5, color: MUTED })
+        // таблица листов
+        let y = TOP
+        ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y - 4.2), mm(190), mm(6))
+        for (const [t, x, a] of cols) text(ctx, t, x, y, { size: 2.7, bold: true, color: MUTED, align: a })
+        y += 1.6
+        for (let si = from; si < Math.min(sheets.length, from + PER); si++) {
+          y += ROW
+          const g = geos[si], sh = sheets[si], area = g.usableX * g.usableY
+          const v = [`${sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1}${same && same[si].first !== si ? ` (как ${same[si].first + 1})` : ''}`, `${fmt(g.sheetL)} × ${fmt(g.sheetW)}`,
+            `${Math.round(area > 0 ? used[si] / area * 100 : 0)} %`, String(sh.placed.length), m2(used[si] / 1e6), m2(edges[si].total),
+            (sh.manualOffcuts || []).map(o => `${Math.round(o.h)}×${Math.round(o.w)}`).join(', ')]
+          cols.forEach(([, x, a], ci) => text(ctx, v[ci], x, y, { size: 3, bold: ci === 0 || ci === 2, align: a, ...(ci === 6 ? { max: 46, color: MUTED } : {}) }))
+          rule(ctx, 10, y + 1.8, 200, y + 1.8, 0.1)
+        }
+      })
+    }
+    // списки деталей листов — колонками (по 4 на странице), каждый лист со своей подписью
+    const ops = []                       // [{ page, col, y, kind: 'title'|'head'|'row', ... }]
+    let page = 0, col = 0, y = LIST_TOP
+    const next = () => { col++; y = LIST_TOP; if (col > 3) { col = 0; page++ } }
+    sheets.forEach((sheet, si) => {
+      const { rows } = sheetRows(sheet, details)
+      if (y + 5 + 6 + LROW > LIST_BOTTOM) next()
+      const title = `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} · ${sheet.placed.length} дет.`
+      ops.push({ page, col, y, kind: 'title', t: title }); y += 5
+      ops.push({ page, col, y, kind: 'head' }); y += 6
+      for (const r of rows) {
+        if (y + LROW > LIST_BOTTOM) { next(); ops.push({ page, col, y, kind: 'title', t: `${title} (прод.)` }); y += 5; ops.push({ page, col, y, kind: 'head' }); y += 6 }
+        ops.push({ page, col, y, kind: 'row', r }); y += LROW
+      }
+      y += 4
+    })
+    const anyCut = sheets.some(sh => sheetRows(sh, details).rows.some(r => r.cut))
+    for (let pg = 0; pg <= page; pg++) {
+      pages.push(() => {
+        pageNo++
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
+        const tx = drawBrand(ctx) + 4
+        text(ctx, `Детали по листам · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
+        text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
+        text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+        rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
+        for (const o of ops) {
+          if (o.page !== pg) continue
+          const x = 10 + o.col * (LW + 4.6)
+          if (o.kind === 'title') text(ctx, o.t, x, o.y + 3.6, { size: 3, bold: true, max: LW })
+          else if (o.kind === 'head') listHead(ctx, x, o.y)
+          else listRow(ctx, x, o.y, o.r)
+        }
+        if (anyCut) text(ctx, 'Размеры в списке — заготовки (с учётом кромки).', 10, 288.5, { size: 2.4, color: MUTED })
+        text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
+        text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
+      })
+    }
+  }
   // Статистика раскроя и стоимость работ — отдельной страницей после карт
   if (summary && ((summary.rows || []).length || (summary.lines || []).length || summary.total != null)) {
     pages.push(() => {
@@ -552,10 +644,10 @@ export function drawPdfPreview(canvas, { order, mat, tpl }) {
   return boxes
 }
 
-export async function buildNestingPdf({ order, mat, onProgress, summary = null, tpl = null, same = 0 }) {
+export async function buildNestingPdf({ order, mat, onProgress, summary = null, tpl = null, same = 0, statsPage = false }) {
   const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
   const ctx = cv.getContext('2d')
-  const { pages } = preparePages({ order, mat, summary, tpl, ctx, sameAlpha: same })
+  const { pages } = preparePages({ order, mat, summary, tpl, ctx, sameAlpha: same, statsPage })
   // PDF: страница — картинка A4
   const chunks = [], offsets = []
   let size = 0
@@ -629,8 +721,8 @@ function askShare(file, title) {
  * PDF карт раскроя: на телефоне сразу открывается «Поделиться» (мессенджер, почта, облако) — файл уходит клиенту
  * без скачивания. Где так нельзя (компьютер, старый браузер) — файл скачивается, как раньше.
  */
-export async function saveNestingPdf({ order, mat, fileName, onProgress, summary = null, tpl = null, same = 0 }) {
-  const data = await buildNestingPdf({ order, mat, onProgress, summary, tpl, same })
+export async function saveNestingPdf({ order, mat, fileName, onProgress, summary = null, tpl = null, same = 0, statsPage = false }) {
+  const data = await buildNestingPdf({ order, mat, onProgress, summary, tpl, same, statsPage })
   const file = new File([data], fileName, { type: 'application/pdf' })
   const title = `Карта раскроя · ${orderTitle(order)}`
   let can

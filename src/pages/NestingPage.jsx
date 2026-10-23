@@ -2509,6 +2509,8 @@ export default function NestingPage() {
   const [pdfBusy, setPdfBusy] = useState(null)
   const [pdfEstimate, setPdfEstimateState] = useState(() => !!getUserSettings(user).pdfEstimate)   // галочка «Смета» под кнопкой PDF
   const setPdfEstimate = on => { setPdfEstimateState(on); saveUserSettings({ pdfEstimate: on }, user) }
+  const [pdfStatsPage, setPdfStatsPageState] = useState(() => !!getUserSettings(user).pdfStatsPage)   // галочка «Стат. отдельно» под кнопкой PDF
+  const setPdfStatsPage = on => { setPdfStatsPageState(on); saveUserSettings({ pdfStatsPage: on }, user) }
   // β Пильный центр: программа для пилы KDT (XML) — по текущей карте, с ручными правками и обрезками
   async function xmlCfg(cfg) {
     try {
@@ -2531,7 +2533,7 @@ export default function NestingPage() {
         summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {})
       }
       await saveNestingPdf({ order, fileName: `${fileNameOf('maps', fileNamesOf(user).maps, { total: mat.sheets.length, order, material: mat.name, thickness: mat.thickness, client: clientName })}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`, mat,
-        summary, tpl: cabinet === 'production' ? userPdfTpl(user) : null, same: showSame ? sameAlpha : 0 })
+        summary, tpl: cabinet === 'production' ? userPdfTpl(user) : null, same: showSame ? sameAlpha : 0, statsPage: pdfStatsPage })
     } catch (e) { window.alert('Не удалось собрать PDF: ' + (e?.message || e)) } finally { setPdfBusy(null) }
   }
 
@@ -3661,6 +3663,9 @@ export default function NestingPage() {
                           <button onClick={() => xmlCfg(cfg)} title="β Программа для пильного центра KDT: XML с деревом резов"
                             style={{ padding: '4px 10px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 11.5, cursor: 'pointer' }}>XML пилы</button>
                         )}
+                        <label title="Статистика листов на отдельной странице: на листе — только карта, список деталей и обозначения (карта крупнее)" style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10.5, color: pdfStatsPage ? 'var(--blue)' : 'var(--text-hint)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                          <input type="checkbox" checked={pdfStatsPage} onChange={e => setPdfStatsPage(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />Стат. отдельно
+                        </label>
                         {cabinet === 'production' && (
                           <label title="Добавить в PDF страницу со статистикой раскроя и сметой: операция, количество, цена, сумма" style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10.5, color: pdfEstimate ? 'var(--blue)' : 'var(--text-hint)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                             <input type="checkbox" checked={pdfEstimate} onChange={e => setPdfEstimate(e.target.checked)} style={{ width: 13, height: 13, margin: 0 }} />Смета

@@ -19,6 +19,8 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const { user } = useAuth()
   const { stats, quote } = useNestingQuote({ order, mats: [mat], method, productionId: order?.production_id })
   const [cfg, setCfg] = useState(() => ({ off: [], price: 'lines', ...(getUserSettings(user).pdfSummary || {}) }))
+  const [statsPage, setStatsPageState] = useState(() => !!getUserSettings(user).pdfStatsPage)
+  const setStatsPage = on => { setStatsPageState(on); saveUserSettings({ pdfStatsPage: on }, user) }
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [layout, setLayout] = useState(false)       // открыт конструктор листа
@@ -33,7 +35,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
     setBusy('…'); setError('')
     try {
       const summary = pdfSummaryOf(stats, quote, cfg)
-      await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), onProgress: (a, b) => setBusy(`${a}/${b}`) })
+      await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, onProgress: (a, b) => setBusy(`${a}/${b}`) })
       onClose()
     } catch (e) { setError('Не удалось собрать PDF: ' + (e?.message || e)); setBusy('') }
   }
@@ -53,6 +55,12 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0 10px', fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={statsPage} onChange={e => setStatsPage(e.target.checked)} style={{ width: 'auto', marginTop: 2 }} />
+            <span>Статистика листов на отдельной странице
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>На листе — только карта, список деталей и обозначения, карта крупнее; использование, кромка и обрезки по листам — таблицей в конце</span>
+            </span>
+          </label>
           <p className="section-title">Статистика раскроя</p>
           {rows.map(r => (
             <label key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderTop: '0.5px solid var(--border)', fontSize: 13 }}>
