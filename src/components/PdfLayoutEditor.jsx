@@ -14,9 +14,9 @@ const ZOOMS = [1, 1.5, 2, 3]
 const ADD_GROUPS = [
   ['Карта и оформление', ['map', 'list', 'legend', 'line', 'text']],
   ['Шапка', ['title', 'order', 'sheetNo', 'material', 'date']],
-  ['Лист', ['used', 'sheetSize', 'usable', 'kerf', 'partsOnSheet', 'partsArea', 'offcuts', 'edgeSheet']],
+  ['Лист', ['used', 'sheetSize', 'usable', 'kerf', 'partsOnSheet', 'partsArea', 'offcuts', 'edgeSheet', 'edgeTypesSheet']],
   ['Операции на листе', ['sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves']],
-  ['Всего по материалу', ['totals', 'allArea', 'allCuts', 'allCutM', 'allPerim', 'edgeTotal', 'overs', 'allHoles', 'allEdgeHoles', 'allGrooves']],
+  ['Всего по материалу', ['totals', 'allArea', 'allCuts', 'allCutM', 'allPerim', 'edgeTotal', 'edgeTypesAll', 'overs', 'allHoles', 'allEdgeHoles', 'allGrooves']],
   ['Примечания', ['orderNote', 'prodNote']],
   ['Низ страницы', ['footer', 'pageNo']],
 ]

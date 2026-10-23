@@ -439,10 +439,17 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
       allArea: ['Площадь деталей всего', `${n(t.partsM2)} м²`],
     }
   }
+  // кромка по видам (как в заказе: из Excel или из бланка) с толщиной: «ПВХ 0,4 — 12,3 м · ПВХ 2 (2 мм) — 4,1 м»
+  const eTypes = parseEdgeTypes(order?.edge_types)
+  const byType = e => Object.entries(e.byName).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([n, v]) => {
+    const t = Number(String((eTypes[n === 'Кромка' ? 'default' : n] || {}).t ?? '').replace(',', '.')) || 0, ts = String(t).replace('.', ',')
+    return `${n}${t && !n.includes(ts) ? ` (${ts} мм)` : ''} — ${m2(v)} м`
+  }).join(' · ')
   const pageValues = si => {
     const geo = geos[si], sheet = sheets[si], area = geo.usableX * geo.usableY
     return {
       ...opsVals(si),
+      edgeTypesSheet: ['Кромка по видам', byType(edges[si])], edgeTypesAll: ['Кромка по видам, всего', byType(edgeAll)],
       orderNote: ['Примечание', String(order?.order_note || '').trim()], prodNote: ['Примечание производства', String(order?.prod_note || '').trim()],
       title: ['', `Карта раскроя · ${orderTitle(order)}`], order: ['Заказ', orderTitle(order)],
       sheetNo: ['', `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${same && same[si].first !== si ? ` · карта как лист ${same[si].first + 1}` : same && same[si].count > 1 ? ` · карта ×${same[si].count}` : ''}`],
@@ -872,13 +879,14 @@ export const PDF_ITEMS = [
   ['sheetHoles', 'Отверстий в пласть на листе', 'text'], ['sheetEdgeHoles', 'Отверстий в торец на листе', 'text'], ['sheetGrooves', 'Пазов на листе', 'text'],
   ['allCuts', 'Резов всего', 'text'], ['allCutM', 'Длина реза всего', 'text'], ['allPerim', 'Периметр деталей всего', 'text'],
   ['allHoles', 'Отверстий в пласть всего', 'text'], ['allEdgeHoles', 'Отверстий в торец всего', 'text'], ['allGrooves', 'Пазов всего', 'text'], ['allArea', 'Площадь деталей всего', 'text'],
+  ['edgeTypesSheet', 'Кромка по видам на листе', 'text'], ['edgeTypesAll', 'Кромка по видам всего', 'text'],
   ['orderNote', 'Примечание к заказу', 'text'], ['prodNote', 'Примечание производства', 'text'],
   ['footer', 'Подпись приложения', 'text'], ['pageNo', 'Номер страницы', 'text'], ['text', 'Свой текст', 'text'],
 ]
 export const pdfItemTitle = type => (PDF_ITEMS.find(x => x[0] === type) || [])[1] || type
 export const pdfItemKind = type => (PDF_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
 const HAS_LABEL = new Set(['order', 'material', 'date', 'used', 'sheetSize', 'usable', 'kerf', 'partsOnSheet', 'partsArea', 'offcuts', 'edgeSheet', 'edgeTotal', 'totals',
-  'sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves', 'allCuts', 'allCutM', 'allPerim', 'allHoles', 'allEdgeHoles', 'allGrooves', 'allArea', 'orderNote', 'prodNote'])
+  'sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves', 'allCuts', 'allCutM', 'allPerim', 'allHoles', 'allEdgeHoles', 'allGrooves', 'allArea', 'orderNote', 'prodNote', 'edgeTypesSheet', 'edgeTypesAll'])
 export const pdfItemHasLabel = type => HAS_LABEL.has(type)
 
 const T = (type, x, y, size, extra = {}) => ({ type, x, y, size, ...extra })

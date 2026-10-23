@@ -18,8 +18,12 @@ const DEMO_QUOTE = { total: 18640, currency: '₸', lines: [{ key: 'cut_m', qty:
 // все строки статистики (в заказе выводятся только те, что в нём есть)
 function allRows() {
   const st = { ...emptyStats(), sheets: [{ parts: 1 }, { parts: 2 }], sheetCount: 2, parts: 3, partsM2: 1, sheetsM2: 2, kerf: 4, cuts: 1, cutM: 1, perimM: 1,
-    shapedParts: 1, cutouts: 1, edgeM: 1, edgeThinM: 1, edgeThickM: 1, edgeCurvedM: 1, edgeCurvedParts: 1, holes: 1, edgeHoles: 1, grooves: 1, grooveM: 1, pockets: 1 }
-  return statsRows(st).map(r => ({ key: r.key, label: r.label }))
+    shapedParts: 1, cutouts: 1, edgeM: 1, edgeThinM: 1, edgeThickM: 1, edgeCurvedM: 1, edgeCurvedParts: 1, holes: 1, edgeHoles: 1, grooves: 1, grooveM: 1, pockets: 1, edgeByType: { 'ПВХ 0,4': 1, 'ПВХ 2': 1 } }
+  const out = []
+  for (const r of statsRows(st)) {
+    if (r.key === 'edgeTypes') { if (!out.some(x => x.key === 'edgeTypes')) out.push({ key: r.key, label: 'Кромка по видам (каждый вид — своей строкой)' }) } else out.push({ key: r.key, label: r.label })
+  }
+  return out
 }
 
 export default function SummaryLayoutEditor({ onClose }) {

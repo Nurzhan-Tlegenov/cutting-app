@@ -17,6 +17,8 @@ export const emptyStats = () => ({
   sheets: [], sheetCount: 0, offcutSheets: 0, parts: 0, kerf: 0, method: 'nesting',
   cutM: 0, cuts: 0, perimM: 0, partsM2: 0, sheetsM2: 0,
   edgeM: 0, edgeThinM: 0, edgeThickM: 0, edgeCurvedM: 0, edgeCurvedParts: 0,
+  edgeByType: {},   // кромка по видам заказа: { название: м } (виды — из Excel или из бланка заказа; толщина — edgeTypeT)
+  edgeTypeT: {},
   holes: 0, edgeHoles: 0, grooves: 0, grooveM: 0, pockets: 0, cutouts: 0, shapedParts: 0,
   hdf: false,   // материал заказа — ХДФ / ДВП: распил в прайс-листе по своим ценам
 })
@@ -58,6 +60,8 @@ export function nestingStats({ order, mat, method }) {
         for (const e of detailEdgeList(rawDetail(d))) {
           const m = (e.mm + over) / 1000
           st.edgeM += m
+          st.edgeByType[e.name] = (st.edgeByType[e.name] || 0) + m
+          if (thickOf(e.name) > 0) st.edgeTypeT[e.name] = thickOf(e.name)
           if (e.curved) { st.edgeCurvedM += m; curved = true }
           else if (thickOf(e.name) > THICK_FROM) st.edgeThickM += m
           else st.edgeThinM += m
@@ -90,6 +94,8 @@ export function sumStats(list) {
     if (!s) continue
     for (const k of Object.keys(t)) {
       if (k === 'sheets') t.sheets.push(...s.sheets)
+      else if (k === 'edgeByType') for (const [n, v] of Object.entries(s.edgeByType || {})) t.edgeByType[n] = (t.edgeByType[n] || 0) + v
+      else if (k === 'edgeTypeT') Object.assign(t.edgeTypeT, s.edgeTypeT || {})
       else if (k === 'kerf') t.kerf = t.kerf || s.kerf
       else if (k === 'method') t.method = s.method || t.method
       else if (k === 'hdf') t.hdf = t.hdf || !!s.hdf
@@ -135,5 +141,15 @@ export function statsRows(st) {
     ['grooves', 'Пазы', `${st.grooves} шт. · ${n2(st.grooveM)} м`, st.grooves > 0],
     ['pockets', 'Выемок', st.pockets, st.pockets > 0],
   ]
+  // кромка по видам: каждый вид — своей строкой (ключ один — галочка и порядок в конструкторе на все сразу)
+  const types = Object.entries(st.edgeByType || {}).filter(([, v]) => v > 0)
+  if (types.length && !(types.length === 1 && types[0][0] === 'Кромка')) {
+    const at = rows.findIndex(r => r[0] === 'edgeCurved') + 1
+    const fmtT = t => String(Math.round(t * 100) / 100).replace('.', ',')
+    rows.splice(at, 0, ...types.sort((a, b) => b[1] - a[1]).map(([n, v]) => {
+      const t = st.edgeTypeT?.[n], tl = t && !String(n).includes(fmtT(t)) ? ` · ${fmtT(t)} мм` : ''
+      return ['edgeTypes', `Кромка ${n}${tl}`, `${n2(v)} м`, true]
+    }))
+  }
   return rows.filter(r => r[3]).map(([key, label, value]) => ({ key, label, value: String(value) }))
 }

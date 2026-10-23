@@ -36,8 +36,8 @@ export default function NestingCost({ order, mats, method, productionId, full = 
       <p className="section-title">Статистика раскроя{note ? ` ${note}` : ''}</p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', columnGap: 10, rowGap: 2 }}>
         {rows.map(r => [
-          <span key={r.key + 'l'} style={{ color: 'var(--text-muted)' }}>{r.label}</span>,
-          <b key={r.key + 'v'} style={{ fontWeight: 500, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.value}</b>,
+          <span key={r.key + r.label + 'l'} style={{ color: 'var(--text-muted)' }}>{r.label}</span>,
+          <b key={r.key + r.label + 'v'} style={{ fontWeight: 500, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.value}</b>,
         ])}
       </div>
       {quote?.own && (

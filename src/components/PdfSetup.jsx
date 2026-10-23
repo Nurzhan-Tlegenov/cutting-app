@@ -63,7 +63,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
           </label>
           <p className="section-title">Статистика раскроя</p>
           {rows.map(r => (
-            <label key={r.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderTop: '0.5px solid var(--border)', fontSize: 13 }}>
+            <label key={r.key + r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderTop: '0.5px solid var(--border)', fontSize: 13 }}>
               <input type="checkbox" checked={!off.has(r.key)} onChange={() => toggle(r.key)} style={{ width: 'auto' }} />
               <span style={{ flex: 1, color: off.has(r.key) ? 'var(--text-hint)' : 'var(--text)' }}>{r.label}</span>
               <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{r.value}</span>
