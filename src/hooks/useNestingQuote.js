@@ -19,7 +19,7 @@ export function useNestingQuote({ order, mats, method, productionId, enabled = t
     + `|${method}|${order?.sheet_length}x${order?.sheet_width}|${order?.kerf_width}|${order?.margin_left},${order?.margin_right},${order?.margin_top},${order?.margin_bottom}|${JSON.stringify(order?.edge_types ?? '')}|${order?.material_kind || ''}`
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const stats = useMemo(() => (enabled ? sumStats(list.map(mat => nestingStats({ order, mat, method }))) : null), [sig])
-  const payload = useMemo(() => (stats && stats.parts ? JSON.stringify(statsPayload(stats)) : ''), [stats])
+  const payload = useMemo(() => (stats && stats.parts ? JSON.stringify(statsPayload(stats, order)) : ''), [stats, order?.drill_kind])   // eslint-disable-line react-hooks/exhaustive-deps
   const [state, setState] = useState({ key: '', quote: undefined })
   const fixedId = order?.id && order.status && order.status !== 'draft' ? order.id : ''
   const key = productionId && payload ? `${productionId}|${fixedId}|${payload}` : ''

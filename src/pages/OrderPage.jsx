@@ -250,7 +250,7 @@ export default function OrderPage() {
       )}
       {/* производство видит всю статистику раскроя и расчёт; заказчик — стоимость работ (если цены ему доступны) */}
       {nestings.length > 0 && (order.production_id || inProduction) && showPrices && (
-        <NestingCost order={order} mats={nestings} method={order.cutting_method || 'nesting'} productionId={order.production_id}
+        <NestingCost onDrillKind={k => setOrder(o => ({ ...o, drill_kind: k }))} order={order} mats={nestings} method={order.cutting_method || 'nesting'} productionId={order.production_id}
           full={inProduction} style={{ marginBottom: 12 }} />
       )}
       {/* примечания: из бланка заказа и от производства — оба идут в PDF карт раскроя */}

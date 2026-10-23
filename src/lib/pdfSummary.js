@@ -60,7 +60,7 @@ export async function statsAndQuote({ order, mats, method }) {
   let quote = null
   if (order?.production_id && stats.parts) {
     if (order.id && order.status && order.status !== 'draft') quote = await fetchFixedQuote(order.id)
-    if (!quote) quote = await fetchQuote(order.production_id, statsPayload(stats))
+    if (!quote) quote = await fetchQuote(order.production_id, statsPayload(stats, order))
     else if (quote.hidden) quote = null
   }
   return { stats, quote }

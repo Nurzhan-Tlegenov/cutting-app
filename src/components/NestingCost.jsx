@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { useNestingQuote } from '../hooks/useNestingQuote'
+import { supabase } from '../lib/supabase'
 import { statsRows } from '../lib/nestingStats'
 import { money, GROUP_TITLE, lineTitle, lineUnit } from '../lib/pricing'
 
@@ -7,8 +9,39 @@ import { money, GROUP_TITLE, lineTitle, lineUnit } from '../lib/pricing'
 // и расчёт построчно: количество × цена. Аккаунту со своим производством цены чужого не показываются (так решает база).
 const num = v => (Math.round(Number(v) * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
-export default function NestingCost({ order, mats, method, productionId, full = false, note = '', style }) {
-  const { stats, quote } = useNestingQuote({ order, mats, method, productionId })
+// Тип изделия для цены присадки за м²: у производства две цены — «кухни, ванные» (мелкие детали, дороже) и «шкафы»
+// (крупные детали). Переключатель виден, только когда у производства заполнены обе (quote.drill_kinds) и цена ещё не
+// зафиксирована; выбор пишется в заказ (orders.drill_kind, migration_drill_kind.sql) и сразу пересчитывает смету
+function DrillKind({ value, onChange }) {
+  const opt = [['', 'Кухня, ванная', 'мелкие детали'], ['large', 'Шкафы', 'крупные детали']]
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>Что кроите — от этого зависит цена присадки за м²:</div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {opt.map(([k, t, s]) => {
+          const on = (value || '') === k
+          return (
+            <button key={k} type="button" onClick={() => onChange(k)} style={{ flex: 1, padding: '6px 8px', borderRadius: 10, cursor: 'pointer', textAlign: 'center',
+              border: on ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)', background: on ? 'var(--bg)' : 'transparent', color: on ? 'var(--blue)' : 'var(--text-muted)' }}>
+              <div style={{ fontSize: 13, fontWeight: on ? 600 : 400 }}>{t}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>{s}</div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+export default function NestingCost({ order, mats, method, productionId, full = false, note = '', style, onDrillKind = null }) {
+  const [kind, setKind] = useState(order?.drill_kind || '')
+  const ord = order ? { ...order, drill_kind: kind || null } : order
+  const { stats, quote } = useNestingQuote({ order: ord, mats, method, productionId })
+  const pickKind = async k => {
+    setKind(k)
+    if (order?.id) { try { await supabase.from('orders').update({ drill_kind: k || null }).eq('id', order.id); onDrillKind?.(k || null) } catch { /* нет колонки — смета всё равно пересчитана */ } }
+  }
+  const kindSwitch = quote?.drill_kinds && !quote.fixed ? <DrillKind value={kind} onChange={pickKind} /> : null
   if (!stats || !stats.parts) return null
   if (!full) {
     if (!quote || quote.empty) return null
@@ -24,6 +57,7 @@ export default function NestingCost({ order, mats, method, productionId, full = 
           </div>
         )}
         {quote.min_applied && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Действует минимальная сумма заказа.</div>}
+        {kindSwitch}
         <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 2 }}>
           {quote.fixed ? `Цена зафиксирована при оформлении заказа${quote.at ? ' ' + new Date(quote.at).toLocaleDateString('ru-RU') : ''}` : 'Предварительно: по этому раскрою и текущему прайс-листу. Цена фиксируется при оформлении заказа'}; материал и кромка в сумму не входят.
         </div>
@@ -57,6 +91,7 @@ export default function NestingCost({ order, mats, method, productionId, full = 
           </div>
         </>
       )}
+      {quote?.own && kindSwitch}
       {quote?.empty && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 8 }}>Стоимость не посчитана: заполните и включите прайс-лист в кабинете производства.</p>}
     </div>
   )

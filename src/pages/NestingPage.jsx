@@ -2630,7 +2630,7 @@ export default function NestingPage() {
       if (fresh?.production_id) {
         const mats = savedNestings(fresh, cutDetails(allDetails, parseEdgeTypes(fresh.edge_types)))
         const st = sumStats(mats.map(mat => nestingStats({ order: fresh, mat, method: fresh.cutting_method || 'nesting' })))
-        if (st.parts) await fixOrderQuote(id, statsPayload(st))
+        if (st.parts) await fixOrderQuote(id, statsPayload(st, fresh))
       }
     } catch { /* не посчиталось — заказ всё равно оформлен, цена покажется по текущему прайсу */ }
     navigate(`/orders/${id}`)
@@ -2659,7 +2659,7 @@ export default function NestingPage() {
         try {
           const mats = savedNestings(o, cutDetails(list, parseEdgeTypes(o.edge_types)))
           const st = sumStats(mats.map(mat => nestingStats({ order: o, mat, method: o.cutting_method || 'nesting' })))
-          if (st.parts) await fixOrderQuote(o.id, statsPayload(st))
+          if (st.parts) await fixOrderQuote(o.id, statsPayload(st, o))
         } catch { /* цена покажется по текущему прайсу */ }
       }
       const keepKey = rest.length ? null : sendKeys[sendKeys.length - 1]       // всё уходит — последний материал остаётся этим заказом
@@ -2760,7 +2760,7 @@ export default function NestingPage() {
       try {
         const mats = savedNestings(copy, cutDetails(allDetails, parseEdgeTypes(copy.edge_types)))
         const st = sumStats(mats.map(mat => nestingStats({ order: copy, mat, method: copy.cutting_method || 'nesting' })))
-        if (st.parts) await fixOrderQuote(copy.id, statsPayload(st))
+        if (st.parts) await fixOrderQuote(copy.id, statsPayload(st, copy))
       } catch { /* цена покажется по текущему прайсу */ }
       setBusyId(null)
       navigate(`/orders/${copy.id}`)
@@ -3603,7 +3603,7 @@ export default function NestingPage() {
 
                 {/* Стоимость работ выбранного производства — сразу после раскроя (расценки не показываются) */}
                 {order.production_id && cfg.result && cfg.status !== 'running' && cfg.status !== 'stopping' && cfg.status !== 'queued' && cfg.buffer.length === 0 && (
-                  <NestingCost order={order} method={cuttingMethod} productionId={order.production_id} style={{ marginBottom: 6 }}
+                  <NestingCost onDrillKind={k => setOrder(o => ({ ...o, drill_kind: k }))} order={order} method={cuttingMethod} productionId={order.production_id} style={{ marginBottom: 6 }}
                     note={multiMat ? '(этот материал)' : ''}
                     mats={[{ sheets: cfg.sheetsData, details, result: cfg.result, thickness: Number(String(matKey || '').split('|')[1]) || Number(order.material_thickness) || 16 }]} />
                 )}

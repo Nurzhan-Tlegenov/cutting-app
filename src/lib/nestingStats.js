@@ -108,13 +108,15 @@ export function sumStats(list) {
 }
 
 /** Статистика в том виде, в каком её ждёт база (production_quote) */
-export function statsPayload(st) {
+// order — чтобы передать тип изделия для цены присадки за м² (orders.drill_kind: 'large' — шкафы, крупные детали)
+export function statsPayload(st, order = null) {
   return {
     sheets: st.sheets.map(s => ({ parts: s.parts })),
     parts: st.parts, cut_m: r2(st.cutM),
     edge_thin_m: r2(st.edgeThinM), edge_thick_m: r2(st.edgeThickM), edge_curved_m: r2(st.edgeCurvedM), edge_curved_parts: st.edgeCurvedParts,
     holes: st.holes, edge_holes: st.edgeHoles, drill_m2: r2(st.drillM2), drill_parts: st.drillParts, groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
-    ...(st.hdf ? { hdf: true } : {}),   // ХДФ / ДВП — база берёт цены распила ХДФ (migration_hdf_prices.sql)
+    ...(st.hdf ? { hdf: true } : {}),
+    ...(order?.drill_kind === 'large' ? { drill_kind: 'large' } : {}),   // ХДФ / ДВП — база берёт цены распила ХДФ (migration_hdf_prices.sql)
   }
 }
 
