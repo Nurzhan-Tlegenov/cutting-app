@@ -28,12 +28,26 @@ export function quoteLines(quote) {
 }
 
 /** Страница «Статистика и стоимость» для PDF. cfg — pdfSummary; estimate === false — без сметы */
+/** Строки статистики в порядке, заданном в конструкторе страницы статистики (cfg.order — ключи); новые — в конце */
+export function orderRows(rows, order) {
+  if (!Array.isArray(order) || !order.length) return rows
+  const at = new Map(order.map((k, i) => [k, i]))
+  return rows.map((r, i) => [r, at.has(r.key) ? at.get(r.key) : 1000 + i]).sort((a, b) => a[1] - b[1]).map(x => x[0])
+}
+/** Вид страницы статистики: порядок разделов, шрифт строк, колонки */
+export function summaryLayout(cfg = {}) {
+  const ok = ['stats', 'cost', 'notes']
+  const sec = Array.isArray(cfg.sections) ? cfg.sections.filter(k => ok.includes(k)) : []
+  const all = [...new Set([...sec, ...ok])]
+  return { sections: cfg.noNotes ? all.filter(k => k !== 'notes') : all, size: Number(cfg.size) || 3.1, cols: cfg.cols === 1 ? 1 : 2 }
+}
 export function pdfSummaryOf(stats, quote, cfg = {}, estimate = true) {
   const off = new Set(cfg.off || [])
   const lines = quoteLines(quote)
   const priced = lines.length > 0 && estimate && cfg.price !== 'none'
   return {
-    rows: stats ? statsRows(stats).filter(r => !off.has(r.key)).map(r => ({ label: r.label, value: r.value })) : [],
+    rows: stats ? orderRows(statsRows(stats), cfg.order).filter(r => !off.has(r.key)).map(r => ({ key: r.key, label: r.label, value: r.value })) : [],
+    layout: summaryLayout(cfg),
     lines: priced && cfg.price !== 'total' ? lines : [],
     total: priced ? money(quote.total, quote.currency) : null,
     currency: priced ? quote.currency : '', minApplied: priced && !!quote.min_applied,

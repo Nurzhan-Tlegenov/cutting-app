@@ -657,64 +657,87 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
       })
     }
   }
-  // Статистика раскроя и стоимость работ — отдельной страницей после карт
-  if (summary && ((summary.rows || []).length || (summary.lines || []).length || summary.total != null)) {
-    pages.push(() => {
-      pageNo++
-      ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
-      const tx = drawBrand(ctx) + 4
-      text(ctx, `Статистика раскроя · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
-      text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
-      text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
-      rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
-      text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
-      text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
-      let y = 34
-      const rows = summary.rows || []
-      if (rows.length) {
-        text(ctx, 'Раскрой', 10, y, { size: 3.6, bold: true }); y += 3
-        // две колонки: подпись слева, значение справа
-        const half = Math.ceil(rows.length / 2), colW = 92
-        rows.forEach((r, i) => {
-          const c = i < half ? 0 : 1, yy = y + 5.4 * ((i < half ? i : i - half) + 1), x = 10 + c * (colW + 6)
-          text(ctx, r.label, x, yy, { size: 3, color: MUTED, max: colW - 34 })
-          text(ctx, r.value, x + colW, yy, { size: 3.1, bold: true, align: 'right', max: 40 })
-          rule(ctx, x, yy + 1.6, x + colW, yy + 1.6, 0.1)
-        })
-        y += 5.4 * half + 10
-      }
-      const lines = summary.lines || []
-      if (lines.length || summary.total != null) {
-        const cur = summary.currency ? `, ${summary.currency}` : ''
-        text(ctx, 'Стоимость работ', 10, y, { size: 3.6, bold: true }); y += 6
-        if (lines.length) {
-          ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y - 4.2), mm(190), mm(6))
-          text(ctx, 'Операция', 12, y, { size: 2.7, bold: true, color: MUTED })
-          text(ctx, 'Количество', 136, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
-          text(ctx, `Цена${cur}`, 168, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
-          text(ctx, `Сумма${cur}`, 198, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
-          y += 2
-          for (const l of lines) {
-            y += 5.6
-            text(ctx, l.title, 12, y, { size: 3.1, max: 96 })
-            if (l.qty) text(ctx, l.qty, 136, y, { size: 3, color: MUTED, align: 'right' })
-            if (l.rate) text(ctx, l.rate, 168, y, { size: 3, color: MUTED, align: 'right' })
-            text(ctx, l.sum, 198, y, { size: 3.1, bold: true, align: 'right' })
-            rule(ctx, 10, y + 1.7, 200, y + 1.7, 0.1)
-          }
-          y += 8
-        }
-        if (summary.total != null) {
-          text(ctx, summary.minApplied ? 'Итого (минимальная сумма заказа)' : 'Итого', 12, y, { size: 3.8, bold: true })
-          text(ctx, summary.total, 198, y, { size: 5, bold: true, align: 'right' })
-          rule(ctx, 10, y + 2.4, 200, y + 2.4, 0.35, INK); y += 8
-          text(ctx, 'Стоимость работ; материал и кромка в сумму не входят.', 12, y, { size: 2.5, color: MUTED })
-        }
-      }
-      if (notes.length && y + 12 < 284) notesBlock(ctx, notes, 10, y + 8, 190, { size: 3.2, maxLines: Math.max(1, Math.floor((284 - y - 10) / 4.2 / notes.length)) })
-    })
-  }
+  // Статистика раскроя и стоимость работ — отдельной страницей после карт (вид — конструктор страницы статистики:
+  // summary.layout { sections — порядок разделов 'stats' | 'cost' | 'notes', size — шрифт строк, мм, cols — 1 или 2 колонки })
+  const hasSummary = summary && ((summary.rows || []).length || (summary.lines || []).length || summary.total != null)
+  if (hasSummary) pages.push(() => { pageNo++; drawSummaryPage(ctx, { order, matName, summary, notes, pageNo }) })
   return { pages, boxes }
+}
+
+/** Страница «Статистика раскроя»: разделы в заданном порядке */
+function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo }) {
+  const L = summary.layout || {}
+  const sections = Array.isArray(L.sections) && L.sections.length ? L.sections : ['stats', 'cost', 'notes']
+  const fs = Math.min(5, Math.max(2.4, Number(L.size) || 3.1)), step = fs * 1.75, cols = L.cols === 1 ? 1 : 2
+  ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
+  const tx = drawBrand(ctx) + 4
+  text(ctx, `${L.title || 'Статистика раскроя'} · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
+  text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
+  text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+  rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
+  text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
+  text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
+  let y = 34
+  const draw = {
+    stats: () => {
+      const rows = summary.rows || []
+      if (!rows.length) return
+      text(ctx, 'Раскрой', 10, y, { size: 3.6, bold: true }); y += 3
+      // одна или две колонки: подпись слева, значение справа
+      const per = Math.ceil(rows.length / cols), colW = cols === 1 ? 190 : 92
+      rows.forEach((r, i) => {
+        const c = Math.floor(i / per), yy = y + step * ((i % per) + 1), x = 10 + c * (colW + 6)
+        text(ctx, r.label, x, yy, { size: fs * 0.97, color: MUTED, max: colW - 40 })
+        text(ctx, r.value, x + colW, yy, { size: fs, bold: true, align: 'right', max: 40 })
+        rule(ctx, x, yy + 1.6, x + colW, yy + 1.6, 0.1)
+      })
+      y += step * per + 10
+    },
+    cost: () => {
+      const lines = summary.lines || []
+      if (!lines.length && summary.total == null) return
+      const cur = summary.currency ? `, ${summary.currency}` : ''
+      text(ctx, 'Стоимость работ', 10, y, { size: 3.6, bold: true }); y += 6
+      if (lines.length) {
+        ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y - 4.2), mm(190), mm(6))
+        text(ctx, 'Операция', 12, y, { size: 2.7, bold: true, color: MUTED })
+        text(ctx, 'Количество', 136, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
+        text(ctx, `Цена${cur}`, 168, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
+        text(ctx, `Сумма${cur}`, 198, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
+        y += 2
+        for (const l of lines) {
+          y += step
+          text(ctx, l.title, 12, y, { size: fs, max: 96 })
+          if (l.qty) text(ctx, l.qty, 136, y, { size: fs * 0.97, color: MUTED, align: 'right' })
+          if (l.rate) text(ctx, l.rate, 168, y, { size: fs * 0.97, color: MUTED, align: 'right' })
+          text(ctx, l.sum, 198, y, { size: fs, bold: true, align: 'right' })
+          rule(ctx, 10, y + 1.7, 200, y + 1.7, 0.1)
+        }
+        y += 8
+      }
+      if (summary.total != null) {
+        text(ctx, summary.minApplied ? 'Итого (минимальная сумма заказа)' : 'Итого', 12, y, { size: 3.8, bold: true })
+        text(ctx, summary.total, 198, y, { size: 5, bold: true, align: 'right' })
+        rule(ctx, 10, y + 2.4, 200, y + 2.4, 0.35, INK); y += 8
+        text(ctx, 'Стоимость работ; материал и кромка в сумму не входят.', 12, y, { size: 2.5, color: MUTED }); y += 8
+      }
+    },
+    notes: () => {
+      if (!notes.length || y + 12 > 284) return
+      y += notesBlock(ctx, notes, 10, y, 190, { size: fs, maxLines: Math.max(1, Math.floor((284 - y - 4) / (fs * 1.3) / notes.length)) }) + 6
+    },
+  }
+  for (const k of sections) draw[k]?.()
+}
+
+/** Превью страницы статистики для конструктора (образец заказа). -> canvas */
+export function drawSummaryPreview(canvas, { order, mat, summary }) {
+  canvas.width = PW; canvas.height = PH
+  const ctx = canvas.getContext('2d')
+  const matName = [mat?.name || '', mat?.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · ')
+  drawSummaryPage(ctx, { order, matName, summary, notes: orderNotes(order), pageNo: (mat?.sheets?.length || 0) + 1 })
+  return canvas
+
 }
 
 /**

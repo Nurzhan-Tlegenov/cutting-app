@@ -6,7 +6,7 @@ import { statsRows } from '../lib/nestingStats'
 import { money } from '../lib/pricing'
 import { saveNestingPdf } from '../lib/nestingPdf'
 import { userSameAlpha } from '../lib/sameParts'
-import { quoteLines, pdfSummaryOf, userPdfTpl } from '../lib/pdfSummary'
+import { quoteLines, pdfSummaryOf, userPdfTpl, orderRows } from '../lib/pdfSummary'
 import PdfLayoutEditor from './PdfLayoutEditor'
 import { useBackClose } from '../lib/backStack'
 
@@ -26,7 +26,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const [layout, setLayout] = useState(false)       // открыт конструктор листа
   const customTpl = userPdfTpl(user)
   const change = patch => { const next = { ...cfg, ...patch }; setCfg(next); saveUserSettings({ pdfSummary: next }, user) }
-  const rows = stats ? statsRows(stats) : []
+  const rows = stats ? orderRows(statsRows(stats), cfg.order) : []
   const off = new Set(cfg.off || [])
   const toggle = key => change({ off: off.has(key) ? [...off].filter(k => k !== key) : [...off, key] })
   const priced = quote && !quote.empty && Number(quote.total) > 0
