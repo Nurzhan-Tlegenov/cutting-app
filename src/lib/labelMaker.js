@@ -434,6 +434,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
+    exit: !!part,      // деталь в положении выхода со станка (пильный центр)
   }
 }
 
@@ -651,8 +652,14 @@ export function labelText(type, info, tpl = null) {
     case 'cutouts': return info.cutouts ? `Вырезов: ${info.cutouts}` : ''
     case 'twoSided': return info.twoSided ? '⇅ обработка с двух сторон' : ''
     case 'edgeList': return info.edgeList.length ? `Кромка: ${info.edgeList.join(', ')}` : ''
-    case 'length': return r1(info.length)
-    case 'width': return r1(info.width)
+    // пильный центр: деталь на бирке повёрнута, как выходит со станка, — «Длина» и «Ширина» идут за сторонами,
+    // как размеры у кромки: «Длина» — размер верхней/нижней стороны бирки, «Ширина» — левой/правой
+    // (в обычном положении это и есть длина и ширина; деталь повернулась на 90° — значения меняются местами)
+    case 'length': case 'width': {
+      if (!info.exit) return r1(type === 'length' ? info.length : info.width)
+      const rot = tpl ? tpl.rot !== false : true
+      return r1((type === 'length') === rot ? info.sizeY : info.sizeX)
+    }
     case 'thickness': return info.thickness ? `${r1(info.thickness)} мм` : ''
     case 'qty': return `${info.qty} шт`
     case 'image': return ' '
