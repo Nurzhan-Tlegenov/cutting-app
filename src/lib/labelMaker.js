@@ -396,6 +396,19 @@ export function blockChain(m) {
 }
 
 /** Все свойства детали для бирки. mat — материал из savedNestings, si / pi — лист и деталь на нём */
+// сколько штук детали в результате раскроя (по всем листам материала) — на бирку идёт оно, а не число из бланка заказа
+const placedCount = new WeakMap()
+function nestedQty(mat, di) {
+  const sheets = mat?.sheets
+  if (!Array.isArray(sheets)) return 0
+  let m = placedCount.get(sheets)
+  if (!m) {
+    m = new Map()
+    for (const sh of sheets) for (const p of sh?.placed || []) if (p?.detailIndex != null) m.set(p.detailIndex, (m.get(p.detailIndex) || 0) + 1)
+    placedCount.set(sheets, m)
+  }
+  return m.get(di) || 0
+}
 export function labelInfo(order, mat, si, pi, part = null) {
   // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
   const sh = mat.sheets[si], p = part || sh.placed[pi], d = mat.details[p.detailIndex] || {}, m = detailMeta(d) || {}
@@ -429,7 +442,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     material: (() => { const nm = String(mat.name || '').trim(), t = Number(mat.thickness) || 0
       const has = t > 0 && new RegExp(`(^|[^0-9.,])${String(t).replace('.', '[.,]')}([^0-9]|$)`).test(nm)
       return [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · ') })(),
-    length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: Number(d.qty) || 1,
+    length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
@@ -631,7 +644,8 @@ export function labelText(type, info, tpl = null) {
     case 'block': return info.chain?.[0] || ''
     case 'group': return info.chain?.length > 1 ? info.chain[info.chain.length - 1] : ''
     case 'blockPath': return (info.chain || []).join(' / ')
-    case 'size': return `${r1(info.length)} x ${r1(info.width)} x ${info.qty} шт`
+    // размер — как деталь лежит на бирке (за поворотом, как «Длина» и «Ширина»): верх/низ × лево/право
+    case 'size': return `${labelText('length', info, tpl)} x ${labelText('width', info, tpl)} x ${info.qty} шт`
     case 'curved': return info.curved.length ? `Крив. кромка: ${info.curved.join('; ')}` : ''
     case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
     case 'sheet': return `Карта  ${info.sheet}`
