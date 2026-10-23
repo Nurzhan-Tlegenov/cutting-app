@@ -55,6 +55,13 @@ function deriveGroups(items, axis) {
   }
   return out
 }
+/** Последний кусок заготовки — деловой обрезок до самого её конца (за ним ни деталей, ни реза) */
+export function tailOffcut(node) {
+  const last = node.slots[node.slots.length - 1]
+  if (!last?.item?.offcut || node.slots.length < 2) return false
+  const end = node.trim + node.slots.reduce((t, sl) => t + sl.a, 0)
+  return end >= node.A - EPS
+}
 export const depthOf = n => 1 + Math.max(0, ...n.slots.map(s => (s.child ? depthOf(s.child) : 0)))
 
 /** Дерево резов листа: ось 1-го уровня — как посчитал раскрой (sheet.beamAxis), иначе та, где уровней меньше */
@@ -66,7 +73,7 @@ export function sheetCutTree(sheet, geo) {
     // обрезок — в тех же координатах, что детали; может заходить в отступ — берём его часть в рабочей зоне, с пропилом как у детали
     const y = o.y
     const x0 = Math.max(0, o.x), y0 = Math.max(0, y), x1 = Math.min(geo.usableX, o.x + o.w), y1 = Math.min(geo.usableY, y + o.h)
-    if (x1 - x0 > EPS && y1 - y0 > EPS) offs.push({ x: x0, y: y0, w: x1 - x0 + k, h: y1 - y0 + k, offcut: true })
+    if (x1 - x0 > EPS && y1 - y0 > EPS) offs.push({ x: x0, y: y0, w: x1 - x0 + k, h: y1 - y0 + k, offcut: true, ow: o.w, oh: o.h })
   }
   const axes = sheet.beamAxis ? [sheet.beamAxis, sheet.beamAxis === 'x' ? 'y' : 'x'] : ['x', 'y']
   const tryTree = items => {
@@ -119,9 +126,12 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
     let tree
     try { tree = sheetCutTree(sheet, geo) } catch (e) { throw new Error(`лист ${si + 1}: ${e?.message || e}`, { cause: e }) }
     dropped += tree.droppedOffcuts || 0
-    if (maxStrip > 0) for (const sl of tree.slots || []) if (sl.a - k > maxStrip + 0.5) wide.push(`лист ${si + 1}: полоса ${Math.round(sl.a - k)} мм`)
+    if (maxStrip > 0) for (const sl of tree.slots || []) if (!sl.item?.offcut && sl.a - k > maxStrip + 0.5) wide.push(`лист ${si + 1}: полоса ${Math.round(sl.a - k)} мм`)
     const mcode = `T${ts}${si + 1}`
-    out.push(`  <panel${si + 1} l="${r1(geo.sheetL)}" w="${r1(geo.sheetW)}" trimSLength="${r1(geo.marginT)}" trimSWidth="${r1(geo.marginL)}" trimELength="${r1(geo.marginB)}" trimEWidth="${r1(geo.marginR)}" num="1" material="${esc(material)}" thickness="${r1(thick)}" saw="${r1(k)}" mcode="${mcode}" texture="${texture ? 'True' : 'False'}">`)
+    // деловой обрезок в конце листа (1-й уровень) — край листа у него не торцуется: торцовка в конце = 0
+    const endOff = tailOffcut(tree)
+    const trimEL = endOff && tree.axis === 'y' ? 0 : geo.marginB, trimEW = endOff && tree.axis === 'x' ? 0 : geo.marginR
+    out.push(`  <panel${si + 1} l="${r1(geo.sheetL)}" w="${r1(geo.sheetW)}" trimSLength="${r1(geo.marginT)}" trimSWidth="${r1(geo.marginL)}" trimELength="${r1(trimEL)}" trimEWidth="${r1(trimEW)}" num="1" material="${esc(material)}" thickness="${r1(thick)}" saw="${r1(k)}" mcode="${mcode}" texture="${texture ? 'True' : 'False'}">`)
     // узлы: номер no.K по порядку вывода, id узла = id куска в родителе (у листа 0)
     let no = 0, nextId = 0
     const lines = []
@@ -138,7 +148,14 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
       // 2-й уровень: полоса идёт от края листа — по своей оси от 0
       const head = `    <no.${no} l="${r1(lReal)}" w="${r1(wReal)}" trim="${r1(trim)}" x="${r1(layer <= 2 ? 0 : cx)}" y="${r1(layer === 1 ? 0 : cy)}" layer="${layer}" id="${id}"`
       const kids = []
-      const partLines = node.slots.map(sl => {
+      // деловой обрезок в конце заготовки — это её остаток: его не отпиливаем (лишний рез и опил края не нужны),
+      // бирка обрезка остаётся (offRows)
+      const tail = tailOffcut(node) ? node.slots[node.slots.length - 1] : null
+      if (tail) {
+        oc++
+        offRows.push({ code: `OC${oc}`, si, w: Math.round(tail.item.ow ?? tail.item.w - k), h: Math.round(tail.item.oh ?? tail.item.h - k) })
+      }
+      const partLines = node.slots.filter(sl => sl !== tail).map(sl => {
         const cut = sl.a - k
         const myId = ++nextId
         if (sl.item?.part) {
@@ -150,7 +167,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
         }
         if (sl.item?.offcut) {
           oc++
-          offRows.push({ code: `OC${oc}`, si, w: Math.round(sl.item.w - k), h: Math.round(sl.item.h - k) })
+          offRows.push({ code: `OC${oc}`, si, w: Math.round(sl.item.ow ?? sl.item.w - k), h: Math.round(sl.item.oh ?? sl.item.h - k) })
           kids.push({ leaf: true, id: myId, l: wReal, w: cut, layer: layer + 1, sl })
           return `      <part cut="${r1(cut)}" type="3" id="${myId}" code="OC${oc}" print_code="" />`
         }

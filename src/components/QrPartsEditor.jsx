@@ -72,6 +72,11 @@ export default function QrPartsEditor({ value, onChange, exclude = [], preview, 
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Разделитель при добавлении
           <input type="text" key={'s' + sep} defaultValue={sep} maxLength={3} onBlur={e => { if (e.target.value !== sep) onChange({ ...q, tpl, sep: e.target.value }) }}
             style={{ width: 52, padding: '4px 6px', textAlign: 'center' }} /></label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', margin: 0 }}
+          title="Если в части меньше символов, чем задано, — спереди дописывается этот знак: 12 при 4 символах -> 0012. Пусто — не дополнять">Дополнять до числа символов знаком
+          <input type="text" key={'p' + (q.pad || '')} defaultValue={q.pad || ''} maxLength={1} placeholder="нет"
+            onBlur={e => { const v = [...e.target.value][0] || ''; if (v !== (q.pad || '')) onChange({ ...q, tpl, pad: v }) }}
+            style={{ width: 52, padding: '4px 6px', textAlign: 'center' }} /></label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, cursor: 'pointer', margin: 0 }}>
           <input type="checkbox" checked={!!q.latin} onChange={e => onChange({ ...q, tpl, latin: e.target.checked })} style={{ width: 17, height: 17 }} />
           Перевести в латиницу
@@ -79,7 +84,7 @@ export default function QrPartsEditor({ value, onChange, exclude = [], preview, 
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
         Части в фигурных скобках подставляются сами, всё остальное (прочерк, точка, свой текст) идёт в код как написано. Части можно повторять.
-        Число символов: пусто — целиком, 8 — первые 8, −4 — последние 4. Пустая часть убирается вместе с разделителем рядом. Пробелы в коде заменяются «_».
+        Число символов: пусто — целиком, 8 — первые 8, −4 — последние 4; если символов меньше и задан знак дополнения — спереди дописывается он (заказ 12, 4 символа, знак 0 → 0012). Пустая часть убирается вместе с разделителем рядом. Пробелы в коде заменяются «_».
       </div>
       {preview != null && (
         <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>

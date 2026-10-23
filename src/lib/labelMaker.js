@@ -154,6 +154,8 @@ export function labelQr(tpl, info) {
     let v = lat(String(qrValue(m[1].trim(), info) ?? '').trim())
     const n = m[2] != null ? Number(m[2]) : 0
     if (n > 0) v = v.slice(0, n); else if (n < 0) v = v.slice(n)
+    // короче заданного числа символов — дополняется спереди знаком, который выбрал пользователь (12 -> 0012)
+    if (n && v && q.pad && v.length < Math.abs(n)) v = q.pad.repeat(Math.abs(n) - v.length) + v
     seg.push({ val: v })
     last = m.index + m[0].length
   }
@@ -343,7 +345,7 @@ export function normalizeLabel(raw) {
     // contour — толщина линии контура, мм; hole — наименьший размер точки отверстия, мм; ring — отверстия кружком, без заливки
     part: { dims: !!t.part?.dims, dimSize: Math.max(1, Math.min(6, Number(t.part?.dimSize) || 2)),
       contour: Math.max(0.08, Math.min(0.8, Number(t.part?.contour) || 0.18)), hole: Math.max(0.15, Math.min(2, Number(t.part?.hole) || 0.35)), ring: !!t.part?.ring },
-    qr: { parts: Array.isArray(t.qr?.parts) ? [...new Set(t.qr.parts.map(k => (k === 'number' ? 'order' : k)))].filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin, ...(typeof t.qr?.tpl === 'string' && t.qr.tpl.trim() ? { tpl: t.qr.tpl.slice(0, 300) } : {}) } }
+    qr: { parts: Array.isArray(t.qr?.parts) ? [...new Set(t.qr.parts.map(k => (k === 'number' ? 'order' : k)))].filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin, ...(typeof t.qr?.pad === 'string' && t.qr.pad ? { pad: [...t.qr.pad][0] } : {}), ...(typeof t.qr?.tpl === 'string' && t.qr.tpl.trim() ? { tpl: t.qr.tpl.slice(0, 300) } : {}) } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
 export function resizeLabel(tpl, w, h) {
