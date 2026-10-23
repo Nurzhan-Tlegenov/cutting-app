@@ -24,6 +24,7 @@ import { planStages } from '../lib/posts'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
 import { myOrderPerms } from '../lib/workplaces'
 import NestingCost from '../components/NestingCost'
+import OrderNotes from '../components/OrderNotes'
 import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
@@ -252,6 +253,11 @@ export default function OrderPage() {
         <NestingCost order={order} mats={nestings} method={order.cutting_method || 'nesting'} productionId={order.production_id}
           full={inProduction} style={{ marginBottom: 12 }} />
       )}
+      {/* примечания: из бланка заказа и от производства — оба идут в PDF карт раскроя */}
+      {order.status !== 'draft' || order.order_note ? (
+        <OrderNotes key={order.id} order={order} canEdit={inProduction && order.status !== 'draft'} style={{ marginBottom: 12 }}
+          onSaved={v => setOrder(o => ({ ...o, prod_note: v }))} />
+      ) : null}
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>

@@ -1,4 +1,5 @@
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
+import { saveOrderNote, NOTES_SQL_HINT } from '../lib/orderNotes'
 import ShareBadge from '../components/ShareBadge'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -284,6 +285,8 @@ export default function EditOrderPage() {
   const [model3d, setModel3d] = useState(null)   // 3D-модель из Базиса — сохраняется вместе с заказом
   const [error, setError] = useState('')
   const [orderName, setOrderName] = useState('')
+  const [orderNote, setOrderNote] = useState('')   // примечание к заказу — выводится в PDF карт раскроя
+  const noteWas = useRef('')
   const [materialName, setMaterialName] = useState('')
   const [materialThickness, setMaterialThickness] = useState(16)
   const [prefixes, setPrefixes] = useState([])
@@ -318,6 +321,7 @@ export default function EditOrderPage() {
   async function fetchOrder() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+    if (o) { setOrderNote(o.order_note || ''); noteWas.current = o.order_note || '' }
     if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16); setMaterialKind(o.material_kind === 'hdf' ? 'hdf' : ''); kindWas.current = o.material_kind === 'hdf' ? 'hdf' : '' }
     if (o) { const saved = parseEdgeTypes(o.edge_types); if (Object.keys(saved).length) setEdgeTypesState(prev => ({ ...prev, ...saved })) }
     let loadedDetails = []
@@ -456,6 +460,11 @@ export default function EditOrderPage() {
         if (!oErr && Object.keys(typesToSave(edgeTypes, edgeNames)).length) window.alert(EDGE_TYPES_HINT)
       }
       if (oErr) throw new Error('Ошибка обновления заказа: ' + oErr.message)
+      // примечание — отдельно и только если меняли: нет колонки в базе — заказ всё равно сохранён
+      if (orderNote.trim() !== noteWas.current.trim()) {
+        if (await saveOrderNote(id, orderNote)) noteWas.current = orderNote
+        else window.alert(NOTES_SQL_HINT)
+      }
       // тип материала пишется отдельно и только если его меняли: нет колонки в базе — заказ всё равно сохранён
       if (materialKind !== kindWas.current) {
         const { error: kErr } = await supabase.from('orders').update(materialKind === 'hdf' ? { material_kind: 'hdf', cutting_method: 'guillotine' } : { material_kind: null }).eq('id', id)
@@ -510,6 +519,9 @@ export default function EditOrderPage() {
         <div className="card">
           <input type="text" placeholder="Например: Кухня Ивановых" value={orderName}
             onChange={e => setOrderName(e.target.value)} style={{ marginBottom: 10 }} />
+          <label className="label">Примечание <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}>— выводится в PDF карт раскроя</span></label>
+          <textarea rows={2} placeholder="Например: фасады — текстура вертикально; забрать до пятницы" value={orderNote} maxLength={2000}
+            onChange={e => setOrderNote(e.target.value)} style={{ marginBottom: 10, width: '100%', resize: 'vertical', fontFamily: 'inherit', fontSize: 14 }} />
           <label className="label">Материал</label>
           <div style={{ display:'flex', gap:8 }}>
             <input type="text" placeholder="ЛДСП Белый 16мм" value={materialName}

@@ -1,4 +1,5 @@
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
+import { saveOrderNote, NOTES_SQL_HINT } from '../lib/orderNotes'
 import { useState, useRef, useEffect } from 'react'
 import ContourEditor from '../components/ContourEditor'
 import { useNavigate } from 'react-router-dom'
@@ -349,6 +350,7 @@ export default function NewOrderPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [orderName, setOrderName] = useState('')
+  const [orderNote, setOrderNote] = useState('')   // примечание к заказу — выводится в PDF карт раскроя
   const [materialName, setMaterialName] = useState('')
   const [materialThickness, setMaterialThickness] = useState(16)
   const [materialKind, setMaterialKind] = useState('')     // '' — плита (ЛДСП, МДФ), 'hdf' — ХДФ / ДВП (только пила)
@@ -521,6 +523,8 @@ export default function NewOrderPage() {
         const { error: kErr } = await supabase.from('orders').update({ material_kind: 'hdf', cutting_method: 'guillotine' }).eq('id', order.id)
         if (kErr) window.alert(KIND_SQL_HINT)
       }
+      // примечание пишется отдельно: нет колонки в базе — заказ всё равно создан
+      if (orderNote.trim() && !(await saveOrderNote(order.id, orderNote))) window.alert(NOTES_SQL_HINT)
 
       const rows = details.map((d, i) => {
         const pfx = d.prefix || null
@@ -625,6 +629,11 @@ export default function NewOrderPage() {
               <input type="number" placeholder="16" value={materialThickness}
                 onChange={e => setMaterialThickness(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
             </div>
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <label className="label">Примечание <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}>— выводится в PDF карт раскроя</span></label>
+            <textarea rows={2} placeholder="Например: фасады — текстура вертикально; забрать до пятницы" value={orderNote} maxLength={2000}
+              onChange={e => setOrderNote(e.target.value)} style={{ padding: '6px 8px', fontSize: 13.5, width: '100%', resize: 'vertical', fontFamily: 'inherit' }} />
           </div>
           <MaterialKind value={materialKind} onChange={setMaterialKind} style={{ marginTop: 8 }} />
         </div>

@@ -26,6 +26,46 @@ const fmt = v => String(r1(v)).replace('.', ',')
 const polyArea = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a.x * b.y - b.x * a.y } return Math.abs(s) / 2 }
 const partArea = p => (Array.isArray(p.polygon) && p.polygon.length > 2 ? polyArea(p.polygon) : (Number(p.origX) || 0) * (Number(p.origY) || 0))
 
+/** Текст по строкам в ширину w мм (переносы по словам и по \n), не больше maxLines строк -> строки */
+function wrapLines(ctx, s, w, size, bold = false, maxLines = 99) {
+  ctx.font = `${bold ? '600 ' : ''}${mm(size)}px Arial, Helvetica, sans-serif`
+  const out = []
+  for (const para of String(s ?? '').split(/\r?\n/)) {
+    let line = ''
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const t = line ? `${line} ${word}` : word
+      if (ctx.measureText(t).width <= mm(w) || !line) line = t
+      else { out.push(line); line = word }
+    }
+    out.push(line)
+  }
+  while (out.length && !out[out.length - 1]) out.pop()
+  if (out.length > maxLines) { out.length = maxLines; out[maxLines - 1] = out[maxLines - 1].replace(/.{0,2}$/, '') + '…' }
+  return out
+}
+/** Примечания заказа для PDF: [[подпись, текст]] — из бланка заказа и от производства */
+const orderNotes = order => [['Примечание', order?.order_note], ['Примечание производства', order?.prod_note]]
+  .map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v)
+/** Нарисовать примечания блоком шириной w с (x, y) -> высота блока, мм. dry — только посчитать */
+function notesBlock(ctx, notes, x, y, w, { size = 3, maxLines = 4, dry = false } = {}) {
+  let yy = y
+  for (const [k, v] of notes) {
+    const lines = wrapLines(ctx, `${k}: ${v}`, w, size, false, maxLines)
+    lines.forEach((ln, i) => {
+      yy += size * 1.3
+      if (dry) return
+      if (i === 0) {
+        // подпись — жирным, сам текст — обычным
+        text(ctx, `${k}:`, x, yy, { size, bold: true })
+        ctx.font = `600 ${mm(size)}px Arial, Helvetica, sans-serif`
+        const kw = ctx.measureText(`${k}: `).width / K
+        text(ctx, ln.slice(k.length + 2), x + kw, yy, { size, max: w - kw })
+      } else text(ctx, ln, x, yy, { size })
+    })
+    yy += 1
+  }
+  return yy - y
+}
 function text(ctx, s, x, y, { size = 3, bold = false, color = INK, align = 'left', max = 0, base = 'alphabetic' } = {}) {
   let px = mm(size)
   ctx.font = `${bold ? '600 ' : ''}${px}px Arial, Helvetica, sans-serif`
@@ -349,6 +389,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
   const edges = sheets.map(sh => sh.placed.reduce((a, p) => (details[p.detailIndex] ? addEdges(a, rawDetail(details[p.detailIndex]), over) : a), { total: 0, byName: {} }))
   const edgeAll = edges.reduce((a, e) => { a.total += e.total; for (const [k, v] of Object.entries(e.byName)) a.byName[k] = (a.byName[k] || 0) + v; return a }, { total: 0, byName: {} })
   const pages = []                                   // функции, рисующие страницу
+  const notes = orderNotes(order)                    // примечания: из бланка заказа и от производства
   let pageNo = 0
   const header = (si, cont) => {
     pageNo++
@@ -402,6 +443,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
     const geo = geos[si], sheet = sheets[si], area = geo.usableX * geo.usableY
     return {
       ...opsVals(si),
+      orderNote: ['Примечание', String(order?.order_note || '').trim()], prodNote: ['Примечание производства', String(order?.prod_note || '').trim()],
       title: ['', `Карта раскроя · ${orderTitle(order)}`], order: ['Заказ', orderTitle(order)],
       sheetNo: ['', `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${same && same[si].first !== si ? ` · карта как лист ${same[si].first + 1}` : same && same[si].count > 1 ? ` · карта ×${same[si].count}` : ''}`],
       material: ['Материал', matName], date: ['Дата', new Date().toLocaleDateString('ru-RU')],
@@ -444,6 +486,16 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
         const v = vals[it.type]
         const str = it.type === 'text' ? String(it.text || '') : !v ? '' : v[0] && it.label !== false ? `${v[0]}: ${v[1]}` : v[1]
         const size = Number(it.size) || 3
+        if (it.type === 'orderNote' || it.type === 'prodNote') {
+          // примечание — по строкам в ширину рамки элемента (на образце — серой подсказкой)
+          const nw = Number(it.w) || 120, shownN = str || (v ? `${v[0]}: …` : '')
+          const lines = wrapLines(ctx, shownN, nw, size, !!it.bold, it.lines || 6)
+          ctx.save(); ctx.translate(mm(it.x), mm(it.y)); ctx.rotate(rot * Math.PI / 180)
+          lines.forEach((ln, li) => text(ctx, ln, 0, li * size * 1.3, { size, bold: !!it.bold, color: !str ? LINE : it.muted ? MUTED : INK, base: 'top' }))
+          ctx.restore()
+          boxes.push({ id: it.id, x: it.x, y: it.y, w: nw, h: Math.max(1, lines.length) * size * 1.3, rot, kind: 'wide' })
+          continue
+        }
         const shown = str || (it.type === 'text' ? 'свой текст' : '')
         if (!shown || (v && !v[1])) continue
         ctx.save(); ctx.translate(mm(it.x), mm(it.y)); ctx.rotate(rot * Math.PI / 180)
@@ -475,15 +527,18 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
       // и сведения — на страницах статистики в конце
       pages.push(() => {
         header(si, false)
-        drawSheet(ctx, 10, LIST_TOP, 190, 249, sheet, geo, details, noOf, { cuts, ...sameOpt })
+        const nh = notes.length ? notesBlock(ctx, notes, 10, LIST_TOP - 1, 190) + 2 : 0
+        drawSheet(ctx, 10, LIST_TOP + nh, 190, 249 - nh, sheet, geo, details, noOf, { cuts, ...sameOpt })
         legendBottom()
       })
       return
     }
     pages.push(custom ? () => drawCustom(si, { sheet, geo, rows, noOf, first }) : () => {
       header(si, false)
+      // примечания заказа — над схемой (схема на их высоту ниже)
+      const nh = notes.length ? notesBlock(ctx, notes, 10, LIST_TOP - 1, 142) + 2 : 0
       // схема листа — слева, на всю ширину до списка
-      const box = drawSheet(ctx, 10, LIST_TOP, 142, 214, sheet, geo, details, noOf, { cuts, ...sameOpt })
+      const box = drawSheet(ctx, 10, LIST_TOP + nh, 142, 214 - nh, sheet, geo, details, noOf, { cuts, ...sameOpt })
       // список деталей листа — колонкой справа
       const lx = 200 - LW
       let ly = listHead(ctx, lx, LIST_TOP)
@@ -560,6 +615,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
           cols.forEach(([, x, a], ci) => text(ctx, v[ci], x, y, { size: 3, bold: ci === 0 || ci === 2, align: a, ...(ci === 6 ? { max: 46, color: MUTED } : {}) }))
           rule(ctx, 10, y + 1.8, 200, y + 1.8, 0.1)
         }
+        if (notes.length && from + PER >= sheets.length && y + 12 < 280) notesBlock(ctx, notes, 10, y + 6, 190, { size: 3.2, maxLines: Math.max(1, Math.floor((280 - y - 8) / 4.2 / notes.length)) })
       })
     }
     // списки деталей листов — колонками (по 4 на странице), каждый лист со своей подписью
@@ -655,6 +711,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
           text(ctx, 'Стоимость работ; материал и кромка в сумму не входят.', 12, y, { size: 2.5, color: MUTED })
         }
       }
+      if (notes.length && y + 12 < 284) notesBlock(ctx, notes, 10, y + 8, 190, { size: 3.2, maxLines: Math.max(1, Math.floor((284 - y - 10) / 4.2 / notes.length)) })
     })
   }
   return { pages, boxes }
@@ -674,7 +731,7 @@ export function demoPdfSample() {
   const P = (di, x, y, rot) => { const d = details[di], w = rot ? d.length : d.width, h = rot ? d.width : d.length; return { detailIndex: di, x, y, w: w + k, h: h + k, origX: w, origY: h, ...(rot ? { rotated: true, rotation: 90 } : {}) } }
   const s1 = { placed: [P(0, 0, 0), P(0, 564, 0), P(2, 1128, 0), P(1, 0, 804), P(1, 544, 804), P(1, 1088, 804), P(3, 0, 1572, true), P(3, 768, 1572, true), P(4, 0, 1676), P(4, 384, 1676), P(4, 768, 1676)] }
   const s2 = { placed: [P(0, 0, 0), P(0, 564, 0), P(2, 1128, 0), P(1, 0, 804)], manualOffcuts: [{ x: 544, y: 808, w: 1266, h: 1922 }] }
-  const order = { id: null, order_number: '261023_001', order_name: 'Образец', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: k }
+  const order = { id: null, order_number: '261023_001', order_name: 'Образец', order_note: 'Фасады — текстура вертикально', prod_note: 'Кромка 2 мм — только по фасадам', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: k }
   const mat = { key: 'demo', name: 'ЛДСП Белый', thickness: 16, details, sheets: [s1, s2], result: { sheets: [s1, s2] } }
   return { order, mat }
 }
@@ -792,12 +849,13 @@ export const PDF_ITEMS = [
   ['sheetHoles', 'Отверстий в пласть на листе', 'text'], ['sheetEdgeHoles', 'Отверстий в торец на листе', 'text'], ['sheetGrooves', 'Пазов на листе', 'text'],
   ['allCuts', 'Резов всего', 'text'], ['allCutM', 'Длина реза всего', 'text'], ['allPerim', 'Периметр деталей всего', 'text'],
   ['allHoles', 'Отверстий в пласть всего', 'text'], ['allEdgeHoles', 'Отверстий в торец всего', 'text'], ['allGrooves', 'Пазов всего', 'text'], ['allArea', 'Площадь деталей всего', 'text'],
+  ['orderNote', 'Примечание к заказу', 'text'], ['prodNote', 'Примечание производства', 'text'],
   ['footer', 'Подпись приложения', 'text'], ['pageNo', 'Номер страницы', 'text'], ['text', 'Свой текст', 'text'],
 ]
 export const pdfItemTitle = type => (PDF_ITEMS.find(x => x[0] === type) || [])[1] || type
 export const pdfItemKind = type => (PDF_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
 const HAS_LABEL = new Set(['order', 'material', 'date', 'used', 'sheetSize', 'usable', 'kerf', 'partsOnSheet', 'partsArea', 'offcuts', 'edgeSheet', 'edgeTotal', 'totals',
-  'sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves', 'allCuts', 'allCutM', 'allPerim', 'allHoles', 'allEdgeHoles', 'allGrooves', 'allArea'])
+  'sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves', 'allCuts', 'allCutM', 'allPerim', 'allHoles', 'allEdgeHoles', 'allGrooves', 'allArea', 'orderNote', 'prodNote'])
 export const pdfItemHasLabel = type => HAS_LABEL.has(type)
 
 const T = (type, x, y, size, extra = {}) => ({ type, x, y, size, ...extra })
@@ -833,8 +891,9 @@ export function normalizePdfTpl(raw) {
     else if (i.type === 'list') o.h = clamp(i.h, 20, 290, 258)
     // левый верхний угол занят знаком приложения: текст оттуда сдвигается правее, чтобы знак его не закрыл
     if (i.type !== 'map' && i.type !== 'line' && o.y < 20 && o.y > -4 && o.x < 48) o.x = 49
-    else if (i.type === 'line') o.w = clamp(i.w, 5, 210, 190)
-    else if (i.type !== 'legend') Object.assign(o, { size: clamp(i.size, 1.5, 14, 3), bold: !!i.bold, muted: !!i.muted, rot: normRot(i.rot), ...(i.label === false ? { label: false } : {}), ...(i.type === 'text' ? { text: String(i.text || '').slice(0, 200) } : {}) })
+    if (i.type === 'orderNote' || i.type === 'prodNote') o.w = clamp(i.w, 20, 200, 120)
+    if (i.type === 'line') o.w = clamp(i.w, 5, 210, 190)
+    else if (i.type !== 'legend' && i.type !== 'map' && i.type !== 'list') Object.assign(o, { size: clamp(i.size, 1.5, 14, 3), bold: !!i.bold, muted: !!i.muted, rot: normRot(i.rot), ...(i.label === false ? { label: false } : {}), ...(i.type === 'text' ? { text: String(i.text || '').slice(0, 200) } : {}) })
     return o
   })
   return { custom: !!raw?.custom, items }

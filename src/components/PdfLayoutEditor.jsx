@@ -17,6 +17,7 @@ const ADD_GROUPS = [
   ['Лист', ['used', 'sheetSize', 'usable', 'kerf', 'partsOnSheet', 'partsArea', 'offcuts', 'edgeSheet']],
   ['Операции на листе', ['sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves']],
   ['Всего по материалу', ['totals', 'allArea', 'allCuts', 'allCutM', 'allPerim', 'edgeTotal', 'overs', 'allHoles', 'allEdgeHoles', 'allGrooves']],
+  ['Примечания', ['orderNote', 'prodNote']],
   ['Низ страницы', ['footer', 'pageNo']],
 ]
 
