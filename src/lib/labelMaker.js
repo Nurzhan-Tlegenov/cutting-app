@@ -326,6 +326,7 @@ export function normalizeLabel(raw) {
       if ([0, 90, 180, 270].includes(Number(i.trot))) o.trot = Number(i.trot)
       if (i.fill) o.fill = true   // «По рамке»: шрифт увеличивается на всю рамку, если текст помещается
       if (['middle', 'bottom'].includes(i.valign)) o.valign = i.valign
+      if (typeof i.cap === 'string' && canCaption(i.type)) o.cap = i.cap.slice(0, 30)   // своя подпись перед значением ('' — без подписи)
       if (i.bind && !EDGE_TYPES.includes(i.type)) o.bind = true   // «Привязать к стороне детали» — поворачивается вместе с деталью
       const vert = textRot(o) % 180 !== 0
       o.w = Math.max(3, Math.min(vert ? h : w, Number(i.w) || 20))
@@ -641,23 +642,37 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 }
 
 /** Текст элемента бирки */
-export function labelText(type, info, tpl = null) {
+// Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
+// написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
+export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:' }
+const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image'])
+export const canCaption = type => !NO_CAP.has(type)
+export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
+/** Текст элемента бирки: подпись (своя у элемента или стандартная) + значение */
+export function labelText(type, info, tpl = null, cap = undefined) {
+  const v = labelValue(type, info, tpl)
+  if (!v || !canCaption(type)) return v
+  const c = String(cap ?? defaultCap(type, tpl)).trim()
+  return c ? `${c} ${v}` : v
+}
+function labelValue(type, info, tpl = null) {
   switch (type) {
-    case 'order': return [tpl?.order ? tpl.order.prefix : 'Заказ', info.order].filter(Boolean).join(' ')
+    case 'order': return info.order
     case 'material': return info.material
     case 'title': return [info.des, info.name].filter(Boolean).join(' ')
     case 'name': return info.name
     case 'des': return info.des
-    case 'pos': return info.pos ? `Поз. ${info.pos}` : ''
+    case 'pos': return info.pos || ''
     case 'prefix': return info.prefix
     case 'block': return info.chain?.[0] || ''
     case 'group': return info.chain?.length > 1 ? info.chain[info.chain.length - 1] : ''
     case 'blockPath': return (info.chain || []).join(' / ')
     // размер — как деталь лежит на бирке (за поворотом, как «Длина» и «Ширина»): верх/низ × лево/право
-    case 'size': return `${labelText('length', info, tpl)} x ${labelText('width', info, tpl)} x ${info.qty} шт`
-    case 'curved': return info.curved.length ? `Крив. кромка: ${info.curved.join('; ')}` : ''
+    case 'size': return `${labelValue('length', info, tpl)} x ${labelValue('width', info, tpl)} x ${info.qty} шт`
+    case 'curved': return info.curved.length ? info.curved.join('; ') : ''
     case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
-    case 'sheet': return `Карта  ${info.sheet}`
+    case 'sheet': return String(info.sheet)
     case 'num': return String(info.num)
     case 'edgeTop': case 'edgeBottom': case 'edgeLeft': case 'edgeRight': {
       // сторона бирки = сторона детали на карте (карта и деталь на бирке повёрнуты одинаково)
@@ -667,14 +682,14 @@ export function labelText(type, info, tpl = null) {
       // размер стороны с кромкой — по выбору в шаблоне («Размер стороны у кромки»), по умолчанию есть
       return tpl && tpl.edgeDims === false ? name : `${name} · ${r1(horiz === rot ? info.sizeY : info.sizeX)}`
     }
-    case 'faceHoles': return info.faceHoles ? `Отв. в пласть: ${info.faceHoles}` : ''
-    case 'backHoles': return info.backHoles ? `Нижняя присадка: ${info.backHoles}` : ''
-    case 'endHoles': return info.endHoles ? `Отв. в торец: ${info.endHoles}` : ''
-    case 'grooves': return info.grooves ? `Пазов: ${info.grooves}` : ''
-    case 'pockets': return info.pockets ? `Выемок: ${info.pockets}` : ''
-    case 'cutouts': return info.cutouts ? `Вырезов: ${info.cutouts}` : ''
+    case 'faceHoles': return info.faceHoles ? String(info.faceHoles) : ''
+    case 'backHoles': return info.backHoles ? String(info.backHoles) : ''
+    case 'endHoles': return info.endHoles ? String(info.endHoles) : ''
+    case 'grooves': return info.grooves ? String(info.grooves) : ''
+    case 'pockets': return info.pockets ? String(info.pockets) : ''
+    case 'cutouts': return info.cutouts ? String(info.cutouts) : ''
     case 'twoSided': return info.twoSided ? '⇅ обработка с двух сторон' : ''
-    case 'edgeList': return info.edgeList.length ? `Кромка: ${info.edgeList.join(', ')}` : ''
+    case 'edgeList': return info.edgeList.length ? info.edgeList.join(', ') : ''
     // «Длина» и «Ширина» идут за сторонами бирки, как размеры у кромки (фрезер — как деталь лежит на карте, пильный
     // центр — как выходит со станка): «Длина» — размер верхней/нижней стороны бирки, «Ширина» — левой/правой.
     // В обычном положении это и есть длина и ширина; деталь повёрнута на 90° — значения меняются местами
@@ -742,7 +757,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
       if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0,
         tpl.part ? { contour: tpl.part.contour * mm, inner: tpl.part.contour * mm * 0.7, holeMin: tpl.part.hole * mm, ring: tpl.part.ring } : {})
     } else {
-      let text = labelText(it.type, info, tpl), ghost = false
+      let text = labelText(it.type, info, tpl, it.cap), ghost = false
       if (!text) {
         if (!opts.preview) continue                         // параметра у детали нет — ни текста, ни картинки
         if (!it.img) { text = itemTitle(it.type); ghost = true }

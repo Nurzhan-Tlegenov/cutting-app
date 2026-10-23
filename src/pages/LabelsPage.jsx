@@ -12,7 +12,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, qrHasLink, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, qrHasLink, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -373,6 +373,16 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
                 </label>
               )}
             </>
+          )}
+          {canCaption(cur.type) && cur.type !== 'order' && !cur.img && !isBox(cur) && (
+            <div style={{ flex: '1 1 100%', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Подпись
+                <input type="text" key={'cap' + cur.id + (cur.cap ?? '\u0000')} defaultValue={cur.cap ?? defaultCap(cur.type, tpl)} placeholder="без подписи" maxLength={30}
+                  onBlur={e => { const v = e.target.value; if (v !== (cur.cap ?? defaultCap(cur.type, tpl))) edit({ cap: v }) }}
+                  style={{ width: 140, marginLeft: 6, padding: '6px 8px' }} /></label>
+              {cur.cap != null && cur.cap !== defaultCap(cur.type, tpl) && <button type="button" style={chip(false)} onClick={() => edit({ cap: undefined })}>Как было</button>}
+              <span style={{ flex: '1 1 100%', fontSize: 11, color: 'var(--text-hint)' }}>Текст перед значением («Поз.», «Карта», «Пазов:» …). Сотрите — останется только значение, или напишите своё.</span>
+            </div>
           )}
           {cur.type === 'order' && !cur.img && (
             <div style={{ flex: '1 1 100%', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
