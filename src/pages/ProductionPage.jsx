@@ -19,6 +19,7 @@ import { simShareOrders } from '../lib/simShare'
 import CncLoader from '../components/CncLoader'
 import PriceList from '../components/PriceList'
 import CncSetup from '../components/CncSetup'
+import ReportsSettings from '../components/ReportsSettings'
 import { useKeptState } from '../hooks/useKeptState'
 import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
@@ -215,6 +216,7 @@ export default function ProductionPage() {
     ...(betaBeam ? [['beamsaw', I.sliders, 'Пильный центр β', 'Уровни резов, повороты, захват, узкие детали, полосы']] : []),
     ['post', I.cnc, 'Постпроцессоры', 'Станки ЧПУ, инструменты, обработка'],
     ['labels', I.tag, 'Бирки', 'Шаблон бирки: размер, параметры, картинки'],
+    ['reports', I.file, 'Отчёты (PDF)', 'Карты раскроя: конструктор листа, статистика, смета'],
     ['xml', I.file, 'Просмотр XML присадки', 'Программы присадочного станка'],
     ['gsim', I.cnc, 'Симуляция G-кода', 'Любая УП — в том числе из других программ'],
   ] : []
@@ -338,6 +340,7 @@ export default function ProductionPage() {
               </>}
               {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
               {setSec === 'post' && <CncSetup prodId={prod.id} />}
+              {setSec === 'reports' && <ReportsSettings />}
               {setSec === 'beamsaw' && <BeamSawSettings key={prod.id} prod={prod} onSaved={v => setProd(p => ({ ...p, beam_saw_settings: v }))} />}
             </div>
           ))}

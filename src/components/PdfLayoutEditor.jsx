@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
-import { drawPdfPreview, normalizePdfTpl, newPdfItem, PDF_ITEMS, pdfItemTitle, pdfItemKind, pdfItemHasLabel } from '../lib/nestingPdf'
+import { drawPdfPreview, normalizePdfTpl, newPdfItem, PDF_ITEMS, pdfItemTitle, pdfItemKind, pdfItemHasLabel, demoPdfSample } from '../lib/nestingPdf'
 import { useBackClose } from '../lib/backStack'
 
 // Конструктор листа PDF карт раскроя — как конструктор бирки: карта листа, список деталей, заголовок и каждая строка
@@ -10,8 +10,21 @@ import { useBackClose } from '../lib/backStack'
 const PAGE_W = 210, PAGE_H = 297
 const ZOOMS = [1, 1.5, 2, 3]
 
-export default function PdfLayoutEditor({ order, mat, onClose }) {
+// что добавить на лист — по группам, чтобы длинный список не путал
+const ADD_GROUPS = [
+  ['Карта и оформление', ['map', 'list', 'legend', 'line', 'text']],
+  ['Шапка', ['title', 'order', 'sheetNo', 'material', 'date']],
+  ['Лист', ['used', 'sheetSize', 'usable', 'kerf', 'partsOnSheet', 'partsArea', 'offcuts', 'edgeSheet']],
+  ['Операции на листе', ['sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves']],
+  ['Всего по материалу', ['totals', 'allArea', 'allCuts', 'allCutM', 'allPerim', 'edgeTotal', 'overs', 'allHoles', 'allEdgeHoles', 'allGrooves']],
+  ['Низ страницы', ['footer', 'pageNo']],
+]
+
+export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
   useBackClose(true, onClose)
+  // из настроек производства заказа нет — показываем образец
+  const [demo] = useState(() => (mat0 ? null : demoPdfSample()))
+  const order = demo ? demo.order : order0, mat = demo ? demo.mat : mat0
   const { user } = useAuth()
   const [tpl, setTpl] = useState(() => normalizePdfTpl(getUserSettings(user).pdfTpl))
   const [sel, setSel] = useState(null)
@@ -79,7 +92,7 @@ export default function PdfLayoutEditor({ order, mat, onClose }) {
         <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1 }}>←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 16, fontWeight: 500 }}>Оформление листа PDF</div>
-          <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Страница A4 · показан первый лист</div>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Страница A4 · {demo ? 'на образце' : 'показан первый лист'}</div>
         </div>
         <button type="button" style={chip(false)} disabled={zoom === ZOOMS[0]} onClick={() => setZoom(z => ZOOMS[Math.max(0, ZOOMS.indexOf(z) - 1)])}>−</button>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 28, textAlign: 'center' }}>{zoom}×</span>
@@ -135,6 +148,23 @@ export default function PdfLayoutEditor({ order, mat, onClose }) {
                 onBlur={e => { if (e.target.value !== cur.text) edit({ text: e.target.value }) }} style={{ flex: '1 1 100%', padding: '7px 9px', fontSize: 13 }} />
             )}
             {cur.type === 'map' && <button type="button" style={chip(false)} onClick={() => edit({ x: 10, w: 190 })}>На всю ширину</button>}
+            {cur.type === 'map' && (
+              <>
+                <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 70 }}>Размеры:</span>
+                  {[['sides', 'По сторонам'], ['line', 'Строкой Д×Ш'], ['none', 'Без размеров']].map(([k, l]) => (
+                    <button key={k} type="button" style={chip((cur.dims || 'sides') === k)} onClick={() => edit({ dims: k === 'sides' ? undefined : k })}>{l}</button>
+                  ))}
+                </div>
+                <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 70 }}>Шрифт на карте:</span>
+                  <button type="button" style={chip(false)} onClick={() => edit({ dimK: Math.max(0.5, Math.round(((cur.dimK || 1) - 0.1) * 10) / 10) })}>A−</button>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 38, textAlign: 'center' }}>{Math.round((cur.dimK || 1) * 100)}%</span>
+                  <button type="button" style={chip(false)} onClick={() => edit({ dimK: Math.min(2.5, Math.round(((cur.dimK || 1) + 0.1) * 10) / 10) })}>A+</button>
+                  <button type="button" style={chip(cur.num !== false)} onClick={() => edit({ num: cur.num === false ? undefined : false })}>{cur.num !== false ? '✓ ' : ''}Номер позиции</button>
+                </div>
+              </>
+            )}
             <button type="button" style={{ ...chip(false), color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }}
               onClick={() => { change(tpl.items.filter(i => i.id !== sel)); setSel(null) }}>Убрать</button>
           </div>
@@ -142,11 +172,20 @@ export default function PdfLayoutEditor({ order, mat, onClose }) {
 
         <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>Знак RaskroyPro и адрес raskroypro.com всегда стоят в левом верхнем углу страницы — убрать или передвинуть их нельзя.</p>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на лист</div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-          {PDF_ITEMS.filter(([k]) => !used.has(k) || k === 'text' || k === 'line').map(([k, label]) => (
-            <button key={k} type="button" style={chip(false)} onClick={() => { const it = newPdfItem(k); change([...tpl.items, it]); setSel(it.id) }}>+ {label}</button>
-          ))}
-        </div>
+        {ADD_GROUPS.map(([title, keys]) => {
+          const list = keys.filter(k => PDF_ITEMS.some(x => x[0] === k) && (!used.has(k) || k === 'text' || k === 'line'))
+          if (!list.length) return null
+          return (
+            <div key={title} style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>{title}</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {list.map(k => (
+                  <button key={k} type="button" style={chip(false)} onClick={() => { const it = newPdfItem(k); change([...tpl.items, it]); setSel(it.id) }}>+ {pdfItemTitle(k)}</button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
         <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если список деталей не помещается в свою высоту, он продолжается на следующей странице. Статистика всего раскроя и смета идут отдельной последней страницей.</p>
       </div>
 

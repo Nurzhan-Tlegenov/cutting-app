@@ -14,6 +14,7 @@ import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeom
 import { insetEdgeLines } from './edgeLines'
 import { computeCutLines } from './cutLines'
 import { sameMaps } from './beamSaw'
+import { nestingStats } from './nestingStats'
 
 const K = 1654 / 210                     // точек на мм
 const PW = 1654, PH = 2339
@@ -196,7 +197,10 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
     // подписи: номер позиции — в середине, размеры — вдоль сторон внутри детали (ширина — у верхней, длина — у левой).
     // На мелкой детали всё уменьшается, пока помещается; на совсем мелкой — номер и размер одной-двумя строками
     const pw = w * s, ph = h * s, cx = x0 + (px + w / 2) * s, cy = y0 + (geo.sheetL - py - h / 2) * s
-    const no = String(noOf.get(p.detailIndex) ?? '')
+    // подписи на карте (свой макет PDF): opt.dims — 'sides' размеры по сторонам (как было) | 'line' — номер и «Д×Ш»
+    // одной строкой | 'none' — без размеров; opt.dimK — крупность подписей; opt.noNum — без номера позиции
+    const dimsMode = opt.dims || 'sides', dk = opt.dimK || 1
+    const no = opt.noNum ? '' : String(noOf.get(p.detailIndex) ?? '')
     const sw = fmt(w), sh = fmt(h)
     const tw = (str, size, bold) => { ctx.font = `${bold ? '600 ' : ''}${mm(size)}px Arial, Helvetica, sans-serif`; return ctx.measureText(str).width / K }
     const vtext = (str, x, y, size, opt = {}) => {                         // текст снизу вверх
@@ -204,17 +208,21 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
       ctx.font = `${opt.bold ? '600 ' : ''}${mm(size)}px Arial, Helvetica, sans-serif`; ctx.fillStyle = opt.color || INK
       ctx.textAlign = 'center'; ctx.textBaseline = opt.base || 'alphabetic'; ctx.fillText(str, 0, 0); ctx.restore()
     }
+    if (dimsMode === 'none') {
+      if (no) text(ctx, no, cx, cy, { size: Math.max(1.2, Math.min(4 * dk, Math.min(pw, ph) * 0.35)), bold: true, align: 'center', base: 'middle' })
+      continue
+    }
     let placed = false
-    for (const k of [1, 0.88, 0.76, 0.65, 0.55, 0.45]) {
+    for (const k of dimsMode === 'line' ? [] : [1, 0.88, 0.76, 0.65, 0.55, 0.45]) {
       // размеры по сторонам — главное на распечатке (по ним режут): крупно; номер позиции — скромнее
-      const ds = Math.max(1.5, Math.min(5.2, Math.min(pw, ph) * 0.26) * k)
-      const ns = Math.max(1.8, Math.min(4, Math.min(pw, ph) * 0.3) * k)
+      const ds = Math.max(1.5, Math.min(5.2 * dk, Math.min(pw, ph) * 0.26 * dk) * k)
+      const ns = Math.max(1.8, Math.min(4 * dk, Math.min(pw, ph) * 0.3 * dk) * k)
       const eL = p.edgeLeft ? 0.9 : 0, eT = p.edgeTop ? 0.9 : 0           // размер не наезжает на полоску кромки
       const bandL = ds + 1.2 + eL, bandT = ds + 1.2 + eT                  // полосы под размер у левой и верхней стороны
       const fitTop = tw(sw, ds, true) <= pw - bandL - 0.8, fitLeft = tw(sh, ds, true) <= ph - bandT - 0.8
       const fitNo = ph / 2 - ns / 2 >= bandT + 0.3 && pw / 2 - tw(no, ns, true) / 2 >= bandL + 0.3
       if (!(fitTop && fitLeft && fitNo)) continue
-      text(ctx, no, cx, cy, { size: ns, bold: true, align: 'center', base: 'middle' })
+      if (no) text(ctx, no, cx, cy, { size: ns, bold: true, align: 'center', base: 'middle' })
       text(ctx, sw, cx, y0 + (geo.sheetL - py - h) * s + ds + 0.9 + eT, { size: ds, bold: true, color: DIM, align: 'center' })
       vtext(sh, x0 + px * s + ds + 0.8 + eL, cy, ds, { bold: true, color: DIM })
       placed = true
@@ -229,10 +237,10 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
       const cx = x0 + px * s + il + iw / 2, cy = y0 + (geo.sheetL - py - h) * s + it + ih / 2
       const dims = d ? `${fmt(d.length)}×${fmt(d.width)}` : `${sh}×${sw}`
       const long = Math.max(iw, ih), short = Math.min(iw, ih), vert = ih > iw
-      const one = Math.min(3.8, (short - 0.4) * 0.8, (long - 0.8) / Math.max(0.1, tw(`${no}  ${dims}`, 1.05, true)))
-      const two = Math.min(3.8, (short - 0.4) / 2.3, (long - 0.8) / Math.max(0.1, tw(dims, 1, true), tw(no, 1.15, true)))
+      const one = Math.min(3.8 * dk, (short - 0.4) * 0.8, (long - 0.8) / Math.max(0.1, tw(no ? `${no}  ${dims}` : dims, 1.05, true)))
+      const two = no ? Math.min(3.8 * dk, (short - 0.4) / 2.3, (long - 0.8) / Math.max(0.1, tw(dims, 1, true), tw(no, 1.15, true))) : 0
       if (one >= two) {
-        const size = Math.max(0.9, one), wn = tw(no, size, true), gap = size * 0.5, total = wn + gap + tw(dims, size, true)
+        const size = Math.max(0.9, one), wn = no ? tw(no, size, true) : 0, gap = no ? size * 0.5 : 0, total = wn + gap + tw(dims, size, true)
         if (vert) {
           vtext(no, cx, cy + total / 2 - wn / 2, size, { bold: true, base: 'middle' })
           vtext(dims, cx, cy - total / 2 + (total - wn - gap) / 2, size, { bold: true, color: DIM, base: 'middle' })
@@ -371,9 +379,29 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
   }
   // β Пильный центр: одинаковые карты подписываются («карта ×3», «карта как лист 1»)
   const same = mat?.result?.beamSaw && mat.result.beamSettings?.mergeSame !== false ? sameMaps(sheets) : null
+  // операции раскроя (резы, длина реза, периметр, присадка) — по листу и по всему материалу; считаются, только если
+  // такие строки стоят в своём макете
+  const OPS = ['sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves', 'allCuts', 'allCutM', 'allPerim', 'allHoles', 'allEdgeHoles', 'allGrooves', 'allArea']
+  const needOps = !!custom && custom.items.some(i => OPS.includes(i.type))
+  const method = cuts ? 'guillotine' : 'nesting'
+  const opsSheet = needOps ? sheets.map(sh => nestingStats({ order, mat: { ...mat, sheets: [sh] }, method })) : []
+  const opsAll = needOps ? nestingStats({ order, mat: { ...mat, sheets }, method }) : null
+  const opsVals = si => {
+    if (!needOps) return {}
+    const a = opsSheet[si], t = opsAll, n = v => m2(v)
+    const cutWord = cuts ? 'Резов' : 'Контуров реза'
+    return {
+      sheetCuts: [`${cutWord} на листе`, String(a.cuts)], sheetCutM: ['Длина реза на листе', `${n(a.cutM)} м`], sheetPerim: ['Периметр деталей на листе', `${n(a.perimM)} м`],
+      sheetHoles: ['Отверстий в пласть на листе', String(a.holes)], sheetEdgeHoles: ['Отверстий в торец на листе', String(a.edgeHoles)], sheetGrooves: ['Пазов на листе', `${a.grooves} шт · ${n(a.grooveM)} м`],
+      allCuts: [`${cutWord} всего`, String(t.cuts)], allCutM: ['Длина реза всего', `${n(t.cutM)} м`], allPerim: ['Периметр деталей всего', `${n(t.perimM)} м`],
+      allHoles: ['Отверстий в пласть всего', String(t.holes)], allEdgeHoles: ['Отверстий в торец всего', String(t.edgeHoles)], allGrooves: ['Пазов всего', `${t.grooves} шт · ${n(t.grooveM)} м`],
+      allArea: ['Площадь деталей всего', `${n(t.partsM2)} м²`],
+    }
+  }
   const pageValues = si => {
     const geo = geos[si], sheet = sheets[si], area = geo.usableX * geo.usableY
     return {
+      ...opsVals(si),
       title: ['', `Карта раскроя · ${orderTitle(order)}`], order: ['Заказ', orderTitle(order)],
       sheetNo: ['', `${sheet.stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${same && same[si].first !== si ? ` · карта как лист ${same[si].first + 1}` : same && same[si].count > 1 ? ` · карта ×${same[si].count}` : ''}`],
       material: ['Материал', matName], date: ['Дата', new Date().toLocaleDateString('ru-RU')],
@@ -398,7 +426,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
         const turned = Math.abs(rot) % 180 === 90, bw = turned ? it.h : it.w, bh = turned ? it.w : it.h
         const sc = Math.min(bw / geo.sheetW, bh / geo.sheetL)
         ctx.save(); ctx.translate(mm(it.x + it.w / 2), mm(it.y + it.h / 2)); ctx.rotate(rot * Math.PI / 180)
-        drawSheet(ctx, -bw / 2, -geo.sheetL * sc / 2, bw, bh, sheet, geo, details, noOf, { cuts, ...sameOpt })
+        drawSheet(ctx, -bw / 2, -geo.sheetL * sc / 2, bw, bh, sheet, geo, details, noOf, { cuts, ...sameOpt, dims: it.dims, dimK: it.dimK, noNum: it.num === false })
         ctx.restore()
         boxes.push({ id: it.id, x: it.x, y: it.y, w: it.w, h: it.h, rot: 0, kind: 'box' })
       } else if (it.type === 'list') {
@@ -636,6 +664,21 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
  * Показать первую страницу (первый лист) на canvas — для конструктора листа.
  * -> рамки элементов: [{ id, x, y, w, h, rot, kind }] в мм
  */
+/** Образец для конструктора в настройках производства (заказа под рукой нет): два листа с деталями, кромкой и обрезком */
+export function demoPdfSample() {
+  const E = 'ПВХ 0,4', E2 = 'ПВХ 2'
+  const det = (name, L, W, e, pos) => ({ name, length: L, width: W, qty: 1, edge_top: e[0] || null, edge_right: e[1] || null, edge_bottom: e[2] || null, edge_left: e[3] || null,
+    contour: JSON.stringify({ vertices: [{ x: 0, y: 0, r: 0 }, { x: W, y: 0, r: 0 }, { x: W, y: L, r: 0 }, { x: 0, y: L, r: 0 }], holes: [], grooves: [], layout: [], meta: { pos }, drillings: [] }) })
+  const details = [det('Бок', 720, 560, [E2, E, E, E], '1'), det('Полка', 764, 540, [E2], '2'), det('Крышка', 800, 560, [E2, E, E, E], '3'), det('Цоколь', 764, 100, [E], '4'), det('Дно ящика', 450, 380, [], '5')]
+  const k = 4
+  const P = (di, x, y, rot) => { const d = details[di], w = rot ? d.length : d.width, h = rot ? d.width : d.length; return { detailIndex: di, x, y, w: w + k, h: h + k, origX: w, origY: h, ...(rot ? { rotated: true, rotation: 90 } : {}) } }
+  const s1 = { placed: [P(0, 0, 0), P(0, 564, 0), P(2, 1128, 0), P(1, 0, 804), P(1, 544, 804), P(1, 1088, 804), P(3, 0, 1572, true), P(3, 768, 1572, true), P(4, 0, 1676), P(4, 384, 1676), P(4, 768, 1676)] }
+  const s2 = { placed: [P(0, 0, 0), P(0, 564, 0), P(2, 1128, 0), P(1, 0, 804)], manualOffcuts: [{ x: 544, y: 808, w: 1266, h: 1922 }] }
+  const order = { id: null, order_number: '261023_001', order_name: 'Образец', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: k }
+  const mat = { key: 'demo', name: 'ЛДСП Белый', thickness: 16, details, sheets: [s1, s2], result: { sheets: [s1, s2] } }
+  return { order, mat }
+}
+
 export function drawPdfPreview(canvas, { order, mat, tpl }) {
   canvas.width = PW; canvas.height = PH
   const ctx = canvas.getContext('2d')
@@ -745,11 +788,16 @@ export const PDF_ITEMS = [
   ['used', 'Использовано материала', 'text'], ['sheetSize', 'Размер листа', 'text'], ['usable', 'Рабочая область', 'text'], ['kerf', 'Ширина реза', 'text'],
   ['partsOnSheet', 'Деталей на листе', 'text'], ['partsArea', 'Площадь деталей', 'text'], ['offcuts', 'Обрезки', 'text'],
   ['edgeSheet', 'Кромка на листе', 'text'], ['edgeTotal', 'Кромка всего', 'text'], ['overs', 'Свесы кромки', 'text'], ['totals', 'Всего по заказу', 'text'],
+  ['sheetCuts', 'Резов на листе', 'text'], ['sheetCutM', 'Длина реза на листе', 'text'], ['sheetPerim', 'Периметр деталей на листе', 'text'],
+  ['sheetHoles', 'Отверстий в пласть на листе', 'text'], ['sheetEdgeHoles', 'Отверстий в торец на листе', 'text'], ['sheetGrooves', 'Пазов на листе', 'text'],
+  ['allCuts', 'Резов всего', 'text'], ['allCutM', 'Длина реза всего', 'text'], ['allPerim', 'Периметр деталей всего', 'text'],
+  ['allHoles', 'Отверстий в пласть всего', 'text'], ['allEdgeHoles', 'Отверстий в торец всего', 'text'], ['allGrooves', 'Пазов всего', 'text'], ['allArea', 'Площадь деталей всего', 'text'],
   ['footer', 'Подпись приложения', 'text'], ['pageNo', 'Номер страницы', 'text'], ['text', 'Свой текст', 'text'],
 ]
 export const pdfItemTitle = type => (PDF_ITEMS.find(x => x[0] === type) || [])[1] || type
 export const pdfItemKind = type => (PDF_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
-const HAS_LABEL = new Set(['order', 'material', 'date', 'used', 'sheetSize', 'usable', 'kerf', 'partsOnSheet', 'partsArea', 'offcuts', 'edgeSheet', 'edgeTotal', 'totals'])
+const HAS_LABEL = new Set(['order', 'material', 'date', 'used', 'sheetSize', 'usable', 'kerf', 'partsOnSheet', 'partsArea', 'offcuts', 'edgeSheet', 'edgeTotal', 'totals',
+  'sheetCuts', 'sheetCutM', 'sheetPerim', 'sheetHoles', 'sheetEdgeHoles', 'sheetGrooves', 'allCuts', 'allCutM', 'allPerim', 'allHoles', 'allEdgeHoles', 'allGrooves', 'allArea'])
 export const pdfItemHasLabel = type => HAS_LABEL.has(type)
 
 const T = (type, x, y, size, extra = {}) => ({ type, x, y, size, ...extra })
@@ -780,7 +828,8 @@ export function normalizePdfTpl(raw) {
   const src = raw && Array.isArray(raw.items) && raw.items.length ? raw.items : DEFAULT_ITEMS
   const items = src.filter(i => i && PDF_ITEMS.some(x => x[0] === i.type)).map(i => {
     const o = { id: i.id || newId(), type: i.type, x: clamp(i.x, -20, 215, 10), y: clamp(i.y, -20, 300, 10) }
-    if (i.type === 'map') Object.assign(o, { w: clamp(i.w, 20, 210, 142), h: clamp(i.h, 20, 297, 214), rot: normRot(i.rot) })
+    if (i.type === 'map') Object.assign(o, { w: clamp(i.w, 20, 210, 142), h: clamp(i.h, 20, 297, 214), rot: normRot(i.rot),
+      ...(['line', 'none'].includes(i.dims) ? { dims: i.dims } : {}), ...(i.dimK && Math.abs(i.dimK - 1) > 0.01 ? { dimK: clamp(i.dimK, 0.5, 2.5, 1) } : {}), ...(i.num === false ? { num: false } : {}) })
     else if (i.type === 'list') o.h = clamp(i.h, 20, 290, 258)
     // левый верхний угол занят знаком приложения: текст оттуда сдвигается правее, чтобы знак его не закрыл
     if (i.type !== 'map' && i.type !== 'line' && o.y < 20 && o.y > -4 && o.x < 48) o.x = 49

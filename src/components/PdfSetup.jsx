@@ -45,7 +45,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
       <div style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderRadius: '16px 16px 0 0' }}>
         <div style={{ padding: '14px 16px 8px' }}>
           <div style={{ fontSize: 16, fontWeight: 500 }}>PDF карт раскроя</div>
-          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Отметьте, что вывести на последней странице: статистику раскроя и смету.</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Отметьте, что вывести на последней странице: статистику раскроя и смету. Все настройки отчётов — также в «Производство → Настройки → Отчёты (PDF)».</div>
           <div onClick={() => setLayout(true)} style={{ display: 'flex', alignItems: 'center', marginTop: 8, padding: '8px 10px', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', cursor: 'pointer' }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, color: 'var(--blue)', fontWeight: 500 }}>Оформление листа (конструктор)</div>
