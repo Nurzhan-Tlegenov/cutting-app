@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Проверка связи · RaskroyPro</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:18px;color:#222;max-width:560px}
+h1{font-size:19px;color:#009BDE;margin:0 0 6px}p{color:#555;font-size:14px;line-height:1.45}
+.row{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid #eee;font-size:14px}
+.ok{color:#1e7e34;font-weight:600}.bad{color:#c0392b;font-weight:600}.wait{color:#888}
+button{margin-top:14px;padding:11px 18px;border:none;border-radius:10px;background:#009BDE;color:#fff;font-size:15px;font-weight:600}
+#sum{margin-top:14px;padding:12px;border-radius:10px;background:#f4f8fb;font-size:14px;white-space:pre-wrap}</style></head>
+<body>
+<h1>Проверка связи с RaskroyPro</h1>
+<p>Страница проверяет, доходят ли до телефона файлы приложения и ответы базы. Сделайте снимок экрана после проверки и отправьте его.</p>
+<div id="rows"></div>
+<button id="again">Проверить ещё раз</button>
+<div id="sum"></div>
+<script>
+// Простая проверка без приложения: адрес, база, файлы приложения (с замером, сколько скачалось и за сколько)
+(function () {
+  var rows = document.getElementById('rows'), sum = document.getElementById('sum')
+  var mirror = /^ru\./i.test(location.hostname)
+  var db = mirror ? location.origin + '/sb' : 'https://bmcmyrdsxievaglpspcn.supabase.co'
+  function row(name) {
+    var d = document.createElement('div'); d.className = 'row'
+    d.innerHTML = '<span>' + name + '</span><span class="wait">…</span>'; rows.appendChild(d)
+    return function (text, ok) { var s = d.lastChild; s.textContent = text; s.className = ok === true ? 'ok' : ok === false ? 'bad' : 'wait' }
+  }
+  function kb(n) { return n > 1048576 ? (n / 1048576).toFixed(2) + ' МБ' : Math.round(n / 1024) + ' КБ' }
+  // скачать с замером: сколько байт пришло; через 40 с без конца — «зависло»
+  function load(url, set) {
+    var t0 = Date.now(), got = 0, ctl = new AbortController(), last = Date.now()
+    var tick = setInterval(function () {
+      set('идёт: ' + kb(got) + ' за ' + ((Date.now() - t0) / 1000).toFixed(0) + ' с')
+      if (Date.now() - last > 20000) { ctl.abort() }
+    }, 500)
+    return fetch(url, { cache: 'no-store', signal: ctl.signal }).then(function (r) {
+      var rd = r.body && r.body.getReader ? r.body.getReader() : null
+      if (!rd) return r.arrayBuffer().then(function (b) { got = b.byteLength; return r.status })
+      function pump() { return rd.read().then(function (x) { if (x.done) return r.status; got += x.value.length; last = Date.now(); return pump() }) }
+      return pump()
+    }).then(function (st) {
+      clearInterval(tick); var s = ((Date.now() - t0) / 1000).toFixed(1)
+      set('✓ ' + kb(got) + ' за ' + s + ' с (код ' + st + ')', st < 500); return { ok: st < 500, got: got }
+    }, function (e) {
+      clearInterval(tick); set('✕ остановилось на ' + kb(got) + ' (' + (e && e.name === 'AbortError' ? 'нет данных 20 с' : (e && e.message) || 'ошибка') + ')', false)
+      return { ok: false, got: got }
+    })
+  }
+  function run() {
+    rows.innerHTML = ''; sum.textContent = ''
+    var info = row('Адрес'); info(location.host + (mirror ? ' (зеркало)' : ''), true)
+    var r1 = row('База (ответ сервера)'), r2 = row('Страница приложения'), r3 = row('Файл приложения (основной)')
+    var res = {}
+    load(db + '/auth/v1/health', r1).then(function (x) { res.db = x
+      return fetch('/?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.text() }).then(function (html) {
+        r2('✓ ' + kb(html.length), true)
+        var m = html.match(/src="(\/assets\/index-[^"]+\.js)"/)
+        if (!m) { r3('не найден (сайт не собран?)', false); return }
+        return load(m[1] + '?t=' + Date.now(), r3).then(function (y) { res.js = y })
+      }, function () { r2('✕ не открылась', false) })
+    }).then(function () {
+      var t = res.js && res.js.ok ? 'Связь в порядке: приложение должно открываться. Если не открывается — обновите страницу или закройте и откройте браузер.'
+        : res.js && res.js.got > 0 && res.js.got < 200000 ? 'Загрузка останавливается на первых килобайтах — похоже, провайдер ограничивает связь с сервером. Отправьте этот экран разработчику.'
+        : 'Файл приложения не скачался. Отправьте этот экран разработчику.'
+      sum.textContent = t + '\n\n' + new Date().toLocaleString('ru-RU') + ' · ' + navigator.userAgent
+    })
+  }
+  document.getElementById('again').onclick = run
+  run()
+})()
+</script>
+</body></html>
