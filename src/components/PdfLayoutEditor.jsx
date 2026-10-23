@@ -31,15 +31,26 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
   const [sel, setSel] = useState(null)
   const [boxes, setBoxes] = useState([])
   const [zoom, setZoom] = useState(1)
-  const [baseW, setBaseW] = useState(320)
+  const [fitK, setFitK] = useState(1.5)             // точек экрана на мм, когда лист целиком помещается в окно превью
+  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900)   // монитор: параметры справа
   const [live, setLive] = useState(null)             // идёт перетаскивание: { id, dx, dy, dw, dh } в мм
   const holderRef = useRef(null), cvRef = useRef(null), drag = useRef(null)
-  const scale = baseW * zoom / PAGE_W                // точек экрана на мм
+  const scale = fitK * zoom                          // точек экрана на мм
 
+  // превью всегда целиком в своём окне (по ширине и по высоте); «+» — крупнее, лист прокручивается
   useEffect(() => {
-    const fit = () => { const w = holderRef.current?.clientWidth; if (w) setBaseW(w - 2) }
-    fit(); window.addEventListener('resize', fit)
-    return () => window.removeEventListener('resize', fit)
+    const el = holderRef.current
+    const fit = () => {
+      setWide(window.innerWidth >= 900)
+      if (!el) return
+      const w = el.clientWidth - 16, h = el.clientHeight - 16
+      if (w > 0 && h > 0) setFitK(Math.max(0.5, Math.min(w / PAGE_W, h / PAGE_H)))
+    }
+    fit()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null
+    if (ro && el) ro.observe(el)
+    window.addEventListener('resize', fit)
+    return () => { ro?.disconnect(); window.removeEventListener('resize', fit) }
   }, [])
   useEffect(() => {
     if (!cvRef.current || !mat) return
@@ -100,10 +111,11 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
         <button type="button" style={chip(false)} disabled={zoom === ZOOMS[ZOOMS.length - 1]} onClick={() => setZoom(z => ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + 1)])}>+</button>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px' }}>
-        <div ref={holderRef} style={{ overflow: 'auto', maxHeight: '58vh', border: '1px solid var(--border-md)', background: '#8a8a86' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: wide ? 'row' : 'column' }}>
+        {/* превью листа: на телефоне — сверху, на мониторе — слева; лист целиком в окне */}
+        <div ref={holderRef} style={{ flex: wide ? 1 : '1 1 55%', minHeight: 0, minWidth: 0, overflow: 'auto', background: '#8a8a86', padding: 8, display: 'flex' }}>
           <div onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerDown={() => setSel(null)}
-            style={{ position: 'relative', width: PAGE_W * scale, height: PAGE_H * scale, background: '#fff', userSelect: 'none', overflow: 'hidden' }}>
+            style={{ position: 'relative', width: PAGE_W * scale, height: PAGE_H * scale, flex: 'none', margin: 'auto', background: '#fff', userSelect: 'none', overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.25)' }}>
             <canvas ref={cvRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
             {boxes.map(b => {
               const on = b.id === sel, l = live && live.id === b.id ? live : null
@@ -122,7 +134,10 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
             })}
           </div>
         </div>
-        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0 8px' }}>Перетащите элемент на своё место; синяя точка в углу меняет размер. Лист двигается за пустое место.</p>
+        {/* параметры: на телефоне — снизу своей прокруткой, на мониторе — колонкой справа */}
+        <div style={{ flex: wide ? '0 0 380px' : '1 1 45%', minHeight: 0, overflowY: 'auto', padding: '10px 12px', background: 'var(--bg2)',
+          borderLeft: wide ? '0.5px solid var(--border)' : 'none', borderTop: wide ? 'none' : '0.5px solid var(--border)' }}>
+        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>{cur ? 'Перетащите элемент на своё место; синяя точка в углу меняет размер.' : 'Нажмите на элемент листа, чтобы настроить его, или добавьте новый ниже.'}</p>
 
         {cur && (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: '8px 10px', background: 'var(--bg)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
@@ -188,6 +203,7 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
           )
         })}
         <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если список деталей не помещается в свою высоту, он продолжается на следующей странице. Статистика всего раскроя и смета идут отдельной последней страницей.</p>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '0.5px solid var(--border)' }}>
