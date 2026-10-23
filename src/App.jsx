@@ -45,6 +45,7 @@ import TourOverlay from './components/TourOverlay'
 import { pendingInvite } from './lib/workplaces'
 import { pendingRef } from './lib/refLinks'
 import CncLoader from './components/CncLoader'
+import UpdateWatcher from './components/UpdateWatcher'
 import Watermark from './components/Watermark'
 import { resolveGo } from './lib/noticeNav'
 
@@ -147,6 +148,7 @@ export default function App() {
         <ErrorBoundary>
           <AppRoutes />
           <PushBridge />
+          <UpdateWatcher />
           <OldDomain />
           <KeyboardNext />
           <Watermark />

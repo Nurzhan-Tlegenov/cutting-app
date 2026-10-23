@@ -9,8 +9,11 @@ const APP_VERSION = `${p.year}${p.month}${p.day}.${p.hour}${p.minute}`
 const APP_COMMIT = String(process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7)
 
 // https://vite.dev/config/
+// version.json — по нему открытое приложение узнаёт, что вышла новая версия (UpdateWatcher)
+const versionFile = { name: 'version-file', apply: 'build', generateBundle() { this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ v: APP_VERSION }) }) } }
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), versionFile],
   resolve: {
     alias: [
       // mdb-reader (импорт К3-Мебель): шифрование Access не нужно, а его зависимости тянут Node-потоки и process

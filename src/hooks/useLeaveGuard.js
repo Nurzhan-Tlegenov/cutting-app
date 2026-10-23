@@ -4,9 +4,14 @@ import { useEffect, useRef, useState } from 'react'
 // показывая подтверждение, если есть несохранённые изменения.
 // shouldGuard — булево значение (пересчитывается снаружи), стух через ref, чтобы
 // не пересоздавать обработчики истории на каждый рендер.
+// Открытые страницы с несохранённым — приложение не перезагружается само ради обновления, пока они есть
+const guards = new Set()
+export const hasUnsaved = () => [...guards].some(r => r.current)
+
 export function useLeaveGuard(shouldGuard) {
   const guardRef = useRef(shouldGuard)
   guardRef.current = shouldGuard
+  useEffect(() => { guards.add(guardRef); return () => { guards.delete(guardRef) } }, [])
   const [showConfirm, setShowConfirm] = useState(false)
 
   useEffect(() => {

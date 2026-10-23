@@ -652,11 +652,11 @@ export function labelText(type, info, tpl = null) {
     case 'cutouts': return info.cutouts ? `Вырезов: ${info.cutouts}` : ''
     case 'twoSided': return info.twoSided ? '⇅ обработка с двух сторон' : ''
     case 'edgeList': return info.edgeList.length ? `Кромка: ${info.edgeList.join(', ')}` : ''
-    // пильный центр: деталь на бирке повёрнута, как выходит со станка, — «Длина» и «Ширина» идут за сторонами,
-    // как размеры у кромки: «Длина» — размер верхней/нижней стороны бирки, «Ширина» — левой/правой
-    // (в обычном положении это и есть длина и ширина; деталь повернулась на 90° — значения меняются местами)
+    // «Длина» и «Ширина» идут за сторонами бирки, как размеры у кромки (фрезер — как деталь лежит на карте, пильный
+    // центр — как выходит со станка): «Длина» — размер верхней/нижней стороны бирки, «Ширина» — левой/правой.
+    // В обычном положении это и есть длина и ширина; деталь повёрнута на 90° — значения меняются местами
     case 'length': case 'width': {
-      if (!info.exit) return r1(type === 'length' ? info.length : info.width)
+      if (info.sizeX == null) return r1(type === 'length' ? info.length : info.width)
       const rot = tpl ? tpl.rot !== false : true
       return r1((type === 'length') === rot ? info.sizeY : info.sizeX)
     }
