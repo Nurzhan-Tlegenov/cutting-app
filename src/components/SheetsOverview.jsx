@@ -39,6 +39,7 @@ const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 export default function SheetsOverview({
   sheets, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf,
   activeSheet = -1, onPickSheet, running = false, bufferCount = 0, details = null, labelMode = 'name',
+  sameFill = null, sameAlpha = 0.22,   // подсветка одинаковых деталей: { индекс детали: 'r,g,b' } и прозрачность
   reserve = null,   // сколько пикселей экрана оставить под кнопки над и под картой («Стоп», «Выбрать»); null — окно до 60% экрана
 }) {
   const canvasRef = useRef(null)
@@ -196,7 +197,7 @@ export default function SheetsOverview({
       const x = X(it.x), y = Y(it.y), w = it.w * sc, h = it.h * sc
       ctx.globalAlpha = it.alpha
       // мелкая/узкая деталь у края листа («мелкие — в центр» не выполнено) — оранжевым
-      ctx.fillStyle = it.atEdge ? 'rgba(245,158,11,0.35)' : it.back === 'both' ? 'rgba(123,31,162,0.22)' : it.back === 'back' ? 'rgba(123,31,162,0.13)' : PART_FILL
+      ctx.fillStyle = it.atEdge ? 'rgba(245,158,11,0.35)' : it.back === 'both' ? 'rgba(123,31,162,0.22)' : it.back === 'back' ? 'rgba(123,31,162,0.13)' : sameFill && sameFill[it.di] ? `rgba(${sameFill[it.di]},${sameAlpha})` : PART_FILL
       ctx.strokeStyle = it.atEdge ? '#D97706' : PART_STROKE
       ctx.lineWidth = it.atEdge ? 1.6 : (w < 6 ? 0.5 : 1)
       if (it.polygon) {

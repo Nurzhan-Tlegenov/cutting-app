@@ -18,6 +18,7 @@ import { placedThroughHoles, polyInsideWithGap } from '../lib/nestInHoles'
 import { partLabel, LABEL_MODES } from '../lib/partLabel'
 import { edgeTotals, detailEdgeList, holeEdgeSegments } from '../lib/edgeLength'
 import { backSide } from '../lib/partInfo'
+import { sameColorMap } from '../lib/sameParts'
 import { useLabelMode, rememberOrderDefaults, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useAuth } from '../context/AuthContext'
 import { productionSaveNesting, productionOrderSheet, orderClient } from '../lib/productionApi'
@@ -491,7 +492,7 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, dimScale = 1, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null, canSwipe = null }) {
+function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, dimScale = 1, sameFill = null, sameAlpha = 0.22, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null, canSwipe = null }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   // Перелистывание как в галерее телефона: карта едет за пальцем, при отпускании уходит за край, а соседний
@@ -608,7 +609,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   useLayoutEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, dimScale, canvasW, canvasH, DPR])
+  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, dimScale, sameFill, sameAlpha, canvasW, canvasH, DPR])
 
   const toC = v => v * sc
   const fromC = v => v / sc
@@ -682,7 +683,8 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
       // Обработка снизу (с нелицевой пласти) — фиолетовый фон: с двух сторон — деталь переворачивают,
       // только снизу (фасад: лицевая без присадки, петли с изнанки) — тоже нужно видеть, тон светлее
       const back = details && details[p.detailIndex] ? backSide(details[p.detailIndex]) : null
-      const baseFill = back === 'both' ? 'rgba(123,31,162,0.22)' : back === 'back' ? 'rgba(123,31,162,0.13)' : PART_FILL
+      const same = sameFill && sameFill[p.detailIndex]
+      const baseFill = back === 'both' ? 'rgba(123,31,162,0.22)' : back === 'back' ? 'rgba(123,31,162,0.13)' : same ? `rgba(${same},${sameAlpha})` : PART_FILL
       const atEdge = edgeSmall.has(i)
       ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : atEdge ? 'rgba(245,158,11,0.28)' : baseFill))
       ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : atEdge ? '#D97706' : PART_STROKE)
@@ -1744,6 +1746,11 @@ export default function NestingPage() {
   // показывать ли кромку на картах (без неё карта читается легче) — тоже за аккаунтом
   const [showEdges, setShowEdges] = useState(() => getUserSettings(user).nestShowEdges !== false)
   const toggleEdges = v => { setShowEdges(v); saveUserSettings({ nestShowEdges: v }, user) }
+  // подсветка одинаковых деталей цветом (кому надо — включает) и её прозрачность — за аккаунтом
+  const [showSame, setShowSame] = useState(() => getUserSettings(user).nestShowSame === true)
+  const toggleSame = v => { setShowSame(v); saveUserSettings({ nestShowSame: v }, user) }
+  const [sameAlpha, setSameAlpha] = useState(() => { const v = Number(getUserSettings(user).nestSameAlpha); return v >= 0.1 && v <= 0.6 ? v : 0.22 })
+  const saveSameAlpha = v => saveUserSettings({ nestSameAlpha: v }, user)
   // Размер цифр-размеров по сторонам деталей на карте (только они, остальное не меняется); идёт за аккаунтом
   const [dimScale, setDimScale] = useState(() => { const v = Number(getUserSettings(user).nestDimScale); return v >= 0.75 && v <= 2.5 ? v : 1 })
   const stepDim = d => setDimScale(v => { const n = Math.round(Math.min(2.5, Math.max(0.75, v + d)) * 100) / 100; saveUserSettings({ nestDimScale: n }, user); return n })
@@ -1856,6 +1863,7 @@ export default function NestingPage() {
 
   const colorMap = {}
   details.forEach((d, i) => { colorMap[i] = COLORS[i % COLORS.length] })
+  const sameFill = useMemo(() => (showSame ? sameColorMap(details) : null), [showSame, details])
 
   const anyRunning = configs.some(c => c.status === 'running' || c.status === 'queued' || c.status === 'stopping')
 
@@ -3397,6 +3405,20 @@ export default function NestingPage() {
                       <input type="checkbox" checked={showEdges} onChange={e => toggleEdges(e.target.checked)} style={{ width: 'auto' }} />
                       Кромка
                     </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, margin: '0 0 0 6px', fontSize: 11, color: 'var(--text-hint)' }} title="Одинаковые детали (наименование, размер, кромка, обработка) — своим цветом">
+                      <input type="checkbox" checked={showSame} onChange={e => toggleSame(e.target.checked)} style={{ width: 'auto' }} />
+                      Одинаковые
+                    </label>
+                    {showSame && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6 }} title="Насыщенность цвета одинаковых деталей">
+                        Цвет:
+                        <input type="range" min={10} max={60} step={5} value={Math.round(sameAlpha * 100)}
+                          onChange={e => setSameAlpha(Number(e.target.value) / 100)} onPointerUp={e => saveSameAlpha(Number(e.target.value) / 100)}
+                          onTouchEnd={e => saveSameAlpha(Number(e.target.value) / 100)} onKeyUp={e => saveSameAlpha(Number(e.target.value) / 100)}
+                          style={{ width: 70, padding: 0, margin: 0 }} />
+                        <span style={{ minWidth: 28, color: 'var(--text-muted)' }}>{Math.round(sameAlpha * 100)}%</span>
+                      </span>
+                    )}
                     {view !== 'all' && (
                       <span style={{ display: 'flex', alignItems: 'center', gap: 3, marginLeft: 6 }} title="Размер цифр по сторонам деталей">
                         Размеры:
@@ -3419,7 +3441,7 @@ export default function NestingPage() {
                         activeSheet={locked || hEvent ? -1 : cfg.activeSheet}
                         onPickSheet={locked || hEvent ? null : openSheet}
                         running={isRunning} bufferCount={cfg.buffer.length}
-                        details={details} labelMode={labelMode}
+                        details={details} labelMode={labelMode} sameFill={sameFill} sameAlpha={sameAlpha}
                         reserve={OVERVIEW_RESERVE}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
@@ -3468,7 +3490,7 @@ export default function NestingPage() {
                         usableX={cgeo.usableX} usableY={cgeo.usableY}
                         sheetL={cgeo.sheetL} sheetW={cgeo.sheetW}
                         marginL={cgeo.marginL} marginT={cgeo.marginT}
-                        kerf={cgeo.kerf} colorMap={colorMap} details={details} labelMode={labelMode} showEdges={showEdges} dimScale={dimScale}
+                        kerf={cgeo.kerf} colorMap={colorMap} details={details} labelMode={labelMode} showEdges={showEdges} dimScale={dimScale} sameFill={sameFill} sameAlpha={sameAlpha}
                         onMove={(si, np) => onMoveCfg(cfg.id, si, np)} interactive={true} showOffcuts={showOffcuts}
                         offcutMode={offcutMode} manualOffcuts={canvasSheet.manualOffcuts}
                         onManualOffcuts={(si, list) => onManualOffcutsCfg(cfg.id, si, list)}
