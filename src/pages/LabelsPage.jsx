@@ -364,6 +364,14 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
                 ))}
                 <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{textRot(cur)}°</span>
               </div>
+              {!['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight'].includes(cur.type) && (
+                <label style={{ flex: '1 1 100%', display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, margin: 0, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!cur.bind} onChange={e => edit({ bind: e.target.checked || undefined })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
+                  <span>Привязать к стороне детали
+                    <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>Деталь повернулась на раскрое или на выходе со станка — элемент переезжает к той же стороне детали, как кромка (например, свойство «паз» у своей стороны). Без галочки стоит на своём месте.</span>
+                  </span>
+                </label>
+              )}
             </>
           )}
           {cur.type === 'order' && !cur.img && (

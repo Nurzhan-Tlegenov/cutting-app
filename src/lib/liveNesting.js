@@ -13,6 +13,7 @@
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
 import { runNesting, smallAtEdge, lastOffcutArea, repackLastForOffcut, sweepLast } from './nesting'
 import { runBeamSaw } from './beamSawNesting'
+import { beamSettings } from './beamSaw'
 import { readyOrderResult } from './readyOrder'
 import { groupBlocks } from './partGroupBlocks'
 import { needsTrueShape, roughShapePolygons, placedRotation, buildHybridPlan } from './trueShapeNesting'
@@ -548,8 +549,79 @@ function asBoxes(res) {
   return { ...res, sheets: mark(res.sheets), ...(res.rawSheets ? { rawSheets: mark(res.rawSheets) } : {}), byBox: true }
 }
 
+// β Пильный центр со складом обрезков: сначала обрезки (крупные первыми) — каждый раскраивается тем же алгоритмом
+// пильного центра (сквозные резы, отступ обрезка — его торцовка со всех сторон), из раскроя берётся самый заполненный
+// лист; остаток заказа — обычный раскрой пильного центра на целые листы. Листы-обрезки — в начале (stock: 'offcut',
+// свои размеры и отступы, как у фрезера). Детали групп с общей текстурой на обрезки не идут (группа — одним блоком).
+async function runBeamSawStock(params, opts = {}) {
+  const offs = offcutInstances(params.offcuts)
+  if (!offs.length) return runBeamSaw(params, opts)
+  const details = params.details || []
+  const kerf = Number(params.kerf) || 0
+  const remaining = details.map(d => Math.max(0, Number(d.qty) || 0))
+  const offSheets = []
+  for (let k = 0; k < offs.length; k++) {
+    const off = offs[k], m = off.margin
+    const ux = off.width - 2 * m, uy = off.length - 2 * m
+    const idx = [], det = []
+    details.forEach((d, di) => {
+      if (!remaining[di] || (typeof d.part_group === 'string' && d.part_group.trim())) return
+      const w = Number(d.width) + kerf, l = Number(d.length) + kerf
+      if (!((w <= ux + kerf && l <= uy + kerf) || (d.rotatable && l <= ux + kerf && w <= uy + kerf))) return
+      idx.push(di); det.push({ ...d, qty: remaining[di] })
+    })
+    if (!det.length) continue
+    let res
+    try {
+      res = await runBeamSaw({
+        ...params, details: det, sheetL: off.length, sheetW: off.width, optimizeSeconds: 0.3, offcuts: null,
+        beamSaw: { ...(params.beamSaw || {}), trimLeft: m, trimRight: m, trimTop: m, trimBottom: m },
+      }, { live: false })
+    } catch { continue }
+    let best = null, bestA = 0
+    for (const sh of res?.sheets || []) {
+      const a = sh.placed.reduce((t, p) => t + (p.origX || 0) * (p.origY || 0), 0)
+      if (a > bestA) { best = sh; bestA = a }
+    }
+    if (!best) continue
+    const map = new Map()
+    const placed = best.placed.map(p => {
+      const di = idx[p.detailIndex]
+      remaining[di]--
+      map.set(p.id, `off${k}_${p.id}`)
+      return { ...p, detailIndex: di, id: `off${k}_${p.id}` }
+    })
+    // дерево резов ссылается на id деталей — переименовываем и там
+    const ren = node => (node && node.slots ? { ...node, slots: node.slots.map(sl => ({ ...sl, ...(sl.part != null ? { part: map.get(sl.part) ?? sl.part } : {}), ...(sl.child ? { child: ren(sl.child) } : {}) })) } : node)
+    offSheets.push({
+      ...best, placed, beamTree: ren(best.beamTree), index: offSheets.length,
+      stock: 'offcut', offcutItem: off.item,
+      sheetL: off.length, sheetW: off.width, usableX: ux, usableY: uy,
+      marginT: m, marginR: m, marginB: m, marginL: m,
+    })
+  }
+  if (!offSheets.length) return runBeamSaw(params, opts)
+  const subToOrig = [], subDetails = []
+  details.forEach((d, di) => { if (remaining[di] > 0) { subToOrig.push(di); subDetails.push({ ...d, qty: remaining[di] }) } })
+  const nOff = offSheets.length
+  const toFull = res => {
+    if (!res) return res
+    const main = (res.sheets || []).map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p, detailIndex: subToOrig[p.detailIndex] })) }))
+    return { ...res, sheets: [...offSheets, ...main], offcutSheets: nOff }
+  }
+  if (!subDetails.length) {
+    const s = beamSettings(params.beamSaw)
+    const res = { usableX: Number(params.sheetW) - s.trimLeft - s.trimRight, usableY: Number(params.sheetL) - s.trimTop - s.trimBottom, sheetL: Number(params.sheetL), sheetW: Number(params.sheetW),
+      marginT: s.trimTop, marginR: s.trimRight, marginB: s.trimBottom, marginL: s.trimLeft, kerf: s.kerf, beamSaw: true, beamSettings: s, sheets: [...offSheets], unplaced: [], offcutSheets: nOff, iter: 0 }
+    opts.onProgress?.(res)
+    return res
+  }
+  const onProgress = opts.onProgress ? r => opts.onProgress(toFull(r)) : null
+  return toFull(await runBeamSaw({ ...params, details: subDetails, offcuts: null }, { ...opts, onProgress }))
+}
+
 export async function runLiveNesting(params, opts = {}) {
-  if (params.beamSaw) return runBeamSaw(params, opts)   // β Пильный центр — свой алгоритм уровнями резов (island, onStats — для потоков и хронологии)
+  if (params.beamSaw) return runBeamSawStock(params, opts)   // β Пильный центр — свой алгоритм уровнями резов (island, onStats — для потоков и хронологии)
   // Группы деталей с общей текстурой: фрезер и форматник со складом обрезков — группа одним блоком на входе, детали на
   // выходе (partGroupBlocks.js); форматник без склада знает группы сам (полосами, beamSawNesting)
   const stripsPath = (params.cuttingMethod || 'nesting') === 'guillotine' && !params.offcuts?.items?.length

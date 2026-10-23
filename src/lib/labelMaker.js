@@ -326,6 +326,7 @@ export function normalizeLabel(raw) {
       if ([0, 90, 180, 270].includes(Number(i.trot))) o.trot = Number(i.trot)
       if (i.fill) o.fill = true   // «По рамке»: шрифт увеличивается на всю рамку, если текст помещается
       if (['middle', 'bottom'].includes(i.valign)) o.valign = i.valign
+      if (i.bind && !EDGE_TYPES.includes(i.type)) o.bind = true   // «Привязать к стороне детали» — поворачивается вместе с деталью
       const vert = textRot(o) % 180 !== 0
       o.w = Math.max(3, Math.min(vert ? h : w, Number(i.w) || 20))
       const th = Number(i.th) || 0
@@ -424,6 +425,14 @@ export function labelInfo(order, mat, si, pi, part = null) {
     const on = Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]
     if (edgeName(v)) sides[on] = edgeName(v)
   })
+  // на сколько четвертей по часовой повёрнута деталь относительно положения «как в заказе»: куда ушла её верхняя сторона
+  // (для элементов, привязанных к стороне детали)
+  let quarter = 0
+  {
+    const q = rotatePointTimes(DW / 2, DL, DW, DL, turns), bw = Number(p.origX) || DW, bh = Number(p.origY) || DL
+    const dist = { 0: bh - q.y, 1: bw - q.x, 2: q.y, 3: q.x }
+    quarter = Number(Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0])
+  }
   // размер — как деталь лежит на карте: по горизонтали (X листа) × по вертикали (Y листа)
   const even = turns % 2 === 0
   const curved = {}
@@ -447,7 +456,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
-    exit: !!part,      // деталь в положении выхода со станка (пильный центр)
+    exit: !!part, quarter,      // деталь в положении выхода со станка (пильный центр)
   }
 }
 
@@ -687,13 +696,36 @@ export function labelText(type, info, tpl = null) {
  */
 // opts.preview — шаблон в редакторе: картинка показывается всегда (даже если у образцовой детали этого параметра нет),
 // а пустой текстовый параметр — серым названием, чтобы было видно, что стоит в рамке
+/**
+ * Элемент, привязанный к стороне детали (галочка в шаблоне): деталь на бирке повернулась на k четвертей по часовой —
+ * элемент переезжает к той же стороне детали, как кромка: место на бирке поворачивается вокруг её центра (в долях
+ * сторон бирки), текст поворачивается вместе с ним, длина строки — в той же доле новой стороны.
+ */
+export function boundItem(it, k, W, H) {
+  let o = { ...it }
+  for (let i = 0; i < ((k % 4) + 4) % 4; i++) {
+    const [bw, bh] = itemBox(o), u = (o.x + bw / 2) / W, v = (o.y + bh / 2) / H
+    const vert = isVert(o)
+    const n = { ...o, trot: (textRot(o) + 90) % 360 }
+    if (isBox(o)) { n.w = o.h * W / H; n.h = o.w * H / W }
+    else n.w = o.w * (vert ? W / H : H / W)            // строка была вдоль одной стороны бирки — теперь вдоль другой
+    const [nw, nh] = itemBox(n), cu = 1 - v, cv = u     // по часовой: (u, v) -> (1 − v, u)
+    n.x = Math.max(0, Math.min(W - nw, cu * W - nw / 2)); n.y = Math.max(0, Math.min(H - nh, cv * H - nh / 2))
+    o = n
+  }
+  // вверх ногами не пишем — как у кромки снизу: текст читается обычно (рамка та же)
+  if (!isBox(o) && textRot(o) === 180) o = { ...o, trot: 0 }
+  return o
+}
+
 export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height
   const mm = W / tpl.w, line = Math.max(1, mm * 0.17), rot = tpl.rot !== false
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
 
-  for (const it of tpl.items || []) {
+  for (const it0 of tpl.items || []) {
+    const it = it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0
     const x = it.x * mm, y = it.y * mm, w = it.w * mm
     if (it.type === 'qr') {
       const text = labelQr(tpl, info)
