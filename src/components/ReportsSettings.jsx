@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { userPdfTpl } from '../lib/pdfSummary'
 import PdfLayoutEditor from './PdfLayoutEditor'
 import SummaryLayoutEditor from './SummaryLayoutEditor'
+import { syncProductionReports } from '../lib/productionReports'
 
 // Настройки производства → «Отчёты (PDF)»: всё, что касается PDF карт раскроя, в одном месте —
 // конструктор листа (что и где выводить на странице листа), статистика на отдельной странице,
@@ -15,6 +16,7 @@ export default function ReportsSettings() {
   const { user } = useAuth()
   const [layout, setLayout] = useState(false)
   const [sumEdit, setSumEdit] = useState(false)
+  useEffect(() => { syncProductionReports(user) }, [user])   // открыли настройки отчётов — копия для клиентов свежая
   const [, setTick] = useState(0)
   const st = getUserSettings(user)
   const [statsPage, setStatsPageS] = useState(() => !!st.pdfStatsPage)
@@ -38,11 +40,11 @@ export default function ReportsSettings() {
         </div>
         <span style={{ color: 'var(--blue)', fontSize: 18 }}>›</span>
       </div>
-      {check(statsPage, v => { setStatsPageS(v); saveUserSettings({ pdfStatsPage: v }, user) }, 'Статистика листов на отдельной странице',
+      {check(statsPage, v => { setStatsPageS(v); saveUserSettings({ pdfStatsPage: v }, user); syncProductionReports(user) }, 'Статистика листов на отдельной странице',
         'Для стандартного вида: на листе только карта на всю ширину и обозначения; использование, кромка, обрезки и списки деталей — в конце')}
 
       <p className="section-title" style={{ marginTop: 12 }}>Последняя страница: статистика раскроя и смета</p>
-      {check(estimate, v => { setEstimateS(v); saveUserSettings({ pdfEstimate: v }, user) }, 'Добавлять страницу статистики и сметы', 'Та же галочка «Смета» под кнопкой PDF на странице раскроя')}
+      {check(estimate, v => { setEstimateS(v); saveUserSettings({ pdfEstimate: v }, user); syncProductionReports(user) }, 'Добавлять страницу статистики и сметы', 'Та же галочка «Смета» под кнопкой PDF на странице раскроя. Так же выводится и у ваших клиентов, когда они делают PDF с вашим производством')}
       <div onClick={() => setSumEdit(true)} style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', cursor: 'pointer', margin: '6px 0 10px' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, color: 'var(--blue)', fontWeight: 500 }}>Конструктор страницы статистики</div>
@@ -52,8 +54,8 @@ export default function ReportsSettings() {
       </div>
 
 
-      {sumEdit && <SummaryLayoutEditor onClose={() => setSumEdit(false)} />}
-      {layout && <PdfLayoutEditor onClose={() => { setLayout(false); setTick(t => t + 1) }} />}
+      {sumEdit && <SummaryLayoutEditor onClose={() => { setSumEdit(false); syncProductionReports(user) }} />}
+      {layout && <PdfLayoutEditor onClose={() => { setLayout(false); setTick(t => t + 1); syncProductionReports(user) }} />}
     </div>
   )
 }

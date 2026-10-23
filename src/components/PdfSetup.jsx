@@ -8,6 +8,7 @@ import { saveNestingPdf } from '../lib/nestingPdf'
 import { userSameAlpha } from '../lib/sameParts'
 import { quoteLines, pdfSummaryOf, userPdfTpl, orderRows } from '../lib/pdfSummary'
 import PdfLayoutEditor from './PdfLayoutEditor'
+import { syncProductionReports } from '../lib/productionReports'
 import { useBackClose } from '../lib/backStack'
 
 // PDF карт раскроя из кабинета производства — конструктор: что из статистики раскроя и стоимости вывести
@@ -25,7 +26,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const [error, setError] = useState('')
   const [layout, setLayout] = useState(false)       // открыт конструктор листа
   const customTpl = userPdfTpl(user)
-  const change = patch => { const next = { ...cfg, ...patch }; setCfg(next); saveUserSettings({ pdfSummary: next }, user) }
+  const change = patch => { const next = { ...cfg, ...patch }; setCfg(next); saveUserSettings({ pdfSummary: next }, user); syncProductionReports(user) }
   const rows = stats ? orderRows(statsRows(stats), cfg.order) : []
   const off = new Set(cfg.off || [])
   const toggle = key => change({ off: off.has(key) ? [...off].filter(k => k !== key) : [...off, key] })
@@ -34,6 +35,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const make = async () => {
     setBusy('…'); setError('')
     try {
+      syncProductionReports(user)
       const summary = pdfSummaryOf(stats, quote, cfg)
       await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, onProgress: (a, b) => setBusy(`${a}/${b}`) })
       onClose()
@@ -104,7 +106,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
           </div>
         </div>
       </div>
-      {layout && <PdfLayoutEditor order={order} mat={mat} onClose={() => setLayout(false)} />}
+      {layout && <PdfLayoutEditor order={order} mat={mat} onClose={() => { setLayout(false); syncProductionReports(user) }} />}
     </div>
   )
 }

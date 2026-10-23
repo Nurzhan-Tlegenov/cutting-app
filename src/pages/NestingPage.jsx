@@ -41,6 +41,7 @@ import NestingCost from '../components/NestingCost'
 import { nestingStats, sumStats, statsPayload } from '../lib/nestingStats'
 import { fixOrderQuote } from '../lib/pricing'
 import { statsAndQuote, pdfSummaryOf, userPdfTpl } from '../lib/pdfSummary'
+import { syncProductionReports, clientReport } from '../lib/productionReports'
 import { savedNestings } from '../lib/savedNesting'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
 import { flipDetail } from '../lib/mirrorDetail'
@@ -2508,7 +2509,7 @@ export default function NestingPage() {
   // Карты раскроя этого варианта в PDF: лист на страницу, список деталей листа, кромка, процент использования
   const [pdfBusy, setPdfBusy] = useState(null)
   const [pdfEstimate, setPdfEstimateState] = useState(() => !!getUserSettings(user).pdfEstimate)   // галочка «Смета» под кнопкой PDF
-  const setPdfEstimate = on => { setPdfEstimateState(on); saveUserSettings({ pdfEstimate: on }, user) }
+  const setPdfEstimate = on => { setPdfEstimateState(on); saveUserSettings({ pdfEstimate: on }, user); syncProductionReports(user) }
   const [pdfStatsPage, setPdfStatsPageState] = useState(() => !!getUserSettings(user).pdfStatsPage)   // галочка «Стат. отдельно» под кнопкой PDF
   const setPdfStatsPage = on => { setPdfStatsPageState(on); saveUserSettings({ pdfStatsPage: on }, user) }
   // β Пильный центр: программа для пилы KDT (XML) — по текущей карте, с ручными правками и обрезками
@@ -2528,12 +2529,15 @@ export default function NestingPage() {
       const mat = { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details, method: cuttingMethod }
       // кабинет производства: своё оформление листа, а с галочкой «Смета» — ещё страница со статистикой раскроя и сметой
       let summary = null
-      if (cabinet === 'production' && pdfEstimate) {
+      // клиент с выбранным производством: PDF — как настроило производство (смета, вид статистики, свой макет листа)
+      if (cabinet === 'production') syncProductionReports(user)   // настройки уже были — пусть дойдут и до клиентов
+      const prodRep = cabinet !== 'production' && order.production_id ? clientReport(productions.find(p => p.id === order.production_id)) : null
+      if (cabinet === 'production' ? pdfEstimate : prodRep?.estimate) {
         const { stats, quote } = await statsAndQuote({ order, mats: [mat], method: cuttingMethod })
-        summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {})
+        summary = pdfSummaryOf(stats, quote, (cabinet === 'production' ? getUserSettings(user).pdfSummary : prodRep.summary) || {})
       }
       await saveNestingPdf({ order, fileName: `${fileNameOf('maps', fileNamesOf(user).maps, { total: mat.sheets.length, order, material: mat.name, thickness: mat.thickness, client: clientName })}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`, mat,
-        summary, tpl: cabinet === 'production' ? userPdfTpl(user) : null, same: showSame ? sameAlpha : 0, statsPage: pdfStatsPage })
+        summary, tpl: cabinet === 'production' ? userPdfTpl(user) : prodRep?.tpl || null, same: showSame ? sameAlpha : 0, statsPage: pdfStatsPage || !!prodRep?.statsPage })
     } catch (e) { window.alert('Не удалось собрать PDF: ' + (e?.message || e)) } finally { setPdfBusy(null) }
   }
 
