@@ -100,7 +100,7 @@ export function insertPart(value, pos, code) {
 }
 // ─── Имена файлов: карты PDF и архив — шаблоны из тех же частей (настраиваются пользователем) ────────
 export const FILE_NAME_PARTS = NAME_PARTS.filter(([code]) => code !== '{N}')
-export const FILE_NAME_DEFAULTS = { maps: '{ZAKAZ}_{KLIENT}_{MAT}', zip: '{ZAKAZ}_{KLIENT}' }
+export const FILE_NAME_DEFAULTS = { maps: '{ZAKAZ}_{KLIENT}_{MAT}', zip: '{ZAKAZ}_{KLIENT}_{DATA}' }
 /** Имя файла по шаблону (без расширения): tpl — шаблон или пусто (по умолчанию для kind), ctx — как у programName */
 export const fileNameOf = (kind, tpl, ctx) => fillName(String(tpl || '').trim() || FILE_NAME_DEFAULTS[kind] || '{ZAKAZ}', { ...ctx, n: null }) || fillName(FILE_NAME_DEFAULTS[kind], { ...ctx, n: null }) || 'zakaz'
 function fillName(t, ctx) {

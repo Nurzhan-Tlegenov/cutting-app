@@ -40,7 +40,8 @@ import { useBackClose } from '../lib/backStack'
 import { saveBeamSawXml, buildBeamSawXml } from '../lib/beamSawXml'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import { fileNamesOf } from '../lib/fileNames'
-import { fileNameOf } from '../lib/orderUtils'
+import { fileNameOf, FILE_NAME_PARTS, FILE_NAME_DEFAULTS } from '../lib/orderUtils'
+import TplInput from '../components/TplInput'
 const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -139,7 +140,11 @@ export default function CncPage() {
   // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
   const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName })
   const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для бирок
-  const fileBase = kind => fileNameOf(kind, fileNamesOf(user)[kind], nameCtx(null))   // имена PDF карт и архивов — по настройке аккаунта («Имена файлов»)
+  const fileBase = kind => fileNameOf(kind, fileNamesOf(user)[kind], nameCtx(null))
+  // имя архива «Сохранить все файлы» — конструктор прямо здесь, над папками (та же настройка аккаунта, что в «Имена файлов»)
+  const [zipTpl, setZipTpl] = useState(() => fileNamesOf(user).zip)
+  const [zipEdit, setZipEdit] = useState(false)
+  const changeZipTpl = v => { setZipTpl(v); saveUserSettings({ fileNames: { ...fileNamesOf(user), zip: v } }, user) }   // имена PDF карт и архивов — по настройке аккаунта («Имена файлов»)
   const fileName = si => `${programName(post.nameTpl, nameCtx(si + 1))}.${post.ext || 'nc'}`
   const beamName = () => `${programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', nameCtx(null))}.${saw?.ext || 'xml'}`
   const build = () => {
@@ -270,12 +275,12 @@ export default function CncPage() {
     if (withMaps && mat) {
       // PDF карт по листам этого материала — тем же оформлением, что «PDF карт» (шаблон листа аккаунта), без сметы
       setMapsBusy('Готовим карты PDF…')
-      try { maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: rd } } catch { maps = null } finally { setMapsBusy('') }
+      try { maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: [] } } catch { maps = null } finally { setMapsBusy('') }
     }
     const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
     if (built.second) { const d2 = pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`); files.push(...built.second.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: d2 }))) }
-    if (maps) files.push(maps)
+    if (maps) files.unshift(maps)          // PDF карт — в корень архива, рядом с папками станков
     setSaveAsk({ files, zipName: `${fileBase('zip')}.zip` })
   }
   const allCount = () => built.files.filter(f => !f.empty).length + (built.labels?.length || 0) + (built.drill || []).reduce((a, r) => a + r.files.length, 0) + (built.second?.files.filter(f => !f.empty).length || 0)
@@ -405,6 +410,16 @@ export default function CncPage() {
                 </div>
               )
             })()}
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>📦 Архив: <b style={{ fontFamily: 'monospace', color: 'var(--text)', wordBreak: 'break-all' }}>{fileBase('zip')}.zip</b></div>
+                <button type="button" style={small} onClick={() => setZipEdit(x => !x)}>{zipEdit ? 'Готово' : 'Изменить'}</button>
+              </div>
+              {zipEdit && (
+                <TplInput value={zipTpl} def={FILE_NAME_DEFAULTS.zip} parts={FILE_NAME_PARTS} onChange={changeZipTpl} style={{ marginTop: 6 }}
+                  hint={<div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 4 }}>Имя архива «Сохранить все файлы». Внутри — PDF карт (если отмечено) и папки станков. Латиницей; пустая часть (нет клиента) пропускается.</div>} />
+              )}
+            </div>
           </div>
           <SimLinksBox orderId={id} refresh={linksTick} style={{ marginBottom: 10, padding: '10px 12px' }} />
           {pre.length > 0 && !beamMat && (
@@ -499,7 +514,7 @@ export default function CncPage() {
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
             <input type="checkbox" checked={withMaps} onChange={e => setWithMaps(e.target.checked)} style={{ width: 18, height: 18, flex: '0 0 auto', marginTop: 1 }} />
             <span>📄 Карты раскроя (PDF) вместе с программами
-              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>При «Сохранить все файлы» — PDF карт всех листов материала в папку программ: <b style={{ fontFamily: 'monospace' }}>{fileBase('maps')}.pdf</b>. Для тех, кто печатает карты.</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>При «Сохранить все файлы» — PDF карт всех листов материала — в самый верх архива, рядом с папками станков: <b style={{ fontFamily: 'monospace' }}>{fileBase('maps')}.pdf</b>. Для тех, кто печатает карты.</span>
             </span>
           </label>
           {mapsBusy && <CncLoader compact label={mapsBusy} />}
@@ -553,9 +568,9 @@ export default function CncPage() {
           {built && allCount() > 1 && (
             <>
               <button data-tour="cnc-save" className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll} disabled={!!mapsBusy}>⬇ Сохранить все файлы ({allCount() + (withMaps ? 1 : 0)})</button>
-              {((built.drill || []).some(r => r.files.length) || built.second) && (
+              {((built.drill || []).some(r => r.files.length) || built.second || withMaps) && (
                 <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-                  Папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}{built.second && <span>; <b style={{ fontFamily: 'monospace' }}>{pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`).join('/')}</b> — {built.second.post.name}</span>}
+                  В архиве <b style={{ fontFamily: 'monospace' }}>{fileBase('zip')}.zip</b>: {withMaps && <><b style={{ fontFamily: 'monospace' }}>{fileBase('maps')}.pdf</b>; </>}папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}{built.second && <span>; <b style={{ fontFamily: 'monospace' }}>{pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`).join('/')}</b> — {built.second.post.name}</span>}
                 </p>
               )}
             </>

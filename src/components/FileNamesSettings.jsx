@@ -6,7 +6,7 @@ import { fileNamesOf } from '../lib/fileNames'
 import { useAuth } from '../context/AuthContext'
 
 // Имена файлов: PDF карт раскроя и архива «Сохранить все файлы» — из тех же частей, что названия программ.
-// По умолчанию: карты — заказ_клиент_материал, архив — заказ_клиент (клиента нет — без него). Настройка аккаунта.
+// По умолчанию: карты — заказ_клиент_материал, архив — заказ_клиент_дата (клиента нет — без него). Настройка аккаунта.
 export default function FileNamesSettings() {
   const { user } = useAuth()
   const [v, setV] = useState(() => fileNamesOf(user))
