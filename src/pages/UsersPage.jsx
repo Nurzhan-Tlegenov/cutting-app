@@ -18,6 +18,8 @@ import { COUNTRY_NAMES } from '../lib/phoneCountries'
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
 const ROLES = [['client', 'Клиент'], ['operator', 'Производство'], ['admin', 'Администратор']]
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—')
+// дата и время подачи заявки: «24.10.26 12:28»
+const dateTime = v => (v ? `${date(v)} ${new Date(v).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : '—')
 const digits = v => String(v || '').replace(/\D/g, '')
 // ссылка открывает «У меня есть код» с подставленными номером и кодом — остаётся придумать пароль
 const codeLink = (code, digits) => `${siteOrigin()}/auth?code=${code}&tel=${digits}`
@@ -388,7 +390,7 @@ export default function UsersPage() {
                   {r.resubmits > 0 && <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 9, fontSize: 10.5, fontWeight: 500, background: 'var(--amber-light)', color: 'var(--amber)' }}>повторная{r.resubmits > 1 ? ` ×${r.resubmits}` : ''}</span>}
                 </div>
                 {r.resubmits > 0 && r.rejected_name && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>отклонена с именем «{r.rejected_name}»</div>}
-                <div style={{ fontSize: 13 }}><a href={`tel:+${r.digits}`} style={{ color: 'var(--blue)' }}>{r.phone}</a> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· {date(r.created_at)}</span></div>
+                <div style={{ fontSize: 13 }}><a href={`tel:+${r.digits}`} style={{ color: 'var(--blue)' }}>{r.phone}</a> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· заявка {dateTime(r.created_at)}</span></div>
                 {(r.country || r.city) && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{[countryCode(r.country), r.city].filter(Boolean).join(' · ')}</div>}
                 {r.comment && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{r.comment}</div>}
                 <div style={{ marginTop: 2 }}><VerifyBadge r={r} /></div>
@@ -406,6 +408,7 @@ export default function UsersPage() {
                   <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name || 'Без имени'}</span>
                   <a href={`tel:+${r.digits}`} style={{ fontSize: 12, color: 'var(--blue)' }}>{r.phone}</a>
                 </div>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Заявка подана {dateTime(r.created_at)}</div>
                 {r.ref_by_name && <div style={{ fontSize: 11, color: 'var(--teal)' }}>по ссылке{r.ref_kind === 'production' ? ' для производства' : ''} от «{r.ref_by_name}» — одобрена сама</div>}
                 <VerifyBadge r={r} />
                 {codeRow(r)}
@@ -426,7 +429,7 @@ export default function UsersPage() {
                 {rest.map(r => (
                   <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '0.5px solid var(--border)', fontSize: 12 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div>{r.full_name || 'Без имени'} · {r.phone}</div>
+                      <div>{r.full_name || 'Без имени'} · {r.phone} <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>· заявка {dateTime(r.created_at)}</span></div>
                       <div style={{ color: r.status === 'rejected' ? 'var(--danger)' : 'var(--text-hint)' }}>{statusLabel(r)} <VerifyBadge r={r} /></div>
                       {codeRow(r)}
                     </div>
