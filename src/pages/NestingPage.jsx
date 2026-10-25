@@ -58,7 +58,10 @@ import { hasBeta } from '../lib/beta'
 import { beamSettings, sameMaps, sameMapTag } from '../lib/beamSaw'
 import { cutMethods } from '../lib/productionServices'
 import { saveBeamSawXml } from '../lib/beamSawXml'
+
 import { mm } from '../lib/mmFmt'
+// Сколько id за раз в фильтре .in(): адрес запроса ограничен по длине (uuid — 36 знаков)
+const ID_CHUNK = 100
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
 
 const COLORS = [
@@ -2063,7 +2066,11 @@ export default function NestingPage() {
     if (!window.confirm(msg)) return
     setRotBusy(true)
     const ids = list.map(d => d.id)
-    const { error } = await supabase.from('order_details').update({ rotatable: on }).in('id', ids)
+    // Пачками: сотни id в одном запросе не помещаются в адрес — сервер отвечает «Bad Request» (250911Ajbibi_k1, 243 поз.)
+    let error = null
+    for (let i = 0; i < ids.length && !error; i += ID_CHUNK) {
+      ({ error } = await supabase.from('order_details').update({ rotatable: on }).in('id', ids.slice(i, i + ID_CHUNK)))
+    }
     setRotBusy(false)
     if (error) { window.alert('Не удалось изменить вращение: ' + error.message); return }
     setAllDetails(ds => ds.map(x => (ids.includes(x.id) ? { ...x, rotatable: on } : x)))
@@ -2681,8 +2688,18 @@ export default function NestingPage() {
         if (e1 || !copy) throw new Error(/limit/i.test(e1?.message || '') ? 'Достигнут предел бесплатного использования: заказов слишком много. Удалите или отправьте в архив ненужные.' : (e1?.message || 'не удалось создать заявку'))
         const { error: e2 } = await supabase.from('order_details').insert(mine.map(r => { const { id: _i, created_at: _c, ...restCols } = r; void _i; void _c; return { ...restCols, order_id: copy.id } }))
         if (e2) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e2.message) }
-        const { error: e3 } = await supabase.from('order_details').delete().in('id', mine.map(r => r.id))
-        if (e3) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e3.message) }
+        // Пачками (сотни id не помещаются в адрес запроса); сбой посередине — удалённые строки возвращаем на место
+        let e3 = null, gone = []
+        for (let i = 0; i < mine.length && !e3; i += ID_CHUNK) {
+          const part = mine.slice(i, i + ID_CHUNK)
+          ;({ error: e3 } = await supabase.from('order_details').delete().in('id', part.map(r => r.id)))
+          if (!e3) gone = gone.concat(part)
+        }
+        if (e3) {
+          if (gone.length) await supabase.from('order_details').insert(gone.map(r => { const { _parsedContour: _p, ...cols } = r; void _p; return cols }))
+          await supabase.from('orders').delete().eq('id', copy.id)
+          throw new Error(e3.message)
+        }
         if (model) { try { await supabase.from('order_models').insert({ order_id: copy.id, data: model }) } catch { /* без модели */ } }
         await fixQuote(copy, mine)
         made.push({ key: k, number: copy.order_number })

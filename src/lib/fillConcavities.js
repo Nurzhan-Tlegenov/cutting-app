@@ -166,11 +166,16 @@ export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usabl
         if (dst._free == null) dst._free = Math.max(0, ...dst._shapes.map(s => s.hole || 0))
         if (mw * mh > dst._free) continue
         for (const v of variants) {
+          // Не влезла деталь этого размера на этот лист — и такая же не влезет, пока лист не изменился
+          // (tryPlace зависит только от листа, размера и признака мелкой): на заказах из сотен одинаковых деталей с
+          // пазами перебор занимал ~16 с (250911Ajbibi_k1, 346 дет.) — черновик и онлайн-показ стояли
+          const fk = self ? null : sizeOf(v, kerf).join('x') + (v.isSmall ? 's' : '')
+          if (fk && dst._fail?.has(fk)) continue
           const q = tryPlace(dst, v, kerf, uX, uY)
-          if (!q) continue
+          if (!q) { if (fk) (dst._fail || (dst._fail = new Set())).add(fk); continue }
           if (self && v === p && Math.abs(q.x - p.x) < 0.01 && Math.abs(q.y - p.y) < 0.01) { done = true; break }   // уже стоит в вырезе
           const real = out[ti]
-          real.placed.push(q); real._shapes.push(shapeOf(q, kerf)); real._free = null
+          real.placed.push(q); real._shapes.push(shapeOf(q, kerf)); real._free = null; real._fail = null
           gone.add(i); moved++; done = true
           break
         }
@@ -178,10 +183,11 @@ export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usabl
     }
     if (gone.size) {
       src._free = null                               // пересчитается при следующем обращении
+      src._fail = null                               // лист изменился — неудачи пересчитываются
       src.placed = src.placed.filter((_, i) => !gone.has(i))
       src._shapes = src._shapes.filter((_, i) => !gone.has(i))
     }
   }
   if (!moved) return null
-  return out.filter(sh => sh.placed.length).map(sh => { const rest = { ...sh }; delete rest._shapes; delete rest._free; return rest })
+  return out.filter(sh => sh.placed.length).map(sh => { const rest = { ...sh }; delete rest._shapes; delete rest._free; delete rest._fail; return rest })
 }
