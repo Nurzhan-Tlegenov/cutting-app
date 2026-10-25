@@ -293,7 +293,7 @@ export function parsePolygonFromDetail(d) {
 // 964×1690 и 1380×1200). Раньше бралась только первая (самая плотная), а листу
 // подходила вторая: 2 пары «лёжа» на лист = 4 детали, «стоя» — только 2 (10 листов
 // вместо 6). Какая лучше — решает runHybrid быстрым пробным раскроем (pairShapes).
-export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, marginR, marginB, marginL }, choice = {}, pairLimit = null) {
+export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, marginR, marginB, marginL }, choice = {}, pairLimit = null, pairOpts = {}) {
   const usableX = sheetW - marginL - marginR
   const usableY = sheetL - marginT - marginB
   const cellSize = Math.min(MAX_CELL_MM, Math.max(MIN_CELL_MM, Math.sqrt((usableX * usableY) / TARGET_CELLS)))
@@ -310,13 +310,15 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
       })
     }
   })
-  const tiled = tileIntoPairs(instances, kerf, usableX, usableY, pairLimit)
+  const tiled = tileIntoPairs(instances, kerf, usableX, usableY, pairLimit, pairOpts)
   const pairKinds = new Map()   // kind → { tmpl, n }
   const singles = new Map()     // detailIndex → n (фигурные детали без пары)
   tiled.forEach(inst => {
     if (inst.isComposite) {
-      if (!pairKinds.has(inst.kind)) pairKinds.set(inst.kind, { tmpl: inst, n: 0 })
-      pairKinds.get(inst.kind).n++
+      if (!pairKinds.has(inst.kind)) pairKinds.set(inst.kind, { tmpl: inst, n: 0, srcs: [] })
+      const pk = pairKinds.get(inst.kind)
+      pk.n++
+      if (inst.srcs) pk.srcs.push(inst.srcs)
     } else singles.set(inst.detailIndex, (singles.get(inst.detailIndex) || 0) + 1)
   })
   // Пар может и не быть — тогда гибрид = раскрой по габаритам (как черновик), но
@@ -328,7 +330,7 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
     if (n > 0) hybridDetails.push({ ...d, qty: n, contour: null, _h: { single: di } })
   })
   const pairShapes = []
-  for (const [kind, { tmpl, n }] of pairKinds.entries()) {
+  for (const [kind, { tmpl, n, srcs }] of pairKinds.entries()) {
     const shapes0 = tmpl.variants.filter(v => v.angle === 0)
     pairShapes.push([kind, shapes0.length])
     const v0 = shapes0[choice[kind] || 0] || shapes0[0] || tmpl.variants[0]
@@ -347,7 +349,7 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
       name: src.name, display_name: src.display_name, prefix: src.prefix,
       width: bw, length: bh, qty: n, rotatable: !!v90, contour: null,
       freeTurn: !!v90 && v90.angle === 0, // «поворот» = другая сцепка, а не поворот деталей
-      _h: { pair: tmpl, v0, v90, bw },
+      _h: { pair: tmpl, v0, v90, bw, srcs },
     })
   }
 
@@ -365,7 +367,10 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
     }
   }
   // Результат прямоугольного поиска (по гибридным деталям) → настоящие детали
-  const expand = res => ({
+  const expand = res => {
+    // Пары из разных позиций (pairOpts.byShape): каждой уложенной паре — своя пара настоящих деталей, по очереди
+    const used = new Map()
+    return {
     ...res,
     sheets: res.sheets.map((sh, si) => ({
       ...sh, index: si, freeRects: [],
@@ -384,10 +389,17 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
           return [out]
         }
         const v = isTurned(p, h.bw ?? h.v0.w) && h.v90 ? h.v90 : h.v0
-        return expandPlacement({ inst: h.pair, variant: v, x: p.x, y: p.y }).map(m => toPlaced(m.inst, m.variant, m.x, m.y))
+        let inst = h.pair
+        if (h.srcs?.length) {
+          const k = used.get(h) || 0
+          used.set(h, k + 1)
+          inst = { ...h.pair, srcs: h.srcs[k % h.srcs.length] }
+        }
+        return expandPlacement({ inst, variant: v, x: p.x, y: p.y }).map(m => toPlaced(m.inst, m.variant, m.x, m.y))
       }),
     })),
-  })
+    }
+  }
   // singles: номер гибридной детали → номер настоящей детали (undefined — сцепленная пара); нужен, чтобы
   // продолжить поиск с готовой раскладки (см. seed в liveNesting.js)
   // pairCounts — сколько пар собрано у каждой детали: гибрид пробует и меньше (см. chooseHybridPlan)

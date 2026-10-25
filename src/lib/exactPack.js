@@ -663,12 +663,14 @@ const PAIR_MIN_DENSITY = 0.95
 // при меньшей плотности, если она заметно плотнее одиночной детали.
 const PAIR_MIN_DENSITY_SOFT = 0.85
 const PAIR_MIN_GAIN = 0.15
+// Мягкий порог (гибрид): пара плотнее двух деталей рядом хотя бы на 3 п. п.
+const PAIR_SOFT_GAIN = 0.03
 
 // Кэш собранных пар (по форме детали): форма → найденные пары
 const PAIR_CACHE = new Map()
-function pairCacheKey(inst, kerf, usableX, usableY) {
+function pairCacheKey(inst, kerf, usableX, usableY, mode = '') {
   const v = inst.variants.map(x => x.angle + ':' + x.polygon.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(';')).join('|')
-  return `${kerf}|${usableX}|${usableY}|${v}`
+  return `${mode}|${kerf}|${usableX}|${usableY}|${v}`
 }
 
 // A — положение ПЕРВОЙ детали пары. Раньше всегда бралось 0°: у детали с
@@ -886,11 +888,20 @@ function fillStripWithSingles(sheet, group, kerf, usableX, usableY) {
 // Заменяет пары одинаковых вогнутых деталей составными «деталями-парами».
 // pairLimit — { [detailIndex]: сколько пар не больше } (гибрид пробует разное число пар: лучшая раскладка бывает
 // смешанной — часть деталей парами, часть поодиночке, 261011_002). null — все возможные пары.
-export function tileIntoPairs(instances, kerf, usableX, usableY, pairLimit = null) {
+// opts (только гибрид, см. chooseHybridPlan — там прежний план всегда остаётся кандидатом):
+//  byShape — пары из одинаковых деталей РАЗНЫХ позиций (Базис дробит одинаковые стойки на позиции по 1–4 шт., и
+//            одиночки не сцеплялись вовсе); каждая часть пары разворачивается в свою настоящую деталь (srcs);
+//  soft    — пара берётся и ниже порога плотности, если она заметно плотнее двух таких же деталей рядом
+//            (зубчатая стойка 397×1528: пара 685×1710 — 0,884, рядом — 0,847; порог 0,95 её отбрасывал)
+export function tileIntoPairs(instances, kerf, usableX, usableY, pairLimit = null, opts = {}) {
   const byDetail = new Map()
+  const groupKey = inst => opts.byShape && !inst.isSmall
+    ? 'S' + (inst.variants.length > 2 ? 'r' : '') + pairCacheKey(inst, kerf, usableX, usableY)
+    : inst.detailIndex
   for (const inst of instances) {
-    if (!byDetail.has(inst.detailIndex)) byDetail.set(inst.detailIndex, [])
-    byDetail.get(inst.detailIndex).push(inst)
+    const k = groupKey(inst)
+    if (!byDetail.has(k)) byDetail.set(k, [])
+    byDetail.get(k).push(inst)
   }
   const out = []
   let nextId = instances.reduce((m, i) => Math.max(m, i.id), 0) + 1
@@ -916,7 +927,13 @@ export function tileIntoPairs(instances, kerf, usableX, usableY, pairLimit = nul
       const dirs = ['auto', 'along_y', 'along_x']
       const found = []
       const singleFill = polyArea(v0.polygon) / (v0.w * v0.h)
-      const minDensity = Math.min(PAIR_MIN_DENSITY, Math.max(PAIR_MIN_DENSITY_SOFT, singleFill + PAIR_MIN_GAIN))
+      let minDensity = Math.min(PAIR_MIN_DENSITY, Math.max(PAIR_MIN_DENSITY_SOFT, singleFill + PAIR_MIN_GAIN))
+      if (opts.soft) {
+        // две детали рядом (через рез) — лучшая из двух сторон
+        const a2 = 2 * polyArea(v0.polygon)
+        const side = Math.max(a2 / ((2 * v0.w + kerf) * v0.h), a2 / (v0.w * (2 * v0.h + kerf)))
+        minDensity = Math.min(minDensity, Math.max(PAIR_MIN_DENSITY_SOFT, side + PAIR_SOFT_GAIN))
+      }
       const add = p => {
         if (!p || p.density < minDensity) return
         const same = found.findIndex(q => Math.abs(q.W - p.W) < 2 && Math.abs(q.H - p.H) < 2)
@@ -925,7 +942,7 @@ export function tileIntoPairs(instances, kerf, usableX, usableY, pairLimit = nul
       }
       // Результат зависит только от формы детали, реза и размера листа —
       // запоминаем: в онлайн-раскрое раунды повторяются, пересчёт не нужен.
-      const cacheKey = pairCacheKey(first, kerf, usableX, usableY)
+      const cacheKey = pairCacheKey(first, kerf, usableX, usableY, opts.soft ? 'soft' : '')
       const cached = PAIR_CACHE.get(cacheKey)
       if (cached) found.push(...cached)
       else {
@@ -973,7 +990,7 @@ export function tileIntoPairs(instances, kerf, usableX, usableY, pairLimit = nul
     for (let k = 0; k < n; k++) {
       out.push({
         id: nextId++, detailIndex: first.detailIndex, kind: 'pair' + first.detailIndex, isComposite: true,
-        src: first, parts: pair.parts, W: pair.W, H: pair.H, matArea: pair.matArea,
+        src: first, ...(opts.byShape ? { srcs: [group[2 * k], group[2 * k + 1]] } : {}), parts: pair.parts, W: pair.W, H: pair.H, matArea: pair.matArea,
         variants, area: pair.W * pair.H, cellSize: first.cellSize, isSmall: false,
         label: first.label, prefix: first.prefix,
       })
@@ -993,13 +1010,14 @@ export function expandPlacement(m) {
   const ang = m.variant.angle // 0 или 90
   // Разные ориентации пары («стоит»/«лежит») хранят свои parts и W в варианте.
   const parts = m.variant.parts || inst.parts, W = m.variant.W ?? inst.W
-  return parts.map(part => {
+  return parts.map((part, pi) => {
     let pts = part.variant.polygon.map(([px, py]) => [px + part.ox, py + part.oy])
     if (ang === 90) pts = pts.map(([x, y]) => [y, W - x])
     const bb = bboxOf(pts)
-    const v = inst.src.variants.find(vv => vv.angle === (part.variant.angle + ang) % 360)
+    const src = inst.srcs?.[pi] || inst.src   // пара из разных позиций (см. tileIntoPairs, byShape) — у каждой части своя
+    const v = src.variants.find(vv => vv.angle === (part.variant.angle + ang) % 360)
     const vb = bboxOf(v.polygon)
-    return { inst: inst.src, variant: v, x: m.x + bb.minX - vb.minX, y: m.y + bb.minY - vb.minY }
+    return { inst: src, variant: v, x: m.x + bb.minX - vb.minX, y: m.y + bb.minY - vb.minY }
   })
 }
 

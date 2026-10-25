@@ -173,32 +173,47 @@ const HYBRID_PLANS = new Map()
 // часть поодиночке (261011_002: 10 деталей с вырезом — 3 пары + 4 одиночных дают тот же последний лист, что и
 // россыпь, но с парами; «все 5 пар» — последний лист больше). Пробуем и меньшее число пар.
 async function chooseHybridPlan(params, meta) {
-  const base = buildHybridPlan(params)
-  if (!base) return null
-  let combos = [{ c: {}, lim: null }]
-  for (const [kind, n] of base.pairShapes || []) {
-    if (n < 2) continue
-    const next = []
-    for (const x of combos) for (let i = 0; i < Math.min(n, 3); i++) next.push({ ...x, c: { ...x.c, [kind]: i } })
-    combos = next.slice(0, 9)
+  // Два исходных плана: прежний (пары внутри позиции, строгий порог) и расширенный — пары из одинаковых деталей разных
+  // позиций и мягкий порог (зубчатые стойки, см. tileIntoPairs). Расширенный — только кандидат: пробный раскрой
+  // сравнивает оба, и если он не лучше, всё идёт ровно как раньше
+  const base0 = buildHybridPlan(params)
+  if (!base0) return null
+  const EXT = { byShape: true, soft: true }
+  const ext = buildHybridPlan(params, {}, null, EXT)
+  const sig = pl => JSON.stringify(pl?.pairCounts || []) + '|' + JSON.stringify(pl?.pairShapes || [])
+  const bases = [{ base: base0, opts: {} }]
+  if (ext && sig(ext) !== sig(base0)) bases.push({ base: ext, opts: EXT })
+  let combos = []
+  for (const { base, opts } of bases) {
+    let cs = [{ c: {}, lim: null, base, opts }]
+    for (const [kind, n] of base.pairShapes || []) {
+      if (n < 2) continue
+      const next = []
+      for (const x of cs) for (let i = 0; i < Math.min(n, 3); i++) next.push({ ...x, c: { ...x.c, [kind]: i } })
+      cs = next.slice(0, 9)
+    }
+    // число пар: все, на одну меньше, ~половина, ~треть (для каждой детали с парами; сочетаний — не больше 16)
+    for (const [di, n] of base.pairCounts || []) {
+      if (n < 2) continue
+      const opts2 = [...new Set([n - 1, Math.ceil(n * 0.6), Math.ceil(n / 2), Math.ceil(n / 3)])].filter(k => k >= 1 && k < n)
+      const next = cs.slice()
+      for (const x of cs) for (const k of opts2) next.push({ ...x, lim: { ...(x.lim || {}), [di]: k } })
+      cs = next.slice(0, 16)
+    }
+    combos.push(cs)
   }
-  // число пар: все, на одну меньше, ~половина, ~треть (для каждой детали с парами; сочетаний — не больше 16)
-  for (const [di, n] of base.pairCounts || []) {
-    if (n < 2) continue
-    const opts = [...new Set([n - 1, Math.ceil(n * 0.6), Math.ceil(n / 2), Math.ceil(n / 3)])].filter(k => k >= 1 && k < n)
-    const next = combos.slice()
-    for (const x of combos) for (const k of opts) next.push({ ...x, lim: { ...(x.lim || {}), [di]: k } })
-    combos = next.slice(0, 16)
-  }
-  if (combos.length < 2) return base
+  // порядок проб: оба исходных плана (обязательно), дальше сочетания прежнего плана — в прежнем порядке, потом расширенного
+  const order = [...combos.map(cs => cs[0]), ...combos.flatMap(cs => cs.slice(1))]
+  if (order.length < 2) return base0
   let best = null, bestScore = null
   // не дольше PLAN_BUDGET_MS: первые сочетания — самые важные (все пары, на одну меньше); остальное — пока есть время
   const PLAN_BUDGET_MS = 2500
   const t0 = Date.now()
-  for (const { c, lim } of combos) {
-    if (best && Date.now() - t0 > PLAN_BUDGET_MS) break
+  for (let oi = 0; oi < order.length; oi++) {
+    const { c, lim, base, opts } = order[oi]
+    if (best && oi >= bases.length && Date.now() - t0 > PLAN_BUDGET_MS) break
     const tp = Date.now()
-    const plan = Object.values(c).some(Boolean) || lim ? buildHybridPlan(params, c, lim) : base
+    const plan = Object.values(c).some(Boolean) || lim ? buildHybridPlan(params, c, lim, opts) : base
     if (!plan) continue
     try {
       // быстрая проба: доводка итога короткая (обрезок последнего листа — 0,1 с, без перекомпоновки и «узкие — от края») —
@@ -207,11 +222,11 @@ async function chooseHybridPlan(params, meta) {
         finishBudget: { maxMs: 100, composeMs: 0, relayout: 0 } })
       const sc = liveScore(plan.expand({ ...meta, ...r }).sheets, meta.usableX, meta.usableY)
       if (liveBetter(sc, bestScore)) { best = plan; bestScore = sc }
-      if (globalThis.__DBG) console.log('probe', Date.now() - tp, 'ms', JSON.stringify(c), JSON.stringify(lim), r.sheets.length)
+      if (globalThis.__DBG) console.log('probe', Date.now() - tp, 'ms', opts.byShape ? 'EXT' : 'old', JSON.stringify(c), JSON.stringify(lim), r.sheets.length)
     } catch { /* пробуем следующее сочетание */ }
   }
   if (globalThis.__DBG) console.log('plan total', Date.now() - t0)
-  return best || base
+  return best || base0
 }
 // Готовая раскладка (seed) в терминах гибридных деталей: настоящие номера деталей → гибридные. Детали из
 // сцепленных пар так не переводятся — тогда продолжить с раскладки нельзя, поиск идёт с нуля.
