@@ -1020,7 +1020,9 @@ export function sweepLast(sheets, modes, direction, usableX, usableY, budgetMs =
 
 // fresh — свободные места каждого листа строятся заново по его деталям (раскладка после доводки: переукладка
 // «узкие — от края», стяжка и перестановка полос двигают детали, а freeRects листа остаются от укладки)
-function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf', fresh = false) {
+// settle = false — без стяжки листа-приёмника: раскладка фигурных деталей после развёртки гибрида (детали лежат в
+// вырезах соседей, габариты перекрываются — стяжка по габаритам их бы сдвинула); вставка только в свободное место
+export function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf', fresh = false, settle = true) {
   if (sheets.length < 2) return sheets
   if (fresh) sheets = sheets.map(sh => rebuildFree(sh, usableX, usableY))
   const n = sheets.length - 1
@@ -1049,7 +1051,7 @@ function insertLeftovers(sheets, direction, usableX, usableY, mode = 'baf', fres
       if (!sh.freeRects?.length || sh.maxFreeW === undefined) { if (!cur) cur = sheets.slice(); cur[j] = rebuildFree(sh, usableX, usableY) }
       let target = (cur || sheets)[j]
       let spot = cannotFit(target, piece) ? null : chooseSpot(target.freeRects, piece, direction, usableX, usableY, mode, target.placed)
-      if (!spot && sheetArea(target) + piece.pw * piece.ph <= usableX * usableY) {
+      if (!spot && settle && sheetArea(target) + piece.pw * piece.ph <= usableX * usableY) {
         for (const v of settledVariants(target)) {
           if (cannotFit(v, piece)) continue
           spot = chooseSpot(v.freeRects, piece, direction, usableX, usableY, mode, v.placed)

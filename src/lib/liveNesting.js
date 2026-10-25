@@ -11,7 +11,7 @@
 //
 // Обычный (не онлайн) режим тоже идёт через этот модуль: тот же поиск, но с
 // лимитом времени из настроек, и промежуточные улучшения тоже видны.
-import { runNesting, smallAtEdge, lastOffcutArea, repackLastForOffcut, sweepLast } from './nesting'
+import { runNesting, smallAtEdge, lastOffcutArea, repackLastForOffcut, sweepLast, insertLeftovers } from './nesting'
 import { runBeamSaw } from './beamSawNesting'
 import { beamSettings } from './beamSaw'
 import { readyOrderResult } from './readyOrder'
@@ -88,11 +88,25 @@ function sweepExpanded(sheets, params, usableX, usableY, kerf, budgetMs) {
     const d = params.details[p.detailIndex]
     return { ...p, id, rotatable: !!d?.rotatable, kf: kerf }
   }) }))
-  const out = sweepLast(prep, SWEEP_MODES, params.direction || 'auto', usableX + kerf, usableY + kerf, budgetMs)
+  // Сначала — детали последнего листа прямо в свободные места предыдущих, ничего на них не двигая. Свободные места
+  // часто открываются только после развёртки и дозаполнения вырезов, а поиск шёл по своей раскладке и их не видел;
+  // перекладка листа с нуля (sweepLast) плотный лист не повторяет. 250911Ajbibi_k1_history_1: на листе 32 над
+  // тремя «днами» была полоса 1720×190, а на 33-м лежала одна деталь 1358×120 — пользователь переложил вручную
+  const dir = params.direction || 'auto'
+  const same = new Set(prep.flatMap(sh => sh.placed))   // детали, оставшиеся на месте, — возвращаются как были
+  let out = prep
+  for (let pass = 0; pass < 3 && out.length >= 2; pass++) {
+    const m = insertLeftovers(out, dir, usableX + kerf, usableY + kerf, 'baf', true, false)
+    if (m === out) break
+    out = m
+  }
+  out = sweepLast(out, SWEEP_MODES, dir, usableX + kerf, usableY + kerf, budgetMs)
   if (out === prep) return sheets
   return out.map(sh => ({ ...sh, placed: sh.placed.map(q => {
     const o = byId.get(q.id)
     if (!o) return q
+    // не двигалась — как была: флаг rotated у неё исходный, а не «повёрнута при перекладке»
+    if (same.has(q)) return o
     const turned = !!q.rotated   // поворот при укладке — относительно исходного положения детали
     const res = { ...o, x: q.x, y: q.y, w: q.w, h: q.h, origX: q.origX, origY: q.origY, rotated: turned ? !o.rotated : o.rotated, rotation: q.rotation,
       edgeTop: q.edgeTop, edgeRight: q.edgeRight, edgeBottom: q.edgeBottom, edgeLeft: q.edgeLeft }
