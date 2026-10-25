@@ -131,7 +131,8 @@ export async function runNesting({
   onStats = null,                 // хронология раскроя: «пульс» поиска раз в ~1 с (итерации, поколение, режимы в популяции, разнообразие)
   seed = null,                    // «Продолжить»: листы готовой раскладки (как в результате) — поиск начинается с неё, а не с нуля
   finishBudget = null,            // { maxMs, composeMs, relayout } — своё время на итоговую доводку (быстрые пробы гибрида — короче)
-  probe = false,                  // быстрая проба (черновик, выбор плана пар гибрида): короткая случайная фаза, без интенсификации
+  probe = false,
+  noColgen = false,               // шаблоны (ЛП) — в другом потоке: этот сразу ведёт обычный поиск (см. ниже)                  // быстрая проба (черновик, выбор плана пар гибрида): короткая случайная фаза, без интенсификации
 }) {
   // Фрезер: «вдоль X / вдоль Y» — это желаемый обрезок на ПОСЛЕДНЕМ листе (вдоль Y — справа, вдоль X — сверху), а не
   // способ укладки всех листов: заполненные листы укладываются как плотнее (авто), и только последний — под обрезок
@@ -471,9 +472,15 @@ export async function runNesting({
   // ~15 с, генетическому поиску на это нужно ~10 минут. Дальше дожим работает
   // уже от этого решения.
   let pool = null, pooledBest = null, poolSolvedAt = Date.now(), poolSizeAtSolve = 0
-  if (BIG_ORDER && cuttingMethod !== 'guillotine' && !stopNow()) {
-    const kinds = new Set(basePieces.map(p => p.detailIndex)).size
-    if (kinds <= 150 && basePieces.length / kinds >= 3) {
+  // проба (черновик, выбор плана пар) — без шаблонов: им нужны секунды, а проба должна идти доли секунды
+  if (BIG_ORDER && !probe && cuttingMethod !== 'guillotine' && !stopNow()) {
+    const kinds = new Set(basePieces.map(pieceKindKey)).size
+    // По позициям (как было) шаблоны включались не всегда: Базис дробит одинаковые детали на позиции. Включённые только
+    // благодаря виду по размеру — считает один поток (noColgen у остальных): иначе все потоки секунды стоят без показа
+    const byRow = new Set(basePieces.map(p => p.detailIndex)).size
+    const wasOn = byRow <= 150 && basePieces.length / byRow >= 3
+    if (kinds <= 150 && basePieces.length / kinds >= 3 && (wasOn || !noColgen)) {
+      maybeReport(true)   // на экран — то, что уже есть: шаблоны считаются секунды
       try {
         const cgMs = basePieces.length > 600 ? 15000 : 8000
         const cg = await colgenPack(basePieces, scoringModes.filter(m => !m.startsWith('g-')), direction, usableX, usableY, cgMs, Math.random, stopNow)
@@ -1943,6 +1950,7 @@ function scoreSpot(rect, w, h, direction, mode, usableX, usableY, isSmall, conta
   return score
 }
 
+const PLACED_CORE = { id: 1, detailIndex: 1, label: 1, prefix: 1, x: 1, y: 1, w: 1, h: 1, origX: 1, origY: 1, rotated: 1, rotation: 1, isSmall: 1, edgeOkMax: 1, edgeMin: 1, kf: 1, rotatable: 1, edgeTop: 1, edgeRight: 1, edgeBottom: 1, edgeLeft: 1 }
 function makePlacedFrom(piece, rect, rot, pw, ph) {
   return {
     id: piece.id, detailIndex: piece.detailIndex,
@@ -2455,17 +2463,24 @@ function lpCover(cols, d) {
 //    «ценовых»).
 // Решение: ЛП min Σx при покрытии спроса; целое — последовательным округлением
 // (остаток — снова ЛП), хвост — быстрым SVC. Мелкие у края из шаблонов убираются.
+// Вид детали для шаблонов — по размеру и свойствам укладки, а не по позиции заказа: Базис дробит одинаковые детали на
+// десятки позиций (250911Ajbibi_k1: 47 размеров на 243 позиции), и ЛП не видело, что они взаимозаменяемы.
+// Каждая уложенная деталь остаётся своей позицией (название, кромка) — см. instantiate
+export const pieceKindKey = p => `${p.pw}|${p.ph}|${p.rotatable ? 1 : 0}|${p.freeTurn ? 1 : 0}|${p.rot0 || 0}|${p.isSmall ? 1 : 0}|${p.edgeOkMax || 0}`
 export function makePatternPool(pieces, modes, direction, usableX, usableY, rand = Math.random) {
   const S = usableX * usableY
-  const kinds = [...new Set(pieces.map(p => p.detailIndex))]
+  const kinds = [...new Set(pieces.map(pieceKindKey))]
   const kIdx = new Map(kinds.map((k, i) => [k, i]))
+  const idKind = new Map(pieces.map(p => [p.id, kIdx.get(pieceKindKey(p))]))
+  const pieceById = new Map(pieces.map(p => [p.id, p]))
+  const kindOf = p => idKind.get(p.id)
   const R = kinds.length
   const byKind = kinds.map(() => [])
-  pieces.forEach(p => byKind[kIdx.get(p.detailIndex)].push(p))
+  pieces.forEach(p => byKind[kindOf(p)].push(p))
   const d = byKind.map(l => l.length)
   const area = byKind.map(l => l[0].pw * l[0].ph)
   const packOne = (order, mode) => packPatternSheet(order, mode, direction, usableX, usableY, rand)
-  const countOf = sh => { const c = new Array(R).fill(0); sh.placed.forEach(p => { const t = kIdx.get(p.detailIndex); if (t !== undefined) c[t]++ }); return c }
+  const countOf = sh => { const c = new Array(R).fill(0); sh.placed.forEach(p => { const t = kindOf(p); if (t !== undefined) c[t]++ }); return c }
   const pats = [], seen = new Map()
   const addPat = sh => {
     if (!sh || !sh.placed.length) return false
@@ -2481,6 +2496,8 @@ export function makePatternPool(pieces, modes, direction, usableX, usableY, rand
     }
     seen.set(key, pats.length); pats.push({ c, score, sheet: { placed: sh.placed.map(p => ({ ...p })) } }); return true
   }
+  // служебные поля уложенной детали, которых нет у makePlacedFrom (их переносим как есть)
+  const pickExtra = p => { const o = {}; for (const k of Object.keys(p)) if (!(k in PLACED_CORE)) o[k] = p[k]; return o }
   // стартовые шаблоны: по одному виду (гарантируют допустимость ЛП)
   for (let t = 0; t < R; t++) addPat(packOne(byKind[t].slice(0, Math.min(d[t], Math.ceil(S / area[t]) + 2)), modes[0]))
   const genPatterns = (val, tries) => {
@@ -2501,7 +2518,7 @@ export function makePatternPool(pieces, modes, direction, usableX, usableY, rand
       const mode = modes[Math.floor(rand() * modes.length)]
       const shs = multi ? compactUntilStable(packAttempt(order, mode, direction, usableX, usableY), direction, usableX, usableY).slice(0, -1).map(sh => stripEdgeSmall(sh, usableX, usableY)) : [packOne(order, mode)]
       for (const sh of shs) {
-        let v = 0; sh.placed.forEach(p => { v += val[kIdx.get(p.detailIndex)] })
+        let v = 0; sh.placed.forEach(p => { v += val[kindOf(p)] ?? 0 })
         out.push({ sh, v })
       }
     }
@@ -2541,9 +2558,12 @@ export function makePatternPool(pieces, modes, direction, usableX, usableY, rand
       const instantiate = pat => {
         const placed = []
         for (const p of pat.sheet.placed) {
-          const l = rem[kIdx.get(p.detailIndex)]
-          if (!l.length) continue
-          placed.push({ ...p, id: l.pop().id })
+          const t = kindOf(p)
+          const l = t === undefined ? null : rem[t]
+          if (!l || !l.length) continue
+          const q = l.pop(), src = pieceById.get(p.id)
+          // та же позиция — как было; другая позиция того же вида — её название и кромка (с тем же поворотом)
+          placed.push(!src || src.detailIndex === q.detailIndex ? { ...p, id: q.id } : { ...makePlacedFrom(q, p, !!p.rotated, p.w, p.h), ...pickExtra(p) })
         }
         if (!placed.length) return
         const sh = { index: sheets.length, family: 'maxrects', placed, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }

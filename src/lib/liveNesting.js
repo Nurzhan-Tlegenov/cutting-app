@@ -386,9 +386,11 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
     kerf: params.kerf,
   }
 
+  // шаблоны (ЛП) для больших заказов из одинаковых деталей — в одном потоке (1-м), остальные сразу ищут и показывают
+  const noColgen = islands > 1 && island !== 1
   if (isRasterPath(params)) {
     return await runNesting({
-      ...params,
+      ...params, noColgen,
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
       shouldStop, takeMigrant, onStats,
       onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded }) => onProgress({ ...meta, sheets, ...(searchSheets && searchSheets !== sheets ? { rawSheets: searchSheets } : {}), iter, genome, ...(seeded ? { seeded } : {}) }) : null,
@@ -417,7 +419,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
   // Г-образными деталями почти всегда выигрывает гибрид (261010_Timur_k1: 11 листов перестали находиться за 5 мин)
   const hybridRole = hybridAllowed && islands > 1 && (islands >= 3 ? island !== 0 : island % 2 === 1)
   if (hybridRole) {
-    const r = await runHybrid(params, meta, { live, shouldStop, onProgress, takeMigrant, onStats, t0 })
+    const r = await runHybrid({ ...params, noColgen }, meta, { live, shouldStop, onProgress, takeMigrant, onStats, t0 })
     if (r) return rough && liveBetter(scoreOf(rough.sheets, meta.usableX, meta.usableY), scoreOf(r.sheets, meta.usableX, meta.usableY)) ? rough : r
   }
   if (!live) {
@@ -451,7 +453,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
   while (!shouldStop()) {
     if (hybridAllowed && round >= 2 && hybridBest && shapeBest && liveBetter(hybridBest, shapeBest)) {
       // непрерывный гибрид до «Стоп» — каждое улучшение сразу на экран
-      const r = await runHybrid(params, meta, {
+      const r = await runHybrid({ ...params, noColgen }, meta, {
         live: true, shouldStop, takeMigrant, onStats, t0,
         onProgress: onProgress ? res => { const { improved } = take(res, 'hybrid'); if (improved) onProgress({ ...res, iter: round, round }) } : null,
       })
@@ -460,7 +462,7 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
     }
     let secs = ROUND_SECONDS[Math.min(round, ROUND_SECONDS.length - 1)]
     const useHybrid = hybridAllowed && round % 2 === 1
-    const res = (useHybrid && await runHybrid({ ...params, optimizeSeconds: secs }, meta, { live: false, shouldStop, onProgress: null, takeMigrant: islands > 1 ? takeMigrant : null, onStats: null, t0 }))
+    const res = (useHybrid && await runHybrid({ ...params, optimizeSeconds: secs, noColgen }, meta, { live: false, shouldStop, onProgress: null, takeMigrant: islands > 1 ? takeMigrant : null, onStats: null, t0 }))
       || withFilled(await runNesting({ ...params, optimizeSeconds: (secs = shapeRoundSeconds(secs, params.details)) }), params)
     round++
     const { sc, improved } = take(res, res.hybrid ? 'hybrid' : 'shape')
