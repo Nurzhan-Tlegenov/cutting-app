@@ -15,7 +15,10 @@ const nameOf = profile => [profile?.full_name, profile?.phone].filter(Boolean).j
 export async function listMessages(limit = 200) {
   try {
     const { data, error } = await supabase.from('app_messages').select(COLS).order('created_at', { ascending: false }).limit(limit)
-    return error ? fail(error) : { data: data || [] }
+    if (error) return fail(error)
+    // переписка по заказам — в ленте только своя (сотрудник производства видит чаты всех заказов — им место в заказе)
+    const uid = (await supabase.auth.getUser())?.data?.user?.id
+    return { data: (data || []).filter(m => m.kind !== 'order' || m.from_id === uid || m.to_id === uid) }
   } catch (e) { return fail(e) }
 }
 async function insert(row) {
@@ -100,18 +103,28 @@ export async function messagePayload(id) {
 }
 
 /** Что считать входящим для этого пользователя */
-export const isIncoming = (m, userId, master) => m.from_id !== userId && (master ? m.kind === 'appeal' || m.kind === 'debug' : m.kind === 'news' || m.kind === 'reply')
+export const isIncoming = (m, userId, master) => m.from_id !== userId && ((m.kind === 'order' && m.to_id === userId) || (master ? m.kind === 'appeal' || m.kind === 'debug' : m.kind === 'news' || m.kind === 'reply'))
 /** Сколько непрочитанных входящих */
 export async function unreadCount(user, master) {
   if (!user) return 0
   try {
     const seen = getUserSettings(user).msgSeenAt || '1970-01-01T00:00:00Z'
     let q = supabase.from('app_messages').select('id', { count: 'exact', head: true }).gt('created_at', seen).neq('from_id', user.id)
-    q = master ? q.in('kind', ['appeal', 'debug']) : q.in('kind', ['news', 'reply'])
+    q = q.or(`kind.in.(${master ? 'appeal,debug' : 'news,reply'}),and(kind.eq.order,to_id.eq.${user.id})`)   // + сообщения по заказу мне
     const { count, error } = await q
     return error ? 0 : count || 0
   } catch { return 0 }
 }
+/** Переписка по заказу (заказчик ↔ производство), старые сверху. -> { data } | { error, missing } */
+export async function listOrderMessages(orderId) {
+  try {
+    const { data, error } = await supabase.from('app_messages').select(COLS).eq('order_id', orderId).eq('kind', 'order').order('created_at', { ascending: true }).limit(300)
+    return error ? fail(error) : { data: data || [] }
+  } catch (e) { return fail(e) }
+}
+/** Сообщение по заказу: адресата ставит база (заказчик → производство, производство → заказчик) */
+export const sendOrderMessage = (user, profile, orderId, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'order', order_id: orderId, body })
+export const ORDER_CHAT_SQL_HINT = 'Переписка по заказу пока не включена в базе: выполните migration_order_chat.sql в Supabase (SQL Editor) — один раз.'
 export const markSeen = user => saveUserSettings({ msgSeenAt: new Date().toISOString() }, user)
 
 // ─── общие постпроцессоры ───────────────────────────────────────────────────

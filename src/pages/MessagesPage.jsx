@@ -13,7 +13,7 @@ import { orderTitle } from '../lib/orderUtils'
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
 // у мастер-аккаунта — обращения и файлы для отладки от пользователей (видно, от кого), новости для всех.
 const when = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
-const KIND = { news: ['Новость', 'var(--blue-light)', 'var(--blue-dark)'], appeal: ['Обращение', 'var(--amber-light)', 'var(--amber)'], reply: ['Сообщение', 'var(--teal-light)', 'var(--teal)'], debug: ['Файл для отладки', '#F3E5F5', '#7B1FA2'] }
+const KIND = { news: ['Новость', 'var(--blue-light)', 'var(--blue-dark)'], appeal: ['Обращение', 'var(--amber-light)', 'var(--amber)'], reply: ['Сообщение', 'var(--teal-light)', 'var(--teal)'], debug: ['Файл для отладки', '#F3E5F5', '#7B1FA2'], order: ['По заказу', 'var(--teal-light)', 'var(--teal)'] }
 const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 1024 ? Math.round(n / 1024) + ' КБ' : (n || 0) + ' Б')
 
 function download(name, text) {
@@ -187,7 +187,8 @@ export default function MessagesPage() {
                       : <button type="button" style={{ ...small, color: 'white', background: 'var(--amber)', borderColor: 'var(--amber)' }} disabled={busy} onClick={() => doExclude(m, exclOrder, true)}>Убрать из итогов</button>
                   })()}
                   {excl && exclOrder && <button type="button" style={small} onClick={() => navigate(`/all-productions?order=${exclOrder.id}`)}>Итоги производства</button>}
-                  {isMaster && m.order_id && !excl && <button type="button" style={small} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>Открыть заказ</button>}
+                  {m.kind === 'order' && m.order_id && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => navigate(`/orders/${m.order_id}#order-chat`)}>Открыть заказ и ответить</button>}
+                  {isMaster && m.order_id && !excl && m.kind !== 'order' && <button type="button" style={small} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>Открыть заказ</button>}
                   {isMaster && !mine && (m.kind === 'appeal' || m.kind === 'debug') && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => { setReplyTo(m); setReplyText('') }}>Ответить</button>}
                   {(isMaster || mine) && <button type="button" style={small} onClick={() => remove(m)}>Удалить</button>}
                 </div>

@@ -28,6 +28,7 @@ import OrderNotes from '../components/OrderNotes'
 import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
+import OrderChat from '../components/OrderChat'
 import { sameColorMap, userSameAlpha } from '../lib/sameParts'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
@@ -152,7 +153,21 @@ export default function OrderPage() {
         <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
           {!isMine && (client.full_name || client.phone) && (
             <div>Заказчик: <b>{client.full_name || '—'}</b>{client.phone ? <a href={`tel:+${String(client.phone).replace(/\D/g, '')}`} style={{ color: 'var(--blue)', marginLeft: 8 }}>{client.phone}</a> : null}
-              {(client.whatsapp || client.phone) ? <a href={`https://wa.me/${String(client.whatsapp || client.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 8, fontSize: 12 }}>WhatsApp</a> : null}</div>
+              {/* откуда заказчик — производство видит, если заказ прислал человек из другого города (тест, ошибка) */}
+              <div style={{ marginTop: 2 }}>
+                <span style={{ color: client.country || client.city ? 'var(--text)' : 'var(--amber)' }}>
+                  {[client.country, client.city].filter(Boolean).join(', ') || 'Страна и город не указаны'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                {(client.whatsapp || client.phone) && <a href={`https://wa.me/${String(client.whatsapp || client.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 12, padding: '5px 12px', borderRadius: 20, border: '0.5px solid var(--teal)', color: 'var(--teal)', textDecoration: 'none', fontWeight: client.messenger === 'whatsapp' ? 600 : 400 }}>WhatsApp</a>}
+                {client.phone && (client.telegram || client.messenger === 'telegram') && <a href={`https://t.me/+${String(client.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 12, padding: '5px 12px', borderRadius: 20, border: '0.5px solid var(--blue)', color: 'var(--blue)', textDecoration: 'none', fontWeight: 600 }}>Telegram</a>}
+                {canStatus && <button type="button" onClick={() => document.getElementById('order-chat')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  style={{ fontSize: 12, padding: '5px 12px', borderRadius: 20, border: 'none', background: 'var(--blue)', color: 'white', width: 'auto' }}>Написать в приложении</button>}
+              </div>
+            </div>
           )}
           {client.production && <div style={{ color: 'var(--text-muted)' }}>Производство: {client.production}</div>}
         </div>
@@ -170,6 +185,11 @@ export default function OrderPage() {
             ))}
           </div>
         </div>
+      )}
+      {order.status !== 'draft' && order.production_id && (isMine || canStatus) && (
+        <OrderChat orderId={id}
+          title={isMine ? 'Переписка с производством' : 'Переписка с заказчиком'}
+          hint={isMine ? 'Производство может уточнить детали заказа здесь — ответьте в этом окне.' : 'Уточните у заказчика детали: настоящий ли заказ, не отправлен ли по ошибке. Ему придёт уведомление.'} />
       )}
       {/* техпроцесс: где заказ, кто принял и через сколько увидел, история движения — руководителю и сотрудникам */}
       {order.status !== 'draft' && <OrderTechProcess orderId={id} status={order.status} manage={inProduction && (!wperms || !!wperms.all)} onChange={fetchOrder} />}
