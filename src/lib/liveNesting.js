@@ -50,6 +50,13 @@ async function roughLayout(params) {
   } catch { return null }
 }
 const ROUND_SECONDS = [3, 6, 10, 15, 20, 30]
+// Раунд точной укладки по контурам на большом заказе (>150 деталей): одному проходу точной укладки нужно ~1 с на
+// 20 деталей, и за 3 с раунд не успевал ничего (250911Ajbibi_k1, 346 дет.: точная укладка — 34 листа за 10–18 с, а
+// раунд 3 с возвращал растр на 130 листов). Заказы поменьше — как раньше.
+const shapeRoundSeconds = (secs, details) => {
+  const n = (details || []).reduce((t, d) => t + (Number(d.qty) || 0), 0)
+  return n > 150 ? Math.max(secs, Math.ceil(n / 20)) : secs
+}
 
 // Вырезы фигурных деталей. Гибрид и черновик кладут одиночную фигурную деталь
 // (Г-образная боковина с вырезом под цоколь) по габариту — вырез пустой.
@@ -422,10 +429,10 @@ async function runCore(params, { live = false, shouldStop = () => false, onProgr
       if (r) { const { improved } = take(r, 'hybrid'); if (improved && onProgress) onProgress({ ...r, iter: round, round }) }
       break
     }
-    const secs = ROUND_SECONDS[Math.min(round, ROUND_SECONDS.length - 1)]
+    let secs = ROUND_SECONDS[Math.min(round, ROUND_SECONDS.length - 1)]
     const useHybrid = hybridAllowed && round % 2 === 1
     const res = (useHybrid && await runHybrid({ ...params, optimizeSeconds: secs }, meta, { live: false, shouldStop, onProgress: null, takeMigrant: islands > 1 ? takeMigrant : null, onStats: null, t0 }))
-      || withFilled(await runNesting({ ...params, optimizeSeconds: secs }), params)
+      || withFilled(await runNesting({ ...params, optimizeSeconds: (secs = shapeRoundSeconds(secs, params.details)) }), params)
     round++
     const { sc, improved } = take(res, res.hybrid ? 'hybrid' : 'shape')
     // «Пульс» по раундам: что дал каждый раунд, даже если он не лучше

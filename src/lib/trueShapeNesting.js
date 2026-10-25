@@ -738,7 +738,7 @@ async function attemptPack(pieceInstances, cols, rows, deadline) {
   let n = 0
   let idx = 0
   while (idx < pieceInstances.length) {
-    if (deadline && Date.now() > deadline) break // одна попытка сама по себе может быть слишком долгой на большом заказе — прерываем, а не игнорируем бюджет времени
+    if (deadline && Date.now() > deadline) { sheets.truncated = true; break } // одна попытка сама по себе может быть слишком долгой на большом заказе — прерываем, а не игнорируем бюджет времени
     const inst = pieceInstances[idx]
     // Якоря — не только правый край габарита уже уложенных деталей, но и
     // координаты ВСЕХ их вершин (в клетках). Это важно для деталей с пазом:
@@ -1105,10 +1105,61 @@ export async function packTrueShape({
   const budgetMs = useExact ? totalBudgetMs * 0.2 : totalBudgetMs
   const startTime = Date.now()
 
+  // ─── Точная укладка по контурам (тетрис с миллиметровой точностью) — отдельной функцией: на больших заказах она
+  // может идти раньше растровой базы (см. ниже). baseStat — с чем сравнивать (null — принять, если все детали на месте)
+  const runExact = async (baseStat) => {
+    // Деталь, которая не влезает даже на пустой лист (запрет поворота: 80×2332 поперёк листа 1830 —
+    // 250911Ajbibi_k1), точная укладка раньше встречала и бросала ВСЮ работу (packOrder → null), и поток впустую
+    // считал растр. Такие детали растр тоже не кладёт — исключаем их и здесь; проверка ниже считает без них.
+    const fitsEmpty = inst => inst.variants.some(v => v.w <= usableX + 0.01 && v.h <= usableY + 0.01)
+    const exactInst = instances.filter(fitsEmpty)
+    const exact = exactInst.length ? await packExact({
+      instances: exactInst, kerf, usableX, usableY, direction,
+      deadline: Date.now() + Math.max(2500, totalBudgetMs * 0.8),
+    }) : null
+    // Страховка: точная укладка принимается, только если на листах ровно
+    // столько деталей, сколько в заказе — ни одна не потеряна и не задвоена.
+    const exactCount = exact ? exact.sheets.reduce((a, sh) => a + sh.meta.flatMap(expandPlacement).length, 0) : 0
+    if (exact && exactCount !== exactInst.length) console.warn(`Точная укладка отброшена: деталей ${exactCount} из ${exactInst.length}`)
+    if (!(exact && exactCount === exactInst.length && exactBetter(exact.stat, baseStat))) return null
+    return exact.sheets.map((sh, si) => ({
+        index: si,
+        freeRects: [],
+        placed: gravityPolygons(sh.meta.flatMap(expandPlacement).map(({ inst, variant: v, x, y }) => {
+          const times = v.angle / 90
+          let top = inst.edgeTop, right = inst.edgeRight, bottom = inst.edgeBottom, left = inst.edgeLeft
+          for (let i = 0; i < times; i++) {
+            const nTop = left, nRight = top, nBottom = right, nLeft = bottom
+            top = nTop; right = nRight; bottom = nBottom; left = nLeft
+          }
+          return {
+            detailIndex: inst.detailIndex, label: inst.label, prefix: inst.prefix,
+            x, y, w: v.w + kerf, h: v.h + kerf,
+            origX: v.w, origY: v.h, rotated: v.angle === 90 || v.angle === 270, rotation: v.angle,
+            rotatable: inst.variants.length > 2, isSmall: inst.isSmall,
+            edgeTop: top, edgeRight: right, edgeBottom: bottom, edgeLeft: left,
+            polygon: v.polygon.map(([px, py]) => ({ x: px, y: py })),
+          }
+        }), direction, kerf),
+      }))
+  }
+
   // Базовый результат ВСЕГДА без дедлайна — обязан разместить все детали
   // целиком, это гарантированная основа, даже если бюджет = 0.
   const seedOrder = instances.slice().sort((a, b) => b.area - a.area)
-  let best = await attemptPack(seedOrder, cols, rows, null)
+  // Большой заказ (>150 деталей) с точной укладкой: растровая база (сетка ~7 мм, зазор до двух клеток вместо реза)
+  // на нём идёт десятки секунд и почти всегда проигрывает — 250911Ajbibi_k1 (346 дет.): 17 с и 131 лист, точная — 34.
+  // Даём базе четверть бюджета; не успела — сначала точная укладка, и только если она не справилась — база целиком,
+  // как раньше. Заказы поменьше и база, успевшая в срок, идут ровно прежним путём.
+  const BIG_SHAPE = useExact && totalInstances > 150
+  let best = await attemptPack(seedOrder, cols, rows, BIG_SHAPE ? startTime + Math.max(2000, totalBudgetMs * 0.25) : null)
+  let exactTried = false
+  if (best.truncated) {
+    exactTried = true
+    const ex = await runExact(null)
+    if (ex) return { sheets: ex, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }
+    best = await attemptPack(seedOrder, cols, rows, null)
+  }
   let bestScore = scoreSheets(best, cols, rows)
 
   // ─── Генетический алгоритм поверх ПОРЯДКА укладки деталей ─────────────────
@@ -1217,7 +1268,7 @@ export async function packTrueShape({
   // ─── Точная укладка по контурам (тетрис с миллиметровой точностью) ────────
   // Сравниваем с растровым результатом: меньше листов — лучше; при равенстве —
   // меньше материала на последнем листе (первые листы плотнее).
-  if (useExact) {
+  if (useExact && !exactTried) {
     const polyArea = pts => { let a = 0; for (let i = 0; i < pts.length; i++) { const q = pts[(i + 1) % pts.length]; a += pts[i].x * q.y - q.x * pts[i].y } return Math.abs(a) / 2 }
     const lastSheet = resultSheets[resultSheets.length - 1]
     let envX = 0, envY = 0
@@ -1228,36 +1279,8 @@ export async function packTrueShape({
       lastUsed: lastSheet ? lastSheet.placed.reduce((acc, p) => acc + polyArea(p.polygon), 0) : 0,
       lastEnv: envX * envY,
     }
-    const exact = await packExact({
-      instances, kerf, usableX, usableY, direction,
-      deadline: Date.now() + Math.max(2500, totalBudgetMs * 0.8),
-    })
-    // Страховка: точная укладка принимается, только если на листах ровно
-    // столько деталей, сколько в заказе — ни одна не потеряна и не задвоена.
-    const exactCount = exact ? exact.sheets.reduce((a, sh) => a + sh.meta.flatMap(expandPlacement).length, 0) : 0
-    if (exact && exactCount !== totalInstances) console.warn(`Точная укладка отброшена: деталей ${exactCount} из ${totalInstances}`)
-    if (exact && exactCount === totalInstances && exactBetter(exact.stat, baseStat)) {
-      resultSheets = exact.sheets.map((sh, si) => ({
-        index: si,
-        freeRects: [],
-        placed: gravityPolygons(sh.meta.flatMap(expandPlacement).map(({ inst, variant: v, x, y }) => {
-          const times = v.angle / 90
-          let top = inst.edgeTop, right = inst.edgeRight, bottom = inst.edgeBottom, left = inst.edgeLeft
-          for (let i = 0; i < times; i++) {
-            const nTop = left, nRight = top, nBottom = right, nLeft = bottom
-            top = nTop; right = nRight; bottom = nBottom; left = nLeft
-          }
-          return {
-            detailIndex: inst.detailIndex, label: inst.label, prefix: inst.prefix,
-            x, y, w: v.w + kerf, h: v.h + kerf,
-            origX: v.w, origY: v.h, rotated: v.angle === 90 || v.angle === 270, rotation: v.angle,
-            rotatable: inst.variants.length > 2, isSmall: inst.isSmall,
-            edgeTop: top, edgeRight: right, edgeBottom: bottom, edgeLeft: left,
-            polygon: v.polygon.map(([px, py]) => ({ x: px, y: py })),
-          }
-        }), direction, kerf),
-      }))
-    }
+    const ex = await runExact(baseStat)
+    if (ex) resultSheets = ex
   }
 
   return { sheets: resultSheets, usableX, usableY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf }

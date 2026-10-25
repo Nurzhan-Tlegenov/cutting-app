@@ -90,7 +90,16 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
   }))
   details.forEach((d, i) => {
     const need = Number(d.qty) || 1
-    if (cnt[i] < need) push(`Потеряны детали: «${d.display_name || d.name}» — на листах ${cnt[i]} из ${need}`)
+    if (cnt[i] < need) {
+      // Причина — если деталь в разрешённых положениях не помещается в рабочую зону листа даже одна
+      // (250911Ajbibi_k1: 80×2332 с запретом поворота при ширине листа 1830 — без причины было непонятно, что делать)
+      const L = Number(d.length) || 0, W = Number(d.width) || 0
+      const big = usableX > 0 && usableY > 0 && !(W <= usableX + 0.01 && L <= usableY + 0.01) && !(d.rotatable && L <= usableX + 0.01 && W <= usableY + 0.01)
+      const why = !big ? '' : (!d.rotatable && L <= usableX + 0.01 && W <= usableY + 0.01)
+        ? ` — не помещается на лист без поворота (${mm(L)}×${mm(W)}), включите вращение`
+        : ` — больше рабочей зоны листа (${mm(L)}×${mm(W)})`
+      push(`Потеряны детали: «${d.display_name || d.name}» — на листах ${cnt[i]} из ${need}${why}`)
+    }
     if (cnt[i] > need) push(`Лишние детали: «${d.display_name || d.name}» — на листах ${cnt[i]}, в заказе ${need}`)
   })
   if (unknown) push(`На листах ${unknown} дет., которых нет в заказе`)
