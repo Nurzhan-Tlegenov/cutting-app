@@ -42,6 +42,11 @@ export async function requestSignup2(name, phone, comment, country, city, messen
   return r.data || {}
 }
 /** Код из Telegram / WhatsApp перед регистрацией. -> { ok } | { error } */
+/** Чего не хватает в одобренной заявке номера ('' — всё есть или база ещё без функции): 'name,country,city' — migration_signup_required.sql */
+export async function signupMissing(phone) {
+  const r = await call('signup_missing', { p_phone: phone || '' })
+  return r.error || r.missing ? '' : String(r.data || '')
+}
 export async function confirmSignupCode(phone, code) {
   const r = await call('confirm_signup_code', { p_phone: phone || '', p_code: code || '' })
   if (r.missing) return { ok: true }   // база ещё старая — код не требуется
@@ -125,7 +130,6 @@ export async function adminDeleteUser(id) {
   const r = await call('admin_delete_user', { p_id: id })
   if (r.missing) return { error: HELP_SQL_HINT }
   if (r.error) return { error: /self/.test(r.error) ? 'Свой аккаунт удалить нельзя.' : /admin/.test(r.error) ? 'Аккаунт администратора удалить нельзя.' : r.error }
-  if (r.data && /^has orders:/.test(r.data)) return { error: `У пользователя есть заказы (${r.data.split(':')[1]}) — сначала удалите их или перенесите, потом удаляйте аккаунт.` }
   if (r.data && /profiles_id_fkey/.test(r.data)) return { error: 'Нужно один раз обновить базу: Supabase → SQL Editor → вставьте файл migration_delete_user_profile.sql → Run.' }
   if (r.data && r.data !== 'ok') return { error: r.data === 'not found' ? 'Аккаунт уже удалён.' : `Удалить не получилось: ${r.data}` }
   return {}

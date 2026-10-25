@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom } from '../i18n'
-import { signupOpen, requestSignup2, confirmSignupCode, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
+import { signupOpen, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
 import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -157,6 +157,13 @@ export default function AuthPage() {
         if (form.password.length < 6) throw new Error('Придумайте пароль — минимум 6 символов')
         const c = await confirmSignupCode(regPhone, form.code)
         if (c.error) throw new Error(c.error)
+        // В заявке нет имени, страны или города — без них аккаунт не создаётся (migration_signup_required.sql):
+        // переводим на полную форму, номер и код уже введены
+        if (await signupMissing(regPhone)) {
+          setReq({ status: 'approved' }); setApproved(true); setMode('register')
+          setNote('Укажите имя и фамилию, страну и город — без них регистрация не завершится. Номер и код уже введены.')
+          return
+        }
         await signUp(phoneToEmail(regPhone), form.password, { full_name: '', phone: regPhone, country: '', city: '' })
       } else if (mode === 'login') {
         await signInAny(form.phone, form.password)
