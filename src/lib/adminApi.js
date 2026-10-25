@@ -125,6 +125,8 @@ export async function adminDeleteUser(id) {
   const r = await call('admin_delete_user', { p_id: id })
   if (r.missing) return { error: HELP_SQL_HINT }
   if (r.error) return { error: /self/.test(r.error) ? 'Свой аккаунт удалить нельзя.' : /admin/.test(r.error) ? 'Аккаунт администратора удалить нельзя.' : r.error }
+  if (r.data && /^has orders:/.test(r.data)) return { error: `У пользователя есть заказы (${r.data.split(':')[1]}) — сначала удалите их или перенесите, потом удаляйте аккаунт.` }
+  if (r.data && /profiles_id_fkey/.test(r.data)) return { error: 'Нужно один раз обновить базу: Supabase → SQL Editor → вставьте файл migration_delete_user_profile.sql → Run.' }
   if (r.data && r.data !== 'ok') return { error: r.data === 'not found' ? 'Аккаунт уже удалён.' : `Удалить не получилось: ${r.data}` }
   return {}
 }
