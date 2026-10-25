@@ -46,14 +46,15 @@ function labelTexture(text) {
   const font = '600 30px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
   g.font = font
   const t = text.length > 22 ? text.slice(0, 21) + '…' : text
-  const w = Math.ceil(g.measureText(t).width) + 20, h = 44
+  // без рамки: белый ореол только вокруг самих символов — сквозь подписи видна конструкция (рамки сливались в «паутину»)
+  const w = Math.ceil(g.measureText(t).width) + 16, h = 44
   cv.width = w; cv.height = h
   g.font = font
-  g.fillStyle = 'rgba(255,255,255,0.9)'
-  g.beginPath(); g.roundRect(0, 0, w, h, 10); g.fill()
-  g.strokeStyle = 'rgba(24,95,165,0.55)'; g.lineWidth = 2
-  g.beginPath(); g.roundRect(1, 1, w - 2, h - 2, 9); g.stroke()
-  g.fillStyle = '#12314f'; g.textBaseline = 'middle'; g.textAlign = 'center'
+  g.textBaseline = 'middle'; g.textAlign = 'center'
+  g.lineJoin = 'round'; g.miterLimit = 2
+  g.strokeStyle = 'rgba(255,255,255,0.95)'; g.lineWidth = 8
+  g.strokeText(t, w / 2, h / 2 + 1)
+  g.fillStyle = '#12314f'
   g.fillText(t, w / 2, h / 2 + 1)
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
@@ -123,6 +124,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const setView = patch => setViewState(v => { const n = { ...v, ...patch }; saveUserSettings({ view3d: n }, user); return n })
   const [hidden, setHidden] = useState(() => new Set())   // скрытые материалы
   const [showSet, setShowSet] = useState(false)           // выпадающая панель настроек вида
+  const [showLabelSet, setShowLabelSet] = useState(false) // ползунки «Aa»: размер и видимость подписей
   const [hl, setHl] = useState('')                        // подсветка присадки: '' | 'front' (лицевая) | 'back' (изнанка)
   const [picked, setPicked] = useState(null)
   const [error, setError] = useState('')
@@ -697,8 +699,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     st.labels.forEach(sp => { sp.parent?.remove(sp); sp.material.map?.dispose(); sp.material.dispose() })
     st.labels = []
     st.sizeLabels = () => {
-      const cam = st.camera                                                                 // 22 px высотой на экране
-      const k = cam.isOrthographicCamera ? (22 * (cam.top - cam.bottom)) / cam.zoom / (st.viewH || 300) : (22 * 2 * Math.tan((cam.fov * Math.PI) / 360)) / (st.viewH || 300)
+      const cam = st.camera, px = 22 * (st.labelScale || 1)                                // 22 px высотой на экране × размер подписей
+      const k = cam.isOrthographicCamera ? (px * (cam.top - cam.bottom)) / cam.zoom / (st.viewH || 300) : (px * 2 * Math.tan((cam.fov * Math.PI) / 360)) / (st.viewH || 300)
       st.labels.forEach(sp => sp.scale.set(k * sp.__aspect, k, 1))
     }
     if (view.label === 'block') {
@@ -741,6 +743,15 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     }
     // видимость и взрыв применяются следующими эффектами
   }, [view.label, model])
+  // размер и прозрачность подписей (ползунки «Aa» справа на просмотре)
+  useEffect(() => {
+    const st = stateRef.current
+    if (!st) return
+    st.labelScale = view.labelSize ?? 1
+    const op = view.labelOp ?? 1
+    st.labels.forEach(sp => { sp.material.opacity = op })
+    st.sizeLabels?.()
+  }, [view.labelSize, view.labelOp, view.label, model])
 
   // выбранные детали — синим
   useEffect(() => {
@@ -1409,6 +1420,20 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
                 <button type="button" onClick={() => { setMulti(false); setSel(new Set()); setPicked(null) }} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)' }}>Готово</button>
               </>
             )}
+          </div>
+        )}
+        {view.label && view.label !== 'none' && (
+          <div style={{ position: 'absolute', right: 8, bottom: 8, zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            {showLabelSet && (
+              <div style={{ background: 'var(--bg)', border: '0.5px solid var(--border-md)', borderRadius: 12, padding: '8px 10px', width: 190, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', fontSize: 12, color: 'var(--text-muted)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Размер</span><span>{Math.round((view.labelSize ?? 1) * 100)} %</span></div>
+                <input type="range" min="40" max="160" step="5" value={Math.round((view.labelSize ?? 1) * 100)} onChange={e => setView({ labelSize: Number(e.target.value) / 100 })} style={{ width: '100%' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}><span>Видимость</span><span>{Math.round((view.labelOp ?? 1) * 100)} %</span></div>
+                <input type="range" min="15" max="100" step="5" value={Math.round((view.labelOp ?? 1) * 100)} onChange={e => setView({ labelOp: Number(e.target.value) / 100 })} style={{ width: '100%' }} />
+              </div>
+            )}
+            <button type="button" onClick={() => setShowLabelSet(v => !v)} title="Размер и видимость подписей"
+              style={{ width: 42, height: 42, padding: 0, borderRadius: 21, border: '0.5px solid ' + (showLabelSet ? 'var(--blue)' : 'var(--border-md)'), background: showLabelSet ? 'var(--blue)' : 'var(--bg)', color: showLabelSet ? 'white' : 'var(--blue)', fontSize: 15, fontWeight: 600, boxShadow: '0 2px 8px rgba(0,0,0,0.12)', cursor: 'pointer' }}>Aa</button>
           </div>
         )}
         {toast && (

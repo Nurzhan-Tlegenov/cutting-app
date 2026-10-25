@@ -76,14 +76,21 @@ export function AuthProvider({ children }) {
     if (data.user) {
       const row = { id: data.user.id, email, full_name: profileData.full_name, phone: profileData.phone, whatsapp: profileData.whatsapp, role: 'client' }
       // страна и город — в профиле (migration_user_location.sql); пока в базе нет этих колонок, они остаются в данных аккаунта
+      // Пустое не записываем поверх заполненного: при входе «У меня есть код» имени здесь нет (оно в заявке), а профиль
+      // параллельно уже создан с именем из заявки (ensure_profile при входе) — обновление пустым затирало имя, и мастер
+      // видел «Без имени», пока человек не открывал приложение снова
+      const filled = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && String(v).trim() !== ''))
       let { error: pErr } = await supabase.from('profiles').insert({ ...row, country, city })
       if (pErr) ({ error: pErr } = await supabase.from('profiles').insert(row))
-      else return data
-      // профиль не создался (например, запись уже есть пустая) — записываем те же данные обновлением
+      // профиль не создался (например, запись уже есть) — дописываем непустые данные обновлением
       if (pErr) {
-        await supabase.from('profiles').update({ full_name: row.full_name, phone: row.phone, whatsapp: row.whatsapp }).eq('id', row.id)
-        await supabase.from('profiles').update({ country, city }).eq('id', row.id)   // нет колонок — ошибка, это не страшно
+        const base = filled({ full_name: row.full_name, phone: row.phone, whatsapp: row.whatsapp })
+        if (Object.keys(base).length) await supabase.from('profiles').update(base).eq('id', row.id)
+        const loc = filled({ country, city })
+        if (Object.keys(loc).length) await supabase.from('profiles').update(loc).eq('id', row.id)   // нет колонок — ошибка, это не страшно
       }
+      // имени нет (вход по коду) — сразу из заявки, а не при следующем открытии приложения
+      if (!String(row.full_name || '').trim()) { try { await supabase.rpc('ensure_profile') } catch { /* база ещё старая */ } }
     }
     return data
   }
