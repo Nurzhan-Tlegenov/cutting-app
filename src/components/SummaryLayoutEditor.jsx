@@ -2,7 +2,10 @@ import { useSideWidth } from './DeskSplit'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
-import { drawSummaryPreview, demoPdfSample } from '../lib/nestingPdf'
+import { drawSummaryPreview, demoPdfSample, renderPdfPages } from '../lib/nestingPdf'
+import PdfPreview from './PdfPreview'
+import { userPdfTpl } from '../lib/pdfSummary'
+import { userSameAlpha } from '../lib/sameParts'
 import { nestingStats, statsRows, emptyStats } from '../lib/nestingStats'
 import { pdfSummaryOf, orderRows } from '../lib/pdfSummary'
 import { useBackClose } from '../lib/backStack'
@@ -39,6 +42,8 @@ export default function SummaryLayoutEditor({ onClose }) {
   const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900)
   const [sideW, sideHandle] = useSideWidth('pdf-summary', 400)   // монитор: ширину колонки параметров тянут мышью
   const [fitK, setFitK] = useState(1.5)
+  const [zoom, setZoom] = useState(1)               // превью страницы: крупнее (−/+, Ctrl + колёсико), страница прокручивается
+  const [preview, setPreview] = useState(false)     // предварительный просмотр всего PDF (на образце, с этими настройками)
   const holderRef = useRef(null), cvRef = useRef(null)
   const off = new Set(cfg.off || [])
   const rows = orderRows(allRows(), cfg.order)
@@ -79,6 +84,14 @@ export default function SummaryLayoutEditor({ onClose }) {
     return () => cancelAnimationFrame(id)
   }, [cfg, demo, demoStats])
 
+  // Ctrl + колёсико мыши (и щипок на тачпаде) над превью — крупнее / мельче
+  useEffect(() => {
+    const el = holderRef.current
+    if (!el) return
+    const onWheel = e => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); setZoom(z => Math.max(1, Math.min(4, z * Math.exp(-e.deltaY * 0.002)))) }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
   const moveRow = (key, d) => {
     const keys = rows.map(r => r.key), i = keys.indexOf(key), j = i + d
     if (j < 0 || j >= keys.length) return
@@ -105,10 +118,14 @@ export default function SummaryLayoutEditor({ onClose }) {
           <div style={{ fontSize: 16, fontWeight: 500 }}>Страница статистики PDF</div>
           <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Последняя страница · на образце (цифры и цены — для примера)</div>
         </div>
+        <button type="button" style={chip(false)} disabled={zoom <= 1} onClick={() => setZoom(z => Math.max(1, Math.round((z / 1.5) * 100) / 100))}>−</button>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 36, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+        <button type="button" style={chip(false)} disabled={zoom >= 4} onClick={() => setZoom(z => Math.min(4, Math.round(z * 1.5 * 100) / 100))}>+</button>
+        <button type="button" style={{ ...chip(false), color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setPreview(true)}>👁 Просмотр PDF</button>
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: wide ? 'row' : 'column' }}>
         <div ref={holderRef} style={{ flex: wide ? 1 : '1 1 50%', minHeight: 0, minWidth: 0, overflow: 'auto', background: '#8a8a86', padding: 8, display: 'flex' }}>
-          <canvas ref={cvRef} style={{ width: PAGE_W * fitK, height: PAGE_H * fitK, flex: 'none', margin: 'auto', background: '#fff', boxShadow: '0 2px 10px rgba(0,0,0,0.25)' }} />
+          <canvas ref={cvRef} style={{ width: PAGE_W * fitK * zoom, height: PAGE_H * fitK * zoom, flex: 'none', margin: 'auto', background: '#fff', boxShadow: '0 2px 10px rgba(0,0,0,0.25)' }} />
         </div>
         {wide && sideHandle}
         <div style={{ flex: wide ? `0 0 ${sideW}px` : '1 1 50%', minHeight: 0, overflowY: 'auto', padding: '10px 12px',
@@ -200,8 +217,12 @@ export default function SummaryLayoutEditor({ onClose }) {
       </div>
       <div style={{ display: 'flex', gap: 8, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '0.5px solid var(--border)' }}>
         <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={reset}>Как было</button>
+        <button type="button" className="btn-secondary" style={{ flex: 1.2, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setPreview(true)}>👁 Просмотр PDF</button>
         <button type="button" className="btn-primary" style={{ flex: 1.4 }} onClick={save}>Сохранить</button>
       </div>
+      {preview && <PdfPreview title="Просмотр PDF · на образце" start="last" onClose={() => setPreview(false)}
+        make={prog => renderPdfPages({ order: demo.order, mat: demo.mat, summary: pdfSummaryOf(demoStats, DEMO_QUOTE, cfg), tpl: userPdfTpl(user),
+          same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => prog(`${a}/${b}`) })} />}
     </div>
   )
 }

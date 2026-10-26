@@ -2,7 +2,11 @@ import { useSideWidth } from './DeskSplit'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
-import { drawPdfPreview, normalizePdfTpl, newPdfItem, PDF_ITEMS, pdfItemTitle, pdfItemKind, pdfItemHasLabel, demoPdfSample } from '../lib/nestingPdf'
+import PdfPreview from './PdfPreview'
+import { userSameAlpha } from '../lib/sameParts'
+import { pdfSummaryOf } from '../lib/pdfSummary'
+import { nestingStats } from '../lib/nestingStats'
+import { drawPdfPreview, renderPdfPages, normalizePdfTpl, newPdfItem, PDF_ITEMS, pdfItemTitle, pdfItemKind, pdfItemHasLabel, demoPdfSample } from '../lib/nestingPdf'
 import { useBackClose } from '../lib/backStack'
 
 // Конструктор листа PDF карт раскроя — как конструктор бирки: карта листа, список деталей, заголовок и каждая строка
@@ -32,6 +36,7 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
   const [sel, setSel] = useState(null)
   const [boxes, setBoxes] = useState([])
   const [zoom, setZoom] = useState(1)
+  const [preview, setPreview] = useState(false)     // предварительный просмотр всего PDF с этим (ещё не сохранённым) макетом
   const [fitK, setFitK] = useState(1.5)             // точек экрана на мм, когда лист целиком помещается в окно превью
   const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900)   // монитор: параметры справа
   const [sideW, sideHandle] = useSideWidth('pdf-layout', 380)   // монитор: ширину колонки параметров тянут мышью
@@ -60,6 +65,20 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
     return () => cancelAnimationFrame(id)
   }, [tpl, order, mat])
 
+  // Ctrl + колёсико мыши (и щипок на тачпаде) над листом — крупнее / мельче (по ступеням масштаба)
+  useEffect(() => {
+    const el = holderRef.current
+    if (!el) return
+    let t = 0
+    const onWheel = e => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const now = Date.now(); if (now - t < 180) return; t = now
+      setZoom(z => ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + (e.deltaY < 0 ? 1 : -1)))])
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
   const change = items => setTpl(normalizePdfTpl({ custom: true, items }))
   const cur = tpl.items.find(i => i.id === sel) || null
   const edit = patch => change(tpl.items.map(i => (i.id === sel ? { ...i, ...patch } : i)))
@@ -211,8 +230,16 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
 
       <div style={{ display: 'flex', gap: 8, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '0.5px solid var(--border)' }}>
         <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={reset}>Стандартный вид</button>
+        <button type="button" className="btn-secondary" style={{ flex: 1.2, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setPreview(true)}>👁 Просмотр PDF</button>
         <button type="button" className="btn-primary" style={{ flex: 1.4 }} onClick={save}>Сохранить макет</button>
       </div>
+      {preview && <PdfPreview title={demo ? 'Просмотр PDF · на образце' : 'Просмотр PDF'} onClose={() => setPreview(false)}
+        make={prog => {
+          let summary = null
+          try { summary = pdfSummaryOf(nestingStats({ order, mat, method: order?.cutting_method || 'nesting' }), null, getUserSettings(user).pdfSummary || {}) } catch { /* без статистики */ }
+          return renderPdfPages({ order, mat, summary, tpl: { custom: true, items: tpl.items }, same: userSameAlpha(user),
+            statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => prog(`${a}/${b}`) })
+        }} />}
     </div>
   )
 }

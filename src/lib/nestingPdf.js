@@ -973,6 +973,22 @@ export async function buildNestingPdf({ order, mat, onProgress, summary = null, 
   return out
 }
 
+/** Предварительный просмотр: те же страницы, что пойдут в PDF, — картинками (адреса blob:), без сборки файла */
+export async function renderPdfPages({ order, mat, summary = null, tpl = null, same = 0, statsPage = false, onProgress }) {
+  const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
+  const ctx = cv.getContext('2d')
+  const { pages } = preparePages({ order, mat, summary, tpl, ctx, sameAlpha: same, statsPage })
+  const urls = []
+  for (let i = 0; i < pages.length; i++) {
+    pages[i]()
+    const blob = await new Promise(r => cv.toBlob(r, 'image/png'))
+    urls.push(URL.createObjectURL(blob))
+    onProgress?.(i + 1, pages.length)
+    await new Promise(r => setTimeout(r))
+  }
+  return urls
+}
+
 function download(file) {
   const url = URL.createObjectURL(file)
   const a = document.createElement('a'); a.href = url; a.download = file.name

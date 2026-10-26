@@ -5,7 +5,8 @@ import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useNestingQuote } from '../hooks/useNestingQuote'
 import { statsRows } from '../lib/nestingStats'
 import { money } from '../lib/pricing'
-import { saveNestingPdf } from '../lib/nestingPdf'
+import { saveNestingPdf, renderPdfPages } from '../lib/nestingPdf'
+import PdfPreview from './PdfPreview'
 import { userSameAlpha } from '../lib/sameParts'
 import { quoteLines, pdfSummaryOf, userPdfTpl, orderRows } from '../lib/pdfSummary'
 import PdfLayoutEditor from './PdfLayoutEditor'
@@ -21,6 +22,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const { user } = useAuth()
   const { stats, quote } = useNestingQuote({ order, mats: [mat], method, productionId: order?.production_id })
   const desk = useDesktop()   // компьютер: окно по центру, а не снизу
+  const [preview, setPreview] = useState(false)   // предварительный просмотр PDF этого заказа, до создания файла
   const [cfg, setCfg] = useState(() => ({ off: [], price: 'lines', ...(getUserSettings(user).pdfSummary || {}) }))
   const [statsPage, setStatsPageState] = useState(() => !!getUserSettings(user).pdfStatsPage)
   const setStatsPage = on => { setStatsPageState(on); saveUserSettings({ pdfStatsPage: on }, user) }
@@ -104,10 +106,13 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
           {error && <p className="error-text" style={{ marginBottom: 6 }}>{error}</p>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className="btn-secondary" style={{ flex: 1 }} disabled={!!busy} onClick={onClose}>Отмена</button>
+            <button type="button" className="btn-secondary" style={{ flex: 1.3, color: 'var(--blue)', borderColor: 'var(--blue)' }} disabled={!!busy || quote === undefined} onClick={() => setPreview(true)}>👁 Просмотр</button>
             <button type="button" className="btn-primary" style={{ flex: 2 }} disabled={!!busy || quote === undefined} onClick={make}>{busy ? `PDF ${busy}` : 'Создать PDF'}</button>
           </div>
         </div>
       </div>
+      {preview && <PdfPreview title="Просмотр PDF" onClose={() => setPreview(false)}
+        make={prog => renderPdfPages({ order, mat, summary: pdfSummaryOf(stats, quote, cfg), tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, onProgress: (a, b) => prog(`${a}/${b}`) })} />}
       {layout && <PdfLayoutEditor order={order} mat={mat} onClose={() => { setLayout(false); syncProductionReports(user) }} />}
     </div>
   )
