@@ -23,7 +23,8 @@ export const emptyStats = () => ({
   edgeByType: {},   // кромка по видам заказа: { название: м } (виды — из Excel или из бланка заказа; толщина — edgeTypeT)
   edgeTypeT: {},
   holes: 0, edgeHoles: 0, grooves: 0, grooveM: 0, pockets: 0, cutouts: 0, shapedParts: 0,
-  drillM2: 0, drillParts: 0,   // детали с присадкой (отверстия в пласть, с изнанки, в торец): их площадь — для цены «присадка за м²»
+  drillM2: 0, drillParts: 0,   // детали с присадкой (отверстия в пласть, с изнанки, в торец): их площадь и число — для сведения;
+                               // цена «присадка за м²» считается от площади ВСЕХ деталей заказа, если присадка в нём есть (statsPayload)
   hdf: false,   // материал заказа — ХДФ / ДВП: распил в прайс-листе по своим ценам
 })
 
@@ -127,7 +128,7 @@ export function statsPayload(st, order = null) {
     sheets: st.sheets.map(s => ({ parts: s.parts })),
     parts: st.parts, cut_m: r2(st.cutM),
     edge_thin_m: r2(st.edgeThinM), edge_thick_m: r2(st.edgeThickM), edge_curved_m: r2(st.edgeCurvedM), edge_curved_parts: st.edgeCurvedParts,
-    holes: st.holes, edge_holes: st.edgeHoles, drill_m2: r2(st.drillM2), drill_parts: st.drillParts, groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
+    holes: st.holes, edge_holes: st.edgeHoles, drill_m2: st.drillParts > 0 ? r2(st.partsM2) : 0, drill_parts: st.drillParts,   // присадка за м² — от общей площади деталей groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
     ...(st.hdf ? { hdf: true } : {}),
     ...(order?.drill_kind === 'large' ? { drill_kind: 'large' } : {}),   // ХДФ / ДВП — база берёт цены распила ХДФ (migration_hdf_prices.sql)
   }
@@ -155,7 +156,7 @@ export function statsRows(st) {
     ['edgeCurved', 'Кромка криволинейная', `${n2(st.edgeCurvedM)} м · ${st.edgeCurvedParts} дет.`, st.edgeCurvedM > 0],
     ['holes', 'Отверстий в пласть', st.holes, st.holes > 0],
     ['edgeHoles', 'Отверстий в торец', st.edgeHoles, st.edgeHoles > 0],
-    ['drillM2', 'Площадь деталей с присадкой', `${n2(st.drillM2)} м² · ${st.drillParts} дет.`, st.drillM2 > 0],
+    ['drillM2', 'Присадка: площадь деталей заказа', `${n2(st.partsM2)} м² · присадка у ${st.drillParts} дет.`, st.drillParts > 0],
     ['grooves', 'Пазы', `${st.grooves} шт. · ${n2(st.grooveM)} м`, st.grooves > 0],
     ['pockets', 'Выемок', st.pockets, st.pockets > 0],
     ['offcuts', 'Деловые остатки', `${Object.values(st.offcutSizes || {}).reduce((a, v) => a + v, 0)} шт`, Object.keys(st.offcutSizes || {}).length > 0],
