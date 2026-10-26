@@ -28,6 +28,8 @@ export default function NewsPopup() {
           .eq('kind', 'news').is('to_id', null).gt('created_at', since).order('created_at', { ascending: false }).limit(1)
         const n = !error && data?.[0]
         if (!alive || !n || st.newsPopupId === n.id) return
+        // уже видел её в «Сообщениях» (открывал раздел после выхода новости) — окном не дублируем
+        if (st.msgSeenAt && n.created_at <= st.msgSeenAt) return
         // новость вышла раньше, чем человек зарегистрировался, — для него это не новость
         if (user.created_at && n.created_at < user.created_at) return
         setNews(n)
