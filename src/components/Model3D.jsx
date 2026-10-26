@@ -136,7 +136,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const [showViews, setShowViews] = useState(false)
   const [explode, setExplode] = useState(0)                      // взрыв-схема: 0..1
   const [showExplode, setShowExplode] = useState(false)
-  const [showClash, setShowClash] = useState(false)      // «Пересечения»: где детали заходят друг в друга и насколько
+  const [showClash, setShowClash] = useState(false)
+  const [clashOpen, setClashOpen] = useState(false)      // список пересечений развёрнут (свёрнут — одна строка, модель крутится свободно)      // «Пересечения»: где детали заходят друг в друга и насколько
   const [tool, setToolState] = useState('')                      // '' | 'edge' (кромка) | 'drill' (присадка)
   const [edgeValue, setEdgeValue] = useState('default')          // какая кромка ставится
   const [schemes, setSchemes] = useState([])                     // база фурнитуры пользователя
@@ -1449,24 +1450,30 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
           </div>
         )}
         {showClash && clashes && (
-          <div style={{ position: 'absolute', left: 8, right: 60, bottom: 8, zIndex: 3, maxHeight: '42%', overflowY: 'auto', background: 'var(--bg)', border: '0.5px solid var(--border-md)', borderRadius: 12, padding: '8px 10px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', fontSize: 12.5 }}>
+          <div style={{ position: 'absolute', left: 8, right: 60, bottom: 8, zIndex: 3, maxHeight: clashOpen ? '38%' : undefined, overflowY: clashOpen ? 'auto' : 'hidden', background: 'var(--bg)', border: '0.5px solid var(--border-md)', borderRadius: 12, padding: '8px 10px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', fontSize: 12.5 }}>
             {!clashes.length ? (
-              <div style={{ color: 'var(--teal)' }}>✓ Пересечений нет — детали только касаются друг друга.</div>
+              <div onClick={() => setShowClash(false)} style={{ color: 'var(--teal)', cursor: 'pointer' }}>✓ Пересечений нет — детали только касаются друг друга. <span style={{ color: 'var(--text-muted)' }}>×</span></div>
             ) : (
               <>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                <div onClick={() => setClashOpen(v => !v)} style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: clashOpen ? 4 : 0, flexWrap: 'wrap', cursor: 'pointer', position: 'sticky', top: -8, background: 'var(--bg)', padding: '2px 0' }}>
+                  <span style={{ flex: 'none', fontSize: 13, color: 'var(--text-muted)' }}>{clashOpen ? '▾' : '▸'}</span>
                   <b>Пересечений: {clashes.length}</b>
                   {(() => { const cr = clashes.filter(c => c.depth >= CLASH_CRITICAL).length, wr = clashes.filter(c => c.depth >= CLASH_NOTICE && c.depth < CLASH_CRITICAL).length, mn = clashes.length - cr - wr
-                    return <span style={{ color: 'var(--text-muted)' }}>{[cr && <span key="c" style={{ color: '#E24B4A' }}>● критичных {cr}</span>, wr && <span key="w" style={{ color: '#D08A10' }}> ● заметных {wr}</span>, mn && <span key="m" style={{ color: '#B39400' }}> ● мелких {mn}</span>].filter(Boolean)}</span> })()}
+                    return <span style={{ color: 'var(--text-muted)', flex: 1 }}>{[cr && <span key="c" style={{ color: '#E24B4A' }}>● критичных {cr}</span>, wr && <span key="w" style={{ color: '#D08A10' }}> ● заметных {wr}</span>, mn && <span key="m" style={{ color: '#B39400' }}> ● мелких {mn}</span>].filter(Boolean)}</span> })()}
+                  <span style={{ flex: 'none', fontSize: 12, color: 'var(--blue)' }}>{clashOpen ? 'Свернуть' : 'Список'}</span>
+                  <button type="button" aria-label="Закрыть" onClick={e => { e.stopPropagation(); setShowClash(false) }}
+                    style={{ flex: 'none', border: 'none', background: 'none', fontSize: 18, lineHeight: 1, padding: '0 2px', color: 'var(--text-muted)', cursor: 'pointer' }}>×</button>
                 </div>
+                {clashOpen && <>
                 <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Глубина — насколько одна деталь заходит в другую. Критичные (от {CLASH_CRITICAL} мм) — деталь так не встанет; заметные (от {CLASH_NOTICE} мм) — проверить; мелкие — допуск. Тап — показать только эти две детали.</div>
                 {clashes.map((c, i) => (
-                  <div key={i} onClick={() => isolate([c.a, c.b])} style={{ display: 'flex', gap: 6, alignItems: 'baseline', padding: '4px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
+                  <div key={i} onClick={() => { isolate([c.a, c.b]); setClashOpen(false) }} style={{ display: 'flex', gap: 6, alignItems: 'baseline', padding: '4px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
                     <span style={{ width: 9, height: 9, borderRadius: 5, flex: 'none', background: c.depth >= CLASH_CRITICAL ? '#E24B4A' : c.depth >= CLASH_NOTICE ? '#F2A623' : '#F5D76E' }} />
                     <span style={{ flex: 1, minWidth: 0 }}>{c.nameA} × {c.nameB}{c.approx ? <span style={{ color: 'var(--text-hint)' }}> · по габариту фигурной детали</span> : null}</span>
                     <b style={{ whiteSpace: 'nowrap' }}>{String(c.depth).replace('.', ',')} мм</b>
                   </div>
                 ))}
+                </>}
               </>
             )}
           </div>
