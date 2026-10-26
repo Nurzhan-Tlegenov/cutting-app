@@ -226,8 +226,10 @@ export default function AuthPage() {
       navigate(pendingRef() ? `/r/${pendingRef()}` : '/')
     } catch (err) {
       const msg = err.message
-      if (msg.includes('Invalid login')) setLoginFails(n => n + 1)
-      if (msg.includes('Invalid login')) setError('Неверный телефон или пароль. Если вашу заявку одобрили и пришёл код, а пароль вы ещё не задавали — нажмите «У меня есть код».')
+      // закрытый вход (номер заблокирован мастером) — как обычный неверный пароль, без слов о блокировке
+      const badLogin = /Invalid login|banned/i.test(msg)
+      if (badLogin) setLoginFails(n => n + 1)
+      if (badLogin) setError('Неверный телефон или пароль. Если вашу заявку одобрили и пришёл код, а пароль вы ещё не задавали — нажмите «У меня есть код».')
       else if (msg.includes('already registered')) setError('Этот номер уже зарегистрирован — войдите на вкладке «Вход». Не помните пароль — «Забыли пароль?» или напишите разработчику ниже.')
       else if (/signup_closed|Database error saving new user|Signups not allowed/i.test(msg)) { setOpen(false); setApproved(false); setError('Регистрация сейчас только по запросу. Оставьте заявку.') }
       else setError(msg)

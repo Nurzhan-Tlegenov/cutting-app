@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
-import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation } from '../lib/adminApi'
+import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
 import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
@@ -71,9 +71,13 @@ export default function UsersPage() {
   const [lim, setLim] = useState(null)         // лимиты: { defaults, users } или { error } — в базе ещё нет лимитов
   const [helps, setHelps] = useState(null)     // «Не получается войти» с экрана входа; null — в базе ещё нет этой части
   const [beta, setBeta] = useState(null)       // бета-тест: Map(user_id -> [функции]) или { error } — в базе ещё нет
+  const [blocked, setBlocked] = useState(null) // заблокированные номера: [] или { error } — в базе ещё нет этой части
+  const [blkPhone, setBlkPhone] = useState('')
+  const [blkNote, setBlkNote] = useState('')
 
   const load = async () => {
-    const [u, r, o, pr, lm, lh, bt] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta()])
+    const [u, r, o, pr, lm, lh, bt, bl] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones()])
+    setBlocked(bl.error ? { error: bl.error } : bl.data || [])
     setBeta(bt.error ? { error: bt.error } : bt.data)
     setHelps(lh.error ? null : lh.data || [])
     setLim(lm.error ? { error: lm.error } : { defaults: lm.data?.defaults || {}, users: new Map((lm.data?.users || []).map(x => [x.user_id, x])) })
@@ -143,6 +147,12 @@ export default function UsersPage() {
         </div>
       </div>
     )
+  }
+  // Заблокировать номер: регистрация, заявка, смена пароля и вход для него больше не проходят (ему об этом не сообщается)
+  const blockPhone = (ph, note, who) => {
+    if (digits(ph).length < 10) { setError('Введите номер телефона полностью'); return }
+    if (!window.confirm(`Заблокировать ${who ? `«${who}» (${ph})` : ph}?\n\nС этим номером нельзя будет зарегистрироваться, оставить заявку или войти. Сообщение о блокировке человек не увидит — у него просто не получится.\nАккаунт и заказы не удаляются (удалить можно отдельно). Снять блокировку — в списке «Заблокированные номера».`)) return
+    act(async () => { const r = await adminBlockPhone(ph, note); if (!r.error) { setBlkPhone(''); setBlkNote(''); setInfo(`Номер ${ph} заблокирован.`) } return r })
   }
   const allow = () => {
     if (digits(phone).length < 10) { setError('Введите номер телефона полностью'); return }
@@ -273,6 +283,7 @@ export default function UsersPage() {
                     onSave={(id, unl, l) => act(() => adminSetUserLimits(id, unl, l))} />}
                   {u.id !== user?.id && u.role !== 'admin' && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                      <button type="button" disabled={busy} onClick={() => blockPhone(u.phone || ('+' + digits(u.email)), '', u.full_name || '')} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11, marginRight: 6 }}>🚫 Заблокировать номер</button>
                       <button type="button" disabled={busy} onClick={() => delUser(u)} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11 }}>Удалить аккаунт</button>
                     </div>
                   )}
@@ -423,6 +434,29 @@ export default function UsersPage() {
               <input type="text" placeholder="Имя" value={name} onChange={e => setName(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
               <button type="button" disabled={busy} style={btn('main')} onClick={allow}>Разрешить</button>
             </div>
+            {/* Заблокированные номера: ни регистрации, ни заявки, ни входа — без сообщения о блокировке */}
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ fontSize: 12, color: 'var(--danger)', cursor: 'pointer' }}>🚫 Заблокированные номера{Array.isArray(blocked) ? ` (${blocked.length})` : ''}</summary>
+              {blocked?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', margin: '6px 0' }}>{blocked.error}</p> : (
+                <>
+                  <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>С этих номеров нельзя зарегистрироваться (даже по ссылке-приглашению), оставить заявку, сменить пароль или войти. Человек не видит, что заблокирован, — у него просто не получается.</div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                    <input type="tel" placeholder="+7 700 000 00 00" value={blkPhone} onChange={e => setBlkPhone(e.target.value)} style={{ flex: 1.2, minWidth: 0 }} />
+                    <input type="text" placeholder="Пометка (для себя)" value={blkNote} onChange={e => setBlkNote(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+                    <button type="button" disabled={busy} style={btn('danger')} onClick={() => blockPhone(blkPhone, blkNote, '')}>Заблокировать</button>
+                  </div>
+                  {(blocked || []).map(b => (
+                    <div key={b.digits} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '0.5px solid var(--border)', fontSize: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div>+{b.digits}{b.name ? ` · ${b.name}` : ''}{b.user_id ? <span style={{ color: 'var(--text-hint)' }}> · аккаунт есть, вход закрыт</span> : ''}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{b.note ? `${b.note} · ` : ''}с {dateTime(b.created_at)}</div>
+                      </div>
+                      <button type="button" disabled={busy} style={btn()} onClick={() => { if (window.confirm(`Снять блокировку с +${b.digits}?`)) act(() => adminUnblockPhone('+' + b.digits)) }}>Разблокировать</button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </details>
             {rest.length > 0 && (
               <details style={{ marginTop: 10 }}>
                 <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Рассмотренные ({rest.length})</summary>

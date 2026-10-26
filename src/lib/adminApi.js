@@ -141,3 +141,15 @@ export async function adminSetLocation(userId, country, city) {
   if (r.missing) return { error: 'Нужно один раз обновить базу: Supabase → SQL Editor → вставьте файл migration_admin_location.sql → Run.' }
   return r
 }
+
+/** Мастер: заблокированные номера (migration_phone_block.sql) — номер не может зарегистрироваться, вход в его аккаунт закрыт */
+export const BLOCK_SQL_HINT = 'Нужно один раз обновить базу: Supabase → SQL Editor → вставьте файл migration_phone_block.sql → Run.'
+export async function adminBlockedPhones() { const r = await call('admin_blocked_phones'); return r.missing ? { error: BLOCK_SQL_HINT, missing: true } : r }
+export async function adminBlockPhone(phone, note) {
+  const r = await call('admin_block_phone', { p_phone: phone, p_note: note || '' })
+  if (r.missing) return { error: BLOCK_SQL_HINT }
+  if (r.data === 'bad phone') return { error: 'Проверьте номер: нужны все цифры с кодом страны.' }
+  if (r.data === 'admin') return { error: 'Номер администратора заблокировать нельзя.' }
+  return r
+}
+export const adminUnblockPhone = phone => call('admin_unblock_phone', { p_phone: phone })
