@@ -9,6 +9,7 @@ import { getUserSettings } from '../lib/userSettings'
 import { adminProductionOrders } from '../lib/adminApi'
 import { productionExcludeStats } from '../lib/productionApi'
 import { orderTitle } from '../lib/orderUtils'
+import { markNewsSeen, adminNewsViews } from '../lib/activity'
 
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
 // у мастер-аккаунта — обращения и файлы для отладки от пользователей (видно, от кого), новости для всех.
@@ -37,12 +38,16 @@ export default function MessagesPage() {
   const fileRef = useRef(null)
   const [replyTo, setReplyTo] = useState(null)      // сообщение, на которое отвечает мастер-аккаунт
   const [replyText, setReplyText] = useState('')
+  const [views, setViews] = useState(null)          // мастер: просмотры новостей { byId, users }
+  const [viewersOf, setViewersOf] = useState(null)  // мастер: у какой новости раскрыт список прочитавших
   const [seenAt] = useState(() => getUserSettings(user).msgSeenAt || '')   // что было непрочитанным на момент открытия
 
   const load = async () => {
     const r = await listMessages()
     if (r.error) { setError(r.error); setList([]); return }
     setError(''); setList(r.data)
+    if (isMaster) adminNewsViews().then(v => { if (!v.error) setViews(v.data) })
+    else markNewsSeen(r.data.filter(m => m.kind === 'news').map(m => m.id))   // мастер видит, кто прочитал новость
     markSeen(user)
     window.dispatchEvent(new Event('messages-seen'))
   }
@@ -176,6 +181,25 @@ export default function MessagesPage() {
                 {m.title && <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>{m.title}</div>}
                 {m.body && <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body.replace(/\n?Сделать: Профиль → Заказы всех производств[^\n]*/, '')}</div>}
                 {m.file_name && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace', wordBreak: 'break-all' }}>📎 {m.file_name} · {sizeTxt(m.file_size)}</div>}
+                {isMaster && m.kind === 'news' && views && (() => {
+                  const v = views.byId.get(m.id) || { viewers: [], audience: 0 }
+                  const n = v.viewers.length, all = Math.max(v.audience, n)
+                  const pct = all ? Math.round(n / all * 100) : 0
+                  const open = viewersOf === m.id
+                  return (
+                    <div style={{ marginTop: 6 }}>
+                      <button type="button" onClick={() => setViewersOf(open ? null : m.id)} title="Сколько пользователей открыли новость"
+                        style={{ border: 'none', background: 'none', padding: 0, fontSize: 12.5, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                        👁 <b style={{ color: 'var(--text)' }}>{n}</b> из {all} · {pct}%{n > 0 ? (open ? ' ▾' : ' ▸') : ''}
+                      </button>
+                      {open && n > 0 && (
+                        <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 220, overflowY: 'auto' }}>
+                          {v.viewers.map(x => <div key={x.id}>{x.name || 'пользователь'} <span style={{ color: 'var(--text-hint)' }}>· {when(x.at)}</span></div>)}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                   {isMaster && m.file_name && <button type="button" style={{ ...small, color: 'var(--teal)', borderColor: 'var(--teal)' }} onClick={() => getFile(m)}>⬇ Скачать файл</button>}
                   {excl && (() => {

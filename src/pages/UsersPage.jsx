@@ -46,7 +46,7 @@ export default function UsersPage() {
   const [busy, setBusy] = useState(false)
   const [phone, setPhone] = useState('')
   const [name, setName] = useState('')
-  const [find, setFind] = useState('')
+  const [find, setFind] = useState(() => new URLSearchParams(window.location.search).get('find') || '')   // из «Активности» — сразу нужный человек
   // карточки пользователей свёрнуты; нажатие раскрывает
   const [openU, setOpenU] = useState(() => new Set())
   const flip = id => setOpenU(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { forgetPush } from '../lib/push'
 import { supabase } from '../lib/supabase'
 import { purgeArchived } from '../lib/orderArchive'
+import { touchActivity } from '../lib/activity'
 
 let purged = false   // заказы с истёкшим сроком хранения в архиве удаляются раз за запуск приложения
 import { getUserSettings, saveUserSettings, fetchUserSettings } from '../lib/userSettings'
@@ -22,6 +23,14 @@ export function AuthProvider({ children }) {
     fetchUserSettings(user).then(st => { if (alive) setCabinetState(st.cabinet === 'production' ? 'production' : 'client') })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id])
+  // «пользователь в приложении» — для статистики вовлечённости мастер-аккаунта (раз в полчаса, и когда приложение снова открыли)
+  useEffect(() => {
+    if (!user?.id) return
+    touchActivity(user.id)
+    const on = () => { if (document.visibilityState === 'visible') touchActivity(user.id) }
+    document.addEventListener('visibilitychange', on)
+    return () => document.removeEventListener('visibilitychange', on)
   }, [user?.id])
   const setCabinet = mode => { const m = mode === 'production' ? 'production' : 'client'; setCabinetState(m); saveUserSettings({ cabinet: m }, user) }
 
