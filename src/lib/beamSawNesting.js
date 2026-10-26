@@ -14,7 +14,7 @@ import { beamSettings, maxLevels, trimAt } from './beamSaw'
 import { groupLinesOnSheet, posOfInstance } from './partGroups'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.17'
+export const BEAM_SAW_VERSION = 'β0.18'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -680,7 +680,11 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   }
   // последний лист при «авто»: обрезок вдоль заданной стороны (ось 1-го уровня — поперёк неё); пильный центр сравнивает
   // последние листы по самому крупному цельному остатку (форматник — как раньше: у него своя «ступенька»)
-  const lastAxis = axes.length > 1 && s.lastDir !== 'any' ? (s.lastDir === 'x' ? 'y' : 'x') : null
+  // Детали с текстурой: заполненные листы — как раньше, только вдоль волокон; последний лист перекладывается отдельно
+  // (compactLast) — по заданной стороне обрезка: детали не поворачиваются, меняется только направление полос. Раньше с
+  // текстурой настройка молча не действовала (у производства детали из Базиса почти всегда с текстурой — «не работает»).
+  // Строгое «вдоль X / вдоль Y» в конфигурации раскроя главнее — как было
+  const lastAxis = s.lastDir !== 'any' && (axes.length > 1 || (!cfgDir && s.direction === 'auto')) ? (s.lastDir === 'x' ? 'y' : 'x') : null
   CMP = { maxFree: !s.stairLast, lastAxis }
   const withLast = o => (lastAxis ? { ...o, lastAxis } : o)
   const budget = (live ? 3600 : Math.max(1, Number(params.optimizeSeconds) || 5)) * 1000

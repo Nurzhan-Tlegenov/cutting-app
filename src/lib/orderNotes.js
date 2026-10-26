@@ -17,3 +17,11 @@ export async function saveProdNote(orderId, note) {
   if (error) throw new Error(/function|schema cache|does not exist/i.test(error.message) ? NOTES_SQL_HINT : error.message)
   return data || ''
 }
+
+export const RENAME_SQL_HINT = 'Переименование пока не включено в базе: выполните migration_order_rename.sql в Supabase (SQL Editor) — один раз.'
+/** Новое название заказа (производство или хозяин заказа). -> сохранённое название ('' — пусто, тогда показывается номер) */
+export async function saveOrderName(orderId, name) {
+  const { data, error } = await supabase.rpc('production_set_name', { p_order: orderId, p_name: String(name || '') })
+  if (error) throw new Error(/function|schema cache|does not exist/i.test(error.message) ? RENAME_SQL_HINT : error.message)
+  return data || ''
+}

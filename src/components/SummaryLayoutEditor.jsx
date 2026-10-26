@@ -8,9 +8,9 @@ import { useBackClose } from '../lib/backStack'
 
 // Конструктор страницы «Статистика раскроя» (последняя страница PDF карт): что выводить, в каком порядке, каким шрифтом,
 // в одну или две колонки; порядок разделов (раскрой, стоимость работ, примечания) и вид сметы. Видно сразу на образце.
-// Хранится за аккаунтом в pdfSummary: { off, order, sections, size, cols, price, noNotes }.
+// Хранится за аккаунтом в pdfSummary: { off, order, sections, size, cols, price, noNotes, noOrderNote, noProdNote }.
 const PAGE_W = 210, PAGE_H = 297
-const SECTIONS = { stats: 'Статистика раскроя', cost: 'Стоимость работ (смета)', notes: 'Примечания заказа' }
+const SECTIONS = { stats: 'Статистика раскроя', cost: 'Стоимость работ (смета)', notes: 'Примечания' }
 const PRICE_MODES = [['lines', 'Построчно'], ['total', 'Только итог'], ['none', 'Без сметы']]
 // образец сметы — чтобы видеть, как она ляжет на страницу
 const DEMO_QUOTE = { total: 18640, currency: '₸', lines: [{ key: 'cut_m', qty: 34.55, rate: 40, sum: 1382 }, { key: 'edge_m', qty: 18.94, rate: 120, sum: 2272.8 }, { key: 'hole', qty: 48, rate: 30, sum: 1440 }] }
@@ -99,8 +99,14 @@ export default function SummaryLayoutEditor({ onClose }) {
           {sections.map((k, i) => (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none', fontSize: 13 }}>
               <span style={{ flex: 1 }}>{SECTIONS[k]}</span>
-              {k === 'notes' && <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                <input type="checkbox" checked={!cfg.noNotes} onChange={e => set({ noNotes: !e.target.checked || undefined })} style={{ width: 'auto' }} />выводить</label>}
+              {k === 'notes' && <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {/* каждое примечание — своей галочкой (старая общая noNotes снимается при первой правке) */}
+                {[['noOrderNote', 'клиента (к заказу)'], ['noProdNote', 'производства']].map(([f, l]) => (
+                  <label key={f} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+                    <input type="checkbox" checked={!(cfg.noNotes || cfg[f])} style={{ width: 'auto' }}
+                      onChange={e => set({ noNotes: undefined, noOrderNote: cfg.noNotes ? true : cfg.noOrderNote, noProdNote: cfg.noNotes ? true : cfg.noProdNote, [f]: !e.target.checked || undefined })} />{l}</label>
+                ))}
+              </span>}
               <button type="button" style={arrow} disabled={i === 0} onClick={() => moveSec(k, -1)}>↑</button>
               <button type="button" style={arrow} disabled={i === sections.length - 1} onClick={() => moveSec(k, 1)}>↓</button>
             </div>

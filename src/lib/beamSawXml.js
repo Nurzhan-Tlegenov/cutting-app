@@ -99,6 +99,49 @@ export function sheetCutTree(sheet, geo) {
   return best
 }
 
+/**
+ * Резы листа пильного центра — ровно как в программе для станка (то же дерево резов): длина (мм) и число.
+ * Входит всё, что пила реально режет: опил (обрезка кромок листа и торцовка заготовок на уровнях 3+), резы между
+ * кусками, рез, отделяющий деловой обрезок (сам обрезок не торцуется), и подрезка узких деталей (пилятся с запасом,
+ * потом подрезаются до размера — trimTo). Рез идёт поперёк заготовки, на всю её ширину.
+ * -> { len, cuts, trimLen, trimCuts } | null (карту нельзя разрезать насквозь — тогда статистика считает как раньше)
+ */
+export function beamSheetCuts(sheet, geo) {
+  let tree
+  try { tree = sheetCutTree(sheet, geo) } catch { return null }
+  const k = geo.kerf
+  const res = { len: 0, cuts: 0, trimLen: 0, trimCuts: 0 }
+  const add = (l, trim) => { res.len += l; res.cuts++; if (trim) { res.trimLen += l; res.trimCuts++ } }
+  const sheetLen = ax => (ax === 'x' ? geo.sheetW : geo.sheetL)
+  const startMargin = ax => (ax === 'x' ? geo.marginL : geo.marginT)
+  const endMargin = ax => (ax === 'x' ? geo.marginR : geo.marginB)
+  const walk = (node, layer, wReal) => {
+    // торцовка / обрезка кромки в начале заготовки (1-й и 2-й уровни — от края листа: отступ листа + свой зазор)
+    const trim = layer <= 2 ? startMargin(node.axis) + node.trim : node.trim
+    if (trim > EPS) add(wReal, true)
+    const tail = tailOffcut(node) ? node.slots[node.slots.length - 1] : null
+    let pos = node.trim
+    const slots = node.slots.filter(sl => sl !== tail)
+    for (const sl of slots) {
+      pos += sl.a
+      // рез после куска; последний — только если дальше что-то остаётся (обрезок, отход)
+      if (node.A - pos > EPS || tail) add(wReal, false)
+      if (sl.child) walk(sl.child, layer + 1, sl.a - k)
+    }
+    // куски дошли до конца заготовки 1-го/2-го уровня — край листа обрезается (опил в конце)
+    if (!tail && layer <= 2 && node.A - pos <= EPS && endMargin(node.axis) > EPS) add(wReal, true)
+  }
+  walk(tree, 1, sheetLen(tree.axis === 'x' ? 'y' : 'x'))
+  // подрезка узких деталей: один рез вдоль детали
+  for (const p of sheet.placed || []) {
+    const t = p.trimTo
+    if (!t) continue
+    const W = Number(p.origX) || 0, H = Number(p.origY) || 0
+    add(Math.max(W, H), true)
+  }
+  return res
+}
+
 // ── XML ───────────────────────────────────────────────────────────────────
 const stamp = d => [d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()].map(v => String(v).padStart(2, '0')).join('')
 const edgeStr = e => (e ? (typeof e === 'object' ? String(e.name || e.type || 'кромка') : e === true ? 'кромка' : String(e)) : '')   // в заказе кромка — да/нет по стороне

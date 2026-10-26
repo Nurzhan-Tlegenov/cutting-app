@@ -44,8 +44,8 @@ function wrapLines(ctx, s, w, size, bold = false, maxLines = 99) {
   return out
 }
 /** Примечания заказа для PDF: [[подпись, текст]] — из бланка заказа и от производства */
-const orderNotes = order => [['Примечание', order?.order_note], ['Примечание производства', order?.prod_note]]
-  .map(([k, v]) => [k, String(v ?? '').trim()]).filter(([, v]) => v)
+const orderNotes = (order, L = {}) => [[L.noOrderNote ? '' : 'Примечание к заказу', order?.order_note], [L.noProdNote ? '' : 'Примечание производства', order?.prod_note]]
+  .map(([k, v]) => [k, String(v ?? '').trim()]).filter(([k, v]) => k && v)
 /** Нарисовать примечания блоком шириной w с (x, y) -> высота блока, мм. dry — только посчитать */
 function notesBlock(ctx, notes, x, y, w, { size = 3, maxLines = 4, dry = false } = {}) {
   let yy = y
@@ -667,7 +667,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
   // Статистика раскроя и стоимость работ — отдельной страницей после карт (вид — конструктор страницы статистики:
   // summary.layout { sections — порядок разделов 'stats' | 'cost' | 'notes', size — шрифт строк, мм, cols — 1 или 2 колонки })
   const hasSummary = summary && ((summary.rows || []).length || (summary.lines || []).length || summary.total != null)
-  if (hasSummary) pages.push(() => { pageNo++; drawSummaryPage(ctx, { order, matName, summary, notes, pageNo }) })
+  if (hasSummary) pages.push(() => { pageNo++; drawSummaryPage(ctx, { order, matName, summary, notes: orderNotes(order, summary.layout), pageNo }) })
   return { pages, boxes }
 }
 
@@ -742,7 +742,7 @@ export function drawSummaryPreview(canvas, { order, mat, summary }) {
   canvas.width = PW; canvas.height = PH
   const ctx = canvas.getContext('2d')
   const matName = [mat?.name || '', mat?.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · ')
-  drawSummaryPage(ctx, { order, matName, summary, notes: orderNotes(order), pageNo: (mat?.sheets?.length || 0) + 1 })
+  drawSummaryPage(ctx, { order, matName, summary, notes: orderNotes(order, summary?.layout), pageNo: (mat?.sheets?.length || 0) + 1 })
   return canvas
 
 }

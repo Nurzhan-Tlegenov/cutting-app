@@ -39,7 +39,9 @@ export function summaryLayout(cfg = {}) {
   const ok = ['stats', 'cost', 'notes']
   const sec = Array.isArray(cfg.sections) ? cfg.sections.filter(k => ok.includes(k)) : []
   const all = [...new Set([...sec, ...ok])]
-  return { sections: cfg.noNotes ? all.filter(k => k !== 'notes') : all, size: Number(cfg.size) || 3.1, cols: cfg.cols === 1 ? 1 : 2 }
+  // примечания — каждое своей галочкой: клиента (бланк заказа) и производства; noNotes — старая общая галочка «не выводить»
+  const noOrder = !!(cfg.noNotes || cfg.noOrderNote), noProd = !!(cfg.noNotes || cfg.noProdNote)
+  return { sections: noOrder && noProd ? all.filter(k => k !== 'notes') : all, size: Number(cfg.size) || 3.1, cols: cfg.cols === 1 ? 1 : 2, noOrderNote: noOrder, noProdNote: noProd }
 }
 export function pdfSummaryOf(stats, quote, cfg = {}, estimate = true) {
   const off = new Set(cfg.off || [])

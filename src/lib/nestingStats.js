@@ -7,6 +7,7 @@ import { partFeatures } from './gcode.js'
 import { detailEdgeList } from './edgeLength.js'
 import { rawDetail, overMm, parseEdgeTypes } from './edgeCut.js'
 import { decomposeCuts } from './cutLines.js'
+import { beamSheetCuts } from './beamSawXml.js'
 
 const loopLen = pts => { let l = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; l += Math.hypot(b[0] - a[0], b[1] - a[1]) } return l }
 const loopArea = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1] } return Math.abs(s) / 2 }
@@ -16,6 +17,7 @@ const THICK_FROM = 1          // кромка толще 1 мм считаетс
 export const emptyStats = () => ({
   sheets: [], sheetCount: 0, offcutSheets: 0, parts: 0, kerf: 0, method: 'nesting',
   cutM: 0, cuts: 0, perimM: 0, partsM2: 0, sheetsM2: 0,
+  trimM: 0, trimCuts: 0,   // пильный центр: опил (обрезка кромок листа, торцовка, подрезка узких) — уже входит в cutM / cuts
   edgeM: 0, edgeThinM: 0, edgeThickM: 0, edgeCurvedM: 0, edgeCurvedParts: 0,
   edgeByType: {},   // кромка по видам заказа: { название: м } (виды — из Excel или из бланка заказа; толщина — edgeTypeT)
   edgeTypeT: {},
@@ -71,7 +73,12 @@ export function nestingStats({ order, mat, method }) {
         if (curved) st.edgeCurvedParts++
       }
     }
-    if (st.method === 'guillotine') {
+    // пильный центр: резы — как в программе станка, вместе с опилом (обрезка кромок листа, торцовка) и подрезкой узких
+    const beam = st.method === 'guillotine' && mat.result?.beamSaw ? beamSheetCuts(sh, geo) : null
+    if (beam) {
+      row.cutM = beam.len / 1000; row.cuts = beam.cuts; row.trimM = beam.trimLen / 1000
+      st.trimM += row.trimM; st.trimCuts += beam.trimCuts
+    } else if (st.method === 'guillotine') {
       // пила: сквозные резы по карте (берём тот порядок резов, что короче — как на экране)
       const rects = sh.placed.map(p => ({ x: p.x, y: p.y, w: Number(p.w) || p.origX + geo.kerf, h: Number(p.h) || p.origY + geo.kerf }))
       const a = decomposeCuts(rects, geo.usableX, geo.usableY, geo.kerf, 'v'), b = decomposeCuts(rects, geo.usableX, geo.usableY, geo.kerf, 'h')
@@ -132,7 +139,7 @@ export function statsRows(st) {
     ['used', 'Использование листов', st.sheetsM2 > 0 ? `${Math.round(st.partsM2 / st.sheetsM2 * 100)} %` : '—', st.sheetsM2 > 0],
     ['kerf', saw ? 'Ширина реза (пила)' : 'Ширина реза (фреза)', `${n2(st.kerf)} мм`, st.kerf > 0],
     ['cuts', saw ? 'Количество резов' : 'Количество контуров реза', st.cuts, true],
-    ['cutM', saw ? 'Длина реза' : 'Длина реза (траектория)', `${n2(st.cutM)} м`, true],
+    ['cutM', saw ? 'Длина реза' : 'Длина реза (траектория)', `${n2(st.cutM)} м` + (st.trimM > 0 ? ` (в т. ч. опил ${n2(st.trimM)} м)` : ''), true],
     ['perimM', 'Периметр всех деталей', `${n2(st.perimM)} м`, true],
     ['shaped', 'Фигурных деталей', st.shapedParts, st.shapedParts > 0],
     ['cutouts', 'Вырезов', st.cutouts, st.cutouts > 0],
