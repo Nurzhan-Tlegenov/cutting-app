@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { nestingStats, sumStats, statsPayload } from '../lib/nestingStats'
-import { fetchQuote, fetchFixedQuote } from '../lib/pricing'
+import { fetchQuote, fetchFixedQuote, freshFixedQuote } from '../lib/pricing'
 
 // номер объекта — чтобы понять, что раскрой тот же самый, не сравнивая его целиком
 const ids = new WeakMap()
@@ -27,7 +27,7 @@ export function useNestingQuote({ order, mats, method, productionId, enabled = t
     if (!key) return
     let alive = true
     const t = setTimeout(async () => {
-      let q = fixedId ? await fetchFixedQuote(fixedId) : null
+      let q = fixedId ? await freshFixedQuote(fixedId, await fetchFixedQuote(fixedId), JSON.parse(payload)) : null
       if (!q) q = await fetchQuote(productionId, JSON.parse(payload))
       else if (q.hidden) q = null
       if (alive) setState({ key, quote: q })

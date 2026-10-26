@@ -3,7 +3,7 @@
 // pdfEstimate (галочка «Смета» у кнопки PDF в раскрое), pdfTpl (макет листа из конструктора).
 import { getUserSettings } from './userSettings'
 import { nestingStats, sumStats, statsPayload, statsRows } from './nestingStats'
-import { fetchQuote, fetchFixedQuote, money, GROUP_TITLE, lineTitle, lineUnit } from './pricing'
+import { fetchQuote, fetchFixedQuote, freshFixedQuote, money, GROUP_TITLE, lineTitle, lineUnit } from './pricing'
 import { normalizePdfTpl } from './nestingPdf'
 
 const num = v => (Math.round(Number(v) * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
@@ -67,7 +67,7 @@ export async function statsAndQuote({ order, mats, method }) {
   const stats = sumStats((mats || []).map(mat => nestingStats({ order, mat, method })))
   let quote = null
   if (order?.production_id && stats.parts) {
-    if (order.id && order.status && order.status !== 'draft') quote = await fetchFixedQuote(order.id)
+    if (order.id && order.status && order.status !== 'draft') quote = await freshFixedQuote(order.id, await fetchFixedQuote(order.id), statsPayload(stats, order))
     if (!quote) quote = await fetchQuote(order.production_id, statsPayload(stats, order))
     else if (quote.hidden) quote = null
   }

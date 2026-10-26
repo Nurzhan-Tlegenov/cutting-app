@@ -82,6 +82,18 @@ export async function fixOrderQuote(orderId, payload) {
   try { await supabase.rpc('fix_order_quote', { p_order: orderId, p_stats: payload }) } catch { /* цена просто не зафиксируется */ }
 }
 /** Зафиксированная цена заказа. -> null (не фиксировалась, скрыта или база не обновлена) | { fixed: true, at, ...как у fetchQuote } */
+/**
+ * Зафиксированная цена, но присадка за м² в ней посчитана по-старому (по площади только деталей с присадкой, до 26.10.2026),
+ * — один раз пересчитать по общей площади деталей. Делает это производство (своя цена), остальное в цене — как есть сейчас.
+ * -> обновлённая цена или та же
+ */
+export async function freshFixedQuote(orderId, q, payload) {
+  if (!q || !q.own || !Array.isArray(q.lines) || !payload) return q
+  const dl = q.lines.find(l => l.key === 'drill_m2' || l.key === 'drill_m2_large')
+  if (!dl || Math.abs((Number(dl.qty) || 0) - (Number(payload.drill_m2) || 0)) < 0.05) return q
+  await fixOrderQuote(orderId, payload)
+  return (await fetchFixedQuote(orderId)) || q
+}
 export async function fetchFixedQuote(orderId) {
   if (!orderId) return null
   try {
