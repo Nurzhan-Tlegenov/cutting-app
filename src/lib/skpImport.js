@@ -457,7 +457,7 @@ export function parseSkp(u8, opts = {}) {
       cutsRaw.push({ p: [x0, y0], q: [x1, y1], depth: r1(z1 - z0), top, name: 'Паз' })
     }
     makers.push(() => buildItem({
-      T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], warnCuts: 0,
+      T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material, rotatable: false, anim: null,
       meta: { src: 'sketchup', ids: [id], des: pa.itemcode || '', pos: '', name, product: pnl.product, productDes: '', productPos: '', path: pnl.path.slice(1), material, materialCode: pa.type_material || '' },
     }, pHoles, opts.faceRule))
@@ -551,7 +551,7 @@ export function parseSkp(u8, opts = {}) {
     const texDir = U1 - U0 >= W1 - W0 ? 1 : 2
     const name = pl.name || 'Панель'
     makers.push(() => buildItem({
-      T, elems, texDir, M: Mp, butts: [], cutsRaw: [], decorRaw: [], warnCuts: 0,
+      T, elems, texDir, M: Mp, butts: [], cutsRaw: [], decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material: pl.mat, rotatable: false, anim: null,
       meta: { src: 'sketchup', ids: [id], des: '', pos: '', name, product: pl.product, productDes: '', productPos: '', path: pl.path.slice(1), material: pl.mat, materialCode: '' },
     }, holesW, opts.faceRule))

@@ -645,7 +645,14 @@ export function buildItem(src, holes, faceRule) {
       if (sp?.edge) shapedEdge.push(sp.edge)
       continue
     }
-    const q = applyP(Mi, h.P), d = applyV(Mi, h.D)
+    let q = applyP(Mi, h.P), d = applyV(Mi, h.D)
+    // SketchUp: у цилиндра отверстия нет «начала» — оно может быть записано от дна. Начинается в толще, а кончается
+    // ровно на пласти — значит, сверлено с этой пласти: разворачиваем (это не чужое отверстие)
+    if (src.anyEnd && Math.abs(d[2]) > 0.99) {
+      const e = q[2] + d[2] * h.depth
+      const onFace = z => Math.min(Math.abs(z), Math.abs(z - T)) <= Math.max(tol, 1)
+      if (!onFace(q[2]) && onFace(e)) { q = [q[0] + d[0] * h.depth, q[1] + d[1] * h.depth, e]; d = d.map(v => -v) }
+    }
     if (Math.abs(d[2]) > 0.99) {
       if (h.only === 'edge') continue
       // strict — отверстие должно начинаться прямо на пласти (детали прилегают вплотную)
