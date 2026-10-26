@@ -18,6 +18,13 @@ export async function saveProdNote(orderId, note) {
   return data || ''
 }
 
+export const MATERIAL_SQL_HINT = 'Правка материала пока не включена в базе: выполните migration_order_material.sql в Supabase (SQL Editor) — один раз.'
+/** Новое название материала заказа (производство): у заказа, у деталей из модели и в ключах готового раскроя */
+export async function saveOrderMaterial(orderId, oldName, newName) {
+  const { data, error } = await supabase.rpc('production_set_material', { p_order: orderId, p_old: String(oldName || ''), p_new: String(newName || '') })
+  if (error) throw new Error(/function|schema cache|does not exist/i.test(error.message) ? MATERIAL_SQL_HINT : error.message)
+  return data || ''
+}
 export const RENAME_SQL_HINT = 'Переименование пока не включено в базе: выполните migration_order_rename.sql в Supabase (SQL Editor) — один раз.'
 /** Новое название заказа (производство или хозяин заказа). -> сохранённое название ('' — пусто, тогда показывается номер) */
 export async function saveOrderName(orderId, name) {

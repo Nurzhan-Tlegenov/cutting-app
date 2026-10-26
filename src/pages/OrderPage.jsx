@@ -29,7 +29,7 @@ import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
 import OrderChat from '../components/OrderChat'
-import { saveOrderName } from '../lib/orderNotes'
+import { saveOrderName, saveOrderMaterial } from '../lib/orderNotes'
 import { sameColorMap, userSameAlpha } from '../lib/sameParts'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
@@ -47,6 +47,8 @@ export default function OrderPage() {
   const [order, setOrder] = useState(null)
   const [renaming, setRenaming] = useState(null)   // производство переименовывает заказ: null — не редактируется
   const [renameErr, setRenameErr] = useState('')
+  const [matEdit, setMatEdit] = useState(null)      // производство правит название материала: { key, value }
+  const [matErr, setMatErr] = useState('')
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
   const [labelMode] = useLabelMode(user)
@@ -147,14 +149,14 @@ export default function OrderPage() {
             </form>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{orderTitle(order)}</div>
+              <div style={{ fontWeight: 600, fontSize: 16, minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.25 }}>{orderTitle(order)}</div>
               {/* производство переименовывает заказ клиента — понятным для себя названием (видят обе стороны) */}
               {canStatus && <button type="button" title="Переименовать заказ" onClick={() => setRenaming(String(order.order_name || ''))}
                 style={{ flex: 'none', width: 'auto', padding: '1px 7px', borderRadius: 12, border: '0.5px solid var(--border-md)', background: 'none', color: 'var(--blue)', fontSize: 12 }}>✎</button>}
             </div>
           )}
           {renameErr && <div style={{ fontSize: 11, color: 'var(--danger)' }}>{renameErr}</div>}
-          <div style={{ fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{order.material_name}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-hint)', overflowWrap: 'anywhere' }}>{order.material_name}</div>
           <ShareBadge orderId={id} style={{ marginTop: 3 }} />
         </div>
         {!inProduction && canEditOrder(order, user, profile) && order.status !== 'done' && <button type="button" onClick={() => openOrderEdit(order, navigate)} style={EDIT_BTN}>✎ Редактировать</button>}
@@ -249,11 +251,29 @@ export default function OrderPage() {
             <div key={m.key} onClick={has ? () => setMapMat(m.key) : undefined}
               style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: cur ? '4px 6px' : '1px 6px', margin: '0 -6px', borderRadius: 6, cursor: has ? 'pointer' : 'default',
                 background: cur ? 'var(--blue-light)' : 'transparent', color: !nest || cur ? 'var(--text)' : 'var(--text-muted)' }}>
-              <b style={{ fontWeight: cur ? 600 : 500 }}>{cur ? '▸ ' : ''}{m.label}</b>
+              {matEdit?.key === m.key ? (
+                <form onClick={e => e.stopPropagation()} onSubmit={async e => {
+                  e.preventDefault()
+                  try { await saveOrderMaterial(order.id, m.key.split('|')[0], matEdit.value); setMatEdit(null); setMatErr(''); fetchOrder() }
+                  catch (err) { setMatErr(err?.message || String(err)) }
+                }} style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
+                  <input autoFocus value={matEdit.value} maxLength={200} onChange={e => setMatEdit({ ...matEdit, value: e.target.value })} style={{ flex: 1, minWidth: 0, fontSize: 14, padding: '4px 8px' }} />
+                  <button type="submit" disabled={!matEdit.value.trim()} style={{ flex: 'none', width: 'auto', padding: '4px 10px', borderRadius: 16, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 12 }}>OK</button>
+                  <button type="button" onClick={() => { setMatEdit(null); setMatErr('') }} style={{ flex: 'none', width: 'auto', padding: '4px 8px', borderRadius: 16, border: '0.5px solid var(--border-md)', background: 'none', fontSize: 12, color: 'var(--text-muted)' }}>✕</button>
+                </form>
+              ) : (
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                  <b style={{ fontWeight: cur ? 600 : 500, overflowWrap: 'anywhere' }}>{cur ? '▸ ' : ''}{m.label}</b>
+                  {/* производство поправляет название материала (клиент забыл цвет и т. п.) */}
+                  {canStatus && <button type="button" title="Исправить название материала" onClick={e => { e.stopPropagation(); setMatEdit({ key: m.key, value: m.key.split('|')[0] }) }}
+                    style={{ flex: 'none', width: 'auto', padding: '0 7px', borderRadius: 12, border: '0.5px solid var(--border-md)', background: 'none', color: 'var(--blue)', fontSize: 12 }}>✎</button>}
+                </span>
+              )}
               <span style={{ color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{m.pieces} дет.{nest ? (cur ? ' · карты ниже' : has ? ' · раскроен' : ' · без раскроя') : ''}</span>
             </div>
           )
         })}
+        {matErr && <div style={{ fontSize: 11, color: 'var(--danger)' }}>{matErr}</div>}
         <div style={{ color: 'var(--text-hint)', fontSize: 12, marginTop: 2 }}>Лист {order.sheet_length}×{order.sheet_width} мм</div>
       </div>
       {!nest && canProduce && (
