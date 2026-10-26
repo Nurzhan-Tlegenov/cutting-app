@@ -139,7 +139,7 @@ export function statsRows(st) {
     ['used', 'Использование листов', st.sheetsM2 > 0 ? `${Math.round(st.partsM2 / st.sheetsM2 * 100)} %` : '—', st.sheetsM2 > 0],
     ['kerf', saw ? 'Ширина реза (пила)' : 'Ширина реза (фреза)', `${n2(st.kerf)} мм`, st.kerf > 0],
     ['cuts', saw ? 'Количество резов' : 'Количество контуров реза', st.cuts, true],
-    ['cutM', saw ? 'Длина реза' : 'Длина реза (траектория)', `${n2(st.cutM)} м` + (st.trimM > 0 ? ` (в т. ч. опил ${n2(st.trimM)} м)` : ''), true],
+    ['cutM', saw ? 'Длина реза' : 'Длина реза (траектория)', `${n2(st.cutM)} м`, true],   // пильный центр: опил уже входит в сумму
     ['perimM', 'Периметр всех деталей', `${n2(st.perimM)} м`, true],
     ['shaped', 'Фигурных деталей', st.shapedParts, st.shapedParts > 0],
     ['cutouts', 'Вырезов', st.cutouts, st.cutouts > 0],
