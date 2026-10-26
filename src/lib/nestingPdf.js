@@ -795,53 +795,101 @@ function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo, partRows
   return null
 }
 
+/** Текст ячейки по строкам в ширину w: по словам, а слово длиннее ширины — по буквам (в соседнюю колонку не заходит);
+ *  строк больше maxLines — последняя с «…» */
+function wrapCell(ctx, s, w, size, bold, maxLines) {
+  ctx.font = `${bold ? '600 ' : ''}${mm(size)}px Arial, Helvetica, sans-serif`
+  const fit = t => ctx.measureText(t).width <= mm(w)
+  const out = []
+  for (const para of String(s ?? '').split(/\r?\n/)) {
+    let line = ''
+    for (let word of para.split(/\s+/).filter(Boolean)) {
+      const t = line ? `${line} ${word}` : word
+      if (fit(t)) { line = t; continue }
+      if (line) { out.push(line); line = '' }
+      while (!fit(word) && word.length > 1) {          // слово шире колонки — режем по буквам
+        let n = word.length - 1
+        while (n > 1 && !fit(word.slice(0, n))) n--
+        out.push(word.slice(0, n)); word = word.slice(n)
+      }
+      line = word
+    }
+    out.push(line)
+  }
+  while (out.length && !out[out.length - 1]) out.pop()
+  if (out.length > maxLines) {
+    const cut = out.slice(0, maxLines)
+    let last = cut[maxLines - 1]
+    while (last.length > 1 && !fit(last + '…')) last = last.slice(0, -1)
+    cut[maxLines - 1] = last + '…'
+    return cut
+  }
+  return out.length ? out : ['']
+}
+
 /** Таблица деталей: шапка (повторяется на каждой странице), строки с переносом по словам. -> { row: следующая строка, y } */
 function drawPartTable(ctx, { P, rows, from, y, fsBase, cont }) {
   const cols = P.cols
-  const fs = Math.min(4.5, Math.max(2, Number(P.size) || fsBase * 0.85)), lh = fs * 1.3, pad = 1
-  // ширина колонок: своя (мм) или «авто» — по самому длинному тексту (шапка и значения), авто-колонки ужимаются,
-  // если все вместе не влезают в 190 мм
-  ctx.font = `${mm(fs)}px Arial, Helvetica, sans-serif`
-  const want = cols.map((c, ci) => {
-    if (Number(c.w) > 0) return Number(c.w)
-    let w = 0
-    ctx.font = `600 ${mm(fs * 0.9)}px Arial, Helvetica, sans-serif`
-    for (const word of colHead(c).split(/\s+/)) w = Math.max(w, ctx.measureText(word).width / K)
-    ctx.font = `${mm(fs)}px Arial, Helvetica, sans-serif`
-    for (const r of rows) w = Math.max(w, ctx.measureText(r[ci] || '').width / K)
-    return Math.min(70, w + 2 * pad + 0.5)
-  })
+  let fs = Math.min(4.5, Math.max(2, Number(P.size) || fsBase * 0.85))
+  const W = (s, size, bold = false) => { ctx.font = `${bold ? '600 ' : ''}${mm(size)}px Arial, Helvetica, sans-serif`; return ctx.measureText(String(s ?? '')).width / K }
   const isAuto = i => !(Number(cols[i].w) > 0)
-  const fixed = cols.reduce((a, c, i) => a + (isAuto(i) ? 0 : want[i]), 0), auto = want.reduce((a, w, i) => a + (isAuto(i) ? w : 0), 0)
+  const fixed = cols.reduce((a, c, i) => a + (isAuto(i) ? 0 : Number(c.w)), 0)
   const room = Math.max(0, 190 - fixed)
-  let ws = want.slice()
-  if (auto > room && room > 0) {
-    // не влезает — ужимаются самые широкие авто-колонки (длинные названия переносятся), короткие (размеры, кромка) — как есть
-    let lo = 0, hi = Math.max(...want)
-    for (let it = 0; it < 30; it++) { const c = (lo + hi) / 2; const sum = want.reduce((a, w, i) => a + (isAuto(i) ? Math.min(w, c) : 0), 0); if (sum > room) hi = c; else lo = c }
-    ws = want.map((w, i) => (isAuto(i) ? Math.max(6, Math.min(w, lo)) : w))
-  } else if (auto > 0 && auto < room) {
-    // свободное место — поровну по ширине авто-колонок: таблица во всю ширину страницы
-    const k2 = room / auto
-    ws = want.map((w, i) => (isAuto(i) ? w * k2 : w))
+  const pad = 1
+  // Ширина авто-колонки: «минимум» — то, что нельзя разрывать (самое длинное слово; короткое значение целиком —
+  // кромка «X X X1X X X», размеры), «желаемая» — самый длинный текст в одну строку
+  const SHORT = 14
+  const measure = f => {
+    const h = f * 0.9, minW = [], want = []
+    cols.forEach((c, ci) => {
+      let lo = 0, hi = W(colHead(c), h, true)
+      for (const word of colHead(c).split(/\s+/)) lo = Math.max(lo, W(word, h, true))
+      for (const r of rows) {
+        const v = String(r[ci] || ''), whole = W(v, f)
+        hi = Math.max(hi, whole)
+        lo = Math.max(lo, v.length <= SHORT ? whole : Math.max(...v.split(/\s+/).map(t => W(t, f))))
+      }
+      minW.push(Math.min(40, lo + 2 * pad + 0.6)); want.push(Math.min(80, Math.max(lo, hi) + 2 * pad + 0.6))
+    })
+    return { minW, want, minSum: minW.reduce((a, w, i) => a + (isAuto(i) ? w : 0), 0) }
+  }
+  let m = measure(fs)
+  // минимумы не влезают в ширину листа — шрифт таблицы уменьшается (до 2 мм), чтобы слова не рвались
+  for (let g = 0; g < 4 && m.minSum > room && fs > 2; g++) { fs = Math.max(2, fs * room / m.minSum * 0.98); m = measure(fs) }
+  const { minW, want } = m
+  const lh = fs * 1.3, hs = fs * 0.9
+  // сначала всем минимум, остаток ширины — тем, кому нужно больше (наименование, примечание); всё равно не влезает —
+  // ужимаются пропорционально, слова переносятся по буквам: текст никогда не залезает в соседнюю колонку
+  const minSum = minW.reduce((a, w, i) => a + (isAuto(i) ? w : 0), 0), wantSum = want.reduce((a, w, i) => a + (isAuto(i) ? w : 0), 0)
+  let ws
+  if (minSum >= room) {
+    const k = minSum > 0 ? room / minSum : 1
+    ws = cols.map((c, i) => (isAuto(i) ? Math.max(5, minW[i] * k) : Number(c.w)))
+  } else if (wantSum <= room) {
+    // всё влезает в строку — свободное место пропорционально: таблица во всю ширину
+    const k = wantSum > 0 ? room / wantSum : 1
+    ws = cols.map((c, i) => (isAuto(i) ? want[i] * k : Number(c.w)))
+  } else {
+    const extra = room - minSum, need = wantSum - minSum
+    ws = cols.map((c, i) => (isAuto(i) ? minW[i] + (want[i] - minW[i]) * (need > 0 ? extra / need : 0) : Number(c.w)))
   }
   const xs = []; let x = 10; for (const w of ws) { xs.push(x); x += w }
   const right = Math.min(200, x)
   if (!cont) { text(ctx, 'Список деталей', 10, y, { size: 3.6, bold: true }); y += 3 }
   // шапка
-  const headLines = cols.map((c, ci) => wrapLines(ctx, colHead(c), ws[ci] - 2 * pad, fs * 0.9, true, 3))
+  const headLines = cols.map((c, ci) => wrapCell(ctx, colHead(c), ws[ci] - 2 * pad, hs, true, 3))
   const hh = Math.max(...headLines.map(l => l.length)) * fs * 0.9 * 1.3 + 2
   ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y), mm(right - 10), mm(hh))
-  headLines.forEach((ls, ci) => ls.forEach((ln, li) => text(ctx, ln, xs[ci] + pad, y + 1 + fs * 0.9 * 1.3 * (li + 1) - fs * 0.25, { size: fs * 0.9, bold: true, color: DIM })))
+  headLines.forEach((ls, ci) => ls.forEach((ln, li) => text(ctx, ln, xs[ci] + pad, y + 1 + fs * 0.9 * 1.3 * (li + 1) - fs * 0.25, { size: fs * 0.9, bold: true, color: DIM, max: ws[ci] - 2 * pad })))
   const top = y
   y += hh
   rule(ctx, 10, y, right, y, 0.25, INK)
   let i = from
   for (; i < rows.length; i++) {
-    const lines = rows[i].map((v, ci) => (P.wrap ? wrapLines(ctx, v, ws[ci] - 2 * pad, fs, false, 3) : [v]))
+    const lines = rows[i].map((v, ci) => (P.wrap ? wrapCell(ctx, v, ws[ci] - 2 * pad, fs, false, 6) : [v]))
     const rh = Math.max(1, ...lines.map(l => l.length)) * lh + 1.2
     if (y + rh > SUM_BOTTOM) break
-    lines.forEach((ls, ci) => ls.forEach((ln, li) => text(ctx, ln, xs[ci] + pad, y + lh * (li + 1) - fs * 0.2, { size: fs, max: P.wrap ? 0 : ws[ci] - 2 * pad })))
+    lines.forEach((ls, ci) => ls.forEach((ln, li) => text(ctx, ln, xs[ci] + pad, y + lh * (li + 1) - fs * 0.2, { size: fs, max: ws[ci] - 2 * pad })))
     y += rh
     rule(ctx, 10, y, right, y, 0.1)
   }
