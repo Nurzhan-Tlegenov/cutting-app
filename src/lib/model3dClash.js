@@ -100,3 +100,8 @@ export function findClashes(parts) {
   }
   return out.sort((x, y) => (x.approx === y.approx ? y.depth - x.depth : x.approx ? 1 : -1))
 }
+
+/** Глубина врезания двух деталей ({ outline, t, m }) по их габаритам, мм — та же мера, что в просмотрщике (0 — не пересекаются) */
+export function pairDepth(a, b) {
+  try { return Math.round(sat(partObb(a), partObb(b)) * 10) / 10 } catch { return 0 }
+}

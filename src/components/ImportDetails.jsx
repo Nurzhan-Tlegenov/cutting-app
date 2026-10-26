@@ -509,7 +509,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
               <div style={{ background: 'var(--danger-light)', border: '0.5px solid var(--danger)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--danger)' }}>
                 <b>Ошибка в модели: детали входят друг в друга{clashes.length > 0 && ` (${clashes.length})`}</b>
                 {clashes.slice(0, 30).map((c, i) => (
-                  <div key={i}>· {clashName(c.a)} ↔ {clashName(c.b)} — на {c.depth} мм{c.a.material !== c.b.material && ` (${c.b.material})`}</div>
+                  <div key={i}>{c.depth >= 5 ? '● ' : '· '}{clashName(c.a)} ↔ {clashName(c.b)} — на {String(c.depth).replace('.', ',')} мм{c.depth >= 5 ? ' — критично' : ''}{c.a.material !== c.b.material && ` (${c.b.material})`}</div>
                 ))}
                 {clashes.length > 30 && <div>…и ещё {clashes.length - 30}</div>}
                 {sumWarn('foreign') > 0 && (
@@ -517,7 +517,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
                     Чужие отверстия на эти детали не перенесены: {sumWarn('foreign')} отв. — у каждой детали осталась только её собственная присадка.
                   </div>
                 )}
-                <div style={{ marginTop: 4 }}>Размеры деталей взяты как в модели. Исправьте модель у конструктора или проверьте эти детали перед раскроем.</div>
+                <div style={{ marginTop: 4 }}>Размеры деталей взяты как в модели. Исправьте модель у конструктора или проверьте эти детали перед раскроем.{clashes.length > 0 && ' Где именно — в 3D-просмотре, кнопка «Пересечения».'}</div>
               </div>
             )}
             {basis?.skp && (

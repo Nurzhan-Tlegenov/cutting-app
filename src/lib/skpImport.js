@@ -11,7 +11,8 @@
 
 import { unzipSync } from 'fflate'
 import { ShapeUtils, Vector2 } from 'three'
-import { buildItem, groupItems } from './basisB3d.js'
+import { buildItem, groupItems, findClashes } from './basisB3d.js'
+import { pairDepth } from './model3dClash.js'
 
 const IN = 25.4
 const r1 = v => Math.round(v * 10) / 10
@@ -396,6 +397,8 @@ export function parseSkp(u8, opts = {}) {
 
   // ── панели -> детали заказа ──
   const makers = []
+  const srcs = []                       // исходные панели — для проверки «детали входят друг в друга»
+  const keep = src => { srcs.push(src); return src }
   let pid = 0
   for (const pnl of panels) {
     const id = pid++
@@ -456,11 +459,11 @@ export function parseSkp(u8, opts = {}) {
       if (top === bottom) continue                              // насквозь или внутри — не паз
       cutsRaw.push({ p: [x0, y0], q: [x1, y1], depth: r1(z1 - z0), top, name: 'Паз' })
     }
-    makers.push(() => buildItem({
+    makers.push(() => buildItem(keep({
       T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material, rotatable: false, anim: null,
       meta: { src: 'sketchup', ids: [id], des: pa.itemcode || '', pos: '', name, product: pnl.product, productDes: '', productPos: '', path: pnl.path.slice(1), material, materialCode: pa.type_material || '' },
-    }, pHoles, opts.faceRule))
+    }), pHoles, opts.faceRule))
   }
 
   // обычная модель: плиты -> детали (контур — большая пласть, кромки и присадки в такой модели нет)
@@ -550,11 +553,11 @@ export function parseSkp(u8, opts = {}) {
     // текстура — вдоль длинной стороны (в обычной модели направления нет); поворот детали — как у остальных импортов
     const texDir = U1 - U0 >= W1 - W0 ? 1 : 2
     const name = pl.name || 'Панель'
-    makers.push(() => buildItem({
+    makers.push(() => buildItem(keep({
       T, elems, texDir, M: Mp, butts: [], cutsRaw: [], decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material: pl.mat, rotatable: false, anim: null,
       meta: { src: 'sketchup', ids: [id], des: '', pos: '', name, product: pl.product, productDes: '', productPos: '', path: pl.path.slice(1), material: pl.mat, materialCode: '' },
-    }, holesW, opts.faceRule))
+    }), holesW, opts.faceRule))
   }
 
   // ── остальное с гранями -> 3D «фурнитура»; одинаковые формы — одна сетка ──
@@ -609,13 +612,34 @@ export function parseSkp(u8, opts = {}) {
 
   // мелкие отверстия (насечки 1–1,5 мм под саморез) и соосные Ø4,5 под Ø7 — оставляем как в модели
   const { items, groups, skipped } = groupItems(makers)
+  // детали, входящие друг в друга (любая глубина от 0,3 мм): отмечаем у обеих и отдаём списком — предупреждение при импорте
+  let clashes
+  try { clashes = findClashes(srcs) } catch { clashes = [] }
+  const byId = new Map()
+  for (const it of items) for (const i of (it.contour.meta.ids || [])) byId.set(i, it)
+  // глубина — насколько одна деталь заходит в другую, как в 3D-просмотре («Пересечения»)
+  const srcById = new Map(srcs.map(s => [s.meta.ids[0], s]))
+  const asPart = s => {
+    const pts = s.elems.flatMap(e => [e.a, e.b])
+    return { outline: pts, t: s.T, m: s.M }
+  }
+  for (const c of clashes) {
+    const A = srcById.get(c.a.id), B = srcById.get(c.b.id)
+    const d = A && B ? pairDepth(asPart(A), asPart(B)) : 0
+    if (d > c.depth) c.depth = d
+    for (const sd of [c.a, c.b]) {
+      const it = byId.get(sd.id)
+      if (it) { it.warn.clash++; sd.groupKey = it.groupKey }
+    }
+  }
+  clashes.sort((x, y) => y.depth - x.depth)
   if (!items.length) throw new Error('в модели SketchUp не найдено панелей: ни компонентов мебельного плагина, ни тел-плит (две параллельные пласти, толщина 2,5–60 мм)')
   const scene = {
     v: 1, order: '',
     parts: items.map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
     extras: [], meshes, hardware, colors: {},
   }
-  return { orderName: '', scene, skipped, items, groups, skp: true, other: hardware.length, hidden: hiddenSkipped }
+  return { orderName: '', scene, skipped, items, groups, clashes, skp: true, other: hardware.length, hidden: hiddenSkipped }
 }
 
 export async function readSkpFile(file, opts) {
