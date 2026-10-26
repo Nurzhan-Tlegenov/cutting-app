@@ -28,6 +28,7 @@ import SharedModelPage from './pages/SharedModelPage'
 import SharedSimPage from './pages/SharedSimPage'
 import UsersPage from './pages/UsersPage'
 import ActivityPage from './pages/ActivityPage'
+import NewsPopup from './components/NewsPopup'
 import AllOrdersPage from './pages/AllOrdersPage'
 import AllProductionsPage from './pages/AllProductionsPage'
 import KeyboardNext from './components/KeyboardNext'
@@ -155,6 +156,7 @@ export default function App() {
           <KeyboardNext />
           <Watermark />
           <TourOverlay />
+          <NewsPopup />
         </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
