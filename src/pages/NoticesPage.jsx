@@ -21,7 +21,7 @@ export default function NoticesPage() {
   }, [user?.id, isMaster])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+    <div className="page page-read" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 12, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Уведомления</h1></div>
       <PushSettings />
       <p className="section-title">Новое{list?.length ? ` · ${list.length}` : ''}</p>

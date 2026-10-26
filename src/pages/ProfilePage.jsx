@@ -117,7 +117,7 @@ export default function ProfilePage() {
     : (user?.email?.[0] || '?').toUpperCase()
 
   return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+    <div className="page page-read" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 20, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Профиль</h1></div>
 
       {/* карточка профиля свёрнута: значок, имя и кабинет; тап — телефон, почта, язык */}

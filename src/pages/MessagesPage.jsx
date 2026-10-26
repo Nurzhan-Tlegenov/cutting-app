@@ -117,7 +117,7 @@ export default function MessagesPage() {
   const small = { padding: '5px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', whiteSpace: 'nowrap' }
 
   return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+    <div className="page page-read" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 12, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Сообщения</h1></div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 

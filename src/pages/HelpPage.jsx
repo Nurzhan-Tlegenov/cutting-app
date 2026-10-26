@@ -29,7 +29,7 @@ export default function HelpPage() {
   // туры по настоящим экранам пока только по-русски — на других языках остаётся видео (оно переведено полностью)
   const ruOnly = demoLang() === 'ru'
   return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+    <div className="page page-read" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Обучение</h1></div>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.45 }}>
         {ruOnly ? '«Смотреть видео» — ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом. «Пройти самому» — подсказки на настоящих экранах, на своих заказах.'
