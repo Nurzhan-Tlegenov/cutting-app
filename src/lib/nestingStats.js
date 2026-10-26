@@ -128,7 +128,9 @@ export function statsPayload(st, order = null) {
     sheets: st.sheets.map(s => ({ parts: s.parts })),
     parts: st.parts, cut_m: r2(st.cutM),
     edge_thin_m: r2(st.edgeThinM), edge_thick_m: r2(st.edgeThickM), edge_curved_m: r2(st.edgeCurvedM), edge_curved_parts: st.edgeCurvedParts,
-    holes: st.holes, edge_holes: st.edgeHoles, drill_m2: st.drillParts > 0 ? r2(st.partsM2) : 0, drill_parts: st.drillParts,   // присадка за м² — от общей площади деталей groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
+    holes: st.holes, edge_holes: st.edgeHoles, // присадка за м² — от общей площади ВСЕХ деталей заказа, всегда (и для списка из Excel, где отверстий в данных нет:
+    // детали всё равно перекладывают, обрабатывают); не начислять — «Без присадки» у стоимости работ (drill_kind 'none')
+    drill_m2: order?.drill_kind === 'none' ? 0 : r2(st.partsM2), drill_parts: st.drillParts, groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
     ...(st.hdf ? { hdf: true } : {}),
     ...(order?.drill_kind === 'large' ? { drill_kind: 'large' } : {}),   // ХДФ / ДВП — база берёт цены распила ХДФ (migration_hdf_prices.sql)
   }

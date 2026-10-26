@@ -12,11 +12,12 @@ const num = v => (Math.round(Number(v) * 100) / 100).toLocaleString('ru-RU', { m
 // Тип изделия для цены присадки за м²: у производства две цены — «кухни, ванные» (мелкие детали, дороже) и «шкафы»
 // (крупные детали). Переключатель виден, только когда у производства заполнены обе (quote.drill_kinds) и цена ещё не
 // зафиксирована; выбор пишется в заказ (orders.drill_kind, migration_drill_kind.sql) и сразу пересчитывает смету
-function DrillKind({ value, onChange }) {
-  const opt = [['', 'Кухня, ванная', 'мелкие детали'], ['large', 'Шкафы', 'крупные детали']]
+// «Без присадки» — цена присадки за м² не начисляется (присадка по площади всех деталей начисляется всегда, если цена есть)
+function DrillKind({ value, onChange, two }) {
+  const opt = [...(two ? [['', 'Кухня, ванная', 'мелкие детали'], ['large', 'Шкафы', 'крупные детали']] : [['', 'С присадкой', 'по площади деталей']]), ['none', 'Без присадки', 'не начислять']]
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>Что кроите — от этого зависит цена присадки за м²:</div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>{two ? 'Что кроите — от этого зависит цена присадки за м²:' : 'Присадка за м²:'}</div>
       <div style={{ display: 'flex', gap: 6 }}>
         {opt.map(([k, t, s]) => {
           const on = (value || '') === k
@@ -41,7 +42,9 @@ export default function NestingCost({ order, mats, method, productionId, full = 
     setKind(k)
     if (order?.id) { try { await supabase.from('orders').update({ drill_kind: k || null }).eq('id', order.id); onDrillKind?.(k || null) } catch { /* нет колонки — смета всё равно пересчитана */ } }
   }
-  const kindSwitch = quote?.drill_kinds && !quote.fixed ? <DrillKind value={kind} onChange={pickKind} /> : null
+  // переключатель — когда у производства есть цена присадки за м² (одна или две) и цена ещё не зафиксирована
+  const hasDrill = !!quote?.drill_kinds || kind === 'none' || (quote?.lines || []).some(l => l.key === 'drill_m2' || l.key === 'drill_m2_large')
+  const kindSwitch = quote && hasDrill && !quote.fixed ? <DrillKind value={kind} onChange={pickKind} two={!!quote.drill_kinds} /> : null
   if (!stats || !stats.parts) return null
   if (!full) {
     if (!quote || quote.empty) return null

@@ -24,7 +24,7 @@ export const PRICE_GROUPS = [
   { id: 'drill', title: 'Присадка и фрезеровка', items: [
     ['hole', 'Отверстие в пласть', 'за отверстие'],
     ['edge_hole', 'Отверстие в торец', 'за отверстие'],
-    ['drill_m2', 'Присадка за м² — кухни, ванные (мелкие детали)', 'за м² площади всех деталей заказа (если в заказе есть присадка)'],
+    ['drill_m2', 'Присадка за м² — кухни, ванные (мелкие детали)', 'за м² площади всех деталей заказа; в заказе можно выбрать «Без присадки»'],
     ['drill_m2_large', 'Присадка за м² — шкафы (крупные детали)', 'за м²; заполнены обе цены — клиент выбирает тип изделия, пусто — одна цена для всех'],
     ['groove_m', 'Паз', 'за метр'],
     ['pocket', 'Выемка', 'за выемку'],
@@ -90,7 +90,11 @@ export async function fixOrderQuote(orderId, payload) {
 export async function freshFixedQuote(orderId, q, payload) {
   if (!q || !q.own || !Array.isArray(q.lines) || !payload) return q
   const dl = q.lines.find(l => l.key === 'drill_m2' || l.key === 'drill_m2_large')
-  if (!dl || Math.abs((Number(dl.qty) || 0) - (Number(payload.drill_m2) || 0)) < 0.05) return q
+  const want = Number(payload.drill_m2) || 0
+  // присадки в цене нет, а должна быть (список из Excel без отверстий, цена зафиксирована до 26.10.2026) — тоже пересчитать;
+  // только старые цены: после пересчёта дата новая, и повторно не трогаем
+  const old = !q.at || new Date(q.at).getTime() < Date.parse('2026-10-26T09:30:00Z')
+  if (dl ? Math.abs((Number(dl.qty) || 0) - want) < 0.05 : !(want > 0 && old)) return q
   await fixOrderQuote(orderId, payload)
   return (await fetchFixedQuote(orderId)) || q
 }
