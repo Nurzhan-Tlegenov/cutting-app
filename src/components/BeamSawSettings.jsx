@@ -121,11 +121,9 @@ export default function BeamSawSettings({ prod, onSaved }) {
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Направление полос</div>
       {seg('direction', [['y', 'Вдоль длинной (Y)'], ['x', 'Вдоль короткой (X)'], ['auto', 'Авто']])}
       <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Авто: есть детали с текстурой — вдоль волокон (Y), нет — пробуются оба направления. Детали с текстурой не поворачиваются при любом направлении.</div>
-      {s.direction === 'auto' && <>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Последний лист — обрезок вдоль</div>
-        {seg('lastDir', [['y', 'Длинной (Y)'], ['x', 'Короткой (X)'], ['any', 'Как выгоднее']])}
-        <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Только для последнего листа: его полосы идут вдоль выбранной стороны, чтобы цельный остаток был вдоль неё. Остальные листы — как выгоднее.</div>
-      </>}
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Последний лист — обрезок вдоль</div>
+      {seg('lastDir', [['y', 'Длинной (Y)'], ['x', 'Короткой (X)'], ['any', 'Как выгоднее']])}
+      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Только для последнего листа: его полосы идут так, чтобы цельный остаток был вдоль выбранной стороны. Остальные листы — по направлению полос выше. Действует, когда в раскрое выбрано «Авто».</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Порядок полос</div>
       {seg('stripOrder', [['desc', 'От большой к малой'], ['wnw', 'Б → М → Б']])}
 

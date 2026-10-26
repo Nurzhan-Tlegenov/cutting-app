@@ -431,13 +431,18 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
     if (!needOps) return {}
     const a = opsSheet[si], t = opsAll, n = v => m2(v)
     const cutWord = cuts ? 'Резов' : 'Контуров реза'
-    return {
+    const out = {
       sheetCuts: [`${cutWord} на листе`, String(a.cuts)], sheetCutM: ['Длина реза на листе', `${n(a.cutM)} м`], sheetPerim: ['Периметр деталей на листе', `${n(a.perimM)} м`],
       sheetHoles: ['Отверстий в пласть на листе', String(a.holes)], sheetEdgeHoles: ['Отверстий в торец на листе', String(a.edgeHoles)], sheetGrooves: ['Пазов на листе', `${a.grooves} шт · ${n(a.grooveM)} м`],
       allCuts: [`${cutWord} всего`, String(t.cuts)], allCutM: ['Длина реза всего', `${n(t.cutM)} м`], allPerim: ['Периметр деталей всего', `${n(t.perimM)} м`],
       allHoles: ['Отверстий в пласть всего', String(t.holes)], allEdgeHoles: ['Отверстий в торец всего', String(t.edgeHoles)], allGrooves: ['Пазов всего', `${t.grooves} шт · ${n(t.grooveM)} м`],
       allArea: ['Площадь деталей всего', `${n(t.partsM2)} м²`],
     }
+    // операции, которых в заказе нет (нет присадки, пазов…), — пустые: строка на листе не печатается
+    if (!t.holes) { out.sheetHoles[1] = ''; out.allHoles[1] = '' }
+    if (!t.edgeHoles) { out.sheetEdgeHoles[1] = ''; out.allEdgeHoles[1] = '' }
+    if (!t.grooves) { out.sheetGrooves[1] = ''; out.allGrooves[1] = '' }
+    return out
   }
   // кромка по видам (как в заказе: из Excel или из бланка) с толщиной: «ПВХ 0,4 — 12,3 м · ПВХ 2 (2 мм) — 4,1 м»
   const eTypes = parseEdgeTypes(order?.edge_types)
@@ -458,7 +463,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
       sheetSize: ['Лист, мм', `${fmt(geo.sheetL)} × ${fmt(geo.sheetW)}`], usable: ['Рабочая область, мм', `${fmt(geo.usableY)} × ${fmt(geo.usableX)}`],
       kerf: ['Рез, мм', fmt(geo.kerf)], partsOnSheet: ['Деталей на листе', String(sheet.placed.length)], partsArea: ['Площадь деталей', `${m2(used[si] / 1e6)} м²`],
       offcuts: ['Обрезки, мм', (sheet.manualOffcuts || []).map(o => `${Math.round(o.h)}×${Math.round(o.w)}`).join(', ')],
-      edgeSheet: ['Кромка на листе', `${m2(edges[si].total)} м`], edgeTotal: ['Кромка всего', `${m2(edgeAll.total)} м`],
+      edgeSheet: ['Кромка на листе', edgeAll.total > 0 ? `${m2(edges[si].total)} м` : ''], edgeTotal: ['Кромка всего', edgeAll.total > 0 ? `${m2(edgeAll.total)} м` : ''],   // без кромки в заказе — не печатаются
       overs: ['', over > 0 ? `кромка со свесами ${fmt(over)} мм на сторону` : 'кромка без свесов'],
       totals: ['Всего', `листов ${sheets.length}, деталей ${totalParts}, использовано ${Math.round(totalArea > 0 ? totalUsed / totalArea * 100 : 0)} %`],
       footer: ['', `Сформировано в приложении RaskroyPro · ${SITE}`], pageNo: ['', `стр. ${pageNo}`],

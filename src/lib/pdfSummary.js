@@ -18,13 +18,14 @@ export function userPdfTpl(user) {
 export function quoteLines(quote) {
   if (!quote || quote.empty || !(Number(quote.total) > 0)) return []
   if (quote.lines) {
-    return quote.lines.map(l => ({
+    // только операции, которые есть в заказе: нулевые строки (нет присадки, пазов…) не выводятся
+    return quote.lines.filter(l => Number(l.qty) > 0 || Number(l.sum) > 0).map(l => ({
       title: lineTitle(l.key), qty: `${num(l.qty)} ${lineUnit(l.key)}`, sum: num(l.sum),
       // у раскроя листа по ступеням цена у листов может быть разной — показываем среднюю
       rate: l.rate != null ? num(l.rate) : Number(l.qty) > 0 ? `≈ ${num(l.sum / l.qty)}` : '',
     }))
   }
-  return (quote.groups || []).map(g => ({ title: GROUP_TITLE[g.group] || g.group, qty: '', rate: '', sum: num(g.sum) }))
+  return (quote.groups || []).filter(g => Number(g.sum) > 0).map(g => ({ title: GROUP_TITLE[g.group] || g.group, qty: '', rate: '', sum: num(g.sum) }))
 }
 
 /** Страница «Статистика и стоимость» для PDF. cfg — pdfSummary; estimate === false — без сметы */
@@ -40,7 +41,8 @@ export function summaryLayout(cfg = {}) {
   const sec = Array.isArray(cfg.sections) ? cfg.sections.filter(k => ok.includes(k)) : []
   const all = [...new Set([...sec, ...ok])]
   // примечания — каждое своей галочкой: клиента (бланк заказа) и производства; noNotes — старая общая галочка «не выводить»
-  const noOrder = !!(cfg.noNotes || cfg.noOrderNote), noProd = !!(cfg.noNotes || cfg.noProdNote)
+  // по умолчанию обе включены: раз примечание написали — оно важно (старая общая галочка noNotes больше не действует)
+  const noOrder = !!cfg.noOrderNote, noProd = !!cfg.noProdNote
   return { sections: noOrder && noProd ? all.filter(k => k !== 'notes') : all, size: Number(cfg.size) || 3.1, cols: cfg.cols === 1 ? 1 : 2, noOrderNote: noOrder, noProdNote: noProd }
 }
 export function pdfSummaryOf(stats, quote, cfg = {}, estimate = true) {

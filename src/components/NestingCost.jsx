@@ -78,7 +78,7 @@ export default function NestingCost({ order, mats, method, productionId, full = 
         <>
           <p className="section-title" style={{ marginTop: 10 }}>Стоимость работ{quote.fixed ? ` · зафиксирована${quote.at ? ' ' + new Date(quote.at).toLocaleDateString('ru-RU') : ''}` : ' · по текущему прайс-листу'}</p>
           {!quote.lines?.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В прайс-листе нет цен на операции этого заказа.</p>}
-          {(quote.lines || []).map(l => (
+          {(quote.lines || []).filter(l => Number(l.qty) > 0 || Number(l.sum) > 0).map(l => (   // только операции, которые есть в заказе
             <div key={l.key} style={{ display: 'flex', gap: 8, padding: '2px 0', borderTop: '0.5px solid var(--border)' }}>
               <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)' }}>{lineTitle(l.key)}</span>
               <span style={{ color: 'var(--text-hint)', whiteSpace: 'nowrap', fontSize: 12 }}>{num(l.qty)} {lineUnit(l.key)}{l.rate != null ? ` × ${num(l.rate)}` : ''}</span>

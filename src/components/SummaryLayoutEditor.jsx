@@ -103,8 +103,8 @@ export default function SummaryLayoutEditor({ onClose }) {
                 {/* каждое примечание — своей галочкой (старая общая noNotes снимается при первой правке) */}
                 {[['noOrderNote', 'клиента (к заказу)'], ['noProdNote', 'производства']].map(([f, l]) => (
                   <label key={f} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                    <input type="checkbox" checked={!(cfg.noNotes || cfg[f])} style={{ width: 'auto' }}
-                      onChange={e => set({ noNotes: undefined, noOrderNote: cfg.noNotes ? true : cfg.noOrderNote, noProdNote: cfg.noNotes ? true : cfg.noProdNote, [f]: !e.target.checked || undefined })} />{l}</label>
+                    <input type="checkbox" checked={!cfg[f]} style={{ width: 'auto' }}
+                      onChange={e => set({ noNotes: undefined, [f]: !e.target.checked || undefined })} />{l}</label>
                 ))}
               </span>}
               <button type="button" style={arrow} disabled={i === 0} onClick={() => moveSec(k, -1)}>↑</button>
