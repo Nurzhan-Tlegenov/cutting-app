@@ -8,6 +8,9 @@ import { supabase } from '../lib/supabase'
 import { computeOffcutAtPoint, smallAtEdge, smallEdgeReal } from '../lib/nesting'
 import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
+import DeskSplit, { usePane } from '../components/DeskSplit'
+import { useDesktop } from '../hooks/useDesktop'
+import { createPortal } from 'react-dom'
 import { newHistory, recordEvent, recordIsland, recordStats, buildHistoryExport } from '../lib/nestingHistory'
 import { validateNesting } from '../lib/validateNesting'
 import { NESTING_VERSION } from '../lib/version'
@@ -594,8 +597,15 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
 
 
   const PADDING = 8
+  // Компьютер: лист — на всю левую колонку (по ширине или по высоте, что раньше упрётся)
+  const pane = usePane()
+  const paneRef = useRef(pane)
+  paneRef.current = pane
+  const DESK_RESERVE = 210   // кнопки над картой и подсказка с листами под ней (левая колонка)
   // Лист не выше ~⅔ экрана — над ним остаются кнопки, под ним буфер и листы
-  const fitW = typeof window !== 'undefined'
+  const fitW = pane
+    ? Math.max(200, Math.min(pane.w - 2, (Math.max(320, pane.h - DESK_RESERVE) - PADDING * 2) * sheetW / sheetL + PADDING * 2))
+    : typeof window !== 'undefined'
     ? Math.min(window.innerWidth - 32, 480, (Math.max(260, window.innerHeight * 0.64) - PADDING * 2) * sheetW / sheetL + PADDING * 2)
     : 360
   const canvasW = fitW * zoom
@@ -1320,6 +1330,32 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     }
   }, [])
 
+  // Компьютер: колёсико мыши над листом — увеличить/уменьшить (точка под курсором остаётся на месте), как в CAD
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    let clr = 0
+    const onWheel = e => {
+      if (!paneRef.current) return
+      const cv = canvasRef.current
+      if (!cv) return
+      e.preventDefault()
+      const wr = el.getBoundingClientRect(), cr = cv.getBoundingClientRect()
+      anchorRef.current = {
+        fracX: (e.clientX - cr.left) / (cr.width || 1), fracY: (e.clientY - cr.top) / (cr.height || 1),
+        midX: e.clientX - wr.left, midY: e.clientY - wr.top,
+      }
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY
+      let nz = Math.max(1, Math.min(6, zoomRef.current * Math.exp(-dy * 0.0016)))
+      if (nz < 1.03) nz = 1
+      if (Math.abs(nz - zoomRef.current) > 0.001) setZoom(nz)
+      clearTimeout(clr)
+      clr = setTimeout(() => { anchorRef.current = null }, 200)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => { clearTimeout(clr); el.removeEventListener('wheel', onWheel) }
+  }, [])
+
   // После смены масштаба возвращаем под пальцы ту же точку листа
   useLayoutEffect(() => {
     const a = anchorRef.current, el = wrapRef.current, cv = canvasRef.current
@@ -1332,7 +1368,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     <div style={{ position: 'relative', overflow: 'hidden' }}>
      <div ref={slideRef} style={{ willChange: 'transform' }}>
       <div ref={wrapRef}
-        style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? '70vh' : 'none', borderRadius: 8,
+        style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? (pane ? Math.max(320, pane.h - DESK_RESERVE) : '70vh') : 'none', borderRadius: 8,
           display: zoom > 1 ? 'block' : 'flex', justifyContent: 'center' }}>
         <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
           style={{ width: canvasW, height: 'auto', aspectRatio: `${canvasW} / ${canvasH}`, maxWidth: zoom > 1 ? 'none' : '100%', borderRadius: 8, display: 'block', touchAction: interactive ? (zoom > 1 ? 'pan-x pan-y' : 'none') : 'auto' }}
@@ -1760,6 +1796,9 @@ export default function NestingPage() {
   const stepDim = d => setDimScale(v => { const n = Math.round(Math.min(2.5, Math.max(0.75, v + d)) * 100) / 100; saveUserSettings({ nestDimScale: n }, user); return n })
   const [configs, setConfigs] = useState(() => [newCfg()])
   const [focusId, setFocusId] = useState(null)   // конфигурация, по которой считается шапка со статистикой
+  // Экран компьютера: карты — в левой колонке (порталом из конфигурации), настройки и кнопки — справа
+  const desk = useDesktop()
+  const [previewEl, setPreviewEl] = useState(null)
   const [parallel, setParallel] = useState(true) // считать конфигурации одновременно или по очереди
   const [tick, setTick] = useState(0)
   const [showDebugExport, setShowDebugExport] = useState(false)
@@ -2970,6 +3009,26 @@ export default function NestingPage() {
     offcuts: offcutsValue(offForm),
   })
   const focusIdx = focus ? configs.indexOf(focus) : -1
+  // Какая конфигурация показывает карты в левой колонке (компьютер): выбранная пользователем, иначе та, что считается,
+  // иначе первая с результатом. Остальные — кнопкой «Показать слева»
+  const hasMap = c => c.open && c.result && c.sheetsData.length > 0
+  const previewId = !desk ? null
+    : (configs.find(c => c.id === focusId && hasMap(c)) || configs.find(c => hasMap(c) && (c.status === 'running' || c.status === 'stopping'))
+      || configs.find(hasMap))?.id ?? null
+  const toPreview = (cid, node, title) => {
+    if (!desk || !previewEl) return node
+    if (cid === previewId) return createPortal(<>
+      {configs.length > 1 && <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>}
+      {node}
+    </>, previewEl)
+    return (
+      <button type="button" onClick={() => setFocusId(cid)}
+        style={{ width: '100%', padding: 9, marginBottom: 8, borderRadius: 'var(--radius)', border: '0.5px dashed var(--blue)',
+          background: 'var(--blue-light)', color: 'var(--blue)', fontSize: 13, cursor: 'pointer' }}>
+        ◧ Показать карты этой конфигурации слева
+      </button>
+    )
+  }
 
   // Сравнение конфигураций: «лучший» — меньше листов, затем меньше на последнем
   const sums = configs.map(c => c.result ? summarize(c.sheetsData, c.result.usableX, c.result.usableY) : null)
@@ -3387,6 +3446,7 @@ export default function NestingPage() {
                     Этот раскрой посчитан: {cfg.result.algoVersion ? 'v' + cfg.result.algoVersion : 'до версионирования'}
                   </p>
                 )}
+                {toPreview(cfg.id, <>
                 <div style={{ background: 'transparent', borderRadius: 'var(--radius)', padding: 6, marginBottom: 6, border: '0.5px solid var(--border)' }}>
                   {/* Переключатель вида: все листы / один лист для правки */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
@@ -3472,12 +3532,12 @@ export default function NestingPage() {
                         onPickSheet={locked || hEvent ? null : openSheet}
                         running={isRunning} bufferCount={cfg.buffer.length}
                         details={details} labelMode={labelMode} sameFill={sameFill} sameAlpha={sameAlpha}
-                        reserve={OVERVIEW_RESERVE}
+                        reserve={OVERVIEW_RESERVE} deskReserve={hist && hEvents.length > 0 ? 280 : 185}
                       />
                       <p style={{ fontSize: 10, color: 'var(--text-hint)', textAlign: 'center', marginTop: 4, marginBottom: 0 }}>
                         {isRunning
                           ? 'Идёт поиск — при более плотной укладке детали переезжают · «Стоп» — зафиксировать'
-                          : hEvent ? 'Просмотр хронологии — правка недоступна' : 'Тап по листу — открыть для правки · щипок или −/+ — больше/меньше листов в ряд'}
+                          : hEvent ? 'Просмотр хронологии — правка недоступна' : desk ? 'Щелчок по листу — открыть для правки · Ctrl + колёсико или −/+ — больше/меньше листов в ряд' : 'Тап по листу — открыть для правки · щипок или −/+ — больше/меньше листов в ряд'}
                       </p>
                       {hist && hEvents.length > 0 && renderTimeline(cfg, idx, hEvents, hPos, hLast, hEvent)}
                     </>
@@ -3535,6 +3595,7 @@ export default function NestingPage() {
                           ? 'Удержи палец на свободном месте — обрезок · удержи на выбранном — снять его'
                           : (showOffcuts && offcutMode === 'cuts'
                             ? 'Линии реза учитывают детали и выбранные обрезки и пересчитываются по текущей карте · красный пунктир — участок без сквозного реза'
+                            : desk ? 'Колёсико мыши — масштаб · щелчок — выделить (для буфера) · двойной щелчок — поворот · зажми и тяни — перенос · долго держи — редактор контура · фиолетовый фон — есть обработка снизу'
                             : 'Смахни влево/вправо — другой лист · тап — выделить (для буфера) · двойной тап — поворот · удержи и тяни — перенос · долго держи на месте — редактор контура · щипок — масштаб · фиолетовый фон — есть обработка снизу (с изнанки или с двух сторон; на карте показана только лицевая, изнанку видно в редакторе)')}
                       </p>
                     </>
@@ -3552,6 +3613,8 @@ export default function NestingPage() {
                     )) })()}
                   </div>
                 )}
+
+                </>, `Конфигурация ${idx + 1} · ${DIR_SHORT[cfg.dir]} · ${statusLine}`)}
 
                 {/* Буфер деталей — перенос деталей между листами */}
                 {!locked && (view === 'sheet' || cfg.buffer.length > 0) && (
@@ -3737,8 +3800,7 @@ export default function NestingPage() {
     )
   }
 
-  return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+  const pageBody = (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, paddingTop: 4 }}>
         <button onClick={() => navigate(`/orders/${id}`)}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, cursor: 'pointer' }}>←</button>
@@ -4214,6 +4276,27 @@ export default function NestingPage() {
           </Suspense>
         ))}
       <SendToMaster job={sendJob} onClose={() => setSendJob(null)} />
+  </>)
+
+  // Компьютер: слева — карты раскроя (на всю высоту окна), справа — всё остальное; ширину колонок тянут мышью
+  if (desk) return (
+    <div className="page desk-page">
+      <DeskSplit id="nesting" def={0.62}
+        left={<>
+          {!previewId && (
+            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+              color: 'var(--text-hint)', fontSize: 14, padding: 24, border: '1px dashed var(--border-md)', borderRadius: 'var(--radius-lg)', whiteSpace: 'pre-line' }}>
+              {anyRunning ? 'Считаю раскрой…' : 'Здесь будут карты раскроя.\nНажмите «▶ Выполнить раскрой» справа.'}
+            </div>
+          )}
+          <div ref={setPreviewEl} />
+        </>}
+        right={pageBody} />
+    </div>
+  )
+  return (
+    <div className="page" style={{ paddingBottom: 100 }}>
+      {pageBody}
     </div>
   )
 }

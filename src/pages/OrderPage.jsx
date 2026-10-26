@@ -28,6 +28,9 @@ import OrderNotes from '../components/OrderNotes'
 import SimLinksBox from '../components/SimLinksBox'
 import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
+import DeskSplit from '../components/DeskSplit'
+import { useDesktop } from '../hooks/useDesktop'
+import { createPortal } from 'react-dom'
 import OrderChat from '../components/OrderChat'
 import { saveOrderName, saveOrderMaterial } from '../lib/orderNotes'
 import { sameColorMap, userSameAlpha } from '../lib/sameParts'
@@ -56,6 +59,9 @@ export default function OrderPage() {
   useEffect(() => { fetchOrder() }, [id])
   // сотрудник производства: что ему можно в этом заказе (статусы, ЧПУ, бирки, цены); null — не сотрудник
   const [wperms, setWperms] = useState(null)
+  // компьютер: карты раскроя — в левой колонке, всё остальное — справа
+  const desk = useDesktop()
+  const [previewEl, setPreviewEl] = useState(null)
   useEffect(() => { let alive = true; if (inProduction) myOrderPerms(id).then(r => { if (alive) setWperms(r.data || null) }); return () => { alive = false } }, [id, inProduction])
   // открыта ли ссылка для просмотра 3D-модели (её могли создать в самой модели)
   const [shared, setShared] = useState(() => !!cachedShare(id))
@@ -131,8 +137,7 @@ export default function OrderPage() {
   const showPrices = !wperms || !!wperms.prices || !!wperms.owner   // сотруднику цены — только с галочкой «Цены»
   const actBtn = main => ({ flex: 1, padding: '10px 8px', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: 'pointer',
     border: main ? 'none' : '0.5px solid var(--blue)', background: main ? 'var(--blue)' : 'var(--bg)', color: main ? 'white' : 'var(--blue)' })
-  return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+  const pageBody = (<>
       {/* шапка: сверху — название заказа во всю ширину (длинное переносится), под ним материал, ниже — действия и статус */}
       <div style={{ marginBottom: 20, paddingTop: 8 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
@@ -283,7 +288,7 @@ export default function OrderPage() {
       {!nest && canProduce && (
         <button onClick={() => navigate(`/orders/${id}/nesting`)} style={{ ...actBtn(true), width: '100%', marginBottom: 16 }}>▶ Выполнить раскрой</button>
       )}
-      {nest && (
+      {nest && (desk && previewEl ? (fn => createPortal(fn, previewEl)) : (x => x))(
         <div data-tour="order-maps" style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6 }}>
             <p className="section-title" style={{ marginBottom: 0 }}>Карты раскроя · листов {nest.sheets.length}<span style={{ display: 'block', textTransform: 'none', fontSize: 14, fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>{nest.label}</span></p>
@@ -386,6 +391,25 @@ export default function OrderPage() {
         🗑 Удалить заказ
       </button>}
       <BottomNav />
+  </>)
+  if (desk) return (
+    <div className="page desk-page">
+      <DeskSplit id="order" def={0.55}
+        left={<>
+          {!nest && (
+            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+              color: 'var(--text-hint)', fontSize: 14, padding: 24, border: '1px dashed var(--border-md)', borderRadius: 'var(--radius-lg)' }}>
+              Раскроя пока нет — здесь будут карты листов
+            </div>
+          )}
+          <div ref={setPreviewEl} />
+        </>}
+        right={pageBody} />
+    </div>
+  )
+  return (
+    <div className="page" style={{ paddingBottom: 100 }}>
+      {pageBody}
     </div>
   )
 }

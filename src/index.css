@@ -129,3 +129,30 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 .notice-flash { animation: notice-flash 3s ease-out; border-radius: var(--radius); }
+
+/* ─── Экран компьютера (окно шире 1100 px) ───────────────────────────────────
+   Страницы — во всю ширину окна; списки карточек — сеткой в несколько колонок;
+   нижнее меню — по центру, а не растянутое на весь монитор.
+   Телефон (узкое окно) — без изменений. */
+.desk-divider { flex: 0 0 9px; cursor: col-resize; display: flex; align-items: center; justify-content: center;
+  background: var(--bg2); touch-action: none; position: relative; }
+.desk-divider span { width: 3px; height: 100%; background: var(--border); border-radius: 2px; transition: background .15s, width .15s; }
+.desk-divider:hover span, .desk-divider.on span { background: var(--blue); width: 4px; }
+.desk-divider::after { content: '⋮'; position: absolute; top: 50%; transform: translateY(-50%); font-size: 14px; line-height: 1;
+  color: var(--text-hint); background: var(--bg2); border-radius: 4px; padding: 6px 0; pointer-events: none; }
+.desk-divider:hover::after, .desk-divider.on::after { color: var(--blue); }
+.desk-pane-right { background: var(--bg2); }
+.desk-pane-left::-webkit-scrollbar, .desk-pane-right::-webkit-scrollbar { width: 10px; height: 10px; }
+.desk-pane-left::-webkit-scrollbar-thumb, .desk-pane-right::-webkit-scrollbar-thumb { background: var(--gray-mid); border-radius: 5px; border: 2px solid var(--bg2); }
+
+@media (min-width: 1100px) {
+  .page { max-width: none; padding: 16px 28px; }
+  .desk-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px !important; align-items: start; }
+  .bottom-nav { justify-content: center; }
+  .bottom-nav a { flex: 0 1 150px; }
+  /* превью раскроя слева — карты на всю колонку */
+  .desk-pane-left .card { max-width: none; }
+}
+@media (min-width: 1100px) {
+  .page.desk-page { padding: 0; min-height: 0; overflow: hidden; }
+}

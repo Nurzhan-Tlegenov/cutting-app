@@ -190,7 +190,7 @@ export default function OrdersPage() {
               Исполненных заказов не в архиве: <b>{orders.filter(o => o.status === 'done' && !o.archived_at).length}</b>. Отправьте их в архив — кнопка «📦 В архив» на заказе.
             </div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="desk-grid" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {[...orders.filter(o => !o.archived_at), ...(showArchive ? orders.filter(o => o.archived_at) : [])].map(order => {
               const isSelected = selected.has(order.id)
               return (

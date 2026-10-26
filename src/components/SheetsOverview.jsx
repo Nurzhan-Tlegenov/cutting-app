@@ -3,6 +3,7 @@ import { placedHoles } from '../lib/partHoles'
 import { partLabel } from '../lib/partLabel'
 import { smallEdgeReal } from '../lib/nesting'
 import { backSide } from '../lib/partInfo'
+import { usePane } from './DeskSplit'
 
 // ─── Обзор ВСЕХ листов раскроя на одном холсте ──────────────────────────────
 // Нужен для онлайн-раскроя: пока идёт поиск, пользователь видит, как укладка
@@ -41,22 +42,18 @@ export default function SheetsOverview({
   activeSheet = -1, onPickSheet, running = false, bufferCount = 0, details = null, labelMode = 'name',
   sameFill = null, sameAlpha = 0.22,   // подсветка одинаковых деталей: { индекс детали: 'r,g,b' } и прозрачность
   reserve = null,   // сколько пикселей экрана оставить под кнопки над и под картой («Стоп», «Выбрать»); null — окно до 60% экрана
+  deskReserve = 180, // компьютер (карта в левой колонке): сколько пикселей колонки занято кнопками над и под картой
 }) {
+  const pane = usePane()   // компьютер: размер левой колонки; телефон — null
   const canvasRef = useRef(null)
   const scrollRef = useRef(null)
   const curRef = useRef([])     // что сейчас нарисовано (с учётом анимации), мм общей раскладки
   const animRef = useRef(null)  // requestAnimationFrame id
   const n = Math.max(1, sheets.length)
-  const defaultCols = n === 1 ? 1 : n <= 4 ? 2 : n <= 12 ? 3 : 4
-  const [colsSet, setColsSet] = useState(null) // выбор пользователя (щипок / кнопки); null — по умолчанию
-  const cols = Math.max(1, Math.min(MAX_COLS, colsSet ?? defaultCols, n))
-  const colsRef = useRef(cols)
-  colsRef.current = cols
   const [boxW, setBoxW] = useState(() => (typeof window !== 'undefined' ? Math.min(window.innerWidth - 32, 900) : 360))
   const drawRef = useRef(null)     // последняя draw (для прокрутки без перерисовки React)
   const scrollRaf = useRef(0)
 
-  const rows = Math.ceil(n / cols)
   // Размеры каждого листа: у листа-обрезка — свои (sheet.sheetW/usableX…),
   // у обычного — общие. Клетка сетки — по самому большому листу.
   const dimOf = s => ({
@@ -67,15 +64,37 @@ export default function SheetsOverview({
   })
   const cellW = Math.max(sheetW, ...sheets.map(s => dimOf(s).sw))
   const cellL = Math.max(sheetL, ...sheets.map(s => dimOf(s).sl))
-  const totalW = cols * cellW + (cols - 1) * GAP_MM
   const rowMM = CAPTION_MM + cellL + GAP_MM
-  const totalH = rows * rowMM - GAP_MM
   const PADDING = 6
   // Окно просмотра: экран минус место под кнопки («Стоп» сверху, «Выбрать» снизу) — чтобы всё было видно сразу
   const winH = typeof window !== 'undefined' ? window.innerHeight : 800
   // нижнее меню (на iPhone выше — с отступом под полоску жестов) тоже вычитаем: меряем его, а не угадываем
   const navH = typeof document !== 'undefined' ? (document.querySelector('.bottom-nav')?.offsetHeight || 0) : 0
-  const maxViewH = reserve != null ? Math.max(260, Math.round(winH - reserve - navH)) : Math.max(260, Math.round(winH * 0.6))
+  // компьютер: окно карты — вся левая колонка минус кнопки над и под картой
+  const maxViewH = pane ? Math.max(300, Math.round(pane.h - deskReserve))
+    : reserve != null ? Math.max(260, Math.round(winH - reserve - navH)) : Math.max(260, Math.round(winH * 0.6))
+
+  // Сколько листов в ряд по умолчанию. Телефон — по числу листов. Компьютер — так, чтобы листы были как можно
+  // крупнее и при этом все помещались в колонку; если листов много — не мельче ~170 px по ширине (дальше прокрутка)
+  let defaultCols = n === 1 ? 1 : n <= 4 ? 2 : n <= 12 ? 3 : 4
+  if (pane && boxW > 500) {
+    const fit = c => Math.min((boxW - PADDING * 2) / (c * cellW + (c - 1) * GAP_MM), (maxViewH - PADDING * 2) / (Math.ceil(n / c) * rowMM - GAP_MM))
+    let best = 1, bs = 0
+    for (let c = 1; c <= Math.min(n, MAX_COLS); c++) { const f = fit(c); if (f > bs * 1.0001) { bs = f; best = c } }
+    let cMax = 1
+    for (let c = 1; c <= Math.min(n, MAX_COLS); c++) if ((boxW - PADDING * 2) / (c * cellW + (c - 1) * GAP_MM) * cellW >= 170) cMax = c
+    defaultCols = Math.min(best, cMax)
+    // все листы не помещаются — тогда максимум в ряд при читаемом размере: прокрутка короче
+    if (bs * cellW < 170) defaultCols = cMax
+  }
+  const [colsSet, setColsSet] = useState(null) // выбор пользователя (щипок / кнопки); null — по умолчанию
+  const cols = Math.max(1, Math.min(MAX_COLS, colsSet ?? defaultCols, n))
+  const colsRef = useRef(cols)
+  colsRef.current = cols
+
+  const rows = Math.ceil(n / cols)
+  const totalW = cols * cellW + (cols - 1) * GAP_MM
+  const totalH = rows * rowMM - GAP_MM
   // Во всю ширину блока — сколько листов в ряд, столько и делят ширину; но ряд листов (подпись + лист) целиком
   // помещается в окно по высоте — крупный лист (1 в ряд) уменьшается до высоты окна и встаёт по центру
   const scW = (boxW - PADDING * 2) / totalW
@@ -403,6 +422,27 @@ export default function SheetsOverview({
       el.removeEventListener('touchend', onEnd)
       el.removeEventListener('touchcancel', onEnd)
     }
+  }, [])
+  // Компьютер: Ctrl + колёсико мыши (и щипок на тачпаде — он приходит так же) — больше/меньше листов в ряд.
+  // Простое колёсико — прокрутка листов, как обычно
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    let acc = 0, t = 0
+    const onWheel = e => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      acc += e.deltaY
+      const now = Date.now()
+      if (Math.abs(acc) < 40 && now - t < 400) return
+      const dir = Math.sign(acc); acc = 0; t = now
+      if (!dir) return
+      const r = el.getBoundingClientRect()
+      const si = Math.max(0, sheetAtRef.current(e.clientX, e.clientY))
+      changeColsRef.current(colsRef.current + dir, si, e.clientY - r.top)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
   }, [])
   const sheetAtRef = useRef(sheetAt); sheetAtRef.current = sheetAt
   const nRef = useRef(n); nRef.current = n

@@ -106,7 +106,7 @@ export default function AllOrdersPage() {
         ))}
       </div>
       {shown.length === 0 && <p style={{ color: 'var(--text-hint)', textAlign: 'center', padding: '40px 20px' }}>Ничего не найдено</p>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="desk-grid" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {shown.map(o => {
           const u = owner(o), t = tel(u), ss = stateOf(o), pr = o.production_id ? prods.get(o.production_id) : null
           return (

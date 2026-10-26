@@ -378,7 +378,7 @@ export default function ProductionPage() {
           {orders.length > 0 && 'gcode_at' in orders[0] && !('sheets' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{KIND_HINT}</p>}
           {orders.length > 0 && !('gcode_at' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{MARKS_SQL_HINT}</p>}
           {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="desk-grid" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {shown.map((o, oi) => {
               const tel = digits(o.client_phone), wa = digits(o.client_whatsapp) || tel
               const isOpen = open.has(o.id)
