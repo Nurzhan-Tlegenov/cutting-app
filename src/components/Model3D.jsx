@@ -14,6 +14,7 @@ import { loadHardwarePresets, saveHardwarePreset } from '../lib/hardwarePresets'
 import { blockTree, partBox, hardwareLinks, movingSet, sweepLimits, clampMove, moveModel, rotateModel, planStretch, stretchModel } from '../lib/model3dMove'
 import ShareLinkBox from './ShareLinkBox'
 import { lazyRetry } from '../lib/lazyRetry'
+import { findClashes, CLASH_CRITICAL, CLASH_NOTICE } from '../lib/model3dClash'
 import { useBackClose } from '../lib/backStack'
 const ContourEditor = lazyRetry(() => import('./ContourEditor'))
 
@@ -135,6 +136,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const [showViews, setShowViews] = useState(false)
   const [explode, setExplode] = useState(0)                      // взрыв-схема: 0..1
   const [showExplode, setShowExplode] = useState(false)
+  const [showClash, setShowClash] = useState(false)      // «Пересечения»: где детали заходят друг в друга и насколько
   const [tool, setToolState] = useState('')                      // '' | 'edge' (кромка) | 'drill' (присадка)
   const [edgeValue, setEdgeValue] = useState('default')          // какая кромка ставится
   const [schemes, setSchemes] = useState([])                     // база фурнитуры пользователя
@@ -168,6 +170,7 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
   const say = msg => { setToast(msg); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(''), 3200) }
   const model = useMemo(() => buildModel(details, savedScene), [details, savedScene])
   const parts = model.parts
+  const clashes = useMemo(() => (showClash ? findClashes(parts) : null), [showClash, parts])
   const [scope, setScope] = useState('all')      // 'all' — вся модель · 'order' — только детали заказа
   const count = parts.filter(p => scope === 'all' || p.inOrder).length
   const hasAnim = parts.some(p => p.anim) || model.hardware.some(h => h.inst.some(i => i.anim))
@@ -753,12 +756,33 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
     st.sizeLabels?.()
   }, [view.labelSize, view.labelOp, view.label, model])
 
-  // выбранные детали — синим
+  // выбранные детали — синим; «Пересечения» — детали с пересечением цветом по глубине, остальные — прозрачные
   useEffect(() => {
     const st = stateRef.current
     if (!st) return
-    st.meshes.forEach(o => { o.material = sel.has(o.__pid) ? st.selMat : o.__mat0 })
-  }, [sel, model])
+    if (!st.clashMats) {
+      const mk = (c, o) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.8, transparent: o < 1, opacity: o, depthWrite: o >= 1, side: THREE.DoubleSide })
+      st.clashMats = { crit: mk(0xe24b4a, 1), warn: mk(0xf2a623, 1), minor: mk(0xf5d76e, 1), ghost: mk(0xc8c6be, 0.18) }
+    }
+    const depthOf = new Map()
+    for (const c of clashes || []) for (const q of [c.a, c.b]) depthOf.set(q, Math.max(depthOf.get(q) || 0, c.depth))
+    st.meshes.forEach(o => {
+      if (!clashes) { o.material = sel.has(o.__pid) ? st.selMat : o.__mat0; return }
+      const d = depthOf.get(o.__pid)
+      o.material = d == null ? (o.__kind === 'panel' ? st.clashMats.ghost : o.__mat0) : d >= CLASH_CRITICAL ? st.clashMats.crit : d >= CLASH_NOTICE ? st.clashMats.warn : st.clashMats.minor
+    })
+    // метки в местах пересечений
+    if (st.clashGroup) { st.clashGroup.parent?.remove(st.clashGroup); st.clashGroup.children.forEach(m => m.material.dispose()); st.clashGroup = null }
+    if (clashes?.length) {
+      const g = new THREE.Group(), geo = new THREE.SphereGeometry(14, 16, 12)
+      for (const c of clashes) {
+        const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: c.depth >= CLASH_CRITICAL ? 0xe24b4a : c.depth >= CLASH_NOTICE ? 0xf2a623 : 0xd4b106, depthTest: false, transparent: true, opacity: 0.85 }))
+        m.position.set(c.at[0], c.at[1], c.at[2]); m.renderOrder = 30
+        g.add(m)
+      }
+      st.root.add(g); st.clashGroup = g
+    }
+  }, [sel, model, clashes])
 
   // подписи живут отдельно от сцены: видимость для них — после того, как они созданы
   useEffect(() => {
@@ -1271,6 +1295,8 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
           {LABELS.map(([id, label]) => <option key={id} value={id}>{id === 'none' ? 'Подписи: нет' : `Подписи: ${label.toLowerCase()}`}</option>)}
         </select>
         <button type="button" style={toolChip(showExplode || explode > 0)} onClick={() => { if (tool) setTool(tool); setShowExplode(v => !v) }}>Взрыв</button>
+        <button type="button" style={toolChip(showClash)} title="Где детали заходят друг в друга и насколько" onClick={() => { if (tool) setTool(tool); setShowClash(v => !v); setSel(new Set()) }}>
+          Пересечения{clashes ? ` · ${clashes.length}` : ''}</button>
         {editable && <button type="button" style={toolChip(tool === 'edge')} onClick={() => setTool('edge')}>Кромка</button>}
         {editable && <button type="button" style={toolChip(tool === 'drill')} onClick={() => setTool('drill')}>Крепёж</button>}
         {editable && <button type="button" style={toolChip(tool === 'move')} onClick={() => (tool === 'move' ? setTool('move') : startMove())}>✥ Двигать</button>}
@@ -1418,6 +1444,29 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
                 {editable && <button type="button" disabled={!sel.size} onClick={() => { if (tool !== 'edge') setTool('edge') }} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)', color: 'var(--blue)', borderColor: 'var(--blue)', opacity: sel.size ? 1 : 0.5 }}>Кромка</button>}
                 {editable && <button type="button" disabled={!sel.size} onClick={() => { if (tool !== 'drill') setTool('drill') }} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)', color: 'var(--blue)', borderColor: 'var(--blue)', opacity: sel.size ? 1 : 0.5 }}>Крепёж</button>}
                 <button type="button" onClick={() => { setMulti(false); setSel(new Set()); setPicked(null) }} style={{ ...smallBtn, pointerEvents: 'auto', background: 'var(--bg)' }}>Готово</button>
+              </>
+            )}
+          </div>
+        )}
+        {showClash && clashes && (
+          <div style={{ position: 'absolute', left: 8, right: 60, bottom: 8, zIndex: 3, maxHeight: '42%', overflowY: 'auto', background: 'var(--bg)', border: '0.5px solid var(--border-md)', borderRadius: 12, padding: '8px 10px', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', fontSize: 12.5 }}>
+            {!clashes.length ? (
+              <div style={{ color: 'var(--teal)' }}>✓ Пересечений нет — детали только касаются друг друга.</div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <b>Пересечений: {clashes.length}</b>
+                  {(() => { const cr = clashes.filter(c => c.depth >= CLASH_CRITICAL).length, wr = clashes.filter(c => c.depth >= CLASH_NOTICE && c.depth < CLASH_CRITICAL).length, mn = clashes.length - cr - wr
+                    return <span style={{ color: 'var(--text-muted)' }}>{[cr && <span key="c" style={{ color: '#E24B4A' }}>● критичных {cr}</span>, wr && <span key="w" style={{ color: '#D08A10' }}> ● заметных {wr}</span>, mn && <span key="m" style={{ color: '#B39400' }}> ● мелких {mn}</span>].filter(Boolean)}</span> })()}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Глубина — насколько одна деталь заходит в другую. Критичные (от {CLASH_CRITICAL} мм) — деталь так не встанет; заметные (от {CLASH_NOTICE} мм) — проверить; мелкие — допуск. Тап — показать только эти две детали.</div>
+                {clashes.map((c, i) => (
+                  <div key={i} onClick={() => isolate([c.a, c.b])} style={{ display: 'flex', gap: 6, alignItems: 'baseline', padding: '4px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 5, flex: 'none', background: c.depth >= CLASH_CRITICAL ? '#E24B4A' : c.depth >= CLASH_NOTICE ? '#F2A623' : '#F5D76E' }} />
+                    <span style={{ flex: 1, minWidth: 0 }}>{c.nameA} × {c.nameB}{c.approx ? <span style={{ color: 'var(--text-hint)' }}> · по габариту фигурной детали</span> : null}</span>
+                    <b style={{ whiteSpace: 'nowrap' }}>{String(c.depth).replace('.', ',')} мм</b>
+                  </div>
+                ))}
               </>
             )}
           </div>

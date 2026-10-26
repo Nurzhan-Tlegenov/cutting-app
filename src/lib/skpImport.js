@@ -385,9 +385,9 @@ export function parseSkp(u8, opts = {}) {
       if (!a.owner || !f.chain.startsWith(a.owner)) continue
       const fr = frameOf(f); if (!fr) continue
       const q = fr.toL(mid)
-      // петля повёрнута вокруг кромки у начала координат фасада (Y = 0): чашка за ней — отражаем
-      const x = q[0] < fr.Y0 ? 2 * fr.Y0 - q[0] : q[0]
-      if (!(x > fr.Y0 && x < fr.Y1 && q[1] > fr.Z0 && q[1] < fr.Z1)) continue
+      // чашка — внутри фасада (раньше здесь отражали: поворот вставок читался неверно, и петля оказывалась за кромкой)
+      const x = q[0]
+      if (!(x > fr.Y0 && x < fr.Y1 && q[1] > fr.Z0 && q[1] < fr.Z1 && q[2] > -2 && q[2] < fr.T + 2)) continue
       const dd = Math.abs(q[2] - fr.T / 2)
       if (dd < bestD) { bestD = dd; best = f }
     }
@@ -426,18 +426,22 @@ export function parseSkp(u8, opts = {}) {
     // направление текстуры: 1 — по длине (вдоль Z тела), 2 — по ширине
     const napr = String(pa.a05_napr ?? pa.napr_texture ?? '1')
     const texDir = napr === '2' ? 1 : 2
-    // чашки петель: в модели плагина петля стоит повёрнутой на 180° вокруг кромки фасада у его начала координат —
-    // чашка оказывается за этой кромкой и перед фасадом. Ставим её зеркально, на внутреннюю пласть (дальнюю от зрителя).
+    // чашки петель: стоят в фасаде, как в модели; пласть — та, ближе к которой середина чашки (чашка 12 мм от пласти)
     const own = []
     const toW = q => [0, 1, 2].map(k => o[k] + q[0] * u[k] + q[1] * v[k] + q[2] * n[k])
     const toWv = q => [0, 1, 2].map(k => q[0] * u[k] + q[1] * v[k] + q[2] * n[k])
-    const innerAtZero = n[2] >= 0
     for (const h of pnl.cups || []) {
       const c = toL(h.mid)
-      if (c[0] < Y0) c[0] = 2 * Y0 - c[0]
       if (!(c[0] > Y0 && c[0] < Y1 && c[1] > Z0 && c[1] < Z1)) continue
-      c[2] = innerAtZero ? 0 : T
-      own.push({ ...h, P: toW(c), D: toWv([0, 0, innerAtZero ? 1 : -1]) })
+      const atZero = c[2] <= T / 2
+      c[2] = atZero ? 0 : T
+      // у модели петли два соосных цилиндра (чашка и её посадка) — одно отверстие, глубже из двух
+      const Pw = toW(c)
+      // та же чашка уже есть среди крепежа (цилиндр на слое Z_fastener) — второй раз не ставим
+      if (holes.some(x => Math.abs(x.r - h.r) < 1 && Math.hypot(x.P[0] - Pw[0], x.P[1] - Pw[1], x.P[2] - Pw[2]) < 3)) continue
+      const dup = own.find(x => Math.hypot(x.c[0] - c[0], x.c[1] - c[1]) < 2 && x.c[2] === c[2])
+      if (dup) { if (h.depth > dup.depth) Object.assign(dup, { ...h, P: toW(c), D: dup.D, c }); continue }
+      own.push({ ...h, P: toW(c), D: toWv([0, 0, atZero ? 1 : -1]), c })
     }
     const pHoles = own.length ? [...holes, ...own] : holes
     // пазы: брусок паза в системе панели — прямоугольник на пласти и глубина от неё
