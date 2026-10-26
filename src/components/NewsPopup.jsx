@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
-import { fetchUserSettings, saveUserSettings } from '../lib/userSettings'
+import { fetchUserSettings, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { markNewsSeen } from '../lib/activity'
 
 const FRESH_DAYS = 21          // старше — уже не «новое», окном не показываем
@@ -39,7 +39,10 @@ export default function NewsPopup() {
   if (off || !news) return null
   const close = more => {
     markNewsSeen([news.id])
-    saveUserSettings({ newsPopupId: news.id }, user)
+    // прочитанная в окне новость (и всё, что старше неё) больше не висит непрочитанной в «Сообщениях»
+    const seen = getUserSettings(user).msgSeenAt || ''
+    saveUserSettings({ newsPopupId: news.id, ...(news.created_at > seen ? { msgSeenAt: news.created_at } : {}) }, user)
+    window.dispatchEvent(new Event('messages-recount'))
     setNews(null)
     if (more) navigate('/messages')
   }

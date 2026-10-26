@@ -80,7 +80,8 @@ export default function BottomNav() {
     check()
     const seen = () => setUnread(0)
     window.addEventListener('messages-seen', seen)
-    return () => { alive = false; window.removeEventListener('messages-seen', seen) }
+    window.addEventListener('messages-recount', check)   // часть прочитана в другом месте (окно «Что нового») — пересчитать
+    return () => { alive = false; window.removeEventListener('messages-seen', seen); window.removeEventListener('messages-recount', check) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isMaster])
   // Уведомления: новые заявки на регистрацию (мастер), новые заявки производству, смена статуса своих заказов.
