@@ -151,8 +151,8 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 @media (min-width: 1100px) {
   .page { max-width: none; padding: 16px 28px; }
   .desk-grid { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 10px !important; align-items: start; }
-  .bottom-nav { justify-content: center; }
-  .bottom-nav a { flex: 0 1 150px; }
+  /* нижнее меню на компьютере не нужно: все разделы — в боковом меню (язычок слева) */
+  .bottom-nav { display: none !important; }
   /* превью раскроя слева — карты на всю колонку */
   .desk-pane-left .card { max-width: none; }
 }
@@ -172,3 +172,5 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
     font-size: 11px; color: var(--text-hint); }
   .det-head > .det-row, .det-head > .det-edges { min-height: 0; }
 }
+/* раскрой на компьютере: строка листов прижата к низу левой колонки */
+.desk-preview > .sheet-chips { margin-top: auto; margin-bottom: 0 !important; padding-top: 6px; }

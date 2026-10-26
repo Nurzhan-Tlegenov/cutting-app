@@ -3018,10 +3018,11 @@ export default function NestingPage() {
       || configs.find(hasMap))?.id ?? null
   const toPreview = (cid, node, title) => {
     if (!desk || !previewEl) return node
-    if (cid === previewId) return createPortal(<>
+    // колонка на всю высоту: строка листов внизу стоит на одном месте и в «Все листы», и в «Лист N»
+    if (cid === previewId) return createPortal(<div className="desk-preview" style={{ minHeight: '100%', display: 'flex', flexDirection: 'column' }}>
       {configs.length > 1 && <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>}
       {node}
-    </>, previewEl)
+    </div>, previewEl)
     return (
       <button type="button" onClick={() => setFocusId(cid)}
         style={{ width: '100%', padding: 9, marginBottom: 8, borderRadius: 'var(--radius)', border: '0.5px dashed var(--blue)',
@@ -3605,7 +3606,7 @@ export default function NestingPage() {
 
                 {/* Переключатель листов — под картой, чтобы палец не закрывал карту */}
                 {!locked && (
-                  <div style={{ display: 'flex', gap: 5, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                  <div className="sheet-chips" style={{ display: 'flex', gap: 5, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }}>
                     {(() => { const same = cfg.result?.beamSaw && cfg.result.beamSettings?.mergeSame !== false ? sameMaps(cfg.sheetsData) : null; return cfg.sheetsData.map((sh, i) => (
                       <button key={i} onClick={() => openSheet(i)} title={same && same[i].first !== i ? `Такая же карта, как лист ${same[i].first + 1}` : same && same[i].count > 1 ? `Эта карта режется ${same[i].count} раза` : undefined}
                         style={chip(view === 'sheet' && cfg.activeSheet === i, 'var(--blue)')}>
@@ -4290,7 +4291,7 @@ export default function NestingPage() {
               {anyRunning ? 'Считаю раскрой…' : 'Здесь будут карты раскроя.\nНажмите «▶ Выполнить раскрой» справа.'}
             </div>
           )}
-          <div ref={setPreviewEl} />
+          <div ref={setPreviewEl} style={{ height: previewId ? '100%' : 0 }} />
         </>}
         right={pageBody} />
     </div>
