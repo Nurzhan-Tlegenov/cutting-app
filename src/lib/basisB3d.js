@@ -566,13 +566,17 @@ function layerOf(user) {
 // Узел ищется по имени (User…/Prop…/Attr…); внутри — либо элементы списка с полями «имя» и «значение»,
 // либо пары «ключ — значение». Служебные поля геометрии сюда не попадают — смотрим только такие узлы.
 const PROP_NODE = /user|prop|attr|param/i
+const PROP_NODE_STRICT = /^(user|prop|attr)/i      // узлы свойств (не параметризация Params → Elastic)
 const NAME_KEY = /^(name|caption|title|key|n)$/i
 const VALUE_KEY = /^(value|val|v|text|data)$/i
 function propValue(v) {
   if (v == null || v instanceof Uint8Array) return ''
   if (typeof v === 'number') return String(Math.round(v * 1000) / 1000)
   if (typeof v === 'boolean') return v ? 'да' : 'нет'
-  return String(v).replace(/[\r\n]+/g, ' ').trim().slice(0, 120)
+  const t = String(v).replace(/[\r\n]+/g, ' ').trim()
+  // двоичные данные, прочитанные как текст (схема секции и т. п.), — не свойство
+  if (/[\u0000-\u0008\u000E-\u001F\uFFFF\uFFFD]/.test(t)) return ''
+  return t.slice(0, 120)
 }
 function userProps(o) {
   const out = {}
@@ -584,6 +588,7 @@ function userProps(o) {
   const walk = (n, depth) => {
     if (!n?.c || depth > 3) return
     for (const ch of n.c) {
+      if (ch.c && /^(elastic|planes?|scheme)$/i.test(ch.k)) continue
       if (ch.c) {
         // элемент списка «имя — значение»
         const nm = ch.c.find(x => !x.c && NAME_KEY.test(x.k) && typeof x.v === 'string')
@@ -593,7 +598,15 @@ function userProps(o) {
       } else if (ch.k && !NAME_KEY.test(ch.k) && !VALUE_KEY.test(ch.k)) add(ch.k, ch.v)
     }
   }
-  for (const ch of o?.c || []) if (ch.c && PROP_NODE.test(ch.k)) walk(ch, 0)
+  // Params — не свойства: там параметризация Базиса (Elastic → Planes → Plane: Axis, Pos, Weight), схема секции (Scheme),
+  // заметки; из него берём только вложенные узлы User/Prop/Attr. Раньше «Axis», «Pos», «Weight», «x», «y», «z» и двоичная
+  // «Scheme» попадали в свойства детали и в параметры бирки.
+  const GEOM = /^(elastic|planes?|scheme|objectnotes|trajectory|clipplanes|cutsections)$/i
+  for (const ch of o?.c || []) {
+    if (!ch.c || GEOM.test(ch.k)) continue
+    if (/^params$/i.test(ch.k)) { for (const sub of ch.c) if (sub?.c && PROP_NODE_STRICT.test(sub.k)) walk(sub, 0) }
+    else if (PROP_NODE_STRICT.test(ch.k)) walk(ch, 0)
+  }
   return Object.keys(out).length ? out : null
 }
 
