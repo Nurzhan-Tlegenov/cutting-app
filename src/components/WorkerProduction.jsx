@@ -14,6 +14,7 @@ import StageProgress from './StageProgress'
 import ProductionBoard from './ProductionBoard'
 import { ruleOf } from '../lib/stageParts'
 import CncLoader from './CncLoader'
+import OrderEdge from './OrderEdge'
 import { useKeptState } from '../hooks/useKeptState'
 
 // Кабинет производства у сотрудника (своего производства нет, есть рабочие места по приглашению).
@@ -150,7 +151,7 @@ export default function WorkerProduction({ wps }) {
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(q)}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[q.material_name, q.sheets > 0 && `листов ${q.sheets}`, `деталей ${q.parts}`].filter(Boolean).join(' · ')}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{[q.material_name, q.sheets > 0 && `листов ${q.sheets}`, `деталей ${q.parts}`].filter(Boolean).join(' · ')}<OrderEdge orderId={q.order_id} /></div>
                       <div style={{ fontSize: 11.5, color: isNew ? 'var(--amber)' : 'var(--text-muted)' }}>
                         {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт принятия ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)} (увидел через ${since(q.queued_at, q.accepted_at)}), ${since(q.accepted_at)}`}
                         {q.next_post ? ` · дальше: ${q.next_post}` : ' · последний пост'}
@@ -207,6 +208,9 @@ export default function WorkerProduction({ wps }) {
                     </div>
                     {isOpen && (
                       <>
+                        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4, paddingLeft: 18 }}>
+                          {[o.sheets > 0 && `Листов: ${o.sheets}`, `деталей: ${o.parts}`].filter(Boolean).join(' · ')}<OrderEdge orderId={o.id} style={{ fontWeight: 600, color: 'var(--text)' }} />
+                        </div>
                         <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                           {o.status !== 'inwork' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять в работу</button>}
                           {orderBtns(o.id)}

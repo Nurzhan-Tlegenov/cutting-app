@@ -1,3 +1,4 @@
+import OrderEdge from '../components/OrderEdge'
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -65,7 +66,7 @@ export default function PostPage() {
     return (
       <div key={q.stage_id} className="card" style={{ padding: '12px 14px', border: isNew ? '1px solid var(--amber)' : undefined }}>
         <div style={{ fontWeight: 600, fontSize: 16 }}>{orderTitle(q)}</div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{[q.client_name, q.material_name, q.sheets > 0 && `листов ${q.sheets}`, `деталей ${q.parts}`].filter(Boolean).join(' · ')}</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{[q.client_name, q.material_name, q.sheets > 0 && `листов ${q.sheets}`, `деталей ${q.parts}`].filter(Boolean).join(' · ')}<OrderEdge orderId={q.order_id} /></div>
         <div style={{ fontSize: 12, color: isNew ? 'var(--amber)' : 'var(--text-muted)', marginTop: 2 }}>
           {isNew ? `Новый · пришёл ${clock(q.queued_at)}, ждёт принятия ${since(q.queued_at)}` : `В работе · принял ${q.accepted_me ? 'вы' : q.accepted_by || '—'} ${clock(q.accepted_at)} (увидел через ${since(q.queued_at, q.accepted_at)}), ${since(q.accepted_at)}`}
           {q.next_post ? ` · дальше: ${q.next_post}` : ' · последний пост'}
