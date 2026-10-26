@@ -17,7 +17,8 @@ const THICK_FROM = 1          // кромка толще 1 мм считаетс
 export const emptyStats = () => ({
   sheets: [], sheetCount: 0, offcutSheets: 0, parts: 0, kerf: 0, method: 'nesting',
   cutM: 0, cuts: 0, perimM: 0, partsM2: 0, sheetsM2: 0,
-  trimM: 0, trimCuts: 0,   // пильный центр: опил (обрезка кромок листа, торцовка, подрезка узких) — уже входит в cutM / cuts
+  trimM: 0, trimCuts: 0,
+  offcutSizes: {},   // деловые остатки: { 'длина×ширина': шт } (обрезки, отмеченные на картах)   // пильный центр: опил (обрезка кромок листа, торцовка, подрезка узких) — уже входит в cutM / cuts
   edgeM: 0, edgeThinM: 0, edgeThickM: 0, edgeCurvedM: 0, edgeCurvedParts: 0,
   edgeByType: {},   // кромка по видам заказа: { название: м } (виды — из Excel или из бланка заказа; толщина — edgeTypeT)
   edgeTypeT: {},
@@ -86,6 +87,10 @@ export function nestingStats({ order, mat, method }) {
       const best = a.unsplit.length !== b.unsplit.length ? (a.unsplit.length < b.unsplit.length ? a : b) : (len(a) <= len(b) ? a : b)
       row.cutM = len(best) / 1000; row.cuts = best.lines.length
     } else { row.cutM = contourM; row.cuts = contours }
+    for (const o of sh.manualOffcuts || []) {
+      const L = Math.round(Number(o.h) || 0), W = Math.round(Number(o.w) || 0)
+      if (L > 0 && W > 0) { const k = `${Math.max(L, W)}×${Math.min(L, W)}`; st.offcutSizes[k] = (st.offcutSizes[k] || 0) + 1 }
+    }
     const area = geo.usableX * geo.usableY
     row.usedPct = area > 0 ? used / area * 100 : 0
     st.sheets.push(row)
@@ -105,6 +110,7 @@ export function sumStats(list) {
       if (k === 'sheets') t.sheets.push(...s.sheets)
       else if (k === 'edgeByType') for (const [n, v] of Object.entries(s.edgeByType || {})) t.edgeByType[n] = (t.edgeByType[n] || 0) + v
       else if (k === 'edgeTypeT') Object.assign(t.edgeTypeT, s.edgeTypeT || {})
+      else if (k === 'offcutSizes') for (const [n, v] of Object.entries(s.offcutSizes || {})) t.offcutSizes[n] = (t.offcutSizes[n] || 0) + v
       else if (k === 'kerf') t.kerf = t.kerf || s.kerf
       else if (k === 'method') t.method = s.method || t.method
       else if (k === 'hdf') t.hdf = t.hdf || !!s.hdf
@@ -152,6 +158,7 @@ export function statsRows(st) {
     ['drillM2', 'Площадь деталей с присадкой', `${n2(st.drillM2)} м² · ${st.drillParts} дет.`, st.drillM2 > 0],
     ['grooves', 'Пазы', `${st.grooves} шт. · ${n2(st.grooveM)} м`, st.grooves > 0],
     ['pockets', 'Выемок', st.pockets, st.pockets > 0],
+    ['offcuts', 'Деловые остатки', `${Object.values(st.offcutSizes || {}).reduce((a, v) => a + v, 0)} шт`, Object.keys(st.offcutSizes || {}).length > 0],
   ]
   // кромка по видам: каждый вид — своей строкой (ключ один — галочка и порядок в конструкторе на все сразу)
   const types = Object.entries(st.edgeByType || {}).filter(([, v]) => v > 0)

@@ -15,6 +15,7 @@ import { insetEdgeLines } from './edgeLines'
 import { computeCutLines } from './cutLines'
 import { sameMaps } from './beamSaw'
 import { nestingStats } from './nestingStats'
+import { partListRows, colHead } from './partList'
 
 const K = 1654 / 210                     // точек на мм
 const PW = 1654, PH = 2339
@@ -672,18 +673,32 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
   // Статистика раскроя и стоимость работ — отдельной страницей после карт (вид — конструктор страницы статистики:
   // summary.layout { sections — порядок разделов 'stats' | 'cost' | 'notes', size — шрифт строк, мм, cols — 1 или 2 колонки })
   const hasSummary = summary && ((summary.rows || []).length || (summary.lines || []).length || summary.total != null)
-  if (hasSummary) pages.push(() => { pageNo++; drawSummaryPage(ctx, { order, matName, summary, notes: orderNotes(order, summary.layout), pageNo }) })
+  if (hasSummary) {
+    // страницы статистики: сначала прогон — сколько их (длинный список деталей уходит на следующие), потом каждая рисуется
+    const notesS = orderNotes(order, summary.layout)
+    const partRows = summary.layout?.parts ? partListRows(order, { ...mat, sheets }, summary.layout.parts.cols) : null
+    const starts = []
+    let st = { sec: 0, row: 0 }
+    for (let g = 0; st && g < 60; g++) { starts.push(st); st = drawSummaryPage(ctx, { order, matName, summary, notes: notesS, pageNo: 0, partRows, state: st }) }
+    for (const s0 of starts) pages.push(() => { pageNo++; drawSummaryPage(ctx, { order, matName, summary, notes: notesS, pageNo, partRows, state: s0 }) })
+  }
   return { pages, boxes }
 }
 
-/** Страница «Статистика раскроя»: разделы в заданном порядке */
-function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo }) {
+/**
+ * Страницы «Статистика раскроя»: разделы в заданном порядке. Длинный список деталей переносится на следующие страницы
+ * (шапка таблицы повторяется). -> [состояние начала каждой страницы] — по нему страница рисуется ещё раз при сборке PDF.
+ * state — { sec: номер раздела, row: строка списка деталей }
+ */
+const SUM_BOTTOM = 284
+function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo, partRows = null, state = { sec: 0, row: 0 } }) {
   const L = summary.layout || {}
   const sections = Array.isArray(L.sections) && L.sections.length ? L.sections : ['stats', 'cost', 'notes']
   const fs = Math.min(5, Math.max(2.4, Number(L.size) || 3.1)), step = fs * 1.75, cols = L.cols === 1 ? 1 : 2
   ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
   const tx = drawBrand(ctx) + 4
-  text(ctx, `${L.title || 'Статистика раскроя'} · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
+  const cont = state.sec > 0 || state.row > 0
+  text(ctx, `${L.title || 'Статистика раскроя'} · ${orderTitle(order)}${cont ? ' (продолжение)' : ''}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
   text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
   text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
   rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
@@ -704,6 +719,27 @@ function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo }) {
         rule(ctx, x, yy + 1.6, x + colW, yy + 1.6, 0.1)
       })
       y += step * per + 10
+    },
+    // деловые остатки: размеры и сколько штук — что ушло на склад
+    offcuts: () => {
+      const list = summary.offcuts || []
+      if (!list.length) return
+      text(ctx, 'Деловые остатки', 10, y, { size: 3.6, bold: true }); y += 6
+      ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y - 4.2), mm(100), mm(6))
+      text(ctx, '№', 12, y, { size: 2.7, bold: true, color: MUTED })
+      text(ctx, 'Длина, мм', 50, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
+      text(ctx, 'Ширина, мм', 78, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
+      text(ctx, 'Кол-во', 106, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
+      y += 2
+      list.forEach(([l, w, n], i) => {
+        y += step
+        text(ctx, String(i + 1), 12, y, { size: fs * 0.97, color: MUTED })
+        text(ctx, String(l), 50, y, { size: fs, bold: true, align: 'right' })
+        text(ctx, String(w), 78, y, { size: fs, bold: true, align: 'right' })
+        text(ctx, `${n} шт`, 106, y, { size: fs, align: 'right' })
+        rule(ctx, 10, y + 1.7, 110, y + 1.7, 0.1)
+      })
+      y += 10
     },
     cost: () => {
       const lines = summary.lines || []
@@ -735,11 +771,83 @@ function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo }) {
       }
     },
     notes: () => {
-      if (!notes.length || y + 12 > 284) return
-      y += notesBlock(ctx, notes, 10, y, 190, { size: fs, maxLines: Math.max(1, Math.floor((284 - y - 4) / (fs * 1.3) / notes.length)) }) + 6
+      if (!notes.length || y + 12 > SUM_BOTTOM) return
+      y += notesBlock(ctx, notes, 10, y, 190, { size: fs, maxLines: Math.max(1, Math.floor((SUM_BOTTOM - y - 4) / (fs * 1.3) / notes.length)) }) + 6
     },
   }
-  for (const k of sections) draw[k]?.()
+  for (let si = state.sec; si < sections.length; si++) {
+    const k = sections[si]
+    if (k === 'parts') {
+      const P = L.parts
+      if (!P?.cols?.length || !partRows?.length) continue
+      const from = si === state.sec ? state.row : 0
+      // мало места до конца страницы — таблица начинается со следующей
+      if (from === 0 && y > SUM_BOTTOM - 30 && y > 40) return { sec: si, row: 0 }
+      const next = drawPartTable(ctx, { P, rows: partRows, from, y, fsBase: fs, cont: from > 0 })
+      if (next.row < partRows.length) return { sec: si, row: next.row }
+      y = next.y + 8
+      continue
+    }
+    // раздел не влезает в остаток страницы — на следующую (кроме самого первого на странице)
+    if (y > SUM_BOTTOM - 20 && y > 40 && si > state.sec) return { sec: si, row: 0 }
+    draw[k]?.()
+  }
+  return null
+}
+
+/** Таблица деталей: шапка (повторяется на каждой странице), строки с переносом по словам. -> { row: следующая строка, y } */
+function drawPartTable(ctx, { P, rows, from, y, fsBase, cont }) {
+  const cols = P.cols
+  const fs = Math.min(4.5, Math.max(2, Number(P.size) || fsBase * 0.85)), lh = fs * 1.3, pad = 1
+  // ширина колонок: своя (мм) или «авто» — по самому длинному тексту (шапка и значения), авто-колонки ужимаются,
+  // если все вместе не влезают в 190 мм
+  ctx.font = `${mm(fs)}px Arial, Helvetica, sans-serif`
+  const want = cols.map((c, ci) => {
+    if (Number(c.w) > 0) return Number(c.w)
+    let w = 0
+    ctx.font = `600 ${mm(fs * 0.9)}px Arial, Helvetica, sans-serif`
+    for (const word of colHead(c).split(/\s+/)) w = Math.max(w, ctx.measureText(word).width / K)
+    ctx.font = `${mm(fs)}px Arial, Helvetica, sans-serif`
+    for (const r of rows) w = Math.max(w, ctx.measureText(r[ci] || '').width / K)
+    return Math.min(70, w + 2 * pad + 0.5)
+  })
+  const isAuto = i => !(Number(cols[i].w) > 0)
+  const fixed = cols.reduce((a, c, i) => a + (isAuto(i) ? 0 : want[i]), 0), auto = want.reduce((a, w, i) => a + (isAuto(i) ? w : 0), 0)
+  const room = Math.max(0, 190 - fixed)
+  let ws = want.slice()
+  if (auto > room && room > 0) {
+    // не влезает — ужимаются самые широкие авто-колонки (длинные названия переносятся), короткие (размеры, кромка) — как есть
+    let lo = 0, hi = Math.max(...want)
+    for (let it = 0; it < 30; it++) { const c = (lo + hi) / 2; const sum = want.reduce((a, w, i) => a + (isAuto(i) ? Math.min(w, c) : 0), 0); if (sum > room) hi = c; else lo = c }
+    ws = want.map((w, i) => (isAuto(i) ? Math.max(6, Math.min(w, lo)) : w))
+  } else if (auto > 0 && auto < room) {
+    // свободное место — поровну по ширине авто-колонок: таблица во всю ширину страницы
+    const k2 = room / auto
+    ws = want.map((w, i) => (isAuto(i) ? w * k2 : w))
+  }
+  const xs = []; let x = 10; for (const w of ws) { xs.push(x); x += w }
+  const right = Math.min(200, x)
+  if (!cont) { text(ctx, 'Список деталей', 10, y, { size: 3.6, bold: true }); y += 3 }
+  // шапка
+  const headLines = cols.map((c, ci) => wrapLines(ctx, colHead(c), ws[ci] - 2 * pad, fs * 0.9, true, 3))
+  const hh = Math.max(...headLines.map(l => l.length)) * fs * 0.9 * 1.3 + 2
+  ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y), mm(right - 10), mm(hh))
+  headLines.forEach((ls, ci) => ls.forEach((ln, li) => text(ctx, ln, xs[ci] + pad, y + 1 + fs * 0.9 * 1.3 * (li + 1) - fs * 0.25, { size: fs * 0.9, bold: true, color: DIM })))
+  const top = y
+  y += hh
+  rule(ctx, 10, y, right, y, 0.25, INK)
+  let i = from
+  for (; i < rows.length; i++) {
+    const lines = rows[i].map((v, ci) => (P.wrap ? wrapLines(ctx, v, ws[ci] - 2 * pad, fs, false, 3) : [v]))
+    const rh = Math.max(1, ...lines.map(l => l.length)) * lh + 1.2
+    if (y + rh > SUM_BOTTOM) break
+    lines.forEach((ls, ci) => ls.forEach((ln, li) => text(ctx, ln, xs[ci] + pad, y + lh * (li + 1) - fs * 0.2, { size: fs, max: P.wrap ? 0 : ws[ci] - 2 * pad })))
+    y += rh
+    rule(ctx, 10, y, right, y, 0.1)
+  }
+  // вертикальные линии колонок
+  for (const xx of [...xs, right]) rule(ctx, xx, top, xx, y, 0.1)
+  return { row: i, y }
 }
 
 /** Превью страницы статистики для конструктора (образец заказа). -> canvas */
@@ -747,7 +855,8 @@ export function drawSummaryPreview(canvas, { order, mat, summary }) {
   canvas.width = PW; canvas.height = PH
   const ctx = canvas.getContext('2d')
   const matName = [mat?.name || '', mat?.thickness ? `${mat.thickness} мм` : ''].filter(Boolean).join(' · ')
-  drawSummaryPage(ctx, { order, matName, summary, notes: orderNotes(order, summary?.layout), pageNo: (mat?.sheets?.length || 0) + 1 })
+  const partRows = summary?.layout?.parts ? partListRows(order, mat, summary.layout.parts.cols) : null
+  drawSummaryPage(ctx, { order, matName, summary, notes: orderNotes(order, summary?.layout), pageNo: (mat?.sheets?.length || 0) + 1, partRows })
   return canvas
 
 }

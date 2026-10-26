@@ -37,13 +37,15 @@ export function orderRows(rows, order) {
 }
 /** Вид страницы статистики: порядок разделов, шрифт строк, колонки */
 export function summaryLayout(cfg = {}) {
-  const ok = ['stats', 'cost', 'notes']
+  // разделы: раскрой, деловые остатки, смета, примечания, список деталей (новые — в конце порядка, если порядок уже задан)
+  const ok = ['stats', 'offcuts', 'cost', 'notes', 'parts']
   const sec = Array.isArray(cfg.sections) ? cfg.sections.filter(k => ok.includes(k)) : []
-  const all = [...new Set([...sec, ...ok])]
+  const all = [...new Set([...sec, ...ok])].filter(k => (k !== 'parts' || cfg.parts?.on) && (k !== 'offcuts' || !cfg.noOffcuts))
   // примечания — каждое своей галочкой: клиента (бланк заказа) и производства; noNotes — старая общая галочка «не выводить»
   // по умолчанию обе включены: раз примечание написали — оно важно (старая общая галочка noNotes больше не действует)
   const noOrder = !!cfg.noOrderNote, noProd = !!cfg.noProdNote
-  return { sections: noOrder && noProd ? all.filter(k => k !== 'notes') : all, size: Number(cfg.size) || 3.1, cols: cfg.cols === 1 ? 1 : 2, noOrderNote: noOrder, noProdNote: noProd }
+  return { sections: noOrder && noProd ? all.filter(k => k !== 'notes') : all, size: Number(cfg.size) || 3.1, cols: cfg.cols === 1 ? 1 : 2, noOrderNote: noOrder, noProdNote: noProd,
+    parts: cfg.parts?.on ? { cols: Array.isArray(cfg.parts.cols) ? cfg.parts.cols.filter(c => c && c.type) : [], wrap: cfg.parts.wrap !== false, size: Number(cfg.parts.size) || 0 } : null }
 }
 export function pdfSummaryOf(stats, quote, cfg = {}, estimate = true) {
   const off = new Set(cfg.off || [])
@@ -52,6 +54,8 @@ export function pdfSummaryOf(stats, quote, cfg = {}, estimate = true) {
   return {
     rows: stats ? orderRows(statsRows(stats), cfg.order).filter(r => !off.has(r.key)).map(r => ({ key: r.key, label: r.label, value: r.value })) : [],
     layout: summaryLayout(cfg),
+    // деловые остатки: [[длина, ширина, шт]] — крупные первыми
+    offcuts: stats ? Object.entries(stats.offcutSizes || {}).map(([k, n]) => [...k.split('×').map(Number), n]).sort((a, b) => b[0] * b[1] - a[0] * a[1]) : [],
     lines: priced && cfg.price !== 'total' ? lines : [],
     total: priced ? money(quote.total, quote.currency) : null,
     currency: priced ? quote.currency : '', minApplied: priced && !!quote.min_applied,
