@@ -1,5 +1,6 @@
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
-import { getCnc } from '../lib/cncSettings'
+import { getCnc, normalizeCnc, routerPost } from '../lib/cncSettings'
+import { postView } from '../lib/postTools'
 import ShareBadge from '../components/ShareBadge'
 import { useKeptState } from '../hooks/useKeptState'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react'
@@ -1922,6 +1923,20 @@ export default function NestingPage() {
   // на готовом раскрое фрезера и форматника свободные куски не меньше заданного отмечаются обрезками сами —
   // чтобы шинковка ЧПУ их не порезала. Один раз на лист (offAuto): снятые вручную обрезки не возвращаются.
   // Пильный центр отмечает обрезки сам по своим настройкам.
+  // Производство режет на фрезере только прямоугольники (ЧПУ → постпроцессор → «Обработка» → «Резать только прямоугольники»):
+  // фигурные детали в раскрое на фрезере всегда укладываются по габариту — иначе раскрой идёт по контуру, детали
+  // сцепляются вырезами, а станок режет их прямоугольником и задевает соседей. Галочка «по габаритам» тогда включена и закрыта.
+  const prodRectOnly = (() => {
+    if (!order || beamSaw || cuttingMethod !== 'nesting') return false
+    const pr = order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)
+    try {
+      const own = pr ? pr.owner_id === user?.id : cabinet === 'production'
+      const cnc = own ? getCnc(user) : pr?.cnc ? normalizeCnc(pr.cnc) : null
+      if (!cnc) return false
+      const rp = routerPost(cnc)
+      return !!(rp && postView({ ...cnc, post: rp.id }).ops?.skip?.contour)
+    } catch { return false }
+  })()
   const offRulePr = order ? (order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)) : null
   // По умолчанию у фрезера (там есть шинковка) — 400 × 400; 0 в настройке производства — выключено.
   // Форматник — только если производство задало размер само
@@ -2281,7 +2296,7 @@ export default function NestingPage() {
       optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
       cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
-      byBox: !!cfg.box && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту
+      byBox: (!!cfg.box || prodRectOnly) && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту (или производство режет только прямоугольники)
     }
     // β Пильный центр: свой алгоритм (src/lib/beamSawNesting.js) и свои настройки пильного центра производства —
     // выбранного в заказе, иначе своего: пропил и обрезка листа тоже свои (не «Параметры станка» пилы / фрезера);
@@ -3004,8 +3019,8 @@ export default function NestingPage() {
   const offcutCount = sheetsData.filter(sh => sh.stock === 'offcut').length
   const sheetsCount = sheetsData.length - offcutCount
   const totalArea = result ? sheetsData.reduce((a, sh) => { const g = geoOf(order, result, sh); return a + g.usableX * g.usableY / 1e6 }, 0) : 0
-  const curParamsKey = paramsKey({
-    sheetL: order.sheet_length, sheetW: order.sheet_width, kerf: order.kerf_width,
+  const curParamsKeyFor = byBox => paramsKey({
+    byBox, sheetL: order.sheet_length, sheetW: order.sheet_width, kerf: order.kerf_width,
     marginT: order.margin_top, marginR: order.margin_right, marginB: order.margin_bottom, marginL: order.margin_left,
     offcuts: offcutsValue(offForm),
   })
@@ -3230,7 +3245,7 @@ export default function NestingPage() {
               {cfg.saved && badge('✓ в заказе', '#e6f4ea', '#1e7e34')}
             </div>
             <div style={{ fontSize: 10.5, color: cfg.status === 'error' ? '#dc3545' : 'var(--text-hint)', marginTop: 1 }}>
-              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{cfg.box && hasShaped && cuttingMethod !== 'guillotine' ? ' · по габаритам' : ''}{cfg.small && !smallRuleOff(details, cfg) ? ' · мелкие в центр' : ''} · {statusLine}
+              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{(cfg.box || prodRectOnly) && hasShaped && cuttingMethod !== 'guillotine' ? ' · по габаритам' : ''}{cfg.small && !smallRuleOff(details, cfg) ? ' · мелкие в центр' : ''} · {statusLine}
             </div>
           </div>
           {(isRunning || isQueued) && (
@@ -3266,10 +3281,15 @@ export default function NestingPage() {
             {hasShaped && cuttingMethod !== 'guillotine' && (
               <div style={{ marginBottom: 8 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
-                  <input type="checkbox" checked={!!cfg.box} onChange={e => updateCfg(cfg.id, { box: e.target.checked })}
+                  <input type="checkbox" checked={!!cfg.box || prodRectOnly} disabled={prodRectOnly} onChange={e => updateCfg(cfg.id, { box: e.target.checked })}
                     style={{ width: 17, height: 17, flexShrink: 0 }} />
                   Фигурные детали — по габаритам
                 </label>
+                {prodRectOnly && (
+                  <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 2, marginLeft: 23 }}>
+                    Включено всегда: производство режет на фрезере только прямоугольники (ЧПУ → «Обработка» → «Резать только прямоугольники»).
+                  </div>
+                )}
                 <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2, marginLeft: 23 }}>
                   Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах. Включите, если производство режет только прямоугольники.
                 </div>
@@ -3426,13 +3446,17 @@ export default function NestingPage() {
               const overviewSheets = hEvent ? hEvent.sheets : cfg.sheetsData
               const geo = geoOf(order, cfg.result)                 // обычный лист
               const cgeo = geoOf(order, cfg.result, canvasSheet)   // открытый лист (может быть обрезком)
-              const stale = cfg.result.paramsKey && cfg.result.paramsKey !== curParamsKey && !isRunning
+              // раскрой «по габаритам» сделан не по габаритам (производство теперь режет только прямоугольники) — тоже пересчитать
+              const wantBox = (!!cfg.box || prodRectOnly) && cuttingMethod !== 'guillotine' && hasShaped
+              const staleBox = !isRunning && wantBox && !cfg.result.byBox && !cfg.result.beamSaw
+              const stale = staleBox || (!isRunning && cfg.result.paramsKey && cfg.result.paramsKey !== curParamsKeyFor(!!cfg.result.byBox))
               return (
               <div>
                 {stale && (
                   <p style={{ fontSize: 11, color: '#9a5b00', background: '#fff3d6', border: '1px solid #f0c674',
                     borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>
-                    Параметры листа или обрезки изменились после расчёта — пересчитайте раскрой
+                    {staleBox ? 'Этот раскрой сделан по контуру, а фигурные детали нужно укладывать по габаритам (станок режет только прямоугольники) — пересчитайте раскрой'
+                      : 'Параметры листа или обрезки изменились после расчёта — пересчитайте раскрой'}
                   </p>
                 )}
                 {cfg.result.algo === 'nfp' && (
