@@ -90,7 +90,7 @@ begin
       (select count(*) from app_messages m where m.from_id = u.id and m.kind in ('appeal', 'debug', 'order') and m.created_at >= since) as messages,
       (select count(*) from message_views v where v.user_id = u.id and v.seen_at >= since) as news_seen,
       (select count(*) from orders o where pr.id is not null and o.production_id = pr.id and o.status <> 'draft' and coalesce(o.submitted_at, o.created_at) >= since) as received,
-      (select count(*) from orders o where pr.id is not null and o.production_id = pr.id and o.status = 'done' and o.updated_at >= since) as done,
+      (select count(*) from orders o where pr.id is not null and o.production_id = pr.id and o.status = 'done' and coalesce(o.done_at, o.accepted_at, o.submitted_at, o.created_at) >= since) as done,
       (select count(*) from stage_events e where e.user_id = u.id and e.at >= since) as stage_marks
     from auth.users u left join profiles p on p.id = u.id left join productions pr on pr.owner_id = u.id) x);
 end $$;
