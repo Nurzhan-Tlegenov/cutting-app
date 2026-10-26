@@ -17,7 +17,7 @@ const read = (key, def) => {
   try { const v = Number(localStorage.getItem(key)); return v > 0.05 && v < 0.95 ? v : def } catch { return def }
 }
 
-export default function DeskSplit({ id, left, right, def = 0.62, min = 0.25, max = 0.82, leftRef = null }) {
+export default function DeskSplit({ id, left, right, def = 0.62, min = 0.25, max = 0.82, leftRef = null, full = false }) {
   const key = 'deskSplit:' + id
   const [ratio, setRatio] = useState(() => read(key, def))
   const [pane, setPane] = useState(null)
@@ -91,7 +91,7 @@ export default function DeskSplit({ id, left, right, def = 0.62, min = 0.25, max
     <PaneCtx.Provider value={pane}>
       {/* обычный блок высотой в окно (не position: fixed): fixed создал бы свой слой, и окна поверх страницы
           (3D, редактор контура, диалоги) оказывались бы под нижним меню */}
-      <div ref={boxRef} className="desk-split" style={{ height: `calc(100dvh - ${navH}px)`, display: 'flex' }}>
+      <div ref={boxRef} className="desk-split" style={{ height: full ? '100dvh' : `calc(100dvh - ${navH}px)`, display: 'flex' }}>
         <div ref={setLeft} className="desk-pane desk-pane-left"
           style={{ flex: `0 0 ${(ratio * 100).toFixed(2)}%`, minWidth: 0, overflow: 'auto', scrollbarGutter: 'stable', padding: '14px 12px 14px 20px', background: 'var(--bg2)' }}>
           {left}
@@ -107,4 +107,47 @@ export default function DeskSplit({ id, left, right, def = 0.62, min = 0.25, max
       </div>
     </PaneCtx.Provider>
   )
+}
+
+// ─── Ширина правой колонки в редакторах «на весь экран» (PDF, бирки, контур, ЧПУ) ───
+// const [sideW, handle] = useSideWidth('pdf-layout', 380) → в разметке: превью | {handle} | колонка шириной sideW.
+// Тянуть разделитель мышью; двойной щелчок — как было. Ширина запоминается.
+export function useSideWidth(id, def = 380, min = 260, max = 900) {
+  const key = 'deskSide:' + id
+  const [w, setW] = useState(() => { try { const v = Number(localStorage.getItem(key)); return v >= min && v <= max ? v : def } catch { return def } })
+  const st = useRef(null)
+  const [on, setOn] = useState(false)
+  const onDown = e => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    const box = e.currentTarget.parentElement?.getBoundingClientRect()
+    st.current = { right: box ? box.right : window.innerWidth, w }
+    setOn(true)
+  }
+  const onMove = e => {
+    if (!st.current) return
+    const lim = Math.min(max, (window.innerWidth || 1200) - 300)
+    setW(Math.round(Math.max(min, Math.min(lim, st.current.right - e.clientX))))
+  }
+  const onUp = () => {
+    if (!st.current) return
+    st.current = null
+    setOn(false)
+    setW(v => { try { localStorage.setItem(key, String(v)) } catch { /* без памяти */ } return v })
+  }
+  const reset = () => { setW(def); try { localStorage.removeItem(key) } catch { /* без памяти */ } }
+  useEffect(() => {
+    if (!on) return
+    const prev = document.body.style.cursor, us = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'
+    return () => { document.body.style.cursor = prev; document.body.style.userSelect = us }
+  }, [on])
+  const handle = (
+    <div className={'desk-divider' + (on ? ' on' : '')} title="Потяните, чтобы изменить ширину колонок · двойной щелчок — как было"
+      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onDoubleClick={reset}>
+      <span />
+    </div>
+  )
+  return [w, handle]
 }

@@ -1,3 +1,4 @@
+import { useDesktop } from '../hooks/useDesktop'
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -19,6 +20,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   useBackClose(true, onClose)
   const { user } = useAuth()
   const { stats, quote } = useNestingQuote({ order, mats: [mat], method, productionId: order?.production_id })
+  const desk = useDesktop()   // компьютер: окно по центру, а не снизу
   const [cfg, setCfg] = useState(() => ({ off: [], price: 'lines', ...(getUserSettings(user).pdfSummary || {}) }))
   const [statsPage, setStatsPageState] = useState(() => !!getUserSettings(user).pdfStatsPage)
   const setStatsPage = on => { setStatsPageState(on); saveUserSettings({ pdfStatsPage: on }, user) }
@@ -43,8 +45,8 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   }
   const chip = on => ({ flex: 1, padding: '7px 4px', borderRadius: 20, fontSize: 12, border: on ? 'none' : '0.5px solid var(--border-md)', background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text-muted)' })
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget && !busy) onClose() }}>
-      <div style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderRadius: '16px 16px 0 0' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: desk ? 'center' : 'flex-end', justifyContent: 'center' }} onClick={e => { if (e.target === e.currentTarget && !busy) onClose() }}>
+      <div style={{ width: '100%', maxWidth: 520, maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderRadius: desk ? 16 : '16px 16px 0 0' }}>
         <div style={{ padding: '14px 16px 8px' }}>
           <div style={{ fontSize: 16, fontWeight: 500 }}>PDF карт раскроя</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Отметьте, что вывести на последней странице: статистику раскроя и смету. Все настройки отчётов — также в «Производство → Настройки → Отчёты (PDF)».</div>

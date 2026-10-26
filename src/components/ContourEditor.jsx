@@ -1,3 +1,5 @@
+import DeskSplit from './DeskSplit'
+import { useDesktop, isDesktop } from '../hooks/useDesktop'
 import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -857,7 +859,9 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
 
     // Высокое разрешение — базовая ширина берётся от контейнера (не масштабируется зумом),
     // сам масштаб детали внутри регулируется зумом отдельно
-    const baseW = wrapRef.current?.clientWidth || canvas.offsetWidth || 280
+    let baseW = wrapRef.current?.clientWidth || canvas.offsetWidth || 280
+    // компьютер: деталь целиком в окне по высоте (широкое окно не растягивает высокую деталь за экран)
+    if (isDesktop()) baseW = Math.max(240, Math.min(baseW, (window.innerHeight - 190 - 60) * fitW / fitH + 60))
     const CSS_W = Math.round(baseW * zoom)
     const PAD = 30
     // Отступы одинаковые со всех сторон (не только у ширины) — деталь всегда точно
@@ -1879,6 +1883,7 @@ function ExtraHolesEditor({ dr, i, allowEdgeType, addExtraHole, updateExtraHole,
 // edgeNames — виды кромки, которые пользователь создал в бланке заказа; activeEdge — выбранный там сейчас.
 // В режиме «Кромить» они предлагаются на выбор для участков контура и вырезов (а не безымянная «Кромка»).
 export default function ContourEditor({ detail, onUpdate, materialThickness, onClose, edgeNames = null, activeEdge = null }) {
+  const desk = useDesktop()
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
   const w = Number(detail.h) || 0
   const h = Number(detail.w) || 0
@@ -2709,9 +2714,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
 
   const activeVertex = activeIdx !== null ? getActiveVerts()[activeIdx] : null
 
-  return (
-    <div className={onClose ? 'page' : undefined} style={onClose ? { paddingBottom: 40 } : { marginTop:10, borderTop:'0.5px solid var(--border)', paddingTop:10 }}>
-
+  const partHead = (<>
       {/* Шапка с кнопкой "Готово" — только когда редактор открыт на весь экран (из EditOrderPage) */}
       {onClose && (
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, paddingTop:8 }}>
@@ -2726,6 +2729,8 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
         </div>
       )}
 
+  </>)
+  const partPreview = (<>
       {/* Кнопка отката */}
       {history.length > 0 && (
         <button type="button" onClick={undo}
@@ -2951,6 +2956,8 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
         </div>
       )}
 
+  </>)
+  const partParams = (<>
       {/* Параметры под превью */}
       {activeVertex && tab === 'contour' && (
         <div style={{ background:'var(--bg2)', borderRadius:'var(--radius)', padding:10, marginBottom:8 }}>
@@ -4096,6 +4103,18 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
           Сбросить контур
         </button>
       )}
+  </>)
+  // Компьютер, редактор на весь экран: слева — деталь (превью), справа — параметры; ширину колонок тянут мышью
+  if (desk && onClose) return (
+    <div className="page desk-page">
+      <DeskSplit id="contour" def={0.55} full left={partPreview} right={<>{partHead}{partParams}</>} />
+    </div>
+  )
+  return (
+    <div className={onClose ? 'page' : undefined} style={onClose ? { paddingBottom: 40 } : { marginTop:10, borderTop:'0.5px solid var(--border)', paddingTop:10 }}>
+      {partHead}
+      {partPreview}
+      {partParams}
     </div>
   )
 }

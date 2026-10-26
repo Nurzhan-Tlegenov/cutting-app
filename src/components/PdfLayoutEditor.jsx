@@ -1,3 +1,4 @@
+import { useSideWidth } from './DeskSplit'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -33,6 +34,7 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
   const [zoom, setZoom] = useState(1)
   const [fitK, setFitK] = useState(1.5)             // точек экрана на мм, когда лист целиком помещается в окно превью
   const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900)   // монитор: параметры справа
+  const [sideW, sideHandle] = useSideWidth('pdf-layout', 380)   // монитор: ширину колонки параметров тянут мышью
   const [live, setLive] = useState(null)             // идёт перетаскивание: { id, dx, dy, dw, dh } в мм
   const holderRef = useRef(null), cvRef = useRef(null), drag = useRef(null)
   const scale = fitK * zoom                          // точек экрана на мм
@@ -135,8 +137,9 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
           </div>
         </div>
         {/* параметры: на телефоне — снизу своей прокруткой, на мониторе — колонкой справа */}
-        <div style={{ flex: wide ? '0 0 380px' : '1 1 45%', minHeight: 0, overflowY: 'auto', padding: '10px 12px', background: 'var(--bg2)',
-          borderLeft: wide ? '0.5px solid var(--border)' : 'none', borderTop: wide ? 'none' : '0.5px solid var(--border)' }}>
+        {wide && sideHandle}
+        <div style={{ flex: wide ? `0 0 ${sideW}px` : '1 1 45%', minHeight: 0, overflowY: 'auto', padding: '10px 12px', background: 'var(--bg2)',
+          borderLeft: 'none', borderTop: wide ? 'none' : '0.5px solid var(--border)' }}>
         <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>{cur ? 'Перетащите элемент на своё место; синяя точка в углу меняет размер.' : 'Нажмите на элемент листа, чтобы настроить его, или добавьте новый ниже.'}</p>
 
         {cur && (

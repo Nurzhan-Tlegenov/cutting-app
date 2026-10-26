@@ -1,3 +1,4 @@
+import { useSideWidth } from './DeskSplit'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -36,6 +37,7 @@ export default function SummaryLayoutEditor({ onClose }) {
   const [demoStats] = useState(() => nestingStats({ order: demo.order, mat: demo.mat, method: 'nesting' }))
   const [cfg, setCfg] = useState(() => ({ off: [], price: 'lines', ...(getUserSettings(user).pdfSummary || {}) }))
   const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 900)
+  const [sideW, sideHandle] = useSideWidth('pdf-summary', 400)   // монитор: ширину колонки параметров тянут мышью
   const [fitK, setFitK] = useState(1.5)
   const holderRef = useRef(null), cvRef = useRef(null)
   const off = new Set(cfg.off || [])
@@ -108,8 +110,9 @@ export default function SummaryLayoutEditor({ onClose }) {
         <div ref={holderRef} style={{ flex: wide ? 1 : '1 1 50%', minHeight: 0, minWidth: 0, overflow: 'auto', background: '#8a8a86', padding: 8, display: 'flex' }}>
           <canvas ref={cvRef} style={{ width: PAGE_W * fitK, height: PAGE_H * fitK, flex: 'none', margin: 'auto', background: '#fff', boxShadow: '0 2px 10px rgba(0,0,0,0.25)' }} />
         </div>
-        <div style={{ flex: wide ? '0 0 400px' : '1 1 50%', minHeight: 0, overflowY: 'auto', padding: '10px 12px',
-          borderLeft: wide ? '0.5px solid var(--border)' : 'none', borderTop: wide ? 'none' : '0.5px solid var(--border)' }}>
+        {wide && sideHandle}
+        <div style={{ flex: wide ? `0 0 ${sideW}px` : '1 1 50%', minHeight: 0, overflowY: 'auto', padding: '10px 12px',
+          borderLeft: 'none', borderTop: wide ? 'none' : '0.5px solid var(--border)' }}>
           <p className="section-title">Порядок разделов</p>
           {sections.map((k, i) => (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none', fontSize: 13 }}>

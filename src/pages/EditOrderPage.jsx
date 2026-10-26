@@ -2,6 +2,8 @@ import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
 import { saveOrderNote, NOTES_SQL_HINT } from '../lib/orderNotes'
 import ShareBadge from '../components/ShareBadge'
 import { useState, useEffect, useRef } from 'react'
+import DeskSplit from '../components/DeskSplit'
+import { useDesktop } from '../hooks/useDesktop'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -110,7 +112,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, showEdg
     (detail.contour.edgeGrooves || []).length > 0
   )
   return (
-    <div className="card" style={{ marginBottom: 8, padding: '10px 12px' }}>
+    <div className="card" style={{ marginBottom: 8, padding: '10px 12px', ...(showCopyPicker ? { gridColumn: '1 / -1' } : {}) }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>#{index + 1}</div>
@@ -303,6 +305,7 @@ export default function EditOrderPage() {
     return v
   })
   const [details, setDetails] = useState([])
+  const desk = useDesktop()   // компьютер: детали — слева, параметры заказа и «Сохранить» — справа
   const [showEdge, setShowEdge] = useState(true)
   // группы деталей с общей текстурой: activeGroup — идёт отбор деталей в эту группу; extraGroups — созданные, пока пустые
   const [activeGroup, setActiveGroup] = useState(null)
@@ -506,8 +509,7 @@ export default function EditOrderPage() {
   }
   const validCount = details.filter(d => d.w > 0 && d.h > 0).length
   if (loading) return <div className="page"><CncLoader label="Открываем заказ…" /></div>
-  return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+  const settingsPart = (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingTop: 8 }}>
         <button type="button" onClick={() => navigate(`/orders/${id}`)}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
@@ -568,6 +570,8 @@ export default function EditOrderPage() {
       <ImportDetails
         hasDetails={details.some(d => Number(d.w) > 0 || Number(d.h) > 0)}
         onImport={handleImport} />
+  </>)
+  const detailsPart = (<>
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>
@@ -593,7 +597,7 @@ export default function EditOrderPage() {
           <button type="button" onClick={() => setDetails(d => d.map(x => ({ ...x, rotatable: false })))} style={{ padding: '4px 12px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Выкл</button>
         </div>
         <PartGroups details={details} setDetails={setDetails} active={activeGroup} onActive={setActiveGroup} extra={extraGroups} setExtra={setExtraGroups} />
-        <div style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
+        <div className="desk-hide" style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Длина</div>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>
           <div style={{ width: 44, fontSize: 11, color: 'var(--text-hint)' }}>Кол.</div>
@@ -602,6 +606,7 @@ export default function EditOrderPage() {
         {grouped.map(([pfx, dets]) => (
           <div key={pfx}>
             {pfx && <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--blue)', marginBottom: 4, marginTop: 8, padding: '4px 8px', background: 'var(--blue-light)', borderRadius: 'var(--radius)', display: 'inline-block' }}>{pfx}</div>}
+            <div className="desk-grid det-grid">
             {dets.map((d) => {
               const globalIndex = details.findIndex(x => x.uid === d.uid)
               return (
@@ -618,6 +623,7 @@ export default function EditOrderPage() {
                   onCopyFrom={(sourceUid, opts) => copyDetailConfig(d.uid, sourceUid, opts)} />
               )
             })}
+            </div>
           </div>
         ))}
         <button type="button" onClick={addDetail}
@@ -625,6 +631,8 @@ export default function EditOrderPage() {
           + Добавить деталь {activePrefix ? `(${activePrefix})` : ''}
         </button>
       </div>
+  </>)
+  const restPart = (<>
       <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '10px 12px', marginBottom: 12, fontSize: 13, color: 'var(--amber)' }}>
         ⚠ После сохранения раскрой будет сброшен — нужно выполнить заново
       </div>
@@ -636,6 +644,17 @@ export default function EditOrderPage() {
       {showLeaveConfirm && (
         <LeaveConfirmModal saving={saving} onSave={handleSave} onDiscard={leavePage} onStay={stayOnPage} />
       )}
+  </>)
+  if (desk) return (
+    <div className="page desk-page">
+      <DeskSplit id="order-form" def={0.64} left={detailsPart} right={<>{settingsPart}{restPart}</>} />
+    </div>
+  )
+  return (
+    <div className="page" style={{ paddingBottom: 100 }}>
+      {settingsPart}
+      {detailsPart}
+      {restPart}
     </div>
   )
 }

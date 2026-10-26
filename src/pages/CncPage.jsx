@@ -451,7 +451,7 @@ export default function CncPage() {
             )}
             <button type="button" style={small} onClick={() => { setPicked(sel.length === mat.sheets.length ? [] : null); setBuilt(null) }}>{sel.length === mat.sheets.length ? 'Снять все' : 'Выбрать все'}</button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+          <div className="desk-grid" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
             {mat.sheets.map((sh, i) => {
               const g = sheetGeo(order, mat.result, sh), on = sel.includes(i), f = built?.files.find(x => x.si === i), f2 = built?.second?.files.find(x => x.si === i)
               return (
@@ -600,7 +600,7 @@ export default function CncPage() {
       {/* симулятор — поверх всего экрана: выносится прямо в body (иначе при прокрученной странице снизу виднелось окно заказа) */}
       {sim && createPortal(
         <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 1100, padding: 10, boxSizing: 'border-box', height: '100dvh', overscrollBehavior: 'contain' }}>
-          <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
+          <div style={{ maxWidth: window.innerWidth >= 1100 ? 'none' : 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(simP?.rapid) || 20000} zShift={sim.zShift}
                 toolDia={toolDia} headTools={simHead} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />

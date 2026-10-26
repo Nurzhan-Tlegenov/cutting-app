@@ -1,3 +1,6 @@
+import { createPortal } from 'react-dom'
+import DeskSplit from '../components/DeskSplit'
+import { useDesktop } from '../hooks/useDesktop'
 import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
 import ShareBadge from '../components/ShareBadge'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, Suspense } from 'react'
@@ -495,7 +498,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
 
 // Настройка шаблона бирки: размер, мои шаблоны, расстановка элементов, чертёж детали, разрешение.
 // Одна и та же — в бирках заказа и в «Настройки производства → Бирки» (там — на образцовой детали, без заказа).
-export function LabelSetup({ tpl, setTpl, user, order, mat, shared }) {
+export function LabelSetup({ tpl, setTpl, user, order, mat, shared, previewEl = null }) {
   const [hist, setHist] = useState([])               // прежние состояния шаблона — для «Отменить»
   const [savedT, setSavedT] = useState(() => getLabelSaved(user))   // «Мои шаблоны бирок»
   const [curSaved, setCurSaved] = useState(() => getUserSettings(user).labelSavedCur || '')   // какой сохранённый шаблон открыт
@@ -554,7 +557,11 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared }) {
                 </div>
               ))}
             </div>
-            {mat ? <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} />
+            {mat ? (previewEl
+              // компьютер: бирка — в левой колонке, на всю её высоту; настройки — справа
+              ? createPortal(<div style={{ maxWidth: `calc((100dvh - 230px) * ${(tpl.w / tpl.h).toFixed(4)})`, margin: '0 auto' }}>
+                  <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} /></div>, previewEl)
+              : <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} />)
               : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
             {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же'], ['edgeDims', 'Размер стороны у кромки (например «ПВХ 2 мм · 720»)']].map(([k, label]) => (
               <label key={k} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
@@ -859,8 +866,9 @@ export function LabelSettingsPage() {
   const { user } = useAuth()
   const [tpl, setTpl] = useState(() => getLabelTpl(user))
   const sample = useMemo(() => demoLabelSample(), [])
-  return (
-    <div className="page" style={{ paddingBottom: 40 }}>
+  const desk = useDesktop()
+  const [previewEl, setPreviewEl] = useState(null)
+  const body = (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingTop: 4 }}>
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
         <div style={{ flex: 1 }}>
@@ -871,8 +879,14 @@ export function LabelSettingsPage() {
       </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 4px' }}>Бирка показана на образцовой детали. Шаблон тот же, что в бирках заказа: настроили здесь — он сразу работает во всех заказах.</p>
-        <LabelSetup tpl={tpl} setTpl={setTpl} user={user} order={sample.order} mat={sample.mat} shared={false} />
+        <LabelSetup tpl={tpl} setTpl={setTpl} user={user} order={sample.order} mat={sample.mat} shared={false} previewEl={desk ? previewEl : null} />
       </div>
+  </>)
+  // компьютер: слева — бирка на образцовой детали, справа — размеры и параметры шаблона
+  if (desk) return (
+    <div className="page desk-page">
+      <DeskSplit id="label-tpl" def={0.6} left={<div ref={setPreviewEl} />} right={body} />
     </div>
   )
+  return <div className="page" style={{ paddingBottom: 40 }}>{body}</div>
 }

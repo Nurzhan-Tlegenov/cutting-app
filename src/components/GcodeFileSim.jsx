@@ -44,7 +44,7 @@ export default function GcodeFileSim({ onClose }) {
   return createPortal(
     sim ? (
       <div style={{ ...box, padding: 10, boxSizing: 'border-box' }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto', height: '100%' }}>
+        <div style={{ maxWidth: window.innerWidth >= 1100 ? 'none' : 1100, margin: '0 auto', height: '100%' }}>
           <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
             <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} title={sim.name} thickness={sim.thickness}
               toolDia={t => sim.dia[t] || 0} headTools={sim.head} onClose={() => setSim(null)} />

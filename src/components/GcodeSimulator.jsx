@@ -5,6 +5,8 @@ import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
+import { useDesktop } from '../hooks/useDesktop'
+import { useSideWidth } from './DeskSplit'
 
 // Симулятор G-кода в 3D: лист на столе, траектории фрезы в объёме (с глубиной), фреза идёт по программе,
 // на листе остаётся след реза. Один палец — вращать, два — масштаб и сдвиг.
@@ -72,6 +74,8 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
   const [follow, setFollow] = useState(false)   // камера следит за шпинделем
   const [sel, setSel] = useState(-1)       // выделенное перемещение
   const [scrollTop, setScrollTop] = useState(0)
+  const desk = useDesktop()   // компьютер: 3D слева на всю высоту, управление и G-код — колонкой справа
+  const [sideW, sideHandle] = useSideWidth('gcode-sim', 420)
   const [viewH, setViewH] = useState(() => Math.round(Math.max(200, Math.min(window.innerHeight * 0.42, 620))))   // высота 3D-окна — двигается границей
   const dragRef = useRef(null)
 
@@ -551,8 +555,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
   const dragMove = e => { const d = dragRef.current; if (d) setViewH(Math.round(Math.max(120, Math.min(window.innerHeight - 230, d.h + e.clientY - d.y)))) }
   const dragEnd = () => { dragRef.current = null }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, touchAction: 'manipulation' }}>
+  const partHead = (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flex: '0 0 auto' }}>
         <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title || 'Симулятор'}</div>
         <span style={{ fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{fmtTime(t)} / {fmtTime(prog.time)}</span>
@@ -560,7 +563,9 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
         {onDownload && <button type="button" onClick={onDownload} style={{ ...viewBtn, color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇</button>}
         {onClose && <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--text-muted)', padding: '0 4px' }}>×</button>}
       </div>
-      <div ref={wrapRef} style={{ position: 'relative', flex: '0 0 auto', height: viewH, background: 'var(--bg3)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+  </>)
+  const partView = (<>
+      <div ref={wrapRef} style={{ position: 'relative', flex: desk ? '1 1 0' : '0 0 auto', minWidth: 0, height: desk ? '100%' : viewH, background: 'var(--bg3)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
         <div ref={mountRef} />
         <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
           <button type="button" onClick={() => setFollow(f => !f)} title="Камера едет за шпинделем; расстояние и угол выбираются пальцами и сохраняются"
@@ -569,6 +574,8 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
           <button type="button" style={viewBtn} onClick={() => api.current?.setView('top')}>Сверху</button>
         </div>
       </div>
+  </>)
+  const partCtl = (<>
       <div style={{ flex: '0 0 auto' }}>
         <div style={{ display: 'flex', gap: 5, overflowX: 'auto', marginTop: 6, paddingBottom: 2 }}>
           {LAYERS.filter(l => l.groups.some(g => data.groups[g])).map(l => (
@@ -603,10 +610,14 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
           )}
         </div>
       </div>
+  </>)
+  const partDrag = (<>
       <div onPointerDown={dragStart} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd} title="Потяните вверх или вниз"
         style={{ flex: '0 0 auto', height: 22, marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'row-resize', touchAction: 'none', userSelect: 'none', color: 'var(--text-hint)', fontSize: 10 }}>
         <span>▲</span><i style={{ width: 54, height: 5, borderRadius: 3, background: 'var(--gray-mid)' }} /><span>▼</span>
       </div>
+  </>)
+  const partCode = (<>
       <div ref={codeRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
         style={{ flex: '1 1 0', minHeight: 60, overflowY: 'auto', background: 'var(--bg2)', borderRadius: 'var(--radius)', fontFamily: 'monospace', fontSize: 11, WebkitOverflowScrolling: 'touch' }}>
         <div style={{ position: 'relative', height: total * LH }}>
@@ -622,6 +633,28 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
           })}
         </div>
       </div>
+  </>)
+  if (desk) return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      {partHead}
+      <div style={{ flex: '1 1 0', minHeight: 0, display: 'flex' }}>
+        {partView}
+        {sideHandle}
+        <div style={{ flex: `0 0 ${sideW}px`, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {partCtl}
+          <div style={{ height: 6 }} />
+          {partCode}
+        </div>
+      </div>
+    </div>
+  )
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, touchAction: 'manipulation' }}>
+      {partHead}
+      {partView}
+      {partCtl}
+      {partDrag}
+      {partCode}
     </div>
   )
 }

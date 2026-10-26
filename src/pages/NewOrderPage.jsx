@@ -1,5 +1,7 @@
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
 import { saveOrderNote, NOTES_SQL_HINT } from '../lib/orderNotes'
+import DeskSplit from '../components/DeskSplit'
+import { useDesktop } from '../hooks/useDesktop'
 import { useState, useRef, useEffect } from 'react'
 import ContourEditor from '../components/ContourEditor'
 import { useNavigate } from 'react-router-dom'
@@ -127,7 +129,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
   }
 
   return (
-    <div className="card" style={{ marginBottom: 4, padding: '6px 10px' }}>
+    <div className="card" style={{ marginBottom: 4, padding: '6px 10px', ...(showContour || showCopyPicker ? { gridColumn: '1 / -1' } : {}) }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* Номер + кнопка контура */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
@@ -372,6 +374,7 @@ export default function NewOrderPage() {
 
   // Детали
   const [details, setDetails] = useState([newDetail()])
+  const desk = useDesktop()   // компьютер: детали — слева, параметры заказа и кнопки — справа
   const [showEdge, setShowEdge] = useState(true)
   // группы деталей с общей текстурой: activeGroup — идёт отбор деталей в эту группу; extraGroups — созданные, пока пустые
   const [activeGroup, setActiveGroup] = useState(null)
@@ -597,8 +600,7 @@ export default function NewOrderPage() {
       <BottomNav />
     </div>
   )
-  return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+  const settingsPart = (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
         <button type="button" onClick={() => navigate('/orders')}
           style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, cursor: 'pointer' }}>←</button>
@@ -686,6 +688,8 @@ export default function NewOrderPage() {
         onImport={handleImport} />
       </div>
 
+  </>)
+  const detailsPart = (<>
       {/* Детали */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
@@ -717,8 +721,8 @@ export default function NewOrderPage() {
         </div>
         <PartGroups details={details} setDetails={setDetails} active={activeGroup} onActive={setActiveGroup} extra={extraGroups} setExtra={setExtraGroups} />
 
-        {/* Заголовок колонок */}
-        <div style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
+        {/* Заголовок колонок (на компьютере детали идут сеткой — там подписи в самих полях) */}
+        <div className="desk-hide" style={{ display: 'flex', gap: 8, paddingLeft: 30, paddingRight: 28, marginBottom: 4 }}>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Длина</div>
           <div style={{ flex: 1, fontSize: 11, color: 'var(--text-hint)' }}>Ширина</div>
           <div style={{ width: 44, fontSize: 11, color: 'var(--text-hint)' }}>Кол.</div>
@@ -734,6 +738,7 @@ export default function NewOrderPage() {
                 {pfx}
               </div>
             )}
+            <div className="desk-grid det-grid">
             {dets.map((d) => {
               const globalIndex = details.findIndex(x => x.uid === d.uid)
               return (
@@ -752,6 +757,7 @@ export default function NewOrderPage() {
                   onCopyFrom={(sourceUid, opts) => copyDetailConfig(d.uid, sourceUid, opts)} />
               )
             })}
+            </div>
           </div>
         ))}
 
@@ -762,6 +768,8 @@ export default function NewOrderPage() {
         </button>
       </div>
 
+  </>)
+  const restPart = (<>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 
       {!keyboardOpen && <BottomNav />}
@@ -769,6 +777,18 @@ export default function NewOrderPage() {
       {showLeaveConfirm && (
         <LeaveConfirmModal saving={saving} onSave={handleSave} onDiscard={leavePage} onStay={stayOnPage} />
       )}
+  </>)
+  // Компьютер: слева — список деталей (сеткой), справа — название, материал, кромка, импорт и «Сохранить»
+  if (desk) return (
+    <div className="page desk-page">
+      <DeskSplit id="order-form" def={0.64} left={detailsPart} right={<>{settingsPart}{restPart}</>} />
+    </div>
+  )
+  return (
+    <div className="page" style={{ paddingBottom: 100 }}>
+      {settingsPart}
+      {detailsPart}
+      {restPart}
     </div>
   )
 }
