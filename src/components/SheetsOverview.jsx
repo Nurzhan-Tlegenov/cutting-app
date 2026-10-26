@@ -4,6 +4,7 @@ import { partLabel } from '../lib/partLabel'
 import { smallEdgeReal } from '../lib/nesting'
 import { backSide } from '../lib/partInfo'
 import { usePane } from './DeskSplit'
+import { useDevicePixelRatio } from '../hooks/useDesktop'
 
 // ─── Обзор ВСЕХ листов раскроя на одном холсте ──────────────────────────────
 // Нужен для онлайн-раскроя: пока идёт поиск, пользователь видит, как укладка
@@ -45,6 +46,7 @@ export default function SheetsOverview({
   deskReserve = 180, // компьютер (карта в левой колонке): сколько пикселей колонки занято кнопками над и под картой
 }) {
   const pane = usePane()   // компьютер: размер левой колонки; телефон — null
+  const dprNow = useDevicePixelRatio()   // масштаб браузера сменился — холст перерисовать в новой чёткости
   const canvasRef = useRef(null)
   const scrollRef = useRef(null)
   const curRef = useRef([])     // что сейчас нарисовано (с учётом анимации), мм общей раскладки
@@ -77,12 +79,15 @@ export default function SheetsOverview({
   // Сколько листов в ряд по умолчанию. Телефон — по числу листов. Компьютер — так, чтобы листы были как можно
   // крупнее и при этом все помещались в колонку; если листов много — не мельче ~170 px по ширине (дальше прокрутка)
   let defaultCols = n === 1 ? 1 : n <= 4 ? 2 : n <= 12 ? 3 : 4
-  if (pane && boxW > 500) {
-    const fit = c => Math.min((boxW - PADDING * 2) / (c * cellW + (c - 1) * GAP_MM), (maxViewH - PADDING * 2) / (Math.ceil(n / c) * rowMM - GAP_MM))
+  // считаем от ширины колонки (pane.w), а не от холста: ширина холста зависит от полосы прокрутки, и выбор
+  // «листов в ряд» мог качаться туда-сюда (карта дёргалась по кругу)
+  const colW = pane ? Math.round(pane.w / 8) * 8 : boxW
+  if (pane && colW > 500) {
+    const fit = c => Math.min((colW - PADDING * 2) / (c * cellW + (c - 1) * GAP_MM), (maxViewH - PADDING * 2) / (Math.ceil(n / c) * rowMM - GAP_MM))
     let best = 1, bs = 0
     for (let c = 1; c <= Math.min(n, MAX_COLS); c++) { const f = fit(c); if (f > bs * 1.0001) { bs = f; best = c } }
     let cMax = 1
-    for (let c = 1; c <= Math.min(n, MAX_COLS); c++) if ((boxW - PADDING * 2) / (c * cellW + (c - 1) * GAP_MM) * cellW >= 170) cMax = c
+    for (let c = 1; c <= Math.min(n, MAX_COLS); c++) if ((colW - PADDING * 2) / (c * cellW + (c - 1) * GAP_MM) * cellW >= 170) cMax = c
     defaultCols = Math.min(best, cMax)
     // все листы не помещаются — тогда максимум в ряд при читаемом размере: прокрутка короче
     if (bs * cellW < 170) defaultCols = cMax
@@ -104,7 +109,7 @@ export default function SheetsOverview({
   const contentH = Math.round(totalH * sc) + PADDING * 2
   const viewH = Math.min(contentH, maxViewH)
   const canvasW = boxW
-  const DPR = Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, 2.5)
+  const DPR = Math.min(dprNow || 1, 2.5)
 
   const origin = si => ({
     x: offX + (si % cols) * (cellW + GAP_MM),

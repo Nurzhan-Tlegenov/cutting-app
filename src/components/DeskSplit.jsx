@@ -43,7 +43,7 @@ export default function DeskSplit({ id, left, right, def = 0.62, min = 0.25, max
       const cs = getComputedStyle(el)
       const w = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
       const h = el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
-      setPane(p => (p && Math.abs(p.w - w) < 1 && Math.abs(p.h - h) < 1 ? p : { w: Math.floor(w), h: Math.floor(h) }))
+      setPane(p => (p && Math.abs(p.w - w) < 2 && Math.abs(p.h - h) < 2 ? p : { w: Math.floor(w), h: Math.floor(h) }))
     }
     upd()
     if (typeof ResizeObserver === 'undefined') { window.addEventListener('resize', upd); return () => window.removeEventListener('resize', upd) }
@@ -93,7 +93,7 @@ export default function DeskSplit({ id, left, right, def = 0.62, min = 0.25, max
           (3D, редактор контура, диалоги) оказывались бы под нижним меню */}
       <div ref={boxRef} className="desk-split" style={{ height: `calc(100dvh - ${navH}px)`, display: 'flex' }}>
         <div ref={setLeft} className="desk-pane desk-pane-left"
-          style={{ flex: `0 0 ${(ratio * 100).toFixed(2)}%`, minWidth: 0, overflow: 'auto', padding: '14px 12px 14px 20px', background: 'var(--bg2)' }}>
+          style={{ flex: `0 0 ${(ratio * 100).toFixed(2)}%`, minWidth: 0, overflow: 'auto', scrollbarGutter: 'stable', padding: '14px 12px 14px 20px', background: 'var(--bg2)' }}>
           {left}
         </div>
         <div className={'desk-divider' + (drag ? ' on' : '')} title="Потяните, чтобы изменить ширину колонок · двойной щелчок — как было"
@@ -101,7 +101,7 @@ export default function DeskSplit({ id, left, right, def = 0.62, min = 0.25, max
           <span />
         </div>
         <div className="desk-pane desk-pane-right"
-          style={{ flex: '1 1 0', minWidth: 0, overflow: 'auto', padding: '14px 20px 24px 12px' }}>
+          style={{ flex: '1 1 0', minWidth: 0, overflow: 'auto', scrollbarGutter: 'stable', padding: '14px 20px 24px 12px' }}>
           {right}
         </div>
       </div>

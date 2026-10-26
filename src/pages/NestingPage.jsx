@@ -9,7 +9,7 @@ import { computeOffcutAtPoint, smallAtEdge, smallEdgeReal } from '../lib/nesting
 import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
 import DeskSplit, { usePane } from '../components/DeskSplit'
-import { useDesktop } from '../hooks/useDesktop'
+import { useDesktop, useDevicePixelRatio } from '../hooks/useDesktop'
 import { createPortal } from 'react-dom'
 import { newHistory, recordEvent, recordIsland, recordStats, buildHistoryExport } from '../lib/nestingHistory'
 import { validateNesting } from '../lib/validateNesting'
@@ -599,6 +599,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   const PADDING = 8
   // Компьютер: лист — на всю левую колонку (по ширине или по высоте, что раньше упрётся)
   const pane = usePane()
+  const dprNow = useDevicePixelRatio()   // масштаб браузера сменился — перерисовать в новой чёткости
   const paneRef = useRef(pane)
   paneRef.current = pane
   const DESK_RESERVE = 210   // кнопки над картой и подсказка с листами под ней (левая колонка)
@@ -612,7 +613,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   const sc = (canvasW - PADDING * 2) / sheetW
   const canvasH = Math.round(sc * sheetL) + PADDING * 2
   // При увеличении холст большой — ограничиваем плотность пикселей, чтобы не упереться в лимит памяти телефона
-  const DPR = pinching ? 1 : Math.min(typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1, Math.sqrt(12e6 / (canvasW * canvasH)))
+  const DPR = pinching ? 1 : Math.min(dprNow || 1, Math.sqrt(12e6 / (canvasW * canvasH)))
 
   // useLayoutEffect: при смене масштаба холст пересоздаётся — перерисовываем
   // до показа на экране, чтобы не мигал пустым

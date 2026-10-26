@@ -21,3 +21,23 @@ export function useDesktop() {
   }, [])
   return desk
 }
+
+// Плотность пикселей экрана меняется, когда в браузере меняют масштаб (Ctrl + колёсико / Ctrl +−)
+// или переносят окно на другой монитор. Холсты карт рисуются под эту плотность — при её смене их надо
+// перерисовать, иначе карта остаётся размытой, пока её не тронешь.
+export function useDevicePixelRatio() {
+  const [dpr, setDpr] = useState(() => (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1))
+  useEffect(() => {
+    if (!window.matchMedia) return
+    let mq = null
+    const listen = () => {
+      mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+      const on = () => { mq.removeEventListener?.('change', on); setDpr(window.devicePixelRatio || 1); listen() }
+      mq.addEventListener?.('change', on)
+      mq._on = on
+    }
+    listen()
+    return () => { if (mq?._on) mq.removeEventListener?.('change', mq._on) }
+  }, [])
+  return dpr
+}
