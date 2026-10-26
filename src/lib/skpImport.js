@@ -48,7 +48,7 @@ function reader(m) {
 function unpack(u8) {
   let at = -1
   for (let i = 0; i < Math.min(u8.length - 4, 4096); i++) if (u8[i] === 0x50 && u8[i + 1] === 0x4b && u8[i + 2] === 3 && u8[i + 3] === 4) { at = i; break }
-  if (at < 0) throw new Error('это файл старой версии SketchUp (до 2021) — откройте его в SketchUp и сохраните заново, затем импортируйте')
+  if (at < 0) throw new Error('это файл старой версии SketchUp (до 2021). Пересохраните его в новом формате: бесплатно в браузере — app.sketchup.com → открыть файл → «Сохранить как» / «Скачать» (.skp), или в SketchUp 2021 и новее, — затем импортируйте')
   const files = unzipSync(u8.subarray(at), { filter: f => f.name === 'model.dat' || /(^|\/)material\.xml$/.test(f.name) })
   if (!files['model.dat']) throw new Error('в файле SketchUp нет модели (model.dat)')
   return files
@@ -200,6 +200,79 @@ export function parseSkp(u8, opts = {}) {
   const rootM = UP
   if (geomOf(rootEnt).F.length) others.push({ M: rootM, ent: rootEnt, name: 'Модель', product: '', layer: 'Layer0' })
   walk(rootEnt, rootM, [], '', null, 0)
+
+  // ── обычная модель (без мебельного плагина): панель — тело-«плита» ──
+  // Панели нарисованы компонентами / группами с именами («Шкаф дно полки#9»). Плита — все вершины тела лежат на двух
+  // параллельных плоскостях (пласти) на расстоянии толщины 2,5–60 мм, а пласть не меньше 20 мм по каждой стороне и
+  // заметно больше толщины. Ось толщины — нормаль самой большой грани (плита может стоять в модели под любым углом).
+  // Название — имя вставки или компонента без «#номер», изделие — верхний компонент, материал — материал SketchUp.
+  const plain = []
+  if (!panels.length) {
+    others.length = 0
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    const slabMemo = new Map()
+    // плита в координатах определения: { nl, ul, vl, lo, hi } (lo/hi — по осям u, v, n) или null
+    const slabOf = ent => {
+      if (slabMemo.has(ent[0])) return slabMemo.get(ent[0])
+      const { V, F } = geomOf(ent)
+      let res = null
+      if (V.size >= 6 && F.length >= 4) {
+        let big = null, bigA = 0
+        for (const f of F) {
+          const P = f.loops[0].map(id => V.get(id)).filter(Boolean)
+          if (P.length < 3) continue
+          let nx = 0, ny = 0, nz = 0
+          for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; nx += (a[1] - b[1]) * (a[2] + b[2]); ny += (a[2] - b[2]) * (a[0] + b[0]); nz += (a[0] - b[0]) * (a[1] + b[1]) }
+          const A = Math.hypot(nx, ny, nz) / 2
+          if (A > bigA) { bigA = A; big = { P, n: norm([nx, ny, nz]) } }
+        }
+        if (big) {
+          const nl = big.n
+          // ось u — самое длинное ребро большой грани
+          let ul = null, ulL = 0
+          for (let i = 0; i < big.P.length; i++) { const a = big.P[i], b = big.P[(i + 1) % big.P.length]; const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = vlen(d); if (L > ulL) { ulL = L; ul = d } }
+          if (ul) {
+            ul = norm(ul.map((c, k) => c - dot(ul, nl) * nl[k]))
+            const vl = cross(nl, ul)
+            const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], ns = []
+            for (const p of V.values()) { const q = [dot(p, ul), dot(p, vl), dot(p, nl)]; ns.push(q[2]); for (let k = 0; k < 3; k++) { if (q[k] < lo[k]) lo[k] = q[k]; if (q[k] > hi[k]) hi[k] = q[k] } }
+            const tol = 0.3 / IN
+            if (ns.every(z => Math.abs(z - lo[2]) < tol || Math.abs(z - hi[2]) < tol)) res = { nl, ul, vl, lo, hi }
+          }
+        }
+      }
+      slabMemo.set(ent[0], res); return res
+    }
+    const walkPlain = (ent, M, path, product, depth) => {
+      if (depth > 40) return
+      for (const [o, l] of instancesOf(ent)) {
+        const bi = baseInfo(o, l)
+        if (bi.flags & 1) { hiddenSkipped++; continue }
+        const ln = layers.get(bi.layer) || 'Layer0'
+        const def = defs.get(nval(o, l, 0x1967)); if (!def) continue
+        const W = mul(M, tfOf(o, l))
+        const iname = sval(o, l, 0x1965) || ''
+        const nm = cleanName(iname || def.name)
+        const prod = product || nm
+        const sl = slabOf(def.ent)
+        if (sl) {
+          const su = vlen(applyV(W, sl.ul)) * IN, sv = vlen(applyV(W, sl.vl)) * IN, sn = vlen(applyV(W, sl.nl)) * IN
+          const T = (sl.hi[2] - sl.lo[2]) * sn, A = (sl.hi[0] - sl.lo[0]) * su, B = (sl.hi[1] - sl.lo[1]) * sv
+          if (T >= 2.5 && T <= 60 && Math.min(A, B) >= 20 && T <= 0.5 * Math.min(A, B)) {
+            const { F } = geomOf(def.ent)
+            const fm = F.map(f => f.mat).find(Boolean)
+            plain.push({ M: W, ent: def.ent, sl, name: nm, product: depth ? prod : '', layer: ln, path, mat: cleanMat(materials.get(bi.mat) || materials.get(fm) || '') })
+            continue
+          }
+        }
+        const g = geomOf(def.ent)
+        if (g.F.length) others.push({ M: W, ent: def.ent, name: nm, product: prod, layer: ln, mat: bi.mat })
+        walkPlain(def.ent, W, [...path, nm], prod, depth + 1)
+      }
+    }
+    walkPlain(rootEnt, rootM, [], '', 0)
+  }
 
   // ── присадка: цилиндры крепежа плагина (слой Z_fastener: конфирмат, шкант, эксцентрик, полкодержатель) и чашки петель ──
   // Отверстие в модели — тело-цилиндр: две круглые грани одного диаметра на одной оси. Передаём оба направления оси —
@@ -373,6 +446,43 @@ export function parseSkp(u8, opts = {}) {
     }, pHoles, opts.faceRule))
   }
 
+  // обычная модель: плиты -> детали (контур — большая пласть, кромки и присадки в такой модели нет)
+  for (const pl of plain) {
+    const id = pid++
+    const { V, F } = geomOf(pl.ent)
+    const { nl, lo, hi } = pl.sl
+    let { ul, vl } = pl.sl
+    let uw = applyV(pl.M, ul), vw = applyV(pl.M, vl)
+    const nw = applyV(pl.M, nl)
+    // система панели должна быть правой (u × v = n в мире), иначе контур зеркалится
+    const cr = [uw[1] * vw[2] - uw[2] * vw[1], uw[2] * vw[0] - uw[0] * vw[2], uw[0] * vw[1] - uw[1] * vw[0]]
+    let flip = cr[0] * nw[0] + cr[1] * nw[1] + cr[2] * nw[2] < 0
+    if (flip) { vl = vl.map(c => -c); vw = vw.map(c => -c) }
+    const su = vlen(uw) * IN, sv = vlen(vw) * IN, sn = vlen(nw) * IN
+    const u = norm(uw), v = norm(vw), n = norm(nw)
+    const T = r1((hi[2] - lo[2]) * sn)
+    const lu = p => p[0] * ul[0] + p[1] * ul[1] + p[2] * ul[2], lv = p => p[0] * vl[0] + p[1] * vl[1] + p[2] * vl[2]
+    const o = apply(pl.M, nl.map(c => c * lo[2])).map(c => c * IN)
+    const Mp = [u[0], v[0], n[0], u[1], v[1], n[1], u[2], v[2], n[2], o[0], o[1], o[2]]
+    let face = null
+    for (const f of F) if (f.n && Math.abs(norm(f.n)[0] * nl[0] + norm(f.n)[1] * nl[1] + norm(f.n)[2] * nl[2]) > 0.99 && (!face || f.loops[0].length > face.loops[0].length)) face = f
+    const toUV = id => { const p = V.get(id); return p ? [lu(p) * su, lv(p) * sv] : null }
+    let loops = face ? face.loops.map(lp => lp.map(toUV).filter(Boolean)) : []
+    const U0 = Math.min(...[...V.values()].map(p => lu(p) * su)), U1 = Math.max(...[...V.values()].map(p => lu(p) * su))
+    const W0 = Math.min(...[...V.values()].map(p => lv(p) * sv)), W1 = Math.max(...[...V.values()].map(p => lv(p) * sv))
+    if (!loops.length || loops[0].length < 3) loops = [[[U0, W0], [U1, W0], [U1, W1], [U0, W1]]]
+    const elems = []
+    for (const lp of loops) for (let i = 0; i < lp.length; i++) elems.push({ t: 'L', a: lp[i], b: lp[(i + 1) % lp.length] })
+    // текстура — вдоль длинной стороны (в обычной модели направления нет); поворот детали — как у остальных импортов
+    const texDir = U1 - U0 >= W1 - W0 ? 1 : 2
+    const name = pl.name || 'Панель'
+    makers.push(() => buildItem({
+      T, elems, texDir, M: Mp, butts: [], cutsRaw: [], decorRaw: [], warnCuts: 0,
+      name, prefix: '', material: pl.mat, rotatable: false, anim: null,
+      meta: { src: 'sketchup', ids: [id], des: '', pos: '', name, product: pl.product, productDes: '', productPos: '', path: pl.path.slice(1), material: pl.mat, materialCode: '' },
+    }, [], opts.faceRule))
+  }
+
   // ── остальное с гранями -> 3D «фурнитура»; одинаковые формы — одна сетка ──
   // Упрощение формы фурнитуры для памяти и скорости: тяжёлые сетки (вешалки, ручки сложной формы) — слиянием вершин
   // в ячейки сетки (около 1/24 габарита); вырожденные треугольники выбрасываются. Вид остаётся узнаваемым.
@@ -425,7 +535,7 @@ export function parseSkp(u8, opts = {}) {
 
   // мелкие отверстия (насечки 1–1,5 мм под саморез) и соосные Ø4,5 под Ø7 — оставляем как в модели
   const { items, groups, skipped } = groupItems(makers)
-  if (!items.length) throw new Error('в модели SketchUp не найдено панелей мебельного плагина (тела «Essence»)')
+  if (!items.length) throw new Error('в модели SketchUp не найдено панелей: ни компонентов мебельного плагина, ни тел-плит (две параллельные пласти, толщина 2,5–60 мм)')
   const scene = {
     v: 1, order: '',
     parts: items.map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
