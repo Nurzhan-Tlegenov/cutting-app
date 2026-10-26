@@ -133,44 +133,48 @@ export default function OrderPage() {
     border: main ? 'none' : '0.5px solid var(--blue)', background: main ? 'var(--blue)' : 'var(--bg)', color: main ? 'white' : 'var(--blue)' })
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingTop: 8 }}>
-        <button onClick={() => navigate(inProduction ? '/production' : '/orders')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {renaming !== null ? (
-            <form onSubmit={async e => {
-              e.preventDefault()
-              try { const v = await saveOrderName(order.id, renaming); setOrder(o => ({ ...o, order_name: v || null })); setRenaming(null); setRenameErr('') }
-              catch (err) { setRenameErr(err?.message || String(err)) }
-            }} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <input autoFocus value={renaming} maxLength={120} onChange={e => setRenaming(e.target.value)} placeholder={String(order.order_number || 'Название заказа')}
-                style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600, padding: '4px 8px' }} />
-              <button type="submit" style={{ flex: 'none', width: 'auto', padding: '4px 10px', borderRadius: 16, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 12 }}>OK</button>
-              <button type="button" onClick={() => { setRenaming(null); setRenameErr('') }} style={{ flex: 'none', width: 'auto', padding: '4px 8px', borderRadius: 16, border: '0.5px solid var(--border-md)', background: 'none', fontSize: 12, color: 'var(--text-muted)' }}>✕</button>
-            </form>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 16, minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.25 }}>{orderTitle(order)}</div>
-              {/* производство переименовывает заказ клиента — понятным для себя названием (видят обе стороны) */}
-              {canStatus && <button type="button" title="Переименовать заказ" onClick={() => setRenaming(String(order.order_name || ''))}
-                style={{ flex: 'none', width: 'auto', padding: '1px 7px', borderRadius: 12, border: '0.5px solid var(--border-md)', background: 'none', color: 'var(--blue)', fontSize: 12 }}>✎</button>}
-            </div>
-          )}
-          {renameErr && <div style={{ fontSize: 11, color: 'var(--danger)' }}>{renameErr}</div>}
-          <div style={{ fontSize: 12, color: 'var(--text-hint)', overflowWrap: 'anywhere' }}>{order.material_name}</div>
-          <ShareBadge orderId={id} style={{ marginTop: 3 }} />
+      {/* шапка: сверху — название заказа во всю ширину (длинное переносится), под ним материал, ниже — действия и статус */}
+      <div style={{ marginBottom: 20, paddingTop: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <button onClick={() => navigate(inProduction ? '/production' : '/orders')} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1, flex: 'none' }}>←</button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {renaming !== null ? (
+              <form onSubmit={async e => {
+                e.preventDefault()
+                try { const v = await saveOrderName(order.id, renaming); setOrder(o => ({ ...o, order_name: v || null })); setRenaming(null); setRenameErr('') }
+                catch (err) { setRenameErr(err?.message || String(err)) }
+              }} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input autoFocus value={renaming} maxLength={120} onChange={e => setRenaming(e.target.value)} placeholder={String(order.order_number || 'Название заказа')}
+                  style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600, padding: '4px 8px' }} />
+                <button type="submit" style={{ flex: 'none', width: 'auto', padding: '4px 10px', borderRadius: 16, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 12 }}>OK</button>
+                <button type="button" onClick={() => { setRenaming(null); setRenameErr('') }} style={{ flex: 'none', width: 'auto', padding: '4px 8px', borderRadius: 16, border: '0.5px solid var(--border-md)', background: 'none', fontSize: 12, color: 'var(--text-muted)' }}>✕</button>
+              </form>
+            ) : (
+              <div style={{ fontWeight: 600, fontSize: 17, lineHeight: 1.25, overflowWrap: 'break-word', wordBreak: 'break-word' }}>{orderTitle(order)}</div>
+            )}
+            {renameErr && <div style={{ fontSize: 11, color: 'var(--danger)' }}>{renameErr}</div>}
+            <div style={{ fontSize: 12, color: 'var(--text-hint)', overflowWrap: 'anywhere', marginTop: 2 }}>{order.material_name}</div>
+            <ShareBadge orderId={id} style={{ marginTop: 3 }} />
+          </div>
         </div>
-        {!inProduction && canEditOrder(order, user, profile) && order.status !== 'done' && <button type="button" onClick={() => openOrderEdit(order, navigate)} style={EDIT_BTN}>✎ Редактировать</button>}
-        {inProduction && order.status !== 'draft' && <button type="button" onClick={() => navigate('/production')} style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
-          <span className={`badge ${sendState(order).badge}`} title={sendState(order).note}>
-            {sendState(order).label}
-          </span>
-          {(order.status === 'draft' || !order.status) && <span style={{ fontSize: 10, color: 'var(--text-hint)', maxWidth: 150, textAlign: 'right' }}>{sendState(order).note}</span>}
-          {inProduction && (order.status === 'inwork' || order.status === 'done' || order.gcode_at || order.files_saved_at) && (
-            <div style={{ display: 'flex', gap: 4 }}>
-              {orderMarks(order).map(m => <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>)}
-            </div>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+          {/* производство переименовывает заказ клиента — понятным для себя названием (видят обе стороны) */}
+          {canStatus && renaming === null && <button type="button" title="Переименовать заказ" onClick={() => setRenaming(String(order.order_name || ''))}
+            style={{ flex: '0 0 auto', width: 'auto', padding: '4px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)', background: 'none', color: 'var(--blue)', fontSize: 11, whiteSpace: 'nowrap' }}>✎ Переименовать</button>}
+          {!inProduction && canEditOrder(order, user, profile) && order.status !== 'done' && <button type="button" onClick={() => openOrderEdit(order, navigate)} style={EDIT_BTN}>✎ Редактировать</button>}
+          {inProduction && order.status !== 'draft' && <button type="button" onClick={() => navigate('/production')} style={{ flex: '0 0 auto', padding: '4px 9px', borderRadius: 20, fontSize: 11, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>}
+          <span style={{ flex: 1 }} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
+            <span className={`badge ${sendState(order).badge}`} title={sendState(order).note}>
+              {sendState(order).label}
+            </span>
+            {(order.status === 'draft' || !order.status) && <span style={{ fontSize: 10, color: 'var(--text-hint)', maxWidth: 150, textAlign: 'right' }}>{sendState(order).note}</span>}
+            {inProduction && (order.status === 'inwork' || order.status === 'done' || order.gcode_at || order.files_saved_at) && (
+              <div style={{ display: 'flex', gap: 4 }}>
+                {orderMarks(order).map(m => <span key={m.key} title={m.text} style={{ fontSize: 11, lineHeight: '16px', borderRadius: 9, padding: '0 7px', whiteSpace: 'nowrap', border: `0.5px solid ${m.on ? 'var(--blue)' : 'var(--border-md)'}`, background: m.on ? 'var(--blue)' : 'transparent', color: m.on ? 'white' : 'var(--text-hint)' }}>{m.short}</span>)}
+              </div>
+            )}
+          </div>
         </div>
       </div>
       {client && (client.production || (!isMine && client.full_name)) && (
