@@ -1776,6 +1776,13 @@ export default function NestingPage() {
   const [showOffcuts, setShowOffcuts] = useKeptState('offcuts', false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
   const [productions, setProductions] = useState([])     // зарегистрированные производства (если есть)
+  // Выбранное производство режет на пильном центре (бета-тестер, в «Услугах» отмечен пильный центр) — его клиенты тоже
+  // видят «Пильный центр β» и кроят его алгоритмом с настройками этого производства, даже если сами не бета-тестеры
+  const prodBeam = (() => {
+    const pr = order?.production_id ? productions.find(x => x.id === order.production_id) : null
+    const m = pr ? cutMethods(pr.services) : null
+    return !!(m && m.known && m.beamsaw)
+  })()
   const [needProd, setNeedProd] = useState(null)         // «Оформить» без производства: { cfg, force, pick, own }
   // «Где будете резать?» — производство выбирается до раскроя: { mine } пока окно открыто
   const [pickProd, setPickProd] = useState(null)
@@ -1806,7 +1813,7 @@ export default function NestingPage() {
     const m = cutMethods(pr.services)
     const cur = beamSaw ? 'beamsaw' : cuttingMethod
     if (m[cur]) return
-    const next = ['nesting', 'guillotine', 'beamsaw'].find(k => m[k] && (k !== 'beamsaw' || betaBeam) && !(k === 'nesting' && order.material_kind === 'hdf'))
+    const next = ['nesting', 'guillotine', 'beamsaw'].find(k => m[k] && (k !== 'beamsaw' || betaBeam || (m.known && m.beamsaw)) && !(k === 'nesting' && order.material_kind === 'hdf'))
     if (!next) return
     const beam = next === 'beamsaw', method = beam ? 'guillotine' : next
     Promise.resolve().then(() => setMachine(method, beam))
@@ -3926,7 +3933,7 @@ export default function NestingPage() {
 
       {/* Тип станка — общий для всех конфигураций */}
       <div data-tour="nest-machine" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)'], ...(betaBeam || beamSaw ? [['beamsaw', 'Пильный центр β']] : [])].map(([val, label]) => {
+        {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)'], ...(betaBeam || beamSaw || prodBeam ? [['beamsaw', 'Пильный центр β']] : [])].map(([val, label]) => {
           const active = val === 'beamsaw' ? beamSaw : !beamSaw && cuttingMethod === val
           // производство выбрано и указало, на чём режет (Услуги) — только эти способы; не указало — любые
           const prc = order.production_id ? productions.find(x => x.id === order.production_id) : null
