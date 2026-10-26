@@ -213,32 +213,41 @@ export function parseSkp(u8, opts = {}) {
     const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
     const slabMemo = new Map()
     // плита в координатах определения: { nl, ul, vl, lo, hi } (lo/hi — по осям u, v, n) или null
+    const areaN = P => { let nx = 0, ny = 0, nz = 0; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; nx += (a[1] - b[1]) * (a[2] + b[2]); ny += (a[2] - b[2]) * (a[0] + b[0]); nz += (a[0] - b[0]) * (a[1] + b[1]) } return [nx / 2, ny / 2, nz / 2] }
+    // Плита: самая большая грань задаёт ось толщины n; пласти — грани, параллельные ей, у крайних плоскостей тела
+    // (лицо и оборот). Обе пласти занимают большую часть габарита — это плита, а не ручка или фигурная фурнитура.
+    // Вершины между пластями допустимы: отверстия, выемки, фрезерованный профиль фасада.
     const slabOf = ent => {
       if (slabMemo.has(ent[0])) return slabMemo.get(ent[0])
       const { V, F } = geomOf(ent)
       let res = null
       if (V.size >= 6 && F.length >= 4) {
+        const fa = []
         let big = null, bigA = 0
         for (const f of F) {
           const P = f.loops[0].map(id => V.get(id)).filter(Boolean)
           if (P.length < 3) continue
-          let nx = 0, ny = 0, nz = 0
-          for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; nx += (a[1] - b[1]) * (a[2] + b[2]); ny += (a[2] - b[2]) * (a[0] + b[0]); nz += (a[0] - b[0]) * (a[1] + b[1]) }
-          const A = Math.hypot(nx, ny, nz) / 2
-          if (A > bigA) { bigA = A; big = { P, n: norm([nx, ny, nz]) } }
+          const an = areaN(P), A = vlen(an)
+          fa.push({ f, P, A, n: norm(an) })
+          if (A > bigA) { bigA = A; big = fa[fa.length - 1] }
         }
         if (big) {
           const nl = big.n
-          // ось u — самое длинное ребро большой грани
           let ul = null, ulL = 0
           for (let i = 0; i < big.P.length; i++) { const a = big.P[i], b = big.P[(i + 1) % big.P.length]; const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = vlen(d); if (L > ulL) { ulL = L; ul = d } }
           if (ul) {
             ul = norm(ul.map((c, k) => c - dot(ul, nl) * nl[k]))
             const vl = cross(nl, ul)
-            const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], ns = []
-            for (const p of V.values()) { const q = [dot(p, ul), dot(p, vl), dot(p, nl)]; ns.push(q[2]); for (let k = 0; k < 3; k++) { if (q[k] < lo[k]) lo[k] = q[k]; if (q[k] > hi[k]) hi[k] = q[k] } }
-            const tol = 0.3 / IN
-            if (ns.every(z => Math.abs(z - lo[2]) < tol || Math.abs(z - hi[2]) < tol)) res = { nl, ul, vl, lo, hi }
+            const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+            for (const p of V.values()) { const q = [dot(p, ul), dot(p, vl), dot(p, nl)]; for (let k = 0; k < 3; k++) { if (q[k] < lo[k]) lo[k] = q[k]; if (q[k] > hi[k]) hi[k] = q[k] } }
+            const tol = 0.3 / IN, box = (hi[0] - lo[0]) * (hi[1] - lo[1])
+            let top = 0, bot = 0
+            for (const x of fa) {
+              if (Math.abs(dot(x.n, nl)) < 0.999) continue
+              const z = dot(x.P[0], nl)
+              if (Math.abs(z - hi[2]) < tol) top += x.A; else if (Math.abs(z - lo[2]) < tol) bot += x.A
+            }
+            if (box > 0 && Math.max(top, bot) >= 0.6 * box && Math.min(top, bot) >= 0.3 * box) res = { nl, ul, vl, lo, hi }
           }
         }
       }
@@ -464,10 +473,67 @@ export function parseSkp(u8, opts = {}) {
     const lu = p => p[0] * ul[0] + p[1] * ul[1] + p[2] * ul[2], lv = p => p[0] * vl[0] + p[1] * vl[1] + p[2] * vl[2]
     const o = apply(pl.M, nl.map(c => c * lo[2])).map(c => c * IN)
     const Mp = [u[0], v[0], n[0], u[1], v[1], n[1], u[2], v[2], n[2], o[0], o[1], o[2]]
-    let face = null
-    for (const f of F) if (f.n && Math.abs(norm(f.n)[0] * nl[0] + norm(f.n)[1] * nl[1] + norm(f.n)[2] * nl[2]) > 0.99 && (!face || f.loops[0].length > face.loops[0].length)) face = f
+    // Контур — пласть с наибольшей площадью (у фрезерованного фасада — оборот, полный прямоугольник). Внутренние петли:
+    // сквозной вырез — только если такая же петля есть и на другой пласти; круглые до Ø40 — отверстия (ниже), остальное
+    // (открытие глухой выемки) в контур не идёт
+    const dotL = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
     const toUV = id => { const p = V.get(id); return p ? [lu(p) * su, lv(p) * sv] : null }
-    let loops = face ? face.loops.map(lp => lp.map(toUV).filter(Boolean)) : []
+    const circleOf = P => {
+      if (P.length < 10) return null
+      const c = [0, 1, 2].map(k => P.reduce((a, p) => a + p[k], 0) / P.length)
+      const ds = P.map(p => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]))
+      const r = ds.reduce((a, b) => a + b, 0) / ds.length
+      return r > 0 && ds.every(d => Math.abs(d - r) <= r * 0.04) ? { c, r } : null
+    }
+    const pf = []
+    for (const f of F) {
+      if (!f.n || Math.abs(dotL(norm(f.n), nl)) < 0.999) continue
+      const P0 = f.loops[0].map(id => V.get(id)).filter(Boolean)
+      if (P0.length < 3) continue
+      const z = dotL(P0[0], nl), tolZ = 0.3 / IN
+      const side = Math.abs(z - hi[2]) < tolZ ? 'hi' : Math.abs(z - lo[2]) < tolZ ? 'lo' : null
+      let ax = 0
+      const pu = P0.map(p => [lu(p) * su, lv(p) * sv])
+      for (let i = 0; i < pu.length; i++) { const a = pu[i], b = pu[(i + 1) % pu.length]; ax += a[0] * b[1] - b[0] * a[1] }
+      pf.push({ f, side, A: Math.abs(ax) / 2 })
+    }
+    const outerF = pf.filter(x => x.side).sort((a, b) => b.A - a.A)[0]
+    const key = lp => { const P = lp.map(id => V.get(id)).filter(Boolean); const c = [0, 1].map(k => P.reduce((a, p) => a + (k ? lv(p) * sv : lu(p) * su), 0) / P.length); return c.map(x => Math.round(x)).join(',') + ':' + P.length }
+    const otherKeys = new Set(pf.filter(x => x.side && outerF && x.side !== outerF.side).flatMap(x => x.f.loops.slice(1).map(key)))
+    const holesW = []
+    const toW = p => apply(pl.M, p).map(c => c * IN)
+    let loops = []
+    if (outerF) {
+      loops.push(outerF.f.loops[0].map(toUV).filter(Boolean))
+      for (const lp of outerF.f.loops.slice(1)) {
+        const P = lp.map(id => V.get(id)).filter(Boolean)
+        const ci = circleOf(P), through = otherKeys.has(key(lp))
+        if (ci && ci.r * IN <= 20) {
+          if (through) {   // сквозное отверстие: от этой пласти насквозь
+            const sgn = outerF.side === 'hi' ? -1 : 1
+            const P0 = toW(ci.c), D = norm(applyV(pl.M, nl.map(c => c * sgn)))
+            holesW.push({ P: P0, D, r: Math.round(ci.r * IN * 20) / 20, depth: T, name: `Ø${Math.round(ci.r * IN * 20) / 10}` })
+          }
+          continue
+        }
+        if (through) loops.push(lp.map(toUV).filter(Boolean))
+      }
+    }
+    // глухие отверстия: дно — круглая грань внутри тела; открытие — на пласти или торце в сторону её нормали
+    for (const f of F) {
+      if (!f.n) continue
+      const P = f.loops[0].map(id => V.get(id)).filter(Boolean)
+      const ci = circleOf(P)
+      if (!ci || ci.r * IN > 20) continue
+      const m = norm(f.n)
+      const zc = dotL(ci.c, m)
+      let zmax = -Infinity
+      for (const p of V.values()) zmax = Math.max(zmax, dotL(p, m))
+      const depthIn = zmax - zc
+      if (!(depthIn > 0.3 / IN)) continue            // грань на поверхности тела — не дно отверстия
+      const open = ci.c.map((c, k) => c + m[k] * depthIn)
+      holesW.push({ P: toW(open), D: norm(applyV(pl.M, m.map(c => -c))), r: Math.round(ci.r * IN * 20) / 20, depth: Math.round(depthIn * vlen(applyV(pl.M, m)) * IN * 10) / 10, name: `Ø${Math.round(ci.r * IN * 20) / 10}` })
+    }
     const U0 = Math.min(...[...V.values()].map(p => lu(p) * su)), U1 = Math.max(...[...V.values()].map(p => lu(p) * su))
     const W0 = Math.min(...[...V.values()].map(p => lv(p) * sv)), W1 = Math.max(...[...V.values()].map(p => lv(p) * sv))
     if (!loops.length || loops[0].length < 3) loops = [[[U0, W0], [U1, W0], [U1, W1], [U0, W1]]]
@@ -480,7 +546,7 @@ export function parseSkp(u8, opts = {}) {
       T, elems, texDir, M: Mp, butts: [], cutsRaw: [], decorRaw: [], warnCuts: 0,
       name, prefix: '', material: pl.mat, rotatable: false, anim: null,
       meta: { src: 'sketchup', ids: [id], des: '', pos: '', name, product: pl.product, productDes: '', productPos: '', path: pl.path.slice(1), material: pl.mat, materialCode: '' },
-    }, [], opts.faceRule))
+    }, holesW, opts.faceRule))
   }
 
   // ── остальное с гранями -> 3D «фурнитура»; одинаковые формы — одна сетка ──
