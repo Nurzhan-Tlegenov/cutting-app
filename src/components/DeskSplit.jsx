@@ -91,7 +91,7 @@ export default function DeskSplit({ id, left, right, def = 0.62, min = 0.25, max
     <PaneCtx.Provider value={pane}>
       {/* обычный блок высотой в окно (не position: fixed): fixed создал бы свой слой, и окна поверх страницы
           (3D, редактор контура, диалоги) оказывались бы под нижним меню */}
-      <div ref={boxRef} className="desk-split" style={{ height: full ? '100dvh' : `calc(100dvh - ${navH}px)`, display: 'flex' }}>
+      <div ref={boxRef} className="desk-split" style={{ height: full === 'parent' ? '100%' : full ? '100dvh' : `calc(100dvh - ${navH}px)`, display: 'flex' }}>
         <div ref={setLeft} className="desk-pane desk-pane-left"
           style={{ flex: `0 0 ${(ratio * 100).toFixed(2)}%`, minWidth: 0, overflow: 'auto', scrollbarGutter: 'stable', padding: '14px 12px 14px 20px', background: 'var(--bg2)' }}>
           {left}

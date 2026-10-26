@@ -175,7 +175,7 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d, bp 
 // Показана бирка первой детали первого листа — на настоящих данных заказа.
 import LabelImageEditor from '../components/LabelImageEditor'
 
-function LabelEditor({ tpl, onChange, order, mat, shared }) {
+function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null }) {
   const wrapRef = useRef(null), cvRef = useRef(null), drag = useRef(null)
   const [live, setLive] = useState(null)            // шаблон во время перетаскивания
   const [sel, setSel] = useState(null)
@@ -186,14 +186,26 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const scale = fitScale * zoom
   const t = live || tpl
+  // компьютер (previewEl): бирка — в левой колонке, целиком по ширине и высоте колонки; ширину колонки тянут мышью
+  const boxRef = useRef(null)
   useEffect(() => {
-    const fit = () => { const w = wrapRef.current?.clientWidth; if (w) setFitScale(w / tpl.w) }
+    const fit = () => {
+      if (previewEl) {
+        const w = boxRef.current?.clientWidth || previewEl.clientWidth, h = (previewEl.parentElement?.clientHeight || window.innerHeight) - 120
+        if (w > 0) setFitScale(Math.max(1, Math.min(w / tpl.w, h / tpl.h)))
+        return
+      }
+      const w = wrapRef.current?.clientWidth; if (w) setFitScale(w / tpl.w)
+    }
     fit(); window.addEventListener('resize', fit)
-    return () => window.removeEventListener('resize', fit)
-  }, [tpl.w])
-  const viewH = Math.min(tpl.h * scale, Math.max(tpl.h * fitScale, (typeof window !== 'undefined' ? window.innerHeight : 800) * 0.55))
+    const ro = previewEl && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null
+    if (ro && previewEl.parentElement) ro.observe(previewEl.parentElement)
+    return () => { window.removeEventListener('resize', fit); ro?.disconnect() }
+  }, [tpl.w, tpl.h, previewEl])
+  const viewOf = H => (previewEl ? tpl.h * fitScale : Math.min(H, Math.max(tpl.h * fitScale, (typeof window !== 'undefined' ? window.innerHeight : 800) * 0.55)))
+  const viewH = viewOf(tpl.h * scale)
   const clampPan = (p, z = zoom) => {
-    const W = tpl.w * fitScale * z, H = tpl.h * fitScale * z, vw = tpl.w * fitScale, vh = Math.min(H, Math.max(tpl.h * fitScale, window.innerHeight * 0.55))
+    const W = tpl.w * fitScale * z, H = tpl.h * fitScale * z, vw = tpl.w * fitScale, vh = viewOf(H)
     return { x: Math.min(0, Math.max(vw - W, p.x)), y: Math.min(0, Math.max(vh - H, p.y)) }
   }
   const zoomAt = (nz, cx, cy) => {      // cx, cy — точка экрана внутри окна бирки, которая остаётся на месте
@@ -243,6 +255,22 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
     const draw = () => drawLabel(cv, t, labelInfo(order, mat, 0, 0), { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] }, { preview: true })
     draw(); if (t.items.some(i => i.img)) preloadLabelImages(t).then(draw)
   }, [t, order, mat])
+  // компьютер: колёсико мыши над биркой — увеличить/уменьшить в точке под курсором
+  const zoomAtRef = useRef(null)
+  zoomAtRef.current = zoomAt
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el || !previewEl) return
+    const onWheel = e => {
+      e.preventDefault()
+      const r = el.getBoundingClientRect(), dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY
+      zoomAtRef.current(zoomRef.current * Math.exp(-dy * 0.0016), e.clientX - r.left, e.clientY - r.top)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [previewEl])
   const fileRef = useRef(null)
   const [imgErr, setImgErr] = useState('')
   // картинка сначала открывается в редакторе (убрать фон → прозрачный PNG, обрезать поля), потом ставится на бирку
@@ -291,10 +319,10 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
       }}>+ {label}{n ? ` · ${n}` : ''}</button>
     )
   }
-  return (
-    <div>
+  const previewPart = (
+    <div ref={boxRef}>
       <div ref={wrapRef} onPointerDown={bgDown} onPointerMove={bgMove} onPointerUp={bgUp} onPointerCancel={bgUp}
-        style={{ position: 'relative', width: '100%', height: viewH, border: '1px solid #2C2C2A', borderRadius: 3, background: zoom > 1 ? 'var(--bg2)' : '#fff', touchAction: 'none', userSelect: 'none', overflow: 'hidden' }}>
+        style={{ position: 'relative', width: previewEl ? tpl.w * fitScale + 2 : '100%', margin: previewEl ? '0 auto' : undefined, height: viewH, border: '1px solid #2C2C2A', borderRadius: 3, background: zoom > 1 ? 'var(--bg2)' : '#fff', touchAction: 'none', userSelect: 'none', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', left: pan.x, top: pan.y, width: tpl.w * scale, height: tpl.h * scale, background: '#fff' }}>
         <canvas ref={cvRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
         {t.items.map(it => {
@@ -317,7 +345,13 @@ function LabelEditor({ tpl, onChange, order, mat, shared }) {
         {zoom > 1 && <button type="button" style={chip(false)} onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>Вся бирка</button>}
         {cur && zoom < 2.5 && <button type="button" style={chip(false)} onClick={() => { const [bw, bh] = itemBox(cur), z = 3; setZoom(z); setPan(clampPan({ x: tpl.w * fitScale / 2 - (cur.x + bw / 2) * fitScale * z, y: viewH / 2 - (cur.y + bh / 2) * fitScale * z }, z)) }}>🔍 К выбранному</button>}
       </div>
-      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>Перетащите элемент на своё место; у выбранного — синяя точка в углу меняет размер. Увеличить — «+» или щипком двумя пальцами, сдвинуть увеличенную бирку — пальцем по пустому месту.</p>
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>Перетащите элемент на своё место; у выбранного — синяя точка в углу меняет размер. {previewEl ? 'Увеличить — колёсиком мыши или «+», сдвинуть увеличенную бирку — мышью по пустому месту. Параметры выбранного элемента — справа.' : 'Увеличить — «+» или щипком двумя пальцами, сдвинуть увеличенную бирку — пальцем по пустому месту.'}</p>
+    </div>
+  )
+  return (
+    <div>
+      {previewEl ? createPortal(previewPart, previewEl) : previewPart}
+      {previewEl && !cur && <p style={{ fontSize: 12, color: 'var(--text-hint)', margin: '0 0 8px', padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>Щёлкните по элементу на бирке слева — здесь откроются его настройки.</p>}
       {cur && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
           <div style={{ flex: '1 1 100%', fontSize: 13, fontWeight: 500 }}>{itemTitle(cur.type)}{cur.img ? ' · картинкой' : ''}</div>
@@ -524,6 +558,8 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared, previewEl = 
   const size = (k, v) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x) && x > 0) { apply({ ...resizeLabel(tpl, k === 'w' ? x : tpl.w, k === 'h' ? x : tpl.h), enabled: true }) } }
   return (
     <>
+            {/* компьютер: бирка слева, а настройки выбранного элемента и «добавить на бирку» — сразу вверху справа */}
+            {previewEl && mat && <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} previewEl={previewEl} />}
             <div className="row2" style={{ marginTop: 8 }}>
               <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ширина, мм
                 <input type="text" inputMode="decimal" key={'w' + tpl.w} defaultValue={tpl.w} onBlur={e => size('w', e.target.value)} style={{ marginTop: 3, padding: '8px 10px' }} /></label>
@@ -557,10 +593,7 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared, previewEl = 
                 </div>
               ))}
             </div>
-            {mat ? (previewEl
-              // компьютер: бирка — в левой колонке, на всю её высоту; настройки — справа
-              ? createPortal(<div style={{ maxWidth: `calc((100dvh - 230px) * ${(tpl.w / tpl.h).toFixed(4)})`, margin: '0 auto' }}>
-                  <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} /></div>, previewEl)
+            {mat ? (previewEl ? null   // компьютер: редактор стоит в начале правой колонки (см. выше), бирка — слева
               : <LabelEditor tpl={tpl} onChange={change} order={order} mat={mat} shared={shared} />)
               : <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Расставить элементы можно в заказе с сохранённым раскроем — бирка показывается на настоящей детали.</p>}
             {[['rot', 'Лист на бирке — горизонтально (длина листа слева направо); деталь и кромка повёрнуты так же'], ['edgeDims', 'Размер стороны у кромки (например «ПВХ 2 мм · 720»)']].map(([k, label]) => (
@@ -615,6 +648,8 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared, previewEl = 
 }
 
 export default function LabelsPage() {
+  const desk = useDesktop()   // компьютер: шаблон бирки открывается на весь экран — бирка слева, настройки справа
+  const [lblPrev, setLblPrev] = useState(null)
   const { id } = useParams()
   const navigate = useNavigate()
   const { user, cabinet } = useAuth()
@@ -767,7 +802,21 @@ export default function LabelsPage() {
           <div style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>Шаблон бирки</div>
           <span style={{ fontSize: 11, color: tpl.enabled ? 'var(--teal)' : 'var(--text-hint)' }}>{tpl.enabled ? '✓ настроен' : 'не настроен'}</span>
         </div>
-        {setup && (
+        {setup && desk && (
+          <div className="no-print" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'var(--bg2)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
+              <button type="button" onClick={() => setSetup(false)} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1 }}>←</button>
+              <div style={{ flex: 1, fontSize: 16, fontWeight: 500 }}>Шаблон бирки · {tpl.w}×{tpl.h} мм</div>
+              {mat && <button type="button" disabled={busy} onClick={exportFiles} style={{ padding: '7px 12px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)' }}>{busy ? 'Собираем файлы…' : '⬇ Файлы для маркировочного стола'}</button>}
+              <button type="button" onClick={() => setSetup(false)} style={{ padding: '7px 16px', borderRadius: 'var(--radius)', border: 'none', background: 'var(--blue)', color: 'white', fontSize: 13 }}>Готово</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <DeskSplit id="label-tpl" def={0.6} full="parent" left={<div ref={setLblPrev} />}
+                right={<LabelSetup tpl={tpl} setTpl={setTpl} user={user} order={order} mat={mat} shared={shared} previewEl={lblPrev} />} />
+            </div>
+          </div>
+        )}
+        {setup && !desk && (
           <div style={{ padding: '4px 12px 12px', borderTop: '0.5px solid var(--border)' }}>
             <LabelSetup tpl={tpl} setTpl={setTpl} user={user} order={order} mat={mat} shared={shared} />
             {mat && <button type="button" className="btn-secondary" style={{ marginTop: 10 }} disabled={busy} onClick={exportFiles}>{busy ? 'Собираем файлы…' : '⬇ Файлы для маркировочного стола'}</button>}
