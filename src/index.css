@@ -130,6 +130,9 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 }
 .notice-flash { animation: notice-flash 3s ease-out; border-radius: var(--radius); }
 
+/* показывается только на компьютере */
+.desk-only { display: none !important; }
+
 /* ─── Экран компьютера (окно шире 1100 px) ───────────────────────────────────
    Страницы — во всю ширину окна; списки карточек — сеткой в несколько колонок;
    нижнее меню — по центру, а не растянутое на весь монитор.
@@ -158,7 +161,14 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 }
 @media (min-width: 1100px) {
   .desk-hide { display: none !important; }
-  /* детали заказа: карточки сеткой; у каждой свой отступ снизу — в сетке не нужен */
-  .det-grid { grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); gap: 8px 12px !important; }
-  .det-grid > * { margin-bottom: 0 !important; }
+  .desk-only { display: flex !important; }
+  /* детали заказа — строкой слева направо: № · длина · ширина · кол-во · кромка по сторонам · вращение;
+     название, размер в раскрой, копирование и редактор контура — под строкой */
+  .det-card { display: flex; flex-wrap: wrap; align-items: center; column-gap: 14px; }
+  .det-card > * { flex: 1 1 100%; order: 2; }
+  .det-card > .det-row { flex: 0 1 460px; min-width: 340px; order: 0; }
+  .det-card > .det-edges { flex: 0 1 420px; min-width: 300px; margin-top: 0 !important; order: 1; }
+  .det-head { background: transparent; border: none; margin-bottom: 2px;
+    font-size: 11px; color: var(--text-hint); }
+  .det-head > .det-row, .det-head > .det-edges { min-height: 0; }
 }

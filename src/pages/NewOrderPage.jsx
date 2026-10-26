@@ -129,8 +129,8 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
   }
 
   return (
-    <div className="card" style={{ marginBottom: 4, padding: '6px 10px', ...(showContour || showCopyPicker ? { gridColumn: '1 / -1' } : {}) }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div className="card det-card" style={{ marginBottom: 4, padding: '6px 10px' }}>
+      <div className="det-row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* Номер + кнопка контура */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>#{index + 1}</div>
@@ -182,7 +182,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
 
       {/* Кромка — галочки */}
       {showEdge && (
-        <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
+        <div className="det-edges" style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--text-hint)', minWidth: 44 }}>Кромка:</span>
           {SIDES.map((side, i) => {
             const key = KEYS[i]
@@ -730,6 +730,19 @@ export default function NewOrderPage() {
 
         {/* Детали сгруппированные */}
         <MaterialFilter details={details} order={matOrder} value={matFilter} onChange={setMatFilter} />
+        {/* компьютер: подписи колонок над строками деталей (детали идут строкой: размеры, кол-во, кромка, вращение) */}
+        <div className="card det-card det-head desk-only" style={{ padding: "0 10px" }}>
+          <div className="det-row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ minWidth: 28 }}>№</div>
+            <div style={{ display: 'flex', gap: 4, flex: 1 }}><div style={{ flex: 1 }}>Длина</div><div style={{ flex: 1 }}>Ширина</div><div style={{ width: 44 }}>Кол.</div></div>
+            <div style={{ width: 18 }} />
+          </div>
+          <div className="det-edges" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <div style={{ minWidth: 44 }}>Кромка</div>
+            {['Дл', 'Дп', 'Шв', 'Шн'].map(t => <div key={t} style={{ flex: 1, textAlign: 'center' }}>{t}</div>)}
+            <div style={{ width: 26, textAlign: 'center' }} title="Вращение">↻</div>
+          </div>
+        </div>
         {grouped.map(([pfx, dets]) => (
           <div key={pfx}>
             {pfx && (
@@ -738,7 +751,7 @@ export default function NewOrderPage() {
                 {pfx}
               </div>
             )}
-            <div className="desk-grid det-grid">
+            <div className="det-grid">
             {dets.map((d) => {
               const globalIndex = details.findIndex(x => x.uid === d.uid)
               return (
