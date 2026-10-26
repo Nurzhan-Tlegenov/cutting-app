@@ -28,7 +28,7 @@ import { productionMark, orderMarks } from '../lib/productionApi'
 import PdfSetup from '../components/PdfSetup'
 import { buildNestingPdf } from '../lib/nestingPdf'
 import { userSameAlpha } from '../lib/sameParts'
-import { userPdfTpl } from '../lib/pdfSummary'
+import { userPdfTpl, statsAndQuote, pdfSummaryOf } from '../lib/pdfSummary'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
 import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from '../lib/simShare'
@@ -273,9 +273,20 @@ export default function CncPage() {
     const rd = routerDir()
     let maps = null
     if (withMaps && mat) {
-      // PDF карт по листам этого материала — тем же оформлением, что «PDF карт» (шаблон листа аккаунта), без сметы
+      // PDF карт по листам этого материала — тем же оформлением, что «PDF карт» (шаблон листа аккаунта)
       setMapsBusy('Готовим карты PDF…')
-      try { maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: [] } } catch { maps = null } finally { setMapsBusy('') }
+      try {
+        // страница статистики и сметы — как у кнопки «PDF карт» на раскрое (галочка «Смета» под ней): раньше в архив
+        // с программами она не попадала, хотя галочка стояла
+        let summary = null
+        if (getUserSettings(user).pdfEstimate) {
+          try {
+            const { stats, quote } = await statsAndQuote({ order, mats: [mat], method: order.cutting_method || 'nesting' })
+            summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {})
+          } catch { summary = null }
+        }
+        maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: [] }
+      } catch { maps = null } finally { setMapsBusy('') }
     }
     const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
