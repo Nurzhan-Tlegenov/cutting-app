@@ -125,6 +125,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
   const [presetDirty, setPresetDirty] = useState(false)
   const autoRolesRef = useRef([])                // как колонки распознало само приложение — для «без настройки»
   const [groupKey, setGroupKey] = useState(ALL)
+  const [layersOff, setLayersOff] = useState(() => new Set())   // слои модели Базиса, которые не берём в заказ
   // лимит бесплатного использования: сколько материалов можно взять за один импорт (null — сколько угодно)
   const [matCap, setMatCap] = useState(null)
   useEffect(() => { let alive = true; myLimits().then(l => { if (alive) setMatCap(l?.limits?.import_mats?.limit ?? null) }); return () => { alive = false } }, [])
@@ -146,6 +147,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
     setSheetIdx(idx); setHeaderRow(a.headerRow); setRoles(useRoles)
     const res = buildDetails(allSheets[idx].rows, a.headerRow, useRoles)
     setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
+    setLayersOff(new Set())
   }
 
   const pick = (src) => {
@@ -174,6 +176,7 @@ export default function ImportDetails({ hasDetails, onImport }) {
         if (!res.items.length) throw new Error(res.pdf ? 'в файле нет деталей' : 'в модели нет панелей')
         setFileName(file.name); setSource(SOURCES.find(x => x.id === model.src)); setMode('add')
         setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
+        setLayersOff(new Set())
         setSheets(null); setBasis(res)
         return
       }
@@ -205,7 +208,14 @@ export default function ImportDetails({ hasDetails, onImport }) {
   // «Все вместе» — только если материалов не больше лимита; иначе по умолчанию первый материал
   const allowAll = matCap == null || result.groups.length <= matCap
   const activeKey = result.groups.some(g => g.key === groupKey) ? groupKey : (allowAll || !result.groups.length ? ALL : result.groups[0].key)
-  const chosen = activeKey === ALL ? result.items : result.items.filter(it => it.groupKey === activeKey)
+  // слои модели (Базис, скрипт «Слои»: Верх, Низ…) — сколько деталей в каждом; снятый слой в заказ не идёт
+  const layerList = (() => {
+    const m = new Map()
+    for (const it of result.items) { const l = it.contour?.meta?.layer; if (l) m.set(l, (m.get(l) || 0) + (it.qty || 1)) }
+    return [...m]
+  })()
+  const inLayer = it => !layersOff.size || !layersOff.has(it.contour?.meta?.layer)
+  const chosen = (activeKey === ALL ? result.items : result.items.filter(it => it.groupKey === activeKey)).filter(inLayer)
   // подрезка под кромку из модели: в списке проверки — размер в раскрой (толщина кромки — из модели)
   const modelTypes = typesFromItems(result.items)
   const pieces = chosen.reduce((s, it) => s + it.qty, 0)
@@ -466,6 +476,25 @@ export default function ImportDetails({ hasDetails, onImport }) {
               <p className="error-text" style={{ marginBottom: 12 }}>
                 Укажите над таблицей, в каких колонках Длина и Ширина (или одна колонка «Размер Д×Ш»).
               </p>
+            )}
+
+            {/* Слои модели Базиса */}
+            {layerList.length > 1 && (
+              <div style={{ marginBottom: 12 }}>
+                <label className="label">Модель разложена по слоям — какие слои берём в заказ</label>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {layerList.map(([l, n]) => {
+                    const on = !layersOff.has(l)
+                    return (
+                      <button key={l} type="button" style={chip(on)}
+                        onClick={() => setLayersOff(prev => { const nx = new Set(prev); if (nx.has(l)) nx.delete(l); else if (nx.size < layerList.length - 1) nx.add(l); return nx })}>
+                        {on ? '✓ ' : ''}{l} · {n} шт.
+                      </button>
+                    )
+                  })}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Снимите слой, если в нём то, что резать не нужно (другой вариант, старая версия). Слой детали можно вывести на бирку — свойство «Слой».</div>
+              </div>
             )}
 
             {/* Материалы */}

@@ -520,7 +520,7 @@ function basisSrc(panel) {
   const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
   const texDir = val(o, 'TexDir', 0)
   // свои свойства панели + унаследованные от блоков/изделия/модели; при одинаковом названии берётся ближайшее
-  const user = (panel.ctx.user || userProps(o)) ? { ...(panel.ctx.user || {}), ...(userProps(o) || {}) } : null
+  const { user, layer } = layerOf((panel.ctx.user || userProps(o)) ? { ...(panel.ctx.user || {}), ...(userProps(o) || {}) } : null)
   // Лицевая сторона, назначенная конструктором в Базисе: поле есть, только если её задали вручную.
   // 0 — лицевая пласть «сверху» панели (Z = толщина, как без переворота), 1 — противоположная.
   const ff = val(o, 'FrontFace', null)
@@ -540,8 +540,25 @@ function basisSrc(panel) {
       material: matFull[0] || '', materialCode: matFull.slice(1).join(' / '),
       ...(val(o, 'Color') != null ? { color: val(o, 'Color') } : {}),
       ...(user ? { user } : {}),                 // пользовательские свойства панели — на бирку
+      ...(layer ? { layer } : {}),               // слой модели (Верх / Низ …) — выбор слоёв при импорте, «Слой» на бирке
     },
   }
+}
+
+// Слои модели. В Базисе слои делает скрипт «Слои»: он пишет в пользовательские свойства блоков и модели
+// ownerLayer (слой, в котором лежит блок: «Верх», «Низ»…), activeLayer (какой слой открыт в редакторе), tmpLayer,
+// «Скрытые фасады» (так показывать модель), OldName / PF (прежнее имя блока, префикс) — служебное, не свойства детали.
+// Слой детали уходит в meta.layer и на бирку как свойство «Слой»; служебные поля скрипта — не на бирку.
+const LAYER_KEY = /^(ownerlayer|layer|слой)$/i
+const LAYER_SERVICE = /^(tmplayer|activelayer|ownerlayer|layer|oldname|pf|скрытые фасады)$/i
+function layerOf(user) {
+  if (!user) return { user: null, layer: '' }
+  const k = Object.keys(user).find(x => LAYER_KEY.test(x.trim()))
+  const layer = k ? String(user[k] || '').trim().slice(0, 40) : ''
+  const out = {}
+  for (const [key, v] of Object.entries(user)) if (!LAYER_SERVICE.test(key.trim())) out[key] = v
+  if (layer) out['Слой'] = layer
+  return { user: Object.keys(out).length ? out : null, layer }
 }
 
 // Пользовательские свойства панели (Базис: «Пользовательские свойства» объекта) -> { название: значение } | null.
