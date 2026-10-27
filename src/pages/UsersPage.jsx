@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
+import { adminEmailSignup, adminSetEmailSignup } from '../lib/adminApi'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
@@ -22,6 +23,8 @@ const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit',
 // дата и время подачи заявки: «24.10.26 12:28»
 const dateTime = v => (v ? `${date(v)} ${new Date(v).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : '—')
 const digits = v => String(v || '').replace(/\D/g, '')
+const byPhone = u => /@raskoypro\.local$/i.test(String(u?.email || ''))   // аккаунт по номеру; иначе — по почте (email, Google)
+const isEmail = v => String(v || '').includes('@')
 // ссылка открывает «У меня есть код» с подставленными номером и кодом — остаётся придумать пароль
 const codeLink = (code, digits) => `${siteOrigin()}/auth?code=${code}&tel=${digits}`
 const codeMsg = (code, digits) => `Ваша заявка в RaskroyPro одобрена. Код: ${code}\n\nЗавершите регистрацию по ссылке — номер и код уже подставлены, останется придумать пароль:\n${codeLink(code, digits)}\n\nИли откройте приложение → «У меня есть код». Код действует 3 дня.`
@@ -76,8 +79,10 @@ export default function UsersPage() {
   const [blkPhone, setBlkPhone] = useState('')
   const [blkNote, setBlkNote] = useState('')
 
+  const [emailOpen, setEmailOpen] = useState(null)   // регистрация по почте и Google: true / false, null — в базе ещё нет (migration_email_login.sql)
   const load = async () => {
-    const [u, r, o, pr, lm, lh, bt, bl] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones()])
+    const [u, r, o, pr, lm, lh, bt, bl, eo] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones(), adminEmailSignup()])
+    setEmailOpen(eo)
     setBlocked(bl.error ? { error: bl.error } : bl.data || [])
     setBeta(bt.error ? { error: bt.error } : bt.data)
     setHelps(lh.error ? null : lh.data || [])
@@ -151,7 +156,7 @@ export default function UsersPage() {
   }
   // Заблокировать номер: регистрация, заявка, смена пароля и вход для него больше не проходят (ему об этом не сообщается)
   const blockPhone = (ph, note, who) => {
-    if (digits(ph).length < 10) { setError('Введите номер телефона полностью'); return }
+    if (isEmail(ph) ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ph.trim()) : digits(ph).length < 10) { setError('Введите номер телефона полностью или адрес почты'); return }
     if (!window.confirm(`Заблокировать ${who ? `«${who}» (${ph})` : ph}?\n\nС этим номером нельзя будет зарегистрироваться, оставить заявку или войти. Сообщение о блокировке человек не увидит — у него просто не получится.\nАккаунт и заказы не удаляются (удалить можно отдельно). Снять блокировку — в списке «Заблокированные номера».`)) return
     act(async () => { const r = await adminBlockPhone(ph, note); if (!r.error) { setBlkPhone(''); setBlkNote(''); setInfo(`Номер ${ph} заблокирован.`) } return r })
   }
@@ -190,7 +195,7 @@ export default function UsersPage() {
   }
   // карточка пользователя: свёрнута — имя, «произв.», страна·город; нажатие — всё остальное
   const userCard = u => {
-              const tel = digits(u.phone) || digits(String(u.email || '').split('@')[0])
+              const tel = digits(u.phone) || (byPhone(u) ? digits(String(u.email || '').split('@')[0]) : '')
               const wa = digits(u.whatsapp) || tel
     return (
                 <div key={u.id} className="card" data-focus={`nu:${u.id}`} style={{ padding: '8px 12px' }}>
@@ -284,7 +289,7 @@ export default function UsersPage() {
                     onSave={(id, unl, l) => act(() => adminSetUserLimits(id, unl, l))} />}
                   {u.id !== user?.id && u.role !== 'admin' && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-                      <button type="button" disabled={busy} onClick={() => blockPhone(u.phone || ('+' + digits(u.email)), '', u.full_name || '')} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11, marginRight: 6 }}>🚫 Заблокировать номер</button>
+                      <button type="button" disabled={busy} onClick={() => blockPhone(byPhone(u) ? (u.phone || ('+' + digits(u.email))) : u.email, '', u.full_name || '')} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11, marginRight: 6 }}>{byPhone(u) ? '🚫 Заблокировать номер' : '🚫 Заблокировать почту'}</button>
                       <button type="button" disabled={busy} onClick={() => delUser(u)} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11 }}>Удалить аккаунт</button>
                     </div>
                   )}
@@ -324,6 +329,17 @@ export default function UsersPage() {
               </div>
               <button type="button" disabled={busy} onClick={toggle} style={btn(open ? 'danger' : 'main')}>{open ? 'Закрыть регистрацию' : 'Открыть для всех'}</button>
             </div>
+            {emailOpen != null && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>{emailOpen ? 'Регистрация по email и Google — включена' : 'Регистрация по email и Google — выключена'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>Для зарубежных: без Telegram/WhatsApp и без вашего одобрения. Новые аккаунты появятся вверху как «без вашего одобрения».</div>
+                </div>
+                <button type="button" disabled={busy} style={btn(emailOpen ? 'danger' : 'main')}
+                  onClick={() => { if (emailOpen && !window.confirm('Выключить регистрацию по email и Google? Уже зарегистрированные по-прежнему смогут входить.')) return; act(() => adminSetEmailSignup(!emailOpen)) }}>
+                  {emailOpen ? 'Выключить' : 'Включить'}</button>
+              </div>
+            )}
           </div>
 
           <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -443,17 +459,17 @@ export default function UsersPage() {
                 <>
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>С этих номеров нельзя зарегистрироваться (даже по ссылке-приглашению), оставить заявку, сменить пароль или войти. Человек не видит, что заблокирован, — у него просто не получается.</div>
                   <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                    <input type="tel" placeholder="+7 700 000 00 00" value={blkPhone} onChange={e => setBlkPhone(e.target.value)} style={{ flex: 1.2, minWidth: 0 }} />
+                    <input type="text" placeholder="+7 700 000 00 00 или почта" value={blkPhone} onChange={e => setBlkPhone(e.target.value)} style={{ flex: 1.2, minWidth: 0 }} />
                     <input type="text" placeholder="Пометка (для себя)" value={blkNote} onChange={e => setBlkNote(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
                     <button type="button" disabled={busy} style={btn('danger')} onClick={() => blockPhone(blkPhone, blkNote, '')}>Заблокировать</button>
                   </div>
                   {(blocked || []).map(b => (
                     <div key={b.digits} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: '0.5px solid var(--border)', fontSize: 12 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div>+{b.digits}{b.name ? ` · ${b.name}` : ''}{b.user_id ? <span style={{ color: 'var(--text-hint)' }}> · аккаунт есть, вход закрыт</span> : ''}</div>
+                        <div>{isEmail(b.digits) ? '' : '+'}{b.digits}{b.name ? ` · ${b.name}` : ''}{b.user_id ? <span style={{ color: 'var(--text-hint)' }}> · аккаунт есть, вход закрыт</span> : ''}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{b.note ? `${b.note} · ` : ''}с {dateTime(b.created_at)}</div>
                       </div>
-                      <button type="button" disabled={busy} style={btn()} onClick={() => { if (window.confirm(`Снять блокировку с +${b.digits}?`)) act(() => adminUnblockPhone('+' + b.digits)) }}>Разблокировать</button>
+                      <button type="button" disabled={busy} style={btn()} onClick={() => { const v = isEmail(b.digits) ? b.digits : '+' + b.digits; if (window.confirm(`Снять блокировку с ${v}?`)) act(() => adminUnblockPhone(v)) }}>Разблокировать</button>
                     </div>
                   ))}
                 </>

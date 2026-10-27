@@ -148,8 +148,11 @@ export async function adminBlockedPhones() { const r = await call('admin_blocked
 export async function adminBlockPhone(phone, note) {
   const r = await call('admin_block_phone', { p_phone: phone, p_note: note || '' })
   if (r.missing) return { error: BLOCK_SQL_HINT }
-  if (r.data === 'bad phone') return { error: 'Проверьте номер: нужны все цифры с кодом страны.' }
+  if (r.data === 'bad phone') return { error: String(phone || '').includes('@') ? 'Проверьте адрес почты.' : 'Проверьте номер: нужны все цифры с кодом страны.' }
   if (r.data === 'admin') return { error: 'Номер администратора заблокировать нельзя.' }
   return r
 }
 export const adminUnblockPhone = phone => call('admin_unblock_phone', { p_phone: phone })
+// Регистрация по email и Google (migration_email_login.sql). -> true / false; null — в базе ещё нет этой части
+export async function adminEmailSignup() { const r = await call('email_signup_open'); return r.error ? null : r.data !== false }
+export const adminSetEmailSignup = open => call('admin_set_email_signup', { p_open: !!open })

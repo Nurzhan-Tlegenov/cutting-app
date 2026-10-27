@@ -31,6 +31,7 @@ export default function ProfilePage() {
   const { profile, user, signOut, cabinet, setCabinet, isMaster, setContactEmail } = useAuth()
   // почта для восстановления пароля — необязательная, меняется здесь
   const contactEmail = user?.user_metadata?.contact_email || ''
+  const loginEmail = /@raskoypro\.local$/i.test(String(user?.email || '')) ? '' : user?.email || ''   // вход по почте / Google — она и есть адрес аккаунта
   const [mail, setMail] = useState(null)             // null — не редактируем; строка — идёт ввод
   const [mailErr, setMailErr] = useState('')
   const saveMail = async () => {
@@ -162,7 +163,9 @@ export default function ProfilePage() {
           <div style={{ padding: '10px 0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <span style={{ color: 'var(--text-hint)', fontSize: 13, flex: '0 0 auto' }}>Почта</span>
-              {mail === null ? (
+              {loginEmail ? (
+                <span style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{loginEmail}</span>
+              ) : mail === null ? (
                 <span style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {contactEmail || <span style={{ color: 'var(--text-hint)' }}>не указана</span>}
                   <span onClick={() => { setMail(contactEmail); setMailErr('') }} style={{ color: 'var(--blue)', marginLeft: 8, cursor: 'pointer' }}>{contactEmail ? 'Изменить' : 'Указать'}</span>

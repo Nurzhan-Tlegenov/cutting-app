@@ -79,6 +79,16 @@ create table if not exists order_details (
 alter table order_details disable row level security;
 ```
 
+## Вход по email и Google (окт 2026, migration_email_login.sql)
+- Два вида аккаунтов: по номеру (служебный адрес `цифры@raskoypro.local`, заявка/код Telegram/WhatsApp — без изменений)
+  и по настоящей почте (email+пароль или Google). Признак — `isPhoneAccount(user)` в AuthContext, в SQL — `is_phone_email()`.
+- Триггеры auth.users: почтовый аккаунт создаётся без кода и одобрения, пока `app_config.email_signup` = true
+  (мастер → Пользователи, переключатель); блокировка почты — в том же `blocked_phones` (почта в нижнем регистре).
+- Имя/страна/город у почтового аккаунта — `CompleteProfilePage` (гейт в ProtectedRoute, `needsProfile`).
+- Сброс пароля по почте: resetPasswordForEmail → ссылка на /auth → `NewPasswordPage` (`recovery`). Нужен свой SMTP в Supabase.
+- Кнопка Google показывается, только если провайдер включён в Supabase (`/auth/v1/settings`), и не на зеркале ru.
+- Способ входа по умолчанию: языки ru/uk/kk/ky/uz/az — телефон, остальные — email; выбор помнится (localStorage authMethod).
+
 ## Номер заказа
 Формат: `YYMMDD_NNN` (например 260611_001)
 Генерируется автоматически в `src/lib/orderUtils.js`

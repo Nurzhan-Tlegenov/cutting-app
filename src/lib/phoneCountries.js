@@ -20,6 +20,11 @@ export const PHONE_COUNTRIES = [
   { iso: 'CN', name: 'Китай', dial: '86', len: [11, 11], mask: '130 0000 0000' },
   { iso: 'PL', name: 'Польша', dial: '48', len: [9, 9], mask: '500 000 000' },
   { iso: 'DE', name: 'Германия', dial: '49', len: [10, 11], mask: '1500 0000000' },
+  { iso: 'LT', name: 'Литва', dial: '370', len: [8, 8], mask: '600 00000' },
+  { iso: 'LV', name: 'Латвия', dial: '371', len: [8, 8], mask: '2000 0000' },
+  { iso: 'EE', name: 'Эстония', dial: '372', len: [7, 8], mask: '5000 0000' },
+  { iso: 'GB', name: 'Великобритания', dial: '44', len: [10, 10], mask: '7400 000000' },
+  { iso: 'CZ', name: 'Чехия', dial: '420', len: [9, 9], mask: '600 000 000' },
   { iso: 'OTHER', name: 'Другая страна', dial: '', len: [6, 13], mask: 'номер без кода страны' },
 ]
 
@@ -36,7 +41,15 @@ const TZ = {
   Moscow: 'RU', Samara: 'RU', Yekaterinburg: 'RU', Omsk: 'RU', Novosibirsk: 'RU', Krasnoyarsk: 'RU', Irkutsk: 'RU', Yakutsk: 'RU', Vladivostok: 'RU',
   Kaliningrad: 'RU', Volgograd: 'RU', Saratov: 'RU', Barnaul: 'RU', Tomsk: 'RU', Novokuznetsk: 'RU', Magadan: 'RU', Kamchatka: 'RU', Astrakhan: 'RU', Ulyanovsk: 'RU', Kirov: 'RU',
   Tashkent: 'UZ', Samarkand: 'UZ', Bishkek: 'KG', Dushanbe: 'TJ', Ashgabat: 'TM', Baku: 'AZ', Yerevan: 'AM', Tbilisi: 'GE', Minsk: 'BY',
-  Kiev: 'UA', Kyiv: 'UA', Chisinau: 'MD', Ulaanbaatar: 'MN', Istanbul: 'TR', Shanghai: 'CN', Urumqi: 'CN', Warsaw: 'PL', Berlin: 'DE',
+  Kiev: 'UA', Kyiv: 'UA', Chisinau: 'MD', Ulaanbaatar: 'MN', Istanbul: 'TR', Shanghai: 'CN', Urumqi: 'CN', Warsaw: 'PL', Berlin: 'DE', Busingen: 'DE',
+  Vilnius: 'LT', Riga: 'LV', Tallinn: 'EE', London: 'GB', Prague: 'CZ',
+}
+/** Страна по часовому поясу или '' — для регистрации по почте (там нет номера, по которому угадать) */
+export function guessCountryName() {
+  try {
+    const iso = TZ[String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').split('/').pop()]
+    return iso ? phoneCountry(iso).name : ''
+  } catch { return '' }
 }
 export function guessPhoneCountry() {
   try {

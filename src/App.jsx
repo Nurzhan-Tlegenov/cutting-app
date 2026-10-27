@@ -19,6 +19,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import './index.css'
 
 import AuthPage from './pages/AuthPage'
+import { CompleteProfilePage, NewPasswordPage } from './pages/CompleteProfilePage'
 import OrdersPage from './pages/OrdersPage'
 import OrderPage from './pages/OrderPage'
 import NewOrderPage from './pages/NewOrderPage'
@@ -94,13 +95,15 @@ function PushBridge() {
 const AFTER_LOGIN = 'afterLogin'
 const afterLogin = () => { try { const v = sessionStorage.getItem(AFTER_LOGIN); if (v) sessionStorage.removeItem(AFTER_LOGIN); return v && v.startsWith('/') ? v : null } catch { return null } }
 function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth()
+  const { user, loading, recovery, needsProfile } = useAuth()
   const loc = useLocation()
   if (loading) return <CncLoader full label="Открываем приложение…" />
   if (!user) {
     try { sessionStorage.setItem(AFTER_LOGIN, loc.pathname + loc.search) } catch { /* без памяти */ }
     return <Navigate to="/auth" replace />
   }
+  if (recovery) return <NewPasswordPage />           // ссылка из письма «сменить пароль»
+  if (needsProfile) return <CompleteProfilePage />   // вход по почте / Google: имя, страна, город — до работы
   return children
 }
 

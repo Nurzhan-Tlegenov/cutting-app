@@ -62,7 +62,7 @@ export default function AllOrdersPage() {
     if (note === null) return
     act(() => productionReturnOrder(o.id, note), o.id, () => patch(o.id, { status: 'draft', returned_at: new Date().toISOString() }))
   }
-  const tel = u => digits(u?.phone) || digits(String(u?.email || '').split('@')[0])
+  const tel = u => digits(u?.phone) || (/@raskoypro\.local$/i.test(String(u?.email || '')) ? digits(String(u?.email || '').split('@')[0]) : '')
   const stateOf = o => sendState(o, nested.has(o.id))
   const shown = useMemo(() => {
     const q = find.trim().toLowerCase(), qd = digits(q)

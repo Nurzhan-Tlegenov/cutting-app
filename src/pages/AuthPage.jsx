@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
-import { offerLangFrom } from '../i18n'
+import { offerLangFrom, getLang, tr } from '../i18n'
 import { signupOpen, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
-import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
-import { useAuth } from '../context/AuthContext'
+import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, guessCountryName, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
+import { useAuth, googleEnabled } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { pendingInvite } from '../lib/workplaces'
 import { pendingRef, savePendingRef, clearPendingRef, refInfo, requestSignupRef } from '../lib/refLinks'
@@ -42,12 +42,21 @@ export default function AuthPage() {
   const [mode, setMode] = useState(linkCode ? 'code' : qs.get('reg') ? 'register' : 'login')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const { signIn, signUp } = useAuth()
+  const { signIn, signUp, signInWithGoogle, sendResetEmail } = useAuth()
   const navigate = useNavigate()
+  // Способ входа: по номеру телефона (Telegram / WhatsApp) или по почте. Зарубежным Telegram и WhatsApp не нужны —
+  // для языков Европы и дальнего зарубежья сразу открывается почта; выбор запоминается на этом устройстве.
+  const [method, setMethodState] = useState(() => {
+    try { const v = localStorage.getItem('authMethod'); if (v === 'email' || v === 'phone') return v } catch { /* без памяти */ }
+    return ['ru', 'uk', 'kk', 'ky', 'uz', 'az'].includes(getLang()) ? 'phone' : 'email'
+  })
+  const setMethod = m => { setMethodState(m); setError(''); setNote(''); try { localStorage.setItem('authMethod', m) } catch { /* без памяти */ } }
+  const [googleOn, setGoogleOn] = useState(false)
+  useEffect(() => { let alive = true; googleEnabled().then(v => { if (alive) setGoogleOn(v) }); return () => { alive = false } }, [])
 
   const [showPass, setShowPass] = useState(false)
   const [form, setForm] = useState(() => ({
-    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: linkCode.replace(/\D/g, '').slice(0, 8), country: phoneCountry(guessPhoneCountry()).name, city: ''
+    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: linkCode.replace(/\D/g, '').slice(0, 8), country: (method === 'email' ? tr(guessCountryName()) : guessCountryName()) || (method === 'phone' ? phoneCountry(guessPhoneCountry()).name : ''), city: ''
   }))
   // Регистрация может быть закрыта: тогда новый человек оставляет заявку, а регистрируется после одобрения
   const [open, setOpen] = useState(true)
@@ -55,9 +64,10 @@ export default function AuthPage() {
   const [note, setNote] = useState('')
   useEffect(() => { let alive = true; signupOpen().then(v => { if (alive) setOpen(v) }); return () => { alive = false } }, [])
   const invite = pendingInvite()   // пришёл по ссылке-приглашению производства — регистрация сотрудника без заявки
+  const byEmail = method === 'email' && !invite && mode !== 'code'   // вход / регистрация по почте (сотрудник по приглашению — только по номеру)
   // Регистрация (кроме приглашения производства) всегда идёт через подтверждение номера: при закрытой — по заявке,
   // при открытой — Telegram подтверждает номер и сразу присылает код, без администратора
-  const byRequest = mode === 'register' && !approved && !invite
+  const byRequest = mode === 'register' && !approved && !invite && !byEmail
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   // Номер при регистрации: страна (код) + номер нужной длины — номер с недостающей цифрой не уйдёт
@@ -138,11 +148,35 @@ export default function AuthPage() {
     setNote(r.verified ? 'Номер уже подтверждён в Telegram — код придёт туда. Введите его ниже и придумайте пароль.' : 'Нажмите кнопку ниже, затем «Поделиться номером» в боте — код придёт сразу.')
   }
 
+  async function google() {
+    setError(''); setLoading(true)
+    try { await signInWithGoogle() } catch (err) { setError(err.message); setLoading(false) }
+  }
+  const emailOk = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim())
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
+      if (byEmail) {
+        const em = form.email.trim().toLowerCase()
+        if (!emailOk(em)) throw new Error('Проверьте адрес почты')
+        if (/@raskoypro\.local$/.test(em)) throw new Error('Проверьте адрес почты')
+        if (mode === 'forgot') {
+          await sendResetEmail(em)
+          setNote('Мы отправили письмо со ссылкой для смены пароля. Откройте его на этом устройстве. Письма нет — проверьте «Спам».')
+          return
+        }
+        if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
+        if (mode === 'login') { await signIn(em, form.password); navigate(pendingRef() ? `/r/${pendingRef()}` : '/'); return }
+        if (!form.full_name.trim()) throw new Error('Введите имя и фамилию')
+        if (form.country.trim().length < 2) throw new Error('Укажите страну')
+        if (form.city.trim().length < 2) throw new Error('Укажите город')
+        await signUp(em, form.password, { full_name: form.full_name.trim(), phone: '', country: form.country.trim(), city: form.city.trim() })
+        navigate('/')
+        return
+      }
       if (mode === 'forgot') {
         if (!form.code.trim()) throw new Error('Введите код, который мы вам прислали')
         if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
@@ -225,7 +259,15 @@ export default function AuthPage() {
       }
       navigate(pendingRef() ? `/r/${pendingRef()}` : '/')
     } catch (err) {
-      const msg = err.message
+      const msg = String(err?.message || err)
+      if (byEmail) {
+        if (/Invalid login|banned/i.test(msg)) setError('Неверная почта или пароль.')
+        else if (/already registered|already been registered/i.test(msg)) setError('Эта почта уже зарегистрирована — войдите на вкладке «Вход».')
+        else if (/signup_closed|Database error saving new user|Signups not allowed/i.test(msg)) setError('Регистрация по почте сейчас закрыта. Попробуйте позже.')
+        else if (/rate limit|too many/i.test(msg)) setError('Слишком много попыток — подождите немного и попробуйте снова.')
+        else setError(msg)
+        return
+      }
       // закрытый вход (номер заблокирован мастером) — как обычный неверный пароль, без слов о блокировке
       const badLogin = /Invalid login|banned/i.test(msg)
       if (badLogin) setLoginFails(n => n + 1)
@@ -263,6 +305,83 @@ export default function AuthPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {googleOn && !invite && (mode === 'login' || mode === 'register') && (
+              <>
+                <button type="button" onClick={google} disabled={loading}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '10px', borderRadius: 'var(--radius)', border: '1px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', fontSize: 15, fontWeight: 500, cursor: 'pointer' }}>
+                  <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+                  Продолжить с Google
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-hint)', fontSize: 12 }}>
+                  <div style={{ flex: 1, height: 1, background: 'var(--border-md)' }} />или<div style={{ flex: 1, height: 1, background: 'var(--border-md)' }} />
+                </div>
+              </>
+            )}
+            {!invite && mode !== 'code' && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[['email', '✉', 'Email'], ['phone', '📱', 'Телефон']].map(([k, ic, t]) => (
+                  <button key={k} type="button" onClick={() => setMethod(k)}
+                    style={{ flex: 1, padding: '7px', borderRadius: 'var(--radius)', fontSize: 13, cursor: 'pointer',
+                      border: method === k ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)',
+                      background: method === k ? 'var(--blue-light, var(--bg2))' : 'transparent',
+                      color: method === k ? 'var(--blue)' : 'var(--text-muted)', fontWeight: method === k ? 600 : 400 }}><span>{ic}</span> <span>{t}</span></button>
+                ))}
+              </div>
+            )}
+            {byEmail && (
+              <>
+                {mode === 'register' && (
+                  <div>
+                    <label className="label">Имя и фамилия *</label>
+                    <input type="text" autoComplete="name" placeholder="Jan Kowalski" value={form.full_name} onChange={e => set('full_name', e.target.value)} maxLength={120} required />
+                  </div>
+                )}
+                <div>
+                  <label className="label">Электронная почта *</label>
+                  <input type="email" inputMode="email" autoComplete="email" placeholder="name@mail.com" value={form.email} onChange={e => set('email', e.target.value)} required />
+                </div>
+                {mode === 'register' && (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <label className="label">Страна *</label>
+                      <input type="text" list="reg-countries-em" value={form.country} onChange={e => set('country', e.target.value)} maxLength={60} required />
+                      <datalist id="reg-countries-em">{COUNTRIES.map(c => <option key={c} value={tr(c)} />)}</datalist>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <label className="label">Город *</label>
+                      <input type="text" value={form.city} onChange={e => set('city', e.target.value)} maxLength={80} required />
+                    </div>
+                  </div>
+                )}
+                {mode === 'forgot' ? (
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', margin: 0 }}>
+                    Введите почту, с которой вы регистрировались, — пришлём ссылку для смены пароля.
+                  </p>
+                ) : (
+                  <div>
+                    <label className="label">Пароль *</label>
+                    <div style={{ position: 'relative' }}>
+                      <input type={showPass ? 'text' : 'password'} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="Минимум 6 символов"
+                        value={form.password} onChange={e => set('password', e.target.value)} required minLength={6} style={{ paddingRight: 44 }} />
+                      <button type="button" onClick={() => setShowPass(v => !v)}
+                        style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-hint)', fontSize: 18, lineHeight: 1, padding: 0 }}>
+                        {showPass ? '🙈' : '👁'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {note && <p style={{ fontSize: 13, color: 'var(--teal)' }}>{note}</p>}
+                {error && <p className="error-text">{error}</p>}
+                <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: 4 }}>
+                  {loading ? 'Загрузка...' : mode === 'forgot' ? 'Отправить ссылку' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+                </button>
+                {mode === 'login' && <button type="button" onClick={() => { setMode('forgot'); setError(''); setNote('') }}
+                  style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>Забыли пароль?</button>}
+                {mode === 'forgot' && <button type="button" onClick={() => { setMode('login'); setError(''); setNote('') }}
+                  style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>← Вернуться ко входу</button>}
+              </>
+            )}
+            {!byEmail && <>
             {refI && mode !== 'login' && mode !== 'forgot' && (
               <div style={{ border: '1px solid var(--teal)', borderRadius: 'var(--radius)', padding: '10px 12px', background: 'var(--bg2)' }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--teal)' }}>Приглашение{refBy ? ` от «${refBy}»` : ''}</div>
@@ -474,6 +593,7 @@ export default function AuthPage() {
               style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>Кода нет — оставить заявку на регистрацию</button>}
             {mode === 'forgot' && <button type="button" onClick={() => { setMode('login'); setError(''); setNote('') }}
               style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 13, padding: 0, cursor: 'pointer' }}>← Вернуться ко входу</button>}
+            </>}
           </div>
         </form>
       </div>
