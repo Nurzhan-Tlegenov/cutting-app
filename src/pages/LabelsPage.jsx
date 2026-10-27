@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { sheetOffcuts, drawOffcutLabel, OFFCUT_CORNERS, labelQr, qrHasLink, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -48,7 +48,7 @@ const beamPostOf = user => sawPost(normalizeCnc(getUserSettings(user).cnc, [], {
 const beamPart = (mat, sheet, pi, bp) => (isBeamMat(mat) ? beamExitPart(sheet.placed[pi], sheet, bp) : null)
 const beamOpts = (mat, bp) => (isBeamMat(mat) ? { seqOf: beamLabelSeq, partOf: (sheet, pi) => beamExitPart(sheet.placed[pi], sheet, bp) } : {})
 
-function Label({ tpl, order, mat, si, pi, n, onOpen, bp }) {
+function Label({ tpl, order, mat, si, pi, n, onOpen, bp, page, pages }) {
   const ref = useRef(null)
   useEffect(() => {
     const cv = ref.current
@@ -56,9 +56,9 @@ function Label({ tpl, order, mat, si, pi, n, onOpen, bp }) {
     const { w, h } = labelPx(tpl, true)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[si], part = beamPart(mat, sheet, pi, bp)
-    const draw = () => drawLabel(cv, tpl, labelInfo(order, mat, si, pi, part), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex], part })
+    const draw = () => drawLabel(cv, tpl, { ...labelInfo(order, mat, si, pi, part), page, pages }, { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex], part })
     draw(); if (tpl.items.some(i => i.img)) preloadLabelImages(tpl).then(draw)
-  }, [tpl, order, mat, si, pi, bp])
+  }, [tpl, order, mat, si, pi, bp, page, pages])
   return <canvas ref={ref} data-lbl={n} onClick={onOpen} style={{ cursor: 'zoom-in' }} />
 }
 
@@ -81,7 +81,7 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d, bp 
   const cvRef = useRef(null), boxRef = useRef(null)
   const v = useRef({ s: 1, x: 0, y: 0 })                 // масштаб и сдвиг
   const g = useRef({ pts: new Map(), start: null, tap: 0, moved: false })
-  const { si, pi } = list[index]
+  const { si, pi, page, pages } = list[index]
   const apply = (anim = false) => {
     const cv = cvRef.current, box = boxRef.current
     if (!cv || !box) return
@@ -99,7 +99,7 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d, bp 
     const k = Math.min(32, Math.floor(4096 / Math.max(tpl.w, tpl.h)))       // точек на мм — с запасом под увеличение
     cv.width = Math.round(tpl.w * k); cv.height = Math.round(tpl.h * k)
     const sheet = mat.sheets[si], part = beamPart(mat, sheet, pi, bp)
-    const draw = () => drawLabel(cv, tpl, labelInfo(order, mat, si, pi, part), { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex], part })
+    const draw = () => drawLabel(cv, tpl, { ...labelInfo(order, mat, si, pi, part), page, pages }, { sheet, geo: sheetGeo(order, mat.result, sheet), index: pi, detail: mat.details[sheet.placed[pi].detailIndex], part })
     draw(); if (tpl.items.some(i => i.img)) preloadLabelImages(tpl).then(draw)
     v.current = { s: 1, x: 0, y: 0 }; apply()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,7 +252,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null }) {
     const { w, h } = labelPx(t, true)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[0]
-    const draw = () => drawLabel(cv, t, labelInfo(order, mat, 0, 0), { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] }, { preview: true })
+    const draw = () => drawLabel(cv, t, { ...labelInfo(order, mat, 0, 0), page: 1, pages: 1 }, { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] }, { preview: true })
     draw(); if (t.items.some(i => i.img)) preloadLabelImages(t).then(draw)
   }, [t, order, mat])
   // компьютер: колёсико мыши над биркой — увеличить/уменьшить в точке под курсором
@@ -758,7 +758,9 @@ export default function LabelsPage() {
   if (loading) return <div className="page"><CncLoader label="Готовим бирки…" /></div>
   if (!order) return <div className="page"><p>Заказ не найден</p></div>
   const total = mat ? mat.sheets.reduce((a, s) => a + s.placed.length, 0) : 0
-  const allLabels = mat ? mat.sheets.flatMap((sh, si) => (isBeamMat(mat) ? beamLabelSeq(sh, sheetGeo(order, mat.result, sh), null).map(q => q.pi) : labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual')).map(pi => ({ si, pi }))).map((q, n) => ({ ...q, n })) : []
+  // номера страниц — как в PDF всех бирок (с бирками обрезков, если они включены)
+  const pageNos = mat && tpl ? labelPages(order, mat, tpl, isBeamMat(mat) ? beamLabelSeq : null) : { map: new Map(), total: 0 }
+  const allLabels = mat ? mat.sheets.flatMap((sh, si) => (isBeamMat(mat) ? beamLabelSeq(sh, sheetGeo(order, mat.result, sh), null).map(q => q.pi) : labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual')).map(pi => ({ si, pi }))).map((q, n) => ({ ...q, n, page: pageNos.map.get(`${q.si}:${q.pi}`), pages: pageNos.total })) : []
   const apply = t => { setTpl(t); saveLabelTpl(t, user) }   // настройки бирок на обрезки
   // файлы маркировочного стола — тем же набором, что делает ЧПУ вместе с G-кодом
   // все бирки одним PDF: бирка — страница, страница размером с бирку
@@ -871,7 +873,7 @@ export default function LabelsPage() {
           <div key={si} style={{ marginBottom: 14 }}>
             <p className="section-title no-print">{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
             <div className="lbl-grid">
-              {allLabels.filter(q => q.si === si).map(q => <Label key={q.pi} tpl={tpl} order={order} mat={mat} si={si} pi={q.pi} n={q.n} bp={bp} onOpen={() => setView(q.n)} />)}
+              {allLabels.filter(q => q.si === si).map(q => <Label key={q.pi} tpl={tpl} order={order} mat={mat} si={si} pi={q.pi} n={q.n} page={q.page} pages={q.pages} bp={bp} onOpen={() => setView(q.n)} />)}
               {tpl.offcuts && sheetOffcuts(sh).map((o, k) => <OffcutLabel key={'o' + k} tpl={tpl} order={order} mat={mat} si={si} o={o} />)}
             </div>
           </div>

@@ -53,6 +53,7 @@ export const LABEL_ITEMS = [
   ['image', 'Своя картинка (логотип)', 'text'],
   ['sheet', 'Номер карты', 'text'],
   ['num', 'Номер детали на листе', 'text'],
+  ['page', 'Номер страницы (по порядку печати)', 'text'],
   ['edgeTop', 'Кромка — сверху', 'text'],
   ['edgeBottom', 'Кромка — снизу', 'text'],
   ['edgeLeft', 'Кромка — слева', 'text'],
@@ -674,6 +675,8 @@ function labelValue(type, info, tpl = null) {
     case 'work': return [...info.work, info.twoSided ? '⇅ с двух сторон' : ''].filter(Boolean).join(', ')
     case 'sheet': return String(info.sheet)
     case 'num': return String(info.num)
+    // номер бирки в общем PDF (страница): кончилась лента в принтере — видно, с какой страницы печатать дальше
+    case 'page': return info.page ? (info.pages ? `${info.page}/${info.pages}` : String(info.page)) : ''
     case 'edgeTop': case 'edgeBottom': case 'edgeLeft': case 'edgeRight': {
       // сторона бирки = сторона детали на карте (карта и деталь на бирке повёрнуты одинаково)
       const rot = tpl ? tpl.rot !== false : true, side = type.slice(4).toLowerCase(), name = (rot ? info.sidesCw : info.sides)[side]
@@ -1058,6 +1061,17 @@ export const zipFiles = files => zipSync(Object.fromEntries(files.map(f => [f.na
  * Бирка на странице — чёрно-белая картинка в разрешении печати (не меньше 300 dpi).
  * onProgress(сделано, всего) — для счётчика. -> Uint8Array
  */
+/** Номера страниц бирок — в том же порядке, что в PDF всех бирок: Map «лист:деталь» -> страница, и всего страниц */
+export function labelPages(order, mat, tpl, seqOf = null) {
+  const map = new Map()
+  let n = 0
+  for (let si = 0; si < (mat?.sheets || []).length; si++) {
+    const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
+    for (const { pi, o } of (seqOf ? seqOf(sheet, geo, tpl) : labelSeq(sheet, geo, 'manual', tpl))) { n++; if (!o) map.set(`${si}:${pi}`, n) }
+  }
+  return { map, total: n }
+}
+
 export async function buildLabelsPdf({ order, mat, tpl, onProgress, seqOf = null, partOf = null }) {
   await preloadLabelImages(tpl)
   if (order?.id && qrHasLink(tpl.qr) && cachedShare(order.id) === undefined) await getShare(order.id)
@@ -1078,7 +1092,7 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress, seqOf = null
     const pages = seqOf ? seqOf(sheet, geo, tpl) : labelSeq(sheet, geo, 'manual', tpl)
     for (const { pi, o } of pages) {
       if (o) drawOffcutLabel(cv, tpl, { order, mat, si, o })
-      else { const part = partOf ? partOf(sheet, pi) : null; drawLabel(cv, tpl, labelInfo(order, mat, si, pi, part), { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex], part }) }
+      else { const part = partOf ? partOf(sheet, pi) : null; drawLabel(cv, tpl, { ...labelInfo(order, mat, si, pi, part), page: done + 1, pages: total }, { sheet, geo, index: pi, detail: mat.details[sheet.placed[pi].detailIndex], part }) }
       const px = cv.getContext('2d').getImageData(0, 0, W, H).data, bits = new Uint8Array(row * H)
       for (let y = 0; y < H; y++) for (let x = 0, i = y * W * 4; x < W; x++, i += 4) if ((px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10 >= 140) bits[y * row + (x >> 3)] |= 0x80 >> (x & 7)
       const img = zlibSync(bits, { level: 6 }), content = `q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`
