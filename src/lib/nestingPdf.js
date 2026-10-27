@@ -8,6 +8,7 @@ import { zlibSync, strToU8 } from 'fflate'
 import { sheetGeo } from './savedNesting'
 import { placedHoles, placedTurns } from './partHoles'
 import { orderTitle } from './orderUtils'
+import { detailMeta, metaPos } from './partLabel'
 import { rawDetail, overMm, parseEdgeTypes } from './edgeCut'
 import { detailEdgeList, holeEdgeSegments } from './edgeLength'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
@@ -149,12 +150,19 @@ function orderPos(d, di) {
   const so = rawDetail(d || {})?.sort_order
   return so !== null && so !== undefined && so !== '' && Number.isFinite(Number(so)) ? Number(so) + 1 : di + 1
 }
+// Номер на детали в PDF — как на карте раскроя в приложении: позиция детали из модели или из колонки «Позиция» Excel,
+// а если её нет — номер строки в бланке заказа (раньше PDF всегда писал номер строки: на карте 28, в PDF 12)
+function partNo(d, di) {
+  let pos = ''
+  try { pos = metaPos(detailMeta(d)) } catch { pos = '' }
+  return pos || orderPos(d, di)
+}
 
 /** Строки списка деталей листа: [{ no, di, len, wid, qty, nl, nw }] и номер позиции по детали */
 function sheetRows(sheet, details) {
   const cnt = new Map()
   for (const p of sheet.placed) cnt.set(p.detailIndex, (cnt.get(p.detailIndex) || 0) + 1)
-  const rows = [...cnt].map(([di, qty]) => [di, qty, orderPos(details[di], di)]).sort((a, b) => a[2] - b[2] || a[0] - b[0]).map(([di, qty, no]) => {
+  const rows = [...cnt].map(([di, qty]) => [di, qty, partNo(details[di], di), orderPos(details[di], di)]).sort((a, b) => (Number(a[2]) - Number(b[2])) || String(a[2]).localeCompare(String(b[2]), 'ru', { numeric: true }) || a[3] - b[3] || a[0] - b[0]).map(([di, qty, no]) => {
     const d = details[di] || {}, raw = rawDetail(d)
     return { no, di, len: fmt(d.length), wid: fmt(d.width), qty, cut: !!d._cut,
       nl: (on(raw.edge_left) ? 1 : 0) + (on(raw.edge_right) ? 1 : 0), nw: (on(raw.edge_top) ? 1 : 0) + (on(raw.edge_bottom) ? 1 : 0) }
