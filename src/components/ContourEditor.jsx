@@ -820,6 +820,36 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
       }
       onZoomChangeRef.current && onZoomChangeRef.current(nz)
     }
+    // Компьютер: Ctrl + колесо мыши (или щипок на тачпаде — браузер шлёт его так же) — приблизить / отдалить вокруг
+    // курсора, как в превью карт раскроя. Обычное колесо — прокрутка, Shift + колесо — вбок.
+    let pend = null, pendAt = 0
+    const onWheel = e => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const wrap = wrapRef.current, canvas = ref.current
+      if (!wrap || !canvas) return
+      e.preventDefault()
+      const cur = pend != null && Date.now() - pendAt < 400 ? pend : zoomRef.current
+      const k = Math.exp(-Math.max(-60, Math.min(60, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY)) * 0.0045)
+      const nz = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, cur * k))
+      if (Math.abs(nz - cur) < 0.001) return
+      const r = wrap.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top
+      const cw = canvas.offsetWidth || 1, ch = canvas.offsetHeight || 1
+      // точка под курсором — в долях картинки; после перерисовки она снова окажется под курсором
+      const fx = (wrap.scrollLeft + mx - (parseFloat(canvas.style.marginLeft) || 0)) / cw
+      const fy = (wrap.scrollTop + my - (parseFloat(canvas.style.marginTop) || 0)) / ch
+      if (!zoomAnchorRef.current) zoomAnchorRef.current = { fracX: fx, fracY: fy, midX: mx, midY: my, clear: true }
+      pend = nz; pendAt = Date.now()
+      onZoomChangeRef.current && onZoomChangeRef.current(nz)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    // средняя кнопка мыши (колесо) зажата — двигаем деталь в окне, как рукой
+    let pan = null
+    const onDown = e => { if (e.button !== 1) return; e.preventDefault(); const w = wrapRef.current; pan = { x: e.clientX, y: e.clientY, sl: w.scrollLeft, st: w.scrollTop }; w.style.cursor = 'grabbing' }
+    const onMoveM = e => { if (!pan) return; const w = wrapRef.current; w.scrollLeft = pan.sl - (e.clientX - pan.x); w.scrollTop = pan.st - (e.clientY - pan.y) }
+    const onUp = () => { if (!pan) return; pan = null; if (wrapRef.current) wrapRef.current.style.cursor = '' }
+    el.addEventListener('mousedown', onDown)
+    window.addEventListener('mousemove', onMoveM)
+    window.addEventListener('mouseup', onUp)
     const noGesture = e => e.preventDefault()               // iPhone: собственное увеличение страницы поверх превью не нужно
     el.addEventListener('touchstart', onStart, { passive: false })
     el.addEventListener('touchmove', onMove, { passive: false })
@@ -828,6 +858,10 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     el.addEventListener('gesturestart', noGesture)
     el.addEventListener('gesturechange', noGesture)
     return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMoveM)
+      window.removeEventListener('mouseup', onUp)
       el.removeEventListener('gesturestart', noGesture)
       el.removeEventListener('gesturechange', noGesture)
       el.removeEventListener('touchstart', onStart)
@@ -2745,7 +2779,7 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
         <>
           {/* Подсказка pinch-zoom — масштабируется только сама деталь в превью, щипком двух пальцев */}
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6, gap:6 }}>
-            <span style={{ fontSize:10, color:'var(--text-hint)', flex:1 }}>🤏 Щипок двумя пальцами — масштаб</span>
+            <span style={{ fontSize:10, color:'var(--text-hint)', flex:1 }}>{isDesktop() ? '🖱 Ctrl + колесо — масштаб у курсора, средняя кнопка — двигать' : '🤏 Щипок двумя пальцами — масштаб'}</span>
             <button type="button" onClick={toggleEdgeMode}
               title="Кромить: нажимайте на отрезки, дуги и скругления контура прямо на детали"
               style={{ fontSize:12, fontWeight:500, padding:'5px 12px', border: edgeMode ? '1.5px solid #2FA84F' : '0.5px solid #2FA84F',
