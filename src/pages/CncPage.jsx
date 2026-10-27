@@ -138,7 +138,10 @@ export default function CncPage() {
   }, [layers, rview])
 
   // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
-  const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName })
+  // галочка «Имена латиницей» станка, которым выпускается программа (пила или фрезер): выключена — названия программ,
+  // архива, PDF карт и папок на языке заказа, как он назван
+  const mainLatin = (beamMat && saw ? saw : post)?.dirLatin !== false
+  const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName, latin: mainLatin })
   const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для бирок
   const fileBase = kind => fileNameOf(kind, fileNamesOf(user)[kind], nameCtx(null))
   // имя архива «Сохранить все файлы» — конструктор прямо здесь, над папками (та же настройка аккаунта, что в «Имена файлов»)
@@ -146,7 +149,7 @@ export default function CncPage() {
   const [zipEdit, setZipEdit] = useState(false)
   const changeZipTpl = v => { setZipTpl(v); saveUserSettings({ fileNames: { ...fileNamesOf(user), zip: v } }, user) }   // имена PDF карт и архивов — по настройке аккаунта («Имена файлов»)
   const fileName = si => `${programName(post.nameTpl, nameCtx(si + 1))}.${post.ext || 'nc'}`
-  const beamName = () => `${programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', nameCtx(null))}.${saw?.ext || 'xml'}`
+  const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', nameCtx(null))).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
   const build = () => {
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     if (beamMat && saw) return buildBeam()
@@ -159,7 +162,7 @@ export default function CncPage() {
     const second = r2 ? { post: r2, files: sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: r2.id } })
-      return { second: true, si, name: `${programName(r2.nameTpl, nameCtx(si + 1))}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
+      return { second: true, si, name: `${programName(r2.nameTpl, { ...nameCtx(si + 1), latin: r2.dirLatin !== false })}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
     }) } : null
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
     const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
@@ -181,7 +184,7 @@ export default function CncPage() {
       buildLabelFiles({ order, mat: m, base: baseName(), post: machine, tpl: labelTpl, sheets, ...beamOpts }),
       table ? Promise.resolve(null) : buildLabelsPdf({ order, mat: m, tpl: labelTpl, ...beamOpts }).catch(() => null),
     ])
-      .then(([labels, pdf]) => setBuilt(b => (b && b.files === files ? { ...b, labels: pdf ? [...labels, { name: `Birki_${baseName()}.pdf`, data: pdf }] : labels, labelsOwnDir: !table } : b)))
+      .then(([labels, pdf]) => setBuilt(b => (b && b.files === files ? { ...b, labels: pdf ? [...labels, { name: `${mainLatin ? 'Birki' : 'Бирки'}_${baseName()}.pdf`, data: pdf }] : labels, labelsOwnDir: !table } : b)))
       .catch(() => {})
       .finally(() => setLabelBusy(false))
   }
@@ -402,7 +405,7 @@ export default function CncPage() {
                     return (
                       <div key={'i' + p.id} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '6px 0 6px', lineHeight: 1.5 }}>
                         <div>Файлы: <b>.{latinExt(p.ext || 'XML')}</b> — по файлу на деталь; имя = код QR бирки, например <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{example || '—'}.{latinExt(p.ext || 'XML')}</b></div>
-                        <DirPathEditor value={p.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={pathOf(p.dirPath ?? DRILL_DIR_DEFAULT, p)} onChange={v => setPostPath(p.id, v)} latin={p.dirLatin !== false} onLatin={v => setPostLatin(p.id, v)} />
+                        <DirPathEditor value={p.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={pathOf(p.dirPath ?? DRILL_DIR_DEFAULT, p)} onChange={v => setPostPath(p.id, v)} latin={p.dirLatin !== false} onLatin={v => setPostLatin(p.id, v)} latinLabel="Имена папок латиницей" />
                       </div>
                     )
                   })}
@@ -554,7 +557,7 @@ export default function CncPage() {
                   ? <>Файлов: {built.labels.length} — картинки бирок, бирки по листам, список листов и PDF всех бирок для печати. Папка: <b style={{ fontFamily: 'monospace' }}>{labelsDir().join(' / ')}</b>.</>
                   : <>Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт маркировка, затем раскрой.</>}
               </div>
-              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `Birki_${fileBase('zip')}.zip`, ...(built.beam ? { folders: routerDir() } : built.labelsOwnDir ? { folders: labelsDir() } : {}) })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
+              <button type="button" onClick={() => setSaveAsk({ files: labelFiles(), zipName: `${mainLatin ? 'Birki' : 'Бирки'}_${fileBase('zip')}.zip`, ...(built.beam ? { folders: routerDir() } : built.labelsOwnDir ? { folders: labelsDir() } : {}) })} style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы маркировки</button>
             </div>
           )}
           {built?.drill?.map(r => (

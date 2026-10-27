@@ -9,7 +9,7 @@ export const routerDirDefault = (post, withDrills) => `${post?.folderTpl || '{ZA
 const DIR_PARTS = [['{ZAKAZ}', 'заказ'], ['{NOMER}', 'номер'], ['{MAT}', 'материал'], ['{T}', 'толщина'], ['{DATA}', 'дата'], ['{KLIENT}', 'клиент'], ['{LISTOV}', 'листов']]
 // Конструктор папок выгрузки: уровни вложенности (матрёшка), у каждого уровня — части имени и свой текст
 // latin — имена папок латиницей (по умолчанию да); выключено — на языке заказа. onLatin — галочка (без него не показывается)
-export default function DirPathEditor({ value, def, preview, onChange, latin = true, onLatin }) {
+export default function DirPathEditor({ value, def, preview, onChange, latin = true, onLatin, latinLabel = 'Имена папок и файлов латиницей' }) {
   const levels = String(value || '').split('/')
   const [cur, setCur] = useState(Math.max(0, levels.length - 1))
   const k = Math.min(cur, levels.length - 1)
@@ -45,10 +45,10 @@ export default function DirPathEditor({ value, def, preview, onChange, latin = t
       {onLatin && (
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginTop: 5, cursor: 'pointer' }}>
           <input type="checkbox" checked={latin} onChange={e => onLatin(e.target.checked)} style={{ width: 16, height: 16 }} />
-          Имена папок латиницей
+          {latinLabel}
         </label>
       )}
-      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 2 }}>Части вставляются в выделенную папку туда, где стоял курсор; свой текст — прямо в поле. {latin ? 'Имена — латиницей.' : 'Имена — на языке заказа, как он назван.'}</div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 2 }}>Части вставляются в выделенную папку туда, где стоял курсор; свой текст — прямо в поле. {latin ? 'Имена — латиницей.' : 'Имена — на языке заказа, как он назван (без перевода в латиницу).'}</div>
     </div>
   )
 }

@@ -270,8 +270,8 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           <TplInput value={post.nameTpl || NAME_TPL_DEFAULT} def={NAME_TPL_DEFAULT} parts={NAME_PARTS} onChange={v => set({ nameTpl: v })} />
           <Hint>
             Части в фигурных скобках подставляются сами, между ними можно писать свой текст. Получится, например:{' '}
-            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' })}.{post.ext || 'nc'}</b>.
-            Название всегда латиницей; номер листа обязателен — если его убрать, он встанет в начало.
+            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат', latin: post.dirLatin !== false })}.{post.ext || 'nc'}</b>.
+            {post.dirLatin !== false ? 'Название латиницей' : 'Название на языке заказа'} (галочка «Имена папок и файлов латиницей» ниже); номер листа обязателен — если его убрать, он встанет в начало.
           </Hint>
         </div>
         {/* название папки заказа — тот же конструктор */}
@@ -289,7 +289,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           </div>
           <Hint>
             В эту папку складываются программы и файлы бирок заказа, внутри — папка материала. Получится, например:{' '}
-            <b style={{ fontFamily: 'monospace' }}>{folderName(post.folderTpl, { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' })}</b>.
+            <b style={{ fontFamily: 'monospace' }}>{folderName(post.folderTpl, { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат', latin: post.dirLatin !== false })}</b>.
             Имя клиента берётся из заказа; если его нет — эта часть пропускается.
           </Hint>
         </div>
@@ -327,7 +327,7 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
       <div style={{ marginTop: 10 }}>
         <label className="label">Название программы</label>
         <TplInput value={post.nameTpl || BEAM_NAME_DEFAULT} def={BEAM_NAME_DEFAULT} parts={NAME_PARTS.filter(([code]) => code !== '{N}')} onChange={v => set({ nameTpl: v })} />
-        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null })}.{post.ext || 'xml'}</b> — латиницей, один файл на материал.</Hint>
+        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null, latin: post.dirLatin !== false })}.{post.ext || 'xml'}</b> — {post.dirLatin !== false ? 'латиницей' : 'на языке заказа'}, один файл на материал. Латиница или нет — галочка под папками.</Hint>
       </div>
       <div style={{ marginTop: 10 }}>
         <label className="label">📁 Папки для программы пилы</label>
@@ -415,7 +415,7 @@ function Drill6Basic({ post, set, router }) {
         )}
         <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
           <label className="label">📁 Папки для программ присадки{<span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', whiteSpace: 'nowrap', fontWeight: 500 }}>шестисторонний · .{post.ext || 'XML'}</span>}</label>
-          <DirPathEditor value={post.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={dirPreview(post.dirPath ?? DRILL_DIR_DEFAULT, post.dirLatin !== false)} onChange={x => set({ dirPath: x })} latin={post.dirLatin !== false} onLatin={x => set({ dirLatin: x })} />
+          <DirPathEditor value={post.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={dirPreview(post.dirPath ?? DRILL_DIR_DEFAULT, post.dirLatin !== false)} onChange={x => set({ dirPath: x })} latin={post.dirLatin !== false} onLatin={x => set({ dirLatin: x })} latinLabel="Имена папок латиницей" />
           <Hint>Куда складываются XML-файлы при сохранении (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
         </div>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
