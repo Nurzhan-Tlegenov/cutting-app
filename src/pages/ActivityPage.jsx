@@ -46,13 +46,14 @@ export default function ActivityPage() {
         if (u.production_name) p.prods.push(u.production_name)
         p.received = n(p.received) + n(u.received); p.done = n(p.done) + n(u.done)
       }
-      setRows([...by.values()].map(u => ({ ...u, score: scoreOf(u), status: statusOf(u), seen: lastSeenOf(u) })))
+      const now = Date.now()
+      setRows([...by.values()].map(u => { const seen = lastSeenOf(u); return { ...u, score: scoreOf(u), status: statusOf(u), seen, ago: seen ? now - new Date(seen).getTime() : null } }))
     })
     return () => { alive = false }
   }, [days])
 
   // заходил за выбранный период (1 день — последние 24 часа)
-  const inPeriod = u => !days || (u.seen && Date.now() - new Date(u.seen).getTime() <= days * 86400000)
+  const inPeriod = u => !days || (u.ago != null && u.ago <= days * 86400000)
   const counts = useMemo(() => {
     const c = { active: 0, rare: 0, sleep: 0, never: 0 }
     for (const u of rows || []) c[u.status]++
