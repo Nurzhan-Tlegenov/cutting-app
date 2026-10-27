@@ -2,6 +2,7 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 // Чтение моделей лежит в основной части приложения, а не подгружается отдельно: после обновления приложения
 // у открытой страницы адреса подгружаемых частей устаревают, и импорт падал с «Failed to fetch dynamically imported module».
 import { readBasisFile, packScene } from '../lib/basisB3d'
+import { readDxfFile, isDxfText } from '../lib/dxfImport'
 import { readAstraFile } from '../lib/astraAdd'
 import { isK3File, readK3File } from '../lib/k3Mdb'
 import { readAstraXmlFile, looksLikeAstraXml } from '../lib/astraXml'
@@ -52,6 +53,8 @@ const SOURCES = [
     hint: 'Выберите модель, сохранённую из PRO100 в формате OBJ (Файл → Экспорт) — возьмём панели с размерами и 3D-модель; названия, кромку и присадку нужно будет добавить в приложении. Подойдёт и отчёт со списком деталей в Excel или CSV.' },
   { id: 'sketchup', icon: '🏠', label: 'SketchUp',
     hint: 'Выберите модель SketchUp (.skp, версия 2021 и новее), собранную мебельным плагином, — возьмём панели с названием, размером, материалом, кромкой по сторонам, направлением текстуры и присадкой, а фурнитуру (штанги, ручки, петли) — в 3D.' },
+  { id: 'dxf', icon: '📏', label: 'DXF',
+    hint: 'Выберите чертёж DXF — каждый замкнутый внешний контур станет деталью, а всё внутри него — её обработкой по слоям: вырезы, отверстия D<диаметр>_Z<глубина>, пазы PAZ, выемки, отверстия в торец TOREC, кромка — как в нашем экспорте DXF.' },
   { id: 'sketchcut', icon: '📄', label: 'SketchCut',
     hint: 'Выберите PDF, сохранённый из SketchCut, — возьмём детали из таблицы «Детали» и кромку: чёрточки под размером показывают, на скольких сторонах она стоит (одна — на одной, две — на обеих).' },
 ]
@@ -60,9 +63,13 @@ const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocume
 const ALL = '__all__'
 
 // Файл модели: Базис (.b3d, 'BZ…'), Астра (.add, составной файл OLE2), К3-Мебель (.mdb), PRO100 (.obj). Иначе — null (это таблица).
-async function readModelFile(file, faceRule, marks = null) {
+async function readModelFile(file, faceRule, marks = null, thickness = 16) {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
   const lower = file.name.toLowerCase()
+  // DXF: текстовый чертёж («0 / SECTION») или .dxf
+  if (lower.endsWith('.dxf') || isDxfText(new TextDecoder('latin1').decode(new Uint8Array(await file.slice(0, 64).arrayBuffer())))) {
+    return { src: 'dxf', res: await readDxfFile(file, { thickness }) }
+  }
   // PDF из SketchCut ('%PDF')
   if ((head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) || lower.endsWith('.pdf')) {
     return { src: 'sketchcut', res: await readSketchCutPdf(file) }
@@ -100,7 +107,7 @@ async function readModelFile(file, faceRule, marks = null) {
 const cellText = v => (v == null ? '' : String(v))
 const groupLabel = g => `${g.material || 'Без материала'}${g.thickness ? ` · ${g.thickness} мм` : ''}`
 
-export default function ImportDetails({ hasDetails, onImport, existing = null }) {
+export default function ImportDetails({ hasDetails, onImport, existing = null, thickness = 16 }) {
   const fileRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
@@ -168,7 +175,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null })
       const lower = file.name.toLowerCase()
       const rule = savedFaceOrder(getUserSettings(user).basisFaceOrder || getUserSettings(user).basisFaceRule || faceRule)
       setMarks({ markOff: [], markOn: [] })
-      const model = await readModelFile(file, rule)
+      const model = await readModelFile(file, rule, null, Number(thickness) || 16)
       if (model) {
         const { res } = model
         setFaceRule(rule)
@@ -579,7 +586,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null })
                 у каждой кромки из номенклатуры К3 взяты толщина, подрезка и прифуговка — после импорта проверьте их в видах кромки бланка: размер пила считается по ним.
               </div>
             )}
-            {basis && !basis.bare && !basis.skp && !basis.pdf && (
+            {basis && !basis.bare && !basis.skp && !basis.pdf && !basis.dxf && (
               <div style={{ marginBottom: 12 }}>
                 <label className="label">Лицевая сторона детали (смотрит вверх на станке) — по приоритету</label>
                 {faceRule.map((k, i) => {
@@ -603,6 +610,28 @@ export default function ImportDetails({ hasDetails, onImport, existing = null })
                   Обработка с изнанки не теряется: она остаётся в детали и видна в редакторе контура, там же деталь можно перевернуть.
                   {chosen.length > 0 && ` Деталей с обработкой с двух сторон: ${chosen.filter(it => it.info?.back > 0).length}.`}
                 </p>
+              </div>
+            )}
+
+            {/* DXF: какой слой как понят */}
+            {basis?.dxf && (
+              <div style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                <div style={{ fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>Деталей: {basis.dxf.pieces} шт. · слои чертежа:</div>
+                {basis.dxf.layers.map(l => (
+                  <div key={l.name} style={{ display: 'flex', gap: 8 }}>
+                    <span style={{ fontFamily: 'monospace', color: 'var(--text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%' }}>{l.name}</span>
+                    <span>— {l.title}{l.count ? ` (${l.count})` : ''}</span>
+                  </div>
+                ))}
+                <div style={{ color: 'var(--text-hint)', marginTop: 4 }}>
+                  Толщина для глубины отверстий и выемок — {basis.dxf.T} мм (из заказа): глубина Z не меньше толщины — насквозь. Инструменты под эти слои задаются в ЧПУ → «Обработка» (пазы, выемки и отверстия — по размеру и глубине).
+                </div>
+                {(basis.dxf.open > 0 || basis.dxf.lost > 0) && (
+                  <div style={{ color: 'var(--amber)', marginTop: 4 }}>
+                    {basis.dxf.open > 0 && <div>· незамкнутых контуров обработки: {basis.dxf.open} — не взяты</div>}
+                    {basis.dxf.lost > 0 && <div>· обработка вне деталей: {basis.dxf.lost} — не взята</div>}
+                  </div>
+                )}
               </div>
             )}
 
@@ -672,7 +701,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null })
                 Фрезеровка фасадов (скругление кромки, V-паз, выемка): {sumInfo('decor')} — показывается объёмно в 3D, на раскрой и присадку не влияет. Типы фрез добавятся в Профиль → Фасадные фрезы.
               </div>
             )}
-            {basis && !basis.scene && !basis.pdf && (
+            {basis && !basis.scene && !basis.pdf && !basis.dxf && (
               <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
                 В XML нет положения деталей в изделии — 3D-модели по этому файлу не будет. Для 3D импортируйте файл проекта (.add).
               </div>

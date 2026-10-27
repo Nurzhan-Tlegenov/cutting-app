@@ -689,6 +689,7 @@ export default function NewOrderPage() {
       <ImportDetails
         hasDetails={details.some(d => Number(d.w) > 0 || Number(d.h) > 0)}
         existing={details}
+        thickness={Number(materialThickness) || 16}
         onImport={handleImport} />
       </div>
 
