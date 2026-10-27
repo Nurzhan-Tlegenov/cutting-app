@@ -1,4 +1,4 @@
-import { LABEL_POS, getLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
+import { LABEL_POS, getLabelTpl, saveLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
 import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
@@ -20,6 +20,20 @@ const r1 = v => String(Math.round(num(v) * 10) / 10)
 // как будут называться папки выгрузки — на примере заказа
 const DIR_EXAMPLE = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
 const dirPreview = (tpl, latin = true) => String(tpl || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, { ...DIR_EXAMPLE, latin })).filter(Boolean)
+
+// Вторая галочка: имена файлов управляющих программ латиницей (по умолчанию да). Сняли — имя на языке заказа;
+// прочитает ли его стойка станка — на ответственности пользователя
+function ProgLatin({ on, onChange }) {
+  return (
+    <>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={on} onChange={e => onChange(e.target.checked)} style={{ width: 18, height: 18 }} />
+        Файлы программ — латиницей
+      </label>
+      {!on && <div style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 2 }}>Имена программ — на языке заказа. Не все станки читают такие имена: проверьте на своём станке.</div>}
+    </>
+  )
+}
 
 function Num({ label, value, onChange, unit, hint }) {
   return (
@@ -270,9 +284,10 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           <TplInput value={post.nameTpl || NAME_TPL_DEFAULT} def={NAME_TPL_DEFAULT} parts={NAME_PARTS} onChange={v => set({ nameTpl: v })} />
           <Hint>
             Части в фигурных скобках подставляются сами, между ними можно писать свой текст. Получится, например:{' '}
-            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' })}.{post.ext || 'nc'}</b>.
-            Название всегда латиницей; номер листа обязателен — если его убрать, он встанет в начало.
+            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат', latin: post.progLatin !== false })}.{post.ext || 'nc'}</b>.
+            Номер листа обязателен — если его убрать, он встанет в начало.
           </Hint>
+          <ProgLatin on={post.progLatin !== false} onChange={v => set({ progLatin: v })} />
         </div>
         {/* название папки заказа — тот же конструктор */}
         <div style={{ marginTop: 10 }}>
@@ -327,7 +342,8 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
       <div style={{ marginTop: 10 }}>
         <label className="label">Название программы</label>
         <TplInput value={post.nameTpl || BEAM_NAME_DEFAULT} def={BEAM_NAME_DEFAULT} parts={NAME_PARTS.filter(([code]) => code !== '{N}')} onChange={v => set({ nameTpl: v })} />
-        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null })}.{post.ext || 'xml'}</b> — всегда латиницей, один файл на материал.</Hint>
+        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null, latin: post.progLatin !== false })}.{post.ext || 'xml'}</b> — один файл на материал.</Hint>
+        <ProgLatin on={post.progLatin !== false} onChange={v => set({ progLatin: v })} />
       </div>
       <div style={{ marginTop: 10 }}>
         <label className="label">📁 Папки для программы пилы</label>
@@ -368,6 +384,7 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
 function Drill6Basic({ post, set, router }) {
   const { user } = useAuth()
   // код с бирки: что в нём сейчас (шаблон бирок аккаунта)
+  const [, bump] = useState(0)
   const ltpl = getLabelTpl(user)
   const noLink = q => ({ ...q, parts: (q.parts || []).filter(k => k !== 'link'), ...(typeof q.tpl === 'string' ? { tpl: q.tpl.replace(/\{SSYLKA(:-?\d+)?\}/g, '') } : {}) })
   const labelQrSet = noLink({ ...D6_QR_DEFAULT, ...ltpl.qr })
@@ -403,7 +420,7 @@ function Drill6Basic({ post, set, router }) {
             Все программы присадки выпускаются с именем, которое зашито в QR-код бирки: на станке бирку сканируют — и открывается программа этой детали.
             <span style={{ display: 'block', marginTop: 4 }}>Сейчас в QR бирки: <b>{labelQrParts || '— ничего не выбрано —'}</b>{labelQrSet.latin ? ', латиницей' : ''}. Например: <b style={{ fontFamily: 'monospace' }}>{example(labelQrSet)}.{post.ext || 'XML'}</b></span>
             {!labelHasQr && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>На бирке сейчас нет QR-кода — добавьте его в шаблоне бирок, иначе сканировать будет нечего.</span>}
-            {!labelQrSet.latin && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>По спецификации станка код — только латиница и цифры: в шаблоне бирок включите «Перевести в латиницу».</span>}
+            <span style={{ display: 'block', marginTop: 4, color: 'var(--text-hint)' }}>Имя файла и QR бирки всегда совпадают: галочка «Файлы программ — латиницей» ниже меняет и код в QR-коде бирки.</span>
             {!(typeof labelQrSet.tpl === 'string' && labelQrSet.tpl.trim() ? /\{(OBOZ|POZ|NOM)(:-?\d+)?\}/.test(labelQrSet.tpl) : (labelQrSet.parts || []).some(k => k === 'des' || k === 'pos' || k === 'num')) && <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>В коде нет обозначения детали — у разных деталей он совпадёт. Добавьте в QR бирки «Обозначение детали».</span>}
             <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Код меняется в шаблоне бирок (заказ → Бирки → «Что зашито в QR-код»). Файл выпускается на каждую деталь с биркой.</span>
           </div>
@@ -413,6 +430,9 @@ function Drill6Basic({ post, set, router }) {
             <QrPartsEditor value={post.d6Qr || D6_QR_DEFAULT} exclude={['link']} onChange={v => set({ d6Qr: v })} preview={`${example(post.d6Qr || D6_QR_DEFAULT)}.${post.ext || 'XML'}`} />
           </div>
         )}
+        {post.d6Name !== 'own'
+          ? <ProgLatin on={!!labelQrSet.latin} onChange={v => { saveLabelTpl({ ...ltpl, qr: { ...(ltpl.qr || {}), latin: v } }, user); bump(x => x + 1) }} />
+          : <ProgLatin on={(post.d6Qr || D6_QR_DEFAULT).latin !== false} onChange={v => set({ d6Qr: { ...(post.d6Qr || D6_QR_DEFAULT), latin: v } })} />}
         <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
           <label className="label">📁 Папки для программ присадки{<span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', whiteSpace: 'nowrap', fontWeight: 500 }}>шестисторонний · .{post.ext || 'XML'}</span>}</label>
           <DirPathEditor value={post.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={dirPreview(post.dirPath ?? DRILL_DIR_DEFAULT, post.dirLatin !== false)} onChange={x => set({ dirPath: x })} latin={post.dirLatin !== false} onLatin={x => set({ dirLatin: x })} latinLabel="Имена папок латиницей" />

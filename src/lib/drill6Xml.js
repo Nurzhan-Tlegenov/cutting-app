@@ -731,7 +731,7 @@ export function buildDrill6Files({ mat, order, post = {}, labelTpl, makeCode }) 
     if (!code) { code = `L${si + 1}_N${pi + 1}`; warnings.add('код детали пуст — выберите части кода (QR бирки или своё имя файла); пока имя: L<лист>_N<деталь>') }
     if (BAD_CHARS.test(code)) { code = code.replace(BAD_CHARS, '-'); warnings.add('в коде есть символы, недопустимые в имени файла (\\ / : * ? " < > |) — заменены на «-», имя файла не совпадёт с кодом на бирке; уберите их из кода') }
     BAD_CHARS.lastIndex = 0
-    if (/[^\x20-\x7E]/.test(code)) warnings.add('в коде есть не латинские буквы — по спецификации станка код только из латиницы и цифр: включите «Перевести в латиницу»')
+    if (q.latin !== false && /[^\x20-\x7E]/.test(code)) warnings.add('в коде есть не латинские буквы — по спецификации станка код только из латиницы и цифр: включите «Перевести в латиницу»')
     const was = byCode.get(code)
     if (was === di) return                                // та же деталь с тем же кодом — один файл
     if (was != null) {

@@ -148,9 +148,9 @@ export default function CncPage() {
   const [zipTpl, setZipTpl] = useState(() => fileNamesOf(user).zip)
   const [zipEdit, setZipEdit] = useState(false)
   const changeZipTpl = v => { setZipTpl(v); saveUserSettings({ fileNames: { ...fileNamesOf(user), zip: v } }, user) }   // имена PDF карт и архивов — по настройке аккаунта («Имена файлов»)
-  // управляющие программы — всегда латиницей (стойки станков кириллицу в именах файлов не читают)
-  const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: true })}.${post.ext || 'nc'}`
-  const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: true })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
+  // управляющие программы — латиницей, если у станка не снята галочка «Файлы программ — латиницей» (progLatin)
+  const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: post.progLatin !== false })}.${post.ext || 'nc'}`
+  const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: saw?.progLatin !== false })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
   const build = () => {
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     if (beamMat && saw) return buildBeam()
@@ -163,7 +163,7 @@ export default function CncPage() {
     const second = r2 ? { post: r2, files: sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: r2.id } })
-      return { second: true, si, name: `${programName(r2.nameTpl, { ...nameCtx(si + 1), latin: true })}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
+      return { second: true, si, name: `${programName(r2.nameTpl, { ...nameCtx(si + 1), latin: r2.progLatin !== false })}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
     }) } : null
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
     const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
