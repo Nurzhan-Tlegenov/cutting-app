@@ -65,6 +65,15 @@ function parseTree(u8, start, skipKeys) {
       case 8: break
       default: throw new Error('Неизвестный тип данных в файле (' + t + ')')
     }
+    // У значения тоже бывают вложенные узлы: n — их число (материал «Mtr → Scheme → Prop → Value» в свежих версиях Базиса).
+    // Раньше они не читались: разбор сбивался, дерево обрывалось раньше конца файла — и пропадала часть модели
+    // (например, весь нижний слой). Читаем их всегда, а у значения сохраняем как c.
+    if (n > 0) {
+      const b = build && !skipKeys.has(key)
+      const c = b ? [] : null
+      for (let i = 0; i < n; i++) { const ch = node(b); if (b) c.push(ch) }
+      return b ? { k: key, v, c } : null
+    }
     return build ? { k: key, v } : null
   }
   const root = node(true)
@@ -554,7 +563,7 @@ function basisSrc(panel) {
 // «Скрытые фасады» (так показывать модель), OldName / PF (прежнее имя блока, префикс) — служебное, не свойства детали.
 // Слой детали уходит в meta.layer и на бирку как свойство «Слой»; служебные поля скрипта — не на бирку.
 const LAYER_KEY = /^(ownerlayer|layer|слой)$/i
-const LAYER_SERVICE = /^(tmplayer|activelayer|ownerlayer|layer|oldname|pf|скрытые фасады)$/i
+const LAYER_SERVICE = /^(tmplayer|activelayer|ownerlayer|layer|oldname|pf|скрытые фасады|режим x-ray)$/i
 function layerOf(user) {
   if (!user) return { user: null, layer: '' }
   const k = Object.keys(user).find(x => LAYER_KEY.test(x.trim()))
