@@ -6,6 +6,7 @@ export const LABEL_MODES = [
   ['des', 'Обозначение'],
   ['des_name', 'Обозначение + наименование'],
   ['pos', 'Позиция'],
+  ['pos_name', 'Позиция + наименование'],
   ['none', 'Без подписи'],
 ]
 
@@ -30,7 +31,9 @@ const userProp = (m, re) => {
   const k = Object.keys(u).find(x => re.test(String(x).trim()))
   return k ? String(u[k] ?? '').trim() : ''
 }
-export const metaPos = m => (m?.pos != null && String(m.pos).trim() ? String(m.pos).trim() : userProp(m, /^(позиц|поз\.?$|поз\b|pos\b|pos\.|position)/i))
+// У старых импортов Базиса в свойствах лежит служебное «Pos» (координата плоскости параметризации) — это не позиция
+export const metaPos = m => (m?.pos != null && String(m.pos).trim() ? String(m.pos).trim()
+  : userProp(m?.src === 'basis' ? { ...m, user: Object.fromEntries(Object.entries(m.user || {}).filter(([k]) => k !== 'Pos')) } : m, /^(позиц|поз\.?$|поз\b|pos\b|pos\.|position)/i))
 export const metaDes = m => (m?.des != null && String(m.des).trim() ? String(m.des).trim() : userProp(m, /^(обознач|designation)/i))
 
 /** Подпись уложенной детали p по выбранному режиму; short — префикс до 3 букв (для карты) */
@@ -49,5 +52,6 @@ export function partLabel(p, details, mode, short = false) {
   if (mode === 'des') return metaDes(m) || base
   if (mode === 'des_name') { const des = metaDes(m); return des ? `${des} ${name}` : base }
   if (mode === 'pos') return metaPos(m) || base
+  if (mode === 'pos_name') { const pos = metaPos(m); return pos ? `${pos} ${name}` : base }
   return base
 }

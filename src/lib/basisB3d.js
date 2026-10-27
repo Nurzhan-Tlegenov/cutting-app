@@ -19,6 +19,7 @@ import { inflateSync, gzipSync, gunzipSync, strToU8, strFromU8 } from 'fflate'
 const EPS = 0.05
 const TYPE_PANEL = 4002
 const TYPE_FASTENER = 3001
+const TYPE_LAYER = 1002       // слой Базиса (Верх, Низ, Помещение…): папка верхнего уровня, изделия — внутри
 const TYPE_PROFILE = 2004     // профиль/погонаж: сечение (Contour), вытянутое на длину (Thickness)
 
 // ---------- Дерево ----------
@@ -520,7 +521,10 @@ function basisSrc(panel) {
   const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
   const texDir = val(o, 'TexDir', 0)
   // свои свойства панели + унаследованные от блоков/изделия/модели; при одинаковом названии берётся ближайшее
-  const { user, layer } = layerOf((panel.ctx.user || userProps(o)) ? { ...(panel.ctx.user || {}), ...(userProps(o) || {}) } : null)
+  const lu = layerOf((panel.ctx.user || userProps(o)) ? { ...(panel.ctx.user || {}), ...(userProps(o) || {}) } : null)
+  // слой: настоящий слой Базиса (папка верхнего уровня) главнее свойства ownerLayer скрипта «Слои»
+  const layer = panel.ctx.layer || lu.layer
+  const user = panel.ctx.layer ? { ...(lu.user || {}), 'Слой': panel.ctx.layer } : lu.user
   // Лицевая сторона, назначенная конструктором в Базисе: поле есть, только если её задали вручную.
   // 0 — лицевая пласть «сверху» панели (Z = толщина, как без переворота), 1 — противоположная.
   const ff = val(o, 'FrontFace', null)
@@ -1222,12 +1226,23 @@ export function parseBasis(u8, opts = {}) {
   const I = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
   // свойства всей модели (Параметры модели → пользовательские) — у всех деталей
   const modelUser = userProps(kid(doc, 'ModelParams')) || null
-  for (const top of model.c) {
-    if (top.k !== 'Obj' || !top.c) continue
+  const kidsOf = o => (o.c || []).flatMap(c => (!c?.c ? [] : c.k === 'Obj' ? [c] : c.c)).filter(cc => cc?.c && cc.k === 'Obj' && kid(cc, 'Type'))
+  const walkTop = (top, M, layer) => {
     // изделие — только блок верхнего уровня; панель, лежащая прямо в модели, сама себе не изделие
     // (иначе её имя становится префиксом: «БОК» с префиксом «БОК» → на карте «БОК БОК»)
     const blk = val(top, 'Type') !== TYPE_PANEL
-    walk(top, I, { product: blk ? cleanName(val(top, 'Name')) : '', productDes: blk ? cleanName(val(top, 'Des')) : '', productPos: blk ? cleanName(val(top, 'ArtPos')) : '', path: [], depth: 0, user: modelUser })
+    walk(top, M, { product: blk ? cleanName(val(top, 'Name')) : '', productDes: blk ? cleanName(val(top, 'Des')) : '', productPos: blk ? cleanName(val(top, 'ArtPos')) : '', path: [], depth: 0, user: modelUser, layer })
+  }
+  for (const top of model.c) {
+    if (top.k !== 'Obj' || !top.c) continue
+    // Слой Базиса (тип 1002, «Верх», «Низ»…): сам он не изделие — изделия лежат внутри; имя слоя — у каждой детали (meta.layer).
+    // Раньше слой считался изделием, и у всех деталей префиксом стояло «Верх» / «Низ» вместо шкафа.
+    if (val(top, 'Type') === TYPE_LAYER) {
+      const Ml = mul(I, transOf(top)), lname = cleanName(val(top, 'Name'))
+      for (const k of kidsOf(top)) walkTop(k, Ml, lname)
+      continue
+    }
+    walkTop(top, I, '')
   }
 
   const srcs = panels.flatMap(p => { try { return glueLayers(p.obj, basisSrc(p)) } catch { return [null] } })

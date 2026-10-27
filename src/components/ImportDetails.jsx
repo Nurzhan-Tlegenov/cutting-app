@@ -100,7 +100,7 @@ async function readModelFile(file, faceRule, marks = null) {
 const cellText = v => (v == null ? '' : String(v))
 const groupLabel = g => `${g.material || 'Без материала'}${g.thickness ? ` · ${g.thickness} мм` : ''}`
 
-export default function ImportDetails({ hasDetails, onImport }) {
+export default function ImportDetails({ hasDetails, onImport, existing = null }) {
   const fileRef = useRef(null)
   const auth = useAuth()
   const user = auth?.user || null
@@ -174,7 +174,9 @@ export default function ImportDetails({ hasDetails, onImport }) {
         setFaceRule(rule)
         basisFileRef.current = file
         if (!res.items.length) throw new Error(res.pdf ? 'в файле нет деталей' : 'в модели нет панелей')
-        setFileName(file.name); setSource(SOURCES.find(x => x.id === model.src)); setMode('add')
+        setFileName(file.name); setSource(SOURCES.find(x => x.id === model.src))
+        // детали этой модели уже есть в заказе (импортировали раньше) — по умолчанию «Заменить», иначе они задвоятся
+        setMode(dupOf(res.items) ? 'replace' : 'add')
         setGroupKey(res.groups.length > 1 ? res.groups[0].key : ALL)
         setLayersOff(new Set())
         setSheets(null); setBasis(res)
@@ -200,6 +202,15 @@ export default function ImportDetails({ hasDetails, onImport }) {
     }
   }
 
+  // Сколько деталей модели уже есть в заказе: совпадение по ID панелей модели (meta.ids) — повторный импорт того же файла
+  const dupOf = items => {
+    const have = new Set()
+    for (const d of existing || []) for (const id of (d?.contour?.meta?.ids || [])) have.add(String(id))
+    if (!have.size) return 0
+    let n = 0
+    for (const it of items || []) if ((it.contour?.meta?.ids || []).some(id => have.has(String(id)))) n += it.qty || 1
+    return n
+  }
   const result = useMemo(
     () => (basis ? { items: basis.items, skipped: 0, groups: basis.groups }
       : sheets ? buildDetails(rows, headerRow, roles) : { items: [], skipped: 0, groups: [] }),
@@ -524,6 +535,13 @@ export default function ImportDetails({ hasDetails, onImport }) {
                   <button type="button" style={chip(mode === 'add')} onClick={() => setMode('add')}>Добавить к ним</button>
                   <button type="button" style={chip(mode === 'replace')} onClick={() => setMode('replace')}>Заменить</button>
                 </div>
+                {basis && dupOf(chosen) > 0 && (
+                  <div style={{ fontSize: 12, color: mode === 'add' ? 'var(--danger)' : 'var(--amber)', marginTop: 6 }}>
+                    {mode === 'add'
+                      ? `⚠ ${dupOf(chosen)} дет. из этой модели уже есть в заказе — «Добавить» задвоит их (одна и та же позиция будет несколько раз). Выберите «Заменить».`
+                      : `Эта модель уже импортировалась в заказ (${dupOf(chosen)} дет. совпадают) — детали заказа заменятся новыми, без задвоения.`}
+                  </div>
+                )}
               </div>
             )}
 

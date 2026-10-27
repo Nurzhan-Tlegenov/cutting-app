@@ -1,9 +1,10 @@
 // Сортировка списка деталей заказа. Работает и с деталями формы
 // ({ w, h, qty, name, contour }), и со строками order_details
 // ({ length, width, qty, name, contour — JSON-строка }).
-import { detailMeta } from './partLabel.js'
+import { detailMeta, metaPos } from './partLabel.js'
 
 export const SORT_MODES = [
+  ['pos', 'По позиции (из модели)'],
   ['des', 'По обозначению'],
   ['name', 'По наименованию'],
   ['length', 'По длине (крупные сверху)'],
@@ -17,9 +18,11 @@ const wid = d => Number(d.h ?? d.width) || 0
 
 export function sortDetails(list, mode) {
   const des = d => detailMeta(d)?.des || ''
+  const pos = d => metaPos(detailMeta(d)) || ''
   const name = d => String(d.name || '')
   const cmp = {
     // детали без обозначения (введённые вручную) — в конец, в прежнем порядке
+    pos: (a, b) => (!pos(a) - !pos(b)) || natural.compare(pos(a), pos(b)),
     des: (a, b) => (!des(a) - !des(b)) || natural.compare(des(a), des(b)),
     name: (a, b) => (!name(a) - !name(b)) || natural.compare(name(a), name(b)),
     length: (a, b) => len(b) - len(a) || wid(b) - wid(a),
