@@ -33,7 +33,7 @@ const userProp = (m, re) => {
 }
 // У старых импортов Базиса в свойствах лежит служебное «Pos» (координата плоскости параметризации) — это не позиция
 export const metaPos = m => (m?.pos != null && String(m.pos).trim() ? String(m.pos).trim()
-  : userProp(m?.src === 'basis' ? { ...m, user: Object.fromEntries(Object.entries(m.user || {}).filter(([k]) => k !== 'Pos')) } : m, /^(позиц|поз\.?$|поз\b|pos\b|pos\.|position)/i))
+  : userProp(m?.src === 'basis' ? { ...m, user: Object.fromEntries(Object.entries(m.user || {}).filter(([k]) => k !== 'Pos')) } : m, /^(поз|pos(?![a-z])|position)/i))   // «поз…» целиком: и «Позиция», и «Поз.», и с опечаткой «Позизиция детали»
 export const metaDes = m => (m?.des != null && String(m.des).trim() ? String(m.des).trim() : userProp(m, /^(обознач|designation)/i))
 
 /** Подпись уложенной детали p по выбранному режиму; short — префикс до 3 букв (для карты) */
