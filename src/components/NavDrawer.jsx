@@ -74,11 +74,11 @@ export default function NavDrawer({ notices, unread }) {
     document.documentElement.style.setProperty('--nav-pin-w', docked ? PIN_W + 'px' : '0px')
     // карты раскроя и превью меряют ширину при изменении окна — сообщаем, что места стало меньше / больше
     const t = setTimeout(() => window.dispatchEvent(new Event('resize')), 30)
-    if (docked) refresh()
     return () => clearTimeout(t)
   }, [docked])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => Promise.all([myWorkplaces(), myProduction(user?.id)]).then(([r, p]) => { cache = { wps: r.data || [], own: p || null }; setData(cache) })
+  useEffect(() => { if (docked) refresh() }, [docked])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const on = () => { setOpen(true); refresh() }
     window.addEventListener('nav-open', on)
