@@ -1,3 +1,4 @@
+import AppStopCard from '../components/AppStopCard'
 import { MenuButton } from '../components/NavDrawer'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
@@ -312,6 +313,7 @@ export default function UsersPage() {
         </div>
       ) : (
         <>
+          <AppStopCard />
           <div className="card" style={{ marginBottom: 12, border: open ? undefined : '1px solid var(--amber)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div style={{ flex: 1 }}>

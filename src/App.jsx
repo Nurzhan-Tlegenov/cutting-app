@@ -1,3 +1,4 @@
+import StopGate from './components/AppStop'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { Component, useEffect } from 'react'
 
@@ -149,14 +150,17 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ErrorBoundary>
-          <AppRoutes />
-          <PushBridge />
+          {/* остановка приложения мастер-аккаунтом: у остальных — заставка (AppStop.jsx) */}
+          <StopGate>
+            <AppRoutes />
+            <PushBridge />
+            <KeyboardNext />
+            <Watermark />
+            <TourOverlay />
+            <NewsPopup />
+          </StopGate>
           <UpdateWatcher />
           <OldDomain />
-          <KeyboardNext />
-          <Watermark />
-          <TourOverlay />
-          <NewsPopup />
         </ErrorBoundary>
       </AuthProvider>
     </BrowserRouter>
