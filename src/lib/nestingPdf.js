@@ -78,6 +78,30 @@ function text(ctx, s, x, y, { size = 3, bold = false, color = INK, align = 'left
   ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base
   ctx.fillText(s, mm(x), mm(y))
 }
+/** Заголовок страницы в шапке: в одну строку крупно; длинный (название заказа) — переносится по словам на вторую строку
+ *  шрифтом поменьше, с ровным отступом; ещё длиннее — мельче, а конец второй строки — «…». Линия под шапкой остаётся на месте:
+ *  разметка листа не сдвигается. sub — строка под заголовком (материал), её ширина — subMax. -> линия строки sub (для даты справа) */
+function headTitle(ctx, s, x, max, sub = '', subMax = max) {
+  const one = wrapLines(ctx, s, max, 5, true, 99)
+  if (one.length === 1) {
+    text(ctx, s, x, 14.5, { size: 5, bold: true })
+    if (sub) text(ctx, sub, x, 20.5, { size: 3.4, color: MUTED, max: subMax })
+    return 20.5
+  }
+  // чуть длиннее — та же одна строка шрифтом 4 мм
+  if (wrapLines(ctx, s, max, 4, true, 99).length === 1) {
+    text(ctx, s, x, 14.5, { size: 4, bold: true })
+    if (sub) text(ctx, sub, x, 20.5, { size: 3.4, color: MUTED, max: subMax })
+    return 20.5
+  }
+  // две строки: 4 мм, если влезает; иначе 3,4 мм и «…» в конце второй
+  const size = wrapLines(ctx, s, max, 4, true, 99).length <= 2 ? 4 : 3.4
+  const lines = wrapLines(ctx, s, max, size, true, 2)
+  const y0 = size === 4 ? 11.6 : 11.9, lh = size * 1.18
+  lines.forEach((ln, i) => text(ctx, ln, x, y0 + i * lh, { size, bold: true, max }))
+  if (sub) text(ctx, sub, x, 22.3, { size: 3, color: MUTED, max: subMax })
+  return 22.3
+}
 const rule = (ctx, x0, y0, x1, y1, w = 0.2, color = LINE) => { ctx.strokeStyle = color; ctx.lineWidth = mm(w); ctx.beginPath(); ctx.moveTo(mm(x0), mm(y0)); ctx.lineTo(mm(x1), mm(y1)); ctx.stroke() }
 
 const on = v => !!v && v !== 'false'
@@ -396,10 +420,13 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
     pageNo++
     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
     const tx = drawBrand(ctx) + 4
-    text(ctx, `Карта раскроя · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 150 - tx })
-    text(ctx, `${sheets[si].stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${cont ? ' (продолжение)' : ''}`, 200, 14.5, { size: 5, bold: true, align: 'right' })
-    text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
-    text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+    // «Лист N из M» — справа; заголовок занимает место до него
+    const sheetTxt = `${sheets[si].stock === 'offcut' ? 'Обрезок' : 'Лист'} ${si + 1} из ${sheets.length}${cont ? ' (продолжение)' : ''}`
+    ctx.font = `600 ${mm(5)}px Arial, Helvetica, sans-serif`
+    const sw = ctx.measureText(sheetTxt).width / K
+    text(ctx, sheetTxt, 200, 14.5, { size: 5, bold: true, align: 'right' })
+    const hy = headTitle(ctx, `Карта раскроя · ${orderTitle(order)}`, tx, 200 - sw - 6 - tx, matName, 150 - tx)
+    text(ctx, new Date().toLocaleDateString('ru-RU'), 200, hy, { size: 3, color: MUTED, align: 'right' })
     rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
     text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
     text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
@@ -601,9 +628,8 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
         pageNo++
         ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
         const tx = drawBrand(ctx) + 4
-        text(ctx, `Статистика листов · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
-        text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
-        text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+        const hy = headTitle(ctx, `Статистика листов · ${orderTitle(order)}`, tx, 190 - tx, matName, 150 - tx)
+        text(ctx, new Date().toLocaleDateString('ru-RU'), 200, hy, { size: 3, color: MUTED, align: 'right' })
         rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
         text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
         text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
@@ -653,9 +679,8 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
         pageNo++
         ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
         const tx = drawBrand(ctx) + 4
-        text(ctx, `Детали по листам · ${orderTitle(order)}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
-        text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
-        text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+        const hy = headTitle(ctx, `Детали по листам · ${orderTitle(order)}`, tx, 190 - tx, matName, 150 - tx)
+        text(ctx, new Date().toLocaleDateString('ru-RU'), 200, hy, { size: 3, color: MUTED, align: 'right' })
         rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
         for (const o of ops) {
           if (o.page !== pg) continue
@@ -698,9 +723,8 @@ function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo, partRows
   ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PW, PH)
   const tx = drawBrand(ctx) + 4
   const cont = state.sec > 0 || state.row > 0
-  text(ctx, `${L.title || 'Статистика раскроя'} · ${orderTitle(order)}${cont ? ' (продолжение)' : ''}`, tx, 14.5, { size: 5, bold: true, max: 190 - tx })
-  text(ctx, matName, tx, 20.5, { size: 3.4, color: MUTED, max: 150 - tx })
-  text(ctx, new Date().toLocaleDateString('ru-RU'), 200, 20.5, { size: 3, color: MUTED, align: 'right' })
+  const hy = headTitle(ctx, `${L.title || 'Статистика раскроя'} · ${orderTitle(order)}${cont ? ' (продолжение)' : ''}`, tx, 190 - tx, matName, 150 - tx)
+  text(ctx, new Date().toLocaleDateString('ru-RU'), 200, hy, { size: 3, color: MUTED, align: 'right' })
   rule(ctx, 10, 25.5, 200, 25.5, 0.35, INK)
   text(ctx, `Сформировано в приложении RaskroyPro · ${SITE}`, 10, 292.5, { size: 2.4, color: MUTED })
   text(ctx, `стр. ${pageNo}`, 200, 292.5, { size: 2.4, color: MUTED, align: 'right' })
