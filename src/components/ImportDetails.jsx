@@ -3,6 +3,7 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 // у открытой страницы адреса подгружаемых частей устаревают, и импорт падал с «Failed to fetch dynamically imported module».
 import { readBasisFile, packScene } from '../lib/basisB3d'
 import { readDxfFile, isDxfText } from '../lib/dxfImport'
+import DxfCheck from './DxfCheck'
 import { readAstraFile } from '../lib/astraAdd'
 import { isK3File, readK3File } from '../lib/k3Mdb'
 import { readAstraXmlFile, looksLikeAstraXml } from '../lib/astraXml'
@@ -63,12 +64,12 @@ const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocume
 const ALL = '__all__'
 
 // Файл модели: Базис (.b3d, 'BZ…'), Астра (.add, составной файл OLE2), К3-Мебель (.mdb), PRO100 (.obj). Иначе — null (это таблица).
-async function readModelFile(file, faceRule, marks = null, thickness = 16) {
+async function readModelFile(file, faceRule, marks = null, dxfOpts = {}) {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
   const lower = file.name.toLowerCase()
   // DXF: текстовый чертёж («0 / SECTION») или .dxf
   if (lower.endsWith('.dxf') || isDxfText(new TextDecoder('latin1').decode(new Uint8Array(await file.slice(0, 64).arrayBuffer())))) {
-    return { src: 'dxf', res: await readDxfFile(file, { thickness }) }
+    return { src: 'dxf', res: await readDxfFile(file, dxfOpts) }
   }
   // PDF из SketchCut ('%PDF')
   if ((head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46) || lower.endsWith('.pdf')) {
@@ -140,6 +141,20 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
   const [basis, setBasis] = useState(null)       // разобранная модель Базиса или Астры (вместо таблицы)
   // выемки по объектам-меткам Астры: выключенные метки и включённые кандидаты (объекты без названия «viemka»)
   const [marks, setMarks] = useState({ markOff: [], markOn: [] })
+  // DXF: допуск сшивания, замкнутые пользователем контуры, детали «не брать», масштаб единиц — пересчёт без нового выбора файла
+  const [dxfOpts, setDxfOpts] = useState({ snap: 0.5, close: [], skip: [], scale: 1 })
+  const rerunDxf = async next => {
+    const file = basisFileRef.current
+    if (!file) return
+    setBusy(true); setError('')
+    try {
+      const res = await readDxfFile(file, { thickness: Number(thickness) || 16, ...next })
+      setDxfOpts(next); setBasis(res)
+      if (next.snap !== dxfOpts.snap) saveUserSettings({ dxfSnap: next.snap }, user)
+    } catch (err) {
+      setError('Не удалось прочитать файл: ' + (err?.message || err))
+    } finally { setBusy(false) }
+  }
 
   const rows = useMemo(() => (sheets ? sheets[sheetIdx].rows : []), [sheets, sheetIdx])
 
@@ -175,12 +190,14 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
       const lower = file.name.toLowerCase()
       const rule = savedFaceOrder(getUserSettings(user).basisFaceOrder || getUserSettings(user).basisFaceRule || faceRule)
       setMarks({ markOff: [], markOn: [] })
-      const model = await readModelFile(file, rule, null, Number(thickness) || 16)
+      const dOpts = { snap: Number(getUserSettings(user).dxfSnap) || 0.5, close: [], skip: [], scale: 1 }
+      setDxfOpts(dOpts)
+      const model = await readModelFile(file, rule, null, { thickness: Number(thickness) || 16, ...dOpts })
       if (model) {
         const { res } = model
         setFaceRule(rule)
         basisFileRef.current = file
-        if (!res.items.length) throw new Error(res.pdf ? 'в файле нет деталей' : 'в модели нет панелей')
+        if (!res.items.length && !res.dxf?.problems?.length) throw new Error(res.pdf ? 'в файле нет деталей' : 'в модели нет панелей')
         setFileName(file.name); setSource(SOURCES.find(x => x.id === model.src))
         // детали этой модели уже есть в заказе (импортировали раньше) — по умолчанию «Заменить», иначе они задвоятся
         setMode(dupOf(res.items) ? 'replace' : 'add')
@@ -614,6 +631,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
             )}
 
             {/* DXF: какой слой как понят */}
+            {basis?.dxf && <DxfCheck dxf={basis.dxf} opts={dxfOpts} onOpts={rerunDxf} busy={busy} />}
             {basis?.dxf && (
               <div style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
                 <div style={{ fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>Деталей: {basis.dxf.pieces} шт. · слои чертежа:</div>
@@ -626,12 +644,6 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                 <div style={{ color: 'var(--text-hint)', marginTop: 4 }}>
                   Толщина для глубины отверстий и выемок — {basis.dxf.T} мм (из заказа): глубина Z не меньше толщины — насквозь. Инструменты под эти слои задаются в ЧПУ → «Обработка» (пазы, выемки и отверстия — по размеру и глубине).
                 </div>
-                {(basis.dxf.open > 0 || basis.dxf.lost > 0) && (
-                  <div style={{ color: 'var(--amber)', marginTop: 4 }}>
-                    {basis.dxf.open > 0 && <div>· незамкнутых контуров обработки: {basis.dxf.open} — не взяты</div>}
-                    {basis.dxf.lost > 0 && <div>· обработка вне деталей: {basis.dxf.lost} — не взята</div>}
-                  </div>
-                )}
               </div>
             )}
 

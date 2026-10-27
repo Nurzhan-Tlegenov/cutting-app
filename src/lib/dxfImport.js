@@ -255,51 +255,207 @@ export function layerKind(name) {
 const KIND_TITLE = { part: 'контур детали', cutout: 'вырезы', drill: 'отверстия в пласть', groove: 'пазы', pocket: 'выемки', endhole: 'отверстия в торец', edge: 'кромка', text: 'подписи', skip: 'не берётся', other: 'контуры без обработки' }
 
 // ---------- петли ----------
-// элементы одного слоя -> замкнутые петли { elems, poly, area, box }, незамкнутые цепочки — open
-function loopsOf(elems) {
-  const loops = [], segs = []
+// Сетка для поиска соседей: концы элементов и их габариты
+function makeGrid(cell) {
+  const m = new Map()
+  const k = (i, j) => i * 73856093 ^ j * 19349663
+  return {
+    add(x0, y0, x1, y1, v) {
+      for (let i = Math.floor(x0 / cell); i <= Math.floor(x1 / cell); i++) for (let j = Math.floor(y0 / cell); j <= Math.floor(y1 / cell); j++) {
+        const key = k(i, j); if (!m.has(key)) m.set(key, []); m.get(key).push(v)
+      }
+    },
+    near(x0, y0, x1, y1) {
+      const out = new Set()
+      for (let i = Math.floor(x0 / cell); i <= Math.floor(x1 / cell); i++) for (let j = Math.floor(y0 / cell); j <= Math.floor(y1 / cell); j++) for (const v of m.get(k(i, j)) || []) out.add(v)
+      return out
+    },
+  }
+}
+const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1])
+const segKey = e => e.t + (e.c ? `${e.c[0].toFixed(2)},${e.c[1].toFixed(2)}` : '')
+// тот же элемент (дубль): тот же вид, те же концы в любом направлении
+const sameSeg = (e, f, tol) => e.t === f.t && segKey(e) === segKey(f) &&
+  ((dist(e.a, f.a) <= tol && dist(e.b, f.b) <= tol && (e.t !== 'A' || e.ccw === f.ccw)) || (dist(e.a, f.b) <= tol && dist(e.b, f.a) <= tol && (e.t !== 'A' || e.ccw !== f.ccw)))
+
+// Очистка отрезков одного слоя перед сборкой петель:
+//  · отрезок делится в точке, где в него упирается конец другого (Т-стык, наложение «внахлёст»);
+//  · пересечение у самого конца («ус» — линия заехала за угол) — тоже делится, а хвост длиной до tail отрезается
+function cleanLines(segs, tail, stats) {
+  const lines = segs.filter(e => e.t === 'L'), rest = segs.filter(e => e.t !== 'L')
+  if (lines.length < 2) return segs
+  const g = makeGrid(50)
+  lines.forEach((e, i) => g.add(Math.min(e.a[0], e.b[0]) - 1, Math.min(e.a[1], e.b[1]) - 1, Math.max(e.a[0], e.b[0]) + 1, Math.max(e.a[1], e.b[1]) + 1, i))
+  const cuts = lines.map(() => [])
+  lines.forEach((e, i) => {
+    const dx = e.b[0] - e.a[0], dy = e.b[1] - e.a[1], len = Math.hypot(dx, dy)
+    if (len < 1e-6) return
+    for (const j of g.near(Math.min(e.a[0], e.b[0]) - 1, Math.min(e.a[1], e.b[1]) - 1, Math.max(e.a[0], e.b[0]) + 1, Math.max(e.a[1], e.b[1]) + 1)) {
+      if (j === i) continue
+      const f = lines[j]
+      // конец f лежит внутри e
+      for (const q of [f.a, f.b]) {
+        const t = ((q[0] - e.a[0]) * dx + (q[1] - e.a[1]) * dy) / (len * len)
+        if (t * len > TOL && (1 - t) * len > TOL && segDist(q, e.a, e.b) <= TOL) cuts[i].push(t)
+      }
+      // пересечение у конца одного из отрезков — «ус»
+      const fx = f.b[0] - f.a[0], fy = f.b[1] - f.a[1], den = dx * fy - dy * fx
+      if (Math.abs(den) < 1e-9) continue
+      const t = ((f.a[0] - e.a[0]) * fy - (f.a[1] - e.a[1]) * fx) / den
+      const u = ((f.a[0] - e.a[0]) * dy - (f.a[1] - e.a[1]) * dx) / den
+      const fl = Math.hypot(fx, fy)
+      if (t * len <= TOL || (1 - t) * len <= TOL || u * fl < -TOL || (1 - u) * fl < -TOL) continue
+      const nearEnd = Math.min(t * len, (1 - t) * len) <= tail || Math.min(u * fl, (1 - u) * fl) <= tail
+      if (nearEnd) cuts[i].push(t)
+    }
+  })
+  let out = []
+  lines.forEach((e, i) => {
+    const ts = [...new Set(cuts[i].map(t => Math.round(t * 1e6) / 1e6))].sort((a, b) => a - b)
+    if (!ts.length) { out.push(e); return }
+    stats.split += ts.length
+    let prev = e.a
+    for (const t of [...ts, 1]) {
+      const q = t === 1 ? e.b : [e.a[0] + (e.b[0] - e.a[0]) * t, e.a[1] + (e.b[1] - e.a[1]) * t]
+      if (dist(prev, q) > 1e-6) out.push({ ...e, a: prev, b: q })
+      prev = q
+    }
+  })
+  // хвосты: короткий отрезок, у которого один конец свободен, а другой — в узле, где сходятся ещё два и больше
+  for (let pass = 0; pass < 3; pass++) {
+    const ends = makeGrid(Math.max(tail, 1))
+    const all = [...out, ...rest]
+    all.forEach((e, i) => { for (const q of [e.a, e.b]) ends.add(q[0] - TOL, q[1] - TOL, q[0] + TOL, q[1] + TOL, i) })
+    const deg = q => [...ends.near(q[0] - TOL, q[1] - TOL, q[0] + TOL, q[1] + TOL)].filter(i => dist(all[i].a, q) <= TOL || dist(all[i].b, q) <= TOL).length
+    const keep = out.filter(e => {
+      if (dist(e.a, e.b) > tail) return true
+      const da = deg(e.a), db = deg(e.b)
+      if ((da === 1 && db >= 3) || (db === 1 && da >= 3)) { stats.tails++; return false }
+      return true
+    })
+    if (keep.length === out.length) break
+    out = keep
+  }
+  return [...out, ...rest]
+}
+
+// элементы одного слоя -> замкнутые петли { elems, poly, area, box }; незамкнутые цепочки — openChains.
+// snap — до какого разрыва концы сшиваются; close — ключи цепочек, которые пользователь велел замкнуть прямой
+function loopsOf(elems, { snap = 0.5, tail = 2, close = null, stats = { gaps: 0, maxGap: 0, dups: 0, split: 0, tails: 0 } } = {}) {
+  const loops = [], circles = []
+  let segs = []
   for (const e of elems) {
-    if (e.t === 'C') { const poly = Array.from({ length: 32 }, (_, k) => [e.c[0] + e.r * Math.cos(k * Math.PI / 16), e.c[1] + e.r * Math.sin(k * Math.PI / 16)]); loops.push({ elems: [e], circle: e, poly }); continue }
-    if (near(e.a, e.b, 1e-6) && e.t === 'L') continue
+    if (e.t === 'C') {
+      if (circles.some(c => dist(c.c, e.c) <= TOL && Math.abs(c.r - e.r) <= TOL)) { stats.dups++; continue }
+      circles.push(e)
+      const poly = Array.from({ length: 32 }, (_, k) => [e.c[0] + e.r * Math.cos(k * Math.PI / 16), e.c[1] + e.r * Math.sin(k * Math.PI / 16)])
+      loops.push({ elems: [e], circle: e, poly })
+      continue
+    }
+    if (e.t === 'L' && dist(e.a, e.b) < 1e-6) continue
     segs.push(e)
   }
+  segs = cleanLines(segs, tail, stats)
+  const sn = Math.max(TOL, snap)
+  const grid = makeGrid(Math.max(sn, 1))
+  segs.forEach((e, i) => { for (const q of [e.a, e.b]) grid.add(q[0] - sn, q[1] - sn, q[0] + sn, q[1] + sn, i) })
   const used = new Array(segs.length).fill(false)
+  const usedList = []
   const rev = e => (e.t === 'L' ? { ...e, a: e.b, b: e.a } : { ...e, a: e.b, b: e.a, ccw: !e.ccw })
-  let open = 0
   const openChains = []
+  const isDup = e => [...grid.near(e.a[0] - sn, e.a[1] - sn, e.a[0] + sn, e.a[1] + sn)].some(j => used[j] && sameSeg(segs[j], e, Math.max(TOL, Math.min(sn, 0.5))))
   for (let i = 0; i < segs.length; i++) {
     if (used[i]) continue
-    used[i] = true
+    if (isDup(segs[i])) { used[i] = true; stats.dups++; continue }
+    used[i] = true; usedList.push(i)
     const chain = [segs[i]]
-    let closed = near(segs[i].a, segs[i].b) && segs[i].t === 'A'
+    let closed = segs[i].t === 'A' && dist(segs[i].a, segs[i].b) <= TOL
     for (let guard = 0; guard < segs.length && !closed; guard++) {
-      const cur = chain[chain.length - 1].b
-      if (near(cur, chain[0].a)) { closed = true; break }
-      let j = -1, flip = false
-      for (let k = 0; k < segs.length; k++) {
+      const last = chain[chain.length - 1], cur = last.b
+      let j = -1, flip = false, bd = Infinity
+      for (const k of grid.near(cur[0] - sn, cur[1] - sn, cur[0] + sn, cur[1] + sn)) {
         if (used[k]) continue
-        if (near(segs[k].a, cur)) { j = k; break }
-        if (near(segs[k].b, cur)) { j = k; flip = true; break }
+        const s2 = segs[k]
+        if (sameSeg(s2, last, TOL)) continue            // дубль только что пройденного — не разворачиваемся назад
+        const da = dist(s2.a, cur), db = dist(s2.b, cur)
+        if (da <= sn && da < bd) { bd = da; j = k; flip = false }
+        if (db <= sn && db < bd) { bd = db; j = k; flip = true }
+      }
+      const ds = dist(cur, chain[0].a)
+      if (ds <= sn && (chain.length > 1 || chain[0].t === 'A') && ds <= bd + 1e-9) {
+        closed = true
+        if (ds > TOL) { stats.gaps++; stats.maxGap = Math.max(stats.maxGap, ds) }
+        break
       }
       if (j < 0) break
-      used[j] = true
+      if (bd > TOL) { stats.gaps++; stats.maxGap = Math.max(stats.maxGap, bd) }
+      used[j] = true; usedList.push(j)
       chain.push(flip ? rev(segs[j]) : segs[j])
     }
-    if (!closed) { open++; openChains.push(chain); continue }
+    if (!closed) {
+      // цепочка могла начаться с середины: достраиваем назад от начала
+      for (let guard = 0; guard < segs.length; guard++) {
+        const cur = chain[0].a
+        let j = -1, flip = false, bd = Infinity
+        for (const k of grid.near(cur[0] - sn, cur[1] - sn, cur[0] + sn, cur[1] + sn)) {
+          if (used[k]) continue
+          const s2 = segs[k]
+          if (sameSeg(s2, chain[0], TOL)) continue
+          const da = dist(s2.b, cur), db = dist(s2.a, cur)
+          if (da <= sn && da < bd) { bd = da; j = k; flip = false }
+          if (db <= sn && db < bd) { bd = db; j = k; flip = true }
+        }
+        if (j < 0) break
+        if (bd > TOL) { stats.gaps++; stats.maxGap = Math.max(stats.maxGap, bd) }
+        used[j] = true; usedList.push(j)
+        chain.unshift(flip ? rev(segs[j]) : segs[j])
+      }
+      const key = chainKey(chain)
+      if (close && close.has(key) && (chain.length > 1 || chain[0].t === 'A')) {
+        chain.push({ t: 'L', a: chain[chain.length - 1].b, b: chain[0].a })   // замкнуть прямой — по решению пользователя
+      } else { openChains.push({ chain, key }); continue }
+    }
     // концы — ровно в одной точке (построитель контура требует точного совпадения)
     for (let k = 0; k < chain.length; k++) chain[(k + 1) % chain.length] = { ...chain[(k + 1) % chain.length], a: chain[k].b }
     const poly = []
     for (const e of chain) { if (e.t === 'L') poly.push(e.a); else poly.push(...arcPts(e, 16).slice(0, -1)) }
+    // петля нулевой площади (линия туда и обратно) — это не контур
+    let sa = 0
+    for (let q = 0; q < poly.length; q++) { const a = poly[q], b = poly[(q + 1) % poly.length]; sa += a[0] * b[1] - b[0] * a[1] }
+    if (Math.abs(sa) < 0.01) { stats.dups += chain.length; continue }
     loops.push({ elems: chain, poly })
   }
   for (const lp of loops) {
     let s = 0
     for (let i = 0; i < lp.poly.length; i++) { const a = lp.poly[i], b = lp.poly[(i + 1) % lp.poly.length]; s += a[0] * b[1] - b[0] * a[1] }
     lp.area = Math.abs(s / 2)
-    const xs = lp.poly.map(p => p[0]), ys = lp.poly.map(p => p[1])
-    lp.box = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }
+    lp.box = boxOf(lp.poly)
   }
-  return { loops, open, openChains }
+  return { loops, open: openChains.length, openChains, stats }
+}
+const boxOf = pts => { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) } }
+const chainPts = chain => { const pts = []; for (const e of chain) { if (e.t === 'L') pts.push(e.a); else pts.push(...arcPts(e, 8).slice(0, -1)) } pts.push(chain[chain.length - 1].b); return pts }
+const rk = p => `${Math.round(p[0] * 10)},${Math.round(p[1] * 10)}`
+// ключ незамкнутой цепочки — по её концам (в любом порядке), чтобы решение пользователя пережило пересчёт
+function chainKey(chain) { const a = rk(chain[0].a), b = rk(chain[chain.length - 1].b); return 'o|' + (a < b ? a + '|' + b : b + '|' + a) }
+// паз, нарисованный одной линией (траекторией): полоса шириной w вокруг неё -> замкнутый контур из отрезков
+function pathBand(pts, w) {
+  const h = w / 2, L = [], R = []
+  const nrm = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [-dy / l, dx / l] }
+  for (let i = 0; i < pts.length; i++) {
+    let n
+    if (i === 0) n = nrm(pts[0], pts[1])
+    else if (i === pts.length - 1) n = nrm(pts[i - 1], pts[i])
+    else {
+      const n1 = nrm(pts[i - 1], pts[i]), n2 = nrm(pts[i], pts[i + 1])
+      const m = [n1[0] + n2[0], n1[1] + n2[1]], ml = Math.hypot(m[0], m[1]) || 1, cos = Math.max(0.3, (m[0] * n1[0] + m[1] * n1[1]) / ml)
+      n = [m[0] / ml / cos, m[1] / ml / cos]
+    }
+    L.push([pts[i][0] + n[0] * h, pts[i][1] + n[1] * h]); R.push([pts[i][0] - n[0] * h, pts[i][1] - n[1] * h])
+  }
+  const ring = [...L, ...R.reverse()]
+  const elems = ring.map((p, i) => ({ t: 'L', a: p, b: ring[(i + 1) % ring.length] }))
+  return { elems, poly: ring, box: boxOf(ring), area: Math.abs(ring.reduce((s, a, i) => { const b = ring[(i + 1) % ring.length]; return s + a[0] * b[1] - b[0] * a[1] }, 0) / 2) }
 }
 function inPoly(pt, poly) {
   let inside = false
@@ -329,11 +485,44 @@ function loopInside(a, b) {
 // ---------- сборка ----------
 const stripSize = s => String(s || '').replace(/\s+\d+(?:[.,]\d+)?\s*[xх×*]\s*\d+(?:[.,]\d+)?\s*$/i, '').trim()
 
-export async function readDxfFile(file, { thickness = 16 } = {}) {
+// разобранный файл — один раз: при смене допуска или решений пользователя пересчитывается только сборка
+const parsedCache = new WeakMap()
+async function parsedOf(file) {
+  if (!parsedCache.has(file)) parsedCache.set(file, parseDxf(await readText(file)))
+  return parsedCache.get(file)
+}
+const partKey = lp => `p|${Math.round(lp.box.x0)}|${Math.round(lp.box.y0)}|${Math.round(lp.box.x1 - lp.box.x0)}|${Math.round(lp.box.y1 - lp.box.y0)}`
+// пересекаются ли контуры двух деталей (рёбра режут друг друга)
+function polysCross(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    const p1 = a[i], p2 = a[(i + 1) % a.length]
+    for (let j = 0; j < b.length; j++) {
+      const q1 = b[j], q2 = b[(j + 1) % b.length]
+      const d = (p2[0] - p1[0]) * (q2[1] - q1[1]) - (p2[1] - p1[1]) * (q2[0] - q1[0])
+      if (Math.abs(d) < 1e-9) continue
+      const t = ((q1[0] - p1[0]) * (q2[1] - q1[1]) - (q1[1] - p1[1]) * (q2[0] - q1[0])) / d
+      const u = ((q1[0] - p1[0]) * (p2[1] - p1[1]) - (q1[1] - p1[1]) * (p2[0] - p1[0])) / d
+      if (t > 1e-3 && t < 1 - 1e-3 && u > 1e-3 && u < 1 - 1e-3) return true
+    }
+  }
+  return false
+}
+const r1v = v => Math.round(v * 10) / 10
+const thin = pts => pts.map(q => [r1v(q[0]), r1v(q[1])])
+
+/**
+ * opts: thickness — толщина из заказа; snap — до какого разрыва (мм) концы сшиваются сами; close — ключи незамкнутых
+ * контуров, которые замкнуть прямой; skip — ключи деталей, которые не брать; scale — множитель единиц (×25,4 — дюймы)
+ */
+export async function readDxfFile(file, { thickness = 16, snap = 0.5, close = [], skip = [], scale = 1 } = {}) {
   const T = Number(thickness) > 0 ? Number(thickness) : 16
-  const { ents, blocks, unit } = parseDxf(await readText(file))
+  const { ents, blocks, unit } = await parsedOf(file)
   const out = { elems: [], texts: [] }
-  const k = unit
+  const k = unit * (Number(scale) > 0 ? Number(scale) : 1)
+  const closeSet = new Set(close), skipSet = new Set(skip)
+  const stats = { gaps: 0, maxGap: 0, dups: 0, split: 0, tails: 0 }
+  const problems = []
+  const ghosts = []                                // что на чертеже есть, но в детали не попало (лист, незамкнутое) — для картинки
   const sc = p => [p[0] * k, p[1] * k]
   flatten(ents, blocks, {
     p: sc,
@@ -355,11 +544,33 @@ export async function readDxfFile(file, { thickness = 16 } = {}) {
     layers.push(L)
     if (info.kind === 'skip' || info.kind === 'text') continue
     if (info.kind === 'edge') { edgeEls.push(...els.map(e => ({ ...e, L }))); L.count = els.length; continue }
-    const { loops, open } = loopsOf(els)
-    if (info.kind !== 'other') openTotal += open
+    const { loops, openChains } = loopsOf(els, { snap, close: closeSet, stats })
     for (const lp of loops) all.push({ ...lp, layer: name, info, L })
+    // паз или выемка одной линией: полоса шириной W из имени слоя
+    const w = numAfter(name, 'W')
+    for (const oc of openChains) {
+      const pts = chainPts(oc.chain)
+      if ((info.kind === 'groove' || info.kind === 'pocket') && w > 0) {
+        const band = pathBand(pts, w)
+        all.push({ ...band, layer: name, info, L, path: true }); stats.paths = (stats.paths || 0) + 1
+        continue
+      }
+      openTotal++
+      const a = oc.chain[0].a, b = oc.chain[oc.chain.length - 1].b
+      const box = boxOf(pts)
+      ghosts.push({ k: 'open', pts: thin(pts) })
+      problems.push({
+        id: oc.key, kind: 'open', layer: name, box, at: [r1v(b[0]), r1v(b[1])], at2: [r1v(a[0]), r1v(a[1])], gap: r1v(dist(a, b)),
+        part: info.kind === 'part' || info.kind === 'other' || info.kind === 'cutout',
+        text: (info.kind === 'groove' || info.kind === 'pocket') && !(w > 0)
+          ? `${KIND_TITLE[info.kind]} одной линией, но в имени слоя «${name}» нет ширины W — назовите слой, например, PAZ_W4_Z8`
+          : `Контур не замкнут (слой «${name}»): разрыв ${String(r1v(dist(a, b))).replace('.', ',')} мм`,
+        canClose: oc.chain.length > 1 || oc.chain[0].t === 'A',
+      })
+    }
     L.count = loops.length
   }
+  const fixed = { ...stats, maxGap: r1v(stats.maxGap) }
 
   // детали: петли слоя контура; если такого слоя нет — внешние петли (чёт-нечет: деталь, вырез, деталь в вырезе…)
   const hasPartLayer = all.some(l => l.info.kind === 'part')
@@ -388,8 +599,21 @@ export async function readDxfFile(file, { thickness = 16 } = {}) {
     l.kids.forEach(c => walk(c, !asPart))
   }
   for (const l of cand) if (!l.parent || hasPartLayer) walk(l, true)
-  if (!parts.length) throw new Error('не нашлось замкнутых контуров деталей — проверьте, что контуры замкнуты')
   for (const p of parts) if (!cutsOf.has(p)) cutsOf.set(p, [])
+  for (const p of parts) p.key = partKey(p)
+  // детали, наложенные друг на друга (контуры пересекаются)
+  for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+    const a = parts[i], b = parts[j]
+    if (a.box.x1 < b.box.x0 || b.box.x1 < a.box.x0 || a.box.y1 < b.box.y0 || b.box.y1 < a.box.y0) continue
+    if (skipSet.has(a.key) || skipSet.has(b.key) || !polysCross(a.poly, b.poly)) continue
+    problems.push({ id: `x|${a.key}|${b.key}`, kind: 'overlap', box: { x0: Math.min(a.box.x0, b.box.x0), y0: Math.min(a.box.y0, b.box.y0), x1: Math.max(a.box.x1, b.box.x1), y1: Math.max(a.box.y1, b.box.y1) },
+      text: 'Две детали наложены друг на друга — контуры пересекаются', keys: [a.key, b.key], sizes: [a, b].map(q => `${Math.round(q.box.y1 - q.box.y0)}×${Math.round(q.box.x1 - q.box.x0)}`) })
+  }
+  // единицы: все детали подозрительно мелкие — чертёж, похоже, в дюймах или сантиметрах
+  if (parts.length && scale === 1) {
+    const big = Math.max(...parts.map(q => Math.max(q.box.x1 - q.box.x0, q.box.y1 - q.box.y0)))
+    if (big < 120) problems.push({ id: 'units', kind: 'units', box: null, text: `Самая большая деталь — ${String(r1v(big)).replace('.', ',')} мм. Похоже, чертёж не в миллиметрах`, big })
+  }
 
   // обработка -> наименьшая деталь, внутри которой она лежит
   const owner = lp => {
@@ -399,11 +623,18 @@ export async function readDxfFile(file, { thickness = 16 } = {}) {
   }
   const work = new Map(parts.map(p => [p, { drills: [], grooves: [], pockets: [], ends: [], cuts: [...(cutsOf.get(p) || [])], edges: [], names: [] }]))
   let lost = 0
+  const inPart = new Set([...parts, ...[...cutsOf.values()].flat()])
   for (const lp of all) {
     const kd = lp.info.kind
-    if (kd === 'part' || (kd === 'other' && !hasPartLayer) || (kd === 'cutout' && !hasPartLayer)) continue
+    if (kd === 'part' || (kd === 'other' && !hasPartLayer) || (kd === 'cutout' && !hasPartLayer)) { if (!inPart.has(lp)) ghosts.push({ k: 'ghost', pts: thin(lp.poly), closed: true }); continue }
     const p = owner(lp)
-    if (!p) { lost++; continue }
+    if (!p) {
+      lost++
+      ghosts.push({ k: 'lost', pts: thin(lp.poly), closed: true })
+      if (lost <= 30) problems.push({ id: `l|${partKey(lp)}|${lp.layer}`, kind: 'lost', box: lp.box, text: `${(t => t.charAt(0).toUpperCase() + t.slice(1))(KIND_TITLE[kd] || 'обработка')} (слой «${lp.layer}») — вне деталей, не взята` })
+      continue
+    }
+    lp.owner = p
     const w = work.get(p)
     lp.L.used++
     if (kd === 'drill') w.drills.push(lp)
@@ -431,7 +662,7 @@ export async function readDxfFile(file, { thickness = 16 } = {}) {
 
   // ---------- деталь -> построитель (как у Базиса) ----------
   let seq = 0
-  const makers = parts.map(p => () => {
+  const makers = parts.filter(p => !skipSet.has(p.key)).map(p => () => {
     const w = work.get(p)
     const outerEls = p.elems.map(e => ({ ...e }))
     const elems = [...outerEls, ...w.cuts.flatMap(c => c.elems)]
@@ -520,10 +751,23 @@ export async function readDxfFile(file, { thickness = 16 } = {}) {
   })
   const { items, groups, skipped } = groupItems(makers)
   for (const it of items) delete it.contour.meta.ids        // повторный импорт другого DXF не должен считаться «тем же файлом»
+  // картинка чертежа для окна проверки: детали (взятые и отложенные), их обработка, прочее
+  const draw = []
+  for (const p of parts) {
+    draw.push({ k: skipSet.has(p.key) ? 'skipped' : 'part', pts: thin(p.poly), closed: true, key: p.key })
+    const w = work.get(p)
+    for (const lp of [...w.cuts, ...w.drills, ...w.grooves, ...w.pockets, ...w.ends]) draw.push({ k: 'work', pts: thin(lp.poly), closed: true })
+    for (const e of w.edges) draw.push({ k: 'edge', pts: thin(e.t === 'L' ? [e.a, e.b] : e.t === 'A' ? arcPts(e, 8) : []) })
+  }
+  draw.push(...ghosts)
+  const allPts = draw.flatMap(d => d.pts)
+  const view = allPts.length ? boxOf(allPts) : { x0: 0, y0: 0, x1: 1, y1: 1 }
+  if (!parts.length && !problems.length) throw new Error('не нашлось замкнутых контуров деталей — проверьте, что контуры замкнуты')
   return {
     orderName: String(file.name || '').replace(/\.dxf$/i, ''), scene: null, skipped, items, groups,
     dxf: {
-      pieces: items.reduce((a, it) => a + it.qty, 0), T, open: openTotal, lost,
+      pieces: items.reduce((a, it) => a + it.qty, 0), T, open: openTotal, lost, fixed, problems, draw, view, snap,
+      parts: parts.length, skippedParts: parts.filter(p => skipSet.has(p.key)).length,
       layers: layers.sort((a, b) => a.name.localeCompare(b.name)).map(l => ({ name: l.name, title: l.title, kind: l.kind, count: l.count })),
     },
   }
