@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useAuth } from '../context/AuthContext'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useNestingQuote } from '../hooks/useNestingQuote'
 import { supabase } from '../lib/supabase'
 import { statsRows } from '../lib/nestingStats'
@@ -35,13 +37,28 @@ function DrillKind({ value, onChange, two }) {
 }
 
 export default function NestingCost({ order, mats, method, productionId, full = false, note = '', style, onDrillKind = null }) {
-  const [kind, setKind] = useState(order?.drill_kind || '')
+  const { user } = useAuth()
+  // в заказе: 'small' — явно выбрано «Кухня, ванная» (в смете — как пусто), 'large', 'none'; пусто — ещё не выбирали
+  const [kind, setKind] = useState(order?.drill_kind === 'small' ? '' : (order?.drill_kind || ''))
   const ord = order ? { ...order, drill_kind: kind || null } : order
   const { stats, quote } = useNestingQuote({ order: ord, mats, method, productionId })
-  const pickKind = async k => {
-    setKind(k)
-    if (order?.id) { try { await supabase.from('orders').update({ drill_kind: k || null }).eq('id', order.id); onDrillKind?.(k || null) } catch { /* нет колонки — смета всё равно пересчитана */ } }
+  const saveKind = async k => {
+    if (order?.id) { try { await supabase.from('orders').update({ drill_kind: k || 'small' }).eq('id', order.id); onDrillKind?.(k || 'small') } catch { /* нет колонки — смета всё равно пересчитана */ } }
   }
+  const pickKind = k => {
+    setKind(k)
+    saveUserSettings({ drillKind: k || 'small' }, user)      // запомнить: следующий заказ откроется с тем же выбором
+    saveKind(k)
+  }
+  // новый заказ (в нём ещё не выбирали): подставляется последний выбор пользователя — только своему черновику,
+  // чужие заказы (производство смотрит заказ клиента) не трогаем
+  useEffect(() => {
+    if (!order?.id || order.drill_kind || (order.status && order.status !== 'draft') || (order.user_id && user?.id && order.user_id !== user.id)) return
+    const last = getUserSettings(user).drillKind
+    if (!last) return
+    const k = last === 'small' ? '' : last
+    setKind(k); saveKind(k)
+  }, [order?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   // переключатель — когда у производства есть цена присадки за м² (одна или две) и цена ещё не зафиксирована
   const hasDrill = !!quote?.drill_kinds || kind === 'none' || (quote?.lines || []).some(l => l.key === 'drill_m2' || l.key === 'drill_m2_large')
   const kindSwitch = quote && hasDrill && !quote.fixed ? <DrillKind value={kind} onChange={pickKind} two={!!quote.drill_kinds} /> : null

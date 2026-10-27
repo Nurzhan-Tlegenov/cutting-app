@@ -178,3 +178,8 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 @media (min-width: 1100px) {
   .page.page-read { max-width: 820px; margin: 0 auto; }
 }
+
+/* закреплённое боковое меню (компьютер): страница сдвигается вправо на ширину меню */
+@media (min-width: 1100px) {
+  body.nav-pinned #root { margin-left: var(--nav-pin-w, 0px); }
+}

@@ -14,7 +14,12 @@ import { getUiScale, setUiScale, isTouchDevice, UI_SCALE_MIN, UI_SCALE_MAX } fro
 
 let cache = null                                       // { wps, own } — один раз за запуск, обновляется при открытии
 const W = () => Math.min(340, Math.round(window.innerWidth * 0.86))
-const EASE = 'cubic-bezier(.32,.72,0,1)'                // кривая iOS: быстрый старт, мягкая остановка
+const EASE = 'cubic-bezier(.32,.72,0,1)'
+// Закреплённое меню (компьютер, окно от 1100 px): стоит слева постоянно, страница сдвигается вправо на его ширину
+const PIN_W = 270
+const PIN_MIN = 1100
+const isWide = () => typeof window !== 'undefined' && window.innerWidth >= PIN_MIN
+const readPinned = () => { try { return localStorage.getItem('navPinned') === '1' } catch { return false } }                // кривая iOS: быстрый старт, мягкая остановка
 
 /** Кнопка ☰ — ставится в шапку главных экранов. Красная точка — есть новое */
 let lastBadge = 0
@@ -57,6 +62,21 @@ export default function NavDrawer({ notices, unread }) {
   useEffect(() => { wRef.current = w }, [w])
   useEffect(() => { const on = () => setW(W()); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on) }, [])
   const close = () => { setDrag(null); setOpen(false) }
+  // закрепить меню: на компьютере — стоит слева, страница (карты раскроя, превью) сдвигается; на телефоне не закрепляется
+  const [pinned, setPinned] = useState(readPinned)
+  const [wide, setWide] = useState(isWide)
+  useEffect(() => { const on = () => setWide(isWide()); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on) }, [])
+  const docked = pinned && wide && !!user
+  const pin = v => { try { localStorage.setItem('navPinned', v ? '1' : '0') } catch { /* без памяти — до перезагрузки */ } setPinned(v); setDrag(null); setOpen(false) }
+  useEffect(() => {
+    const b = document.body
+    b.classList.toggle('nav-pinned', docked)
+    document.documentElement.style.setProperty('--nav-pin-w', docked ? PIN_W + 'px' : '0px')
+    // карты раскроя и превью меряют ширину при изменении окна — сообщаем, что места стало меньше / больше
+    const t = setTimeout(() => window.dispatchEvent(new Event('resize')), 30)
+    if (docked) refresh()
+    return () => clearTimeout(t)
+  }, [docked])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => Promise.all([myWorkplaces(), myProduction(user?.id)]).then(([r, p]) => { cache = { wps: r.data || [], own: p || null }; setData(cache) })
   useEffect(() => {
@@ -147,7 +167,7 @@ export default function NavDrawer({ notices, unread }) {
     return () => clearTimeout(t)
   }, [moving])
   const shown = drag != null ? drag : open ? w : 0
-  const k = shown / w
+  const k = docked ? 1 : shown / w
   if (!user) return null
 
   const wps = data?.wps || [], own = data?.own
@@ -157,7 +177,7 @@ export default function NavDrawer({ notices, unread }) {
   const n = notices || {}
 
   // переходы
-  const go = (to, state) => { close(); navigate(to, state ? { state } : undefined) }
+  const go = (to, state) => { if (!docked) close(); navigate(to, state ? { state } : undefined) }
   const goOwn = tab => { openOwnProduction(); if (tab) setTabKey('prodTab', tab); if (tab === 'settings') setTabKey('setSec', null); setCabinet('production'); go('/production', { tab }) }
   const goWork = (pid, wtab) => { openWorkplace(pid); if (wtab) setTabKey('wTab', wtab); setCabinet('production'); go('/production', { wtab }) }
   const goClient = to => { setCabinet('client'); go(to) }
@@ -232,14 +252,7 @@ export default function NavDrawer({ notices, unread }) {
       <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><path d="M9 6l6 6-6 6" /></svg>
     </button>
   )
-  return createPortal(<>
-    {tab}
-    <div ref={root} style={{ position: 'fixed', inset: 0, zIndex: 1100, pointerEvents: moving ? 'auto' : 'none', visibility: moving || vis ? 'visible' : 'hidden' }}>
-      <div onClick={close} style={{ position: 'absolute', inset: 0, background: '#000', opacity: k * 0.38, transition: drag != null ? 'none' : `opacity .42s ${EASE}`, WebkitTapHighlightColor: 'transparent' }} />
-      <nav ref={panel}
-        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: w, transform: `translate3d(${shown - w}px,0,0)`, transition: tr, willChange: 'transform',
-          background: 'var(--bg)', boxShadow: k > 0 ? '8px 0 32px rgba(0,0,0,.18)' : 'none', display: 'flex', flexDirection: 'column',
-          paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', borderRadius: '0 18px 18px 0', overflow: 'hidden' }}>
+  const inner = (<>
         {/* шапка: кто и где сейчас */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 16px 12px' }}>
           <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, fontSize: 15, flexShrink: 0 }}>{initials}</div>
@@ -247,7 +260,16 @@ export default function NavDrawer({ notices, unread }) {
             <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile?.full_name || 'Пользователь'}</div>
             <div style={{ fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Сейчас: {where}</div>
           </div>
-          <button type="button" aria-label="Закрыть" onClick={close} style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 18, padding: 0, cursor: 'pointer' }}>×</button>
+          {wide && (
+            <button type="button" aria-label={docked ? 'Открепить меню' : 'Закрепить меню'} title={docked ? 'Свернуть меню (открепить)' : 'Закрепить меню слева — страница сдвинется'}
+              onClick={() => pin(!docked)}
+              style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: docked ? 'var(--blue-light)' : 'var(--bg2)', color: docked ? 'var(--blue)' : 'var(--text-muted)', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {docked
+                ? <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6" /></svg>
+                : <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6z" /></svg>}
+            </button>
+          )}
+          {!docked && <button type="button" aria-label="Закрыть" onClick={close} style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 18, padding: 0, cursor: 'pointer' }}>×</button>}
         </div>
         <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', padding: '0 10px 16px' }}>
           {!data && <div style={{ fontSize: 12, color: 'var(--text-hint)', padding: '6px 8px' }}>Загружаем…</div>}
@@ -300,6 +322,23 @@ export default function NavDrawer({ notices, unread }) {
             RaskroyPro · {appVersionText()} · раскрой {NESTING_VERSION}
           </div>
         </div>
+  </>)
+  if (docked) return createPortal(
+    <nav style={{ position: 'fixed', top: 0, bottom: 0, left: 0, width: PIN_W, zIndex: 900, background: 'var(--bg)', borderRight: '0.5px solid var(--border-md)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {inner}
+    </nav>,
+    document.body,
+  )
+  return createPortal(<>
+    {tab}
+    <div ref={root} style={{ position: 'fixed', inset: 0, zIndex: 1100, pointerEvents: moving ? 'auto' : 'none', visibility: moving || vis ? 'visible' : 'hidden' }}>
+      <div onClick={close} style={{ position: 'absolute', inset: 0, background: '#000', opacity: k * 0.38, transition: drag != null ? 'none' : `opacity .42s ${EASE}`, WebkitTapHighlightColor: 'transparent' }} />
+      <nav ref={panel}
+        style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: w, transform: `translate3d(${shown - w}px,0,0)`, transition: tr, willChange: 'transform',
+          background: 'var(--bg)', boxShadow: k > 0 ? '8px 0 32px rgba(0,0,0,.18)' : 'none', display: 'flex', flexDirection: 'column',
+          paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', borderRadius: '0 18px 18px 0', overflow: 'hidden' }}>
+        {inner}
       </nav>
     </div>
   </>,
