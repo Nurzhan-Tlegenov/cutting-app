@@ -9,7 +9,7 @@ import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { adminActivity, scoreOf, statusOf, lastSeenOf, STATUS } from '../lib/activity'
 
-const PERIODS = [[7, '7 дней'], [30, '30 дней'], [90, '90 дней'], [0, 'Всё время']]
+const PERIODS = [[1, '1 день'], [7, '7 дней'], [30, '30 дней'], [90, '90 дней'], [0, 'Всё время']]
 const ago = v => {
   if (!v) return 'никогда'
   const d = Math.floor((Date.now() - new Date(v).getTime()) / 86400000)
@@ -51,6 +51,8 @@ export default function ActivityPage() {
     return () => { alive = false }
   }, [days])
 
+  // заходил за выбранный период (1 день — последние 24 часа)
+  const inPeriod = u => !days || (u.seen && Date.now() - new Date(u.seen).getTime() <= days * 86400000)
   const counts = useMemo(() => {
     const c = { active: 0, rare: 0, sleep: 0, never: 0 }
     for (const u of rows || []) c[u.status]++
@@ -60,7 +62,7 @@ export default function ActivityPage() {
     const q = find.trim().toLowerCase()
     return (rows || [])
       .filter(u => kind === 'all' || (kind === 'prod' ? u.prods.length > 0 || u.role === 'operator' : !u.prods.length && u.role !== 'operator'))
-      .filter(u => !st || u.status === st)
+      .filter(u => !st || (st === 'period' ? inPeriod(u) : u.status === st))
       .filter(u => !q || [u.name, u.phone, u.city, u.country, ...u.prods].some(x => String(x || '').toLowerCase().includes(q)))
       .sort((a, b) => b.score - a.score || String(b.seen || '').localeCompare(String(a.seen || '')))
   }, [rows, kind, st, find])
@@ -94,6 +96,21 @@ export default function ActivityPage() {
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 8, paddingBottom: 2 }}>
         {PERIODS.map(([d, l]) => <button key={d} type="button" style={chip(days === d)} onClick={() => setDays(d)}>{l}</button>)}
       </div>
+      {rows && (() => {
+        const pr = rows.filter(inPeriod), sum = k => rows.reduce((a, u) => a + n(u[k]), 0)
+        const f = v => Math.round(v).toLocaleString('ru-RU')
+        const per = days === 1 ? 'за последние 24 часа' : days ? `за ${days} дней` : 'за всё время'
+        return (
+          <button type="button" onClick={() => setSt(s => (s === 'period' ? '' : 'period'))}
+            style={{ width: '100%', textAlign: 'left', border: st === 'period' ? '1.5px solid var(--blue)' : '0.5px solid var(--border)', background: 'var(--bg)', borderRadius: 12, padding: '8px 10px', marginBottom: 8, cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>
+            <div style={{ color: 'var(--text)' }}>Заходили {per}: <b style={{ fontSize: 15 }}>{f(pr.length)}</b> из {f(total)}{st === 'period' ? ' · показаны только они' : ' · нажмите, чтобы показать их'}</div>
+            <div style={{ marginTop: 2 }}>
+              заказов {f(sum('orders'))} · отправлено {f(sum('submitted'))} · деталей {f(sum('parts'))} · сообщений {f(sum('messages'))} · прочитано новостей {f(sum('news_seen'))}
+              {sum('received') > 0 && ` · производства приняли ${f(sum('received'))}`}{sum('done') > 0 && ` · исполнено ${f(sum('done'))}`}
+            </div>
+          </button>
+        )
+      })()}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
         {[['all', 'Все'], ['client', 'Клиенты'], ['prod', 'Производства']].map(([k, l]) => <button key={k} type="button" style={chip(kind === k)} onClick={() => setKind(k)}>{l}</button>)}
       </div>
