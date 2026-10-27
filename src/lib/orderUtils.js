@@ -76,6 +76,8 @@ export const orderFileName = order => toLatin(orderTitle(order)).replace(/[^\w.-
 // Части в фигурных скобках подставляются, остальное — свой текст. Итог — строго латиницей.
 export const NAME_PARTS = [['{N}', 'номер листа'], ['{ZAKAZ}', 'название заказа'], ['{NOMER}', 'номер заказа'], ['{MAT}', 'материал'], ['{T}', 'толщина'], ['{DATA}', 'дата'], ['{LISTOV}', 'всего листов'], ['{KLIENT}', 'имя клиента']]
 export const NAME_TPL_DEFAULT = '{N}_{ZAKAZ}_{MAT}'
+// имя на языке заказа: буквы любого алфавита и цифры остаются, запрещённые в именах файлов знаки и пробелы — «_»
+const nativeName = s => String(s ?? '').replace(/[^\p{L}\p{N}_.-]+/gu, '_').replace(/_{2,}/g, '_').replace(/^[_.-]+|[_.-]+$/g, '')
 const latinName = s => toLatin(String(s ?? '')).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^[_.-]+|[_.-]+$/g, '')
 /**
  * tpl — шаблон; ctx — { n (номер листа; null — общая часть имени без номера), total, order, material, thickness, client (имя заказчика) }.
@@ -89,6 +91,7 @@ export function programName(tpl, ctx) {
 /** Название папки заказа при сохранении программ: тот же конструктор, но без номера листа */
 export const FOLDER_PARTS = NAME_PARTS.filter(([code]) => code !== '{N}' && code !== '{MAT}')
 export const FOLDER_TPL_DEFAULT = '{ZAKAZ}'
+// ctx.latin === false — имя папки на языке заказа (как назван заказ, материал, клиент), без перевода в латиницу
 export const folderName = (tpl, ctx) => fillName(String(tpl || '').trim() || FOLDER_TPL_DEFAULT, { ...ctx, n: null }) || fillName(FOLDER_TPL_DEFAULT, { ...ctx, n: null }) || 'zakaz'
 /** Вставить часть имени ({KLIENT} и т. п.) в шаблон на позицию курсора pos (null — в конец), с «_» по краям, где нужно */
 export function insertPart(value, pos, code) {
@@ -107,5 +110,6 @@ function fillName(t, ctx) {
   const d = new Date(), date = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')
   const val = { N: ctx.n == null ? '' : String(ctx.n), ZAKAZ: String(ctx.order?.order_name || '').trim() || ctx.order?.order_number || '', NOMER: ctx.order?.order_number || '',
     MAT: ctx.material || '', T: ctx.thickness ? String(ctx.thickness).replace('.', '_') : '', DATA: date, LISTOV: ctx.total ? String(ctx.total) : '', KLIENT: String(ctx.client || '').trim() }
-  return latinName(t.replace(/\{([A-Z]+)\}/gi, (m, k) => (k.toUpperCase() in val ? val[k.toUpperCase()] : '')))
+  const out = t.replace(/\{([A-Z]+)\}/gi, (m, k) => (k.toUpperCase() in val ? val[k.toUpperCase()] : ''))
+  return ctx.latin === false ? nativeName(out) : latinName(out)
 }

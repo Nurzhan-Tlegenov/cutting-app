@@ -8,7 +8,8 @@ import { insertPart } from '../lib/orderUtils'
 export const routerDirDefault = (post, withDrills) => `${post?.folderTpl || '{ZAKAZ}'}${withDrills ? '_CNC_frezer' : ''}/{MAT}`
 const DIR_PARTS = [['{ZAKAZ}', 'заказ'], ['{NOMER}', 'номер'], ['{MAT}', 'материал'], ['{T}', 'толщина'], ['{DATA}', 'дата'], ['{KLIENT}', 'клиент'], ['{LISTOV}', 'листов']]
 // Конструктор папок выгрузки: уровни вложенности (матрёшка), у каждого уровня — части имени и свой текст
-export default function DirPathEditor({ value, def, preview, onChange }) {
+// latin — имена папок латиницей (по умолчанию да); выключено — на языке заказа. onLatin — галочка (без него не показывается)
+export default function DirPathEditor({ value, def, preview, onChange, latin = true, onLatin }) {
   const levels = String(value || '').split('/')
   const [cur, setCur] = useState(Math.max(0, levels.length - 1))
   const k = Math.min(cur, levels.length - 1)
@@ -41,7 +42,13 @@ export default function DirPathEditor({ value, def, preview, onChange }) {
         <button type="button" style={{ ...chip, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => { setLevels([...levels, '{MAT}']); setCur(levels.length) }}>+ вложенная папка</button>
         <button type="button" style={chip} onClick={() => onChange(def)}>↺ как было</button>
       </div>
-      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 2 }}>Части вставляются в выделенную папку туда, где стоял курсор; свой текст — прямо в поле. Имена — латиницей.</div>
+      {onLatin && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginTop: 5, cursor: 'pointer' }}>
+          <input type="checkbox" checked={latin} onChange={e => onLatin(e.target.checked)} style={{ width: 16, height: 16 }} />
+          Имена папок латиницей
+        </label>
+      )}
+      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 2 }}>Части вставляются в выделенную папку туда, где стоял курсор; свой текст — прямо в поле. {latin ? 'Имена — латиницей.' : 'Имена — на языке заказа, как он назван.'}</div>
     </div>
   )
 }

@@ -682,7 +682,7 @@ export function drill6Qr(post, labelTpl) {
 /** Вложенные папки для сохранения: шаблон «{ZAKAZ}/XML» -> ['Kuhnya', 'XML'] */
 export function drill6Folders(post, ctx) {
   return String(post?.dirPath ?? DRILL_DIR_DEFAULT).split('/').map(t => t.trim()).filter(Boolean)
-    .map(t => folderName(t, ctx)).filter(Boolean)
+    .map(t => folderName(t, { ...ctx, latin: post?.dirLatin !== false })).filter(Boolean)
 }
 
 /**

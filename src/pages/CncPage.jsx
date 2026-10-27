@@ -258,17 +258,18 @@ export default function CncPage() {
   // (G-код, маркировка, внутри — папка материала) и «<папка присадки>_<пометка станка>» (XML по деталям)
   // Папки выгрузки — матрёшка, которую пользователь собирает сам: уровни через «/», в каждом — части имени
   // ({ZAKAZ}, {MAT}, …) и свой текст. Своя у фрезера и у каждого шестистороннего станка.
-  const pathOf = tpl => String(tpl || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, nameCtx(null))).filter(Boolean)
+  const pathOf = (tpl, pp) => String(tpl || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, { ...nameCtx(null), latin: pp?.dirLatin !== false })).filter(Boolean)
   // по умолчанию — как раньше («папка заказа»/материал); с шестисторонним станком — с пометкой фрезера
   const routerDef = () => routerDirDefault(post, drills.length > 0 || !!r2)
   // второй раскроечный: по умолчанию «<заказ>_CNC_2/<материал>» — чтобы не смешаться с файлами основного станка
   const r2Def = () => `${r2?.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`
-  const r2Dir = () => pathOf(r2?.dirPath ?? r2Def())
-  const routerDir = () => (beamMat && saw ? pathOf(saw.dirPath ?? '{ZAKAZ}/{MAT}') : pathOf(post.dirPath ?? routerDef()))
+  const r2Dir = () => pathOf(r2?.dirPath ?? r2Def(), r2)
+  const routerDir = () => (beamMat && saw ? pathOf(saw.dirPath ?? '{ZAKAZ}/{MAT}', saw) : pathOf(post.dirPath ?? routerDef(), post))
   // папка бирок для станка без маркировочного стола: та же, что у программ, со словом «Etiketki» в конце
-  const labelsDir = () => { const d = routerDir(); return d.length ? [...d.slice(0, -1), `${d[d.length - 1]}_${folderName('Этикетки', nameCtx(null))}`] : [folderName('Этикетки', nameCtx(null))] }
-  const drillDir = r => pathOf(r.post.dirPath ?? DRILL_DIR_DEFAULT)
+  const labelsDir = () => { const d = routerDir(), lp = beamMat && saw ? saw : post, lb = folderName('Этикетки', { ...nameCtx(null), latin: lp?.dirLatin !== false }); return d.length ? [...d.slice(0, -1), `${d[d.length - 1]}_${lb}`] : [lb] }
+  const drillDir = r => pathOf(r.post.dirPath ?? DRILL_DIR_DEFAULT, r.post)
   const setPostPath = (id, v) => change({ ...cnc, posts: cnc.posts.map(q => (q.id === id ? { ...q, dirPath: v } : q)) })
+  const setPostLatin = (id, v) => change({ ...cnc, posts: cnc.posts.map(q => (q.id === id ? { ...q, dirLatin: v } : q)) })
   const saveAll = async () => {
     const rd = routerDir()
     let maps = null
@@ -290,7 +291,7 @@ export default function CncPage() {
     }
     const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
-    if (built.second) { const d2 = pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`); files.push(...built.second.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: d2 }))) }
+    if (built.second) { const d2 = pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`, built.second.post); files.push(...built.second.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: d2 }))) }
     if (maps) files.unshift(maps)          // PDF карт — в корень архива, рядом с папками станков
     setSaveAsk({ files, zipName: `${fileBase('zip')}.zip` })
   }
@@ -401,20 +402,23 @@ export default function CncPage() {
                     return (
                       <div key={'i' + p.id} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '6px 0 6px', lineHeight: 1.5 }}>
                         <div>Файлы: <b>.{latinExt(p.ext || 'XML')}</b> — по файлу на деталь; имя = код QR бирки, например <b style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{example || '—'}.{latinExt(p.ext || 'XML')}</b></div>
-                        <DirPathEditor value={p.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={pathOf(p.dirPath ?? DRILL_DIR_DEFAULT)} onChange={v => setPostPath(p.id, v)} />
+                        <DirPathEditor value={p.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={pathOf(p.dirPath ?? DRILL_DIR_DEFAULT, p)} onChange={v => setPostPath(p.id, v)} latin={p.dirLatin !== false} onLatin={v => setPostLatin(p.id, v)} />
                       </div>
                     )
                   })}
                   {r2 && (
                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '6px 0 6px', lineHeight: 1.5 }}>
                       <div>{r2.name}: G-код по листам, файлы <b>.{r2.ext || 'nc'}</b>{r2.drillHead ? ' (присадочная голова + шпиндель)' : ''}</div>
-                      <DirPathEditor value={r2.dirPath ?? r2Def()} def={r2Def()} preview={r2Dir()} onChange={v => setPostPath(r2.id, v)} />
+                      <DirPathEditor value={r2.dirPath ?? r2Def()} def={r2Def()} preview={r2Dir()} onChange={v => setPostPath(r2.id, v)} latin={r2.dirLatin !== false} onLatin={v => setPostLatin(r2.id, v)} />
                     </div>
                   )}
                   {sec && (
                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)', paddingTop: 6, borderTop: '0.5px dashed var(--border)' }}>
-                      <div>Основной ({post.name}): файлы <b>.{post.ext || 'nc'}</b></div>
-                      <DirPathEditor value={post.dirPath ?? routerDef()} def={routerDef()} preview={routerDir()} onChange={v => setPostPath(post.id, v)} />
+                      {(() => { const mp = beamMat && saw ? saw : post, mdef = beamMat && saw ? '{ZAKAZ}/{MAT}' : routerDef()
+                        return <>
+                          <div>Основной ({mp.name}): файлы <b>.{mp.ext || 'nc'}</b></div>
+                          <DirPathEditor value={mp.dirPath ?? mdef} def={mdef} preview={routerDir()} onChange={v => setPostPath(mp.id, v)} latin={mp.dirLatin !== false} onLatin={v => setPostLatin(mp.id, v)} />
+                        </> })()}
                       <div style={{ color: 'var(--text-hint)' }}>«Сохранить все файлы» кладёт программы обоих станков в одну выгрузку — каждую в свои папки.</div>
                     </div>
                   )}
@@ -581,7 +585,7 @@ export default function CncPage() {
               <button data-tour="cnc-save" className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll} disabled={!!mapsBusy}>⬇ Сохранить все файлы ({allCount() + (withMaps ? 1 : 0)})</button>
               {((built.drill || []).some(r => r.files.length) || built.second || withMaps) && (
                 <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
-                  В архиве <b style={{ fontFamily: 'monospace' }}>{fileBase('zip')}.zip</b>: {withMaps && <><b style={{ fontFamily: 'monospace' }}>{fileBase('maps')}.pdf</b>; </>}папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}{built.second && <span>; <b style={{ fontFamily: 'monospace' }}>{pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`).join('/')}</b> — {built.second.post.name}</span>}
+                  В архиве <b style={{ fontFamily: 'monospace' }}>{fileBase('zip')}.zip</b>: {withMaps && <><b style={{ fontFamily: 'monospace' }}>{fileBase('maps')}.pdf</b>; </>}папки: <b style={{ fontFamily: 'monospace' }}>{routerDir()[0]}</b> — фрезер (G-код{built.labels?.length ? ', маркировка' : ''}){(built.drill || []).filter(r => r.files.length).map(r => <span key={r.post.id}>; <b style={{ fontFamily: 'monospace' }}>{drillDir(r).join('/')}</b> — {r.post.name}</span>)}{built.second && <span>; <b style={{ fontFamily: 'monospace' }}>{pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`, built.second.post).join('/')}</b> — {built.second.post.name}</span>}
                 </p>
               )}
             </>

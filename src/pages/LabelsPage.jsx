@@ -903,7 +903,7 @@ export default function LabelsPage() {
         return <Suspense fallback={wait}><Model3D key={view} details={one} title={name} onClose={closeView} readOnly materialThickness={T} /></Suspense>
       })()}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)}
-        folders={[folderName(routerPost(getCnc(user)).folderTpl, { total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName }), safeName(mat?.name || order?.material_name).slice(0, 40) || 'material']} />}
+        folders={(rp => [folderName(rp.folderTpl, { total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName, latin: rp.dirLatin !== false }), (rp.dirLatin !== false ? safeName(mat?.name || order?.material_name) : folderName('{MAT}', { material: mat?.name || order?.material_name || '', latin: false })).slice(0, 40) || 'material'])(routerPost(getCnc(user)))} />}
     </div>
   )
 }

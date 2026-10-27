@@ -128,7 +128,10 @@ export function normOps(raw) {
 export { postView, postBack, hasOwnTools } from './postTools'
 
 export const getCnc = user => normalizeCnc(getUserSettings(user).cnc)
-export const fetchCnc = async user => normalizeCnc((await fetchUserSettings(user)).cnc)
+// с { beam: true }: сохранённый постпроцессор пилы (папки, название, калибровка бирок) не выкидывается при загрузке —
+// раньше он отбрасывался здесь, а потом withShared ставил пилу «по умолчанию», и все настройки пилы терялись при каждом открытии.
+// Есть ли у пользователя доступ к пиле — решает следующий шаг (withShared(…, { beam })), там лишний постпроцессор убирается.
+export const fetchCnc = async user => normalizeCnc((await fetchUserSettings(user)).cnc, [], { beam: true })
 export const withShared = (cnc, shared, opts) => normalizeCnc(cnc, shared, opts)
 export const saveCnc = (cnc, user) => saveUserSettings({ cnc: { ...cnc, posts: cnc.posts.filter(p => !p.shared) } }, user)
 /** Постпроцессор, открытый в настройках (его правят вкладки «Основные» и «Команды») */

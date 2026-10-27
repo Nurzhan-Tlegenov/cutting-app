@@ -19,7 +19,7 @@ const r1 = v => String(Math.round(num(v) * 10) / 10)
 
 // как будут называться папки выгрузки — на примере заказа
 const DIR_EXAMPLE = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
-const dirPreview = tpl => String(tpl || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, DIR_EXAMPLE)).filter(Boolean)
+const dirPreview = (tpl, latin = true) => String(tpl || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, { ...DIR_EXAMPLE, latin })).filter(Boolean)
 
 function Num({ label, value, onChange, unit, hint }) {
   return (
@@ -297,7 +297,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
           <label className="label">📁 Папки для G-кода раскроя{<span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--blue-light)', color: 'var(--blue-dark)', whiteSpace: 'nowrap', fontWeight: 500 }}>фрезер · .{post.ext || 'nc'}</span>}</label>
           {(() => { const def = routerDirDefault(post, drillPosts(cnc).length > 0), v = post.dirPath ?? def
-            return <DirPathEditor value={v} def={def} preview={dirPreview(v)} onChange={x => set({ dirPath: x })} /> })()}
+            return <DirPathEditor value={v} def={def} preview={dirPreview(v, post.dirLatin !== false)} onChange={x => set({ dirPath: x })} latin={post.dirLatin !== false} onLatin={x => set({ dirLatin: x })} /> })()}
           <Hint>Куда складываются G-код и файлы бирок при «Сохранить все файлы» (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
         </div>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
@@ -318,7 +318,7 @@ const BEAM_DIR_DEFAULT = '{ZAKAZ}/{MAT}'
 function BeamSawPostBasic({ post, set, cnc, onChange }) {
   const d6 = (cnc?.posts || []).filter(isDrill6), on6 = d6.find(p => (cnc.use6 || []).includes(p.id))
   const ex = { total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' }
-  const dirPreview = v => String(v || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, ex))   // массив уровней (DirPathEditor сам соединяет)
+  const dirPreview = v => String(v || '').split('/').map(t => t.trim()).filter(Boolean).map(t => folderName(t, { ...ex, latin: post.dirLatin !== false }))   // массив уровней (DirPathEditor сам соединяет)
   const dir = post.dirPath ?? BEAM_DIR_DEFAULT
   return (
     <div className="card" style={{ marginBottom: 10 }}>
@@ -331,7 +331,7 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
       </div>
       <div style={{ marginTop: 10 }}>
         <label className="label">📁 Папки для программы пилы</label>
-        <DirPathEditor value={dir} def={BEAM_DIR_DEFAULT} preview={dirPreview(dir)} onChange={x => set({ dirPath: x })} />
+        <DirPathEditor value={dir} def={BEAM_DIR_DEFAULT} preview={dirPreview(dir)} onChange={x => set({ dirPath: x })} latin={post.dirLatin !== false} onLatin={x => set({ dirLatin: x })} />
         <Hint>Бирки (если отмечено «Бирки вместе с программами») — файлами EMF по кодам деталей, в эту же папку.</Hint>
       </div>
       {/* вместе с программой пилы — программы шестистороннего присадочного станка (файлы по деталям) */}
@@ -415,7 +415,7 @@ function Drill6Basic({ post, set, router }) {
         )}
         <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
           <label className="label">📁 Папки для программ присадки{<span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', whiteSpace: 'nowrap', fontWeight: 500 }}>шестисторонний · .{post.ext || 'XML'}</span>}</label>
-          <DirPathEditor value={post.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={dirPreview(post.dirPath ?? DRILL_DIR_DEFAULT)} onChange={x => set({ dirPath: x })} />
+          <DirPathEditor value={post.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={dirPreview(post.dirPath ?? DRILL_DIR_DEFAULT, post.dirLatin !== false)} onChange={x => set({ dirPath: x })} latin={post.dirLatin !== false} onLatin={x => set({ dirLatin: x })} />
           <Hint>Куда складываются XML-файлы при сохранении (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
         </div>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
