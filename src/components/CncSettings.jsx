@@ -270,8 +270,8 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
           <TplInput value={post.nameTpl || NAME_TPL_DEFAULT} def={NAME_TPL_DEFAULT} parts={NAME_PARTS} onChange={v => set({ nameTpl: v })} />
           <Hint>
             Части в фигурных скобках подставляются сами, между ними можно писать свой текст. Получится, например:{' '}
-            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат', latin: post.dirLatin !== false })}.{post.ext || 'nc'}</b>.
-            {post.dirLatin !== false ? 'Название латиницей' : 'Название на языке заказа'} (галочка «Имена папок и файлов латиницей» ниже); номер листа обязателен — если его убрать, он встанет в начало.
+            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат' })}.{post.ext || 'nc'}</b>.
+            Название всегда латиницей; номер листа обязателен — если его убрать, он встанет в начало.
           </Hint>
         </div>
         {/* название папки заказа — тот же конструктор */}
@@ -327,7 +327,7 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
       <div style={{ marginTop: 10 }}>
         <label className="label">Название программы</label>
         <TplInput value={post.nameTpl || BEAM_NAME_DEFAULT} def={BEAM_NAME_DEFAULT} parts={NAME_PARTS.filter(([code]) => code !== '{N}')} onChange={v => set({ nameTpl: v })} />
-        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null, latin: post.dirLatin !== false })}.{post.ext || 'xml'}</b> — {post.dirLatin !== false ? 'латиницей' : 'на языке заказа'}, один файл на материал. Латиница или нет — галочка под папками.</Hint>
+        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null })}.{post.ext || 'xml'}</b> — всегда латиницей, один файл на материал.</Hint>
       </div>
       <div style={{ marginTop: 10 }}>
         <label className="label">📁 Папки для программы пилы</label>

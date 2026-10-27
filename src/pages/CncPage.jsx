@@ -138,18 +138,19 @@ export default function CncPage() {
   }, [layers, rview])
 
   // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
-  // галочка «Имена латиницей» станка, которым выпускается программа (пила или фрезер): выключена — названия программ,
-  // архива, PDF карт и папок на языке заказа, как он назван
+  // галочка «Папки, архив и PDF латиницей» станка, которым выпускается программа (пила или фрезер): выключена — архив,
+  // PDF карт, PDF бирок и папки на языке заказа, как он назван; сами программы — всегда латиницей
   const mainLatin = (beamMat && saw ? saw : post)?.dirLatin !== false
   const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName, latin: mainLatin })
-  const baseName = () => programName(post.nameTpl, nameCtx(null))                    // общая часть — для бирок
+  const baseName = () => programName(post.nameTpl, { ...nameCtx(null), latin: true })                    // общая часть — для бирок
   const fileBase = kind => fileNameOf(kind, fileNamesOf(user)[kind], nameCtx(null))
   // имя архива «Сохранить все файлы» — конструктор прямо здесь, над папками (та же настройка аккаунта, что в «Имена файлов»)
   const [zipTpl, setZipTpl] = useState(() => fileNamesOf(user).zip)
   const [zipEdit, setZipEdit] = useState(false)
   const changeZipTpl = v => { setZipTpl(v); saveUserSettings({ fileNames: { ...fileNamesOf(user), zip: v } }, user) }   // имена PDF карт и архивов — по настройке аккаунта («Имена файлов»)
-  const fileName = si => `${programName(post.nameTpl, nameCtx(si + 1))}.${post.ext || 'nc'}`
-  const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', nameCtx(null))).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
+  // управляющие программы — всегда латиницей (стойки станков кириллицу в именах файлов не читают)
+  const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: true })}.${post.ext || 'nc'}`
+  const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: true })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
   const build = () => {
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     if (beamMat && saw) return buildBeam()
@@ -162,7 +163,7 @@ export default function CncPage() {
     const second = r2 ? { post: r2, files: sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: r2.id } })
-      return { second: true, si, name: `${programName(r2.nameTpl, { ...nameCtx(si + 1), latin: r2.dirLatin !== false })}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
+      return { second: true, si, name: `${programName(r2.nameTpl, { ...nameCtx(si + 1), latin: true })}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
     }) } : null
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
     const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
