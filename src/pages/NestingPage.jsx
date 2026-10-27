@@ -64,6 +64,7 @@ import { cutMethods } from '../lib/productionServices'
 import { saveBeamSawXml } from '../lib/beamSawXml'
 
 import { mm } from '../lib/mmFmt'
+import { readOffcutsFile } from '../lib/importDetails'
 // Сколько id за раз в фильтре .in(): адрес запроса ограничен по длине (uuid — 36 знаков)
 const ID_CHUNK = 100
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
@@ -1900,6 +1901,8 @@ export default function NestingPage() {
   useBackClose(!!needProd, () => setNeedProd(null))
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
   const [offForm, setOffForm] = useState(() => parseOffcuts(null))
+  const [offImport, setOffImport] = useState('')        // итог импорта обрезков из Excel (или ошибка)
+  const offFileRef = useRef(null)
   const [sheetOpen, setSheetOpen] = useKeptState('sheetOpen', false)   // «Лист и обрезки» по умолчанию свёрнут
   const [paramsWarn, setParamsWarn] = useState(() => {
     // страница только что перезагрузилась из-за не поднявшихся потоков (см. reloadOnce) — скажем, что делать
@@ -2257,6 +2260,25 @@ export default function NestingPage() {
   function commitOffcuts(form = offForm) {
     const v = offcutsValue(form)
     saveOrderPatch({ offcuts: JSON.stringify(v) })
+  }
+  // Обрезки со склада из Excel/CSV: длина, ширина, кол-во (материал — из заказа). Склад обычно ведут в Excel
+  // целиком, поэтому по умолчанию список заменяется; «Отмена» в вопросе — добавить к уже введённым
+  async function importOffcuts(file) {
+    if (!file) return
+    setOffImport('Читаем файл…')
+    try {
+      const r = await readOffcutsFile(file)
+      if (!r.items.length) { setOffImport('В файле не нашлось размеров обрезков — нужны колонки «Длина» и «Ширина» (или два числа в строке).'); return }
+      const rows = r.items.map(it => ({ length: String(it.length), width: String(it.width), qty: String(it.qty) }))
+      const have = offForm.items.filter(it => it.length !== '' || it.width !== '')
+      const replace = !have.length || window.confirm(`В файле ${rows.length} видов обрезков. Заменить ими текущий список (${have.length})?\n\nОК — заменить, Отмена — добавить к имеющимся.`)
+      const f = { ...offForm, items: replace ? rows : [...have, ...rows] }
+      setOffForm(f); commitOffcuts(f)
+      const pcs = r.items.reduce((a, it) => a + it.qty, 0)
+      setOffImport(`Загружено: ${rows.length} видов, ${pcs} шт.${r.skipped ? ` Пропущено строк без размера: ${r.skipped}.` : ''}`)
+    } catch (e) {
+      setOffImport('Не удалось прочитать файл: ' + String(e?.message || e))
+    }
   }
 
   function addCfg() {
@@ -3972,6 +3994,14 @@ export default function NestingPage() {
                         background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                       + Добавить обрезок
                     </button>
+                    <button disabled={offLocked} onClick={() => offFileRef.current?.click()}
+                      title="Список обрезков из Excel или CSV: длина, ширина, количество"
+                      style={{ flex: '0 0 auto', padding: '7px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--blue-mid)',
+                        background: 'transparent', color: 'var(--blue)', fontSize: 12, cursor: 'pointer' }}>
+                      📥 Из Excel
+                    </button>
+                    <input ref={offFileRef} type="file" accept=".xlsx,.xls,.csv,.txt,.ods" style={{ display: 'none' }}
+                      onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; importOffcuts(f) }} />
                     {offForm.items.length > 0 && (
                       <label style={{ ...lbl, flex: '0 0 120px' }} title="Отступ от края обрезка (со всех сторон)">
                         Отступ от края, мм
@@ -3982,6 +4012,7 @@ export default function NestingPage() {
                       </label>
                     )}
                   </div>
+                  {offImport && <p style={{ fontSize: 10.5, color: 'var(--text-muted)', margin: '6px 0 0' }}>{offImport}</p>}
                   {offForm.items.some(it => it.length !== '' && it.width !== '' && (Number(it.length) <= 2 * ov.margin || Number(it.width) <= 2 * ov.margin)) && (
                     <p style={{ fontSize: 10.5, color: '#b45309', margin: '6px 0 0' }}>Обрезок меньше двух отступов — он не будет использован.</p>
                   )}

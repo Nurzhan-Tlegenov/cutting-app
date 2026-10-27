@@ -355,3 +355,40 @@ export function buildDetails(rows, headerRow, roles) {
   const groups = [...map.values()].sort((a, b) => b.pieces - a.pieces)
   return { items, skipped, groups }
 }
+
+// ---------- Обрезки со склада из Excel / CSV ----------
+// Берётся только длина, ширина и количество (материал задан в заказе — колонку материала игнорируем).
+// Колонки ищутся так же, как в импорте деталей (шапка «Длина / Ширина / Кол-во» или «Размер 1200x600»);
+// без шапки — первые два числа строки = длина и ширина, третье (если есть) = количество.
+// Одинаковые размеры складываются. -> { items: [{ length, width, qty }], skipped, sheet }
+export async function readOffcutsFile(file) {
+  const { sheets } = await readTableFile(file)
+  let best = null
+  for (const s of sheets) {
+    let items = [], skipped = 0
+    try {
+      const { headerRow, roles } = analyzeTable(s.rows)
+      if (roles.includes('length') && roles.includes('width') || roles.includes('size')) {
+        const r = buildDetails(s.rows, headerRow, roles)
+        items = r.items.map(it => ({ length: it.w, width: it.h, qty: it.qty })); skipped = r.skipped || 0
+      }
+    } catch { items = [] }
+    if (!items.length) {           // без распознанной шапки: числа по порядку в строке
+      for (const row of s.rows) {
+        const nums = row.map(toNumber).filter(n => !Number.isNaN(n) && n > 0)
+        if (nums.length < 2) { if (row.some(c => c !== '' && c != null)) skipped++; continue }
+        const [l, w, q] = nums
+        if (l < 20 || w < 20) { skipped++; continue }          // не размер обрезка (номер строки и т. п.)
+        items.push({ length: Math.round(l * 100) / 100, width: Math.round(w * 100) / 100, qty: q > 0 && q < 10000 && Number.isInteger(q) ? q : 1 })
+      }
+    }
+    if (!best || items.length > best.items.length) best = { items, skipped, sheet: s.name }
+  }
+  const merged = new Map()
+  for (const it of best?.items || []) {
+    const k = `${it.length}x${it.width}`
+    const was = merged.get(k)
+    merged.set(k, was ? { ...was, qty: was.qty + it.qty } : { ...it })
+  }
+  return { items: [...merged.values()], skipped: best?.skipped || 0, sheet: best?.sheet || '' }
+}
