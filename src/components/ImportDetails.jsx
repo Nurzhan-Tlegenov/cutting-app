@@ -375,7 +375,9 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
     close()
   }
 
-  const previewRows = rows.slice(headerRow + 1, headerRow + 7)
+  // таблица в окне импорта — все строки файла (листается своим ползунком), до 1000 — чтобы не тормозило
+  const dataRows = rows.length - headerRow - 1
+  const previewRows = rows.slice(headerRow + 1, headerRow + 1 + 1000)
   const colCount = rows[0]?.length || 0
   const chip = (active) => ({
     padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
@@ -468,9 +470,9 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                 «Свойство (на бирку)» — значение колонки сохранится в детали под названием колонки; его можно вывести на бирку.
               </div>
             )}
-            <div style={{ overflowX: 'auto', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 12 }}>
-              <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
+            <div style={{ overflow: 'auto', maxHeight: 'max(260px, 62vh)', background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 4 }}>
+              <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--bg)', boxShadow: '0 1px 0 var(--border)' }}>
                   <tr>
                     {Array.from({ length: colCount }, (_, ci) => (
                       <th key={ci} style={{ padding: 4, minWidth: 96, verticalAlign: 'top', fontWeight: 400 }}>
@@ -495,7 +497,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                   {previewRows.map((r, ri) => (
                     <tr key={ri} style={{ borderTop: '0.5px solid var(--border)' }}>
                       {Array.from({ length: colCount }, (_, ci) => (
-                        <td key={ci} style={{ padding: '5px 6px', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        <td key={ci} style={{ padding: '5px 6px', borderTop: '0.5px solid var(--border)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                           color: roles[ci] ? 'var(--text)' : 'var(--text-hint)' }}>
                           {cellText(r[ci])}
                         </td>
@@ -504,6 +506,9 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 12 }}>
+              Строк в файле: {Math.max(0, dataRows)}{dataRows > previewRows.length ? ` · показаны первые ${previewRows.length} (импортируются все)` : ''} · таблица листается вниз и вбок
             </div>
             </>}
 
