@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
+import { receipt } from '../lib/messages'
 import { excludeRequest, listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob } from '../lib/messages'
 import { getUserSettings } from '../lib/userSettings'
 import { adminProductionOrders } from '../lib/adminApi'
@@ -49,6 +50,7 @@ export default function MessagesPage() {
     if (isMaster) adminNewsViews().then(v => { if (!v.error) setViews(v.data) })
     else markNewsSeen(r.data.filter(m => m.kind === 'news').map(m => m.id))   // мастер видит, кто прочитал новость
     markSeen(user)
+    if (!isMaster) receipt(true)                     // открыл «Сообщения» — ответы мастер-аккаунта прочитаны
     window.dispatchEvent(new Event('messages-seen'))
   }
   useEffect(() => { Promise.resolve().then(load) }, [user?.id])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -181,6 +183,14 @@ export default function MessagesPage() {
                 {m.title && <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>{m.title}</div>}
                 {m.body && <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body.replace(/\n?Сделать: Профиль → Заказы всех производств[^\n]*/, '')}</div>}
                 {m.file_name && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace', wordBreak: 'break-all' }}>📎 {m.file_name} · {sizeTxt(m.file_size)}</div>}
+                {/* мастер-аккаунт: дошёл ли ответ и прочитан ли — галочки как в мессенджерах */}
+                {isMaster && mine && m.kind === 'reply' && 'read_at' in m && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5, marginTop: 4, fontSize: 11.5, color: m.read_at ? 'var(--blue)' : 'var(--text-hint)' }}
+                    title={m.read_at ? `Прочитано ${when(m.read_at)}` : m.delivered_at ? `Дошло ${when(m.delivered_at)} — ещё не открыл «Сообщения»` : 'Отправлено — пользователь ещё не открывал приложение'}>
+                    <span>{m.read_at ? `прочитано ${when(m.read_at)}` : m.delivered_at ? `дошло ${when(m.delivered_at)}` : 'отправлено'}</span>
+                    <span style={{ fontWeight: 700, letterSpacing: -3, color: m.read_at ? 'var(--blue)' : 'var(--text-hint)' }}>{m.delivered_at || m.read_at ? '✓✓' : '✓'}</span>
+                  </div>
+                )}
                 {isMaster && m.kind === 'news' && views && (() => {
                   const v = views.byId.get(m.id) || { viewers: [], audience: 0 }
                   const n = v.viewers.length, all = Math.max(v.audience, n)

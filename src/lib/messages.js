@@ -14,7 +14,9 @@ const nameOf = profile => [profile?.full_name, profile?.phone].filter(Boolean).j
 /** Лента сообщений, новые сверху. -> { data: [...] } | { error, missing } */
 export async function listMessages(limit = 200) {
   try {
-    const { data, error } = await supabase.from('app_messages').select(COLS).order('created_at', { ascending: false }).limit(limit)
+    // галочки «дошло / прочитано» (migration_msg_receipts.sql); колонок ещё нет — без них
+    let { data, error } = await supabase.from('app_messages').select(COLS + ',delivered_at,read_at').order('created_at', { ascending: false }).limit(limit)
+    if (error && /delivered_at|read_at/.test(String(error.message))) ({ data, error } = await supabase.from('app_messages').select(COLS).order('created_at', { ascending: false }).limit(limit))
     if (error) return fail(error)
     // переписка по заказам — в ленте только своя (сотрудник производства видит чаты всех заказов — им место в заказе)
     const uid = (await supabase.auth.getUser())?.data?.user?.id
@@ -112,6 +114,7 @@ export async function unreadCount(user, master) {
     let q = supabase.from('app_messages').select('id', { count: 'exact', head: true }).gt('created_at', seen).neq('from_id', user.id)
     q = q.or(`kind.in.(${master ? 'appeal,debug' : 'news,reply'}),and(kind.eq.order,to_id.eq.${user.id})`)   // + сообщения по заказу мне
     const { count, error } = await q
+    if (!master) receipt(false)                     // ответы мастер-аккаунта дошли: приложение у пользователя открыто
     return error ? 0 : count || 0
   } catch { return 0 }
 }
@@ -125,6 +128,13 @@ export async function listOrderMessages(orderId) {
 /** Сообщение по заказу: адресата ставит база (заказчик → производство, производство → заказчик) */
 export const sendOrderMessage = (user, profile, orderId, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'order', order_id: orderId, body })
 export const ORDER_CHAT_SQL_HINT = 'Переписка по заказу пока не включена в базе: выполните migration_order_chat.sql в Supabase (SQL Editor) — один раз.'
+/** Галочки у ответов мастер-аккаунта: дошло (read = false) / прочитано (read = true). Нет функции в базе — молча */
+let lastReceipt = 0
+export function receipt(read) {
+  if (!read && Date.now() - lastReceipt < 60000) return
+  lastReceipt = Date.now()
+  supabase.rpc('msg_receipt', { p_read: !!read }).then(() => {}, () => {})
+}
 export const markSeen = user => saveUserSettings({ msgSeenAt: new Date().toISOString() }, user)
 
 // ─── общие постпроцессоры ───────────────────────────────────────────────────
