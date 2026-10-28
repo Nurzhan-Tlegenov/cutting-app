@@ -162,9 +162,19 @@ export function scoreLines({ geo, outlines = [], paths = [], offcuts = [], r = 3
     while (e < n && ok(at(e))) e++
     const a0 = k === 0 ? 0 : (k + 1) * CELL, b0 = e === n ? (vertical ? L : W) : (e - 1) * CELL
     if (b0 - a0 < MIN_LEN) return null
+    // защита: параллельно существующей надсечке ближе SEP (на том же участке) — не режем, это лишний рез
+    for (const o of out) {
+      if (o.dir !== (vertical ? 'v' : 'h')) continue
+      const q = vertical ? o.a[0] : o.a[1]
+      if (Math.abs(q - pos) >= SEP) continue
+      const [p0, p1] = vertical ? [Math.min(o.a[1], o.b[1]), Math.max(o.a[1], o.b[1])] : [Math.min(o.a[0], o.b[0]), Math.max(o.a[0], o.b[0])]
+      if (Math.min(p1, b0) - Math.max(p0, a0) > 0) return null
+    }
     const sg = vertical ? { a: [pos, a0], b: [pos, b0], dir: 'v' } : { a: [a0, pos], b: [b0, pos], dir: 'h' }
     out.push(sg); mark(sg); return sg
   }
+  const SEP = 50                                         // мм — надсечки по стыку ближе этого к параллельной не делаются
+  const TAIL = 100                                       // мм — узкий хвостик не длиннее этого не отделяется
   const LEG = 6                                          // клеток — меньший выступ (30 мм) Г-образным не считается
   for (let round = 0; round < 8; round++) {
     const comp = new Int32Array(nx * ny).fill(-1), list = []
@@ -216,13 +226,32 @@ export function scoreLines({ geo, outlines = [], paths = [], offcuts = [], r = 3
         // (ступенька полосы и узкая ножка рядом с ней — разные участки)
         const cells = []
         for (let k = sd.lo; k <= sd.hi; k++) { const [i, j] = sd.nb(k); cells.push(inC(i, j) ? depth(i, j, sd.d[0], sd.d[1]) : 0) }
+        const isLeg = (k, e) => { const dmin = Math.min(...cells.slice(k, e)); return dmin >= Math.max(LEG, e - k + 1) }
+        const segs = []
         let k = 0
         while (k < cells.length) {
           if (!cells[k]) { k++; continue }
           let e = k + 1
           while (e < cells.length && cells[e] && Math.abs(cells[e] - cells[e - 1]) <= 2) e++
-          const w = e - k, dmin = Math.min(...cells.slice(k, e))
-          if (dmin >= Math.max(LEG, w + 1)) {
+          segs.push({ k, e, leg: isLeg(k, e) })
+          k = e
+        }
+        // соседние участки-ножки вплотную друг к другу — это одна ножка с неровным дном (например, у скошенного или
+        // скруглённого угла детали): режется целиком, по всей ширине. Иначе надсечка отрезала бы только часть ножки,
+        // кусок оставался бы целым, и на следующих кругах добавлялись бы параллельные надсечки через 10 мм
+        const legs = []
+        for (const g of segs) {
+          if (!g.leg) continue
+          const last = legs[legs.length - 1]
+          if (last && last.e === g.k && isLeg(last.k, g.e)) last.e = g.e
+          else legs.push({ k: g.k, e: g.e })
+        }
+        for (const { k, e } of legs) {
+          const dmin = Math.min(...cells.slice(k, e))
+          // короткий узкий хвостик (уже 30 мм и не длиннее 100 мм — например, в кармане у скруглённого угла детали)
+          // ломается рукой — отдельная надсечка не нужна
+          if (e - k < LEG && dmin * CELL <= TAIL) continue
+          {
             // надсечка — там, где ножка с обеих сторон уже зажата (не продолжается кусок), и ещё клетка вглубь
             const [i0, j0] = sd.nb(sd.lo + k), [i1, j1] = sd.nb(sd.lo + e - 1)
             const along = sd.v ? [0, 1] : [1, 0]
@@ -238,7 +267,6 @@ export function scoreLines({ geo, outlines = [], paths = [], offcuts = [], r = 3
             const lo = sd.lo + k, hi = sd.lo + e - 1
             if (sd.v ? seam(true, cx(ti), lo, hi, ti, ok) : seam(false, cy(tj), lo, hi, tj, ok)) added++
           }
-          k = e
         }
       }
     }
