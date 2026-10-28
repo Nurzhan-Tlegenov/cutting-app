@@ -1082,7 +1082,8 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress, seqOf = null
   let size = 0
   const put = d => { const b = typeof d === 'string' ? strToU8(d) : d; chunks.push(b); size += b.length }
   const obj = (n, body, stream) => { offsets[n] = size; put(`${n} 0 obj\n${body}\n`); if (stream) { put('stream\n'); put(stream); put('\nendstream\n') } put('endobj\n') }
-  put('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n')
+  // заголовок: вторая строка — четыре байта > 127 (признак «двоичный файл»), байтами, а не UTF-8
+  put('%PDF-1.4\n'); put(new Uint8Array([0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A]))
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H
   const row = Math.ceil(W / 8), kids = []
   let n = 3, done = 0
@@ -1107,10 +1108,15 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress, seqOf = null
   }
   obj(1, '<< /Type /Catalog /Pages 2 0 R >>')
   obj(2, `<< /Type /Pages /Count ${kids.length} /Kids [${kids.join(' ')}] >>`)
+  // сведения о файле и идентификатор — строгие просмотрщики на компьютере (Acrobat и др.) ждут их в обычном PDF
+  const info = n++, d = new Date(), z = v => String(v).padStart(2, '0')
+  const stamp = `D:${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`
+  obj(info, `<< /Producer (RaskroyPro) /Creator (RaskroyPro) /Title (Birki) /CreationDate (${stamp}) >>`)
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')
   const xref = size
   put(`xref\n0 ${n}\n0000000000 65535 f \n`)
   for (let i = 1; i < n; i++) put(String(offsets[i]).padStart(10, '0') + ' 00000 n \n')
-  put(`trailer\n<< /Size ${n} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`)
+  put(`trailer\n<< /Size ${n} /Root 1 0 R /Info ${info} 0 R /ID [<${id}> <${id}>] >>\nstartxref\n${xref}\n%%EOF\n`)
   const out = new Uint8Array(size)
   let o = 0
   for (const c of chunks) { out.set(c, o); o += c.length }
