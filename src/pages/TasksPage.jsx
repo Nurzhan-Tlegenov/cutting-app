@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import { useBackClose } from '../lib/backStack'
+import { useDesktop } from '../hooks/useDesktop'
 import { sendState, orderTitle } from '../lib/orderUtils'
 import {
   loadBoard, addColumn, updateColumn, deleteColumn, addCard, updateCard, deleteCard, myOrders, ordersByIds,
@@ -46,6 +47,14 @@ export default function TasksPage() {
   const [error, setError] = useState('')
   const [showDone, setShowDone] = useState(() => { try { return localStorage.getItem('tasksShowDone') === '1' } catch { return false } })
   const [openId, setOpenId] = useState(qs.get('card'))
+  // вид доски, как у техпроцесса: дорожки (этапы сверху вниз, задачи строкой вправо) или колонки слева направо
+  const [layout, setLayoutRaw] = useState(() => { try { return localStorage.getItem('tasksLayout') || 'lanes' } catch { return 'lanes' } })
+  const setLayout = v => { setLayoutRaw(v); try { localStorage.setItem('tasksLayout', v) } catch { /* без памяти */ } }
+  const lanes = layout === 'lanes'
+  const [cardW, setCardWRaw] = useState(() => { try { return Number(localStorage.getItem('tasksCardW')) || (window.innerWidth < 760 ? 180 : 230) } catch { return 180 } })
+  const setCardW = f => setCardWRaw(w => { const v = Math.max(150, Math.min(400, Math.round(f(w)))); try { localStorage.setItem('tasksCardW', String(v)) } catch { /* без памяти */ } return v })
+  const CW = cardW
+  const desk = useDesktop()
   const [drag, setDrag] = useState(null)              // { card, x, y, x0, y0, over, idx }
   const boardRef = useRef(null), press = useRef(null), dragged = useRef(false), dragRef = useRef(null), ghostRef = useRef(null)
   useEffect(() => { dragRef.current = drag }, [drag])
@@ -188,12 +197,16 @@ export default function TasksPage() {
       if (!colEl) return null
       const els = [...colEl.querySelectorAll('[data-card]')].filter(el => el.getAttribute('data-card') !== dragRef.current?.card.id)
       let idx = els.length
-      for (let i = 0; i < els.length; i++) { const r = els[i].getBoundingClientRect(); if (pos.y < r.top + r.height / 2) { idx = i; break } }
+      const byX = !!colEl.querySelector('[data-lane]')                 // дорожка: место — по горизонтали
+      for (let i = 0; i < els.length; i++) { const r = els[i].getBoundingClientRect(); if (byX ? pos.x < r.left + r.width / 2 : pos.y < r.top + r.height / 2) { idx = i; break } }
       return { over: colEl.getAttribute('data-col'), idx }
     }
     const tick = () => {
       const el = boardRef.current
-      if (el) { const r = el.getBoundingClientRect(), edge = 44; if (pos.x < r.left + edge) el.scrollLeft -= 12; else if (pos.x > r.right - edge) el.scrollLeft += 12 }
+      // у края — листаем: доску (колонки) или дорожку этапа под пальцем
+      const lane = document.elementFromPoint(pos.x, pos.y)?.closest?.('[data-col]')?.querySelector('[data-lane]')
+      const sc = lane || el
+      if (sc) { const r = sc.getBoundingClientRect(), edge = 44; if (pos.x < r.left + edge) sc.scrollLeft -= 12; else if (pos.x > r.right - edge) sc.scrollLeft += 12 }
       if (pos.y < 70) window.scrollBy(0, -10); else if (pos.y > window.innerHeight - 70) window.scrollBy(0, 10)
       const t = target()
       if (t) setDrag(d => (d && (d.over !== t.over || d.idx !== t.idx) ? { ...d, ...t } : d))
@@ -210,6 +223,29 @@ export default function TasksPage() {
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up)
     return () => { cancelAnimationFrame(raf); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up) }
   }, [!!drag])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // карточка задачи (одна и та же в колонках и в дорожках)
+  const cardView = (k, c) => {
+    const p = progress(k), due = dueInfo(k), o = k.order_id ? orders.get(k.order_id) : null
+    return (
+      <div data-card={k.id} className="card" {...dragProps(k)} onClick={() => { if (!dragged.current) setOpenId(k.id) }}
+        style={{ padding: '9px 10px', cursor: 'pointer', borderLeft: `3px solid ${c.color || 'var(--gray-mid)'}`, opacity: drag?.card.id === k.id ? 0.35 : k.done_at ? 0.6 : 1, userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'pan-x pan-y' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          {!readOnly && <input type="checkbox" checked={!!k.done_at} title="Выполнено" onChange={e => patchCard(k.id, { done_at: e.target.checked ? new Date().toISOString() : null })} onClick={e => e.stopPropagation()} style={{ width: 17, height: 17, marginTop: 1, flexShrink: 0 }} />}
+          <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, textDecoration: k.done_at ? 'line-through' : 'none', wordBreak: 'break-word' }}>{k.title || <span style={{ color: 'var(--text-hint)' }}>Без названия</span>}</div>
+        </div>
+        {k.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{k.note}</div>}
+        <Progress {...p} />
+        {(due || k.remind_at || o) && (
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
+            {due && <span style={chip(...TONE[due.tone])}>📅 {due.text}</span>}
+            {k.remind_at && !k.done_at && <span style={chip('var(--text-muted)', 'var(--bg2)')} title="Напоминание">{k.reminded_at ? '🔕' : '🔔'}</span>}
+            {o && <span style={{ ...chip('var(--blue)', 'var(--blue-light)'), whiteSpace: 'normal' }}>📋 {orderTitle(o)} · {sendState(o).label}</span>}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   const open = cards.find(k => k.id === openId) || null
   const closeEditor = () => { setOpenId(null); if (qs.get('card')) navigate(readOnly ? `/tasks?u=${viewUser}` : '/tasks', { replace: true }) }
@@ -228,7 +264,15 @@ export default function TasksPage() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8, fontSize: 12.5, color: 'var(--text-muted)' }}>
           <span>Задач: <b>{cards.length - doneCount}</b></span>
           {lateCount > 0 && <span style={chip(...TONE.late)}>просрочено {lateCount}</span>}
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginLeft: 'auto', cursor: 'pointer' }}>
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+            <button type="button" title={lanes ? 'Колонками слева направо' : 'Этапы сверху вниз, задачи строкой (как техпроцесс)'} onClick={() => setLayout(lanes ? 'cols' : 'lanes')}
+              style={{ padding: '3px 9px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>{lanes ? '⇆ Колонки' : '☰ Дорожки'}</button>
+            {lanes && <>
+              <button type="button" title="Мельче" onClick={() => setCardW(w => w / 1.2)} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>−</button>
+              <button type="button" title="Крупнее" onClick={() => setCardW(w => w * 1.2)} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>+</button>
+            </>}
+          </span>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
             <input type="checkbox" checked={showDone} onChange={e => { setShowDone(e.target.checked); try { localStorage.setItem('tasksShowDone', e.target.checked ? '1' : '0') } catch { /* без памяти */ } }} style={{ width: 15, height: 15 }} />
             выполненные{doneCount ? ` (${doneCount})` : ''}
           </label>
@@ -240,7 +284,44 @@ export default function TasksPage() {
         </div>
       )}
 
-      {cols && cols.length > 0 && (
+      {cols && cols.length > 0 && (lanes ? (
+        // дорожки, как доска техпроцесса: этапы сверху вниз, задачи этапа — строкой вправо (листаются вбок)
+        <div ref={boardRef} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 12 }}>
+          {cols.map((c, ci) => {
+            const list = byCol.get(c.id) || [], hot = drag && drag.over === c.id
+            return (
+              <div key={c.id} data-col={c.id} style={{ display: 'flex', alignItems: 'stretch', gap: 6, minHeight: 92, borderRadius: 12, outline: hot ? '2px dashed var(--blue)' : 'none', background: hot ? 'var(--blue-light)' : 'transparent' }}>
+                {/* этап — слева */}
+                <div style={{ flex: `0 0 ${desk ? 150 : 86}px`, display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 6px', borderRadius: 12, background: 'var(--bg3)', borderLeft: `4px solid ${c.color || 'var(--gray-mid)'}` }}>
+                  <button type="button" disabled={readOnly} onClick={() => renameColumn(c)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontWeight: 600, fontSize: desk ? 13.5 : 12, lineHeight: 1.2, color: 'var(--text)', cursor: readOnly ? 'default' : 'pointer', wordBreak: 'break-word' }}>{c.name}</button>
+                  <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>задач {list.length}</span>
+                  {!readOnly && (
+                    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginTop: 'auto' }}>
+                      <button type="button" aria-label="Цвет этапа" title="Цвет" style={{ ...iconBtn, width: 24, height: 24 }} onClick={() => recolor(c)}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: c.color || 'var(--gray-mid)' }} /></button>
+                      {ci > 0 && <button type="button" aria-label="Этап выше" style={{ ...iconBtn, width: 24, height: 24, fontSize: 13 }} onClick={() => moveColumn(c, -1)}>↑</button>}
+                      {ci < cols.length - 1 && <button type="button" aria-label="Этап ниже" style={{ ...iconBtn, width: 24, height: 24, fontSize: 13 }} onClick={() => moveColumn(c, 1)}>↓</button>}
+                      <button type="button" aria-label="Удалить этап" style={{ ...iconBtn, width: 24, height: 24, fontSize: 12 }} onClick={() => removeColumn(c)}>✕</button>
+                    </span>
+                  )}
+                </div>
+                {/* задачи этапа — строкой вправо */}
+                <div data-lane style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, overflowX: 'auto', alignItems: 'flex-start', padding: 4, background: 'var(--bg3)', borderRadius: 12 }}>
+                  {list.map((k, i) => (
+                    <div key={k.id} style={{ display: 'flex', flex: '0 0 auto' }}>
+                      {hot && drag.idx === i && drag.card.id !== k.id && <div style={{ width: 5, borderRadius: 3, background: 'var(--blue)', marginRight: 6 }} />}
+                      <div style={{ width: CW }}>{cardView(k, c)}</div>
+                    </div>
+                  ))}
+                  {hot && drag.idx === list.length && <div style={{ flex: '0 0 5px', alignSelf: 'stretch', borderRadius: 3, background: 'var(--blue)' }} />}
+                  {!readOnly && <button type="button" onClick={() => quickAdd(c.id)} style={{ flex: '0 0 auto', alignSelf: 'stretch', minWidth: 44, border: '1px dashed var(--border-md)', borderRadius: 10, background: 'transparent', color: 'var(--text-muted)', fontSize: 13, padding: '0 10px', cursor: 'pointer' }}>{list.length ? '+' : '+ Задача'}</button>}
+                  {readOnly && !list.length && <div style={{ alignSelf: 'center', fontSize: 12, color: 'var(--text-hint)', padding: '0 6px' }}>пусто</div>}
+                </div>
+              </div>
+            )
+          })}
+          {!readOnly && <button type="button" onClick={newColumn} style={{ minHeight: 44, borderRadius: 12, border: '1px dashed var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}>+ Этап</button>}
+        </div>
+      ) : (
         <div ref={boardRef} style={{ display: 'flex', gap: 10, overflowX: 'auto', alignItems: 'flex-start', paddingBottom: 12, scrollSnapType: drag ? 'none' : 'x proximity', WebkitOverflowScrolling: 'touch', margin: '0 -16px', padding: '0 16px 12px' }}>
           {cols.map((c, ci) => {
             const list = byCol.get(c.id) || [], hot = drag && drag.over === c.id
@@ -258,31 +339,12 @@ export default function TasksPage() {
                   </>}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {list.map((k, i) => {
-                    const p = progress(k), due = dueInfo(k), o = k.order_id ? orders.get(k.order_id) : null
-                    const ghostHere = hot && drag.idx === i && drag.card.id !== k.id
-                    return (
-                      <div key={k.id}>
-                        {ghostHere && <div style={{ height: 6, borderRadius: 3, background: 'var(--blue)', margin: '0 0 6px' }} />}
-                        <div data-card={k.id} className="card" {...dragProps(k)} onClick={() => { if (!dragged.current) setOpenId(k.id) }}
-                          style={{ padding: '9px 10px', cursor: 'pointer', borderLeft: `3px solid ${c.color || 'var(--gray-mid)'}`, opacity: drag?.card.id === k.id ? 0.35 : k.done_at ? 0.6 : 1, userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'pan-x pan-y' }}>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                            {!readOnly && <input type="checkbox" checked={!!k.done_at} title="Выполнено" onChange={e => patchCard(k.id, { done_at: e.target.checked ? new Date().toISOString() : null })} onClick={e => e.stopPropagation()} style={{ width: 17, height: 17, marginTop: 1, flexShrink: 0 }} />}
-                            <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, textDecoration: k.done_at ? 'line-through' : 'none', wordBreak: 'break-word' }}>{k.title || <span style={{ color: 'var(--text-hint)' }}>Без названия</span>}</div>
-                          </div>
-                          {k.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{k.note}</div>}
-                          <Progress {...p} />
-                          {(due || k.remind_at || o) && (
-                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
-                              {due && <span style={chip(...TONE[due.tone])}>📅 {due.text}</span>}
-                              {k.remind_at && !k.done_at && <span style={chip('var(--text-muted)', 'var(--bg2)')} title="Напоминание">{k.reminded_at ? '🔕' : '🔔'}</span>}
-                              {o && <span style={chip('var(--blue)', 'var(--blue-light)')}>📋 {orderTitle(o)} · {sendState(o).label}</span>}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
+                  {list.map((k, i) => (
+                    <div key={k.id}>
+                      {hot && drag.idx === i && drag.card.id !== k.id && <div style={{ height: 6, borderRadius: 3, background: 'var(--blue)', margin: '0 0 6px' }} />}
+                      {cardView(k, c)}
+                    </div>
+                  ))}
                   {hot && drag.idx === list.length && <div style={{ height: 6, borderRadius: 3, background: 'var(--blue)' }} />}
                   {!list.length && !hot && <div style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center', padding: '10px 0' }}>{drag ? 'сюда' : 'пусто'}</div>}
                   {!readOnly && <button type="button" onClick={() => quickAdd(c.id)} style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 13.5, textAlign: 'left', padding: '6px 4px', cursor: 'pointer' }}>+ Добавить задачу</button>}
@@ -294,7 +356,7 @@ export default function TasksPage() {
             <button type="button" onClick={newColumn} style={{ flex: '0 0 170px', minHeight: 60, borderRadius: 14, border: '1px dashed var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}>+ Этап</button>
           )}
         </div>
-      )}
+      ))}
 
       {drag && (
         <div ref={ghostRef} style={{ position: 'fixed', left: 0, top: 0, zIndex: 3000, width: 220, pointerEvents: 'none', transform: `translate(${drag.x - 110}px, ${drag.y - 24}px)` }}>

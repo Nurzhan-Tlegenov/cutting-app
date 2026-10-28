@@ -1496,6 +1496,8 @@ const BEAM_COL = { kerf_width: 'kerf', margin_left: 'trimLeft', margin_right: 't
 const prodNeed = (pr, col, order, result) => (result?.beamSaw ? beamSettings(pr.beam_saw_settings)[BEAM_COL[col]] : prodVal(pr, col, order))
 // Рез и отступы, которые подставляются в поля листа: выбран пильный центр β — его настройки, иначе «Параметры станка»
 const machineVal = (pr, col, order) => (order?.beam_saw && BEAM_COL[col] ? beamSettings(pr.beam_saw_settings)[BEAM_COL[col]] : prodVal(pr, col, order))
+// популярные форматы листа (длина × ширина, мм) — в выпадающем списке «Формат листа»; свои пользователь добавляет сам
+const SHEET_PRESETS = [{ L: 2800, W: 2070 }, { L: 2750, W: 1830 }]
 const SHEET_FIELDS = [
   ['L', 'sheet_length'], ['W', 'sheet_width'], ['kerf', 'kerf_width'],
   ['ml', 'margin_left'], ['mr', 'margin_right'], ['mt', 'margin_top'], ['mb', 'margin_bottom'],
@@ -1900,6 +1902,7 @@ export default function NestingPage() {
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
   useBackClose(!!needProd, () => setNeedProd(null))
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
+  const [, setFmtTick] = useState(0)                 // свои форматы листа сохранены — перерисовать список
   const [offForm, setOffForm] = useState(() => parseOffcuts(null))
   const [offImport, setOffImport] = useState('')        // итог импорта обрезков из Excel (или ошибка)
   const offFileRef = useRef(null)
@@ -3952,6 +3955,57 @@ export default function NestingPage() {
                     Рез и отступы задаёт производство «{prod.name}». Формат листа можно менять — например, под свой материал.
                   </p>
                 )}
+                {(() => {
+                  // формат листа — выпадающим списком: популярные + свои, сохранённые за аккаунтом
+                  const mine = (getUserSettings(user).sheetFormats || []).filter(f => f && f.L > 0 && f.W > 0)
+                  const keyOf = (L, W) => `${Number(L)}x${Number(W)}`
+                  const all = [...SHEET_PRESETS.map(f => ({ ...f, mine: false })), ...mine.filter(f => !SHEET_PRESETS.some(p => keyOf(p.L, p.W) === keyOf(f.L, f.W))).map(f => ({ ...f, mine: true }))]
+                  const cur = keyOf(order.sheet_length, order.sheet_width)
+                  const hit = all.find(f => keyOf(f.L, f.W) === cur)
+                  const saveMine = list => { saveUserSettings({ sheetFormats: list }, user); setFmtTick(t => t + 1) }
+                  const addOwn = () => {
+                    const t = window.prompt('Свой формат листа: длина × ширина, мм (например 2440 × 1220)', '')
+                    if (t == null) return
+                    const m = String(t).replace(/,/g, '.').match(/(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)/)
+                    if (!m) { window.alert('Введите два числа: длину и ширину, например 2440 × 1220'); return }
+                    const L = Number(m[1]), W = Number(m[2])
+                    if (!(L >= 50 && W >= 50)) { window.alert('Длина и ширина — не меньше 50 мм'); return }
+                    if (!all.some(f => keyOf(f.L, f.W) === keyOf(L, W))) saveMine([...mine, { L, W }])
+                    saveOrderPatch({ sheet_length: L, sheet_width: W })
+                  }
+                  const pick = v => {
+                    if (v === '+') { addOwn(); return }
+                    if (v === '-') { saveMine(mine.filter(f => keyOf(f.L, f.W) !== cur)); return }
+                    const f = all.find(x => keyOf(x.L, x.W) === v)
+                    if (f) saveOrderPatch({ sheet_length: f.L, sheet_width: f.W })
+                  }
+                  return (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 8, flexWrap: 'wrap' }}>
+                      <label style={{ ...lbl, flex: '1 1 200px' }}>
+                        Формат листа
+                        <select value={hit ? cur : ''} disabled={isLocked('L')} onChange={e => pick(e.target.value)} style={{ ...inp, padding: '5px 6px' }}>
+                          {!hit && <option value="">{order.sheet_length} × {order.sheet_width} — свой (не сохранён)</option>}
+                          <optgroup label="Популярные">
+                            {all.filter(f => !f.mine).map(f => <option key={keyOf(f.L, f.W)} value={keyOf(f.L, f.W)}>{f.L} × {f.W}</option>)}
+                          </optgroup>
+                          {all.some(f => f.mine) && (
+                            <optgroup label="Мои форматы">
+                              {all.filter(f => f.mine).map(f => <option key={keyOf(f.L, f.W)} value={keyOf(f.L, f.W)}>{f.L} × {f.W}</option>)}
+                            </optgroup>
+                          )}
+                          <option value="+">＋ Добавить свой формат…</option>
+                          {hit?.mine && <option value="-">✕ Убрать {hit.L} × {hit.W} из моих</option>}
+                        </select>
+                      </label>
+                      {!hit && !isLocked('L') && (
+                        <button type="button" onClick={() => saveMine([...mine, { L: Number(order.sheet_length), W: Number(order.sheet_width) }])}
+                          style={{ flex: '0 0 auto', padding: '6px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', fontSize: 12.5, cursor: 'pointer' }}>
+                          ★ Запомнить {order.sheet_length} × {order.sheet_width}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })()}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   {field('L', 'Длина листа, мм', 'Вертикаль на карте')}
                   {field('W', 'Ширина листа, мм', 'Горизонталь на карте')}
