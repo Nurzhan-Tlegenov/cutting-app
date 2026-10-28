@@ -839,7 +839,7 @@ export default function LabelsPage() {
   // номера страниц — как в PDF всех бирок (с бирками обрезков, если они включены)
   const pageNos = mat && tpl ? labelPages(order, mat, tpl, isBeamMat(mat) ? beamLabelSeq : null) : { map: new Map(), total: 0 }
   const allLabels = mat ? mat.sheets.flatMap((sh, si) => (isBeamMat(mat) ? beamLabelSeq(sh, sheetGeo(order, mat.result, sh), null).map(q => q.pi) : labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual')).map(pi => ({ si, pi }))).map((q, n) => ({ ...q, n, page: pageNos.map.get(`${q.si}:${q.pi}`), pages: pageNos.total })) : []
-  const apply = t => { setTpl(t); saveLabelTpl(t, user) }   // настройки бирок на обрезки
+  const apply = t => { setTpl(t); saveLabelTpl(t, user) }   // настройки бирок на деловые остатки
   // файлы маркировочного стола — тем же набором, что делает ЧПУ вместе с G-кодом
   // все бирки одним PDF: бирка — страница, страница размером с бирку
   const savePdf = async () => {
@@ -1028,6 +1028,7 @@ export function LabelSettingsPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [tpl, setTpl] = useState(() => getLabelTpl(user))
+  const applyTpl = t => { setTpl(t); saveLabelTpl(t, user) }      // бирка остатка — сохраняется сразу, как на странице бирок
   const sample = useMemo(() => demoLabelSample(), [])
   const desk = useDesktop()
   const [previewEl, setPreviewEl] = useState(null)
@@ -1044,6 +1045,12 @@ export function LabelSettingsPage() {
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 4px' }}>Бирка показана на образцовой детали. Шаблон тот же, что в бирках заказа: настроили здесь — он сразу работает во всех заказах.</p>
         <LabelSetup tpl={tpl} setTpl={setTpl} user={user} order={sample.order} mat={sample.mat} shared={false} previewEl={desk ? previewEl : null} />
       </div>
+      {/* бирка делового остатка — тот же шаблон, что на странице бирок заказа: настраивается и здесь, и там */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, margin: '4px 0 8px', cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!tpl.offcuts} onChange={e => applyTpl({ ...tpl, offcuts: e.target.checked })} style={{ width: 18, height: 18 }} />
+        Печатать бирки на деловые остатки
+      </label>
+      <RemLabelSetup tpl={tpl} onChange={applyTpl} sample={{ order: sample.order, mat: sample.mat, si: 0, o: { w: 612, h: 1250 }, client: 'Иван Петров' }} />
   </>)
   // компьютер: слева — бирка на образцовой детали, справа — размеры и параметры шаблона
   if (desk) return (
