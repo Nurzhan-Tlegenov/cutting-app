@@ -7,6 +7,7 @@ import FileNamesSettings from './FileNamesSettings'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
 import { useState, useRef, useEffect } from 'react'
+import { useDesktop } from '../hooks/useDesktop'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
 import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot, forkShared } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor } from '../lib/gcode'
@@ -603,8 +604,80 @@ function LearnFromProgram({ post, onApply, tools = [] }) {
   )
 }
 
+// Подсказка команд G-кода: нажатие вставляет команду в поле, где стоит курсор. Для тех, кто собирает команды своего
+// станка сам (новый постпроцессор создаётся с пустыми командами). Команды у разных контроллеров могут отличаться.
+const CMD_HELP = [
+  ['Начало программы', [
+    ['%', 'начало / конец файла программы (нужен не всем станкам)'],
+    ['G21', 'единицы — миллиметры'],
+    ['G90', 'абсолютные координаты'],
+    ['G17', 'плоскость обработки XY'],
+    ['G40', 'отменить коррекцию на радиус фрезы'],
+    ['G49', 'отменить коррекцию на длину инструмента'],
+    ['G80', 'отменить циклы сверления'],
+    ['G54', 'система координат детали (ноль листа)'],
+    ['G53 Z0', 'поднять Z в машинный ноль (безопасно)'],
+    ['G0 Z50', 'подняться на высоту 50 мм ускоренно'],
+  ]],
+  ['Смена инструмента — начало', [
+    ['M05', 'остановить шпиндель'],
+    ['M06 T{T}', 'сменить инструмент: взять T{T} из магазина'],
+    ['T{T} M06', 'то же — другой порядок, у части контроллеров'],
+    ['G43 H{T}', 'коррекция длины инструмента {T}'],
+    ['M03 S{S}', 'шпиндель по часовой, обороты {S}'],
+    ['M04 S{S}', 'шпиндель против часовой, обороты {S}'],
+    ['G4 P3', 'пауза — дать шпинделю разогнаться (P — секунды или мс, по станку)'],
+    ['M08', 'включить охлаждение / обдув'],
+  ]],
+  ['Смена инструмента — конец', [
+    ['M09', 'выключить охлаждение / обдув'],
+    ['G53 Z0', 'поднять Z в машинный ноль'],
+    ['G54', 'вернуться в систему координат детали'],
+  ]],
+  ['Конец программы', [
+    ['M05', 'остановить шпиндель'],
+    ['G53 Z0', 'поднять Z в машинный ноль'],
+    ['G0 X0 Y0', 'отъехать в начало листа'],
+    ['M30', 'конец программы с возвратом в начало'],
+    ['M02', 'конец программы'],
+  ]],
+  ['Прочее', [
+    ['( комментарий )', 'комментарий — станок его пропускает'],
+  ]],
+]
+function CmdPalette({ onPick, desk }) {
+  const [open, setOpen] = useState(desk)
+  return (
+    <div style={{ border: '0.5px solid var(--border-md)', borderRadius: 12, background: 'var(--bg2)', padding: '8px 10px', marginBottom: 10, position: desk ? 'sticky' : 'static', top: 10 }}>
+      <button type="button" onClick={() => setOpen(o => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: 'var(--text)', fontSize: 13, fontWeight: 600, textAlign: 'left' }}>
+        <span style={{ flex: 1 }}>💡 Подсказка: команды G-кода</span><span style={{ color: 'var(--text-hint)' }}>{open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <>
+          <div style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '4px 0 6px' }}>Поставьте курсор в нужное поле слева и нажмите команду — она встанет отдельной строкой. Команды разных контроллеров (NC Studio, Syntec, Weihong, Mach3…) могут отличаться — сверяйтесь с инструкцией своего станка.</div>
+          {CMD_HELP.map(([group, list]) => (
+            <div key={group} style={{ marginTop: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: 2 }}>{group}</div>
+              {list.map(([code, what]) => (
+                <button key={group + code} type="button" onMouseDown={e => e.preventDefault()} onClick={() => onPick(code)} title="Вставить в поле"
+                  style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'baseline', border: 'none', borderRadius: 8, background: 'transparent', padding: '4px 4px', cursor: 'pointer', textAlign: 'left', color: 'var(--text)' }}>
+                  <code style={{ flex: '0 0 auto', minWidth: 76, fontSize: 12.5, fontWeight: 600, color: 'var(--blue-dark)', background: 'var(--bg)', borderRadius: 6, padding: '1px 6px' }}>{code}</code>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.3 }}>{what}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
 export function CncCommands({ cnc, onChange, isMaster = false }) {
   const post = activePost(cnc)
+  const cmdTarget = useRef(null)                       // поле команд, куда вставляет подсказка
+  const [cmdFocus, setCmdFocus] = useState(null)
+  const desk = useDesktop()
   const set = patch => {
     if (post.shared && !isMaster) { const p = { ...post, ...patch, id: newId(), shared: false, forAll: false, ownerId: undefined, name: post.name + ' (мой)' }; onChange({ ...cnc, posts: [...cnc.posts, p], post: p.id }); return }
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
@@ -645,11 +718,30 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
   const Box = ({ k, label, rows = 3 }) => (
     <div style={{ marginBottom: 10 }}>
       <label className="label">{label}</label>
-      <textarea key={post.id + k + (post[k] || '')} defaultValue={post[k]} rows={rows} spellCheck={false}
+      <textarea key={post.id + k + (post[k] || '')} data-cmd={k} defaultValue={post[k]} rows={rows} spellCheck={false}
+        placeholder={post[k] ? '' : 'пусто — впишите команды своего станка или добавьте из подсказки'}
+        onFocus={e => { cmdTarget.current = { k, el: e.target } }}
         onBlur={e => { if (e.target.value !== post[k]) set({ [k]: e.target.value }) }}
-        style={{ fontFamily: 'monospace', fontSize: 13, resize: 'vertical' }} />
+        style={{ fontFamily: 'monospace', fontSize: 13, resize: 'vertical', outline: cmdFocus === k ? '2px solid var(--blue-mid)' : undefined }} />
     </div>
   )
+  // подсказка: вставить команду в поле, где стоит курсор (или в «Начало программы»), отдельной строкой
+  const insertCmd = code => {
+    const t = cmdTarget.current || { k: 'cmdStart', el: null }
+    const el = t.el && document.body.contains(t.el) ? t.el : null
+    const cur = el ? el.value : (post[t.k] || '')
+    const at = el ? el.selectionStart ?? cur.length : cur.length
+    const before = cur.slice(0, at), after = cur.slice(at)
+    const line = (before && !before.endsWith('\n') ? '\n' : '') + code + (after && !after.startsWith('\n') ? '\n' : '')
+    const next = before + line + after
+    set({ [t.k]: next })
+    setCmdFocus(t.k)
+    // курсор — после вставленной строки (поле пересоздаётся с новым значением)
+    setTimeout(() => {
+      const box = document.querySelector(`textarea[data-cmd="${t.k}"]`)
+      if (box) { const pos = (before + line).length; box.focus(); box.setSelectionRange(pos, pos); cmdTarget.current = { k: t.k, el: box } }
+    }, 30)
+  }
   if (isBeamSaw(post)) return (
     <div className="card">
       <Title>Команды · {post.name}</Title>
@@ -666,6 +758,8 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
     <div className="card">
       <Title>Команды · {post.name}</Title>
       {isMaster && <LearnFromProgram post={post} tools={cnc.tools || []} onApply={applyLearned} />}
+      <div style={desk ? { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 14, alignItems: 'start' } : undefined}>
+      <div>
       {Box({ k: 'cmdStart', label: 'Начало программы' })}
       {Box({ k: 'cmdToolStart', label: 'Смена инструмента — начало', rows: 5 })}
       {Box({ k: 'cmdToolEnd', label: 'Смена инструмента — конец' })}
@@ -679,6 +773,9 @@ export function CncCommands({ cnc, onChange, isMaster = false }) {
         </div>
       )}
       <Hint>Каждая команда — с новой строки. В смене инструмента вместо {'{T}'} подставляется номер инструмента в магазине, вместо {'{S}'} — обороты шпинделя.</Hint>
+      </div>
+      <CmdPalette onPick={insertCmd} desk={desk} />
+      </div>
       <div style={{ marginTop: 10 }}><SaveSnapshotButton cnc={cnc} onChange={onChange} /></div>
     </div>
   )
