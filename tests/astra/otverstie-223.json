@@ -1,0 +1,18 @@
+{
+ "items": [
+  {
+   "des": "1",
+   "name": "Деталь",
+   "size": "400x400x16",
+   "qty": 1,
+   "material": "K1",
+   "edges": "",
+   "drillings": 1,
+   "grooves": [],
+   "holes": [],
+   "edgeGrooves": []
+  }
+ ],
+ "marks": [],
+ "candidates": []
+}

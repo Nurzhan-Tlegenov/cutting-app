@@ -436,8 +436,14 @@ function furnitureHoles(part, T, M, out, plates, faceAt) {
             const h = fx.holes?.[0]?.d
             if (!h) break
             const z = [[T, 1], [0, -1]]
-            // глубина 0 — сквозное отверстие в ответной панели
-            for (const [zz, dz] of (f.u === 2 ? [z[0]] : f.u === 1 ? [z[1]] : z)) push([at[0] + nin[0] * f.d, at[1] + nin[1] * f.d, zz], [0, 0, dz], h[0], h[1] > 0 ? h[1] : 22, { only: 'face' })
+            // глубина 0 — сквозное отверстие в ответной панели.
+            // Отверстие идёт в панель, прилегающую к этой пласти (фурнитура-панель крепится к корпусу). Если к пласти ничего
+            // не прилегает (отверстие поставлено на саму деталь — так его рисует и чертёж Астры), сверлится сама деталь с этой пласти.
+            for (const [zz, dz] of (f.u === 2 ? [z[0]] : f.u === 1 ? [z[1]] : z)) {
+              const p = [at[0] + nin[0] * f.d, at[1] + nin[1] * f.d, zz]
+              if (faceAt(applyP(M, p), applyV(M, [0, 0, dz]))) push(p, [0, 0, dz], h[0], h[1] > 0 ? h[1] : 22, { only: 'face' })
+              else push(p, [0, 0, -dz], h[0], h[1] > 0 ? Math.min(h[1], T) : T, { only: 'face' })
+            }
             break
           }
           default:
