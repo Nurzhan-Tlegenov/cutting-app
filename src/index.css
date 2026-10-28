@@ -182,4 +182,7 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 /* закреплённое боковое меню (компьютер): страница сдвигается вправо на ширину меню */
 @media (min-width: 1100px) {
   body.nav-pinned #root { margin-left: var(--nav-pin-w, 0px); }
+  /* окна на весь экран (импорт, редакторы, просмотр, 3D…) — тоже правее закреплённого меню, а не под ним.
+     data-full — окна, которые должны закрывать весь экран (само меню, обучение) */
+  body.nav-pinned [style*="position: fixed"][style*="inset: 0"]:not([data-full]) { left: var(--nav-pin-w, 0px) !important; }
 }

@@ -167,7 +167,7 @@ export default function DemoVideo({ id, onClose }) {
   const ctl = { width: 44, height: 44, borderRadius: 22, border: 'none', background: 'rgba(255,255,255,.12)', color: '#fff', fontSize: 18, padding: 0, cursor: 'pointer' }
 
   return createPortal(
-    <div dir="ltr" data-no-i18n={L === 'ru' ? '' : undefined} style={{ position: 'fixed', inset: 0, zIndex: 1300, background: '#0f1218', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <div dir="ltr" data-full="" data-no-i18n={L === 'ru' ? '' : undefined} style={{ position: 'fixed', inset: 0, zIndex: 1300, background: '#0f1218', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <style>{CSS}</style>
       {/* шапка */}
       <div style={{ width: '100%', maxWidth: 480, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px 8px', boxSizing: 'border-box' }}>
@@ -223,7 +223,7 @@ export default function DemoVideo({ id, onClose }) {
         {!canSpeak && <div data-no-i18n="" style={{ textAlign: 'center', fontSize: 11.5, opacity: 0.6, marginTop: 6 }}>{ui.noVoice}</div>}
         {/* список голосов — панелью снизу поверх ролика, открывается вверх и листается внутри: всё помещается в экран */}
         {voiceMenu && canSpeak && (
-          <div data-no-i18n="" onClick={closeVoices} style={{ position: 'fixed', inset: 0, zIndex: 10, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div data-no-i18n="" data-full="" onClick={closeVoices} style={{ position: 'fixed', inset: 0, zIndex: 10, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
             <div onClick={e => e.stopPropagation()} className="demo-sheet"
               style={{ width: '100%', maxWidth: 480, maxHeight: '70vh', display: 'flex', flexDirection: 'column', background: '#1c222c', borderRadius: '18px 18px 0 0', paddingBottom: 'env(safe-area-inset-bottom)', boxShadow: '0 -8px 30px rgba(0,0,0,.4)' }}>
               <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px 8px', gap: 10 }}>

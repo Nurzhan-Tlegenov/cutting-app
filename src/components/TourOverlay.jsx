@@ -95,7 +95,7 @@ export default function TourOverlay() {
   const btn = main => ({ padding: '7px 14px', borderRadius: 18, fontSize: 13, border: main ? 'none' : '0.5px solid var(--border-md)', background: main ? 'var(--blue)' : 'transparent', color: main ? '#fff' : 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' })
 
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1200, pointerEvents: 'none' }}>
+    <div data-full="" style={{ position: 'fixed', inset: 0, zIndex: 1200, pointerEvents: 'none' }}>
       {rect && !center && (
         <div style={{ position: 'fixed', left: rect.x - PAD, top: rect.y - PAD, width: rect.w + PAD * 2, height: rect.h + PAD * 2, borderRadius: 12,
           boxShadow: '0 0 0 2px var(--blue), 0 0 0 9999px rgba(0,0,0,.45)', transition: `all .3s ${EASE}` }} />

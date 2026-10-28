@@ -333,7 +333,7 @@ export default function NavDrawer({ notices, unread }) {
   )
   return createPortal(<>
     {tab}
-    <div ref={root} style={{ position: 'fixed', inset: 0, zIndex: 1100, pointerEvents: moving ? 'auto' : 'none', visibility: moving || vis ? 'visible' : 'hidden' }}>
+    <div ref={root} data-full="" style={{ position: 'fixed', inset: 0, zIndex: 1100, pointerEvents: moving ? 'auto' : 'none', visibility: moving || vis ? 'visible' : 'hidden' }}>
       <div onClick={close} style={{ position: 'absolute', inset: 0, background: '#000', opacity: k * 0.38, transition: drag != null ? 'none' : `opacity .42s ${EASE}`, WebkitTapHighlightColor: 'transparent' }} />
       <nav ref={panel}
         style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: w, transform: `translate3d(${shown - w}px,0,0)`, transition: tr, willChange: 'transform',
