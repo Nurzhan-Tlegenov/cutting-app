@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { REM_QR_PARTS, REM_ITEMS, PART_ITEMS, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
+import { REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
 import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
@@ -195,6 +195,103 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d, bp 
 // Показана бирка первой детали первого листа — на настоящих данных заказа.
 import LabelImageEditor from '../components/LabelImageEditor'
 
+// Сетка бирки в мм: тонкая — через 1 мм (когда крупно), через 5 мм, жирнее — через 10 мм с цифрами по верху и слева
+function LabelGrid({ w, h, scale }) {
+  const lines = [], step1 = scale >= 7
+  for (let x = 0; x <= w + 0.001; x += 1) { const k = Math.round(x); if (k % 5 && !step1) continue; lines.push(<line key={'x' + k} x1={x * scale} y1={0} x2={x * scale} y2={h * scale} stroke={k % 10 ? (k % 5 ? 'rgba(24,95,165,.12)' : 'rgba(24,95,165,.25)') : 'rgba(24,95,165,.45)'} strokeWidth={1} />) }
+  for (let y = 0; y <= h + 0.001; y += 1) { const k = Math.round(y); if (k % 5 && !step1) continue; lines.push(<line key={'y' + k} x1={0} y1={y * scale} x2={w * scale} y2={y * scale} stroke={k % 10 ? (k % 5 ? 'rgba(24,95,165,.12)' : 'rgba(24,95,165,.25)') : 'rgba(24,95,165,.45)'} strokeWidth={1} />) }
+  const nums = []
+  for (let x = 10; x < w; x += 10) nums.push(<text key={'nx' + x} x={x * scale + 2} y={10} fontSize={9} fill="#185FA5">{x}</text>)
+  for (let y = 10; y < h; y += 10) nums.push(<text key={'ny' + y} x={2} y={y * scale - 2} fontSize={9} fill="#185FA5">{y}</text>)
+  return <svg width={w * scale} height={h * scale} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>{lines}{nums}</svg>
+}
+
+// Место элемента в мм: X, Y, ширина, высота — числами; отступы до краёв бирки
+function ItemPlace({ it, tpl, edit }) {
+  const [bw, bh] = itemBox(it), box = isBox(it)
+  const f = v => String(Math.round(v * 10) / 10).replace('.', ',')
+  const num = (v, set) => { const x = Number(String(v).replace(',', '.')); if (isFinite(x)) set(x) }
+  const inp = { width: 58, padding: '5px 6px', fontSize: 12.5, marginLeft: 4 }
+  const field = (lab, val, set, k) => (
+    <label key={k} style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0, display: 'flex', alignItems: 'center' }}>{lab}
+      <input type="text" inputMode="decimal" key={k + it.id + val} defaultValue={f(val)} onBlur={e => num(e.target.value, set)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} style={inp} /></label>
+  )
+  return (
+    <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      {field('X', it.x, x => edit({ x }), 'x')}
+      {field('Y', it.y, y => edit({ y }), 'y')}
+      {box && it.type !== 'vline' && field(it.type === 'hline' ? 'Длина' : 'Ширина', it.w, w => edit({ w }), 'w')}
+      {box && it.type !== 'hline' && field(it.type === 'vline' ? 'Длина' : 'Высота', it.h, h => edit({ h }), 'h')}
+      {!box && field('Длина строки', it.w, w => edit({ w }), 'w')}
+      <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>мм · до краёв: слева {f(it.x)}, сверху {f(it.y)}, справа {f(tpl.w - it.x - bw)}, снизу {f(tpl.h - it.y - bh)}</span>
+    </div>
+  )
+}
+
+// Оформление: у линий, рамки и таблицы — толщина, заливка, скругление, ячейки; у остальных — рамка вокруг и «белым по чёрному»
+function ItemStyle({ it, tpl, edit, chip }) {
+  const row = { flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }
+  const lab = { fontSize: 11.5, color: 'var(--text-muted)', minWidth: 62 }
+  const hint = { fontSize: 11, color: 'var(--text-hint)' }
+  const lw = it.lw || 0.3, f = v => String(Math.round(v * 10) / 10).replace('.', ',')
+  const thick = (
+    <>
+      <span style={lab}>Толщина линии:</span>
+      <button type="button" style={chip(false)} onClick={() => edit({ lw: Math.max(0.1, Math.round((lw - 0.1) * 10) / 10) })}>−</button>
+      <span style={hint}>{f(lw)} мм</span>
+      <button type="button" style={chip(false)} onClick={() => edit({ lw: Math.round((lw + 0.1) * 10) / 10 })}>+</button>
+    </>
+  )
+  if (isShape(it)) {
+    const st = (n, d, lo, hi) => Math.max(lo, Math.min(hi, (it[n] || 0) + d))
+    return (
+      <>
+        <div style={row}>{thick}</div>
+        {it.type === 'hline' && <div style={row}><button type="button" style={chip(false)} onClick={() => edit({ x: 0, w: tpl.w })}>↔ Во всю ширину</button><button type="button" style={chip(false)} onClick={() => edit({ y: (tpl.h - lw) / 2 })}>↕ По центру бирки</button></div>}
+        {it.type === 'vline' && <div style={row}><button type="button" style={chip(false)} onClick={() => edit({ y: 0, h: tpl.h })}>↕ Во всю высоту</button><button type="button" style={chip(false)} onClick={() => edit({ x: (tpl.w - lw) / 2 })}>↔ По центру бирки</button></div>}
+        {(it.type === 'rect' || it.type === 'table') && (
+          <div style={row}>
+            <button type="button" style={chip(false)} onClick={() => edit({ x: 0, y: 0, w: tpl.w, h: tpl.h })}>⛶ По краю бирки</button>
+            <button type="button" style={chip(false)} onClick={() => { const m = 2; edit({ x: m, y: m, w: tpl.w - 2 * m, h: tpl.h - 2 * m }) }}>С отступом 2 мм</button>
+            <button type="button" style={chip(false)} onClick={() => edit({ x: (tpl.w - it.w) / 2, y: (tpl.h - it.h) / 2 })}>✛ В центр бирки</button>
+          </div>
+        )}
+        {it.type === 'rect' && (
+          <div style={row}>
+            <button type="button" style={chip(!!it.inv)} onClick={() => edit({ inv: !it.inv || undefined })}>■ Залить чёрным</button>
+            <span style={{ ...lab, minWidth: 0, marginLeft: 4 }}>Скругление:</span>
+            <button type="button" style={chip(false)} onClick={() => edit({ rad: st('rad', -0.5, 0, 10) })}>−</button>
+            <span style={hint}>{f(it.rad || 0)} мм</span>
+            <button type="button" style={chip(false)} onClick={() => edit({ rad: st('rad', 0.5, 0, 10) })}>+</button>
+            {it.inv && <span style={{ ...hint, flex: '1 1 100%' }}>Залитая рамка лежит под остальными элементами. Текст поверх неё сделайте «белым по чёрному».</span>}
+          </div>
+        )}
+        {it.type === 'table' && (
+          <div style={row}>
+            <span style={lab}>Столбцов:</span>
+            <button type="button" style={chip(false)} onClick={() => edit({ cols: st('cols', -1, 1, 12) })}>−</button>
+            <span style={hint}>{it.cols}</span>
+            <button type="button" style={chip(false)} onClick={() => edit({ cols: st('cols', 1, 1, 12) })}>+</button>
+            <span style={{ ...lab, minWidth: 0, marginLeft: 6 }}>Строк:</span>
+            <button type="button" style={chip(false)} onClick={() => edit({ rows: st('rows', -1, 1, 12) })}>−</button>
+            <span style={hint}>{it.rows}</span>
+            <button type="button" style={chip(false)} onClick={() => edit({ rows: st('rows', 1, 1, 12) })}>+</button>
+            <span style={{ ...hint, flex: '1 1 100%' }}>Ячейка {f(it.w / it.cols)} × {f(it.h / it.rows)} мм. Текст и другие элементы ставьте в ячейки сверху — с «📐 Разметкой» видно, куда.</span>
+          </div>
+        )}
+      </>
+    )
+  }
+  return (
+    <div style={row}>
+      <span style={lab}>Оформление:</span>
+      <button type="button" style={chip(!!it.box)} onClick={() => edit({ box: !it.box || undefined })}>▭ В рамке</button>
+      {!isBox(it) && <button type="button" style={chip(!!it.inv)} onClick={() => edit({ inv: !it.inv || undefined })}>◼ Белым по чёрному</button>}
+      {it.box && thick}
+    </div>
+  )
+}
+
 function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem = null }) {
   const wrapRef = useRef(null), cvRef = useRef(null), drag = useRef(null)
   const [live, setLive] = useState(null)            // шаблон во время перетаскивания
@@ -204,6 +301,9 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
   // месту — двигать увеличенную бирку
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
+  // разметка: сетка в мм с цифрами по краям; включена — элементы встают по сетке через 0,5 мм
+  const [grid, setGrid] = useState(() => { try { return localStorage.getItem('lblGrid') === '1' } catch { return false } })
+  const toggleGrid = () => setGrid(v => { try { localStorage.setItem('lblGrid', v ? '0' : '1') } catch { /* без памяти */ } return !v })
   const scale = fitScale * zoom
   const t = live || tpl
   // компьютер (previewEl): бирка — в левой колонке, целиком по ширине и высоте колонки; ширину колонки тянут мышью
@@ -320,8 +420,11 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
     const d = drag.current
     if (!d) return
     const dx = (e.clientX - d.x) / scale, dy = (e.clientY - d.y) / scale, o = d.it, pic = isBox(o)
-    const patch = d.mode === 'move' ? { x: o.x + dx, y: o.y + dy }
-      : pic ? { w: Math.max(4, o.w + dx), h: Math.max(4, o.h + dy) }
+    const sn = v => (grid ? Math.round(v * 2) / 2 : v)
+    const patch = d.mode === 'move' ? { x: sn(o.x + dx), y: sn(o.y + dy) }
+      : o.type === 'hline' ? { w: Math.max(1, sn(o.x + o.w + dx) - o.x) }        // линия тянется только в длину
+      : o.type === 'vline' ? { h: Math.max(1, sn(o.y + o.h + dy) - o.y) }
+      : pic ? { w: Math.max(isShape(o) ? 1 : 4, sn(o.x + o.w + dx) - o.x), h: Math.max(isShape(o) ? 1 : 4, sn(o.y + o.h + dy) - o.y) }
         : isVert(o) ? { w: Math.max(4, o.w + dy), size: Math.max(1.2, o.size + dx / 1.25) } : { w: Math.max(4, o.w + dx), size: Math.max(1.2, o.size + dy / 1.25) }
     setLive(normalizeLabel({ ...tpl, items: tpl.items.map(i => (i.id === d.id ? { ...i, ...patch } : i)) }))
   }
@@ -347,11 +450,15 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
         style={{ position: 'relative', width: previewEl ? tpl.w * fitScale + 2 : '100%', margin: previewEl ? '0 auto' : undefined, height: viewH, border: '1px solid #2C2C2A', borderRadius: 3, background: zoom > 1 ? 'var(--bg2)' : '#fff', touchAction: 'none', userSelect: 'none', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', left: pan.x, top: pan.y, width: tpl.w * scale, height: tpl.h * scale, background: '#fff' }}>
         <canvas ref={cvRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
-        {t.items.map(it => {
+        {grid && <LabelGrid w={tpl.w} h={tpl.h} scale={scale} />}
+        {/* рамки и таблицы — под остальными элементами: щелчок по тексту в ячейке выбирает текст, по пустой ячейке — таблицу */}
+        {[...t.items].sort((a, b) => (['rect', 'table'].includes(b.type) ? 1 : 0) - (['rect', 'table'].includes(a.type) ? 1 : 0)).map(it => {
           const on = it.id === sel
+          // тонкую линию легко схватить: поле для мыши/пальца — не тоньше 12 точек
+          const [bw, bh] = itemBox(it), W = bw * scale, H = bh * scale, gw = Math.max(0, 12 - W) / 2, gh = Math.max(0, 12 - H) / 2
           return (
             <div key={it.id} onPointerDown={e => down(e, it, 'move')} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-              style={{ position: 'absolute', left: it.x * scale, top: it.y * scale, width: itemBox(it)[0] * scale, height: itemBox(it)[1] * scale, boxSizing: 'border-box', cursor: 'move',
+              style={{ position: 'absolute', left: it.x * scale - gw, top: it.y * scale - gh, width: W + 2 * gw, height: H + 2 * gh, boxSizing: 'border-box', cursor: 'move',
                 border: on ? '1.5px solid #185FA5' : '1px dashed rgba(24,95,165,0.45)', background: on ? 'rgba(24,95,165,0.08)' : 'transparent' }}>
               {on && <div onPointerDown={e => down(e, it, 'size')} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
                 style={{ position: 'absolute', right: -9, bottom: -9, width: 20, height: 20, borderRadius: 10, background: '#185FA5', border: '2px solid #fff', cursor: 'nwse-resize' }} />}
@@ -365,6 +472,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
         <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 44, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
         <button type="button" style={chip(false)} onClick={() => zoomAt(zoom * 1.5, tpl.w * fitScale / 2, viewH / 2)} disabled={zoom >= 8}>+</button>
         {zoom > 1 && <button type="button" style={chip(false)} onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>Вся бирка</button>}
+        <button type="button" style={chip(grid)} onClick={toggleGrid} title="Сетка в миллиметрах, элементы встают по ней через 0,5 мм">📐 Разметка</button>
         {cur && zoom < 2.5 && <button type="button" style={chip(false)} onClick={() => { const [bw, bh] = itemBox(cur), z = 3; setZoom(z); setPan(clampPan({ x: tpl.w * fitScale / 2 - (cur.x + bw / 2) * fitScale * z, y: viewH / 2 - (cur.y + bh / 2) * fitScale * z }, z)) }}>🔍 К выбранному</button>}
       </div>
       <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>Перетащите элемент на своё место; у выбранного — синяя точка в углу меняет размер. {previewEl ? 'Увеличить — колёсиком мыши или «+», сдвинуть увеличенную бирку — мышью по пустому месту. Параметры выбранного элемента — справа.' : 'Увеличить — «+» или щипком двумя пальцами, сдвинуть увеличенную бирку — пальцем по пустому месту.'}</p>
@@ -384,8 +492,8 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
               const st = zoom > 1.5 ? 0.2 : 0.5
               return <button key={l} type="button" style={{ ...chip(false), padding: '6px 13px', fontSize: 14 }} onClick={() => edit({ x: cur.x + ix * st, y: cur.y + iy * st })}>{l}</button>
             })}
-            <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>x {cur.x.toFixed(1)} · y {cur.y.toFixed(1)} мм</span>
           </div>
+          <ItemPlace it={cur} tpl={tpl} edit={edit} />
           {!isBox(cur) && (
             <>
               <button type="button" style={chip(false)} onClick={() => edit({ size: cur.size - 0.3 })}>A−</button>
@@ -407,7 +515,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
                     edit({ valign: k === 'top' ? undefined : k, ...(k !== 'top' && th <= line + 0.01 ? { th: Math.min(isVert(cur) ? tpl.w : tpl.h, line * 2) } : {}) })
                   }}>{l}</button>
                 ))}
-                <span style={{ fontSize: 11.5, color: 'var(--text-muted)', marginLeft: 4 }}>Рамка:</span>
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)', marginLeft: 4 }}>Высота поля:</span>
                 <button type="button" style={chip(false)} onClick={() => edit({ th: Math.max(cur.size * 1.25, textThick(cur) - 1) })}>−</button>
                 <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{textThick(cur).toFixed(1)} мм</span>
                 <button type="button" style={chip(false)} onClick={() => edit({ th: textThick(cur) + 1 })}>+</button>
@@ -449,6 +557,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
                 <input type="text" key={'op' + tpl.order.prefix} defaultValue={tpl.order.prefix} placeholder="без подписи" onBlur={e => { if (e.target.value !== tpl.order.prefix) onChange({ ...tpl, order: { ...tpl.order, prefix: e.target.value.trim() } }) }} style={{ width: 120, marginLeft: 6, padding: '6px 8px' }} /></label>
             </div>
           )}
+          <ItemStyle it={cur} tpl={tpl} edit={edit} chip={chip} />
           {cur.type === 'part' && (
             <div style={{ flex: '1 1 100%', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button type="button" style={chip(tpl.part.dims)} onClick={() => onChange({ ...tpl, part: { ...tpl.part, dims: !tpl.part.dims } })}>{tpl.part.dims ? '✓ ' : ''}Размеры торцевых отверстий от края</button>
@@ -537,6 +646,10 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         {/* любой параметр можно поставить несколько раз: например, один раз текстом, другой — картинкой в другом месте */}
         {(rem ? REM_ITEMS : [...PART_ITEMS, ...metaItems(mat?.details)]).map(([k, label]) => addChip(k, label))}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Разметка — линии, рамки, таблица</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {SHAPE_ITEMS.map(([k, label]) => addChip(k, label))}
       </div>
       {/* пользовательские параметры деталей: колонки таблицы при импорте Excel/CSV и пользовательские свойства из Базиса —
           под теми же названиями, что в источнике; на бирке — значение у каждой детали */}

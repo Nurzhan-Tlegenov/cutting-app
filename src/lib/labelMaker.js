@@ -67,9 +67,17 @@ export const LABEL_ITEMS = [
   ['client', 'Заказчик', 'text', 'rem'],
   ['date', 'Дата', 'text', 'rem'],
   ['remText', 'Свой текст', 'text', 'rem'],
+  // разметка бирки — линии, рамки, таблица (и на бирке детали, и на бирке остатка)
+  ['hline', 'Линия ─', 'shape', 'shape'],
+  ['vline', 'Линия │', 'shape', 'shape'],
+  ['rect', 'Рамка ▭', 'shape', 'shape'],
+  ['table', 'Таблица ⊞', 'shape', 'shape'],
 ]
 /** Элементы бирки детали (без элементов бирки остатка) */
-export const PART_ITEMS = LABEL_ITEMS.filter(x => x[3] !== 'rem')
+export const PART_ITEMS = LABEL_ITEMS.filter(x => !x[3])
+/** Разметка: линии, рамка, таблица */
+export const SHAPE_ITEMS = LABEL_ITEMS.filter(x => x[3] === 'shape')
+export const isShape = it => itemKind(it.type) === 'shape'
 /** Элементы бирки делового остатка */
 export const REM_ITEMS = ['remTitle', 'remSize', 'material', 'thickness', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'map', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
   .map(x => (x[0] === 'map' ? ['map', 'Карта раскроя — остаток чёрным', 'pic'] : x))
@@ -212,7 +220,7 @@ const EDGE_TYPES = ['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight']
 // у текста: длина строки (w) и толщина рамки поперёк строки — не меньше строки, можно больше (th): тогда текст в ней — вверх/центр/вниз
 export const textThick = it => Math.max(it.size * 1.25, Number(it.th) || 0)
 export const itemBox = it => (isBox(it) ? [it.w, it.h] : isVert(it) ? [textThick(it), it.w] : [it.w, textThick(it)])
-export const isBox = it => itemKind(it.type) === 'pic' || !!it.img || it.type === 'image'
+export const isBox = it => itemKind(it.type) === 'pic' || itemKind(it.type) === 'shape' || !!it.img || it.type === 'image'
 // Картинки шаблона. В шаблоне — ссылка «ref:<id>», сама картинка хранится отдельно (за аккаунтом) в хорошем качестве.
 const IMAGES = new Map()
 /** Размер загруженной картинки шаблона (точки) с учётом поворота -> { w, h } | null */
@@ -308,6 +316,11 @@ const DEFAULT_ITEMS = [
 ]
 // место нового элемента — там же, где он стоит в раскладке по умолчанию, иначе — посередине
 export function newLabelItem(type, tpl) {
+  const id = type + '_' + Math.random().toString(36).slice(2, 7), W = tpl.w, H = tpl.h
+  if (type === 'hline') return { id, type, x: W * 0.1, y: H / 2, w: W * 0.8, h: 0.3, lw: 0.3 }
+  if (type === 'vline') return { id, type, x: W / 2, y: H * 0.1, w: 0.3, h: H * 0.8, lw: 0.3 }
+  if (type === 'rect') return { id, type, x: 2, y: 2, w: W - 4, h: H - 4, lw: 0.3 }
+  if (type === 'table') return { id, type, x: 2, y: 2, w: W - 4, h: H - 4, lw: 0.3, cols: 2, rows: 2 }
   const d = DEFAULT_ITEMS.find(i => i.type === type), kx = tpl.w / BASE.w, ky = tpl.h / BASE.h
   const it = d ? { ...d, x: d.x * kx, y: d.y * ky, w: d.w * (isVert(d) ? ky : kx), ...(d.h ? { h: d.h * ky } : {}), ...(d.th ? { th: d.th * (isVert(d) ? kx : ky) } : {}), ...(d.size ? { size: d.size * Math.min(kx, ky) } : {}) }
     : itemKind(type) === 'pic' || type === 'image' ? { type, x: tpl.w * 0.3, y: tpl.h * 0.3, w: tpl.w * 0.3, h: tpl.h * 0.3 } : { type, x: tpl.w * 0.1, y: tpl.h * 0.45, w: tpl.w * 0.5, size: 2.6 * Math.min(kx, ky) }
@@ -333,7 +346,20 @@ export function normalizeLabel(raw) {
     if (typeof i.img === 'string' && (i.img.startsWith('ref:') || (i.img.startsWith('data:image/') && i.img.length < 40000))) o.img = i.img
     if (pic) o.h = Math.max(3, Math.min(h, Number(i.h) || 10))
     if (o.img && [90, 180, 270].includes(Number(i.irot))) o.irot = Number(i.irot)   // поворот картинки
-    if (itemKind(i.type) !== 'pic') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
+    if (itemKind(i.type) !== 'pic' && itemKind(i.type) !== 'shape') o.size = Math.max(1.2, Math.min(20, Number(i.size) || 2.6))
+    // разметка и оформление: толщина линии (мм), рамка вокруг элемента, белым по чёрному, скругление, ячейки таблицы
+    const lw = Math.max(0.1, Math.min(3, Number(i.lw) || 0.3))
+    if (itemKind(i.type) === 'shape') {
+      o.lw = lw
+      if (i.type === 'hline') { o.h = lw; o.w = Math.max(1, Math.min(w, Number(i.w) || 10)) }
+      if (i.type === 'vline') { o.w = lw; o.h = Math.max(1, Math.min(h, Number(i.h) || 10)) }
+      if (i.type === 'rect') { if (i.inv) o.inv = true; const rad = Math.max(0, Math.min(10, Number(i.rad) || 0)); if (rad) o.rad = rad }
+      if (i.type === 'table') { o.cols = Math.max(1, Math.min(12, Math.round(Number(i.cols) || 2))); o.rows = Math.max(1, Math.min(12, Math.round(Number(i.rows) || 2))) }
+      if (i.type === 'rect' || i.type === 'table') { o.w = Math.max(1, Math.min(w, Number(i.w) || 10)); o.h = Math.max(1, Math.min(h, Number(i.h) || 10)) }
+    } else {
+      if (i.box) { o.box = true; o.lw = lw }
+      if (i.inv && !pic) o.inv = true
+    }
     if (!pic) {
       if ([0, 90, 180, 270].includes(Number(i.trot))) o.trot = Number(i.trot)
       if (i.fill) o.fill = true   // «По рамке»: шрифт увеличивается на всю рамку, если текст помещается
@@ -665,7 +691,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
   endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
-const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image'])
+const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
 export const canCaption = type => !NO_CAP.has(type)
 export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
 /** Текст элемента бирки: подпись (своя у элемента или стандартная) + значение */
@@ -763,10 +789,33 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   const mm = W / tpl.w, line = Math.max(1, mm * 0.17), rot = tpl.rot !== false
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
+  const place = it0 => (it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0)
+  const px1 = v => Math.max(1, Math.round(v * mm))                      // линия не тоньше точки принтера
+  // фон: залитые рамки и поля «белым по чёрному» — под всем остальным
+  for (const it0 of tpl.items || []) {
+    const it = place(it0)
+    if (!it.inv) continue
+    if (!isShape(it) && !opts.preview && !it.img && !labelText(it.type, info, tpl, it.cap)) continue   // пустой параметр — без чёрной плашки
+    const [bw, bh] = itemBox(it)
+    ctx.beginPath(); roundRect(ctx, it.x * mm, it.y * mm, bw * mm, bh * mm, (it.rad || 0) * mm); ctx.fill()
+  }
 
   for (const it0 of tpl.items || []) {
-    const it = it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0
+    const it = place(it0)
     const x = it.x * mm, y = it.y * mm, w = it.w * mm
+    if (isShape(it)) {
+      const lw = px1(it.lw || 0.3), h = it.h * mm
+      if (it.type === 'hline' || it.type === 'vline') { ctx.fillRect(Math.round(x), Math.round(y), Math.max(lw, Math.round(w)), Math.max(lw, Math.round(h))); continue }
+      if (it.type === 'rect' && it.inv) continue                      // залита в первом проходе
+      ctx.save(); ctx.lineWidth = lw; ctx.strokeStyle = '#000'
+      ctx.beginPath(); roundRect(ctx, x + lw / 2, y + lw / 2, w - lw, h - lw, (it.rad || 0) * mm); ctx.stroke()
+      if (it.type === 'table') {
+        for (let c = 1; c < it.cols; c++) { const cx = Math.round(x + w * c / it.cols - lw / 2); ctx.fillRect(cx, Math.round(y), lw, Math.round(h)) }
+        for (let r = 1; r < it.rows; r++) { const cy = Math.round(y + h * r / it.rows - lw / 2); ctx.fillRect(Math.round(x), cy, Math.round(w), lw) }
+      }
+      ctx.restore()
+      continue
+    }
     if (it.type === 'qr') {
       const text = tpl.kind === 'rem' ? remQrText(tpl, info) : labelQr(tpl, info)
       if (!text) continue
@@ -802,6 +851,9 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
       }
       let sz = it.size * mm, LH = sz * 1.25
       const weight = it.bold ? 'bold' : ''
+      // в рамке или на чёрном — текст отступает от краёв поля, чтобы не прилипал к линии
+      const pad = it.box || it.inv ? ((it.box ? it.lw || 0.3 : 0) + 0.6) * mm : 0
+      const wT = Math.max(4, w - 2 * pad)
       // Работа с текстом в рамке — у всех текстовых элементов (название, материал, кромка, свойства, свой текст):
       // заданный шрифт — наименьший, меньше не бывает. Текст целиком помещается в рамку — шрифт растёт на всю рамку
       // (по ширине и высоте, с переносом, если так крупнее). Не помещается — перенос по строкам заданным шрифтом,
@@ -809,8 +861,8 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
       const frame = textThick(it) * mm
       const okAt = s0 => {
         ctx.font = `${weight} ${Math.round(s0)}px Arial, Helvetica, sans-serif`.trim()
-        if (String(text).split(/\s+/).some(wd => ctx.measureText(wd).width > w)) return null   // слово не рвём
-        const ls = wrapText(ctx, text, w, s0, weight, 999)
+        if (String(text).split(/\s+/).some(wd => ctx.measureText(wd).width > wT)) return null   // слово не рвём
+        const ls = wrapText(ctx, text, wT, s0, weight, 999)
         return ls.length * s0 * 1.25 <= frame + 0.01 ? ls : null
       }
       let lines = okAt(sz)
@@ -819,9 +871,9 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
         for (let k = 0; k < 14 && hi - lo > 0.5; k++) { const mid = (lo + hi) / 2; if (okAt(mid)) lo = mid; else hi = mid }
         sz = lo; LH = sz * 1.25; lines = okAt(sz) || lines
       }
-      if (!lines) lines = wrapText(ctx, text, w, sz, weight, Math.max(1, Math.floor((frame + 0.01) / LH)))
+      if (!lines) lines = wrapText(ctx, text, wT, sz, weight, Math.max(1, Math.floor((frame + 0.01) / LH)))
       ctx.font = `${weight} ${Math.round(sz)}px Arial, Helvetica, sans-serif`.trim()
-      const ax = it.align === 'right' ? w : it.align === 'center' ? w / 2 : 0
+      const ax = it.align === 'right' ? wT : it.align === 'center' ? wT / 2 : 0
       ctx.textAlign = it.align === 'right' ? 'right' : it.align === 'center' ? 'center' : 'left'
       ctx.save()
       // поворот текста в рамке: 90 — читается сверху вниз, 270 — снизу вверх (кромка слева/справа по умолчанию), 180 — вверх ногами
@@ -830,19 +882,34 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
       else if (r === 180) { ctx.translate(x + w, y + th); ctx.rotate(Math.PI) }
       else if (r === 270) { ctx.translate(x, y + w); ctx.rotate(-Math.PI / 2) }
       else ctx.translate(x, y)
+      if (pad) ctx.translate(pad, 0)
       // по высоте рамки: сверху, по центру или снизу
       const blockH = LH * lines.length
       if (it.valign === 'middle') ctx.translate(0, (th - blockH) / 2); else if (it.valign === 'bottom') ctx.translate(0, th - blockH)
-      if (ghost) ctx.fillStyle = '#9aa3ad'
+      ctx.fillStyle = it.inv ? (ghost ? '#c8cdd2' : '#fff') : ghost ? '#9aa3ad' : '#000'   // белым по чёрному
       lines.forEach((t, li) => {
         ctx.fillText(t, ax, li * LH + sz * 0.62)
-        if (it.ul === 'below' || it.ul === 'above') { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? w - tw : it.align === 'center' ? (w - tw) / 2 : 0, uh = Math.max(1, Math.round(sz * 0.09)); ctx.fillRect(x0, li * LH + (it.ul === 'below' ? sz * 1.16 : 0), tw, uh) }
+        if (it.ul === 'below' || it.ul === 'above') { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? wT - tw : it.align === 'center' ? (wT - tw) / 2 : 0, uh = Math.max(1, Math.round(sz * 0.09)); ctx.fillRect(x0, li * LH + (it.ul === 'below' ? sz * 1.16 : 0), tw, uh) }
       })
       ctx.restore()
       ctx.fillStyle = '#000'
     }
   }
+  // рамка вокруг элемента (текст, QR, карта, чертёж, картинка) — поверх, по краю его поля
+  for (const it0 of tpl.items || []) {
+    const it = place(it0)
+    if (!it.box || isShape(it)) continue
+    const [bw, bh] = itemBox(it), lw = px1(it.lw || 0.3)
+    ctx.save(); ctx.lineWidth = lw; ctx.strokeStyle = '#000'
+    ctx.beginPath(); roundRect(ctx, it.x * mm + lw / 2, it.y * mm + lw / 2, bw * mm - lw, bh * mm - lw, 0); ctx.stroke()
+    ctx.restore()
+  }
   return canvas
+}
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2))
+  if (!r) { ctx.rect(x, y, w, h); return }
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath()
 }
 
 /** Деловые обрезки листа, отмеченные в раскрое: [{ w, h }] — ширина (X) и длина (Y), мм */
