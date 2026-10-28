@@ -25,6 +25,8 @@ export function logPostUse(user, posts, { orderId = null, sheets = null } = {}) 
 
 // ─── мастер-аккаунт ─────────────────────────────────────────────────────────
 export const adminPostAccess = async () => res(await supabase.rpc('admin_post_access'))
+/** Свои постпроцессоры пользователей: [{ user_id, own: [{ name, base }], own_runs, own_last }] (migration_post_owners.sql) */
+export const adminUserPosts = async () => res(await supabase.rpc('admin_user_posts'))
 export const adminFindUsers = async q => res(await supabase.rpc('admin_find_users', { p_q: q }))
 export const grantPost = async (postId, userId, note = null) => res(await supabase.from('shared_post_access').upsert({ post_id: postId, user_id: userId, note }))
 export const revokePost = async (postId, userId) => res(await supabase.from('shared_post_access').delete().eq('post_id', postId).eq('user_id', userId))

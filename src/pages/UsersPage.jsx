@@ -14,7 +14,7 @@ import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { adminBeta, adminSetBeta, BETA_FEATURES } from '../lib/beta'
-import { adminPostAccess, grantPost, revokePost, setRequestStatus } from '../lib/postAccess'
+import { adminPostAccess, adminUserPosts, grantPost, revokePost, setRequestStatus } from '../lib/postAccess'
 import { sendReply } from '../lib/messages'
 import { COUNTRY_NAMES } from '../lib/phoneCountries'
 
@@ -83,13 +83,13 @@ export default function UsersPage() {
 
   const [emailOpen, setEmailOpen] = useState(null)   // регистрация по почте и Google: true / false, null — в базе ещё нет (migration_email_login.sql)
   const load = async () => {
-    const [u, r, o, pr, lm, lh, bt, bl, eo, pa] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones(), adminEmailSignup(), adminPostAccess()])
+    const [u, r, o, pr, lm, lh, bt, bl, eo, pa, up] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones(), adminEmailSignup(), adminPostAccess(), adminUserPosts()])
     if (pa.error) setPosts(null)
     else {
       const has = new Map(), asks = new Map()
       for (const p of pa.data?.posts || []) for (const a of p.access || []) { if (!has.has(a.user_id)) has.set(a.user_id, new Set()); has.get(a.user_id).add(p.id) }
       for (const q of pa.data?.requests || []) if (q.status === 'new') { if (!asks.has(q.user_id)) asks.set(q.user_id, []); asks.get(q.user_id).push(q) }
-      setPosts({ list: pa.data?.posts || [], has, asks })
+      setPosts({ list: pa.data?.posts || [], has, asks, own: new Map((up.error ? [] : up.data || []).map(x => [x.user_id, x])) })
     }
     setEmailOpen(eo)
     setBlocked(bl.error ? { error: bl.error } : bl.data || [])
@@ -212,6 +212,12 @@ export default function UsersPage() {
                     <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || 'Без имени'}{u.id === user?.id ? ' (вы)' : ''}</span>
                     {isProd(u) && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>произв.</span>}
                     {betaOf(u).length > 0 && <span title="Бета-тестер" style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)', flexShrink: 0 }}>β</span>}
+                    {posts?.has.get(u.id)?.size > 0 && <span title={'Выданы постпроцессоры: ' + posts.list.filter(p => posts.has.get(u.id).has(p.id)).map(p => p.name).join(', ')} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', flexShrink: 0 }}>🔑{posts.has.get(u.id).size > 1 ? ' ' + posts.has.get(u.id).size : ''}</span>}
+                    {posts?.own?.get(u.id) && (() => {
+                      const o = posts.own.get(u.id), based = o.own.filter(x => x.base)
+                      return <span title={'Свои постпроцессоры: ' + o.own.map(x => x.name + (x.base ? ` (на основе «${x.base}»)` : '')).join(', ')} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: based.length ? 'var(--amber-light)' : 'var(--bg2)', color: based.length ? 'var(--amber)' : 'var(--text-muted)', flexShrink: 0 }}>⚙ {based.length ? 'из каталога' : 'свой'}</span>
+                    })()}
+                    {posts?.asks.has(u.id) && <span title="Ждёт постпроцессор" style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>просит 🔑</span>}
                     <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{landOf(u) === '—' ? '—' : `${landOf(u)}${townOf(u) === '—' ? '' : ' · ' + townOf(u)}`}</span>
                     <span style={{ color: 'var(--text-hint)', fontSize: 14, transform: openU.has(u.id) ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
                   </button>
@@ -294,7 +300,7 @@ export default function UsersPage() {
                       })}
                     </div>
                   )}
-                  {posts && posts.list.length > 0 && u.role !== 'admin' && (isProd(u) || posts.has.has(u.id) || posts.asks.has(u.id)) && (
+                  {posts && posts.list.length > 0 && u.role !== 'admin' && (isProd(u) || posts.has.has(u.id) || posts.asks.has(u.id) || posts.own?.has(u.id)) && (
                     <div style={{ marginTop: 6 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Постпроцессоры:</span>
@@ -316,6 +322,12 @@ export default function UsersPage() {
                           )
                         })}
                       </div>
+                      {posts.own?.get(u.id) && (
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                          ⚙ Свои: {posts.own.get(u.id).own.map((x, i) => <span key={i}>{i ? ', ' : ''}«{x.name}»{x.base ? <span style={{ color: 'var(--amber)' }}> — на основе «{x.base}»</span> : null}</span>)}
+                          {posts.own.get(u.id).own_runs > 0 ? ` · выпущено своими: ${posts.own.get(u.id).own_runs}` : ''}
+                        </div>
+                      )}
                       {(posts.asks.get(u.id) || []).filter(q => !q.post_id).map(q => (
                         <div key={q.id} style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 3 }}>Запрос под свой станок: {[q.machine, q.controller].filter(Boolean).join(' · ') || 'без описания'} — подробности и пример программы в «Постпроцессоры по запросу»</div>
                       ))}
