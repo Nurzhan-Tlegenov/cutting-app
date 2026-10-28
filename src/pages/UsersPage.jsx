@@ -212,12 +212,12 @@ export default function UsersPage() {
                     <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || 'Без имени'}{u.id === user?.id ? ' (вы)' : ''}</span>
                     {isProd(u) && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>произв.</span>}
                     {betaOf(u).length > 0 && <span title="Бета-тестер" style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)', flexShrink: 0 }}>β</span>}
-                    {posts?.has.get(u.id)?.size > 0 && <span title={'Выданы постпроцессоры: ' + posts.list.filter(p => posts.has.get(u.id).has(p.id)).map(p => p.name).join(', ')} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', flexShrink: 0 }}>🔑{posts.has.get(u.id).size > 1 ? ' ' + posts.has.get(u.id).size : ''}</span>}
+                    {posts?.has.get(u.id)?.size > 0 && <span title={'Выданы постпроцессоры: ' + posts.list.filter(p => posts.has.get(u.id).has(p.id)).map(p => p.name).join(', ')} style={{ fontSize: 10.5, padding: '1px 5px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', flexShrink: 0 }}>🔑{posts.has.get(u.id).size > 1 ? ' ' + posts.has.get(u.id).size : ''}</span>}
                     {posts?.own?.get(u.id) && (() => {
                       const o = posts.own.get(u.id), based = o.own.filter(x => x.base)
-                      return <span title={'Свои постпроцессоры: ' + o.own.map(x => x.name + (x.base ? ` (на основе «${x.base}»)` : '')).join(', ')} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: based.length ? 'var(--amber-light)' : 'var(--bg2)', color: based.length ? 'var(--amber)' : 'var(--text-muted)', flexShrink: 0 }}>⚙ {based.length ? 'из каталога' : 'свой'}</span>
+                      return <span title={'Свои постпроцессоры: ' + o.own.map(x => x.name + (x.base ? ` (на основе «${x.base}»)` : '')).join(', ')} style={{ fontSize: 10.5, padding: '1px 5px', borderRadius: 9, background: based.length ? 'var(--amber-light)' : 'var(--bg2)', color: based.length ? 'var(--amber)' : 'var(--text-muted)', flexShrink: 0 }}>⚙</span>
                     })()}
-                    {posts?.asks.has(u.id) && <span title="Ждёт постпроцессор" style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>просит 🔑</span>}
+                    {posts?.asks.has(u.id) && <span title="Ждёт постпроцессор" style={{ fontSize: 10.5, padding: '1px 5px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>⏳</span>}
                     <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{landOf(u) === '—' ? '—' : `${landOf(u)}${townOf(u) === '—' ? '' : ' · ' + townOf(u)}`}</span>
                     <span style={{ color: 'var(--text-hint)', fontSize: 14, transform: openU.has(u.id) ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
                   </button>
@@ -617,6 +617,21 @@ export default function UsersPage() {
             )}
           </div>
           {users.length > 6 && <input type="text" placeholder="Поиск: имя или телефон" value={find} onChange={e => setFind(e.target.value)} style={{ marginBottom: 8 }} />}
+          {/* значки у имени — коротко; «?» раскрывает, что они значат */}
+          <details style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--text-muted)' }}>
+            <summary style={{ cursor: 'pointer', listStyle: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 18, height: 18, borderRadius: 9, border: '1px solid var(--border-md)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600 }}>?</span>
+              Что значат значки
+            </summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 2px 0' }}>
+              <span><b style={{ color: 'var(--blue)' }}>β</b> — бета-тестер</span>
+              <span><b style={{ color: 'var(--teal)' }}>🔑</b> — вы выдали постпроцессор (число — сколько)</span>
+              <span><b style={{ padding: '0 4px', borderRadius: 6, background: 'var(--bg2)' }}>⚙</b> серый — свой постпроцессор, настроил сам</span>
+              <span><b style={{ padding: '0 4px', borderRadius: 6, background: 'var(--amber-light)', color: 'var(--amber)' }}>⚙</b> жёлтый — свой, взятый за основу из каталога</span>
+              <span><b style={{ color: 'var(--amber)' }}>⏳</b> — просит постпроцессор</span>
+              <span style={{ color: 'var(--text-hint)' }}>Подробнее — в карточке пользователя (нажать на имя).</span>
+            </div>
+          </details>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {shown.map(userCard)}
           </div>
