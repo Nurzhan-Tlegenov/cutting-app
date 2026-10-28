@@ -33,10 +33,13 @@ export function postBack(cnc, view) {
   const shown = new Set((own ? all.filter(t => t.postId === post.id) : all.filter(t => !t.postId)).map(t => t.id))
   const rest = all.filter(t => !shown.has(t.id))
   const mine = (view.tools || []).map(t => (own ? { ...t, postId: post.id } : t))
-  const next = { ...cnc, ...view, tools: [...rest, ...mine], posts: cnc.posts, post: cnc.post }
+  // станки — из «вида»: на вкладке «Обработка» правится и сам станок (заглубление фрезы в стол — millOver);
+  // раньше здесь брались прежние cnc.posts, и такая правка терялась — в программе оставалось 0,15 по умолчанию
+  const posts = Array.isArray(view.posts) ? view.posts : cnc.posts
+  const next = { ...cnc, ...view, tools: [...rest, ...mine], posts, post: view.post ?? cnc.post }
   if (own && post.ownOps) {
     next.ops = cnc.ops
-    if (view.ops !== post.ownOps) next.posts = cnc.posts.map(p => (p.id === post.id ? { ...p, ownOps: view.ops } : p))
+    if (view.ops !== post.ownOps) next.posts = posts.map(p => (p.id === post.id ? { ...p, ownOps: view.ops } : p))
   }
   return next
 }
