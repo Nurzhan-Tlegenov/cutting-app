@@ -58,7 +58,7 @@ export function useCnc(onSaved, prodId = null) {
       const was = prev.posts.find(q => q.id === p.id)
       if (p.forAll && p !== was) {
         saveSharedPost(p, user)
-        if (!was?.forAll && !was?.shared) sendNews(user, profile, 'Новый постпроцессор', `Добавлен постпроцессор «${p.name}». Он уже доступен в разделе ЧПУ → Основные.`)
+        if (!was?.forAll && !was?.shared) sendNews(user, profile, 'Новый постпроцессор', `В каталоге появился постпроцессор «${p.name}». Если у вас такой станок — запросите его: ЧПУ → «Постпроцессор» → «Готовые постпроцессоры — по запросу».`)
       } else if (!p.forAll && (was?.forAll || was?.shared)) removeSharedPost(p.id)
     }
     prev.posts.forEach(q => { if ((q.forAll || q.shared) && !next.posts.some(p => p.id === q.id)) removeSharedPost(q.id) })

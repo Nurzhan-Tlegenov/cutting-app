@@ -11,6 +11,7 @@ import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettin
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
+import { logPostUse } from '../lib/postAccess'
 import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useCnc } from '../hooks/useCnc'
@@ -168,6 +169,7 @@ export default function CncPage() {
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
     const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
     setBuilt({ files, drill, second }); setSaved('')
+    logPostUse(user, [post, r2, ...drills], { orderId: order?.id || null, sheets: sel.length })   // мастер видит, кто каким постпроцессором выпускает программы
     // маркировка: файлы маркировочного стола для тех же листов (на линии сначала бирки, потом раскрой)
     const ok = files.filter(f => !f.empty)
     makeLabels(files, ok.map(f => ({ si: f.si, nc: f.name })))
@@ -191,6 +193,7 @@ export default function CncPage() {
   }
   // Пильный центр: одна программа XML на материал по выбранным листам (дерево резов), бирки — по галочке
   const buildBeam = () => {
+    logPostUse(user, [saw], { orderId: order?.id || null, sheets: sel.length })
     const sub = { ...mat, sheets: sel.map(si => mat.sheets[si]) }
     let text = '', error = '', xml = null
     try { xml = buildBeamSawXml({ order, mat: sub, geoOf: sh => sheetGeo(order, mat.result, sh) }); text = xml.text } catch (e) { error = String(e?.message || e) }

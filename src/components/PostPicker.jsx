@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import SendToMaster from './SendToMaster'
+import PostRequest from './PostRequest'
+import { postCatalog } from '../lib/postAccess'
+import { useNavigate } from 'react-router-dom'
 import { fileToPayload, REPORT_MAX_MB } from '../lib/messages'
 import { DEFAULT_POST, DEFAULT_DRILL6, DEFAULT_BEAMSAW, isBeamSaw, isRouterPost, newId, isDrill6, activePost, routerPost, pickPost, toggleUse6, applySnapshot, removeSnapshot, renameSnapshot, sameName } from '../lib/cncSettings'
 
@@ -22,6 +25,12 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
   // по ней добавляется постпроцессор. Файл на телефон не скачивается.
   const upFile = useRef(null)
   const [ask, setAsk] = useState(null)
+  // каталог постпроцессоров (по запросу) и запрос
+  const navigate = useNavigate()
+  const [catalog, setCatalog] = useState(null)
+  const [reqFor, setReqFor] = useState(undefined)     // undefined — окно закрыто; null — свой станок; item — из каталога
+  const loadCatalog = () => postCatalog().then(r => setCatalog(r.missing ? false : (r.data || [])))
+  useEffect(() => { if (open && !isMaster) loadCatalog() }, [open])   // eslint-disable-line react-hooks/exhaustive-deps
   const pickUp = e => {
     const f = e.target.files?.[0]
     e.target.value = ''
@@ -42,10 +51,10 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
 
   // общий (виден всем пользователям): мастер-аккаунт отметил «Для всех»
   const isPub = p => !!(p.forAll || p.shared)
-  const pubTag = p => isMaster && isPub(p) ? <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', whiteSpace: 'nowrap', fontWeight: 600 }}>🌐 для всех</span> : null
+  const pubTag = p => isMaster && isPub(p) ? <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', whiteSpace: 'nowrap', fontWeight: 600 }}>🔑 в каталоге</span> : null
   const togglePub = p => {
     const on = !p.forAll
-    if (!window.confirm(on ? `Сделать «${p.name}» общим?\nЕго увидят все пользователи приложения.` : `Убрать «${p.name}» из общих?\nДругие пользователи его больше не увидят.`)) return
+    if (!window.confirm(on ? `Опубликовать «${p.name}» в каталоге?\nВсе увидят только его название и смогут запросить. Пользоваться им будут те, кому вы его выдадите (Мастер-аккаунт → «Постпроцессоры: выдача и запросы»).` : `Убрать «${p.name}» из каталога?\nУ всех, кому он выдан, он пропадёт.`)) return
     onChange({ ...cnc, posts: cnc.posts.map(q => (q.id === p.id ? { ...q, forAll: on, shared: false } : q)) })
   }
   const openPost = id => { onChange(pickPost(cnc, id)); close() }
@@ -123,7 +132,12 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
             </div>
             <div style={{ overflowY: 'auto', padding: '0 12px 14px', overscrollBehavior: 'contain' }}>
               <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', margin: '4px 4px 6px' }}>Станки в настройке</div>
-              {isMaster && <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-2px 4px 6px' }}>🌐 — общий: виден всем пользователям{cnc.posts.some(isPub) ? ` (сейчас ${cnc.posts.filter(isPub).length})` : ''}. Кнопка 🌐 у станка — сделать общим или убрать.</div>}
+              {isMaster && (
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-2px 4px 6px' }}>
+                  🔑 — в каталоге: все видят название и могут запросить, пользуются те, кому вы выдали{cnc.posts.some(isPub) ? ` (в каталоге ${cnc.posts.filter(isPub).length})` : ''}. Кнопка 🔑 у станка — добавить в каталог или убрать.
+                  <button type="button" onClick={() => { close(); navigate('/post-access') }} style={{ display: 'block', marginTop: 4, padding: '7px 10px', borderRadius: 10, border: '1px solid var(--teal)', background: 'transparent', color: 'var(--teal)', fontSize: 12.5, cursor: 'pointer' }}>🔑 Выдача, запросы и кто чем пользуется ›</button>
+                </div>
+              )}
               {cnc.posts.map(p => {
                 const on = p.id === post.id
                 return (
@@ -137,8 +151,8 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
                         {on && <span style={{ fontSize: 10.5, color: 'var(--blue)' }}>открыт</span>}
                       </div>
                     </div>
-                    {isMaster && !p.shared && <button type="button" title={p.forAll ? 'Общий для всех — убрать из общих' : 'Сделать общим для всех'} onClick={() => togglePub(p)}
-                      style={{ ...icon, background: p.forAll || p.shared ? 'var(--teal)' : 'var(--bg)', color: p.forAll || p.shared ? 'white' : 'var(--text-hint)', border: '0.5px solid var(--border-md)' }}>🌐</button>}
+                    {isMaster && !p.shared && <button type="button" title={p.forAll ? 'В каталоге — убрать' : 'Добавить в каталог (выдача по запросу)'} onClick={() => togglePub(p)}
+                      style={{ ...icon, background: p.forAll || p.shared ? 'var(--teal)' : 'var(--bg)', color: p.forAll || p.shared ? 'white' : 'var(--text-hint)', border: '0.5px solid var(--border-md)' }}>🔑</button>}
                     {!p.shared && snapOf(p) && <button type="button" title={`Вернуть сохранённые настройки (${new Date(snapOf(p).at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })})`} onClick={() => restore(p, snapOf(p))} style={{ ...icon, color: 'var(--blue)' }}>↺</button>}
                     {!p.shared && <button type="button" title="Переименовать" onClick={() => rename(p)} style={icon}>✎</button>}
                     {!p.shared && <button type="button" title="Удалить" onClick={() => del(p)} style={{ ...icon, color: 'var(--danger)' }}>🗑</button>}
@@ -153,12 +167,28 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
 
               {!isMaster && (
                 <div style={{ padding: '10px 12px', borderRadius: 12, border: '1px dashed var(--teal)', background: 'var(--bg2)', margin: '0 0 14px' }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>Нет постпроцессора для вашего станка?</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>Готовые постпроцессоры — по запросу</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
-                    Пришлите разработчику управляющую программу (G-код), сделанную для вашего станка — лучше лист, где есть и раскрой, и сверление. По ней мы добавим ваш постпроцессор. Файл уйдёт сразу разработчику, на телефон ничего не скачивается.
+                    Постпроцессор настраивается под ваш станок и выдаётся вашему производству. Выберите свой станок из списка или опишите его — с примером рабочей программы.
                   </div>
-                  <input ref={upFile} type="file" style={{ display: 'none' }} onChange={pickUp} />
-                  <button type="button" onClick={() => upFile.current?.click()} style={{ width: '100%', padding: '9px 8px', borderRadius: 12, border: 'none', background: 'var(--teal)', color: 'white', fontSize: 13, cursor: 'pointer' }}>📂 Выбрать УП и попросить добавить</button>
+                  {catalog === null && <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Загружаем каталог…</div>}
+                  {catalog && catalog.filter(c => !c.mine).map(c => (
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', borderTop: '0.5px solid var(--border)' }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                      {kindTag(c)}
+                      {c.asked
+                        ? <span style={{ fontSize: 11.5, color: 'var(--teal)', whiteSpace: 'nowrap' }}>запрос отправлен</span>
+                        : <button type="button" onClick={() => setReqFor(c)} style={{ padding: '5px 10px', borderRadius: 14, border: '1px solid var(--teal)', background: 'transparent', color: 'var(--teal)', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>Запросить</button>}
+                    </div>
+                  ))}
+                  {catalog === false ? (
+                    <>
+                      <input ref={upFile} type="file" style={{ display: 'none' }} onChange={pickUp} />
+                      <button type="button" onClick={() => upFile.current?.click()} style={{ width: '100%', padding: '9px 8px', borderRadius: 12, border: 'none', background: 'var(--teal)', color: 'white', fontSize: 13, cursor: 'pointer' }}>📂 Выбрать УП и попросить добавить</button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => setReqFor(null)} style={{ width: '100%', marginTop: 8, padding: '9px 8px', borderRadius: 12, border: 'none', background: 'var(--teal)', color: 'white', fontSize: 13, cursor: 'pointer' }}>🔑 Запросить постпроцессор под свой станок</button>
+                  )}
                 </div>
               )}
 
@@ -187,6 +217,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
         document.body,
       )}
       <SendToMaster job={ask} onClose={() => setAsk(null)} />
+      {reqFor !== undefined && <PostRequest catalogItem={reqFor} onClose={() => setReqFor(undefined)} onSent={loadCatalog} />}
     </>
   )
 }

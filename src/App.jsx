@@ -46,6 +46,7 @@ import InvitePage from './pages/InvitePage'
 import PostPage from './pages/PostPage'
 import HelpPage from './pages/HelpPage'
 import TasksPage from './pages/TasksPage'
+import PostAccessPage from './pages/PostAccessPage'
 import TourOverlay from './components/TourOverlay'
 import { pendingInvite } from './lib/workplaces'
 import { pendingRef } from './lib/refLinks'
@@ -142,6 +143,7 @@ function AppRoutes() {
       <Route path="/messages" element={<ProtectedRoute><MessagesPage /></ProtectedRoute>} />
       <Route path="/help" element={<ProtectedRoute><HelpPage /></ProtectedRoute>} />
       <Route path="/tasks" element={<ProtectedRoute><TasksPage /></ProtectedRoute>} />
+      <Route path="/post-access" element={<ProtectedRoute><PostAccessPage /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
       {/* рабочий пост по ссылке — окно одного поста (настольный компьютер со сканером); видят только свои */}
       <Route path="/post/:id" element={<ProtectedRoute><PostPage /></ProtectedRoute>} />
