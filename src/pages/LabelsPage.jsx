@@ -682,6 +682,7 @@ export default function LabelsPage() {
   colsRef.current = cols
   const anchor = useRef(null)                        // { n, y, k, step, ox, oy } — что было под пальцами
   const [gridEl, setGridEl] = useState(null)
+  useEffect(() => () => document.getElementById('lbl-print')?.remove(), [])   // ушли со страницы — блок печати убрать
   const setCols = (next, a = null) => {
     const c = Math.max(1, Math.min(MAX_COLS, Math.round(next)))
     if (c === colsRef.current) { if (gridEl) { gridEl.style.transition = 'transform 180ms ease-out'; gridEl.style.transform = 'scale(1)' } return }
@@ -774,6 +775,35 @@ export default function LabelsPage() {
       setTimeout(() => URL.revokeObjectURL(url), 5000)
     } finally { setPdf('') }
   }
+  // Печать: бирки — картинками в отдельном блоке, а всё приложение на время печати скрыто. Раньше печатались сами
+  // canvas внутри страницы — на компьютере выходили пустые страницы (слой с will-change/transform, сдвиг закреплённого
+  // меню, анимация появления страницы). Картинка печатается всегда, независимо от раскладки экрана.
+  const printLabels = async () => {
+    const cvs = gridEl ? [...gridEl.querySelectorAll('.lbl-grid canvas')] : []
+    let urls
+    try { urls = cvs.map(cv => cv.toDataURL('image/png')) } catch { urls = null }   // картинка с чужого сайта — печатаем по-старому
+    if (!urls || !urls.length) { window.print(); return }
+    document.getElementById('lbl-print')?.remove()
+    const box = document.createElement('div')
+    box.id = 'lbl-print'
+    const css = document.createElement('style')
+    css.textContent = `@media screen { #lbl-print { display: none } }
+@media print {
+  @page { size: ${tpl.w}mm ${tpl.h}mm; margin: 0 }
+  html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+  body > *:not(#lbl-print) { display: none !important; }
+  #lbl-print { display: block !important; }
+  #lbl-print img { display: block; width: ${tpl.w}mm; height: ${tpl.h}mm; margin: 0; break-after: page; page-break-after: always; }
+  #lbl-print img:last-child { break-after: auto; page-break-after: auto; }
+}`
+    box.appendChild(css)
+    const imgs = urls.map(u => { const im = document.createElement('img'); im.src = u; im.alt = ''; box.appendChild(im); return im })
+    document.body.appendChild(box)
+    await Promise.all(imgs.map(im => (im.decode ? im.decode().catch(() => {}) : Promise.resolve())))
+    const done = () => { window.removeEventListener('afterprint', done); setTimeout(() => box.remove(), 500) }
+    window.addEventListener('afterprint', done)
+    window.print()
+  }
   const exportFiles = async () => {
     setBusy(true)
     try {
@@ -795,7 +825,7 @@ export default function LabelsPage() {
         </div>
         <button onClick={() => navigate(cabinet === 'production' ? '/production' : '/orders')} style={{ padding: '7px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
         {mat && <button onClick={savePdf} disabled={!!pdf} style={{ ...pill, background: 'var(--teal)' }}>{pdf || '⬇ PDF'}</button>}
-        {mat && <button onClick={() => window.print()} style={pill}>🖨 Печать</button>}
+        {mat && <button onClick={printLabels} style={pill}>🖨 Печать</button>}
       </div>
 
       <div className="card no-print" style={{ marginBottom: 10, padding: 0, overflow: 'hidden' }}>
