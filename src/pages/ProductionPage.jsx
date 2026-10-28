@@ -50,11 +50,16 @@ const OFFCUT_KEYS = [['offcut_min_length', 'Вдоль текстуры (дли�
 const OFFCUT_HINT = 'Чтобы включить авто-обрезки, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists offcut_min_length numeric;\nalter table productions add column if not exists offcut_min_width numeric;'
 const KIND_HINT = 'Чтобы задать параметры для ХДФ и видеть число листов в заявках, выполните migration_material_kind.sql в Supabase (SQL Editor) — один раз.'
 
+// последнее загруженное состояние кабинета производства (на время работы приложения), см. начало ProductionPage
+let pageCache = { uid: null }
+
 export default function ProductionPage() {
   const navigate = useNavigate()
   const { user, profile, isMaster, refreshProfile } = useAuth()
-  const [prod, setProd] = useState(undefined)       // undefined — загрузка, null — производства нет
-  const [orders, setOrders] = useState([])
+  // прошлый раз загруженное — показывается сразу при возврате на страницу (с бирок, заказа, другого раздела), свежее догружается
+  const C = pageCache.uid === user?.id ? pageCache : null
+  const [prod, setProd] = useState(C ? C.prod : undefined)       // undefined — загрузка, null — производства нет
+  const [orders, setOrders] = useState(C?.orders || [])
   const [error, setError] = useState('')
   // раздел списка запоминается: вернувшись из ЧПУ или бирок «к заказам», попадаем туда же, где были
   const [filter, setFilterState] = useState(() => { try { const f = sessionStorage.getItem('prodFilter'); return FILTERS.some(([k]) => k === f) ? f : 'new' } catch { return 'new' } })
@@ -67,10 +72,10 @@ export default function ProductionPage() {
   const [openIds, setOpenIds] = useKeptState('open', [])   // развёрнутые заявки; по умолчанию все свёрнуты — список короткий
   const open = useMemo(() => new Set(openIds), [openIds])
   const toggle = id => setOpenIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]))
-  const [sheet, setSheet] = useState({})
-  const [staff, setStaff] = useState({ data: null, error: '' })   // сотрудники и приглашения (владелец)
-  const [wps, setWps] = useState([])                              // где я сотрудник (своего производства нет)
-  const [stages, setStages] = useState({})                        // где сейчас заказы: id -> { name (пост), status, done, total }
+  const [sheet, setSheet] = useState(C?.sheet || {})
+  const [staff, setStaff] = useState(C?.staff || { data: null, error: '' })   // сотрудники и приглашения (владелец)
+  const [wps, setWps] = useState(C?.wps || [])                              // где я сотрудник (своего производства нет)
+  const [stages, setStages] = useState(C?.stages || {})                        // где сейчас заказы: id -> { name (пост), status, done, total }
   const loadStages = () => productionStageMap().then(r => setStages(r.data || {}))
   const [reopen, setReopen] = useState(null)                  // исполненный заказ — вернуть в техпроцесс (выбор поста)
   const [tab, setTab] = useKeptState('prodTab', 'orders')    // вкладка кабинета: orders | board | settings
@@ -104,8 +109,8 @@ export default function ProductionPage() {
     for (const o of orders) { const t = cachedShare(o.id); if (t) next.set(o.id, t); else if (t === null) next.delete(o.id) }
     return next
   })), [orders])
-  const [archived, setArchived] = useState(() => new Map())     // заказы в архиве: id -> когда отправлен
-  const [stats, setStats] = useState(null)                       // строки статистики (вместе с удалёнными заказами); null — в базе её ещё нет
+  const [archived, setArchived] = useState(() => C?.archived || new Map())     // заказы в архиве: id -> когда отправлен
+  const [stats, setStats] = useState(C?.stats ?? null)                       // строки статистики (вместе с удалёнными заказами); null — в базе её ещё нет
   const [statsHint, setStatsHint] = useState('')
   const per = usePeriod('prodStats_')
   // что показывать в итогах — галочки, хранятся в настройках аккаунта
@@ -152,8 +157,10 @@ export default function ProductionPage() {
   }
 
   const load = async () => {
-    const p = (await myProduction(user?.id)) ?? null
-    { const w = await myWorkplaces(); setWps(w.data || []) }    // где я сотрудник — рабочие места (может быть и своё производство)
+    // производство и рабочие места — параллельно (раньше по очереди: на медленной связи страница открывалась секунды)
+    const [p0, w] = await Promise.all([myProduction(user?.id), myWorkplaces()])
+    const p = p0 ?? null
+    setWps(w.data || [])    // где я сотрудник — рабочие места (может быть и своё производство)
     setProd(p)
     if (p && (p.status ?? 'approved') === 'approved') { loadStaff(); loadStages() }
     if (p && (p.status ?? 'approved') === 'approved') {
@@ -164,6 +171,7 @@ export default function ProductionPage() {
     }
   }
   useEffect(() => { Promise.resolve().then(load) }, [user?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (prod !== undefined) pageCache = { uid: user?.id, prod, orders, sheet, staff, wps, stages, archived, stats } }, [user?.id, prod, orders, sheet, staff, wps, stages, archived, stats])
 
   const setStatus = async (o, status) => {
     setBusy(o.id)
