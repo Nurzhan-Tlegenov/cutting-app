@@ -711,8 +711,10 @@ export function buildItem(src, holes, faceRule) {
       // Сверлят с пласти. Если отверстие начинается в толще детали — это отверстие соседней детали,
       // которая в модели врезана в эту (ошибка конструктора): сюда его не переносим.
       if (!src.strict && (d[2] > 0 ? q[2] : T - q[2]) > Math.max(tol, 1)) { warn.foreign++; continue }
+      h.hit = true                                     // отверстие нашло деталь (импорт Астры предупреждает о потерянных)
       face.push({ x: q[0], y: q[1], d: 2 * h.r, depth: top && bottom ? T : top ? T - Math.max(za, 0) : Math.min(zb, T), through: top && bottom, top, name: h.name })
     } else if (Math.abs(d[2]) < 0.01 && q[2] > 0.5 && q[2] < T - 0.5 && h.only !== 'face') {
+      h.hit = true
       edge.push({ q, d, z: q[2], dia: 2 * h.r, depth: h.depth, name: h.name, entry: !!h.entry })
     }
   }

@@ -371,7 +371,7 @@ function edgeNotches(e, T) {
 
 // Отверстия от крепежа на торцах одной детали — в мировых координатах.
 // Крепёж стоит на стороне контура: pos — от начала (mode 1) или от конца (mode 2) стороны.
-function furnitureHoles(part, T, M, out, plates, faceAt) {
+function furnitureHoles(part, T, M, out, plates, faceAt, lost = []) {
   for (const lp of loopsOf(part)) {
     for (const e of lp.src) {
       const furn = e.end?.furn
@@ -388,7 +388,7 @@ function furnitureHoles(part, T, M, out, plates, faceAt) {
         const at = f.mode === 2 ? [b[0] - dir[0] * f.pos, b[1] - dir[1] * f.pos] : [a[0] + dir[0] * f.pos, a[1] + dir[1] * f.pos]
         const name = fixName(fx)
         const push = (p, d, dia, depth, extra) => {
-          if (!(dia > 0) || !(depth > 0)) return
+          if (!(dia > 0) || !(depth > 0)) { lost.push({ name: name || fx._, why: 'size', part }); return }
           out.push({ P: applyP(M, p), D: applyV(M, d), r: dia / 2, depth, name, from: part, ...extra })
         }
         const mid = T / 2
@@ -446,7 +446,8 @@ function furnitureHoles(part, T, M, out, plates, faceAt) {
             }
             break
           }
-          default:
+          default:                        // крепёж, который импорт ещё не понимает — не молчим, а предупреждаем
+            lost.push({ name: name || fx._, why: 'unknown', part })
         }
       }
     }
@@ -716,6 +717,7 @@ export function parseAstra(u8, opts = {}) {
     solid.push({ ...g, Mi: inverse(g.M), poly: polyOf(p.el.flatMap(expand)), part: p })
   }
   const TOUCH = 0.1                                // Астра считает детали состыкованными только при плотном прилегании
+  const lostFix = []                                  // крепёж, отверстия которого не попали ни в одну деталь
   const faceAt = (P, D) => {
     for (const sp of solid) {
       const d = applyV(sp.Mi, D)
@@ -728,7 +730,7 @@ export function parseAstra(u8, opts = {}) {
   }
   for (const { p } of [...panels, ...bents]) {
     const g = geo.get(p)
-    if (g) furnitureHoles(p, g.T, g.M, holes, plates, faceAt)
+    if (g) furnitureHoles(p, g.T, g.M, holes, plates, faceAt, lostFix)
   }
   const markRes = markPockets(marks.filter(m => !markOff.has(m.p._i)), solid)
   const markHits = markRes.map
@@ -917,7 +919,18 @@ export function parseAstra(u8, opts = {}) {
       return [...g.values()]
     })(),
   }
-  return { orderName, scene, skipped, items, groups, pockets,
+  // Предупреждение: отверстия крепежа, которые никуда не попали (нет детали в этом месте, крепёж неизвестен, нет размера)
+  const lostPart = q => [(q?.pos || '').trim(), (q?.name || '').trim()].filter(Boolean).join(' ') || 'деталь'
+  const lostMap = new Map()
+  const addLost = (name, why, part) => {
+    const k = `${why}|${name}`
+    if (!lostMap.has(k)) lostMap.set(k, { name, why, count: 0, parts: new Set() })
+    const x = lostMap.get(k); x.count++; if (part) x.parts.add(lostPart(part))
+  }
+  for (const h of holes) if (!h.hit && h.from) addLost(h.name || 'отверстие', 'nowhere', h.from)
+  for (const l of lostFix) addLost(l.name, l.why, l.part)
+  const lost = [...lostMap.values()].map(x => ({ ...x, parts: [...x.parts].slice(0, 6) }))
+  return { orderName, scene, skipped, items, groups, pockets, lost,
     ...(opts.debug ? { debug: { holes, plates, solid } } : {}) }
 }
 

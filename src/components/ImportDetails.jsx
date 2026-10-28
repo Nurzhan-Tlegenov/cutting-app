@@ -729,6 +729,17 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                 Проверьте эти детали в редакторе контура или импортируйте файл проекта (.add) — там это однозначно.
               </div>
             )}
+            {/* крепёж из файла, отверстия которого не попали ни в одну деталь — не молчим */}
+            {basis?.lost?.length > 0 && (
+              <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
+                <div style={{ fontWeight: 600, marginBottom: 2 }}>⚠ Часть крепежа из файла не перенесена в детали — проверьте присадку:</div>
+                {basis.lost.map((l, i) => (
+                  <div key={i}>· «{l.name}» — {l.count} шт.: {l.why === 'unknown' ? 'такой вид крепежа импорт пока не понимает' : l.why === 'size' ? 'в файле нет диаметра или глубины' : 'в этом месте нет детали, куда сверлить'}{l.parts.length ? ` (на детали ${l.parts.join(', ')})` : ''}</div>
+                ))}
+                <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>Добавьте эти отверстия в редакторе контура детали и отправьте файл разработчику — импорт научится их читать.</div>
+                <div style={{ marginTop: 4 }}>{reportLink('Отправить файл разработчику')}</div>
+              </div>
+            )}
             {basis && (sumWarn('open') + sumWarn('edges') + sumWarn('edgeHoles') + sumWarn('cuts') + sumWarn('offPart') > 0) && (
               <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
                 Не всё удалось перенести — проверьте эти детали в редакторе контура:
