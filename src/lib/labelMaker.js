@@ -71,7 +71,8 @@ export const LABEL_ITEMS = [
 /** Элементы бирки детали (без элементов бирки остатка) */
 export const PART_ITEMS = LABEL_ITEMS.filter(x => x[3] !== 'rem')
 /** Элементы бирки делового остатка */
-export const REM_ITEMS = ['remTitle', 'remSize', 'material', 'thickness', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
+export const REM_ITEMS = ['remTitle', 'remSize', 'material', 'thickness', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'map', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
+  .map(x => (x[0] === 'map' ? ['map', 'Карта раскроя — остаток чёрным', 'pic'] : x))
 // Из чего собирается строка QR-кода — выбирает пользователь; порядок — как в этом списке
 export const QR_PARTS = [
   ['link', 'Ссылка на 3D-модель детали'],
@@ -604,7 +605,8 @@ export function sheetOutlines(sheet, geo) {
 }
 
 /** Карта листа в прямоугольнике (x, y, w, h): контуры деталей, деталь hi — чёрная. Лежачий прямоугольник — лист кладётся длиной по горизонтали. */
-export function drawSheetMap(ctx, x, y, w, h, sheet, geo, hi = -1, line = 1, rot = false) {
+export function drawSheetMap(ctx, x, y, w, h, sheet, geo, hi = -1, line = 1, rot = false, hiRect = null) {
+  // hiRect — { x, y, w, h } от угла листа: закрасить прямоугольник (деловой остаток — куда клеить его бирку)
   // rot — лист лежит горизонтально: длина листа (Y) — слева направо, начало листа — слева
   const SW = rot ? geo.sheetL : geo.sheetW, SH = rot ? geo.sheetW : geo.sheetL
   const k = Math.min(w / SW, h / SH), ox = x + (w - SW * k) / 2, oy = y + (h - SH * k) / 2
@@ -619,6 +621,10 @@ export function drawSheetMap(ctx, x, y, w, h, sheet, geo, hi = -1, line = 1, rot
     if (i === hi) ctx.fill()
     ctx.stroke()
   })
+  if (hiRect) {
+    const [a, b] = T([hiRect.x, hiRect.y]), [c, d] = T([hiRect.x + hiRect.w, hiRect.y + hiRect.h])
+    ctx.fillRect(Math.min(a, c), Math.min(b, d), Math.abs(c - a), Math.abs(d - b))
+  }
   ctx.restore()
 }
 
@@ -770,7 +776,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
         for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect(Math.round(x) + c * cell, Math.round(y) + r * cell, cell, cell)
       } catch { /* слишком длинная строка — без QR */ }
     } else if (it.type === 'map') {
-      if (sheetCtx) drawSheetMap(ctx, x, y, w, it.h * mm, sheetCtx.sheet, sheetCtx.geo, sheetCtx.index, line, rot)
+      if (sheetCtx) drawSheetMap(ctx, x, y, w, it.h * mm, sheetCtx.sheet, sheetCtx.geo, sheetCtx.index ?? -1, line, rot, sheetCtx.remRect)
     } else if (it.type === 'part') {
       const p = sheetCtx?.part || sheetCtx?.sheet.placed[sheetCtx.index]
       if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0,
@@ -840,7 +846,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
 }
 
 /** Деловые обрезки листа, отмеченные в раскрое: [{ w, h }] — ширина (X) и длина (Y), мм */
-export const sheetOffcuts = sheet => (sheet?.manualOffcuts || []).map(o => ({ w: Math.round(o.w), h: Math.round(o.h) })).filter(o => o.w > 0 && o.h > 0)
+export const sheetOffcuts = sheet => (sheet?.manualOffcuts || []).map(o => ({ w: Math.round(o.w), h: Math.round(o.h), x: o.x, y: o.y })).filter(o => o.w > 0 && o.h > 0)
 
 /** Бирка на обрезок — самая простая: заказ, материал и размер обрезка. info: { order, mat, si, o: { w, h } } */
 // ─── Бирка на деловой остаток ───────────────────────────────────────────────
@@ -881,8 +887,29 @@ export function remQrText(rt, info) {
   const val = { size: `${r1(x.o?.h)}x${r1(x.o?.w)}x${info.thickness || ''}`, material: info.materialName, order: info.order, client: info.client, date: info.date, sheet: info.sheet ? `L${info.sheet}` : '' }
   return ['OSTATOK', ...(q.parts || []).map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(q.sep || ';')
 }
+/**
+ * Карта листа для бирки остатка: где на листе этот остаток (закрашен) — кто клеит руками, видит, куда клеить.
+ * Нет координат (пильный центр) — остаток ищется на листе по размеру; guess — для образца в редакторе: в конце листа.
+ */
+export function remSheetCtx(x, guess = false) {
+  const sheet = x?.mat?.sheets?.[x.si]
+  if (!sheet || !x.o) return null
+  const geo = sheetGeo(x.order, x.mat.result, sheet)
+  let o = x.o
+  if (o.x == null || o.y == null) {
+    const near = (a, b) => Math.abs(a - b) <= 1.5
+    o = (sheet.manualOffcuts || []).find(m => (near(m.w, o.w) && near(m.h, o.h)) || (near(m.w, o.h) && near(m.h, o.w)))
+    if (!o && guess) {
+      const uw = geo.sheetW - geo.marginL, ul = geo.sheetL - geo.marginB
+      o = { x: Math.max(0, uw - x.o.w), y: Math.max(0, ul - x.o.h), w: Math.min(x.o.w, uw), h: Math.min(x.o.h, ul) }
+    }
+    if (!o) return null
+  }
+  return { sheet, geo, remRect: { x: geo.marginL + o.x, y: geo.marginB + o.y, w: o.w, h: o.h } }
+}
 export function drawOffcutLabel(canvas, tpl, x, opts = {}) {
-  return drawLabel(canvas, remTplOf(tpl), remInfo(x), null, opts)
+  const rt = remTplOf(tpl)
+  return drawLabel(canvas, rt, remInfo(x), rt.items.some(i => i.type === 'map') ? remSheetCtx(x) : null, opts)
 }
 
 /** Размер картинки бирки в точках; preview — для экрана (без лишнего разрешения) */
@@ -940,7 +967,7 @@ export function labelSeq(sheet, geo, mode = 'manual', tpl = null) {
   if (tpl?.offcuts) (sheet.manualOffcuts || []).forEach((o, oi) => {
     if (!(o.w > 0 && o.h > 0)) return
     const at = offcutPoint(o, geo, tpl)
-    offs.push({ oi, o: { w: Math.round(o.w), h: Math.round(o.h) }, at, cx: at[0], cy: at[1], h: 0 })
+    offs.push({ oi, o: { w: Math.round(o.w), h: Math.round(o.h), x: o.x, y: o.y }, at, cx: at[0], cy: at[1], h: 0 })
   })
   const order = list => {
     if (mode === 'table') {

@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { REM_QR_PARTS, REM_ITEMS, PART_ITEMS, remTplOf, remInfo, remQrText } from '../lib/labelMaker'
+import { REM_QR_PARTS, REM_ITEMS, PART_ITEMS, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
 import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
@@ -73,7 +73,7 @@ function OffcutLabel({ tpl, order, mat, si, o, client = '' }) {
     cv.width = w; cv.height = h
     const draw = () => drawOffcutLabel(cv, tpl, { order, mat, si, o, client })
     draw(); const rt = remTplOf(tpl); if (rt.items.some(i => i.img)) preloadLabelImages(rt).then(draw)
-  }, [tpl, order, mat, si, o.w, o.h, client])
+  }, [tpl, order, mat, si, o.w, o.h, o.x, o.y, client])
   return <canvas ref={ref} />
 }
 
@@ -273,7 +273,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
     cv.width = w; cv.height = h
     const sheet = mat.sheets[0]
     // бирка остатка — на образцовом остатке; бирка детали — на первой детали
-    const draw = rem ? () => drawLabel(cv, t, remInfo(rem), null, { preview: true })
+    const draw = rem ? () => drawLabel(cv, t, remInfo(rem), remSheetCtx(rem, true), { preview: true })
       : () => drawLabel(cv, t, { ...labelInfo(order, mat, 0, 0), page: 1, pages: 1 }, { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] }, { preview: true })
     draw(); if (t.items.some(i => i.img)) preloadLabelImages(t).then(draw)
   }, [t, order, mat, rem])
@@ -376,7 +376,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
       {previewEl && !cur && <p style={{ fontSize: 12, color: 'var(--text-hint)', margin: '0 0 8px', padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>Щёлкните по элементу на бирке слева — здесь откроются его настройки.</p>}
       {cur && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)' }}>
-          <div style={{ flex: '1 1 100%', fontSize: 13, fontWeight: 500 }}>{itemTitle(cur.type)}{cur.img ? ' · картинкой' : ''}</div>
+          <div style={{ flex: '1 1 100%', fontSize: 13, fontWeight: 500 }}>{rem && cur.type === 'map' ? 'Карта раскроя — остаток чёрным' : itemTitle(cur.type)}{cur.img ? ' · картинкой' : ''}</div>
           {/* точная подвижка: шаг 0,5 мм (с увеличением — 0,2 мм) */}
           <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Сдвинуть на {zoom > 1.5 ? '0,2' : '0,5'} мм:</span>
