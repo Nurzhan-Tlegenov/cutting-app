@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { useAuth } from '../context/AuthContext'
+import { nameOk, phoneOk } from '../lib/profileRules'
 import { COUNTRY_NAMES, guessCountryName } from '../lib/phoneCountries'
 import { tr } from '../i18n'
 
@@ -22,10 +23,10 @@ export function CompleteProfilePage() {
   async function save(e) {
     e.preventDefault()
     setError('')
-    if (form.full_name.trim().length < 2) { setError('Введите имя и фамилию'); return }
+    if (!nameOk(form.full_name)) { setError('Введите имя и фамилию полностью — например, Иван Петров'); return }
     if (form.country.trim().length < 2) { setError('Укажите страну'); return }
     if (form.city.trim().length < 2) { setError('Укажите город'); return }
-    if (form.phone.trim() && form.phone.replace(/\D/g, '').length < 7) { setError('Проверьте номер телефона — или оставьте поле пустым'); return }
+    if (!phoneOk(form.phone)) { setError('Укажите номер телефона с кодом страны — например, +7 701 000 00 00'); return }
     setBusy(true)
     try { await completeProfile(form) } catch (err) { setError(String(err?.message || err)) } finally { setBusy(false) }
   }
@@ -42,6 +43,7 @@ export function CompleteProfilePage() {
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Вход: {user?.email}</p>
           <div>
             <label className="label">Имя и фамилия *</label>
+            <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-2px 0 4px' }}>Полностью, как вас зовут — их видят производство и заказчики.</p>
             <input type="text" autoComplete="name" value={form.full_name} onChange={e => set('full_name', e.target.value)} maxLength={120} required />
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -56,9 +58,9 @@ export function CompleteProfilePage() {
             </div>
           </div>
           <div>
-            <label className="label">Телефон (необязательно)</label>
-            <input type="tel" autoComplete="tel" placeholder="+48 500 000 000" value={form.phone} onChange={e => set('phone', e.target.value)} maxLength={40} />
-            <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Чтобы производство могло связаться с вами по заказу.</p>
+            <label className="label">Телефон *</label>
+            <input type="tel" autoComplete="tel" placeholder="+7 701 000 00 00" value={form.phone} onChange={e => set('phone', e.target.value)} maxLength={40} required />
+            <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Чтобы производство и поддержка РаскройPro могли связаться с вами. В РаскройPro все знают, с кем работают.</p>
           </div>
           {error && <p className="error-text">{error}</p>}
           <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Загрузка...' : 'Продолжить'}</button>

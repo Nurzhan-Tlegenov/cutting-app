@@ -1,3 +1,4 @@
+import { nameOk, phoneOk } from '../lib/profileRules'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { forgetPush } from '../lib/push'
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
@@ -178,7 +179,7 @@ export function AuthProvider({ children }) {
 
   // аккаунт по почте без имени, страны или города — сначала дозаполнить профиль (у Google их нет до входа)
   const needsProfile = !!user && !loading && !isPhoneAccount(user) && profile?.role !== 'admin'
-    && (!String(profile?.full_name || '').trim() || !String(profile?.country || '').trim() || !String(profile?.city || '').trim())
+    && (!nameOk(profile?.full_name) || !phoneOk(profile?.phone) || !String(profile?.country || '').trim() || !String(profile?.city || '').trim())
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, setContactEmail, refreshProfile: () => (user ? fetchProfile(user.id) : null),

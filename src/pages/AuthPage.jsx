@@ -1,3 +1,4 @@
+import { nameOk } from '../lib/profileRules'
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom, getLang, tr } from '../i18n'
@@ -170,7 +171,7 @@ export default function AuthPage() {
         }
         if (form.password.length < 6) throw new Error('Пароль минимум 6 символов')
         if (mode === 'login') { await signIn(em, form.password); navigate(pendingRef() ? `/r/${pendingRef()}` : '/'); return }
-        if (!form.full_name.trim()) throw new Error('Введите имя и фамилию')
+        if (!nameOk(form.full_name)) throw new Error('Введите имя и фамилию полностью — например, Иван Петров')
         if (form.country.trim().length < 2) throw new Error('Укажите страну')
         if (form.city.trim().length < 2) throw new Error('Укажите город')
         await signUp(em, form.password, { full_name: form.full_name.trim(), phone: '', country: form.country.trim(), city: form.city.trim() })
@@ -202,7 +203,7 @@ export default function AuthPage() {
       } else if (mode === 'login') {
         await signInAny(form.phone, form.password)
       } else {
-        if (!form.full_name.trim()) throw new Error('Введите имя и фамилию')
+        if (!nameOk(form.full_name)) throw new Error('Введите имя и фамилию полностью — например, Иван Петров')
         if (byRequest && !nameLooksReal(form.full_name)) throw new Error('Укажите настоящие имя и фамилию (например: Иван Петров) — заявки без имени не одобряются')
         setPhoneTouched(true)
         if (phoneErr) throw new Error(phoneErr)
