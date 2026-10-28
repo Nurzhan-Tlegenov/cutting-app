@@ -15,8 +15,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { REM_FIELDS, REM_QR_PARTS, normRem, remQr } from '../lib/labelMaker'
-import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
+import { REM_QR_PARTS, REM_ITEMS, PART_ITEMS, remTplOf, remInfo, remQrText } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -71,82 +71,26 @@ function OffcutLabel({ tpl, order, mat, si, o, client = '' }) {
     if (!cv) return
     const { w, h } = labelPx(tpl, true)
     cv.width = w; cv.height = h
-    drawOffcutLabel(cv, tpl, { order, mat, si, o, client })
+    const draw = () => drawOffcutLabel(cv, tpl, { order, mat, si, o, client })
+    draw(); const rt = remTplOf(tpl); if (rt.items.some(i => i.img)) preloadLabelImages(rt).then(draw)
   }, [tpl, order, mat, si, o.w, o.h, client])
   return <canvas ref={ref} />
 }
 
-// Шаблон бирки делового остатка: какие строки, порядок (↑↓), высота шрифта, жирность, заголовок, свой текст, QR-код.
-// Слева (сверху на телефоне) — бирка как напечатается, на первом остатке заказа.
+// Шаблон бирки делового остатка — тот же редактор, что у бирки детали: элементы ставятся куда угодно, тянутся,
+// поворачиваются, выравниваются, заменяются картинкой. Размер — как у бирки детали (тот же рулон).
 function RemLabelSetup({ tpl, onChange, sample }) {
-  const rem = normRem(tpl.rem)
-  const set = patch => onChange({ ...tpl, rem: { ...rem, ...patch } })
-  const setField = (i, patch) => set({ fields: rem.fields.map((f, j) => (j === i ? { ...f, ...patch } : f)) })
-  const move = (i, d) => { const f = [...rem.fields], j = i + d; if (j < 0 || j >= f.length) return; [f[i], f[j]] = [f[j], f[i]]; set({ fields: f }) }
-  const ref = useRef(null)
-  useEffect(() => {
-    const cv = ref.current
-    if (!cv) return
-    const { w, h } = labelPx(tpl, true)
-    cv.width = w; cv.height = h
-    drawOffcutLabel(cv, tpl, sample)
-  })
-  const num = { width: 56, padding: '4px 6px', fontSize: 13, textAlign: 'center' }
-  const name = k => (REM_FIELDS.find(x => x[0] === k) || [])[1] || k
+  const rt = remTplOf(tpl)
+  const set = next => onChange({ ...tpl, remTpl: normalizeLabel({ ...next, kind: 'rem', enabled: true }) })
   return (
     <div className="card no-print" style={{ marginBottom: 12, padding: '10px 12px' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>Бирка делового остатка</div>
-      <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 8 }}>Размер бирки — как у бирок деталей ({tpl.w}×{tpl.h} мм). Строки печатаются сверху вниз в этом порядке; не помещаются — шрифт уменьшается сам.</div>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <canvas ref={ref} style={{ width: 'min(100%, 340px)', height: 'auto', border: '1px solid #2C2C2A', borderRadius: 3, background: '#fff' }} />
-        <div style={{ flex: '1 1 300px', minWidth: 0 }}>
-          {rem.fields.map((f, i) => (
-            <div key={f.k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
-              <input type="checkbox" checked={f.on} onChange={e => setField(i, { on: e.target.checked })} style={{ width: 17, height: 17 }} />
-              <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: f.on ? 'var(--text)' : 'var(--text-hint)' }}>{name(f.k)}</span>
-              <input type="text" inputMode="decimal" key={f.k + f.size} defaultValue={String(f.size).replace('.', ',')} title="Высота шрифта, мм"
-                onBlur={e => { const v = Number(e.target.value.replace(',', '.')); if (v > 0) setField(i, { size: v }) }} style={num} />
-              <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>мм</span>
-              <button type="button" title="Жирный" onClick={() => setField(i, { bold: !f.bold })} style={{ width: 30, height: 28, borderRadius: 8, border: '0.5px solid var(--border-md)', background: f.bold ? 'var(--blue)' : 'transparent', color: f.bold ? '#fff' : 'var(--text-muted)', fontWeight: 700, cursor: 'pointer' }}>Ж</button>
-              <button type="button" title="Выше" disabled={!i} onClick={() => move(i, -1)} style={{ width: 28, height: 28, borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'transparent', cursor: 'pointer' }}>↑</button>
-              <button type="button" title="Ниже" disabled={i === rem.fields.length - 1} onClick={() => move(i, 1)} style={{ width: 28, height: 28, borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'transparent', cursor: 'pointer' }}>↓</button>
-            </div>
-          ))}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-            <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Заголовок
-              <input type="text" key={'t' + rem.title} defaultValue={rem.title} onBlur={e => set({ title: e.target.value })} style={{ marginTop: 3 }} />
-            </label>
-            <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Свой текст
-              <input type="text" key={'x' + rem.text} defaultValue={rem.text} placeholder="например, название цеха" onBlur={e => set({ text: e.target.value })} style={{ marginTop: 3 }} />
-            </label>
-          </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, fontSize: 12.5 }}>
-            <span style={{ color: 'var(--text-muted)' }}>Выравнивание:</span>
-            {[['center', 'по центру'], ['left', 'слева']].map(([k, l]) => (
-              <button key={k} type="button" onClick={() => set({ align: k })} style={{ padding: '4px 10px', borderRadius: 14, border: `0.5px solid ${rem.align === k ? 'var(--blue)' : 'var(--border-md)'}`, background: rem.align === k ? 'var(--blue-light)' : 'transparent', color: rem.align === k ? 'var(--blue-dark)' : 'var(--text-muted)', cursor: 'pointer' }}>{l}</button>
-            ))}
-          </div>
-          <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-              <input type="checkbox" checked={rem.qr.on} onChange={e => set({ qr: { ...rem.qr, on: e.target.checked } })} style={{ width: 17, height: 17 }} />
-              QR-код на бирке (справа)
-            </label>
-            {rem.qr.on && (
-              <>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0 0 25px' }}>
-                  {REM_QR_PARTS.map(([k, l]) => {
-                    const on = rem.qr.parts.includes(k)
-                    return <button key={k} type="button" onClick={() => set({ qr: { ...rem.qr, parts: on ? rem.qr.parts.filter(x => x !== k) : REM_QR_PARTS.map(([x]) => x).filter(x => x === k || rem.qr.parts.includes(x)) } })}
-                      style={{ padding: '3px 10px', borderRadius: 14, fontSize: 12, border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? '#fff' : 'var(--text-muted)', cursor: 'pointer' }}>{l}</button>
-                  })}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0 0 25px', wordBreak: 'break-all' }}>В коде: {remQr(rem, sample)}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '2px 0 0 25px' }}>По этому коду остаток потом можно будет найти и учесть на складе деловых остатков.</div>
-              </>
-            )}
-          </div>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+        <div style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>Бирка делового остатка</div>
+        <button type="button" onClick={() => { if (window.confirm('Вернуть раскладку бирки остатка по образцу?')) onChange({ ...tpl, remTpl: null }) }}
+          style={{ padding: '5px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>↺ По образцу</button>
       </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 8 }}>Размер — как у бирки детали ({tpl.w}×{tpl.h} мм). Нажмите на элемент — двигайте, растягивайте, поворачивайте, меняйте шрифт или ставьте картинку; «Добавить на бирку» — новые элементы.</div>
+      <LabelEditor tpl={rt} onChange={set} order={sample.order} mat={sample.mat} shared={false} rem={sample} />
     </div>
   )
 }
@@ -251,7 +195,7 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d, bp 
 // Показана бирка первой детали первого листа — на настоящих данных заказа.
 import LabelImageEditor from '../components/LabelImageEditor'
 
-function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null }) {
+function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem = null }) {
   const wrapRef = useRef(null), cvRef = useRef(null), drag = useRef(null)
   const [live, setLive] = useState(null)            // шаблон во время перетаскивания
   const [sel, setSel] = useState(null)
@@ -328,9 +272,11 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null }) {
     const { w, h } = labelPx(t, true)
     cv.width = w; cv.height = h
     const sheet = mat.sheets[0]
-    const draw = () => drawLabel(cv, t, { ...labelInfo(order, mat, 0, 0), page: 1, pages: 1 }, { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] }, { preview: true })
+    // бирка остатка — на образцовом остатке; бирка детали — на первой детали
+    const draw = rem ? () => drawLabel(cv, t, remInfo(rem), null, { preview: true })
+      : () => drawLabel(cv, t, { ...labelInfo(order, mat, 0, 0), page: 1, pages: 1 }, { sheet, geo: sheetGeo(order, mat.result, sheet), index: 0, detail: mat.details[sheet.placed[0].detailIndex] }, { preview: true })
     draw(); if (t.items.some(i => i.img)) preloadLabelImages(t).then(draw)
-  }, [t, order, mat])
+  }, [t, order, mat, rem])
   // компьютер: колёсико мыши над биркой — увеличить/уменьшить в точке под курсором
   const zoomAtRef = useRef(null)
   zoomAtRef.current = zoomAt
@@ -477,7 +423,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null }) {
                 ))}
                 <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{textRot(cur)}°</span>
               </div>
-              {!['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight'].includes(cur.type) && (
+              {!rem && !['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight'].includes(cur.type) && (
                 <label style={{ flex: '1 1 100%', display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, margin: 0, cursor: 'pointer' }}>
                   <input type="checkbox" checked={!!cur.bind} onChange={e => edit({ bind: e.target.checked || undefined })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
                   <span>Привязать к стороне детали
@@ -560,7 +506,20 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null }) {
             onClick={() => { onChange({ ...tpl, items: tpl.items.filter(i => i.id !== sel) }); setSel(null) }}>Убрать</button>
         </div>
       )}
-      {used.has('qr') && (
+      {used.has('qr') && rem && (
+        <div style={{ marginBottom: 10, padding: '8px 10px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)' }}>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Что зашито в QR-код остатка</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {REM_QR_PARTS.map(([k, l]) => {
+              const q = t.remQr || { parts: [], sep: ';' }, on = q.parts.includes(k)
+              return <button key={k} type="button" style={chip(on)} onClick={() => onChange({ ...tpl, remQr: { ...q, parts: on ? q.parts.filter(x => x !== k) : REM_QR_PARTS.map(([x]) => x).filter(x => x === k || q.parts.includes(x)) } })}>{l}</button>
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>В коде: {remQrText(t, remInfo(rem))}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>По этому коду остаток потом можно будет найти и учесть на складе деловых остатков.</div>
+        </div>
+      )}
+      {used.has('qr') && !rem && (
         <div style={{ marginBottom: 10, padding: '8px 10px', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)' }}>
           <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Что зашито в QR-код</div>
           {qrHasLink(tpl.qr) && (
@@ -577,11 +536,11 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null }) {
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на бирку</div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
         {/* любой параметр можно поставить несколько раз: например, один раз текстом, другой — картинкой в другом месте */}
-        {[...LABEL_ITEMS, ...metaItems(mat?.details)].map(([k, label]) => addChip(k, label))}
+        {(rem ? REM_ITEMS : [...PART_ITEMS, ...metaItems(mat?.details)]).map(([k, label]) => addChip(k, label))}
       </div>
       {/* пользовательские параметры деталей: колонки таблицы при импорте Excel/CSV и пользовательские свойства из Базиса —
           под теми же названиями, что в источнике; на бирке — значение у каждой детали */}
-      {(() => {
+      {!rem && (() => {
         const list = userItems(mat?.details)
         t.items.forEach(i => { if (i.type.startsWith('user:') && !list.some(([k]) => k === i.type)) list.push([i.type, itemTitle(i.type)]) })
         return (

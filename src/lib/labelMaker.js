@@ -61,7 +61,17 @@ export const LABEL_ITEMS = [
   ['part', 'Чертёж детали', 'pic'],
   ['map', 'Карта раскроя — деталь чёрным', 'pic'],
   ['qr', 'QR-код', 'pic'],
+  // только на бирке делового остатка
+  ['remTitle', 'Заголовок (свой текст)', 'text', 'rem'],
+  ['remSize', 'Размер остатка', 'text', 'rem'],
+  ['client', 'Заказчик', 'text', 'rem'],
+  ['date', 'Дата', 'text', 'rem'],
+  ['remText', 'Свой текст', 'text', 'rem'],
 ]
+/** Элементы бирки детали (без элементов бирки остатка) */
+export const PART_ITEMS = LABEL_ITEMS.filter(x => x[3] !== 'rem')
+/** Элементы бирки делового остатка */
+export const REM_ITEMS = ['remTitle', 'remSize', 'material', 'thickness', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
 // Из чего собирается строка QR-кода — выбирает пользователь; порядок — как в этом списке
 export const QR_PARTS = [
   ['link', 'Ссылка на 3D-модель детали'],
@@ -338,7 +348,9 @@ export function normalizeLabel(raw) {
     o.x = Math.max(0, Math.min(w - bw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - bh, Number(i.y) || 0))
     return o
   })
-  return { enabled: !!t.enabled, w, h, edges: false, offcuts: !!t.offcuts, rem: normRem(t.rem),
+  return { enabled: !!t.enabled, w, h, edges: false, offcuts: !!t.offcuts,
+    ...(t.kind === 'rem' ? { kind: 'rem', remQr: { parts: Array.isArray(t.remQr?.parts) ? t.remQr.parts.filter(k => REM_QR_PARTS.some(([x]) => x === k)) : ['size', 'material', 'order', 'date'], sep: typeof t.remQr?.sep === 'string' && t.remQr.sep ? t.remQr.sep.slice(0, 3) : ';' } } : {}),
+    ...(t.kind !== 'rem' && t.remTpl && Array.isArray(t.remTpl.items) ? { remTpl: normalizeLabel({ ...t.remTpl, kind: 'rem' }) } : {}),
     // бирка на обрезок: в каком углу обрезка клеить и на сколько отступить от его сторон, мм
     offcut: { corner: ['bl', 'br', 'tl', 'tr', 'center'].includes(t.offcut?.corner) ? t.offcut.corner : 'bl', dx: Math.max(0, Math.min(1000, Number(t.offcut?.dx ?? 100) || 0)), dy: Math.max(0, Math.min(1000, Number(t.offcut?.dy ?? 100) || 0)) },
     rot: t.rot !== false, edgeDims: t.edgeDims !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
@@ -646,12 +658,13 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
-  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:' }
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image'])
 export const canCaption = type => !NO_CAP.has(type)
 export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
 /** Текст элемента бирки: подпись (своя у элемента или стандартная) + значение */
 export function labelText(type, info, tpl = null, cap = undefined) {
+  if (type === 'remTitle' || type === 'remText') return String(cap ?? defaultCap(type, tpl)).trim()   // свой текст — сама подпись
   const v = labelValue(type, info, tpl)
   if (!v || !canCaption(type)) return v
   const c = String(cap ?? defaultCap(type, tpl)).trim()
@@ -661,6 +674,9 @@ function labelValue(type, info, tpl = null) {
   switch (type) {
     case 'order': return info.order
     case 'material': return info.material
+    case 'remSize': return info.remSize || ''
+    case 'client': return info.client || ''
+    case 'date': return info.date || ''
     case 'title': return [info.des, info.name].filter(Boolean).join(' ')
     case 'name': return info.name
     case 'des': return info.des
@@ -746,7 +762,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
     const it = it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0
     const x = it.x * mm, y = it.y * mm, w = it.w * mm
     if (it.type === 'qr') {
-      const text = labelQr(tpl, info)
+      const text = tpl.kind === 'rem' ? remQrText(tpl, info) : labelQr(tpl, info)
       if (!text) continue
       try {
         const qr = qrcode(0, 'M'); qr.addData(unescape(encodeURIComponent(text))); qr.make()
@@ -828,94 +844,45 @@ export const sheetOffcuts = sheet => (sheet?.manualOffcuts || []).map(o => ({ w:
 
 /** Бирка на обрезок — самая простая: заказ, материал и размер обрезка. info: { order, mat, si, o: { w, h } } */
 // ─── Бирка на деловой остаток ───────────────────────────────────────────────
-// Свой шаблон (tpl.rem): какие строки печатать, их порядок, высота шрифта и жирность, заголовок, свой текст, QR-код.
-// Бирка того же размера, что и бирки деталей (тот же рулон в принтере). Строки — сверху вниз, QR — справа.
-export const REM_FIELDS = [
-  ['title', 'Заголовок'],
-  ['size', 'Размер остатка'],
-  ['material', 'Материал и толщина'],
-  ['order', 'Заказ'],
-  ['client', 'Заказчик'],
-  ['date', 'Дата'],
-  ['sheet', 'Номер карты'],
-  ['text', 'Свой текст'],
-]
+// Полноценный шаблон, как у бирки детали (tpl.remTpl): элементы ставятся куда угодно, тянутся, поворачиваются,
+// заменяются картинкой. Размер — как у бирки детали (тот же рулон в принтере). QR — свои части (REM_QR_PARTS).
 export const REM_QR_PARTS = [['size', 'Размер (Д×Ш×толщина)'], ['material', 'Материал'], ['order', 'Заказ'], ['client', 'Заказчик'], ['date', 'Дата'], ['sheet', 'Номер карты']]
-export const DEFAULT_REM = () => ({
-  title: 'ДЕЛОВОЙ ОСТАТОК', text: '', align: 'center',
-  fields: [
-    { k: 'title', on: true, size: 4, bold: true }, { k: 'size', on: true, size: 9, bold: true }, { k: 'material', on: true, size: 3.6, bold: false },
-    { k: 'order', on: true, size: 3.2, bold: false }, { k: 'date', on: true, size: 3, bold: false }, { k: 'sheet', on: true, size: 2.8, bold: false },
-    { k: 'client', on: false, size: 3, bold: false }, { k: 'text', on: false, size: 3, bold: false },
-  ],
-  qr: { on: false, parts: ['size', 'material', 'order', 'date'], sep: ';' },
-})
-export function normRem(raw) {
-  const d = DEFAULT_REM(), t = raw && typeof raw === 'object' ? raw : {}
-  const got = Array.isArray(t.fields) ? t.fields.filter(f => f && REM_FIELDS.some(([k]) => k === f.k)) : []
-  const fields = [...got, ...d.fields.filter(f => !got.some(g => g.k === f.k))].map(f => ({ k: f.k, on: !!f.on, bold: !!f.bold, size: Math.max(1.2, Math.min(30, Number(f.size) || 3)) }))
-  const q = t.qr || {}
-  return {
-    title: typeof t.title === 'string' ? t.title.slice(0, 40) : d.title, text: typeof t.text === 'string' ? t.text.slice(0, 80) : '',
-    align: t.align === 'left' ? 'left' : 'center', fields,
-    qr: { on: !!q.on, parts: Array.isArray(q.parts) ? q.parts.filter(k => REM_QR_PARTS.some(([x]) => x === k)) : d.qr.parts, sep: typeof q.sep === 'string' && q.sep ? q.sep.slice(0, 3) : ';' },
-  }
-}
 const today = () => new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
-const remMat = info => [info.mat?.name || info.mat?.label || info.order?.material_name || '', info.mat?.thickness ? `${info.mat.thickness} мм` : ''].filter(Boolean).join(' · ')
-function remValue(k, rem, info) {
-  switch (k) {
-    case 'title': return rem.title
-    case 'size': return `${r1(info.o.h)} × ${r1(info.o.w)}`
-    case 'material': return remMat(info)
-    case 'order': return info.order ? `Заказ ${orderTitle(info.order)}` : ''
-    case 'client': return info.client || ''
-    case 'date': return info.date || today()
-    case 'sheet': return info.si != null ? `карта ${info.si + 1}` : ''
-    case 'text': return rem.text
-    default: return ''
+// раскладка по умолчанию — в долях бирки (x, y, ширина), шрифт — в долях высоты
+const REM_DEFAULT = [
+  { type: 'remTitle', x: 0.06, y: 0.06, w: 0.88, s: 0.075, bold: true, align: 'center' },
+  { type: 'remSize', x: 0.06, y: 0.2, w: 0.88, s: 0.16, bold: true, align: 'center' },
+  { type: 'material', x: 0.06, y: 0.47, w: 0.88, s: 0.065, align: 'center' },
+  { type: 'order', x: 0.06, y: 0.6, w: 0.88, s: 0.06, align: 'center' },
+  { type: 'date', x: 0.06, y: 0.72, w: 0.88, s: 0.055, align: 'center' },
+  { type: 'sheet', x: 0.06, y: 0.83, w: 0.88, s: 0.05, align: 'center' },
+]
+export function defaultRemTpl(w = BASE.w, h = BASE.h) {
+  const items = REM_DEFAULT.map(d => ({ id: d.type + '_' + Math.random().toString(36).slice(2, 7), type: d.type, x: d.x * w, y: d.y * h, w: d.w * w, size: d.s * h, bold: !!d.bold, align: d.align }))
+  return normalizeLabel({ kind: 'rem', enabled: true, w, h, items, remQr: { parts: ['size', 'material', 'order', 'date'], sep: ';' } })
+}
+/** Шаблон бирки остатка из общего шаблона бирок; размер — как у бирки детали */
+export function remTplOf(tpl) {
+  const r = tpl?.remTpl && Array.isArray(tpl.remTpl.items) ? tpl.remTpl : defaultRemTpl(tpl?.w, tpl?.h)
+  return tpl && (Math.abs(r.w - tpl.w) > 0.01 || Math.abs(r.h - tpl.h) > 0.01) ? { ...resizeLabel(r, tpl.w, tpl.h), kind: 'rem', remQr: r.remQr } : r
+}
+/** Данные для бирки остатка: { order, mat, si, o: { w, h }, client } -> info для drawLabel */
+export function remInfo(x) {
+  const mat = x.mat || {}, nm = String(mat.name || mat.label || x.order?.material_name || '').trim(), t = Number(mat.thickness) || 0
+  const has = t > 0 && new RegExp(`(^|[^0-9.,])${String(t).replace('.', '[.,]')}([^0-9]|$)`).test(nm)
+  return {
+    rem: x, order: x.order ? orderTitle(x.order) : '', material: [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · '), materialName: nm, thickness: t,
+    remSize: `${r1(x.o.h)} × ${r1(x.o.w)}`, sheet: x.si != null ? x.si + 1 : '', client: x.client || '', date: x.date || today(), meta: {},
   }
 }
 /** Строка QR-кода остатка — по ней остаток потом можно найти и учесть (склад деловых остатков) */
-export function remQr(rem, info) {
-  const val = {
-    size: `${r1(info.o.h)}x${r1(info.o.w)}x${info.mat?.thickness || ''}`, material: info.mat?.name || info.mat?.label || info.order?.material_name || '',
-    order: info.order ? orderTitle(info.order) : '', client: info.client || '', date: info.date || today(), sheet: info.si != null ? `L${info.si + 1}` : '',
-  }
-  return ['OSTATOK', ...rem.qr.parts.map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(rem.qr.sep)
+export function remQrText(rt, info) {
+  const x = info.rem || {}, q = rt.remQr || { parts: ['size', 'material', 'order', 'date'], sep: ';' }
+  const val = { size: `${r1(x.o?.h)}x${r1(x.o?.w)}x${info.thickness || ''}`, material: info.materialName, order: info.order, client: info.client, date: info.date, sheet: info.sheet ? `L${info.sheet}` : '' }
+  return ['OSTATOK', ...(q.parts || []).map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(q.sep || ';')
 }
-export function drawOffcutLabel(canvas, tpl, info) {
-  const rem = normRem(tpl.rem)
-  const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height, mm = W / (tpl.w || 85)
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
-  ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
-  const pad = 1.5 * mm
-  let right = W - pad
-  if (rem.qr.on) {
-    const text = remQr(rem, info)
-    try {
-      const qr = qrcode(0, 'M'); qr.addData(unescape(encodeURIComponent(text))); qr.make()
-      const n = qr.getModuleCount(), side = Math.min(H - 2 * pad, W * 0.42), cell = Math.max(1, Math.floor(side / n)), q = cell * n
-      const x0 = Math.round(W - pad - q), y0 = Math.round((H - q) / 2)
-      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect(x0 + c * cell, y0 + r * cell, cell, cell)
-      right = x0 - pad
-    } catch { /* слишком длинная строка — без QR */ }
-  }
-  const lines = rem.fields.filter(f => f.on).map(f => ({ ...f, text: remValue(f.k, rem, info) })).filter(l => l.text)
-  const need = lines.reduce((a, l) => a + l.size * 1.3, 0) * mm, room = H - 2 * pad, k = need > room ? room / need : 1
-  let y = pad + (room - need * k) / 2
-  const left = pad, width = Math.max(10, right - left)
-  for (const l of lines) {
-    let fs = l.size * mm * k
-    const h = fs * 1.3
-    ctx.font = `${l.bold ? 'bold ' : ''}${fs}px sans-serif`
-    const w = ctx.measureText(l.text).width
-    if (w > width) { fs = Math.max(6, fs * width / w); ctx.font = `${l.bold ? 'bold ' : ''}${fs}px sans-serif` }
-    ctx.textAlign = rem.align === 'left' ? 'left' : 'center'
-    ctx.fillText(l.text, rem.align === 'left' ? left : left + width / 2, y + h / 2)
-    y += h
-  }
-  return canvas
+export function drawOffcutLabel(canvas, tpl, x, opts = {}) {
+  return drawLabel(canvas, remTplOf(tpl), remInfo(x), null, opts)
 }
 
 /** Размер картинки бирки в точках; preview — для экрана (без лишнего разрешения) */
@@ -1018,7 +985,7 @@ export function labelPoint(x0, x1, y0, y1, pos, tpl) {
 export async function buildLabelFiles({ order, mat, sheets, base, post, tpl, seqOf = null, partOf = null }) {
   // seqOf(sheet, geo, tpl) — свой порядок бирок (пильный центр: по готовности); partOf(sheet, pi) — деталь в положении выхода
   const files = [], list = [], { w, h } = labelPx(tpl)
-  await preloadLabelImages(tpl)
+  await preloadLabelImages(tpl); if (tpl.offcuts) await preloadLabelImages(remTplOf(tpl))
   if (order?.id && qrHasLink(tpl.qr) && cachedShare(order.id) === undefined) await getShare(order.id)   // для QR со ссылкой на 3D
   // коррекция наклейки: стол клеит со сдвигом — все точки наклейки смещаются на заданную величину (плюс и минус).
   // На программу раскроя (G-код) коррекция не влияет.
@@ -1104,7 +1071,7 @@ export function canvasToEmf(canvas, wMm, hMm) {
  * sheetIdx(si) — номер листа в материале по номеру листа в программе; partOf(sheet, pi) — деталь в положении выхода со станка.
  */
 export async function buildBeamEmfLabels({ order, mat, tpl, rows, offRows = [], sheetIdx = si => si, partOf = null }) {
-  await preloadLabelImages(tpl)
+  await preloadLabelImages(tpl); if (tpl.offcuts) await preloadLabelImages(remTplOf(tpl))
   if (order?.id && qrHasLink(tpl.qr) && cachedShare(order.id) === undefined) await getShare(order.id)
   const { w, h } = labelPx(tpl)
   const files = []
@@ -1143,7 +1110,7 @@ export function labelPages(order, mat, tpl, seqOf = null) {
 }
 
 export async function buildLabelsPdf({ order, mat, tpl, onProgress, seqOf = null, partOf = null }) {
-  await preloadLabelImages(tpl)
+  await preloadLabelImages(tpl); if (tpl.offcuts) await preloadLabelImages(remTplOf(tpl))
   if (order?.id && qrHasLink(tpl.qr) && cachedShare(order.id) === undefined) await getShare(order.id)
   const k = Math.max(12, pxMm(tpl)), W = Math.round(tpl.w * k), H = Math.round(tpl.h * k)
   const pw = (tpl.w * 72 / 25.4).toFixed(2), ph = (tpl.h * 72 / 25.4).toFixed(2)
