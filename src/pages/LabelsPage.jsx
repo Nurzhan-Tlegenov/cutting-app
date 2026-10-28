@@ -79,7 +79,7 @@ function OffcutLabel({ tpl, order, mat, si, o, client = '' }) {
 
 // Шаблон бирки делового остатка — тот же редактор, что у бирки детали: элементы ставятся куда угодно, тянутся,
 // поворачиваются, выравниваются, заменяются картинкой. Размер — как у бирки детали (тот же рулон).
-function RemLabelSetup({ tpl, onChange, sample }) {
+function RemLabelSetup({ tpl, onChange, sample, previewEl = null }) {
   const rt = remTplOf(tpl)
   const set = next => onChange({ ...tpl, remTpl: normalizeLabel({ ...next, kind: 'rem', enabled: true }) })
   return (
@@ -90,7 +90,7 @@ function RemLabelSetup({ tpl, onChange, sample }) {
           style={{ padding: '5px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>↺ По образцу</button>
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 8 }}>Размер — как у бирки детали ({tpl.w}×{tpl.h} мм). Нажмите на элемент — двигайте, растягивайте, поворачивайте, меняйте шрифт или ставьте картинку; «Добавить на бирку» — новые элементы.</div>
-      <LabelEditor tpl={rt} onChange={set} order={sample.order} mat={sample.mat} shared={false} rem={sample} />
+      <LabelEditor tpl={rt} onChange={set} order={sample.order} mat={sample.mat} shared={false} rem={sample} previewEl={previewEl} />
     </div>
   )
 }
@@ -718,6 +718,7 @@ export default function LabelsPage() {
   const anchor = useRef(null)                        // { n, y, k, step, ox, oy } — что было под пальцами
   const [gridEl, setGridEl] = useState(null)
   const [remEdit, setRemEdit] = useState(false)      // открыт шаблон бирки делового остатка
+  const [remPrev, setRemPrev] = useState(null)       // компьютер: место для бирки остатка слева
   useEffect(() => () => document.getElementById('lbl-print')?.remove(), [])   // ушли со страницы — блок печати убрать
   const setCols = (next, a = null) => {
     const c = Math.max(1, Math.min(MAX_COLS, Math.round(next)))
@@ -927,7 +928,22 @@ export default function LabelsPage() {
       })()}
       {mat && tpl.offcuts && remEdit && (() => {
         const sh = mat.sheets.findIndex(x => sheetOffcuts(x).length), o = sh >= 0 ? sheetOffcuts(mat.sheets[sh])[0] : { w: 600, h: 1200 }
-        return <RemLabelSetup tpl={tpl} onChange={apply} sample={{ order, mat, si: Math.max(0, sh), o, client: clientName }} />
+        const sample = { order, mat, si: Math.max(0, sh), o, client: clientName }
+        // компьютер: как шаблон бирки детали — во весь экран, бирка слева, параметры справа
+        if (desk) return (
+          <div className="no-print" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'var(--bg2)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
+              <button type="button" onClick={() => setRemEdit(false)} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, lineHeight: 1 }}>←</button>
+              <div style={{ flex: 1, fontSize: 16, fontWeight: 500 }}>Бирка делового остатка · {tpl.w}×{tpl.h} мм</div>
+              <button type="button" onClick={() => setRemEdit(false)} style={{ padding: '7px 16px', borderRadius: 'var(--radius)', border: 'none', background: 'var(--blue)', color: 'white', fontSize: 13 }}>Готово</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <DeskSplit id="label-tpl" def={0.6} full="parent" left={<div ref={setRemPrev} />}
+                right={<div style={{ padding: '12px 16px' }}><RemLabelSetup tpl={tpl} onChange={apply} sample={sample} previewEl={remPrev} /></div>} />
+            </div>
+          </div>
+        )
+        return <RemLabelSetup tpl={tpl} onChange={apply} sample={sample} />
       })()}
       {mat && (
         <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -991,25 +1007,35 @@ export function LabelSettingsPage() {
   const sample = useMemo(() => demoLabelSample(), [])
   const desk = useDesktop()
   const [previewEl, setPreviewEl] = useState(null)
+  const [which, setWhich] = useState('part')          // какую бирку настраиваем: детали или делового остатка
+  const tab = (k, l) => <button key={k} type="button" onClick={() => setWhich(k)} style={{ flex: 1, padding: '6px 8px', borderRadius: 15, border: 'none', fontSize: 13, fontWeight: which === k ? 600 : 400, background: which === k ? 'var(--bg)' : 'transparent', color: which === k ? 'var(--blue)' : 'var(--text-muted)', boxShadow: which === k ? '0 1px 2px rgba(0,0,0,0.12)' : 'none', cursor: 'pointer' }}>{l}</button>
   const body = (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingTop: 4 }}>
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0 }}>←</button>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 500 }}>Шаблон бирки</div>
+          <div style={{ fontWeight: 500 }}>Шаблоны бирок</div>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{tpl.w}×{tpl.h} мм · {tpl.enabled ? '✓ настроен' : 'не настроен'}</div>
         </div>
         <button onClick={() => navigate('/production')} style={{ padding: '7px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', whiteSpace: 'nowrap' }}>К заказам</button>
       </div>
-      <div className="card" style={{ marginBottom: 10 }}>
-        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 4px' }}>Бирка показана на образцовой детали. Шаблон тот же, что в бирках заказа: настроили здесь — он сразу работает во всех заказах.</p>
-        <LabelSetup tpl={tpl} setTpl={setTpl} user={user} order={sample.order} mat={sample.mat} shared={false} previewEl={desk ? previewEl : null} />
+      <div style={{ display: 'flex', gap: 4, background: 'var(--bg2)', borderRadius: 18, padding: 3, marginBottom: 10 }}>
+        {tab('part', 'Бирка детали')}{tab('rem', 'Бирка делового остатка')}
       </div>
-      {/* бирка делового остатка — тот же шаблон, что на странице бирок заказа: настраивается и здесь, и там */}
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, margin: '4px 0 8px', cursor: 'pointer' }}>
-        <input type="checkbox" checked={!!tpl.offcuts} onChange={e => applyTpl({ ...tpl, offcuts: e.target.checked })} style={{ width: 18, height: 18 }} />
-        Печатать бирки на деловые остатки
-      </label>
-      <RemLabelSetup tpl={tpl} onChange={applyTpl} sample={{ order: sample.order, mat: sample.mat, si: 0, o: { w: 612, h: 1250 }, client: 'Иван Петров' }} />
+      {which === 'part' ? (
+        <div className="card" style={{ marginBottom: 10 }}>
+          <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 4px' }}>Бирка показана на образцовой детали. Шаблон тот же, что в бирках заказа: настроили здесь — он сразу работает во всех заказах.</p>
+          <LabelSetup key="part" tpl={tpl} setTpl={setTpl} user={user} order={sample.order} mat={sample.mat} shared={false} previewEl={desk ? previewEl : null} />
+        </div>
+      ) : (
+        <>
+          {/* бирка делового остатка — тот же шаблон, что на странице бирок заказа: настраивается и здесь, и там */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, margin: '4px 0 8px', cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!tpl.offcuts} onChange={e => applyTpl({ ...tpl, offcuts: e.target.checked })} style={{ width: 18, height: 18 }} />
+            Печатать бирки на деловые остатки
+          </label>
+          <RemLabelSetup key="rem" tpl={tpl} onChange={applyTpl} sample={{ order: sample.order, mat: sample.mat, si: 0, o: { w: 612, h: 1250 }, client: 'Иван Петров' }} previewEl={desk ? previewEl : null} />
+        </>
+      )}
   </>)
   // компьютер: слева — бирка на образцовой детали, справа — размеры и параметры шаблона
   if (desk) return (
