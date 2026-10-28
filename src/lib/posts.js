@@ -1,6 +1,6 @@
 // Рабочие посты производства (см. migration_posts.sql): техпроцесс, по которому заказ идёт как по канбану.
 import { supabase } from './supabase'
-import { ruleOf, defaultRule, stageParts, loadOrderParts } from './stageParts'
+import { skipRuleOf, stageParts, loadOrderParts } from './stageParts'
 import { siteOrigin } from './siteOrigin'
 
 export const POSTS_SQL_HINT = 'Рабочие посты ещё не включены в базе: выполните migration_posts.sql в Supabase (SQL Editor) — один раз.'
@@ -48,19 +48,30 @@ export async function setOrderOp(orderId, postId, on) { const r = await call('se
  */
 export async function planStages(orderId) {
   const st = await orderStages(orderId)
-  // вид поста: по его правилу, а если «без списка деталей» — по названию (кромление / присадка): нужен ли пост, решают детали заказа
-  const kindOf = s => { const r = ruleOf(s.rule, s.name); if (['edge', 'drill'].includes(r.list)) return r; const d = defaultRule(s.name); return ['edge', 'drill'].includes(d.list) ? d : null }
+  // нужен ли пост, решают детали заказа и настройка поста «Пропускать пост» (нет кромки / нет присадки)
+  const kindOf = s => skipRuleOf(s.rule, s.name)
   const open = (st.data || []).filter(s => (s.status === 'waiting' || s.status === 'queued') && !Number(s.scanned) && kindOf(s))
   if (!open.length) return 0
   const d = await loadOrderParts(orderId)
   // деталей не видно (нет доступа или ещё не загрузились) — ничего не пропускаем: иначе заказ проскочит посты
-  if (!d.order || !d.rows.length) return 0
+  if (!d.order || !d.rows.length) { skipReason.set(orderId, 'приложение не видит детали заказа'); return 0 }
   const empty = open.filter(s => { try { return !stageParts(d.order, d.rows, kindOf(s)).length } catch { return false } }).map(s => s.post_id).filter(Boolean)
   if (!empty.length) return 0
-  // база сама перепроверяет: сколько деталей видело приложение, есть ли кромка, не «без списка деталей» ли пост
-  const r = await call('stage_auto_skip_v2', { p_order: orderId, p_posts: empty, p_seen: d.rows.length })
-  return r.error ? 0 : Number(r.data) || 0
+  // база сама перепроверяет: сколько деталей видело приложение, есть ли кромка, включён ли у поста пропуск
+  let r = await call('stage_auto_skip_v3', { p_order: orderId, p_posts: empty, p_seen: d.rows.length })
+  if (r.missing) {
+    // база ещё старая (не выполнен migration_stage_skip_v3.sql) — прежняя функция: пропускает только посты «С кромкой» / «С присадкой»
+    const o = await call('stage_auto_skip_v2', { p_order: orderId, p_posts: empty, p_seen: d.rows.length })
+    if (o.error) { skipReason.set(orderId, o.missing ? 'выполните migration_stage_skip_v3.sql в Supabase' : o.error); return 0 }
+    r = { data: { skipped: Number(o.data) || 0, reason: Number(o.data) ? null : 'выполните migration_stage_skip_v3.sql в Supabase' } }
+  }
+  if (r.error) { skipReason.set(orderId, r.error); return 0 }
+  const n = Number(r.data?.skipped) || 0
+  if (n) skipReason.delete(orderId); else skipReason.set(orderId, r.data?.reason || 'база не пропустила пост')
+  return n
 }
+/** Почему пост не пропустился сам (для подсказки на карточке заказа): orderId -> текст */
+export const skipReason = new Map()
 
 /** Сколько прошло: «25 мин», «3 ч 10 мин», «2 дн 4 ч» */
 export function since(from, to = null) {

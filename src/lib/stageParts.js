@@ -19,6 +19,27 @@ export function defaultRule(name) {
   return { list: 'all' }
 }
 export const ruleOf = (rule, name) => (rule && rule.list ? rule : defaultRule(name))
+/**
+ * Когда пост пропускается сам: 'edge' — в заказе нет деталей с кромкой, 'drill' — нет присадки, null — не пропускается.
+ * Настройка поста rule.skipIf ('edge' | 'drill' | 'off'); не задана — по списку деталей, а если список «все» / «без списка» —
+ * по названию поста. Как post_skip_kind в базе (migration_stage_skip_v3.sql)
+ */
+export function skipKindOf(rule, name) {
+  if (rule && 'skipIf' in rule) return rule.skipIf === 'edge' || rule.skipIf === 'drill' ? rule.skipIf : null
+  if (rule && (rule.list === 'edge' || rule.list === 'drill')) return rule.list
+  const n = String(name || '').toLowerCase()
+  if (/присад|сверл|drill/.test(n)) return 'drill'
+  if (/кром|edge/.test(n)) return 'edge'
+  return null
+}
+/** Правило, по которому ищутся детали для пропуска: есть ли у заказа хоть одна деталь для этого поста */
+export function skipRuleOf(rule, name) {
+  const k = skipKindOf(rule, name)
+  if (!k) return null
+  const r = ruleOf(rule, name)
+  if (r.list === k) return r
+  return k === 'edge' ? { list: 'edge' } : defaultRule('присадка')
+}
 /** Название похоже на раскрой / кромление / присадку — у таких постов «по умолчанию» включено, пока его не меняли */
 export const isBasePost = name => /(раскр|распил|кром|присад|сверл)/i.test(String(name || ''))
 /** Пост «по умолчанию»: всегда добавляется в маршрут приходящего заказа (галочка в настройке поста). Иначе — по галочке в заказе */

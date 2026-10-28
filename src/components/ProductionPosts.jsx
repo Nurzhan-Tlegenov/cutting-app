@@ -3,7 +3,7 @@ import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
 import StageProgress from './StageProgress'
 import StageReturn from './StageReturn'
-import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, byDefaultOf } from '../lib/stageParts'
+import { RULE_LISTS, DRILL_KEYS, ruleOf, ruleText, savePostRule, byDefaultOf, skipKindOf } from '../lib/stageParts'
 import { POST_PRESETS, STAGE_LABEL, postsList, savePost, deletePost, orderPosts, setPostMembers, orderStages, stageSkip, startOrderStages, stageDone, stageAccept, stageUnaccept, since, clock, postLink, orderOps, setOrderOp, planStages } from '../lib/posts'
 
 // Рабочие посты (техпроцесс): производство само задаёт посты, их порядок и сотрудников на каждом посту.
@@ -235,10 +235,13 @@ function PostLinkBox({ post }) {
   )
 }
 
+const SKIP_OPTS = [['edge', 'если в заказе нет кромки'], ['drill', 'если в заказе нет присадки'], ['off', 'не пропускать']]
+
 /** Какие детали идут через пост: все, с кромкой, с присадкой (что учитывать), без списка */
 function RuleEditor({ post, busy, onSave }) {
   const r = ruleOf(post.rule, post.name)
-  const set = patch => onSave({ ...r, ...patch })
+  const skip = skipKindOf(post.rule, post.name) || 'off'
+  const set = patch => onSave({ ...r, ...(post.rule && 'skipIf' in post.rule ? { skipIf: post.rule.skipIf } : {}), ...patch })
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Детали на посту (сканируют бирки и отмечают, что прошло):</div>
@@ -247,8 +250,12 @@ function RuleEditor({ post, busy, onSave }) {
       </div>
       <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
         <input type="checkbox" checked={byDefaultOf(post.rule, post.name)} disabled={busy} onChange={e => set({ byDefault: e.target.checked, onDemand: !e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />
-        <span><span>Учитывать техпроцесс по умолчанию</span> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>— включено: пост всегда добавляется в приходящие заказы{r.list === 'edge' || r.list === 'drill' ? ' (пропускается, только если таких деталей в заказе нет)' : ''}; выключено: пост выбирается галочкой в «Операциях» заказа.</span></span>
+        <span><span>Учитывать техпроцесс по умолчанию</span> <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>— включено: пост всегда добавляется в приходящие заказы; выключено: пост выбирается галочкой в «Операциях» заказа.</span></span>
       </label>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 4px' }}>Пропускать пост сам (заказ сразу идёт на следующий пост):</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {SKIP_OPTS.map(([k, l]) => <button key={k} type="button" disabled={busy} style={chip(skip === k)} onClick={() => set({ skipIf: k })}>{skip === k ? '✓ ' : ''}{l}</button>)}
+      </div>
       {r.list === 'edge' && (
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, marginTop: 6, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!r.sides} disabled={busy} onChange={e => set({ sides: e.target.checked })} style={{ width: 16, height: 16, flex: '0 0 auto', marginTop: 1 }} />
