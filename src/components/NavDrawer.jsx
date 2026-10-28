@@ -214,6 +214,7 @@ export default function NavDrawer({ notices, unread }) {
   const clientSec = { id: 'client', icon: I.bag, title: 'Клиент', sub: 'Мои заказы на раскрой', badge: n.orders || 0, items: [
     { icon: I.orders, label: 'Мои заказы', badge: n.orders || 0, on: isClient('/orders'), act: () => goClient('/orders') },
     { icon: I.plus, label: 'Новый заказ', on: isClient('/orders/new'), act: () => goClient('/orders/new') },
+    { icon: I.tasks, label: 'Мои задачи', on: isClient('/tasks'), act: () => goClient('/tasks') },
   ] }
   // сотруднику — сначала рабочее место, потом клиент, потом своё производство; остальным — производство, клиент
   if (wps.length) sections.push(clientSec, prodSec); else sections.unshift(prodSec, clientSec)

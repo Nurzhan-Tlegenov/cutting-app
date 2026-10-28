@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { adminActivity, scoreOf, statusOf, lastSeenOf, STATUS } from '../lib/activity'
+import { adminTaskStats } from '../lib/tasks'
 
 const PERIODS = [[1, '1 день'], [7, '7 дней'], [30, '30 дней'], [90, '90 дней'], [0, 'Всё время']]
 const ago = v => {
@@ -97,6 +98,7 @@ export default function ActivityPage() {
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 8, paddingBottom: 2 }}>
         {PERIODS.map(([d, l]) => <button key={d} type="button" style={chip(days === d)} onClick={() => setDays(d)}>{l}</button>)}
       </div>
+      <TaskUsage days={days} />
       {rows && (() => {
         const pr = rows.filter(inPeriod), sum = k => rows.reduce((a, u) => a + n(u[k]), 0)
         const f = v => Math.round(v).toLocaleString('ru-RU')
@@ -182,6 +184,34 @@ export default function ActivityPage() {
         Дни в приложении и прочитанные новости считаются с момента включения этой статистики.
       </p>
       <BottomNav />
+    </div>
+  )
+}
+
+/** «Мои задачи» (канбан клиентов): пользуются ли инструментом — сколько людей, задач, выполнено; нажатие — доска пользователя (только чтение) */
+function TaskUsage({ days }) {
+  const navigate = useNavigate()
+  const [st, setSt] = useState(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => { let alive = true; adminTaskStats(days).then(r => { if (alive) setSt(r) }); return () => { alive = false } }, [days])
+  if (!st) return null
+  if (st.error) return <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 8 }}>Мои задачи: {st.error}</div>
+  const d = st.data || {}, f = v => Math.round(n(v)).toLocaleString('ru-RU')
+  const per = days === 1 ? 'за 24 часа' : days ? `за ${days} дн.` : 'за всё время'
+  return (
+    <div style={{ border: '0.5px solid var(--border)', background: 'var(--bg)', borderRadius: 12, padding: '8px 10px', marginBottom: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+      <button type="button" onClick={() => setOpen(o => !o)} style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', color: 'inherit', fontSize: 'inherit' }}>
+        <div style={{ color: 'var(--text)' }}>✅ Мои задачи (канбан): пользуются <b style={{ fontSize: 15 }}>{f(d.users)}</b> чел. · активны {per}: <b>{f(d.active)}</b> {open ? '▴' : '▾'}</div>
+        <div style={{ marginTop: 2 }}>задач {f(d.cards)} · создано {per} {f(d.created)} · выполнено {per} {f(d.done)} · связаны с заказом {f(d.linked)} · с напоминанием {f(d.reminders)}</div>
+      </button>
+      {open && (d.list || []).map(u => (
+        <button key={u.id} type="button" onClick={() => navigate(`/tasks?u=${u.id}`)}
+          style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'baseline', border: 'none', borderTop: '0.5px solid var(--border)', background: 'transparent', padding: '6px 0', marginTop: 4, cursor: 'pointer', textAlign: 'left', color: 'var(--text)', fontSize: 12.5 }}>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name || 'Без имени'}</span>
+          <span style={{ color: 'var(--text-muted)' }}>задач {f(u.cards)} · ✓ {f(u.done)} · этапов {f(u.columns)}</span>
+          <span style={{ color: 'var(--text-hint)', fontSize: 11 }}>{u.last ? new Date(u.last).toLocaleDateString('ru-RU') : ''}</span>
+        </button>
+      ))}
     </div>
   )
 }

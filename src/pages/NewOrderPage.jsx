@@ -5,7 +5,8 @@ import DeskSplit from '../components/DeskSplit'
 import { useDesktop } from '../hooks/useDesktop'
 import { useState, useRef, useEffect } from 'react'
 import ContourEditor from '../components/ContourEditor'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { linkOrder } from '../lib/tasks'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { reached, limitFromError, resetLimitsCache } from '../lib/limits'
@@ -354,8 +355,10 @@ function PrefixManager({ prefixes, active, onChange, onSetActive }) {
 export default function NewOrderPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const [orderName, setOrderName] = useState('')
-  const [orderNote, setOrderNote] = useState('')   // примечание к заказу — выводится в PDF карт раскроя
+  // заказ из задачи («Мои задачи» → «Создать заказ из задачи»): название и примечание — из задачи, после создания заказ привязывается к ней
+  const fromTask = useLocation().state?.task || null
+  const [orderName, setOrderName] = useState(fromTask?.title || '')
+  const [orderNote, setOrderNote] = useState(fromTask?.note || '')   // примечание к заказу — выводится в PDF карт раскроя
   const [materialName, setMaterialName] = useState('')
   const [materialThickness, setMaterialThickness] = useState(16)
   const [materialKind, setMaterialKind] = useState('')     // '' — плита (ЛДСП, МДФ), 'hdf' — ХДФ / ДВП (только пила)
@@ -531,6 +534,7 @@ export default function NewOrderPage() {
       }
       // примечание пишется отдельно: нет колонки в базе — заказ всё равно создан
       if (orderNote.trim() && !(await saveOrderNote(order.id, orderNote))) window.alert(NOTES_SQL_HINT)
+      if (fromTask?.id) await linkOrder(fromTask.id, order.id)   // ошибка привязки не мешает заказу
 
       const rows = details.map((d, i) => {
         const pfx = d.prefix || null
