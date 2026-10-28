@@ -338,7 +338,7 @@ export function normalizeLabel(raw) {
     o.x = Math.max(0, Math.min(w - bw, Number(i.x) || 0)); o.y = Math.max(0, Math.min(h - bh, Number(i.y) || 0))
     return o
   })
-  return { enabled: !!t.enabled, w, h, edges: false, offcuts: !!t.offcuts,
+  return { enabled: !!t.enabled, w, h, edges: false, offcuts: !!t.offcuts, rem: normRem(t.rem),
     // бирка на обрезок: в каком углу обрезка клеить и на сколько отступить от его сторон, мм
     offcut: { corner: ['bl', 'br', 'tl', 'tr', 'center'].includes(t.offcut?.corner) ? t.offcut.corner : 'bl', dx: Math.max(0, Math.min(1000, Number(t.offcut?.dx ?? 100) || 0)), dy: Math.max(0, Math.min(1000, Number(t.offcut?.dy ?? 100) || 0)) },
     rot: t.rot !== false, edgeDims: t.edgeDims !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
@@ -827,24 +827,94 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
 export const sheetOffcuts = sheet => (sheet?.manualOffcuts || []).map(o => ({ w: Math.round(o.w), h: Math.round(o.h) })).filter(o => o.w > 0 && o.h > 0)
 
 /** Бирка на обрезок — самая простая: заказ, материал и размер обрезка. info: { order, mat, si, o: { w, h } } */
-export function drawOffcutLabel(canvas, tpl, info) {
-  const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
-  ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  const pad = W * 0.05
-  const line = (text, y, size, bold) => {
-    let fs = size
-    ctx.font = `${bold ? 'bold ' : ''}${fs}px sans-serif`
-    const w = ctx.measureText(text).width
-    if (w > W - 2 * pad) { fs = Math.max(6, fs * (W - 2 * pad) / w); ctx.font = `${bold ? 'bold ' : ''}${fs}px sans-serif` }
-    ctx.fillText(text, W / 2, y)
+// ─── Бирка на деловой остаток ───────────────────────────────────────────────
+// Свой шаблон (tpl.rem): какие строки печатать, их порядок, высота шрифта и жирность, заголовок, свой текст, QR-код.
+// Бирка того же размера, что и бирки деталей (тот же рулон в принтере). Строки — сверху вниз, QR — справа.
+export const REM_FIELDS = [
+  ['title', 'Заголовок'],
+  ['size', 'Размер остатка'],
+  ['material', 'Материал и толщина'],
+  ['order', 'Заказ'],
+  ['client', 'Заказчик'],
+  ['date', 'Дата'],
+  ['sheet', 'Номер карты'],
+  ['text', 'Свой текст'],
+]
+export const REM_QR_PARTS = [['size', 'Размер (Д×Ш×толщина)'], ['material', 'Материал'], ['order', 'Заказ'], ['client', 'Заказчик'], ['date', 'Дата'], ['sheet', 'Номер карты']]
+export const DEFAULT_REM = () => ({
+  title: 'ДЕЛОВОЙ ОСТАТОК', text: '', align: 'center',
+  fields: [
+    { k: 'title', on: true, size: 4, bold: true }, { k: 'size', on: true, size: 9, bold: true }, { k: 'material', on: true, size: 3.6, bold: false },
+    { k: 'order', on: true, size: 3.2, bold: false }, { k: 'date', on: true, size: 3, bold: false }, { k: 'sheet', on: true, size: 2.8, bold: false },
+    { k: 'client', on: false, size: 3, bold: false }, { k: 'text', on: false, size: 3, bold: false },
+  ],
+  qr: { on: false, parts: ['size', 'material', 'order', 'date'], sep: ';' },
+})
+export function normRem(raw) {
+  const d = DEFAULT_REM(), t = raw && typeof raw === 'object' ? raw : {}
+  const got = Array.isArray(t.fields) ? t.fields.filter(f => f && REM_FIELDS.some(([k]) => k === f.k)) : []
+  const fields = [...got, ...d.fields.filter(f => !got.some(g => g.k === f.k))].map(f => ({ k: f.k, on: !!f.on, bold: !!f.bold, size: Math.max(1.2, Math.min(30, Number(f.size) || 3)) }))
+  const q = t.qr || {}
+  return {
+    title: typeof t.title === 'string' ? t.title.slice(0, 40) : d.title, text: typeof t.text === 'string' ? t.text.slice(0, 80) : '',
+    align: t.align === 'left' ? 'left' : 'center', fields,
+    qr: { on: !!q.on, parts: Array.isArray(q.parts) ? q.parts.filter(k => REM_QR_PARTS.some(([x]) => x === k)) : d.qr.parts, sep: typeof q.sep === 'string' && q.sep ? q.sep.slice(0, 3) : ';' },
   }
-  const mat = [info.mat?.name || info.mat?.label || info.order?.material_name || '', info.mat?.thickness ? `${info.mat.thickness} мм` : ''].filter(Boolean).join(' · ')
-  line('ОБРЕЗОК', H * 0.13, H * 0.13, true)
-  line(`Заказ ${orderTitle(info.order)}`, H * 0.31, H * 0.11, false)
-  line(mat, H * 0.47, H * 0.11, false)
-  line(`${info.o.h} × ${info.o.w}`, H * 0.72, H * 0.24, true)
-  line(`мм · лист ${info.si + 1}`, H * 0.91, H * 0.08, false)
+}
+const today = () => new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const remMat = info => [info.mat?.name || info.mat?.label || info.order?.material_name || '', info.mat?.thickness ? `${info.mat.thickness} мм` : ''].filter(Boolean).join(' · ')
+function remValue(k, rem, info) {
+  switch (k) {
+    case 'title': return rem.title
+    case 'size': return `${r1(info.o.h)} × ${r1(info.o.w)}`
+    case 'material': return remMat(info)
+    case 'order': return info.order ? `Заказ ${orderTitle(info.order)}` : ''
+    case 'client': return info.client || ''
+    case 'date': return info.date || today()
+    case 'sheet': return info.si != null ? `карта ${info.si + 1}` : ''
+    case 'text': return rem.text
+    default: return ''
+  }
+}
+/** Строка QR-кода остатка — по ней остаток потом можно найти и учесть (склад деловых остатков) */
+export function remQr(rem, info) {
+  const val = {
+    size: `${r1(info.o.h)}x${r1(info.o.w)}x${info.mat?.thickness || ''}`, material: info.mat?.name || info.mat?.label || info.order?.material_name || '',
+    order: info.order ? orderTitle(info.order) : '', client: info.client || '', date: info.date || today(), sheet: info.si != null ? `L${info.si + 1}` : '',
+  }
+  return ['OSTATOK', ...rem.qr.parts.map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(rem.qr.sep)
+}
+export function drawOffcutLabel(canvas, tpl, info) {
+  const rem = normRem(tpl.rem)
+  const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height, mm = W / (tpl.w || 85)
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
+  ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
+  const pad = 1.5 * mm
+  let right = W - pad
+  if (rem.qr.on) {
+    const text = remQr(rem, info)
+    try {
+      const qr = qrcode(0, 'M'); qr.addData(unescape(encodeURIComponent(text))); qr.make()
+      const n = qr.getModuleCount(), side = Math.min(H - 2 * pad, W * 0.42), cell = Math.max(1, Math.floor(side / n)), q = cell * n
+      const x0 = Math.round(W - pad - q), y0 = Math.round((H - q) / 2)
+      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect(x0 + c * cell, y0 + r * cell, cell, cell)
+      right = x0 - pad
+    } catch { /* слишком длинная строка — без QR */ }
+  }
+  const lines = rem.fields.filter(f => f.on).map(f => ({ ...f, text: remValue(f.k, rem, info) })).filter(l => l.text)
+  const need = lines.reduce((a, l) => a + l.size * 1.3, 0) * mm, room = H - 2 * pad, k = need > room ? room / need : 1
+  let y = pad + (room - need * k) / 2
+  const left = pad, width = Math.max(10, right - left)
+  for (const l of lines) {
+    let fs = l.size * mm * k
+    const h = fs * 1.3
+    ctx.font = `${l.bold ? 'bold ' : ''}${fs}px sans-serif`
+    const w = ctx.measureText(l.text).width
+    if (w > width) { fs = Math.max(6, fs * width / w); ctx.font = `${l.bold ? 'bold ' : ''}${fs}px sans-serif` }
+    ctx.textAlign = rem.align === 'left' ? 'left' : 'center'
+    ctx.fillText(l.text, rem.align === 'left' ? left : left + width / 2, y + h / 2)
+    y += h
+  }
   return canvas
 }
 
@@ -880,7 +950,7 @@ const xml = (cycles) => '﻿' + ['<?xml version="1.0" encoding="UTF-8"?>', '<Cyc
  *             и так до конца листа, без холостых переездов.
  */
 /** Где клеить бирку на обрезок: угол и отступ от его сторон; обрезок меньше двух отступов — по середине. -> [x, y] от угла листа */
-export const OFFCUT_CORNERS = [['bl', 'левый нижний угол'], ['br', 'правый нижний угол'], ['tl', 'левый верхний угол'], ['tr', 'правый верхний угол'], ['center', 'середина обрезка']]
+export const OFFCUT_CORNERS = [['bl', 'левый нижний угол'], ['br', 'правый нижний угол'], ['tl', 'левый верхний угол'], ['tr', 'правый верхний угол'], ['center', 'середина остатка']]
 export function offcutPoint(o, geo, tpl) {
   const st = tpl?.offcut || {}, corner = st.corner || 'bl'
   const x0 = Math.max(0, geo.marginL + o.x), y0 = Math.max(0, geo.marginB + o.y)

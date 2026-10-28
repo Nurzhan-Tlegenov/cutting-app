@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
+import { REM_FIELDS, REM_QR_PARTS, normRem, remQr } from '../lib/labelMaker'
 import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, LABEL_ITEMS, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
@@ -63,16 +64,91 @@ function Label({ tpl, order, mat, si, pi, n, onOpen, bp, page, pages }) {
 }
 
 // Бирка на деловой обрезок листа: заказ, материал, размер
-function OffcutLabel({ tpl, order, mat, si, o }) {
+function OffcutLabel({ tpl, order, mat, si, o, client = '' }) {
   const ref = useRef(null)
   useEffect(() => {
     const cv = ref.current
     if (!cv) return
     const { w, h } = labelPx(tpl, true)
     cv.width = w; cv.height = h
-    drawOffcutLabel(cv, tpl, { order, mat, si, o })
-  }, [tpl, order, mat, si, o.w, o.h])
+    drawOffcutLabel(cv, tpl, { order, mat, si, o, client })
+  }, [tpl, order, mat, si, o.w, o.h, client])
   return <canvas ref={ref} />
+}
+
+// Шаблон бирки делового остатка: какие строки, порядок (↑↓), высота шрифта, жирность, заголовок, свой текст, QR-код.
+// Слева (сверху на телефоне) — бирка как напечатается, на первом остатке заказа.
+function RemLabelSetup({ tpl, onChange, sample }) {
+  const rem = normRem(tpl.rem)
+  const set = patch => onChange({ ...tpl, rem: { ...rem, ...patch } })
+  const setField = (i, patch) => set({ fields: rem.fields.map((f, j) => (j === i ? { ...f, ...patch } : f)) })
+  const move = (i, d) => { const f = [...rem.fields], j = i + d; if (j < 0 || j >= f.length) return; [f[i], f[j]] = [f[j], f[i]]; set({ fields: f }) }
+  const ref = useRef(null)
+  useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    const { w, h } = labelPx(tpl, true)
+    cv.width = w; cv.height = h
+    drawOffcutLabel(cv, tpl, sample)
+  })
+  const num = { width: 56, padding: '4px 6px', fontSize: 13, textAlign: 'center' }
+  const name = k => (REM_FIELDS.find(x => x[0] === k) || [])[1] || k
+  return (
+    <div className="card no-print" style={{ marginBottom: 12, padding: '10px 12px' }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>Бирка делового остатка</div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 8 }}>Размер бирки — как у бирок деталей ({tpl.w}×{tpl.h} мм). Строки печатаются сверху вниз в этом порядке; не помещаются — шрифт уменьшается сам.</div>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <canvas ref={ref} style={{ width: 'min(100%, 340px)', height: 'auto', border: '1px solid #2C2C2A', borderRadius: 3, background: '#fff' }} />
+        <div style={{ flex: '1 1 300px', minWidth: 0 }}>
+          {rem.fields.map((f, i) => (
+            <div key={f.k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
+              <input type="checkbox" checked={f.on} onChange={e => setField(i, { on: e.target.checked })} style={{ width: 17, height: 17 }} />
+              <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: f.on ? 'var(--text)' : 'var(--text-hint)' }}>{name(f.k)}</span>
+              <input type="text" inputMode="decimal" key={f.k + f.size} defaultValue={String(f.size).replace('.', ',')} title="Высота шрифта, мм"
+                onBlur={e => { const v = Number(e.target.value.replace(',', '.')); if (v > 0) setField(i, { size: v }) }} style={num} />
+              <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>мм</span>
+              <button type="button" title="Жирный" onClick={() => setField(i, { bold: !f.bold })} style={{ width: 30, height: 28, borderRadius: 8, border: '0.5px solid var(--border-md)', background: f.bold ? 'var(--blue)' : 'transparent', color: f.bold ? '#fff' : 'var(--text-muted)', fontWeight: 700, cursor: 'pointer' }}>Ж</button>
+              <button type="button" title="Выше" disabled={!i} onClick={() => move(i, -1)} style={{ width: 28, height: 28, borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'transparent', cursor: 'pointer' }}>↑</button>
+              <button type="button" title="Ниже" disabled={i === rem.fields.length - 1} onClick={() => move(i, 1)} style={{ width: 28, height: 28, borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'transparent', cursor: 'pointer' }}>↓</button>
+            </div>
+          ))}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+            <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Заголовок
+              <input type="text" key={'t' + rem.title} defaultValue={rem.title} onBlur={e => set({ title: e.target.value })} style={{ marginTop: 3 }} />
+            </label>
+            <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Свой текст
+              <input type="text" key={'x' + rem.text} defaultValue={rem.text} placeholder="например, название цеха" onBlur={e => set({ text: e.target.value })} style={{ marginTop: 3 }} />
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, fontSize: 12.5 }}>
+            <span style={{ color: 'var(--text-muted)' }}>Выравнивание:</span>
+            {[['center', 'по центру'], ['left', 'слева']].map(([k, l]) => (
+              <button key={k} type="button" onClick={() => set({ align: k })} style={{ padding: '4px 10px', borderRadius: 14, border: `0.5px solid ${rem.align === k ? 'var(--blue)' : 'var(--border-md)'}`, background: rem.align === k ? 'var(--blue-light)' : 'transparent', color: rem.align === k ? 'var(--blue-dark)' : 'var(--text-muted)', cursor: 'pointer' }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={rem.qr.on} onChange={e => set({ qr: { ...rem.qr, on: e.target.checked } })} style={{ width: 17, height: 17 }} />
+              QR-код на бирке (справа)
+            </label>
+            {rem.qr.on && (
+              <>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0 0 25px' }}>
+                  {REM_QR_PARTS.map(([k, l]) => {
+                    const on = rem.qr.parts.includes(k)
+                    return <button key={k} type="button" onClick={() => set({ qr: { ...rem.qr, parts: on ? rem.qr.parts.filter(x => x !== k) : REM_QR_PARTS.map(([x]) => x).filter(x => x === k || rem.qr.parts.includes(x)) } })}
+                      style={{ padding: '3px 10px', borderRadius: 14, fontSize: 12, border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? '#fff' : 'var(--text-muted)', cursor: 'pointer' }}>{l}</button>
+                  })}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0 0 25px', wordBreak: 'break-all' }}>В коде: {remQr(rem, sample)}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '2px 0 0 25px' }}>По этому коду остаток потом можно будет найти и учесть на складе деловых остатков.</div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // Просмотр бирки во весь экран — как фотография в галерее: щипок увеличивает, палец двигает, двойное касание —
@@ -682,6 +758,7 @@ export default function LabelsPage() {
   colsRef.current = cols
   const anchor = useRef(null)                        // { n, y, k, step, ox, oy } — что было под пальцами
   const [gridEl, setGridEl] = useState(null)
+  const [remEdit, setRemEdit] = useState(false)      // открыт шаблон бирки делового остатка
   useEffect(() => () => document.getElementById('lbl-print')?.remove(), [])   // ушли со страницы — блок печати убрать
   const setCols = (next, a = null) => {
     const c = Math.max(1, Math.min(MAX_COLS, Math.round(next)))
@@ -867,7 +944,7 @@ export default function LabelsPage() {
         return (
           <label className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer', color: n ? 'var(--text)' : 'var(--text-hint)' }}>
             <input type="checkbox" checked={!!tpl.offcuts} onChange={e => apply({ ...tpl, offcuts: e.target.checked })} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
-            Печатать бирки на обрезки{n ? ` · ${n} шт.` : ' (в раскрое обрезки не отмечены)'}
+            Печатать бирки на деловые остатки{n ? ` · ${n} шт.` : ' (в раскрое деловые остатки не отмечены)'}
           </label>
         )
       })()}
@@ -876,17 +953,22 @@ export default function LabelsPage() {
         const inp = { width: 64, padding: '5px 6px', fontSize: 13, textAlign: 'center', marginLeft: 4 }
         return (
           <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12.5, color: 'var(--text-muted)', margin: '-2px 0 10px 26px' }}>
-            <span>Клеить на обрезок:</span>
+            <span>Клеить на остаток:</span>
             <select value={st.corner} onChange={e => apply({ ...tpl, offcut: { ...st, corner: e.target.value } })} style={{ width: 'auto', padding: '5px 8px', fontSize: 13 }}>
               {OFFCUT_CORNERS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
             </select>
             {st.corner !== 'center' && <>
               <label style={{ margin: 0 }}>отступ по X<input type="text" inputMode="decimal" key={'dx' + st.dx} defaultValue={st.dx} onBlur={e => num('dx', e.target.value)} style={inp} /></label>
               <label style={{ margin: 0 }}>по Y<input type="text" inputMode="decimal" key={'dy' + st.dy} defaultValue={st.dy} onBlur={e => num('dy', e.target.value)} style={inp} /></label>
-              <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>мм от сторон обрезка — для маркировочного стола</span>
+              <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>мм от сторон остатка — для маркировочного стола</span>
             </>}
+            <button type="button" onClick={() => setRemEdit(v => !v)} style={{ padding: '5px 11px', borderRadius: 14, border: '1px solid var(--blue)', background: remEdit ? 'var(--blue)' : 'transparent', color: remEdit ? '#fff' : 'var(--blue)', fontSize: 12.5, cursor: 'pointer' }}>✎ Шаблон бирки остатка</button>
           </div>
         )
+      })()}
+      {mat && tpl.offcuts && remEdit && (() => {
+        const sh = mat.sheets.findIndex(x => sheetOffcuts(x).length), o = sh >= 0 ? sheetOffcuts(mat.sheets[sh])[0] : { w: 600, h: 1200 }
+        return <RemLabelSetup tpl={tpl} onChange={apply} sample={{ order, mat, si: Math.max(0, sh), o, client: clientName }} />
       })()}
       {mat && (
         <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -901,10 +983,10 @@ export default function LabelsPage() {
       <div ref={setGridEl} style={{ '--lbl-cols': cols, touchAction: 'pan-y', willChange: 'transform' }}>
         {mat && mat.sheets.map((sh, si) => (
           <div key={si} style={{ marginBottom: 14 }}>
-            <p className="section-title no-print">{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
+            <p className="section-title no-print">{sh.stock === 'offcut' ? 'Остаток' : 'Лист'} {si + 1} · {sh.placed.length} дет.</p>
             <div className="lbl-grid">
               {allLabels.filter(q => q.si === si).map(q => <Label key={q.pi} tpl={tpl} order={order} mat={mat} si={si} pi={q.pi} n={q.n} page={q.page} pages={q.pages} bp={bp} onOpen={() => setView(q.n)} />)}
-              {tpl.offcuts && sheetOffcuts(sh).map((o, k) => <OffcutLabel key={'o' + k} tpl={tpl} order={order} mat={mat} si={si} o={o} />)}
+              {tpl.offcuts && sheetOffcuts(sh).map((o, k) => <OffcutLabel key={'o' + k} tpl={tpl} order={order} mat={mat} si={si} o={o} client={clientName} />)}
             </div>
           </div>
         ))}
