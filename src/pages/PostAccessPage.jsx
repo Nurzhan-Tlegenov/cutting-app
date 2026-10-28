@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
-import { adminPostAccess, adminFindUsers, grantPost, revokePost, setRequestStatus, deleteRequest, requestProgram } from '../lib/postAccess'
+import { adminPostAccess, grantPost, revokePost, setRequestStatus, deleteRequest, requestProgram } from '../lib/postAccess'
 
 const dt = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—')
 const ago = v => {
@@ -146,11 +146,8 @@ function Request({ r, posts, act }) {
   )
 }
 
-/** Кому выдан постпроцессор: список с программами и последним выпуском, отозвать; выдать — поиск пользователя */
+/** Кому выдан постпроцессор: список с программами и последним выпуском, отозвать (выдают в «Пользователи и регистрация») */
 function Access({ p, act }) {
-  const [q, setQ] = useState('')
-  const [found, setFound] = useState(null)
-  const find = async () => { if (!q.trim()) return; const r = await adminFindUsers(q.trim()); setFound(r.error ? [] : r.data || []) }
   return (
     <div style={{ marginTop: 8 }}>
       {!p.access.length && <div style={{ fontSize: 12.5, color: 'var(--text-hint)', padding: '4px 0' }}>Пока никому не выдан.</div>}
@@ -165,23 +162,7 @@ function Access({ p, act }) {
           <button type="button" style={btn('var(--danger)')} onClick={() => { if (window.confirm(`Отозвать «${p.name}» у ${a.name}?\nУ него и сотрудников его производства этот постпроцессор пропадёт.`)) act(revokePost(p.id, a.user_id)) }}>Отозвать</button>
         </div>
       ))}
-      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-        <input type="text" value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') find() }} placeholder="Выдать: имя, телефон, почта или производство" style={{ flex: 1, minWidth: 0, padding: '7px 10px', fontSize: 13 }} />
-        <button type="button" style={btn('var(--blue)')} onClick={find}>Найти</button>
-      </div>
-      {found && (
-        <div style={{ marginTop: 6 }}>
-          {!found.length && <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Никого не нашли.</div>}
-          {found.map(u => (
-            <div key={u.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', borderTop: '0.5px solid var(--border)' }}>
-              <span style={{ flex: 1, minWidth: 0, fontSize: 13 }}>{u.name}{u.prod ? <span style={{ color: 'var(--text-muted)' }}> · {u.prod}</span> : null}{u.phone ? <span style={{ color: 'var(--text-hint)' }}> · {u.phone}</span> : null}</span>
-              {p.access.some(a => a.user_id === u.id)
-                ? <span style={{ fontSize: 12, color: 'var(--teal)' }}>уже выдан</span>
-                : <button type="button" style={btn('var(--teal)', true)} onClick={() => act(grantPost(p.id, u.id, 'вручную')).then(() => setFound(null))}>🔑 Выдать</button>}
-            </div>
-          ))}
-        </div>
-      )}
+      <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 8 }}>Выдать — в «Пользователи и регистрация»: фильтр «Производства», у пользователя кнопки 🔑 с названиями постпроцессоров.</div>
     </div>
   )
 }

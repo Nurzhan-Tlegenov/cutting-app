@@ -14,6 +14,7 @@ import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { adminBeta, adminSetBeta, BETA_FEATURES } from '../lib/beta'
+import { adminPostAccess, grantPost, revokePost, setRequestStatus } from '../lib/postAccess'
 import { sendReply } from '../lib/messages'
 import { COUNTRY_NAMES } from '../lib/phoneCountries'
 
@@ -75,13 +76,21 @@ export default function UsersPage() {
   const [lim, setLim] = useState(null)         // лимиты: { defaults, users } или { error } — в базе ещё нет лимитов
   const [helps, setHelps] = useState(null)     // «Не получается войти» с экрана входа; null — в базе ещё нет этой части
   const [beta, setBeta] = useState(null)       // бета-тест: Map(user_id -> [функции]) или { error } — в базе ещё нет
+  const [posts, setPosts] = useState(null)     // постпроцессоры по запросу: { list, has: Map(user -> Set(post)), asks: Map(user -> [запросы]) } или null — в базе ещё нет
   const [blocked, setBlocked] = useState(null) // заблокированные номера: [] или { error } — в базе ещё нет этой части
   const [blkPhone, setBlkPhone] = useState('')
   const [blkNote, setBlkNote] = useState('')
 
   const [emailOpen, setEmailOpen] = useState(null)   // регистрация по почте и Google: true / false, null — в базе ещё нет (migration_email_login.sql)
   const load = async () => {
-    const [u, r, o, pr, lm, lh, bt, bl, eo] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones(), adminEmailSignup()])
+    const [u, r, o, pr, lm, lh, bt, bl, eo, pa] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones(), adminEmailSignup(), adminPostAccess()])
+    if (pa.error) setPosts(null)
+    else {
+      const has = new Map(), asks = new Map()
+      for (const p of pa.data?.posts || []) for (const a of p.access || []) { if (!has.has(a.user_id)) has.set(a.user_id, new Set()); has.get(a.user_id).add(p.id) }
+      for (const q of pa.data?.requests || []) if (q.status === 'new') { if (!asks.has(q.user_id)) asks.set(q.user_id, []); asks.get(q.user_id).push(q) }
+      setPosts({ list: pa.data?.posts || [], has, asks })
+    }
     setEmailOpen(eo)
     setBlocked(bl.error ? { error: bl.error } : bl.data || [])
     setBeta(bt.error ? { error: bt.error } : bt.data)
@@ -283,6 +292,33 @@ export default function UsersPage() {
                           </button>
                         )
                       })}
+                    </div>
+                  )}
+                  {posts && posts.list.length > 0 && u.role !== 'admin' && (isProd(u) || posts.has.has(u.id) || posts.asks.has(u.id)) && (
+                    <div style={{ marginTop: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Постпроцессоры:</span>
+                        {posts.list.map(p => {
+                          const on = !!posts.has.get(u.id)?.has(p.id), asked = (posts.asks.get(u.id) || []).some(q => q.post_id === p.id)
+                          return (
+                            <button key={p.id} type="button" disabled={busy} title={on ? 'Выдан — нажмите, чтобы отозвать' : 'Выдать'}
+                              onClick={() => {
+                                if (on && !window.confirm(`Отозвать «${p.name}» у ${u.full_name || 'пользователя'}?`)) return
+                                act(async () => {
+                                  const r = on ? await revokePost(p.id, u.id) : await grantPost(p.id, u.id, 'выдан в «Пользователи»')
+                                  if (!r.error && !on) for (const q of (posts.asks.get(u.id) || []).filter(q => q.post_id === p.id || !q.post_id)) await setRequestStatus(q.id, 'done')
+                                  return r
+                                })
+                              }}
+                              style={{ padding: '3px 10px', borderRadius: 14, fontSize: 11.5, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--teal)' : asked ? 'var(--amber)' : 'var(--border-md)'}`, background: on ? 'var(--teal)' : asked ? 'var(--amber-light)' : 'transparent', color: on ? 'white' : asked ? 'var(--amber)' : 'var(--text-muted)' }}>
+                              🔑 {p.name}{on ? ' ✓' : asked ? ' · просит' : ''}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {(posts.asks.get(u.id) || []).filter(q => !q.post_id).map(q => (
+                        <div key={q.id} style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 3 }}>Запрос под свой станок: {[q.machine, q.controller].filter(Boolean).join(' · ') || 'без описания'} — подробности и пример программы в «Постпроцессоры по запросу»</div>
+                      ))}
                     </div>
                   )}
                   {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.defaults} isProd={isProd(u)} busy={busy}
