@@ -6,7 +6,7 @@ import { purgeArchived } from '../lib/orderArchive'
 import { touchActivity } from '../lib/activity'
 
 let purged = false   // заказы с истёкшим сроком хранения в архиве удаляются раз за запуск приложения
-import { getUserSettings, saveUserSettings, fetchUserSettings } from '../lib/userSettings'
+import { getUserSettings, saveUserSettings, fetchUserSettings, loadUserSettings } from '../lib/userSettings'
 
 const AuthContext = createContext(null)
 
@@ -68,8 +68,9 @@ export function AuthProvider({ children }) {
 
   async function fetchProfile(userId) {
     if (!purged) { purged = true; purgeArchived() }
-    let { data } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
     const { data: { session: ses } } = await supabase.auth.getSession()
+    // настройки аккаунта — до показа приложения (их читают сразу: шаблон бирок, ЧПУ, параметры раскроя)
+    let [{ data }] = await Promise.all([supabase.from('profiles').select('*').eq('id', userId).maybeSingle(), loadUserSettings(ses?.user).catch(() => {})])
     const byPhone = isPhoneAccount(ses?.user)
     // Профиля нет или в нём нет имени / телефона (так бывало после регистрации по заявке) — производство тогда не видит,
     // чей заказ. Дозаполняем: база берёт имя из заявки на регистрацию и номер входа, остальное — из данных регистрации.
@@ -174,7 +175,9 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     await forgetPush()   // этот телефон больше не получает уведомления этого аккаунта
-    await supabase.auth.signOut()
+    // сервер не принял выход (например, «Bad Request») — всё равно выйти на этом устройстве
+    const { error } = await supabase.auth.signOut()
+    if (error) await supabase.auth.signOut({ scope: 'local' })
   }
 
   // аккаунт по почте без имени, страны или города — сначала дозаполнить профиль (у Google их нет до входа)

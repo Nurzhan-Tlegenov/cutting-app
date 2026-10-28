@@ -1,8 +1,9 @@
 // Настройки пользователя, которые идут за аккаунтом (а не за устройством):
 // подпись на карте раскроя и параметры раскроя по умолчанию для новых заказов
 // (формат листа, диаметр фрезы/рез, отступы, мелкие детали, время, способ).
-// Хранятся в профиле входа Supabase (user_metadata.app_settings) — отдельная
-// таблица и миграция не нужны. Копия в localStorage — на случай офлайна.
+// Хранятся в таблице user_settings (migration_user_settings.sql). Раньше лежали в данных входа
+// (user_metadata.app_settings), но те входят в ключ входа, который уходит с каждым запросом: настройки
+// выросли — сервер стал отвечать «Bad Request» на всё. Пока миграции нет — по-старому. Копия в localStorage — на случай офлайна.
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from './supabase'
 
@@ -17,13 +18,34 @@ export const ORDER_DEFAULT_COLS = [
 
 let cache = null, cacheUid = undefined, timer = null, dirty = false
 const lsKey = uid => 'appSettings:' + (uid || 'anon')
+let row = { uid: undefined, data: null }       // настройки из таблицы
+let tableOk = null                               // null — ещё не знаем, false — таблицы нет (миграция не выполнена)
+const missing = e => /user_settings|schema cache|PGRST20|42P01/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
+
+/** Загрузить настройки из таблицы (при входе). Старые настройки из данных входа переносятся в таблицу и оттуда убираются. */
+export async function loadUserSettings(user) {
+  const uid = user?.id
+  if (!uid) return
+  const { data, error } = await supabase.from('user_settings').select('data').eq('user_id', uid).maybeSingle()
+  if (error) { if (missing(error)) tableOk = false; return }
+  tableOk = true
+  const legacy = user?.user_metadata?.app_settings
+  let d = data?.data || null
+  if (!d && legacy && typeof legacy === 'object') {
+    const { error: e2 } = await supabase.from('user_settings').upsert({ user_id: uid, data: legacy, updated_at: new Date().toISOString() })
+    if (!e2) d = legacy
+  }
+  if (d && legacy) supabase.auth.updateUser({ data: { app_settings: null } }).then(() => {}, () => {})   // ключ входа — снова маленький
+  row = { uid, data: d || {} }
+  if (!dirty) cache = null
+}
 
 function read(user) {
   const uid = user?.id || null
   if (cache && cacheUid === uid) return cache
   let local
   try { local = JSON.parse(localStorage.getItem(lsKey(uid)) || '{}') || {} } catch { local = {} }
-  const remote = user?.user_metadata?.app_settings || {}
+  const remote = (row.uid === uid && row.data) || (tableOk ? {} : user?.user_metadata?.app_settings) || {}
   cache = { ...local, ...remote, orderDefaults: { ...(local.orderDefaults || {}), ...(remote.orderDefaults || {}) } }
   cacheUid = uid
   return cache
@@ -40,7 +62,15 @@ export function saveUserSettings(patch, user) {
   clearTimeout(timer)
   const snapshot = cache
   timer = setTimeout(async () => {
-    try { await supabase.auth.updateUser({ data: { app_settings: snapshot } }); if (cache === snapshot) dirty = false } catch { /* повторим при следующем изменении */ }
+    try {
+      if (tableOk !== false) {
+        const { error } = await supabase.from('user_settings').upsert({ user_id: cacheUid, data: snapshot, updated_at: new Date().toISOString() })
+        if (!error) { row = { uid: cacheUid, data: snapshot }; tableOk = true; if (cache === snapshot) dirty = false; return }
+        if (!missing(error)) return                 // сеть и т. п. — повторим при следующем изменении
+        tableOk = false
+      }
+      await supabase.auth.updateUser({ data: { app_settings: snapshot } }); if (cache === snapshot) dirty = false
+    } catch { /* повторим при следующем изменении */ }
   }, 800)
 }
 
@@ -50,7 +80,7 @@ export async function fetchUserSettings(user) {
   try {
     const { data } = await supabase.auth.getUser()
     const u = data?.user
-    if (u) { cache = null; return read(u) }
+    if (u) { await loadUserSettings(u); cache = null; return read(u) }
   } catch { /* офлайн — берём то, что есть */ }
   return read(user)
 }
