@@ -52,7 +52,9 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
   const add = kind => {
     const p = kind === 'drill6' ? { ...DEFAULT_DRILL6(), name: `Шестисторонний ${cnc.posts.filter(isDrill6).length + 1}` }
       : kind === 'beamsaw' ? { ...DEFAULT_BEAMSAW(), id: newId(), name: `Пильный центр ${cnc.posts.filter(isBeamSaw).length + 1}` }
-        : { ...DEFAULT_POST(), name: `Постпроцессор ${cnc.posts.filter(isRouterPost).length + 1}` }
+        // новый станок — с пустыми командами: чужие команды (начало, смена инструмента, конец) не подставляются,
+        // чтобы их случайно не отправили на свой станок. Взять за основу готовый — выбрать существующий постпроцессор
+        : { ...DEFAULT_POST(), name: `Постпроцессор ${cnc.posts.filter(isRouterPost).length + 1}`, cmdStart: '', cmdToolStart: '', cmdToolEnd: '', cmdEnd: '', cmdHeadStart: '', cmdHeadEnd: '' }
     onChange({ ...(kind === 'drill6' ? toggleUse6(cnc, p.id, true) : cnc), posts: [...cnc.posts, p], post: p.id })
     close()
   }

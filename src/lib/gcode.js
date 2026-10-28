@@ -1114,6 +1114,8 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   cutTools.forEach(t => add(jobs.filter(j => j.stage === 2 && j.tool === t)))
   add(jobs.filter(j => j.stage === 2 && !cutTools.includes(j.tool)))
   const out = new Out(zTop ? T : 0)
+  // новый постпроцессор создаётся с пустыми командами — их вписывает сам пользователь под свой станок
+  if (!String(post.cmdToolStart || '').trim() && !String(post.cmdStart || '').trim()) warn.add(`Команды станка «${post.name || 'постпроцессор'}» не заданы (ЧПУ → Команды): в программе нет начала, смены инструмента и конца. Впишите команды своего станка.`)
   out.raw(post.cmdStart)
   let active = null, opId = 0
   const KIND = ['hole', 'hole', 'groove', 'pocket', 'cutout', 'outer', 'outer', 'score']
