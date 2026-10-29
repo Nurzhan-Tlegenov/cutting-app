@@ -46,6 +46,7 @@ import InvitePage from './pages/InvitePage'
 import PostPage from './pages/PostPage'
 import HelpPage from './pages/HelpPage'
 import TasksPage from './pages/TasksPage'
+import StockPage from './pages/StockPage'
 import PostAccessPage from './pages/PostAccessPage'
 import LoadPage from './pages/LoadPage'
 import TourOverlay from './components/TourOverlay'
@@ -146,6 +147,7 @@ function AppRoutes() {
       <Route path="/tasks" element={<ProtectedRoute><TasksPage /></ProtectedRoute>} />
       <Route path="/post-access" element={<ProtectedRoute><PostAccessPage /></ProtectedRoute>} />
       <Route path="/load" element={<ProtectedRoute><LoadPage /></ProtectedRoute>} />
+      <Route path="/stock" element={<ProtectedRoute><StockPage /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
       {/* рабочий пост по ссылке — окно одного поста (настольный компьютер со сканером); видят только свои */}
       <Route path="/post/:id" element={<ProtectedRoute><PostPage /></ProtectedRoute>} />

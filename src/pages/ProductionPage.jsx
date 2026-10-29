@@ -224,6 +224,7 @@ export default function ProductionPage() {
     ...(betaBeam ? [['beamsaw', I.sliders, 'Пильный центр β', 'Уровни резов, повороты, захват, узкие детали, полосы']] : []),
     ['post', I.cnc, 'Постпроцессоры', 'Станки ЧПУ, инструменты, обработка'],
     ['labels', I.tag, 'Бирки', 'Шаблон бирки: размер, параметры, картинки'],
+    ['stock', I.stack, 'Деловые остатки', 'Склад остатков: ячейки, списание, журнал'],
     ['reports', I.file, 'Отчёты (PDF)', 'Карты раскроя: конструктор листа, статистика, смета'],
     ['xml', I.file, 'Просмотр XML присадки', 'Программы присадочного станка'],
     ['gsim', I.cnc, 'Симуляция G-кода', 'Любая УП — в том числе из других программ'],
@@ -280,7 +281,7 @@ export default function ProductionPage() {
             // разделы настроек — кнопками-строками, как в боковом меню: значок, название, пояснение, ›
             <div className="card" data-tour="prod-settings" style={{ marginBottom: 12, padding: 4 }}>
               {settingsMenu.map(([id, icon, title, sub, cnt], i) => (
-                <button key={id} type="button" onClick={() => (id === 'labels' ? navigate('/label-settings') : id === 'prices' ? setPrices(true) : id === 'xml' ? setXmlView(true) : id === 'gsim' ? setGsim(true) : setSetSec(id))}
+                <button key={id} type="button" onClick={() => (id === 'labels' ? navigate('/label-settings') : id === 'stock' ? navigate(`/stock?p=${prod.id}`) : id === 'prices' ? setPrices(true) : id === 'xml' ? setXmlView(true) : id === 'gsim' ? setGsim(true) : setSetSec(id))}
                   style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 10px', border: 'none', borderTop: i ? '0.5px solid var(--border)' : 'none',
                     background: 'transparent', textAlign: 'left', cursor: 'pointer', color: 'var(--text)', borderRadius: 0 }}>
                   <span style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Ico d={icon} size={19} /></span>

@@ -121,6 +121,8 @@ export default function WorkerProduction({ wps }) {
           ) : <div title={`Доступ: ${permsText(perms)}`} style={{ fontWeight: 600, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{wp.production_name}</div>}
         </div>
         <span style={{ flex: '0 1 auto', minWidth: 0, fontSize: 12.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{wp.name || ''}</span>
+        <button type="button" title={can('stock') ? 'Деловые остатки — склад' : 'Деловые остатки — склад (просмотр)'} onClick={() => navigate(`/stock?p=${wp.production_id}`)}
+          style={{ flex: '0 0 auto', height: 34, borderRadius: 17, border: '0.5px solid var(--border-md)', background: 'transparent', fontSize: 12.5, padding: '0 10px', cursor: 'pointer', color: 'var(--text)', whiteSpace: 'nowrap' }}>Остатки</button>
         <button type="button" title="Сканер бирки — деталь в 3D-модели (сборка)" onClick={() => navigate('/scan')}
           style={{ flex: '0 0 auto', width: 36, height: 34, borderRadius: 17, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', fontSize: 16, padding: 0, cursor: 'pointer' }}>📷</button>
       </div>
