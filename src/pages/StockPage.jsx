@@ -14,8 +14,9 @@ import { myWorkplaces, workPid, prodView } from '../lib/workplaces'
 import { supabase } from '../lib/supabase'
 import {
   stockInfo, stockList, stockEvents, stockJournal, stockAdd, stockEdit, stockCell, stockRecut, stockWriteoff, stockRestore, stockDelete,
-  stockSetSettings, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
+  stockSetSettings, stockAllEvents, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
 } from '../lib/stock'
+import { readStockFile, exportStockXlsx } from '../lib/stockExcel'
 
 const pill = on => ({ padding: '6px 11px', borderRadius: 16, border: 'none', fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap', background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
 const btn = kind => ({ padding: '8px 14px', borderRadius: 20, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : kind === 'danger' ? '0.5px solid var(--danger)' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : kind === 'danger' ? 'var(--danger)' : 'var(--text)' })
@@ -42,6 +43,8 @@ export default function StockPage() {
   const [adding, setAdding] = useState(false)
   const [openId, setOpenId] = useState(() => Number(params.get('id')) || null)
   const [showSet, setShowSet] = useState(false)
+  const [imp, setImp] = useState(null)            // прочитанный файл Excel — ждёт подтверждения
+  const [exporting, setExporting] = useState(false)
   const edit = info?.access === 'edit'
 
   // какое производство: из ссылки, своё или рабочее место сотрудника
@@ -110,7 +113,22 @@ export default function StockPage() {
         {info.access === 'view' && <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 10, padding: '6px 10px', marginBottom: 10 }}>Только просмотр. Вносить, перерезать и списывать остатки могут ответственные за склад.</p>}
         {showSet && info.owner && <StockSettings pid={pid} settings={info.settings || {}} onSaved={s => setInfo(i => ({ ...i, settings: s }))} />}
 
-        {edit && !adding && <button type="button" style={{ ...btn('main'), width: '100%', marginBottom: 10, padding: '10px 14px' }} onClick={() => setAdding(true)}>+ Внести остатки</button>}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {edit && !adding && <button type="button" style={{ ...btn('main'), flex: 1, padding: '10px 14px' }} onClick={() => setAdding(true)}>+ Внести остатки</button>}
+          {edit && <label style={{ ...btn(), padding: '10px 12px', display: 'inline-flex', alignItems: 'center' }} title="Загрузить готовую таблицу остатков (.xlsx, .xls, .csv)">
+            Из Excel<input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={async e => {
+              const f = e.target.files?.[0]; e.target.value = ''
+              if (!f) return
+              try { setImp({ ...(await readStockFile(f)), file: f.name }) } catch (x) { setError('Не удалось прочитать файл: ' + String(x?.message || x)) }
+            }} /></label>}
+          <button type="button" disabled={exporting} style={{ ...btn(), padding: '10px 12px', flex: edit ? '0 0 auto' : 1 }} title="Скачать весь склад и журнал в Excel — резервная копия" onClick={async () => {
+            setExporting(true)
+            const ev = await stockAllEvents(pid)
+            try { await exportStockXlsx(rows || [], ev.data || [], info.name) } catch (x) { setError('Не удалось выгрузить: ' + String(x?.message || x)) }
+            setExporting(false)
+          }}>{exporting ? '…' : '⬇ В Excel'}</button>
+        </div>
+        {imp && <ImportPreview imp={imp} pid={pid} materials={materials} onClose={() => setImp(null)} onSaved={load} />}
         {adding && <AddRows pid={pid} materials={materials} cells={cells} onClose={() => setAdding(false)} onSaved={load} />}
 
         <div style={{ display: 'flex', gap: 5, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -221,6 +239,54 @@ function AddRows({ pid, materials, cells, onClose, onSaved }) {
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <button type="button" disabled={busy} style={{ ...btn('main'), flex: 1 }} onClick={save}>{busy ? 'Сохраняю…' : `Сохранить${ready.length ? ` · ${ready.length} стр., ${ready.reduce((s, r) => s + Math.max(1, Math.round(num(r.qty) || 1)), 0)} шт` : ''}`}</button>
         <button type="button" style={btn()} onClick={onClose}>Закрыть</button>
+      </div>
+    </div>
+  )
+}
+
+/** Импорт из Excel: что нашлось в файле, общий материал / ячейка, если в таблице их нет, — и «Добавить на склад» */
+function ImportPreview({ imp, pid, materials, onClose, onSaved }) {
+  const [mat, setMat] = useState('')
+  const [cell, setCell] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const pcs = imp.items.reduce((a, x) => a + x.qty, 0)
+  const save = async () => {
+    setBusy(true); setErr('')
+    const rows = imp.items.map(x => ({ ...x, material: x.material || mat, cell: x.cell || cell }))
+    for (let i = 0; i < rows.length; i += 500) {          // большие таблицы — частями
+      const r = await stockAdd(pid, rows.slice(i, i + 500))
+      if (r.error) { setBusy(false); setErr(r.error + (i ? ` Добавлено до строки ${i}.` : '')); return }
+    }
+    setBusy(false)
+    await onSaved()
+    onClose()
+  }
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 14, fontWeight: 600 }}>Импорт из Excel</div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 8px' }}>{imp.file}{imp.sheet && imp.sheet !== imp.file ? ` · лист «${imp.sheet}»` : ''}</div>
+      {!imp.items.length ? <p style={{ fontSize: 13 }}>Не нашлось ни одного остатка. Нужны колонки «Длина» и «Ширина» (можно «Кол-во», «Материал», «Толщина», «Ячейка», «Примечание») — или два числа в строке.</p> : <>
+        <p style={{ fontSize: 13, margin: '0 0 6px' }}>Найдено <b>{imp.items.length}</b> строк, <b>{pcs}</b> шт.{imp.skipped ? ` Пропущено строк без размера: ${imp.skipped}.` : ''}</p>
+        {!imp.hasMaterial && <label style={lbl}>В таблице нет материала — для всех строк<input list="stock-mats-imp" value={mat} onChange={e => setMat(e.target.value)} placeholder="ЛДСП Белый 16 мм" style={inp} /></label>}
+        <datalist id="stock-mats-imp">{materials.map(m => <option key={m} value={m} />)}</datalist>
+        {!imp.hasCell && <label style={{ ...lbl, marginTop: 6 }}>Ячейка для всех (необязательно)<input value={cell} onChange={e => setCell(e.target.value)} placeholder="пусто — вписать потом" style={inp} /></label>}
+        <div style={{ maxHeight: 220, overflowY: 'auto', marginTop: 8, border: '0.5px solid var(--border)', borderRadius: 8 }}>
+          {imp.items.slice(0, 200).map((x, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12.5, padding: '4px 8px', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
+              <span style={{ fontWeight: 600, minWidth: 92 }}>{sizeText(x)}{x.qty > 1 ? ` ×${x.qty}` : ''}</span>
+              <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.material || mat || '—'}{x.thickness ? ` · ${x.thickness} мм` : ''}{x.note ? ` · ${x.note}` : ''}</span>
+              <span style={{ color: 'var(--teal)' }}>{x.cell || cell}</span>
+            </div>
+          ))}
+          {imp.items.length > 200 && <div style={{ fontSize: 12, padding: '4px 8px', color: 'var(--text-hint)' }}>…и ещё {imp.items.length - 200}</div>}
+        </div>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Строки добавятся к складу как новые остатки (не заменят имеющиеся). В журнале будет записано, кто их внёс.</p>
+      </>}
+      {err && <p className="error-text" style={{ marginTop: 8 }}>{err}</p>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        {!!imp.items.length && <button type="button" disabled={busy} style={{ ...btn('main'), flex: 1 }} onClick={save}>{busy ? 'Добавляю…' : `Добавить на склад · ${pcs} шт`}</button>}
+        <button type="button" style={btn()} onClick={onClose}>Отмена</button>
       </div>
     </div>
   )

@@ -39,6 +39,11 @@ export async function stockJournal(prodId, fromIso) {
   const { data, error } = await q
   return error ? errText(error) : { data: data || [] }
 }
+// весь журнал склада (для выгрузки в Excel)
+export async function stockAllEvents(prodId) {
+  const { data, error } = await supabase.from('remnant_events').select('*').eq('production_id', prodId).order('at', { ascending: false }).limit(10000)
+  return error ? errText(error) : { data: data || [] }
+}
 export const stockAdd = (prodId, rows) => call('stock_add', { p_prod: prodId, p_rows: rows })
 export const stockEdit = (id, patch, reason = null) => call('stock_edit', { p_id: id, p_patch: patch, p_reason: reason })
 export const stockCell = (id, cell) => call('stock_cell', { p_id: id, p_cell: cell || '' })
