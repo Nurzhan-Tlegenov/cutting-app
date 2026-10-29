@@ -358,7 +358,7 @@ export function normalizeLabel(raw) {
       if (i.type === 'rect' || i.type === 'table') { o.w = Math.max(1, Math.min(w, Number(i.w) || 10)); o.h = Math.max(1, Math.min(h, Number(i.h) || 10)) }
     } else {
       if (i.box) { o.box = true; o.lw = lw }
-      if (i.inv && !pic) o.inv = true
+      if (i.inv) o.inv = true
     }
     if (!pic) {
       if ([0, 90, 180, 270].includes(Number(i.trot))) o.trot = Number(i.trot)
@@ -794,7 +794,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   // фон: залитые рамки и поля «белым по чёрному» — под всем остальным
   for (const it0 of tpl.items || []) {
     const it = place(it0)
-    if (!it.inv) continue
+    if (!it.inv || (isBox(it) && !isShape(it))) continue      // картинки, QR, карта, чертёж — переворачиваются после отрисовки
     if (!isShape(it) && !opts.preview && !it.img && !labelText(it.type, info, tpl, it.cap)) continue   // пустой параметр — без чёрной плашки
     const [bw, bh] = itemBox(it)
     ctx.beginPath(); roundRect(ctx, it.x * mm, it.y * mm, bw * mm, bh * mm, (it.rad || 0) * mm); ctx.fill()
@@ -894,6 +894,18 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
       ctx.restore()
       ctx.fillStyle = '#000'
     }
+  }
+  // «белым по чёрному» у картинок, QR, карты и чертежа детали: их поле переворачивается целиком (чёрное ↔ белое)
+  for (const it0 of tpl.items || []) {
+    const it = place(it0)
+    if (!it.inv || !isBox(it) || isShape(it)) continue
+    const [bw, bh] = itemBox(it)
+    const x0 = Math.max(0, Math.round(it.x * mm)), y0 = Math.max(0, Math.round(it.y * mm))
+    const w0 = Math.min(canvas.width - x0, Math.round(bw * mm)), h0 = Math.min(canvas.height - y0, Math.round(bh * mm))
+    if (w0 < 1 || h0 < 1) continue
+    const im = ctx.getImageData(x0, y0, w0, h0), px = im.data
+    for (let i = 0; i < px.length; i += 4) { px[i] = 255 - px[i]; px[i + 1] = 255 - px[i + 1]; px[i + 2] = 255 - px[i + 2] }
+    ctx.putImageData(im, x0, y0)
   }
   // рамка вокруг элемента (текст, QR, карта, чертёж, картинка) — поверх, по краю его поля
   for (const it0 of tpl.items || []) {

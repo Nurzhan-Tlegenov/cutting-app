@@ -286,7 +286,8 @@ function ItemStyle({ it, tpl, edit, chip }) {
     <div style={row}>
       <span style={lab}>Оформление:</span>
       <button type="button" style={chip(!!it.box)} onClick={() => edit({ box: !it.box || undefined })}>▭ В рамке</button>
-      {!isBox(it) && <button type="button" style={chip(!!it.inv)} onClick={() => edit({ inv: !it.inv || undefined })}>◼ Белым по чёрному</button>}
+      <button type="button" style={chip(!!it.inv)} onClick={() => edit({ inv: !it.inv || undefined })}>◼ Белым по чёрному</button>
+      {it.inv && it.type === 'qr' && <span style={{ flex: '1 1 100%', fontSize: 11, color: 'var(--text-hint)' }}>Перевёрнутый QR-код читают не все сканеры — проверьте своим.</span>}
       {it.box && thick}
     </div>
   )
