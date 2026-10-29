@@ -18,6 +18,8 @@ const strip = s => s
 const word = (s, ch) => { const m = new RegExp(`${ch}\\s*(-?\\d*\\.?\\d+)`, 'i').exec(s); return m ? Number(m[1]) : null }
 const gcodes = s => [...s.matchAll(/G\s*(\d+(?:\.\d+)?)/gi)].map(m => Number(m[1]))
 const isToolChange = s => /(?:^|\s)M0?6(?=\D|$)/i.test(s)
+// у части станков смена — сама команда T (без M6): «T8», «T1», дальше включение шпинделя и корректор
+const isTWord = s => /^T\s*\d+(?=\D|$)/i.test(s) && !/[XYZ]\s*-?[\d.]/i.test(s)
 const toolNo = s => { const m = /T\s*0*(\d+)/i.exec(s); return m ? Number(m[1]) : null }
 const rpmOf = s => { const m = /(?:^|\s)S\s*(\d+(?:\.\d+)?)/i.exec(s); return m ? Math.round(Number(m[1])) : null }
 const norm = s => s.toUpperCase().replace(/\s+/g, '')
@@ -31,8 +33,9 @@ const isPrep = s => /^(?:M0?5|M0?9|G53|G28|G30|G91\s*G28|G49|G40|T\s*\d+)(?=\D|$
  */
 function classify(lines) {
   let x = null, y = null, mode = 0
+  const tOnly = !lines.some(isToolChange)            // M6 в программе нет — сменой считается строка с командой T
   return lines.map(s => {
-    if (isToolChange(s)) return 'm6'
+    if (isToolChange(s) || (tOnly && isTWord(s))) return 'm6'
     const gs = gcodes(s)
     if (gs.some(g => g === 53 || g === 28 || g === 30 || g === 43 || g === 44 || g === 49)) return 'cmd'   // машинные координаты, корректор длины
     for (const g of gs) if (g >= 0 && g <= 3) mode = g
@@ -66,7 +69,7 @@ export function learnFromProgram(text) {
   if (!lines.length) return { ok: false, warnings: ['В файле нет команд G-кода.'], report }
   const kind = classify(lines)
   const changes = kind.map((k, i) => (k === 'm6' ? i : -1)).filter(i => i >= 0)
-  if (!changes.length) return { ok: false, warnings: ['В программе не найдена смена инструмента (M6). Начало и конец можно ввести вручную.'], report }
+  if (!changes.length) return { ok: false, warnings: ['В программе не найдена смена инструмента (ни M6, ни строки с командой T). Начало и конец можно ввести вручную.'], report }
   const work = kind.map((k, i) => (k === 'cut' || k === 'plunge' ? i : -1)).filter(i => i >= 0)
   if (!work.length) return { ok: false, warnings: ['В программе нет рабочих ходов — это не похоже на управляющую программу раскроя.'], report }
   const keep = i => kind[i] === 'cmd'
