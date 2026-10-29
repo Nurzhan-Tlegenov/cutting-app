@@ -252,6 +252,12 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
       ...edges, '', '', '', '', sawL, sawW, L, W, fileTitle, c, si + 1, si + 1, p.rotated ? 'true' : 'false', 1]
     out.push(`    <row code="${c}" ${v.map((x, i) => `columns${i + 1}="${esc(x)}"`).join(' ')} />`)
   }
+  // деловые остатки — тоже строками таблицы: без строки у станка нет команды печатать бирку (файл OC*.emf лежит, но не печатается)
+  for (const { code: c, si, w, h } of offRows) {
+    const v = ['True', material, r1(thick), 'Деловой остаток', r1(h), r1(w), 1, 'Без текстуры(T_N)', '|||', '', '0|0|0|0', title, 'Деловой остаток', '',
+      '', '', '', '', '', '', '', '', r1(h), r1(w), r1(h), r1(w), fileTitle, c, si + 1, si + 1, 'false', 1]
+    out.push(`    <row code="${c}" ${v.map((x, i) => `columns${i + 1}="${esc(x)}"`).join(' ')} />`)
+  }
   out.push('  </table>', '</project>', '')
   const base = toLatin(`${title}_${material}_${thick}`).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '') || 'beamsaw'
   return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length, rows, offRows, droppedOffcuts: dropped, wideStrips: wide, maxStrip }
