@@ -16,7 +16,7 @@ import { myWorkplaces, workPid, prodView } from '../lib/workplaces'
 import { supabase } from '../lib/supabase'
 import {
   stockInfo, stockList, stockEvents, stockJournal, stockAdd, stockEdit, stockCell, stockRecut, stockWriteoff, stockRestore, stockDelete,
-  stockSetSettings, stockAllEvents, stockLabeled, remnantIdFromQr, parseRemnantQr, stockByKey, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
+  stockSetSettings, stockAllEvents, stockLabeled, remnantIdFromQr, parseRemnantQr, stockByKey, stockAutoMatch, stockLinkLabel, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
 } from '../lib/stock'
 import { readStockFile, exportStockXlsx, stockFileName } from '../lib/stockExcel'
 import { backupSupported, backupConf, chooseBackupFile, setBackupHours, stopBackup, backupPermission, runBackup, BACKUP_HOURS } from '../lib/stockBackup'
@@ -79,7 +79,9 @@ export default function StockPage() {
     const p = parseRemnantQr(text)
     if (!p) { setScanMsg('Это не бирка делового остатка (код начинается не с OSTATOK).'); return }
     const ex = await stockByKey(pid, p.key)          // с такой бирки уже вносили — предложим открыть его
-    setScan(false); setScanMsg(''); setFromLabel({ ...p, existing: ex.data || null })
+    // остаток мог уже прийти на склад из раскроя сам («Мои остатки») — без ячейки: предложим его
+    const auto = ex.data ? null : await stockAutoMatch(pid, p)
+    setScan(false); setScanMsg(''); setFromLabel({ ...p, existing: ex.data || null, auto })
   }
   // пришли со сканера бирок (/scan): код в ссылке
   const codeDone = useRef(false)
@@ -350,6 +352,14 @@ function FromLabel({ p, pid, edit, cells, materials, onClose, onSaved, onOpen })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [asNew, setAsNew] = useState(false)          // такая бирка уже вносилась, но это другой остаток
+  const auto = !asNew && !p.existing ? p.auto : null   // этот остаток уже пришёл из раскроя — осталось вписать ячейку
+  const link = async c => {
+    setBusy(true); setErr('')
+    const r = await stockLinkLabel(auto.id, p.key, c ?? cell)
+    setBusy(false)
+    if (r.error) { setErr(r.error); return }
+    onSaved(auto.id)
+  }
   const from = [p.texts.slice(1).join(', '), p.sheet ? `карта ${p.sheet}` : '', p.date].filter(Boolean).join(' · ')
   const okSize = num(len) > 0 && num(wid) > 0
   const save = async c => {
@@ -367,7 +377,7 @@ function FromLabel({ p, pid, edit, cells, materials, onClose, onSaved, onOpen })
       <div style={sheet} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'flex-start' }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{ex && !asNew ? 'С этой бирки остаток уже вносили' : 'Бирка остатка — внести на склад'}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{ex && !asNew ? 'С этой бирки остаток уже вносили' : auto ? 'Бирка остатка из раскроя' : 'Бирка остатка — внести на склад'}</div>
             <div style={{ fontSize: okSize ? 24 : 16, fontWeight: okSize ? 700 : 600 }}>{okSize ? `${len} × ${wid}` : 'Размера в коде нет — впишите его'}</div>
             {from && <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{from}</div>}
           </div>
@@ -381,7 +391,16 @@ function FromLabel({ p, pid, edit, cells, materials, onClose, onSaved, onOpen })
               {edit && <button type="button" style={btn()} onClick={() => setAsNew(true)}>Это другой — внести новый</button>}
             </div>
           </div>
-        ) : !edit ? <p style={{ fontSize: 13, marginTop: 10 }}>Внести остаток на склад может ответственный за склад.</p> : <>
+        ) : !edit ? <p style={{ fontSize: 13, marginTop: 10 }}>Внести остаток на склад может ответственный за склад.</p> : auto ? (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ fontSize: 13, margin: '0 0 8px' }}>Это остаток №{auto.id} — пришёл на склад из раскроя{auto.note ? ` (${auto.note})` : ''}: {sizeText(auto)}, {auto.material || 'материал не указан'}. Укажите, куда положили.</p>
+            <label style={lbl}>Ячейка<input autoFocus value={cell} onChange={e => setCell(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && cell.trim()) link() }} placeholder="А-3" style={{ ...inp, fontSize: 18 }} /></label>
+            {!!cells.length && <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>{cells.slice(0, 24).map(c => <button key={c} type="button" disabled={busy} style={{ ...pill(false), padding: '6px 11px' }} onClick={() => link(c)}>{c}</button>)}</div>}
+            {err && <p className="error-text" style={{ marginTop: 8 }}>{err}</p>}
+            <Actions busy={busy} ok="Сохранить ячейку" disabled={!cell.trim()} onOk={() => link()} onCancel={onClose} />
+            <button type="button" style={{ ...btn(), marginTop: 8, fontSize: 12 }} onClick={() => setAsNew(true)}>Это другой остаток — внести новый</button>
+          </div>
+        ) : <>
           <datalist id="stock-mats-lbl">{materials.map(m => <option key={m} value={m} />)}</datalist>
           <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
             <label style={{ ...lbl, flex: 1 }}>Длина<input inputMode="decimal" value={len} onChange={e => setLen(cleanNum(e.target.value))} style={inp} /></label>

@@ -24,6 +24,8 @@ import { orderTitle, orderFileName, toLatin, programName, folderName, fileNameOf
 import { fileNamesOf } from '../lib/fileNames'
 import { orderClient } from '../lib/productionApi'
 import SaveFilesDialog from '../components/SaveFilesDialog'
+import OffcutOwner from '../components/OffcutOwner'
+import { syncOrderRemnants } from '../lib/stock'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 
 // Бирки деталей по принятому раскрою. Бирку собирает пользователь: размер и какие параметры детали на ней есть.
@@ -920,6 +922,7 @@ export default function LabelsPage() {
     setPdf('Готовим PDF…')
     try {
       const data = await buildLabelsPdf({ order, mat, tpl, onProgress: (a, b) => setPdf(`PDF: ${a} из ${b}`), ...beamOpts(mat, bp) })
+      syncOrderRemnants(order, mats)          // «Мои остатки» — на склад (без дублей)
       const url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
       const a = document.createElement('a'); a.href = url; a.download = `Birki_${orderFileName(order)}${mats.length > 1 ? '_' + safeName(mat.name).slice(0, 24) : ''}.pdf`
       document.body.appendChild(a); a.click(); a.remove()
@@ -1013,6 +1016,7 @@ export default function LabelsPage() {
           {mats.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
         </select>
       )}
+      {mat && <OffcutOwner order={order} mats={mats} onChange={v => setOrder(o => ({ ...o, offcuts_owner: v }))} />}
       {mat && (() => {
         const n = mat.sheets.reduce((x, sh) => x + sheetOffcuts(sh).length, 0)
         return (

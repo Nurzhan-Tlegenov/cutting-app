@@ -11,6 +11,8 @@ import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettin
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
+import OffcutOwner from '../components/OffcutOwner'
+import { syncOrderRemnants } from '../lib/stock'
 import { logPostUse } from '../lib/postAccess'
 import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -153,6 +155,7 @@ export default function CncPage() {
   const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: post.progLatin !== false })}.${post.ext || 'nc'}`
   const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: saw?.progLatin !== false })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
   const build = () => {
+    syncOrderRemnants(order, mats)          // «Мои остатки» — на склад остатков (без дублей при повторном выпуске)
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     if (beamMat && saw) return buildBeam()
     const files = sel.map(si => {
@@ -193,6 +196,7 @@ export default function CncPage() {
   }
   // Пильный центр: одна программа XML на материал по выбранным листам (дерево резов), бирки — по галочке
   const buildBeam = () => {
+    syncOrderRemnants(order, mats)
     logPostUse(user, [saw], { orderId: order?.id || null, sheets: sel.length })
     const sub = { ...mat, sheets: sel.map(si => mat.sheets[si]) }
     let text = '', error = '', xml = null
@@ -524,6 +528,7 @@ export default function CncPage() {
               <button type="button" className="btn-secondary" style={{ marginTop: 6 }} onClick={() => navigate(`/orders/${id}/nesting`)}>Открыть раскрой</button>
             </div>
           )}
+          <OffcutOwner order={order} mats={mats} onChange={v => setOrder(o => ({ ...o, offcuts_owner: v }))} />
           {/* у станка без маркировочного стола — бирки вместе с программами, отдельной папкой */}
           {!machine?.labelTable && (
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>

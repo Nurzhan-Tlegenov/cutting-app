@@ -39,6 +39,8 @@ import { parsePolygonFromDetail, needsTrueShape } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY, edgeKey, blankType } from '../lib/edgeCut'
 import { saveNestingPdf } from '../lib/nestingPdf'
+import StockPicker from '../components/StockPicker'
+import { stockReserve } from '../lib/stock'
 import { computeCutLines } from '../lib/cutLines'
 import { insetEdgeLines } from '../lib/edgeLines'
 import NestingCost from '../components/NestingCost'
@@ -1508,14 +1510,14 @@ function parseOffcuts(raw, defMargin = '10') {
   let o = raw
   if (typeof raw === 'string') { try { o = JSON.parse(raw) } catch { o = null } }
   const items = Array.isArray(o?.items)
-    ? o.items.map(it => ({ length: String(it.length ?? ''), width: String(it.width ?? ''), qty: String(it.qty ?? '1') }))
+    ? o.items.map(it => ({ length: String(it.length ?? ''), width: String(it.width ?? ''), qty: String(it.qty ?? '1'), ...(it.stock ? { stock: it.stock } : {}) }))
     : []
   // у заказа отступ ещё не задан — последний, который пользователь ставил сам (идёт за аккаунтом)
   return { margin: o?.margin != null && (items.length || Number(o.margin) !== 10) ? String(o.margin) : defMargin, items }
 }
 function offcutsValue(form) {
   const items = form.items
-    .map(it => ({ length: Number(it.length) || 0, width: Number(it.width) || 0, qty: Math.max(0, Math.floor(Number(it.qty) || 0)) }))
+    .map(it => ({ length: Number(it.length) || 0, width: Number(it.width) || 0, qty: Math.max(0, Math.floor(Number(it.qty) || 0)), ...(it.stock ? { stock: it.stock } : {}) }))
     .filter(it => it.length > 0 && it.width > 0 && it.qty > 0)
   return { margin: Math.max(0, Number(String(form.margin).replace(',', '.')) || 0), items }
 }
@@ -1911,6 +1913,8 @@ export default function NestingPage() {
   const [offForm, setOffForm] = useState(() => parseOffcuts(null, offMarginDef()))
   const [offImport, setOffImport] = useState('')        // итог импорта обрезков из Excel (или ошибка)
   const offFileRef = useRef(null)
+  const [stockPick, setStockPick] = useState(false)    // «Взять со склада» — выбор остатков склада производства
+  const hadStockRef = useRef(false)                     // у заказа были остатки со склада — при сохранении снять/обновить резерв
   const [sheetOpen, setSheetOpen] = useKeptState('sheetOpen', false)   // «Лист и обрезки» по умолчанию свёрнут
   const [paramsWarn, setParamsWarn] = useState(() => {
     // страница только что перезагрузилась из-за не поднявшихся потоков (см. reloadOnce) — скажем, что делать
@@ -2016,6 +2020,7 @@ export default function NestingPage() {
       if (!initial) dropWork(id)   // заказ перечитан после отправки / изменения — прежний запас уже не про него
       setSheetForm(sheetFormOf(o))
       setOffForm(parseOffcuts(o.offcuts, offMarginDef()))
+      hadStockRef.current = /"stock"/.test(typeof o.offcuts === 'string' ? o.offcuts : JSON.stringify(o.offcuts || ''))
       fetchProductions(o).then(() => setProdsReady(true))   // после этого — «Где будете резать?», если производство не выбрано
       setCuttingMethod(o.material_kind === 'hdf' ? 'guillotine' : (o.cutting_method || 'nesting'))   // ХДФ / ДВП режется только на пиле
       setBeamSaw(!!o.beam_saw && (o.material_kind === 'hdf' || (o.cutting_method || 'nesting') === 'guillotine'))
@@ -2587,7 +2592,23 @@ export default function NestingPage() {
     const next = multiMat ? { ...savedByMat, [matKey]: toSave } : {}
     if (multiMat) setSavedByMat(next)
     await writeSaved(next, toSave)
+    await reserveStock(sheets)
     return next
+  }
+  // Остатки со склада, на которые лёг раскрой, резервируются за заказом (прежний резерв снимается). Лист-обрезок
+  // знает свой обрезок (offcutItem — номер в списке «Обрезков со склада»)
+  async function reserveStock(sheets) {
+    const ov = offcutsValue(offForm)
+    const used = new Map()
+    for (const sh of sheets) {
+      if (sh.stock !== 'offcut') continue
+      const it = ov.items[sh.offcutItem]
+      if (it?.stock) used.set(it.stock, (used.get(it.stock) || 0) + 1)
+    }
+    if (!used.size && !hadStockRef.current) return
+    hadStockRef.current = used.size > 0
+    const r = await stockReserve(id, [...used].map(([sid, qty]) => ({ id: sid, qty })))
+    if (r.error && !r.missing) window.alert(r.error)
   }
 
   // ─── Проверка раскроя перед сохранением / оформлением ──────────────────────
@@ -3916,6 +3937,9 @@ export default function NestingPage() {
         const prod = order.production_id ? productions.find(x => x.id === order.production_id) : null
         const isLocked = key => anyRunning || (!!prod && PROD_LOCKED.includes(key)) // производство задаёт рез и отступы
         const offLocked = anyRunning
+        // склад остатков: своё производство видит его всегда, чужое — если оно разрешило показывать остатки клиентам
+        const stockProd0 = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id) || null
+        const stockProd = stockProd0 && (stockProd0.owner_id === user?.id || stockProd0.stock_settings?.clients) ? stockProd0 : null
         const inp = { width: '100%', fontSize: 14, padding: '4px 6px', boxSizing: 'border-box', display: 'block' }
         const lbl = { flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-muted)' }
         const field = (key, label, title) => (
@@ -4034,12 +4058,14 @@ export default function NestingPage() {
                       {[['length', 'Длина, мм'], ['width', 'Ширина, мм'], ['qty', 'Шт.']].map(([k, t]) => (
                         <label key={k} style={{ ...lbl, flex: k === 'qty' ? '0 0 52px' : 1 }}>
                           {i === 0 ? t : ''}
-                          <input type="text" inputMode="numeric" value={it[k]} disabled={offLocked}
+                          <input type="text" inputMode="numeric" value={it[k]} disabled={offLocked || (it.stock && k !== 'qty')}
+                            title={it.stock ? `Остаток №${it.stock} со склада` : undefined}
                             onChange={e => setItem(i, k, e.target.value.replace(/[^0-9]/g, ''))}
                             onBlur={() => commitOffcuts()}
                             style={inp} />
                         </label>
                       ))}
+                      {it.stock && <span title="Остаток со склада: при выборе раскроя резервируется за заказом" style={{ flexShrink: 0, fontSize: 10.5, color: 'var(--teal)', paddingBottom: 8, whiteSpace: 'nowrap' }}>📦 №{it.stock}</span>}
                       <button disabled={offLocked}
                         onClick={() => { const f = { ...offForm, items: offForm.items.filter((_, j) => j !== i) }; setOffForm(f); commitOffcuts(f) }}
                         style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 'var(--radius)', border: '0.5px solid var(--border-md)',
@@ -4053,6 +4079,12 @@ export default function NestingPage() {
                         background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                       + Добавить обрезок
                     </button>
+                    {stockProd && <button disabled={offLocked} onClick={() => setStockPick(true)}
+                      title="Остатки со склада производства — по материалу заказа"
+                      style={{ flex: '0 0 auto', padding: '7px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
+                        background: 'transparent', color: 'var(--teal)', fontSize: 12, cursor: 'pointer' }}>
+                      📦 Со склада
+                    </button>}
                     <button disabled={offLocked} onClick={() => offFileRef.current?.click()}
                       title="Список обрезков из Excel или CSV: длина, ширина, количество"
                       style={{ flex: '0 0 auto', padding: '7px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--blue-mid)',
@@ -4317,6 +4349,19 @@ export default function NestingPage() {
         </div>
       )}
       <BottomNav />
+      {stockPick && order && (() => {
+        const sp = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id)
+        if (!sp) return null
+        const curMat = (materials.find(m => m.key === matKey) || materials[0])?.name || order.material_name || ''
+        const taken = new Set(offForm.items.map(it => it.stock).filter(Boolean))
+        return <StockPicker prodId={sp.id} prodName={sp.name} orderId={order.id} material={curMat} taken={taken} onClose={() => setStockPick(false)}
+          onPick={items => {
+            const keep = offForm.items.filter(it => it.length !== '' || it.width !== '')
+            const f = { ...offForm, items: [...keep, ...items.map(x => ({ length: String(x.length), width: String(x.width), qty: String(x.qty), stock: x.stock }))] }
+            setOffForm(f); commitOffcuts(f); setStockPick(false)
+            setOffImport(`Со склада: ${items.length} остатк${items.length === 1 ? '' : 'ов'}. Нажмите «Рассчитать» заново — остатки раскраиваются первыми.`)
+          }} />
+      })()}
       {pickProd && (
         <ProductionPicker productions={productions} mine={pickProd.mine} lastId={getUserSettings(user).lastProductionId} profile={profile}
           kerfOf={pr => prodVal(pr, 'kerf_width', order)} needs={orderNeeds}

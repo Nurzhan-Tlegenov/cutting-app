@@ -1,6 +1,7 @@
 // Склад деловых остатков производства (см. migration_remnants_stock.sql): список, ввод, ячейки, перерезка, списание, журнал.
 import { supabase } from './supabase'
 import { mm } from './mmFmt'
+import { orderTitle } from './orderUtils'
 
 export const STOCK_SQL_HINT = 'Склад остатков ещё не включён в базе: выполните migration_remnants_stock.sql в Supabase (SQL Editor) — один раз.'
 
@@ -76,7 +77,7 @@ const val = v => (v == null || v === '' ? '—' : String(v))
 export function eventText(e) {
   const b = e.before || {}, a = e.after || {}
   switch (e.action) {
-    case 'create': return `Внесён на склад: ${sz(a)}${a.qty > 1 ? `, ${a.qty} шт` : ''}${a.cell ? `, ячейка ${a.cell}` : ''}`
+    case 'create': return `${a.source === 'nesting' ? 'Пришёл из раскроя' + (a.order ? ` заказа ${a.order}` : '') : 'Внесён на склад'}: ${sz(a)}${a.qty > 1 ? `, ${a.qty} шт` : ''}${a.cell ? `, ячейка ${a.cell}` : ''}`
     case 'cell': return a.cell ? (b.cell ? `Ячейка: ${b.cell} → ${a.cell}` : `Ячейка указана: ${a.cell}`) : `Ячейка убрана (была ${val(b.cell)})`
     case 'edit': return 'Исправлено: ' + Object.keys(a).map(k => `${FIELD[k] || k} ${val(b[k])} → ${val(a[k])}`).join(', ')
     case 'recut':
@@ -84,8 +85,10 @@ export function eventText(e) {
       return `Перерезан: ${sz(b)} → ${sz(a)}${b.from ? ` (из остатка №${b.from})` : ''}`
     case 'writeoff':
       if (a.to) return `Списано ${e.qty} шт (${kindText(a.kind).toLowerCase()}) — отдельной строкой №${a.to}, осталось ${a.qty} шт`
-      return `Списан${e.qty > 1 ? ` (${e.qty} шт)` : ''}: ${kindText(a.kind).toLowerCase()}${b.from ? ` (из остатка №${b.from})` : ''}`
+      return `Списан${e.qty > 1 ? ` (${e.qty} шт)` : ''}: ${kindText(a.kind).toLowerCase()}${a.order ? ` — заказ ${a.order}` : ''}${b.from ? ` (из остатка №${b.from})` : ''}`
     case 'restore': return 'Возвращён на склад'
+    case 'reserve': return a.to ? `${e.qty} шт отделено в остаток №${a.to} под заказ` : `В резерве за заказом ${a.order || ''}${b.from ? ` (из остатка №${b.from})` : ''}`
+    case 'release': return `Резерв снят (заказ ${b.order || ''})`
     case 'label': return 'Бирка выпущена'
     case 'delete': return `Удалён насовсем: ${sz(b)}${b.material ? `, ${b.material}` : ''}`
     default: return e.action
@@ -123,8 +126,65 @@ export function parseRemnantQr(text) {
   out.material = out.texts[0] || ''
   return out
 }
-/** Уже внесённый на склад остаток с этой бирки */
+/** Уже внесённый на склад остаток с этой бирки (внесён сканом или привязан к бирке) */
 export async function stockByKey(prodId, key) {
-  const { data, error } = await supabase.from('remnants').select('*').eq('production_id', prodId).eq('source_key', key).maybeSingle()
-  return error ? errText(error) : { data }
+  const r = await call('stock_by_key', { p_prod: prodId, p_key: key })
+  if (r.error && r.missing) {          // база без migration_remnants_nesting.sql — как раньше
+    const { data, error } = await supabase.from('remnants').select('*').eq('production_id', prodId).eq('source_key', key).maybeSingle()
+    return error ? errText(error) : { data }
+  }
+  return r
 }
+/** Остаток пришёл из раскроя сам («Мои остатки»), ещё без ячейки и без бирки-кода: похожий по размеру и материалу */
+export async function stockAutoMatch(prodId, p) {
+  const { data } = await supabase.from('remnants').select('*').eq('production_id', prodId).eq('source', 'nesting').eq('status', 'free').is('cell', null).is('label_key', null).limit(500)
+  const near = (a, b) => Math.abs(num(a) - num(b)) <= 1.5
+  const m = normMaterial(p.material)
+  return (data || []).filter(r => ((near(r.length, p.length) && near(r.width, p.width)) || (near(r.length, p.width) && near(r.width, p.length)))
+    && (!m || materialMatch(m, r.material))).sort((a, b) => b.id - a.id)[0] || null
+}
+export const stockLinkLabel = (id, key, cell) => call('stock_link_label', { p_id: id, p_key: key || '', p_cell: cell || '' })
+
+// ── раскрой ──
+/** Остатки склада производства для раскроя: { allowed, own, items } */
+export const stockForNesting = (prodId, orderId) => call('stock_for_nesting', { p_prod: prodId, p_order: orderId || null })
+/** Резерв остатков за заказом (прежний резерв снимается). Ошибка «занят» -> { error, busy: [номера] } */
+export async function stockReserve(orderId, items) {
+  const { data, error } = await supabase.rpc('stock_reserve', { p_order: orderId, p_items: items })
+  if (!error) return { data }
+  const m = /stock: busy ([\d,]+)/.exec(String(error.message || ''))
+  if (m) return { error: `Остатки ${m[1].split(',').map(x => '№' + x).join(', ')} уже заняты другим заказом. Уберите их из «Обрезков со склада» и пересчитайте раскрой.`, busy: m[1].split(',').map(Number) }
+  return errText(error)
+}
+/** Остатки из раскроя: owner 'production' — на склад (без дублей), 'client' — не на склад */
+export const stockFromNesting = (orderId, owner, items) => call('stock_from_nesting', { p_order: orderId, p_owner: owner, p_items: items })
+
+const GENERIC = new Set(['лдсп', 'мдф', 'хдф', 'двп', 'дсп', 'лмдф', 'плита', 'панель', 'egger', 'kronospan', 'увадрев', 'кроношпан'])
+/** Сравнение материалов без регистра, пробелов и толщины: 'exact' | 'similar' | null */
+export function materialMatch(a, b) {
+  const x = normMaterial(a), y = normMaterial(b)
+  if (!x || !y) return null
+  if (x === y) return 'exact'
+  // общие слова материала (ЛДСП, МДФ…) похожести не дают — только декор / цвет
+  const ok = w => w.length >= 3 && !GENERIC.has(w)
+  const wx = x.split(' ').filter(ok), wy = new Set(y.split(' ').filter(ok))
+  return wx.some(w => wy.has(w)) ? 'similar' : null
+}
+
+/** Все деловые остатки сохранённого раскроя заказа — строки для склада (ключ — заказ, материал, лист, номер, размер) */
+export function nestingRemnants(order, mats) {
+  const out = []
+  for (const m of mats || []) {
+    (m.sheets || []).forEach((sh, si) => (sh.manualOffcuts || []).map(o => ({ w: Math.round(o.w), h: Math.round(o.h) })).filter(o => o.w > 0 && o.h > 0).forEach((o, k) => out.push({
+      key: `auto:${order.id}:${m.key}:${si}:${k}:${o.h}x${o.w}`, length: o.h, width: o.w, material: m.name || order.material_name || '', thickness: m.thickness || '',
+      note: `из раскроя заказа ${orderTitle(order)}, карта ${si + 1}`,
+    })))
+  }
+  return out
+}
+/** При выпуске бирок / программ: остатки производства — на склад (если так выбрано у заказа). Ошибки не мешают выпуску */
+export async function syncOrderRemnants(order, mats) {
+  if (order?.offcuts_owner !== 'production') return null
+  try { return await stockFromNesting(order.id, 'production', nestingRemnants(order, mats)) } catch { return null }
+}
+
