@@ -18,6 +18,7 @@ import { myLimits, limitText } from '../lib/limits'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { makePreset, applyPreset, bestPreset } from '../lib/importPresets'
 import { useBackClose } from '../lib/backStack'
+import { isDesktop } from '../hooks/useDesktop'
 import SendToMaster from './SendToMaster'
 import { fileToPayload, REPORT_MAX_MB } from '../lib/messages'
 
@@ -119,7 +120,12 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
   const [faceRule, setFaceRule] = useState(() => savedFaceOrder(getUserSettings(user).basisFaceOrder || getUserSettings(user).basisFaceRule))
   const [source, setSource] = useState(SOURCES[0])
   const [busy, setBusy] = useState(false)
-  const [open, setOpen] = useState(false)        // блок свёрнут, пока не нажали «Импорт деталей»
+  // раскрыт блок или свёрнут — запоминается за аккаунтом, отдельно для компьютера и телефона;
+  // по умолчанию на компьютере раскрыт (место есть), на телефоне — свёрнут
+  const openKey = isDesktop() ? 'importOpenDesk' : 'importOpenPhone'
+  const openSaved = () => { const v = getUserSettings(user)[openKey]; return typeof v === 'boolean' ? v : isDesktop() }
+  const [open, setOpenState] = useState(openSaved)
+  const setOpen = f => setOpenState(v => { const n = typeof f === 'function' ? f(v) : f; saveUserSettings({ [openKey]: n }, user); return n })
   const [error, setError] = useState('')
 
   const [fileName, setFileName] = useState('')
@@ -357,7 +363,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
     const g = activeKey === ALL
       ? (result.groups.length === 1 ? result.groups[0] : null)
       : result.groups.find(x => x.key === activeKey)
-    setOpen(false)
+    setOpenState(openSaved())   // после импорта — как пользователь оставил
     onImport({
       items: chosen.map(it => ({
         name: it.name, w: it.w, h: it.h, qty: it.qty, edges: it.edges, prefix: it.prefix,
