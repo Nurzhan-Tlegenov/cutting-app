@@ -29,6 +29,7 @@ export default function ScanPage() {
     if (link) { navigate(link); return }                    // на бирке — ссылка на 3D-модель
     const rem = remnantIdFromQr(text)
     if (rem) { navigate(`/stock?id=${rem}`); return }        // бирка остатка со склада — его карточка
+    if (/^\s*OSTATOK\W/i.test(text)) { navigate(`/stock?code=${encodeURIComponent(text)}`); return }   // бирка остатка из раскроя — на склад
     setState({ step: 'find', text })
     const r = await resolveQr(text)
     if (r.error) { setState({ step: 'fail', text, error: r.error }); busy.current = false; return }

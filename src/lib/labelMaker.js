@@ -66,8 +66,6 @@ export const LABEL_ITEMS = [
   // только на бирке делового остатка
   ['remTitle', 'Заголовок (свой текст)', 'text', 'rem'],
   ['remSize', 'Размер остатка', 'text', 'rem'],
-  ['cell', 'Ячейка хранения', 'text', 'rem'],
-  ['remNo', 'Номер остатка (склад)', 'text', 'rem'],
   ['client', 'Заказчик', 'text', 'rem'],
   ['date', 'Дата', 'text', 'rem'],
   ['remText', 'Свой текст', 'text', 'rem'],
@@ -83,7 +81,7 @@ export const PART_ITEMS = LABEL_ITEMS.filter(x => !x[3])
 export const SHAPE_ITEMS = LABEL_ITEMS.filter(x => x[3] === 'shape')
 export const isShape = it => itemKind(it.type) === 'shape'
 /** Элементы бирки делового остатка */
-export const REM_ITEMS = ['remTitle', 'remSize', 'material', 'thickness', 'cell', 'remNo', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'map', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
+export const REM_ITEMS = ['remTitle', 'remSize', 'material', 'thickness', 'order', 'client', 'date', 'sheet', 'remText', 'image', 'map', 'qr'].map(k => LABEL_ITEMS.find(x => x[0] === k)).filter(Boolean)
   .map(x => (x[0] === 'map' ? ['map', 'Карта раскроя — остаток чёрным', 'pic'] : x))
 // Из чего собирается строка QR-кода — выбирает пользователь; порядок — как в этом списке
 export const QR_PARTS = [
@@ -710,7 +708,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
-  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст', cell: 'Ячейка', remNo: '№' }
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
 export const canCaption = type => !NO_CAP.has(type)
 export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
@@ -727,8 +725,6 @@ function labelValue(type, info, tpl = null) {
     case 'order': return info.order
     case 'material': return info.material
     case 'remSize': return info.remSize || ''
-    case 'cell': return info.cell || ''
-    case 'remNo': return info.remNo ? String(info.remNo) : ''
     case 'client': return info.client || ''
     case 'date': return info.date || ''
     case 'title': return [info.des, info.name].filter(Boolean).join(' ')
@@ -967,7 +963,6 @@ const REM_DEFAULT = [
   { type: 'remSize', x: 0.06, y: 0.2, w: 0.88, s: 0.16, bold: true, align: 'center' },
   { type: 'material', x: 0.06, y: 0.47, w: 0.88, s: 0.065, align: 'center' },
   { type: 'order', x: 0.06, y: 0.6, w: 0.88, s: 0.06, align: 'center' },
-  { type: 'cell', x: 0.06, y: 0.6, w: 0.88, s: 0.07, bold: true, align: 'center' },   // на месте заказа: у остатка со склада заказа нет, у остатка из раскроя — ячейки
   { type: 'date', x: 0.06, y: 0.72, w: 0.88, s: 0.055, align: 'center' },
   { type: 'sheet', x: 0.06, y: 0.83, w: 0.88, s: 0.05, align: 'center' },
 ]
@@ -987,15 +982,15 @@ export function remInfo(x) {
   return {
     rem: x, order: x.order ? orderTitle(x.order) : '', material: [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · '), materialName: nm, thickness: t,
     remSize: `${r1(x.o.h)} × ${r1(x.o.w)}`, sheet: x.si != null ? x.si + 1 : '', client: x.client || '', date: x.date || today(), meta: {},
-    cell: x.cell || '', remNo: x.stockId || '',
   }
 }
 /** Строка QR-кода остатка — по ней остаток потом можно найти и учесть (склад деловых остатков) */
 export function remQrText(rt, info) {
   const x = info.rem || {}, q = rt.remQr || { parts: ['size', 'material', 'order', 'date'], sep: ';' }
   const val = { size: `${r1(x.o?.h)}x${r1(x.o?.w)}x${info.thickness || ''}`, material: info.materialName, order: info.order, client: info.client, date: info.date, sheet: info.sheet ? `L${info.sheet}` : '' }
-  // остаток со склада: номер в базе идёт сразу за OSTATOK (R123) — по нему скан бирки открывает карточку остатка
-  return ['OSTATOK', ...(x.stockId ? [`R${x.stockId}`] : []), ...(q.parts || []).map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(q.sep || ';')
+  // размер в коде есть всегда (по нему остаток вносится на склад сканом бирки); остаток со склада — ещё и его номер (R123)
+  const parts = (q.parts || []).includes('size') ? q.parts : ['size', ...(q.parts || [])]
+  return ['OSTATOK', ...(x.stockId ? [`R${x.stockId}`] : []), ...parts.map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(q.sep || ';')
 }
 /**
  * Карта листа для бирки остатка: где на листе этот остаток (закрашен) — кто клеит руками, видит, куда клеить.
@@ -1265,7 +1260,7 @@ export async function buildStockLabelsPdf({ tpl, items, onProgress }) {
   const row = Math.ceil(W / 8), kids = []
   let n = 3, done = 0
   for (const r of pages) {
-    const x = { stockId: r.id, cell: r.cell || '', mat: { name: r.material || '', thickness: r.thickness || 0 }, o: { w: Number(r.width), h: Number(r.length) }, date: new Date(r.created_at || Date.now()).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) }
+    const x = { stockId: r.id, mat: { name: r.material || '', thickness: r.thickness || 0 }, o: { w: Number(r.width), h: Number(r.length) }, date: new Date(r.created_at || Date.now()).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }) }
     drawLabel(cv, rt, remInfo(x), null, {})
     const px = cv.getContext('2d').getImageData(0, 0, W, H).data, bits = new Uint8Array(row * H)
     for (let y = 0; y < H; y++) for (let xx = 0, i = y * W * 4; xx < W; xx++, i += 4) if ((px[i] * 3 + px[i + 1] * 6 + px[i + 2]) / 10 >= 140) bits[y * row + (xx >> 3)] |= 0x80 >> (xx & 7)

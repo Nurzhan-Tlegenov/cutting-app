@@ -97,3 +97,33 @@ export function remnantIdFromQr(text) {
   const m = /^\s*OSTATOK\W+R(\d+)\b/i.exec(String(text || ''))
   return m ? Number(m[1]) : null
 }
+
+/**
+ * Бирка остатка из раскроя: OSTATOK<разделитель>1250x612x16<разделитель>материал<разделитель>заказ…
+ * Части и разделитель выбирает пользователь в шаблоне; размер в коде есть всегда. Узнаём по виду:
+ * размер — «ДxШ(xТ)», дата — дд.мм.гггг, номер карты — L5, остальной текст по порядку: материал, затем заказ / заказчик.
+ * -> { key, length, width, thickness, material, texts, date, sheet } | null
+ */
+export function parseRemnantQr(text) {
+  const t = String(text || '').trim()
+  const m = /^OSTATOK(\W)/i.exec(t)
+  if (!m) return null
+  const sep = m[1]
+  const toks = t.slice(m[0].length).split(sep).map(x => x.trim()).filter(Boolean)
+  const out = { key: t, length: 0, width: 0, thickness: 0, material: '', texts: [], date: '', sheet: '' }
+  for (const k of toks) {
+    const sz = /^(\d+(?:[.,]\d+)?)\s*[xх×*]\s*(\d+(?:[.,]\d+)?)(?:\s*[xх×*]\s*(\d+(?:[.,]\d+)?)?)?$/i.exec(k)
+    if (sz && !out.length) { out.length = num(sz[1]); out.width = num(sz[2]); out.thickness = num(sz[3]); continue }
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(k)) { out.date = k; continue }
+    if (/^L\d+$/i.test(k)) { out.sheet = k.slice(1); continue }
+    if (/^R\d+$/i.test(k)) continue
+    out.texts.push(k)
+  }
+  out.material = out.texts[0] || ''
+  return out.length > 0 && out.width > 0 ? out : null
+}
+/** Уже внесённый на склад остаток с этой бирки */
+export async function stockByKey(prodId, key) {
+  const { data, error } = await supabase.from('remnants').select('*').eq('production_id', prodId).eq('source_key', key).maybeSingle()
+  return error ? errText(error) : { data }
+}

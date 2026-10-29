@@ -16,7 +16,7 @@ import { myWorkplaces, workPid, prodView } from '../lib/workplaces'
 import { supabase } from '../lib/supabase'
 import {
   stockInfo, stockList, stockEvents, stockJournal, stockAdd, stockEdit, stockCell, stockRecut, stockWriteoff, stockRestore, stockDelete,
-  stockSetSettings, stockAllEvents, stockLabeled, remnantIdFromQr, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
+  stockSetSettings, stockAllEvents, stockLabeled, remnantIdFromQr, parseRemnantQr, stockByKey, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
 } from '../lib/stock'
 import { readStockFile, exportStockXlsx, stockFileName } from '../lib/stockExcel'
 import { backupSupported, backupConf, chooseBackupFile, setBackupHours, stopBackup, backupPermission, runBackup, BACKUP_HOURS } from '../lib/stockBackup'
@@ -69,12 +69,27 @@ export default function StockPage() {
     } catch (e) { setError('Не удалось собрать PDF: ' + String(e?.message || e)) }
     setPdfBusy('')
   }
-  const onScan = text => {
+  const [fromLabel, setFromLabel] = useState(null)   // отсканирована бирка остатка из раскроя — внести на склад
+  const onScan = async text => {
     const id = remnantIdFromQr(text)
-    if (!id) { setScanMsg('Это не бирка остатка со склада.'); return }
-    if (!(rows || []).some(r => r.id === id)) { setScanMsg(`Остаток №${id} не найден на этом складе.`); return }
-    setScan(false); setScanMsg(''); setTab(t => (t === 'journal' ? 'free' : t)); setOpenId(id)
+    if (id) {
+      if (!(rows || []).some(r => r.id === id)) { setScanMsg(`Остаток №${id} не найден на этом складе.`); return }
+      setScan(false); setScanMsg(''); setTab(t => (t === 'journal' ? 'free' : t)); setOpenId(id); return
+    }
+    const p = parseRemnantQr(text)
+    if (!p) { setScanMsg('Это не бирка делового остатка (в коде нет OSTATOK и размера).'); return }
+    const ex = await stockByKey(pid, p.key)          // этот остаток уже внесён — открываем его
+    if (ex.data) { setScan(false); setScanMsg(''); setTab(t => (t === 'journal' ? 'free' : t)); setOpenId(ex.data.id); return }
+    setScan(false); setScanMsg(''); setFromLabel(p)
   }
+  // пришли со сканера бирок (/scan): код в ссылке
+  const codeDone = useRef(false)
+  useEffect(() => {
+    const code = new URLSearchParams(loc.search).get('code')
+    if (!code || codeDone.current || !rows || !pid) return
+    codeDone.current = true
+    Promise.resolve().then(() => { setScan(true); onScan(code) })
+  }, [rows, pid])   // eslint-disable-line react-hooks/exhaustive-deps
   const edit = info?.access === 'edit'
 
   // какое производство: из ссылки, своё или рабочее место сотрудника
@@ -191,7 +206,8 @@ export default function StockPage() {
         {scan && (
           <div style={backdrop} onClick={() => setScan(false)}>
             <div style={sheet} onClick={e => e.stopPropagation()}>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}><span style={{ flex: 1, fontSize: 15, fontWeight: 600 }}>Наведите камеру на бирку остатка</span><button type="button" onClick={() => setScan(false)} style={{ border: 'none', background: 'none', fontSize: 22, color: 'var(--text-hint)', cursor: 'pointer' }}>×</button></div>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}><span style={{ flex: 1, fontSize: 15, fontWeight: 600 }}>Наведите камеру на бирку остатка</span><button type="button" onClick={() => setScan(false)} style={{ border: 'none', background: 'none', fontSize: 22, color: 'var(--text-hint)', cursor: 'pointer' }}>×</button></div>
+              <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Бирка из раскроя — остаток внесётся на склад (останется вписать ячейку). Уже внесённый — откроется его карточка.</p>
               <QrCamera onCode={onScan} height={280} />
               {scanMsg && <p style={{ fontSize: 13, color: 'var(--amber)', marginTop: 8 }}>{scanMsg}</p>}
               <form style={{ display: 'flex', gap: 6, marginTop: 10 }} onSubmit={e => { e.preventDefault(); const v = e.currentTarget.elements.n.value.trim(); if (v) onScan(/^\d+$/.test(v) ? `OSTATOK;R${v}` : v) }}>
@@ -201,6 +217,8 @@ export default function StockPage() {
             </div>
           </div>
         )}
+        {fromLabel && <FromLabel p={fromLabel} pid={pid} edit={edit} cells={cells} materials={materials} onClose={() => setFromLabel(null)}
+          onSaved={async id => { setFromLabel(null); await load(); setTab('free'); setOpenId(id) }} />}
         <BackupBox pid={pid} prodName={info.name} />
         {imp && <ImportPreview imp={imp} pid={pid} materials={materials} onClose={() => setImp(null)} onSaved={load} />}
         {adding && <AddRows pid={pid} materials={materials} cells={cells} onClose={() => setAdding(false)} onSaved={load} />}
@@ -317,6 +335,48 @@ function AddRows({ pid, materials, cells, onClose, onSaved }) {
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <button type="button" disabled={busy} style={{ ...btn('main'), flex: 1 }} onClick={save}>{busy ? 'Сохраняю…' : `Сохранить${ready.length ? ` · ${ready.length} стр., ${ready.reduce((s, r) => s + Math.max(1, Math.round(num(r.qty) || 1)), 0)} шт` : ''}`}</button>
         <button type="button" style={btn()} onClick={onClose}>Закрыть</button>
+      </div>
+    </div>
+  )
+}
+
+/** Отсканирована бирка остатка из раскроя: размер, материал, заказ — из кода; вписать ячейку и внести на склад */
+function FromLabel({ p, pid, edit, cells, materials, onClose, onSaved }) {
+  const [mat, setMat] = useState(p.material)
+  const [th, setTh] = useState(p.thickness ? String(p.thickness) : '')
+  const [cell, setCell] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const from = [p.texts.slice(1).join(', '), p.sheet ? `карта ${p.sheet}` : '', p.date].filter(Boolean).join(' · ')
+  const save = async c => {
+    setBusy(true); setErr('')
+    const r = await stockAdd(pid, [{ length: p.length, width: p.width, qty: 1, material: mat, thickness: th ? num(th) : '', cell: c ?? cell, note: from ? `с бирки: ${from}` : '', source: 'nesting', source_key: p.key }])
+    setBusy(false)
+    if (r.error) { setErr(r.error); return }
+    onSaved(r.data?.[0])
+  }
+  return (
+    <div style={backdrop} onClick={onClose}>
+      <div style={sheet} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Бирка остатка — на складе его ещё нет</div>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>{sizeText(p)}</div>
+            {from && <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{from}</div>}
+          </div>
+          <button type="button" onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 22, color: 'var(--text-hint)', cursor: 'pointer', padding: 0 }}>×</button>
+        </div>
+        {!edit ? <p style={{ fontSize: 13, marginTop: 10 }}>Внести остаток на склад может ответственный за склад.</p> : <>
+          <datalist id="stock-mats-lbl">{materials.map(m => <option key={m} value={m} />)}</datalist>
+          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            <label style={{ ...lbl, flex: 3 }}>Материал<input list="stock-mats-lbl" value={mat} onChange={e => setMat(e.target.value)} style={inp} /></label>
+            <label style={{ ...lbl, flex: 1 }}>Толщина<input inputMode="decimal" value={th} onChange={e => setTh(cleanNum(e.target.value))} style={inp} /></label>
+          </div>
+          <label style={{ ...lbl, marginTop: 8 }}>Куда положили — ячейка<input autoFocus value={cell} onChange={e => setCell(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') save() }} placeholder="А-3 (можно потом)" style={{ ...inp, fontSize: 18 }} /></label>
+          {!!cells.length && <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>{cells.slice(0, 24).map(c => <button key={c} type="button" disabled={busy} style={{ ...pill(false), padding: '6px 11px' }} onClick={() => save(c)}>{c}</button>)}</div>}
+          {err && <p className="error-text" style={{ marginTop: 8 }}>{err}</p>}
+          <Actions busy={busy} ok="Внести на склад" onOk={() => save()} onCancel={onClose} />
+        </>}
       </div>
     </div>
   )
