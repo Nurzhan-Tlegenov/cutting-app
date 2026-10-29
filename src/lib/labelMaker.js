@@ -36,6 +36,7 @@ export const LABEL_ITEMS = [
   ['group', 'Группа в блоке из модели', 'text'],
   ['blockPath', 'Блок / группа — полностью', 'text'],
   ['size', 'Размер и количество', 'text'],
+  ['finSize', 'Размер готовой детали (с кромкой)', 'text'],
   ['curved', 'Криволинейная кромка', 'text'],
   ['work', 'Вся обработка одной строкой', 'text'],
   ['faceHoles', 'Отверстия в пласть — с лица', 'text'],
@@ -492,7 +493,10 @@ export function labelInfo(order, mat, si, pi, part = null) {
     material: (() => { const nm = String(mat.name || '').trim(), t = Number(mat.thickness) || 0
       const has = t > 0 && new RegExp(`(^|[^0-9.,])${String(t).replace('.', '[.,]')}([^0-9]|$)`).test(nm)
       return [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · ') })(),
-    length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW, thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
+    length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW,
+    // готовая деталь (с кромкой) — как в заказе; в раскрой она идёт с подрезкой / прифуговкой (d — уже заготовка, _raw — строка заказа)
+    finX: (() => { const r = d._raw || d, w = Number(r.width) || DW, l = Number(r.length) || DL; return even ? w : l })(),
+    finY: (() => { const r = d._raw || d, w = Number(r.width) || DW, l = Number(r.length) || DL; return even ? l : w })(), thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
@@ -748,6 +752,12 @@ function labelValue(type, info, tpl = null) {
       if (info.sizeX == null) return r1(type === 'length' ? info.length : info.width)
       const rot = tpl ? tpl.rot !== false : true
       return r1((type === 'length') === rot ? info.sizeY : info.sizeX)
+    }
+    // размер готовой детали — так же за сторонами бирки, как «Длина» и «Ширина»
+    case 'finSize': {
+      if (info.finX == null) return ''
+      const rot = tpl ? tpl.rot !== false : true
+      return `${r1(rot ? info.finY : info.finX)} x ${r1(rot ? info.finX : info.finY)}`
     }
     case 'thickness': return info.thickness ? `${r1(info.thickness)} мм` : ''
     case 'qty': return `${info.qty} шт`
