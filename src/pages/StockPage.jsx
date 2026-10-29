@@ -268,11 +268,11 @@ function RemRow({ r, first, onOpen, pick, onPick }) {
         <span style={{ display: 'block', fontSize: 14.5, fontWeight: 600 }}>{sizeText(r)}{r.qty > 1 && <span style={{ fontWeight: 500, color: 'var(--blue)' }}> × {r.qty} шт</span>}</span>
         <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.material || 'материал не указан'}{r.thickness ? ` · ${r.thickness} мм` : ''}{r.note ? ` · ${r.note}` : ''}</span>
       </span>
-      <span style={{ textAlign: 'right', flexShrink: 0 }}>
-        {r.status === 'used' ? <span style={{ display: 'block', fontSize: 11.5, color: 'var(--danger)' }}>{kindText(r.used_kind)} · {dayText(r.used_at)}</span>
+      <span style={{ textAlign: 'right', flexShrink: 0, maxWidth: '42%' }}>
+        {r.status === 'used' ? <span style={{ display: 'block', fontSize: 11.5, color: 'var(--danger)' }}>{kindText(r.used_kind)}{r.used_kind === 'order' && r.reserved_title ? ` ${r.reserved_title}` : ''} · {dayText(r.used_at)}</span>
           : r.cell ? <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--teal)' }}>{r.cell}</span>
           : <span style={{ display: 'block', fontSize: 11.5, color: 'var(--amber)' }}>ячейка не указана</span>}
-        {r.status === 'reserved' && <span style={{ display: 'block', fontSize: 11, color: 'var(--amber)' }}>в резерве</span>}
+        {r.status === 'reserved' && <span style={{ display: 'block', fontSize: 11, color: 'var(--amber)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🔒 {r.reserved_title || 'резерв'}</span>}
         <span style={{ display: 'block', fontSize: 10.5, color: r.label_at ? 'var(--text-hint)' : 'var(--text-hint)', opacity: r.label_at ? 1 : 0.6 }}>{r.label_at ? `🏷 ${dayText(r.label_at)}` : 'без бирки'}</span>
       </span>
     </button>
@@ -555,21 +555,27 @@ function RemCard({ r, edit, cells, materials, settings, onClose, onChanged, onPr
           <button type="button" onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 22, color: 'var(--text-hint)', cursor: 'pointer', padding: 0, lineHeight: 1 }}>×</button>
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          {used ? <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--danger)' }}>Списан: {kindText(r.used_kind).toLowerCase()} · {dateText(r.used_at)}</span>
+          {used ? <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--danger)' }}>Списан: {kindText(r.used_kind).toLowerCase()}{r.used_kind === 'order' && r.reserved_title ? ` ${r.reserved_title}` : ''} · {dateText(r.used_at)}</span>
             : <span style={{ fontSize: 15, padding: '4px 12px', borderRadius: 10, fontWeight: 600, background: r.cell ? 'var(--teal-light, var(--bg2))' : 'var(--amber-light, var(--bg2))', color: r.cell ? 'var(--teal)' : 'var(--amber)' }}>{r.cell ? `Ячейка ${r.cell}` : 'Ячейка не указана'}</span>}
-          {r.status === 'reserved' && <span style={{ fontSize: 12.5, color: 'var(--amber)' }}>в резерве за заказом</span>}
+
           <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>{r.label_at ? `🏷 бирка выпущена ${dayText(r.label_at)}` : 'бирка не выпущена'}</span>
         </div>
         {r.note && <div style={{ fontSize: 13, marginTop: 8, color: 'var(--text-muted)' }}>{r.note}</div>}
+        {r.status === 'reserved' && (
+          <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 10, background: 'var(--amber-light, var(--bg2))', border: '1px solid var(--amber)', fontSize: 13 }}>
+            <b>🔒 В резерве за заказом {r.reserved_title || ''}</b> — остаток пойдёт в раскрой этого заказа. Не перерезайте и не берите его в работу.
+            Спишется сам, когда выпустят программы ЧПУ (или пройдут раскрой). Снять резерв — убрать остаток из раскроя заказа.
+          </div>
+        )}
 
         {edit && !mode && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
             {!used && <button type="button" style={bigBtn} onClick={() => go('cell')}>📦 {r.cell ? 'Сменить ячейку' : 'Указать ячейку'}</button>}
             {r.status === 'free' && <button type="button" style={bigBtn} onClick={() => go('recut')}>✂ Перерезать</button>}
-            {!used && <button type="button" style={{ ...bigBtn, color: 'var(--danger)' }} onClick={() => go('writeoff')}>Списать</button>}
+            {r.status === 'free' && <button type="button" style={{ ...bigBtn, color: 'var(--danger)' }} onClick={() => go('writeoff')}>Списать</button>}
             {used && <button type="button" style={bigBtn} onClick={() => run(() => stockRestore(r.id))}>↩ Вернуть на склад</button>}
             {!used && <button type="button" style={bigBtn} disabled={!!printBusy} onClick={onPrint}>🏷 {printBusy ? '…' : r.label_at ? 'Перепечатать бирку' : 'Напечатать бирку'}</button>}
-            <button type="button" style={bigBtn} onClick={() => go('edit')}>✎ Исправить</button>
+            {r.status !== 'reserved' && <button type="button" style={bigBtn} onClick={() => go('edit')}>✎ Исправить</button>}
           </div>
         )}
 

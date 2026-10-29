@@ -68,7 +68,7 @@ export default function StockPicker({ prodId, prodName, orderId, material, taken
             {!!groups.other.length && (all
               ? <><div style={{ fontSize: 12, fontWeight: 600, margin: '10px 0 2px', color: 'var(--text-muted)' }}>Другие материалы</div>{groups.other.map(x => row(x, 'другой материал'))}</>
               : <button type="button" style={{ ...btn(false), marginTop: 8, fontSize: 12 }} onClick={() => setAll(true)}>Показать другие материалы · {groups.other.length}</button>)}
-            <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '10px 0 0' }}>Взятые остатки раскраиваются первыми. Когда раскрой выбран («Выбрать» / «Оформить»), они резервируются за заказом и другим заказам не предлагаются; когда заказ исполнен — списываются.</p>
+            <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '10px 0 0' }}>Взятые остатки раскраиваются первыми. Когда раскрой выбран («Выбрать» / «Оформить»), они резервируются за заказом и другим заказам не предлагаются; когда выпустят программы ЧПУ (или пройдут раскрой) — списываются.</p>
           </>}
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button type="button" disabled={!n} style={{ ...btn(true), flex: 1, opacity: n ? 1 : 0.5 }} onClick={pick}>Взять · {n} шт</button>

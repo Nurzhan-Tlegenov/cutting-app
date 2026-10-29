@@ -12,7 +12,7 @@ import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import OffcutOwner from '../components/OffcutOwner'
-import { syncOrderRemnants } from '../lib/stock'
+import { syncOrderRemnants, stockUseOrder } from '../lib/stock'
 import { logPostUse } from '../lib/postAccess'
 import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -156,6 +156,7 @@ export default function CncPage() {
   const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: saw?.progLatin !== false })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
   const build = () => {
     syncOrderRemnants(order, mats)          // «Мои остатки» — на склад остатков (без дублей при повторном выпуске)
+    if (order?.id) stockUseOrder(order.id)   // остатки со склада, взятые в этот раскрой, — списываются «в заказ»
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     if (beamMat && saw) return buildBeam()
     const files = sel.map(si => {
@@ -197,6 +198,7 @@ export default function CncPage() {
   // Пильный центр: одна программа XML на материал по выбранным листам (дерево резов), бирки — по галочке
   const buildBeam = () => {
     syncOrderRemnants(order, mats)
+    if (order?.id) stockUseOrder(order.id)
     logPostUse(user, [saw], { orderId: order?.id || null, sheets: sel.length })
     const sub = { ...mat, sheets: sel.map(si => mat.sheets[si]) }
     let text = '', error = '', xml = null

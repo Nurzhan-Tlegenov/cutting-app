@@ -11,6 +11,7 @@ const KNOWN = {
   'stock: not found': 'Остаток не найден — возможно, его уже удалили.',
   'stock: not free': 'Остаток списан или в резерве — перерезать нельзя.',
   'stock: already used': 'Остаток уже списан.',
+  'stock: reserved': 'Остаток в резерве за заказом — он пойдёт в раскрой, трогать его нельзя. Снять резерв можно, убрав его из раскроя заказа.',
   'stock: bad size': 'Укажите длину и ширину больше нуля.',
 }
 const errText = error => {
@@ -147,6 +148,8 @@ export const stockLinkLabel = (id, key, cell) => call('stock_link_label', { p_id
 
 // ── раскрой ──
 /** Остатки склада производства для раскроя: { allowed, own, items } */
+/** Выпустили программы ЧПУ — остатки из резерва заказа списываются «в заказ» */
+export const stockUseOrder = orderId => call('stock_use_order', { p_order: orderId })
 export const stockForNesting = (prodId, orderId) => call('stock_for_nesting', { p_prod: prodId, p_order: orderId || null })
 /** Резерв остатков за заказом (прежний резерв снимается). Ошибка «занят» -> { error, busy: [номера] } */
 export async function stockReserve(orderId, items) {
