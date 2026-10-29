@@ -14,7 +14,7 @@ import { beamSettings, maxLevels, trimAt } from './beamSaw'
 import { groupLinesOnSheet, posOfInstance } from './partGroups'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.19'
+export const BEAM_SAW_VERSION = 'β0.20'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -668,9 +668,10 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   const meta = { usableX: realX, usableY: realY, sheetL, sheetW, marginT, marginR, marginB, marginL, kerf, beamSaw: true, beamVersion: BEAM_SAW_VERSION, beamSettings: s }
   const finish = r => ({ ...meta, sheets: r.sheets, unplaced: r.unplaced, beamCuts: r.cuts })
 
-  // направление полос: y — вдоль длинной стороны листа (1-й уровень режет по X), x — наоборот, auto — оба
-  // (есть детали с текстурой — только вдоль волокон, Y)
-  let axes = s.direction === 'x' ? ['y'] : s.direction === 'y' || pieces.some(p => !p.rotatable) ? ['x'] : ['x', 'y']
+  // направление полос: y — вдоль длинной стороны листа (1-й уровень режет по X), x — наоборот, auto — оба, на каждом
+  // листе своё. Детали с текстурой этому не мешают: деталь не поворачивается, меняется только порядок резов
+  // (261029_006: с текстурой у всех деталей на одних листах полосы вдоль, на других поперёк — так и у других программ)
+  let axes = s.direction === 'x' ? ['y'] : s.direction === 'y' ? ['x'] : ['x', 'y']
   // максимальная ширина полосы главнее направления: если в заданном направлении деталь даёт полосу шире предела
   // (деталь 2600×600, полосы поперёк — 2600), а в другом укладывается — разрешаем и другое направление
   if (s.maxStrip > 0 && axes.length === 1) {
