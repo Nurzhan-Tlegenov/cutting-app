@@ -12,7 +12,7 @@ import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import OffcutOwner from '../components/OffcutOwner'
-import { syncOrderRemnants, stockUseOrder } from '../lib/stock'
+import { syncOrderRemnants, stockUseOrder, nestingRemnants } from '../lib/stock'
 import { logPostUse } from '../lib/postAccess'
 import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -76,6 +76,8 @@ export default function CncPage() {
   const setWithMaps = on => { setWithMapsState(on); saveUserSettings({ cncWithMaps: on }, user) }
   const [mapsBusy, setMapsBusy] = useState('')
   const [order, setOrder] = useState(null)
+  const [ownerCan, setOwnerCan] = useState(false)     // производство может выбрать «чьи остатки» (свой склад)
+  const [ownerAttn, setOwnerAttn] = useState(0)       // не выбрано, а программу создают — подсветить выбор
   const [clientName, setClientName] = useState('')   // имя заказчика — для названий программ и папки
   useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }); return () => { alive = false } }, [id])
   const [details, setDetails] = useState([])
@@ -155,9 +157,11 @@ export default function CncPage() {
   const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: post.progLatin !== false })}.${post.ext || 'nc'}`
   const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: saw?.progLatin !== false })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
   const build = () => {
+    if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
+    // производство обязательно выбирает, чьи деловые остатки раскроя (мои — на склад / клиента) — иначе забудут
+    if (ownerCan && !order?.offcuts_owner && nestingRemnants(order, mats).length) { setOwnerAttn(Date.now()); return false }
     syncOrderRemnants(order, mats)          // «Мои остатки» — на склад остатков (без дублей при повторном выпуске)
     if (order?.id) stockUseOrder(order.id)   // остатки со склада, взятые в этот раскрой, — списываются «в заказ»
-    if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     if (beamMat && saw) return buildBeam()
     const files = sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
@@ -197,8 +201,6 @@ export default function CncPage() {
   }
   // Пильный центр: одна программа XML на материал по выбранным листам (дерево резов), бирки — по галочке
   const buildBeam = () => {
-    syncOrderRemnants(order, mats)
-    if (order?.id) stockUseOrder(order.id)
     logPostUse(user, [saw], { orderId: order?.id || null, sheets: sel.length })
     const sub = { ...mat, sheets: sel.map(si => mat.sheets[si]) }
     let text = '', error = '', xml = null
@@ -530,7 +532,7 @@ export default function CncPage() {
               <button type="button" className="btn-secondary" style={{ marginTop: 6 }} onClick={() => navigate(`/orders/${id}/nesting`)}>Открыть раскрой</button>
             </div>
           )}
-          <OffcutOwner order={order} mats={mats} onChange={v => setOrder(o => ({ ...o, offcuts_owner: v }))} />
+          <OffcutOwner order={order} mats={mats} onChange={v => setOrder(o => ({ ...o, offcuts_owner: v }))} onCan={setOwnerCan} attention={ownerAttn} />
           {/* у станка без маркировочного стола — бирки вместе с программами, отдельной папкой */}
           {!machine?.labelTable && (
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
@@ -547,7 +549,7 @@ export default function CncPage() {
             </span>
           </label>
           {mapsBusy && <CncLoader compact label={mapsBusy} />}
-          <button data-tour="cnc-build" className="btn-primary" disabled={!sel.length || faults.length > 0 || (beamMat && !saw)} onClick={() => { if (faults.length) return; build(); mark('gcode') }}>{beamMat ? (built ? '↻ Создать программу пилы заново' : `Создать программу пилы (XML${drills.length ? ' + присадка' : ''})`) : built ? (drills.length || r2 ? '↻ Создать программы заново' : '↻ Создать G-код заново') : r2 ? `Создать программы (${post.name} + ${r2.name})` : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
+          <button data-tour="cnc-build" className="btn-primary" disabled={!sel.length || faults.length > 0 || (beamMat && !saw)} onClick={() => { if (faults.length) return; if (build() === false) return; mark('gcode') }}>{beamMat ? (built ? '↻ Создать программу пилы заново' : `Создать программу пилы (XML${drills.length ? ' + присадка' : ''})`) : built ? (drills.length || r2 ? '↻ Создать программы заново' : '↻ Создать G-код заново') : r2 ? `Создать программы (${post.name} + ${r2.name})` : (drills.length ? `Создать программы (G-код + ${drills.length > 1 ? 'присадка ×' + drills.length : 'присадка'})` : 'Создать G-код')}</button>
           {built?.beam && built.files.map(f => (
             <div key={f.name} className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
               <div style={{ fontSize: 13, fontWeight: 500 }}>🪚 {saw?.name || 'Пильный центр'}</div>
