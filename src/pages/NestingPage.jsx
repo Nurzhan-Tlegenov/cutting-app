@@ -60,6 +60,7 @@ import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { beamSettings, sameMaps, sameMapTag } from '../lib/beamSaw'
+import BeamSawSettings from '../components/BeamSawSettings'
 import { cutMethods } from '../lib/productionServices'
 import { saveBeamSawXml } from '../lib/beamSawXml'
 
@@ -1816,6 +1817,8 @@ export default function NestingPage() {
   // β Пильный центр: режет сквозными резами (cuttingMethod 'guillotine'), а сам выбор — отдельный флаг заказа orders.beam_saw.
   // Кнопку видят мастер-аккаунт и выбранные им бета-тестеры (migration_beta.sql).
   const [beamSaw, setBeamSaw] = useState(false)
+  const [beamSetOpen, setBeamSetOpenState] = useState(() => getUserSettings(user).beamSetOpen === true)   // блок настроек пильного центра — раскрыт / свёрнут, как оставили
+  const setBeamSetOpen = v => { if (v !== beamSetOpen) { setBeamSetOpenState(v); saveUserSettings({ beamSetOpen: v }, user) } }
   const [betaBeam, setBetaBeam] = useState(false)
   useEffect(() => { let alive = true; hasBeta('beam_saw').then(v => { if (alive) setBetaBeam(v) }); return () => { alive = false } }, [])
   const [showOffcuts, setShowOffcuts] = useKeptState('offcuts', false)
@@ -4132,6 +4135,24 @@ export default function NestingPage() {
           )
         })}
       </div>
+      {beamSaw && (() => {
+        // настройки пильного центра прямо здесь — как в кабинете производства: владелец производства меняет их, не
+        // переключаясь в кабинет; остальные видят, по каким правилам режет производство
+        const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id)
+        if (!pr) return null
+        const own = !!user?.id && pr.owner_id === user.id
+        return (
+          <details className="card" style={{ padding: '8px 12px', marginBottom: 8 }} open={beamSetOpen} onToggle={e => setBeamSetOpen(e.currentTarget.open)}>
+            <summary style={{ fontSize: 13, fontWeight: 500, color: 'var(--blue)', cursor: 'pointer', userSelect: 'none' }}>⚙ Настройки пильного центра «{pr.name}»{own ? '' : ' — только просмотр'}</summary>
+            <div style={{ marginTop: 8 }}>
+              <BeamSawSettings key={pr.id} prod={pr} readOnly={!own}
+                intro={own ? 'Те же настройки, что в кабинете производства → Пильный центр: меняются здесь и там сразу. После изменения нажмите «Заново» в конфигурации — раскрой пересчитается по новым правилам.'
+                  : `Правила пильного центра производства «${pr.name}». Меняет их производство в своём кабинете.`}
+                onSaved={v => setProductions(list => list.map(x => (x.id === pr.id ? { ...x, beam_saw_settings: v } : x)))} />
+            </div>
+          </details>
+        )
+      })()}
       {beamSaw && (
         <p style={{ fontSize: 11, color: 'var(--blue)', margin: '-4px 0 8px', lineHeight: 1.4 }}>
           β Бета-тест. Полосы от большой к малой, только сквозные резы по уровням, остаток для захвата, узкие детали с запасом (✂ — подрезать до размера). Направление — как выбрано в конфигурации («авто» — как у производства); пропил, обрезка листа и остальные правила — свои, из настроек пильного центра {(() => { const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id); const bs = beamSettings(pr?.beam_saw_settings); return <>{pr ? `производства «${pr.name}»` : 'по умолчанию (производство не выбрано)'}: <b>рез {bs.kerf} мм, отступы ←{bs.trimLeft} →{bs.trimRight} ↑{bs.trimTop} ↓{bs.trimBottom}</b> {order.production_id ? '— подставлены в рез и отступы выше' : '(рез и отступы выше для пильного центра не используются)'}</> })()}.

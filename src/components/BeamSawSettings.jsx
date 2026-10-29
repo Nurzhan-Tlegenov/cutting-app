@@ -10,7 +10,8 @@ export const BEAM_SQL_HINT = 'Настройки пильного центра �
 const str = v => (v == null ? '' : String(v))
 const clean = v => v.replace(/[^0-9.,]/g, '')
 
-export default function BeamSawSettings({ prod, onSaved }) {
+// readOnly — только посмотреть (раскрой у клиента: менять может владелец производства); intro — свой текст сверху
+export default function BeamSawSettings({ prod, onSaved, readOnly = false, intro = null }) {
   const raw = prod?.beam_saw_settings && typeof prod.beam_saw_settings === 'object' ? prod.beam_saw_settings : {}
   // в полях — настоящие значения (сохранённые или по умолчанию), а не серые подсказки: их можно просто исправить
   const filled = r => { const f = beamSettings(r); return { ...f, rotations: f.rotations == null ? '' : f.rotations, levelTrims: f.levelTrims.map(str) } }
@@ -19,6 +20,7 @@ export default function BeamSawSettings({ prod, onSaved }) {
   const s = beamSettings(v)
 
   const save = async next => {
+    if (readOnly) return
     const val = next || v
     const out = {}
     for (const [k, x] of Object.entries(val)) {
@@ -75,8 +77,9 @@ export default function BeamSawSettings({ prod, onSaved }) {
   return (
     <div>
       <p style={{ fontSize: 11.5, color: 'var(--blue)', margin: '0 0 6px', lineHeight: 1.4 }}>
-        β Бета-тест. Эти настройки подставляются в раскрой «Пильный центр β» у заказчиков, выбравших ваше производство. Все значения можно увеличить или уменьшить под ваш станок: нажмите на число и впишите своё. Сохраняется само.
+        {intro || 'β Бета-тест. Эти настройки подставляются в раскрой «Пильный центр β» у заказчиков, выбравших ваше производство. Все значения можно увеличить или уменьшить под ваш станок: нажмите на число и впишите своё. Сохраняется само.'}
       </p>
+      <fieldset disabled={readOnly} style={{ border: 'none', padding: 0, margin: 0, minWidth: 0, opacity: readOnly ? 0.75 : 1 }}>
       {msg && <p style={{ fontSize: 12, color: msg === 'Сохранено' ? 'var(--teal)' : 'var(--amber)', margin: '0 0 6px' }}>{msg}</p>}
 
       {head('Пила и лист')}
@@ -120,7 +123,7 @@ export default function BeamSawSettings({ prod, onSaved }) {
       {field('maxStrip', 'Максимальная ширина полосы, мм (0 — без ограничения)', 'Полоса 1-го уровня не шире этого: например 1500 — деталь 2600×600 ляжет так, чтобы полоса была 600, а не 2600. Деталь шире предела с обеих сторон всё равно режется (иначе её не уложить).')}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Направление полос</div>
       {seg('direction', [['y', 'Вдоль длинной (Y)'], ['x', 'Вдоль короткой (X)'], ['auto', 'Авто']])}
-      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Авто: есть детали с текстурой — вдоль волокон (Y), нет — пробуются оба направления. Детали с текстурой не поворачиваются при любом направлении.</div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Авто: на каждом листе пробуются оба направления, берётся лучшее. Детали с текстурой не поворачиваются при любом направлении — меняется только порядок резов.</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Последний лист — обрезок вдоль</div>
       {seg('lastDir', [['y', 'Длинной (Y)'], ['x', 'Короткой (X)'], ['any', 'Как выгоднее']])}
       <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-2px 0 6px' }}>Только для последнего листа: его полосы идут так, чтобы цельный остаток был вдоль выбранной стороны. Остальные листы — по направлению полос выше. Действует, когда в раскрое выбрано «Авто».</div>
@@ -143,6 +146,7 @@ export default function BeamSawSettings({ prod, onSaved }) {
       <button type="button" onClick={reset} style={{ marginTop: 8, padding: '6px 12px', borderRadius: 16, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
         Вернуть значения по умолчанию
       </button>
+      </fieldset>
     </div>
   )
 }
