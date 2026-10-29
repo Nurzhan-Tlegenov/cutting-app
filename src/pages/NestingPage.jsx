@@ -1503,13 +1503,14 @@ const SHEET_FIELDS = [
   ['ml', 'margin_left'], ['mr', 'margin_right'], ['mt', 'margin_top'], ['mb', 'margin_bottom'],
 ]
 const sheetFormOf = src => Object.fromEntries(SHEET_FIELDS.map(([k, col]) => [k, src?.[col] != null ? String(src[col]) : '']))
-function parseOffcuts(raw) {
+function parseOffcuts(raw, defMargin = '10') {
   let o = raw
   if (typeof raw === 'string') { try { o = JSON.parse(raw) } catch { o = null } }
   const items = Array.isArray(o?.items)
     ? o.items.map(it => ({ length: String(it.length ?? ''), width: String(it.width ?? ''), qty: String(it.qty ?? '1') }))
     : []
-  return { margin: o?.margin != null ? String(o.margin) : '10', items }
+  // у заказа отступ ещё не задан — последний, который пользователь ставил сам (идёт за аккаунтом)
+  return { margin: o?.margin != null && (items.length || Number(o.margin) !== 10) ? String(o.margin) : defMargin, items }
 }
 function offcutsValue(form) {
   const items = form.items
@@ -1903,7 +1904,8 @@ export default function NestingPage() {
   useBackClose(!!needProd, () => setNeedProd(null))
   const [sheetForm, setSheetForm] = useState(() => sheetFormOf(null))
   const [, setFmtTick] = useState(0)                 // свои форматы листа сохранены — перерисовать список
-  const [offForm, setOffForm] = useState(() => parseOffcuts(null))
+  const offMarginDef = () => { const v = getUserSettings(user).offcutMargin; return v != null && v !== '' ? String(v) : '10' }
+  const [offForm, setOffForm] = useState(() => parseOffcuts(null, offMarginDef()))
   const [offImport, setOffImport] = useState('')        // итог импорта обрезков из Excel (или ошибка)
   const offFileRef = useRef(null)
   const [sheetOpen, setSheetOpen] = useKeptState('sheetOpen', false)   // «Лист и обрезки» по умолчанию свёрнут
@@ -2010,7 +2012,7 @@ export default function NestingPage() {
       workSigRef.current = sig
       if (!initial) dropWork(id)   // заказ перечитан после отправки / изменения — прежний запас уже не про него
       setSheetForm(sheetFormOf(o))
-      setOffForm(parseOffcuts(o.offcuts))
+      setOffForm(parseOffcuts(o.offcuts, offMarginDef()))
       fetchProductions(o).then(() => setProdsReady(true))   // после этого — «Где будете резать?», если производство не выбрано
       setCuttingMethod(o.material_kind === 'hdf' ? 'guillotine' : (o.cutting_method || 'nesting'))   // ХДФ / ДВП режется только на пиле
       setBeamSaw(!!o.beam_saw && (o.material_kind === 'hdf' || (o.cutting_method || 'nesting') === 'guillotine'))
@@ -4061,7 +4063,7 @@ export default function NestingPage() {
                         Отступ от края, мм
                         <input type="text" inputMode="decimal" value={offForm.margin} disabled={offLocked}
                           onChange={e => { const v = e.target.value.replace(/[^0-9.,]/g, ''); setOffForm(f => ({ ...f, margin: v })) }}
-                          onBlur={() => commitOffcuts()}
+                          onBlur={() => { commitOffcuts(); saveUserSettings({ offcutMargin: offcutsValue(offForm).margin }, user) }}
                           style={inp} />
                       </label>
                     )}

@@ -671,20 +671,16 @@ export default function NewOrderPage() {
 
       <div style={{ marginBottom: 10 }}>
         <div className="card" data-tour="order-edges" style={{ padding: '8px 12px' }}>
-          <details>
-            <summary style={{ fontSize: 12, color: 'var(--text-hint)', cursor: 'pointer', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span>
+          {/* всегда открыто — виды кромки видны сразу */}
+          <div style={{ fontSize: 12, color: 'var(--text-hint)' }}><span>
                 <span style={{ fontWeight: 500, color: edgeNames.length ? 'var(--blue)' : 'var(--text-hint)' }}>
                   Виды кромки {edgeNames.length ? `(${edgeNames.length})` : ''}
                 </span>
                 {activeEdge && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--blue)' }}>· активная: {activeEdge}</span>}
-              </span>
-              <span style={{ fontSize: 10, color: 'var(--text-hint)' }}>▼</span>
-            </summary>
-            <div style={{ marginTop: 8 }}>
-              <EdgeTypes edgeNames={edgeNames} edgeTypes={edgeTypes} activeEdge={activeEdge} onNames={setEdgeNames} onTypes={setEdgeTypes} onSetActive={setActiveEdge} />
-            </div>
-          </details>
+              </span></div>
+          <div style={{ marginTop: 8 }}>
+            <EdgeTypes edgeNames={edgeNames} edgeTypes={edgeTypes} activeEdge={activeEdge} onNames={setEdgeNames} onTypes={setEdgeTypes} onSetActive={setActiveEdge} />
+          </div>
         </div>
       </div>
 
