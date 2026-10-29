@@ -15,9 +15,19 @@ function pathOf(url) {
   return p.replace(/\/[0-9a-f-]{20,}.*/i, '/…')
 }
 
-/** Записать один запрос: url, время (мс), успех */
-export function recordRequest(url, ms, ok) {
-  if (off) return
+// Время честное, только если приложение всё время запроса было на экране: свёрнутое приложение и уснувший телефон
+// замораживают ответ на минуты (так в первых замерах получалось «худший ответ 328 с»). Каждое сворачивание/разворачивание
+// меняет «эпоху» — запрос, начатый в другой эпохе или в фоне, не считается. Без сети — тоже (это не база тормозит).
+let epoch = 0
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { epoch++ })
+const onScreen = () => typeof document === 'undefined' || document.visibilityState === 'visible'
+/** Метка начала запроса (для recordRequest) */
+export const perfMark = () => (onScreen() && (typeof navigator === 'undefined' || navigator.onLine !== false) ? epoch : -1)
+
+/** Записать один запрос: url, время (мс), успех, метка начала (perfMark) */
+export function recordRequest(url, ms, ok, mark = epoch) {
+  if (off || mark < 0 || mark !== epoch || !onScreen()) return
+  if (ms > 60000) return                                    // минута и дольше — зависший запрос / сон телефона, не скорость базы
   const p = pathOf(url)
   if (!p || p.includes('perf_samples')) return           // сами сводки не меряем
   // файлы (модели, картинки) и функции (уведомления) идут долго по своей природе — в скорость базы не считаем,
