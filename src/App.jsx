@@ -47,6 +47,7 @@ import PostPage from './pages/PostPage'
 import HelpPage from './pages/HelpPage'
 import TasksPage from './pages/TasksPage'
 import StockPage from './pages/StockPage'
+import { startBackupTimer } from './lib/stockBackup'
 import PostAccessPage from './pages/PostAccessPage'
 import LoadPage from './pages/LoadPage'
 import TourOverlay from './components/TourOverlay'
@@ -113,6 +114,7 @@ function ProtectedRoute({ children }) {
 
 function AppRoutes() {
   const { user, loading, cabinet } = useAuth()
+  if (user) startBackupTimer()            // автокопия склада остатков в файл — на компьютерах, где её включили
   if (loading) return <CncLoader full label="Открываем приложение…" />
   const home = cabinet === 'production' ? '/production' : '/orders'   // с чего начинается кабинет
   return (

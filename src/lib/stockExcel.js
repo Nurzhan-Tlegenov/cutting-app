@@ -68,8 +68,8 @@ export async function readStockFile(file) {
 const STATUS = { free: 'на складе', reserved: 'в резерве', used: 'списан' }
 const d = iso => (iso ? new Date(iso).toLocaleDateString('ru-RU') : '')
 
-/** Выгрузить склад в .xlsx: лист «Остатки» и лист «Журнал» (если передан) */
-export async function exportStockXlsx(rows, events, prodName) {
+/** Склад в .xlsx: лист «Остатки» и лист «Журнал» -> ArrayBuffer */
+export async function buildStockXlsx(rows, events) {
   const XLSX = await importRetry(() => import('@e965/xlsx'))
   const head = ['№', 'Длина', 'Ширина', 'Кол-во', 'Материал', 'Толщина', 'Ячейка', 'Примечание', 'Статус', 'Списан', 'Бирка выпущена', 'Внесён']
   const data = rows.map(r => [r.id, Number(mm(r.length)), Number(mm(r.width)), r.qty, r.material || '', r.thickness ?? '', r.cell || '', r.note || '',
@@ -83,9 +83,16 @@ export async function exportStockXlsx(rows, events, prodName) {
     ev['!cols'] = [17, 10, 18, 60, 30].map(w => ({ wch: w }))
     XLSX.utils.book_append_sheet(wb, ev, 'Журнал')
   }
-  const name = `Остатки ${String(prodName || '').replace(/[\\/:*?"<>|]+/g, ' ').trim()} ${new Date().toISOString().slice(0, 10)}.xlsx`.replace(/\s+/g, ' ')
-  const blob = new Blob([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-  const url = URL.createObjectURL(blob)
+  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+}
+export const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+export const stockFileName = prodName => `Остатки ${String(prodName || '').replace(/[\\/:*?"<>|]+/g, ' ').trim()}.xlsx`.replace(/\s+/g, ' ')
+
+/** Скачать склад в .xlsx (с датой в имени) */
+export async function exportStockXlsx(rows, events, prodName) {
+  const buf = await buildStockXlsx(rows, events)
+  const name = stockFileName(prodName).replace(/\.xlsx$/, ` ${new Date().toISOString().slice(0, 10)}.xlsx`)
+  const url = URL.createObjectURL(new Blob([buf], { type: XLSX_TYPE }))
   const a = document.createElement('a'); a.href = url; a.download = name
   document.body.appendChild(a); a.click(); a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 4000)

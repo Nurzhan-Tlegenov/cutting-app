@@ -16,7 +16,8 @@ import {
   stockInfo, stockList, stockEvents, stockJournal, stockAdd, stockEdit, stockCell, stockRecut, stockWriteoff, stockRestore, stockDelete,
   stockSetSettings, stockAllEvents, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
 } from '../lib/stock'
-import { readStockFile, exportStockXlsx } from '../lib/stockExcel'
+import { readStockFile, exportStockXlsx, stockFileName } from '../lib/stockExcel'
+import { backupSupported, backupConf, chooseBackupFile, setBackupHours, stopBackup, backupPermission, runBackup, BACKUP_HOURS } from '../lib/stockBackup'
 
 const pill = on => ({ padding: '6px 11px', borderRadius: 16, border: 'none', fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap', background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
 const btn = kind => ({ padding: '8px 14px', borderRadius: 20, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : kind === 'danger' ? '0.5px solid var(--danger)' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : kind === 'danger' ? 'var(--danger)' : 'var(--text)' })
@@ -128,6 +129,7 @@ export default function StockPage() {
             setExporting(false)
           }}>{exporting ? '…' : '⬇ В Excel'}</button>
         </div>
+        <BackupBox pid={pid} prodName={info.name} />
         {imp && <ImportPreview imp={imp} pid={pid} materials={materials} onClose={() => setImp(null)} onSaved={load} />}
         {adding && <AddRows pid={pid} materials={materials} cells={cells} onClose={() => setAdding(false)} onSaved={load} />}
 
@@ -240,6 +242,59 @@ function AddRows({ pid, materials, cells, onClose, onSaved }) {
         <button type="button" disabled={busy} style={{ ...btn('main'), flex: 1 }} onClick={save}>{busy ? 'Сохраняю…' : `Сохранить${ready.length ? ` · ${ready.length} стр., ${ready.reduce((s, r) => s + Math.max(1, Math.round(num(r.qty) || 1)), 0)} шт` : ''}`}</button>
         <button type="button" style={btn()} onClick={onClose}>Закрыть</button>
       </div>
+    </div>
+  )
+}
+
+/** Автокопия склада в файл на компьютере: выбрать файл, как часто, состояние */
+function BackupBox({ pid, prodName }) {
+  const [conf, setConf] = useState(() => backupConf(pid))
+  const [open, setOpen] = useState(false)
+  const [perm, setPerm] = useState('')
+  const [msg, setMsg] = useState('')
+  const ok = backupSupported()
+  useEffect(() => {
+    const on = e => { if (e.detail === pid) setConf(backupConf(pid)) }
+    window.addEventListener('stock-backup', on)
+    return () => window.removeEventListener('stock-backup', on)
+  }, [pid])
+  useEffect(() => { let alive = true; if (ok && conf) backupPermission(pid).then(p => { if (alive) setPerm(p) }); return () => { alive = false } }, [pid, ok, conf])
+  const res = r => setMsg(r.error === 'need-permission' ? 'Браузер просит разрешение — нажмите «Разрешить запись».' : r.error ? 'Не получилось: ' + r.error : r.skipped ? 'Изменений не было — файл уже свежий.' : 'Копия сохранена.')
+  const choose = async () => {
+    setMsg('')
+    try { res(await chooseBackupFile(pid, prodName, stockFileName(prodName))); setPerm('granted') } catch (e) { if (e?.name !== 'AbortError') setMsg('Не получилось: ' + String(e?.message || e)) }
+  }
+  const need = conf && perm && perm !== 'granted'
+  const t = iso => (iso ? new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—')
+  return (
+    <div style={{ marginBottom: 10, fontSize: 12.5 }}>
+      <button type="button" onClick={() => setOpen(v => !v)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: need ? 'var(--amber)' : 'var(--text-muted)', fontSize: 12.5, textAlign: 'left' }}>
+        💾 Автокопия в файл: {conf ? `${conf.file} · ${(BACKUP_HOURS.find(h => h[0] === conf.hours) || ['', ''])[1]} · последняя ${t(conf.savedAt)}${need ? ' · нужно разрешение' : ''}` : 'выключена'} {open ? '▴' : '▾'}
+      </button>
+      {open && (
+        <div className="card" style={{ marginTop: 6 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 8px' }}>
+            Резервная копия склада у вас на компьютере: файл Excel (остатки и журнал) сам перезаписывается, пока приложение открыто. Пишется только если на складе что-то поменялось и в свободную минуту — работе не мешает.
+          </p>
+          <p style={{ fontSize: 12, margin: '0 0 8px', padding: '6px 8px', borderRadius: 8, background: 'var(--bg2)' }}>
+            Работает на компьютере в браузерах <b>Chrome, Edge, Яндекс.Браузер, Opera</b>. В Firefox, Safari и на телефоне автокопии нет — там скачивайте склад кнопкой «⬇ В Excel».
+            {' '}Файл удобно положить в папку облака (Яндекс.Диск, Google Диск, OneDrive) — копия будет и вне компьютера.
+          </p>
+          {!ok ? <p style={{ fontSize: 12.5, color: 'var(--amber)' }}>В этом браузере автокопия недоступна.</p> : <>
+            {conf && <label style={{ ...lbl, marginBottom: 8, maxWidth: 260 }}>Как часто перезаписывать
+              <select value={conf.hours} onChange={e => setBackupHours(pid, Number(e.target.value))} style={{ padding: 6, fontSize: 13 }}>{BACKUP_HOURS.map(([h, l]) => <option key={h} value={h}>{l}</option>)}</select></label>}
+            {need && <p style={{ fontSize: 12, color: 'var(--amber)', margin: '0 0 6px' }}>После перезапуска браузера он один раз спрашивает разрешение на запись в файл.</p>}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {need && <button type="button" style={btn('main')} onClick={async () => { const p = await backupPermission(pid, true); setPerm(p); if (p === 'granted') res(await runBackup(pid)) }}>Разрешить запись</button>}
+              <button type="button" style={conf ? btn() : btn('main')} onClick={choose}>{conf ? 'Другой файл' : 'Выбрать файл и включить'}</button>
+              {conf && !need && <button type="button" style={btn()} onClick={async () => res(await runBackup(pid, { force: true }))}>Сохранить сейчас</button>}
+              {conf && <button type="button" style={btn()} onClick={async () => { await stopBackup(pid); setMsg('Автокопия выключена. Файл остался на компьютере.') }}>Выключить</button>}
+            </div>
+            <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Настраивается на каждом компьютере отдельно. По умолчанию — каждые 3 часа.</p>
+          </>}
+          {msg && <p style={{ fontSize: 12.5, margin: '6px 0 0' }}>{msg}</p>}
+        </div>
+      )}
     </div>
   )
 }
