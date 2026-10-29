@@ -626,7 +626,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
             })}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>В коде: {remQrText(t, remInfo(rem))}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>По этому коду остаток потом можно будет найти и учесть на складе деловых остатков.</div>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>У остатка со склада в код сам добавляется его номер (R128): скан бирки сразу открывает карточку остатка. Элементы «Ячейка хранения» и «Номер остатка» заполняются у остатков со склада.</div>
         </div>
       )}
       {used.has('qr') && !rem && (
@@ -1147,7 +1147,7 @@ export function LabelSettingsPage() {
             <input type="checkbox" checked={!!tpl.offcuts} onChange={e => applyTpl({ ...tpl, offcuts: e.target.checked })} style={{ width: 18, height: 18 }} />
             Печатать бирки на деловые остатки
           </label>
-          <RemLabelSetup key="rem" tpl={tpl} onChange={applyTpl} sample={{ order: sample.order, mat: sample.mat, si: 0, o: { w: 612, h: 1250 }, client: 'Иван Петров' }} previewEl={desk ? previewEl : null} />
+          <RemLabelSetup key="rem" tpl={tpl} onChange={applyTpl} sample={{ order: sample.order, mat: sample.mat, si: 0, o: { w: 612, h: 1250 }, client: 'Иван Петров', cell: 'А-3', stockId: 128 }} previewEl={desk ? previewEl : null} />
         </>
       )}
   </>)

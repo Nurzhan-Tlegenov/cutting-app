@@ -51,6 +51,7 @@ export const stockRecut = (id, length, width, reason) => call('stock_recut', { p
 export const stockWriteoff = (id, qty, kind, reason) => call('stock_writeoff', { p_id: id, p_qty: qty, p_kind: kind, p_reason: reason || '' })
 export const stockRestore = (id, reason = null) => call('stock_restore', { p_id: id, p_reason: reason })
 export const stockDelete = (id, reason = null) => call('stock_delete', { p_id: id, p_reason: reason })
+export const stockLabeled = ids => call('stock_labeled', { p_ids: ids })
 export const stockSetSettings = (prodId, settings) => call('stock_settings_set', { p_prod: prodId, p_settings: settings })
 
 // причины списания
@@ -89,4 +90,10 @@ export function eventText(e) {
     case 'delete': return `Удалён насовсем: ${sz(b)}${b.material ? `, ${b.material}` : ''}`
     default: return e.action
   }
+}
+
+/** Номер остатка склада из QR-кода бирки (OSTATOK;R123;…) или null */
+export function remnantIdFromQr(text) {
+  const m = /^\s*OSTATOK\W+R(\d+)\b/i.exec(String(text || ''))
+  return m ? Number(m[1]) : null
 }

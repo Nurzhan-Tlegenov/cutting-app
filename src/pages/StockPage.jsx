@@ -8,13 +8,15 @@ import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
+import QrCamera from '../components/QrCamera'
+import { getLabelTpl, buildStockLabelsPdf, remTplOf } from '../lib/labelMaker'
 import { useBackClose } from '../lib/backStack'
 import { myProduction } from '../lib/productionApi'
 import { myWorkplaces, workPid, prodView } from '../lib/workplaces'
 import { supabase } from '../lib/supabase'
 import {
   stockInfo, stockList, stockEvents, stockJournal, stockAdd, stockEdit, stockCell, stockRecut, stockWriteoff, stockRestore, stockDelete,
-  stockSetSettings, stockAllEvents, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
+  stockSetSettings, stockAllEvents, stockLabeled, remnantIdFromQr, KINDS, kindText, sizeText, num, normMaterial, eventText, dateText, dayText,
 } from '../lib/stock'
 import { readStockFile, exportStockXlsx, stockFileName } from '../lib/stockExcel'
 import { backupSupported, backupConf, chooseBackupFile, setBackupHours, stopBackup, backupPermission, runBackup, BACKUP_HOURS } from '../lib/stockBackup'
@@ -46,6 +48,33 @@ export default function StockPage() {
   const [showSet, setShowSet] = useState(false)
   const [imp, setImp] = useState(null)            // прочитанный файл Excel — ждёт подтверждения
   const [exporting, setExporting] = useState(false)
+  const [printing, setPrinting] = useState(false)   // выбор остатков для бирок
+  const [sel, setSel] = useState(() => new Set())
+  const [scan, setScan] = useState(false)
+  const [scanMsg, setScanMsg] = useState('')
+  const [pdfBusy, setPdfBusy] = useState('')
+  // бирки на остатки одним PDF (по бирке на штуку) — шаблоном «Бирка делового остатка»; потом отметка «бирка выпущена»
+  const printLabels = async list => {
+    if (!list.length) return
+    setPdfBusy('Готовлю PDF…')
+    try {
+      const { pdf, pages } = await buildStockLabelsPdf({ tpl: getLabelTpl(user), items: list, onProgress: (d, t) => setPdfBusy(`Бирки: ${d} из ${t}`) })
+      const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }))
+      const a = document.createElement('a'); a.href = url; a.download = `Бирки остатков ${new Date().toISOString().slice(0, 10)} (${pages} шт).pdf`
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 8000)
+      const r = await stockLabeled(list.map(x => x.id))
+      if (r.error) setError(r.error)
+      setPrinting(false); setSel(new Set())
+      await load()
+    } catch (e) { setError('Не удалось собрать PDF: ' + String(e?.message || e)) }
+    setPdfBusy('')
+  }
+  const onScan = text => {
+    const id = remnantIdFromQr(text)
+    if (!id) { setScanMsg('Это не бирка остатка со склада.'); return }
+    if (!(rows || []).some(r => r.id === id)) { setScanMsg(`Остаток №${id} не найден на этом складе.`); return }
+    setScan(false); setScanMsg(''); setTab(t => (t === 'journal' ? 'free' : t)); setOpenId(id)
+  }
   const edit = info?.access === 'edit'
 
   // какое производство: из ссылки, своё или рабочее место сотрудника
@@ -53,6 +82,12 @@ export default function StockPage() {
     if (pid) return
     let alive = true
     ;(async () => {
+      // открыли по скану бирки: склад того производства, чей это остаток
+      const rid = Number(new URLSearchParams(window.location.search).get('id'))
+      if (rid) {
+        const { data } = await supabase.from('remnants').select('production_id').eq('id', rid).maybeSingle()
+        if (data?.production_id) { if (alive) setPid(data.production_id); return }
+      }
       const own = await myProduction(user?.id)
       const w = await myWorkplaces()
       const wps = w.data || []
@@ -129,6 +164,43 @@ export default function StockPage() {
             setExporting(false)
           }}>{exporting ? '…' : '⬇ В Excel'}</button>
         </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          <button type="button" style={{ ...btn(), flex: 1, padding: '10px 12px', fontWeight: 600, borderColor: 'var(--blue)', color: 'var(--blue)' }} onClick={() => { setScanMsg(''); setScan(true) }}>📷 Сканировать бирку</button>
+          {edit && <button type="button" style={{ ...btn(), flex: 1, padding: '10px 12px', ...(printing ? { background: 'var(--blue-light)', borderColor: 'var(--blue)' } : {}) }} onClick={() => { setPrinting(v => !v); setSel(new Set()) }}>🏷 Бирки на остатки</button>}
+        </div>
+        {printing && (() => {
+          const noLabel = live.filter(r => !r.label_at), shownLive = shown.filter(r => r.status !== 'used'), picked = live.filter(r => sel.has(r.id))
+          const pcs = l => l.reduce((a, r) => a + (r.qty || 1), 0)
+          return (
+            <div className="card" style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Распечатать бирки — одним PDF, по бирке на каждую штуку</div>
+              {(() => { const its = remTplOf(getLabelTpl(user)).items.map(i => i.type), miss = [!its.includes('qr') && 'QR-кода (по нему скан открывает остаток)', !its.includes('cell') && 'ячейки хранения'].filter(Boolean)
+                return miss.length ? <p style={{ fontSize: 12, color: 'var(--amber)', margin: '0 0 6px' }}>В шаблоне бирки остатка нет {miss.join(' и ')}. Добавьте: Настройки производства → Бирки → «Бирка делового остатка».</p> : null })()}
+              <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>Шаблон — «Бирка делового остатка» (Настройки производства → Бирки). Отметьте остатки галочками в списке или возьмите готовый отбор. После PDF у остатков ставится «🏷 бирка выпущена».</p>
+              {pdfBusy ? <p style={{ fontSize: 13 }}>{pdfBusy}</p> : (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button type="button" disabled={!noLabel.length} style={btn('main')} onClick={() => printLabels(noLabel)}>Все без бирки · {pcs(noLabel)} шт</button>
+                  {(q || tab === 'nocell') && <button type="button" disabled={!shownLive.length} style={btn()} onClick={() => printLabels(shownLive)}>По отбору · {pcs(shownLive)} шт</button>}
+                  <button type="button" disabled={!picked.length} style={btn()} onClick={() => printLabels(picked)}>Отмеченные · {pcs(picked)} шт</button>
+                  <button type="button" style={btn()} onClick={() => setSel(new Set(shownLive.map(r => r.id)))}>Отметить показанные</button>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+        {scan && (
+          <div style={backdrop} onClick={() => setScan(false)}>
+            <div style={sheet} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}><span style={{ flex: 1, fontSize: 15, fontWeight: 600 }}>Наведите камеру на бирку остатка</span><button type="button" onClick={() => setScan(false)} style={{ border: 'none', background: 'none', fontSize: 22, color: 'var(--text-hint)', cursor: 'pointer' }}>×</button></div>
+              <QrCamera onCode={onScan} height={280} />
+              {scanMsg && <p style={{ fontSize: 13, color: 'var(--amber)', marginTop: 8 }}>{scanMsg}</p>}
+              <form style={{ display: 'flex', gap: 6, marginTop: 10 }} onSubmit={e => { e.preventDefault(); const v = e.currentTarget.elements.n.value.trim(); if (v) onScan(/^\d+$/.test(v) ? `OSTATOK;R${v}` : v) }}>
+                <input name="n" inputMode="numeric" placeholder="или номер остатка" style={{ ...inp, flex: 1 }} />
+                <button type="submit" style={btn()}>Открыть</button>
+              </form>
+            </div>
+          </div>
+        )}
         <BackupBox pid={pid} prodName={info.name} />
         {imp && <ImportPreview imp={imp} pid={pid} materials={materials} onClose={() => setImp(null)} onSaved={load} />}
         {adding && <AddRows pid={pid} materials={materials} cells={cells} onClose={() => setAdding(false)} onSaved={load} />}
@@ -152,12 +224,13 @@ export default function StockPage() {
           <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 6 }}>{shown.length} строк · {totalPcs} шт · {totalM2.toFixed(2)} м²</div>
           {!shown.length ? <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '18px 0' }}>{(rows || []).length ? 'Ничего не найдено.' : 'Склад пуст. Внесите остатки — строка за строкой, как детали в бланке заказа.'}</p> : (
             <div className="card" style={{ padding: 0 }}>
-              {shown.map((r, i) => <RemRow key={r.id} r={r} first={!i} onOpen={() => setOpenId(r.id)} />)}
+              {shown.map((r, i) => <RemRow key={r.id} r={r} first={!i} onOpen={() => setOpenId(r.id)}
+                pick={printing && r.status !== 'used' ? sel.has(r.id) : null} onPick={() => setSel(p => { const n = new Set(p); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n })} />)}
             </div>
           )}
         </>}
       </>}
-      {open && <RemCard r={open} edit={edit} cells={cells} materials={materials} settings={info?.settings || {}} onClose={() => setOpenId(null)} onChanged={async id => { await load(); if (id) setOpenId(id) }} />}
+      {open && <RemCard r={open} edit={edit} cells={cells} materials={materials} settings={info?.settings || {}} onClose={() => setOpenId(null)} onChanged={async id => { await load(); if (id) setOpenId(id) }} onPrint={() => printLabels([open])} printBusy={pdfBusy} />}
       {openId && rows && !open && <div className="modal-backdrop" onClick={() => setOpenId(null)} style={backdrop}><div style={sheet} onClick={e => e.stopPropagation()}><p style={{ fontSize: 14 }}>Остаток №{openId} не найден на этом складе — возможно, его удалили.</p><button type="button" style={btn()} onClick={() => setOpenId(null)}>Закрыть</button></div></div>}
       <BottomNav />
     </div>
@@ -165,9 +238,11 @@ export default function StockPage() {
 }
 
 /** Строка списка: №, размер, кол-во, материал, ячейка, бирка */
-function RemRow({ r, first, onOpen }) {
+function RemRow({ r, first, onOpen, pick, onPick }) {
   return (
-    <button type="button" onClick={onOpen} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 12px', border: 'none', borderTop: first ? 'none' : '0.5px solid var(--border)', background: 'transparent', textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', borderTop: first ? 'none' : '0.5px solid var(--border)' }}>
+    {pick != null && <input type="checkbox" checked={pick} onChange={onPick} style={{ width: 20, height: 20, flex: '0 0 auto', marginLeft: 10 }} />}
+    <button type="button" onClick={pick != null ? onPick : onOpen} style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 12px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}>
       <span style={{ fontSize: 11, color: 'var(--text-hint)', width: 34, flexShrink: 0 }}>№{r.id}</span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 14.5, fontWeight: 600 }}>{sizeText(r)}{r.qty > 1 && <span style={{ fontWeight: 500, color: 'var(--blue)' }}> × {r.qty} шт</span>}</span>
@@ -181,6 +256,7 @@ function RemRow({ r, first, onOpen }) {
         <span style={{ display: 'block', fontSize: 10.5, color: r.label_at ? 'var(--text-hint)' : 'var(--text-hint)', opacity: r.label_at ? 1 : 0.6 }}>{r.label_at ? `🏷 ${dayText(r.label_at)}` : 'без бирки'}</span>
       </span>
     </button>
+    </div>
   )
 }
 
@@ -351,7 +427,7 @@ const backdrop = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', 
 const sheet = { background: 'var(--bg)', width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', padding: '14px 16px calc(18px + env(safe-area-inset-bottom))' }
 
 /** Карточка остатка: крупно размер и ячейка, быстрые действия, журнал */
-function RemCard({ r, edit, cells, materials, settings, onClose, onChanged }) {
+function RemCard({ r, edit, cells, materials, settings, onClose, onChanged, onPrint, printBusy }) {
   const [mode, setMode] = useState('')         // '' | cell | recut | writeoff | edit
   const [ev, setEv] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -396,6 +472,7 @@ function RemCard({ r, edit, cells, materials, settings, onClose, onChanged }) {
             {r.status === 'free' && <button type="button" style={bigBtn} onClick={() => go('recut')}>✂ Перерезать</button>}
             {!used && <button type="button" style={{ ...bigBtn, color: 'var(--danger)' }} onClick={() => go('writeoff')}>Списать</button>}
             {used && <button type="button" style={bigBtn} onClick={() => run(() => stockRestore(r.id))}>↩ Вернуть на склад</button>}
+            {!used && <button type="button" style={bigBtn} disabled={!!printBusy} onClick={onPrint}>🏷 {printBusy ? '…' : r.label_at ? 'Перепечатать бирку' : 'Напечатать бирку'}</button>}
             <button type="button" style={bigBtn} onClick={() => go('edit')}>✎ Исправить</button>
           </div>
         )}

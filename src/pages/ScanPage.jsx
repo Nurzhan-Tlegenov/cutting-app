@@ -4,6 +4,7 @@ import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { lazyRetry } from '../lib/lazyRetry'
 import { resolveQr, qrLink } from '../lib/qrResolve'
+import { remnantIdFromQr } from '../lib/stock'
 import { hasModel } from '../lib/model3d'
 import { loadOrderModel } from '../lib/orderModel'
 import { orderTitle } from '../lib/orderUtils'
@@ -26,6 +27,8 @@ export default function ScanPage() {
     busy.current = true
     const link = qrLink(text)
     if (link) { navigate(link); return }                    // на бирке — ссылка на 3D-модель
+    const rem = remnantIdFromQr(text)
+    if (rem) { navigate(`/stock?id=${rem}`); return }        // бирка остатка со склада — его карточка
     setState({ step: 'find', text })
     const r = await resolveQr(text)
     if (r.error) { setState({ step: 'fail', text, error: r.error }); busy.current = false; return }
