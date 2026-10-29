@@ -16,6 +16,7 @@ import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
+import { parseEdgeTypes, cutDetail, edgeKey } from './edgeCut'
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
@@ -452,6 +453,21 @@ function nestedQty(mat, di) {
   }
   return m.get(di) || 0
 }
+/**
+ * Размер готовой детали (с кромкой): пильный размер (заготовка — с подрезкой / прифуговкой), минус прифуговка, плюс толщина
+ * кромки — с каждой закромленной стороны. Пример: пильный 827×120, прифуговка 1, кромка 0,5 вкруг → 826×119.
+ * d — строка заказа или уже заготовка (cutDetail: _raw — строка заказа). -> { l, w }
+ */
+export function finishedSize(order, d) {
+  const types = parseEdgeTypes(order?.edge_types)
+  const raw = d?._raw || d || {}
+  const cut = d?._raw ? d : cutDetail(raw, types) || raw
+  let l = Number(cut.length) || 0, w = Number(cut.width) || 0
+  const add = side => { const k = edgeKey(raw['edge_' + side]); if (!k) return 0; const t = types[k] || {}; return (Number(t.t) || 0) - (Number(t.joint) || 0) }
+  l += add('top') + add('bottom'); w += add('left') + add('right')
+  return { l: Math.round(l * 100) / 100, w: Math.round(w * 100) / 100 }
+}
+
 export function labelInfo(order, mat, si, pi, part = null) {
   // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
   const sh = mat.sheets[si], p = part || sh.placed[pi], d = mat.details[p.detailIndex] || {}, m = detailMeta(d) || {}
@@ -494,9 +510,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
       const has = t > 0 && new RegExp(`(^|[^0-9.,])${String(t).replace('.', '[.,]')}([^0-9]|$)`).test(nm)
       return [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · ') })(),
     length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW,
-    // готовая деталь (с кромкой) — как в заказе; в раскрой она идёт с подрезкой / прифуговкой (d — уже заготовка, _raw — строка заказа)
-    finX: (() => { const r = d._raw || d, w = Number(r.width) || DW, l = Number(r.length) || DL; return even ? w : l })(),
-    finY: (() => { const r = d._raw || d, w = Number(r.width) || DW, l = Number(r.length) || DL; return even ? l : w })(), thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
+    ...(() => { const f = finishedSize(order, d); return { finX: even ? f.w : f.l, finY: even ? f.l : f.w } })(), thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
