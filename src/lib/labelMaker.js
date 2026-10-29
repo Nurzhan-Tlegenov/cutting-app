@@ -988,9 +988,8 @@ export function remInfo(x) {
 export function remQrText(rt, info) {
   const x = info.rem || {}, q = rt.remQr || { parts: ['size', 'material', 'order', 'date'], sep: ';' }
   const val = { size: `${r1(x.o?.h)}x${r1(x.o?.w)}x${info.thickness || ''}`, material: info.materialName, order: info.order, client: info.client, date: info.date, sheet: info.sheet ? `L${info.sheet}` : '' }
-  // размер в коде есть всегда (по нему остаток вносится на склад сканом бирки); остаток со склада — ещё и его номер (R123)
-  const parts = (q.parts || []).includes('size') ? q.parts : ['size', ...(q.parts || [])]
-  return ['OSTATOK', ...(x.stockId ? [`R${x.stockId}`] : []), ...parts.map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(q.sep || ';')
+  // что в коде — решает производство (части в шаблоне); у остатка со склада добавляется его номер (R123)
+  return ['OSTATOK', ...(x.stockId ? [`R${x.stockId}`] : []), ...(q.parts || []).map(k => String(val[k] ?? '').trim()).filter(Boolean)].join(q.sep || ';')
 }
 /**
  * Карта листа для бирки остатка: где на листе этот остаток (закрашен) — кто клеит руками, видит, куда клеить.

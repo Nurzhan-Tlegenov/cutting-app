@@ -102,7 +102,8 @@ export function remnantIdFromQr(text) {
  * Бирка остатка из раскроя: OSTATOK<разделитель>1250x612x16<разделитель>материал<разделитель>заказ…
  * Части и разделитель выбирает пользователь в шаблоне; размер в коде есть всегда. Узнаём по виду:
  * размер — «ДxШ(xТ)», дата — дд.мм.гггг, номер карты — L5, остальной текст по порядку: материал, затем заказ / заказчик.
- * -> { key, length, width, thickness, material, texts, date, sheet } | null
+ * Состав кода выбирает производство: чего в коде нет, сотрудник впишет сам.
+ * -> { key, length, width, thickness, material, texts, date, sheet } | null (не бирка остатка)
  */
 export function parseRemnantQr(text) {
   const t = String(text || '').trim()
@@ -120,7 +121,7 @@ export function parseRemnantQr(text) {
     out.texts.push(k)
   }
   out.material = out.texts[0] || ''
-  return out.length > 0 && out.width > 0 ? out : null
+  return out
 }
 /** Уже внесённый на склад остаток с этой бирки */
 export async function stockByKey(prodId, key) {

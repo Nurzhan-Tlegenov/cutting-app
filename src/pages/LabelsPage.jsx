@@ -622,12 +622,11 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {REM_QR_PARTS.map(([k, l]) => {
               const q = t.remQr || { parts: [], sep: ';' }, on = q.parts.includes(k)
-              if (k === 'size') return <button key={k} type="button" style={chip(true)} title="Размер в коде всегда — по нему остаток вносится на склад" disabled>✓ {l} · всегда</button>
               return <button key={k} type="button" style={chip(on)} onClick={() => onChange({ ...tpl, remQr: { ...q, parts: on ? q.parts.filter(x => x !== k) : REM_QR_PARTS.map(([x]) => x).filter(x => x === k || q.parts.includes(x)) } })}>{l}</button>
             })}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>В коде: {remQrText(t, remInfo(rem))}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Размер в коде есть всегда. Сотрудник сканирует бирку (Производство → Деловые остатки → «📷 Сканировать бирку»): остаток с размером, материалом и заказом вносится на склад, остаётся вписать ячейку. Повторный скан открывает этот же остаток.</div>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Состав кода выбираете вы. Сотрудник сканирует бирку (Производство → Деловые остатки → «📷 Сканировать бирку»): что есть в коде — размер, материал, толщина, заказ — подставляется само, остальное он впишет; остаётся указать ячейку. Удобно держать в коде размер и материал, а номер заказа — чтобы потом найти остаток от того же заказа (та же партия плиты, текстура). Повторный скан открывает этот же остаток.</div>
         </div>
       )}
       {used.has('qr') && !rem && (
