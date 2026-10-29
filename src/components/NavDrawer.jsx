@@ -238,6 +238,7 @@ export default function NavDrawer({ notices, unread }) {
     { icon: I.globe, label: 'Заказы всех клиентов', on: pathname === '/all-orders', act: () => go('/all-orders') },
     { icon: I.factory, label: 'Заказы всех производств', on: pathname === '/all-productions', act: () => go('/all-productions') },
     { icon: I.gear, label: 'Постпроцессоры по запросу', on: pathname === '/post-access', act: () => go('/post-access') },
+    { icon: I.chart, label: 'Нагрузка', on: pathname === '/load', act: () => go('/load') },
     { icon: I.inbox, label: 'Обращения и файлы', on: false, act: () => go('/messages') },
   ] })
 
