@@ -14,7 +14,7 @@ import { beamSettings, maxLevels, trimAt } from './beamSaw'
 import { groupLinesOnSheet, posOfInstance } from './partGroups'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
-export const BEAM_SAW_VERSION = 'β0.21'
+export const BEAM_SAW_VERSION = 'β0.22'
 
 const EPS = 0.5
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
@@ -531,6 +531,26 @@ function stairFree(node) {
   return best
 }
 
+// «Мелкие — в центр» (конфигурация раскроя): узкие полосы 1-го уровня (не шире «узкой полосы») — не у края листа, а в
+// середине: широкие полосы расходятся к краям, узкие встают между ними так, чтобы от края листа до них было не меньше
+// «до края» (если широких полос на это хватает). Порядок самих широких и самих узких — как был.
+function narrowToMiddle(slots, A, kerf, mid) {
+  const narrow = sl => sl.a - kerf <= mid.side + EPS
+  const N = slots.filter(narrow), W = slots.filter(sl => !narrow(sl))
+  if (!N.length || !W.length) return slots
+  const sumN = N.reduce((t, sl) => t + sl.a, 0), U = slots.reduce((t, sl) => t + sl.a, 0)
+  const target = (U - sumN) / 2
+  let best = 0, bestK = Infinity, P = 0
+  for (let i = 0; i <= W.length; i++) {
+    // нарушение «до края» (от начала листа и от дальнего края) — главное, потом — ближе к середине уложенного
+    const bad = Math.max(0, mid.gap - P) + Math.max(0, P + sumN - (A - mid.gap))
+    const k = bad * 1e6 + Math.abs(P - target)
+    if (k < bestK) { bestK = k; best = i }
+    if (i < W.length) P += W[i].a
+  }
+  return [...W.slice(0, best), ...N, ...W.slice(best)]
+}
+
 // Обход дерева: координаты деталей и линии/счёт резов. 1-й уровень (полосы) — по настройке «Порядок полос»,
 // глубже — по готовности. stair — 1-й уровень «ступенькой» (форматник, последний лист).
 function layout(node, ox, oy, s, out, stair = false) {
@@ -538,6 +558,7 @@ function layout(node, ox, oy, s, out, stair = false) {
   const packed = packGroups(node.slots, node.B)
   node.slots = unpackGroups(node.level === 1 && stair ? orderStair(packed, node.B)
     : node.level === 1 && s.stripOrder === 'wnw' ? orderSlots(packed, 'wnw') : orderByReady(packed, node.level))
+  if (node.level === 1 && s.narrowMid) node.slots = narrowToMiddle(node.slots, node.A, out.kerf, s.narrowMid)
   let pos = node.trim
   if (node.trim > EPS) out.cuts++
   for (const sl of node.slots) {
@@ -821,6 +842,8 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   const s = { ...beamSettings(params.beamSaw), ...(cfgDir ? { direction: cfgDir } : {}) }
   // «ступенька» на последнем листе — только у форматника (liveNesting передаёт её сам; в настройках пильного центра её нет)
   s.stairLast = !!params.beamSaw?.stairLast
+  // «Мелкие — в центр» с «узкой полосой до …» — узкие полосы в середину листа (narrowToMiddle)
+  if (params.smallPartsToCenter && Number(params.smallPartsMaxSide) > 0) s.narrowMid = { side: Number(params.smallPartsMaxSide), gap: Math.max(0, Number(params.smallPartsEdgeGap) || 0) }
   const kerf = s.kerf
   const sheetL = Number(params.sheetL) || 0, sheetW = Number(params.sheetW) || 0
   const marginL = s.trimLeft, marginR = s.trimRight, marginT = s.trimTop, marginB = s.trimBottom
