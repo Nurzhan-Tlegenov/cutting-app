@@ -16,6 +16,7 @@ import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { adminBeta, adminSetBeta, BETA_FEATURES } from '../lib/beta'
 import { adminPostAccess, adminUserPosts, grantPost, revokePost, setRequestStatus } from '../lib/postAccess'
 import { sendReply } from '../lib/messages'
+import WriteToUser, { WriteToUserDialog } from '../components/WriteToUser'
 import { COUNTRY_NAMES } from '../lib/phoneCountries'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
@@ -40,6 +41,7 @@ function VerifyBadge({ r }) {
 
 export default function UsersPage() {
   const { user, profile } = useAuth()
+  const [notifyU, setNotifyU] = useState(null)   // выдан постпроцессор — окно «написать пользователю»
   const [writeTo, setWriteTo] = useState(null)   // кому мастер пишет личное сообщение (id пользователя)
   const [draft, setDraft] = useState('')
   const [locEdit, setLocEdit] = useState(null)   // { id, country, city } — мастер правит страну и город пользователя
@@ -208,7 +210,8 @@ export default function UsersPage() {
               const wa = digits(u.whatsapp) || tel
     return (
                 <div key={u.id} className="card" data-focus={`nu:${u.id}`} style={{ padding: '8px 12px' }}>
-                  <button type="button" onClick={() => flip(u.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button type="button" onClick={() => flip(u.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, width: '100%', background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || 'Без имени'}{u.id === user?.id ? ' (вы)' : ''}</span>
                     {isProd(u) && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>произв.</span>}
                     {betaOf(u).length > 0 && <span title="Бета-тестер" style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)', flexShrink: 0 }}>β</span>}
@@ -221,6 +224,10 @@ export default function UsersPage() {
                     <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{landOf(u) === '—' ? '—' : `${landOf(u)}${townOf(u) === '—' ? '' : ' · ' + townOf(u)}`}</span>
                     <span style={{ color: 'var(--text-hint)', fontSize: 14, transform: openU.has(u.id) ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }}>›</span>
                   </button>
+                  {u.id !== user?.id && <WriteToUser id={u.id} name={u.full_name || u.phone || ''} label="✉"
+                    style={{ width: 30, height: 26, borderRadius: 13, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', fontSize: 13, cursor: 'pointer', flexShrink: 0, padding: 0 }}
+                    onSent={() => setInfo(`Сообщение отправлено: ${u.full_name || u.phone || 'пользователю'}.`)} />}
+                  </div>
                   {openU.has(u.id) && <div style={{ marginTop: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -313,6 +320,7 @@ export default function UsersPage() {
                                 act(async () => {
                                   const r = on ? await revokePost(p.id, u.id) : await grantPost(p.id, u.id, 'выдан в «Пользователи»')
                                   if (!r.error && !on) for (const q of (posts.asks.get(u.id) || []).filter(q => q.post_id === p.id || !q.post_id)) await setRequestStatus(q.id, 'done')
+                                  if (!r.error && !on) setNotifyU({ id: u.id, name: u.full_name || u.phone || '', post: p.name })   // сразу — написать, что выдан
                                   return r
                                 })
                               }}
@@ -637,6 +645,9 @@ export default function UsersPage() {
           </div>
         </>
       )}
+      {notifyU && <WriteToUserDialog to={notifyU} post={notifyU.post}
+        text={`Здравствуйте! Выдал вам постпроцессор «${notifyU.post}». Он появился в настройках ЧПУ (Профиль → Настройки ЧПУ → станок). Попробуйте выпустить программу и напишите, как отработал станок.`}
+        onClose={() => setNotifyU(null)} onSent={() => setInfo(`Сообщение отправлено: ${notifyU.name || 'пользователю'}.`)} />}
       <BottomNav />
     </div>
   )

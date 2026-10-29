@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
+import WriteToUser, { WriteToUserDialog } from '../components/WriteToUser'
 import { adminPostAccess, grantPost, revokePost, setRequestStatus, deleteRequest, requestProgram } from '../lib/postAccess'
 
 const dt = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—')
@@ -80,6 +81,7 @@ export default function PostAccessPage() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>{u.name}{u.prod ? <span style={{ color: 'var(--text-hint)', fontWeight: 400 }}> · {u.prod}</span> : null}</span>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{u.runs} раз · {ago(u.last)}</span>
+                <WriteToUser id={u.user_id} name={u.name} label="✉" />
               </div>
               <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
                 {(u.posts || []).map((x, i) => <span key={i} style={chip(x.shared ? 'var(--teal)' : 'var(--text-muted)', x.shared ? 'var(--teal-light)' : 'var(--bg2)')}>{x.shared ? '🔑 ' : ''}{x.name || '—'}</span>)}
@@ -96,6 +98,7 @@ export default function PostAccessPage() {
 /** Запрос производства: кто, что просит, пример программы; выдать / готово / отклонить */
 function Request({ r, posts, act }) {
   const [pick, setPick] = useState(r.post_id || '')
+  const [notify, setNotify] = useState(null)      // выдан постпроцессор — окно «написать пользователю» (название)
   const many = r.user_30d >= SUSPECT
   const download = async () => {
     const x = await requestProgram(r.id)
@@ -111,6 +114,7 @@ function Request({ r, posts, act }) {
     const g = await grantPost(pick, r.user_id, 'по запросу')
     if (g.error) { window.alert(g.error); return }
     await act(setRequestStatus(r.id, 'done'))
+    setNotify(p?.name || '')                     // сразу — написать пользователю, что постпроцессор выдан
   }
   return (
     <div className="card" style={{ padding: '10px 12px', border: r.status === 'new' ? '1px solid var(--blue)' : undefined, opacity: r.status === 'new' ? 1 : 0.7 }}>
@@ -139,8 +143,12 @@ function Request({ r, posts, act }) {
           </>
         )}
         {r.status !== 'new' && <button type="button" style={btn('var(--text-muted)')} onClick={() => act(setRequestStatus(r.id, 'new'))}>Вернуть в новые</button>}
+        <WriteToUser id={r.user_id} name={r.name} post={r.post_name || ''} />
         <button type="button" style={btn('var(--danger)')} onClick={() => { if (window.confirm('Удалить запрос?')) act(deleteRequest(r.id)) }}>Удалить</button>
       </div>
+      {notify != null && <WriteToUserDialog to={{ id: r.user_id, name: r.name }} post={notify}
+        text={`Здравствуйте! Выдал вам постпроцессор${notify ? ` «${notify}»` : ''}. Он появился в настройках ЧПУ (Профиль → Настройки ЧПУ → станок). Попробуйте выпустить программу и напишите, как отработал станок.`}
+        onClose={() => setNotify(null)} />}
       {!posts.length && r.status === 'new' && <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 4 }}>Сначала настройте постпроцессор под этот станок и добавьте его в каталог (🔑 у станка в настройках ЧПУ) — потом выдайте здесь.</div>}
     </div>
   )
@@ -159,6 +167,7 @@ function Access({ p, act }) {
               выдан {dt(a.granted_at)}{a.note ? ` (${a.note})` : ''} · программ: <b style={{ color: a.runs ? 'var(--teal)' : 'var(--text-muted)' }}>{a.runs}</b> · {ago(a.last)}{a.phone ? ` · ${a.phone}` : ''}
             </div>
           </div>
+          <WriteToUser id={a.user_id} name={a.name} post={p.name} label="✉" />
           <button type="button" style={btn('var(--danger)')} onClick={() => { if (window.confirm(`Отозвать «${p.name}» у ${a.name}?\nУ него и сотрудников его производства этот постпроцессор пропадёт.`)) act(revokePost(p.id, a.user_id)) }}>Отозвать</button>
         </div>
       ))}
