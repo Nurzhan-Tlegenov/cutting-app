@@ -59,7 +59,7 @@ function scoreOf(sheets, usableX, usableY) {
 export function recordEvent(hist, res, island, kind) {
   const t = Date.now() - hist.startedAt
   // via — чем найден: черновик / гибрид (пары → прямоугольники) / точная укладка по контурам / прямоугольный поиск
-  const via = res.seeded ? 'seed' : res.rough ? 'rough' : res.hybrid ? 'hybrid' : res.round !== undefined ? 'exact' : 'rect'
+  const via = res.lattice ? 'lattice' : res.seeded ? 'seed' : res.rough ? 'rough' : res.hybrid ? 'hybrid' : res.round !== undefined ? 'exact' : 'rect'
   hist.events.push({ t, kind, island, via, iter: res.iter || 0, mode: res.genome?.mode || null, ...scoreOf(res.sheets, res.usableX, res.usableY), sheets: res.sheets })
   if (hist.events.length > HIST_MAX_EVENTS) {
     // прореживаем старшую половину через один (первый и последние снимки остаются)

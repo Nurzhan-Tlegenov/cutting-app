@@ -21,6 +21,7 @@ import { fillConcavities } from './fillConcavities'
 import { gravityPolygons } from './gravity'
 import { planNestInHoles, expandNested, stripNested } from './nestInHoles'
 import { validateNesting } from './validateNesting'
+import { latticeNesting } from './latticeNesting'
 
 const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажатия «Стоп»
 
@@ -559,6 +560,14 @@ export async function fillOffcuts(params, offs, shaped, budget) {
 // (runNesting.seed — на экране не мелькнёт раскладка хуже исходной) и первым «мигрантом» (порядок деталей + сама
 // укладка). Номера деталей в листах — по details переданного params; id деталей выставляются заново по номеру
 // и порядку (`${di}_${q}`, как у buildPieces) — ручные правки и переносы их не ломают.
+function latticeFor(params) {
+  try {
+    const lat = latticeNesting(params)
+    if (!lat) return null
+    const bad = validateNesting({ sheets: lat.sheets, details: params.details, usableX: lat.usableX, usableY: lat.usableY, kerf: params.kerf }).errors.length
+    return bad ? null : lat
+  } catch (e) { console.warn('Решётка не удалась:', e); return null }
+}
 function seedInto(params, opts, sheetsIn) {
   const sheets = (sheetsIn || []).filter(sh => sh?.placed?.length)
   if (!sheets.length) return { params: { ...params, seed: undefined }, opts }
@@ -715,7 +724,16 @@ async function runLiveNestingRaw(params, opts = {}) {
   const seedSheets = Array.isArray(params.seed?.sheets) ? params.seed.sheets : null
   if (!offs.length) {
     ;({ params, opts } = seedInto(params, opts, seedSheets))
-    return await runCore(params, opts)
+    // одинаковые фигурные детали — решётка «ёлочкой» (latticeNesting.js): сразу на экран, поиск показывает только лучшее
+    const lat = latticeFor(params)
+    if (!lat) return await runCore(params, opts)
+    const offFirst = (params.cuttingMethod || 'nesting') === 'nesting'
+    const sc = r => liveScore(r.sheets, r.usableX, r.usableY, params.direction, offFirst)
+    const latSc = sc(lat)
+    const beats = r => r?.sheets?.length && liveBetter(sc(r), latSc)
+    opts.onProgress?.({ ...lat, iter: 0 })
+    const res = await runCore(params, { ...opts, onProgress: opts.onProgress ? r => { if (beats(r)) opts.onProgress(r) } : null })
+    return beats(res) ? res : { ...lat, iter: res?.iter || 0 }
   }
   params = { ...params, seed: undefined }
 

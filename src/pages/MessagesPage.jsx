@@ -1,5 +1,5 @@
 import { MenuButton } from '../components/NavDrawer'
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
@@ -11,6 +11,9 @@ import { adminProductionOrders } from '../lib/adminApi'
 import { productionExcludeStats } from '../lib/productionApi'
 import { orderTitle } from '../lib/orderUtils'
 import { markNewsSeen, adminNewsViews } from '../lib/activity'
+import { isNestingFileName } from '../lib/nestingFile'
+import { lazyRetry } from '../lib/lazyRetry'
+const NestingFileViewer = lazyRetry(() => import('../components/NestingFileViewer'))
 
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
 // у мастер-аккаунта — обращения и файлы для отладки от пользователей (видно, от кого), новости для всех.
@@ -77,6 +80,14 @@ export default function MessagesPage() {
     const r = await messagePayload(m.id)
     if (r.error) { setError(r.error); return }
     download(r.fileName, r.payload)
+  }
+  // мастер: файл раскроя из сообщения (или с компьютера) — открыть прямо здесь: карты листов и хронология с откатом
+  const [nestView, setNestView] = useState(null)   // { fileName, text }
+  const nestFileRef = useRef(null)
+  const openNesting = async m => {
+    const r = await messagePayload(m.id)
+    if (r.error) { setError(r.error); return }
+    setNestView({ fileName: r.fileName, text: r.payload })
   }
   const remove = async m => {
     if (!window.confirm('Удалить сообщение?')) return
@@ -156,6 +167,13 @@ export default function MessagesPage() {
 
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 10, paddingBottom: 2 }}>
         {FILTERS.map(([k, l]) => <button key={k} type="button" style={chip(filter === k)} onClick={() => setFilter(k)}>{l}</button>)}
+        {isMaster && <>
+          <span style={{ flex: 1 }} />
+          <button type="button" style={{ ...small, flex: '0 0 auto' }} title="Файл раскроя или истории раскроя (.json), присланный не через приложение"
+            onClick={() => nestFileRef.current?.click()}>👁 Раскрой из файла…</button>
+          <input ref={nestFileRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
+            onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setNestView({ fileName: f.name, text: await f.text() }) }} />
+        </>}
       </div>
 
       {list === null ? <CncLoader label="Загружаем сообщения…" compact /> : !shown.length ? (
@@ -211,6 +229,7 @@ export default function MessagesPage() {
                   )
                 })()}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  {isMaster && m.file_name && isNestingFileName(m.file_name) && <button type="button" style={{ ...small, color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => openNesting(m)}>👁 Открыть раскрой</button>}
                   {isMaster && m.file_name && <button type="button" style={{ ...small, color: 'var(--teal)', borderColor: 'var(--teal)' }} onClick={() => getFile(m)}>⬇ Скачать файл</button>}
                   {excl && (() => {
                     if (!allOrders) return <span style={{ fontSize: 12, color: 'var(--text-hint)', alignSelf: 'center' }}>ищем заказ…</span>
@@ -241,6 +260,7 @@ export default function MessagesPage() {
         </div>
       )}
       <BottomNav />
+      {nestView && <Suspense fallback={null}><NestingFileViewer fileName={nestView.fileName} text={nestView.text} onClose={() => setNestView(null)} /></Suspense>}
     </div>
   )
 }
