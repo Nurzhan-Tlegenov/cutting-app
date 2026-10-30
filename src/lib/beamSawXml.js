@@ -197,7 +197,9 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
       const tail = tailOffcut(node) ? node.slots[node.slots.length - 1] : null
       const before = node.slots.slice(0, -1).reduce((t, sl) => t + sl.a, 0)
       const partLines = node.slots.map(sl => {
-        const cut = sl === tail ? Math.max(sl.a - k, lReal - trim - before - k) : sl.a - k
+        // остаток в конце листа (торцовка в конце = 0): после него реза нет — станок ставит его вплотную к краю и без
+        // пропила за ним (иначе он сдвигал детали на пропил и торцовка начала выходила 22,8 вместо 18)
+        const cut = sl === tail ? Math.max(sl.a - k, lReal - trim - before - (layer === 1 ? 0 : k)) : sl.a - k
         const myId = ++nextId
         if (sl.item?.part) {
           code++
