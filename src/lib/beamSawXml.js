@@ -208,7 +208,9 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
         }
         if (sl.item?.offcut) {
           oc++
-          offRows.push({ code: `OC${oc}`, si, w: Math.round(sl.item.ow ?? sl.item.w - k), h: Math.round(sl.item.oh ?? sl.item.h - k) })
+          // размер на бирке — как остаток выходит со станка: вдоль реза — сам кусок (cut), поперёк — как в раскрое
+          const ow = sl.item.ow ?? sl.item.w - k, oh = sl.item.oh ?? sl.item.h - k
+          offRows.push({ code: `OC${oc}`, si, w: r1(node.axis === 'x' ? cut : ow), h: r1(node.axis === 'x' ? oh : cut) })
           kids.push({ leaf: true, id: myId, l: wReal, w: cut, layer: layer + 1, sl })
           return `      <part cut="${r1(cut)}" type="3" id="${myId}" code="OC${oc}" print_code="" />`
         }
