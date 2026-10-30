@@ -170,6 +170,48 @@ export function parseBdf(u8, opts = {}) {
     return out
   }
 
+  // свойства панели (запись 0x40b) — поля «ключ (4 байта) · значение»:
+  //   материалы: 1000000 — начало, 1000001 — название, 1000004 — вид (0 — плита, 2 — кромка), 1000005 — толщина (double);
+  //   торцы (по порядку сторон контура): 3000 — начало, 3001 — название («Гладкий торец»), 3002 — номер материала кромки (−1 — нет);
+  //   код детали (позиция) — короткая строка рядом с названием панели
+  const panelProps = (ob, title) => {
+    const b = ob.k.get(0x40b)?.[0]; if (!b) return { mats: [], edges: [], code: '' }
+    const [o, l] = b, end = o + l
+    const strAt = i => {
+      const n = dv.getUint32(i, true)
+      if (n < 1 || n > 200 || i + 4 + 2 * n > end) return null
+      let s = ''
+      for (let j = 0; j < n; j++) { const c = dv.getUint16(i + 4 + 2 * j, true); if (c < 0x20 || (c > 0x7e && c < 0x400) || c > 0x4ff) return null; s += String.fromCharCode(c) }
+      return s
+    }
+    const mats = [], edges = [], strs = []
+    for (let i = o; i + 8 <= end; i++) {
+      const key = dv.getUint32(i, true)
+      if (key === 1000001) {
+        const s = strAt(i + 4); if (s == null) continue
+        const m = { name: s.trim(), type: 0, thick: 0 }
+        let q = i + 8 + 2 * s.length
+        for (let g = 0; g < 80 && q + 8 <= end; g++, q++) {
+          const k2 = dv.getUint32(q, true)
+          if (k2 === 1000004) m.type = dv.getUint32(q + 4, true)
+          else if (k2 === 1000005) { m.thick = dv.getFloat64(q + 4, true); break }
+        }
+        mats.push(m); i += 7 + 2 * s.length; continue
+      }
+      if (key === 3001) {
+        const s = strAt(i + 4); if (s == null) continue
+        const q = i + 8 + 2 * s.length
+        const mi = q + 8 <= end && dv.getUint32(q, true) === 3002 ? dv.getInt32(q + 4, true) : -1
+        edges.push({ name: s, mat: mi }); i += 7 + 2 * s.length; continue
+      }
+      if (key >= 0x3e0 && key <= 0x3ff) { const s = strAt(i + 4); if (s != null) { strs.push({ key, s }); i += 7 + 2 * s.length } }
+    }
+    const ti = strs.findIndex(x => x.s === title)
+    const near = ti >= 0 ? [strs[ti - 1], strs[ti + 1]].filter(x => x && Math.abs(x.key - strs[ti].key) === 1) : []
+    const code = (near.find(x => x.s.trim().length <= 24) || {}).s?.trim() || ''
+    return { mats, edges, code }
+  }
+
   // ── обход: детали и крепёж ──
   const panels = [], fasteners = []
   const walk = (ob, layer, depth) => {
@@ -338,18 +380,39 @@ export function parseBdf(u8, opts = {}) {
     }
 
     const strs = u16strings(pn.ob)
-    const material = (strs.find(x => /\d\s*мм/i.test(x)) || strs[0] || '').trim()
-    // кромка: в свойствах торцы названы («Гладкий торец» — без кромки); к сторонам контура её пока не привязываем — сообщаем
-    const banded = strs.filter(x => /кромк|ABS|ПВХ|меламин/i.test(x))
-    if (banded.length) lostAdd(`${pn.ob.name}: кромка (${banded[0]})`, 'edge', banded.length)
+    const props = panelProps(pn.ob, pn.ob.name)
+    const material = (props.mats.find(m => m.type === 0)?.name || strs.find(x => /\d\s*мм/i.test(x)) || strs[0] || '').trim()
+    // кромка: у каждого торца — номер материала из списка материалов панели (−1 — без кромки). Торцы идут по порядку сторон
+    // контура, как сетки «Торец» внутри панели: участок контура — проекция своей сетки на пласть
+    const butts = []
+    const torecs = pn.ch.filter(c => c.type === 'MESH3' && c.name === 'Торец')
+    const banded = props.edges.filter(e => e.mat >= 0 && props.mats[e.mat])
+    if (banded.length) {
+      if (torecs.length !== props.edges.length) lostAdd(`${pn.ob.name}: кромка`, 'edge', banded.length)
+      else props.edges.forEach((e, k) => {
+        const m = e.mat >= 0 ? props.mats[e.mat] : null
+        if (!m) return
+        const P = meshVerts(torecs[k]).map(up).map(p => toL(p)).filter(p => p[2] < T / 2).map(p => [p[0], p[1]])
+        if (P.length < 2) { lostAdd(`${pn.ob.name}: кромка`, 'edge'); return }
+        let a = P[0], b = P[0], best = -1
+        for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const d = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]); if (d > best) { best = d; a = P[i]; b = P[j] } }
+        // по дуге: участок — та дуга контура, что начинается и кончается в этих точках
+        const curved = P.some(p => Math.abs((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) / (best || 1) > 0.5)
+        const thick = m.thick > 0 ? r1(m.thick) : null
+        const nm = thick && !/мм|mm/i.test(m.name) ? `${m.name} (${thick} мм)` : m.name
+        butts.push({ e: { t: curved ? 'A' : 'L', a, b }, name: nm, info: { mat: m.name, thick } })
+      })
+    }
     const Mp = [u[0], v[0], n[0], u[1], v[1], n[1], u[2], v[2], n[2], o[0], o[1], o[2]]
-    const name = pn.ob.name.replace(/^[^.]{1,30}\.\s*/, '').trim() || pn.ob.name || 'Панель'
-    const product = /^([^.]{1,30})\./.exec(pn.ob.name)?.[1] || ''
+    // «Шкаф. Прав. ст.» — изделие «Шкаф», деталь «Прав. ст.»; «Стойка лев.» — просто деталь
+    const pm = /^([^.]{1,30})\.\s+(\S.{2,})$/.exec(pn.ob.name)
+    const name = (pm ? pm[2] : pn.ob.name).trim() || 'Панель'
+    const product = pm ? pm[1].trim() : ''
     const texDir = U1 - U0 >= W1 - W0 ? 1 : 2
     makers.push(() => buildItem(keep({
-      T, elems, texDir, M: Mp, butts: [], cutsRaw, decorRaw: [], pocketsRaw, edgeCutsRaw: [], warnCuts: 0, anyEnd: true,
+      T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], pocketsRaw, edgeCutsRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material, rotatable: false, anim: null,
-      meta: { src: 'bcad', ids: [id], des: '', pos: '', name, product, productDes: '', productPos: '', path: [], material, materialCode: '' },
+      meta: { src: 'bcad', ids: [id], des: '', pos: props.code, name, product, productDes: '', productPos: '', path: [], material, materialCode: '' },
     }), holes, opts.faceRule))
   }
 
