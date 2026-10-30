@@ -566,7 +566,8 @@ function tidyResult(params, res) {
   if (!res?.sheets?.length) return res
   try {
     const right = params.sheetW - params.marginL - params.marginR + (Number(params.kerf) || 0)
-    const sheets = tidySheets(res.sheets, right)
+    const top = params.sheetL - params.marginT - params.marginB + (Number(params.kerf) || 0)
+    const sheets = tidySheets(res.sheets, right, top, params.direction)
     if (sheets.every((sh, i) => sh === res.sheets[i])) return res
     const ux = res.usableX, uy = res.usableY
     if (validateNesting({ sheets, details: params.details, usableX: ux, usableY: uy, kerf: params.kerf }).errors.length) return res

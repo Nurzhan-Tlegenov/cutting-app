@@ -43,33 +43,52 @@ function columnsOnce(placed, right) {
   return moved.size ? placed.map(p => (moved.has(p) ? { ...p, x: moved.get(p) } : p)) : null
 }
 
-// вниз, затем влево — до упора (несколько проходов: сдвиг одной детали освобождает место другой)
-function settle(placed) {
+// Прижим: каждая деталь встаёт на самое низкое (вдоль Y — самое левое) свободное место, куда её можно переставить, —
+// не только прямо вниз, но и со сдвигом вбок к краю соседа (261030_027: Д2 висела над Д4 из-за 2 мм, на которые
+// заходила на соседний столбец, — сдвиг на 2 мм вправо, и она ложится на Д4). Выше / правее, чем была, деталь не уходит.
+function settle(placed, right, top, yFirst) {
   const ps = placed.map(p => ({ ...p }))
-  const overlapX = (p, q) => p.x < q.x + q.w - EPS && q.x < p.x + p.w - EPS
-  const overlapY = (p, q) => p.y < q.y + q.h - EPS && q.y < p.y + p.h - EPS
-  for (let pass = 0; pass < 4; pass++) {
+  const hit = (x, y, p, q) => x < q.x + q.w - EPS && q.x < x + p.w - EPS && y < q.y + q.h - EPS && q.y < y + p.h - EPS
+  const key = (x, y) => (yFirst ? [y, x] : [x, y])
+  const less = (a, b) => a[0] < b[0] - EPS || (Math.abs(a[0] - b[0]) <= EPS && a[1] < b[1] - EPS)
+  for (let pass = 0; pass < 6; pass++) {
     let moved = false
-    for (const p of ps.slice().sort((a, b) => a.y - b.y || a.x - b.x)) {
-      let y = 0
-      for (const q of ps) if (q !== p && overlapX(p, q) && q.y + q.h <= p.y + EPS) y = Math.max(y, q.y + q.h)
-      if (y < p.y - EPS) { p.y = y; moved = true }
-      let x = 0
-      for (const q of ps) if (q !== p && overlapY(p, q) && q.x + q.w <= p.x + EPS) x = Math.max(x, q.x + q.w)
-      if (x < p.x - EPS) { p.x = x; moved = true }
+    for (const p of ps.slice().sort((a, b) => { const ka = key(a.x, a.y), kb = key(b.x, b.y); return ka[0] - kb[0] || ka[1] - kb[1] })) {
+      const others = ps.filter(q => q !== p)
+      const xs = new Set([0, p.x]), ys = new Set([0, p.y])
+      for (const q of others) { xs.add(q.x + q.w); xs.add(q.x - p.w); xs.add(q.x); xs.add(q.x + q.w - p.w); ys.add(q.y + q.h); ys.add(q.y - p.h); ys.add(q.y); ys.add(q.y + q.h - p.h) }
+      const X = [...xs].filter(x => x >= -EPS && x + p.w <= right + EPS)
+      const Y = [...ys].filter(y => y >= -EPS && y + p.h <= top + EPS)
+      let best = key(p.x, p.y), bx = p.x, by = p.y
+      // перебор по «ведущей» оси: для каждого значения — самое малое свободное по другой
+      const lead = yFirst ? Y : X, other = yFirst ? X : Y
+      lead.sort((a, b) => a - b); other.sort((a, b) => a - b)
+      for (const a of lead) {
+        if (a > best[0] + EPS) break
+        for (const b of other) {
+          const x = yFirst ? b : a, y = yFirst ? a : b
+          const k = key(x, y)
+          if (!less(k, best)) break
+          if (others.some(q => hit(x, y, p, q))) continue
+          best = k; bx = x; by = y
+          break
+        }
+      }
+      if (bx !== p.x || by !== p.y) { p.x = Math.max(0, bx); p.y = Math.max(0, by); moved = true }
     }
     if (!moved) break
   }
   return ps
 }
 
-/** Листы после наведения порядка (те же детали, те же листы); right — правый край зоны укладки */
-export function tidySheets(sheets, right) {
-  return sheets.map(sh => {
+/** Листы после наведения порядка (те же детали, те же листы); right / top — правый и верхний край зоны укладки */
+export function tidySheets(sheets, right, top, direction = 'auto') {
+  // заполненные листы — к низу (как поиск), последний — под обрезок: «вдоль Y» обрезок справа — детали к левому краю
+  return sheets.map((sh, si) => {
     if (!sh?.placed?.length || sh.stock === 'offcut' || sh.placed.some(p => p.polygon || p.group)) return sh
     let placed = sh.placed
     for (let k = 0; k < 3; k++) { const c = columnsOnce(placed, right); if (!c) break; placed = c }
-    placed = settle(placed)
+    if (placed.length <= 150) placed = settle(placed, right, top, !(direction === 'along_y' && si === sheets.length - 1))
     return { ...sh, placed }
   })
 }
