@@ -121,6 +121,26 @@ export function parseSkp(u8, opts = {}) {
   { const t = topOf(0x1f7); const a = t && child(t[0], t[1], 0x30d4); const b = a && child(a[0], a[1], 0x30d5)
     for (const [o, l] of b ? children(b[0], b[1], 0x32c8) : []) materials.set(idOf(o, l), sval(o, l, 0x32cc) || '') }
 
+  // Безымянный материал SketchUp («*2» — в модели «_2»): название — из его свойств (плагин kot_panel: type_16.0 = «ЛДСП»)
+  // и из имени текстуры (обычно код декора: «14-10040-001_detail.jpg» → «14-10040-001»)
+  const matXml = new Map()
+  const matName = (raw, T) => {
+    const nm = cleanMat(raw)
+    if (nm && !/^\*?\d*$/.test(nm)) return nm
+    const key = String(raw || '').replace(/^\*/, '_')
+    if (!matXml.has(key)) {
+      const f = files[`materials/${key}/material.xml`]
+      const x = f ? new TextDecoder().decode(f) : ''
+      const types = {}
+      for (const m of x.matchAll(/key="type_([\d.]+)"[^>]*>\s*<!\[CDATA\[([^\]]*)\]\]>/g)) types[Number(m[1])] = m[2].trim()
+      const tex = (/textureFilename="([^"]*)"/.exec(x)?.[1] || '').split(/[\\/]/).pop().replace(/\.[a-z0-9]+$/i, '').replace(/[_ ]?detail$/i, '').replace(/_/g, ' ').trim()
+      matXml.set(key, { types, tex })
+    }
+    const { types, tex } = matXml.get(key)
+    const type = types[Math.round(T * 10) / 10] || Object.values(types)[0] || ''
+    return [type, tex].filter(Boolean).join(' ')
+  }
+
   // определения компонентов: id сущностей -> { name, ent }
   const defs = new Map()
   { const t = topOf(0x1f9); const a = t && child(t[0], t[1], 0x1770); const b = a && child(a[0], a[1], 0x1771)
@@ -356,7 +376,7 @@ export function parseSkp(u8, opts = {}) {
           if (T >= 2.5 && T <= 60 && Math.min(A, B) >= 20 && T <= 0.5 * Math.min(A, B)) {
             const { F } = geomOf(def.ent)
             const fm = F.map(f => f.mat).find(Boolean)
-            plain.push({ M: W, ent: def.ent, sl, name: nm, product: depth ? prod : '', layer: ln, path, mat: cleanMat(materials.get(bi.mat) || materials.get(fm) || '') })
+            plain.push({ M: W, ent: def.ent, sl, name: nm, product: depth ? prod : '', layer: ln, path, mat: matName(materials.get(bi.mat) || materials.get(fm) || '', T) })
             continue
           }
         }
