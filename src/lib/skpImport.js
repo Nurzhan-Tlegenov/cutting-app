@@ -10,6 +10,7 @@
 // Единицы SketchUp — дюймы; ось Z вверх -> мир просмотра (Y вверх).
 
 import { unzipSync } from 'fflate'
+const EDGE_MAT = /кромк|\bedge|\babs\b|пвх|\bpvc\b/i
 import { ShapeUtils, Vector2 } from 'three'
 import { buildItem, groupItems, findClashes } from './basisB3d.js'
 import { pairDepth } from './model3dClash.js'
@@ -517,7 +518,7 @@ export function parseSkp(u8, opts = {}) {
     }), pHoles, opts.faceRule))
   }
 
-  // обычная модель: плиты -> детали (контур — большая пласть, кромки и присадки в такой модели нет)
+  // обычная модель: плиты -> детали (контур — большая пласть; кромка — торцы, окрашенные материалом кромки)
   for (const pl of plain) {
     const id = pid++
     const { V, F } = geomOf(pl.ent)
@@ -620,9 +621,24 @@ export function parseSkp(u8, opts = {}) {
       if (cutsRaw.some(c => Math.abs(c.p[0] - x0) < 0.5 && Math.abs(c.p[1] - y0) < 0.5 && Math.abs(c.q[0] - x1) < 0.5 && Math.abs(c.q[1] - y1) < 0.5 && c.top === top)) continue
       cutsRaw.push({ p: [x0, y0], q: [x1, y1], depth: r1(z1 - z0), top, name: 'Паз' })
     }
+    // кромка: торцы, окрашенные материалом кромки («Кромка-0.4 mm», «ABS 2 мм»…) — на тот участок контура, где лежит торец
+    const butts = []
+    for (const f of F) {
+      if (!f.n || Math.abs(dotL(norm(f.n), nl)) > 0.2) continue
+      const mname = materials.get(f.mat) || ''
+      if (!EDGE_MAT.test(mname)) continue
+      const P = f.loops[0].map(toUV).filter(Boolean)
+      let a = null, b = null, best = -1
+      for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) { const d = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]); if (d > best) { best = d; a = P[i]; b = P[j] } }
+      if (!(best > 0.5)) continue
+      const mm = /(\d+(?:[.,]\d+)?)\s*(?:mm|мм)/i.exec(mname)?.[1]?.replace(',', '.')
+      const base = cleanMat(mname.replace(/[-_\s]*\d+(?:[.,]\d+)?\s*(?:mm|мм)\b/i, '')).trim() || 'Кромка'
+      const nm = mm ? `${base} ${mm} мм` : base
+      butts.push({ e: { t: 'L', a, b }, name: nm, info: { mat: base, thick: mm ? Number(mm) : null } })
+    }
     const plainH = plainHoles.flatMap(x => [x[0], x[1]])
     makers.push(() => buildItem(keep({
-      T, elems, texDir, M: Mp, butts: [], cutsRaw, decorRaw: [], warnCuts: 0, anyEnd: true,
+      T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material: pl.mat, rotatable: false, anim: null,
       meta: { src: 'sketchup', ids: [id], des: '', pos: '', name, product: pl.product, productDes: '', productPos: '', path: pl.path.slice(1), material: pl.mat, materialCode: '' },
     }), plainH.length ? [...holesW, ...plainH] : holesW, opts.faceRule))
