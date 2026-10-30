@@ -751,9 +751,30 @@ function getMarkers(verts, sc, ox, oy, dh) {
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 const ZOOM_MIN = 0.3, ZOOM_MAX = 6      // масштаб превью детали
 
+const VIEW_H_KEY = 'contourViewH'
+const defViewH = () => (isDesktop() ? Math.max(460, window.innerHeight - 250) : 460)
+const clampViewH = v => Math.max(200, Math.min(v, Math.max(260, window.innerHeight - 60)))
+const readViewH = () => { try { const v = Number(localStorage.getItem(VIEW_H_KEY)); if (v > 0) return clampViewH(v) } catch { /* без памяти */ } return defViewH() }
+
 function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMarkers=true, showLengths=true, showAngles=true, showDrillDims=true, arcMode=false, arcPoints=[], activeHoleIdx=null, placeMode=false, onPlaceTap=null, zoom=1, onZoomChange=null, onLayoutTap=null, highlightLayoutIdx=null, rotation=0, materialThickness=16, edgeMode=false, onEdgeTap=null }) {
   const ref = useRef(null)
   const wrapRef = useRef(null)
+  // высота окна чертежа: тянется ползунком снизу и запоминается (на компьютере по умолчанию — почти весь экран)
+  const [viewH, setViewH] = useState(readViewH)
+  const viewHRef = useRef(viewH)
+  useEffect(() => { viewHRef.current = viewH }, [viewH])
+  const startResize = e => {
+    e.preventDefault()
+    const y0 = e.clientY, h0 = viewHRef.current, el = e.currentTarget
+    try { el.setPointerCapture(e.pointerId) } catch { /* без захвата */ }
+    const move = ev => setViewH(clampViewH(h0 + ev.clientY - y0))
+    const up = () => {
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up)
+      try { localStorage.setItem(VIEW_H_KEY, String(Math.round(viewHRef.current))) } catch { /* без памяти */ }
+    }
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up)
+  }
+  const resetViewH = () => { try { localStorage.removeItem(VIEW_H_KEY) } catch { /* без памяти */ } setViewH(defViewH()) }
   // Ширина(X) детали — горизонталь канваса, Длина(Y) — вертикаль (мебельный стандарт)
   const w = Number(detail.h) || 0
   const h = Number(detail.w) || 0
@@ -895,7 +916,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     // сам масштаб детали внутри регулируется зумом отдельно
     let baseW = wrapRef.current?.clientWidth || canvas.offsetWidth || 280
     // компьютер: деталь целиком в окне по высоте (широкое окно не растягивает высокую деталь за экран)
-    if (isDesktop()) baseW = Math.max(240, Math.min(baseW, (window.innerHeight - 190 - 60) * fitW / fitH + 60))
+    if (isDesktop()) baseW = Math.max(240, Math.min(baseW, (viewH - 60) * fitW / fitH + 60))
     const CSS_W = Math.round(baseW * zoom)
     const PAD = 30
     // Отступы одинаковые со всех сторон (не только у ширины) — деталь всегда точно
@@ -1535,7 +1556,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
 
     ctx.restore() // закрываем поворот сцены
 
-  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, showDrillDims, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges, rotation, edgeMode])
+  }, [w, h, contour, activeIdx, previewVerts, showMarkers, showLengths, showAngles, showDrillDims, arcMode, arcPoints, activeHoleIdx, zoom, highlightLayoutIdx, detail.edges, rotation, edgeMode, viewH])
 
   const handleTap = (e) => {
     const canvas = ref.current
@@ -1628,14 +1649,19 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
     onTap(null)
   }
 
-  return (
-    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:460, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y', overscrollBehavior:'contain' }}>
+  return (<>
+    <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:viewH, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y', overscrollBehavior:'contain' }}>
       <canvas ref={ref}
         onClick={handleTap}
         style={{ display:'block', cursor:'pointer', touchAction:'manipulation',
           outline: placeMode ? '2px solid #0E8A6D' : edgeMode ? '2px solid #2FA84F' : 'none' }} />
     </div>
-  )
+    {/* ползунок высоты окна чертежа: потянуть вниз / вверх; двойной щелчок — как было */}
+    <div onPointerDown={startResize} onDoubleClick={resetViewH} title="Потяните, чтобы изменить высоту чертежа · двойной щелчок — по умолчанию"
+      style={{ height:14, cursor:'ns-resize', touchAction:'none', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ width:48, height:4, borderRadius:2, background:'var(--border-md)' }} />
+    </div>
+  </>)
 }
 
 // ─── Меню вершины ─────────────────────────────────────────────────────────────

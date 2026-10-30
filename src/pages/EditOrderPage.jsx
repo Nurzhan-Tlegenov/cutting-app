@@ -442,6 +442,7 @@ export default function EditOrderPage() {
           materialThickness={materialThickness}
           edgeNames={edgeNames} activeEdge={activeEdge}
         />
+        <BottomNav />
         {showLeaveConfirm && (
           <LeaveConfirmModal saving={saving} onSave={handleSave} onDiscard={leavePage} onStay={stayOnPage} />
         )}
