@@ -43,38 +43,85 @@ function columnsOnce(placed, right) {
   return moved.size ? placed.map(p => (moved.has(p) ? { ...p, x: moved.get(p) } : p)) : null
 }
 
-// Прижим: каждая деталь встаёт на самое низкое (вдоль Y — самое левое) свободное место, куда её можно переставить, —
-// не только прямо вниз, но и со сдвигом вбок к краю соседа (261030_027: Д2 висела над Д4 из-за 2 мм, на которые
-// заходила на соседний столбец, — сдвиг на 2 мм вправо, и она ложится на Д4). Выше / правее, чем была, деталь не уходит.
+// Самый большой свободный прямоугольник листа (деловой остаток): углы — у края листа или у краёв деталей
+export function maxEmptyRect(placed, right, top) {
+  const xs0 = [0, ...placed.map(p => p.x + p.w)].filter(x => x < right - EPS)
+  const ys0 = [...new Set([0, ...placed.map(p => p.y + p.h)])].filter(y => y < top - EPS)
+  const xr = [...new Set([...placed.map(p => p.x), right])].sort((a, b) => a - b)
+  let best = 0
+  for (const x0 of new Set(xs0)) for (const y0 of ys0) {
+    // угол не внутри детали
+    if (placed.some(p => p.x <= x0 + EPS && p.x + p.w > x0 + EPS && p.y <= y0 + EPS && p.y + p.h > y0 + EPS)) continue
+    let ceil = top
+    let prev = x0
+    for (const x1 of xr) {
+      if (x1 <= x0 + EPS) continue
+      // детали в полосе [prev, x1) выше y0 ограничивают высоту; деталь, накрывающая y0, — обрывает ширину
+      let blocked = false
+      for (const p of placed) {
+        if (p.x + p.w <= prev + EPS || p.x >= x1 - EPS) continue
+        if (p.y + p.h <= y0 + EPS) continue
+        if (p.y <= y0 + EPS) { blocked = true; break }
+        if (p.y < ceil) ceil = p.y
+      }
+      if (blocked) break
+      const area = (x1 - x0) * (ceil - y0)
+      if (area > best) best = area
+      prev = x1
+    }
+  }
+  return best
+}
+
+// Прижим: каждая деталь переставляется ниже / левее — в место, где упирается в край листа или в соседа (со сдвигом
+// вбок к краю соседа: 261030_027 — Д2 висела над Д4 из-за 2 мм, на которые заходила на соседний столбец). Из таких
+// мест выбирается то, где деловой остаток листа (самый большой свободный прямоугольник) не меньше — иначе деталь
+// «падает» в ближайшую щель и делит остаток на два (Д5 и Д4 уходили на другую сторону верхнего ряда).
+// Выше / правее, чем была, деталь не уходит.
 function settle(placed, right, top, yFirst) {
   const ps = placed.map(p => ({ ...p }))
   const hit = (x, y, p, q) => x < q.x + q.w - EPS && q.x < x + p.w - EPS && y < q.y + q.h - EPS && q.y < y + p.h - EPS
   const key = (x, y) => (yFirst ? [y, x] : [x, y])
   const less = (a, b) => a[0] < b[0] - EPS || (Math.abs(a[0] - b[0]) <= EPS && a[1] < b[1] - EPS)
+  const judge = ps.length <= 40                      // считать остаток — на небольших листах (на больших — просто прижим)
+  let rest = judge ? maxEmptyRect(ps, right, top) : 0
   for (let pass = 0; pass < 6; pass++) {
     let moved = false
     for (const p of ps.slice().sort((a, b) => { const ka = key(a.x, a.y), kb = key(b.x, b.y); return ka[0] - kb[0] || ka[1] - kb[1] })) {
       const others = ps.filter(q => q !== p)
       const xs = new Set([0, p.x]), ys = new Set([0, p.y])
       for (const q of others) { xs.add(q.x + q.w); xs.add(q.x - p.w); xs.add(q.x); xs.add(q.x + q.w - p.w); ys.add(q.y + q.h); ys.add(q.y - p.h); ys.add(q.y); ys.add(q.y + q.h - p.h) }
-      const X = [...xs].filter(x => x >= -EPS && x + p.w <= right + EPS)
-      const Y = [...ys].filter(y => y >= -EPS && y + p.h <= top + EPS)
-      let best = key(p.x, p.y), bx = p.x, by = p.y
-      // перебор по «ведущей» оси: для каждого значения — самое малое свободное по другой
+      const X = [...xs].filter(x => x >= -EPS && x + p.w <= right + EPS).sort((a, b) => a - b)
+      const Y = [...ys].filter(y => y >= -EPS && y + p.h <= top + EPS).sort((a, b) => a - b)
       const lead = yFirst ? Y : X, other = yFirst ? X : Y
-      lead.sort((a, b) => a - b); other.sort((a, b) => a - b)
+      const cur = key(p.x, p.y)
+      // свободные места ниже/левее: для каждого значения ведущей оси — самое малое по другой
+      const cands = []
       for (const a of lead) {
-        if (a > best[0] + EPS) break
+        if (a > cur[0] + EPS) break
         for (const b of other) {
           const x = yFirst ? b : a, y = yFirst ? a : b
-          const k = key(x, y)
-          if (!less(k, best)) break
+          if (!less(key(x, y), cur)) break
           if (others.some(q => hit(x, y, p, q))) continue
-          best = k; bx = x; by = y
-          break
+          cands.push([x, y]); break
         }
+        if (cands.length >= 12) break
       }
-      if (bx !== p.x || by !== p.y) { p.x = Math.max(0, bx); p.y = Math.max(0, by); moved = true }
+      if (!cands.length) continue
+      let pick = null
+      if (!judge) pick = cands[0]
+      else {
+        const ox = p.x, oy = p.y
+        let bestRest = rest - 1e3
+        for (const [x, y] of cands) {
+          p.x = x; p.y = y
+          const r = maxEmptyRect(ps, right, top)
+          if (r > bestRest + 1e3 || (!pick && r >= bestRest)) { bestRest = r; pick = [x, y] }
+        }
+        p.x = ox; p.y = oy
+        if (pick) rest = Math.max(rest, bestRest)
+      }
+      if (pick) { p.x = Math.max(0, pick[0]); p.y = Math.max(0, pick[1]); moved = true }
     }
     if (!moved) break
   }
