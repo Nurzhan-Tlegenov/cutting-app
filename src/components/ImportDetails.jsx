@@ -9,6 +9,7 @@ import { isK3File, readK3File } from '../lib/k3Mdb'
 import { readAstraXmlFile, looksLikeAstraXml } from '../lib/astraXml'
 import { readPro100Obj } from '../lib/pro100Obj'
 import { readSkpFile, isSkp } from '../lib/skpImport'
+import { readBdfFile, isBdf } from '../lib/bcadBdf'
 import { readSketchCutPdf } from '../lib/sketchcutPdf'
 import { millsFromItems, mergeMills } from '../lib/facadeCarve'
 import { readTableFile, analyzeTable, buildDetails, ROLES, MULTI_ROLES } from '../lib/importDetails'
@@ -55,6 +56,8 @@ const SOURCES = [
     hint: 'Выберите модель, сохранённую из PRO100 в формате OBJ (Файл → Экспорт) — возьмём панели с размерами и 3D-модель; названия, кромку и присадку нужно будет добавить в приложении. Подойдёт и отчёт со списком деталей в Excel или CSV.' },
   { id: 'sketchup', icon: '🏠', label: 'SketchUp',
     hint: 'Выберите модель SketchUp (.skp, версия 2021 и новее). Из мебельного плагина возьмём панели с названием, размером, материалом, кромкой, текстурой и присадкой; из обычной модели — тела-плиты, присадку (цилиндры крепежа) и пазы. Фурнитура — в 3D. Что не удалось взять — покажем списком.' },
+  { id: 'bcad', icon: '🛠️', label: 'bCAD',
+    hint: 'Выберите модель bCAD Мебельщик (.bdf) — возьмём панели с названием, материалом, контуром (скругления — дугами), вырезами, пазами, четвертями и присадкой крепежа (конфирматы, эксцентрики, чашки петель, шурупы). Кромку добавьте в заказе. Что не удалось взять — покажем списком.' },
   { id: 'dxf', icon: '📏', label: 'DXF',
     hint: 'Выберите чертёж DXF — каждый замкнутый внешний контур станет деталью, а всё внутри него — её обработкой по слоям: вырезы, отверстия D<диаметр>_Z<глубина>, пазы PAZ, выемки, отверстия в торец TOREC, кромка — как в нашем экспорте DXF.' },
   { id: 'sketchcut', icon: '📄', label: 'SketchCut',
@@ -79,6 +82,11 @@ async function readModelFile(file, faceRule, marks = null, dxfOpts = {}) {
   // SketchUp (.skp): заголовок «SketchUp Model» в UTF-16 (FF FE FF …)
   if (isSkp(head) || lower.endsWith('.skp')) {
     return { src: 'sketchup', res: await readSkpFile(file, { faceRule }) }
+  }
+  // bCAD Мебельщик (.bdf)
+  const head16 = new Uint8Array(await file.slice(0, 16).arrayBuffer())
+  if (isBdf(head16) || lower.endsWith('.bdf')) {
+    return { src: 'bcad', res: await readBdfFile(file, { faceRule }) }
   }
   if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
     return { src: 'basis', res: await readBasisFile(file, { faceRule }) }
@@ -615,6 +623,12 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                 {basis.other > 0 && ` Фурнитура и прочие объекты (${basis.other}) — в 3D, упрощённо.`}{basis.hidden > 0 && ` Скрытые в модели объекты не взяты (${basis.hidden}).`}
               </div>
             )}
+            {basis?.bcad && (
+              <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                Из bCAD взяты панели: название, материал, контур со скруглениями, вырезы, пазы и четверти ({sumInfo('grooves')}), присадка крепежа — {sumInfo('holes')} отв.
+                Кромки в модели нет (торцы «гладкие») — добавьте её в заказе.
+              </div>
+            )}
             {basis?.k3 && (
               <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
                 Из К3 взяты детали с контуром, кромкой, пазами и присадкой ({sumInfo('holes')} отв.). Размер детали — габарит с кромкой, как в К3;
@@ -745,10 +759,11 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
             {/* крепёж из файла, отверстия которого не попали ни в одну деталь — не молчим */}
             {basis?.lost?.length > 0 && (
               <div style={{ background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--amber)' }}>
-                <div style={{ fontWeight: 600, marginBottom: 2 }}>⚠ {basis.skp ? 'Часть объектов модели не перенесена в детали — проверьте' : 'Часть крепежа из файла не перенесена в детали — проверьте присадку'}:</div>
+                <div style={{ fontWeight: 600, marginBottom: 2 }}>⚠ {basis.skp || basis.bcad ? 'Часть объектов модели не перенесена в детали — проверьте' : 'Часть крепежа из файла не перенесена в детали — проверьте присадку'}:</div>
                 {basis.lost.map((l, i) => (
                   <div key={i}>· «{l.name}» — {l.count} шт.: {l.why === 'unknown' ? 'такой вид крепежа импорт пока не понимает' : l.why === 'size' ? 'в файле нет диаметра или глубины'
-                    : l.why === 'notPart' ? 'похоже на плиту, но не взято деталью (слишком мелкое или толстое) — только в 3D' : 'не попало ни в одну деталь'}{l.parts.length ? ` (на детали ${l.parts.join(', ')})` : ''}</div>
+                    : l.why === 'notPart' ? 'похоже на плиту, но не взято деталью (слишком мелкое или толстое) — только в 3D'
+                    : l.why === 'cut' ? 'обработка не перенесена — добавьте её в редакторе контура' : l.why === 'edge' ? 'кромка не привязана к сторонам — укажите её в заказе' : 'не попало ни в одну деталь'}{l.parts.length ? ` (на детали ${l.parts.join(', ')})` : ''}</div>
                 ))}
                 <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>Добавьте эти отверстия в редакторе контура детали и отправьте файл разработчику — импорт научится их читать.</div>
                 <div style={{ marginTop: 4 }}>{reportLink('Отправить файл разработчику')}</div>
