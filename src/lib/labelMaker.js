@@ -815,6 +815,14 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
   const place = it0 => (it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0)
   const px1 = v => Math.max(1, Math.round(v * mm))                      // линия не тоньше точки принтера
+  // Параметра нет (нет отверстий снизу, нет кромки…) — нет и рамки (в превью шаблона рамка видна)
+  const empty = it => {
+    if (opts.preview || it.type === 'image') return false
+    if (it.type === 'qr') return !(tpl.kind === 'rem' ? remQrText(tpl, info) : labelQr(tpl, info))
+    if (it.type === 'map') return !sheetCtx
+    if (it.type === 'part') return !(sheetCtx?.part || sheetCtx?.sheet?.placed?.[sheetCtx.index])
+    return !labelText(it.type, info, tpl, it.cap)
+  }
   // фон: залитые рамки и поля «белым по чёрному» — под всем остальным
   for (const it0 of tpl.items || []) {
     const it = place(it0)
@@ -922,7 +930,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   // «белым по чёрному» у картинок, QR, карты и чертежа детали: их поле переворачивается целиком (чёрное ↔ белое)
   for (const it0 of tpl.items || []) {
     const it = place(it0)
-    if (!it.inv || !isBox(it) || isShape(it)) continue
+    if (!it.inv || !isBox(it) || isShape(it) || empty(it)) continue
     const [bw, bh] = itemBox(it)
     const x0 = Math.max(0, Math.round(it.x * mm)), y0 = Math.max(0, Math.round(it.y * mm))
     const w0 = Math.min(canvas.width - x0, Math.round(bw * mm)), h0 = Math.min(canvas.height - y0, Math.round(bh * mm))
@@ -934,7 +942,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   // рамка вокруг элемента (текст, QR, карта, чертёж, картинка) — поверх, по краю его поля
   for (const it0 of tpl.items || []) {
     const it = place(it0)
-    if (!it.box || isShape(it)) continue
+    if (!it.box || isShape(it) || empty(it)) continue
     const [bw, bh] = itemBox(it), lw = px1(it.lw || 0.3)
     ctx.save(); ctx.lineWidth = lw; ctx.strokeStyle = '#000'
     ctx.beginPath(); roundRect(ctx, it.x * mm + lw / 2, it.y * mm + lw / 2, bw * mm - lw, bh * mm - lw, 0); ctx.stroke()
@@ -1156,7 +1164,7 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl, seq
 }
 
 // ─── Бирки пильного центра: формат, как у программ раскроя для KDT — одна бирка = один файл EMF с именем по коду детали
-// из программы XML («1.emf», «2.emf», …; деловые обрезки — «OC1.emf»), рядом с программой. Станок печатает бирку,
+// из программы XML («1.emf», «2.emf», …; деловые остатки — номерами после деталей, «N+1.emf»), рядом с программой. Станок печатает бирку,
 // когда выдаёт деталь с этим кодом. Внутри EMF — картинка бирки (как в PDF) в размер бирки, мм.
 /** canvas -> EMF (Uint8Array): одна чёрно-белая картинка во весь размер wMm × hMm */
 export function canvasToEmf(canvas, wMm, hMm) {

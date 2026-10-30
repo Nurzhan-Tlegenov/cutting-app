@@ -196,7 +196,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
       const tail = tailOffcut(node) ? node.slots[node.slots.length - 1] : null
       if (tail) {
         oc++
-        offRows.push({ code: `OC${oc}`, si, w: Math.round(tail.item.ow ?? tail.item.w - k), h: Math.round(tail.item.oh ?? tail.item.h - k) })
+        offRows.push({ code: `@OC${oc}@`, si, w: Math.round(tail.item.ow ?? tail.item.w - k), h: Math.round(tail.item.oh ?? tail.item.h - k) })
       }
       const partLines = node.slots.filter(sl => sl !== tail).map(sl => {
         const cut = sl.a - k
@@ -210,9 +210,9 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
         }
         if (sl.item?.offcut) {
           oc++
-          offRows.push({ code: `OC${oc}`, si, w: Math.round(sl.item.ow ?? sl.item.w - k), h: Math.round(sl.item.oh ?? sl.item.h - k) })
+          offRows.push({ code: `@OC${oc}@`, si, w: Math.round(sl.item.ow ?? sl.item.w - k), h: Math.round(sl.item.oh ?? sl.item.h - k) })
           kids.push({ leaf: true, id: myId, l: wReal, w: cut, layer: layer + 1, sl })
-          return `      <part cut="${r1(cut)}" type="3" id="${myId}" code="OC${oc}" print_code="" />`
+          return `      <part cut="${r1(cut)}" type="3" id="${myId}" code="@OC${oc}@" print_code="" />`
         }
         kids.push({ leaf: false, id: myId, l: wReal, w: cut, layer: layer + 1, sl })
         return `      <part cut="${r1(cut)}" type="2" id="${myId}" code="" print_code="" />`
@@ -259,6 +259,11 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
     out.push(`    <row code="${c}" ${v.map((x, i) => `columns${i + 1}="${esc(x)}"`).join(' ')} />`)
   }
   out.push('  </table>', '</project>', '')
+  // коды деловых остатков — числами после деталей (1…N — детали, N+1… — остатки): станок печатает бирку по коду куска,
+  // а буквенный код (OC1) он не принимает — бирки остатков не печатались. Файлы бирок — по тем же номерам (N+1.emf)
+  const ocNum = k => rows.length + k
+  for (const o of offRows) o.code = String(ocNum(Number(/\d+/.exec(o.code)[0])))
+  for (let i = 0; i < out.length; i++) if (out[i].includes('@OC')) out[i] = out[i].replace(/@OC(\d+)@/g, (m, k) => String(ocNum(Number(k))))
   const base = toLatin(`${title}_${material}_${thick}`).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '') || 'beamsaw'
   return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length, rows, offRows, droppedOffcuts: dropped, wideStrips: wide, maxStrip }
 }
