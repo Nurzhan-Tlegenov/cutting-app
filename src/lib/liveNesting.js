@@ -22,6 +22,7 @@ import { gravityPolygons } from './gravity'
 import { planNestInHoles, expandNested, stripNested } from './nestInHoles'
 import { validateNesting } from './validateNesting'
 import { latticeNesting } from './latticeNesting'
+import { tidySheets } from './rectTidy'
 
 const LIVE_BUDGET_SECONDS = 1e7 // «бесконечно» — до нажатия «Стоп»
 
@@ -560,6 +561,23 @@ export async function fillOffcuts(params, offs, shaped, budget) {
 // (runNesting.seed — на экране не мелькнёт раскладка хуже исходной) и первым «мигрантом» (порядок деталей + сама
 // укладка). Номера деталей в листах — по details переданного params; id деталей выставляются заново по номеру
 // и порядку (`${di}_${q}`, как у buildPieces) — ручные правки и переносы их не ломают.
+// прямоугольный раскрой фрезера: столбцы — лесенкой и одинаковые рядом, детали прижаты (rectTidy.js), если не хуже
+function tidyResult(params, res) {
+  if (!res?.sheets?.length) return res
+  try {
+    const right = params.sheetW - params.marginL - params.marginR + (Number(params.kerf) || 0)
+    const sheets = tidySheets(res.sheets, right)
+    if (sheets.every((sh, i) => sh === res.sheets[i])) return res
+    const ux = res.usableX, uy = res.usableY
+    if (validateNesting({ sheets, details: params.details, usableX: ux, usableY: uy, kerf: params.kerf }).errors.length) return res
+    const sc = s => liveScore(s, ux, uy, params.direction, true)
+    return liveBetter(sc(res.sheets), sc(sheets)) ? res : { ...res, sheets, rawSheets: res.rawSheets || res.sheets }
+  } catch (e) { console.warn('Порядок на листах не наведён:', e); return res }
+}
+async function runTidy(params, opts) {
+  const res = await runCore(params, { ...opts, onProgress: opts.onProgress ? r => opts.onProgress(tidyResult(params, r)) : null })
+  return tidyResult(params, res)
+}
 function latticeFor(params) {
   try {
     const lat = latticeNesting(params)
@@ -726,7 +744,7 @@ async function runLiveNestingRaw(params, opts = {}) {
     ;({ params, opts } = seedInto(params, opts, seedSheets))
     // одинаковые фигурные детали — решётка «ёлочкой» (latticeNesting.js): сразу на экран, поиск показывает только лучшее
     const lat = latticeFor(params)
-    if (!lat) return await runCore(params, opts)
+    if (!lat) return isRasterPath(params) && (params.cuttingMethod || 'nesting') === 'nesting' ? await runTidy(params, opts) : await runCore(params, opts)
     const offFirst = (params.cuttingMethod || 'nesting') === 'nesting'
     const sc = r => liveScore(r.sheets, r.usableX, r.usableY, params.direction, offFirst)
     const latSc = sc(lat)
