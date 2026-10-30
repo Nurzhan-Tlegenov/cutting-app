@@ -211,7 +211,55 @@ export function parseSkp(u8, opts = {}) {
   // параллельных плоскостях (пласти) на расстоянии толщины 2,5–60 мм, а пласть не меньше 20 мм по каждой стороне и
   // заметно больше толщины. Ось толщины — нормаль самой большой грани (плита может стоять в модели под любым углом).
   // Название — имя вставки или компонента без «#номер», изделие — верхний компонент, материал — материал SketchUp.
+  // ── присадка: цилиндры крепежа плагина (слой Z_fastener: конфирмат, шкант, эксцентрик, полкодержатель) и чашки петель ──
+  // Отверстие в модели — тело-цилиндр: две круглые грани одного диаметра на одной оси. Передаём оба направления оси —
+  // какой торец входит в деталь (пласть или торец), решает разбор детали.
+  const cylMemo = new Map()
+  const cylindersOf = ent => {
+    let cs = cylMemo.get(ent[0]); if (cs) return cs
+    const { V, F } = geomOf(ent)
+    const circ = []
+    for (const f of F) {
+      const lp = f.loops[0]; if (lp.length < 10 || !f.n) continue
+      const P = lp.map(id => V.get(id)).filter(Boolean)
+      const c = [0, 1, 2].map(k => P.reduce((a, p) => a + p[k], 0) / P.length)
+      const ds = P.map(p => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]))
+      const r = ds.reduce((a, b) => a + b, 0) / ds.length
+      if (!(r > 0) || ds.some(d => Math.abs(d - r) > r * 0.04)) continue
+      circ.push({ c, n: norm(f.n), r })
+    }
+    cs = []
+    const used = new Set()
+    for (let i = 0; i < circ.length; i++) for (let j = i + 1; j < circ.length; j++) {
+      if (used.has(i) || used.has(j)) continue
+      const a = circ[i], b = circ[j]
+      if (Math.abs(a.r - b.r) > a.r * 0.04 || Math.abs(a.n[0] * b.n[0] + a.n[1] * b.n[1] + a.n[2] * b.n[2]) < 0.995) continue
+      const d = [b.c[0] - a.c[0], b.c[1] - a.c[1], b.c[2] - a.c[2]], L = vlen(d)
+      if (L < 1e-6) continue
+      const along = Math.abs(d[0] * a.n[0] + d[1] * a.n[1] + d[2] * a.n[2])
+      if (L - along > a.r * 0.1) continue                      // центры не на одной оси
+      used.add(i); used.add(j); cs.push({ a: a.c, b: b.c, r: a.r })
+    }
+    cylMemo.set(ent[0], cs); return cs
+  }
+  const HOLE_NAME = { 35: 'Петля', 15: 'Эксцентрик', 8: 'Шкант', 7: 'Конфирмат', 4.5: 'Конфирмат', 5: 'Полкодержатель' }
+  // название отверстия обычной модели — по имени компонента крепежа (присадка рисуется компонентами «Присадка Конфирмат»,
+  // «minifix15», «shkant8», «rafix»), иначе по диаметру
+  // (самое близкое имя решает: шкант внутри «Присадка Конфирмат» — шкант)
+  const plainHoleName = (names, dia) => {
+    for (const hint of names) {
+      if (/confirm|конфирм/i.test(hint)) return 'Конфирмат'
+      if (/minifix|эксцентр/i.test(hint)) return dia >= 13 ? 'Эксцентрик' : 'Минификс'
+      if (/rafix|рафикс/i.test(hint)) return 'Рафикс'
+      if (/shkant|шкант|dowel/i.test(hint)) return 'Шкант'
+      if (/hinge|петл/i.test(hint)) return 'Петля'
+    }
+    if (dia >= 30) return 'Петля'
+    const k = Object.keys(HOLE_NAME).find(x => Math.abs(Number(x) - dia) <= 0.3)
+    return k ? HOLE_NAME[k] : `Ø${dia}`
+  }
   const plain = []
+  const plainHoles = [], plainGrooves = [], unknown = new Map()   // обычная модель: крепёж-цилиндры, пазы-бруски, нераспознанное
   if (!panels.length) {
     others.length = 0
     const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -269,6 +317,37 @@ export function parseSkp(u8, opts = {}) {
         const iname = sval(o, l, 0x1965) || ''
         const nm = cleanName(iname || def.name)
         const prod = product || nm
+        // паз — брусок на слое «groove» (или с именем groove…): габарит в мире — в детали, куда он врезан
+        if (/groove/i.test(ln) || /^groove/i.test(iname) || /^groove/i.test(def.name)) {
+          const { V } = geomOf(def.ent)
+          if (V.size) {
+            const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+            for (const p of V.values()) for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k] }
+            const pts = []
+            for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) pts.push(apply(W, [x, y, z]).map(c => c * IN))
+            plainGrooves.push({ pts, name: nm, hit: false })
+          }
+          continue
+        }
+        // отверстие — тело-цилиндр (присадка нарисована цилиндрами: «d5 12», «D8 confirmation», чашка петли «d35 14»):
+        // не деталь и не фурнитура, а сверловка в ту деталь, в которую цилиндр входит
+        { const g0 = geomOf(def.ent), cs = cylindersOf(def.ent)
+          if (cs.length === 1 && g0.F.length - 2 === g0.V.size / 2) {
+            const cy = cs[0]
+            const A = apply(W, cy.a).map(v => v * IN), B = apply(W, cy.b).map(v => v * IN)
+            const dvec = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], depthMm = vlen(dvec)
+            // радиус — с масштабом вставки поперёк оси цилиндра
+            const ax = norm([cy.b[0] - cy.a[0], cy.b[1] - cy.a[1], cy.b[2] - cy.a[2]]), ref = Math.abs(ax[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]
+            const perp = norm([ax[1] * ref[2] - ax[2] * ref[1], ax[2] * ref[0] - ax[0] * ref[2], ax[0] * ref[1] - ax[1] * ref[0]])
+            const r = Math.round(cy.r * vlen(applyV(W, perp)) * IN * 20) / 20
+            if (depthMm >= 0.5 && r >= 0.5 && r <= 30) {
+              const D = norm(dvec), dia = Math.round(r * 20) / 10
+              const name = plainHoleName([nm, def.name, ...path.slice().reverse()], dia)
+              const h = { P: A, D, r, depth: Math.round(depthMm * 10) / 10, name }, h2 = { P: B, D: D.map(v => -v), r, depth: h.depth, name }
+              plainHoles.push([h, h2, nm])
+              continue
+            }
+          } }
         const sl = slabOf(def.ent)
         if (sl) {
           const su = vlen(applyV(W, sl.ul)) * IN, sv = vlen(applyV(W, sl.vl)) * IN, sn = vlen(applyV(W, sl.nl)) * IN
@@ -281,45 +360,17 @@ export function parseSkp(u8, opts = {}) {
           }
         }
         const g = geomOf(def.ent)
-        if (g.F.length) others.push({ M: W, ent: def.ent, name: nm, product: prod, layer: ln, mat: bi.mat })
+        if (g.F.length) {
+          others.push({ M: W, ent: def.ent, name: nm, product: prod, layer: ln, mat: bi.mat })
+          // тело, похожее на плиту, но не прошедшее как деталь (слишком мелкое / толстое) — сообщаем
+          if (sl) unknown.set(nm, (unknown.get(nm) || 0) + 1)
+        }
         walkPlain(def.ent, W, [...path, nm], prod, depth + 1)
       }
     }
     walkPlain(rootEnt, rootM, [], '', 0)
   }
 
-  // ── присадка: цилиндры крепежа плагина (слой Z_fastener: конфирмат, шкант, эксцентрик, полкодержатель) и чашки петель ──
-  // Отверстие в модели — тело-цилиндр: две круглые грани одного диаметра на одной оси. Передаём оба направления оси —
-  // какой торец входит в деталь (пласть или торец), решает разбор детали.
-  const cylMemo = new Map()
-  const cylindersOf = ent => {
-    let cs = cylMemo.get(ent[0]); if (cs) return cs
-    const { V, F } = geomOf(ent)
-    const circ = []
-    for (const f of F) {
-      const lp = f.loops[0]; if (lp.length < 10 || !f.n) continue
-      const P = lp.map(id => V.get(id)).filter(Boolean)
-      const c = [0, 1, 2].map(k => P.reduce((a, p) => a + p[k], 0) / P.length)
-      const ds = P.map(p => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]))
-      const r = ds.reduce((a, b) => a + b, 0) / ds.length
-      if (!(r > 0) || ds.some(d => Math.abs(d - r) > r * 0.04)) continue
-      circ.push({ c, n: norm(f.n), r })
-    }
-    cs = []
-    const used = new Set()
-    for (let i = 0; i < circ.length; i++) for (let j = i + 1; j < circ.length; j++) {
-      if (used.has(i) || used.has(j)) continue
-      const a = circ[i], b = circ[j]
-      if (Math.abs(a.r - b.r) > a.r * 0.04 || Math.abs(a.n[0] * b.n[0] + a.n[1] * b.n[1] + a.n[2] * b.n[2]) < 0.995) continue
-      const d = [b.c[0] - a.c[0], b.c[1] - a.c[1], b.c[2] - a.c[2]], L = vlen(d)
-      if (L < 1e-6) continue
-      const along = Math.abs(d[0] * a.n[0] + d[1] * a.n[1] + d[2] * a.n[2])
-      if (L - along > a.r * 0.1) continue                      // центры не на одной оси
-      used.add(i); used.add(j); cs.push({ a: a.c, b: b.c, r: a.r })
-    }
-    cylMemo.set(ent[0], cs); return cs
-  }
-  const HOLE_NAME = { 35: 'Петля', 15: 'Эксцентрик', 8: 'Шкант', 7: 'Конфирмат', 4.5: 'Конфирмат', 5: 'Полкодержатель' }
   const holes = [], cups = [], grooves = []
   const walkHoles = (ent, M, depth, chain = '', owner = '') => {
     if (depth > 40) return
@@ -553,11 +604,28 @@ export function parseSkp(u8, opts = {}) {
     // текстура — вдоль длинной стороны (в обычной модели направления нет); поворот детали — как у остальных импортов
     const texDir = U1 - U0 >= W1 - W0 ? 1 : 2
     const name = pl.name || 'Панель'
+    // пазы-бруски: в системе панели — прямоугольник на пласти и глубина от неё (как у плагина)
+    const toL = P => { const d = [P[0] - o[0], P[1] - o[1], P[2] - o[2]]; return [dotL(d, u), dotL(d, v), dotL(d, n)] }
+    const cutsRaw = []
+    for (const g of plainGrooves) {
+      const L = g.pts.map(toL)
+      const mn = [0, 1, 2].map(k => Math.min(...L.map(p => p[k]))), mx = [0, 1, 2].map(k => Math.max(...L.map(p => p[k])))
+      const x0 = Math.max(mn[0], U0), x1 = Math.min(mx[0], U1), y0 = Math.max(mn[1], W0), y1 = Math.min(mx[1], W1)
+      const z0 = Math.max(mn[2], 0), z1 = Math.min(mx[2], T)
+      if (Math.min(x1 - x0, y1 - y0) < 2 || z1 - z0 < 1) continue
+      const top = z1 >= T - 0.3, bottom = z0 <= 0.3
+      if (top === bottom) continue
+      g.hit = true
+      // один и тот же паз в модели бывает нарисован дважды (по разу на каждую из двух деталей) — второй раз не ставим
+      if (cutsRaw.some(c => Math.abs(c.p[0] - x0) < 0.5 && Math.abs(c.p[1] - y0) < 0.5 && Math.abs(c.q[0] - x1) < 0.5 && Math.abs(c.q[1] - y1) < 0.5 && c.top === top)) continue
+      cutsRaw.push({ p: [x0, y0], q: [x1, y1], depth: r1(z1 - z0), top, name: 'Паз' })
+    }
+    const plainH = plainHoles.flatMap(x => [x[0], x[1]])
     makers.push(() => buildItem(keep({
-      T, elems, texDir, M: Mp, butts: [], cutsRaw: [], decorRaw: [], warnCuts: 0, anyEnd: true,
+      T, elems, texDir, M: Mp, butts: [], cutsRaw, decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material: pl.mat, rotatable: false, anim: null,
       meta: { src: 'sketchup', ids: [id], des: '', pos: '', name, product: pl.product, productDes: '', productPos: '', path: pl.path.slice(1), material: pl.mat, materialCode: '' },
-    }), holesW, opts.faceRule))
+    }), plainH.length ? [...holesW, ...plainH] : holesW, opts.faceRule))
   }
 
   // ── остальное с гранями -> 3D «фурнитура»; одинаковые формы — одна сетка ──
@@ -612,6 +680,12 @@ export function parseSkp(u8, opts = {}) {
 
   // мелкие отверстия (насечки 1–1,5 мм под саморез) и соосные Ø4,5 под Ø7 — оставляем как в модели
   const { items, groups, skipped } = groupItems(makers)
+  // не молчим: крепёж и пазы, которые не попали ни в одну деталь, и тела, не понятые как детали
+  const lost = []
+  const lostAdd = (name, why) => { const x = lost.find(l => l.name === name && l.why === why); if (x) x.count++; else lost.push({ name, why, count: 1, parts: [] }) }
+  for (const [h, h2, nm] of plainHoles) if (!h.hit && !h2.hit) lostAdd(`${nm} (${h.name}, Ø${Math.round(h.r * 20) / 10})`, 'place')
+  for (const g of plainGrooves) if (!g.hit) lostAdd(`${g.name} (паз)`, 'place')
+  for (const [nm, c] of unknown) { lostAdd(nm, 'notPart'); lost[lost.length - 1].count = c }
   // детали, входящие друг в друга (любая глубина от 0,3 мм): отмечаем у обеих и отдаём списком — предупреждение при импорте
   let clashes
   try { clashes = findClashes(srcs) } catch { clashes = [] }
@@ -639,7 +713,8 @@ export function parseSkp(u8, opts = {}) {
     parts: items.map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
     extras: [], meshes, hardware, colors: {},
   }
-  return { orderName: '', scene, skipped, items, groups, clashes, skp: true, other: hardware.length, hidden: hiddenSkipped }
+  return { orderName: '', scene, skipped, items, groups, clashes, skp: true, plain: !panels.length, other: hardware.length, hidden: hiddenSkipped, lost,
+    plainHoles: plainHoles.filter(([h, h2]) => h.hit || h2.hit).length, plainGrooves: plainGrooves.filter(g => g.hit).length }
 }
 
 export async function readSkpFile(file, opts) {
