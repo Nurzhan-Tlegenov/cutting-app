@@ -191,15 +191,13 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
       // 2-й уровень: полоса идёт от края листа — по своей оси от 0
       const head = `    <no.${no} l="${r1(lReal)}" w="${r1(wReal)}" trim="${r1(trim)}" x="${r1(layer <= 2 ? 0 : cx)}" y="${r1(layer === 1 ? 0 : cy)}" layer="${layer}" id="${id}"`
       const kids = []
-      // деловой обрезок в конце заготовки — это её остаток: его не отпиливаем (лишний рез и опил края не нужны),
-      // бирка обрезка остаётся (offRows)
+      // деловой обрезок в конце заготовки: кусок с кодом (type 3) — по нему станок печатает бирку остатка (без куска
+      // в программе бирка не печаталась). Его размер — до самого конца заготовки, вместе с краем: рез приходится на край,
+      // отдельной полоски опила нет — край остаётся у остатка
       const tail = tailOffcut(node) ? node.slots[node.slots.length - 1] : null
-      if (tail) {
-        oc++
-        offRows.push({ code: `@OC${oc}@`, si, w: Math.round(tail.item.ow ?? tail.item.w - k), h: Math.round(tail.item.oh ?? tail.item.h - k) })
-      }
-      const partLines = node.slots.filter(sl => sl !== tail).map(sl => {
-        const cut = sl.a - k
+      const before = node.slots.slice(0, -1).reduce((t, sl) => t + sl.a, 0)
+      const partLines = node.slots.map(sl => {
+        const cut = sl === tail ? Math.max(sl.a - k, lReal - trim - before - k) : sl.a - k
         const myId = ++nextId
         if (sl.item?.part) {
           code++
@@ -210,9 +208,9 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
         }
         if (sl.item?.offcut) {
           oc++
-          offRows.push({ code: `@OC${oc}@`, si, w: Math.round(sl.item.ow ?? sl.item.w - k), h: Math.round(sl.item.oh ?? sl.item.h - k) })
+          offRows.push({ code: `OC${oc}`, si, w: Math.round(sl.item.ow ?? sl.item.w - k), h: Math.round(sl.item.oh ?? sl.item.h - k) })
           kids.push({ leaf: true, id: myId, l: wReal, w: cut, layer: layer + 1, sl })
-          return `      <part cut="${r1(cut)}" type="3" id="${myId}" code="@OC${oc}@" print_code="" />`
+          return `      <part cut="${r1(cut)}" type="3" id="${myId}" code="OC${oc}" print_code="" />`
         }
         kids.push({ leaf: false, id: myId, l: wReal, w: cut, layer: layer + 1, sl })
         return `      <part cut="${r1(cut)}" type="2" id="${myId}" code="" print_code="" />`
@@ -252,18 +250,7 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
       ...edges, '', '', '', '', sawL, sawW, L, W, fileTitle, c, si + 1, si + 1, p.rotated ? 'true' : 'false', 1]
     out.push(`    <row code="${c}" ${v.map((x, i) => `columns${i + 1}="${esc(x)}"`).join(' ')} />`)
   }
-  // деловые остатки — тоже строками таблицы: без строки у станка нет команды печатать бирку (файл OC*.emf лежит, но не печатается)
-  for (const { code: c, si, w, h } of offRows) {
-    const v = ['True', material, r1(thick), 'Деловой остаток', r1(h), r1(w), 1, 'Без текстуры(T_N)', '|||', '', '0|0|0|0', title, 'Деловой остаток', '',
-      '', '', '', '', '', '', '', '', r1(h), r1(w), r1(h), r1(w), fileTitle, c, si + 1, si + 1, 'false', 1]
-    out.push(`    <row code="${c}" ${v.map((x, i) => `columns${i + 1}="${esc(x)}"`).join(' ')} />`)
-  }
   out.push('  </table>', '</project>', '')
-  // коды деловых остатков — числами после деталей (1…N — детали, N+1… — остатки): станок печатает бирку по коду куска,
-  // а буквенный код (OC1) он не принимает — бирки остатков не печатались. Файлы бирок — по тем же номерам (N+1.emf)
-  const ocNum = k => rows.length + k
-  for (const o of offRows) o.code = String(ocNum(Number(/\d+/.exec(o.code)[0])))
-  for (let i = 0; i < out.length; i++) if (out[i].includes('@OC')) out[i] = out[i].replace(/@OC(\d+)@/g, (m, k) => String(ocNum(Number(k))))
   const base = toLatin(`${title}_${material}_${thick}`).replace(/[^\w.-]+/g, '_').replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '') || 'beamsaw'
   return { text: out.join('\r\n'), fileName: `${base}.xml`, panels: mat.sheets.length, parts: rows.length, rows, offRows, droppedOffcuts: dropped, wideStrips: wide, maxStrip }
 }

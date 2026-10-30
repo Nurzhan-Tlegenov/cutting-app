@@ -565,7 +565,7 @@ export default function CncPage() {
               <div style={{ fontSize: 13, fontWeight: 500 }}>{built.beam || built.labelsOwnDir ? 'Бирки' : 'Маркировочный стол'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
                 {built.beam
-                  ? <>Файлов: {built.labels.length} — бирка на каждую деталь (1.emf, 2.emf … по коду детали в программе) и на деловые остатки (номерами после деталей), рядом с программой пилы: <b style={{ fontFamily: 'monospace' }}>{routerDir().join(' / ')}</b>. Станок печатает бирку, когда выдаёт деталь.</>
+                  ? <>Файлов: {built.labels.length} — бирка на каждую деталь (1.emf, 2.emf … по коду детали в программе) и на деловые остатки (OC1.emf …), рядом с программой пилы: <b style={{ fontFamily: 'monospace' }}>{routerDir().join(' / ')}</b>. Станок печатает бирку, когда выдаёт деталь.</>
                   : built.labelsOwnDir
                   ? <>Файлов: {built.labels.length} — картинки бирок, бирки по листам, список листов и PDF всех бирок для печати. Папка: <b style={{ fontFamily: 'monospace' }}>{labelsDir().join(' / ')}</b>.</>
                   : <>Файлов: {built.labels.length} — список листов (List), бирки по листам (Label_N.cyc), картинки бирок и листов. На линии сначала идёт маркировка, затем раскрой.</>}
