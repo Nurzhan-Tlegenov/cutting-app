@@ -848,23 +848,39 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
         const z = through ? -drillOver : T - depth
         jobs.push({ stage: 0, rank: 0, tool: t, at: c, run: out => { out.g0(c[0], c[1], safeZ); drillPlunge(out, t, T, z); out.g0(null, null, safeZ) } })
       } else {
-        // Отверстие фрезой. Фреза не сверло — прямо вниз не врезается (горит), поэтому вход по спирали: на диаметре
-        // на 2 мм меньше отверстия (по 1 мм на сторону), но не меньше «фреза + 1 мм»; дошла до низа — разбивает
-        // отверстие кольцами до нужного диаметра, последний круг — по самому диаметру.
+        // Отверстие фрезой — из центра наружу. Фреза не сверло: прямо вниз не врезается (горит), поэтому вход по спирали —
+        // в центре отверстия, на малом радиусе (половина радиуса фрезы): фреза сразу выбирает середину, «бобышки» в центре
+        // не остаётся. Раньше спираль шла у стенки, середина оставалась столбиком, отрывалась при выборке и улетала в
+        // аспирацию (чашка петли Ø35 фрезой Ø8). Дальше — спираль наружу с шагом фрезы до диаметра и чистовой круг по
+        // диаметру. Годится для любого отверстия и любой фрезы меньше него: Ø8 фрезой Ø6 — спираль входа сразу на диаметре.
         const dt = n0(t.d), R = (d - dt) / 2
         if (R < -EPS) { warn.add(`Фреза Ø${num(dt)} больше отверстия Ø${num(d)} — ${label} пропущены.`); continue }
-        if (!o.tool) warn.add(`Сверла Ø${num(d)} нет — ${label} делает фреза Ø${num(dt)} (T${Math.round(n0(t.t))}): вход по спирали и разбивка до диаметра.`)
+        if (!o.tool) warn.add(`Сверла Ø${num(d)} нет — ${label} делает фреза Ø${num(dt)} (T${Math.round(n0(t.t))}): вход по спирали из центра и разбивка до диаметра.`)
         const zBot = through ? -millOver : T - depth
         edgeOk(t, T - zBot, label)
-        const de = Math.min(d, Math.max(dt + 1, d - 2))
-        const Re = Math.max(0, Math.min(R, (de - dt) / 2))           // радиус спирали входа (по центру фрезы)
+        const Re = Math.max(0, Math.min(R, dt / 4))                      // радиус спирали входа (по центру фрезы): ≤ радиуса фрезы — середина выбирается сразу
         const st = Math.max(0.3, Math.min(n0(t.step) || dt / 2, dt * 0.9))
         const tan = Math.tan(Math.max(1, Math.min(89, n0(ops.outer?.angle) || 45)) * Math.PI / 180)
         if (Re < 0.2) warn.add(`Фреза Ø${num(dt)} почти равна отверстию Ø${num(d)} — места на спираль нет, вход прямой на пониженной подаче (${label}).`)
         const cw = (ops.cutout?.dir || 'cw') !== 'ccw'                   // как у вырезов: по умолчанию по часовой
-        const ring = (r, z0, z1) => {                                    // один оборот радиуса r, z — от z0 к z1
+        const sgn = cw ? -1 : 1
+        const ring = (r, z0, z1) => {                                    // один оборот радиуса r от угла 0, z — от z0 к z1
           const L = circleLoop(c[0], c[1], r), pts = cw ? [L[0], ...L.slice(1).reverse(), L[0]] : [...L, L[0]]
           return pts.map((q, k) => [q[0], q[1], z0 + (z1 - z0) * k / (pts.length - 1)])
+        }
+        // спираль наружу от r0 до r1 (с угла 0 и обратно к углу 0): шаг за оборот — не больше st
+        const spiralOut = (r0, r1) => {
+          const turns = Math.max(1, Math.ceil((r1 - r0) / st - 1e-9))
+          const pts = []
+          for (let k = 0; k < turns; k++) {
+            const n = Math.max(24, Math.ceil(2 * Math.PI * (r0 + (r1 - r0) * (k + 1) / turns) / 1.5))
+            for (let i = 1; i <= n; i++) {
+              const f = (k + i / n) / turns, a = sgn * 2 * Math.PI * i / n
+              const r = r0 + (r1 - r0) * f
+              pts.push([c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)])
+            }
+          }
+          return pts
         }
         jobs.push({ stage: 0, rank: 1, tool: t, at: c, run: out => {
           const feed = n0(t.feed) || 1000, inFeed = n0(t.inFeed) || feed
@@ -873,7 +889,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
             out.g0(c[0], c[1], safeZ); out.g1(null, null, top, inFeed)
             levels(top, zBot, n0(t.maxPass) || dt / 2).forEach(z => out.g1(null, null, z, Math.max(100, Math.round(inFeed / 3))))
           } else {
-            // спираль: за оборот — не глубже угла входа и не больше макс. глубины за проход
+            // спираль входа в центре: за оборот — не глубже угла входа и не больше макс. глубины за проход
             const pitch = Math.max(0.2, Math.min(2 * Math.PI * Re * tan, n0(t.maxPass) > 0 ? n0(t.maxPass) : dt * 0.75))
             const turns = Math.max(1, Math.ceil((top - zBot) / pitch - 1e-9))
             out.g0(c[0] + Re, c[1], safeZ); out.g1(null, null, top, inFeed)
@@ -883,16 +899,11 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
             }
             ring(Re, zBot, zBot).slice(1).forEach(q => out.g1(q[0], q[1], null, feed))        // круг по дну
           }
-          // глухое отверстие: середина, которую спираль не задела, выбирается кольцами внутрь
-          if (!through && Re > dt * 0.45) {
-            for (let r = Re - st; r > 0.05; r -= st) { out.g1(c[0] + r, c[1], null, feed); ring(r, zBot, zBot).slice(1).forEach(q => out.g1(q[0], q[1], null, feed)) }
-            out.g1(c[0], c[1], null, feed); out.g1(c[0] + Math.max(Re, 0), c[1], null, feed)
+          // разбивка до диаметра: спираль наружу, затем чистовой круг точно по диаметру
+          if (R > Re + 1e-6) {
+            spiralOut(Math.max(Re, 0), R).forEach(q => out.g1(q[0], q[1], null, feed))
+            ring(R, zBot, zBot).slice(1).forEach(q => out.g1(q[0], q[1], null, feed))
           }
-          // разбивка до диаметра: кольца наружу с шагом перекрытия, последнее — точно по диаметру
-          const rs = []
-          for (let r = Math.max(Re, 0) + st; r < R - 1e-6; r += st) rs.push(r)
-          if (R > Math.max(Re, 0) + 1e-6) rs.push(R)
-          rs.forEach(r => { out.g1(c[0] + r, c[1], null, feed); ring(r, zBot, zBot).slice(1).forEach(q => out.g1(q[0], q[1], null, feed)) })
           out.g1(c[0] + Math.max(0, R - Math.min(0.5, R)), c[1], null, feed)     // отойти от стенки перед подъёмом
           out.g0(null, null, safeZ)
         } })
