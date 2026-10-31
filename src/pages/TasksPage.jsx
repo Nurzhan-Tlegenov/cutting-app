@@ -231,7 +231,8 @@ export default function TasksPage() {
       <div data-card={k.id} className="card" {...dragProps(k)} onClick={() => { if (!dragged.current) setOpenId(k.id) }}
         style={{ padding: '9px 10px', cursor: 'pointer', borderLeft: `3px solid ${c.color || 'var(--gray-mid)'}`, opacity: drag?.card.id === k.id ? 0.35 : k.done_at ? 0.6 : 1, userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'pan-x pan-y' }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-          {!readOnly && <input type="checkbox" checked={!!k.done_at} title="Выполнено" onChange={e => patchCard(k.id, { done_at: e.target.checked ? new Date().toISOString() : null })} onClick={e => e.stopPropagation()} style={{ width: 17, height: 17, marginTop: 1, flexShrink: 0 }} />}
+          {/* «выполнено» — только в карточке задачи: галочка на доске нажималась случайно, и задача пропадала */}
+          {k.done_at && <span title="Выполнено" style={{ color: 'var(--teal)', fontSize: 14, lineHeight: '18px', flexShrink: 0 }}>✓</span>}
           <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, textDecoration: k.done_at ? 'line-through' : 'none', wordBreak: 'break-word' }}>{k.title || <span style={{ color: 'var(--text-hint)' }}>Без названия</span>}</div>
         </div>
         {k.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{k.note}</div>}
@@ -406,6 +407,36 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
   const field = { width: '100%', padding: '8px 10px', fontSize: 14, borderRadius: 8, border: '1px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', fontFamily: 'inherit' }
   const saveText = () => { const patch = {}; if (title !== (card.title || '')) patch.title = title; if (note !== (card.note || '')) patch.note = note || null; if (Object.keys(patch).length) onPatch(patch) }
   const close = () => { saveText(); onClose() }
+  // компьютер: окно задачи посередине экрана, переносится за верхнюю полосу и растягивается за угол; место и размер запоминаются
+  const desk = useDesktop()
+  const winRef = useRef(null)
+  const downOut = useRef(null)
+  const [win, setWin] = useState(() => {
+    let s
+    try { s = JSON.parse(localStorage.getItem('taskWin') || 'null') } catch { s = null }
+    const vw = window.innerWidth, vh = window.innerHeight
+    const w = Math.min(s?.w || 560, vw - 40), h = Math.min(s?.h || Math.round(vh * 0.75), vh - 40)
+    const x = s ? Math.min(Math.max(0, s.x), vw - 120) : Math.round((vw - w) / 2)
+    const y = s ? Math.min(Math.max(0, s.y), vh - 60) : Math.round((vh - h) / 2)
+    return { x, y, w, h }
+  })
+  const saveWin = () => {
+    const el = winRef.current
+    if (!desk || !el) return
+    const r = el.getBoundingClientRect()
+    const next = { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }
+    setWin(next)
+    try { localStorage.setItem('taskWin', JSON.stringify(next)) } catch { /* без памяти */ }
+  }
+  const startMove = e => {
+    if (e.button !== 0 || e.target.closest('button, input, label, select, textarea')) return
+    e.preventDefault()
+    const el = winRef.current, r = el.getBoundingClientRect()
+    const dx = e.clientX - r.left, dy = e.clientY - r.top
+    const move = ev => { el.style.left = Math.min(Math.max(0, ev.clientX - dx), window.innerWidth - 120) + 'px'; el.style.top = Math.min(Math.max(0, ev.clientY - dy), window.innerHeight - 50) + 'px' }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); saveWin() }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
   const setList = l => onPatch({ checklist: l })
   const addItem = () => { const t = item.trim(); if (!t) return; setList([...list, { id: newItemId(), t, done: false }]); setItem('') }
   const setDue = v => { const due = fromLocalInput(v); onPatch({ due_at: due, ...(rk && rk !== 'custom' ? { remind_at: remindAt(rk, due) } : {}) }) }
@@ -415,11 +446,21 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
   const btn = (bg, fg) => ({ padding: '8px 12px', borderRadius: 8, border: bg === 'transparent' ? '1px solid var(--border-md)' : 'none', background: bg, color: fg, fontSize: 13.5, cursor: 'pointer' })
 
   return (
-    <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-      <div data-editor onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', background: 'var(--bg)', borderRadius: '16px 16px 0 0', padding: '14px 16px 24px', boxShadow: '0 -8px 30px rgba(0,0,0,.2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+    // закрыть щелчком мимо окна — только если и нажали мимо (потянули угол окна и отпустили снаружи — не закрываем)
+    <div onMouseDown={e => { downOut.current = e.target === e.currentTarget }} onClick={e => { if (e.target === e.currentTarget && downOut.current !== false) close() }} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: desk ? 'rgba(0,0,0,.12)' : 'rgba(0,0,0,.35)', display: 'flex', alignItems: desk ? 'flex-start' : 'flex-end', justifyContent: desk ? 'flex-start' : 'center' }}>
+      <div ref={winRef} data-editor onClick={e => e.stopPropagation()} onMouseUp={saveWin}
+        style={desk
+          ? { position: 'absolute', left: win.x, top: win.y, width: win.w, height: win.h, minWidth: 360, minHeight: 260, maxWidth: '96vw', maxHeight: '94vh', resize: 'both', overflow: 'auto', background: 'var(--bg)', borderRadius: 14, padding: '0 16px 20px', boxShadow: '0 12px 40px rgba(0,0,0,.25)' }
+          : { width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', background: 'var(--bg)', borderRadius: '16px 16px 0 0', padding: '14px 16px 24px', boxShadow: '0 -8px 30px rgba(0,0,0,.2)' }}>
+        <div onPointerDown={desk ? startMove : undefined} title={desk ? 'Потяните, чтобы перенести окно' : undefined}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, ...(desk ? { position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg)', padding: '12px 0 8px', cursor: 'move', borderBottom: '0.5px solid var(--border)' } : {}) }}>
           {!ro && <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
-            <input type="checkbox" checked={!!card.done_at} onChange={e => onPatch({ done_at: e.target.checked ? new Date().toISOString() : null })} style={{ width: 18, height: 18 }} />Выполнено
+            <input type="checkbox" checked={!!card.done_at} onChange={e => {
+              const on = e.target.checked
+              // не все подзадачи выполнены — переспросить
+              if (on && p.total > p.done && !window.confirm(`Не выполнено подзадач: ${p.total - p.done} из ${p.total}. Всё равно отметить задачу выполненной?`)) return
+              onPatch({ done_at: on ? new Date().toISOString() : null })
+            }} style={{ width: 18, height: 18 }} />Выполнено
           </label>}
           <span style={{ flex: 1 }} />
           {!ro && <button type="button" onClick={onDelete} style={{ ...btn('transparent', 'var(--danger)'), padding: '6px 10px' }}>Удалить</button>}
