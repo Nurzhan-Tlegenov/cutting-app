@@ -28,6 +28,7 @@ import { useBackClose } from '../lib/backStack'
 import PartGroups, { GroupChip } from '../components/PartGroups'
 import { groupsOf, groupDir, PART_GROUPS_SQL_HINT } from '../lib/partGroups'
 import { fetchOrderDetails, insertOrderDetails } from '../lib/orderDetails.js'
+import { withRetry } from '../lib/netRetry.js'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -287,6 +288,7 @@ export default function EditOrderPage() {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [saveProg, setSaveProg] = useState('')   // «300 из 1578» — на слабой связи видно, что сохранение идёт
   const [matFilter, setMatFilter] = useState('')   // какой материал показывать в списке деталей
   const [model3d, setModel3d] = useState(null)   // 3D-модель из Базиса — сохраняется вместе с заказом
   const [error, setError] = useState('')
@@ -479,8 +481,11 @@ export default function EditOrderPage() {
         if (kErr && materialKind === 'hdf') window.alert(KIND_SQL_HINT)
         else kindWas.current = materialKind
       }
-      const { error: dErr } = await supabase.from('order_details').delete().eq('order_id', id)
-      if (dErr) throw new Error('Ошибка удаления деталей: ' + dErr.message)
+      // Сначала записываем новые детали, потом удаляем старые: оборвалась связь посередине — заказ остаётся
+      // со старыми деталями, а не пустым (раньше было «удалить всё → вставить», и на слабом интернете заказ пустел)
+      const { data: oldRows, error: rErr } = await fetchOrderDetails(id, { cols: 'id', ordered: false })
+      if (rErr) throw new Error('Не удалось прочитать детали заказа: ' + rErr.message)
+      const oldIds = (oldRows || []).map(r => r.id)
       let sortIdx = 0
       const rows = valid.map((d) => {
         const pfx = d.prefix || null
@@ -497,19 +502,23 @@ export default function EditOrderPage() {
           part_group: (d.part_group || '').trim() || null, part_group_dir: d.part_group ? (d.part_group_dir === 'x' ? 'x' : 'y') : null, part_group_pos: d.part_group ? (d.part_group_pos || null) : null,
         }
       })
-      let { error: iErr } = await insertOrderDetails(rows)
+      let { error: iErr } = await insertOrderDetails(rows, (n, all) => setSaveProg(all > 150 ? `${n} из ${all}` : ''))
       if (iErr && /part_group/.test(String(iErr.message || ''))) {
         // база ещё без групп — детали сохраняются без них, с подсказкой
         ;({ error: iErr } = await insertOrderDetails(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; delete c.part_group_pos; return c })))
         if (!iErr && rows.some(r => r.part_group)) window.alert(PART_GROUPS_SQL_HINT)
       }
       if (iErr) throw new Error('Ошибка сохранения деталей: ' + iErr.message)
+      for (let k = 0; k < oldIds.length; k += 200) {
+        const { error: dErr } = await withRetry(() => supabase.from('order_details').delete().in('id', oldIds.slice(k, k + 200)))
+        if (dErr) throw new Error('Новые детали сохранены, но старые не удалились (проверьте заказ на дубли): ' + dErr.message)
+      }
       if (model3d) { const r = await saveOrderModel(id, model3d); if (!r.ok) window.alert(r.missing ? MODEL_TABLE_HINT : 'Заказ сохранён, но 3D-модель сохранить не удалось: ' + r.message) }
       navigate(`/orders/${id}/nesting`)   // сразу к делу: статистика и детали есть и в раскрое
     } catch (err) {
       setError(err.message)
     } finally {
-      setSaving(false)
+      setSaving(false); setSaveProg('')
     }
   }
   const validCount = details.filter(d => d.w > 0 && d.h > 0).length
@@ -654,7 +663,7 @@ export default function EditOrderPage() {
       </div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
       <button type="button" className="btn-primary" onClick={handleSave} disabled={saving || !validCount}>
-        {saving ? 'Сохранение...' : `Сохранить изменения (${validCount} дет.)`}
+        {saving ? `Сохранение${saveProg ? ' ' + saveProg : ''}…` : `Сохранить изменения (${validCount} дет.)`}
       </button>
       <BottomNav />
       {showLeaveConfirm && (

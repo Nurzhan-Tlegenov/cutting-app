@@ -394,6 +394,7 @@ export default function NewOrderPage() {
   const groupUi = { groups: groupNames, active: activeGroup, assign: assignGroup }
 
   const [saving, setSaving] = useState(false)
+  const [saveProg, setSaveProg] = useState('')   // «300 из 1578» — на слабой связи видно, что сохранение идёт
   const [matFilter, setMatFilter] = useState('')   // какой материал показывать в списке деталей
   const [model3d, setModel3d] = useState(null)   // 3D-модель из Базиса — сохраняется вместе с заказом
   const [keyboardOpen, setKeyboardOpen] = useState(false)
@@ -558,7 +559,7 @@ export default function NewOrderPage() {
           part_group: (d.part_group || '').trim() || null, part_group_dir: d.part_group ? (d.part_group_dir === 'x' ? 'x' : 'y') : null, part_group_pos: d.part_group ? (d.part_group_pos || null) : null,
         }
       })
-      let { error: dErr } = await insertOrderDetails(rows)
+      let { error: dErr } = await insertOrderDetails(rows, (n, all) => setSaveProg(all > 150 ? `${n} из ${all}` : ''))
       if (dErr && /part_group/.test(String(dErr.message || ''))) {
         // база ещё без групп — детали сохраняются без них, с подсказкой
         ;({ error: dErr } = await insertOrderDetails(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; delete c.part_group_pos; return c })))
@@ -571,7 +572,7 @@ export default function NewOrderPage() {
       const lim = limitFromError(err)
       if (lim) { setLimitBlock(lim); resetLimitsCache() } else setError(err.message)
     } finally {
-      setSaving(false)
+      setSaving(false); setSaveProg('')
     }
   }
 
@@ -616,7 +617,7 @@ export default function NewOrderPage() {
         <button type="button" data-tour="order-save" className="btn-primary" onClick={handleSave}
           disabled={saving || !validCount}
           style={{ padding:'7px 16px', fontSize:13, whiteSpace:'nowrap' }}>
-          {saving ? 'Сохранение...' : `Сохранить заказ (${validCount} дет.)`}
+          {saving ? `Сохранение${saveProg ? ' ' + saveProg : ''}…` : `Сохранить заказ (${validCount} дет.)`}
         </button>
       </div>
 

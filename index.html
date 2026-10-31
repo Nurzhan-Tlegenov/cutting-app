@@ -48,8 +48,19 @@
         }
         window.addEventListener('error', function (e) {
           if (e && e.error && e.error.name === 'SyntaxError') fail('old')
-        })
-        setTimeout(function () { fail('net') }, 15000)
+          // файл приложения не скачался (обрыв связи) — сразу говорим, а не ждём
+          var t = e && e.target
+          if (t && t !== window && (t.tagName === 'SCRIPT' || (t.tagName === 'LINK' && /modulepreload|stylesheet/.test(t.rel)))) fail('net')
+        }, true)
+        // Медленный интернет: приложение ещё скачивается — не пугаем «не загрузилось» (раньше через 15 с человек
+        // видел ошибку, обновлял страницу, и загрузка начиналась заново). Ошибку показываем только через 2 минуты.
+        setTimeout(function () {
+          if (shown || !document.getElementById('boot')) return
+          var m = document.getElementById('boot-msg')
+          m.style.color = '#444'
+          m.innerHTML = '<div style="max-width:420px;line-height:1.45">Медленный интернет — приложение ещё загружается.<br>Не закрывайте и не обновляйте страницу.</div>'
+        }, 12000)
+        setTimeout(function () { fail('net') }, 120000)
       })()
     </script>
     <script type="module" src="/src/main.jsx"></script>

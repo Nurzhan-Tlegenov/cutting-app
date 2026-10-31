@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { recordRequest, startPerf, perfMark } from './perf'
+import { fetchRetry } from './netRetry'
 
 // База напрямую. Из России адреса Supabase и Vercel заблокированы — там приложение открывается через зеркало
 // (ru.raskroypro.com, сервер-посредник, см. deploy/mirror-setup.sh): на зеркале запросы к базе идут через тот же адрес /sb.
@@ -8,11 +9,12 @@ const onMirror = typeof window !== 'undefined' && /^ru\./i.test(window.location.
 export const SUPABASE_URL = onMirror ? `${window.location.origin}/sb` : SUPABASE_DIRECT
 export const SUPABASE_ANON_KEY = 'sb_publishable_M1nC2YyHn_4zJI5QFAI9Cw_IaC6Ou7u'
 
+// чтение при обрыве связи повторяется само (netRetry.js) — слабый интернет не превращается в ошибку
 // каждый запрос к базе засекается — для страницы «Нагрузка» мастер-аккаунта (perf.js)
 const timedFetch = async (input, init) => {
   const t0 = performance.now(), mark = perfMark(), url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url || ''
   try {
-    const res = await fetch(input, init)
+    const res = await fetchRetry(input, init)
     recordRequest(url, performance.now() - t0, res.status < 500, mark)
     return res
   } catch (e) { if (e?.name !== 'AbortError') recordRequest(url, performance.now() - t0, false, mark); throw e }   // отменённый запрос — не ошибка базы
