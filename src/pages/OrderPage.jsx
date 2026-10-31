@@ -37,6 +37,7 @@ import { sameColorMap, userSameAlpha } from '../lib/sameParts'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
 import { useLabelMode } from '../lib/userSettings'
+import { fetchOrderDetails } from '../lib/orderDetails.js'
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
@@ -72,7 +73,7 @@ export default function OrderPage() {
   }, [id])
   async function fetchOrder() {
     const { data: o, error: oErr } = await supabase.from('orders').select('*').eq('id', id).single()
-    const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+    const { data: d } = await fetchOrderDetails(id)
     setOrder(o)
     setDetails(d || [])
     setLoading(false)

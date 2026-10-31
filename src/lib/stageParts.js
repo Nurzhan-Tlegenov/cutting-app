@@ -6,6 +6,7 @@ import { detailMeta } from './partLabel'
 import { savedNestings } from './savedNesting'
 import { labelInfo, labelQr } from './labelMaker'
 import { toLatin } from './orderUtils'
+import { fetchOrderDetails } from './orderDetails.js'
 
 // Правило поста: list — какие детали; для присадки — что учитывать (отверстия сверху, снизу, в торцы, пазы, фрезеровки).
 export const RULE_LISTS = [['all', 'Все детали'], ['edge', 'С кромкой'], ['drill', 'С присадкой'], ['none', 'Без списка деталей']]
@@ -100,7 +101,7 @@ export function stageParts(order, rows, rule) {
 export async function loadOrderParts(orderId) {
   const [{ data: order }, { data: rows }] = await Promise.all([
     supabase.from('orders').select('*').eq('id', orderId).single(),
-    supabase.from('order_details').select('*').eq('order_id', orderId).order('sort_order'),
+    fetchOrderDetails(orderId),
   ])
   // сотруднику таблица деталей напрямую может быть закрыта — тогда детали берутся функцией базы (как у сканера)
   if (order && !(rows || []).length) {

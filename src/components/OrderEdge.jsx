@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { edgeTotals } from '../lib/edgeLength'
 import { rawDetail, overMm, parseEdgeTypes } from '../lib/edgeCut'
+import { fetchOrderDetails } from '../lib/orderDetails.js'
 
 const cache = new Map()   // orderId -> Promise<{ total, curved } | null>
 function loadEdge(orderId) {
@@ -13,7 +14,7 @@ function loadEdge(orderId) {
       try {
         const [{ data: o }, { data: d, error }] = await Promise.all([
           supabase.from('orders').select('edge_types').eq('id', orderId).maybeSingle(),
-          supabase.from('order_details').select('*').eq('order_id', orderId),
+          fetchOrderDetails(orderId, { ordered: false }),
         ])
         if (error || !d) return null
         const t = edgeTotals(d.map(rawDetail), overMm(parseEdgeTypes(o?.edge_types)))

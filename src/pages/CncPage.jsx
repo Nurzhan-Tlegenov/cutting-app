@@ -45,6 +45,7 @@ import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import { fileNamesOf } from '../lib/fileNames'
 import { fileNameOf, FILE_NAME_PARTS, FILE_NAME_DEFAULTS } from '../lib/orderUtils'
 import TplInput from '../components/TplInput'
+import { fetchOrderDetails } from '../lib/orderDetails.js'
 const GcodeSimulator = lazyRetry(() => import('../components/GcodeSimulator'))   // 3D — подгружается при открытии
 const TABS = [['sheets', 'Листы'], ['ops', 'Обработка'], ['tools', 'Инструменты'], ['basic', 'Основные'], ['cmd', 'Команды']]
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -96,7 +97,7 @@ export default function CncPage() {
     let alive = true
     ;(async () => {
       const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
-      const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+      const { data: d } = await fetchOrderDetails(id)
       if (!alive) return
       setOrder(o || null); setDetails(cutDetails(d || [], parseEdgeTypes(o?.edge_types)))   /* заготовки: с учётом кромки, как в раскрое */; setLoading(false)
     })()

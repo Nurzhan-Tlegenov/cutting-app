@@ -27,6 +27,7 @@ import CncLoader from '../components/CncLoader'
 import { useBackClose } from '../lib/backStack'
 import PartGroups, { GroupChip } from '../components/PartGroups'
 import { groupsOf, groupDir, PART_GROUPS_SQL_HINT } from '../lib/partGroups'
+import { fetchOrderDetails, insertOrderDetails } from '../lib/orderDetails.js'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -326,7 +327,7 @@ export default function EditOrderPage() {
   useEffect(() => { fetchOrder() }, [id])
   async function fetchOrder() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
-    const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+    const { data: d } = await fetchOrderDetails(id)
     if (o) { setOrderNote(o.order_note || ''); noteWas.current = o.order_note || '' }
     if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16); setMaterialKind(o.material_kind === 'hdf' ? 'hdf' : ''); kindWas.current = o.material_kind === 'hdf' ? 'hdf' : '' }
     if (o) { const saved = parseEdgeTypes(o.edge_types); if (Object.keys(saved).length) setEdgeTypesState(prev => ({ ...prev, ...saved })) }
@@ -496,10 +497,10 @@ export default function EditOrderPage() {
           part_group: (d.part_group || '').trim() || null, part_group_dir: d.part_group ? (d.part_group_dir === 'x' ? 'x' : 'y') : null, part_group_pos: d.part_group ? (d.part_group_pos || null) : null,
         }
       })
-      let { error: iErr } = await supabase.from('order_details').insert(rows)
+      let { error: iErr } = await insertOrderDetails(rows)
       if (iErr && /part_group/.test(String(iErr.message || ''))) {
         // база ещё без групп — детали сохраняются без них, с подсказкой
-        ;({ error: iErr } = await supabase.from('order_details').insert(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; delete c.part_group_pos; return c })))
+        ;({ error: iErr } = await insertOrderDetails(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; delete c.part_group_pos; return c })))
         if (!iErr && rows.some(r => r.part_group)) window.alert(PART_GROUPS_SQL_HINT)
       }
       if (iErr) throw new Error('Ошибка сохранения деталей: ' + iErr.message)

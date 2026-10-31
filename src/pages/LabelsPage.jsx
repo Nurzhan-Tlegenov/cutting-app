@@ -196,6 +196,7 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d, bp 
 // Конструктор бирки: элементы перетаскиваются по бирке пальцем, за уголок — меняется размер.
 // Показана бирка первой детали первого листа — на настоящих данных заказа.
 import LabelImageEditor from '../components/LabelImageEditor'
+import { fetchOrderDetails } from '../lib/orderDetails.js'
 
 // Сетка бирки в мм: тонкая — через 1 мм (когда крупно), через 5 мм, жирнее — через 10 мм с цифрами по верху и слева
 function LabelGrid({ w, h, scale }) {
@@ -901,7 +902,7 @@ export default function LabelsPage() {
     let alive = true
     ;(async () => {
       const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
-      const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+      const { data: d } = await fetchOrderDetails(id)
       if (alive) { setOrder(o || null); setDetails(cutDetails(d || [], parseEdgeTypes(o?.edge_types)))   /* заготовки: с учётом кромки, как в раскрое */; setLoading(false) }
     })()
     return () => { alive = false }

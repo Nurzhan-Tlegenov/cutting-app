@@ -68,6 +68,7 @@ import { saveBeamSawXml } from '../lib/beamSawXml'
 
 import { mm } from '../lib/mmFmt'
 import { readOffcutsFile } from '../lib/importDetails'
+import { fetchOrderDetails, insertOrderDetails } from '../lib/orderDetails.js'
 // Сколько id за раз в фильтре .in(): адрес запроса ограничен по длине (uuid — 36 знаков)
 const ID_CHUNK = 100
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
@@ -2012,7 +2013,7 @@ export default function NestingPage() {
 
   async function fetchOrder(initial = false) {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
-    const { data: d } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+    const { data: d } = await fetchOrderDetails(id)
     setOrder(o); setAllDetails(d || [])
     if (o) {
       const sig = { status: o.status || 'draft', details: detailsSig(d), result: String(o.nesting_result || '').length }
@@ -2772,7 +2773,7 @@ export default function NestingPage() {
       const byMat = await saveNesting(cfg)
       const { data: src, error: e0 } = await supabase.from('orders').select('*').eq('id', id).single()
       if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
-      const { data: rows } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+      const { data: rows } = await fetchOrderDetails(id)
       const keyOf = r => detailMatKey(r, src)
       const matCols = k => { const [n, t] = k.split('|'); return { material_name: n || src.material_name, material_thickness: t !== '' && t != null && isFinite(Number(t)) ? Number(t) : src.material_thickness } }
       const fixQuote = async (o, list) => {
@@ -2799,7 +2800,7 @@ export default function NestingPage() {
         Object.assign(row, matCols(k), { order_number: await getNextOrderNumber(supabase), status: 'new', submitted_at: now, nesting_result: JSON.stringify(byMat[k]) })
         const { data: copy, error: e1 } = await supabase.from('orders').insert(row).select().single()
         if (e1 || !copy) throw new Error(/limit/i.test(e1?.message || '') ? 'Достигнут предел бесплатного использования: заказов слишком много. Удалите или отправьте в архив ненужные.' : (e1?.message || 'не удалось создать заявку'))
-        const { error: e2 } = await supabase.from('order_details').insert(mine.map(r => { const { id: _i, created_at: _c, ...restCols } = r; void _i; void _c; return { ...restCols, order_id: copy.id } }))
+        const { error: e2 } = await insertOrderDetails(mine.map(r => { const { id: _i, created_at: _c, ...restCols } = r; void _i; void _c; return { ...restCols, order_id: copy.id } }))
         if (e2) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e2.message) }
         // Пачками (сотни id не помещаются в адрес запроса); сбой посередине — удалённые строки возвращаем на место
         let e3 = null, gone = []
@@ -2809,7 +2810,7 @@ export default function NestingPage() {
           if (!e3) gone = gone.concat(part)
         }
         if (e3) {
-          if (gone.length) await supabase.from('order_details').insert(gone.map(r => { const { _parsedContour: _p, ...cols } = r; void _p; return cols }))
+          if (gone.length) await insertOrderDetails(gone.map(r => { const { _parsedContour: _p, ...cols } = r; void _p; return cols }))
           await supabase.from('orders').delete().eq('id', copy.id)
           throw new Error(e3.message)
         }
@@ -2877,9 +2878,9 @@ export default function NestingPage() {
       Object.assign(row, { user_id: user.id, order_number: await getNextOrderNumber(supabase), status: 'new', submitted_at: now, nesting_result: nesting })
       const { data: copy, error: e1 } = await supabase.from('orders').insert(row).select().single()
       if (e1 || !copy) throw new Error(/limit/i.test(e1?.message || '') ? 'Достигнут предел бесплатного использования: заказов слишком много. Удалите или отправьте в архив ненужные.' : (e1?.message || 'не удалось создать заказ'))
-      const { data: rows } = await supabase.from('order_details').select('*').eq('order_id', id).order('sort_order')
+      const { data: rows } = await fetchOrderDetails(id)
       if (rows?.length) {
-        const { error: e2 } = await supabase.from('order_details').insert(rows.map(r => { const { id: _i, created_at: _c, ...rest } = r; void _i; void _c; return { ...rest, order_id: copy.id } }))
+        const { error: e2 } = await insertOrderDetails(rows.map(r => { const { id: _i, created_at: _c, ...rest } = r; void _i; void _c; return { ...rest, order_id: copy.id } }))
         if (e2) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e2.message) }
       }
       try {   // 3D-модель заказа — тоже в копию (если была)

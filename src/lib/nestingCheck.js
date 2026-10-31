@@ -4,6 +4,7 @@
 import { validateNesting } from './validateNesting'
 import { sheetGeo, savedNestings } from './savedNesting'
 import { supabase } from './supabase'
+import { fetchOrderDetails } from './orderDetails.js'
 
 // только геометрия, из-за которой получается брак (пропавшие детали, поворот текстуры и т. п. здесь не блокируют)
 const FATAL = /пересекаются|зазор|заходит на отступ/
@@ -31,7 +32,7 @@ export async function orderFaults(orderId) {
   try {
     const [{ data: order }, { data: details }] = await Promise.all([
       supabase.from('orders').select('*').eq('id', orderId).single(),
-      supabase.from('order_details').select('*').eq('order_id', orderId).order('sort_order'),
+      fetchOrderDetails(orderId),
     ])
     if (!order) return []
     return nestingFaults(order, savedNestings(order, details || []))

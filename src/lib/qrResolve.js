@@ -6,6 +6,7 @@ import { supabase } from './supabase'
 import { orderTitle, toLatin } from './orderUtils'
 import { savedNestings } from './savedNesting'
 import { detailMeta } from './partLabel'
+import { fetchOrderDetails } from './orderDetails.js'
 
 // как текст выглядит в коде: латиница (если была включена), пробелы -> «_», без различия регистра
 const norm = s => String(s || '').trim().replace(/\s+/g, '_').toLowerCase()
@@ -51,7 +52,7 @@ export async function resolveQr(text) {
 async function matchIn(best, code) {
   const [{ data: order }, { data: details }] = await Promise.all([
     supabase.from('orders').select('*').eq('id', best.o.id).single(),
-    supabase.from('order_details').select('*').eq('order_id', best.o.id).order('sort_order'),
+    fetchOrderDetails(best.o.id),
   ])
   if (!order) return null
   let list = details || [], model

@@ -29,6 +29,7 @@ import { useBackClose } from '../lib/backStack'
 import PartGroups, { GroupChip } from '../components/PartGroups'
 import { groupsOf, groupDir, PART_GROUPS_SQL_HINT } from '../lib/partGroups'
 import { keyboardHeight, fullHeight } from '../lib/keyboard'
+import { insertOrderDetails } from '../lib/orderDetails.js'
 
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
@@ -557,10 +558,10 @@ export default function NewOrderPage() {
           part_group: (d.part_group || '').trim() || null, part_group_dir: d.part_group ? (d.part_group_dir === 'x' ? 'x' : 'y') : null, part_group_pos: d.part_group ? (d.part_group_pos || null) : null,
         }
       })
-      let { error: dErr } = await supabase.from('order_details').insert(rows)
+      let { error: dErr } = await insertOrderDetails(rows)
       if (dErr && /part_group/.test(String(dErr.message || ''))) {
         // база ещё без групп — детали сохраняются без них, с подсказкой
-        ;({ error: dErr } = await supabase.from('order_details').insert(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; delete c.part_group_pos; return c })))
+        ;({ error: dErr } = await insertOrderDetails(rows.map(r => { const c = { ...r }; delete c.part_group; delete c.part_group_dir; delete c.part_group_pos; return c })))
         if (!dErr && rows.some(r => r.part_group)) window.alert(PART_GROUPS_SQL_HINT)
       }
       if (dErr) throw dErr
