@@ -4,6 +4,7 @@
 import { supabase } from './supabase'
 import { getUserSettings, saveUserSettings } from './userSettings'
 import { APP_VERSION } from './version'
+import { gzipSync, gunzipSync } from 'fflate'
 
 const isMissing = e => /app_messages|shared_posts|PGRST205|PGRST202|42P01|schema cache/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
 export const MSG_SQL_HINT = 'Сообщения пока не включены в базе: выполните migration_messages_posts.sql в Supabase (SQL Editor) — один раз.'
@@ -23,11 +24,49 @@ export async function listMessages(limit = 200) {
     return { data: (data || []).filter(m => m.kind !== 'order' || m.from_id === uid || m.to_id === uid) }
   } catch (e) { return fail(e) }
 }
-async function insert(row) {
+// Большой файл — частями: один запрос на 10–20 МБ на медленной / мобильной сети обрывался («TypeError: Failed to fetch»).
+// Сообщение создаётся с первой частью, остальные дописываются по одной (msg_append, migration_msg_chunks.sql),
+// каждая — с повтором при сбое сети.
+const CHUNK = 900 * 1024
+const netErr = e => /Failed to fetch|NetworkError|Load failed|network|timeout|ECONN|aborted/i.test(String(e?.message || e))
+async function retry(fn, tries = 4) {
+  let last
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fn()
+      if (!r?.error || !netErr(r.error)) return r
+      last = r.error
+    } catch (e) { if (!netErr(e)) throw e; last = e }
+    await new Promise(res => setTimeout(res, 800 * (i + 1)))
+  }
+  return { error: last }
+}
+const NET_HINT = 'Связь прервалась при отправке. Проверьте интернет и попробуйте ещё раз (большой файл лучше отправлять по Wi-Fi).'
+async function insert(row, onProgress = null) {
   try {
-    const { error } = await supabase.from('app_messages').insert(row)
-    return error ? fail(error) : { ok: true }
-  } catch (e) { return fail(e) }
+    const payload = row.payload || ''
+    if (payload.length <= CHUNK) {
+      const { error } = await retry(() => supabase.from('app_messages').insert(row))
+      return error ? (netErr(error) ? { error: NET_HINT } : fail(error)) : { ok: true }
+    }
+    const parts = []
+    for (let i = 0; i < payload.length; i += CHUNK) parts.push(payload.slice(i, i + CHUNK))
+    onProgress?.(0, parts.length)
+    const first = await retry(() => supabase.from('app_messages').insert({ ...row, payload: parts[0] }).select('id').single())
+    if (first.error) return netErr(first.error) ? { error: NET_HINT } : fail(first.error)
+    const id = first.data.id
+    for (let k = 1; k < parts.length; k++) {
+      onProgress?.(k, parts.length)
+      const r = await retry(() => supabase.rpc('msg_append', { p_id: id, p_chunk: parts[k] }))
+      if (r.error) {
+        await supabase.from('app_messages').delete().eq('id', id)      // недописанный файл — не оставляем
+        if (/msg_append|PGRST202|schema cache/i.test(String(r.error?.message || r.error))) return { error: 'Большие файлы пока не включены в базе: выполните migration_msg_chunks.sql в Supabase (SQL Editor) — один раз.' }
+        return netErr(r.error) ? { error: NET_HINT } : fail(r.error)
+      }
+    }
+    onProgress?.(parts.length, parts.length)
+    return { ok: true }
+  } catch (e) { return netErr(e) ? { error: NET_HINT } : fail(e) }
 }
 /** Обращение пользователя к мастер-аккаунту */
 export const sendAppeal = (user, profile, body, extra = {}) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', body, ...(extra.orderId ? { order_id: extra.orderId } : {}), ...(extra.title ? { title: extra.title } : {}) })
@@ -41,11 +80,12 @@ export function excludeRequest(m) {
   return { orderId: m.order_id || '', num, prod }
 }
 /** Обращение с файлами: один файл уходит как есть, несколько — одним архивом .zip (мастер скачивает и распаковывает) */
-export async function sendAppealFiles(user, profile, body, files) {
+export async function sendAppealFiles(user, profile, body, files, onProgress = null) {
   const list = [...(files || [])]
   if (!list.length) return sendAppeal(user, profile, body)
   const total = list.reduce((a, f) => a + (f.size || 0), 0)
-  if (total > REPORT_MAX_MB * 1048576) return { error: `Файлы слишком большие (${(total / 1048576).toFixed(1)} МБ, можно до ${REPORT_MAX_MB} МБ вместе). Отправьте часть файлов или пришлите их в WhatsApp / Telegram.` }
+  const tooBig = mb => ({ error: `Файлы слишком большие (${mb.toFixed(1)} МБ${mb * 1048576 < total ? ' после сжатия' : ''}, можно до ${REPORT_MAX_MB} МБ вместе). Отправьте часть файлов или пришлите их в WhatsApp / Telegram.` })
+  if (total > REPORT_RAW_MAX_MB * 1048576) return tooBig(total / 1048576)
   let fileName, payload
   try {
     if (list.length === 1) { fileName = list[0].name; payload = await fileToPayload(list[0]) }
@@ -62,8 +102,9 @@ export async function sendAppealFiles(user, profile, body, files) {
       payload = await fileToPayload(new Blob([zip], { type: 'application/zip' }))
     }
   } catch (e) { return { error: 'Не удалось прочитать файл: ' + (e?.message || e) } }
+  if (payloadMb(payload) > REPORT_MAX_MB) return tooBig(payloadMb(payload))
   return insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', title: list.length > 1 ? list.map(f => f.name).join(', ').slice(0, 300) : null,
-    body, file_name: fileName, file_size: payload.length, payload })
+    body, file_name: fileName, file_size: payload.length, payload }, onProgress)
 }
 /** Новость от мастер-аккаунта всем пользователям */
 export const sendNews = (user, profile, title, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'news', title, body })
@@ -71,31 +112,40 @@ export const sendNews = (user, profile, title, body) => insert({ from_id: user.i
 // toName — кому (личное сообщение из списка пользователей): мастер видит адресата у своих сообщений; пользователю from_name не показывается
 export const sendReply = (user, profile, toId, body, toName = '') => insert({ from_id: user.id, from_name: nameOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply', body })
 /** Файл для отладки с комментарием — мастер-аккаунту */
-export const sendDebugFile = (user, profile, { fileName, payload, comment, orderId, title }) =>
-  insert({ from_id: user.id, from_name: nameOf(profile), kind: 'debug', title: `${title || ''}${title ? ' · ' : ''}v${APP_VERSION}`, body: comment, file_name: fileName, file_size: String(payload || '').length, payload: String(payload || ''), order_id: orderId || null })
+export const sendDebugFile = (user, profile, { fileName, payload, comment, orderId, title }, onProgress = null) =>
+  insert({ from_id: user.id, from_name: nameOf(profile), kind: 'debug', title: `${title || ''}${title ? ' · ' : ''}v${APP_VERSION}`, body: comment, file_name: fileName, file_size: String(payload || '').length, payload: String(payload || ''), order_id: orderId || null }, onProgress)
 
 export async function deleteMessage(id) {
   try { const { error } = await supabase.from('app_messages').delete().eq('id', id); return error ? fail(error) : { ok: true } } catch (e) { return fail(e) }
 }
-/** Файл (любой, в т. ч. двоичный: .b3d, .add, .xlsx, .pdf) — в текст для отправки: data:…;base64,… */
-export const REPORT_MAX_MB = 15
-export function fileToPayload(file) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader()
-    fr.onload = () => resolve(String(fr.result || ''))
-    fr.onerror = () => reject(fr.error || new Error('не удалось прочитать файл'))
-    fr.readAsDataURL(file)
-  })
+/** Файл (любой, в т. ч. двоичный: .b3d, .add, .xlsx, .pdf) — в текст для отправки: data:…;base64,…
+ *  Крупный файл, который хорошо сжимается (модели bCAD, Базиса, К3, истории раскроя), — сжатым: data:…;gzip;base64,… */
+export const REPORT_MAX_MB = 15            // после сжатия
+export const REPORT_RAW_MAX_MB = 60        // сам файл до сжатия
+const b64 = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s) }
+export async function fileToPayload(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const mime = file.type || 'application/octet-stream'
+  if (bytes.length > 256 * 1024) {
+    const gz = gzipSync(bytes, { level: 6 })
+    if (gz.length < bytes.length * 0.85) return `data:${mime};gzip;base64,` + b64(gz)
+  }
+  return `data:${mime};base64,` + b64(bytes)
 }
-/** Текст из сообщения обратно в файл: data:…;base64,… → двоичный, иначе — как текст */
+/** Сколько МБ займёт файл в сообщении (после сжатия, без base64) */
+export const payloadMb = payload => (String(payload || '').length * 3) / 4 / 1048576
+/** Текст из сообщения обратно в файл: data:…;base64,… → двоичный (сжатый — распаковывается), иначе — как текст */
 export function payloadBlob(payload) {
-  const m = /^data:([^;,]*)(;base64)?,/.exec(payload || '')
-  if (!m || !m[2]) return new Blob([payload || ''], { type: 'application/octet-stream' })
+  const m = /^data:([^;,]*)(;gzip)?(;base64)?,/.exec(payload || '')
+  if (!m || !m[3]) return new Blob([payload || ''], { type: 'application/octet-stream' })
   const bin = atob(payload.slice(m[0].length))
-  const bytes = new Uint8Array(bin.length)
+  let bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  if (m[2]) bytes = gunzipSync(bytes)
   return new Blob([bytes], { type: m[1] || 'application/octet-stream' })
 }
+/** Текст присланного файла (истории раскроя и т. п.): из data:… — распакованный, иначе как есть */
+export const payloadText = async payload => (/^data:/.test(payload || '') ? await payloadBlob(payload).text() : String(payload || ''))
 /** Содержимое приложенного файла */
 export async function messagePayload(id) {
   try {

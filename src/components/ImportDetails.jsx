@@ -21,7 +21,7 @@ import { makePreset, applyPreset, bestPreset } from '../lib/importPresets'
 import { useBackClose } from '../lib/backStack'
 import { isDesktop } from '../hooks/useDesktop'
 import SendToMaster from './SendToMaster'
-import { fileToPayload, REPORT_MAX_MB } from '../lib/messages'
+import { fileToPayload, REPORT_RAW_MAX_MB } from '../lib/messages'
 
 // Какую пласть считать лицевой при импорте модели — признаки по приоритету, порядок меняет пользователь
 // (копия списка из basisB3d — он грузится по требованию). Первый признак, который решает, — решает.
@@ -309,7 +309,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
   const reportProblem = () => {
     const file = lastFileRef.current
     if (!file) return
-    if (file.size > REPORT_MAX_MB * 1048576) { setError(`Файл слишком большой для отправки из приложения (${(file.size / 1048576).toFixed(1)} МБ, можно до ${REPORT_MAX_MB} МБ). Отправьте его разработчику в WhatsApp или Telegram.`); return }
+    if (file.size > REPORT_RAW_MAX_MB * 1048576) { setError(`Файл слишком большой для отправки из приложения (${(file.size / 1048576).toFixed(1)} МБ, можно до ${REPORT_RAW_MAX_MB} МБ). Отправьте его разработчику в WhatsApp или Telegram.`); return }
     setReport({
       title: `Импорт · ${source.label}: ${file.name}${error ? ' — ' + error.replace(/^Не удалось прочитать файл: /, '') : ''}`.slice(0, 300),
       fileName: file.name,

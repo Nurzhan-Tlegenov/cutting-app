@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { sendDebugFile } from '../lib/messages'
+import { sendDebugFile, payloadMb, REPORT_MAX_MB } from '../lib/messages'
 import { useBackClose } from '../lib/backStack'
 
 // Отправка файла для отладки мастер-аккаунту: «Точно отправить?» + обязательное описание того, что не работает.
@@ -13,14 +13,17 @@ export default function SendToMaster({ job, onClose }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  const [prog, setProg] = useState('')            // большой файл уходит частями — сколько отправлено
   if (!job) return null
   const send = async () => {
     if (comment.trim().length < 5) { setError(job.need || 'Опишите, что не работает — хотя бы пару слов.'); return }
     setBusy(true); setError('')
-    let payload = ''
+    let payload
     try { payload = await job.getPayload() } catch (e) { setBusy(false); setError('Не удалось собрать файл: ' + (e?.message || e)); return }
-    const r = await sendDebugFile(user, profile, { fileName: job.fileName, payload, comment: comment.trim(), orderId: job.orderId, title: job.title })
-    setBusy(false)
+    if (payloadMb(payload) > REPORT_MAX_MB) { setBusy(false); setError(`Файл слишком большой даже после сжатия (${payloadMb(payload).toFixed(1)} МБ, можно до ${REPORT_MAX_MB} МБ). Отправьте его разработчику в WhatsApp или Telegram.`); return }
+    const r = await sendDebugFile(user, profile, { fileName: job.fileName, payload, comment: comment.trim(), orderId: job.orderId, title: job.title },
+      (k, n) => setProg(n > 1 ? `отправлено ${Math.round((k / n) * 100)}%` : ''))
+    setBusy(false); setProg('')
     if (r.error) { setError(r.error); return }
     setDone(true)
   }
@@ -44,7 +47,7 @@ export default function SendToMaster({ job, onClose }) {
               placeholder={job.placeholder || 'Например: на листе 2 деталь наложилась на соседнюю после поворота'} style={{ fontSize: 14, resize: 'vertical' }} />
             {error && <p className="error-text" style={{ marginTop: 6 }}>{error}</p>}
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button type="button" className="btn-primary" disabled={busy} onClick={send}>{busy ? 'Отправка…' : 'Отправить'}</button>
+              <button type="button" className="btn-primary" disabled={busy} onClick={send}>{busy ? `Отправка…${prog ? ' ' + prog : ''}` : 'Отправить'}</button>
               <button type="button" className="btn-secondary" disabled={busy} onClick={onClose}>Отмена</button>
             </div>
           </>

@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { receipt } from '../lib/messages'
-import { excludeRequest, listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob } from '../lib/messages'
+import { excludeRequest, listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob, payloadText } from '../lib/messages'
 import { getUserSettings } from '../lib/userSettings'
 import { adminProductionOrders } from '../lib/adminApi'
 import { productionExcludeStats } from '../lib/productionApi'
@@ -38,6 +38,7 @@ export default function MessagesPage() {
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  const [sendProg, setSendProg] = useState('')     // большой файл уходит частями
   const [files, setFiles] = useState([])            // файлы к обращению (модели Базиса, Астры, К3 и т. п.)
   const fileRef = useRef(null)
   const [replyTo, setReplyTo] = useState(null)      // сообщение, на которое отвечает мастер-аккаунт
@@ -62,8 +63,8 @@ export default function MessagesPage() {
     const body = text.trim() || (files.length ? 'Файлы во вложении' : '')
     if (!body) return
     setBusy(true); setError('')
-    const r = isMaster ? await sendNews(user, profile, title.trim(), body) : files.length ? await sendAppealFiles(user, profile, body, files) : await sendAppeal(user, profile, body)
-    setBusy(false)
+    const r = isMaster ? await sendNews(user, profile, title.trim(), body) : files.length ? await sendAppealFiles(user, profile, body, files, (k, n) => setSendProg(n > 1 ? `${Math.round((k / n) * 100)}%` : '')) : await sendAppeal(user, profile, body)
+    setBusy(false); setSendProg('')
     if (r.error) { setError(r.error); return }
     setText(''); setTitle(''); setFiles([]); load()
   }
@@ -87,7 +88,7 @@ export default function MessagesPage() {
   const openNesting = async m => {
     const r = await messagePayload(m.id)
     if (r.error) { setError(r.error); return }
-    setNestView({ fileName: r.fileName, text: r.payload })
+    setNestView({ fileName: r.fileName, text: await payloadText(r.payload) })
   }
   const remove = async m => {
     if (!window.confirm('Удалить сообщение?')) return
@@ -161,7 +162,7 @@ export default function MessagesPage() {
           </div>
         )}
         <button type="button" className="btn-primary" style={{ marginTop: 8 }} disabled={busy || (!text.trim() && !files.length)} onClick={post}>
-          {busy ? 'Отправка…' : isMaster ? 'Опубликовать новость' : files.length ? `Отправить обращение и файлы (${files.length})` : 'Отправить обращение'}
+          {busy ? `Отправка…${sendProg ? ' ' + sendProg : ''}` : isMaster ? 'Опубликовать новость' : files.length ? `Отправить обращение и файлы (${files.length})` : 'Отправить обращение'}
         </button>
       </div>
 

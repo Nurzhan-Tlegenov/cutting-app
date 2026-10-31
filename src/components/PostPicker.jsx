@@ -4,7 +4,7 @@ import SendToMaster from './SendToMaster'
 import PostRequest from './PostRequest'
 import { postCatalog } from '../lib/postAccess'
 import { useNavigate } from 'react-router-dom'
-import { fileToPayload, REPORT_MAX_MB } from '../lib/messages'
+import { fileToPayload, REPORT_RAW_MAX_MB } from '../lib/messages'
 import { DEFAULT_POST, DEFAULT_DRILL6, DEFAULT_BEAMSAW, isBeamSaw, isRouterPost, newId, isDrill6, activePost, routerPost, pickPost, toggleUse6, applySnapshot, removeSnapshot, renameSnapshot, sameName } from '../lib/cncSettings'
 
 // Выбор постпроцессора — строка сверху настроек ЧПУ: «Постпроцессор: <имя> ▾». Тап — окно снизу:
@@ -35,7 +35,7 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
     const f = e.target.files?.[0]
     e.target.value = ''
     if (!f) return
-    if (f.size > REPORT_MAX_MB * 1048576) { window.alert(`Файл слишком большой (${(f.size / 1048576).toFixed(1)} МБ, можно до ${REPORT_MAX_MB} МБ). Хватит программы одного листа — или отправьте её разработчику в WhatsApp / Telegram.`); return }
+    if (f.size > REPORT_RAW_MAX_MB * 1048576) { window.alert(`Файл слишком большой (${(f.size / 1048576).toFixed(1)} МБ, можно до ${REPORT_RAW_MAX_MB} МБ). Хватит программы одного листа — или отправьте её разработчику в WhatsApp / Telegram.`); return }
     close()
     setAsk({
       title: `Запрос постпроцессора · УП: ${f.name}`,
