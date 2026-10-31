@@ -3,6 +3,7 @@
 // Менять склад могут владелец, начальник производства и ответственные за склад (полномочие «Склад остатков»);
 // остальные сотрудники — только смотрят. Открывается: /stock?p=<производство>&id=<номер остатка>.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import DeskSheet from '../components/DeskSheet'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
@@ -205,8 +206,7 @@ export default function StockPage() {
           )
         })()}
         {scan && (
-          <div style={backdrop} onClick={() => setScan(false)}>
-            <div style={sheet} onClick={e => e.stopPropagation()}>
+          <DeskSheet storeKey="stockWin" onClose={() => setScan(false)}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}><span style={{ flex: 1, fontSize: 15, fontWeight: 600 }}>Наведите камеру на бирку остатка</span><button type="button" onClick={() => setScan(false)} style={{ border: 'none', background: 'none', fontSize: 22, color: 'var(--text-hint)', cursor: 'pointer' }}>×</button></div>
               <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Бирка из раскроя — остаток внесётся на склад (останется вписать ячейку). Уже внесённый — откроется его карточка.</p>
               <QrCamera onCode={onScan} height={280} />
@@ -215,8 +215,7 @@ export default function StockPage() {
                 <input name="n" inputMode="numeric" placeholder="или номер остатка" style={{ ...inp, flex: 1 }} />
                 <button type="submit" style={btn()}>Открыть</button>
               </form>
-            </div>
-          </div>
+          </DeskSheet>
         )}
         {fromLabel && <FromLabel p={fromLabel} pid={pid} edit={edit} cells={cells} materials={materials} onClose={() => setFromLabel(null)}
           onOpen={id => { setFromLabel(null); setTab('free'); setOpenId(id) }}
@@ -251,7 +250,7 @@ export default function StockPage() {
         </>}
       </>}
       {open && <RemCard r={open} edit={edit} cells={cells} materials={materials} settings={info?.settings || {}} onClose={() => setOpenId(null)} onChanged={async id => { await load(); if (id) setOpenId(id) }} onPrint={() => printLabels([open])} printBusy={pdfBusy} />}
-      {openId && rows && !open && <div className="modal-backdrop" onClick={() => setOpenId(null)} style={backdrop}><div style={sheet} onClick={e => e.stopPropagation()}><p style={{ fontSize: 14 }}>Остаток №{openId} не найден на этом складе — возможно, его удалили.</p><button type="button" style={btn()} onClick={() => setOpenId(null)}>Закрыть</button></div></div>}
+      {openId && rows && !open && <DeskSheet storeKey="stockWin" onClose={() => setOpenId(null)}><p style={{ fontSize: 14 }}>Остаток №{openId} не найден на этом складе — возможно, его удалили.</p><button type="button" style={btn()} onClick={() => setOpenId(null)}>Закрыть</button></DeskSheet>}
       <BottomNav />
     </div>
   )
@@ -373,8 +372,7 @@ function FromLabel({ p, pid, edit, cells, materials, onClose, onSaved, onOpen })
   }
   const ex = p.existing
   return (
-    <div style={backdrop} onClick={onClose}>
-      <div style={sheet} onClick={e => e.stopPropagation()}>
+    <DeskSheet storeKey="stockWin" onClose={onClose}>
         <div style={{ display: 'flex', alignItems: 'flex-start' }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>{ex && !asNew ? 'С этой бирки остаток уже вносили' : auto ? 'Бирка остатка из раскроя' : 'Бирка остатка — внести на склад'}</div>
@@ -413,8 +411,7 @@ function FromLabel({ p, pid, edit, cells, materials, onClose, onSaved, onOpen })
           {err && <p className="error-text" style={{ marginTop: 8 }}>{err}</p>}
           <Actions busy={busy} ok="Внести на склад" disabled={!okSize} onOk={() => save()} onCancel={onClose} />
         </>}
-      </div>
-    </div>
+    </DeskSheet>
   )
 }
 
@@ -519,8 +516,6 @@ function ImportPreview({ imp, pid, materials, onClose, onSaved }) {
   )
 }
 
-const backdrop = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }
-const sheet = { background: 'var(--bg)', width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px 16px 0 0', padding: '14px 16px calc(18px + env(safe-area-inset-bottom))' }
 
 /** Карточка остатка: крупно размер и ячейка, быстрые действия, журнал */
 function RemCard({ r, edit, cells, materials, settings, onClose, onChanged, onPrint, printBusy }) {
@@ -544,8 +539,7 @@ function RemCard({ r, edit, cells, materials, settings, onClose, onChanged, onPr
   const reasonOk = !needReason || String(f.reason || '').trim()
   const used = r.status === 'used'
   return (
-    <div style={backdrop} onClick={onClose}>
-      <div style={sheet} onClick={e => e.stopPropagation()}>
+    <DeskSheet storeKey="stockWin" onClose={onClose}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Остаток №{r.id}{r.source === 'nesting' ? ' · из раскроя' : ''}</div>
@@ -644,8 +638,7 @@ function RemCard({ r, edit, cells, materials, settings, onClose, onChanged, onPr
             ))}
           </div>
         )}
-      </div>
-    </div>
+    </DeskSheet>
   )
 }
 
