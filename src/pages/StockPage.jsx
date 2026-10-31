@@ -51,6 +51,9 @@ export default function StockPage() {
   const [exporting, setExporting] = useState(false)
   const [printing, setPrinting] = useState(false)   // выбор остатков для бирок
   const [sel, setSel] = useState(() => new Set())
+  const [selecting, setSelecting] = useState(false)  // выделение остатков: групповое переименование материала
+  const [renameTo, setRenameTo] = useState('')
+  const [renBusy, setRenBusy] = useState('')
   const [scan, setScan] = useState(false)
   const [scanMsg, setScanMsg] = useState('')
   const [pdfBusy, setPdfBusy] = useState('')
@@ -183,8 +186,45 @@ export default function StockPage() {
         </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
           <button type="button" style={{ ...btn(), flex: 1, padding: '10px 12px', fontWeight: 600, borderColor: 'var(--blue)', color: 'var(--blue)' }} onClick={() => { setScanMsg(''); setScan(true) }}>📷 Сканировать бирку</button>
-          {edit && <button type="button" style={{ ...btn(), flex: 1, padding: '10px 12px', ...(printing ? { background: 'var(--blue-light)', borderColor: 'var(--blue)' } : {}) }} onClick={() => { setPrinting(v => !v); setSel(new Set()) }}>🏷 Бирки на остатки</button>}
+          {edit && <button type="button" style={{ ...btn(), flex: 1, padding: '10px 12px', ...(printing ? { background: 'var(--blue-light)', borderColor: 'var(--blue)' } : {}) }} onClick={() => { setPrinting(v => !v); setSelecting(false); setSel(new Set()) }}>🏷 Бирки на остатки</button>}
+          {edit && <button type="button" style={{ ...btn(), flex: 1, padding: '10px 12px', ...(selecting ? { background: 'var(--blue-light)', borderColor: 'var(--blue)' } : {}) }} onClick={() => { setSelecting(v => !v); setPrinting(false); setSel(new Set()); setRenameTo('') }}>☑ Выделить</button>}
         </div>
+        {selecting && (() => {
+          const shownLive = shown.filter(r => r.status !== 'used'), picked = live.filter(r => sel.has(r.id))
+          const rename = async () => {
+            const to = renameTo.trim()
+            if (!to || !picked.length) return
+            if (!window.confirm(`Переименовать материал у ${picked.length} остатк. в «${to}»?\nБирки и QR остаются прежними — остаток находится по номеру.`)) return
+            let ok = 0
+            const errs = []
+            for (const r of picked) {
+              if ((r.material || '') === to) { ok++; continue }
+              setRenBusy(`Переименовываем… ${ok + errs.length + 1} из ${picked.length}`)
+              const res = await stockEdit(r.id, { material: to }, 'групповое переименование')
+              if (res.error) errs.push(`№${r.id}: ${res.error}`); else ok++
+            }
+            setRenBusy('')
+            if (errs.length) setError(`Не переименовано ${errs.length}: ${errs.slice(0, 3).join('; ')}${/reserved/.test(errs.join(' ')) ? ' — выполните migration_remnants_rename.sql' : ''}`)
+            setSel(new Set()); setRenameTo('')
+            await load()
+          }
+          return (
+            <div className="card" style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Выделено: {picked.length}{picked.length ? ` · ${picked.reduce((a, r) => a + (r.qty || 1), 0)} шт` : ''}</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                <button type="button" style={btn()} onClick={() => setSel(new Set(shownLive.map(r => r.id)))}>Отметить показанные</button>
+                {picked.length > 0 && <button type="button" style={btn()} onClick={() => setSel(new Set())}>Снять</button>}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 4 }}>Новое название материала — для карточки, списка и раскроя. Номер остатка, бирка и QR не меняются.</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input list="stock-mats" value={renameTo} onChange={e => setRenameTo(e.target.value)} placeholder={picked[0]?.material || 'Например: ЛДСП Egger H1145 ST10 Дуб Бардолино натуральный'} style={{ ...inp, flex: 1 }} />
+                <datalist id="stock-mats">{materials.map(m => <option key={m} value={m} />)}</datalist>
+                <button type="button" disabled={!picked.length || !renameTo.trim() || !!renBusy} style={btn('main')} onClick={rename}>✎ Переименовать</button>
+              </div>
+              {renBusy && <p style={{ fontSize: 12.5, marginTop: 6 }}>{renBusy}</p>}
+            </div>
+          )
+        })()}
         {printing && (() => {
           const noLabel = live.filter(r => !r.label_at), shownLive = shown.filter(r => r.status !== 'used'), picked = live.filter(r => sel.has(r.id))
           const pcs = l => l.reduce((a, r) => a + (r.qty || 1), 0)
@@ -244,7 +284,7 @@ export default function StockPage() {
           {!shown.length ? <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '18px 0' }}>{(rows || []).length ? 'Ничего не найдено.' : 'Склад пуст. Внесите остатки — строка за строкой, как детали в бланке заказа.'}</p> : (
             <div className="card" style={{ padding: 0 }}>
               {shown.map((r, i) => <RemRow key={r.id} r={r} first={!i} onOpen={() => setOpenId(r.id)}
-                pick={printing && r.status !== 'used' ? sel.has(r.id) : null} onPick={() => setSel(p => { const n = new Set(p); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n })} />)}
+                pick={(printing || selecting) && r.status !== 'used' ? sel.has(r.id) : null} onPick={() => setSel(p => { const n = new Set(p); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n })} />)}
             </div>
           )}
         </>}
