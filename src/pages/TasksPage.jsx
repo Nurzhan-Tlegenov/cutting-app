@@ -18,6 +18,13 @@ import {
 const TONE = { late: ['var(--danger)', 'var(--danger-light)'], today: ['var(--amber)', 'var(--amber-light)'], soon: ['var(--blue)', 'var(--blue-light)'], '': ['var(--text-muted)', 'var(--bg2)'] }
 const chip = (fg, bg) => ({ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11.5, padding: '2px 7px', borderRadius: 10, color: fg, background: bg, whiteSpace: 'nowrap' })
 const iconBtn = { width: 30, height: 30, borderRadius: 15, border: 'none', background: 'transparent', color: 'var(--text-hint)', padding: 0, cursor: 'pointer', fontSize: 16, flexShrink: 0 }
+// дата создания задачи: «31 окт», в этом году — без года; full — с временем
+const createdText = (v, full = false) => {
+  const d = new Date(v)
+  if (isNaN(d)) return ''
+  const o = { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}), ...(full ? { hour: '2-digit', minute: '2-digit' } : {}) }
+  return d.toLocaleString('ru-RU', o).replace('.', '')
+}
 const between = (a, b) => (a == null && b == null ? 1 : a == null ? b - 1 : b == null ? a + 1 : (a + b) / 2)
 
 /** Индикатор подзадач: полоска + «3/5» */
@@ -234,6 +241,7 @@ export default function TasksPage() {
           {/* «выполнено» — только в карточке задачи: галочка на доске нажималась случайно, и задача пропадала */}
           {k.done_at && <span title="Выполнено" style={{ color: 'var(--teal)', fontSize: 14, lineHeight: '18px', flexShrink: 0 }}>✓</span>}
           <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, textDecoration: k.done_at ? 'line-through' : 'none', wordBreak: 'break-word' }}>{k.title || <span style={{ color: 'var(--text-hint)' }}>Без названия</span>}</div>
+          {k.created_at && <span title={`Создана ${createdText(k.created_at, true)}`} style={{ fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap', marginTop: 2 }}>{createdText(k.created_at)}</span>}
         </div>
         {k.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{k.note}</div>}
         <Progress {...p} />
@@ -414,26 +422,32 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
   const [win, setWin] = useState(() => {
     let s
     try { s = JSON.parse(localStorage.getItem('taskWin') || 'null') } catch { s = null }
-    const vw = window.innerWidth, vh = window.innerHeight
+    // ширина подложки: при закреплённом меню — экран без меню
+    const pin = document.body.classList.contains('nav-pinned') ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-pin-w')) || 0 : 0
+    const vw = window.innerWidth - pin, vh = window.innerHeight
     const w = Math.min(s?.w || 560, vw - 40), h = Math.min(s?.h || Math.round(vh * 0.75), vh - 40)
-    const x = s ? Math.min(Math.max(0, s.x), vw - 120) : Math.round((vw - w) / 2)
+    const x = s ? Math.min(Math.max(0, s.x), vw - 160) : Math.round((vw - w) / 2)
     const y = s ? Math.min(Math.max(0, s.y), vh - 60) : Math.round((vh - h) / 2)
     return { x, y, w, h }
   })
   const saveWin = () => {
     const el = winRef.current
     if (!desk || !el) return
-    const r = el.getBoundingClientRect()
-    const next = { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }
+    const r = el.getBoundingClientRect(), pr = el.parentElement.getBoundingClientRect()
+    const next = { x: Math.round(r.left - pr.left), y: Math.round(r.top - pr.top), w: Math.round(r.width), h: Math.round(r.height) }
     setWin(next)
     try { localStorage.setItem('taskWin', JSON.stringify(next)) } catch { /* без памяти */ }
   }
   const startMove = e => {
     if (e.button !== 0 || e.target.closest('button, input, label, select, textarea')) return
     e.preventDefault()
-    const el = winRef.current, r = el.getBoundingClientRect()
+    // координаты — от подложки (при закреплённом меню она начинается правее, не от края экрана)
+    const el = winRef.current, r = el.getBoundingClientRect(), pr = el.parentElement.getBoundingClientRect()
     const dx = e.clientX - r.left, dy = e.clientY - r.top
-    const move = ev => { el.style.left = Math.min(Math.max(0, ev.clientX - dx), window.innerWidth - 120) + 'px'; el.style.top = Math.min(Math.max(0, ev.clientY - dy), window.innerHeight - 50) + 'px' }
+    const move = ev => {
+      el.style.left = Math.min(Math.max(0, ev.clientX - dx - pr.left), pr.width - 160) + 'px'
+      el.style.top = Math.min(Math.max(0, ev.clientY - dy - pr.top), pr.height - 50) + 'px'
+    }
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); saveWin() }
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
   }
@@ -447,7 +461,7 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
 
   return (
     // закрыть щелчком мимо окна — только если и нажали мимо (потянули угол окна и отпустили снаружи — не закрываем)
-    <div onMouseDown={e => { downOut.current = e.target === e.currentTarget }} onClick={e => { if (e.target === e.currentTarget && downOut.current !== false) close() }} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: desk ? 'rgba(0,0,0,.12)' : 'rgba(0,0,0,.35)', display: 'flex', alignItems: desk ? 'flex-start' : 'flex-end', justifyContent: desk ? 'flex-start' : 'center' }}>
+    <div onPointerDown={e => { downOut.current = e.target === e.currentTarget }} onClick={e => { if (e.target === e.currentTarget && downOut.current === true) close() }} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: desk ? 'rgba(0,0,0,.12)' : 'rgba(0,0,0,.35)', display: 'flex', alignItems: desk ? 'flex-start' : 'flex-end', justifyContent: desk ? 'flex-start' : 'center' }}>
       <div ref={winRef} data-editor onClick={e => e.stopPropagation()} onMouseUp={saveWin}
         style={desk
           ? { position: 'absolute', left: win.x, top: win.y, width: win.w, height: win.h, minWidth: 360, minHeight: 260, maxWidth: '96vw', maxHeight: '94vh', resize: 'both', overflow: 'auto', background: 'var(--bg)', borderRadius: 14, padding: '0 16px 20px', boxShadow: '0 12px 40px rgba(0,0,0,.25)' }
@@ -469,6 +483,7 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
 
         <input type="text" value={title} readOnly={ro} placeholder="Что сделать" onChange={e => setTitle(e.target.value)} onBlur={saveText}
           style={{ ...field, fontSize: 17, fontWeight: 600, border: 'none', padding: '4px 0', background: 'transparent' }} />
+        {card.created_at && <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: -2 }}>Создана {createdText(card.created_at, true)}{card.done_at ? ` · выполнена ${createdText(card.done_at, true)}` : ''}</div>}
         <textarea value={note} readOnly={ro} placeholder="Заметка: адрес, размеры, телефон клиента…" rows={3} onChange={e => setNote(e.target.value)} onBlur={saveText}
           style={{ ...field, marginTop: 6, resize: 'vertical' }} />
 
