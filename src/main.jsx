@@ -6,8 +6,10 @@ import App from './App.jsx'
 import { startI18n } from './i18n'
 import { registerSW } from './lib/push'
 import { initUiScale } from './lib/uiScale'
+import { catchInstallPrompt } from './lib/install'
 
 registerSW()   // только для push-уведомлений, ничего не кэширует
+catchInstallPrompt()   // окно «Установить приложение» браузера (Android, компьютер) — ловим сразу, оно приходит один раз
 
 // По ссылке для клиента (/v/…, /view/…) название приложения не показывается
 if (!/^\/(v|view)\//.test(window.location.pathname)) document.title = 'РаскройPro'

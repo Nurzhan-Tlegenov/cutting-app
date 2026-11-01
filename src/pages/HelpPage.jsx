@@ -6,6 +6,7 @@ import { TOURS, setTour } from '../lib/tours'
 import { useAuth } from '../context/AuthContext'
 import { lazyRetry } from '../lib/lazyRetry'
 import { demoLang } from '../components/demo/demoLang'
+import InstallGuide from '../components/InstallGuide'
 
 const DemoVideo = lazyRetry(() => import('../components/demo/DemoVideo'))
 
@@ -35,6 +36,7 @@ export default function HelpPage() {
         {ruOnly ? '«Смотреть видео» — ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом. «Пройти самому» — подсказки на настоящих экранах, на своих заказах.'
           : 'Ролик сам показывает, куда нажимать: палец со стрелкой проходит весь путь по экранам, с субтитрами и голосом.'}
       </p>
+      <InstallGuide />
       {COURSES.map(([id, ico]) => {
         const c = TOURS[id], shown = open === id
         return (
