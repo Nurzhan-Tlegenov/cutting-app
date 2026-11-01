@@ -1,7 +1,7 @@
 // Файл в сообщении: картинку (скриншот) видно сразу — миниатюра прямо в переписке, нажать — на весь экран;
 // любой файл можно скачать.
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import ImageZoom from './ImageZoom'
 import { messagePayload, payloadBlob } from '../lib/messages'
 
 const isImageName = n => /\.(png|jpe?g|gif|webp|bmp|heic)$/i.test(n || '')
@@ -51,14 +51,7 @@ export default function MsgFile({ m, onError, light = false }) {
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: pic ? 5 : 0 }}>
         <button type="button" style={btn} disabled={busy} onClick={download}>{busy ? '…' : '⬇ Скачать'}</button>
       </div>
-      {full && url && createPortal(
-        <div onClick={() => setFull(false)}
-          style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 12 }}>
-          <img src={url} alt={m.file_name} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6 }} />
-          <span style={{ position: 'absolute', top: 'calc(10px + env(safe-area-inset-top))', right: 14, color: '#fff', fontSize: 30 }}>×</span>
-        </div>,
-        document.body,
-      )}
+      {full && url && <ImageZoom src={url} alt={m.file_name} onClose={() => setFull(false)} />}
     </div>
   )
 }

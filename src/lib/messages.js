@@ -105,18 +105,19 @@ async function packFiles(files) {
   return { fileName, payload, title: list.length > 1 ? list.map(f => f.name).join(', ').slice(0, 300) : null }
 }
 // Картинки (скриншоты) уходят каждая отдельным сообщением, без архива — их видно прямо в переписке;
-// крупное фото уменьшается (до 1920 px, JPEG), чтобы не занимать место в базе. Остальные файлы — как раньше
+// крупное фото уменьшается (до 2800 px, JPEG ~0.9), чтобы не занимать место в базе; мелкий текст скриншота остаётся читаемым. Остальные файлы — как раньше
 // (несколько — одним архивом).
 export const isImageFile = f => /^image\/(png|jpe?g|gif|webp|bmp)$/i.test(f?.type || '') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f?.name || '')
 async function shrinkImage(f) {
   try {
-    if (f.size < 350 * 1024 || /gif$/i.test(f.type || f.name)) return f
+    // скриншот (PNG) с мелким текстом не трогаем, пока он не огромный; фото — до 2800 px по длинной стороне
+    if (f.size < 1.5 * 1048576 || /gif$/i.test(f.type || f.name)) return f
     const bmp = await createImageBitmap(f)
-    const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height))
+    const k = Math.min(1, 2800 / Math.max(bmp.width, bmp.height))
     const cv = document.createElement('canvas')
     cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k)
     const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.drawImage(bmp, 0, 0, cv.width, cv.height)
-    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.85))
+    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.9))
     if (!blob || blob.size >= f.size) return f
     return new File([blob], (f.name || 'image').replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg' })
   } catch { return f }
