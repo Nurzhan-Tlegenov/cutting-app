@@ -79,10 +79,9 @@ export function excludeRequest(m) {
   if (!m.order_id && !num) return null
   return { orderId: m.order_id || '', num, prod }
 }
-/** Обращение с файлами: один файл уходит как есть, несколько — одним архивом .zip (мастер скачивает и распаковывает) */
-export async function sendAppealFiles(user, profile, body, files, onProgress = null) {
+/** Файлы к сообщению: один файл уходит как есть, несколько — одним архивом .zip. -> { fileName, payload, title } | { error } */
+async function packFiles(files) {
   const list = [...(files || [])]
-  if (!list.length) return sendAppeal(user, profile, body)
   const total = list.reduce((a, f) => a + (f.size || 0), 0)
   const tooBig = mb => ({ error: `Файлы слишком большие (${mb.toFixed(1)} МБ${mb * 1048576 < total ? ' после сжатия' : ''}, можно до ${REPORT_MAX_MB} МБ вместе). Отправьте часть файлов или пришлите их в WhatsApp / Telegram.` })
   if (total > REPORT_RAW_MAX_MB * 1048576) return tooBig(total / 1048576)
@@ -103,8 +102,31 @@ export async function sendAppealFiles(user, profile, body, files, onProgress = n
     }
   } catch (e) { return { error: 'Не удалось прочитать файл: ' + (e?.message || e) } }
   if (payloadMb(payload) > REPORT_MAX_MB) return tooBig(payloadMb(payload))
-  return insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', title: list.length > 1 ? list.map(f => f.name).join(', ').slice(0, 300) : null,
-    body, file_name: fileName, file_size: payload.length, payload }, onProgress)
+  return { fileName, payload, title: list.length > 1 ? list.map(f => f.name).join(', ').slice(0, 300) : null }
+}
+/** Обращение с файлами (мастер скачивает и распаковывает) */
+export async function sendAppealFiles(user, profile, body, files, onProgress = null) {
+  if (!files?.length) return sendAppeal(user, profile, body)
+  const f = await packFiles(files)
+  if (f.error) return f
+  return insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', title: f.title, body, file_name: f.fileName, file_size: f.payload.length, payload: f.payload }, onProgress)
+}
+/** Ответ мастер-аккаунта с файлами (скриншот, проверенная модель…) — пользователь их скачивает / открывает */
+export async function sendReplyFiles(user, profile, toId, body, files, toName = '', onProgress = null) {
+  if (!files?.length) return sendReply(user, profile, toId, body, toName)
+  const f = await packFiles(files)
+  if (f.error) return f
+  return insert({ from_id: user.id, from_name: nameOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply', title: f.title, body, file_name: f.fileName, file_size: f.payload.length, payload: f.payload }, onProgress)
+}
+/** Вся переписка мастер-аккаунта с пользователем (его обращения и файлы + ответы ему), старые сверху */
+export async function listConversation(userId) {
+  try {
+    let { data, error } = await supabase.from('app_messages').select(COLS + ',delivered_at,read_at')
+      .or(`and(from_id.eq.${userId},kind.in.(appeal,debug)),and(to_id.eq.${userId},kind.eq.reply)`).order('created_at', { ascending: true }).limit(500)
+    if (error && /delivered_at|read_at/.test(String(error.message))) ({ data, error } = await supabase.from('app_messages').select(COLS)
+      .or(`and(from_id.eq.${userId},kind.in.(appeal,debug)),and(to_id.eq.${userId},kind.eq.reply)`).order('created_at', { ascending: true }).limit(500))
+    return error ? fail(error) : { data: data || [] }
+  } catch (e) { return fail(e) }
 }
 /** Новость от мастер-аккаунта всем пользователям */
 export const sendNews = (user, profile, title, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'news', title, body })

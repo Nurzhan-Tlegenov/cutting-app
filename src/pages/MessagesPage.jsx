@@ -14,6 +14,8 @@ import { markNewsSeen, adminNewsViews } from '../lib/activity'
 import { isNestingFileName } from '../lib/nestingFile'
 import { lazyRetry } from '../lib/lazyRetry'
 const NestingFileViewer = lazyRetry(() => import('../components/NestingFileViewer'))
+import Conversation from '../components/Conversation'
+import MsgFile from '../components/MsgFile'
 
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
 // у мастер-аккаунта — обращения и файлы для отладки от пользователей (видно, от кого), новости для всех.
@@ -34,7 +36,9 @@ export default function MessagesPage() {
   const { user, profile, isMaster } = useAuth()
   const [list, setList] = useState(null)
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState('all')
+  const [filterSel, setFilter] = useState('')
+  const filter = filterSel || (isMaster ? 'dialogs' : 'all')     // мастер-аккаунт — сразу «Диалоги» (узнаётся после загрузки профиля)
+  const [conv, setConv] = useState(null)           // мастер: открытая переписка с пользователем { userId, name }
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -125,7 +129,24 @@ export default function MessagesPage() {
     }
   }
 
-  const FILTERS = isMaster ? [['all', 'Все'], ['appeal', 'Обращения'], ['debug', 'Файлы'], ['news', 'Новости']] : [['all', 'Все'], ['news', 'Новости'], ['mine', 'Мои обращения']]
+  // мастер: диалоги — по одному на пользователя (его обращения и файлы + ответы ему), свежие сверху
+  const dialogs = (() => {
+    if (!isMaster) return []
+    const by = new Map()
+    for (const m of list || []) {
+      const uid = m.kind === 'reply' ? m.to_id : (m.kind === 'appeal' || m.kind === 'debug') && m.from_id !== user?.id ? m.from_id : null
+      if (!uid) continue
+      let d = by.get(uid)
+      if (!d) { d = { uid, name: '', last: m, count: 0, fresh: 0 }; by.set(uid, d) }
+      d.count++
+      if (m.kind !== 'reply' && !d.name) d.name = m.from_name || ''
+      if (m.kind === 'reply' && !d.replyName && / → /.test(m.from_name || '')) d.replyName = (m.from_name || '').split(' → ').pop()
+      if (m.created_at > d.last.created_at) d.last = m
+      if (isIncoming(m, user?.id, true) && (!seenAt || m.created_at > seenAt)) d.fresh++
+    }
+    return [...by.values()].map(d => ({ ...d, name: d.name || d.replyName || 'Пользователь' })).sort((a, b) => String(b.last.created_at).localeCompare(String(a.last.created_at)))
+  })()
+  const FILTERS = isMaster ? [['dialogs', 'Диалоги'], ['all', 'Все'], ['appeal', 'Обращения'], ['debug', 'Файлы'], ['news', 'Новости']] : [['all', 'Все'], ['news', 'Новости'], ['mine', 'Мои обращения']]
   const shown = (list || []).filter(m => filter === 'all' || (filter === 'mine' ? m.from_id === user?.id || m.kind === 'reply' : m.kind === filter))
   const chip = on => ({ flex: '0 0 auto', padding: '6px 12px', borderRadius: 20, border: 'none', fontSize: 12, background: on ? 'var(--blue)' : 'var(--bg)', color: on ? 'white' : 'var(--text-muted)' })
   const small = { padding: '5px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', whiteSpace: 'nowrap' }
@@ -177,7 +198,28 @@ export default function MessagesPage() {
         </>}
       </div>
 
-      {list === null ? <CncLoader label="Загружаем сообщения…" compact /> : !shown.length ? (
+      {list !== null && filter === 'dialogs' ? (
+        !dialogs.length ? <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>Обращений пока нет.</p> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {dialogs.map(d => (
+              <button key={d.uid} type="button" className="card" onClick={() => setConv({ userId: d.uid, name: d.name })}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', textAlign: 'left', cursor: 'pointer', width: '100%', borderColor: d.fresh ? 'var(--blue)' : undefined }}>
+                <span style={{ width: 38, height: 38, borderRadius: 19, background: 'var(--blue-light)', color: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, flexShrink: 0 }}>{(d.name.trim()[0] || '?').toUpperCase()}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                    <b style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>{d.name}</b>
+                    <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0 }}>{when(d.last.created_at)}</span>
+                  </span>
+                  <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {d.last.kind === 'reply' ? 'Вы: ' : ''}{d.last.file_name && !d.last.body ? '📎 ' + d.last.file_name : (d.last.body || d.last.title || (d.last.file_name ? '📎 ' + d.last.file_name : '')).replace(/\s+/g, ' ')}
+                  </span>
+                </span>
+                {d.fresh > 0 && <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 10, background: 'var(--danger)', color: '#fff', fontSize: 11.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{d.fresh}</span>}
+              </button>
+            ))}
+          </div>
+        )
+      ) : list === null ? <CncLoader label="Загружаем сообщения…" compact /> : !shown.length ? (
         <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>Сообщений пока нет.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -201,7 +243,8 @@ export default function MessagesPage() {
                 {!isMaster && mine && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Вы писали</div>}
                 {m.title && <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>{m.title}</div>}
                 {m.body && <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body.replace(/\n?Сделать: Профиль → Заказы всех производств[^\n]*/, '')}</div>}
-                {m.file_name && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace', wordBreak: 'break-all' }}>📎 {m.file_name} · {sizeTxt(m.file_size)}</div>}
+                {m.file_name && (!isMaster && m.kind === 'reply' ? <MsgFile m={m} onError={setError} />
+                  : <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace', wordBreak: 'break-all' }}>📎 {m.file_name} · {sizeTxt(m.file_size)}</div>)}
                 {/* мастер-аккаунт: дошёл ли ответ и прочитан ли — галочки как в мессенджерах */}
                 {isMaster && mine && m.kind === 'reply' && 'read_at' in m && (
                   <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5, marginTop: 4, fontSize: 11.5, color: m.read_at ? 'var(--blue)' : 'var(--text-hint)' }}
@@ -243,7 +286,8 @@ export default function MessagesPage() {
                   {excl && exclOrder && <button type="button" style={small} onClick={() => navigate(`/all-productions?order=${exclOrder.id}`)}>Итоги производства</button>}
                   {m.kind === 'order' && m.order_id && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => navigate(`/orders/${m.order_id}#order-chat`)}>Открыть заказ и ответить</button>}
                   {isMaster && m.order_id && !excl && m.kind !== 'order' && <button type="button" style={small} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>Открыть заказ</button>}
-                  {isMaster && !mine && (m.kind === 'appeal' || m.kind === 'debug') && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => { setReplyTo(m); setReplyText('') }}>Ответить</button>}
+                  {isMaster && !mine && (m.kind === 'appeal' || m.kind === 'debug') && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setConv({ userId: m.from_id, name: m.from_name })}>💬 Переписка и ответ</button>}
+                  {isMaster && mine && m.kind === 'reply' && m.to_id && <button type="button" style={small} onClick={() => setConv({ userId: m.to_id, name: (m.from_name || '').split(' → ').pop() })}>💬 Переписка</button>}
                   {(isMaster || mine) && <button type="button" style={small} onClick={() => remove(m)}>Удалить</button>}
                 </div>
                 {replyTo?.id === m.id && (
@@ -261,6 +305,7 @@ export default function MessagesPage() {
         </div>
       )}
       <BottomNav />
+      {conv && <Conversation userId={conv.userId} name={conv.name} onClose={() => setConv(null)} onSent={load} />}
       {nestView && <Suspense fallback={null}><NestingFileViewer fileName={nestView.fileName} text={nestView.text} onClose={() => setNestView(null)} /></Suspense>}
     </div>
   )
