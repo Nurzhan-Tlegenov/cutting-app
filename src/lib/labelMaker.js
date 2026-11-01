@@ -16,7 +16,7 @@ import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
-import { parseEdgeTypes, cutDetail, edgeKey } from './edgeCut'
+import { parseEdgeTypes, cutDetail, edgeKey, edgeAliases, edgeAlias } from './edgeCut'
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
@@ -404,7 +404,7 @@ export const saveLabelSaved = (list, user) => saveUserSettings({ labelSaved: lis
 
 export const LABEL_PX_MM = 8                               // точек на мм при 203 dpi (обычный термопринтер)
 const pxMm = tpl => ({ 300: 12, 600: 24 })[tpl?.dpi] || LABEL_PX_MM
-const edgeName = v => (!v || v === 'false' ? '' : v === 'default' || v === true ? 'Кромка' : String(v))
+const edgeNameRaw = v => (!v || v === 'false' ? '' : v === 'default' || v === true ? 'Кромка' : String(v))
 const r1 = v => String(Math.round((Number(v) || 0) * 10) / 10)
 
 /**
@@ -471,6 +471,8 @@ export function finishedSize(order, d) {
 export function labelInfo(order, mat, si, pi, part = null) {
   // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
   const sh = mat.sheets[si], p = part || sh.placed[pi], d = mat.details[p.detailIndex] || {}, m = detailMeta(d) || {}
+  // обозначения кромки, заданные производством (вместо длинных названий из модели)
+  const al = edgeAliases(order?.edge_types), edgeName = v => edgeAlias(edgeNameRaw(v), al)
   let c = d.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   // стороны бирки — как деталь лежит на листе
@@ -494,7 +496,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
   // размер — как деталь лежит на карте: по горизонтали (X листа) × по вертикали (Y листа)
   const even = turns % 2 === 0
   const curved = {}
-  detailEdgeList(d).filter(e => e.curved).forEach(e => { curved[e.name] = (curved[e.name] || 0) + e.mm })
+  detailEdgeList(d).filter(e => e.curved).forEach(e => { const n = edgeAlias(e.name, al); curved[n] = (curved[n] || 0) + e.mm })
   const holePts = c ? getAllDrillPoints(c, DW, DL, false) : []
   const face = holePts.filter(q => !q.edge && !q.back).length, back = holePts.filter(q => !q.edge && q.back).length, end = holePts.filter(q => q.edge).length
   const grooves = (c?.grooves || []).length + (c?.edgeGrooves || []).length, pockets = (c?.holes || []).filter(h => h.type === 'pocket').length

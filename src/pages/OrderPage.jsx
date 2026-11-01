@@ -19,14 +19,14 @@ import { isTwoSided, backSide } from '../lib/partInfo'
 import { loadOrderModel } from '../lib/orderModel'
 import { getShare, cachedShare, onShareChange } from '../lib/modelShare'
 import ShareLinkBox from '../components/ShareLinkBox'
-import { orderClient, productionSetStatus, orderMarks, productionArchive } from '../lib/productionApi'
+import { orderClient, productionSetStatus, orderMarks, productionArchive, productionOrderSheet } from '../lib/productionApi'
 import { planStages } from '../lib/posts'
 import { limitFromError, resetLimitsCache } from '../lib/limits'
 import { myOrderPerms } from '../lib/workplaces'
 import NestingCost from '../components/NestingCost'
 import OrderNotes from '../components/OrderNotes'
 import SimLinksBox from '../components/SimLinksBox'
-import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf } from '../lib/edgeCut'
+import { cutDetails, parseEdgeTypes, rawDetail, overMm, overOf, edgeAliases, NAMES_KEY } from '../lib/edgeCut'
 import SheetsOverview from '../components/SheetsOverview'
 import DeskSplit from '../components/DeskSplit'
 import { useDesktop } from '../hooks/useDesktop'
@@ -53,6 +53,8 @@ export default function OrderPage() {
   const [renameErr, setRenameErr] = useState('')
   const [matEdit, setMatEdit] = useState(null)      // производство правит название материала: { key, value }
   const [matErr, setMatErr] = useState('')
+  const [edgeEdit, setEdgeEdit] = useState(null)    // производство даёт кромке короткое обозначение: { name, value }
+  const [edgeErr, setEdgeErr] = useState('')
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
   const [labelMode] = useLabelMode(user)
@@ -252,6 +254,48 @@ export default function OrderPage() {
             {(() => { const ov = overOf(parseEdgeTypes(order?.edge_types)); return ov.on && ov.mm > 0 ? ` · со свесами +${ov.mm} мм на сторону` : ' · без свесов' })()}
           </div>
         )}
+        {/* кромка по названиям: длинное название из модели производство заменяет коротким обозначением — оно идёт на бирку */}
+        {totalEdge > 0 && (() => {
+          const al = edgeAliases(order?.edge_types)
+          const saveAlias = async (name, value) => {
+            const v = String(value || '').trim()
+            const names = { ...al }
+            if (v && v !== name) names[name] = v.slice(0, 60); else delete names[name]
+            const next = { ...parseEdgeTypes(order?.edge_types), [NAMES_KEY]: names }
+            if (!Object.keys(names).length) delete next[NAMES_KEY]
+            const r = order.user_id === user?.id ? await supabase.from('orders').update({ edge_types: next }).eq('id', order.id) : await productionOrderSheet(order.id, { edge_types: JSON.stringify(next) })
+            if (r.error) { setEdgeErr(typeof r.error === 'string' ? r.error : r.error.message || 'Не удалось сохранить'); return }
+            setOrder(o => ({ ...o, edge_types: next })); setEdgeEdit(null); setEdgeErr('')
+          }
+          return (
+            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {Object.entries(edgeSum.byName).sort((a, b) => b[1].total - a[1].total).map(([name, b]) => (
+                edgeEdit?.name === name ? (
+                  <div key={name} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input autoFocus value={edgeEdit.value} maxLength={60} placeholder="Короткое обозначение"
+                      onChange={e => setEdgeEdit({ ...edgeEdit, value: e.target.value })}
+                      onKeyDown={e => { if (e.key === 'Enter') saveAlias(name, edgeEdit.value); if (e.key === 'Escape') setEdgeEdit(null) }}
+                      style={{ flex: 1, minWidth: 0, fontSize: 14, padding: '5px 8px' }} />
+                    <button type="button" onClick={() => saveAlias(name, edgeEdit.value)} style={{ flex: 'none', width: 'auto', padding: '5px 10px', borderRadius: 16, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 12 }}>✓</button>
+                    <button type="button" onClick={() => { setEdgeEdit(null); setEdgeErr('') }} style={{ flex: 'none', width: 'auto', padding: '5px 8px', borderRadius: 16, border: '0.5px solid var(--border-md)', background: 'none', fontSize: 12, color: 'var(--text-muted)' }}>✕</button>
+                  </div>
+                ) : (
+                  <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 'var(--radius)', background: 'var(--bg2)', fontSize: 13 }}>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: 500, wordBreak: 'break-word' }}>{al[name] || name}</span>
+                      {al[name] && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', wordBreak: 'break-word' }}>в модели: {name}</span>}
+                    </span>
+                    <b style={{ flex: '0 0 auto' }}>{b.total.toFixed(2)} м</b>
+                    {canStatus && <button type="button" title="Обозначение кромки (на бирке)" onClick={() => { setEdgeEdit({ name, value: al[name] || name }); setEdgeErr('') }}
+                      style={{ flex: 'none', width: 'auto', padding: '2px 8px', borderRadius: 14, border: '0.5px solid var(--border-md)', background: 'var(--bg)', fontSize: 12, color: 'var(--blue)', cursor: 'pointer' }}>✎</button>}
+                  </div>
+                )
+              ))}
+              {canStatus && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>✎ — короткое обозначение кромки вместо длинного названия из модели. Оно печатается на бирках; в деталях заказчика ничего не меняется.</div>}
+              {edgeErr && <p className="error-text" style={{ margin: 0 }}>{edgeErr}</p>}
+            </div>
+          )
+        })()}
       </div>
       <div className="card" style={{ marginBottom: 12, fontSize: 13 }}>
         <p className="section-title">Материал</p>

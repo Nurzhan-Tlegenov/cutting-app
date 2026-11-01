@@ -8,6 +8,7 @@
 // Дерево резов строится по ТЕКУЩЕЙ карте (после ручных правок тоже): сквозные резы, оси по уровням чередуются.
 import { orderTitle, toLatin } from './orderUtils'
 import { detailMeta } from './partLabel.js'
+import { edgeAliases, edgeAlias } from './edgeCut'
 
 const EPS = 0.5
 const r1 = v => +(+v).toFixed(1)
@@ -244,12 +245,13 @@ export function buildBeamSawXml({ order, mat, geoOf, date = new Date() }) {
     'длина пильны', 'ширина пильный', 'длина готовая', 'ширина готовая', 'Наименование файла', 'Номер готовой детали', '№ карты', 'Общ.№ карты', 'Поворот', 'Текущее значение']
   out.push(`  <table name="label" lenghtIndex="4" widthIndex="5" textureIndex="7" materialIndex="1" thicknessIndex="2" quantityIndex="6" codeIndex="9" edgeIndex="8" ${COLS.map((c, i) => `columns${i + 1}="${esc(c)}"`).join(' ')}>`)
   const title = orderTitle(order)
+  const edgeAl = edgeAliases(order?.edge_types)   // обозначения кромки от производства — на бирки пильного центра
   const fileTitle = `${title} ${material}`.trim()
   for (const { code: c, p, si } of rows) {
     const d = (mat.details || [])[p.detailIndex] || {}
     const L = r1(p.trimTo ? p.trimTo.length : d.length ?? p.origY), W = r1(p.trimTo ? p.trimTo.width : d.width ?? p.origX)
     const sawL = r1(p.rotated ? p.origX : p.origY), sawW = r1(p.rotated ? p.origY : p.origX)
-    const edges = [d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeStr)
+    const edges = [d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(e => edgeAlias(edgeStr(e), edgeAl))
     const v = ['True', material, r1(thick), d.display_name || d.name || p.label || '', sawL, sawW, 1, d.rotatable === false ? '1(T_L)' : 'Без текстуры(T_N)',
       edges.join('|'), '', '0|0|0|0', (() => { const so = detailMeta(d)?.srcOrder; return so?.id ? (so.name || so.number || title) : title })(), p.trimTo ? `УПЛ ${Math.min(p.trimTo.width, p.trimTo.length)}` : (d.note || ''), d.prefix || d.position || '',
       ...edges, '', '', '', '', sawL, sawW, L, W, fileTitle, c, si + 1, si + 1, p.rotated ? 'true' : 'false', 1]

@@ -198,11 +198,23 @@ export function overOf(types) {
 /** Сколько мм добавлять к длине кромки на каждую закромленную сторону (0 — свесы отключены) */
 export const overMm = types => { const o = overOf(types); return o.on ? o.mm : 0 }
 
+// ─── Обозначение кромки: производство заменяет длинное название из модели коротким («ПВХ 0,4 мм Egger W1000…» → «0,4 бел.»).
+// Хранится в видах кромки заказа под служебным ключом { исходное: обозначение }; сами детали не меняются.
+// Обозначение идёт на бирку и в статистику заказа.
+export const NAMES_KEY = '__names'
+export function edgeAliases(types) {
+  const v = parseEdgeTypes(types)[NAMES_KEY]
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+}
+/** Название кромки с учётом обозначения производства */
+export const edgeAlias = (name, al) => (name && al && typeof al[name] === 'string' && al[name].trim() ? al[name].trim() : name)
+
 /** Что сохранять в заказ: только те виды кромки, что в нём есть, с числами */
 export function typesToSave(types, names) {
   const out = {}
   const ov = overOf(types)
   if (!ov.on || ov.mm !== OVER_DEFAULT) out[OVER_KEY] = ov          // обычные свесы (включены, 30 мм) не записываем
+  if (types?.[NAMES_KEY] && Object.keys(types[NAMES_KEY]).length) out[NAMES_KEY] = types[NAMES_KEY]   // обозначения кромки от производства
   for (const n of ['default', ...(names || [])]) {
     const v = types?.[n]
     if (!v) continue
