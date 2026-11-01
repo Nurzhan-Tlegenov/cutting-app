@@ -80,7 +80,7 @@ function parseTree(u8, start, skipKeys) {
   return { root, end: p }
 }
 
-const kid = (n, key) => { if (n && n.c) for (const c of n.c) if (c.k === key) return c; return null }
+const kid = (n, key) => { if (n && n.c) for (const c of n.c) if (c && c.k === key) return c; return null }
 const val = (n, key, def = null) => { const c = kid(n, key); return c && c.v !== undefined && c.v !== null ? c.v : def }
 
 // ---------- Геометрия ----------
@@ -595,17 +595,18 @@ function userProps(o) {
   const out = {}
   const add = (k, v) => { const name = String(k || '').trim().slice(0, 40), s = propValue(v); if (name && s && Object.keys(out).length < 40) out[name] = s }
   // Формат Базиса 2025 (проверено на модели): Params → User → Var { Name, Value, Variants } — по одному Var на свойство
-  for (const v of kid(kid(o, 'Params'), 'User')?.c || []) if (v.c) add(val(v, 'Name'), val(v, 'Value'))
+  for (const v of kid(kid(o, 'Params'), 'User')?.c || []) if (v?.c) add(val(v, 'Name'), val(v, 'Value'))
   if (Object.keys(out).length) return out
   // запасной путь — другие версии файла
   const walk = (n, depth) => {
     if (!n?.c || depth > 3) return
     for (const ch of n.c) {
+      if (!ch) continue                               // пропущенный при разборе узел
       if (ch.c && /^(elastic|planes?|scheme)$/i.test(ch.k)) continue
       if (ch.c) {
         // элемент списка «имя — значение»
-        const nm = ch.c.find(x => !x.c && NAME_KEY.test(x.k) && typeof x.v === 'string')
-        const vl = ch.c.find(x => !x.c && VALUE_KEY.test(x.k))
+        const nm = ch.c.find(x => x && !x.c && NAME_KEY.test(x.k) && typeof x.v === 'string')
+        const vl = ch.c.find(x => x && !x.c && VALUE_KEY.test(x.k))
         if (nm && vl) add(nm.v, vl.v)
         else walk(ch, depth + 1)
       } else if (ch.k && !NAME_KEY.test(ch.k) && !VALUE_KEY.test(ch.k)) add(ch.k, ch.v)
@@ -1271,7 +1272,7 @@ export function parseBasis(u8, opts = {}) {
     walk(top, M, { product: blk ? cleanName(val(top, 'Name')) : '', productDes: blk ? cleanName(val(top, 'Des')) : '', productPos: blk ? cleanName(val(top, 'ArtPos')) : '', path: [], depth: 0, user: modelUser, layer })
   }
   for (const top of model.c) {
-    if (top.k !== 'Obj' || !top.c) continue
+    if (!top || top.k !== 'Obj' || !top.c) continue
     // Слой Базиса (тип 1002, «Верх», «Низ»…): сам он не изделие — изделия лежат внутри; имя слоя — у каждой детали (meta.layer).
     // Раньше слой считался изделием, и у всех деталей префиксом стояло «Верх» / «Низ» вместо шкафа.
     if (val(top, 'Type') === TYPE_LAYER) {
