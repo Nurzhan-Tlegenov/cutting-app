@@ -23,6 +23,10 @@ const readPinned = () => { try { return localStorage.getItem('navPinned') === '1
 
 /** Кнопка ☰ — ставится в шапку главных экранов. Красная точка — есть новое */
 let lastBadge = 0
+// iPhone / iPad (в том числе iPad, который называет себя Mac): системный жест «Назад» от левого края
+const IOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+const IOS_EDGE = 22          // столько пикселей у края забирает система
+
 export function MenuButton({ style }) {
   const [n, setN] = useState(lastBadge)
   useEffect(() => {
@@ -85,10 +89,16 @@ export default function NavDrawer({ notices, unread }) {
     return () => window.removeEventListener('nav-open', on)
   }, [user?.id])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // свайп от левого края экрана — панель выезжает за пальцем
+  // свайп от левого края экрана — панель выезжает за пальцем.
+  // iPhone: у самого края (≈20 px) жест забирает система — «Назад» на предыдущую страницу; его не перехватить.
+  // Поэтому на iPhone меню тянется от полосы чуть правее края (20–70 px) и от закладки, отодвинутой от края.
   useEffect(() => {
     let st = null
-    const down = e => { if (open || e.touches.length !== 1) return; const t = e.touches[0]; if (t.clientX < 18) st = { x: t.clientX, y: t.clientY, on: false } }
+    const down = e => {
+      if (open || e.touches.length !== 1) return
+      const t = e.touches[0]
+      if (IOS ? t.clientX >= IOS_EDGE && t.clientX < IOS_EDGE + 50 : t.clientX < 18) st = { x: t.clientX, y: t.clientY, on: false }
+    }
     const move = e => {
       if (!st) return
       const t = e.touches[0], dx = t.clientX - st.x, dy = t.clientY - st.y
@@ -250,7 +260,7 @@ export default function NavDrawer({ notices, unread }) {
   // закладка у левого края: видно, что слева есть меню (нажать — откроется, или потянуть от края)
   const tab = !moving && !vis && (
     <button type="button" aria-label="Меню" onClick={() => { setOpen(true); refresh() }}
-      style={{ position: 'fixed', left: 0, top: '42%', zIndex: 1050, width: 14, height: 56, padding: 0, border: 'none', borderRadius: '0 10px 10px 0',
+      style={{ position: 'fixed', left: IOS ? IOS_EDGE : 0, top: '42%', zIndex: 1050, width: IOS ? 20 : 14, height: 56, padding: 0, border: 'none', borderRadius: IOS ? 10 : '0 10px 10px 0',
         background: 'var(--blue)', opacity: 0.55, boxShadow: '1px 0 6px rgba(0,0,0,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
       <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><path d="M9 6l6 6-6 6" /></svg>
     </button>
