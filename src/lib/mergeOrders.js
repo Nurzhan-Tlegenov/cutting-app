@@ -70,11 +70,19 @@ function copyRow(r, src, s, mergedId) {
 }
 
 /**
- * Объединить заказы в один раскрой. orders — строки orders (свои черновики), productionId — общее производство.
+ * Объединить заказы в один раскрой. orders — заказы (нужны id), productionId — общее производство.
+ * Клиент объединяет свои черновики. Производство (opts.ownerId — владелец производства) объединяет пришедшие к нему заказы
+ * разных заказчиков: объединение — черновик производства (его раскраивают, оформляют на своё производство и ведут по постам),
+ * а заказы-источники помечаются в базе функцией production_merge_mark (в итоги производства идёт только объединение).
  * -> { order } | { error }
  */
-export async function createMergedOrder(orders, productionId = null, onProgress) {
-  const list = [...orders].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+export async function createMergedOrder(orders, productionId = null, onProgress, opts = {}) {
+  // полные строки заказов (у списка производства — только краткие поля)
+  const ids = orders.map(o => o.id)
+  const { data: full, error: e0 } = await supabase.from('orders').select('*').in('id', ids)
+  if (e0) return { error: e0.message }
+  if ((full || []).length !== ids.length) return { error: 'Не все заказы доступны — обновите список и попробуйте снова.' }
+  const list = [...full].sort((a, b) => String(a.submitted_at || a.created_at).localeCompare(String(b.submitted_at || b.created_at)))
   const srcs = []
   const rowsBy = []
   for (const [i, o] of list.entries()) {
@@ -97,6 +105,7 @@ export async function createMergedOrder(orders, productionId = null, onProgress)
     order_name: title.length > 120 ? title.slice(0, 117) + '…' : title,
     production_id: productionId ?? base.production_id ?? null,
     merge_of: srcs,
+    ...(opts.ownerId ? { user_id: opts.ownerId } : {}),
   })
   const { data: made, error: e1 } = await supabase.from('orders').insert(row).select().single()
   if (e1 || !made) {
@@ -107,7 +116,13 @@ export async function createMergedOrder(orders, productionId = null, onProgress)
     .map((r, k) => ({ ...r, sort_order: k }))
   const { error: e2 } = await insertOrderDetails(copies, onProgress)
   if (e2) { await supabase.from('orders').delete().eq('id', made.id); return { error: e2.message } }
-  await supabase.from('orders').update({ merged_into: made.id }).in('id', list.map(o => o.id))
+  if (opts.production) {
+    const { error: e3 } = await supabase.rpc('production_merge_mark', { p_merged: made.id, p_orders: list.map(o => o.id) })
+    if (e3) {
+      await supabase.from('orders').delete().eq('id', made.id)
+      return { error: /PGRST202|Could not find the function|42883/.test(`${e3.message} ${e3.code}`) ? MERGE_SQL_HINT : e3.message }
+    }
+  } else await supabase.from('orders').update({ merged_into: made.id }).in('id', list.map(o => o.id))
   return { order: made }
 }
 

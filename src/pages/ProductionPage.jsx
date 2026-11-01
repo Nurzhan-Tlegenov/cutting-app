@@ -37,6 +37,7 @@ import Drill6Viewer from '../components/Drill6Viewer'
 import GcodeFileSim from '../components/GcodeFileSim'
 import BeamSawSettings from '../components/BeamSawSettings'
 import { hasBeta } from '../lib/beta'
+import { MERGE_FEATURE, createMergedOrder, mergeList } from '../lib/mergeOrders'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -100,6 +101,13 @@ export default function ProductionPage() {
   const [hasPosts, setHasPosts] = useState(false)       // есть посты — принятый, но не пущенный заказ помечается
   const [betaBeam, setBetaBeam] = useState(false)       // β Пильный центр: раздел настроек — мастеру и бета-тестерам
   useEffect(() => { let alive = true; hasBeta('beam_saw').then(v => { if (alive) setBetaBeam(v) }); return () => { alive = false } }, [])
+  // β Объединённый раскрой: производство объединяет пришедшие заказы в один раскрой (та же бета, что у клиентов)
+  const [canMerge, setCanMerge] = useState(false)
+  useEffect(() => { let alive = true; hasBeta(MERGE_FEATURE).then(v => { if (alive) setCanMerge(v) }); return () => { alive = false } }, [])
+  const [mergeMode, setMergeMode] = useState(false)
+  const [mergeSel, setMergeSel] = useState(() => new Set())
+  const [merging, setMerging] = useState('')
+  const [mergeInfo, setMergeInfo] = useState(() => new Map())   // id -> { merge_of, merged_into, into: { number, status } }
   useEffect(() => { let alive = true; postsList().then(r => { if (alive) setHasPosts((r.data || []).some(p => p.active !== false)) }); return () => { alive = false } }, [])
   const loadStaff = () => membersList().then(r => setStaff({ data: r.data || null, error: r.error || '' }))
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заявок открыты ссылки на симуляцию
@@ -156,6 +164,24 @@ export default function ProductionPage() {
     setArchived(new Map((r.data || []).filter(x => !x.deleted && x.prod_archived_at).map(x => [x.id, x.prod_archived_at])))
   }
 
+  // какие заказы — объединения и какие уже в объединении (поля merge_of / merged_into; база без них — пусто)
+  async function loadMergeInfo(list) {
+    try {
+      const ids = list.map(o => o.id), out = new Map()
+      for (let i = 0; i < ids.length; i += 150) {
+        const { data, error: e } = await supabase.from('orders').select('id, merge_of, merged_into').in('id', ids.slice(i, i + 150))
+        if (e) return
+        for (const x of data || []) if (x.merge_of || x.merged_into) out.set(x.id, { merge_of: x.merge_of, merged_into: x.merged_into })
+      }
+      const into = [...new Set([...out.values()].map(x => x.merged_into).filter(Boolean))]
+      if (into.length) {
+        const { data } = await supabase.from('orders').select('id, order_number, status').in('id', into)
+        const by = new Map((data || []).map(x => [x.id, x]))
+        for (const v of out.values()) if (v.merged_into) { const m = by.get(v.merged_into); if (m) v.into = m; else v.merged_into = null }
+      }
+      setMergeInfo(out)
+    } catch { /* без объединений */ }
+  }
   const load = async () => {
     // производство и рабочие места — параллельно (раньше по очереди: на медленной связи страница открывалась секунды)
     const [p0, w] = await Promise.all([myProduction(user?.id), myWorkplaces()])
@@ -166,12 +192,29 @@ export default function ProductionPage() {
     if (p && (p.status ?? 'approved') === 'approved') {
       setSheet(Object.fromEntries([...MARGINS, ...HDF_MARGINS, ...OFFCUT_KEYS].map(([k]) => [k, p[k] != null ? String(p[k]) : ''])))
       const r = await productionOrders()
-      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []); loadStats(); listShares((r.data || []).map(o => o.id)).then(setShares) }
+      if (r.error) setError(r.error); else { setError(''); setOrders(r.data || []); loadStats(); listShares((r.data || []).map(o => o.id)).then(setShares); loadMergeInfo(r.data || []) }
       simShareOrders().then(setSimShares)
     }
   }
   useEffect(() => { Promise.resolve().then(load) }, [user?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (prod !== undefined) pageCache = { uid: user?.id, prod, orders, sheet, staff, wps, stages, archived, stats } }, [user?.id, prod, orders, sheet, staff, wps, stages, archived, stats])
+
+  const inMerge = o => !!mergeInfo.get(o.id)?.merged_into
+  const isMergedOrder = o => mergeList(mergeInfo.get(o.id) || {}).length > 0
+  // объединять можно заказы, которые ещё не пошли по постам: новые, в обсуждении, принятые без маршрута
+  const canJoin = o => !archived.has(o.id) && !inMerge(o) && !isMergedOrder(o)
+    && (o.status === 'new' || o.status === 'discussion' || (o.status === 'inwork' && !stages[o.id]))
+  async function mergeOrders() {
+    const list = orders.filter(o => mergeSel.has(o.id))
+    if (list.length < 2) { window.alert('Отметьте хотя бы 2 заказа.'); return }
+    if (!window.confirm(`Объединить ${list.length} заказа в один раскрой?\n\n${list.map(o => `· ${orderTitle(o)}${o.own ? '' : ` — ${o.client_name || 'заказчик'}`}`).join('\n')}\n\nСоздастся ваш черновик-объединение с деталями всех этих заказов: раскроите его, оформите на своё производство и ведите по постам как обычный заказ. Статус «в работе» / «исполнен» перейдёт на заказы заказчиков. Деловые остатки после раскроя — отметьте «Мои — на склад» или «Клиента».`)) return
+    setMerging('…')
+    const r = await createMergedOrder(list, prod.id, (n, all) => setMerging(`${n} из ${all}`), { ownerId: user.id, production: true })
+    setMerging('')
+    if (r.error) { window.alert(r.error); return }
+    setMergeMode(false); setMergeSel(new Set())
+    navigate(`/orders/${r.order.id}/nesting`)
+  }
 
   const setStatus = async (o, status) => {
     setBusy(o.id)
@@ -386,6 +429,19 @@ export default function ProductionPage() {
           </div>
           {orders.length > 0 && 'gcode_at' in orders[0] && !('sheets' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{KIND_HINT}</p>}
           {orders.length > 0 && !('gcode_at' in orders[0]) && <p style={{ fontSize: 11, color: 'var(--amber)', marginBottom: 8 }}>{MARKS_SQL_HINT}</p>}
+          {canMerge && orders.length > 1 && (mergeMode ? (
+            <div style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8, padding: '7px 8px', borderRadius: 'var(--radius)', background: 'var(--blue-light)', border: '0.5px solid var(--blue)' }}>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>Отметьте заказы для общего раскроя · {mergeSel.size}</span>
+              <button type="button" style={btn()} onClick={() => { setMergeMode(false); setMergeSel(new Set()) }}>Отмена</button>
+              <button type="button" disabled={mergeSel.size < 2 || !!merging} style={{ ...btn('main'), opacity: mergeSel.size < 2 ? 0.5 : 1 }} onClick={mergeOrders}>{merging ? `Объединяем… ${merging}` : `🔗 Объединить (${mergeSel.size})`}</button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => { setMergeMode(true); setMergeSel(new Set()); if (filter === 'done') setFilter('all') }}
+              style={{ width: '100%', marginBottom: 8, padding: '7px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', fontSize: 13, cursor: 'pointer', textAlign: 'left' }}>
+              🔗 Объединить заказы в один раскрой β
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 1 }}>Остатки заказчикам не нужны — раскроите несколько заказов вместе и сэкономьте листы.</span>
+            </button>
+          ))}
           {!shown.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '24px 0' }}>{orders.length ? 'В этом разделе пусто.' : 'Заявок пока нет. Они появятся, когда заказ оформят на ваше производство.'}</p>}
           <div className="desk-grid" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {shown.map((o, oi) => {
@@ -394,10 +450,16 @@ export default function ProductionPage() {
               return (
                 <div key={o.id} data-focus={o.id} data-tour={oi === 0 ? 'prod-order' : undefined} className="card" style={{ padding: isOpen ? '8px 12px 10px' : '7px 12px' }}>
                   {/* свёрнуто — только строка заказа со статусом и пометками; нажатие разворачивает: заказчик и действия */}
-                  <div onClick={() => toggle(o.id)} style={{ cursor: 'pointer' }}>
+                  <div onClick={() => {
+                    if (!mergeMode) { toggle(o.id); return }
+                    if (!canJoin(o)) { window.alert(inMerge(o) ? 'Этот заказ уже в объединённом раскрое.' : isMergedOrder(o) ? 'Это уже объединение — его нельзя объединить ещё раз.' : 'Объединять можно новые заказы, в обсуждении и принятые, но ещё не пущенные по постам.'); return }
+                    setMergeSel(prev => { const n = new Set(prev); if (n.has(o.id)) n.delete(o.id); else n.add(o.id); return n })
+                  }} style={{ cursor: 'pointer', opacity: mergeMode && !canJoin(o) ? 0.45 : 1 }}>
                     {/* слева — заказ, справа — статус и под ним короткие пометки (G-код, Файлы): серые — не сделано, синие — сделано */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                      <span style={{ flex: '0 0 auto', width: 10, fontSize: 11, lineHeight: '20px', color: 'var(--text-hint)' }}>{isOpen ? '▾' : '▸'}</span>
+                      {mergeMode ? (
+                        <span style={{ flex: '0 0 auto', width: 18, height: 18, marginTop: 1, borderRadius: 9, border: `2px solid ${mergeSel.has(o.id) ? 'var(--blue)' : 'var(--border-md)'}`, background: mergeSel.has(o.id) ? 'var(--blue)' : 'transparent', color: 'white', fontSize: 11, lineHeight: '14px', textAlign: 'center' }}>{mergeSel.has(o.id) ? '✓' : ''}</span>
+                      ) : <span style={{ flex: '0 0 auto', width: 10, fontSize: 11, lineHeight: '20px', color: 'var(--text-hint)' }}>{isOpen ? '▾' : '▸'}</span>}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{orderTitle(o)}</div>
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[o.material_name, o.material_kind === 'hdf' && 'ХДФ', o.sheets > 0 && `листов ${o.sheets}`, `деталей ${o.parts}`, date(o.submitted_at)].filter(Boolean).join(' · ')}</div>
@@ -408,11 +470,13 @@ export default function ProductionPage() {
                             {tel && <a href={`tel:+${tel}`} onClick={e => e.stopPropagation()} style={{ color: 'var(--blue)' }}>{o.client_phone}</a>}
                           </>}
                         </div>
+                        {isMergedOrder(o) && <div style={{ fontSize: 11.5, color: 'var(--blue)' }}>🔗 Объединённый раскрой · {mergeList(mergeInfo.get(o.id)).map(x => `${x.seq}: №${x.number}`).join(', ')}</div>}
+                        {inMerge(o) && <div style={{ fontSize: 11.5, color: 'var(--blue)' }}>🔗 Раскраивается в объединении №{mergeInfo.get(o.id).into?.order_number}{mergeInfo.get(o.id).into?.status === 'draft' ? ' (черновик — раскроите и оформите)' : ''}</div>}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flex: '0 0 auto' }}>
                         <span className={`badge ${STATUS_BADGE[o.status] || 'badge-new'}`}>{archived.has(o.id) ? 'В архиве' : STATUS_LABELS[o.status] || o.status}</span>
                         {shares.has(o.id) && <ShareBadge orderId={o.id} known style={{ alignSelf: 'flex-end', lineHeight: '14px' }} />}
-                        {hasPosts && o.status === 'inwork' && !stages[o.id] && <span title="Принят, но ещё не пущен в работу по постам" style={{ fontSize: 11, lineHeight: '16px', color: 'var(--amber)', whiteSpace: 'nowrap' }}>▶ не пущен в работу</span>}
+                        {hasPosts && o.status === 'inwork' && !stages[o.id] && !inMerge(o) && <span title="Принят, но ещё не пущен в работу по постам" style={{ fontSize: 11, lineHeight: '16px', color: 'var(--amber)', whiteSpace: 'nowrap' }}>▶ не пущен в работу</span>}
                         {stages[o.id]?.name && <span title="Пост, на котором сейчас заказ" style={{ fontSize: 11, lineHeight: '16px', color: stages[o.id].status === 'queued' ? 'var(--amber)' : 'var(--blue)', whiteSpace: 'nowrap' }}>📍 {stages[o.id].name} · {stages[o.id].done}/{stages[o.id].total}</span>}
                         {(o.status === 'inwork' || o.status === 'done' || o.gcode_at || o.files_saved_at) && 'gcode_at' in o && (
                           <div style={{ display: 'flex', gap: 4 }}>
@@ -432,13 +496,14 @@ export default function ProductionPage() {
                   </div>
                   {isOpen && <>
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                    {o.status !== 'inwork' && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять</button>}
-                    {o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
+                    {inMerge(o) && <button type="button" style={btn('main')} onClick={() => navigate(`/orders/${mergeInfo.get(o.id).merged_into}/nesting`)}>🔗 Открыть объединение</button>}
+                    {!inMerge(o) && o.status !== 'inwork' && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять</button>}
+                    {!inMerge(o) && o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
                     {/* по постам «Исполнен» ставится сам после последнего поста; без маршрута — кнопкой */}
                     {o.status === 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setReopen(o)}>↩ Вернуть в техпроцесс</button>}
-                    {o.status === 'inwork' && !stages[o.id] && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => finish(o)}>Исполнен</button>}
+                    {!inMerge(o) && o.status === 'inwork' && !stages[o.id] && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => finish(o)}>Исполнен</button>}
                     {/* отменить своё «Принять»: пока ни один пост заказ не взял — заказ снова новый */}
-                    {o.status === 'inwork' && (!stages[o.id] || (stages[o.id].status === 'queued' && !stages[o.id].done)) && <button type="button" disabled={busy === o.id} style={btn()}
+                    {!inMerge(o) && o.status === 'inwork' && (!stages[o.id] || (stages[o.id].status === 'queued' && !stages[o.id].done)) && <button type="button" disabled={busy === o.id} style={btn()}
                       onClick={() => { if (window.confirm(`Отменить принятие заказа «${orderTitle(o)}»?\nОн снова станет новой заявкой${stages[o.id] ? ', маршрут по постам сбросится' : ''}.`)) setStatus(o, 'new') }}>✕ Отменить принятие</button>}
                     <button type="button" data-tour={oi === 0 ? 'prod-open' : undefined} style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>
                     {!o.own && wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none', color: 'var(--teal)', borderColor: 'var(--teal)' }}>WhatsApp</a>}
