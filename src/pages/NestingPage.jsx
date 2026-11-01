@@ -50,6 +50,7 @@ import { statsAndQuote, pdfSummaryOf, userPdfTpl } from '../lib/pdfSummary'
 import { syncProductionReports, clientReport } from '../lib/productionReports'
 import { savedNestings } from '../lib/savedNesting'
 import { detailMatKey, materialsOf } from '../lib/detailMaterial'
+import MergePanel from '../components/MergePanel'
 import { flipDetail } from '../lib/mirrorDetail'
 import { detailMeta } from '../lib/partLabel'
 import { orderTitle, orderFileName, getNextOrderNumber, fileNameOf } from '../lib/orderUtils'
@@ -4118,6 +4119,9 @@ export default function NestingPage() {
         )
       })()}
 
+      {/* Объединённый раскрой нескольких заказов: из каких заказов, объединение материалов */}
+      <MergePanel order={order} allDetails={allDetails} materials={materials} savedByMat={savedByMat} disabled={anyRunning}
+        editable={order.user_id === user?.id && (order.status || 'draft') === 'draft'} onChanged={() => fetchOrder()} />
       {/* Материал — всегда на виду: что сейчас раскраиваем */}
       {!multiMat && materials.length === 1 && (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, padding: '7px 10px', borderRadius: 'var(--radius)', background: 'var(--bg)', border: '0.5px solid var(--border-md)' }}>

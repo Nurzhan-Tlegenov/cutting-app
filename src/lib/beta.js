@@ -4,6 +4,7 @@ import { supabase } from './supabase'
 
 export const BETA_FEATURES = [
   ['beam_saw', 'Пильный центр'],
+  ['merge_nesting', 'Объединённый раскрой'],
 ]
 export const BETA_SQL_HINT = 'Бета-тест ещё не включён в базе: выполните migration_beta.sql в Supabase (SQL Editor) — один раз.'
 const isMissing = e => /PGRST202|42883|schema cache|Could not find the function/i.test(`${e?.message || ''} ${e?.code || ''}`)

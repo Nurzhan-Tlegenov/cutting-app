@@ -17,6 +17,8 @@ import ClientGate from '../components/ClientGate'
 import { clientAccess } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
 import { myLimits, limitText } from '../lib/limits'
+import { hasBeta } from '../lib/beta'
+import { MERGE_FEATURE, createMergedOrder, mergeList } from '../lib/mergeOrders'
 import { archiveOrder, restoreOrder, deleteOrder, deleteOrderNow, canArchive, keepUntilText, daysLeft, KEEP_MONTHS } from '../lib/orderArchive'
 
 export default function OrdersPage() {
@@ -37,6 +39,10 @@ export default function OrdersPage() {
   const [selected, setSelected] = useState(new Set())
   const [deleting, setDeleting] = useState(false)
   const holdTimers = useRef({})
+  // объединённый раскрой (бета): несколько заказов — один раскрой
+  const [canMerge, setCanMerge] = useState(false)
+  const [merging, setMerging] = useState('')
+  useEffect(() => { let alive = true; hasBeta(MERGE_FEATURE).then(v => { if (alive) setCanMerge(v) }); return () => { alive = false } }, [user?.id])
   const [shares, setShares] = useState(() => new Map())
   const [simShares, setSimShares] = useState(() => new Map())   // у каких заказов открыты ссылки на симуляцию
   useEffect(() => onShareChange(() => setShares(prev => {
@@ -132,6 +138,35 @@ export default function OrdersPage() {
     exitSelectMode()
   }
 
+  // Объединить выбранные заказы в один раскрой: детали копируются в новый заказ-объединение, сами заказы не меняются
+  async function mergeSelected() {
+    const list = orders.filter(o => selected.has(o.id))
+    if (list.length < 2) { window.alert('Выберите хотя бы 2 заказа.'); return }
+    const byId = new Map(orders.map(o => [o.id, o]))
+    const bad = list.filter(o => o.status !== 'draft' || o.archived_at)
+    if (bad.length) { window.alert(`Объединять можно только черновики (ещё не отправленные на производство):\n${bad.map(o => '· ' + orderTitle(o)).join('\n')}`); return }
+    const nested = list.filter(o => mergeList(o).length)
+    if (nested.length) { window.alert(`Это уже объединённые раскрои — их нельзя объединять ещё раз:\n${nested.map(o => '· ' + orderTitle(o)).join('\n')}`); return }
+    const busy = list.filter(o => o.merged_into && byId.has(o.merged_into))
+    if (busy.length) { window.alert(`Эти заказы уже в объединённом раскрое — сначала удалите то объединение:\n${busy.map(o => `· ${orderTitle(o)} → №${byId.get(o.merged_into).order_number}`).join('\n')}`); return }
+    // производство одно на всё объединение
+    const prods = [...new Set(list.map(o => o.production_id).filter(Boolean))]
+    let prod = prods[0] || null
+    if (prods.length > 1) {
+      const names = prods.map((p, i) => `${i + 1} — как в заказе ${list.filter(o => o.production_id === p).map(o => o.order_number).join(', ')}`)
+      const ans = window.prompt(`У заказов разные производства. Объединённый раскрой режет одно производство — какое взять?\n${names.join('\n')}\n\nВведите номер:`, '1')
+      if (ans == null) return
+      prod = prods[Math.max(0, Math.min(prods.length - 1, (parseInt(ans, 10) || 1) - 1))]
+    }
+    if (!window.confirm(`Объединить ${list.length} заказа в один раскрой?\n\n${list.map(o => '· ' + orderTitle(o)).join('\n')}\n\nСоздастся новый заказ-объединение с деталями всех этих заказов — его раскрой, смета и отправка общие. Сами заказы не меняются.`)) return
+    setMerging('…')
+    const r = await createMergedOrder(list, prod, (n, all) => setMerging(`${n} из ${all}`))
+    setMerging('')
+    if (r.error) { window.alert(r.error); return }
+    exitSelectMode()
+    navigate(`/orders/${r.order.id}/nesting`)
+  }
+
   if (access?.staff && !access.ok) return <ClientGate access={access} onChange={setAccess} />
   if (loading) return (
     <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -169,6 +204,14 @@ export default function OrdersPage() {
         )}
       </div>
 
+      {selectMode && canMerge && (
+        <button type="button" onClick={mergeSelected} disabled={selected.size < 2 || !!merging}
+          style={{ width: '100%', marginTop: -10, marginBottom: 12, padding: '9px 12px', border: 'none', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: 'pointer',
+            background: selected.size >= 2 ? 'var(--blue)' : 'var(--bg2)', color: selected.size >= 2 ? 'white' : 'var(--text-hint)' }}>
+          {merging ? `Объединяем… ${merging}` : `🔗 Объединить в раскрой (${selected.size}) β`}
+          <span style={{ display: 'block', fontSize: 11, fontWeight: 400, opacity: 0.85, marginTop: 2 }}>Один раскрой на несколько заказов — экономия листов. Заказы остаются отдельными.</span>
+        </button>
+      )}
       <LimitsBar cabinet="client" refresh={orders.length} />
       {orders.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 20px' }}>
@@ -181,7 +224,7 @@ export default function OrdersPage() {
         <>
           {!selectMode && (
             <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 8, textAlign: 'center' }}>
-              Удержите заказ для выбора и удаления
+              Удержите заказ для выбора{canMerge ? ', объединения в раскрой' : ''} и удаления
             </p>
           )}
           {/* исполненные заказы просим отправить в архив: тяжёлые данные удаляются, заказ остаётся в истории */}
@@ -240,6 +283,22 @@ export default function OrdersPage() {
                       ↩ Производство вернуло заказ на доработку{order.return_note ? `: ${order.return_note}` : ''}
                     </div>
                   )}
+                  {/* объединённый раскрой: из каких заказов; заказ в объединении — ссылка на него */}
+                  {mergeList(order).length > 0 && (
+                    <div style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--blue)', background: 'var(--blue-light)', border: '0.5px solid var(--blue)', borderRadius: 10, padding: '1px 8px' }}>
+                      🔗 Объединённый раскрой · {mergeList(order).map(x => `${x.seq}: №${x.number}`).join(', ')}
+                    </div>
+                  )}
+                  {order.merged_into && orders.some(o => o.id === order.merged_into) && (() => {
+                    const m = orders.find(o => o.id === order.merged_into)
+                    return (
+                      <button type="button" onClick={e => { e.stopPropagation(); if (!selectMode) navigate(`/orders/${m.id}/nesting`) }}
+                        onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
+                        style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--blue)', background: 'var(--blue-light)', border: '0.5px solid var(--blue)', borderRadius: 10, padding: '1px 8px', cursor: 'pointer' }}>
+                        🔗 {m.status === 'draft' ? 'В объединённом раскрое' : 'Отправлен в объединённом раскрое'} №{m.order_number} ›
+                      </button>
+                    )
+                  })()}
                   {/* ссылка на 3D: нажать — скопировать или закрыть доступ */}
                   {shares.has(order.id) && <ShareBadge orderId={order.id} known />}
                   {simShares.has(order.id) && (

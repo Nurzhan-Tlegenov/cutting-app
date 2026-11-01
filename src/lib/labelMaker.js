@@ -501,8 +501,10 @@ export function labelInfo(order, mat, si, pi, part = null) {
   const cutouts = (c?.holes || []).filter(h => h.type !== 'pocket').length
   const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
-    order: orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
-    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, orderName: String(order?.order_name || '').trim(), orderNumber: order?.order_number || '',
+    // объединённый раскрой: «Заказ» на бирке — заказ самой детали (mergeOrders.js → meta.srcOrder)
+    order: m.srcOrder?.id ? (m.srcOrder.name || m.srcOrder.number || '') : orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
+    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
+    orderName: m.srcOrder?.id ? String(m.srcOrder.name || '').trim() : String(order?.order_name || '').trim(), orderNumber: m.srcOrder?.id ? (m.srcOrder.number || '') : (order?.order_number || ''),
     name: d.name || p.label || 'Деталь', des: metaDes(m), pos: metaPos(m), prefix: d.prefix || p.prefix || '',
     // толщина почти всегда уже есть в названии материала («ЛДСП белый 16 мм») — второй раз не дописываем;
     // нет её в названии — дописываем. Отдельно толщину можно поставить элементом «Толщина»

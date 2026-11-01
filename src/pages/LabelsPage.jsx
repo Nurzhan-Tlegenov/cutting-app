@@ -197,6 +197,7 @@ function LabelViewer({ tpl, order, mat, list, index, onIndex, onClose, on3d, bp 
 // Показана бирка первой детали первого листа — на настоящих данных заказа.
 import LabelImageEditor from '../components/LabelImageEditor'
 import { fetchOrderDetails } from '../lib/orderDetails.js'
+import { mergeList, srcOrderLabel } from '../lib/mergeOrders'
 
 // Сетка бирки в мм: тонкая — через 1 мм (когда крупно), через 5 мм, жирнее — через 10 мм с цифрами по верху и слева
 function LabelGrid({ w, h, scale }) {
@@ -983,6 +984,14 @@ export default function LabelsPage() {
         {mat && <button onClick={printLabels} style={pill}>🖨 Печать</button>}
       </div>
 
+      {/* объединённый раскрой: на каждой бирке «Заказ» — заказ своей детали */}
+      {mergeList(order).length > 0 && (
+        <div className="no-print" style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 'var(--radius)', background: 'var(--blue-light)', border: '0.5px solid var(--blue)', fontSize: 12.5 }}>
+          <b>🔗 В раскрое {mergeList(order).length} заказа{mat?.name ? `, материал: ${mat.name}` : ''}</b>
+          {mergeList(order).map(s => <div key={s.id}>{srcOrderLabel(s)}</div>)}
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>На бирке «Заказ» — заказ своей детали: так деталь легко отложить к нужному заказу.</div>
+        </div>
+      )}
       <div className="card no-print" style={{ marginBottom: 10, padding: 0, overflow: 'hidden' }}>
         <div onClick={() => setSetup(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', cursor: 'pointer' }}>
           <span style={{ fontSize: 12, color: 'var(--text-hint)', width: 12 }}>{setup ? '▼' : '▶'}</span>

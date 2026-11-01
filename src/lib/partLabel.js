@@ -48,7 +48,10 @@ export function partLabel(p, details, mode, short = false) {
   const showPfx = pfx && pfx !== name.trim()
   const base = (showPfx ? (short ? pfx.slice(0, 3) : pfx) + ' ' : '') + name
   if (!mode || mode === 'name') return base
-  const m = detailMeta(details?.[p.detailIndex])
+  const m0 = detailMeta(details?.[p.detailIndex])
+  // объединённый раскрой: впереди позиции и обозначения — номер заказа в объединении («2·04.06»)
+  const so = m0?.srcOrder?.seq ? `${m0.srcOrder.seq}·` : ''
+  const m = so ? { ...m0, ...(metaPos(m0) ? { pos: so + metaPos(m0) } : {}), ...(metaDes(m0) ? { des: so + metaDes(m0) } : {}) } : m0
   if (mode === 'des') return metaDes(m) || base
   if (mode === 'des_name') { const des = metaDes(m); return des ? `${des} ${name}` : base }
   if (mode === 'pos') return metaPos(m) || base
