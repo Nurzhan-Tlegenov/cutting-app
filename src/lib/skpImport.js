@@ -202,6 +202,8 @@ export function parseSkp(u8, opts = {}) {
   const panels = []          // { M (мир), ent, parent: attrs, product, path }
   const others = []          // { M, ent, name, product }
   let hiddenSkipped = 0
+  // компонент панели плагина: есть a03_name, а у задней стенки (ХДФ) его может не быть — тогда по материалу панели / su_info
+  const isPanelComp = d => !!(d && (d.a03_name || d.a06_mat_panel || d.su_info))
   const walk = (ent, M, path, product, parentAttrs, depth, chain = '') => {
     if (depth > 40) return
     for (const [o, l] of instancesOf(ent)) {
@@ -219,7 +221,7 @@ export function parseSkp(u8, opts = {}) {
       if (isPanelBody) { panels.push({ M: W, ent: def.ent, own: dyn, parent: parentAttrs || {}, product: prod, layer: ln, path, chain }); continue }
       const g = geomOf(def.ent)
       if (g.F.length && !/^holes/i.test(def.name)) others.push({ M: W, ent: def.ent, name: cleanName(sval(o, l, 0x1965) || dyn.a03_name || def.name), product: prod, layer: ln, mat: bi.mat })
-      walk(def.ent, W, [...path, cleanName(dyn.a03_name || def.name)], prod, dyn.a03_name ? dyn : parentAttrs, depth + 1, chain + '/' + o)
+      walk(def.ent, W, [...path, cleanName(dyn.a03_name || def.name)], prod, isPanelComp(dyn) ? dyn : parentAttrs, depth + 1, chain + '/' + o)
     }
   }
   // грани прямо в корне модели (редко) — тоже в 3D
@@ -428,7 +430,7 @@ export function parseSkp(u8, opts = {}) {
       const ch = chain + '/' + o
       // хозяин чашки — ближайший компонент плагина, который не фурнитура (фасад, а не сама петля)
       const dy = attrs(o, l).dynamic_attributes || {}
-      walkHoles(def.ent, W, depth + 1, ch, dy.a03_name && dy.a09_su_type !== 'furniture' && !/Петл|hinge/i.test(def.name) ? ch : owner)
+      walkHoles(def.ent, W, depth + 1, ch, isPanelComp(dy) && dy.a09_su_type !== 'furniture' && !/Петл|hinge/i.test(def.name) ? ch : owner)
     }
   }
   walkHoles(rootEnt, rootM, 0)
@@ -497,7 +499,11 @@ export function parseSkp(u8, opts = {}) {
     side(pa.edge_y1, [Y0, Z1], [Y1, Z1]); side(pa.edge_y2, [Y0, Z0], [Y1, Z0])
     side(pa.edge_z1, [Y0, Z0], [Y0, Z1]); side(pa.edge_z2, [Y1, Z0], [Y1, Z1])
     const material = cleanMat(pa.a06_mat_panel || pa.material || pnl.own.material)
-    const name = cleanName(pa.a03_name) || (/(1_Фасад)/.test(pnl.layer) ? 'Фасад' : 'Панель')
+    // название: a03_name; нет его (задняя стенка) — первое поле description плагина («ХДФ,432|,482,4,…») или имя в дереве
+    const name = cleanName(pa.a03_name) || cleanName(String(pa.description || '').split(',')[0]) || (pa.su_info ? cleanName(pnl.path[pnl.path.length - 1] || '') : '')
+      || (/(1_Фасад)/.test(pnl.layer) ? 'Фасад' : 'Панель')
+    // позиция детали — номер в списке плагина (атрибут number: 1, 2, 3… по каждому материалу)
+    const pos = pa.number != null && String(pa.number).trim() !== '' && String(pa.number) !== '0' ? String(pa.number).replace(/\.0+$/, '') : ''
     // направление текстуры: 1 — по длине (вдоль Z тела), 2 — по ширине
     const napr = String(pa.a05_napr ?? pa.napr_texture ?? '1')
     const texDir = napr === '2' ? 1 : 2
@@ -534,7 +540,7 @@ export function parseSkp(u8, opts = {}) {
     makers.push(() => buildItem(keep({
       T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material, rotatable: false, anim: null,
-      meta: { src: 'sketchup', ids: [id], des: pa.itemcode || '', pos: '', name, product: pnl.product, productDes: '', productPos: '', path: pnl.path.slice(1), material, materialCode: pa.type_material || '' },
+      meta: { src: 'sketchup', ids: [id], des: pa.itemcode || '', pos, name, product: pnl.product, productDes: '', productPos: '', path: pnl.path.slice(1), material, materialCode: pa.type_material || '' },
     }), pHoles, opts.faceRule))
   }
 
