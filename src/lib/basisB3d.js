@@ -721,6 +721,22 @@ export function buildItem(src, holes, faceRule) {
 
   const cutsRaw = src.cutsRaw || [], decorRaw = src.decorRaw || []
 
+  // Глухое отверстие, соосное с пазом с другой пласти и доходящее до его дна (глубина отверстия + глубина паза ≥ толщины),
+  // на деле сквозное: его можно сверлить со стороны паза насквозь. Тогда деталь обрабатывается с одной стороны
+  // (паз и отверстия — с одной пласти), а не «с двух сторон» с переворотом.
+  for (const f of face) {
+    if (f.through) continue
+    const r = f.d / 2
+    const c = cutsRaw.find(c => {
+      if (!!c.top === !!f.top) return false
+      const x0c = Math.min(c.p[0], c.q[0]), x1c = Math.max(c.p[0], c.q[0]), y0c = Math.min(c.p[1], c.q[1]), y1c = Math.max(c.p[1], c.q[1])
+      if (f.x < x0c - 0.5 || f.x > x1c + 0.5 || f.y < y0c - 0.5 || f.y > y1c + 0.5) return false   // ось — в пазу
+      if (r > Math.min(x1c - x0c, y1c - y0c) / 2 + 0.6) return false                               // отверстие шире паза — не сквозь паз
+      return f.depth + Number(c.depth || 0) >= T - Math.max(tol, 0.3)
+    })
+    if (c) { f.through = true; f.depth = T; f.top = !!c.top; f.viaGroove = true }
+  }
+
   // --- какая пласть «лицевая» (смотрит вверх на станке): та, где больше глухой обработки ---
   const holesTop = face.filter(f => !f.through && f.top).length, holesBottom = face.filter(f => !f.through && !f.top).length
   const cutsTop = cutsRaw.filter(c => c.top).length, cutsBottom = cutsRaw.filter(c => !c.top).length
