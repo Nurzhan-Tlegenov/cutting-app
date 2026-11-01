@@ -57,6 +57,7 @@ const RefPage = lazyPage(() => import('./pages/RefPage'))
 const InvitePage = lazyPage(() => import('./pages/InvitePage'))
 const PostPage = lazyPage(() => import('./pages/PostPage'))
 const HelpPage = lazyPage(() => import('./pages/HelpPage'))
+const InstallPage = lazyPage(() => import('./pages/InstallPage'))
 const TasksPage = lazyPage(() => import('./pages/TasksPage'))
 const StockPage = lazyPage(() => import('./pages/StockPage'))
 import { startBackupTimer } from './lib/stockBackup'
@@ -138,6 +139,7 @@ function AppRoutes() {
       {/* симуляция обработки листа по ссылке — без входа */}
       <Route path="/s/:code" element={<SharedSimPage />} />
       <Route path="/auth" element={user ? <Navigate to={pendingInvite() ? `/join/${pendingInvite()}` : pendingRef() ? `/r/${pendingRef()}` : (afterLogin() || home)} /> : <AuthPage />} />
+      <Route path="/install" element={<InstallPage />} />   {/* ссылка-установка — без входа */}
       <Route path="/join/:code" element={<JoinPage />} />
       <Route path="/r/:code" element={<RefPage />} />
       <Route path="/invite" element={<ProtectedRoute><InvitePage /></ProtectedRoute>} />

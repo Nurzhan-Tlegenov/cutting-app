@@ -47,15 +47,15 @@ const STEPS = {
 }
 const TABS = [['ios', '📱 iPhone'], ['android', '🤖 Android'], ['desktop', '💻 Компьютер']]
 
-export default function InstallGuide() {
+export default function InstallGuide({ defaultOpen = null, title = null }) {
   const pf = platform()
   const [tab, setTab] = useState(pf.os)
-  const [open, setOpen] = useState(!isInstalled())
+  const [open, setOpen] = useState(defaultOpen ?? !isInstalled())
   const [, setTick] = useState(0)
   const [copied, setCopied] = useState(false)
   useEffect(() => onInstallChange(() => setTick(t => t + 1)), [])
   const installed = isInstalled()
-  const site = typeof window !== 'undefined' ? window.location.origin : ''
+  const site = typeof window !== 'undefined' ? window.location.origin + '/install' : ''   // ссылка-установка: её можно отправить клиенту
   const copy = async () => {
     try { await navigator.clipboard.writeText(site); setCopied(true); setTimeout(() => setCopied(false), 2500) } catch { window.prompt('Скопируйте ссылку:', site) }
   }
@@ -66,7 +66,7 @@ export default function InstallGuide() {
       <div onClick={() => setOpen(v => !v)} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer' }}>
         <span style={{ fontSize: 26, lineHeight: 1 }}>📲</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Установить приложение на телефон</div>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>{title || 'Установить приложение на телефон'}</div>
           <div style={{ fontSize: 12, color: installed ? 'var(--teal)' : 'var(--text-hint)', marginTop: 2 }}>
             {installed ? '✓ Вы уже открыли приложение с рабочего стола' : 'Значок на рабочем столе — открывается сразу, на весь экран, без браузера'}
           </div>
