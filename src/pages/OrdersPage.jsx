@@ -164,6 +164,7 @@ export default function OrdersPage() {
     setMerging('')
     if (r.error) { window.alert(r.error); return }
     exitSelectMode()
+    if (r.note) window.alert(r.note)
     navigate(`/orders/${r.order.id}/nesting`)
   }
 

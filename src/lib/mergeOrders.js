@@ -96,7 +96,7 @@ export async function createMergedOrder(orders, productionId = null, onProgress,
   const row = {}
   for (const [c, v] of Object.entries(base)) {
     if (c === 'id' || c === 'order_number' || c === 'status' || c.endsWith('_at') || c === 'archived_by' || c === 'archived_sheets'
-      || c === 'return_note' || c === 'nesting_result' || c === 'merged_into' || c === 'merge_of' || c === 'offcuts_owner') continue
+      || c === 'return_note' || c === 'nesting_result' || c === 'merged_into' || c === 'merge_of' || c === 'offcuts_owner' || c === 'offcuts') continue
     row[c] = v
   }
   const title = `Объединение: ${list.map(o => o.order_number || orderTitle(o)).join(' + ')}`
@@ -123,7 +123,15 @@ export async function createMergedOrder(orders, productionId = null, onProgress,
       return { error: /PGRST202|Could not find the function|42883/.test(`${e3.message} ${e3.code}`) ? MERGE_SQL_HINT : e3.message }
     }
   } else await supabase.from('orders').update({ merged_into: made.id }).in('id', list.map(o => o.id))
-  return { order: made }
+  // обрезки, указанные в заказах, в объединение не переносятся: часто это остатки другого заказа из того же объединения
+  // (заказчик режет второй заказ из остатков первого, ещё не раскроенного) — в общем раскрое они получатся сами
+  const withOff = list.filter(o => {
+    let v = o.offcuts
+    if (typeof v === 'string') { try { v = JSON.parse(v) } catch { v = null } }
+    return Array.isArray(v?.items) && v.items.some(x => Number(x?.qty ?? 1) > 0)
+  })
+  const note = withOff.length ? `В заказе ${withOff.map(o => '№' + o.order_number).join(', ')} были указаны обрезки — в объединение они не перенесены: в общем раскрое остатки одного заказа сами пойдут на детали другого. Если это реальные остатки со склада — добавьте их в «Обрезки со склада» объединения.` : ''
+  return { order: made, note }
 }
 
 // Запись contour у многих деталей — по несколько запросов одновременно

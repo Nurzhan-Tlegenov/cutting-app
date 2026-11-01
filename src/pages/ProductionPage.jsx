@@ -23,7 +23,7 @@ import ReportsSettings from '../components/ReportsSettings'
 import { useKeptState } from '../hooks/useKeptState'
 import { StaffSection } from '../components/ProductionStaff'
 import { PostsSection, StageTrack } from '../components/ProductionPosts'
-import { productionStageMap, postsList } from '../lib/posts'
+import { productionStageMap, postsList, stopOrderStages } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
 import ProductionBoard from '../components/ProductionBoard'
 import StageReturn from '../components/StageReturn'
@@ -213,6 +213,7 @@ export default function ProductionPage() {
     setMerging('')
     if (r.error) { window.alert(r.error); return }
     setMergeMode(false); setMergeSel(new Set())
+    if (r.note) window.alert(r.note)
     navigate(`/orders/${r.order.id}/nesting`)
   }
 
@@ -503,6 +504,14 @@ export default function ProductionPage() {
                     {o.status === 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }} onClick={() => setReopen(o)}>↩ Вернуть в техпроцесс</button>}
                     {!inMerge(o) && o.status === 'inwork' && !stages[o.id] && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => finish(o)}>Исполнен</button>}
                     {/* отменить своё «Принять»: пока ни один пост заказ не взял — заказ снова новый */}
+                    {/* пустили по постам, а работа ещё не началась — снять маршрут: заказ снова «принят, не пущен» (отменить принятие, объединить) */}
+                    {!inMerge(o) && o.status === 'inwork' && stages[o.id] && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--amber)', borderColor: 'var(--amber)' }}
+                      onClick={async () => {
+                        if (!window.confirm(`Остановить запуск заказа «${orderTitle(o)}» по постам?\nМаршрут снимется, заказ останется принятым, но не пущенным в работу. Потом его можно снова пустить, отменить принятие или объединить с другим заказом.`)) return
+                        setBusy(o.id); const r = await stopOrderStages(o.id); setBusy('')
+                        if (r.error) { window.alert(r.error); return }
+                        loadStages()
+                      }}>⏹ Остановить запуск</button>}
                     {!inMerge(o) && o.status === 'inwork' && (!stages[o.id] || (stages[o.id].status === 'queued' && !stages[o.id].done)) && <button type="button" disabled={busy === o.id} style={btn()}
                       onClick={() => { if (window.confirm(`Отменить принятие заказа «${orderTitle(o)}»?\nОн снова станет новой заявкой${stages[o.id] ? ', маршрут по постам сбросится' : ''}.`)) setStatus(o, 'new') }}>✕ Отменить принятие</button>}
                     <button type="button" data-tour={oi === 0 ? 'prod-open' : undefined} style={btn()} onClick={() => navigate(`/orders/${o.id}`)}>Открыть</button>

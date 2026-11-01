@@ -12,6 +12,7 @@ const KIND = {
   done: ['var(--teal)', (e, p) => `Выполнено · ${e.me ? 'вы' : e.who || '—'}${p ? ` · в работе ${since(p.at, e.at)}` : ''}`],
   passed: ['var(--danger)', e => `Перенесён дальше без принятия · ${e.me ? 'вы' : e.who || '—'}`],
   skipped: ['var(--text-hint)', e => `Пост «${e.post}» пропущен`],
+  stopped: ['var(--amber)', e => `Запуск по постам остановлен${e.who ? ` · ${e.me ? 'вы' : e.who}` : ''}`],
   returned: ['var(--amber)', e => `Возвращён на пост «${e.post}»${e.who ? ` · ${e.me ? 'вы' : e.who}` : ''}`],
 }
 

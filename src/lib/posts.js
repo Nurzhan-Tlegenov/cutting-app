@@ -107,6 +107,13 @@ export async function stageMove(orderId, postId) {
 
 const LOG_HINT = 'Журнал техпроцесса ещё не включён в базе: выполните migration_stage_log.sql в Supabase (SQL Editor) — один раз.'
 /** Отменить «Принять» на посту (migration_stage_log.sql) */
+// «Остановить запуск» (migration_stage_stop.sql): снять маршрут, пока работа по заказу не началась
+export async function stopOrderStages(orderId) {
+  const r = await call('stop_order_stages', { p_order: orderId })
+  if (r.missing) return { error: 'Остановка запуска ещё не включена в базе: выполните migration_stage_stop.sql в Supabase (SQL Editor) — один раз.' }
+  if (r.error) return { error: /stage done/.test(r.error) ? 'По заказу уже выполнен пост — остановить запуск нельзя. Верните заказ на нужный пост.' : /parts scanned/.test(r.error) ? 'По заказу уже сканировали детали — работа началась, остановить запуск нельзя.' : r.error }
+  return r
+}
 export async function stageUnaccept(stageId) { const r = await call('stage_unaccept', { p_stage: stageId }); return r.missing ? { error: LOG_HINT } : r }
 /** Журнал движения заказа по постам: [{ kind, post, at, who, me }] | null — нет доступа */
 export async function orderStageLog(orderId) { const r = await call('order_stage_log', { p_order: orderId }); return r.missing ? { error: LOG_HINT, missing: true } : r }
