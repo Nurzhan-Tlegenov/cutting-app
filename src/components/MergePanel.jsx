@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { mergeList, srcOrderLabel, mergeMaterials, mergedGroups, unmergeMaterial, staleSources, refreshMerged } from '../lib/mergeOrders'
 
+// галочка / кружок своего размера: общий стиль input растягивает поле на всю ширину — название материала сжималось в столбик
+const tick = { width: 20, height: 20, flex: '0 0 20px', margin: 0, padding: 0, accentColor: 'var(--blue)' }
+const row = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 4px', borderBottom: '0.5px solid var(--border)', cursor: 'pointer' }
 const keyLabel = k => { const i = String(k).lastIndexOf('|'); const n = i < 0 ? k : k.slice(0, i), t = i < 0 ? '' : k.slice(i + 1); return `${n || 'Без материала'}${t ? ` · ${t} мм` : ''}` }
 const box = { marginBottom: 8, padding: '8px 10px', borderRadius: 'var(--radius)', background: 'var(--blue-light)', border: '0.5px solid var(--blue)' }
 const btn = { border: '0.5px solid var(--blue)', background: 'var(--bg)', color: 'var(--blue)', borderRadius: 'var(--radius)', padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' }
@@ -120,10 +123,10 @@ export default function MergePanel({ order, allDetails, materials, savedByMat, e
                 {materials.map(m => {
                   const on = checked.has(m.key), info = matInfo.get(m.key)
                   return (
-                    <label key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 4px', borderBottom: '0.5px solid var(--border)', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={on} onChange={() => setChecked(s => { const n = new Set(s); if (on) n.delete(m.key); else n.add(m.key); return n })} />
+                    <label key={m.key} style={row}>
+                      <input type="checkbox" style={tick} checked={on} onChange={() => setChecked(s => { const n = new Set(s); if (on) n.delete(m.key); else n.add(m.key); return n })} />
                       <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: 14 }}>{m.label}</span>
+                        <span style={{ fontSize: 14, lineHeight: 1.3, wordBreak: 'break-word' }}>{m.label}</span>
                         <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>
                           {m.pieces} шт.{info?.orders?.size ? ` · заказ ${[...info.orders].sort((a, b) => a - b).join(', ')}` : ''}
                         </span>
@@ -142,9 +145,9 @@ export default function MergePanel({ order, allDetails, materials, savedByMat, e
                 <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Каким материалом режем?</div>
                 <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 8 }}>Все отмеченные детали раскроятся одним материалом. В самих заказах материал не меняется.</div>
                 {picked.map(k => (
-                  <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 4px', borderBottom: '0.5px solid var(--border)', cursor: 'pointer' }}>
-                    <input type="radio" name="mm-cut" checked={cut === k} onChange={() => setCut(k)} />
-                    <span style={{ fontSize: 14 }}>{keyLabel(k)}</span>
+                  <label key={k} style={row}>
+                    <input type="radio" name="mm-cut" style={tick} checked={cut === k} onChange={() => setCut(k)} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.3, wordBreak: 'break-word' }}>{keyLabel(k)}</span>
                   </label>
                 ))}
                 <label className="label" style={{ marginTop: 10 }}>Или своё название (необязательно)</label>
