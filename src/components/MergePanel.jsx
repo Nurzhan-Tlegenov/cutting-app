@@ -2,7 +2,7 @@
 // «Обновить детали из заказов», если заказы поменяли после объединения. Логика — lib/mergeOrders.js.
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { mergeList, srcOrderLabel, mergeMaterials, mergedGroups, unmergeMaterial, staleSources, refreshMerged } from '../lib/mergeOrders'
+import { mergeList, srcOrderLabel, mergeMaterials, mergedGroups, unmergeMaterial, staleSources, refreshMerged, dissolveMerged } from '../lib/mergeOrders'
 
 // галочка / кружок своего размера: общий стиль input растягивает поле на всю ширину — название материала сжималось в столбик
 const tick = { width: 20, height: 20, flex: '0 0 20px', margin: 0, padding: 0, accentColor: 'var(--blue)' }
@@ -11,7 +11,7 @@ const keyLabel = k => { const i = String(k).lastIndexOf('|'); const n = i < 0 ? 
 const box = { marginBottom: 8, padding: '8px 10px', borderRadius: 'var(--radius)', background: 'var(--blue-light)', border: '0.5px solid var(--blue)' }
 const btn = { border: '0.5px solid var(--blue)', background: 'var(--bg)', color: 'var(--blue)', borderRadius: 'var(--radius)', padding: '5px 10px', fontSize: 12.5, cursor: 'pointer' }
 
-export default function MergePanel({ order, allDetails, materials, savedByMat, editable, disabled, onChanged }) {
+export default function MergePanel({ order, allDetails, materials, savedByMat, editable, canDissolve, disabled, onChanged, onDissolved }) {
   const srcs = mergeList(order)
   const [open, setOpen] = useState(false)          // окно «Объединить материал»
   const [checked, setChecked] = useState(() => new Set())
@@ -83,6 +83,16 @@ export default function MergePanel({ order, allDetails, materials, savedByMat, e
     onChanged()
   }
 
+  // расформировать: объединение удаляется, заказы снова отдельные — каждый со своим прежним раскроем
+  async function doDissolve() {
+    if (!window.confirm(`Расформировать объединение?\n\nОбъединённый раскрой (его карты, программы, бирки) удалится, заказы снова станут отдельными — каждый со своим прежним раскроем:\n${srcs.map(s => '· ' + srcOrderLabel(s)).join('\n')}`)) return
+    setBusy('…')
+    const r = await dissolveMerged(order)
+    setBusy('')
+    if (r.error) { window.alert(r.error); return }
+    onDissolved?.()
+  }
+
   const picked = [...checked]
   return (
     <div style={box}>
@@ -112,6 +122,10 @@ export default function MergePanel({ order, allDetails, materials, savedByMat, e
         </button>
       )}
       {busy && !(editable && materials.length > 1) && <div style={{ fontSize: 12, marginTop: 6 }}>Сохраняем… {busy}</div>}
+      {canDissolve && (
+        <button type="button" disabled={disabled || !!busy} onClick={doDissolve}
+          style={{ ...btn, marginTop: 7, width: '100%', borderColor: 'var(--danger)', color: 'var(--danger)', padding: '6px 10px' }}>✂ Расформировать объединение</button>
+      )}
 
       {open && (
         <div onClick={() => !busy && setOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>

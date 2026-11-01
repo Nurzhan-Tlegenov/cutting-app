@@ -18,7 +18,7 @@ import { clientAccess } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
 import { myLimits, limitText } from '../lib/limits'
 import { hasBeta } from '../lib/beta'
-import { MERGE_FEATURE, createMergedOrder, mergeList } from '../lib/mergeOrders'
+import { MERGE_FEATURE, createMergedOrder, mergeList, dissolveMerged } from '../lib/mergeOrders'
 import { archiveOrder, restoreOrder, deleteOrder, deleteOrderNow, canArchive, keepUntilText, daysLeft, KEEP_MONTHS } from '../lib/orderArchive'
 
 export default function OrdersPage() {
@@ -286,8 +286,22 @@ export default function OrdersPage() {
                   )}
                   {/* объединённый раскрой: из каких заказов; заказ в объединении — ссылка на него */}
                   {mergeList(order).length > 0 && (
-                    <div style={{ alignSelf: 'flex-start', fontSize: 11, color: 'var(--blue)', background: 'var(--blue-light)', border: '0.5px solid var(--blue)', borderRadius: 10, padding: '1px 8px' }}>
-                      🔗 Объединённый раскрой · {mergeList(order).map(x => `${x.seq}: №${x.number}`).join(', ')}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 11, color: 'var(--blue)', background: 'var(--blue-light)', border: '0.5px solid var(--blue)', borderRadius: 10, padding: '1px 8px' }}>
+                        🔗 Объединённый раскрой · {mergeList(order).map(x => `${x.seq}: №${x.number}`).join(', ')}
+                      </span>
+                      {!selectMode && order.status !== 'done' && (
+                        <button type="button" disabled={archBusy === order.id}
+                          onClick={async e => {
+                            e.stopPropagation()
+                            if (!window.confirm(`Расформировать объединение «${orderTitle(order)}»?\nОбъединённый раскрой удалится, заказы снова станут отдельными — каждый со своим прежним раскроем.`)) return
+                            setArchBusy(order.id); const r = await dissolveMerged(order); setArchBusy('')
+                            if (r.error) { window.alert(r.error); return }
+                            fetchOrders()
+                          }}
+                          onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
+                          style={{ ...EDIT_BTN, padding: '1px 8px', fontSize: 11, color: 'var(--danger)', borderColor: 'var(--danger)' }}>✂ Расформировать</button>
+                      )}
                     </div>
                   )}
                   {order.merged_into && orders.some(o => o.id === order.merged_into) && (() => {

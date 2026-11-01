@@ -37,7 +37,7 @@ import Drill6Viewer from '../components/Drill6Viewer'
 import GcodeFileSim from '../components/GcodeFileSim'
 import BeamSawSettings from '../components/BeamSawSettings'
 import { hasBeta } from '../lib/beta'
-import { MERGE_FEATURE, createMergedOrder, mergeList } from '../lib/mergeOrders'
+import { MERGE_FEATURE, createMergedOrder, mergeList, dissolveMerged } from '../lib/mergeOrders'
 
 // Кабинет производства: моё производство и заявки — заказы, которые заказчики оформили на него.
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -498,6 +498,13 @@ export default function ProductionPage() {
                   {isOpen && <>
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     {inMerge(o) && <button type="button" style={btn('main')} onClick={() => navigate(`/orders/${mergeInfo.get(o.id).merged_into}/nesting`)}>🔗 Открыть объединение</button>}
+                    {isMergedOrder(o) && o.own && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                      onClick={async () => {
+                        if (!window.confirm(`Расформировать объединение «${orderTitle(o)}»?\nОбъединённый раскрой удалится, заказы снова станут отдельными — каждый со своим прежним раскроем.`)) return
+                        setBusy(o.id); const r = await dissolveMerged({ ...o, merge_of: mergeInfo.get(o.id)?.merge_of }); setBusy('')
+                        if (r.error) { window.alert(r.error); return }
+                        load(); loadStages()
+                      }}>✂ Расформировать</button>}
                     {!inMerge(o) && o.status !== 'inwork' && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={btn('main')} onClick={() => setStatus(o, 'inwork')}>✓ Принять</button>}
                     {!inMerge(o) && o.status === 'new' && <button type="button" disabled={busy === o.id} style={btn()} onClick={() => setStatus(o, 'discussion')}>Обсудить</button>}
                     {/* по постам «Исполнен» ставится сам после последнего поста; без маршрута — кнопкой */}

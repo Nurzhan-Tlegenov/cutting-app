@@ -245,3 +245,22 @@ export async function refreshMerged(order, rows, onProgress) {
   const { error: e2 } = await supabase.from('orders').update({ merge_of: srcs, nesting_result: null }).eq('id', order.id)
   return e2 ? { error: e2.message } : {}
 }
+
+/** Расформировать объединение (migration_merge_dissolve.sql): заказы снова отдельные. -> { count } | { error } */
+export async function dissolveMerged(order) {
+  const { data, error } = await supabase.rpc('dissolve_merged', { p_merged: order.id })
+  if (!error) return { count: data || 0 }
+  const msg = `${error.message || ''} ${error.code || ''}`
+  if (/PGRST202|Could not find the function|42883/.test(msg)) {
+    // база ещё без функции: черновик-объединение клиента можно просто удалить
+    if ((order.status || 'draft') !== 'draft') return { error: 'Расформирование ещё не включено в базе: выполните migration_merge_dissolve.sql в Supabase (SQL Editor) — один раз.' }
+    await supabase.from('orders').update({ merged_into: null }).eq('merged_into', order.id)
+    const { error: e2 } = await supabase.from('orders').delete().eq('id', order.id)
+    return e2 ? { error: e2.message } : { count: mergeList(order).length }
+  }
+  if (/merged done/.test(msg)) return { error: 'Объединение уже исполнено — расформировать его нельзя.' }
+  if (/stage done/.test(msg)) return { error: 'По объединению уже выполнен пост — работа началась, расформировать нельзя.' }
+  if (/parts scanned/.test(msg)) return { error: 'По объединению уже сканировали детали — работа началась, расформировать нельзя.' }
+  if (/not allowed/.test(msg)) return { error: 'Расформировать может только тот, кто создал объединение.' }
+  return { error: error.message }
+}

@@ -4121,7 +4121,8 @@ export default function NestingPage() {
 
       {/* Объединённый раскрой нескольких заказов: из каких заказов, объединение материалов */}
       <MergePanel order={order} allDetails={allDetails} materials={materials} savedByMat={savedByMat} disabled={anyRunning}
-        editable={order.user_id === user?.id && (order.status || 'draft') === 'draft'} onChanged={() => fetchOrder()} />
+        editable={order.user_id === user?.id && (order.status || 'draft') === 'draft'} onChanged={() => fetchOrder()}
+        canDissolve={(order.user_id === user?.id || isMaster) && order.status !== 'done'} onDissolved={() => navigate(cabinet === 'production' || order.user_id !== user?.id ? '/production' : '/orders')} />
       {/* Материал — всегда на виду: что сейчас раскраиваем */}
       {!multiMat && materials.length === 1 && (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, padding: '7px 10px', borderRadius: 'var(--radius)', background: 'var(--bg)', border: '0.5px solid var(--border-md)' }}>
