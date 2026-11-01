@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { receipt } from '../lib/messages'
-import { excludeRequest, listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadBlob, payloadText } from '../lib/messages'
+import { excludeRequest, listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadText } from '../lib/messages'
 import { getUserSettings } from '../lib/userSettings'
 import { adminProductionOrders } from '../lib/adminApi'
 import { productionExcludeStats } from '../lib/productionApi'
@@ -23,13 +23,6 @@ const when = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', mon
 const KIND = { news: ['Новость', 'var(--blue-light)', 'var(--blue-dark)'], appeal: ['Обращение', 'var(--amber-light)', 'var(--amber)'], reply: ['Сообщение', 'var(--teal-light)', 'var(--teal)'], debug: ['Файл для отладки', '#F3E5F5', '#7B1FA2'], order: ['По заказу', 'var(--teal-light)', 'var(--teal)'] }
 const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 1024 ? Math.round(n / 1024) + ' КБ' : (n || 0) + ' Б')
 
-function download(name, text) {
-  const url = URL.createObjectURL(payloadBlob(text))   // импортированный файл (Базис, Астра, Excel…) приходит двоичным — восстанавливаем как был
-  const a = document.createElement('a')
-  a.href = url; a.download = name
-  document.body.appendChild(a); a.click(); a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 30000)
-}
 
 export default function MessagesPage() {
   const navigate = useNavigate()
@@ -81,11 +74,7 @@ export default function MessagesPage() {
     if (r.error) { setError(r.error); return }
     setReplyTo(null); setReplyText(''); load()
   }
-  const getFile = async m => {
-    const r = await messagePayload(m.id)
-    if (r.error) { setError(r.error); return }
-    download(r.fileName, r.payload)
-  }
+
   // мастер: файл раскроя из сообщения (или с компьютера) — открыть прямо здесь: карты листов и хронология с откатом
   const [nestView, setNestView] = useState(null)   // { fileName, text }
   const nestFileRef = useRef(null)
@@ -243,7 +232,7 @@ export default function MessagesPage() {
                 {!isMaster && mine && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Вы писали</div>}
                 {m.title && <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>{m.title}</div>}
                 {m.body && <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body.replace(/\n?Сделать: Профиль → Заказы всех производств[^\n]*/, '')}</div>}
-                {m.file_name && (!isMaster && m.kind === 'reply' ? <MsgFile m={m} onError={setError} />
+                {m.file_name && (isMaster || m.kind === 'reply' ? <MsgFile m={m} onError={setError} />
                   : <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace', wordBreak: 'break-all' }}>📎 {m.file_name} · {sizeTxt(m.file_size)}</div>)}
                 {/* мастер-аккаунт: дошёл ли ответ и прочитан ли — галочки как в мессенджерах */}
                 {isMaster && mine && m.kind === 'reply' && 'read_at' in m && (
@@ -274,7 +263,6 @@ export default function MessagesPage() {
                 })()}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                   {isMaster && m.file_name && isNestingFileName(m.file_name) && <button type="button" style={{ ...small, color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => openNesting(m)}>👁 Открыть раскрой</button>}
-                  {isMaster && m.file_name && <button type="button" style={{ ...small, color: 'var(--teal)', borderColor: 'var(--teal)' }} onClick={() => getFile(m)}>⬇ Скачать файл</button>}
                   {excl && (() => {
                     if (!allOrders) return <span style={{ fontSize: 12, color: 'var(--text-hint)', alignSelf: 'center' }}>ищем заказ…</span>
                     if (!exclOrder) return <button type="button" style={small} onClick={() => navigate(`/all-productions?num=${encodeURIComponent(excl.num)}`)}>Заказ не найден — открыть итоги</button>

@@ -104,19 +104,49 @@ async function packFiles(files) {
   if (payloadMb(payload) > REPORT_MAX_MB) return tooBig(payloadMb(payload))
   return { fileName, payload, title: list.length > 1 ? list.map(f => f.name).join(', ').slice(0, 300) : null }
 }
-/** Обращение с файлами (мастер скачивает и распаковывает) */
+// Картинки (скриншоты) уходят каждая отдельным сообщением, без архива — их видно прямо в переписке;
+// крупное фото уменьшается (до 1920 px, JPEG), чтобы не занимать место в базе. Остальные файлы — как раньше
+// (несколько — одним архивом).
+export const isImageFile = f => /^image\/(png|jpe?g|gif|webp|bmp)$/i.test(f?.type || '') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f?.name || '')
+async function shrinkImage(f) {
+  try {
+    if (f.size < 350 * 1024 || /gif$/i.test(f.type || f.name)) return f
+    const bmp = await createImageBitmap(f)
+    const k = Math.min(1, 1920 / Math.max(bmp.width, bmp.height))
+    const cv = document.createElement('canvas')
+    cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k)
+    const ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.drawImage(bmp, 0, 0, cv.width, cv.height)
+    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.85))
+    if (!blob || blob.size >= f.size) return f
+    return new File([blob], (f.name || 'image').replace(/\.[^.]*$/, '') + '.jpg', { type: 'image/jpeg' })
+  } catch { return f }
+}
+// Сообщение с файлами: текст — с первым, каждая картинка — своим сообщением, прочие файлы — одним (архивом, если их несколько)
+async function sendWithFiles(base, body, files, onProgress) {
+  const imgs = files.filter(isImageFile), rest = files.filter(f => !isImageFile(f))
+  const jobs = []
+  if (rest.length) jobs.push(async b => { const f = await packFiles(rest); return f.error ? f : { title: f.title, file_name: f.fileName, payload: f.payload, body: b } })
+  for (const img of imgs) jobs.push(async b => { const f = await shrinkImage(img); const payload = await fileToPayload(f); return payloadMb(payload) > REPORT_MAX_MB ? { error: `Картинка ${img.name} слишком большая.` } : { title: null, file_name: f.name || 'image.jpg', payload, body: b } })
+  let first = true
+  for (const [k, job] of jobs.entries()) {
+    const part = await job(first ? body : '')
+    if (part.error) return part
+    const r = await insert({ ...base, title: part.title, body: part.body, file_name: part.file_name, file_size: part.payload.length, payload: part.payload },
+      onProgress ? (i, n) => onProgress(k * 10 + Math.round((i / Math.max(1, n)) * 10), jobs.length * 10) : null)
+    if (r.error) return r
+    first = false
+  }
+  return { ok: true }
+}
+/** Обращение с файлами (мастер смотрит картинки в переписке, остальное скачивает) */
 export async function sendAppealFiles(user, profile, body, files, onProgress = null) {
   if (!files?.length) return sendAppeal(user, profile, body)
-  const f = await packFiles(files)
-  if (f.error) return f
-  return insert({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal', title: f.title, body, file_name: f.fileName, file_size: f.payload.length, payload: f.payload }, onProgress)
+  return sendWithFiles({ from_id: user.id, from_name: nameOf(profile), kind: 'appeal' }, body, [...files], onProgress)
 }
-/** Ответ мастер-аккаунта с файлами (скриншот, проверенная модель…) — пользователь их скачивает / открывает */
+/** Ответ мастер-аккаунта с файлами (скриншот, проверенная модель…) — картинки пользователь видит сразу */
 export async function sendReplyFiles(user, profile, toId, body, files, toName = '', onProgress = null) {
   if (!files?.length) return sendReply(user, profile, toId, body, toName)
-  const f = await packFiles(files)
-  if (f.error) return f
-  return insert({ from_id: user.id, from_name: nameOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply', title: f.title, body, file_name: f.fileName, file_size: f.payload.length, payload: f.payload }, onProgress)
+  return sendWithFiles({ from_id: user.id, from_name: nameOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply' }, body, [...files], onProgress)
 }
 /** Вся переписка мастер-аккаунта с пользователем (его обращения и файлы + ответы ему), старые сверху */
 export async function listConversation(userId) {
