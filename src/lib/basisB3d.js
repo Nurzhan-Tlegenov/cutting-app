@@ -736,6 +736,16 @@ export function buildItem(src, holes, faceRule) {
     })
     if (c) { f.through = true; f.depth = T; f.top = !!c.top; f.viaGroove = true }
   }
+  // Два глухих отверстия одного диаметра на одной оси с разных пластей, встречающиеся в толще (сумма глубин ≥ толщины), —
+  // одно сквозное: сверлится с одной стороны насквозь
+  for (let i = 0; i < face.length; i++) {
+    const a = face[i]
+    if (a.through || a.gone) continue
+    const b = face.find((q, j) => j !== i && !q.through && !q.gone && !!q.top !== !!a.top && Math.abs(q.d - a.d) <= 0.2
+      && Math.hypot(q.x - a.x, q.y - a.y) <= 0.3 && q.depth + a.depth >= T - Math.max(tol, 0.3))
+    if (b) { a.through = true; a.depth = T; b.gone = true }
+  }
+  for (let i = face.length - 1; i >= 0; i--) if (face[i].gone) face.splice(i, 1)
 
   // --- какая пласть «лицевая» (смотрит вверх на станке): та, где больше глухой обработки ---
   const holesTop = face.filter(f => !f.through && f.top).length, holesBottom = face.filter(f => !f.through && !f.top).length
