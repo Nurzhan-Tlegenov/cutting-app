@@ -36,7 +36,7 @@ import { saveOrderName, saveOrderMaterial } from '../lib/orderNotes'
 import { sameColorMap, userSameAlpha } from '../lib/sameParts'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
-import { useLabelMode } from '../lib/userSettings'
+import { useLabelMode, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { fetchOrderDetails } from '../lib/orderDetails.js'
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
@@ -55,6 +55,7 @@ export default function OrderPage() {
   const [matErr, setMatErr] = useState('')
   const [edgeEdit, setEdgeEdit] = useState(null)    // производство даёт кромке короткое обозначение: { name, value }
   const [edgeErr, setEdgeErr] = useState('')
+  const [edgeMemTick, setEdgeMemTick] = useState(0)   // сохранённые обозначения кромки (за аккаунтом) поменялись
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
   const [labelMode] = useLabelMode(user)
@@ -257,21 +258,40 @@ export default function OrderPage() {
         {/* кромка по названиям: длинное название из модели производство заменяет коротким обозначением — оно идёт на бирку */}
         {totalEdge > 0 && (() => {
           const al = edgeAliases(order?.edge_types)
-          const saveAlias = async (name, value) => {
+          // обозначения, которые производство уже вводило, — за аккаунтом: список для выбора и «как в прошлый раз» для того же названия
+          void edgeMemTick
+          const mem = getUserSettings(user).edgeAliasMem || {}
+          const memList = (Array.isArray(mem.list) ? mem.list : []).filter(x => typeof x === 'string' && x.trim())
+          const memBy = mem.byName && typeof mem.byName === 'object' ? mem.byName : {}
+          const remember = pairs => {
+            let list = [...memList]; const by = { ...memBy }
+            for (const [name, v] of pairs) { list = [v, ...list.filter(x => x !== v)]; by[name] = v }
+            const keys = Object.keys(by); if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(k => delete by[k])
+            saveUserSettings({ edgeAliasMem: { list: list.slice(0, 40), byName: by } }, user); setEdgeMemTick(t => t + 1)
+          }
+          const forget = v => { saveUserSettings({ edgeAliasMem: { list: memList.filter(x => x !== v), byName: memBy } }, user); setEdgeMemTick(t => t + 1) }
+          const lastFor = name => (!al[name] && typeof memBy[name] === 'string' && memBy[name] !== name ? memBy[name] : '')
+          const pending = Object.keys(edgeSum.byName).filter(lastFor)
+          const saveAlias = async (name, value, batch = null) => {
             const v = String(value || '').trim()
             const names = { ...al }
-            if (v && v !== name) names[name] = v.slice(0, 60); else delete names[name]
+            if (batch) for (const n of batch) names[n] = memBy[n]
+            else if (v && v !== name) names[name] = v.slice(0, 60); else delete names[name]
             const next = { ...parseEdgeTypes(order?.edge_types), [NAMES_KEY]: names }
             if (!Object.keys(names).length) delete next[NAMES_KEY]
             const r = order.user_id === user?.id ? await supabase.from('orders').update({ edge_types: next }).eq('id', order.id) : await productionOrderSheet(order.id, { edge_types: JSON.stringify(next) })
             if (r.error) { setEdgeErr(typeof r.error === 'string' ? r.error : r.error.message || 'Не удалось сохранить'); return }
             setOrder(o => ({ ...o, edge_types: next })); setEdgeEdit(null); setEdgeErr('')
+            if (batch) remember(batch.map(n => [n, memBy[n]]))
+            else if (v && v !== name) remember([[name, v.slice(0, 60)]])
           }
           return (
             <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
               {Object.entries(edgeSum.byName).sort((a, b) => b[1].total - a[1].total).map(([name, b]) => (
                 edgeEdit?.name === name ? (
-                  <div key={name} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <div key={name} style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '6px 8px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-hint)', wordBreak: 'break-word' }}>{name}</div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input autoFocus value={edgeEdit.value} maxLength={60} placeholder="Короткое обозначение"
                       onChange={e => setEdgeEdit({ ...edgeEdit, value: e.target.value })}
                       onKeyDown={e => { if (e.key === 'Enter') saveAlias(name, edgeEdit.value); if (e.key === 'Escape') setEdgeEdit(null) }}
@@ -279,11 +299,25 @@ export default function OrderPage() {
                     <button type="button" onClick={() => saveAlias(name, edgeEdit.value)} style={{ flex: 'none', width: 'auto', padding: '5px 10px', borderRadius: 16, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 12 }}>✓</button>
                     <button type="button" onClick={() => { setEdgeEdit(null); setEdgeErr('') }} style={{ flex: 'none', width: 'auto', padding: '5px 8px', borderRadius: 16, border: '0.5px solid var(--border-md)', background: 'none', fontSize: 12, color: 'var(--text-muted)' }}>✕</button>
                   </div>
+                  {/* сохранённые обозначения: нажать — выбрать и сохранить сразу; × — убрать из списка */}
+                  {memList.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {(memBy[name] ? [memBy[name], ...memList.filter(x => x !== memBy[name])] : memList).map(v => (
+                        <span key={v} style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 14, border: `0.5px solid ${v === memBy[name] ? 'var(--blue)' : 'var(--border-md)'}`, background: v === memBy[name] ? 'var(--blue-light)' : 'var(--bg)', fontSize: 12.5 }}>
+                          <button type="button" onClick={() => saveAlias(name, v)} style={{ border: 'none', background: 'none', padding: '4px 4px 4px 10px', fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>{v}</button>
+                          <button type="button" title="Убрать из сохранённых" onClick={() => forget(v)} style={{ border: 'none', background: 'none', padding: '4px 8px 4px 2px', fontSize: 12, color: 'var(--text-hint)', cursor: 'pointer' }}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  </div>
                 ) : (
                   <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 'var(--radius)', background: 'var(--bg2)', fontSize: 13 }}>
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontWeight: 500, wordBreak: 'break-word' }}>{al[name] || name}</span>
                       {al[name] && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', wordBreak: 'break-word' }}>в модели: {name}</span>}
+                      {canStatus && lastFor(name) && <button type="button" onClick={() => saveAlias(name, lastFor(name))}
+                        style={{ display: 'block', marginTop: 2, border: 'none', background: 'none', padding: 0, fontSize: 11.5, color: 'var(--blue)', cursor: 'pointer', textAlign: 'left' }}>↺ как в прошлый раз: «{lastFor(name)}»</button>}
                     </span>
                     <b style={{ flex: '0 0 auto' }}>{b.total.toFixed(2)} м</b>
                     {canStatus && <button type="button" title="Обозначение кромки (на бирке)" onClick={() => { setEdgeEdit({ name, value: al[name] || name }); setEdgeErr('') }}
@@ -291,7 +325,9 @@ export default function OrderPage() {
                   </div>
                 )
               ))}
-              {canStatus && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>✎ — короткое обозначение кромки вместо длинного названия из модели. Оно печатается на бирках; в деталях заказчика ничего не меняется.</div>}
+              {canStatus && pending.length > 1 && <button type="button" onClick={() => saveAlias('', '', pending)}
+                style={{ alignSelf: 'flex-start', padding: '4px 10px', borderRadius: 14, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue)', fontSize: 12, cursor: 'pointer' }}>↺ Обозначить все как в прошлый раз ({pending.length})</button>}
+              {canStatus && <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>✎ — короткое обозначение кромки вместо длинного названия из модели. Оно печатается на бирках; в деталях заказчика ничего не меняется. Введённые обозначения запоминаются за аккаунтом — в следующий раз их можно выбрать одним нажатием.</div>}
               {edgeErr && <p className="error-text" style={{ margin: 0 }}>{edgeErr}</p>}
             </div>
           )
