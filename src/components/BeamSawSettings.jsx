@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { isNetError } from '../lib/netRetry'
 import { supabase } from '../lib/supabase'
 import { BEAM_DEFAULTS, beamSettings, maxPartIn } from '../lib/beamSaw'
 
@@ -30,8 +31,14 @@ export default function BeamSawSettings({ prod, onSaved, readOnly = false, intro
       out[k] = ['direction', 'stripOrder', 'lastDir'].includes(k) ? x : Number(str(x).replace(',', '.'))
     }
     if (JSON.stringify(out) === JSON.stringify(prod?.beam_saw_settings || {})) return
-    const { error } = await supabase.from('productions').update({ beam_saw_settings: out }).eq('id', prod.id)
-    if (error) { setMsg(/beam_saw_settings/.test(String(error.message)) ? BEAM_SQL_HINT : error.message); return }
+    // слабая связь: запись тех же настроек безопасно повторить (дубля не будет) — повторяем, а не показываем «Failed to fetch»
+    let error = null
+    for (const wait of [0, 1500, 4000, 8000]) {
+      if (wait) { setMsg('Слабая связь — сохраняю ещё раз…'); await new Promise(r => setTimeout(r, wait)) }
+      ;({ error } = await supabase.from('productions').update({ beam_saw_settings: out }).eq('id', prod.id))
+      if (!error || !isNetError(error)) break
+    }
+    if (error) { setMsg(/beam_saw_settings/.test(String(error.message)) ? BEAM_SQL_HINT : isNetError(error) ? 'Нет связи с сервером — настройки не сохранились. Проверьте интернет и измените поле ещё раз.' : error.message); return }
     setMsg('Сохранено'); setTimeout(() => setMsg(''), 1500)
     onSaved?.(out)
   }

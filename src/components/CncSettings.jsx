@@ -167,6 +167,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         )}
         <Hint>Постпроцессор — это станок: его поле, высоты и команды. Инструменты и обработка контуров — общие для раскроечных станков.</Hint>
       </div>
+      {drill && <Drill6Beta post={post} set={set} isMaster={isMaster} used={drillPosts(cnc).some(p => p.id === post.id)} />}
       {/* выпуск программ: раскроечный станок (G-код по листам) и, по галочке, второй постпроцессор — любой из своих:
           второй раскроечный (свой G-код, например станок с присадочной головой) или шестисторонний (файлы по деталям).
           «Создать программы» в заказе выпускает оба, «Сохранить все файлы» — одним архивом, у каждого своя папка */}
@@ -198,7 +199,6 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         )
       })()}
       {drill && <Drill6Basic post={post} set={set} router={router} />}
-      {drill && <Drill6Beta post={post} set={set} isMaster={isMaster} />}
       {saw && <BeamSawPostBasic post={post} set={set} cnc={cnc} onChange={onChange} />}
       <FileNamesSettings />
       {!drill && !saw && <>
@@ -385,7 +385,7 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
 // ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
 // ─── β-постпроцессор шестистороннего станка (post.d6Beta) ──────────────────
 // Включает мастер-аккаунт; производству, которому выдан такой постпроцессор, видны и меняются эти настройки
-function Drill6Beta({ post, set, isMaster }) {
+function Drill6Beta({ post, set, isMaster, used }) {
   const b = { ...D6B_DEFAULT(), ...(post.d6b || {}) }
   const setB = patch => set({ d6b: { ...b, ...patch } })
   const chk = (k, text) => (
@@ -420,7 +420,12 @@ function Drill6Beta({ post, set, isMaster }) {
           β-постпроцессор (только мастер видит эту галочку)
         </label>
       )}
-      <Hint>Бета-тест: каждую настройку проверьте сначала на симуляции станка, потом на детали.</Hint>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--amber-light)', borderRadius: 'var(--radius)', padding: '8px 10px', marginTop: 6 }}>
+        <b>Это β-постпроцессор.</b> Что в нём есть сверх обычного — три раздела ниже: присадка, положение детали, фрезеровка.
+        <span style={{ display: 'block', marginTop: 4 }}>Поворачивать и переворачивать детали — в заказе: «ЧПУ» → «Создать программы» → кнопка <b>«↻ Положение деталей β»</b> у программ этого станка.</span>
+        {!used && <span style={{ display: 'block', marginTop: 4, color: 'var(--danger)' }}>Сейчас программы этим станком не выпускаются: в карточке «Выпуск управляющих программ» ниже выберите его вторым постпроцессором.</span>}
+        <span style={{ display: 'block', marginTop: 4, color: 'var(--text-hint)' }}>Каждую настройку проверьте сначала на симуляции станка, потом на детали.</span>
+      </div>
 
       {chk('split', 'Сквозные отверстия — двумя глухими, сверху и снизу')}
       {b.split && (
