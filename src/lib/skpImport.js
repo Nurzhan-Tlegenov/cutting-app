@@ -750,10 +750,18 @@ export function parseSkp(u8, opts = {}) {
   }
   clashes.sort((x, y) => y.depth - x.depth)
   if (!items.length) throw new Error('в модели SketchUp не найдено панелей: ни компонентов мебельного плагина, ни тел-плит (две параллельные пласти, толщина 2,5–60 мм)')
-  // В модели нет позиций вовсе (обычная модель, плагин kot_panel) — нумеруем детали по порядку списка импорта (1, 2, 3…):
-  // тогда позиция есть на бирке, в отчётах и на карте раскроя. Одинаковые детали (одна строка) — один номер.
-  // Модель, где позиции есть хотя бы у одной детали, не трогаем.
-  if (!items.some(it => String(it.contour.meta.pos || '').trim())) items.forEach((it, k) => { it.contour.meta.pos = String(k + 1); it.contour.meta.posAuto = true })
+  // В модели нет позиций вовсе (обычная модель, плагин kot_panel) — нумеруем как отчёт kot_panel в SketchUp (сверено по его
+  // отчёту на модели «…22…2_1.skp»): по каждому материалу отдельно с 1, детали — по названию в порядке кодов символов
+  // (заглавные раньше строчных: «Панель радиус», «Полка», «Полка 2», «Стойка пр», «стойка»). Одинаковые детали (одна строка) —
+  // один номер. Тогда позиция на бирке и в отчётах совпадает с отчётом SketchUp. Модель, где позиции есть хотя бы у одной детали, не трогаем.
+  if (!items.some(it => String(it.contour.meta.pos || '').trim())) {
+    const byMat = new Map()
+    for (const it of items) { const k = it.groupKey || `${it.material}|${it.thickness}`; if (!byMat.has(k)) byMat.set(k, []); byMat.get(k).push(it) }
+    for (const list of byMat.values()) {
+      list.map((it, k) => ({ it, k, n: String(it.name || '') })).sort((a, b) => (a.n < b.n ? -1 : a.n > b.n ? 1 : a.k - b.k))
+        .forEach(({ it }, k) => { it.contour.meta.pos = String(k + 1); it.contour.meta.posAuto = true })
+    }
+  }
   const scene = {
     v: 1, order: '',
     parts: items.map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
