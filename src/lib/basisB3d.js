@@ -703,7 +703,8 @@ export function buildItem(src, holes, faceRule) {
       if (src.strict && Math.min(Math.abs(q[2]), Math.abs(q[2] - T)) > tol) continue
       const za = Math.min(q[2], q[2] + d[2] * h.depth), zb = Math.max(q[2], q[2] + d[2] * h.depth)
       const ov = Math.min(zb, T) - Math.max(za, 0)
-      if (ov < 0.3) continue
+      // зенковка (Базис, скрипт еврошурупа) — 0,3 мм: из-за округления в модели выходит 0,2999 и пропадала «хаотично»
+      if (ov < 0.25) continue
       if (q[0] < x0 - EPS || q[0] > x0 + dx + EPS || q[1] < y0 - EPS || q[1] > y0 + dy + EPS) continue
       if (outerLocal && outerLocal.length > 4 && !pointInPoly(q, outerLocal)) continue
       // крепёж в модели стоит не идеально: отверстие может начинаться на десятые доли мм в глубине

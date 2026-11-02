@@ -1,6 +1,6 @@
 import { LABEL_POS, getLabelTpl, saveLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
 import QrPartsEditor from './QrPartsEditor'
-import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT } from '../lib/drill6Xml'
+import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import TplInput from './TplInput'
 import FileNamesSettings from './FileNamesSettings'
@@ -198,6 +198,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         )
       })()}
       {drill && <Drill6Basic post={post} set={set} router={router} />}
+      {drill && <Drill6Beta post={post} set={set} isMaster={isMaster} />}
       {saw && <BeamSawPostBasic post={post} set={set} cnc={cnc} onChange={onChange} />}
       <FileNamesSettings />
       {!drill && !saw && <>
@@ -382,6 +383,74 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
 }
 
 // ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
+// ─── β-постпроцессор шестистороннего станка (post.d6Beta) ──────────────────
+// Включает мастер-аккаунт; производству, которому выдан такой постпроцессор, видны и меняются эти настройки
+function Drill6Beta({ post, set, isMaster }) {
+  const b = { ...D6B_DEFAULT(), ...(post.d6b || {}) }
+  const setB = patch => set({ d6b: { ...b, ...patch } })
+  const chk = (k, text) => (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
+      <input type="checkbox" checked={!!b[k]} onChange={e => setB({ [k]: e.target.checked })} style={{ width: 18, height: 18 }} />
+      {text}
+    </label>
+  )
+  const T = 16, half = Math.min(T, T / 2 + Math.max(0, num(b.splitOverlap)) / 2)
+  const txt = (k, label, hint) => (
+    <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+      {label}
+      <input type="text" key={String(b[k] ?? '')} defaultValue={b[k] ?? ''} onBlur={e => { if (e.target.value !== (b[k] ?? '')) setB({ [k]: e.target.value }) }} style={{ marginTop: 3, padding: '8px 10px' }} />
+      {hint && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>{hint}</span>}
+    </label>
+  )
+  if (!post.d6Beta) return isMaster ? (
+    <div className="card" style={{ marginBottom: 10 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+        <input type="checkbox" checked={false} onChange={() => set({ d6Beta: true })} style={{ width: 18, height: 18 }} />
+        β-постпроцессор (расширенные настройки)
+      </label>
+      <Hint>Только мастер-аккаунт. Включите, настройте, отметьте «Для всех» и выдайте 🔑 производству-тестеру. Основной шестисторонний постпроцессор не меняется.</Hint>
+    </div>
+  ) : null
+  return (
+    <div className="card" style={{ marginBottom: 10, borderColor: 'var(--amber)' }}>
+      <Title>β · Присадка</Title>
+      {isMaster && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+          <input type="checkbox" checked onChange={() => set({ d6Beta: false })} style={{ width: 16, height: 16 }} />
+          β-постпроцессор (только мастер видит эту галочку)
+        </label>
+      )}
+      <Hint>Бета-тест: каждую настройку проверьте сначала на симуляции станка, потом на детали.</Hint>
+
+      {chk('split', 'Сквозные отверстия — двумя глухими, сверху и снизу')}
+      {b.split && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+            <Num label="Перекрытие половин" unit="мм" value={b.splitOverlap} onChange={v => setB({ splitOverlap: v === '' ? 0 : v })} />
+            <Num label="Только до Ø" unit="мм" value={b.splitMaxD} onChange={v => setB({ splitMaxD: v })} hint="пусто — все" />
+          </div>
+          <Hint>{`Станок сверлит верхним и нижним шпинделем навстречу и не уходит во фрезеровку, снизу не вырывает. Например, ЛДСП ${T} мм: два отверстия по ${r1(half)} мм.`}</Hint>
+        </>
+      )}
+
+      {chk('caps', 'Проверять отверстия по возможностям станка')}
+      {b.caps && (
+        <>
+          {txt('faceD', 'Свёрла в пласть, Ø мм', 'через запятую, например: 5, 8, 10, 15, 20, 35')}
+          {txt('edgeD', 'Свёрла в торец, Ø мм', 'например: 5, 8')}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+            <Num label="Макс. глубина в пласть" unit="мм" value={b.faceMaxDepth} onChange={v => setB({ faceMaxDepth: v })} hint="пусто — без проверки" />
+            <Num label="Макс. глубина в торец" unit="мм" value={b.edgeMaxDepth} onChange={v => setB({ edgeMaxDepth: v })} hint="пусто — без проверки" />
+          </div>
+          <label className="label" style={{ marginTop: 8 }}>Если станок не может</label>
+          <Seg value={b.capsFix} options={[['warn', 'Предупредить'], ['nearest', 'Исправить'], ['skip', 'Убрать']]} onChange={v => setB({ capsFix: v })} />
+          <Hint>«Исправить» — ближайший диаметр из списка и глубина не больше максимальной. Что изменено или не так — в предупреждениях при создании программ, по каждой детали.</Hint>
+        </>
+      )}
+    </div>
+  )
+}
+
 function Drill6Basic({ post, set, router }) {
   const { user } = useAuth()
   // код с бирки: что в нём сейчас (шаблон бирок аккаунта)

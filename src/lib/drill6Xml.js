@@ -481,6 +481,26 @@ export function resolveD6Tool(o6, cat, width, key) {
   return { tool: null, how: 'auto' }
 }
 
+// ─── β-постпроцессор (post.d6Beta) ──────────────────────────────────────────
+// Расширенные настройки шестистороннего станка для бета-теста. Включает мастер-аккаунт галочкой у постпроцессора и
+// выдаёт его 🔑 нужному производству. Без post.d6Beta настройки post.d6b не читаются — программы основного
+// постпроцессора не меняются ни на байт.
+export const D6B_DEFAULT = () => ({
+  split: false,          // сквозные отверстия в пласть -> два глухих: сверху и снизу (станок сверлит, а не фрезерует)
+  splitOverlap: 2,       // перекрытие половин, мм: при 16 мм и 2 — каждая половина 9 мм
+  splitMaxD: '',         // разбивать только отверстия до этого Ø (пусто — все)
+  caps: false,           // проверять отверстия по возможностям станка
+  faceD: '5, 8, 10, 15, 20, 35',   // свёрла в пласть
+  edgeD: '5, 8',                   // свёрла в торец
+  faceMaxDepth: '',      // макс. глубина в пласть (не сквозные), мм
+  edgeMaxDepth: '',      // макс. глубина в торец, мм
+  capsFix: 'warn',       // нет такого сверла: 'warn' — оставить и предупредить, 'nearest' — ближайший Ø из списка, 'skip' — убрать
+})
+export const d6bOf = post => (post?.d6Beta ? { ...D6B_DEFAULT(), ...(post.d6b || {}) } : null)
+/** «5, 8; 10» -> [5, 8, 10] */
+export const numList = s => String(s ?? '').split(/[\s,;]+/).map(v => Number(v.replace(',', '.'))).filter(v => v > 0)
+const nearestOf = (list, v) => list.reduce((b, x) => (Math.abs(x - v) < Math.abs(b - v) ? x : b), list[0])
+
 /**
  * Одна деталь -> { xml, ops, warnings } или null (нет никакой обработки и d6All выключен).
  * d — строка order_details (по готовой детали), T — толщина, id — имя детали в файле.
@@ -510,9 +530,46 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
 
   // присадка — по тем же правилам, что 3D-модель детали: у каждого отверстия своя пласть (лицевая, обратная или обе),
   // у торцевого — высота от лицевой пласти (offsetFace). Размеры — готовой детали, без подрезки под кромку.
+  const b6 = d6bOf(post)
+  const b6Warn = new Set()                           // предупреждения β — по одному на вид, а не на каждое отверстие
+  const faceList = b6?.caps ? numList(b6.faceD) : [], edgeList = b6?.caps ? numList(b6.edgeD) : []
+  // Ø по возможностям станка: -> Ø, который пишем, или null (убрать отверстие)
+  const capDia = (dia, list, where) => {
+    if (!list.length || list.some(v => Math.abs(v - dia) < 0.05)) return dia
+    if (b6.capsFix === 'skip') { b6Warn.add(`Ø${r1(dia)} ${where} — нет такого сверла, отверстие убрано`); return null }
+    if (b6.capsFix === 'nearest') { const v = nearestOf(list, dia); b6Warn.add(`Ø${r1(dia)} ${where} — нет такого сверла, заменено на Ø${r1(v)}`); return v }
+    b6Warn.add(`Ø${r1(dia)} ${where} — нет такого сверла на станке`)
+    return dia
+  }
+  const capDepth = (depth, max, what) => {
+    const m = n0(max)
+    if (!(m > 0) || depth <= m + 0.001) return depth
+    if (b6.capsFix === 'warn') { b6Warn.add(`${what} глубиной ${r1(depth)} мм — глубже ${r1(m)} мм, станок не сделает`); return depth }
+    b6Warn.add(`${what} глубиной ${r1(depth)} мм — глубже ${r1(m)} мм, глубина уменьшена до ${r1(m)}`)
+    return m
+  }
+  const holeKeys = new Set()                         // β: сквозное «с двух сторон» не дублируем
   const faceHole = (x, y, face, dia, depth) => {
     const [X, Y] = fr.at(x, y), back = face === 'back'
-    ;(back ? bottom : top).push({ X, Y, depth: depth > 0 ? Math.min(depth, T) : T, dia, face: back ? fr.bottom : fr.top })
+    if (!b6) { (back ? bottom : top).push({ X, Y, depth: depth > 0 ? Math.min(depth, T) : T, dia, face: back ? fr.bottom : fr.top }); return }
+    let d = depth > 0 ? Math.min(depth, T) : T
+    if (b6.caps) { dia = capDia(dia, faceList, 'в пласть'); if (dia == null) return }
+    const through = d >= T - EPS
+    if (b6.caps && !through) d = capDepth(d, b6.faceMaxDepth, `отверстие Ø${r1(dia)} в пласть`)
+    const add = (bk, dd) => {
+      const k = `${bk ? 'b' : 't'}|${f3(X)}|${f3(Y)}|${f3(dia)}|${f3(dd)}`
+      if (holeKeys.has(k)) return
+      holeKeys.add(k)
+      ;(bk ? bottom : top).push({ X, Y, depth: dd, dia, face: bk ? fr.bottom : fr.top })
+    }
+    const maxD = n0(b6.splitMaxD)
+    if (b6.split && through && (!(maxD > 0) || dia <= maxD + 0.001)) {
+      // сквозное -> два глухих навстречу: каждое на половину толщины + половина перекрытия
+      const half = Math.min(T, T / 2 + Math.max(0, n0(b6.splitOverlap)) / 2)
+      add(false, half); add(true, half)
+      return
+    }
+    add(back, d)
   }
   ;(c.drillings || []).forEach(dr => {
     if (dr.installed === false) return
@@ -525,7 +582,13 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
         const [X, Y] = fr.at(p.x, p.y), face = fr.faceAt(X, Y)
         if (!face) { warnings.push('отверстие в торец не на краю детали (в вырезе) — пропущено'); continue }
         const zf = dr.offsetFace != null && dr.offsetFace !== '' ? n0(dr.offsetFace) : T / 2   // от лицевой пласти
-        edge.push({ face, X, Y, Z: T - zf, depth, dia })   // на станке Z — от нижней пласти, лицевая сверху
+        let ed = dia, edp = depth
+        if (b6?.caps) {
+          ed = capDia(dia, edgeList, 'в торец')
+          if (ed == null) continue
+          edp = capDepth(depth, b6.edgeMaxDepth, `отверстие Ø${r1(ed)} в торец`)
+        }
+        edge.push({ face, X, Y, Z: T - zf, depth: edp, dia: ed })   // на станке Z — от нижней пласти, лицевая сверху
         continue
       }
       const face = p.ehFace ?? (dr.kind === 'edge' || p.isPair ? dr.pairFace ?? dr.face : dr.face) ?? 'front'
@@ -603,6 +666,7 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
     Object.assign(m, { start: sp.start, segs: sp.segs, closed: false, pocket: false, offset: '中' })
   })
   mills.forEach(m => { if ((m.cat === 'cutout' || m.cat === 'edge') && !m.notch) layers.push({ key: m.cat, cat: m.cat }) })
+  b6Warn.forEach(w => warnings.push(w))
   const ops = top.length + bottom.length + edge.length + grooves.length + edgeGrooves.length + edgeMills.length + mills.length
   if (!ops && !post.d6All) return null
 
