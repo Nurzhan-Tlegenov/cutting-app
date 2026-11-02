@@ -1,6 +1,6 @@
 import { LABEL_POS, getLabelTpl, saveLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
 import QrPartsEditor from './QrPartsEditor'
-import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT } from '../lib/drill6Xml'
+import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import TplInput from './TplInput'
 import FileNamesSettings from './FileNamesSettings'
@@ -447,9 +447,39 @@ function Drill6Beta({ post, set, isMaster }) {
           <Hint>«Исправить» — ближайший диаметр из списка и глубина не больше максимальной. Что изменено или не так — в предупреждениях при создании программ, по каждой детали.</Hint>
         </>
       )}
+
+      <div style={{ borderTop: '0.5px solid var(--border)', margin: '12px 0 4px' }} />
+      <Title>β · Положение детали</Title>
+      <Hint>Каждую деталь можно повернуть и перевернуть вручную: заказ → ЧПУ → «Создать программы» → «↻ Положение деталей β». Ручное положение главнее правил и запоминается.</Hint>
+      <label className="label" style={{ marginTop: 8 }}>Лапы (прижимы) — у торца станка</label>
+      <Seg value={Number(b.clamp) || 2} options={FACE_OPTS} onChange={v => setB({ clamp: v })} />
+      <label className="label" style={{ marginTop: 8 }}>Упор на голове — у торца станка</label>
+      <Seg value={Number(b.stop) || 4} options={FACE_OPTS} onChange={v => setB({ stop: v })} />
+      <Hint>Вид сверху: Face 1 — дальний край (Y макс), 2 — ближний (Y 0), 3 — правый (X макс), 4 — левый (X 0). Проверьте по схеме в окне «Положение деталей».</Hint>
+      {chk('rules', 'Выбирать положение по правилам')}
+      {b.rules && (
+        <>
+          {chk('longX', 'Длинной стороной вдоль станка — обязательно')}
+          {chk('allowFlip', 'Правила могут перевернуть деталь (этикетка окажется снизу)')}
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>Правила — сверху важнее:</div>
+          {(b.order || []).filter(k => D6B_RULES[k]).map((k, i, arr) => (
+            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+              <input type="checkbox" checked={b.ruleOn?.[k] !== false} onChange={e => setB({ ruleOn: { ...(b.ruleOn || {}), [k]: e.target.checked } })} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
+              <span style={{ flex: 1, fontSize: 13, opacity: b.ruleOn?.[k] === false ? 0.5 : 1 }}>{i + 1}. {D6B_RULES[k]}</span>
+              <button type="button" disabled={i === 0} onClick={() => { const o = [...arr]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setB({ order: o }) }}
+                style={{ padding: '4px 9px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === 0 ? 'var(--text-hint)' : 'var(--text)' }}>↑</button>
+            </div>
+          ))}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+            <Num label="Узкая деталь — уже" unit="мм" value={b.narrowW} onChange={v => setB({ narrowW: v === '' ? 100 : v })} hint="отверстия в торец к лапам" />
+            <Num label="Паз под ХДФ — до" unit="мм" value={b.hdfMaxW} onChange={v => setB({ hdfMaxW: v === '' ? 5 : v })} hint="шире — под подсветку" />
+          </div>
+        </>
+      )}
     </div>
   )
 }
+const FACE_OPTS = [[1, 'Face 1'], [2, 'Face 2'], [3, 'Face 3'], [4, 'Face 4']]
 
 function Drill6Basic({ post, set, router }) {
   const { user } = useAuth()

@@ -21,6 +21,7 @@ import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT, drill6Lay
 import Drill6Ops from '../components/Drill6Ops'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
+import Drill6Orient from '../components/Drill6Orient'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf } from '../lib/gcode'
 import { getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
@@ -67,6 +68,8 @@ export default function CncPage() {
   const { user, isMaster, cabinet } = useAuth()
   const toOrders = () => navigate(cabinet === 'production' ? '/production' : '/orders')   // «К заказам» — в список своего кабинета
   const labelTpl = useMemo(() => getLabelTpl(user), [user])
+  const [orientOf, setOrientOf] = useState(null)     // β: окно «Положение деталей» — id постпроцессора
+  const [d6Man, setD6Man] = useState(() => getUserSettings(user).d6Man || {})   // β: ручное положение деталей (id детали -> { rot, flip })
   const [labelBusy, setLabelBusy] = useState(false)
   // «Бирки вместе с программами» — для станков без маркировочного стола: файлы бирок (как у стола) и PDF всех бирок
   // ложатся отдельной папкой рядом с программами (имя папки программ + «_Etiketki»). Запоминается за аккаунтом.
@@ -157,6 +160,12 @@ export default function CncPage() {
   // управляющие программы — латиницей, если у станка не снята галочка «Файлы программ — латиницей» (progLatin)
   const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: post.progLatin !== false })}.${post.ext || 'nc'}`
   const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: saw?.progLatin !== false })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
+  // шестисторонний: файлы по деталям; β-постпроцессору — ещё ручное положение деталей
+  const drillOf = (p, man = d6Man) => ({ post: p, ...buildDrill6Files({ mat, order, post: p.d6Beta ? { ...p, d6Man: man } : p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) })
+  const saveMan = next => {
+    setD6Man(next); saveUserSettings({ d6Man: next }, user)
+    setBuilt(bt => (bt?.drill ? { ...bt, drill: bt.drill.map(r => (r.post.d6Beta ? drillOf(r.post, next) : r)) } : bt))
+  }
   const build = () => {
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     // производство обязательно выбирает, чьи деловые остатки раскроя (мои — на склад / клиента) — иначе забудут
@@ -176,7 +185,7 @@ export default function CncPage() {
       return { second: true, si, name: `${programName(r2.nameTpl, { ...nameCtx(si + 1), latin: r2.progLatin !== false })}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
     }) } : null
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
-    const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
+    const drill = drills.map(p => drillOf(p))
     setBuilt({ files, drill, second }); setSaved('')
     logPostUse(user, [post, r2, ...drills], { orderId: order?.id || null, sheets: sel.length })   // мастер видит, кто каким постпроцессором выпускает программы
     // маркировка: файлы маркировочного стола для тех же листов (на линии сначала бирки, потом раскрой)
@@ -210,7 +219,7 @@ export default function CncPage() {
       ...(xml?.droppedOffcuts ? [`Деловых обрезков, отмеченных вручную поперёк реза, — ${xml.droppedOffcuts}: в программу они не вошли (останутся остатком листа)`] : []),
       ...(xml?.wideStrips?.length ? [`Полоса шире максимальной (${xml.maxStrip} мм) после правки карты вручную — ${xml.wideStrips.join('; ')}. Программа собрана; проверьте, возьмёт ли станок такую полосу`] : []),
     ], empty: !text, time: 0 }]
-    const drill = drills.map(p => ({ post: p, ...buildDrill6Files({ mat, order, post: p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) }))
+    const drill = drills.map(p => drillOf(p))
     setBuilt({ files, drill, second: null, beam: true }); setSaved('')
     // бирки — файлами EMF с именами по кодам деталей программы, рядом с программой (как у программ KDT): станок печатает
     // бирку, когда выдаёт деталь с этим кодом; порядок и положение — как деталь выходит (beamSawLabels.js)
@@ -590,6 +599,7 @@ export default function CncPage() {
               {r.files.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => setXmlView({ title: r.post.name, files: r.files })} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>👁 Просмотр</button>
+                  {r.post.d6Beta && <button type="button" onClick={() => setOrientOf(r.post.id)} style={{ ...small, background: 'var(--amber-light)', borderColor: 'var(--amber)' }}>↻ Положение деталей β</button>}
                   <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${fileBase('zip')}.zip`, folders: drillDir(r) })}
                     style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы ({r.files.length})</button>
                   {r.files.length === 1 && <button type="button" onClick={() => { download(r.files[0].name, r.files[0].data, 'text/xml'); mark('files') }} style={small}>⬇ {r.files[0].name}</button>}
@@ -657,6 +667,7 @@ export default function CncPage() {
         </div>, document.body
       )}
       {xmlView && <Drill6Viewer title={xmlView.title} files={xmlView.files} onClose={() => setXmlView(null)} />}
+      {orientOf && mat && (() => { const r = built?.drill?.find(x => x.post.id === orientOf); return r ? <Drill6Orient mat={mat} order={order} post={r.post} man={d6Man} onChange={saveMan} onClose={() => setOrientOf(null)} /> : null })()}
       {pdfAsk && mat && <PdfSetup order={order} mat={mat} method={order?.cutting_method || 'nesting'} fileName={`${fileBase('maps')}.pdf`} onClose={() => setPdfAsk(false)} />}
       {saveAsk && <SaveFilesDialog files={saveAsk.files} zipName={saveAsk.zipName} onClose={() => setSaveAsk(null)} onDone={savedDone}
         folders={saveAsk.folders || routerDir()} />}

@@ -38,6 +38,7 @@ import { toLatin, folderName } from './orderUtils'
 import { detailHoles } from './partHoles'
 import { parsePolygonFromDetail } from './trueShapeNesting'
 import { loopElements } from './arcFit'
+import { flipDetail } from './mirrorDetail'
 
 const EPS = 0.05
 const n0 = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -495,7 +496,109 @@ export const D6B_DEFAULT = () => ({
   faceMaxDepth: '',      // макс. глубина в пласть (не сквозные), мм
   edgeMaxDepth: '',      // макс. глубина в торец, мм
   capsFix: 'warn',       // нет такого сверла: 'warn' — оставить и предупредить, 'nearest' — ближайший Ø из списка, 'skip' — убрать
+  // положение детали на станке по правилам (этап 2)
+  rules: false,          // выбирать положение по правилам (ручной поворот / переворот детали — всегда главнее)
+  clamp: 2,              // торец станка, у которого лапы (прижимы): Face 1 — Y макс, 2 — Y 0, 3 — X макс, 4 — X 0
+  stop: 4,               // торец, у которого упор на голове
+  longX: true,           // длинной стороной вдоль станка — обязательно
+  allowFlip: false,      // правила могут перевернуть деталь (обратной пластью вверх)
+  order: ['zs', 'gola', 'edgeHoles', 'edgeGroove'],
+  ruleOn: { zs: true, gola: true, edgeHoles: true, edgeGroove: true },
+  narrowW: 100,          // деталь уже — отверстия в торец к лапам, шире — от лап
+  hdfMaxW: 5,            // паз в торце до этой ширины — под ХДФ (вверх), шире — под подсветку (вниз)
 })
+export const D6B_RULES = {
+  zs: 'Пазы в пласти (под ЗС) — сверху, подальше от лап и от упора',
+  gola: 'Вырезы на краю (гола) и внешний радиус — подальше от лап и от упора',
+  edgeHoles: 'Отверстия в торец: широкая деталь — от лап, узкая — к лапам',
+  edgeGroove: 'Паз в торце — от лап; два паза — под ХДФ вверх, под подсветку вниз',
+}
+// перевернуть деталь обратной пластью вверх (как кнопка «Перевернуть» в редакторе контура)
+function flipRaw(raw, T) {
+  const c = contourOf(raw) || {}
+  const f = flipDetail({ h: n0(raw.width), contour: c, edges: {} }, T)
+  const fc = f.contour
+  if (fc.meta?.edges) { const e = fc.meta.edges; fc.meta = { ...fc.meta, edges: { ...e, left: e.right, right: e.left } } }
+  return { ...raw, contour: fc, edge_left: raw.edge_right, edge_right: raw.edge_left }
+}
+// оценка положения по правилам: чем больше, тем лучше; по правилу — число, сравниваются по порядку правил
+function ruleScores(geo, b) {
+  const { fr, T } = geo
+  const opp = { 1: 2, 2: 1, 3: 4, 4: 3 }
+  const far = (f, X, Y) => {                       // 0 — у торца f, 1 — у противоположного
+    const d = f === 1 ? fr.Wm - Y : f === 2 ? Y : f === 3 ? fr.L - X : X
+    const size = f === 1 || f === 2 ? fr.Wm : fr.L
+    return size > 0 ? Math.max(0, Math.min(1, d / size)) : 0.5
+  }
+  const cen = pts => pts.reduce((a, q) => [a[0] + q[0] / pts.length, a[1] + q[1] / pts.length], [0, 0])
+  const pathPts = m => [m.start, ...m.segs.map(g => g.to)]
+  const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0)
+  const cl = n0(b.clamp) || 2, st = n0(b.stop) || 4
+  const faceGrooves = [
+    ...geo.grooves.map(g => ({ top: g.face === fr.top, c: g.line ? [(g.line[0] + g.line[2]) / 2, (g.line[1] + g.line[3]) / 2] : cen(pathPts(g.mill)) })),
+    ...geo.mills.filter(m => m.cat === 'groovePath').map(m => ({ top: m.face === fr.top, c: cen(pathPts(m)) })),
+  ]
+  const edgeMills = geo.mills.filter(m => m.cat === 'edge' && !m.notch)
+  const narrow = Math.min(fr.L, fr.Wm) < (n0(b.narrowW) || 100)
+  const two = geo.edgeGrooves.length >= 2
+  return {
+    zs: avg(faceGrooves.map(g => (g.top ? 2 : 0) + far(cl, ...g.c) + far(st, ...g.c))),
+    gola: avg(edgeMills.map(m => { const c = cen(pathPts(m)); return far(cl, ...c) + far(st, ...c) })),
+    edgeHoles: avg(geo.edge.map(h => (narrow ? (h.face === cl ? 1 : h.face === opp[cl] ? 0 : 0.5) : (h.face === opp[cl] ? 1 : h.face === cl ? 0 : 0.5)))),
+    edgeGroove: avg(geo.edgeGrooves.map(g => (g.face === opp[cl] ? 1 : g.face === cl ? 0 : 0.5)
+      + (two ? ((g.width <= (n0(b.hdfMaxW) || 5) + 0.001) === (g.Z > T / 2) ? 1 : 0) : 0))),
+  }
+}
+/** Положение детали на β-станке: ручное (contour.d6) или по правилам -> { turn, flip, how: 'manual' | 'rules' | 'auto', base } */
+export function d6Orient(d, { T, post = {}, types = {} }) {
+  const b = d6bOf(post)
+  const raw = rawDetail(d), c = contourOf(raw) || {}
+  const baseOf = flip => { const r = flip ? flipRaw(raw, T) : raw; return chooseTurn(n0(r.width), n0(r.length), edgeThick(r, types)) }
+  // ручное положение — в настройках производства (post.d6Man: id строки детали -> { rot, flip }), не в детали клиента
+  const man = post.d6Man?.[raw.id] || c.d6
+  if (man && (n0(man.rot) || man.flip)) {
+    const flip = !!man.flip, base = baseOf(flip)
+    return { turn: (base + (n0(man.rot) || 0)) % 4, flip, how: 'manual', base }
+  }
+  if (!b?.rules) return { turn: baseOf(false), flip: false, how: 'auto', base: baseOf(false) }
+  const order = (b.order || []).filter(k => D6B_RULES[k] && b.ruleOn?.[k] !== false)
+  const W = n0(raw.width), H = n0(raw.length)
+  const cands = []
+  for (const flip of b.allowFlip ? [false, true] : [false]) {
+    const base = baseOf(flip)
+    for (let k = 0; k < 4; k++) {
+      const turn = (base + k) % 4, f = machineFrame(W, H, turn)
+      if (b.longX !== false && f.L < f.Wm - EPS) continue
+      let r
+      try { r = panelCore(d, { T, id: 'x', post: { ...post, d6All: true }, types }, { turn, flip }) } catch { r = null }
+      if (r?.geo) cands.push({ turn, flip, k, sc: ruleScores(r.geo, b), base })
+    }
+  }
+  if (!cands.length) return { turn: baseOf(false), flip: false, how: 'auto', base: baseOf(false) }
+  cands.sort((a, b2) => {
+    for (const key of order) { const v = b2.sc[key] - a.sc[key]; if (Math.abs(v) > 1e-6) return v }
+    return (a.flip - b2.flip) || (a.k - b2.k)        // при равенстве — без переворота и как выбрал бы станок сам
+  })
+  const best = cands[0]
+  return { turn: best.turn, flip: best.flip, how: 'rules', base: best.base }
+}
+
+/** Схема детали на β-станке в текущем положении (для окна «Положение деталей») -> { orient, geo, top, bottom } | null */
+export function d6Preview(d, { T, post = {}, types = {} }) {
+  const o = d6Orient(d, { T, post, types })
+  let r
+  try { r = panelCore(d, { T, id: 'x', post: { ...post, d6All: true }, types }, { turn: o.turn, flip: o.flip }) } catch { r = null }
+  return r?.geo ? { orient: o, geo: r.geo } : null
+}
+
+export function panelXml(d, opts) {
+  if (!d6bOf(opts.post)) return panelCore(d, opts, null)
+  const T = opts.T
+  const o = d6Orient(d, { T, post: opts.post, types: opts.types })
+  const r = panelCore(d, opts, { turn: o.turn, flip: o.flip })
+  if (r) { delete r.geo; r.orient = o; if (o.flip) r.warnings.push('деталь перевёрнута: обратной пластью вверх (этикетка снизу)') }
+  return r
+}
 export const d6bOf = post => (post?.d6Beta ? { ...D6B_DEFAULT(), ...(post.d6b || {}) } : null)
 /** «5, 8; 10» -> [5, 8, 10] */
 export const numList = s => String(s ?? '').split(/[\s,;]+/).map(v => Number(v.replace(',', '.'))).filter(v => v > 0)
@@ -505,13 +608,14 @@ const nearestOf = (list, v) => list.reduce((b, x) => (Math.abs(x - v) < Math.abs
  * Одна деталь -> { xml, ops, warnings } или null (нет никакой обработки и d6All выключен).
  * d — строка order_details (по готовой детали), T — толщина, id — имя детали в файле.
  */
-export function panelXml(d, { T, id, post = {}, types = {} }) {
-  const raw = rawDetail(d)
+function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
+  // orient (только β): { turn, flip } — положение на станке; flip — деталь перевёрнута обратной пластью вверх
+  const raw = orient?.flip ? flipRaw(rawDetail(d), T) : rawDetail(d)
   const W = n0(raw.width), H = n0(raw.length)
   const c = contourOf(raw) || {}
   // лицевая — сверху, как на фрезерном ЧПУ; длинная сторона — вдоль станка, кромка — вверх
   const et = edgeThick(raw, types)
-  const fr = machineFrame(W, H, chooseTurn(W, H, et), 'front')
+  const fr = machineFrame(W, H, orient?.turn ?? chooseTurn(W, H, et), 'front')
   const warnings = []
   const o6 = d6OpsOf(post)
   const layers = []                                  // слои детали (для настроек: какие пазы и выемки есть в заказе)
@@ -723,7 +827,7 @@ export function panelXml(d, { T, id, post = {}, types = {} }) {
   const counts = { top: top.length, bottom: bottom.length, edge: edge.length, edgeGrooves: edgeGrooves.length + edgeMills.length,
     groovesTop: grooves.filter(g => g.face === fr.top).length, groovesBottom: grooves.filter(g => g.face !== fr.top).length,
     millsTop: mills.filter(m => m.face === fr.top).length, millsBottom: mills.filter(m => m.face !== fr.top).length }
-  return { xml, ops, warnings, counts, layers }
+  return { xml, ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
 }
 
 // ─── Имена файлов и папки ───────────────────────────────────────────────────
