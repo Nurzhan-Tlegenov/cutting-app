@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
 import ProductionForm from '../components/ProductionForm'
-import { serviceBadges, servicesKnown } from '../lib/productionServices'
+import { serviceBadges, servicesKnown, hasBeamSaw } from '../lib/productionServices'
 import { myProduction, productionOrders, productionSetStatus, productionReturnOrder, orderMarks, MARKS_SQL_HINT, productionStats, productionArchive, productionExcludeStats, testOrderMinutes } from '../lib/productionApi'
 import { Results, usePeriod } from '../components/OrderStats'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -99,7 +99,8 @@ export default function ProductionPage() {
   }, [focusId, orders])   // eslint-disable-line react-hooks/exhaustive-deps
   useBackClose(tab === 'settings' && !!setSec && !edit, () => setSetSec(null))   // «Назад» телефона — к списку разделов
   const [hasPosts, setHasPosts] = useState(false)       // есть посты — принятый, но не пущенный заказ помечается
-  const [betaBeam, setBetaBeam] = useState(false)       // β Пильный центр: раздел настроек — мастеру и бета-тестерам
+  const [betaBeamRaw, setBetaBeam] = useState(false)    // бета-тестер пильного центра
+  const betaBeam = betaBeamRaw || hasBeamSaw(prod?.services)   // раздел «Пильный центр» — бета-тестерам и производствам с пильным центром
   useEffect(() => { let alive = true; hasBeta('beam_saw').then(v => { if (alive) setBetaBeam(v) }); return () => { alive = false } }, [])
   // β Объединённый раскрой: производство объединяет пришедшие заказы в один раскрой (та же бета, что у клиентов)
   const [canMerge, setCanMerge] = useState(false)
@@ -265,7 +266,7 @@ export default function ProductionPage() {
     ['posts', I.posts, 'Рабочие посты', 'Техпроцесс: порядок постов, кто на них'],
     ['prices', I.tag, 'Прайс-лист', 'Распил плиты и ХДФ, кромление, присадка'],
     ['sheet', I.sliders, 'Параметры станка', 'Рез и отступы листа — по типу материала'],
-    ...(betaBeam ? [['beamsaw', I.sliders, 'Пильный центр β', 'Уровни резов, повороты, захват, узкие детали, полосы']] : []),
+    ...(betaBeam ? [['beamsaw', I.sliders, 'Пильный центр', 'Уровни резов, повороты, захват, узкие детали, полосы']] : []),
     ['post', I.cnc, 'Постпроцессоры', 'Станки ЧПУ, инструменты, обработка'],
     ['labels', I.tag, 'Бирки', 'Шаблон бирки: размер, параметры, картинки'],
     ['stock', I.stack, 'Деловые остатки', 'Склад остатков: ячейки, списание, журнал'],

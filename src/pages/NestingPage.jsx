@@ -4149,7 +4149,7 @@ export default function NestingPage() {
 
       {/* Тип станка — общий для всех конфигураций */}
       <div data-tour="nest-machine" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)'], ...(betaBeam || beamSaw || prodBeam ? [['beamsaw', 'Пильный центр β']] : [])].map(([val, label]) => {
+        {[['nesting', 'Фрезер (ЧПУ)'], ['guillotine', 'Пила (форматник)'], ...(betaBeam || beamSaw || prodBeam ? [['beamsaw', 'Пильный центр']] : [])].map(([val, label]) => {
           const active = val === 'beamsaw' ? beamSaw : !beamSaw && cuttingMethod === val
           // производство выбрано и указало, на чём режет (Услуги) — только эти способы; не указало — любые
           const prc = order.production_id ? productions.find(x => x.id === order.production_id) : null

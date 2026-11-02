@@ -8,7 +8,7 @@ export const SERVICE_QUESTIONS = [
   { key: 'saw', group: 'Раскрой', q: 'Режете на форматно-раскроечном станке (пила)?', short: 'Пила' },
   { key: 'cnc', group: 'Раскрой', q: 'Есть фрезер с ЧПУ (нестинг)?', short: 'ЧПУ' },
   // β: вопрос и значок — только мастер-аккаунту и бета-тестерам «Пильный центр»
-  { key: 'beamsaw', group: 'Раскрой', q: 'Есть пильный центр (раскрой по программе)?', short: 'Пильный центр', beta: 'beam_saw' },
+  { key: 'beamsaw', group: 'Раскрой', q: 'Есть пильный центр (раскрой по программе)?', short: 'Пильный центр' },   // раньше — только бета-тестерам
   { key: 'shaped', group: 'Раскрой', q: 'Режете фигурные детали — радиусы, вырезы, произвольный контур?', short: 'Фигурные', parent: 'cnc' },
   { key: 'hdf', group: 'Раскрой', q: 'Режете ХДФ / ДВП (задние стенки)?', short: 'ХДФ' },
   { key: 'edge', group: 'Кромка', q: 'Кромите прямолинейные детали?', short: 'Кромка' },
@@ -90,3 +90,6 @@ export async function saveProductionServices(s) {
     return { error: missing ? SERVICES_SQL_HINT : error.message, missing }
   } catch (e) { return { error: String(e?.message || e) } }
 }
+
+/** У производства есть пильный центр (ответ «Да» в услугах) — тогда ему открыты настройки пилы и её постпроцессор */
+export const hasBeamSaw = raw => parseServices(raw).beamsaw === true

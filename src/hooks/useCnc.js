@@ -4,12 +4,25 @@ import { getCnc, fetchCnc, saveCnc, withShared, normalizeCnc } from '../lib/cncS
 import { listSharedPosts, saveSharedPost, removeSharedPost, sendNews } from '../lib/messages'
 import { productionCnc, saveProductionCnc } from '../lib/productionApi'
 import { hasBeta } from '../lib/beta'
+import { supabase } from '../lib/supabase'
+import { hasBeamSaw } from '../lib/productionServices'
 
 // Настройки ЧПУ (постпроцессоры, инструменты, обработка) — одни и те же в кабинете производства и в заказе:
 // поправили в одном месте — в другом уже так же. onSaved — что сделать после изменения (например, сбросить созданные программы).
 // prodId — производство: владелец работает со своими настройками и они копируются в производство; начальник производства
 // и сотрудник с правом «Управляющие программы» берут настройки производства (начальник может их и менять).
 const forStore = cnc => ({ ...cnc, posts: cnc.posts.filter(p => !p.shared) })
+// Постпроцессор пильного центра: бета-тестерам и производствам, у которых в услугах «Есть пильный центр» — «Да»
+// (то производство, где работаем, или своё). Ошибка чтения — просто как раньше (по бете).
+async function beamAccess(user, prodId) {
+  if (await hasBeta('beam_saw')) return true
+  try {
+    let q = supabase.from('productions').select('services')
+    q = prodId ? q.eq('id', prodId) : q.eq('owner_id', user?.id || '')
+    const { data } = await q.limit(1)
+    return !!(data || []).some(p => hasBeamSaw(p.services))
+  } catch { return false }
+}
 export function useCnc(onSaved, prodId = null) {
   const { user, profile, isMaster } = useAuth()
   const [cnc, setCnc] = useState(() => getCnc(user))
@@ -22,8 +35,8 @@ export function useCnc(onSaved, prodId = null) {
   useEffect(() => {
     let alive = true
     // свои настройки + общие постпроцессоры (мастер-аккаунт отметил «для всех») + настройки производства
-    // β Пильный центр: постпроцессор пилы — только у мастер-аккаунта и бета-тестеров
-    Promise.all([fetchCnc(user), listSharedPosts(), productionCnc(prodId), hasBeta('beam_saw')]).then(([c, sh, pc, beam]) => {
+    // Пильный центр: постпроцессор пилы — у мастер-аккаунта, бета-тестеров и производств с пильным центром
+    Promise.all([fetchCnc(user), listSharedPosts(), productionCnc(prodId), beamAccess(user, prodId)]).then(([c, sh, pc, beam]) => {
       if (!alive) return
       const shared = sh.data || []
       const opts = { beam: !!beam }
