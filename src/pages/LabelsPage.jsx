@@ -91,6 +91,18 @@ function RemLabelSetup({ tpl, onChange, sample, previewEl = null }) {
   // копия настроек в памяти этого устройства (браузера): если бирку остатка настраивали здесь, а затёрли с другого устройства
   const local = (() => { try { const l = JSON.parse(localStorage.getItem('appSettings:' + (user?.id || 'anon')) || '{}'); const r = l.labelRemTpl || l.labelTpl?.remTpl; return differs(r) ? r : null } catch { return null } })()
   if (local) fromSaved.unshift({ id: 'local', name: 'с этого устройства', tpl: { remTpl: local } })
+  // «Мои бирки остатка» — сохранённые кнопкой «Сохранить» варианты (копия на всякий случай; сама бирка сохраняется сразу)
+  const [remSaved, setRemSaved] = useState(() => { const l = getUserSettings(user).labelRemSaved; return Array.isArray(l) ? l.filter(x => x && x.id && x.rem) : [] })
+  const putRemSaved = list => { setRemSaved(list); saveUserSettings({ labelRemSaved: list }, user) }
+  const saveRem = () => {
+    const name = window.prompt('Сохранить бирку делового остатка под именем (то же имя — перезаписать):', remSaved[0]?.name || `Остаток ${tpl.w}×${tpl.h}`)
+    if (name === null) return
+    const nm = name.trim() || `Остаток ${tpl.w}×${tpl.h}`
+    const same = remSaved.find(x => x.name.trim().toLowerCase() === nm.toLowerCase())
+    const item = { id: same?.id || Math.random().toString(36).slice(2, 10), name: nm, at: Date.now(), rem: { ...rt, kind: 'rem', enabled: true } }
+    putRemSaved(same ? remSaved.map(x => (x.id === same.id ? item : x)) : [item, ...remSaved])
+    window.alert(`Бирка остатка сохранена: «${nm}».`)
+  }
   return (
     <div className="card no-print" style={{ marginBottom: 12, padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
@@ -99,6 +111,18 @@ function RemLabelSetup({ tpl, onChange, sample, previewEl = null }) {
           style={{ padding: '5px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>↺ По образцу</button>
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 8 }}>Размер — как у бирки детали ({tpl.w}×{tpl.h} мм). Нажмите на элемент — двигайте, растягивайте, поворачивайте, меняйте шрифт или ставьте картинку; «Добавить на бирку» — новые элементы.</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+        <button type="button" onClick={saveRem} style={{ padding: '6px 12px', borderRadius: 14, fontSize: 12.5, border: 'none', background: 'var(--teal)', color: 'white', cursor: 'pointer' }}>💾 Сохранить</button>
+        {remSaved.map(x => (
+          <span key={x.id} style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 14, border: '0.5px solid var(--border-md)', overflow: 'hidden' }}>
+            <button type="button" title={`Сохранена ${new Date(x.at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`} onClick={() => { if (window.confirm(`Открыть бирку остатка «${x.name}»?\nТекущая раскладка заменится.`)) set(x.rem) }}
+              style={{ padding: '5px 9px', fontSize: 12, border: 'none', background: 'var(--bg2)', color: 'var(--text)', cursor: 'pointer' }}>{x.name}</button>
+            <button type="button" title="Удалить" onClick={() => { if (window.confirm(`Удалить сохранённую бирку «${x.name}»?`)) putRemSaved(remSaved.filter(y => y.id !== x.id)) }}
+              style={{ padding: '5px 8px', fontSize: 12, border: 'none', background: 'var(--bg2)', color: 'var(--danger)', cursor: 'pointer' }}>×</button>
+          </span>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Правки бирки сохраняются сразу. «Сохранить» — держать её копию под своим именем: открыть можно в любой момент, с любого устройства.</div>
       {fromSaved.length > 0 && (
         <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
           Бирка остатка есть в «Мои шаблоны бирок» — взять её оттуда:

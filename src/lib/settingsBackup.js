@@ -27,7 +27,7 @@ export const SECTIONS = [
 // какие настройки аккаунта в каком разделе
 const KEYS = {
   cnc: ['cnc', 'fileNames', 'cncWithLabels', 'cncWithMaps', 'drillKind'],
-  labels: ['labelTpl', 'labelRemTpl', 'labelSaved', 'labelSavedCur'],
+  labels: ['labelTpl', 'labelRemTpl', 'labelRemSaved', 'labelSaved', 'labelSavedCur'],
   reports: ['pdfTpl', 'pdfStatsPage', 'pdfSummary', 'pdfEstimate'],
   other: ['sheetFormats', 'edgeAliasMem', 'edgeTypes', 'facadeMills', 'offcutMargin', 'importPresets', 'basisFaceOrder', 'dxfSnap'],
 }
