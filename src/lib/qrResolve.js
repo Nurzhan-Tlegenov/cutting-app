@@ -10,7 +10,8 @@ import { fetchOrderDetails } from './orderDetails.js'
 
 // как текст выглядит в коде: латиница (если была включена), пробелы -> «_», без различия регистра
 const norm = s => String(s || '').trim().replace(/\s+/g, '_').toLowerCase()
-const forms = s => [...new Set([norm(s), norm(toLatin(s))])].filter(Boolean)
+// бирки, напечатанные до 02.11.2026, — «№» в латинице пропадал (Zakaz_5, сейчас Zakaz_N5): находим и по старому коду
+const forms = s => [...new Set([norm(s), norm(toLatin(s)), norm(toLatin(String(s || '').replace(/№\s*/g, ' ')))])].filter(Boolean)
 
 /** Ссылка на 3D-модель (QR со ссылкой): -> путь внутри приложения или null */
 export function qrLink(text) {
