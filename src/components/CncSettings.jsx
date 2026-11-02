@@ -476,6 +476,33 @@ function Drill6Beta({ post, set, isMaster }) {
           </div>
         </>
       )}
+
+      <div style={{ borderTop: '0.5px solid var(--border)', margin: '12px 0 4px' }} />
+      <Title>β · Фрезеровка</Title>
+      <label className="label">Вырез на краю (гола, радиус) — начинать</label>
+      <Seg value={b.edgeStart || ''} options={[['', 'Как в «Обработке»'], ['far', 'Дальше от лап'], ['near', 'Ближе к лапам']]} onChange={v => setB({ edgeStart: v })} />
+      <Hint>Направление обхода меняется под выбранный конец, фреза остаётся снаружи детали.</Hint>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
+        <input type="checkbox" checked={b.radiusSides !== '' && b.radiusSides != null} onChange={e => setB({ radiusSides: e.target.checked ? 0 : '' })} style={{ width: 18, height: 18 }} />
+        Внешний радиус — проходить со смежными сторонами
+      </label>
+      {b.radiusSides !== '' && b.radiusSides != null && (
+        <>
+          <div style={{ marginTop: 6, maxWidth: 220 }}><Num label="Сколько стороны захватить" unit="мм" value={b.radiusSides || ''} onChange={v => setB({ radiusSides: v === '' ? 0 : v })} hint="пусто или 0 — стороны целиком" /></div>
+          <Hint>Фреза идёт не только по дуге, но и по прилегающим сторонам — снимает припуск и ступеньку от пилы.</Hint>
+        </>
+      )}
+      <label className="label" style={{ marginTop: 10 }}>Врезание во внутренний вырез</label>
+      <Seg value={b.cutEntry || ''} options={[['', 'Как в «Обработке»'], ['none', 'Нет (станок сам)'], ['diag', 'По диагонали из угла']]} onChange={v => setB({ cutEntry: v })} />
+      {chk('grooveLine', 'Пазы с концом внутри детали — пазом, а не выемкой')}
+      {b.grooveLine && (
+        <>
+          <label className="label" style={{ marginTop: 6 }}>Какие пазы</label>
+          <Seg value={b.grooveDir || 'v'} options={[['v', 'Поперёк станка (по Y)'], ['h', 'Вдоль станка (по X)'], ['all', 'Все']]} onChange={v => setB({ grooveDir: v })} />
+          {txt('grooveTool', 'Инструмент таким пазам — имя как на станке', 'например, пила, которой нет на станке (как в бЧПУ); пусто — по настройкам «Обработки»')}
+          <Hint>Выемке на станке можно назначить только фрезу, пазу — и пилу. Концы паза — ровно как в детали.</Hint>
+        </>
+      )}
     </div>
   )
 }

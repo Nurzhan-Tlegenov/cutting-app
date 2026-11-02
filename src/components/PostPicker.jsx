@@ -76,6 +76,14 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
     // свои инструменты постпроцессора (срисованные с программы) уходят вместе с ним — другим станкам они не видны
     onChange({ ...toggleUse6(cnc, p.id, false), posts, tools: (cnc.tools || []).filter(t => t.postId !== p.id), post: cnc.post === p.id ? posts[0].id : cnc.post, router: cnc.router === p.id ? '' : cnc.router })
   }
+  // мастер-аккаунт: β-копия шестистороннего — отдельный постпроцессор с расширенными настройками; исходный не меняется
+  const betaCopy = p => {
+    const name = window.prompt('β-копия: название нового постпроцессора.\nИсходный «' + p.name + '» не изменится.', p.name.replace(/\s*\(β\)$/, '') + ' (β)')
+    if (!name || !name.trim()) return
+    const q = { ...p, id: newId(), name: name.trim(), d6Beta: true, forAll: false, shared: false, ownerId: undefined }
+    onChange({ ...cnc, posts: [...cnc.posts, q], post: q.id })
+    close()
+  }
   const rename = p => {
     const n = window.prompt('Название постпроцессора', p.name)
     if (n && n.trim() && n.trim() !== p.name) onChange({ ...cnc, posts: cnc.posts.map(q => (q.id === p.id ? { ...q, name: n.trim() } : q)) })
@@ -148,12 +156,14 @@ export default function PostPicker({ cnc, onChange, isMaster = false }) {
                         {kindTag(p)}
                         {used(p.id) && <span style={{ fontSize: 10.5, color: 'var(--teal)' }}>✓ выпускает программы</span>}
                         {pubTag(p)}
+                        {p.d6Beta && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber)', color: 'white', fontWeight: 600 }}>β</span>}
                         {on && <span style={{ fontSize: 10.5, color: 'var(--blue)' }}>открыт</span>}
                       </div>
                     </div>
                     {isMaster && !p.shared && <button type="button" title={p.forAll ? 'В каталоге — убрать' : 'Добавить в каталог (выдача по запросу)'} onClick={() => togglePub(p)}
                       style={{ ...icon, background: p.forAll || p.shared ? 'var(--teal)' : 'var(--bg)', color: p.forAll || p.shared ? 'white' : 'var(--text-hint)', border: '0.5px solid var(--border-md)' }}>🔑</button>}
                     {!p.shared && snapOf(p) && <button type="button" title={`Вернуть сохранённые настройки (${new Date(snapOf(p).at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })})`} onClick={() => restore(p, snapOf(p))} style={{ ...icon, color: 'var(--blue)' }}>↺</button>}
+                    {isMaster && isDrill6(p) && !p.d6Beta && <button type="button" title="Создать β-копию (исходный не меняется)" onClick={() => betaCopy(p)} style={{ ...icon, color: 'var(--amber)', fontWeight: 700 }}>β</button>}
                     {!p.shared && <button type="button" title="Переименовать" onClick={() => rename(p)} style={icon}>✎</button>}
                     {!p.shared && <button type="button" title="Удалить" onClick={() => del(p)} style={{ ...icon, color: 'var(--danger)' }}>🗑</button>}
                   </div>
