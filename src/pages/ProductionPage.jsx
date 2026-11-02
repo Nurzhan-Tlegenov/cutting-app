@@ -36,6 +36,7 @@ import { limitFromError, resetLimitsCache } from '../lib/limits'
 import Drill6Viewer from '../components/Drill6Viewer'
 import GcodeFileSim from '../components/GcodeFileSim'
 import BeamSawSettings from '../components/BeamSawSettings'
+import SettingsBackup from '../components/SettingsBackup'
 import { hasBeta } from '../lib/beta'
 import { MERGE_FEATURE, createMergedOrder, mergeList, dissolveMerged } from '../lib/mergeOrders'
 
@@ -273,6 +274,7 @@ export default function ProductionPage() {
     ['reports', I.file, 'Отчёты (PDF)', 'Карты раскроя: конструктор листа, статистика, смета'],
     ['xml', I.file, 'Просмотр XML присадки', 'Программы присадочного станка'],
     ['gsim', I.cnc, 'Симуляция G-кода', 'Любая УП — в том числе из других программ'],
+    ['backup', I.file, 'Сохранить / загрузить настройки', 'Все настройки производства одним файлом — перенести на другой аккаунт'],
   ] : []
   const btn = kind => ({ padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', border: kind === 'main' ? 'none' : '0.5px solid var(--border-md)', background: kind === 'main' ? 'var(--blue)' : 'transparent', color: kind === 'main' ? 'white' : 'var(--text-muted)' })
 
@@ -395,6 +397,7 @@ export default function ProductionPage() {
               {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}
               {setSec === 'post' && <CncSetup prodId={prod.id} />}
               {setSec === 'reports' && <ReportsSettings />}
+              {setSec === 'backup' && <SettingsBackup prod={prod} onApplied={load} />}
               {setSec === 'beamsaw' && <BeamSawSettings key={prod.id} prod={prod} onSaved={v => setProd(p => ({ ...p, beam_saw_settings: v }))} />}
             </div>
           ))}
