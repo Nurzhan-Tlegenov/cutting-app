@@ -161,7 +161,7 @@ export default function CncPage() {
   const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: post.progLatin !== false })}.${post.ext || 'nc'}`
   const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: saw?.progLatin !== false })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
   // шестисторонний: файлы по деталям; β-постпроцессору — ещё ручное положение деталей
-  const drillOf = (p, man = d6Man) => ({ post: p, ...buildDrill6Files({ mat, order, post: p.d6Beta ? { ...p, d6Man: man } : p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) })
+  const drillOf = (p, man = getUserSettings(user).d6Man || {}) => ({ post: p, ...buildDrill6Files({ mat, order, post: p.d6Beta ? { ...p, d6Man: man } : p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) })
   const saveMan = next => {
     setD6Man(next); saveUserSettings({ d6Man: next }, user)
     setBuilt(bt => (bt?.drill ? { ...bt, drill: bt.drill.map(r => (r.post.d6Beta ? drillOf(r.post, next) : r)) } : bt))
@@ -599,7 +599,7 @@ export default function CncPage() {
               {r.files.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button type="button" onClick={() => setXmlView({ title: r.post.name, files: r.files })} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>👁 Просмотр</button>
-                  {r.post.d6Beta && <button type="button" onClick={() => setOrientOf(r.post.id)} style={{ ...small, background: 'var(--amber-light)', borderColor: 'var(--amber)' }}>↻ Положение деталей β</button>}
+                  {r.post.d6Beta && <button type="button" onClick={() => { setD6Man(getUserSettings(user).d6Man || {}); setOrientOf(r.post.id) }} style={{ ...small, background: 'var(--amber-light)', borderColor: 'var(--amber)' }}>↻ Положение деталей β</button>}
                   <button type="button" onClick={() => setSaveAsk({ files: r.files.map(f => ({ name: f.name, data: f.data })), zipName: `${safeName(r.post.name) || 'drill6'}_${fileBase('zip')}.zip`, folders: drillDir(r) })}
                     style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы ({r.files.length})</button>
                   {r.files.length === 1 && <button type="button" onClick={() => { download(r.files[0].name, r.files[0].data, 'text/xml'); mark('files') }} style={small}>⬇ {r.files[0].name}</button>}
@@ -625,7 +625,7 @@ export default function CncPage() {
       {tab === 'ops' && !drill6Open && <CncOps cnc={tview} onChange={tchange} layers={layers} />}
       {tab === 'tools' && !drill6Open && <CncTools cnc={tview} onChange={tchange} />}
       {tab !== 'sheets' && <PostPicker cnc={cnc} onChange={change} isMaster={isMaster} />}
-      {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} />}
+      {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} orderCtx={order ? { order, mat, mats, setMatKey } : null} />}
       {tab === 'cmd' && <CncCommands cnc={cnc} onChange={change} isMaster={isMaster} />}
 
       {/* симулятор — поверх всего экрана: выносится прямо в body (иначе при прокрученной странице снизу виднелось окно заказа) */}

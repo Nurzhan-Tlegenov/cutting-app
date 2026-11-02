@@ -12,7 +12,7 @@ import Drill6PartsView from './Drill6PartsView'
 
 const COLS = 'id, order_number, order_name, edge_types, material_name, material_thickness, created_at'
 
-export default function Drill6LivePreview({ post }) {
+function PickerPreview({ post }) {
   const { user } = useAuth()
   const [orders, setOrders] = useState(null)
   const [orderId, setOrderId] = useState(() => getUserSettings(user).d6PreviewOrder || '')
@@ -73,4 +73,31 @@ export default function Drill6LivePreview({ post }) {
       {!orderId && <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 6 }}>Выберите заказ — увидите каждую деталь так, как она ляжет на станок: присадку, пазы, вырезы, лапы и упор. Повёрнутое здесь — так же выйдет в программе.</div>}
     </div>
   )
+}
+
+const box = { position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', border: '1px solid var(--amber)', borderRadius: 12, padding: '8px 10px', margin: '8px 0', maxHeight: '55vh', overflowY: 'auto' }
+// открыто из заказа (заказ → ЧПУ): детали только этого заказа, материал — как выбран в заказе
+function OrderPreview({ post, ctx }) {
+  const { user } = useAuth()
+  const [man, setMan] = useState(() => getUserSettings(user).d6Man || {})
+  const onMan = next => { setMan(next); saveUserSettings({ d6Man: next }, user) }
+  const { order, mat, mats = [], setMatKey } = ctx
+  return (
+    <div style={box}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>👁 Детали заказа на станке — сразу с этими настройками</div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>№{order.order_number} · {orderTitle(order)}{mat ? ` · ${mat.name || ''}` : ''}</div>
+      {mats.length > 1 && setMatKey && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+          {mats.map(m => <button key={m.key} type="button" onClick={() => setMatKey(m.key)} style={{ padding: '5px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid ' + (m.key === mat?.key ? 'var(--blue)' : 'var(--border-md)'), background: m.key === mat?.key ? 'var(--blue-light)' : 'transparent', color: 'var(--text)', cursor: 'pointer' }}>{m.name}{m.thickness ? ` · ${m.thickness} мм` : ''}</button>)}
+        </div>
+      )}
+      {mat ? <div style={{ marginTop: 6 }}><Drill6PartsView mat={mat} order={order} post={post} man={man} onMan={onMan} maxWidth={Math.min(520, (typeof window !== 'undefined' ? window.innerWidth : 400) - 60)} /></div>
+        : <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 6 }}>В заказе нет сохранённого раскроя — сначала раскрой.</div>}
+    </div>
+  )
+}
+
+/** orderCtx — открыто из заказа: { order, mat, mats, setMatKey }; без него — выбор заказа */
+export default function Drill6LivePreview({ post, orderCtx = null }) {
+  return orderCtx?.order ? <OrderPreview post={post} ctx={orderCtx} /> : <PickerPreview post={post} />
 }

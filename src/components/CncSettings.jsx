@@ -116,7 +116,7 @@ function Fold({ id, title, summary, style, children }) {
 }
 
 // ─── А. Основные ────────────────────────────────────────────────────────────
-export function CncBasic({ cnc, onChange, isMaster = false }) {
+export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
   const { user } = useAuth()
   const labelSize = (() => { const t = getLabelTpl(user); return { w: Number(t?.w) || 0, h: Number(t?.h) || 0 } })()
   const post = activePost(cnc)
@@ -168,7 +168,7 @@ export function CncBasic({ cnc, onChange, isMaster = false }) {
         )}
         <Hint>Постпроцессор — это станок: его поле, высоты и команды. Инструменты и обработка контуров — общие для раскроечных станков.</Hint>
       </div>
-      {drill && <Drill6Beta post={post} set={set} isMaster={isMaster} used={drillPosts(cnc).some(p => p.id === post.id)} />}
+      {drill && <Drill6Beta post={post} set={set} isMaster={isMaster} used={drillPosts(cnc).some(p => p.id === post.id)} orderCtx={orderCtx} />}
       {/* выпуск программ: раскроечный станок (G-код по листам) и, по галочке, второй постпроцессор — любой из своих:
           второй раскроечный (свой G-код, например станок с присадочной головой) или шестисторонний (файлы по деталям).
           «Создать программы» в заказе выпускает оба, «Сохранить все файлы» — одним архивом, у каждого своя папка */}
@@ -386,7 +386,7 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
 // ─── Шестисторонний присадочный станок (XML) ───────────────────────────────
 // ─── β-постпроцессор шестистороннего станка (post.d6Beta) ──────────────────
 // Включает мастер-аккаунт; производству, которому выдан такой постпроцессор, видны и меняются эти настройки
-function Drill6Beta({ post, set, isMaster, used }) {
+function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
   const b = { ...D6B_DEFAULT(), ...(post.d6b || {}) }
   const setB = patch => set({ d6b: { ...b, ...patch } })
   const chk = (k, text) => (
@@ -427,7 +427,7 @@ function Drill6Beta({ post, set, isMaster, used }) {
         {!used && <span style={{ display: 'block', marginTop: 4, color: 'var(--danger)' }}>Сейчас программы этим станком не выпускаются: в карточке «Выпуск управляющих программ» ниже выберите его вторым постпроцессором.</span>}
         <span style={{ display: 'block', marginTop: 4, color: 'var(--text-hint)' }}>Каждую настройку проверьте сначала на симуляции станка, потом на детали.</span>
       </div>
-      <Drill6LivePreview post={post} />
+      <Drill6LivePreview post={post} orderCtx={orderCtx} />
 
       {chk('split', 'Сквозные отверстия — двумя глухими, сверху и снизу')}
       {b.split && (
