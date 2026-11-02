@@ -4,6 +4,8 @@ import { fetchNotices } from '../lib/notices'
 import LangPicker from '../components/LangPicker'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
+import { COUNTRY_NAMES } from '../lib/phoneCountries'
 import { useNavigate } from 'react-router-dom'
 import BottomNav from '../components/BottomNav'
 import { getUserSettings, saveUserSettings, fetchUserSettings } from '../lib/userSettings'
@@ -28,7 +30,22 @@ function MillIcon({ profile, depth }) {
 }
 
 export default function ProfilePage() {
-  const { profile, user, signOut, cabinet, setCabinet, isMaster, setContactEmail } = useAuth()
+  const { profile, user, signOut, cabinet, setCabinet, isMaster, setContactEmail, refreshProfile } = useAuth()
+  // страна и город — можно исправить, если при регистрации указали не то (по ним предлагаются производства в своём регионе)
+  const [loc, setLoc] = useState(null)          // { country, city } — правится
+  const [locErr, setLocErr] = useState('')
+  const [locBusy, setLocBusy] = useState(false)
+  const saveLoc = async () => {
+    const country = String(loc.country || '').trim(), city = String(loc.city || '').trim()
+    if (country.length < 2) { setLocErr('Укажите страну'); return }
+    if (city.length < 2) { setLocErr('Укажите город'); return }
+    setLocBusy(true); setLocErr('')
+    const { error } = await supabase.from('profiles').update({ country: country.slice(0, 60), city: city.slice(0, 80) }).eq('id', user.id)
+    setLocBusy(false)
+    if (error) { setLocErr(error.message); return }
+    await refreshProfile?.()
+    setLoc(null)
+  }
   // почта для восстановления пароля — необязательная, меняется здесь
   const contactEmail = user?.user_metadata?.contact_email || ''
   const loginEmail = /@raskoypro\.local$/i.test(String(user?.email || '')) ? '' : user?.email || ''   // вход по почте / Google — она и есть адрес аккаунта
@@ -160,6 +177,38 @@ export default function ProfilePage() {
               <span style={{ fontSize: 13 }}>{val}</span>
             </div>
           ))}
+          {/* страна и город — с кнопкой «Изменить» */}
+          <div style={{ padding: '10px 0', borderBottom: '0.5px solid var(--border)' }}>
+            {loc === null ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: 'var(--text-hint)', fontSize: 13, flex: '0 0 auto' }}>Страна, город</span>
+                <span style={{ fontSize: 13, minWidth: 0, textAlign: 'right' }}>
+                  {[profile?.country, profile?.city].filter(x => String(x || '').trim()).join(', ') || <span style={{ color: 'var(--text-hint)' }}>не указаны</span>}
+                  <span onClick={() => { setLoc({ country: profile?.country || '', city: profile?.city || '' }); setLocErr('') }} style={{ color: 'var(--blue)', marginLeft: 8, cursor: 'pointer' }}>Изменить</span>
+                </span>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <label className="label">Страна</label>
+                    <input type="text" list="profile-countries" value={loc.country} onChange={e => setLoc({ ...loc, country: e.target.value })} maxLength={60} style={{ fontSize: 14 }} />
+                    <datalist id="profile-countries">{COUNTRY_NAMES.map(c => <option key={c} value={c} />)}</datalist>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <label className="label">Город</label>
+                    <input type="text" value={loc.city} onChange={e => setLoc({ ...loc, city: e.target.value })} maxLength={80} style={{ fontSize: 14 }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>По ним в раскрое сразу предлагаются производства вашего города. Своё производство меняется в его настройках.</div>
+                {locErr && <p className="error-text" style={{ margin: '4px 0 0' }}>{locErr}</p>}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button type="button" className="btn-primary" style={{ flex: 1, padding: 8, fontSize: 14 }} disabled={locBusy} onClick={saveLoc}>{locBusy ? 'Сохраняем…' : 'Сохранить'}</button>
+                  <button type="button" className="btn-secondary" style={{ flex: 1, padding: 8, fontSize: 14 }} onClick={() => setLoc(null)}>Отмена</button>
+                </div>
+              </div>
+            )}
+          </div>
           <div style={{ padding: '10px 0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <span style={{ color: 'var(--text-hint)', fontSize: 13, flex: '0 0 auto' }}>Почта</span>
