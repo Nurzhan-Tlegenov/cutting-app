@@ -25,6 +25,21 @@ export default function Conversation({ userId, name, onClose, onSent }) {
   }
   useEffect(() => { Promise.resolve().then(load) }, [userId])   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [list])
+  // Клавиатура телефона: окно переписки — по видимой части экрана (visualViewport), иначе поле ответа уходит под клавиатуру
+  // (во встроенных браузерах страница под клавиатурой не сжимается)
+  const [vv, setVv] = useState(null)
+  useEffect(() => {
+    const v = window.visualViewport
+    if (!v) return
+    const upd = () => {
+      const kb = window.innerHeight - v.height > 80
+      setVv(kb ? { top: v.offsetTop, h: v.height } : null)
+      if (kb) requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: 'end' }))
+    }
+    upd()
+    v.addEventListener('resize', upd); v.addEventListener('scroll', upd)
+    return () => { v.removeEventListener('resize', upd); v.removeEventListener('scroll', upd) }
+  }, [])
   const addFiles = add => setFiles(fs => [...fs, ...add.filter(f => !fs.some(x => x.name === f.name && x.size === f.size))])
   // скриншот из буфера обмена: картинка становится файлом сообщения
   const onPaste = e => {
@@ -43,8 +58,8 @@ export default function Conversation({ userId, name, onClose, onSent }) {
     setText(''); setFiles([]); load(); onSent?.()
   }
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'var(--bg2)', display: 'flex', flexDirection: 'column',
-      paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <div style={{ position: 'fixed', left: 0, right: 0, ...(vv ? { top: vv.top, height: vv.h } : { top: 0, bottom: 0 }), zIndex: 2000, background: 'var(--bg2)', display: 'flex', flexDirection: 'column',
+      paddingTop: vv ? 0 : 'env(safe-area-inset-top)', paddingBottom: vv ? 0 : 'env(safe-area-inset-bottom)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border-md)' }}>
         <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, cursor: 'pointer' }}>←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
