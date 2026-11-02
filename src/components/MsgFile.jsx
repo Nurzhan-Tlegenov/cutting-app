@@ -1,8 +1,13 @@
 // Файл в сообщении: картинку (скриншот) видно сразу — миниатюра прямо в переписке, нажать — на весь экран;
 // любой файл можно скачать.
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
+import { useAuth } from '../context/AuthContext'
+import { isNestingFileName } from '../lib/nestingFile'
+import { lazyRetry } from '../lib/lazyRetry'
 import ImageZoom from './ImageZoom'
-import { messagePayload, payloadBlob } from '../lib/messages'
+import { messagePayload, payloadBlob, payloadText } from '../lib/messages'
+
+const NestingFileViewer = lazyRetry(() => import('./NestingFileViewer'))
 
 const isImageName = n => /\.(png|jpe?g|gif|webp|bmp|heic)$/i.test(n || '')
 const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 1024 ? Math.round(n / 1024) + ' КБ' : (n || 0) + ' Б')
@@ -21,6 +26,17 @@ export default function MsgFile({ m, onError, light = false }) {
   const [busy, setBusy] = useState(false)
   const [url, setUrl] = useState(() => (m?.id ? urls.get(m.id) || null : null))
   const [full, setFull] = useState(false)
+  // раскрой или его хронология (…_history.json, nesting…json) — мастер-аккаунт открывает прямо из переписки
+  const { isMaster } = useAuth()
+  const nest = isMaster && isNestingFileName(m?.file_name)
+  const [nestView, setNestView] = useState(null)
+  const openNest = async () => {
+    setBusy(true)
+    const r = await messagePayload(m.id)
+    setBusy(false)
+    if (r.error) { onError?.(r.error); return }
+    setNestView({ fileName: r.fileName, text: await payloadText(r.payload) })
+  }
   // картинка — сразу загружаем миниатюру
   useEffect(() => {
     if (!pic || url || !m?.id) return
@@ -49,8 +65,10 @@ export default function MsgFile({ m, onError, light = false }) {
           : <div style={{ width: 160, height: 100, borderRadius: 10, background: light ? 'rgba(255,255,255,.18)' : 'var(--bg2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, opacity: 0.8 }}>картинка…</div>
       ) : <div style={{ fontSize: 12, opacity: 0.85, wordBreak: 'break-all', marginBottom: 4 }}>📎 {m.file_name} · {sizeTxt(m.file_size * 0.75)}</div>}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: pic ? 5 : 0 }}>
+        {nest && <button type="button" style={{ ...btn, background: light ? 'rgba(255,255,255,.2)' : 'var(--blue)', color: '#fff', borderColor: light ? 'rgba(255,255,255,.7)' : 'var(--blue)' }} disabled={busy} onClick={openNest}>👁 Открыть раскрой</button>}
         <button type="button" style={btn} disabled={busy} onClick={download}>{busy ? '…' : '⬇ Скачать'}</button>
       </div>
+      {nestView && <Suspense fallback={null}><NestingFileViewer fileName={nestView.fileName} text={nestView.text} onClose={() => setNestView(null)} /></Suspense>}
       {full && url && <ImageZoom src={url} alt={m.file_name} onClose={() => setFull(false)} />}
     </div>
   )

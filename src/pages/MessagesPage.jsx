@@ -5,13 +5,12 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { receipt } from '../lib/messages'
-import { excludeRequest, listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, messagePayload, markSeen, isIncoming, payloadText } from '../lib/messages'
+import { excludeRequest, listMessages, sendAppeal, sendAppealFiles, REPORT_MAX_MB, sendNews, sendReply, deleteMessage, markSeen, isIncoming } from '../lib/messages'
 import { getUserSettings } from '../lib/userSettings'
 import { adminProductionOrders } from '../lib/adminApi'
 import { productionExcludeStats } from '../lib/productionApi'
 import { orderTitle } from '../lib/orderUtils'
 import { markNewsSeen, adminNewsViews } from '../lib/activity'
-import { isNestingFileName } from '../lib/nestingFile'
 import { lazyRetry } from '../lib/lazyRetry'
 const NestingFileViewer = lazyRetry(() => import('../components/NestingFileViewer'))
 import Conversation from '../components/Conversation'
@@ -78,11 +77,6 @@ export default function MessagesPage() {
   // мастер: файл раскроя из сообщения (или с компьютера) — открыть прямо здесь: карты листов и хронология с откатом
   const [nestView, setNestView] = useState(null)   // { fileName, text }
   const nestFileRef = useRef(null)
-  const openNesting = async m => {
-    const r = await messagePayload(m.id)
-    if (r.error) { setError(r.error); return }
-    setNestView({ fileName: r.fileName, text: await payloadText(r.payload) })
-  }
   const remove = async m => {
     if (!window.confirm('Удалить сообщение?')) return
     const r = await deleteMessage(m.id)
@@ -262,7 +256,6 @@ export default function MessagesPage() {
                   )
                 })()}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  {isMaster && m.file_name && isNestingFileName(m.file_name) && <button type="button" style={{ ...small, color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => openNesting(m)}>👁 Открыть раскрой</button>}
                   {excl && (() => {
                     if (!allOrders) return <span style={{ fontSize: 12, color: 'var(--text-hint)', alignSelf: 'center' }}>ищем заказ…</span>
                     if (!exclOrder) return <button type="button" style={small} onClick={() => navigate(`/all-productions?num=${encodeURIComponent(excl.num)}`)}>Заказ не найден — открыть итоги</button>
