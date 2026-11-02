@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDesktop } from '../hooks/useDesktop'
 import { d6Preview, d6bOf, panelXml } from '../lib/drill6Xml'
 import { parseDrillXml } from '../lib/drill6Parse'
+import { LABEL_MODES, partLabel } from '../lib/partLabel'
 import { Preview } from './Drill6Viewer'
 import { rawDetail, parseEdgeTypes } from '../lib/edgeCut'
 
@@ -120,6 +121,14 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
     return out
   }, [mat, post, man, T, types])
   const set = (id, v) => { const next = { ...man }; if (v) next[id] = v; else delete next[id]; onMan(next) }
+  // как подписывать детали в списке: наименование, обозначение, позиция… (как на карте раскроя), запоминается
+  const [lm, setLm] = useState(() => lsGet('d6pvLabel', 'name'))
+  const nameOf = d => { const raw = rawDetail(d); return partLabel({ label: raw.display_name || raw.name || '', prefix: raw.prefix, detailIndex: 0 }, [d], lm) || raw.name || 'Деталь' }
+  const modeSel = (
+    <select value={lm} onChange={e => { setLm(e.target.value); lsSet('d6pvLabel', e.target.value) }} style={{ width: '100%', padding: '4px 6px', fontSize: 12, marginBottom: 6 }}>
+      {LABEL_MODES.filter(([k]) => k !== 'none').map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+    </select>
+  )
   const btn = { padding: '6px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }
   const clamp = Number(b.clamp) || 2, stop = Number(b.stop) || 4
   // компьютер: слева — выбранная деталь крупно, справа — список деталей (листается сам по себе)
@@ -146,7 +155,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
             return (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>{raw.name || 'Деталь'}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{nameOf(cur.d)}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{raw.length} × {raw.width} · {HOW[o.how]}{o.flip ? ' · перевёрнута' : ''} · сверху {g.top.length} · снизу {g.bottom.length} · в торец {g.edge.length}{g.grooves.length ? ` · пазов ${g.grooves.length}` : ''}{g.edgeGrooves.length ? ` · в торце ${g.edgeGrooves.length}` : ''}</div>
                   <div style={{ flex: 1 }} />
                   <button type="button" style={btn} onClick={() => set(cur.id, { rot: (rotNow + 1) % 4, flip: o.flip })}>↻ 90°</button>
@@ -162,12 +171,13 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
           })() : <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Нет деталей с обработкой.</div>}
         </div>
         <div style={{ overflowY: 'auto', minHeight: 0, borderLeft: '0.5px solid var(--border)', paddingLeft: 8 }}>
+          {modeSel}
           <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Деталей: {list.length}</div>
           {list.map(({ id, d, pv }) => {
             const raw = rawDetail(d), on = cur?.id === id, o = pv.orient
             return (
               <div key={id} onClick={() => setSelId(id)} style={{ padding: '6px 8px', borderRadius: 8, cursor: 'pointer', marginBottom: 2, background: on ? 'var(--blue-light)' : 'transparent', border: on ? '1px solid var(--blue)' : '1px solid transparent' }}>
-                <div style={{ fontSize: 13, fontWeight: on ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{raw.name || 'Деталь'}</div>
+                <div style={{ fontSize: 13, fontWeight: on ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameOf(d)}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{raw.length} × {raw.width}{o.how === 'manual' ? ' · вручную' : ''}{o.flip ? ' · ⇅' : ''}</div>
               </div>
             )
@@ -181,6 +191,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
       <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
         Вид сверху. <span style={{ color: 'var(--amber)' }}>━ кромка (толщина)</span> · ▭ лапы · <span style={{ color: 'var(--blue)' }}>▲ упор</span> · ● отверстие сверху · ○ снизу · <span style={{ color: 'var(--danger)' }}>┃ в торец · ─ вырез (◯ — начало)</span> · <span style={{ color: 'var(--teal)' }}>─ паз, ┅ снизу</span>. {desk ? '' : 'Тап по детали — крупно.'}
       </div>
+      <div style={{ maxWidth: 260 }}>{modeSel}</div>
       {list.map(({ id, d, pv }) => {
         const o = pv.orient, raw = rawDetail(d), big = desk || open === id
         const rotNow = ((o.turn - o.base) % 4 + 4) % 4
@@ -192,7 +203,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                 {!big && <D6Scheme geo={g} clamp={clamp} stop={stop} />}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div onClick={() => setOpen(big ? null : id)} style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{raw.name || 'Деталь'}</div>
+                <div onClick={() => setOpen(big ? null : id)} style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{nameOf(d)}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{raw.length} × {raw.width} · {HOW[o.how]}{o.flip ? ' · перевёрнута' : ''}</div>
                 <div style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>сверху {g.top.length} · снизу {g.bottom.length} · в торец {g.edge.length}{g.grooves.length ? ` · пазов ${g.grooves.length}` : ''}{g.edgeGrooves.length ? ` · в торце ${g.edgeGrooves.length}` : ''}</div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
