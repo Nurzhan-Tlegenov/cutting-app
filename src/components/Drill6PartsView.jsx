@@ -3,7 +3,9 @@
 // (ручное положение — в настройках производства d6Man: id строки детали -> { rot, flip }, главнее правил).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDesktop } from '../hooks/useDesktop'
-import { d6Preview, d6bOf } from '../lib/drill6Xml'
+import { d6Preview, d6bOf, panelXml } from '../lib/drill6Xml'
+import { parseDrillXml } from '../lib/drill6Parse'
+import { Preview } from './Drill6Viewer'
 import { rawDetail, parseEdgeTypes } from '../lib/edgeCut'
 
 const HOW = { manual: 'вручную', rules: 'по правилам', auto: 'авто' }
@@ -23,7 +25,7 @@ export function D6Scheme({ geo, clamp, stop, width = 150, maxH = 80, big = false
   const fs = big ? 10 : 7
   // снаружи у торца f, на расстоянии d от края детали: точка вдоль торца в доле t
   const at = (f, t, d) => { const s = side(f), o = out(f); return [s[0] + (s[2] - s[0]) * t + o[0] * d, s[1] + (s[3] - s[1]) * t + o[1] * d] }
-  const claws = [0.2, 0.5, 0.8].map(t => at(clamp, t, big ? 9 : 6))
+  const claws = [0.25, 0.75].map(t => at(clamp, t, big ? 9 : 6))
   const cw = big ? 12 : 7, ch = big ? 7 : 4
   const horiz = clamp === 1 || clamp === 2
   const stp = at(stop, 0.5, big ? 10 : 7), so = out(stop), ss = big ? 7 : 4.5
@@ -63,6 +65,38 @@ export function D6Scheme({ geo, clamp, stop, width = 150, maxH = 80, big = false
       {geo.edge.map((p, i) => { const o = out(p.face), L = big ? Math.max(6, Math.min(30, p.depth * sc)) : 4; return <line key={'e' + i} x1={X(p.X)} y1={Y(p.Y)} x2={X(p.X) - o[0] * L} y2={Y(p.Y) - o[1] * L} stroke="var(--danger)" strokeWidth={big ? 3 : 2.2} /> })}
       {big && <text x={X(0)} y={Hv - 4} fontSize={fs} fill="var(--text-muted)">X {r1(fr.L)} × Y {r1(fr.Wm)} мм · ноль слева снизу</text>}
     </svg>
+  )
+}
+
+// Деталь крупно — тем же просмотрщиком, что XML присадки: размеры цепью / от нуля, фильтр пластей, увеличение.
+// Показывается сама программа детали (то, что уйдёт на станок), плюс лапы, упор и кромка.
+const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d } catch { return d } }
+const lsSet = (k, v) => { try { localStorage.setItem(k, v) } catch { /* без памяти */ } }
+function PartXml({ d, T, post, man, types, clamp, stop, height }) {
+  const [dims, setDims] = useState(() => { const v = lsGet('d6pvDims', 'chain'); return v === 'off' ? false : v })
+  const [band, setBand] = useState(() => lsGet('d6pvBand', 'line'))
+  const [filter, setFilter] = useState('all')
+  const [sel, setSel] = useState(null)
+  const p = useMemo(() => {
+    let r
+    try { r = panelXml(d, { T, id: 'x', post: { ...post, d6Man: man, d6All: true }, types }) } catch { r = null }
+    return r ? parseDrillXml(r.xml).panels[0] || null : null
+  }, [d, T, post, man, types])
+  if (!p) return null
+  const chip = on => ({ padding: '4px 9px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid ' + (on ? 'var(--blue)' : 'var(--border-md)'), background: on ? 'var(--blue-light)' : 'transparent', color: 'var(--text)', cursor: 'pointer' })
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: height || 320, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', margin: '4px 0' }}>
+        {[['chain', 'Цепь'], ['ord', 'От нуля'], [false, 'Без размеров']].map(([k, l]) => <button key={String(k)} type="button" style={chip(dims === k)} onClick={() => { setDims(k); lsSet('d6pvDims', k || 'off') }}>📏 {l}</button>)}
+        <span style={{ width: 6 }} />
+        {[['line', 'Кромка линией'], ['num', 'Кромка цифрой']].map(([k, l]) => <button key={k} type="button" style={chip(band === k)} onClick={() => { setBand(k); lsSet('d6pvBand', k) }}>{l}</button>)}
+        <span style={{ width: 6 }} />
+        {[['all', 'Все'], ['top', 'Сверху'], ['bottom', 'Снизу'], ['edge', 'Торцы']].map(([k, l]) => <button key={k} type="button" style={chip(filter === k)} onClick={() => setFilter(k)}>{l}</button>)}
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Preview p={p} filter={filter} sel={sel} onSel={setSel} focus={null} dims={dims} marks={{ clamp, stop, band }} />
+      </div>
+    </div>
   )
 }
 
@@ -119,8 +153,8 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                   <button type="button" style={{ ...btn, ...(o.flip ? { background: 'var(--amber-light)' } : {}) }} onClick={() => set(cur.id, { rot: 0, flip: !o.flip })}>⇅ Перевернуть</button>
                   {o.how === 'manual' && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => set(cur.id, null)}>Сброс</button>}
                 </div>
-                <div ref={viewRef} style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                  <D6Scheme geo={g} clamp={clamp} stop={stop} width={Math.max(200, vw.w)} maxH={Math.max(120, vw.h)} big />
+                <div ref={viewRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                  <PartXml d={cur.d} T={T} post={post} man={man} types={types} clamp={clamp} stop={stop} height={Math.max(160, vw.h)} />
                 </div>
                 {legend}
               </>
@@ -168,7 +202,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                 </div>
               </div>
             </div>
-            {big && <div onClick={() => !desk && setOpen(null)} style={{ marginTop: 6, cursor: desk ? 'default' : 'pointer', display: 'flex', justifyContent: 'center' }}><D6Scheme geo={g} clamp={clamp} stop={stop} width={maxWidth} maxH={Math.round(maxWidth * 0.75)} big /></div>}
+            {big && <div style={{ marginTop: 6 }}><PartXml d={d} T={T} post={post} man={man} types={types} clamp={clamp} stop={stop} height={Math.max(300, Math.round(maxWidth * 0.8))} /><button type="button" onClick={() => setOpen(null)} style={{ ...btn, marginTop: 6 }}>Свернуть</button></div>}
           </div>
         )
       })}

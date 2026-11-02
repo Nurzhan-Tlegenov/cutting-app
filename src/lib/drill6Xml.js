@@ -537,8 +537,9 @@ export const D6B_DEFAULT = () => ({
   stop: 4,               // торец, у которого упор на голове
   longX: true,           // длинной стороной вдоль станка — обязательно
   allowFlip: false,      // правила могут перевернуть деталь (обратной пластью вверх)
-  order: ['zs', 'gola', 'edgeHoles', 'edgeGroove'],
-  ruleOn: { zs: true, gola: true, edgeHoles: true, edgeGroove: true },
+  order: ['zs', 'gola', 'edgeHoles', 'edgeGroove', 'band'],
+  ruleOn: { zs: true, gola: true, edgeHoles: true, edgeGroove: true, band: false },
+  bandClamp: 'to',       // кромка: 'to' — к лапам, 'away' — от лап
   narrowW: 100,          // деталь уже — отверстия в торец к лапам, шире — от лап
   hdfMaxW: 5,            // паз в торце до этой ширины — под ХДФ (вверх), шире — под подсветку (вниз)
   // фрезеровка (этап 3)
@@ -554,7 +555,11 @@ export const D6B_RULES = {
   gola: 'Вырезы на краю (гола) и внешний радиус — подальше от лап и от упора',
   edgeHoles: 'Отверстия в торец: широкая деталь — от лап, узкая — к лапам',
   edgeGroove: 'Паз в торце — от лап; два паза — под ХДФ вверх, под подсветку вниз',
+  band: 'Кромка — к лапам или от лап',
 }
+/** Порядок правил (новые правила — в конце, даже если сохранённый порядок старый) и включено ли правило */
+export const d6bOrder = b => { const o = (b?.order || []).filter(k => D6B_RULES[k]); return [...o, ...Object.keys(D6B_RULES).filter(k => !o.includes(k))] }
+export const d6bRuleOn = (b, k) => b?.ruleOn?.[k] ?? (k !== 'band')     // новое правило «кромка» — выключено, пока не включат
 // перевернуть деталь обратной пластью вверх (как кнопка «Перевернуть» в редакторе контура)
 function flipRaw(raw, T) {
   const c = contourOf(raw) || {}
@@ -589,6 +594,13 @@ function ruleScores(geo, b) {
     edgeHoles: avg(geo.edge.map(h => (narrow ? (h.face === cl ? 1 : h.face === opp[cl] ? 0 : 0.5) : (h.face === opp[cl] ? 1 : h.face === cl ? 0 : 0.5)))),
     edgeGroove: avg(geo.edgeGrooves.map(g => (g.face === opp[cl] ? 1 : g.face === cl ? 0 : 0.5)
       + (two ? ((g.width <= (n0(b.hdfMaxW) || 5) + 0.001) === (g.Z > T / 2) ? 1 : 0) : 0))),
+    // кромка к лапам (или от лап): толще кромка — весомее
+    band: (() => {
+      const e = geo.edges || {}, tot = [1, 2, 3, 4].reduce((a, f) => a + (n0(e[f]) > 0 ? 1 + n0(e[f]) : 0), 0)
+      if (!tot) return 0
+      const near = f => (f === cl ? 1 : f === opp[cl] ? 0 : 0.5)
+      return [1, 2, 3, 4].reduce((a, f) => a + (n0(e[f]) > 0 ? (1 + n0(e[f])) * (b.bandClamp === 'away' ? 1 - near(f) : near(f)) : 0), 0) / tot
+    })(),
   }
 }
 /** Положение детали на β-станке: ручное (contour.d6) или по правилам -> { turn, flip, how: 'manual' | 'rules' | 'auto', base } */
@@ -603,7 +615,7 @@ export function d6Orient(d, { T, post = {}, types = {} }) {
     return { turn: (base + (n0(man.rot) || 0)) % 4, flip, how: 'manual', base }
   }
   if (!b?.rules) return { turn: baseOf(false), flip: false, how: 'auto', base: baseOf(false) }
-  const order = (b.order || []).filter(k => D6B_RULES[k] && b.ruleOn?.[k] !== false)
+  const order = d6bOrder(b).filter(k => d6bRuleOn(b, k))
   const W = n0(raw.width), H = n0(raw.length)
   const cands = []
   for (const flip of b.allowFlip ? [false, true] : [false]) {

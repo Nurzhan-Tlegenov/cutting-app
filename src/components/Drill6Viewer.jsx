@@ -217,7 +217,7 @@ function SelDims({ o, p, px }) {
 }
 
 /** Чертёж детали. view — { x, y, w, h } (viewBox), upp — мм на пиксель экрана (подписи и линии постоянного размера) */
-function PanelSvg({ p, filter, sel, onSel, view, upp, dims }) {
+function PanelSvg({ p, filter, sel, onSel, view, upp, dims, marks = null }) {
   const { L, W } = p
   const px = v => v * upp                              // пиксели экрана -> мм детали
   const dim = o => (!o.gen ? 0.35 : sel != null && sel !== o.i ? 0.45 : 1)
@@ -229,8 +229,10 @@ function PanelSvg({ p, filter, sel, onSel, view, upp, dims }) {
   for (const f of [1, 2, 3, 4]) if (p.edges[f] > 0) {
     const [x1, y1, x2, y2] = band[f], [ox, oy] = out[f]
     const t = px(13), cx = (x1 + x2) / 2 + ox * t, cy = (y1 + y2) / 2 + oy * t
-    bandText.push(<text key={'bt' + f} x={cx} y={cy} fontSize={px(12)} fill="var(--text)" fontWeight="600" textAnchor="middle" dominantBaseline="middle" stroke="var(--bg)" strokeWidth={px(4)} paintOrder="stroke"
-      transform={f >= 3 ? `rotate(${f === 3 ? 90 : -90} ${cx} ${cy})` : undefined}>кромка {r3(p.edges[f])}</text>)
+    // marks (β-просмотр): кромка — только толщиной, по желанию ещё и линией по торцу
+    if (marks?.band === 'line') els.push(<line key={'bl' + f} x1={x1 + ox * px(2)} y1={y1 + oy * px(2)} x2={x2 + ox * px(2)} y2={y2 + oy * px(2)} stroke="#e08a00" strokeWidth={4} vectorEffect="non-scaling-stroke" />)
+    bandText.push(<text key={'bt' + f} x={cx} y={cy} fontSize={px(12)} fill={marks ? '#e08a00' : 'var(--text)'} fontWeight="600" textAnchor="middle" dominantBaseline="middle" stroke="var(--bg)" strokeWidth={px(4)} paintOrder="stroke"
+      transform={f >= 3 ? `rotate(${f === 3 ? 90 : -90} ${cx} ${cy})` : undefined}>{marks ? r3(p.edges[f]) : `кромка ${r3(p.edges[f])}`}</text>)
   }
   for (const o of p.ops) {
     if (!pass(o, filter)) continue
@@ -275,6 +277,19 @@ function PanelSvg({ p, filter, sel, onSel, view, upp, dims }) {
       {outline
         ? <><rect x={0} y={0} width={L} height={W} fill="none" stroke="var(--border-md)" strokeWidth={1} vectorEffect="non-scaling-stroke" strokeDasharray="4 4" /><path d={outline} fill="var(--bg2)" stroke="var(--text)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /></>
         : <rect x={0} y={0} width={L} height={W} fill="var(--bg2)" stroke="var(--text)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
+      {marks && (() => {
+        // лапы (две) и упор — снаружи детали, у своих торцов
+        const sideLn = { 1: [0, 0, L, 0], 2: [0, W, L, W], 3: [L, 0, L, W], 4: [0, 0, 0, W] }, outv = { 1: [0, -1], 2: [0, 1], 3: [1, 0], 4: [-1, 0] }
+        const at = (f, t, d) => { const [a1, b1, a2, b2] = sideLn[f], [ox, oy] = outv[f]; return [a1 + (a2 - a1) * t + ox * d, b1 + (b2 - b1) * t + oy * d] }
+        const cf = marks.clamp, hz = cf === 1 || cf === 2, cw = px(16), chh = px(8)
+        const sf = marks.stop, [sx, sy] = at(sf, 0.5, px(9)), [ux, uy] = outv[sf], s2 = px(7)
+        return (
+          <g pointerEvents="none">
+            {[0.25, 0.75].map((t, i) => { const [cx, cy] = at(cf, t, px(8)); return <rect key={'cl' + i} x={cx - (hz ? cw : chh) / 2} y={cy - (hz ? chh : cw) / 2} width={hz ? cw : chh} height={hz ? chh : cw} rx={px(2)} fill="none" stroke="var(--text-muted)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /> })}
+            <polygon points={`${sx - ux * s2},${sy - uy * s2} ${sx + ux * s2 + uy * s2},${sy + uy * s2 + ux * s2} ${sx + ux * s2 - uy * s2},${sy + uy * s2 - ux * s2}`} fill="#2f6fd6" opacity="0.85" />
+          </g>
+        )
+      })()}
       {els}
       {dims && ['bottom', 'top', 'left', 'right'].map(sd => <DimAxis key={sd} side={sd} items={dimSet[sd]} p={p} px={px} mode={dims} />)}
       {bandText}
@@ -294,7 +309,7 @@ function PanelSvg({ p, filter, sel, onSel, view, upp, dims }) {
 }
 
 // Превью с увеличением: щипок двумя пальцами, колёсико мыши, кнопки; сдвиг — одним пальцем. Нажатие (без сдвига) — выбор.
-function Preview({ p, filter, sel, onSel, focus, dims }) {
+export function Preview({ p, filter, sel, onSel, focus, dims, marks = null }) {
   const wrap = useRef(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [view, setView] = useState(null)
@@ -389,7 +404,7 @@ function Preview({ p, filter, sel, onSel, focus, dims }) {
     <div ref={wrap} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerLeave={up}
       onClickCapture={e => { if (moved.current) { e.stopPropagation(); moved.current = false } }} onClick={() => onSel(null)}
       style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', touchAction: 'none', userSelect: 'none', background: 'var(--bg)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
-      {v && <PanelSvg p={p} filter={filter} sel={sel} onSel={onSel} view={v} upp={upp} dims={dims} />}
+      {v && <PanelSvg p={p} filter={filter} sel={sel} onSel={onSel} view={v} upp={upp} dims={dims} marks={marks} />}
       {/* номера торцов — по краям окна превью (как на станке: 1 — верх, 2 — низ, 3 — справа, 4 — слева) */}
       {tag(1, { top: 4, left: '50%', transform: 'translateX(-50%)' })}
       {tag(2, { bottom: 4, left: '50%', transform: 'translateX(-50%)' })}

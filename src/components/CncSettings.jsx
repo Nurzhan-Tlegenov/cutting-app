@@ -1,6 +1,6 @@
 import { LABEL_POS, getLabelTpl, saveLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
 import QrPartsEditor from './QrPartsEditor'
-import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES } from '../lib/drill6Xml'
+import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES, d6bOrder, d6bRuleOn } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import TplInput from './TplInput'
 import Drill6LivePreview from './Drill6LivePreview'
@@ -469,10 +469,11 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
           {chk('longX', 'Длинной стороной вдоль станка — обязательно')}
           {chk('allowFlip', 'Правила могут перевернуть деталь (этикетка окажется снизу)')}
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>Правила — сверху важнее:</div>
-          {(b.order || []).filter(k => D6B_RULES[k]).map((k, i, arr) => (
-            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-              <input type="checkbox" checked={b.ruleOn?.[k] !== false} onChange={e => setB({ ruleOn: { ...(b.ruleOn || {}), [k]: e.target.checked } })} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
-              <span style={{ flex: 1, fontSize: 13, opacity: b.ruleOn?.[k] === false ? 0.5 : 1 }}>{i + 1}. {D6B_RULES[k]}</span>
+          {d6bOrder(b).map((k, i, arr) => (
+            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+              <input type="checkbox" checked={d6bRuleOn(b, k)} onChange={e => setB({ ruleOn: { ...(b.ruleOn || {}), [k]: e.target.checked } })} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
+              <span style={{ flex: 1, fontSize: 13, opacity: d6bRuleOn(b, k) ? 1 : 0.5 }}>{i + 1}. {D6B_RULES[k]}</span>
+              {k === 'band' && d6bRuleOn(b, k) && <span style={{ flex: '1 1 100%', paddingLeft: 24 }}><Seg value={b.bandClamp || 'to'} options={[['to', 'Кромкой к лапам'], ['away', 'Кромкой от лап']]} onChange={v => setB({ bandClamp: v })} /></span>}
               <button type="button" disabled={i === 0} onClick={() => { const o = [...arr]; [o[i - 1], o[i]] = [o[i], o[i - 1]]; setB({ order: o }) }}
                 style={{ padding: '4px 9px', borderRadius: 8, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: i === 0 ? 'var(--text-hint)' : 'var(--text)' }}>↑</button>
             </div>
