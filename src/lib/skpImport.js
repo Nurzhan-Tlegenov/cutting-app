@@ -124,7 +124,58 @@ export function parseSkp(u8, opts = {}) {
   // Безымянный материал SketchUp («*2» — в модели «_2»): название — из его свойств (плагин kot_panel: type_16.0 = «ЛДСП»)
   // и из имени текстуры (обычно код декора: «14-10040-001_detail.jpg» → «14-10040-001»)
   const matXml = new Map()
+  // Плагин kot_panel хранит в самой модели (словарь kot_panel → smeta_params) названия материалов, которыми их видит
+  // пользователь в отчёте: ключ — hex от «p_n» + имя материала SketchUp + толщина + « мм» + «name»,
+  // значение — «Эггер древ 16 мм - ЛДСП - S=0.90м²». Имя безымянного материала «*2» в русском SketchUp — «Материал2».
+  const kotNames = new Map()
+  try {
+    const mdl = topOf(0x1f6), ent = mdl && child(mdl[0], mdl[1], 0x1388)
+    const anyVal = (o, l) => {
+      for (const [t, o2, l2] of kidsOf(o, l) || []) {
+        if (t === 0x38ad) return R.str(o2, l2)
+        if (t === 0x38a9 && l2 === 8) return dbl(o2)
+        if (t === 0x38a7 && l2 === 4) return dv.getInt32(o2, true)
+        if (t === 0x38ae) return children(o2, l2, 0x38a4).map(([o3, l3]) => anyVal(o3, l3))
+      }
+      return null
+    }
+    const b = ent && child(ent[0], ent[1], 0x7d0), r = b && child(b[0], b[1], 0x5dc), a = r && child(r[0], r[1], 0x5dd)
+    const a1 = a && child(a[0], a[1], 0x36b1), a2 = a1 && child(a1[0], a1[1], 0x36b2)
+    for (const [o3, l3] of a2 ? children(a2[0], a2[1], 0x36b3) : []) {
+      if (sval(o3, l3, 0x36b4) !== 'kot_panel') continue
+      const pp = child(o3, l3, 0x36b5); let key = null
+      for (const [t4, o4, l4] of pp ? kidsOf(pp[0], pp[1]) || [] : []) {
+        if (t4 === 0x36b6) key = R.str(o4, l4)
+        else if (t4 === 0x38a4 && key === 'smeta_params') {
+          for (const pair of anyVal(o4, l4) || []) {
+            if (!Array.isArray(pair) || typeof pair[0] !== 'string' || typeof pair[1] !== 'string' || !/^[0-9a-f]+$/i.test(pair[0])) continue
+            const k = new TextDecoder().decode(new Uint8Array(pair[0].match(/../g).map(h => parseInt(h, 16))))
+            const mm = /^p_n(.+)name$/.exec(k)
+            if (mm) kotNames.set(mm[1].trim(), pair[1])
+          }
+        }
+      }
+    }
+  } catch { /* нет словаря — названия как раньше */ }
+  // «Эггер древ 16 мм - ЛДСП - S=0.90м²» -> «ЛДСП Эггер древ 16 мм»
+  const kotName = (raw, T) => {
+    if (!kotNames.size) return ''
+    const t2 = String(Math.round(T * 10) / 10), t = t2.replace('.', ',')
+    const n = String(raw || '').replace(/^[*_]/, '')   // безымянный материал в модели — «*2» или «_2»
+    const bases = /^\d*$/.test(n) ? [`Материал${n}`, `Material${n}`] : [String(raw || '')]
+    for (const base of bases) for (const tt of new Set([t2, t])) {
+      const v = kotNames.get(`${base}${tt} мм`)
+      if (!v) continue
+      const parts = v.replace(/\s*-\s*S\s*=.*$/i, '').split(/\s+-\s+/).map(x => x.trim()).filter(Boolean)
+      if (!parts.length) continue
+      const [name, type] = parts
+      return type && !name.toLowerCase().includes(type.toLowerCase()) ? `${type} ${name}` : name
+    }
+    return ''
+  }
   const matName = (raw, T) => {
+    const kn = kotName(raw, T)
+    if (kn) return kn
     const nm = cleanMat(raw)
     if (nm && !/^\*?\d*$/.test(nm)) return nm
     const key = String(raw || '').replace(/^\*/, '_')
