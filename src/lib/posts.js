@@ -30,7 +30,23 @@ export const stageAccept = id => call('stage_accept', { p_stage: id })
 export const stageDone = id => call('stage_done', { p_stage: id })
 export const stageSkip = id => call('stage_skip', { p_stage: id })
 export const stageBack = orderId => call('stage_back', { p_order: orderId })
-export const startOrderStages = orderId => call('start_order_stages', { p_order: orderId })
+// «Пустить в работу». Объединённый раскрой распадается на свои заказы (migration_merge_launch.sql): каждый встаёт
+// на свой маршрут, а объединение остаётся только общим раскроем. -> { data, split } ; split — сколько заказов пущено
+export async function startOrderStages(orderId) {
+  const r = await call('start_order_stages', { p_order: orderId })
+  if (r.error || !(Number(r.data) < 0)) return r
+  const { data } = await supabase.from('orders').select('id').eq('merge_cut', orderId)
+  for (const x of data || []) { try { await planStages(x.id) } catch { /* пропуск постов — не обязателен */ } }
+  return { data: -Number(r.data), split: -Number(r.data), ids: (data || []).map(x => x.id) }
+}
+/** Объединение, которое уже пустили по постам (до migration_merge_launch.sql), — разделить на заказы */
+export async function splitMerged(orderId) {
+  const r = await call('merge_launch', { p_merged: orderId })
+  if (r.error) return /merge_launch/i.test(r.error) || r.missing ? { error: 'Выполните migration_merge_launch.sql в Supabase (SQL Editor) — один раз.' } : r
+  const { data } = await supabase.from('orders').select('id').eq('merge_cut', orderId)
+  for (const x of data || []) { try { await planStages(x.id) } catch { /* не обязателен */ } }
+  return r
+}
 export const orderStages = orderId => call('order_stages_of', { p_order: orderId })
 export const myPostQueue = () => call('my_post_queue')
 /** Один пост по ссылке /post/<id>: { post, queue } — только своим (сотрудник поста, владелец, начальник) */

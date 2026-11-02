@@ -27,7 +27,7 @@ import { productionStageMap, postsList, stopOrderStages } from '../lib/posts'
 import WorkerProduction from '../components/WorkerProduction'
 import ProductionBoard from '../components/ProductionBoard'
 import StageReturn from '../components/StageReturn'
-import { planStages } from '../lib/posts'
+import { planStages, splitMerged } from '../lib/posts'
 import { sendAppeal } from '../lib/messages'
 import { membersList, myWorkplaces, prodView, workPid } from '../lib/workplaces'
 import LimitsBar from '../components/LimitsBar'
@@ -171,9 +171,11 @@ export default function ProductionPage() {
     try {
       const ids = list.map(o => o.id), out = new Map()
       for (let i = 0; i < ids.length; i += 150) {
-        const { data, error: e } = await supabase.from('orders').select('id, merge_of, merged_into').in('id', ids.slice(i, i + 150))
+        // merge_cut / merge_done_at — после migration_merge_launch.sql; база без них — прежний состав полей
+        let { data, error: e } = await supabase.from('orders').select('id, merge_of, merged_into, merge_cut, merge_done_at').in('id', ids.slice(i, i + 150))
+        if (e) ({ data, error: e } = await supabase.from('orders').select('id, merge_of, merged_into').in('id', ids.slice(i, i + 150)))
         if (e) return
-        for (const x of data || []) if (x.merge_of || x.merged_into) out.set(x.id, { merge_of: x.merge_of, merged_into: x.merged_into })
+        for (const x of data || []) if (x.merge_of || x.merged_into || x.merge_cut) out.set(x.id, { merge_of: x.merge_of, merged_into: x.merged_into, merge_cut: x.merge_cut, merge_done_at: x.merge_done_at })
       }
       const into = [...new Set([...out.values()].map(x => x.merged_into).filter(Boolean))]
       if (into.length) {
@@ -255,9 +257,11 @@ export default function ProductionPage() {
   }
 
   // заказы в архиве — в своём разделе; в остальных разделах и счётчиках их нет
-  const live = orders.filter(o => !archived.has(o.id) && o.status !== 'done')
+  // объединение, пущенное в работу, распалось на заказы — в списке остаются сами заказы (у них ссылка на общий раскрой)
+  const splitDone = o => !!mergeInfo.get(o.id)?.merge_done_at
+  const live = orders.filter(o => !archived.has(o.id) && o.status !== 'done' && !splitDone(o))
   const count = { new: live.filter(o => o.status === 'new').length, work: live.filter(o => o.status === 'discussion' || o.status === 'inwork').length, done: live.filter(o => o.status === 'done').length, all: live.length, archive: archived.size }
-  const doneList = orders.filter(o => o.status === 'done').sort((a, b) => String(b.done_at || '').localeCompare(String(a.done_at || ''))).slice(0, 40)
+  const doneList = orders.filter(o => o.status === 'done' && !splitDone(o)).sort((a, b) => String(b.done_at || '').localeCompare(String(a.done_at || ''))).slice(0, 40)
   const shown = filter === 'done' ? doneList : live.filter(o => filter === 'all' || (filter === 'new' ? o.status === 'new' : o.status === 'discussion' || o.status === 'inwork'))
   // разделы экрана «Настройки»: [id, значок, название, пояснение, число]
   const activeStaff = (staff.data?.members || []).filter(m => m.active).length
@@ -502,6 +506,14 @@ export default function ProductionPage() {
                   {isOpen && <>
                   <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                     {inMerge(o) && <button type="button" style={btn('main')} onClick={() => navigate(`/orders/${mergeInfo.get(o.id).merged_into}/nesting`)}>🔗 Открыть объединение</button>}
+                    {mergeInfo.get(o.id)?.merge_cut && <button type="button" style={btn('main')} onClick={() => navigate(`/orders/${mergeInfo.get(o.id).merge_cut}/nesting`)}>🔗 Общий раскрой (карты, ЧПУ, бирки)</button>}
+                    {isMergedOrder(o) && !splitDone(o) && o.status === 'inwork' && stages[o.id] && <button type="button" disabled={busy === o.id} style={btn('main')}
+                      onClick={async () => {
+                        if (!window.confirm(`Разделить «${orderTitle(o)}» на заказы?\nЗаказы объединения встанут в работу сами — каждый по своему маршруту, с теми же отметками постов. Объединение останется только общим раскроем (карты, ЧПУ, бирки).`)) return
+                        setBusy(o.id); const r = await splitMerged(o.id); setBusy('')
+                        if (r.error) { window.alert(r.error); return }
+                        load(); loadStages()
+                      }}>⇢ Разделить на заказы</button>}
                     {isMergedOrder(o) && o.own && o.status !== 'done' && <button type="button" disabled={busy === o.id} style={{ ...btn(), color: 'var(--danger)', borderColor: 'var(--danger)' }}
                       onClick={async () => {
                         if (!window.confirm(`Расформировать объединение «${orderTitle(o)}»?\nОбъединённый раскрой удалится, заказы снова станут отдельными — каждый со своим прежним раскроем.`)) return

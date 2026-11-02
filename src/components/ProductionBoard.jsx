@@ -192,8 +192,10 @@ export default function ProductionBoard({ prodId = null, onChange }) {
     if (!window.confirm(text)) return
     setBusy(q.stage_id || 'o' + q.order_id)
     let r = {}
-    if (d.from === IDLE) { r = await startOrderStages(q.order_id); if (!r.error) await planStages(q.order_id) }
-    if (!r.error) r = await stageMove(q.order_id, to)
+    if (d.from === IDLE) { r = await startOrderStages(q.order_id); if (!r.error && !r.split) await planStages(q.order_id) }
+    // объединение распалось на заказы — на выбранный пост переносятся сами заказы
+    if (!r.error && r.split) { for (const oid of r.ids || []) { const m = await stageMove(oid, to); if (m.error) { r = m; break } } }
+    else if (!r.error) r = await stageMove(q.order_id, to)
     setBusy('')
     if (r.error) window.alert(r.error)
     else if (r.data === 'no_stage') window.alert(`Пост «${post?.name}» не добавился в маршрут заказа. Выполните migration_stage_move_new_post.sql в Supabase (SQL Editor) — один раз.`)
