@@ -16,7 +16,7 @@ import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
 import { REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
-import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, saveRemTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -82,8 +82,15 @@ function OffcutLabel({ tpl, order, mat, si, o, client = '' }) {
 // Шаблон бирки делового остатка — тот же редактор, что у бирки детали: элементы ставятся куда угодно, тянутся,
 // поворачиваются, выравниваются, заменяются картинкой. Размер — как у бирки детали (тот же рулон).
 function RemLabelSetup({ tpl, onChange, sample, previewEl = null }) {
+  const { user } = useAuth()
   const rt = remTplOf(tpl)
   const set = next => onChange({ ...tpl, remTpl: normalizeLabel({ ...next, kind: 'rem', enabled: true }) })
+  // бирка остатка, сохранённая вместе с шаблоном в «Мои шаблоны бирок», — можно взять оттуда
+  const differs = r => r && Array.isArray(r.items) && r.items.length && JSON.stringify(r.items) !== JSON.stringify(rt.items)
+  const fromSaved = getLabelSaved(user).filter(sv => differs(sv.tpl?.remTpl))
+  // копия настроек в памяти этого устройства (браузера): если бирку остатка настраивали здесь, а затёрли с другого устройства
+  const local = (() => { try { const l = JSON.parse(localStorage.getItem('appSettings:' + (user?.id || 'anon')) || '{}'); const r = l.labelRemTpl || l.labelTpl?.remTpl; return differs(r) ? r : null } catch { return null } })()
+  if (local) fromSaved.unshift({ id: 'local', name: 'с этого устройства', tpl: { remTpl: local } })
   return (
     <div className="card no-print" style={{ marginBottom: 12, padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
@@ -92,6 +99,17 @@ function RemLabelSetup({ tpl, onChange, sample, previewEl = null }) {
           style={{ padding: '5px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>↺ По образцу</button>
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 8 }}>Размер — как у бирки детали ({tpl.w}×{tpl.h} мм). Нажмите на элемент — двигайте, растягивайте, поворачивайте, меняйте шрифт или ставьте картинку; «Добавить на бирку» — новые элементы.</div>
+      {fromSaved.length > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
+          Бирка остатка есть в «Мои шаблоны бирок» — взять её оттуда:
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            {fromSaved.map(sv => (
+              <button key={sv.id} type="button" onClick={() => { if (window.confirm(`Взять бирку делового остатка из шаблона «${sv.name}»?\nТекущая раскладка бирки остатка заменится.`)) set(sv.tpl.remTpl) }}
+                style={{ padding: '5px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', cursor: 'pointer' }}>↩ {sv.name}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <LabelEditor tpl={rt} onChange={set} order={sample.order} mat={sample.mat} shared={false} rem={sample} previewEl={previewEl} />
     </div>
   )
@@ -917,7 +935,7 @@ export default function LabelsPage() {
   // номера страниц — как в PDF всех бирок (с бирками обрезков, если они включены)
   const pageNos = mat && tpl ? labelPages(order, mat, tpl, isBeamMat(mat) ? beamLabelSeq : null) : { map: new Map(), total: 0 }
   const allLabels = mat ? mat.sheets.flatMap((sh, si) => (isBeamMat(mat) ? beamLabelSeq(sh, sheetGeo(order, mat.result, sh), null).map(q => q.pi) : labelOrder(sh, sheetGeo(order, mat.result, sh), 'manual')).map(pi => ({ si, pi }))).map((q, n) => ({ ...q, n, page: pageNos.map.get(`${q.si}:${q.pi}`), pages: pageNos.total })) : []
-  const apply = t => { setTpl(t); saveLabelTpl(t, user) }   // настройки бирок на деловые остатки
+  const apply = t => { const remCh = t.remTpl !== tpl.remTpl; setTpl(t); saveLabelTpl(t, user); if (remCh) saveRemTpl(t.remTpl, user) }   // настройки бирок на деловые остатки
   // файлы маркировочного стола — тем же набором, что делает ЧПУ вместе с G-кодом
   // все бирки одним PDF: бирка — страница, страница размером с бирку
   const savePdf = async () => {
@@ -1131,7 +1149,7 @@ export function LabelSettingsPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [tpl, setTpl] = useState(() => getLabelTpl(user))
-  const applyTpl = t => { setTpl(t); saveLabelTpl(t, user) }      // бирка остатка — сохраняется сразу, как на странице бирок
+  const applyTpl = t => { const remCh = t.remTpl !== tpl.remTpl; setTpl(t); saveLabelTpl(t, user); if (remCh) saveRemTpl(t.remTpl, user) }      // бирка остатка — сохраняется сразу, отдельно от бирки детали
   const sample = useMemo(() => demoLabelSample(), [])
   const desk = useDesktop()
   const [previewEl, setPreviewEl] = useState(null)

@@ -396,8 +396,30 @@ export function resizeLabel(tpl, w, h) {
   const kx = w / tpl.w, ky = h / tpl.h, k = Math.min(kx, ky)
   return normalizeLabel({ ...tpl, w, h, items: tpl.items.map(i => ({ ...i, x: i.x * kx, y: i.y * ky, w: i.w * (isVert(i) ? ky : kx), ...(i.h ? { h: i.h * ky } : {}), ...(i.th ? { th: i.th * (isVert(i) ? kx : ky) } : {}), ...(i.size ? { size: i.size * k } : {}) })) })
 }
-export const getLabelTpl = user => { imgUser = user || imgUser; return normalizeLabel(getUserSettings(user).labelTpl) }
-export const saveLabelTpl = (tpl, user) => saveUserSettings({ labelTpl: tpl }, user)
+// Бирка делового остатка хранится отдельно (labelRemTpl), а не внутри шаблона бирки детали: раньше любое сохранение бирки
+// детали из старой копии шаблона (другая открытая страница, другое устройство, «Мои шаблоны») затирало бирку остатка.
+// labelRemTpl === null — бирка остатка «по образцу»; undefined — ещё не переносили, берём старую tpl.remTpl.
+export const getLabelTpl = user => {
+  imgUser = user || imgUser
+  const st = getUserSettings(user)
+  const t = normalizeLabel(st.labelTpl)
+  if (st.labelRemTpl === undefined) return t
+  const { remTpl: _old, ...rest } = t
+  void _old
+  return st.labelRemTpl && Array.isArray(st.labelRemTpl.items) ? normalizeLabel({ ...rest, remTpl: st.labelRemTpl }) : rest
+}
+/** Сохранить шаблон бирки детали (бирку остатка не трогает — она сохраняется saveRemTpl) */
+export const saveLabelTpl = (tpl, user) => {
+  const st = getUserSettings(user)
+  const { remTpl: _r, ...part } = tpl || {}
+  void _r
+  const patch = { labelTpl: part }
+  // перенос: бирка остатка ещё лежит внутри старого шаблона — переносим её в своё место, пока не потерялась
+  if (st.labelRemTpl === undefined) patch.labelRemTpl = st.labelTpl?.remTpl && Array.isArray(st.labelTpl.remTpl.items) ? st.labelTpl.remTpl : (tpl?.remTpl && Array.isArray(tpl.remTpl.items) ? tpl.remTpl : null)
+  return saveUserSettings(patch, user)
+}
+/** Сохранить бирку делового остатка (null — по образцу) */
+export const saveRemTpl = (rem, user) => saveUserSettings({ labelRemTpl: rem && Array.isArray(rem.items) ? rem : null }, user)
 // «Мои шаблоны бирок»: сохранённые варианты шаблона (разные размеры, раскладки) — применить в любой момент
 export const getLabelSaved = user => (Array.isArray(getUserSettings(user).labelSaved) ? getUserSettings(user).labelSaved : []).filter(s => s && s.tpl && s.id)
 export const saveLabelSaved = (list, user) => saveUserSettings({ labelSaved: list }, user)

@@ -17,6 +17,7 @@ export const ORDER_DEFAULT_COLS = [
 ]
 
 let cache = null, cacheUid = undefined, timer = null, dirty = false
+const pendingKeys = new Set()                    // какие настройки изменены на этом устройстве и ещё не записаны
 const lsKey = uid => 'appSettings:' + (uid || 'anon')
 let row = { uid: undefined, data: null }       // настройки из таблицы
 let tableOk = null                               // null — ещё не знаем, false — таблицы нет (миграция не выполнена)
@@ -59,13 +60,33 @@ export function saveUserSettings(patch, user) {
   try { localStorage.setItem(lsKey(cacheUid), JSON.stringify(cache)) } catch { /* без локальной копии */ }
   if (!cacheUid) return
   dirty = true
+  Object.keys(patch || {}).forEach(k => pendingKeys.add(k))
   clearTimeout(timer)
   const snapshot = cache
   timer = setTimeout(async () => {
     try {
       if (tableOk !== false) {
-        const { error } = await supabase.from('user_settings').upsert({ user_id: cacheUid, data: snapshot, updated_at: new Date().toISOString() })
-        if (!error) { row = { uid: cacheUid, data: snapshot }; tableOk = true; if (cache === snapshot) dirty = false; return }
+        // Пишем только то, что поменяли на этом устройстве, поверх свежих настроек с сервера. Раньше записывалась вся
+        // копия настроек этого устройства — и открытое со вчера приложение на телефоне затирало то, что настроили на
+        // компьютере (так пропадала бирка делового остатка).
+        const keys = [...pendingKeys]
+        const { data: fresh, error: e0 } = await supabase.from('user_settings').select('data').eq('user_id', cacheUid).maybeSingle()
+        if (e0 && !missing(e0)) return                                  // сеть — повторим при следующем изменении
+        const server = (!e0 && fresh?.data && typeof fresh.data === 'object') ? fresh.data : null
+        const mine = Object.fromEntries(keys.map(k => [k, k === 'orderDefaults' ? { ...(server?.orderDefaults || {}), ...(snapshot.orderDefaults || {}) } : (snapshot[k] === undefined ? null : snapshot[k])]))   // убранная настройка — null, иначе на сервере осталась бы старая
+        const data = server ? { ...server, ...mine } : snapshot
+        const { error } = await supabase.from('user_settings').upsert({ user_id: cacheUid, data, updated_at: new Date().toISOString() })
+        if (!error) {
+          row = { uid: cacheUid, data }; tableOk = true
+          keys.forEach(k => { if (cache === snapshot || cache?.[k] === snapshot[k]) pendingKeys.delete(k) })
+          if (cache === snapshot) {
+            // что поменяли на других устройствах — теперь видно и здесь
+            cache = { ...data }
+            try { localStorage.setItem(lsKey(cacheUid), JSON.stringify(cache)) } catch { /* без локальной копии */ }
+            dirty = false
+          }
+          return
+        }
         if (!missing(error)) return                 // сеть и т. п. — повторим при следующем изменении
         tableOk = false
       }
