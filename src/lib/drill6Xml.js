@@ -876,7 +876,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   const counts = { top: top.length, bottom: bottom.length, edge: edge.length, edgeGrooves: edgeGrooves.length + edgeMills.length,
     groovesTop: grooves.filter(g => g.face === fr.top).length, groovesBottom: grooves.filter(g => g.face !== fr.top).length,
     millsTop: mills.filter(m => m.face === fr.top).length, millsBottom: mills.filter(m => m.face !== fr.top).length }
-  return { xml, ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
+  return { xml, ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
 }
 
 // ─── Имена файлов и папки ───────────────────────────────────────────────────

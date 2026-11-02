@@ -2,6 +2,7 @@
 // лапы и упор. Меняются настройки постпроцессора — схема перестраивается сразу. Деталь можно повернуть и перевернуть
 // (ручное положение — в настройках производства d6Man: id строки детали -> { rot, flip }, главнее правил).
 import { useMemo, useState } from 'react'
+import { useDesktop } from '../hooks/useDesktop'
 import { d6Preview, d6bOf } from '../lib/drill6Xml'
 import { rawDetail, parseEdgeTypes } from '../lib/edgeCut'
 
@@ -10,24 +11,43 @@ const r1 = v => String(Math.round(Number(v) * 10) / 10).replace('.', ',')
 
 export function D6Scheme({ geo, clamp, stop, width = 150, maxH = 80, big = false }) {
   const { fr } = geo
-  const pad = big ? 26 : 10, sc = Math.min((width - pad * 2) / fr.L, (maxH - pad * 2) / fr.Wm)
+  // поля вокруг детали: снаружи — лапы, упор и подписи; на самой детали — только обработка и кромка
+  const pad = big ? 34 : 16, sc = Math.min((width - pad * 2) / fr.L, (maxH - pad * 2) / fr.Wm)
   const w = fr.L * sc, h = fr.Wm * sc, Wv = w + pad * 2, Hv = h + pad * 2
   const X = x => pad + x * sc, Y = y => pad + h - y * sc           // станок: вид сверху, Y вверх
   const side = f => (f === 1 ? [X(0), Y(fr.Wm), X(fr.L), Y(fr.Wm)] : f === 2 ? [X(0), Y(0), X(fr.L), Y(0)] : f === 3 ? [X(fr.L), Y(0), X(fr.L), Y(fr.Wm)] : [X(0), Y(0), X(0), Y(fr.Wm)])
   const mid = f => { const s = side(f); return [(s[0] + s[2]) / 2, (s[1] + s[3]) / 2] }
   const out = f => (f === 1 ? [0, -1] : f === 2 ? [0, 1] : f === 3 ? [1, 0] : [-1, 0])      // наружу от торца (экран)
   const path = m => [m.start, ...m.segs.map(g => g.to)].map(q => `${X(q[0])},${Y(q[1])}`).join(' ')
-  const cl = side(clamp), st = side(stop)
   const dot = big ? 3 : 1.8
-  const fs = big ? 10 : 0
+  const fs = big ? 10 : 7
+  // снаружи у торца f, на расстоянии d от края детали: точка вдоль торца в доле t
+  const at = (f, t, d) => { const s = side(f), o = out(f); return [s[0] + (s[2] - s[0]) * t + o[0] * d, s[1] + (s[3] - s[1]) * t + o[1] * d] }
+  const claws = [0.2, 0.5, 0.8].map(t => at(clamp, t, big ? 9 : 6))
+  const cw = big ? 12 : 7, ch = big ? 7 : 4
+  const horiz = clamp === 1 || clamp === 2
+  const stp = at(stop, 0.5, big ? 10 : 7), so = out(stop), ss = big ? 7 : 4.5
+  const tri = `${stp[0] - so[0] * ss},${stp[1] - so[1] * ss} ${stp[0] + so[0] * ss + so[1] * ss},${stp[1] + so[1] * ss + so[0] * ss} ${stp[0] + so[0] * ss - so[1] * ss},${stp[1] + so[1] * ss - so[0] * ss}`
+  const edges = geo.edges || {}
   return (
     <svg width={Wv} height={Hv} viewBox={`0 0 ${Wv} ${Hv}`} style={{ flex: '0 0 auto', display: 'block', maxWidth: '100%' }}>
       <rect x={X(0)} y={Y(fr.Wm)} width={w} height={h} fill="var(--bg2)" stroke="var(--text-muted)" strokeWidth="1" />
-      <line x1={cl[0]} y1={cl[1]} x2={cl[2]} y2={cl[3]} stroke="var(--amber)" strokeWidth={big ? 6 : 4} />
-      <line x1={st[0]} y1={st[1]} x2={st[2]} y2={st[3]} stroke="var(--blue)" strokeWidth={big ? 6 : 4} strokeDasharray="4 3" />
+      {/* кромка — толстая линия по торцу и её толщина снаружи */}
+      {[1, 2, 3, 4].filter(f => Number(edges[f]) > 0).map(f => {
+        const s = side(f), o = out(f), k = big ? 2 : 1.5, [mx, my] = mid(f)
+        return (
+          <g key={'ed' + f}>
+            <line x1={s[0] + o[0] * k} y1={s[1] + o[1] * k} x2={s[2] + o[0] * k} y2={s[3] + o[1] * k} stroke="var(--amber)" strokeWidth={big ? 4 : 3} />
+            <text x={mx + o[0] * (big ? 14 : 9)} y={my + o[1] * (big ? 12 : 8) + (f === 3 || f === 4 ? 3 : (f === 2 ? 4 : 2))} fontSize={fs} textAnchor="middle" fill="var(--amber)" fontWeight="600">{r1(edges[f])}</text>
+          </g>
+        )
+      })}
+      {/* лапы и упор — в стороне от детали */}
+      {claws.map(([cx, cy], i) => <rect key={'cl' + i} x={cx - (horiz ? cw : ch) / 2} y={cy - (horiz ? ch : cw) / 2} width={horiz ? cw : ch} height={horiz ? ch : cw} rx="1.5" fill="none" stroke="var(--text-muted)" strokeWidth="1.2" />)}
+      <polygon points={tri} fill="var(--blue)" opacity="0.8" />
       {(geo.edgeGrooves || []).map((g, i) => {
-        const s = side(g.face), o = out(g.face), k = 3
-        return <line key={'eg' + i} x1={X(g.line[0]) + o[0] * k} y1={Y(g.line[1]) + o[1] * k} x2={X(g.line[2]) + o[0] * k} y2={Y(g.line[3]) + o[1] * k} stroke="var(--teal)" strokeWidth="2.5" data-s={s.join()} />
+        const o = out(g.face), k = big ? 5 : 3
+        return <line key={'eg' + i} x1={X(g.line[0]) - o[0] * k} y1={Y(g.line[1]) - o[1] * k} x2={X(g.line[2]) - o[0] * k} y2={Y(g.line[3]) - o[1] * k} stroke="var(--teal)" strokeWidth="2.5" />
       })}
       {geo.grooves.map((g, i) => (g.line
         ? <line key={'g' + i} x1={X(g.line[0])} y1={Y(g.line[1])} x2={X(g.line[2])} y2={Y(g.line[3])} stroke={g.face === fr.top ? 'var(--teal)' : 'var(--text-hint)'} strokeWidth={Math.max(1.5, g.width * sc)} strokeDasharray={g.face === fr.top ? '' : '3 2'} opacity="0.85" />
@@ -41,7 +61,6 @@ export function D6Scheme({ geo, clamp, stop, width = 150, maxH = 80, big = false
       {geo.top.map((p, i) => <circle key={'t' + i} cx={X(p.X)} cy={Y(p.Y)} r={big ? Math.max(dot, p.dia * sc / 2) : dot} fill="var(--text)" />)}
       {geo.bottom.map((p, i) => <circle key={'b' + i} cx={X(p.X)} cy={Y(p.Y)} r={big ? Math.max(dot, p.dia * sc / 2) : dot} fill="none" stroke="var(--text-muted)" strokeWidth="1" />)}
       {geo.edge.map((p, i) => { const o = out(p.face), L = big ? Math.max(6, Math.min(30, p.depth * sc)) : 4; return <line key={'e' + i} x1={X(p.X)} y1={Y(p.Y)} x2={X(p.X) - o[0] * L} y2={Y(p.Y) - o[1] * L} stroke="var(--danger)" strokeWidth={big ? 3 : 2.2} /> })}
-      {big && [1, 2, 3, 4].map(f => { const [mx, my] = mid(f), o = out(f); return <text key={'f' + f} x={mx + o[0] * 15} y={my + o[1] * 13 + 3} fontSize={fs} textAnchor="middle" fill="var(--text-hint)">F{f}</text> })}
       {big && <text x={X(0)} y={Hv - 4} fontSize={fs} fill="var(--text-muted)">X {r1(fr.L)} × Y {r1(fr.Wm)} мм · ноль слева снизу</text>}
     </svg>
   )
@@ -52,7 +71,8 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
   const b = d6bOf(post) || {}
   const types = useMemo(() => parseEdgeTypes(order?.edge_types), [order])
   const T = Number(mat?.thickness) || 16
-  const [open, setOpen] = useState(null)              // крупно — id детали
+  const desk = useDesktop()                           // на компьютере — сразу крупно
+  const [open, setOpen] = useState(null)              // крупно — id детали (на телефоне)
   const list = useMemo(() => {
     const seen = new Set(), out = []
     const idx = mat?.sheets?.length ? mat.sheets.flatMap(sh => (sh.placed || []).map(p => p.detailIndex)) : (mat?.details || []).map((_, i) => i)
@@ -71,10 +91,10 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
   return (
     <>
       <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
-        Вид сверху. <span style={{ color: 'var(--amber)' }}>━ лапы</span> · <span style={{ color: 'var(--blue)' }}>┅ упор</span> · ● отверстие сверху · ○ снизу · <span style={{ color: 'var(--danger)' }}>┃ в торец · ─ вырез (◯ — начало)</span> · <span style={{ color: 'var(--teal)' }}>─ паз, ┅ снизу</span>. Тап по детали — крупно.
+        Вид сверху. <span style={{ color: 'var(--amber)' }}>━ кромка (толщина)</span> · ▭ лапы · <span style={{ color: 'var(--blue)' }}>▲ упор</span> · ● отверстие сверху · ○ снизу · <span style={{ color: 'var(--danger)' }}>┃ в торец · ─ вырез (◯ — начало)</span> · <span style={{ color: 'var(--teal)' }}>─ паз, ┅ снизу</span>. {desk ? '' : 'Тап по детали — крупно.'}
       </div>
       {list.map(({ id, d, pv }) => {
-        const o = pv.orient, raw = rawDetail(d), big = open === id
+        const o = pv.orient, raw = rawDetail(d), big = desk || open === id
         const rotNow = ((o.turn - o.base) % 4 + 4) % 4
         const g = pv.geo
         return (
@@ -94,7 +114,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                 </div>
               </div>
             </div>
-            {big && <div onClick={() => setOpen(null)} style={{ marginTop: 6, cursor: 'pointer', display: 'flex', justifyContent: 'center' }}><D6Scheme geo={g} clamp={clamp} stop={stop} width={maxWidth} maxH={Math.round(maxWidth * 0.75)} big /></div>}
+            {big && <div onClick={() => !desk && setOpen(null)} style={{ marginTop: 6, cursor: desk ? 'default' : 'pointer', display: 'flex', justifyContent: 'center' }}><D6Scheme geo={g} clamp={clamp} stop={stop} width={maxWidth} maxH={Math.round(maxWidth * 0.75)} big /></div>}
           </div>
         )
       })}
