@@ -127,7 +127,7 @@ function withFilled(res, params, final = true) {
     const usableX = res.usableX ?? (params.sheetW - params.marginL - params.marginR)
     const usableY = res.usableY ?? (params.sheetL - params.marginT - params.marginB)
     const kerf = params.kerf || 0
-    let sheets = fillConcavities({ sheets: res.sheets, details: params.details, kerf, usableX, usableY })
+    let sheets = fillConcavities({ sheets: res.sheets, details: params.details, kerf, usableX, usableY, budgetMs: final ? 600 : 120 })
     if (!sheets) {
       // вырезов не дозаполнили — но закономерный съём последнего листа по настоящим деталям всё равно пробуем
       const swept = sweepExpanded(res.sheets, params, usableX, usableY, kerf, final ? 1500 : 0)

@@ -21,6 +21,15 @@ const isRect = p => {
   const xs = new Set(p.polygon.map(q => Math.round(q.x * 10))), ys = new Set(p.polygon.map(q => Math.round(q.y * 10)))
   return xs.size === 2 && ys.size === 2
 }
+// Прямоугольник и с лишними точками на сторонах (импорт: [0,0],[266,0],[266,100],[0,100],[0,26]) — площадь контура
+// равна площади габарита. Прежний проход такие детали считает фигурными; их берёт только добор мелочи (fillSmallInNotches)
+const boxy = p => {
+  if (isRect(p)) return true
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (const q of p.polygon) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.y < y0) y0 = q.y; if (q.y > y1) y1 = q.y }
+  const box = (x1 - x0) * (y1 - y0)
+  return box > 0 && Math.abs(polyArea(p.polygon) - box) <= box * 0.002
+}
 const sizeOf = (p, kerf) => [Number(p.origX) > 0 ? Number(p.origX) : p.w - kerf, Number(p.origY) > 0 ? Number(p.origY) : p.h - kerf]
 
 function shapeOf(p, kerf) {
@@ -126,7 +135,7 @@ function tryPlace(sh, p, kerf, uX, uY) {
  * вырезы фигурных деталей) более ранних листов. Возвращает новый массив листов
  * (исходный не меняется) или null, если ничего не переложено.
  */
-export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usableY }) {
+export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usableY, budgetMs = 250 }) {
   if (!sheets?.length) return null
   // есть ли вообще вырезы/фигуры — иначе раскрой уже прямоугольный, нечего дозаполнять
   if (!sheets.some(sh => sh.placed.some(p => !isRect(p)))) return null
@@ -188,6 +197,63 @@ export function fillConcavities({ sheets, details = [], kerf = 0, usableX, usabl
       src._shapes = src._shapes.filter((_, i) => !gone.has(i))
     }
   }
+  moved += fillSmallInNotches(out, details, kerf, usableX, usableY, budgetMs)
   if (!moved) return null
-  return out.filter(sh => sh.placed.length).map(sh => { const rest = { ...sh }; delete rest._shapes; delete rest._free; delete rest._fail; return rest })
+  return out.filter(sh => sh.placed.length).map(sh => { const rest = { ...sh }; delete rest._shapes; delete rest._free; delete rest._fail; delete rest._failDom; return rest })
+}
+
+// Добор мелочи в вырезы (с версии 5.12): прежний проход перекладывает детали только на более ранние листы и на свой —
+// только с последнего, поэтому мелочь первых листов лежала рядом с пустыми вырезами (260926_Nurbol_kom_k1: 100×266 на
+// листе 1, вырезы на всех листах пустые). Здесь — каждая мелкая прямоугольная деталь не последнего листа, которая не
+// заходит в габарит фигурной детали (тогда сама она поиску не мешает): в вырез на своём листе, на более ранних или на
+// средних листах (не на последнем — он должен пустеть). Сначала самые мелкие; время ограничено (поиск по контуру с
+// дугами дорогой); не влезла меньшая — большая на этот лист не пробуется.
+function fillSmallInNotches(out, details, kerf, usableX, usableY, budgetMs) {
+  const lastI = out.length - 1
+  if (lastI < 1 || !(budgetMs > 0)) return 0
+  const deadline = Date.now() + budgetMs
+  const holed = out.map(sh => sh.stock !== 'offcut' && sh._shapes.some(s => (s.hole || 0) > 0))
+  if (!holed.some((h, i) => h && i < lastI)) return 0
+  const cand = []
+  for (let si = 0; si < lastI; si++) {
+    const src = out[si]
+    if (src.stock === 'offcut') continue
+    src.placed.forEach(p => { if (boxy(p)) { const [w, h] = sizeOf(p, kerf); cand.push({ si, p, a: w * h }) } })
+  }
+  cand.sort((a, b) => a.a - b.a)
+  let moved = 0
+  for (const c of cand) {
+    if (Date.now() > deadline) break
+    const src = out[c.si], i = src.placed.indexOf(c.p)
+    if (i < 0) continue
+    const sp = src._shapes[i]
+    const clear = src._shapes.every((s, j) => j === i || s.rect || sp.x1 <= s.x0 + 0.01 || sp.x0 >= s.x1 - 0.01 || sp.y1 <= s.y0 + 0.01 || sp.y0 >= s.y1 - 0.01)
+    if (!clear) continue
+    const p = { ...c.p, polygon: null }                      // контур с лишними точками кладётся как прямоугольник
+    if (Array.isArray(c.p.polygon)) { const [w, h] = sizeOf(c.p, kerf); p.polygon = [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }] }
+    const variants = [p]
+    if (details[p.detailIndex]?.rotatable) variants.push(turned(p))
+    const targets = [c.si, ...Array.from({ length: lastI }, (_, k) => k).filter(k => k !== c.si)]
+    let done = false
+    for (const ti of targets) {
+      if (done || Date.now() > deadline) break
+      if (!holed[ti]) continue
+      const dst = out[ti]
+      if (dst._free == null) dst._free = Math.max(0, ...dst._shapes.map(s => s.hole || 0))
+      if (c.a > dst._free) continue
+      for (const v of variants) {
+        const [vw, vh] = sizeOf(v, kerf)
+        if ((dst._failDom || []).some(([fw, fh, sm]) => fw <= vw + 0.01 && fh <= vh + 0.01 && sm === !!v.isSmall)) continue
+        if (Date.now() > deadline) break
+        const q = tryPlace(dst, v, kerf, dst.usableX ?? usableX, dst.usableY ?? usableY)
+        if (!q) { (dst._failDom || (dst._failDom = [])).push([vw, vh, !!v.isSmall]); continue }
+        dst.placed.push(q); dst._shapes.push(shapeOf(q, kerf)); dst._free = null; dst._fail = null; dst._failDom = null
+        const k = src.placed.indexOf(c.p)
+        src.placed.splice(k, 1); src._shapes.splice(k, 1); src._free = null; src._fail = null; src._failDom = null
+        moved++; done = true
+        break
+      }
+    }
+  }
+  return moved
 }
