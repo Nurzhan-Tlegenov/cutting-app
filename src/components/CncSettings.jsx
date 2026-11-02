@@ -3,6 +3,7 @@ import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import TplInput from './TplInput'
+import Drill6LivePreview from './Drill6LivePreview'
 import FileNamesSettings from './FileNamesSettings'
 import { useAuth } from '../context/AuthContext'
 import { NAME_PARTS, NAME_TPL_DEFAULT, programName, FOLDER_PARTS, FOLDER_TPL_DEFAULT, folderName } from '../lib/orderUtils'
@@ -426,6 +427,7 @@ function Drill6Beta({ post, set, isMaster, used }) {
         {!used && <span style={{ display: 'block', marginTop: 4, color: 'var(--danger)' }}>Сейчас программы этим станком не выпускаются: в карточке «Выпуск управляющих программ» ниже выберите его вторым постпроцессором.</span>}
         <span style={{ display: 'block', marginTop: 4, color: 'var(--text-hint)' }}>Каждую настройку проверьте сначала на симуляции станка, потом на детали.</span>
       </div>
+      <Drill6LivePreview post={post} />
 
       {chk('split', 'Сквозные отверстия — двумя глухими, сверху и снизу')}
       {b.split && (
