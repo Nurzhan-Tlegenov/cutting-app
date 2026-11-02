@@ -1,7 +1,7 @@
 // β-постпроцессор шестистороннего станка: детали так, как они лягут на станок, — вся присадка, пазы, вырезы,
 // лапы и упор. Меняются настройки постпроцессора — схема перестраивается сразу. Деталь можно повернуть и перевернуть
 // (ручное положение — в настройках производства d6Man: id строки детали -> { rot, flip }, главнее правил).
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDesktop } from '../hooks/useDesktop'
 import { d6Preview, d6bOf } from '../lib/drill6Xml'
 import { rawDetail, parseEdgeTypes } from '../lib/edgeCut'
@@ -67,7 +67,7 @@ export function D6Scheme({ geo, clamp, stop, width = 150, maxH = 80, big = false
 }
 
 /** Список деталей материала: схема, как ляжет на станок, и поворот / переворот. mat — { details, sheets?, thickness } */
-export default function Drill6PartsView({ mat, order, post, man = {}, onMan, maxWidth = 360 }) {
+export default function Drill6PartsView({ mat, order, post, man = {}, onMan, maxWidth = 360, split = 0 }) {
   const b = d6bOf(post) || {}
   const types = useMemo(() => parseEdgeTypes(order?.edge_types), [order])
   const T = Number(mat?.thickness) || 16
@@ -88,6 +88,60 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
   const set = (id, v) => { const next = { ...man }; if (v) next[id] = v; else delete next[id]; onMan(next) }
   const btn = { padding: '6px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }
   const clamp = Number(b.clamp) || 2, stop = Number(b.stop) || 4
+  // компьютер: слева — выбранная деталь крупно, справа — список деталей (листается сам по себе)
+  const [selId, setSelId] = useState(null)
+  const viewRef = useRef(null)
+  const [vw, setVw] = useState({ w: 500, h: 300 })
+  useEffect(() => {
+    if (!split || !viewRef.current || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => setVw({ w: Math.round(e.contentRect.width), h: Math.round(e.contentRect.height) }))
+    ro.observe(viewRef.current)
+    return () => ro.disconnect()
+  }, [split])
+  if (split) {
+    const cur = list.find(x => x.id === selId) || list[0] || null
+    const ci = cur ? list.indexOf(cur) : -1
+    const go = k => { const n = list[ci + k]; if (n) setSelId(n.id) }
+    const legend = <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Вид сверху. <span style={{ color: 'var(--amber)' }}>━ кромка (толщина)</span> · ▭ лапы · <span style={{ color: 'var(--blue)' }}>▲ упор</span> · ● сверху · ○ снизу · <span style={{ color: 'var(--danger)' }}>┃ в торец · ─ вырез (◯ начало)</span> · <span style={{ color: 'var(--teal)' }}>─ паз, ┅ снизу</span> · стрелки ↑↓ — следующая деталь</div>
+    return (
+      <div tabIndex={0} onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); go(1) } else if (e.key === 'ArrowUp') { e.preventDefault(); go(-1) } }}
+        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 260px', gap: 10, height: '100%', outline: 'none' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+          {cur ? (() => {
+            const o = cur.pv.orient, raw = rawDetail(cur.d), g = cur.pv.geo, rotNow = ((o.turn - o.base) % 4 + 4) % 4
+            return (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{raw.name || 'Деталь'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{raw.length} × {raw.width} · {HOW[o.how]}{o.flip ? ' · перевёрнута' : ''} · сверху {g.top.length} · снизу {g.bottom.length} · в торец {g.edge.length}{g.grooves.length ? ` · пазов ${g.grooves.length}` : ''}{g.edgeGrooves.length ? ` · в торце ${g.edgeGrooves.length}` : ''}</div>
+                  <div style={{ flex: 1 }} />
+                  <button type="button" style={btn} onClick={() => set(cur.id, { rot: (rotNow + 1) % 4, flip: o.flip })}>↻ 90°</button>
+                  <button type="button" style={{ ...btn, ...(o.flip ? { background: 'var(--amber-light)' } : {}) }} onClick={() => set(cur.id, { rot: 0, flip: !o.flip })}>⇅ Перевернуть</button>
+                  {o.how === 'manual' && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => set(cur.id, null)}>Сброс</button>}
+                </div>
+                <div ref={viewRef} style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  <D6Scheme geo={g} clamp={clamp} stop={stop} width={Math.max(200, vw.w)} maxH={Math.max(120, vw.h)} big />
+                </div>
+                {legend}
+              </>
+            )
+          })() : <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Нет деталей с обработкой.</div>}
+        </div>
+        <div style={{ overflowY: 'auto', minHeight: 0, borderLeft: '0.5px solid var(--border)', paddingLeft: 8 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>Деталей: {list.length}</div>
+          {list.map(({ id, d, pv }) => {
+            const raw = rawDetail(d), on = cur?.id === id, o = pv.orient
+            return (
+              <div key={id} onClick={() => setSelId(id)} style={{ padding: '6px 8px', borderRadius: 8, cursor: 'pointer', marginBottom: 2, background: on ? 'var(--blue-light)' : 'transparent', border: on ? '1px solid var(--blue)' : '1px solid transparent' }}>
+                <div style={{ fontSize: 13, fontWeight: on ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{raw.name || 'Деталь'}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{raw.length} × {raw.width}{o.how === 'manual' ? ' · вручную' : ''}{o.flip ? ' · ⇅' : ''}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
   return (
     <>
       <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
