@@ -635,6 +635,11 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                 у каждой кромки из номенклатуры К3 взяты толщина, подрезка и прифуговка — после импорта проверьте их в видах кромки бланка: размер пила считается по ним.
               </div>
             )}
+            {basis?.bought && (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--amber-light)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 10 }}>
+                Покупные изделия: {basis.bought.names.join(', ')} — их детали ({basis.bought.panels} шт.) в раскрой не идут, видны только в 3D-модели. Покупное изделие отмечается в Базисе в свойствах блока.
+              </div>
+            )}
             {basis && !basis.bare && !basis.skp && !basis.pdf && !basis.dxf && (
               <div style={{ marginBottom: 12 }}>
                 <label className="label">Лицевая сторона детали (смотрит вверх на станке) — по приоритету</label>

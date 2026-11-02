@@ -1253,10 +1253,13 @@ export function parseBasis(u8, opts = {}) {
     }
     // пользовательские свойства блока/изделия наследуют все детали внутри (своё свойство детали — главнее)
     const own = type !== TYPE_PANEL ? userProps(obj) : null
+    // «Покупное изделие» (флаг блока в Базисе, BazisFlags бит 1): детали внутри не раскраиваются — их покупают готовыми
+    const bought = ctx.bought || (type === 1005 && (Number(val(obj, 'BazisFlags', 0)) & 1) ? cleanName(val(obj, 'Name')) || 'Покупное изделие' : null)
     for (const c of (obj.c || [])) {
       if (!c.c) continue
       const list = c.k === 'Obj' ? [c] : c.c
       const sub = type === 1005 && ctx.depth > 0 ? { ...ctx, path: [...ctx.path, cleanName(val(obj, 'Name'))], depth: ctx.depth + 1 } : { ...ctx, depth: ctx.depth + 1 }
+      if (bought) sub.bought = bought
       if (anim) sub.anim = anim
       if (own) sub.user = { ...(ctx.user || {}), ...own }
       for (const cc of list) if (cc.c && cc.k === 'Obj' && kid(cc, 'Type')) walk(cc, Mo, sub)
@@ -1270,6 +1273,7 @@ export function parseBasis(u8, opts = {}) {
     // изделие — только блок верхнего уровня; панель, лежащая прямо в модели, сама себе не изделие
     // (иначе её имя становится префиксом: «БОК» с префиксом «БОК» → на карте «БОК БОК»)
     const blk = val(top, 'Type') !== TYPE_PANEL
+    // блок верхнего уровня сам может быть покупным изделием — тогда walk отметит это сам (ctx.bought)
     walk(top, M, { product: blk ? cleanName(val(top, 'Name')) : '', productDes: blk ? cleanName(val(top, 'Des')) : '', productPos: blk ? cleanName(val(top, 'ArtPos')) : '', path: [], depth: 0, user: modelUser, layer })
   }
   for (const top of model.c) {
@@ -1284,7 +1288,13 @@ export function parseBasis(u8, opts = {}) {
     walkTop(top, I, '')
   }
 
-  const srcs = panels.flatMap(p => { try { return glueLayers(p.obj, basisSrc(p)) } catch { return [null] } })
+  // детали покупных изделий — отдельно: в раскрой не идут, в 3D-модели остаются
+  const boughtPanels = panels.filter(p => p.ctx.bought), cutPanels = panels.filter(p => !p.ctx.bought)
+  const boughtNames = [...new Set(boughtPanels.map(p => p.ctx.bought))]
+  const toSrcs = list => list.flatMap(p => { try { return glueLayers(p.obj, basisSrc(p)) } catch { return [null] } })
+  const srcs = toSrcs(cutPanels)
+  let boughtItems = []
+  try { boughtItems = groupItems(toSrcs(boughtPanels).filter(Boolean).map(s => () => buildItem(s, holes, faceRule))).items } catch { boughtItems = [] }
   const { items, groups, skipped } = groupItems(srcs.map(s => () => {
     if (!s) throw new Error('панель не прочитана')
     return buildItem(s, holes, faceRule)
@@ -1329,7 +1339,7 @@ export function parseBasis(u8, opts = {}) {
   }
   const scene = {
     v: 1, order: orderName,
-    parts: items.map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
+    parts: [...items, ...boughtItems].map(it => ({ name: it.name, w: it.w, h: it.h, edges: it.edges, contour: it.contour })),
     extras, meshes, hardware,
   }
 
@@ -1340,6 +1350,7 @@ export function parseBasis(u8, opts = {}) {
     items,
     groups,
     clashes,
+    bought: boughtPanels.length ? { panels: boughtPanels.length, names: boughtNames } : null,
   }
 }
 
