@@ -1255,9 +1255,10 @@ export function parseBasis(u8, opts = {}) {
     }
     // пользовательские свойства блока/изделия наследуют все детали внутри (своё свойство детали — главнее)
     const own = type !== TYPE_PANEL ? userProps(obj) : null
-    // блок с «Не учитывать в раскрое» — все детали внутри тоже. (Бит 1 у блока — не «покупное изделие»: он стоит у обычных
-    // шкафов кухни — «Изделие»; раньше по нему пропадали целые шкафы)
-    const bought = ctx.bought || (type === 1005 && noCut ? `${cleanName(val(obj, 'Name')) || 'Блок'} (не учитывать в раскрое)` : null)
+    // «Покупное изделие» (флаг блока в Базисе, BazisFlags бит 1): детали внутри не раскраиваются — их покупают готовыми;
+    // блок с «Не учитывать в раскрое» (бит 4) — все детали внутри тоже
+    const bought = ctx.bought || (type === 1005 && (Number(val(obj, 'BazisFlags', 0)) & 1) ? cleanName(val(obj, 'Name')) || 'Покупное изделие' : null)
+      || (type === 1005 && noCut ? `${cleanName(val(obj, 'Name')) || 'Блок'} (не учитывать в раскрое)` : null)
     for (const c of (obj.c || [])) {
       if (!c.c) continue
       const list = c.k === 'Obj' ? [c] : c.c
