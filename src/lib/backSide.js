@@ -13,8 +13,10 @@ import { rotatePointTimes } from './drillGeometry'
 import { roughShapePolygons } from './trueShapeNesting'
 import { isTwoSided } from './partInfo'
 import { cornerOf } from './sheetCorner'
+import { rawDetail } from './edgeCut'
 
-export const BACK_DEFAULT = () => ({ on: false, contour: false, holes: true, grooves: true, pockets: true })
+// edge: true — программа по готовой детали с кромкой (доприсадка после кромления), false — по заготовке без кромки (сразу после раскроя)
+export const BACK_DEFAULT = () => ({ on: false, edge: false, contour: false, holes: true, grooves: true, pockets: true })
 export const backOf = post => ({ ...BACK_DEFAULT(), ...(post?.back || {}) })
 
 const n0 = v => Number(v) || 0
@@ -37,16 +39,16 @@ function backContour(c, T, o) {
 }
 
 /** Положение детали на станке для доприсадки: отражение detail -> станок и размеры по X, Y */
-function machineOf(d) {
+function machineOf(d, orient = d) {
   const W = n0(d.width), H = n0(d.length)
-  return H >= W ? { long: 'y', mw: W, mh: H, C: (x, y) => [W - x, y], turns: 0 } : { long: 'x', mw: H, mh: W, C: (x, y) => [y, x], turns: 1 }
+  return n0(orient.length) >= n0(orient.width) ? { long: 'y', mw: W, mh: H, C: (x, y) => [W - x, y], turns: 0 } : { long: 'x', mw: H, mh: W, C: (x, y) => [y, x], turns: 1 }
 }
 
 /** Угол бирки (по карте раскроя: 'bl' | 'br' | 'tl' | 'tr'), который после переворота окажется у упора станка */
-export function backMarkCorner(p, d, stop) {
+export function backMarkCorner(p, d, stop, edge = false) {
   if (!p || !d) return null
   const t = ((placedTurns(p, d) % 4) + 4) % 4, ox = n0(p.origX), oy = n0(p.origY)
-  const m = machineOf(d), c = cornerOf(stop)
+  const m = machineOf(d, edge ? rawDetail(d) : d), c = cornerOf(stop)      // положение (вдоль Y) — как у программы
   const want = [c === 'br' || c === 'tr' ? m.mw : 0, c === 'tl' || c === 'tr' ? m.mh : 0]
   for (const [k, sx, sy] of [['bl', 0, 0], ['br', ox, 0], ['tl', 0, oy], ['tr', ox, oy]]) {
     const q = rotatePointTimes(sx, sy, ox, oy, (4 - t) % 4)          // карта -> деталь
@@ -64,8 +66,8 @@ export function backParts(mat, sel) {
 }
 
 /** Одна деталь для доприсадки -> { sheet, geo, details } для buildSheetGcode (деталь в углу укладки, длиной вдоль Y) */
-export function backJob(d, T, post) {
-  const o = backOf(post), c = parse(d.contour) || {}
+export function backJob(d0, T, post) {
+  const o = backOf(post), d = o.edge ? rawDetail(d0) : d0, c = parse(d.contour) || {}   // с кромкой — готовая деталь
   const m = machineOf(d)
   // обратная сторона, вид сверху после переворота: зеркало по ширине детали + поворот (у W > H — на четверть)
   const dB = { ...d, contour: JSON.stringify(mirrorContour(backContour(c, T, o), n0(d.width))) }

@@ -284,7 +284,9 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
             </label>
             {bk.on && (
               <div style={{ marginTop: 4, paddingLeft: 4 }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Что выпускать в доприсадку:</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, marginBottom: 4 }}>Деталь на доприсадке:</div>
+                <Seg value={bk.edge ? 'edge' : 'blank'} options={[['blank', 'Без кромки'], ['edge', 'С кромкой']]} onChange={v => setBk({ edge: v === 'edge' })} />
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>Что выпускать в доприсадку:</div>
                 {row('holes', 'Отверстия в пласть (глухие)')}
                 {row('grooves', 'Пазы')}
                 {row('pockets', 'Выемки')}

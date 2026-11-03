@@ -495,8 +495,8 @@ export function finishedSize(order, d) {
 const CLIENTS = new Map()
 // доприсадка на фрезере (постпроцессор: «Выпускать программы обратной стороны»): на бирке двусторонней детали — тёмный
 // уголок; после переворота этот угол детали прижимают к упору (углу укладки станка)
-let BACK = { on: false, corner: 'bl' }
-export const setLabelBack = post => { BACK = { on: !!post?.back?.on, corner: post?.corner || 'bl' } }
+let BACK = { on: false, corner: 'bl', edge: false }
+export const setLabelBack = post => { BACK = { on: !!post?.back?.on, corner: post?.corner || 'bl', edge: !!post?.back?.edge } }
 export const setLabelClient = (orderId, name) => { if (orderId) CLIENTS.set(orderId, String(name || '').trim()) }
 export function labelInfo(order, mat, si, pi, part = null) {
   // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
@@ -549,7 +549,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
-    backCorner: BACK.on && !part && isTwoSided(d, mat.thickness) ? backMarkCorner(p, d, BACK.corner) : null,
+    backCorner: BACK.on && !part && isTwoSided(d, mat.thickness) ? backMarkCorner(p, d, BACK.corner, BACK.edge) : null,
     exit: !!part, quarter,      // деталь в положении выхода со станка (пильный центр)
   }
 }
