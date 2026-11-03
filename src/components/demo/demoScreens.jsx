@@ -530,4 +530,106 @@ function CncOut({ st }) {
   )
 }
 
-export const SCREENS = { orders: Orders, new: NewOrder, nest: Nesting, prod: Production, order: OrderView, cnc: Cnc, labels: Labels, cset: CncSet, ncorner: NestCorner, lmark: LabelMark, cout: CncOut }
+// ── Урок: склад деловых остатков ───────────────────────────────────────────
+const STOCK = [['№12', '1200 × 640', 'ЛДСП Белый 16', 'A-3'], ['№13', '820 × 410', 'ЛДСП Белый 16', 'A-3'], ['№14', '1530 × 380', 'ЛДСП Дуб сонома 16', 'B-1']]
+function Stock({ st }) {
+  return (
+    <>
+      <Head left="☰" title="Деловые остатки" />
+      <div style={{ display: 'flex', gap: 6, margin: '0 12px 8px' }}>
+        <Pill main data-demo="addBtn" style={{ flex: 1 }}>+ Внести остатки</Pill><Pill>Из Excel</Pill><Pill>⬇ В Excel</Pill>
+      </div>
+      <div style={{ display: 'flex', gap: 6, margin: '0 12px 10px' }}><Pill data-demo="scanBtn" on style={{ flex: 1 }}>📷 Сканировать бирку</Pill><Pill style={{ flex: 1 }}>🏷 Бирки</Pill></div>
+      {st.adding && (
+        <Card data-demo="addForm" className="demo-pop">
+          <div style={{ display: 'flex', gap: 6 }}><Field id="sl" label="Длина" value="1100" st={st} /><Field id="sw" label="Ширина" value="520" st={st} /><Field id="sc" label="Ячейка" value="A-4" st={st} w={70} /></div>
+          <div style={{ fontSize: 11.5, color: C.muted, marginTop: 5 }}>Материал: ЛДСП Белый 16 · бирка с QR-кодом печатается сразу</div>
+        </Card>
+      )}
+      {st.scanned && (
+        <Card className="demo-pop" style={{ border: `1px solid ${C.blue}` }}>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>Остаток №15 · 960 × 450 · ЛДСП Белый 16</div>
+          <div style={{ fontSize: 11.5, color: C.muted }}>Из раскроя «Кухня Ивановых», лист 2</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}><Field id="cell2" label="Ячейка хранения" value="A-4" st={st} /><Pill main style={{ alignSelf: 'flex-end' }}>Сохранить</Pill></div>
+        </Card>
+      )}
+      <div data-demo="stockList">
+        {STOCK.map(([n, sz, m, c], i) => (
+          <Card key={n} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: st.used && i === 0 ? 0.45 : 1 }}>
+            <div style={{ flex: 1 }}><div style={{ fontSize: 13.5, fontWeight: 500 }}>{n} · {sz}</div><div style={{ fontSize: 11.5, color: C.muted }}>{m}{st.used && i === 0 ? ' · списан в заказ «Кухня Ивановых»' : ''}</div></div>
+            <span style={{ fontSize: 14, padding: '3px 10px', borderRadius: 9, fontWeight: 600, background: 'var(--teal-light)', color: 'var(--teal)' }}>{c}</span>
+          </Card>
+        ))}
+      </div>
+    </>
+  )
+}
+function NestStock({ st }) {
+  return (
+    <>
+      <Head title="Раскрой · Кухня Ивановых" sub="Лист и обрезки" />
+      <Card>
+        <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 4 }}>Обрезки со склада</div>
+        <div style={{ fontSize: 11, color: C.hint, marginBottom: 6 }}>Раскраиваются первыми, потом — целые листы.</div>
+        <div data-demo="offRows">
+          {(st.picked ? [['1200', '640', '№12'], ['820', '410', '№13']] : []).map(([l, w, n]) => (
+            <div key={n} className="demo-pop" style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 5 }}><Field id={'o' + n} value={l} st={st} /><Field id={'w' + n} value={w} st={st} /><Field id={'q' + n} value="1" st={st} w={40} /><span style={{ fontSize: 11, color: 'var(--teal)' }}>📦 {n}</span></div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}><Pill data-demo="takeBtn" on style={{ flex: 1 }}>📦 Взять со склада</Pill><Pill>+ Обрезок</Pill></div>
+      </Card>
+      {st.picked && <div className="demo-pop" style={{ display: 'flex', gap: 10, justifyContent: 'center', margin: '0 12px', background: C.bg2, borderRadius: 10, padding: 10 }}><Sheet parts={PARTS2} w={110} /><Sheet parts={PARTS} w={130} /></div>}
+    </>
+  )
+}
+
+// ── Урок: бирки ────────────────────────────────────────────────────────────
+function LabelEdit({ st }) {
+  const items = ['Заказ', 'Заказчик (имя)', 'Наименование', 'Размер и количество', 'Кромка — списком', 'Чертёж детали', 'Карта раскроя', 'QR-код']
+  return (
+    <>
+      <Head title="Шаблон бирки" right={<Pill main data-demo="lbSave">Сохранить</Pill>} />
+      <Card data-demo="lbSize" style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}><Field id="lw" label="Ширина, мм" value="60" st={st} /><Field id="lh" label="Высота, мм" value="40" st={st} /><Pill data-demo="lbAdd" main>+ Элемент</Pill></Card>
+      <div style={{ position: 'relative', margin: '0 auto 10px', width: 300, height: 200, border: `1px solid ${C.bmd}`, borderRadius: 6, background: '#fff', color: '#222' }}>
+        <div data-demo="lbItem" style={{ position: 'absolute', left: 10, top: 8, border: '1px dashed #185FA5', padding: '1px 4px', fontSize: 13, fontWeight: 600 }}>Кухня Ивановых · Иванов</div>
+        <div style={{ position: 'absolute', left: 10, top: 40, fontSize: 22, fontWeight: 700 }}>01.02</div>
+        <div style={{ position: 'absolute', left: 10, top: 72, fontSize: 12 }}>Боковина · 720 × 560</div>
+        <svg data-demo="lbQr" viewBox="0 0 40 40" width="62" height="62" style={{ position: 'absolute', right: 10, top: 10 }}>{Array.from({ length: 64 }, (_, k) => ((k * 37) % 5 < 2 ? <rect key={k} x={(k % 8) * 5} y={Math.floor(k / 8) * 5} width="5" height="5" fill="#111" /> : null))}</svg>
+        <svg viewBox="0 0 100 50" width="120" height="60" style={{ position: 'absolute', right: 10, bottom: 10 }}><rect x="1" y="1" width="98" height="48" fill="#eee" stroke="#999" strokeWidth=".6" /><rect x="31" y="3" width="26" height="20" fill="#111" /></svg>
+      </div>
+      {st.menu && (
+        <Card className="demo-pop">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>{items.map(t => <Pill key={t} style={{ padding: '4px 9px', fontSize: 11.5 }}>+ {t}</Pill>)}</div>
+        </Card>
+      )}
+      <Card style={{ fontSize: 11.5, color: C.muted }}>Что зашито в QR-код: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{'{ZAKAZ}_{OBOZ}'}</span></Card>
+    </>
+  )
+}
+
+// ── Урок: импорт моделей ───────────────────────────────────────────────────
+const SRC = [['📊', 'Excel / CSV'], ['📐', 'Базис-Мебельщик'], ['🗄️', 'К3-Мебель'], ['🧩', 'Астра'], ['🪑', 'PRO100'], ['🏠', 'SketchUp'], ['🛠️', 'bCAD'], ['📏', 'DXF']]
+function ImportSrc() {
+  return (
+    <>
+      <Head title="Импорт деталей" />
+      <div data-demo="impList" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, margin: '0 12px' }}>
+        {SRC.map(([i, t]) => <div key={t} data-demo={t === 'Базис-Мебельщик' ? 'impBasis' : undefined} style={{ border: `0.5px solid ${C.bmd}`, borderRadius: 10, padding: '12px 8px', textAlign: 'center', fontSize: 12.5 }}><div style={{ fontSize: 22 }}>{i}</div>{t}</div>)}
+      </div>
+    </>
+  )
+}
+function ImportRes() {
+  const rows = [['Бок левый', '720 × 560', 'кромка 2 · отв. 12'], ['Бок правый', '720 × 560', 'кромка 2 · отв. 12'], ['Полка', '764 × 540', 'кромка 1 · отв. 4'], ['Задняя стенка', '796 × 716', 'ХДФ 3 · паз']]
+  return (
+    <>
+      <Head title="Импорт · Кухня.b3d" sub="Базис-Мебельщик · 4 вида деталей" />
+      <div data-demo="impRows">{rows.map(([n, sz, w]) => <Card key={n} style={{ padding: '7px 12px' }}><div style={{ fontSize: 13, fontWeight: 500 }}>{n} · {sz}</div><div style={{ fontSize: 11.5, color: C.muted }}>{w}</div></Card>)}</div>
+      <Card data-demo="impNote" style={{ background: 'var(--amber-light)', fontSize: 11.5, color: C.muted }}>Покупные изделия и «Не учитывать в раскрое»: Петли, Фасад в рамке — в раскрой не идут, видны в 3D.</Card>
+      <Card data-demo="impFace"><div style={{ fontSize: 11.5, color: C.muted, marginBottom: 4 }}>Лицевая сторона детали — по приоритету</div><div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>{['Назначена в модели', 'Больше глухих отверстий', 'Пазы и вырезы'].map(t => <Pill key={t} style={{ padding: '4px 8px', fontSize: 11 }}>{t}</Pill>)}</div></Card>
+      <div style={{ display: 'flex', gap: 6, margin: '0 12px' }}><Pill data-demo="imp3d" style={{ flex: 1 }}>🧊 3D-модель</Pill><Pill main data-demo="impAdd" style={{ flex: 1 }}>Добавить в заказ</Pill></div>
+    </>
+  )
+}
+
+export const SCREENS = { orders: Orders, new: NewOrder, nest: Nesting, prod: Production, order: OrderView, cnc: Cnc, labels: Labels, cset: CncSet, ncorner: NestCorner, lmark: LabelMark, cout: CncOut, stock: Stock, nstock: NestStock, lbedit: LabelEdit, impsrc: ImportSrc, impres: ImportRes }

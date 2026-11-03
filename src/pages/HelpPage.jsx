@@ -15,7 +15,7 @@ const DemoVideo = lazyRetry(() => import('../components/demo/DemoVideo'))
 // Под каждым — краткий план шагов, чтобы можно было прочитать, не запуская тур.
 const COURSES = [['client', '🧾'], ['production', '🏭']]
 // короткие уроки по отдельным темам — только видео
-const LESSONS = [['corner', '📐']]
+const LESSONS = [['corner', '📐'], ['stock', '📦'], ['labels', '🏷'], ['import', '📥']]
 
 export default function HelpPage() {
   const navigate = useNavigate()
