@@ -566,7 +566,9 @@ function flipRaw(raw, T) {
   const f = flipDetail({ h: n0(raw.width), contour: c, edges: {} }, T)
   const fc = f.contour
   if (fc.meta?.edges) { const e = fc.meta.edges; fc.meta = { ...fc.meta, edges: { ...e, left: e.right, right: e.left } } }
-  return { ...raw, contour: fc, edge_left: raw.edge_right, edge_right: raw.edge_left }
+  // contour — строкой, как у строки заказа: разбор контура детали (parsePolygonFromDetail) читает только JSON-строку —
+  // с объектом фигурный контур пропадал и перевёрнутая деталь выходила прямоугольником (без фрезеровки края)
+  return { ...raw, contour: JSON.stringify(fc), edge_left: raw.edge_right, edge_right: raw.edge_left }
 }
 // оценка положения по правилам: чем больше, тем лучше; по правилу — число, сравниваются по порядку правил
 function ruleScores(geo, b) {

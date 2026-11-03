@@ -239,6 +239,13 @@ export function hasCustomOutline(contour, w, h) {
   if (!Array.isArray(v) || v.length < 3) return false
   if (v.length > 4) return true
   const tol = 0.01
+  // треугольник (косой рез от угла до угла): все три вершины — в углах габарита, но это не прямоугольник
+  if (v.length === 3) return true
+  // четыре вершины — прямоугольник, только если это четыре разных угла габарита
+  if (w > 0 && h > 0) {
+    const key = p => `${Math.abs(Number(p.x) || 0) < tol ? 0 : 1}${Math.abs(Number(p.y) || 0) < tol ? 0 : 1}`
+    if (new Set(v.map(key)).size < 4) return true
+  }
   return v.some(p => {
     if ((Number(p.r) || 0) > 0) return true
     if (p.type && p.type !== 'point') return true
