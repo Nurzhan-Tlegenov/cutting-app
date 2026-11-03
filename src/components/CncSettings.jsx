@@ -1,6 +1,6 @@
 import { LABEL_POS, getLabelTpl, saveLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
 import CornerPick from './CornerPick'
-import { backOf } from '../lib/backSide'
+import { backOf, BACK_NAME_DEFAULT } from '../lib/backSide'
 import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES, d6bOrder, d6bRuleOn } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
@@ -291,6 +291,11 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
                 {row('grooves', 'Пазы')}
                 {row('pockets', 'Выемки')}
                 {row('contour', 'Контур детали')}
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 4 }}>Имя файла доприсадки — как на бирке, чтобы оператор сразу нашёл программу детали:</div>
+                <QrPartsEditor value={bk.name || BACK_NAME_DEFAULT()} exclude={['link']} onChange={v => setBk({ name: v })}
+                  preview={`${labelQr({ qr: { ...(bk.name || BACK_NAME_DEFAULT()) } }, { orderName: 'Кухня Ивановых', orderNumber: '261007_005', order: 'Кухня Ивановых', des: 'КБ.01.003', name: 'Боковина', pos: '3', prefix: 'Шкаф', materialName: 'ЛДСП Белый', length: 720, width: 560, thickness: 16, sheet: 2, num: 5, qty: 4, client: 'Иванов' })}.${post.ext || 'nc'}`} />
+                <button type="button" onClick={() => { const q = getLabelTpl(user)?.qr || {}; setBk({ name: { ...BACK_NAME_DEFAULT(), ...q, tpl: `${qrTemplateOf(q) || '{OBOZ}'}_x{KOL}` } }) }}
+                  style={{ marginTop: 6, padding: '5px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>Как код QR на бирке + количество</button>
               </div>
             )}
             <Hint>Для тех, у кого нет шестистороннего станка: детали с обработкой с двух сторон после раскроя переворачивают и доделывают на этом же фрезере. Вместе с G-кодом листов выпускается отдельная папка «Доприсадка» — по программе на каждую такую деталь (одинаковые детали — одна программа, в имени ×N — сколько раз запустить). Деталь кладут в угол укладки станка (см. выше) длинной стороной вдоль Y, обратной стороной вверх. Какой угол детали прижать к упору — показывает тёмный уголок на бирке. Отверстия в торец и сквозное в доприсадку не идут.</Hint>

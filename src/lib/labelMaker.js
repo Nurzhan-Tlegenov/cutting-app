@@ -122,6 +122,8 @@ export const QR_TOKENS = [
   ['T', 'Толщина'],
   ['KARTA', 'Номер карты'],
   ['NOM', 'Номер детали на листе'],
+  ['KOL', 'Количество'],
+  ['KLIENT', 'Заказчик'],
 ]
 export const QR_TOKEN_RE = /\{((?:S:)?[^{}:]+)(?::(-?\d+))?\}/g
 const LEGACY_TOKEN = { link: '{SSYLKA}', order: '{ZAKAZ}', des: '{OBOZ}', name: '{NAIM}', pos: '{POZ}', prefix: '{PREF}', material: '{MAT}', size: '{RAZMER}', sheet: 'L{KARTA}', num: 'N{NOM}' }
@@ -154,6 +156,8 @@ function qrValue(code, info) {
     case 'T': return info.thickness ? r1(info.thickness) : ''
     case 'KARTA': return info.sheet
     case 'NOM': return info.num
+    case 'KOL': return info.qty
+    case 'KLIENT': return info.client
     default: return ''
   }
 }

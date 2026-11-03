@@ -16,7 +16,9 @@ import { cornerOf } from './sheetCorner'
 import { rawDetail } from './edgeCut'
 
 // edge: true — программа по готовой детали с кромкой (доприсадка после кромления), false — по заготовке без кромки (сразу после раскроя)
-export const BACK_DEFAULT = () => ({ on: false, edge: false, contour: false, holes: true, grooves: true, pockets: true })
+// name — имя файла программы: шаблон тем же конструктором, что QR-код бирки ({OBOZ}, {POZ}, {NAIM}, {KOL}…)
+export const BACK_NAME_DEFAULT = () => ({ tpl: '{POZ}_{NAIM}_x{KOL}', sep: '_', latin: true })
+export const BACK_DEFAULT = () => ({ on: false, edge: false, contour: false, holes: true, grooves: true, pockets: true, name: BACK_NAME_DEFAULT() })
 export const backOf = post => ({ ...BACK_DEFAULT(), ...(post?.back || {}) })
 
 const n0 = v => Number(v) || 0
@@ -60,9 +62,9 @@ export function backMarkCorner(p, d, stop, edge = false) {
 
 /** Детали с двух сторон на выбранных листах: [{ di, detail, qty }] */
 export function backParts(mat, sel) {
-  const T = n0(mat.thickness) || 16, cnt = new Map()
-  for (const si of sel) for (const p of mat.sheets[si]?.placed || []) cnt.set(p.detailIndex, (cnt.get(p.detailIndex) || 0) + 1)
-  return [...cnt].filter(([di]) => mat.details[di] && isTwoSided(mat.details[di], T)).map(([di, qty]) => ({ di, detail: mat.details[di], qty }))
+  const T = n0(mat.thickness) || 16, cnt = new Map(), at = new Map()
+  for (const si of sel) (mat.sheets[si]?.placed || []).forEach((p, pi) => { cnt.set(p.detailIndex, (cnt.get(p.detailIndex) || 0) + 1); if (!at.has(p.detailIndex)) at.set(p.detailIndex, [si, pi]) })
+  return [...cnt].filter(([di]) => mat.details[di] && isTwoSided(mat.details[di], T)).map(([di, qty]) => ({ di, detail: mat.details[di], qty, at: at.get(di) }))
 }
 
 /** Одна деталь для доприсадки -> { sheet, geo, details } для buildSheetGcode (деталь в углу укладки, длиной вдоль Y) */

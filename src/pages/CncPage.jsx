@@ -201,11 +201,16 @@ export default function CncPage() {
   const buildBack = () => {
     const T = mat.thickness, used = new Set(), lat = post.progLatin !== false
     const base = programName(post.nameTpl, { ...nameCtx(null), latin: lat })
-    return backParts(mat, sel).map(({ detail, qty }) => {
+    const nq = backOf(post).name || {}
+    return backParts(mat, sel).map(({ detail, qty, at }) => {
       const j = backJob(detail, T, post)
       const r = buildSheetGcode({ sheet: j.sheet, geo: j.geo, details: j.details, thickness: T, cnc: { ...cnc, post: post.id }, outer: j.outer, score: false })
+      // имя — по шаблону доприсадки (конструктор, как QR бирки): по нему оператор находит программу по бирке
+      let own = ''
+      try { if (String(nq.tpl || '').trim()) own = labelQr({ qr: nq }, { ...labelInfo(order, mat, at[0], at[1]), qty }) } catch { own = '' }
+      own = String(own).replace(/[\\/:*?"<>|]+/g, '_').replace(/^[_\s.]+|[_\s.]+$/g, '')
       const title = [metaPos(detailMeta(detail)), detail.name].filter(Boolean).join('_')
-      let nm = `${base}_${lat ? safeName(title) : String(title).replace(/[\\/:*?"<>|]+/g, '_')}_x${qty}`, k = 2
+      let nm = own || `${base}_${lat ? safeName(title) : String(title).replace(/[\\/:*?"<>|]+/g, '_')}_x${qty}`, k = 2
       while (used.has(nm)) nm = `${nm}_${k++}`
       used.add(nm)
       return { name: `${nm}.${post.ext || 'nc'}`, qty, part: detail.name, text: r.text, empty: r.empty, warnings: r.warnings.filter(w => !/изнанк/.test(w)) }
