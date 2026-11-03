@@ -486,7 +486,10 @@ export default function UsersPage() {
                 </div>
               </div>
             ))}
-            {waiting.length > 0 && <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', margin: '10px 0 2px' }}>Одобрены — ждут регистрации · {waiting.length}</div>}
+            {/* одобренные, но ещё не зарегистрированные (часто — не подтвердили номер в Telegram): свёрнуто, чтобы не листать */}
+            {waiting.length > 0 && (
+            <details style={{ margin: '10px 0 2px' }}>
+            <summary style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', cursor: 'pointer' }}>Одобрены — ждут регистрации · {waiting.length}{waiting.some(r => r.messenger === 'telegram' && !r.phone_verified_at) ? ` (не подтвердили Telegram: ${waiting.filter(r => r.messenger === 'telegram' && !r.phone_verified_at).length})` : ''}</summary>
             {waiting.map(r => (
               <div key={r.id} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -502,6 +505,8 @@ export default function UsersPage() {
                 </div>
               </div>
             ))}
+            </details>
+            )}
             <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '10px 0 6px' }}>Разрешить регистрацию номеру без заявки:</div>
             <div style={{ display: 'flex', gap: 6 }}>
               <input type="tel" placeholder="+7 700 000 00 00" value={phone} onChange={e => setPhone(e.target.value)} style={{ flex: 1.2, minWidth: 0 }} />
