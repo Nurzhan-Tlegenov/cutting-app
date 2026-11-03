@@ -949,7 +949,10 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
           const L = orientFromInside(base.map(G), o.dir, sheetRect)
           const bb = bboxOf(f.outline)
           // мелкая деталь: по площади или узкая полоса — вакуум держит её плохо при любой длине
-          const area = Math.abs(signedArea(f.outline)) / 1e6, small = area <= smallArea || Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) <= smallSide
+          // площадь — самой детали: сквозные вырезы вычитаются. Рамка (большой вырез, внутри него — другие детали) по
+          // габариту большая, а материала в ней мало — вакуум держит её как мелкую, и резать её надо как мелкую (в 2 прохода)
+          const holesArea = f.cutouts.reduce((a, c) => a + (c.circle ? Math.PI * c.circle.r ** 2 : Math.abs(signedArea(c.pts))), 0)
+          const area = Math.max(0, Math.abs(signedArea(f.outline)) - holesArea) / 1e6, small = area <= smallArea || Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) <= smallSide
           const N = Math.max(1, Math.round(n0(o.passes) || 1))
           let mk                                         // проходы по контуру L (и черновому Lr)
           let Lr = null
