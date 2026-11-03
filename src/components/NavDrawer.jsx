@@ -49,6 +49,24 @@ export const Ico = ({ d, size = 20 }) => <svg viewBox="0 0 24 24" width={size} h
 const tabOf = key => { try { return JSON.parse(sessionStorage.getItem(`keep:/production#${key}`) || 'null') } catch { return null } }
 const setTabKey = (key, v) => { try { sessionStorage.setItem(`keep:/production#${key}`, JSON.stringify(v)) } catch { /* без памяти */ } }
 
+// Установленное приложение (на компьютере): кнопки браузера «Обновить» нет — маленькая кнопка ↻ справа вверху,
+// сразу под заголовком окна, видна всегда (и когда меню закрыто). В браузере — не нужна, там есть своя
+const installed = () => { try { return window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: window-controls-overlay)').matches } catch { return false } }
+const reloadApp = async () => { try { const reg = await navigator.serviceWorker?.getRegistration?.(); await reg?.update?.() } catch { /* без проверки версии */ } window.location.reload() }
+export function RefreshCorner() {
+  const [show, setShow] = useState(() => installed() && isWide())
+  useEffect(() => { const on = () => setShow(installed() && isWide()); window.addEventListener('resize', on); return () => window.removeEventListener('resize', on) }, [])
+  if (!show) return null
+  return createPortal(
+    <button type="button" aria-label="Обновить" title="Обновить страницу (F5)" onClick={reloadApp}
+      style={{ position: 'fixed', top: 6, right: 8, zIndex: 1000, width: 30, height: 30, borderRadius: 15, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--blue)',
+        boxShadow: '0 1px 4px rgba(0,0,0,.12)', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.85 }}>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></svg>
+    </button>,
+    document.body,
+  )
+}
+
 export default function NavDrawer({ notices, unread }) {
   const { user, profile, cabinet, setCabinet, isMaster } = useAuth()
   const navigate = useNavigate()
@@ -275,7 +293,7 @@ export default function NavDrawer({ notices, unread }) {
           </div>
           {/* обновить страницу (F5): в установленном приложении нет кнопки браузера — свежие данные и новая версия, если вышла */}
           <button type="button" aria-label="Обновить" title="Обновить страницу (F5)"
-            onClick={async () => { try { const reg = await navigator.serviceWorker?.getRegistration?.(); await reg?.update?.() } catch { /* без проверки версии */ } window.location.reload() }}
+            onClick={reloadApp}
             style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--blue)', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></svg>
           </button>

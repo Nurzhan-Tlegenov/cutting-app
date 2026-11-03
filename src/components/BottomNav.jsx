@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { unreadCount } from '../lib/messages'
 import { fetchNotices } from '../lib/notices'
-import NavDrawer, { setMenuBadge } from './NavDrawer'
+import NavDrawer, { setMenuBadge, RefreshCorner } from './NavDrawer'
 import { pushStatus, enablePush, syncPush, playNoticeSound } from '../lib/push'
 
 // Предложение включить уведомления на телефоне: показывается, пока не включены; «Позже» — снова через неделю
@@ -126,6 +126,7 @@ export default function BottomNav() {
   return (
     <>
     <NavDrawer notices={notices} unread={unread} />
+    <RefreshCorner />
     {pathname !== '/notices' && pathname !== '/profile' && <PushAsk />}
     {toast && (
       <div onClick={() => { setToast(null); navigate(toast.more > 0 ? '/notices' : toast.to) }}
