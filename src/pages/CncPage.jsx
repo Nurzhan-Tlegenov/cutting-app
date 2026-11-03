@@ -24,7 +24,7 @@ import Drill6Viewer from '../components/Drill6Viewer'
 import Drill6Orient from '../components/Drill6Orient'
 import { cornerShift } from '../lib/sheetCorner'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf } from '../lib/gcode'
-import { getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
+import { setLabelClient, getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
 import { orderClient } from '../lib/productionApi'
@@ -84,7 +84,7 @@ export default function CncPage() {
   const [ownerCan, setOwnerCan] = useState(false)     // производство может выбрать «чьи остатки» (свой склад)
   const [ownerAttn, setOwnerAttn] = useState(0)       // не выбрано, а программу создают — подсветить выбор
   const [clientName, setClientName] = useState('')   // имя заказчика — для названий программ и папки
-  useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }); return () => { alive = false } }, [id])
+  useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) { setLabelClient(id, r.data?.full_name); setClientName(r.data?.full_name || '') } }); return () => { alive = false } }, [id])
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useKeptState('tab', 'sheets')

@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
+import { setLabelClient, REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
 import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, saveRemTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
@@ -852,7 +852,7 @@ export default function LabelsPage() {
   const { user, cabinet } = useAuth()
   const [order, setOrder] = useState(null)
   const [clientName, setClientName] = useState('')   // имя заказчика — для названий файлов и папки
-  useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }); return () => { alive = false } }, [id])
+  useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) { setLabelClient(id, r.data?.full_name); setClientName(r.data?.full_name || '') } }); return () => { alive = false } }, [id])
   const [details, setDetails] = useState([])
   const [loading, setLoading] = useState(true)
   const [matKey, setMatKey] = useState('')

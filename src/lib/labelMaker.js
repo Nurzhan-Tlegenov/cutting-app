@@ -27,6 +27,7 @@ export { toLatin }
 // (например, значок сверла вместо слов «нижняя присадка»).
 export const LABEL_ITEMS = [
   ['order', 'Заказ', 'text'],
+  ['client', 'Заказчик (имя)', 'text'],
   ['material', 'Материал', 'text'],
   ['title', 'Обозначение + наименование', 'text'],
   ['name', 'Наименование', 'text'],
@@ -66,7 +67,6 @@ export const LABEL_ITEMS = [
   // только на бирке делового остатка
   ['remTitle', 'Заголовок (свой текст)', 'text', 'rem'],
   ['remSize', 'Размер остатка', 'text', 'rem'],
-  ['client', 'Заказчик', 'text', 'rem'],
   ['date', 'Дата', 'text', 'rem'],
   ['remText', 'Свой текст', 'text', 'rem'],
   // разметка бирки — линии, рамки, таблица (и на бирке детали, и на бирке остатка)
@@ -446,7 +446,7 @@ export function demoLabelSample() {
   ]
   const at = [[0, 0], [564, 0], [1128, 0], [0, 724], [568, 724]]
   const placed = details.map((d, i) => ({ detailIndex: i, x: at[i][0], y: at[i][1], origX: d.width, origY: d.length, label: d.name, prefix: d.prefix }))
-  const order = { id: null, order_number: '261022_001', order_name: 'Образец', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: 4 }
+  const order = { id: null, _client: 'Иванов Иван', order_number: '261022_001', order_name: 'Образец', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: 4 }
   const mat = { key: 'demo', label: 'ЛДСП Белый', name: 'ЛДСП Белый', thickness: 16, result: null, sheets: [{ placed }], details, all: details }
   return { order, mat }
 }
@@ -490,6 +490,9 @@ export function finishedSize(order, d) {
   return { l: Math.round(l * 100) / 100, w: Math.round(w * 100) / 100 }
 }
 
+// имя заказчика заказа (orders → профиль клиента): страница бирок / ЧПУ подгружает его и кладёт сюда
+const CLIENTS = new Map()
+export const setLabelClient = (orderId, name) => { if (orderId) CLIENTS.set(orderId, String(name || '').trim()) }
 export function labelInfo(order, mat, si, pi, part = null) {
   // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
   const sh = mat.sheets[si], p = part || sh.placed[pi], d = mat.details[p.detailIndex] || {}, m = detailMeta(d) || {}
@@ -527,7 +530,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
   return {
     // объединённый раскрой: «Заказ» на бирке — заказ самой детали (mergeOrders.js → meta.srcOrder)
     order: m.srcOrder?.id ? (m.srcOrder.name || m.srcOrder.number || '') : orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
-    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length,
+    num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, client: CLIENTS.get(order?.id) || order?._client || '',
     orderName: m.srcOrder?.id ? String(m.srcOrder.name || '').trim() : String(order?.order_name || '').trim(), orderNumber: m.srcOrder?.id ? (m.srcOrder.number || '') : (order?.order_number || ''),
     name: d.name || p.label || 'Деталь', des: metaDes(m), pos: metaPos(m), prefix: d.prefix || p.prefix || '',
     // толщина почти всегда уже есть в названии материала («ЛДСП белый 16 мм») — второй раз не дописываем;
