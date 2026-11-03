@@ -539,6 +539,7 @@ export const D6B_DEFAULT = () => ({
   narrowW: 100,          // деталь уже — отверстия в торец к лапам, шире — от лап
   hdfMaxW: 5,            // паз в торце до этой ширины — под ХДФ (вверх), шире — под подсветку (вниз)
   // фрезеровка (этап 3)
+  blank: 'rect',         // фигурная деталь приходит: 'rect' — прямоугольником с пилы (контур не пишется, фрезеровка края — в конце), 'shape' — уже по контуру
   edgeStart: '',         // вырез на краю (гола, радиус): '' — как в «Обработке», 'far' — начинать с конца дальше от лап, 'near' — ближе
   radiusSides: '',       // внешний радиус — со смежными сторонами: '' — нет, 0 — стороны целиком, N — по N мм
   cutEntry: '',          // врезание во внутренний вырез: '' — как в «Обработке», 'none' — нет (станок сам), 'diag' — по диагонали из угла
@@ -871,13 +872,18 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     m.segs.forEach((g, i) => lines.push(`\t\t\t\t\t\t\t<Line LineID="${i + 1}" EndX="${f3(g.to[0])}" EndY="${f3(g.to[1])}"${z3 ? ` EndZ="${f3(g.to[2])}"` : ''} Angle="${(Math.round(g.angle * 1e6) / 1e6).toFixed(6)}" />`))
     lines.push('\t\t\t\t\t\t</Lines>', '\t\t\t\t\t</Machining>')
   }
-  mills.filter(m => m.face === fr.top).forEach(mill)
+  // β «приходит прямоугольником»: фрезеровка края (косой срез, радиус, вырез на краю) — в самом конце, после всей присадки:
+  // присадка идёт по целой прямоугольной заготовке, с упором и измерением
+  const rectBlank = b6 && b6.blank !== 'shape'
+  const late = m => rectBlank && m.cat === 'edge'
+  mills.filter(m => m.face === fr.top && !late(m)).forEach(mill)
   // паз по спецификации: Z — на поверхности (Face 5 — толщина, Face 6 — 0), ToolOffset 中 (у пазов в торце обязательно)
   grooves.forEach(g => { if (g.mill) { mill(g.mill); return } const z = g.face === 5 ? T : 0; lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" ToolOffset="中"${drillAttr(g.tool)} />`) })
   edgeGrooves.forEach(g => lines.push(`\t\t\t\t\t<Machining ID="${nextId()}" Type="4" IsGenCode="2" Face="${g.face}" X="${f3(g.line[0])}" Y="${f3(g.line[1])}" Z="${f3(g.Z)}" EndX="${f3(g.line[2])}" EndY="${f3(g.line[3])}" EndZ="${f3(g.Z)}" Width="${f3(g.width)}" Depth="${f3(g.depth)}" ToolOffset="中"${drillAttr(g.tool)} />`))
   edgeMills.forEach(mill)
   bottom.forEach(hole)
-  mills.filter(m => m.face !== fr.top).forEach(mill)
+  mills.filter(m => m.face !== fr.top && !late(m)).forEach(mill)
+  mills.filter(late).forEach(mill)
 
   const faceEdge = edgesByFace(fr, W, H, et)
   const eth = v => (v > 0 ? f3(v) : '0.000000')
@@ -890,7 +896,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     '\t\t<Panels>',
     `\t\t\t<Panel ID="${esc(id)}" Name="${esc(name)}" Width="${f3(fr.Wm)}" Length="${f3(fr.L)}" Material="" Thickness="${f3(T)}" IsProduce="true" MachiningPoint="1" Type="1" Face5ID="" Face6ID="" Grain="L">`,
     // β: контур — как его сохраняет сама стойка: Radius у каждой точки (0 — прямая) и замыкающая точка = первой
-    outline ? ['\t\t\t\t<Outline>', ...(b6 ? [...outline, { ...outline[0], R: 0 }] : outline).map(p => `\t\t\t\t\t<Point X="${f3(p.X)}" Y="${f3(p.Y)}"${p.R || b6 ? ` Radius="${f3(p.R || 0)}"` : ''} />`), '\t\t\t\t</Outline>'].join('\r\n') : '\t\t\t\t<Outline></Outline>',
+    outline && !rectBlank ? ['\t\t\t\t<Outline>', ...(b6 ? [...outline, { ...outline[0], R: 0 }] : outline).map(p => `\t\t\t\t\t<Point X="${f3(p.X)}" Y="${f3(p.Y)}"${p.R || b6 ? ` Radius="${f3(p.R || 0)}"` : ''} />`), '\t\t\t\t</Outline>'].join('\r\n') : '\t\t\t\t<Outline></Outline>',
     '\t\t\t\t<Machines>',
     ...lines,
     '\t\t\t\t</Machines>',
