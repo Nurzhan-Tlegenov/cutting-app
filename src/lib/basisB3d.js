@@ -18,6 +18,7 @@ import { inflateSync, gzipSync, gunzipSync, strToU8, strFromU8 } from 'fflate'
 
 const EPS = 0.05
 const TYPE_PANEL = 4002
+const TYPE_BOUGHT = 4001            // покупное изделие
 const TYPE_FASTENER = 3001
 const TYPE_LAYER = 1002       // слой Базиса (Верх, Низ, Помещение…): папка верхнего уровня, изделия — внутри
 const TYPE_PROFILE = 2004     // профиль/погонаж: сечение (Contour), вытянутое на длину (Thickness)
@@ -1255,9 +1256,10 @@ export function parseBasis(u8, opts = {}) {
     }
     // пользовательские свойства блока/изделия наследуют все детали внутри (своё свойство детали — главнее)
     const own = type !== TYPE_PANEL ? userProps(obj) : null
-    // «Покупное изделие» (флаг блока в Базисе, BazisFlags бит 1): детали внутри не раскраиваются — их покупают готовыми;
-    // блок с «Не учитывать в раскрое» (бит 4) — все детали внутри тоже
-    const bought = ctx.bought || (type === 1005 && (Number(val(obj, 'BazisFlags', 0)) & 1) ? cleanName(val(obj, 'Name')) || 'Покупное изделие' : null)
+    // «Покупное изделие» — в Базисе это свой тип объекта (4001, а не блок 1005): детали внутри не раскраиваются, их покупают
+    // готовыми (фурнитура, фасад в рамке, корпус «для вида»). Флаг блока бит 1 — «Сборочная единица»: обычный шкаф, режется.
+    // Блок с «Не учитывать в раскрое» (бит 4) — все детали внутри тоже не режутся
+    const bought = ctx.bought || (type === TYPE_BOUGHT ? cleanName(val(obj, 'Name')) || 'Покупное изделие' : null)
       || (type === 1005 && noCut ? `${cleanName(val(obj, 'Name')) || 'Блок'} (не учитывать в раскрое)` : null)
     for (const c of (obj.c || [])) {
       if (!c.c) continue

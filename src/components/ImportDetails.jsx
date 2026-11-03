@@ -637,7 +637,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
             )}
             {basis?.bought && (
               <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--amber-light)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 10 }}>
-                Покупные изделия и «Не учитывать в раскрое»: {basis.bought.names.join(', ')} — эти детали ({basis.bought.panels} шт.) в раскрой не идут, видны только в 3D-модели. В Базисе: блок, завёрнутый в покупное изделие, или галочка «Не учитывать в раскрое» в свойствах детали или блока.
+                Покупные изделия и «Не учитывать в раскрое»: {basis.bought.names.join(', ')} — эти детали ({basis.bought.panels} шт.) в раскрой не идут, видны только в 3D-модели. В Базисе: покупное изделие или галочка «Не учитывать в раскрое» в свойствах детали или блока. Сборочные единицы режутся как обычно.
               </div>
             )}
             {basis && !basis.bare && !basis.skp && !basis.pdf && !basis.dxf && (
