@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../context/AuthContext'
+import { useNavigate } from 'react-router-dom'
 import { listConversation, sendReplyFiles, REPORT_MAX_MB } from '../lib/messages'
 import MsgFile from './MsgFile'
 
@@ -10,7 +11,10 @@ const when = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', mon
 const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 1024 ? Math.round(n / 1024) + ' КБ' : (n || 0) + ' Б')
 
 export default function Conversation({ userId, name, onClose, onSent }) {
-  const { user, profile } = useAuth()
+  const { user, profile, isMaster } = useAuth()
+  const navigate = useNavigate()
+  // обращение из заказа — мастер открывает этот заказ пользователя сразу (раскрой или бланк)
+  const go = path => { onClose?.(); navigate(path) }
   const [list, setList] = useState(null)
   const [error, setError] = useState('')
   const [text, setText] = useState('')
@@ -80,6 +84,12 @@ export default function Conversation({ userId, name, onClose, onSent }) {
               {m.title && <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 2 }}>{m.title}</div>}
               {m.body && <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body.replace(/\n?Сделать: Профиль → Заказы всех производств[^\n]*/, '')}</div>}
               <MsgFile m={m} light={mine} onError={setError} />
+              {isMaster && !mine && m.order_id && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                  <button type="button" onClick={() => go(`/orders/${m.order_id}/nesting`)} style={{ padding: '4px 10px', borderRadius: 16, fontSize: 12, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', cursor: 'pointer' }}>🧩 Раскрой заказа</button>
+                  <button type="button" onClick={() => go(`/orders/${m.order_id}`)} style={{ padding: '4px 10px', borderRadius: 16, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>📄 Заказ</button>
+                </div>
+              )}
               <div style={{ fontSize: 10.5, opacity: 0.75, textAlign: 'right', marginTop: 3 }}>
                 {when(m.created_at)}{mine && 'read_at' in m ? (m.read_at ? ' · ✓✓ прочитано' : m.delivered_at ? ' · ✓✓ дошло' : ' · ✓') : ''}
               </div>

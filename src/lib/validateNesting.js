@@ -100,7 +100,16 @@ export function validateNesting({ sheets, details, usableX, usableY, kerf, cutti
         : ` — больше рабочей зоны листа (${mm(L)}×${mm(W)})`
       push(`Потеряны детали: «${d.display_name || d.name}» — на листах ${cnt[i]} из ${need}${why}`)
     }
-    if (cnt[i] > need) push(`Лишние детали: «${d.display_name || d.name}» — на листах ${cnt[i]}, в заказе ${need}`)
+    if (cnt[i] > need) {
+      // где лежат копии и не спрятана ли лишняя под другой деталью (её тогда не видно на карте)
+      const at = []
+      sheets.forEach((sh, si) => sh.placed.forEach(p => {
+        if (p.detailIndex !== i) return
+        const under = sh.placed.find(q => q !== p && q.x <= p.x + 0.5 && q.y <= p.y + 0.5 && q.x + q.w >= p.x + p.w - 0.5 && q.y + q.h >= p.y + p.h - 0.5)
+        at.push(`лист ${si + 1}${under ? ` — спрятана под «${name(under)}»` : ''}`)
+      }))
+      push(`Лишние детали: «${d.display_name || d.name}» — на листах ${cnt[i]}, в заказе ${need} (${at.join('; ')})`)
+    }
   })
   if (unknown) push(`На листах ${unknown} дет., которых нет в заказе`)
 

@@ -265,6 +265,7 @@ export default function MessagesPage() {
                       : <button type="button" style={{ ...small, color: 'white', background: 'var(--amber)', borderColor: 'var(--amber)' }} disabled={busy} onClick={() => doExclude(m, exclOrder, true)}>Убрать из итогов</button>
                   })()}
                   {excl && exclOrder && <button type="button" style={small} onClick={() => navigate(`/all-productions?order=${exclOrder.id}`)}>Итоги производства</button>}
+                  {isMaster && m.kind !== 'order' && m.kind !== 'reply' && m.order_id && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>🧩 Раскрой заказа</button>}
                   {m.kind === 'order' && m.order_id && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => navigate(`/orders/${m.order_id}#order-chat`)}>Открыть заказ и ответить</button>}
                   {isMaster && m.order_id && !excl && m.kind !== 'order' && <button type="button" style={small} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>Открыть заказ</button>}
                   {isMaster && !mine && (m.kind === 'appeal' || m.kind === 'debug') && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => setConv({ userId: m.from_id, name: m.from_name })}>💬 Переписка и ответ</button>}
