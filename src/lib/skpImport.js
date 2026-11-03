@@ -113,6 +113,29 @@ export function parseSkp(u8, opts = {}) {
     return out
   }
 
+  // Свойства детали из окна «Свойства» динамического компонента (плагины раскроя для SketchUp): у каждого поля есть
+  // подпись _<ключ>_formlabel («Наименование», «Дополнительно»…). Берём по подписи — ключи у плагинов разные.
+  // -> { name, user: { подпись: значение } } — наименование и все заполненные текстовые поля (на бирку, как свойства Базиса)
+  const SKIP_LABEL = /^(длина|ширина|толщина|по длине|по ширине|кромк|вращать|паз|припуск|lenx|leny|lenz|x|y|z)/i
+  const formProps = (...dicts) => {
+    const out = { name: '', user: {} }
+    for (const d of dicts) {
+      if (!d || typeof d !== 'object') continue
+      for (const [k, lab] of Object.entries(d)) {
+        const m = /^_(.+)_formlabel$/.exec(k)
+        if (!m || typeof lab !== 'string') continue
+        const v = d[m[1]]
+        if (v == null || typeof v === 'object') continue
+        const sv = String(v).trim()
+        if (!sv || sv === '0' && !/наимен|дополн|примеч|коммент/i.test(lab)) continue
+        if (/наимен|название|^name$/i.test(lab)) { if (!out.name) out.name = cleanName(sv); continue }
+        if (SKIP_LABEL.test(lab.trim())) continue
+        if (/дополн|примеч|коммент|note/i.test(lab) && !(lab.trim() in out.user)) out.user[lab.trim()] = sv.slice(0, 120)
+      }
+    }
+    return out
+  }
+
   // слои и материалы
   const layers = new Map()
   { const t = topOf(0x1f8); const a0 = t && child(t[0], t[1], 0x3a98); const a = a0 && child(a0[0], a0[1], 0x3a99)
@@ -389,7 +412,8 @@ export function parseSkp(u8, opts = {}) {
         const def = defs.get(nval(o, l, 0x1967)); if (!def) continue
         const W = mul(M, tfOf(o, l))
         const iname = sval(o, l, 0x1965) || ''
-        const nm = cleanName(iname || def.name)
+        const fp = formProps(attrs(o, l).dynamic_attributes)
+        const nm = fp.name || cleanName(iname || def.name)
         const prod = product || nm
         // паз — брусок на слое «groove» (или с именем groove…): габарит в мире — в детали, куда он врезан
         if (/groove/i.test(ln) || /^groove/i.test(iname) || /^groove/i.test(def.name)) {
@@ -429,7 +453,7 @@ export function parseSkp(u8, opts = {}) {
           if (T >= 2.5 && T <= 60 && Math.min(A, B) >= 20 && T <= 0.5 * Math.min(A, B)) {
             const { F } = geomOf(def.ent)
             const fm = F.map(f => f.mat).find(Boolean)
-            plain.push({ M: W, ent: def.ent, sl, name: nm, product: depth ? prod : '', layer: ln, path, mat: matName(materials.get(bi.mat) || materials.get(fm) || '', T) })
+            plain.push({ M: W, ent: def.ent, sl, name: nm, product: depth ? prod : '', layer: ln, path, mat: matName(materials.get(bi.mat) || materials.get(fm) || '', T), user: fp.user })
             continue
           }
         }
@@ -551,7 +575,8 @@ export function parseSkp(u8, opts = {}) {
     side(pa.edge_z1, [Y0, Z0], [Y0, Z1]); side(pa.edge_z2, [Y1, Z0], [Y1, Z1])
     const material = cleanMat(pa.a06_mat_panel || pa.material || pnl.own.material)
     // название: a03_name; нет его (задняя стенка) — первое поле description плагина («ХДФ,432|,482,4,…») или имя в дереве
-    const name = cleanName(pa.a03_name) || cleanName(String(pa.description || '').split(',')[0]) || (pa.su_info ? cleanName(pnl.path[pnl.path.length - 1] || '') : '')
+    const fpp = formProps(pa, pnl.own)
+    const name = cleanName(pa.a03_name) || fpp.name || cleanName(String(pa.description || '').split(',')[0]) || (pa.su_info ? cleanName(pnl.path[pnl.path.length - 1] || '') : '')
       || (/(1_Фасад)/.test(pnl.layer) ? 'Фасад' : 'Панель')
     // позиция детали — номер в списке плагина (атрибут number: 1, 2, 3… по каждому материалу)
     const pos = pa.number != null && String(pa.number).trim() !== '' && String(pa.number) !== '0' ? String(pa.number).replace(/\.0+$/, '') : ''
@@ -591,7 +616,7 @@ export function parseSkp(u8, opts = {}) {
     makers.push(() => buildItem(keep({
       T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material, rotatable: false, anim: null,
-      meta: { src: 'sketchup', ids: [id], des: pa.itemcode || '', pos, name, product: pnl.product, productDes: '', productPos: '', path: pnl.path.slice(1), material, materialCode: pa.type_material || '' },
+      meta: { src: 'sketchup', ids: [id], des: pa.itemcode || '', pos, name, product: pnl.product, productDes: '', productPos: '', path: pnl.path.slice(1), material, materialCode: pa.type_material || '', ...(Object.keys(fpp.user).length ? { user: fpp.user, note: Object.values(fpp.user).join('; ') } : {}) },
     }), pHoles, opts.faceRule))
   }
 
@@ -717,7 +742,7 @@ export function parseSkp(u8, opts = {}) {
     makers.push(() => buildItem(keep({
       T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], warnCuts: 0, anyEnd: true,
       name, prefix: '', material: pl.mat, rotatable: false, anim: null,
-      meta: { src: 'sketchup', ids: [id], des: '', pos: '', name, product: pl.product, productDes: '', productPos: '', path: pl.path.slice(1), material: pl.mat, materialCode: '' },
+      meta: { src: 'sketchup', ids: [id], des: '', pos: '', name, product: pl.product, productDes: '', productPos: '', path: pl.path.slice(1), material: pl.mat, materialCode: '', ...(Object.keys(pl.user || {}).length ? { user: pl.user, note: Object.values(pl.user).join('; ') } : {}) },
     }), plainH.length ? [...holesW, ...plainH] : holesW, opts.faceRule))
   }
 
