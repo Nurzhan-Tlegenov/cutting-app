@@ -21,6 +21,25 @@ export default function Conversation({ userId, name, onClose, onSent }) {
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState('')
   const fileRef = useRef(null)
+  // поле ответа: само растёт под текст (до половины видимой части экрана); выше — потянуть полоску над полем
+  const taRef = useRef(null)
+  const [taH, setTaH] = useState(0)          // высота, заданная полоской (0 — по тексту)
+  const drag = useRef(null)
+  useEffect(() => {
+    const el = taRef.current
+    if (!el || taH) return
+    el.style.height = 'auto'
+    const max = Math.round((window.visualViewport?.height || window.innerHeight) * 0.5)
+    el.style.height = Math.min(Math.max(el.scrollHeight + 2, 44), max) + 'px'
+  }, [text, taH])
+  const gripDown = e => { e.preventDefault(); drag.current = { y: e.clientY, h: taRef.current?.offsetHeight || 60 }; e.currentTarget.setPointerCapture?.(e.pointerId) }
+  const gripMove = e => {
+    if (!drag.current) return
+    const max = Math.round((window.visualViewport?.height || window.innerHeight) * 0.8)
+    const h = Math.max(44, Math.min(max, drag.current.h + (drag.current.y - e.clientY)))
+    setTaH(h); if (taRef.current) taRef.current.style.height = h + 'px'
+  }
+  const gripUp = () => { drag.current = null }
   const endRef = useRef(null)
   const load = async () => {
     const r = await listConversation(userId)
@@ -59,7 +78,7 @@ export default function Conversation({ userId, name, onClose, onSent }) {
     const r = await sendReplyFiles(user, profile, userId, body, files, name, (k, n) => setBusy(n > 1 ? `${Math.round((k / n) * 100)}%` : '…'))
     setBusy('')
     if (r.error) { setError(r.error); return }
-    setText(''); setFiles([]); load(); onSent?.()
+    setText(''); setFiles([]); setTaH(0); load(); onSent?.()
   }
   return createPortal(
     <div style={{ position: 'fixed', left: 0, right: 0, ...(vv ? { top: vv.top, height: vv.h } : { top: 0, bottom: 0 }), zIndex: 2000, background: 'var(--bg2)', display: 'flex', flexDirection: 'column',
@@ -98,7 +117,12 @@ export default function Conversation({ userId, name, onClose, onSent }) {
         })}
         <div ref={endRef} />
       </div>
-      <div style={{ background: 'var(--bg)', borderTop: '0.5px solid var(--border-md)', padding: '8px 10px' }}>
+      <div style={{ background: 'var(--bg)', borderTop: '0.5px solid var(--border-md)', padding: '0 10px 8px' }}>
+        {/* полоска: потянуть вверх — поле ответа выше (прочитать длинный текст), вниз — ниже; двойной тап — снова по тексту */}
+        <div onPointerDown={gripDown} onPointerMove={gripMove} onPointerUp={gripUp} onPointerCancel={gripUp} onDoubleClick={() => setTaH(0)}
+          title="Потяните вверх — поле ответа выше" style={{ height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'ns-resize', touchAction: 'none' }}>
+          <span style={{ width: 48, height: 5, borderRadius: 3, background: 'var(--border-md)' }} />
+        </div>
         <div style={{ maxWidth: 760, margin: '0 auto' }}>
           {error && <p className="error-text" style={{ margin: '0 0 6px' }}>{error}</p>}
           {files.length > 0 && (
@@ -116,8 +140,8 @@ export default function Conversation({ userId, name, onClose, onSent }) {
             <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={e => { const add = [...(e.target.files || [])]; e.target.value = ''; addFiles(add) }} />
             <button type="button" title={`Прикрепить файл — скриншот, модель… (до ${REPORT_MAX_MB} МБ)`} onClick={() => fileRef.current?.click()} disabled={!!busy}
               style={{ flex: '0 0 auto', width: 40, height: 40, borderRadius: 20, border: '0.5px solid var(--border-md)', background: 'var(--bg2)', fontSize: 18, padding: 0, cursor: 'pointer' }}>📎</button>
-            <textarea value={text} onChange={e => setText(e.target.value)} onPaste={onPaste} rows={2} placeholder="Ответ… (скриншот можно вставить: Ctrl+V)"
-              style={{ flex: 1, minWidth: 0, fontSize: 14, resize: 'none', padding: '8px 10px' }} />
+            <textarea ref={taRef} value={text} onChange={e => setText(e.target.value)} onPaste={onPaste} rows={2} placeholder="Ответ… (скриншот можно вставить: Ctrl+V)"
+              style={{ flex: 1, minWidth: 0, fontSize: 14, resize: 'none', padding: '8px 10px', lineHeight: 1.4, overflowY: 'auto' }} />
             <button type="button" onClick={send} disabled={!!busy || (!text.trim() && !files.length)}
               style={{ flex: '0 0 auto', height: 40, padding: '0 14px', borderRadius: 20, border: 'none', background: 'var(--blue)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', opacity: !text.trim() && !files.length ? 0.5 : 1 }}>
               {busy ? busy : 'Отправить'}
