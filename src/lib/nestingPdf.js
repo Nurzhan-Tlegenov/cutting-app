@@ -359,6 +359,15 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
     }
   }
   ctx.strokeStyle = INK; ctx.lineWidth = mm(0.4); ctx.strokeRect(X(0), Y(geo.sheetL), mm(geo.sheetW * s), mm(geo.sheetL * s))
+  // угол укладки (ноль программы): точка и стрелки осей вдоль краёв листа
+  {
+    const c = geo.corner || 'bl', right = c === 'tr' || c === 'br', top = c === 'tl' || c === 'tr'
+    const cx = right ? geo.sheetW : 0, cy = top ? geo.sheetL : 0, len = Math.min(geo.sheetW, geo.sheetL) * 0.08
+    const ax = right ? -len : len, ay = top ? -len : len
+    ctx.save(); ctx.strokeStyle = '#185FA5'; ctx.fillStyle = '#185FA5'; ctx.lineWidth = mm(0.5)
+    ctx.beginPath(); ctx.moveTo(X(cx + ax), Y(cy)); ctx.lineTo(X(cx), Y(cy)); ctx.lineTo(X(cx), Y(cy + ay)); ctx.stroke()
+    ctx.beginPath(); ctx.arc(X(cx), Y(cy), mm(1.2), 0, Math.PI * 2); ctx.fill(); ctx.restore()
+  }
   return { right: x0 + geo.sheetW * s, bottom: y0 + geo.sheetL * s }
 }
 

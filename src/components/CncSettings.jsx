@@ -1,4 +1,5 @@
 import { LABEL_POS, getLabelTpl, saveLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
+import CornerPick from './CornerPick'
 import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES, d6bOrder, d6bRuleOn } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
@@ -256,7 +257,10 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
           <SignedNum label="Начало X" unit="мм" value={post.originX} onChange={v => set({ originX: v })} />
           <SignedNum label="Начало Y" unit="мм" value={post.originY} onChange={v => set({ originY: v })} />
         </div>
-        <Hint>Начало — где на станке лежит левый нижний угол листа. X — ширина листа, Y — длина. Обработка идёт от этой точки в пределах поля.</Hint>
+        <Hint>Начало — смещение нуля листа от нуля станка (обычно 0). X — ширина листа, Y — длина. Обработка идёт от этой точки в пределах поля.</Hint>
+        <div style={{ marginTop: 10, fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Угол укладки (ноль программы)</div>
+        <CornerPick value={post.corner} onChange={v => set({ corner: v })} />
+        <Hint>Угол листа, к которому прижат лист на станке. Раскрой укладывает детали от этого угла (обрезок — с противоположной стороны), а ноль программы стоит в нём. Оси станка не меняются: X вправо, Y вверх по карте — от левого верхнего угла координаты Y идут в минус, от правого — X в минус. По умолчанию — левый нижний.</Hint>
         <div className="row2" style={{ marginTop: 8 }}>
           <SignedNum empty label="Конечное положение X" unit="мм" value={post.endX} onChange={v => set({ endX: v })} />
           <SignedNum empty label="Конечное положение Y" unit="мм" value={post.endY} onChange={v => set({ endY: v })} />

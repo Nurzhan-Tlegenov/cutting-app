@@ -1,4 +1,5 @@
 import { MenuButton, Ico } from '../components/NavDrawer'
+import CornerPick from '../components/CornerPick'
 import ShareBadge from '../components/ShareBadge'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
 import { I } from '../lib/navIcons'
@@ -380,6 +381,16 @@ export default function ProductionPage() {
                   </div>
                 ))}
                 <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если для ХДФ поле пустое — берётся значение из верхней строки.</p>
+                {/* угол укладки форматно-раскроечного станка (фрезер — в своём постпроцессоре) */}
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Угол укладки — форматно-раскроечный станок</div>
+                  <CornerPick compact value={prod.saw_corner} onChange={async v => {
+                    const { error: e } = await supabase.from('productions').update({ saw_corner: v }).eq('id', prod.id)
+                    if (e) setError(/saw_corner/.test(String(e.message)) ? 'Чтобы задать угол укладки пилы, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists saw_corner text;' : e.message)
+                    else setProd(p => ({ ...p, saw_corner: v }))
+                  }} />
+                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>От какого угла листа идёт раскрой на пиле: детали прижаты к этому углу, обрезок — с противоположной стороны. Подставляется в раскрой заказчика, он видит угол на карте. У фрезера ЧПУ угол — в постпроцессоре (Постпроцессоры → Рабочее поле станка).</p>
+                </div>
                 {/* деловой обрезок: свободные куски не меньше этого отмечаются обрезками сами — шинковка их не трогает */}
                 <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
                   <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>Деловой обрезок — отмечать автоматически</div>

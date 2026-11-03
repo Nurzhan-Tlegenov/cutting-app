@@ -18,6 +18,7 @@ export function sheetGeo(order, result, sh) {
     sheetL, sheetW, marginL, marginR, marginT, marginB, kerf: num(r.kerf, order?.kerf_width),
     usableX: num(sh?.usableX, r.usableX, sheetW - marginL - marginR),
     usableY: num(sh?.usableY, r.usableY, sheetL - marginT - marginB),
+    corner: r.corner || 'bl',          // угол укладки, от которого уложен раскрой (см. sheetCorner.js)
   }
 }
 

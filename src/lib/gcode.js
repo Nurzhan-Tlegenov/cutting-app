@@ -17,6 +17,7 @@ import { detailHoles, placedTurns } from './partHoles'
 import { smoothLoop, arcRuns } from './arcFit'
 import { postView } from './postTools'
 import { scoreLines } from './scoreWaste'
+import { cornerShift, cornerOf, cornerLabel } from './sheetCorner'
 
 const EPS = 0.05
 const ROUGH_ALLOWANCE = 2        // черновые проходы выборки не доходят до контура на 2 мм — их подчищает обход по периметру
@@ -280,12 +281,13 @@ export function rectPaths(x0, y0, x1, y1, open, r, step, spiral = null) {
 // ─── вывод ──────────────────────────────────────────────────────────────────
 const fmt = v => { let r = Math.round(v * 1000) / 1000; if (Object.is(r, -0)) r = 0; return Number.isInteger(r) ? r + '.0' : String(r) }
 class Out {
-  constructor(zOff = 0) { this.zOff = zOff; this.lines = []; this.kinds = []; this.opIds = []; this.tag = null; this.f = null; this.pos = [null, null, null] }
+  // dx, dy — сдвиг нуля программы (угол укладки, см. cornerShift): внутри всё считается от левого нижнего угла листа
+  constructor(zOff = 0, dx = 0, dy = 0) { this.zOff = zOff; this.dx = dx; this.dy = dy; this.lines = []; this.kinds = []; this.opIds = []; this.tag = null; this.f = null; this.pos = [null, null, null] }
   push(line) { this.lines.push(line); this.kinds.push(this.tag ? this.tag[0] : null); this.opIds.push(this.tag ? this.tag[1] : 0) }
   raw(text) { String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).forEach(s => this.push(s)); this.f = null }
   move(g, x, y, z, feed) {
     let s = g
-    if (x != null && y != null && (x !== this.pos[0] || y !== this.pos[1])) { s += ` X${fmt(x)} Y${fmt(y)}`; this.pos[0] = x; this.pos[1] = y }
+    if (x != null && y != null && (x !== this.pos[0] || y !== this.pos[1])) { s += ` X${fmt(x + this.dx)} Y${fmt(y + this.dy)}`; this.pos[0] = x; this.pos[1] = y }
     if (z != null && z !== this.pos[2]) { s += ` Z${fmt(z - this.zOff)}`; this.pos[2] = z }
     if (s === g) return
     if (feed && Math.round(feed) !== this.f) { s += ` F${Math.round(feed)}`; this.f = Math.round(feed) }
@@ -307,7 +309,7 @@ class Out {
     if (!(r > 0.05) || !(d > 1e-6)) { this.g1(x, y, null, feed); return }
     const ex = ox + (x - ox) * r / d, ey = oy + (y - oy) * r / d
     if (Math.hypot(ex - sx, ey - sy) < 0.002) return
-    let s = `${ccw ? 'G3' : 'G2'} X${fmt(ex)} Y${fmt(ey)} I${fmt(i)} J${fmt(j)}`
+    let s = `${ccw ? 'G3' : 'G2'} X${fmt(ex + this.dx)} Y${fmt(ey + this.dy)} I${fmt(i)} J${fmt(j)}`
     this.pos[0] = ex; this.pos[1] = ey
     if (feed && Math.round(feed) !== this.f) { s += ` F${Math.round(feed)}`; this.f = Math.round(feed) }
     this.push(s)
@@ -797,6 +799,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   const zTop = post.zRef === 'top'                       // ноль Z — верхняя пласть листа (иначе — стол)
   let safeZ = (n0(post.safeZ) || 25) + (zTop ? T : 0)
   if (safeZ < T + 5) { warn.add(`Высота безопасности Z${num(safeZ)} ниже верха материала ${num(T)} мм + 5 мм — в программе поднята до Z${num(T + 5)}.`); safeZ = T + 5 }
+  if (cornerOf(geo.corner) !== cornerOf(post.corner)) warn.add(`Раскрой уложен от угла «${cornerLabel(geo.corner).toLowerCase()}», а у станка угол укладки «${cornerLabel(post.corner).toLowerCase()}» (ЧПУ → постпроцессор). Ноль программы — в углу станка; чтобы детали были прижаты к нему, пересчитайте раскрой с этим углом.`)
   if (n0(post.fieldX) && n0(post.originX) + geo.sheetW > n0(post.fieldX) + EPS) warn.add(`Лист по X (${num(n0(post.originX) + geo.sheetW)} мм) выходит за рабочее поле станка ${num(post.fieldX)} мм.`)
   if (n0(post.fieldY) && n0(post.originY) + geo.sheetL > n0(post.fieldY) + EPS) warn.add(`Лист по Y (${num(n0(post.originY) + geo.sheetL)} мм) выходит за рабочее поле станка ${num(post.fieldY)} мм.`)
   // заглубление ниже стола: в настройках его вводят и «0,5», и «−0,5» (как Z) — знак не важен.
@@ -1127,7 +1130,9 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   // обрезки отрезаются последними — когда все детали уже вырезаны
   cutTools.forEach(t => add(jobs.filter(j => j.stage === 2 && j.tool === t)))
   add(jobs.filter(j => j.stage === 2 && !cutTools.includes(j.tool)))
-  const out = new Out(zTop ? T : 0)
+  // ноль программы — в углу укладки (настройка станка): оси станка как есть, деталь от левого верхнего угла — в минусе по Y
+  const sh0 = cornerShift(post.corner, geo.sheetW, geo.sheetL)
+  const out = new Out(zTop ? T : 0, sh0.dx, sh0.dy)
   // новый постпроцессор создаётся с пустыми командами — их вписывает сам пользователь под свой станок
   if (!String(post.cmdToolStart || '').trim() && !String(post.cmdStart || '').trim()) warn.add(`Команды станка «${post.name || 'постпроцессор'}» не заданы (ЧПУ → Команды): в программе нет начала, смены инструмента и конца. Впишите команды своего станка.`)
   out.raw(post.cmdStart)
@@ -1147,7 +1152,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
     out.tag = null
   }
   // конечное положение: шпиндель уходит в точку парковки на безопасной высоте
-  if (seq.length && post.endX !== '' && post.endY !== '' && post.endX != null && post.endY != null) { out.g0(null, null, safeZ); out.g0(n0(post.endX), n0(post.endY), null) }
+  if (seq.length && post.endX !== '' && post.endY !== '' && post.endX != null && post.endY != null) { out.g0(null, null, safeZ); out.g0(n0(post.endX) - sh0.dx, n0(post.endY) - sh0.dy, null) }   // парковка — в координатах станка, без сдвига
   out.raw(post.cmdEnd)
   if (!seq.length) warn.add('На листе нечего обрабатывать: не назначены инструменты.')
   return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds, scored }

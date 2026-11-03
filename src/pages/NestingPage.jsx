@@ -68,6 +68,8 @@ import { cutMethods } from '../lib/productionServices'
 import { saveBeamSawXml } from '../lib/beamSawXml'
 
 import { mm } from '../lib/mmFmt'
+import { prepCorner, flipResult, moveCorner, cornerOf, cornerLabel } from '../lib/sheetCorner'
+import CornerPick from '../components/CornerPick'
 import { readOffcutsFile } from '../lib/importDetails'
 import { fetchOrderDetails, insertOrderDetails } from '../lib/orderDetails.js'
 // Сколько id за раз в фильтре .in(): адрес запроса ограничен по длине (uuid — 36 знаков)
@@ -506,7 +508,7 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
-function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, dimScale = 1, sameFill = null, sameAlpha = 0.22, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null, canSwipe = null }) {
+function SheetCanvas({ corner = 'bl', sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, dimScale = 1, sameFill = null, sameAlpha = 0.22, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null, canSwipe = null }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
   // Перелистывание как в галерее телефона: карта едет за пальцем, при отпускании уходит за край, а соседний
@@ -631,7 +633,7 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
   useLayoutEffect(() => {
     placedRef.current = flipY(sheet.placed)
     redraw(placedRef.current)
-  }, [sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, dimScale, sameFill, sameAlpha, canvasW, canvasH, DPR])
+  }, [corner, sheet.placed, showOffcuts, offcutMode, manualOffcuts, zoom, pinching, selectedIdx, labelMode, showEdges, dimScale, sameFill, sameAlpha, canvasW, canvasH, DPR])
 
   const toC = v => v * sc
   const fromC = v => v / sc
@@ -981,6 +983,22 @@ function SheetCanvas({ sheet, usableX, usableY, sheetL, sheetW, marginL, marginT
     ctx.lineWidth = 1
     ctx.setLineDash([])
     ctx.strokeRect(PADDING, PADDING, toC(sheetW), toC(sheetL))
+    // угол укладки (ноль программы): точка в углу листа и стрелки осей вдоль его краёв
+    {
+      const c = cornerOf(corner), right = c === 'tr' || c === 'br', top = c === 'tl' || c === 'tr'
+      const cx = PADDING + (right ? toC(sheetW) : 0), cy = PADDING + (top ? 0 : toC(sheetL))
+      const sx = right ? -1 : 1, sy = top ? 1 : -1, len = Math.min(26, toC(Math.min(sheetW, sheetL)) * 0.2)
+      ctx.save()
+      ctx.strokeStyle = '#185FA5'; ctx.fillStyle = '#185FA5'; ctx.lineWidth = 1.6
+      const arrow = (dx, dy) => {
+        const ex = cx + dx * len, ey = cy + dy * len
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - dx * 5 - dy * 3, ey - dy * 5 - dx * 3); ctx.lineTo(ex - dx * 5 + dy * 3, ey - dy * 5 + dx * 3); ctx.closePath(); ctx.fill()
+      }
+      arrow(sx, 0); arrow(0, sy)
+      ctx.beginPath(); ctx.arc(cx, cy, 3.5, 0, Math.PI * 2); ctx.fill()
+      ctx.restore()
+    }
 
     // Формат листа — небольшими «плашками» по сторонам: ширина (X) — у верхнего края, длина (Y) — у левого.
     // Видно сразу, если забыли поменять формат перед резкой
@@ -1806,6 +1824,7 @@ export default function NestingPage() {
   const [dimScale, setDimScale] = useState(() => { const v = Number(getUserSettings(user).nestDimScale); return v >= 0.75 && v <= 2.5 ? v : 1 })
   const stepDim = d => setDimScale(v => { const n = Math.round(Math.min(2.5, Math.max(0.75, v + d)) * 100) / 100; saveUserSettings({ nestDimScale: n }, user); return n })
   const [configs, setConfigs] = useState(() => [newCfg()])
+  const [cornerPick, setCornerPick] = useState(null)   // угол укладки, выбранный на странице (null — как у станка)
   const [focusId, setFocusId] = useState(null)   // конфигурация, по которой считается шапка со статистикой
   // Экран компьютера: карты — в левой колонке (порталом из конфигурации), настройки и кнопки — справа
   const desk = useDesktop()
@@ -1954,6 +1973,33 @@ export default function NestingPage() {
       return !!(rp && postView({ ...cnc, post: rp.id }).ops?.skip?.contour)
     } catch { return false }
   })()
+  // Угол укладки: у фрезера — из постпроцессора производства (Рабочее поле станка), у пилы — «Параметры станка»
+  // производства; на странице его можно сменить (cornerPick). Пильный центр — от своего угла, без выбора
+  const cornerDefault = (() => {
+    if (!order || beamSaw) return 'bl'
+    const pr = order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)
+    if (cuttingMethod === 'guillotine') return cornerOf(pr?.saw_corner)
+    try {
+      const own = pr ? pr.owner_id === user?.id : cabinet === 'production'
+      const cnc = own ? getCnc(user) : pr?.cnc ? normalizeCnc(pr.cnc) : null
+      return cornerOf(cnc && routerPost(cnc)?.corner)
+    } catch { return 'bl' }
+  })()
+  const corner = beamSaw ? 'bl' : cornerOf(cornerPick || cornerDefault)
+  // сменили угол — готовые раскрои зеркалятся к нему сразу (без пересчёта); фигурную деталь отзеркалить нельзя — тогда
+  // этот раскрой надо пересчитать
+  function pickCorner(c) {
+    setCornerPick(c)
+    let stuck = 0
+    const moved = new Map()
+    for (const cfg of configsRef.current) {
+      if (!cfg.result || cfg.status === 'running' || cfg.status === 'stopping' || cornerOf(cfg.result.corner) === c) continue
+      const sheets = moveCorner(cfg.sheetsData, details, cfg.result.corner, c, { usableX: cfg.result.usableX, usableY: cfg.result.usableY })
+      if (sheets) moved.set(cfg.id, sheets); else stuck++
+    }
+    if (moved.size) setConfigs(cs => cs.map(cfg => (moved.has(cfg.id) ? { ...cfg, result: { ...cfg.result, corner: c }, sheetsData: moved.get(cfg.id), saved: false, check: null } : cfg)))
+    setParamsWarn(stuck ? `Угол укладки — ${cornerLabel(c).toLowerCase()}. Раскрой с фигурными деталями так просто не отзеркалить — пересчитайте его.` : '')
+  }
   const offRulePr = order ? (order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)) : null
   // По умолчанию у фрезера (там есть шинковка) — 400 × 400; 0 в настройке производства — выключено.
   // Форматник — только если производство задало размер само
@@ -2042,12 +2088,14 @@ export default function NestingPage() {
         CFG_SEQ = Math.max(CFG_SEQ, ...w.cfgs.map(c => Number(c.id) || 0))
         if (mats.length > 1) setMatKey(w.matKey)
         setConfigs(w.cfgs.map(c => newCfg(c)))
+        { const rc = w.cfgs.find(c => c.result?.corner)?.result.corner; if (rc) setCornerPick(rc) }
         setFocusId(w.cfgs.some(c => c.id === w.focusId) ? w.focusId : w.cfgs[0].id)
         return
       }
       // Первая конфигурация — настройки заказа (и уже сохранённый раскрой, если он есть)
       const first = cfgFromOrder(o, saved)
       setConfigs([first])
+      if (saved?.corner) setCornerPick(saved.corner)          // угол, от которого уложен сохранённый раскрой
       setFocusId(first.id)
     }
   }
@@ -2349,6 +2397,12 @@ export default function NestingPage() {
         algoVersion: cfg.result.algoVersion || null, saved: !!cfg.saved,   // в хронологию: чем и когда была посчитана исходная раскладка
       }
     }
+    // угол укладки: алгоритм укладывает от левого нижнего, раскладка зеркалится к углу (sheetCorner.js). «Продолжить» —
+    // только с раскладки того же угла
+    const lay = beamSaw ? 'bl' : corner
+    if (params.seed && cornerOf(cfg.result?.corner) !== lay) delete params.seed
+    const runParams = prepCorner(params, lay)
+    const fix = res => (lay === 'bl' || !res?.sheets ? res : flipResult(res, details, lay) || res)
     const stamp = res => {
       res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
       res.algo = params.algo // 'nfp' | 'raster' — чтобы на карте было видно, чем реально посчитано
@@ -2370,7 +2424,7 @@ export default function NestingPage() {
     // с каждого потока), в конфигурацию попадает после «Стоп» / окончания
     const hist = newHistory(cfg, islands, params)
     historyRef.current[cfg.id] = hist
-    const job = startNestingJob(params, {
+    const job = startNestingJob(runParams, {
       live: cfg.live,
       islands,
       onStats: (st, island) => { if (jobsRef.current[cfg.id] === job) recordStats(hist, st, island) },
@@ -2379,9 +2433,10 @@ export default function NestingPage() {
         updateCfg(cfg.id, { islands: 1 })
         setParamsWarn('Потоки расчёта не поднялись — считаю в основном потоке (медленнее, экран может притормаживать). Обновите приложение: потяните страницу вниз или закройте и откройте его.')
       },
-      onIslandProgress: (res, island, global) => { if (jobsRef.current[cfg.id] === job) recordIsland(hist, res, island, global) },
+      onIslandProgress: (res, island, global) => { if (jobsRef.current[cfg.id] === job) recordIsland(hist, fix(res), island, global) },
       onProgress: (res, island) => {
         if (jobsRef.current[cfg.id] !== job) return
+        res = fix(res)
         recordEvent(hist, res, island, res.seeded ? 'seed' : res.rough ? 'rough' : 'improve')
         showLater(res)
       },
@@ -2409,6 +2464,7 @@ export default function NestingPage() {
     }
     jobsRef.current[cfg.id] = job
     return job.promise.then(res => {
+      res = fix(res)
       if (showTimer) { clearTimeout(showTimer); showTimer = 0; pending = null }
       if (jobsRef.current[cfg.id] !== job) return // отменена или заменена
       delete jobsRef.current[cfg.id]
@@ -3655,6 +3711,7 @@ export default function NestingPage() {
                       )}
                       <SheetCanvas
                         key={cfg.id}
+                        corner={cfg.result?.corner}
                         sheet={canvasSheet}
                         usableX={cgeo.usableX} usableY={cgeo.usableY}
                         sheetL={cgeo.sheetL} sheetW={cgeo.sheetW}
@@ -4049,6 +4106,12 @@ export default function NestingPage() {
                   {field('mt', '↑ сверху')}
                   {field('mb', '↓ снизу')}
                 </div>
+                {!beamSaw && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 3 }}>Угол укладки — от него идёт раскрой{cornerPick && cornerOf(cornerPick) !== cornerDefault ? ` (у станка — ${cornerLabel(cornerDefault).toLowerCase()})` : ''}</div>
+                    <CornerPick compact value={corner} onChange={pickCorner} disabled={anyRunning} />
+                  </div>
+                )}
 
                 <div style={{ borderTop: '0.5px dashed var(--border-md)', paddingTop: 8 }}>
                   <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 2 }}>Обрезки со склада</div>

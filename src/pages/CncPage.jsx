@@ -22,6 +22,7 @@ import Drill6Ops from '../components/Drill6Ops'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
 import Drill6Orient from '../components/Drill6Orient'
+import { cornerShift } from '../lib/sheetCorner'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf } from '../lib/gcode'
 import { getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
@@ -324,7 +325,8 @@ export default function CncPage() {
   const simView = useMemo(() => {
     if (!sim || !mat) return null
     const sheet = mat.sheets[sim.si], geo = sheetGeo(order, mat.result, sheet)
-    const ox = num(post.originX), oy = num(post.originY)
+    const z = cornerShift(post.corner, geo.sheetW, geo.sheetL)          // ноль программы — в углу укладки станка
+    const ox = num(post.originX) + z.dx, oy = num(post.originY) + z.dy
     const outlines = sheet.placed.map(p => partFeatures(p, mat.details[p.detailIndex], mat.thickness, skipOf(rview.ops)).outline.map(([x, y]) => [ox + geo.marginL + p.x + x, oy + geo.marginB + p.y + y]))
     return { sheet: { x: ox, y: oy, w: geo.sheetW, l: geo.sheetL }, outlines }
     // eslint-disable-next-line react-hooks/exhaustive-deps
