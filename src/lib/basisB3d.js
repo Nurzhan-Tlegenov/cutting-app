@@ -1223,7 +1223,9 @@ export function parseBasis(u8, opts = {}) {
     const Mo = mul(M, transOf(obj))
     // блок, в котором лежит объект — чтобы в 3D профили и фурнитура двигались вместе со своим блоком
     const blockOf = () => [ctx.product, ...ctx.path].filter(Boolean).join(' / ')
-    if (type === TYPE_PANEL) panels.push({ obj, M: Mo, ctx })
+    // «Не учитывать в раскрое» (свойство панели или блока в Базисе, BazisFlags бит 4): деталь в раскрой не идёт, в 3D остаётся
+    const noCut = (Number(val(obj, 'BazisFlags', 0)) & 4) !== 0
+    if (type === TYPE_PANEL) panels.push({ obj, M: Mo, ctx: noCut && !ctx.bought ? { ...ctx, bought: cleanName(val(obj, 'Name')) || 'Деталь' } : ctx })
     else if (type === TYPE_PROFILE) profiles.push({ obj, M: Mo, anim: ctx.anim || null, b: blockOf() })
     else if (type === TYPE_FASTENER) {
       const f = furn.get(val(obj, 'FastID'))
@@ -1253,8 +1255,9 @@ export function parseBasis(u8, opts = {}) {
     }
     // пользовательские свойства блока/изделия наследуют все детали внутри (своё свойство детали — главнее)
     const own = type !== TYPE_PANEL ? userProps(obj) : null
-    // «Покупное изделие» (флаг блока в Базисе, BazisFlags бит 1): детали внутри не раскраиваются — их покупают готовыми
-    const bought = ctx.bought || (type === 1005 && (Number(val(obj, 'BazisFlags', 0)) & 1) ? cleanName(val(obj, 'Name')) || 'Покупное изделие' : null)
+    // блок с «Не учитывать в раскрое» — все детали внутри тоже. (Бит 1 у блока — не «покупное изделие»: он стоит у обычных
+    // шкафов кухни — «Изделие»; раньше по нему пропадали целые шкафы)
+    const bought = ctx.bought || (type === 1005 && noCut ? `${cleanName(val(obj, 'Name')) || 'Блок'} (не учитывать в раскрое)` : null)
     for (const c of (obj.c || [])) {
       if (!c.c) continue
       const list = c.k === 'Obj' ? [c] : c.c
