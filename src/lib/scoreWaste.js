@@ -168,7 +168,16 @@ export function scoreLines({ geo, outlines = [], paths = [], offcuts = [], r = 3
       const q = vertical ? o.a[0] : o.a[1]
       if (Math.abs(q - pos) >= SEP) continue
       const [p0, p1] = vertical ? [Math.min(o.a[1], o.b[1]), Math.max(o.a[1], o.b[1])] : [Math.min(o.a[0], o.b[0]), Math.max(o.a[0], o.b[0])]
-      if (Math.min(p1, b0) - Math.max(p0, a0) > 0) return null
+      if (Math.min(p1, b0) - Math.max(p0, a0) > 0) {
+        // та же линия (продолжение надсечки соседнего куска через стык) — продлеваем её, а не режем рядом вторую
+        if (Math.abs(q - pos) < CELL / 2 && (a0 < p0 - 1e-6 || b0 > p1 + 1e-6)) {
+          const lo2 = Math.min(p0, a0), hi2 = Math.max(p1, b0)
+          if (vertical) { o.a = [o.a[0], Math.min(o.a[1], o.b[1]) === p0 ? lo2 : hi2]; o.b = [o.b[0], o.a[1] === lo2 ? hi2 : lo2] }
+          else { o.a = [Math.min(o.a[0], o.b[0]) === p0 ? lo2 : hi2, o.a[1]]; o.b = [o.a[0] === lo2 ? hi2 : lo2, o.b[1]] }
+          mark(o); return o
+        }
+        return null
+      }
     }
     const sg = vertical ? { a: [pos, a0], b: [pos, b0], dir: 'v' } : { a: [a0, pos], b: [b0, pos], dir: 'h' }
     out.push(sg); mark(sg); return sg
@@ -226,7 +235,12 @@ export function scoreLines({ geo, outlines = [], paths = [], offcuts = [], r = 3
         // (ступенька полосы и узкая ножка рядом с ней — разные участки)
         const cells = []
         for (let k = sd.lo; k <= sd.hi; k++) { const [i, j] = sd.nb(k); cells.push(inC(i, j) ? depth(i, j, sd.d[0], sd.d[1]) : 0) }
-        const isLeg = (k, e) => { const dmin = Math.min(...cells.slice(k, e)); return dmin >= Math.max(LEG, e - k + 1) }
+        // ножка: выступ глубже своей ширины. Или большой выступ с косым / скруглённым дном (карман у фигурного края
+        // детали): глубина в разных местах разная, зато он глубокий и это заметная часть куска — его тоже отделяем
+        const isLeg = (k, e) => {
+          const sl = cells.slice(k, e), dmin = Math.min(...sl), dmax = Math.max(...sl), sum = sl.reduce((a, b) => a + b, 0)
+          return dmin >= Math.max(LEG, e - k + 1) || (dmax >= Math.max(LEG, (e - k + 1) / 2) && sum >= 0.3 * C.cells.length)
+        }
         const segs = []
         let k = 0
         while (k < cells.length) {
@@ -247,7 +261,7 @@ export function scoreLines({ geo, outlines = [], paths = [], offcuts = [], r = 3
           else legs.push({ k: g.k, e: g.e })
         }
         for (const { k, e } of legs) {
-          const dmin = Math.min(...cells.slice(k, e))
+          const dmin = Math.min(...cells.slice(k, e)), curved = dmin < Math.max(LEG, e - k + 1)
           // короткий узкий хвостик (уже 30 мм и не длиннее 100 мм — например, в кармане у скруглённого угла детали)
           // ломается рукой — отдельная надсечка не нужна
           if (e - k < LEG && dmin * CELL <= TAIL) continue
@@ -261,9 +275,10 @@ export function scoreLines({ geo, outlines = [], paths = [], offcuts = [], r = 3
               const bx = i1 + sd.d[0] * st + along[0], by = j1 + sd.d[1] * st + along[1]
               if (!inC(ax, ay) && !inC(bx, by)) break
             }
-            st = Math.min(dmin - 2, st + 1)
+            st = curved ? 0 : Math.min(dmin - 2, st + 1)        // косое дно — режем прямо по стыку со стороной прямоугольника
             const ti = i0 + sd.d[0] * st, tj = j0 + sd.d[1] * st
-            const ok = c => free[c] && (!opened[c] || cut[c])                 // продлевать только по зазору, не по соседним кускам
+            // продлевать по зазору и по самому куску (стык надо прорезать насквозь, до детали или другой надсечки), не по соседним кускам
+            const ok = c => free[c] && (!opened[c] || cut[c] || comp[c] === C.id)
             const lo = sd.lo + k, hi = sd.lo + e - 1
             if (sd.v ? seam(true, cx(ti), lo, hi, ti, ok) : seam(false, cy(tj), lo, hi, tj, ok)) added++
           }
