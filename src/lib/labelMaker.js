@@ -12,6 +12,7 @@ import { getUserSettings, saveUserSettings } from './userSettings'
 import { loadLabelImages, saveLabelImage } from './materialTextures'
 import { detailMeta, metaPos, metaDes } from './partLabel'
 import { isTwoSided } from './partInfo'
+import { backMarkCorner } from './backSide'
 import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
@@ -492,6 +493,10 @@ export function finishedSize(order, d) {
 
 // имя заказчика заказа (orders → профиль клиента): страница бирок / ЧПУ подгружает его и кладёт сюда
 const CLIENTS = new Map()
+// доприсадка на фрезере (постпроцессор: «Выпускать программы обратной стороны»): на бирке двусторонней детали — тёмный
+// уголок; после переворота этот угол детали прижимают к упору (углу укладки станка)
+let BACK = { on: false, corner: 'bl' }
+export const setLabelBack = post => { BACK = { on: !!post?.back?.on, corner: post?.corner || 'bl' } }
 export const setLabelClient = (orderId, name) => { if (orderId) CLIENTS.set(orderId, String(name || '').trim()) }
 export function labelInfo(order, mat, si, pi, part = null) {
   // part — деталь в другом положении (пильный центр: как выходит со станка), вместо sh.placed[pi]
@@ -544,6 +549,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
+    backCorner: BACK.on && !part && isTwoSided(d, mat.thickness) ? backMarkCorner(p, d, BACK.corner) : null,
     exit: !!part, quarter,      // деталь в положении выхода со станка (пильный центр)
   }
 }
@@ -977,6 +983,14 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
     ctx.beginPath(); roundRect(ctx, it.x * mm + lw / 2, it.y * mm + lw / 2, bw * mm - lw, bh * mm - lw, 0); ctx.stroke()
     ctx.restore()
   }
+  // доприсадка: тёмный уголок в углу бирки — этот угол детали после переворота к упору станка
+  if (info?.backCorner) {
+    const s = Math.round(Math.min(W, H) * 0.2), c = info.backCorner
+    const x = c === 'tr' || c === 'br' ? W : 0, y = c === 'bl' || c === 'br' ? H : 0, dx = x ? -s : s, dy = y ? -s : s
+    ctx.save(); ctx.fillStyle = '#000'
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx, y); ctx.lineTo(x, y + dy); ctx.closePath(); ctx.fill()
+    ctx.restore()
+  }
   return canvas
 }
 function roundRect(ctx, x, y, w, h, r) {
@@ -1197,7 +1211,8 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl, seq
       const turned = !!post?.labelTurn && labelTurnNeeded(x1 - x0, y1 - y0, tpl), R = turned ? 90 : 0
       const info = labelInfo(order, mat, si, pi, part)
       const tplT = turned ? { ...tpl, rot: false } : tpl                                  // rot: по часовой → без поворота = на четверть против
-      const infoT = turned ? { ...info, quarter: ((info.quarter || 0) + 3) % 4 } : info  // привязанные к сторонам элементы — тоже на четверть против
+      const ccw = { tl: 'bl', bl: 'br', br: 'tr', tr: 'tl' }      // уголок доприсадки — тоже на четверть против
+      const infoT = turned ? { ...info, quarter: ((info.quarter || 0) + 3) % 4, backCorner: info.backCorner ? ccw[info.backCorner] : null } : info  // привязанные к сторонам элементы — тоже на четверть против
       drawLabel(cv, tplT, infoT, { sheet, geo, index: pi, detail: mat.details[p.detailIndex], part })
       files.push({ name: bmp, data: canvasToBmp(cv, tpl.dpi) })
       // точка наклейки — центр детали (или угол по настройке)

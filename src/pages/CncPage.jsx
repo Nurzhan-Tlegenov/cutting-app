@@ -23,8 +23,10 @@ import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
 import Drill6Orient from '../components/Drill6Orient'
 import { cornerShift } from '../lib/sheetCorner'
+import { backOf, backParts, backJob } from '../lib/backSide'
+import { metaPos, detailMeta } from '../lib/partLabel'
 import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf } from '../lib/gcode'
-import { setLabelClient, getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
+import { setLabelBack, setLabelClient, getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
 import { orderClient } from '../lib/productionApi'
@@ -125,6 +127,7 @@ export default function CncPage() {
   const saw = sawPost(cnc)
   const r2 = beamMat ? null : r2raw
   const machine = beamMat && saw ? saw : post        // чем выпускаются программы этого раскроя
+  setLabelBack(beamMat ? null : post)                // уголок доприсадки на бирках двусторонних деталей
   const r2view = useMemo(() => (r2 ? postView({ ...cnc, post: r2.id }) : null), [cnc, r2?.id])   // eslint-disable-line react-hooks/exhaustive-deps
   // вкладки «Инструменты» и «Обработка» — для постпроцессора, открытого в настройках
   const tview = useMemo(() => postView(cnc), [cnc])
@@ -187,11 +190,26 @@ export default function CncPage() {
     }) } : null
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
     const drill = drills.map(p => drillOf(p))
-    setBuilt({ files, drill, second }); setSaved('')
+    setBuilt({ files, drill, second, back: !beamMat && backOf(post).on ? buildBack() : null }); setSaved('')
     logPostUse(user, [post, r2, ...drills], { orderId: order?.id || null, sheets: sel.length })   // мастер видит, кто каким постпроцессором выпускает программы
     // маркировка: файлы маркировочного стола для тех же листов (на линии сначала бирки, потом раскрой)
     const ok = files.filter(f => !f.empty)
     makeLabels(files, ok.map(f => ({ si: f.si, nc: f.name })))
+  }
+  // Доприсадка обратной стороны (постпроцессор: «Выпускать программы обратной стороны»): по программе на каждую деталь
+  // с обработкой с двух сторон; деталь переворачивают и кладут в угол укладки длинной стороной вдоль Y (backSide.js)
+  const buildBack = () => {
+    const T = mat.thickness, used = new Set(), lat = post.progLatin !== false
+    const base = programName(post.nameTpl, { ...nameCtx(null), latin: lat })
+    return backParts(mat, sel).map(({ detail, qty }) => {
+      const j = backJob(detail, T, post)
+      const r = buildSheetGcode({ sheet: j.sheet, geo: j.geo, details: j.details, thickness: T, cnc: { ...cnc, post: post.id }, outer: j.outer, score: false })
+      const title = [metaPos(detailMeta(detail)), detail.name].filter(Boolean).join('_')
+      let nm = `${base}_${lat ? safeName(title) : String(title).replace(/[\\/:*?"<>|]+/g, '_')}_x${qty}`, k = 2
+      while (used.has(nm)) nm = `${nm}_${k++}`
+      used.add(nm)
+      return { name: `${nm}.${post.ext || 'nc'}`, qty, part: detail.name, text: r.text, empty: r.empty, warnings: r.warnings.filter(w => !/изнанк/.test(w)) }
+    })
   }
   // Бирки к программам: у станка с маркировочным столом — файлы стола рядом с G-кодом (как было);
   // у станка без него, если отмечено «Бирки вместе с программами», — те же файлы и PDF всех бирок, отдельной папкой
@@ -294,6 +312,8 @@ export default function CncPage() {
   // папка бирок для станка без маркировочного стола: та же, что у программ, со словом «Etiketki» в конце
   const labelsDir = () => { const d = routerDir(), lp = beamMat && saw ? saw : post, lb = folderName('Этикетки', { ...nameCtx(null), latin: lp?.dirLatin !== false }); return d.length ? [...d.slice(0, -1), `${d[d.length - 1]}_${lb}`] : [lb] }
   const drillDir = r => pathOf(r.post.dirPath ?? DRILL_DIR_DEFAULT, r.post)
+  // доприсадка — своя папка рядом с G-кодом фрезера: «…_Doprisadka»
+  const backDir = () => { const d = routerDir(), lb = folderName('Доприсадка', { ...nameCtx(null), latin: post?.dirLatin !== false }); return d.length ? [...d.slice(0, -1), `${d[d.length - 1]}_${lb}`] : [lb] }
   const setPostPath = (id, v) => change({ ...cnc, posts: cnc.posts.map(q => (q.id === id ? { ...q, dirPath: v } : q)) })
   const setPostLatin = (id, v) => change({ ...cnc, posts: cnc.posts.map(q => (q.id === id ? { ...q, dirLatin: v } : q)) })
   const saveAll = async () => {
@@ -317,11 +337,12 @@ export default function CncPage() {
     }
     const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]
     for (const r of built.drill || []) { const dd = drillDir(r); files.push(...r.files.map(f => ({ name: f.name, data: f.data, dir: dd }))) }
+    if (built.back) { const bd = backDir(); files.push(...built.back.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: bd }))) }
     if (built.second) { const d2 = pathOf(built.second.post.dirPath ?? `${built.second.post.folderTpl || '{ZAKAZ}'}_CNC_2/{MAT}`, built.second.post); files.push(...built.second.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: d2 }))) }
     if (maps) files.unshift(maps)          // PDF карт — в корень архива, рядом с папками станков
     setSaveAsk({ files, zipName: `${fileBase('zip')}.zip` })
   }
-  const allCount = () => built.files.filter(f => !f.empty).length + (built.labels?.length || 0) + (built.drill || []).reduce((a, r) => a + r.files.length, 0) + (built.second?.files.filter(f => !f.empty).length || 0)
+  const allCount = () => built.files.filter(f => !f.empty).length + (built.back || []).filter(f => !f.empty).length + (built.labels?.length || 0) + (built.drill || []).reduce((a, r) => a + r.files.length, 0) + (built.second?.files.filter(f => !f.empty).length || 0)
   const simView = useMemo(() => {
     if (!sim || !mat) return null
     const sheet = mat.sheets[sim.si], geo = sheetGeo(order, mat.result, sheet)
@@ -609,6 +630,32 @@ export default function CncPage() {
               )}
             </div>
           ))}
+          {built?.back && (() => {
+            const ok = built.back.filter(f => !f.empty), warns = [...new Set(built.back.flatMap(f => f.warnings))]
+            return (
+              <div className="card" style={{ marginTop: 8, padding: '9px 12px' }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>⇆ Доприсадка — обратная сторона</div>
+                <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
+                  {built.back.length
+                    ? <>Программ: {ok.length} — по одной на деталь с обработкой с двух сторон (×N в имени — сколько раз запустить). Деталь переворачивают и кладут в угол укладки станка длинной стороной вдоль Y; к упору — угол, отмеченный тёмным уголком на бирке. Папка: <b style={{ fontFamily: 'monospace' }}>{backDir().join(' / ')}</b>.</>
+                    : 'На выбранных листах нет деталей с обработкой с двух сторон.'}
+                </div>
+                {warns.length > 0 && (
+                  <details style={{ marginBottom: 6 }}>
+                    <summary style={{ fontSize: 11, color: 'var(--amber)', cursor: 'pointer' }}>Предупреждения: {warns.length}</summary>
+                    {warns.slice(0, 30).map(w => <div key={w} style={{ fontSize: 11, color: 'var(--text-muted)' }}>· {w}</div>)}
+                  </details>
+                )}
+                {ok.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button type="button" onClick={() => setSaveAsk({ files: ok.map(f => ({ name: f.name, data: f.text })), zipName: `Doprisadka_${fileBase('zip')}.zip`, folders: backDir() })}
+                      style={{ ...small, background: 'var(--teal-light)', color: 'var(--teal)', borderColor: 'var(--teal)' }}>⬇ Сохранить файлы ({ok.length})</button>
+                    {ok.slice(0, 12).map(f => <button key={f.name} type="button" onClick={() => { download(f.name, f.text); mark('files') }} style={small}>⬇ {f.part} ×{f.qty}</button>)}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
           {built && allCount() > 1 && (
             <>
               <button data-tour="cnc-save" className="btn-secondary" style={{ marginTop: 8 }} onClick={saveAll} disabled={!!mapsBusy}>⬇ Сохранить все файлы ({allCount() + (withMaps ? 1 : 0)})</button>

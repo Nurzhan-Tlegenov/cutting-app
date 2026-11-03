@@ -1,5 +1,6 @@
 import { LABEL_POS, getLabelTpl, saveLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
 import CornerPick from './CornerPick'
+import { backOf } from '../lib/backSide'
 import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES, d6bOrder, d6bRuleOn } from '../lib/drill6Xml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
@@ -267,6 +268,33 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
         </div>
         <Hint>Куда уходит шпиндель в конце программы (на высоте безопасности). По умолчанию X0 Y0. Пустое поле — не уходить.</Hint>
       </div>
+      {(() => {
+        const bk = backOf(post), setBk = v => set({ back: { ...bk, ...v } })
+        const row = (k, label) => (
+          <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!bk[k]} onChange={e => setBk({ [k]: e.target.checked })} style={{ width: 18, height: 18 }} />{label}
+          </label>
+        )
+        return (
+          <div className="card" style={{ marginBottom: 10 }}>
+            <Title>Доприсадка — обратная сторона</Title>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={bk.on} onChange={e => setBk({ on: e.target.checked })} style={{ width: 18, height: 18 }} />
+              Выпускать управляющие программы обратной стороны деталей
+            </label>
+            {bk.on && (
+              <div style={{ marginTop: 4, paddingLeft: 4 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Что выпускать в доприсадку:</div>
+                {row('holes', 'Отверстия в пласть (глухие)')}
+                {row('grooves', 'Пазы')}
+                {row('pockets', 'Выемки')}
+                {row('contour', 'Контур детали')}
+              </div>
+            )}
+            <Hint>Для тех, у кого нет шестистороннего станка: детали с обработкой с двух сторон после раскроя переворачивают и доделывают на этом же фрезере. Вместе с G-кодом листов выпускается отдельная папка «Доприсадка» — по программе на каждую такую деталь (одинаковые детали — одна программа, в имени ×N — сколько раз запустить). Деталь кладут в угол укладки станка (см. выше) длинной стороной вдоль Y, обратной стороной вверх. Какой угол детали прижать к упору — показывает тёмный уголок на бирке. Отверстия в торец и сквозное в доприсадку не идут.</Hint>
+          </div>
+        )
+      })()}
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Скругления и дуги</Title>
         <Seg value={post.arcs === 'ij' ? 'ij' : 'lines'} options={[['lines', 'Плавная линия G1'], ['ij', 'Дуга G2 / G3']]} onChange={v => set({ arcs: v })} />

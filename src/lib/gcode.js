@@ -808,7 +808,8 @@ export function routeContours(list, from, sheetRect, smallFirst = true) {
  * sheet — лист из раскроя, geo — геометрия листа (sheetGeo), details — детали материала, thickness — толщина,
  * cnc — настройки (см. cncSettings.js).  -> { text, lines, warnings, tools }
  */
-export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll }) {
+export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, outer = true, score = true }) {
+  // outer: false — без контура деталей (доприсадка обратной стороны, backSide.js); score: false — без шинковки
   // инструменты и обработка — те, что видит этот постпроцессор (свой набор у настроенного по чужой программе, см. postTools.js)
   const cnc = postView(cncAll)
   const post = cnc.posts.find(p => p.id === cnc.post) || cnc.posts[0]
@@ -959,7 +960,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
       part.cutouts.push({ job, pts: c.circle ? circleLoop(c.circle.cx, c.circle.cy, c.circle.r).map(G) : c.pts.map(G) })
     }
     // контур детали — фреза идёт снаружи
-    {
+    if (outer) {
       const t = tool(ops.outer?.tool), o = ops.outer
       if (!t) noTool('контур детали')
       else if (t.type !== 'mill') warn.add('На контур детали назначено сверло — нужна фреза.')
@@ -1048,7 +1049,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
   // до вырезов и контуров деталей, пока лист цел: после контуров мелкие куски отхода вакуум уже не держит.
   let scored = 0
   const sc = ops.score
-  if (sc?.on) {
+  if (score && sc?.on) {
     const t = tool(sc.tool) || tool(ops.outer?.tool)
     const leave = n0(sc.leave)
     if (!t) noTool('шинковка отходов')
