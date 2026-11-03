@@ -352,7 +352,6 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
         // до контура, потом режет вырез и выходит в надсечку — кромку на выходе не рвёт.
         let run = null, runEnd = -1
         // β: от какого конца начинать вырез — дальше от лап («зад») или ближе к ним
-        const fromClamp = q => { const f = set.clamp; return f === 1 ? fr.Wm - q[1] : f === 2 ? q[1] : f === 3 ? fr.L - q[0] : q[0] }
         // β: внешний радиус — вместе со смежными сторонами (снять припуск и ступеньку от пилы): len мм стороны, 0 — вся сторона
         const sideLen = set.radiusSides === '' || set.radiusSides == null ? null : n0(set.radiusSides)
         const part = (e, len, fromEnd) => {
@@ -368,12 +367,9 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
             if (!prev.angle && !cut((i0 - 1 + n) % n)) run = [part(prev, sideLen, true), ...run]
             if (!next.angle && !cut((runEnd + 1) % n)) run = [...run, part(next, sideLen, false)]
           }
-          let rev = edgeCw
-          if (set.edgeStart === 'far' || set.edgeStart === 'near') {
-            const a = fromClamp(run[0].a), b = fromClamp(run[run.length - 1].b)
-            const startA = Math.abs(a - b) < EPS || (set.edgeStart === 'far' ? a >= b : a <= b)
-            rev = !startA
-          }
+          // направление обхода — всегда как в настройках (по / против часовой), при любом повороте и перевороте детали.
+          // С какого конца начинать (β «дальше / ближе к лапам») решает положение детали (правила), а не разворот обхода
+          const rev = edgeCw
           const off = rev ? '左' : '右'
           if (rev) run = reverseEls(run)
           const segs = run.map(e => ({ to: e.b, angle: e.angle }))
@@ -592,7 +588,8 @@ function ruleScores(geo, b) {
   const two = geo.edgeGrooves.length >= 2
   return {
     zs: avg(faceGrooves.map(g => (g.top ? 2 : 0) + far(cl, ...g.c) + far(st, ...g.c))),
-    gola: avg(edgeMills.map(m => { const c = cen(pathPts(m)); return far(cl, ...c) + far(st, ...c) })),
+    // вырез на краю — подальше от лап и упора; β «начинать дальше / ближе к лапам» — и чтобы фреза заходила с того конца
+    gola: avg(edgeMills.map(m => { const c = cen(pathPts(m)); const s0 = far(cl, ...m.start); return far(cl, ...c) + far(st, ...c) + (b.edgeStart === 'far' ? s0 : b.edgeStart === 'near' ? 1 - s0 : 0) })),
     edgeHoles: avg(geo.edge.map(h => (narrow ? (h.face === cl ? 1 : h.face === opp[cl] ? 0 : 0.5) : (h.face === opp[cl] ? 1 : h.face === cl ? 0 : 0.5)))),
     edgeGroove: avg(geo.edgeGrooves.map(g => (g.face === opp[cl] ? 1 : g.face === cl ? 0 : 0.5)
       + (two ? ((g.width <= (n0(b.hdfMaxW) || 5) + 0.001) === (g.Z > T / 2) ? 1 : 0) : 0))),

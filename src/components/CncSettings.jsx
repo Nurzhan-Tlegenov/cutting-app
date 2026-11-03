@@ -494,7 +494,7 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
       <Title>β · Фрезеровка</Title>
       <label className="label">Вырез на краю (гола, радиус) — начинать</label>
       <Seg value={b.edgeStart || ''} options={[['', 'Как в «Обработке»'], ['far', 'Дальше от лап'], ['near', 'Ближе к лапам']]} onChange={v => setB({ edgeStart: v })} />
-      <Hint>Направление обхода меняется под выбранный конец, фреза остаётся снаружи детали.</Hint>
+      <Hint>Направление обхода всегда как в «Обработке» (по или против часовой) — при любом повороте и перевороте. Нужный конец достигается положением детали: работает с включёнными правилами положения (правило «Вырезы на краю»).</Hint>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 10, cursor: 'pointer' }}>
         <input type="checkbox" checked={b.radiusSides !== '' && b.radiusSides != null} onChange={e => setB({ radiusSides: e.target.checked ? 0 : '' })} style={{ width: 18, height: 18 }} />
         Внешний радиус — проходить со смежными сторонами
