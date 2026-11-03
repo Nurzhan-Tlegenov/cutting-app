@@ -889,7 +889,8 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     '\t<Project Name="" Flag="SWJ008">',
     '\t\t<Panels>',
     `\t\t\t<Panel ID="${esc(id)}" Name="${esc(name)}" Width="${f3(fr.Wm)}" Length="${f3(fr.L)}" Material="" Thickness="${f3(T)}" IsProduce="true" MachiningPoint="1" Type="1" Face5ID="" Face6ID="" Grain="L">`,
-    outline ? ['\t\t\t\t<Outline>', ...outline.map(p => `\t\t\t\t\t<Point X="${f3(p.X)}" Y="${f3(p.Y)}"${p.R ? ` Radius="${f3(p.R)}"` : ''} />`), '\t\t\t\t</Outline>'].join('\r\n') : '\t\t\t\t<Outline></Outline>',
+    // β: контур — как его сохраняет сама стойка: Radius у каждой точки (0 — прямая) и замыкающая точка = первой
+    outline ? ['\t\t\t\t<Outline>', ...(b6 ? [...outline, { ...outline[0], R: 0 }] : outline).map(p => `\t\t\t\t\t<Point X="${f3(p.X)}" Y="${f3(p.Y)}"${p.R || b6 ? ` Radius="${f3(p.R || 0)}"` : ''} />`), '\t\t\t\t</Outline>'].join('\r\n') : '\t\t\t\t<Outline></Outline>',
     '\t\t\t\t<Machines>',
     ...lines,
     '\t\t\t\t</Machines>',
