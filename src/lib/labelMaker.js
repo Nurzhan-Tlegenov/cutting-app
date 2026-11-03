@@ -1133,13 +1133,28 @@ export const labelOrder = (sheet, geo, mode = 'manual') => labelSeq(sheet, geo, 
  * Деталь меньше бирки по какой-то стороне — по этой стороне бирка ставится посередине.
  */
 export const LABEL_POS = [['center', 'Середина'], ['bl', 'Левый нижний'], ['br', 'Правый нижний'], ['tl', 'Левый верхний'], ['tr', 'Правый верхний']]
-export function labelPoint(x0, x1, y0, y1, pos, tpl) {
-  // на маркировочном столе бирка лежит повёрнутой: ШИРИНА шаблона идёт вдоль Y стола, ВЫСОТА — вдоль X
-  const hw = (Number(tpl?.h) || 0) / 2, hh = (Number(tpl?.w) || 0) / 2
+export function labelPoint(x0, x1, y0, y1, pos, tpl, turned = false) {
+  // на маркировочном столе бирка лежит повёрнутой: ШИРИНА шаблона идёт вдоль Y стола, ВЫСОТА — вдоль X;
+  // лапка повернула бирку (turned, R = 90) — наоборот: ширина вдоль X, высота вдоль Y
+  const bw = Number(tpl?.w) || 0, bh = Number(tpl?.h) || 0
+  const hw = (turned ? bw : bh) / 2, hh = (turned ? bh : bw) / 2
   const at = (lo, hi, half, side) => (side === 0 || hi - lo < 2 * half ? (lo + hi) / 2 : side < 0 ? lo + half : hi - half)
   const sx = pos === 'bl' || pos === 'tl' ? -1 : pos === 'br' || pos === 'tr' ? 1 : 0
   const sy = pos === 'bl' || pos === 'br' ? -1 : pos === 'tl' || pos === 'tr' ? 1 : 0
   return [at(x0, x1, hw, sx), at(y0, y1, hh, sy)]
+}
+
+/**
+ * Поворот лапки маркировочного стола: нужен ли он для детали с габаритом на столе dx (по X) × dy (по Y).
+ * Без поворота (R = 0) бирка лежит высотой шаблона вдоль X и шириной вдоль Y; с поворотом (лапка по часовой, R = 90) —
+ * наоборот. Поворачиваем только тогда, когда без поворота бирка за деталь выходит, а с поворотом выходит меньше
+ * (узкая деталь, лежащая вдоль X: 400 × 60 при бирке 100 × 50). Влезает и так — не трогаем.
+ */
+export function labelTurnNeeded(dx, dy, tpl) {
+  const bw = Number(tpl?.w) || 0, bh = Number(tpl?.h) || 0
+  const over = (ax, ay) => Math.max(0, ax - dx) + Math.max(0, ay - dy)
+  const o0 = over(bh, bw), o90 = over(bw, bh)
+  return o0 > 0.01 && o90 < o0 - 0.01
 }
 
 /**
@@ -1170,12 +1185,20 @@ export async function buildLabelFiles({ order, mat, sheets, base, post, tpl, seq
         return
       }
       const p = sheet.placed[pi], part = partOf ? partOf(sheet, pi) : null
-      drawLabel(cv, tpl, labelInfo(order, mat, si, pi, part), { sheet, geo, index: pi, detail: mat.details[p.detailIndex], part })
-      files.push({ name: bmp, data: canvasToBmp(cv, tpl.dpi) })
-      // точка наклейки — центр детали; бирки клеятся в одном положении (R = 0), как в образцах
       const pts = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon : [{ x: 0, y: 0 }, { x: p.origX, y: p.origY }]
-      const xs = pts.map(q => q.x), ys = pts.map(q => q.y), R = 0
-      const [lx, ly] = labelPoint(Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), post?.labelPos, tpl)
+      const xs = pts.map(q => q.x), ys = pts.map(q => q.y)
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
+      // Поворот лапки (галочка в постпроцессоре): бирка не влезает на узкую деталь — R = 90, лапка разворачивает её
+      // по часовой. Чтобы после разворота кромки, размеры и чертёж на бирке совпали с деталью, всё, что привязано
+      // к сторонам детали, рисуется заранее повёрнутым на четверть ПРОТИВ часовой (шаблон и надписи — на своих местах).
+      const turned = !!post?.labelTurn && labelTurnNeeded(x1 - x0, y1 - y0, tpl), R = turned ? 90 : 0
+      const info = labelInfo(order, mat, si, pi, part)
+      const tplT = turned ? { ...tpl, rot: false } : tpl                                  // rot: по часовой → без поворота = на четверть против
+      const infoT = turned ? { ...info, quarter: ((info.quarter || 0) + 3) % 4 } : info  // привязанные к сторонам элементы — тоже на четверть против
+      drawLabel(cv, tplT, infoT, { sheet, geo, index: pi, detail: mat.details[p.detailIndex], part })
+      files.push({ name: bmp, data: canvasToBmp(cv, tpl.dpi) })
+      // точка наклейки — центр детали (или угол по настройке)
+      const [lx, ly] = labelPoint(x0, x1, y0, y1, post?.labelPos, tpl, turned)
       cycles.push(['Cycle_Label', [['LabelName', bmp], ['X', r1(ox + geo.marginL + p.x + lx)], ['Y', r1(oy + geo.marginB + p.y + ly)], ['R', R]]])
     })
     files.push({ name: cyc, data: strToU8(xml(cycles)) })

@@ -23,6 +23,7 @@ export const DEFAULT_POST = () => ({
   labelPos: 'center',             // где на детали клеится бирка: 'center' | 'bl' | 'br' | 'tl' | 'tr' (углы габарита детали на столе)
   labelDX: 0, labelDY: 0,         // коррекция точки наклейки бирки на маркировочном столе, мм (плюс и минус), см. buildLabelFiles
   labelTable: false,              // у станка есть маркировочный стол: вместе с G-кодом делаются файлы бирок (List.xml, Label_N.cyc, картинки)
+  labelTurn: false,               // у стола есть поворот лапки (по часовой): бирка, не влезающая на узкую деталь, клеится с R = 90, см. labelTurnNeeded
   // Команды
   cmdStart: 'M16\nG54',
   cmdToolStart: 'G53 Z0\nM05\nM06 T{T}\nG43 H{T}\nM03 S{S}',
