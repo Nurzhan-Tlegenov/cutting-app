@@ -273,6 +273,12 @@ export default function NavDrawer({ notices, unread }) {
             <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile?.full_name || 'Пользователь'}</div>
             <div style={{ fontSize: 12, color: 'var(--text-hint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Сейчас: {where}</div>
           </div>
+          {/* обновить страницу (F5): в установленном приложении нет кнопки браузера — свежие данные и новая версия, если вышла */}
+          <button type="button" aria-label="Обновить" title="Обновить страницу (F5)"
+            onClick={async () => { try { const reg = await navigator.serviceWorker?.getRegistration?.(); await reg?.update?.() } catch { /* без проверки версии */ } window.location.reload() }}
+            style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', color: 'var(--blue)', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></svg>
+          </button>
           {wide && (
             <button type="button" aria-label={docked ? 'Открепить меню' : 'Закрепить меню'} title={docked ? 'Свернуть меню (открепить)' : 'Закрепить меню слева — страница сдвинется'}
               onClick={() => pin(!docked)}
@@ -324,18 +330,6 @@ export default function NavDrawer({ notices, unread }) {
         {/* внизу меню — обучение: интерактивные туры для клиента и производства */}
         <div style={{ padding: '6px 10px 10px', borderTop: '0.5px solid var(--border)', opacity: k }}>
           <UiScaleRow />
-          {/* обновить страницу: в установленном приложении нет кнопки браузера «Обновить» — свежие данные (что поменяли
-              сотрудники) и новая версия приложения, если она уже вышла */}
-          <button type="button" className="nav-item" title="Обновить страницу (F5)"
-            onClick={async () => {
-              try { const reg = await navigator.serviceWorker?.getRegistration?.(); await reg?.update?.() } catch { /* без обновления версии */ }
-              window.location.reload()
-            }}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, border: 'none', textAlign: 'left', cursor: 'pointer', background: 'transparent', color: 'var(--text)', fontSize: 15 }}>
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></svg>
-            <span style={{ flex: 1 }}>Обновить</span>
-            <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>F5</span>
-          </button>
           <button type="button" onClick={() => go('/help')} className="nav-item"
             style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, border: 'none', textAlign: 'left', cursor: 'pointer',
               background: pathname === '/help' ? 'var(--blue-light)' : 'transparent', color: pathname === '/help' ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: pathname === '/help' ? 600 : 400 }}>
