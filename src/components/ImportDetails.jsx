@@ -68,7 +68,7 @@ const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocume
 const ALL = '__all__'
 
 // Файл модели: Базис (.b3d, 'BZ…'), Астра (.add, составной файл OLE2), К3-Мебель (.mdb), PRO100 (.obj). Иначе — null (это таблица).
-async function readModelFile(file, faceRule, marks = null, dxfOpts = {}, takeBuy = false) {
+async function readModelFile(file, faceRule, marks = null, dxfOpts = {}) {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
   const lower = file.name.toLowerCase()
   // DXF: текстовый чертёж («0 / SECTION») или .dxf
@@ -89,7 +89,7 @@ async function readModelFile(file, faceRule, marks = null, dxfOpts = {}, takeBuy
     return { src: 'bcad', res: await readBdfFile(file, { faceRule }) }
   }
   if ((head[0] === 0x42 && head[1] === 0x5A) || lower.endsWith('.b3d')) {
-    return { src: 'basis', res: await readBasisFile(file, { faceRule, takeBuy }) }
+    return { src: 'basis', res: await readBasisFile(file, { faceRule }) }
   }
   // К3-Мебель: база Access ('Standard Jet DB' со смещения 4)
   const head20 = new Uint8Array(await file.slice(0, 20).arrayBuffer())
@@ -633,20 +633,6 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
               <div style={{ background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10, fontSize: 12, color: 'var(--text-muted)' }}>
                 Из К3 взяты детали с контуром, кромкой, пазами и присадкой ({sumInfo('holes')} отв.). Размер детали — габарит с кромкой, как в К3;
                 у каждой кромки из номенклатуры К3 взяты толщина, подрезка и прифуговка — после импорта проверьте их в видах кромки бланка: размер пила считается по ним.
-              </div>
-            )}
-            {basis?.buy && (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--amber-light)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 10 }}>
-                Покупные изделия: {basis.buy.names.join(', ')} ({basis.buy.panels} дет.) — в Базисе блок завёрнут в покупное изделие, {basis.buy.taken ? 'но детали взяты в раскрой.' : 'его детали в раскрой не идут, видны только в 3D-модели.'}
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, cursor: busy ? 'default' : 'pointer', color: 'var(--text)' }}>
-                  <input type="checkbox" disabled={busy} checked={!!basis.buy.taken} style={{ width: 18, height: 18 }} onChange={async e => {
-                    if (!basisFileRef.current) return
-                    setBusy(true)
-                    try { const model = await readModelFile(basisFileRef.current, faceRule, marks, {}, e.target.checked); if (model) setBasis(model.res) }
-                    catch (err) { setError('Не удалось прочитать файл: ' + (err?.message || err)) } finally { setBusy(false) }
-                  }} />
-                  Всё равно взять их детали в раскрой
-                </label>
               </div>
             )}
             {basis?.bought && (

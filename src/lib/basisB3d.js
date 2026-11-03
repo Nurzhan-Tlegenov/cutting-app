@@ -1255,19 +1255,14 @@ export function parseBasis(u8, opts = {}) {
     }
     // пользовательские свойства блока/изделия наследуют все детали внутри (своё свойство детали — главнее)
     const own = type !== TYPE_PANEL ? userProps(obj) : null
-    // блок с «Не учитывать в раскрое» — все детали внутри тоже
+    // блок с «Не учитывать в раскрое» — все детали внутри тоже. (Бит 1 у блока — не «покупное изделие»: он стоит у обычных
+    // шкафов кухни — «Изделие»; раньше по нему пропадали целые шкафы)
     const bought = ctx.bought || (type === 1005 && noCut ? `${cleanName(val(obj, 'Name')) || 'Блок'} (не учитывать в раскрое)` : null)
-    // «Покупное изделие» (блок «завёрнут» в покупное: считается штукой со своей ценой, внутри — детали для вида): флаг блока
-    // бит 1 и своё обозначение (Des / ArtPos, «01-00»). Один бит 1 — не признак: он стоит и у обычных шкафов кухни без
-    // обозначения (В1, Н1…) — по нему пропадали целые шкафы. Такие детали в раскрой не идут, но при импорте их можно взять
-    const isBought = !bought && !ctx.buy && type === 1005 && (Number(val(obj, 'BazisFlags', 0)) & 1) && (cleanName(val(obj, 'Des')) || cleanName(val(obj, 'ArtPos')))
-    const buy = ctx.buy || (isBought ? cleanName(val(obj, 'Name')) || 'Покупное изделие' : null)
     for (const c of (obj.c || [])) {
       if (!c.c) continue
       const list = c.k === 'Obj' ? [c] : c.c
       const sub = type === 1005 && ctx.depth > 0 ? { ...ctx, path: [...ctx.path, cleanName(val(obj, 'Name'))], depth: ctx.depth + 1 } : { ...ctx, depth: ctx.depth + 1 }
       if (bought) sub.bought = bought
-      if (buy) sub.buy = buy
       if (anim) sub.anim = anim
       if (own) sub.user = { ...(ctx.user || {}), ...own }
       for (const cc of list) if (cc.c && cc.k === 'Obj' && kid(cc, 'Type')) walk(cc, Mo, sub)
@@ -1297,12 +1292,8 @@ export function parseBasis(u8, opts = {}) {
   }
 
   // детали покупных изделий — отдельно: в раскрой не идут, в 3D-модели остаются
-  // покупные изделия: по умолчанию не в раскрой (opts.takeBuy — взять)
-  const out = p => p.ctx.bought || (p.ctx.buy && !opts.takeBuy)
-  const buyPanels = panels.filter(p => !p.ctx.bought && p.ctx.buy)
-  const buyInfo = buyPanels.length ? { panels: buyPanels.length, names: [...new Set(buyPanels.map(p => p.ctx.buy))], taken: !!opts.takeBuy } : null
-  const boughtPanels = panels.filter(out), cutPanels = panels.filter(p => !out(p))
-  const boughtNames = [...new Set(panels.filter(p => p.ctx.bought).map(p => p.ctx.bought))]
+  const boughtPanels = panels.filter(p => p.ctx.bought), cutPanels = panels.filter(p => !p.ctx.bought)
+  const boughtNames = [...new Set(boughtPanels.map(p => p.ctx.bought))]
   const toSrcs = list => list.flatMap(p => { try { return glueLayers(p.obj, basisSrc(p)) } catch { return [null] } })
   const srcs = toSrcs(cutPanels)
   let boughtItems = []
@@ -1362,8 +1353,7 @@ export function parseBasis(u8, opts = {}) {
     items,
     groups,
     clashes,
-    bought: boughtNames.length ? { panels: panels.filter(p => p.ctx.bought).length, names: boughtNames } : null,
-    buy: buyInfo,
+    bought: boughtPanels.length ? { panels: boughtPanels.length, names: boughtNames } : null,
   }
 }
 
