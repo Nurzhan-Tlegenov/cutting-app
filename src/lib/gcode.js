@@ -427,16 +427,35 @@ function cutLoop(out, passes, top, tool, op, safeZ, arcs = false) {
       const m = loopMetric(ps.loop)
       if (!(m.per > 0)) return
       if (cur) out.g0(null, null, safeZ)
+      // вход от середины зазора (op.entryLoop — контур по середине реза): первый вход фрезы опускается под наклоном по нему,
+      // на глубине — к углу контура детали. Наклонный вход компрессионной фрезы задирает ламинат — скол остаётся в зазоре
+      const E = k === 0 && ramp && op.entryLoop?.length > 2 ? op.entryLoop : null
+      let entered = false
+      if (E) {
+        let bi = 0, bd = Infinity
+        E.forEach((v, i) => { const d = Math.hypot(v[0] - ps.loop[0][0], v[1] - ps.loop[0][1]); if (d < bd) { bd = d; bi = i } })
+        const El = [...E.slice(bi), ...E.slice(0, bi)], Me = loopMetric(El)
+        if (Me.per > 0) {
+          const zt = top + 1, Le = Math.min(Me.per / 2, (zt - z) / tan), s0 = Me.at(Le)
+          out.g0(s0[0], s0[1], safeZ)
+          out.g1(null, null, zt, inFeed)
+          ;[...Me.cum.filter(d => d > 1e-6 && d < Le - 1e-6).reverse(), 0].forEach(d => { const q = Me.at(d); out.g1(q[0], q[1], z + (zt - z) * d / Le, inFeed) })
+          out.g1(ps.loop[0][0], ps.loop[0][1], z, inFeed)          // на глубине — к углу контура детали
+          entered = true
+        }
+      }
       cur = ps.loop; M = m
       // дуги контура: участки пути [d0, d1], которые идут одной командой G2 / G3 (не больше четверти окружности каждая)
       R = arcs ? arcRuns([...cur, cur[0]]).map(a => ({ ...a, d0: M.cum[a.i0], d1: M.cum[a.i1] })) : []
       zPrev = top + 1
-      const L = ramp ? Math.min(M.per / 2, (zPrev - z) / tan) : 0
-      const s = M.at(L)
-      out.g0(s[0], s[1], safeZ)
-      out.g1(null, null, zPrev, inFeed)
-      if (L > 0) [...M.cum.filter(d => d > 1e-6 && d < L - 1e-6).reverse(), 0].forEach(d => { const q = M.at(d); out.g1(q[0], q[1], z + (zPrev - z) * d / L, inFeed) })
-      else out.g1(null, null, z, inFeed)
+      if (!entered) {
+        const L = ramp ? Math.min(M.per / 2, (zPrev - z) / tan) : 0
+        const s = M.at(L)
+        out.g0(s[0], s[1], safeZ)
+        out.g1(null, null, zPrev, inFeed)
+        if (L > 0) [...M.cum.filter(d => d > 1e-6 && d < L - 1e-6).reverse(), 0].forEach(d => { const q = M.at(d); out.g1(q[0], q[1], z + (zPrev - z) * d / L, inFeed) })
+        else out.g1(null, null, z, inFeed)
+      }
     } else if (ramp) {
       const h = Math.min(M.per / 2, (zPrev - z) / tan / 2), zm = (zPrev + z) / 2
       const ds = M.cum.filter(d => d > 1e-6 && d < h - 1e-6)
@@ -957,6 +976,10 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
           const holesArea = f.cutouts.reduce((a, c) => a + (c.circle ? Math.PI * c.circle.r ** 2 : Math.abs(signedArea(c.pts))), 0)
           const area = Math.max(0, Math.abs(signedArea(f.outline)) - holesArea) / 1e6, small = area <= smallArea || Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) <= smallSide
           const N = Math.max(1, Math.round(n0(o.passes) || 1))
+          // вход от середины зазора между деталями: рез шире фрезы — фреза опускается посередине реза (галочка в «Контуре детали»)
+          const half = n0(geo.kerf) / 2
+          const mid = o.midEntry && o.entry !== 'straight' && half > r + 0.3 ? offsetLoop(smooth, half) : null
+          const Lm = mid ? orientFromInside(mid.map(G), o.dir, sheetRect) : null
           let mk                                         // проходы по контуру L (и черновому Lr)
           let Lr = null
           if (N > 1 && (!o.smallOnly || small)) {
@@ -975,7 +998,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll })
               if (this.Lr) { const q = this.L[0]; let k = 0, bd = Infinity; this.Lr.forEach((v, n) => { const d = Math.hypot(v[0] - q[0], v[1] - q[1]); if (d < bd) { bd = d; k = n } }); this.Lr = [...this.Lr.slice(k), ...this.Lr.slice(0, k)] }
               this.at = this.L[0]; this.passes = mk(this.L, this.Lr)
             },
-            run: out => cutLoop(out, job.passes, T, t, o, safeZ, arcs) }
+            run: out => cutLoop(out, job.passes, T, t, Lm ? { ...o, entryLoop: Lm } : o, safeZ, arcs) }
           jobs.push(job)
           part.contour = job
         }

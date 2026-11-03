@@ -1108,6 +1108,15 @@ export function CncOps({ cnc, onChange, layers }) {
           </div>
         )}
       </div>
+      {k === 'outer' && ops[k].entry === 'ramp' && (
+        <>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!ops[k].midEntry} onChange={e => set(k, { midEntry: e.target.checked })} style={{ width: 18, height: 18 }} />
+            Вход под наклоном — от середины зазора между деталями
+          </label>
+          <Hint>Если ширина реза (зазор между деталями в раскрое) больше диаметра фрезы: фреза опускается под наклоном не по линии контура, а посередине зазора (рез 10 мм, фреза 6 мм — в 5 мм от детали), и уже на глубине подходит к контуру. Компрессионная фреза на входе тянет стружку вверх и задирает ламинат — так скол уходит в зазор, а не на деталь. Размер детали не меняется.</Hint>
+        </>
+      )}
       {extra}
     </Fold>
   )
