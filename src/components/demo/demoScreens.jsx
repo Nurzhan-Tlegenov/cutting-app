@@ -418,4 +418,116 @@ function Labels() {
   )
 }
 
-export const SCREENS = { orders: Orders, new: NewOrder, nest: Nesting, prod: Production, order: OrderView, cnc: Cnc, labels: Labels }
+
+// ── Урок: угол укладки и доприсадка ────────────────────────────────────────
+const CORNER_TXT = { tl: '↖ левый верхний', tr: '↗ правый верхний', bl: '↙ левый нижний', br: '↘ правый нижний' }
+const CornerBtns = ({ val, pre }) => (
+  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+    {['tl', 'tr', 'bl', 'br'].map(k => (
+      <span key={k} data-demo={`${pre}-${k}`} style={{ padding: '6px 8px', borderRadius: 8, fontSize: 11.5, border: `0.5px solid ${k === val ? C.blue : C.bmd}`, background: k === val ? 'var(--blue-light)' : 'transparent', fontWeight: k === val ? 600 : 400 }}>{CORNER_TXT[k]}</span>
+    ))}
+  </div>
+)
+const Chk = ({ on, children, ...p }) => (
+  <div {...p} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, padding: '3px 0' }}>
+    <span style={{ width: 15, height: 15, borderRadius: 4, border: on ? 'none' : `1px solid ${C.bmd}`, background: on ? C.blue : 'transparent', color: '#fff', fontSize: 10, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{on ? '✓' : ''}</span>{children}
+  </div>
+)
+function CncSet({ st }) {
+  const corner = st.corner || 'bl'
+  return (
+    <>
+      <Head title="Настройки ЧПУ · Мой фрезер" />
+      <div style={{ display: 'flex', gap: 5, margin: '0 12px 8px' }}>{['Основные', 'Команды', 'Инструменты', 'Обработка'].map((t, i) => <Pill key={t} on={i === 0} style={{ padding: '4px 9px', fontSize: 11.5 }}>{t}</Pill>)}</div>
+      <Card>
+        <div style={{ fontWeight: 500, fontSize: 13.5, marginBottom: 6 }}>Рабочее поле станка</div>
+        <div style={{ display: 'flex', gap: 7, marginBottom: 8 }}><Field id="fx" label="Поле X, мм" value="2100" st={st} /><Field id="fy" label="Поле Y, мм" value="3000" st={st} /></div>
+        <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Угол укладки (ноль программы)</div>
+        <div data-demo="cornerPick"><CornerBtns val={corner} pre="c" /></div>
+        <div style={{ fontSize: 10.5, color: C.hint, marginTop: 4 }}>Оси станка как есть: от верхнего угла Y — в минус, от правого — X в минус.</div>
+      </Card>
+      <Card>
+        <div style={{ fontWeight: 500, fontSize: 13.5, marginBottom: 4 }}>Доприсадка — обратная сторона</div>
+        <Chk on={!!st.back} data-demo="backOn">Выпускать управляющие программы обратной стороны деталей</Chk>
+        {st.back && (
+          <div className="demo-pop">
+            <div style={{ fontSize: 11, color: C.muted, margin: '5px 0 3px' }}>Деталь на доприсадке:</div>
+            <div data-demo="edgeSeg" style={{ display: 'flex', gap: 5 }}><Pill on={!st.edge} style={{ flex: 1 }}>Без кромки</Pill><Pill on={!!st.edge} style={{ flex: 1 }}>С кромкой</Pill></div>
+            <div data-demo="backWhat" style={{ marginTop: 5 }}>
+              <div style={{ fontSize: 11, color: C.muted }}>Что выпускать в доприсадку:</div>
+              <Chk on>Отверстия в пласть (глухие)</Chk><Chk on>Пазы</Chk><Chk on>Выемки</Chk><Chk on={false}>Контур детали</Chk>
+            </div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Имя файла доприсадки — как на бирке:</div>
+            <div data-demo="bname" style={{ border: `0.5px solid ${C.bmd}`, borderRadius: 7, padding: '5px 7px', fontFamily: 'monospace', fontSize: 12 }}>{'{POZ}_{NAIM}_x{KOL}'}</div>
+            <div style={{ fontSize: 10.5, color: C.hint, marginTop: 2 }}>Например: 3_Bokovina_x4.nc</div>
+          </div>
+        )}
+      </Card>
+    </>
+  )
+}
+// лист с деталями, прижатыми к углу c (схема 150×225), и точка-ноль со стрелками
+function CornerSheet({ c, w = 200 }) {
+  const right = c === 'tr' || c === 'br', top = c === 'tl' || c === 'tr'
+  const P = [[0, 0, 60, 90], [62, 0, 40, 90], [0, 92, 60, 50], [62, 92, 40, 30], [104, 0, 40, 60]]
+  const tx = ([x, y, ww, hh]) => [right ? 150 - x - ww - 2 : x + 2, top ? y + 2 : 225 - y - hh - 2, ww, hh]
+  const cx = right ? 149 : 1, cy = top ? 1 : 224, sx = right ? -1 : 1, sy = top ? 1 : -1
+  return (
+    <svg viewBox="0 0 150 225" width={w} height={w * 1.5} style={{ background: '#f4efe6', borderRadius: 4 }}>
+      <rect x=".5" y=".5" width="149" height="224" fill="none" stroke="#888" strokeWidth=".8" />
+      {P.map((p, i) => { const [x, y, ww, hh] = tx(p); return <rect key={i} x={x} y={y} width={ww} height={hh} fill="#d8c7a5" stroke="#8a7650" strokeWidth=".6" /> })}
+      <g data-demo="cornerDot" stroke="#185FA5" fill="#185FA5" strokeWidth="1.6">
+        <line x1={cx} y1={cy} x2={cx + sx * 22} y2={cy} /><line x1={cx} y1={cy} x2={cx} y2={cy + sy * 22} /><circle cx={cx} cy={cy} r="3.4" />
+      </g>
+    </svg>
+  )
+}
+function NestCorner({ st }) {
+  const c = st.ncorner || 'tl'
+  return (
+    <>
+      <Head title="Раскрой · Кухня Ивановых" sub="Лист 2800×2070 · рез 6" />
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '0 12px 8px', background: C.bg2, borderRadius: 10, padding: 10 }}><CornerSheet c={c} /></div>
+      <Card>
+        <div style={{ fontSize: 11.5, color: C.muted, marginBottom: 4 }}>Угол укладки — от него идёт раскрой</div>
+        <CornerBtns val={c} pre="n" />
+      </Card>
+    </>
+  )
+}
+function LabelMark() {
+  return (
+    <>
+      <Head title="Бирки · Кухня Ивановых" />
+      <div data-demo="mark" style={{ margin: '0 auto 12px', width: 280, height: 170, border: `1px solid ${C.bmd}`, borderRadius: 6, background: '#fff', color: '#222', position: 'relative', padding: 10, boxSizing: 'border-box', overflow: 'hidden' }}>
+        <div style={{ fontSize: 12, fontWeight: 600 }}>Кухня Ивановых · Иванов</div>
+        <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>3 · Боковина</div>
+        <div style={{ fontSize: 11 }}>2000 × 400 · отв. с двух сторон</div>
+        <svg width="40" height="40" style={{ position: 'absolute', right: 0, bottom: 0 }}><polygon points="40,0 40,40 0,40" fill="#111" /></svg>
+      </div>
+      <div data-demo="flipPic" style={{ margin: '0 12px', background: C.bg2, borderRadius: 10, padding: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-around', fontSize: 10.5, color: C.muted, textAlign: 'center' }}>
+        <div><svg width="60" height="120"><rect x="2" y="2" width="56" height="116" fill="#d8c7a5" stroke="#8a7650" /><rect x="10" y="40" width="40" height="28" fill="#fff" stroke="#999" /><polygon points="50,58 50,68 40,68" fill="#111" /></svg><div>лицевая,<br />бирка сверху</div></div>
+        <div style={{ fontSize: 22 }}>⇆</div>
+        <div><svg width="80" height="130"><rect x="0" y="0" width="80" height="130" fill="#e8edf3" /><rect x="4" y="10" width="56" height="116" fill="#cbb994" stroke="#8a7650" /><rect x="0" y="122" width="10" height="8" fill="#185FA5" /><rect x="0" y="0" width="4" height="130" fill="#185FA5" opacity=".6" /><circle cx="6" cy="124" r="4" fill="#111" /></svg><div>обратной стороной,<br />уголком к упору</div></div>
+      </div>
+    </>
+  )
+}
+function CncOut({ st }) {
+  return (
+    <>
+      <Head title="ЧПУ · Кухня Ивановых" />
+      <div style={{ margin: '0 12px' }}>
+        {[1, 2].map(n => <div key={n} style={{ border: `0.5px solid ${C.border}`, borderRadius: 10, padding: '7px 10px', marginBottom: 6, fontSize: 12.5 }}>✓ Лист {n} · <span style={{ color: C.hint }}>Kuhnya_LDSP_{n}.nc</span></div>)}
+      </div>
+      <Card data-demo="backCard" className="demo-pop">
+        <div style={{ fontSize: 13, fontWeight: 500 }}>⇆ Доприсадка — обратная сторона</div>
+        <div style={{ fontSize: 11, color: C.hint, margin: '3px 0 6px' }}>Программ: 2 — по одной на деталь с обработкой с двух сторон. Папка: Kuhnya_LDSP_Doprisadka</div>
+        <div data-demo="backFile" style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}><Pill>⬇ Боковина ×4</Pill><Pill>⬇ Перегородка ×2</Pill></div>
+      </Card>
+      <div style={{ margin: '6px 12px' }}><div data-demo="backSave" style={{ textAlign: 'center', padding: 10, borderRadius: 8, fontSize: 14, border: `0.5px solid ${C.bmd}` }}>{st.bsaved ? '✓ Файлы сохранены' : '⬇ Сохранить все файлы (4)'}</div></div>
+    </>
+  )
+}
+
+export const SCREENS = { orders: Orders, new: NewOrder, nest: Nesting, prod: Production, order: OrderView, cnc: Cnc, labels: Labels, cset: CncSet, ncorner: NestCorner, lmark: LabelMark, cout: CncOut }

@@ -5,7 +5,8 @@ import BottomNav from '../components/BottomNav'
 import { TOURS, setTour } from '../lib/tours'
 import { useAuth } from '../context/AuthContext'
 import { lazyRetry } from '../lib/lazyRetry'
-import { demoLang } from '../components/demo/demoLang'
+import { demoLang, dt } from '../components/demo/demoLang'
+import { DEMOS } from '../components/demo/demoScripts'
 import InstallGuide from '../components/InstallGuide'
 
 const DemoVideo = lazyRetry(() => import('../components/demo/DemoVideo'))
@@ -13,6 +14,8 @@ const DemoVideo = lazyRetry(() => import('../components/demo/DemoVideo'))
 // «Обучение»: интерактивные туры по настоящим экранам — для клиента и для производства.
 // Под каждым — краткий план шагов, чтобы можно было прочитать, не запуская тур.
 const COURSES = [['client', '🧾'], ['production', '🏭']]
+// короткие уроки по отдельным темам — только видео
+const LESSONS = [['corner', '📐']]
 
 export default function HelpPage() {
   const navigate = useNavigate()
@@ -61,6 +64,17 @@ export default function HelpPage() {
           </div>
         )
       })}
+      <div style={{ fontSize: 13, fontWeight: 600, margin: '16px 2px 8px' }}>Короткие уроки</div>
+      {LESSONS.map(([id, ico]) => (
+        <div key={id} className="card" style={{ marginBottom: 10, padding: '12px 14px', display: 'flex', gap: 12, alignItems: 'center' }}>
+          <span style={{ fontSize: 24, lineHeight: 1 }}>{ico}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 14.5 }}>{dt(DEMOS[id].title, demoLang())}</div>
+            {demoLang() === 'ru' && DEMOS[id].short && <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>{DEMOS[id].short}</div>}
+          </div>
+          <button type="button" className="btn-primary" style={{ flex: '0 0 auto', width: 'auto', padding: '8px 12px', fontSize: 13 }} onClick={() => setVideo(id)}>▶ Видео</button>
+        </div>
+      ))}
       <BottomNav />
       {video && <Suspense fallback={null}><DemoVideo id={video} onClose={() => setVideo(null)} /></Suspense>}
     </div>

@@ -1,4 +1,5 @@
 import { MenuButton } from '../components/NavDrawer'
+import TrainingOffer from '../components/TrainingOffer'
 import ShareBadge from '../components/ShareBadge'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useKeptState } from '../hooks/useKeptState'
@@ -205,6 +206,7 @@ export default function OrdersPage() {
         )}
       </div>
 
+      {!selectMode && <TrainingOffer first="client" />}
       {selectMode && canMerge && (
         <button type="button" onClick={mergeSelected} disabled={selected.size < 2 || !!merging}
           style={{ width: '100%', marginTop: -10, marginBottom: 12, padding: '9px 12px', border: 'none', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: 'pointer',

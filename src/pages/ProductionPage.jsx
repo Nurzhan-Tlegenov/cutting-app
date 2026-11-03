@@ -1,4 +1,5 @@
 import { MenuButton, Ico } from '../components/NavDrawer'
+import TrainingOffer from '../components/TrainingOffer'
 import CornerPick from '../components/CornerPick'
 import ShareBadge from '../components/ShareBadge'
 import { listShares, onShareChange, cachedShare } from '../lib/modelShare'
@@ -287,6 +288,7 @@ export default function ProductionPage() {
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Производство</h1></div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
+      {prod && <TrainingOffer first="production" />}
       {prod === undefined ? <CncLoader label="Открываем производство…" /> : wps.length && (prod ? prodView() === 'work' : prodView() !== 'own') ? (
         <WorkerProduction key={workPid() || 'w'} wps={wps} />
       ) : !prod ? (
