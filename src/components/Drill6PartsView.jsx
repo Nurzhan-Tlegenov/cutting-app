@@ -3,7 +3,7 @@
 // (ручное положение — в настройках производства d6Man: id строки детали -> { rot, flip }, главнее правил).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDesktop } from '../hooks/useDesktop'
-import { d6Preview, d6bOf, panelXml } from '../lib/drill6Xml'
+import { d6Preview, d6Turned, d6bOf, panelXml } from '../lib/drill6Xml'
 import { parseDrillXml } from '../lib/drill6Parse'
 import { LABEL_MODES, partLabel } from '../lib/partLabel'
 import { Preview } from './Drill6Viewer'
@@ -121,6 +121,15 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
     return out
   }, [mat, post, man, T, types])
   const set = (id, v) => { const next = { ...man }; if (v) next[id] = v; else delete next[id]; onMan(next) }
+  // повернуть / перевернуть по оси станка — любую деталь, правила положения не мешают (ручное главнее)
+  const turnBtns = (id, raw, o) => {
+    const go = axis => set(id, d6Turned(o, Number(raw.width) || 0, Number(raw.length) || 0, axis))
+    return (<>
+      <button type="button" style={btn} onClick={() => go('rot')} title="Повернуть на 90° на столе">↻ 90°</button>
+      <button type="button" style={{ ...btn, ...(o.flip ? { background: 'var(--amber-light)' } : {}) }} onClick={() => go('x')} title="Перевернуть вокруг оси X станка (верх ↔ низ)">⇅ Перевернуть по X</button>
+      <button type="button" style={{ ...btn, ...(o.flip ? { background: 'var(--amber-light)' } : {}) }} onClick={() => go('y')} title="Перевернуть вокруг оси Y станка (лево ↔ право)">⇆ Перевернуть по Y</button>
+    </>)
+  }
   // как подписывать детали в списке: наименование, обозначение, позиция… (как на карте раскроя), запоминается
   const [lm, setLm] = useState(() => lsGet('d6pvLabel', 'name'))
   const nameOf = d => { const raw = rawDetail(d); return partLabel({ label: raw.display_name || raw.name || '', prefix: raw.prefix, detailIndex: 0 }, [d], lm) || raw.name || 'Деталь' }
@@ -151,15 +160,14 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
         style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 260px', gap: 10, height: '100%', outline: 'none' }}>
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
           {cur ? (() => {
-            const o = cur.pv.orient, raw = rawDetail(cur.d), g = cur.pv.geo, rotNow = ((o.turn - o.base) % 4 + 4) % 4
+            const o = cur.pv.orient, raw = rawDetail(cur.d), g = cur.pv.geo
             return (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{nameOf(cur.d)}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{raw.length} × {raw.width} · {HOW[o.how]}{o.flip ? ' · перевёрнута' : ''} · сверху {g.top.length} · снизу {g.bottom.length} · в торец {g.edge.length}{g.grooves.length ? ` · пазов ${g.grooves.length}` : ''}{g.edgeGrooves.length ? ` · в торце ${g.edgeGrooves.length}` : ''}</div>
                   <div style={{ flex: 1 }} />
-                  <button type="button" style={btn} onClick={() => set(cur.id, { rot: (rotNow + 1) % 4, flip: o.flip })}>↻ 90°</button>
-                  <button type="button" style={{ ...btn, ...(o.flip ? { background: 'var(--amber-light)' } : {}) }} onClick={() => set(cur.id, { rot: 0, flip: !o.flip })}>⇅ Перевернуть</button>
+                  {turnBtns(cur.id, raw, o)}
                   {o.how === 'manual' && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => set(cur.id, null)}>Сброс</button>}
                 </div>
                 <div ref={viewRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -194,7 +202,6 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
       <div style={{ maxWidth: 260 }}>{modeSel}</div>
       {list.map(({ id, d, pv }) => {
         const o = pv.orient, raw = rawDetail(d), big = desk || open === id
-        const rotNow = ((o.turn - o.base) % 4 + 4) % 4
         const g = pv.geo
         return (
           <div key={id} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
@@ -207,8 +214,7 @@ export default function Drill6PartsView({ mat, order, post, man = {}, onMan, max
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{raw.length} × {raw.width} · {HOW[o.how]}{o.flip ? ' · перевёрнута' : ''}</div>
                 <div style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>сверху {g.top.length} · снизу {g.bottom.length} · в торец {g.edge.length}{g.grooves.length ? ` · пазов ${g.grooves.length}` : ''}{g.edgeGrooves.length ? ` · в торце ${g.edgeGrooves.length}` : ''}</div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-                  <button type="button" style={btn} onClick={() => set(id, { rot: (rotNow + 1) % 4, flip: o.flip })}>↻ 90°</button>
-                  <button type="button" style={{ ...btn, ...(o.flip ? { background: 'var(--amber-light)' } : {}) }} onClick={() => set(id, { rot: 0, flip: !o.flip })}>⇅ Перевернуть</button>
+                  {turnBtns(id, raw, o)}
                   {o.how === 'manual' && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => set(id, null)}>Сброс</button>}
                 </div>
               </div>

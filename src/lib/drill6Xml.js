@@ -609,7 +609,9 @@ export function d6Orient(d, { T, post = {}, types = {} }) {
   const baseOf = flip => { const r = flip ? flipRaw(raw, T) : raw; return chooseTurn(n0(r.width), n0(r.length), edgeThick(r, types)) }
   // ручное положение — в настройках производства (post.d6Man: id строки детали -> { rot, flip }), не в детали клиента
   const man = post.d6Man?.[raw.id] || c.d6
-  if (man && (n0(man.rot) || man.flip)) {
+  // новое: положение на станке целиком { turn, flip } — от правил не зависит, крутится и переворачивается любая деталь
+  if (man && man.turn != null) { const flip = !!man.flip; return { turn: ((Math.round(n0(man.turn)) % 4) + 4) % 4, flip, how: 'manual', base: baseOf(flip) } }
+  if (man && (n0(man.rot) || man.flip)) {                    // старое: поворот от «как выбрал станок»
     const flip = !!man.flip, base = baseOf(flip)
     return { turn: (base + (n0(man.rot) || 0)) % 4, flip, how: 'manual', base }
   }
@@ -634,6 +636,23 @@ export function d6Orient(d, { T, post = {}, types = {} }) {
   })
   const best = cands[0]
   return { turn: best.turn, flip: best.flip, how: 'rules', base: best.base }
+}
+
+/**
+ * Ручное положение: повернуть на 90° (axis 'rot') или перевернуть деталь вокруг оси станка X / Y ('x' | 'y').
+ * Переворот — как в жизни: деталь переворачивают на столе, она остаётся на том же месте. -> { turn, flip }
+ */
+export function d6Turned(o, W, H, axis) {
+  const turn = ((n0(o.turn) % 4) + 4) % 4, flip = !!o.flip
+  if (axis === 'rot') return { turn: (turn + 1) % 4, flip }
+  const m = (f, x) => (f ? W - x : x)              // перевёрнутая деталь — зеркало по ширине (flipRaw)
+  const fr = machineFrame(W, H, turn), pts = [[W * 0.2, H * 0.3], [W * 0.7, H * 0.15]]
+  const want = pts.map(([x, y]) => { const [X, Y] = fr.at(m(flip, x), y); return axis === 'x' ? [X, fr.Wm - Y] : [fr.L - X, Y] })
+  for (let k = 0; k < 4; k++) {
+    const f2 = machineFrame(W, H, k)
+    if (pts.every(([x, y], i) => { const [X, Y] = f2.at(m(!flip, x), y); return Math.abs(X - want[i][0]) < 1e-6 && Math.abs(Y - want[i][1]) < 1e-6 })) return { turn: k, flip: !flip }
+  }
+  return { turn, flip: !flip }
 }
 
 /** Схема детали на β-станке в текущем положении (для окна «Положение деталей») -> { orient, geo, top, bottom } | null */
