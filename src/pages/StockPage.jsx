@@ -387,7 +387,7 @@ function FromLabel({ p, pid, edit, cells, materials, onClose, onSaved, onOpen })
   const [wid, setWid] = useState(p.width ? String(p.width) : '')
   const [mat, setMat] = useState(p.material)
   const [th, setTh] = useState(p.thickness ? String(p.thickness) : '')
-  const [cell, setCell] = useState('')
+  const [cell, setCell] = useState(() => (!p.existing && p.auto?.cell) || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [asNew, setAsNew] = useState(false)          // такая бирка уже вносилась, но это другой остаток
@@ -431,7 +431,7 @@ function FromLabel({ p, pid, edit, cells, materials, onClose, onSaved, onOpen })
           </div>
         ) : !edit ? <p style={{ fontSize: 13, marginTop: 10 }}>Внести остаток на склад может ответственный за склад.</p> : auto ? (
           <div style={{ marginTop: 12 }}>
-            <p style={{ fontSize: 13, margin: '0 0 8px' }}>Это остаток №{auto.id} — пришёл на склад из раскроя{auto.note ? ` (${auto.note})` : ''}: {sizeText(auto)}, {auto.material || 'материал не указан'}. Укажите, куда положили.</p>
+            <p style={{ fontSize: 13, margin: '0 0 8px' }}>Это остаток №{auto.id} — пришёл на склад из раскроя{auto.note ? ` (${auto.note})` : ''}: {sizeText(auto)}, {auto.material || 'материал не указан'}{auto.cell ? `, сейчас в ячейке ${auto.cell}` : ''}. Укажите, куда положили.</p>
             <label style={lbl}>Ячейка<input autoFocus value={cell} onChange={e => setCell(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && cell.trim()) link() }} placeholder="А-3" style={{ ...inp, fontSize: 18 }} /></label>
             {!!cells.length && <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>{cells.slice(0, 24).map(c => <button key={c} type="button" disabled={busy} style={{ ...pill(false), padding: '6px 11px' }} onClick={() => link(c)}>{c}</button>)}</div>}
             {err && <p className="error-text" style={{ marginTop: 8 }}>{err}</p>}

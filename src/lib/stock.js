@@ -1,4 +1,5 @@
 // Склад деловых остатков производства (см. migration_remnants_stock.sql): список, ввод, ячейки, перерезка, списание, журнал.
+import { toLatin } from './orderUtils'
 import { supabase } from './supabase'
 import { mm } from './mmFmt'
 import { orderTitle } from './orderUtils'
@@ -136,13 +137,28 @@ export async function stockByKey(prodId, key) {
   }
   return r
 }
-/** Остаток пришёл из раскроя сам («Мои остатки»), ещё без ячейки и без бирки-кода: похожий по размеру и материалу */
+/**
+ * Остаток пришёл из раскроя сам («Мои остатки»), бирку с него ещё не сканировали: находим его по бирке, чтобы не внести
+ * второй раз. Главное — размер; дальше решают материал и заказ. В QR бирки текст часто латиницей («LDSP Dub sonoma»),
+ * а на складе — по-русски: сравниваем и в латинице. Ячейка может быть уже вписана — тогда сотрудник её просто поправит.
+ */
 export async function stockAutoMatch(prodId, p) {
-  const { data } = await supabase.from('remnants').select('*').eq('production_id', prodId).eq('source', 'nesting').eq('status', 'free').is('cell', null).is('label_key', null).limit(500)
-  const near = (a, b) => Math.abs(num(a) - num(b)) <= 1.5
-  const m = normMaterial(p.material)
-  return (data || []).filter(r => ((near(r.length, p.length) && near(r.width, p.width)) || (near(r.length, p.width) && near(r.width, p.length)))
-    && (!m || materialMatch(m, r.material))).sort((a, b) => b.id - a.id)[0] || null
+  const { data } = await supabase.from('remnants').select('*').eq('production_id', prodId).eq('source', 'nesting').eq('status', 'free').is('label_key', null).order('id', { ascending: false }).limit(1000)
+  const near = (a, b) => Math.abs(num(a) - num(b)) <= 2
+  const lat = s => normMaterial(toLatin(String(s || ''))).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  const m = normMaterial(p.material), mL = lat(p.material)
+  const texts = (p.texts || []).map(lat).filter(t => t.length >= 3)
+  const cands = (data || []).filter(r => (near(r.length, p.length) && near(r.width, p.width)) || (near(r.length, p.width) && near(r.width, p.length)))
+  if (!cands.length) return null
+  const score = r => {
+    let sc = 0
+    if (m && (materialMatch(m, r.material) || (mL && lat(r.material).split(' ').some(w => w.length >= 4 && mL.includes(w))))) sc += 2
+    const rn = lat(`${r.note || ''} ${r.material || ''}`)
+    if (texts.some(t => rn.includes(t) || t.split(' ').some(w => w.length >= 4 && rn.includes(w)))) sc += 2
+    if (!r.cell) sc += 1
+    return sc
+  }
+  return cands.map(r => ({ r, sc: score(r) })).sort((a, b) => b.sc - a.sc || b.r.id - a.r.id)[0].r
 }
 export const stockLinkLabel = (id, key, cell) => call('stock_link_label', { p_id: id, p_key: key || '', p_cell: cell || '' })
 
