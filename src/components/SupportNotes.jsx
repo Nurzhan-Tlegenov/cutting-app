@@ -40,8 +40,8 @@ export default function SupportNotes({ cardId = null, me, isMaster, onSent, tall
             : list.map(n => {
               const mine = n.author === me
               return (
-                <div key={n.id} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '90%', background: mine ? 'var(--amber-light)' : 'var(--bg)',
-                  border: mine ? 'none' : '0.5px solid var(--border)', borderRadius: 10, padding: '6px 9px', fontSize: 13 }}>
+                <div key={n.id} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '90%', background: 'var(--bg)',
+                  border: mine ? '1px solid var(--amber)' : '0.5px solid var(--border)', borderRadius: 10, padding: '6px 9px', fontSize: 13 }}>
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', display: 'flex', gap: 6 }}>
                     <span style={{ flex: 1 }}>{mine ? 'Вы' : n.author_name} · {dt(n.created_at)}</span>
                     {(mine || isMaster) && <span role="button" tabIndex={0} title="Удалить" onClick={() => del(n)} onKeyDown={e => { if (e.key === 'Enter') del(n) }} style={{ cursor: 'pointer' }}>✕</span>}

@@ -129,3 +129,16 @@ export const supportNoteDelete = id => callN('support_note_delete', { p_id: id }
 const SEEN = 'supChatSeen'
 export const chatSeenAt = () => { try { return localStorage.getItem(SEEN) || '' } catch { return '' } }
 export const markChatSeen = () => { try { localStorage.setItem(SEEN, new Date().toISOString()) } catch { /* без памяти */ } }
+
+// ═══════════ Заказы обращения и «📦 Пакет для разработчика» (migration_support_pack.sql) ═══════════
+export const PACK_SQL_HINT = 'Пакет для разработчика ещё не включён в базе: выполните migration_support_pack.sql в Supabase (SQL Editor) — один раз.'
+const callP = async (fn, args) => {
+  const r = await call(fn, args)
+  if (r.missing) return { error: PACK_SQL_HINT, missing: true }
+  if (r.error && /not allowed/.test(r.error)) return { error: 'Нет доступа: пакет скачивает мастер-аккаунт (или сотрудник, если мастер разрешил).' }
+  return r
+}
+export const supportConfig = () => callP('support_config')
+export const setSupportStaffPack = on => callP('admin_set_support_pack', { p_on: !!on })
+export const supportCardOrders = cardId => callP('support_card_orders', { p_card: cardId })
+export const supportOrderData = (cardId, orderId, full = false) => callP('support_order_data', { p_card: cardId, p_order: orderId, p_full: !!full })

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import CncLoader from '../components/CncLoader'
 import SupportNotes from '../components/SupportNotes'
+import SupportOrders from '../components/SupportOrders'
 import { isImageFile, payloadBlob } from '../lib/messages'
 import { useIsSupport, supportCard, supportFile, supportTake, supportAssign, supportMove, supportReply, supportSummary,
   supportDevDecide, supportClose, supportReopen, supportMerge, supportTeam, SUPPORT_COLS, SUPPORT_CLOSED, DETAIL_TEMPLATES, DONE_TEXT, supAgo } from '../lib/support'
@@ -129,12 +130,15 @@ export default function SupportCardPage() {
             {m.title && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{m.title}</div>}
             {m.body && <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</div>}
             {m.file_name && <FileItem m={m} onError={setErr} />}
-            {m.order_id && <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 3 }}>🧩 по заказу (просмотр заказа для поддержки — в пакете для разработчика)</div>}
+            {m.order_id && <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 3 }}>🧩 приложен заказ — см. «Заказы из обращения» ниже</div>}
           </div>
         ))}
         {!d.messages.length && <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Сообщений нет.</p>}
         <div ref={endRef} />
       </div>
+
+      {/* заказы из обращения (просмотр) и пакет для разработчика */}
+      <SupportOrders cardId={c.id} messagesKey={d.messages.length} />
 
       {/* внутренние заметки — пользователь их не видит */}
       <div className="card" style={{ marginTop: 14, padding: '9px 10px', background: 'var(--amber-light)', border: 'none' }}>

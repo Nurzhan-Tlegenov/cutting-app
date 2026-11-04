@@ -6,7 +6,7 @@ import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { UserName } from '../components/UserCard'
-import { useIsSupport, useSupportStaff, setSupport, supportTeam, supportBoard, supportTake, supportArchiveLegacy, supportNotes, chatSeenAt, markChatSeen,
+import { useIsSupport, useSupportStaff, setSupport, supportTeam, supportBoard, supportTake, supportArchiveLegacy, supportNotes, supportConfig, setSupportStaffPack, chatSeenAt, markChatSeen,
   SUPPORT_COLS, SUPPORT_CLOSED, supAgo } from '../lib/support'
 
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '')
@@ -200,6 +200,7 @@ function TeamBlock({ isMaster, me }) {
           Добавить — галочкой «🎧 Сотрудник поддержки» в карточке пользователя («Пользователи и регистрация» или нажатие на имя).
           Сотрудник видит только раздел «Поддержка»: обращения, переписку, файлы и краткую карточку автора без телефона.
         </p>
+        <StaffPackToggle />
         {staff === undefined ? <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Загружаем…</p>
           : staff.error ? <p className="error-text" style={{ fontSize: 12 }}>{staff.error}</p>
             : !rows.length ? <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Пока никого.</p>
@@ -216,4 +217,22 @@ function TeamBlock({ isMaster, me }) {
     )}
     {err && team && <p className="error-text" style={{ fontSize: 12 }}>{err}</p>}
   </>
+}
+
+// мастер: могут ли сотрудники поддержки сами скачивать «📦 Пакет для разработчика»
+function StaffPackToggle() {
+  const [on, setOn] = useState(undefined)
+  const [err, setErr] = useState('')
+  useEffect(() => { let alive = true; supportConfig().then(r => { if (alive) setOn(r.data ? !!r.data.staff_pack : null) }); return () => { alive = false } }, [])
+  if (on === undefined || on === null) return null
+  const flip = async () => { const r = await setSupportStaffPack(!on); if (r.error) setErr(r.error); else setOn(!on) }
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+        <input type="checkbox" checked={on} onChange={flip} style={{ width: 18, height: 18, margin: 0 }} />
+        <span>Сотрудники могут скачивать «📦 Пакет для разработчика»</span>
+      </label>
+      {err && <div className="error-text" style={{ fontSize: 11.5 }}>{err}</div>}
+    </div>
+  )
 }
