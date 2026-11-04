@@ -780,13 +780,11 @@ function LearnFromProgram({ post, onApply, tools = [] }) {
     onApply({
       cmdStart: res.cmdStart, cmdToolStart: res.cmdToolStart, cmdToolEnd: res.cmdToolEnd, cmdEnd: res.cmdEnd,
       ...(res.arcs ? { arcs: res.arcs } : {}),
-      ...(res.park ? { endX: res.park.x ?? 0, endY: res.park.y ?? 0 } : {}),   // парковка в конце программы — «конечное положение»
       ...(res.ext && /^(nc|tap|cnc|gcode|ngc|txt|mpf|iso|ptp|anc|eia|h|g)$/i.test(res.ext) ? { ext: res.ext } : {}),
       // два вида смены: присадочная голова — свои команды, у станка включается голова
       ...(res.head ? { drillHead: true, cmdHeadStart: res.head.cmdHeadStart, cmdHeadEnd: res.head.cmdHeadEnd } : { drillHead: false }),
-      ...(res.learned?.post.safeZ != null ? { safeZ: res.learned.post.safeZ } : {}),
-      ...(res.learned?.post.zRef ? { zRef: res.learned.post.zRef } : {}),
-      // заглубление фрезы (глубину реза контура) самонастройка не трогает: его задают во вкладке «Обработка»
+      // координаты (высота безопасности, от какой пласти Z, парковка, заглубление) самонастройка не трогает —
+      // это настройки станка, их задаёт пользователь; в отчёте они только показываются
       learnedFrom: res.fileName, learnedAt: Date.now(),
     }, res.learned)
     setRes(null)

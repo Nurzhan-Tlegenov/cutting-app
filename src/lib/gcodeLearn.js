@@ -17,6 +17,8 @@ const strip = s => s
 
 const word = (s, ch) => { const m = new RegExp(`${ch}\\s*(-?\\d*\\.?\\d+)`, 'i').exec(s); return m ? Number(m[1]) : null }
 const gcodes = s => [...s.matchAll(/G\s*(\d+(?:\.\d+)?)/gi)].map(m => Number(m[1]))
+// в строке есть координата оси (G53 Z-15.000, G28 X0 Y0, G0 Z50…)
+const HAS_COORD = /(?:^|[^A-Z{])[XYZABC]\s*[-+]?\.?\d/i
 const isToolChange = s => /(?:^|\s)M0?6(?=\D|$)/i.test(s)
 // у части станков смена — сама команда T (без M6): «T8», «T1», дальше включение шпинделя и корректор
 const isTWord = s => /^T\s*\d+(?=\D|$)/i.test(s) && !/[XYZ]\s*-?[\d.]/i.test(s)
@@ -205,12 +207,12 @@ export function learnFromProgram(text) {
     report.push('У станка включится «Присадочная голова», её команды встанут в свой блок, а свёрла с этими номерами в базе инструментов будут отмечены «в присадочной голове».')
   }
   if (learned.tools.length) report.push(`Инструменты: ${learned.tools.map(t => `T${t.t} ${t.type === 'mill' ? 'фреза' : 'сверло'}${t.d ? ' Ø' + t.d : ''}${t.rpm ? ' S' + t.rpm : ''}${t.feed ? ' F' + t.feed : ''}${t.head ? ' (голова)' : ''}`).join('; ')}.`)
-  if (learned.post.safeZ != null) report.push(`Высота безопасности Z${learned.post.safeZ}; Z считается ${learned.post.zRef === 'top' ? 'от верхней пласти' : 'от стола'}${learned.post.millOver != null ? `; в программе фреза уходит ниже стола на ${learned.post.millOver} мм — глубину реза задайте сами во вкладке «Обработка»` : ''}.`)
+  if (learned.post.safeZ != null) report.push(`Для сведения (в настройки не берётся — задайте сами в «Основных»): в программе высота безопасности Z${learned.post.safeZ}, Z считается ${learned.post.zRef === 'top' ? 'от верхней пласти' : 'от стола'}${learned.post.millOver != null ? `, фреза уходит ниже стола на ${learned.post.millOver} мм (глубина реза — во вкладке «Обработка»)` : ''}.`)
   if (learned.ops.angle) report.push(`Врезание фрезы под углом ~${learned.ops.angle}°${learned.ops.passes > 1 ? `, контур в ${learned.ops.passes} прохода` : ', контур в один проход на всю глубину'}.`)
   if (dropped) report.push(`Комментарии отброшены (${dropped} строк) — у каждой программы они свои.`)
   if (numbered) report.push('В программе были номера строк (N…) — они убраны: наша программа их не ставит.')
   if (ij) report.push('Дуги в программе — G2/G3 с I, J: в «Основных» включится вывод дуг так же.')
-  if (park) report.push(`Парковка в конце (${park.line}) — в «Основных» станет «конечным положением» X${park.x ?? 0} Y${park.y ?? 0}; поменять или убрать можно там.`)
+  if (park) report.push(`Для сведения: в конце программы шпиндель уезжает (${park.line}) — в настройки не берётся; если нужно, задайте «конечное положение» в «Основных».`)
   if (moveBefore.length) {
     const u = [...new Set(moveBefore)]
     report.push(`Перед сменой инструмента станок уезжал: ${u.slice(0, 3).join(', ')}${u.length > 3 ? '…' : ''}. В команды не взято — это координаты по листу из той программы; если станку переезд нужен, впишите его в команды смены вручную.`)
@@ -222,12 +224,17 @@ export function learnFromProgram(text) {
   if (blocks.length === 1) warnings.push('Смена инструмента в программе одна — граница между началом программы и сменой определена по типичным командам. Проверьте.')
 
   const fixUnits = l => l.replace(/(^|\s)G20(?=\D|$)/g, '$1G21')
+  // Координаты из чужой программы в команды не берём: подъём «G53 Z-15», уход «G53 X0 Y0», высоты и переезды —
+  // это настройки конкретного станка, их пользователь задаёт сам (высота безопасности, конечное положение…)
+  const coordLines = new Set()
+  const noCoords = txt => String(txt || '').split('\n').filter(l => { if (HAS_COORD.test(l)) { coordLines.add(l.trim()); return false } return true }).join('\n')
+  const cmdStart = noCoords(startLines.map(fixUnits).join('\n')), cmdToolStart = noCoords(sp.start), cmdToolEnd = noCoords(sp.end), cmdEnd = noCoords(endLines.join('\n'))
+  const hdC = hd ? { start: noCoords(hd.start), end: noCoords(hd.end) } : null
+  if (coordLines.size) report.push(`Строки с координатами не взяты в команды: ${[...coordLines].slice(0, 4).join(', ')}${coordLines.size > 4 ? '…' : ''}. Подъёмы, высоты и уход в конце — настройки вашего станка: если они нужны, впишите их в команды сами.`)
   return {
     ok: true,
-    cmdStart: startLines.map(fixUnits).join('\n'),
-    cmdToolStart: sp.start, cmdToolEnd: sp.end,
-    cmdEnd: endLines.join('\n'),
-    head: hd ? { cmdHeadStart: hd.start, cmdHeadEnd: hd.end, tools: head.tools } : null,
+    cmdStart, cmdToolStart, cmdToolEnd, cmdEnd,
+    head: hdC ? { cmdHeadStart: hdC.start, cmdHeadEnd: hdC.end, tools: head.tools } : null,
     tools, spindleTools: spindle.tools, arcs: ij ? 'ij' : null, park,
     learned,                         // { tools: [{ t, type, d, rpm, feed, inFeed, maxPass, head, cuts }], ops: { angle, entry }, post: { safeZ, zRef, millOver } }
     report, warnings,
