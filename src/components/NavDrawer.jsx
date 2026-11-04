@@ -256,6 +256,7 @@ export default function NavDrawer({ notices, unread }) {
     { icon: I.msg, label: 'Уведомления', badge: fresh.length, on: pathname === '/notices', act: () => go('/notices') },
     { icon: I.scan, label: 'Сканер бирки', on: pathname === '/scan', act: () => go('/scan') },
     { icon: I.msg, label: 'Сообщения', badge: unread || 0, on: pathname === '/messages', act: () => go('/messages') },
+    ...(isMaster ? [] : [{ icon: I.msg, label: 'Написать в поддержку', on: false, act: () => go('/messages?write=1') }]),
     { icon: I.share, label: ownOk ? 'Пригласить производство' : 'Пригласить своё производство', on: pathname === '/invite' && (!ownOk || search === '?k=production'), act: () => go('/invite?k=production') },
     { icon: I.user, label: 'Профиль', badge: 0, on: pathname === '/profile', act: () => go('/profile') },
   ] }

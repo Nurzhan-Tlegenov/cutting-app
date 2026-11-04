@@ -36,6 +36,8 @@ export default function MessagesPage() {
   const [conv, setConv] = useState(null)           // мастер: открытая переписка с пользователем { userId, name }
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
+  const writeRef = useRef(null)          // «Написать в поддержку» из меню / профиля: /messages?write=1 — сразу поле ввода
+  useEffect(() => { if (/[?&]write=1/.test(window.location.search)) setTimeout(() => { writeRef.current?.scrollIntoView({ block: 'center' }); writeRef.current?.focus() }, 200) }, [])
   const [busy, setBusy] = useState(false)
   const [sendProg, setSendProg] = useState('')     // большой файл уходит частями
   const [files, setFiles] = useState([])            // файлы к обращению (модели Базиса, Астры, К3 и т. п.)
@@ -143,9 +145,9 @@ export default function MessagesPage() {
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
 
       <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 6 }}>{isMaster ? 'Новость для всех пользователей' : 'Написать разработчику'}</div>
+        <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 6 }}>{isMaster ? 'Новость для всех пользователей' : '✉ Написать в поддержку (разработчику)'}</div>
         {isMaster && <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Заголовок (необязательно)" style={{ marginBottom: 6, fontSize: 14 }} />}
-        <textarea value={text} onChange={e => setText(e.target.value)} rows={3} style={{ fontSize: 14, resize: 'vertical' }}
+        <textarea ref={writeRef} value={text} onChange={e => setText(e.target.value)} rows={3} style={{ fontSize: 14, resize: 'vertical' }}
           placeholder={isMaster ? 'Что нового в приложении…' : 'Вопрос, замечание или пожелание…'} />
         {!isMaster && (
           <div style={{ marginTop: 8 }}>

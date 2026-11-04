@@ -234,6 +234,14 @@ export default function ProfilePage() {
       </div>
 
       <PushSettings />
+      {!isMaster && (
+        <button type="button" className="card" onClick={() => navigate('/messages?write=1')}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', cursor: 'pointer', marginBottom: 12, color: 'var(--text)' }}>
+          <span style={{ fontSize: 20 }}>✉</span>
+          <span style={{ flex: 1 }}><b style={{ fontSize: 14 }}>Написать в поддержку</b><span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>Вопрос, ошибка, пожелание — ответ придёт в «Сообщения»</span></span>
+          <span style={{ color: 'var(--text-hint)' }}>›</span>
+        </button>
+      )}
 
       {/* Кабинеты: клиент и производство — переключаются здесь */}
       <p className="section-title">Кабинет</p>
