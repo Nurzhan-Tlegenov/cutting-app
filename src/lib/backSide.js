@@ -11,7 +11,7 @@ import { mirrorContour } from './mirrorDetail'
 import { placedTurns } from './partHoles'
 import { rotatePointTimes } from './drillGeometry'
 import { roughShapePolygons } from './trueShapeNesting'
-import { isTwoSided } from './partInfo'
+import { backSide } from './partInfo'
 import { cornerOf } from './sheetCorner'
 import { rawDetail } from './edgeCut'
 
@@ -37,8 +37,12 @@ function backContour(c, T, o) {
   }) : []
   const grooves = o.grooves ? (c.grooves || []).map(g => ({ ...g, face: swap(g.face || 'front') })) : []
   const holes = (c.holes || []).filter(h => (h.type === 'pocket' ? o.pockets : o.contour)).map(h => (h.type === 'pocket' ? { ...h, face: swap(h.face || 'front') } : h))
-  return { ...c, drillings, grooves, holes, edgeGrooves: [], decor: [] }
+  // паз по траектории с плоским дном (Базис) — как обычный паз; прочая фрезеровка «для вида» не выводится
+  const decor = o.grooves ? (c.decor || []).filter(dc => dc.flat && !dc.closed && Array.isArray(dc.path)).map(dc => ({ ...dc, face: swap(dc.face || 'front') })) : []
+  return { ...c, drillings, grooves, holes, edgeGrooves: [], decor }
 }
+// mirrorContour траекторию паза не отражает: x -> W − x и путь в обратную сторону (левый край полосы остаётся левым)
+const mirrorDecor = (c, W) => ({ ...c, decor: (c.decor || []).map(dc => ({ ...dc, path: [...dc.path].reverse().map(([x, y]) => [W - x, y]) })) })
 
 /** Положение детали на станке для доприсадки: отражение detail -> станок и размеры по X, Y */
 function machineOf(d, orient = d) {
@@ -60,11 +64,11 @@ export function backMarkCorner(p, d, stop, edge = false) {
   return null
 }
 
-/** Детали с двух сторон на выбранных листах: [{ di, detail, qty }] */
+/** Детали с обработкой снизу (с двух сторон или только снизу) на выбранных листах: [{ di, detail, qty }] */
 export function backParts(mat, sel) {
   const T = n0(mat.thickness) || 16, cnt = new Map(), at = new Map()
   for (const si of sel) (mat.sheets[si]?.placed || []).forEach((p, pi) => { cnt.set(p.detailIndex, (cnt.get(p.detailIndex) || 0) + 1); if (!at.has(p.detailIndex)) at.set(p.detailIndex, [si, pi]) })
-  return [...cnt].filter(([di]) => mat.details[di] && isTwoSided(mat.details[di], T)).map(([di, qty]) => ({ di, detail: mat.details[di], qty, at: at.get(di) }))
+  return [...cnt].filter(([di]) => mat.details[di] && backSide(mat.details[di], T)).map(([di, qty]) => ({ di, detail: mat.details[di], qty, at: at.get(di) }))
 }
 
 /** Одна деталь для доприсадки -> { sheet, geo, details } для buildSheetGcode (деталь в углу укладки, длиной вдоль Y) */
@@ -72,7 +76,8 @@ export function backJob(d0, T, post) {
   const o = backOf(post), d = o.edge ? rawDetail(d0) : d0, c = parse(d.contour) || {}   // с кромкой — готовая деталь
   const m = machineOf(d)
   // обратная сторона, вид сверху после переворота: зеркало по ширине детали + поворот (у W > H — на четверть)
-  const dB = { ...d, contour: JSON.stringify(mirrorContour(backContour(c, T, o), n0(d.width))) }
+  const bc = backContour(c, T, o)
+  const dB = { ...d, contour: JSON.stringify(mirrorDecor(mirrorContour(bc, n0(d.width)), n0(d.width))) }
   const rotation = m.turns * 90
   let polygon
   try { polygon = roughShapePolygons(dB)[rotation].map(([x, y]) => ({ x, y })) } catch { polygon = undefined }

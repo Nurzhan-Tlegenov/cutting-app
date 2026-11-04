@@ -752,7 +752,10 @@ export function buildItem(src, holes, faceRule) {
 
   // --- какая пласть «лицевая» (смотрит вверх на станке): та, где больше глухой обработки ---
   const holesTop = face.filter(f => !f.through && f.top).length, holesBottom = face.filter(f => !f.through && !f.top).length
-  const cutsTop = cutsRaw.filter(c => c.top).length, cutsBottom = cutsRaw.filter(c => !c.top).length
+  // пазы по траектории с плоским дном (подсветка и т. п.) — тоже пазы
+  const flatPaths = (src.decorRaw || []).filter(dc => dc.flat)
+  const cutsTop = cutsRaw.filter(c => c.top).length + flatPaths.filter(dc => dc.top).length
+  const cutsBottom = cutsRaw.filter(c => !c.top).length + flatPaths.filter(dc => !dc.top).length
   // Порядок признаков задаёт пользователь при импорте (faceOrder): первый признак, который решает, — решает.
   // Ничего не решило — как в модели (не переворачиваем).
   let flip = false

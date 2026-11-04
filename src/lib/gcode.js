@@ -15,6 +15,7 @@
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeometry'
 import { detailHoles, placedTurns } from './partHoles'
 import { smoothLoop, arcRuns } from './arcFit'
+import { bandPolygon, extendEnd } from './pathBand'
 import { postView } from './postTools'
 import { scoreLines } from './scoreWaste'
 import { cornerShift, cornerOf, cornerLabel } from './sheetCorner'
@@ -46,6 +47,19 @@ function bboxOf(pts) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
   for (const [x, y] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
   return { x0, y0, x1, y1 }
+}
+/** Точка q на контуре детали? -> наружная нормаль ближайшей стороны контура, иначе null */
+function outwardAt(q, outline) {
+  let best = null, bd = 0.5
+  for (let i = 0; i < outline.length; i++) {
+    const a = outline[i], b = outline[(i + 1) % outline.length], d = segDist(q, a, b)
+    if (d >= bd) continue
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+    let n = [(b[1] - a[1]) / l, -(b[0] - a[0]) / l]
+    if (pointInPoly([q[0] + n[0], q[1] + n[1]], outline)) n = [-n[0], -n[1]]
+    bd = d; best = n
+  }
+  return best
 }
 const isAxisRect = (pts, bb) => pts.length === 4 && pts.every(([x, y]) => (Math.abs(x - bb.x0) < EPS || Math.abs(x - bb.x1) < EPS) && (Math.abs(y - bb.y0) < EPS || Math.abs(y - bb.y1) < EPS))
 
@@ -79,7 +93,9 @@ export function partFeatures(p, detail, T, skip = null) {
     if (hole.type === 'pocket') {
       if (sk.face) return
       if (hole.face === 'back') { f.skipped.back++; return }
-      if (!isAxisRect(pts, bb)) { f.skipped.odd++; return }
+      // выемка любой формы (круглая, с дугами, фигурная) — выбирается кольцами от центра к контуру (polyPocket).
+      // Вершины на контуре детали — выемка открыта наружу: там фреза выходит на сам край (out — наружная нормаль)
+      if (!isAxisRect(pts, bb)) { f.pockets.push({ ...bb, open: open(bb), depth: Number(hole.depth) || 10, pts, out: pts.map(q => outwardAt(q, outline)) }); return }
       f.pockets.push({ ...bb, open: open(bb), depth: Number(hole.depth) || 10 })
       return
     }
@@ -90,6 +106,20 @@ export function partFeatures(p, detail, T, skip = null) {
     else f.cutouts.push({ pts })
   })
   if (!sk.face) (contour.grooves || []).forEach(g => { if (g.face === 'back') f.skipped.back++ })
+  // Паз по траектории с плоским дном (Базис: незамкнутая цепочка отрезков и дуг, ширина lo…hi от траектории) —
+  // выбирается как выемка по форме полосы. Конец траектории на краю детали — паз выходит наружу.
+  if (!sk.face) (contour.decor || []).forEach(dc => {
+    if (!(dc.flat && !dc.closed && Array.isArray(dc.path) && dc.path.length > 1 && Number(dc.depth) > 0)) return
+    if (dc.face === 'back') { f.skipped.back++; return }
+    const path = dc.path.map(([x, y]) => at(x, y)), lo = Number(dc.flat.lo) || 0, hi = Number(dc.flat.hi) || 0
+    const band = bandPolygon(path, Math.min(lo, hi), Math.max(lo, hi))
+    if (!band || Math.abs(hi - lo) < 0.1) return
+    const bb = bboxOf(band)
+    const ends = [path[0], path[path.length - 1]].map(q => distToLoop(q, outline) < 0.5 || !pointInPoly(q, outline))
+    let len = 0
+    for (let i = 1; i < path.length; i++) len += Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1])
+    f.grooves.push({ ...bb, open: open(bb), depth: Math.min(Number(dc.depth), T), width: Math.abs(hi - lo), pts: band, path, lo: Math.min(lo, hi), hi: Math.max(lo, hi), ends, len })
+  })
   if (!sk.face) getGrooveRects(contour, W, H, true).forEach(r => {
     const bb = bboxOf(r.pts.map(([x, y]) => at(x, y)))
     f.grooves.push({ ...bb, open: open(bb), depth: r.depth || 0, width: r.width || Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) })
@@ -195,11 +225,13 @@ function splitLoops(P, depth = 0) {
  * Эквидистанта замкнутого контура: delta > 0 — наружу, delta < 0 — внутрь. Острые углы остаются острыми.
  * Возвращает контур (против часовой) или null, если инструмент туда не проходит.
  */
-export function offsetLoop(poly, delta) {
+export function offsetLoop(poly, delta) { return offsetLoops(poly, delta)[0] || null }
+/** То же, но все получившиеся контуры (узкая перемычка делит выборку на части) — крупные первыми */
+export function offsetLoops(poly, delta) {
   let P = dedupe(poly)
-  if (P.length < 3) return null
+  if (P.length < 3) return []
   if (signedArea(P) < 0) P.reverse()
-  if (Math.abs(delta) < 1e-9) return P
+  if (Math.abs(delta) < 1e-9) return [P]
   const n = P.length, out = []
   const nrm = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [dy / l, -dx / l] }
   for (let i = 0; i < n; i++) {
@@ -216,8 +248,7 @@ export function offsetLoop(poly, delta) {
     const m = [(q[0] + L[(i + 1) % L.length][0]) / 2, (q[1] + L[(i + 1) % L.length][1]) / 2]
     return distToLoop(q, P) >= need && distToLoop(m, P) >= need && pointInPoly(m, P) === (delta < 0)
   })
-  const loops = splitLoops(dedupe(out)).filter(ok).sort((a, b) => signedArea(b) - signedArea(a))
-  return loops[0] || null
+  return splitLoops(dedupe(out)).filter(ok).sort((a, b) => signedArea(b) - signedArea(a))
 }
 const circleLoop = (cx, cy, r) => { const n = Math.max(24, Math.ceil(2 * Math.PI * r / 1.5)); return Array.from({ length: n }, (_, i) => [cx + r * Math.cos(2 * Math.PI * i / n), cy + r * Math.sin(2 * Math.PI * i / n)]) }
 
@@ -591,6 +622,64 @@ function cutRect(out, paths, zs, tool, safeZ, top, op = {}) {
   out.g0(null, null, safeZ)
 }
 
+/**
+ * Выборка любой формы кольцами от центра к контуру: эквидистанты контура внутрь с шагом фрезы, вырезаются от самого
+ * внутреннего к внешнему; последнее кольцо — чистовой обход по контуру (центр фрезы на радиус внутри).
+ * -> [{ loop: замкнутый контур (без повтора первой точки), link: переход с предыдущего кольца без подъёма }] | null
+ */
+export function polyPocket(Q, r, step, dir = 'cw') {
+  const fin = offsetLoops(Q, -r)
+  if (!fin.length) return null
+  const st = Math.max(0.5, Math.min(step > 0 ? step : r, 2 * r * 0.7))
+  const seq = []
+  const walk = (L, lvl) => {
+    const kids = lvl < 800 ? offsetLoops(L, -st) : []
+    if (kids.length) kids.forEach(k => walk(k, lvl + 1))
+    else if (st > r + 0.05) offsetLoops(L, -r).forEach(k => seq.push(k))   // середина шире фрезы — ещё один виток
+    seq.push(L)
+  }
+  fin.forEach(L => walk(L, 0))
+  const res = []
+  let prev = null
+  for (const L0 of seq) {
+    let L = orientLoop(L0, dir)
+    const link = !!prev && pointInPoly(prev, L)
+    if (prev) {                                      // начало — ближайшая точка к концу предыдущего кольца
+      let bi = 0, bd = Infinity
+      L.forEach((q, i) => { const d = Math.hypot(q[0] - prev[0], q[1] - prev[1]); if (d < bd) { bd = d; bi = i } })
+      L = [...L.slice(bi), ...L.slice(0, bi)]
+    }
+    res.push({ loop: L, link })
+    prev = L[0]
+  }
+  return res
+}
+function cutPoly(out, segs, zs, tool, safeZ, top, op = {}) {
+  const feed = n0(tool.feed) || 1000, inFeed = n0(tool.inFeed) || feed
+  const tan = Math.tan(Math.max(1, Math.min(89, n0(op.angle) || 45)) * Math.PI / 180)
+  let zPrev = top + 1
+  zs.forEach(z => {
+    segs.forEach((s, i) => {
+      const L = s.loop, start = L[0]
+      if (i && s.link) out.g1(start[0], start[1], null, feed)
+      else {
+        out.g0(null, null, safeZ); out.g0(start[0], start[1], safeZ)
+        out.g1(null, null, zPrev, inFeed)
+        const next = L.find(q => Math.hypot(q[0] - start[0], q[1] - start[1]) > 0.5)
+        if (op.entry === 'ramp' && next) {
+          const len = Math.hypot(next[0] - start[0], next[1] - start[1]), h = Math.min(len, (zPrev - z) / tan / 2), t = h / len
+          out.g1(start[0] + (next[0] - start[0]) * t, start[1] + (next[1] - start[1]) * t, (zPrev + z) / 2, inFeed)
+          out.g1(start[0], start[1], z, inFeed)
+        } else out.g1(null, null, z, inFeed)
+      }
+      L.slice(1).forEach(q => out.g1(q[0], q[1], null, feed))
+      out.g1(start[0], start[1], null, feed)
+    })
+    zPrev = z
+  })
+  out.g0(null, null, safeZ)
+}
+
 // порядок обхода — каждый раз ближайшее
 function nearestOrder(items, from = [0, 0]) {
   const left = items.slice(), out = []
@@ -938,6 +1027,29 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     for (const k of rects) {
       if (!k.t) { noTool(k.label); continue }
       if (k.t.type !== 'mill') { warn.add(`На ${k.label} назначено сверло — нужна фреза.`); continue }
+      if (k.pts) {                                    // фигурная выемка или паз по траектории
+        const r = n0(k.t.d) / 2, dt = n0(k.t.d)
+        edgeOk(k.t, k.depth >= T - EPS ? T + millOver : k.depth, k.label)
+        const zs = levels(T, k.depth >= T - EPS ? -millOver : T - k.depth, n0(k.t.maxPass))
+        let Q
+        if (k.path) {
+          let P = k.path
+          if (k.ends[0]) P = extendEnd(P, 0, r)        // паз выходит на край детали — фреза доходит до самого края
+          if (k.ends[1]) P = extendEnd(P, 1, r)
+          if (k.width < dt - 0.3) { warn.add(`Фреза Ø${num(dt)} шире, чем ${k.label} — пропущено.`); continue }
+          if (k.width <= dt + 0.3) {                   // паз шириной с фрезу — один проход по середине полосы
+            const mid = (k.lo + k.hi) / 2, B = bandPolygon(P, mid, mid)
+            const line = B.slice(0, B.length / 2).map(G)
+            jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: line[0], run: out => cutOpen(out, line, zs, k.t, safeZ, T, k.op) })
+            continue
+          }
+          Q = bandPolygon(P, k.lo, k.hi)
+        } else Q = smoothLoop(k.pts.map((q, i) => (k.out?.[i] ? [q[0] + k.out[i][0] * r, q[1] + k.out[i][1] * r] : q)))
+        const segs = Q && polyPocket(Q.map(G), r, n0(k.t.step), k.op.dir === 'ccw' ? 'ccw' : 'cw')
+        if (!segs) { warn.add(`Фреза Ø${num(dt)} не проходит в ${k.label} — пропущено.`); continue }
+        jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: segs[0].loop[0], run: out => cutPoly(out, segs, zs, k.t, safeZ, T, k.op) })
+        continue
+      }
       const paths = rectPaths(bx + k.x0, by + k.y0, bx + k.x1, by + k.y1, k.open, n0(k.t.d) / 2, n0(k.t.step), k.spiral)
       if (!paths) { warn.add(`Фреза Ø${num(k.t.d)} шире, чем ${k.label} (${num(Math.min(k.x1 - k.x0, k.y1 - k.y0))} мм) — пропущено.`); continue }
       edgeOk(k.t, k.depth >= T - EPS ? T + millOver : k.depth, k.label)

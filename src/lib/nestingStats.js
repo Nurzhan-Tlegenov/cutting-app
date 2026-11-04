@@ -59,7 +59,7 @@ export function nestingStats({ order, mat, method }) {
       st.holes += f.holes.length; st.edgeHoles += f.skipped.edge
       if (f.holes.length || f.skipped.edge || f.skipped.back) { st.drillM2 += loopArea(f.outline) / 1e6; st.drillParts++ }
       st.pockets += f.pockets.length
-      for (const g of f.grooves) { st.grooves++; st.grooveM += Math.max(g.x1 - g.x0, g.y1 - g.y0) / 1000 }
+      for (const g of f.grooves) { st.grooves++; st.grooveM += (g.len || Math.max(g.x1 - g.x0, g.y1 - g.y0)) / 1000 }
       // кромка этой детали
       if (d) {
         let curved = false
