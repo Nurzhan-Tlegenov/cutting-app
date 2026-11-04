@@ -94,11 +94,24 @@ export const DEFAULT_OPS = () => ({
 })
 
 // shared — общие постпроцессоры (мастер-аккаунт отметил «для всех»): видны каждому, в настройках пользователя не хранятся
+// Общий (выданный) постпроцессор приходит без инструментов станка, на котором его настроили: у каждого станка свои
+// номера и имена инструментов — их задаёт сам пользователь. Остаются правила формата и обработки (направления, заходы,
+// Quadrant и т. п.); назначения инструментов сбрасываются в «авто», списки фрез шпинделей KDT — пустые.
+const D6_TOOL_CATS = ['groove', 'edgeGroove', 'pocket', 'edgePocket', 'cutout', 'edge']
+export function withoutTools(p) {
+  if (!isDrill6(p)) return p
+  const o = p.d6Ops || {}, ops = { ...o, layers: {} }
+  for (const k of D6_TOOL_CATS) if (o[k]) ops[k] = { ...o[k], mode: 'auto', tool: '', rules: [], ...(k === 'edge' ? { notchTool: '' } : {}) }
+  const out = { ...p, d6Tools: [], d6Ops: ops, d6ToolAuto: true, d6Tool: '' }
+  if (p.d6b) out.d6b = { ...p.d6b, grooveTool: '' }
+  if (p.kdt) out.kdt = { ...p.kdt, top: [], bottom: [] }
+  return out
+}
 export function normalizeCnc(raw, shared = [], { beam = false } = {}) {
   const c = raw && typeof raw === 'object' ? raw : {}
   const own = (Array.isArray(c.posts) ? c.posts : []).filter(p => p && !p.shared).map(p => ({ ...kindDefault(p), ...p }))
   const mine = own.length ? own : (shared.length ? [] : [DEFAULT_POST()])
-  let posts = [...mine, ...shared.filter(p => !mine.some(q => q.id === p.id)).map(p => ({ ...kindDefault(p), ...p, shared: true }))]
+  let posts = [...mine, ...shared.filter(p => !mine.some(q => q.id === p.id)).map(p => ({ ...kindDefault(p), ...withoutTools(p), shared: true }))]
   if (!posts.some(isRouterPost)) posts = [DEFAULT_POST(), ...posts]   // раскроечный станок есть всегда
   // пильный центр KDT — только с бета-доступом (после своих станков); без него — не показывается вовсе
   if (!beam) posts = posts.filter(p => !isBeamSaw(p))

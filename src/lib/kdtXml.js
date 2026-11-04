@@ -27,8 +27,8 @@
  */
 
 export const KDT_DEFAULT = () => ({
-  top: [{ d: 6, name: 'T2' }, { d: 4, name: 'SP1T1' }],       // фрезы верхнего шпинделя
-  bottom: [{ d: 6, name: 'SP4' }, { d: 4, name: 'SP2' }],     // фрезы нижнего шпинделя
+  top: [],         // фрезы верхнего шпинделя [{ d, name }] — задаёт пользователь (свой станок, свои имена: T2, SP1T1…)
+  bottom: [],      // фрезы нижнего шпинделя (SP4, SP2…)
   // торец станка (Face 1 — Y макс, 2 — Y 0, 3 — X макс, 4 — X 0) -> Quadrant: по выгрузкам Базис-ЧПУ производства-тестера
   // (4219 отверстий): 1 — X макс, 2 — X 0, 3 — Y макс, 4 — Y 0
   quad: { 3: 1, 4: 2, 1: 3, 2: 4 },
@@ -126,7 +126,7 @@ export function kdtPanel(g, post) {
   const path = (m, bottom) => {
     const z3 = (m.start?.length || 0) > 2            // на торце: точки X, Y на торце + Z1 от нижней пласти
     const t = m.kdtTool || (z3 ? edgeTool(m.tool) : kdtTool(k, bottom, { want: n0(m.tool?.d) }))
-    if (!t) { warnings.push('нет фрез для траектории (настройки KDT)'); return true }
+    if (!t) { warnings.push('фрезы шпинделей не заданы (Настройки ЧПУ → этот станок → «Формат файла» KDT) — пазы и фрезеровка в программу не попали'); return true }
     const corr = m.offset === '左' ? 1 : m.offset === '右' ? 2 : 0
     const depth = z3 ? n0(m.depth) : Math.min(n0(m.depth), T)       // на торце глубина — вглубь детали, не по толщине
     cad([['TypeNo', bottom && !z3 ? 17 : 7], ['TypeName', 'Path'], ...(z3 ? [['Quadrant', n0(k.quad[m.face]) || m.face]] : []), ['ToolName', esc(t.name)], ['Width', f2(t.d)], ['Depth', f2(depth)], ['Correction', corr]], () => {
@@ -166,6 +166,7 @@ export function kdtPanel(g, post) {
   // паз в торце — как паз (Line) на торце: Quadrant, отрезок на торце, Z1 — середина паза от нижней пласти
   for (const eg of g.edgeGrooves) {
     const t = edgeTool(eg.tool, eg.width)
+    if (!t) { warnings.push('фрезы шпинделей не заданы (Настройки ЧПУ → этот станок → «Формат файла» KDT) — пазы и фрезеровка в программу не попали'); continue }
     let [ax, ay, bx, by] = eg.line
     if (ax > bx + EPS || (Math.abs(ax - bx) <= EPS && ay > by)) [ax, ay, bx, by] = [bx, by, ax, ay]
     const td = n0(t?.d)
@@ -183,7 +184,7 @@ export function kdtPanel(g, post) {
   for (const gr of g.grooves) {
     const bot = gr.face !== fr.top
     const t = kdtTool(k, bot, { maxD: gr.width })
-    if (!t) { warnings.push('нет фрез для паза (настройки KDT)'); continue }
+    if (!t) { warnings.push('фрезы шпинделей не заданы (Настройки ЧПУ → этот станок → «Формат файла» KDT) — пазы и фрезеровка в программу не попали'); continue }
     let [x0, y0, x1, y1] = gr.rect
     const alongX = x1 - x0 >= y1 - y0
     // средняя линия; конец внутри детали — короче на радиус фрезы (фреза центром не доходит до конца паза)
