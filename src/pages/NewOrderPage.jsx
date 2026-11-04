@@ -1,7 +1,7 @@
 import Hint from '../components/Hint'
 import { metaPos } from '../lib/partLabel'
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
-import { saveOrderNote, NOTES_SQL_HINT } from '../lib/orderNotes'
+import { saveOrderNote, NOTES_SQL_HINT, saveOrderArticle, ARTICLE_SQL_HINT } from '../lib/orderNotes'
 import DeskSplit from '../components/DeskSplit'
 import { useDesktop } from '../hooks/useDesktop'
 import { useState, useRef, useEffect } from 'react'
@@ -360,6 +360,7 @@ export default function NewOrderPage() {
   // заказ из задачи («Мои задачи» → «Создать заказ из задачи»): название и примечание — из задачи, после создания заказ привязывается к ней
   const fromTask = useLocation().state?.task || null
   const [orderName, setOrderName] = useState(fromTask?.title || '')
+  const [orderArticle, setOrderArticle] = useState('')
   const [orderNote, setOrderNote] = useState(fromTask?.note || '')   // примечание к заказу — выводится в PDF карт раскроя
   const [materialName, setMaterialName] = useState('')
   const [materialThickness, setMaterialThickness] = useState(16)
@@ -455,7 +456,8 @@ export default function NewOrderPage() {
   }
 
   // Импорт деталей из таблицы (Excel / Базис-Мебельщик / PRO100)
-  const handleImport = ({ items, mode, material, thickness, orderName: importedName, model3d: importedModel, edgeTypes: importedTypes }) => {
+  const handleImport = ({ items, mode, material, thickness, orderName: importedName, article: importedArticle, model3d: importedModel, edgeTypes: importedTypes }) => {
+    if (importedArticle && !orderArticle.trim()) setOrderArticle(importedArticle)
     if (importedModel) setModel3d(importedModel)
     const imported = items.map(it => ({
       ...newDetail(),
@@ -537,6 +539,7 @@ export default function NewOrderPage() {
       }
       // примечание пишется отдельно: нет колонки в базе — заказ всё равно создан
       if (orderNote.trim() && !(await saveOrderNote(order.id, orderNote))) window.alert(NOTES_SQL_HINT)
+      if (orderArticle.trim() && !(await saveOrderArticle(order.id, orderArticle))) window.alert(ARTICLE_SQL_HINT)
       if (fromTask?.id) await linkOrder(fromTask.id, order.id)   // ошибка привязки не мешает заказу
 
       const rows = details.map((d, i) => {
@@ -630,6 +633,11 @@ export default function NewOrderPage() {
               <label className="label">Название заказа</label>
               <input type="text" placeholder="Кухня Ивановых" value={orderName}
                 onChange={e => setOrderName(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
+            </div>
+            <div style={{ width: 96 }}>
+              <label className="label">Артикул</label>
+              <input type="text" placeholder="—" value={orderArticle} maxLength={120}
+                onChange={e => setOrderArticle(e.target.value)} style={{ padding: '6px 8px', fontSize: 14 }} />
             </div>
             <div style={{ flex: 1 }}>
               <label className="label">Материал</label>

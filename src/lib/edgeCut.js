@@ -48,6 +48,7 @@ export function edgeTrimOf(contour) {
 // На стороне с кромкой, где задана прифуговка (производства или вида кромки), решает прифуговка — припуск модели не
 // добавляется второй раз (в Базисе припуск у кромки — это и есть прифуговка конструктора).
 export const ALLOW_KEY = '__allow'
+export const ALLOW_JOINT_MAX = 3
 export const ALLOW_MODES = [['model', 'Как в модели'], ['off', 'Не учитывать'], ['own', 'Свой припуск']]
 export function allowOf(types) {
   const a = parseEdgeTypes(types)[ALLOW_KEY]
@@ -73,7 +74,10 @@ export function allowApplied(edges, types, contour) {
   const out = {}
   for (const s of Object.keys(a)) {
     const k = edgeKey(edges?.[s])
-    if (k && num(types?.[k]?.joint) > 0) continue            // прифуговка у кромки — главнее припуска модели
+    // у кромки с прифуговкой маленький припуск модели (до ALLOW_JOINT_MAX) — это прифуговка конструктора: решает
+    // прифуговка производства/вида кромки. Большой припуск (под склейку, обрезку) — сверх прифуговки: деталь
+    // сначала упиливают в размер, потом кромят
+    if (k && num(types?.[k]?.joint) > 0 && a[s] <= ALLOW_JOINT_MAX) continue
     const v = set.mode === 'own' ? set.mm : a[s]
     if (v > 0) out[s] = v
   }

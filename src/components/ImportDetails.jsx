@@ -384,6 +384,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
       // название заказа: из файла модели, а если его нет — имя файла без расширения
       // (подставляется, только если в бланке название ещё пустое)
       orderName: basis?.orderName || String(fileName || '').replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim().slice(0, 120),
+      article: basis?.article || '',             // артикул заказа из модели (Базис) — подставляется, если в бланке пусто
       model3d,                                   // вся модель для 3D-просмотра (упакована)
       edgeTypes: basis?.edgeTypes || null,       // толщина видов кромки, если она есть в файле (SketchCut)
     })

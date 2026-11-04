@@ -1,7 +1,7 @@
 import Hint from '../components/Hint'
 import { metaPos } from '../lib/partLabel'
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
-import { saveOrderNote, NOTES_SQL_HINT } from '../lib/orderNotes'
+import { saveOrderNote, NOTES_SQL_HINT, saveOrderArticle, ARTICLE_SQL_HINT } from '../lib/orderNotes'
 import ShareBadge from '../components/ShareBadge'
 import { useState, useEffect, useRef } from 'react'
 import DeskSplit from '../components/DeskSplit'
@@ -294,6 +294,8 @@ export default function EditOrderPage() {
   const [model3d, setModel3d] = useState(null)   // 3D-модель из Базиса — сохраняется вместе с заказом
   const [error, setError] = useState('')
   const [orderName, setOrderName] = useState('')
+  const [orderArticle, setOrderArticle] = useState('')
+  const articleWas = useRef('')
   const [orderNote, setOrderNote] = useState('')   // примечание к заказу — выводится в PDF карт раскроя
   const noteWas = useRef('')
   const [materialName, setMaterialName] = useState('')
@@ -332,7 +334,7 @@ export default function EditOrderPage() {
     const { data: o } = await supabase.from('orders').select('*').eq('id', id).single()
     const { data: d } = await fetchOrderDetails(id)
     if (o) { setOrderNote(o.order_note || ''); noteWas.current = o.order_note || '' }
-    if (o) { setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16); setMaterialKind(o.material_kind === 'hdf' ? 'hdf' : ''); kindWas.current = o.material_kind === 'hdf' ? 'hdf' : '' }
+    if (o) { setOrderArticle(o.order_article || ''); articleWas.current = o.order_article || ''; setOrderName(o.order_name || ''); setMaterialName(o.material_name || ''); setMaterialThickness(o.material_thickness || 16); setMaterialKind(o.material_kind === 'hdf' ? 'hdf' : ''); kindWas.current = o.material_kind === 'hdf' ? 'hdf' : '' }
     if (o) { const saved = parseEdgeTypes(o.edge_types); if (Object.keys(saved).length) setEdgeTypesState(prev => ({ ...prev, ...saved })) }
     let loadedDetails = []
     if (d && d.length > 0) {
@@ -390,7 +392,8 @@ export default function EditOrderPage() {
     updateDetail(targetUid, patch)
   }
   // Импорт деталей из таблицы (Excel / Базис-Мебельщик / PRO100)
-  const handleImport = ({ items, mode, material, thickness, orderName: importedName, model3d: importedModel, edgeTypes: importedTypes }) => {
+  const handleImport = ({ items, mode, material, thickness, orderName: importedName, article: importedArticle, model3d: importedModel, edgeTypes: importedTypes }) => {
+    if (importedArticle && !orderArticle.trim()) setOrderArticle(importedArticle)
     if (importedModel) setModel3d(importedModel)
     const imported = items.map(it => ({
       ...makeDetail(null),
@@ -471,6 +474,11 @@ export default function EditOrderPage() {
         if (!oErr && Object.keys(typesToSave(edgeTypes, edgeNames)).length) window.alert(EDGE_TYPES_HINT)
       }
       if (oErr) throw new Error('Ошибка обновления заказа: ' + oErr.message)
+      // артикул — отдельно и только если меняли: нет колонки в базе — заказ всё равно сохранён
+      if (orderArticle.trim() !== articleWas.current.trim()) {
+        if (await saveOrderArticle(id, orderArticle)) articleWas.current = orderArticle
+        else window.alert(ARTICLE_SQL_HINT)
+      }
       // примечание — отдельно и только если меняли: нет колонки в базе — заказ всё равно сохранён
       if (orderNote.trim() !== noteWas.current.trim()) {
         if (await saveOrderNote(id, orderNote)) noteWas.current = orderNote
@@ -536,6 +544,8 @@ export default function EditOrderPage() {
         <div className="card">
           <input type="text" placeholder="Например: Кухня Ивановых" value={orderName}
             onChange={e => setOrderName(e.target.value)} style={{ marginBottom: 10 }} />
+          <label className="label">Артикул заказа <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}>— из модели Базиса или свой, можно вывести на бирку</span></label>
+          <input type="text" placeholder="—" value={orderArticle} maxLength={120} onChange={e => setOrderArticle(e.target.value)} style={{ marginBottom: 10 }} />
           <label className="label">Примечание <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}>— выводится в PDF карт раскроя</span></label>
           <textarea rows={2} placeholder="Например: фасады — текстура вертикально; забрать до пятницы" value={orderNote} maxLength={2000}
             onChange={e => setOrderNote(e.target.value)} style={{ marginBottom: 10, width: '100%', resize: 'vertical', fontFamily: 'inherit', fontSize: 14 }} />

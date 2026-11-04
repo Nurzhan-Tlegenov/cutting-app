@@ -5,6 +5,14 @@ import { supabase } from './supabase'
 export const NOTES_SQL_HINT = 'Примечание не сохранилось: в базе нет колонки. Выполните migration_order_notes.sql в Supabase (SQL Editor) и сохраните ещё раз.'
 
 /** Записать примечание бланка заказа (хозяин заказа). -> true / false (нет колонки) */
+export const ARTICLE_SQL_HINT = 'Артикул заказа не сохранился: в базе нет колонки. Выполните в Supabase (SQL Editor):\nalter table orders add column if not exists order_article text;'
+/** Артикул заказа (из модели Базиса или вписанный вручную) — на бирку. -> true, если записан */
+export async function saveOrderArticle(orderId, article) {
+  const v = String(article || '').trim().slice(0, 120) || null
+  const { error } = await supabase.from('orders').update({ order_article: v }).eq('id', orderId)
+  return !error
+}
+
 export async function saveOrderNote(orderId, note) {
   const v = String(note || '').trim().slice(0, 2000) || null
   const { error } = await supabase.from('orders').update({ order_note: v }).eq('id', orderId)

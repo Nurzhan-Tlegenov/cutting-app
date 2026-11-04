@@ -1340,7 +1340,9 @@ export function parseBasis(u8, opts = {}) {
   }
   const article = kid(kid(header, 'Header') || header, 'Article')
   const orderName = cleanName(val(article, 'OrderName')) || cleanName(val(article, 'Name'))
-  for (const it of items) { it.contour.meta.order = orderName; it.contour.meta.model = cleanName(val(article, 'Name')) }
+  // артикул модели (Базис: свойства модели → «Артикул», поле Code) — артикул заказа, на бирку
+  const modelArticle = cleanName(val(article, 'Code'))
+  for (const it of items) { it.contour.meta.order = orderName; it.contour.meta.model = cleanName(val(article, 'Name')); if (modelArticle) it.contour.meta.article = modelArticle }
   // --- вся модель для 3D: все панели (любой материал), профили и фурнитура с формой ---
   const extras = []
   for (const pr of profiles) {
@@ -1375,6 +1377,7 @@ export function parseBasis(u8, opts = {}) {
 
   return {
     orderName,
+    article: modelArticle,
     scene,
     skipped,
     items,

@@ -52,7 +52,7 @@ export const LABEL_ITEMS = [
   ['edgeList', 'Кромка — списком', 'text'],
   ['allow', 'Припуск (из модели)', 'text'],
   ['glue', 'Склейка', 'text'],
-  ['matCode', 'Артикул материала', 'text'],
+  ['article', 'Артикул заказа', 'text'],
   ['length', 'Длина', 'text'],
   ['width', 'Ширина', 'text'],
   ['thickness', 'Толщина', 'text'],
@@ -127,6 +127,7 @@ export const QR_TOKENS = [
   ['NOM', 'Номер детали на листе'],
   ['KOL', 'Количество'],
   ['KLIENT', 'Заказчик'],
+  ['ART', 'Артикул заказа'],
 ]
 export const QR_TOKEN_RE = /\{((?:S:)?[^{}:]+)(?::(-?\d+))?\}/g
 const LEGACY_TOKEN = { link: '{SSYLKA}', order: '{ZAKAZ}', des: '{OBOZ}', name: '{NAIM}', pos: '{POZ}', prefix: '{PREF}', material: '{MAT}', size: '{RAZMER}', sheet: 'L{KARTA}', num: 'N{NOM}' }
@@ -161,6 +162,7 @@ function qrValue(code, info) {
     case 'NOM': return info.num
     case 'KOL': return info.qty
     case 'KLIENT': return info.client
+    case 'ART': return info.article
     default: return ''
   }
 }
@@ -465,11 +467,11 @@ export function demoLabelSample() {
   ]
   // образец склейки и припуска из модели — чтобы в редакторе было видно, как выглядят эти элементы
   const withMeta = (d, f) => { const c = JSON.parse(d.contour); f(c); d.contour = JSON.stringify(c) }
-  withMeta(details[3], c => { c.meta.glue = { n: 1, of: 2, with: ['01.04', '01.04а'] }; c.meta.materialCode = 'W1000 ST9' })
+  withMeta(details[3], c => { c.meta.glue = { n: 1, of: 2, with: ['01.04', '01.04а'] } })
   withMeta(details[4], c => { c.allow = { left: 80 } })
   const at = [[0, 0], [564, 0], [1128, 0], [0, 724], [568, 724]]
   const placed = details.map((d, i) => ({ detailIndex: i, x: at[i][0], y: at[i][1], origX: d.width, origY: d.length, label: d.name, prefix: d.prefix }))
-  const order = { id: null, _client: 'Иванов Иван', order_number: '261022_001', order_name: 'Образец', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: 4 }
+  const order = { id: null, order_article: 'КХ-15', _client: 'Иванов Иван', order_number: '261022_001', order_name: 'Образец', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: 4 }
   const mat = { key: 'demo', label: 'ЛДСП Белый', name: 'ЛДСП Белый', thickness: 16, result: null, sheets: [{ placed }], details, all: details }
   return { order, mat }
 }
@@ -574,6 +576,8 @@ export function labelInfo(order, mat, si, pi, part = null) {
     order: m.srcOrder?.id ? (m.srcOrder.name || m.srcOrder.number || '') : orderTitle(order), di: mat.all ? mat.all.indexOf(d) : -1, share: (order?.id && cachedShare(order.id)) || null, materialName: mat.name || '',
     num: pi + 1, sheet: si + 1, sheets: mat.sheets.length, client: CLIENTS.get(order?.id) || order?._client || '',
     orderName: m.srcOrder?.id ? String(m.srcOrder.name || '').trim() : String(order?.order_name || '').trim(), orderNumber: m.srcOrder?.id ? (m.srcOrder.number || '') : (order?.order_number || ''),
+    // артикул заказа: из карточки заказа, а если там пусто — из модели (Базис: свойства модели → «Артикул»)
+    article: String((m.srcOrder?.id ? m.srcOrder.article : order?.order_article) || m.article || '').trim(),
     name: d.name || p.label || 'Деталь', des: metaDes(m), pos: metaPos(m), prefix: d.prefix || p.prefix || '',
     // толщина почти всегда уже есть в названии материала («ЛДСП белый 16 мм») — второй раз не дописываем;
     // нет её в названии — дописываем. Отдельно толщину можно поставить элементом «Толщина»
@@ -781,7 +785,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
-  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', matCode: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
 export const canCaption = type => !NO_CAP.has(type)
 export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
@@ -823,7 +827,11 @@ function labelValue(type, info, tpl = null) {
       // кромки нет, но с этой стороны припуск и включена его подсветка — на месте кромки пишется «припуск 80»
       if (!name) { const a = allowHit(tpl, info, side); return a ? `припуск ${r1(a)}` : '' }
       // размер стороны с кромкой — по выбору в шаблоне («Размер стороны у кромки»), по умолчанию есть
-      return tpl && tpl.edgeDims === false ? name : `${name} · ${r1(horiz === rot ? info.sizeY : info.sizeX)}`
+      const base = tpl && tpl.edgeDims === false ? name : `${name} · ${r1(horiz === rot ? info.sizeY : info.sizeX)}`
+      // подсветка припуска: с этой стороны и кромка, и припуск — рядом с кромкой его размер (деталь сначала
+      // упиливают в размер, потом кромят — кромка остаётся)
+      const a = allowHit(tpl, info, side)
+      return a ? `${base} · припуск ${r1(a)}` : base
     }
     case 'faceHoles': return info.faceHoles ? String(info.faceHoles) : ''
     case 'backHoles': return info.backHoles ? String(info.backHoles) : ''
@@ -846,7 +854,7 @@ function labelValue(type, info, tpl = null) {
       if (!g || !(g.of > 1)) return ''
       return `${g.n}/${g.of}` + (Array.isArray(g.with) && g.with.length ? ` (${g.with.join(' + ')})` : '')
     }
-    case 'matCode': return String(info.meta?.materialCode || '').trim()
+    case 'article': return String(info.article || '').trim()
     // «Длина» и «Ширина» идут за сторонами бирки, как размеры у кромки (фрезер — как деталь лежит на карте, пильный
     // центр — как выходит со станка): «Длина» — размер верхней/нижней стороны бирки, «Ширина» — левой/правой.
     // В обычном положении это и есть длина и ширина; деталь повёрнута на 90° — значения меняются местами

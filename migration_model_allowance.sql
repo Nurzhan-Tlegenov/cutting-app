@@ -2,3 +2,6 @@
 -- allow_mode: 'model' (как в модели, по умолчанию) | 'off' (не учитывать) | 'own' (свой припуск allow_mm на тех же сторонах)
 alter table productions add column if not exists allow_mode text;
 alter table productions add column if not exists allow_mm numeric;
+
+-- Артикул заказа (из модели Базиса: свойства модели → «Артикул», или вписанный вручную) — на бирку
+alter table orders add column if not exists order_article text;
