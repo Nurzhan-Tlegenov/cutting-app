@@ -172,6 +172,19 @@ function tangentOf(e, atStart) {
   // дуга, подогнанная по точкам, даёт касательную чуть мимо оси — почти осевую выравниваем
   return Math.abs(t[0]) < 0.01 ? [0, Math.sign(t[1])] : Math.abs(t[1]) < 0.01 ? [Math.sign(t[0]), 0] : t
 }
+// от конца элемента назад по нему же на len мм (не дальше начала): [{ to, angle }] — продолжение надсечки по линии реза
+function backAlong(e, len) {
+  if (!(len > 0)) return []
+  const dx = e.b[0] - e.a[0], dy = e.b[1] - e.a[1], L = Math.hypot(dx, dy)
+  if (!(L > EPS)) return []
+  if (!e.angle || !e.r) { const k = Math.min(len, L) / L; return [{ to: [e.b[0] - dx * k, e.b[1] - dy * k], angle: 0 }] }
+  const ccw = e.angle < 0, h = Math.sqrt(Math.max(0, e.r * e.r - (L / 2) ** 2))
+  const nx = (ccw ? -dy : dy) / L, ny = (ccw ? dx : -dx) / L, sgn = Math.abs(e.angle) > 180 ? -1 : 1
+  const cx = (e.a[0] + e.b[0]) / 2 + nx * h * sgn, cy = (e.a[1] + e.b[1]) / 2 + ny * h * sgn
+  const sweep = Math.min(len / e.r, Math.abs(e.angle) / DEG)            // назад — против хода дуги
+  const b0 = Math.atan2(e.b[1] - cy, e.b[0] - cx), t = b0 + (ccw ? -sweep : sweep)
+  return [{ to: [cx + e.r * Math.cos(t), cy + e.r * Math.sin(t)], angle: (ccw ? 1 : -1) * sweep * DEG }]
+}
 const inPoly = ([x, y], pts) => {
   let ins = false
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
@@ -319,7 +332,7 @@ const reverseEls = els => [...els].reverse().map(e => ({ ...e, a: e.b, b: e.a, a
 function millPaths(raw, c, W, H, T, fr, set = {}) {
   const out = [], through = T + 1
   const edgeCw = set.edgeDir === 'cw', cutCcw = set.cutoutDir === 'ccw'
-  const edgeLead = set.edgeLead ?? 10, notch = set.notch !== false, cutLead = set.cutoutLead ?? 20
+  const edgeLead = set.edgeLead ?? 10, notch = set.notch !== false, cutLead = set.cutoutLead ?? 20, notchOver = set.notchOver ?? 8
   let outline = null
   const sideOf = (els, outside) => {
     const ccw = loopArea(els) > 0
@@ -381,7 +394,9 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
           const outEnd = edgeLead > 0 && onBox(end) && outside(post)
           if (outEnd) segs.push({ to: post, angle: 0 })
           // надсечка: снаружи к точке выхода (та же сторона фрезы, ход обратный — сторона меняется)
-          if (notch && outEnd) out.push({ face: fr.top, start: post, segs: [{ to: end, angle: 0 }], closed: false, depth: through, pocket: false, offset: off === '右' ? '左' : '右', cat: 'edge', notch: true })
+          // станок останавливает фрезу на радиус раньше края детали (траектория с коррекцией упирается в габарит) —
+          // надсечка идёт дальше края по линии реза на notchOver мм (обратно по последнему элементу выреза, по отходу)
+          if (notch && outEnd) out.push({ face: fr.top, start: post, segs: [{ to: end, angle: 0 }, ...backAlong(run[run.length - 1], notchOver)], closed: false, depth: through, pocket: false, offset: off === '右' ? '左' : '右', cat: 'edge', notch: true })
           out.push({ face: fr.top, start: st, segs, closed: false, depth: through, pocket: false, offset: off, cat: 'edge' })
           run = null
         }
@@ -479,7 +494,7 @@ export const D6_OPS_DEFAULT = () => ({
   pocket: { mode: 'auto', tool: '', step: 50 },           // выемки по пласти: от центра, по часовой; step — шаг, % от Ø фрезы
   edgePocket: { mode: 'auto', tool: '', step: 50 },       // выемки в торце
   cutout: { mode: 'auto', tool: '', dir: 'cw', lead: 20 },                 // вырезы внутри: фреза внутри, по часовой (встречное), вход с отступа 20 мм
-  edge: { mode: 'auto', tool: '', dir: 'ccw', lead: 10, notch: true },     // вырезы на краю: фреза снаружи, против часовой, заход/выход за край 10 мм, надсечка на выходе
+  edge: { mode: 'auto', tool: '', dir: 'ccw', lead: 10, notch: true, notchOver: 8 },  // вырезы на краю: фреза снаружи, против часовой, заход/выход за край 10 мм, надсечка на выходе (за край детали на 8 мм)
   layers: {},
 })
 export function d6OpsOf(post) {
@@ -829,7 +844,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     edgeMills.push(m)
   })
 
-  const { mills, outline } = millPaths(raw, c, W, H, T, fr, { edgeDir: o6.ops.edge.dir, cutoutDir: o6.ops.cutout.dir, edgeLead: n0(o6.ops.edge.lead ?? 10), notch: o6.ops.edge.notch !== false, cutoutLead: n0(o6.ops.cutout.lead ?? 20),
+  const { mills, outline } = millPaths(raw, c, W, H, T, fr, { edgeDir: o6.ops.edge.dir, cutoutDir: o6.ops.cutout.dir, edgeLead: n0(o6.ops.edge.lead ?? 10), notch: o6.ops.edge.notch !== false, notchOver: o6.ops.edge.notchOver ?? 8, cutoutLead: n0(o6.ops.cutout.lead ?? 20),
     ...(b6 ? { edgeStart: b6.edgeStart, clamp: n0(b6.clamp) || 2, cutEntry: b6.cutEntry, radiusSides: b6.radiusSides } : {}) })
   const MILL_WHAT = { edge: 'фигурный край', cutout: 'вырез', pocket: 'выемка' }
   mills.forEach(m => {
