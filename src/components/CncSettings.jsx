@@ -607,9 +607,9 @@ function KdtFormat({ post, set }) {
             ))}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-            <Num label="Direction дуги по часовой" value={k.arcCw} onChange={v => setK({ arcCw: v === '' ? 2 : v })} hint="против часовой — 1" />
+            <Num label="Direction дуги по часовой" value={k.arcCw} onChange={v => setK({ arcCw: v === '' ? 0 : v })} hint="против часовой — 1" />
           </div>
-          <Hint>По образцу станка: ближний торец (Y 0) — Quadrant 4, дуга против часовой — Direction 1. Остальное — предположение: проверьте на стойке и поправьте здесь.</Hint>
+          <Hint>По выгрузкам Базис-ЧПУ: X макс — 1, X 0 — 2, Y макс — 3, Y 0 — 4; дуга по часовой — 0, против — 1.</Hint>
         </>
       )}
     </div>

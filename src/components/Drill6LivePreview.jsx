@@ -10,6 +10,8 @@ import { orderTitle } from '../lib/orderUtils'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import Drill6PartsView from './Drill6PartsView'
 import { useDesktop } from '../hooks/useDesktop'
+import { myProduction } from '../lib/productionApi'
+import { myWorkplaces } from '../lib/workplaces'
 
 // Окно просмотра: прилипает к верху. На компьютере — своей высоты, её меняют ползунком снизу (запоминается);
 // внутри — деталь крупно и список деталей (split = высота для них). На телефоне — как было, с прокруткой.
@@ -47,8 +49,12 @@ function PickerPreview({ post }) {
   useEffect(() => {
     let alive = true
     ;(async () => {
-      let r = await supabase.from('orders').select(COLS).order('created_at', { ascending: false }).limit(40)
-      if (r.error) r = await supabase.from('orders').select('id, order_number, order_name, edge_types, material_name, created_at').order('created_at', { ascending: false }).limit(40)
+      // только свои заказы и заказы, пришедшие в своё производство (владелец или сотрудник) — явно, а не «всё, что видно»
+      const [pr, wp] = await Promise.all([myProduction(user?.id), myWorkplaces().catch(() => ({}))])
+      const prods = [...new Set([pr?.id, ...((wp?.data || []).map(w => w.production_id))].filter(Boolean))]
+      const mine = q => q.or(prods.length ? `user_id.eq.${user?.id},production_id.in.(${prods.join(',')})` : `user_id.eq.${user?.id}`).order('created_at', { ascending: false }).limit(40)
+      let r = await mine(supabase.from('orders').select(COLS))
+      if (r.error) r = await mine(supabase.from('orders').select('id, order_number, order_name, edge_types, material_name, created_at'))
       if (alive) { if (r.error) setErr(r.error.message); setOrders(r.data || []) }
     })()
     return () => { alive = false }
