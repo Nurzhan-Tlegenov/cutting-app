@@ -60,6 +60,7 @@ const HelpPage = lazyPage(() => import('./pages/HelpPage'))
 const InstallPage = lazyPage(() => import('./pages/InstallPage'))
 const TasksPage = lazyPage(() => import('./pages/TasksPage'))
 const StockPage = lazyPage(() => import('./pages/StockPage'))
+const SupportPage = lazyPage(() => import('./pages/SupportPage'))
 import { startBackupTimer } from './lib/stockBackup'
 const PostAccessPage = lazyPage(() => import('./pages/PostAccessPage'))
 const LoadPage = lazyPage(() => import('./pages/LoadPage'))
@@ -164,6 +165,7 @@ function AppRoutes() {
       <Route path="/tasks" element={<ProtectedRoute><TasksPage /></ProtectedRoute>} />
       <Route path="/post-access" element={<ProtectedRoute><PostAccessPage /></ProtectedRoute>} />
       <Route path="/load" element={<ProtectedRoute><LoadPage /></ProtectedRoute>} />
+      <Route path="/support" element={<ProtectedRoute><SupportPage /></ProtectedRoute>} />
       <Route path="/stock" element={<ProtectedRoute><StockPage /></ProtectedRoute>} />
       <Route path="/scan" element={<ProtectedRoute><ScanPage /></ProtectedRoute>} />
       {/* рабочий пост по ссылке — окно одного поста (настольный компьютер со сканером); видят только свои */}

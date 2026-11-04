@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
 import { adminEmailSignup, adminSetEmailSignup } from '../lib/adminApi'
+import SupportToggle from '../components/SupportToggle'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
@@ -364,6 +365,7 @@ export default function UsersPage() {
                   )}
                   {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.defaults} isProd={isProd(u)} busy={busy}
                     onSave={(id, unl, l) => act(() => adminSetUserLimits(id, unl, l))} />}
+                  {u.id !== user?.id && u.role !== 'admin' && <SupportToggle userId={u.id} name={u.full_name || u.phone || ''} style={{ marginTop: 8 }} />}
                   {u.id !== user?.id && u.role !== 'admin' && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
                       <button type="button" disabled={busy} onClick={() => blockPhone(byPhone(u) ? (u.phone || ('+' + digits(u.email))) : u.email, '', u.full_name || '')} style={{ ...btn('danger'), padding: '4px 10px', fontSize: 11, marginRight: 6 }}>{byPhone(u) ? '🚫 Заблокировать номер' : '🚫 Заблокировать почту'}</button>

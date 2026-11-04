@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { myWorkplaces, openWorkplace, openOwnProduction, prodView, workPid } from '../lib/workplaces'
 import { myProduction } from '../lib/productionApi'
 import { I } from '../lib/navIcons'
+import { useIsSupport } from '../lib/support'
 import { APP_COMMIT, appVersionText, NESTING_VERSION } from '../lib/version'
 import { getUiScale, setUiScale, isTouchDevice, UI_SCALE_MIN, UI_SCALE_MAX } from '../lib/uiScale'
 
@@ -69,6 +70,7 @@ export function RefreshCorner() {
 
 export default function NavDrawer({ notices, unread }) {
   const { user, profile, cabinet, setCabinet, isMaster } = useAuth()
+  const isSupport = useIsSupport(user?.id)
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
   const [open, setOpen] = useState(false)
@@ -262,6 +264,10 @@ export default function NavDrawer({ notices, unread }) {
     { icon: I.user, label: 'Профиль', badge: 0, on: pathname === '/profile', act: () => go('/profile') },
   ] }
   sections.push(common)
+  // поддержка — мастер-аккаунту и сотрудникам поддержки (роль выдаёт мастер); разделов мастера сотрудник не видит
+  if (isMaster || isSupport) sections.push({ id: 'support', icon: I.headset, title: 'Поддержка', sub: isMaster ? '' : 'Вы — сотрудник поддержки', items: [
+    { icon: I.inbox, label: 'Обращения', on: pathname === '/support', act: () => go('/support') },
+  ] })
   if (isMaster) sections.push({ id: 'master', icon: I.crown, title: 'Мастер-аккаунт', badge: n.users || 0, items: [
     { icon: I.users, label: 'Пользователи и регистрация', badge: n.users || 0, on: pathname === '/users', act: () => go('/users') },
     { icon: I.chart, label: 'Активность пользователей', on: pathname === '/activity', act: () => go('/activity') },

@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useAdminDirectory, whoLine } from '../lib/adminDirectory'
 import { WriteToUserDialog } from './WriteToUser'
+import SupportToggle from './SupportToggle'
 
 const digits = v => String(v || '').replace(/\D/g, '')
 const telOf = u => digits(u?.phone) || (/@raskoypro\.local$/i.test(String(u?.email || '')) ? digits(String(u.email).split('@')[0]) : '')
@@ -133,6 +134,7 @@ export function UserCardDialog({ id, name, dir: dir0, canWrite = true, onClose }
             {asks.map(q => <div key={q.id} style={{ ...row, fontSize: 12.5, color: 'var(--amber)' }}>⏳ Ждёт: {q.post_name ? `«${q.post_name}»` : 'свой станок'}{q.machine ? ` · ${q.machine}` : ''}</div>)}
             {usage && <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 4 }}>За 90 дней выпустил программ: {usage.runs} · последний раз {ago(usage.last)}</div>}
 
+            {u.role !== 'admin' && <SupportToggle userId={id} name={u.full_name || name} style={{ marginTop: 12 }} />}
             <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
               {canWrite && <button type="button" className="btn-secondary" style={{ flex: 1, minWidth: 130 }} onClick={() => setWrite(true)}>✉ Написать</button>}
               <button type="button" className="btn-primary" style={{ flex: 1, minWidth: 130 }} onClick={openUsers}>В «Пользователях»</button>
