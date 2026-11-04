@@ -77,6 +77,8 @@ export async function tgBot(body) {
 
 export const adminUsers = () => call('admin_users')
 export const adminRequests = () => call('admin_requests')
+/** Кто кого пригласил по ссылкам (migration_ref_friend.sql): [{ user_id, ref_by, ref_by_name, kind, at }] */
+export const adminRefBy = () => call('admin_ref_by')
 export const adminSetSignup = open => call('admin_set_signup', { p_open: !!open })
 export const adminSetRequest = (id, status) => call('admin_set_request', { p_id: id, p_status: status })
 export const adminAllowPhone = (phone, name) => call('admin_allow_phone', { p_phone: phone, p_name: name || '' })

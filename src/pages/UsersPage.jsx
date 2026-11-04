@@ -518,7 +518,7 @@ export default function UsersPage() {
                   <a href={`tel:+${r.digits}`} style={{ fontSize: 12, color: 'var(--blue)' }}>{r.phone}</a>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Заявка подана {dateTime(r.created_at)}</div>
-                {r.ref_by_name && <div style={{ fontSize: 11, color: 'var(--teal)' }}>по ссылке{r.ref_kind === 'production' ? ' для производства' : ''} от «{r.ref_by_name}» — одобрена сама</div>}
+                {r.ref_by_name && <div style={{ fontSize: 11, color: 'var(--teal)' }}>по ссылке{r.ref_kind === 'production' ? ' для производства' : r.ref_kind === 'friend' ? ' «знакомому»' : ''} от «{r.ref_by_name}» — одобрена сама</div>}
                 <VerifyBadge r={r} />
                 {codeRow(r)}
                 <div style={{ marginTop: 4 }}>

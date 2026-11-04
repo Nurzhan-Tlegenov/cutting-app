@@ -42,6 +42,7 @@ export function UserName({ id, name, dir, children, style, canWrite = true }) {
 const row = { display: 'flex', gap: 8, fontSize: 13, padding: '5px 0', borderTop: '0.5px solid var(--border)' }
 const key = { width: 108, flexShrink: 0, color: 'var(--text-hint)', fontSize: 12.5 }
 const chip = (fg, bg) => ({ fontSize: 11.5, padding: '2px 8px', borderRadius: 10, color: fg, background: bg, whiteSpace: 'nowrap' })
+const REF_KIND = { friend: 'ссылка «знакомому»', client: 'ссылка производства', production: 'ссылка для производства' }
 const KIND = { router: 'раскрой', drill6: 'присадка 6-стор.', beamsaw: 'пильный центр' }
 
 /** Карточка пользователя (окно поверх всего, в т. ч. переписки) */
@@ -57,6 +58,9 @@ export function UserCardDialog({ id, name, dir: dir0, canWrite = true, onClose }
   const own = dir?.own.get(id)
   const asks = (dir?.asks.get(id) || []).filter(q => q.status === 'new')
   const usage = dir?.usage.get(id)
+  const refBy = dir?.refBy?.get(id)
+  const invited = dir?.invited?.get(id) || []
+  const [showInv, setShowInv] = useState(false)
   const openUsers = () => { onClose(); navigate(`/users?open=${id}`) }
   if (write) return <WriteToUserDialog to={{ id, name: u?.full_name || name || '' }} onClose={() => { setWrite(false); onClose() }} />
   return createPortal(
@@ -82,6 +86,20 @@ export function UserCardDialog({ id, name, dir: dir0, canWrite = true, onClose }
             <div style={row}><span style={key}>Страна, город</span><span>{place(u.country, u.city) || <span style={{ color: 'var(--text-hint)' }}>не указаны</span>}</span></div>
             <div style={row}><span style={key}>Роль</span><span>{u.role === 'admin' ? 'Администратор' : u.role === 'operator' ? 'Производство' : 'Клиент'}</span></div>
             <div style={row}><span style={key}>В приложении</span><span>с {date(u.created_at)} · заходил {ago(u.last_sign_in_at)}</span></div>
+            {refBy && <div style={row}><span style={key}>Пригласил</span><span style={{ flex: 1, minWidth: 0 }}>
+              <UserName id={refBy.ref_by} name={refBy.ref_by_name} dir={dir} canWrite={canWrite} />
+              <span style={{ color: 'var(--text-hint)', fontSize: 12 }}> · {REF_KIND[refBy.kind] || 'по ссылке'} · {date(refBy.at)}</span>
+            </span></div>}
+            {invited.length > 0 && <div style={row}><span style={key}>Пригласил сам</span><span style={{ flex: 1, minWidth: 0 }}>
+              <span role="button" tabIndex={0} onClick={() => setShowInv(v => !v)} onKeyDown={e => { if (e.key === 'Enter') setShowInv(v => !v) }}
+                style={{ cursor: 'pointer', color: 'var(--blue)' }}>{invited.length} чел. {showInv ? '▴' : '▾'}</span>
+              {showInv && invited.map(x => (
+                <div key={x.user_id} style={{ fontSize: 12.5, marginTop: 3 }}>
+                  <UserName id={x.user_id} name={dir.users.get(x.user_id)?.full_name || 'Пользователь'} dir={dir} canWrite={canWrite} />
+                  <span style={{ color: 'var(--text-hint)' }}> · {REF_KIND[x.kind] || 'по ссылке'} · {date(x.at)}</span>
+                </div>
+              ))}
+            </span></div>}
             <div style={row}><span style={key}>Заказы</span><span>создано <b>{u.orders || 0}</b> · отправлено <b>{u.submitted || 0}</b>{u.last_order_at ? ` · последний ${ago(u.last_order_at)}` : ''}</span></div>
 
             {u.production_id && (

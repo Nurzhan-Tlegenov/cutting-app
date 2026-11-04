@@ -1,10 +1,13 @@
 // Пригласительные ссылки «Поделиться» (migration_ref_links.sql):
 //   • производство → клиенту (kind 'client'): клиент регистрируется без одобрения мастера, только подтверждает номер;
 //     в раскрое у него сразу выбрано это производство;
-//   • любой пользователь → производству (kind 'production'): приглашённое производство подтверждается сразу.
+//   • любой пользователь → производству (kind 'production'): приглашённое производство подтверждается сразу;
+//   • любой пользователь → знакомому (kind 'friend', migration_ref_friend.sql): регистрация клиентом без одобрения мастера,
+//     производство не выбирается заранее — только подсказка, где режет пригласивший.
 import { supabase } from './supabase'
 import { siteOrigin } from './siteOrigin'
 
+export const FRIEND_SQL_HINT = 'Ссылка «Пригласить знакомого» ещё не включена в базе: выполните migration_ref_friend.sql в Supabase (SQL Editor) — один раз.'
 export const REF_SQL_HINT = 'Пригласительные ссылки ещё не включены в базе: выполните migration_ref_links.sql в Supabase (SQL Editor) — один раз.'
 const isMissing = e => /PGRST202|42883|schema cache|Could not find the function/i.test(String(e?.message || '') + ' ' + String(e?.code || ''))
 
@@ -14,14 +17,21 @@ async function call(fn, args) {
     if (error) {
       if (isMissing(error)) return { error: REF_SQL_HINT, missing: true }
       const m = String(error.message || '')
+      if (fn === 'my_ref_code' && args?.p_kind === 'friend' && /ref_codes_kind_check|check constraint/i.test(m)) return { error: FRIEND_SQL_HINT, missing: true }
       return { error: /no production/.test(m) ? 'Ссылка для клиентов появится, когда ваше производство подтвердят.' : /not allowed/.test(m) ? 'Нет прав на это действие.' : m }
     }
     return { data }
   } catch (e) { return { error: String(e?.message || e) } }
 }
 
-/** Моя личная ссылка-приглашение. kind: 'client' (от производства клиентам) | 'production' */
-export const myRefCode = kind => call('my_ref_code', { p_kind: kind })
+/** Моя личная ссылка-приглашение. kind: 'client' (от производства клиентам) | 'production' | 'friend' (знакомому) */
+export async function myRefCode(kind) {
+  const r = await call('my_ref_code', { p_kind: kind })
+  if (kind !== 'friend' || !r.data) return r
+  // до migration_ref_friend.sql база выдаёт на 'friend' ссылку «для производства» — такую не показываем
+  const i = await call('ref_info', { p_code: r.data })
+  return i.data?.kind === 'friend' ? r : { error: FRIEND_SQL_HINT, missing: true }
+}
 export const refInfo = code => call('ref_info', { p_code: code || '' })
 export const acceptRef = code => call('accept_ref', { p_code: code || '' })
 export const myRefPeople = () => call('my_ref_people')
@@ -45,6 +55,7 @@ export const clearPendingRef = () => { try { localStorage.removeItem(KEY) } catc
 /** Текст приглашения для мессенджера */
 export function refText(kind, url, { name = '', production = '', plain = false } = {}) {
   if (plain) return `Здравствуйте!${name ? ` Это ${name}.` : ''} Хочу отправлять вам заказы на раскрой через приложение RaskroyPro — карты раскроя будут сразу с вашим резом и отступами. Зарегистрируйте, пожалуйста, своё производство: ${url}`
+  if (kind === 'friend') return `Привет!${name ? ` Это ${name}.` : ''} Пользуюсь RaskroyPro — приложение для раскроя ЛДСП: вводишь детали с телефона, сразу видишь карты раскроя и отправляешь заказ на производство. Бесплатно. Регистрация по моей ссылке, без ожидания: ${url}`
   if (kind === 'client') return `Здравствуйте!${production ? ` Это ${production}.` : ''} Оформляйте у нас заказы на раскрой через приложение RaskroyPro: вводите детали с телефона — карты раскроя сразу с нашим резом и отступами. Регистрация по ссылке, без ожидания: ${url}`
   return `Здравствуйте!${name ? ` Это ${name}.` : ''} Хочу отправлять вам заказы на раскрой через приложение RaskroyPro — карты раскроя будут сразу с вашим резом и отступами. Зарегистрируйте своё производство по ссылке — подтверждение не нужно: ${url}`
 }

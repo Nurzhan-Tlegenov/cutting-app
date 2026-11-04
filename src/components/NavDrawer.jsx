@@ -234,7 +234,7 @@ export default function NavDrawer({ notices, unread }) {
         { icon: I.orders, label: 'Заказы', badge: n.ownNew || 0, on: isOwn('orders'), act: () => goOwn('orders') },
         { icon: I.board, label: 'Техпроцесс', badge: ownPosts, on: isOwn('board'), act: () => goOwn('board') },
         { icon: I.gear, label: 'Настройки', on: isOwn('settings'), act: () => goOwn('settings') },
-        { icon: I.share, label: 'Пригласить клиентов', on: pathname === '/invite' && search !== '?k=production', act: () => go('/invite?k=client') },
+        { icon: I.share, label: 'Пригласить клиентов', on: pathname === '/invite' && search === '?k=client', act: () => go('/invite?k=client') },
       ] }
     : { id: 'own', icon: I.factory, title: own ? own.name || 'Производство' : wps.length ? 'Своё производство' : 'Производство', sub: own ? 'Ждёт подтверждения' : 'Ещё не создано', items: [
         { icon: own ? I.factory : I.plus, label: own ? 'Открыть' : wps.length ? 'Создать своё производство' : 'Зарегистрировать производство', on: onProd && !workView, act: () => goOwn(null) },
@@ -257,7 +257,8 @@ export default function NavDrawer({ notices, unread }) {
     { icon: I.scan, label: 'Сканер бирки', on: pathname === '/scan', act: () => go('/scan') },
     { icon: I.msg, label: 'Сообщения', badge: unread || 0, on: pathname === '/messages', act: () => go('/messages') },
     ...(isMaster ? [] : [{ icon: I.msg, label: 'Написать в поддержку', on: false, act: () => go('/messages?write=1') }]),
-    { icon: I.share, label: ownOk ? 'Пригласить производство' : 'Пригласить своё производство', on: pathname === '/invite' && (!ownOk || search === '?k=production'), act: () => go('/invite?k=production') },
+    { icon: I.share, label: 'Пригласить знакомого', on: pathname === '/invite' && search === '?k=friend', act: () => go('/invite?k=friend') },
+    { icon: I.share, label: ownOk ? 'Пригласить производство' : 'Пригласить своё производство', on: pathname === '/invite' && search === '?k=production', act: () => go('/invite?k=production') },
     { icon: I.user, label: 'Профиль', badge: 0, on: pathname === '/profile', act: () => go('/profile') },
   ] }
   sections.push(common)

@@ -1,6 +1,6 @@
 // Мастер-аккаунт: справочник пользователей для карточки «кто это» (UserCard.jsx) — один на страницу, обновляется раз в минуту.
 import { useEffect, useState } from 'react'
-import { adminUsers, adminMemberships } from './adminApi'
+import { adminUsers, adminMemberships, adminRefBy } from './adminApi'
 import { adminPostAccess, adminUserPosts } from './postAccess'
 
 const TTL = 60000
@@ -8,7 +8,7 @@ let cache = null          // { at, promise }
 const subs = new Set()
 
 async function loadDirectory() {
-  const [u, m, pa, up] = await Promise.all([adminUsers(), adminMemberships(), adminPostAccess(), adminUserPosts()])
+  const [u, m, pa, up, rb] = await Promise.all([adminUsers(), adminMemberships(), adminPostAccess(), adminUserPosts(), adminRefBy()])
   const users = new Map((u.error ? [] : u.data || []).map(x => [x.id, x]))
   const members = new Map()
   for (const x of m.error ? [] : m.data || []) { if (!members.has(x.user_id)) members.set(x.user_id, []); members.get(x.user_id).push(x) }
@@ -20,7 +20,14 @@ async function loadDirectory() {
   for (const q of pa.error ? [] : pa.data?.requests || []) { if (!asks.has(q.user_id)) asks.set(q.user_id, []); asks.get(q.user_id).push(q) }
   for (const x of pa.error ? [] : pa.data?.usage || []) usage.set(x.user_id, x)
   const own = new Map((up.error ? [] : up.data || []).map(x => [x.user_id, x]))
-  return { users, members, granted, asks, usage, own, error: u.error || '', noMembers: !!m.error }
+  // кто кого пригласил: refBy — пригласивший этого пользователя, invited — кого пригласил он
+  const refBy = new Map(), invited = new Map()
+  for (const x of rb.error ? [] : rb.data || []) {
+    refBy.set(x.user_id, x)
+    if (!invited.has(x.ref_by)) invited.set(x.ref_by, [])
+    invited.get(x.ref_by).push(x)
+  }
+  return { users, members, granted, asks, usage, own, refBy, invited, error: u.error || '', noMembers: !!m.error }
 }
 
 /** Справочник пользователей для мастер-аккаунта (общий для всей страницы, обновляется не чаще раза в минуту) */

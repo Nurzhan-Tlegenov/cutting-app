@@ -8,13 +8,15 @@ import { myProduction } from '../lib/productionApi'
 import { myRefPeople, refSendCode } from '../lib/refLinks'
 import { siteOrigin } from '../lib/siteOrigin'
 
-// «Пригласить»: личные ссылки — клиентам (от своего производства) и производству (от любого пользователя).
+// «Пригласить»: личные ссылки — знакомому (от любого пользователя, migration_ref_friend.sql),
+// клиентам (от своего производства) и производству (от любого пользователя).
 // По ссылке регистрируются без одобрения мастер-аккаунта, только с подтверждением номера: Telegram — код приходит сам,
 // WhatsApp — код отправляете вы, отсюда, одним нажатием.
 export default function InvitePage() {
   const { user, profile } = useAuth()
   const loc = useLocation()
-  const first = new URLSearchParams(loc.search).get('k') === 'production' ? 'production' : 'client'
+  const k = new URLSearchParams(loc.search).get('k')
+  const asked = k === 'production' || k === 'friend' || k === 'client' ? k : ''
   const [prod, setProd] = useState(undefined)
   const [people, setPeople] = useState(null)
   const [err, setErr] = useState('')
@@ -27,6 +29,7 @@ export default function InvitePage() {
   }, [user?.id])
   const ownOk = prod && (prod.status ?? 'approved') === 'approved'
   const name = String(profile?.full_name || '').trim()
+  const first = asked || (ownOk ? 'client' : 'friend')   // без своего производства — сначала «знакомому»
 
   // код в WhatsApp: номер, сам код и ссылка, по которой номер и код подставятся сами
   const sendCode = async p => {
@@ -39,7 +42,20 @@ export default function InvitePage() {
     setSent(s => ({ ...s, [p.id]: true }))
   }
 
-  const block = kind => kind === 'client'
+  const byKind = people?.by_kind || {}
+  const block = kind => kind === 'friend'
+    ? (
+      <div key="friend" className="card" style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>Пригласить знакомого</div>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+          Отправьте ссылку коллеге или знакомому мебельщику. Он зарегистрируется <b>без ожидания одобрения</b> — только подтвердит
+          номер телефона. Производство выберет сам{ownOk ? <> — ваше «{prod.name}» ему будет подсказано</> : ''}.
+        </p>
+        <RefShare kind="friend" name={name} />
+        {byKind.friend > 0 && <p style={{ fontSize: 12, color: 'var(--teal)', marginTop: 8 }}>По этой ссылке зарегистрировались: {byKind.friend}</p>}
+      </div>
+    )
+    : kind === 'client'
     ? (
       <div key="client" className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>Пригласить клиентов</div>
@@ -77,7 +93,7 @@ export default function InvitePage() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.full_name || 'без имени'} <span style={{ color: 'var(--text-hint)', fontWeight: 400 }}>+{p.digits}</span></div>
                 <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
-                  {p.kind === 'production' ? 'производство · ' : ''}
+                  {p.kind === 'production' ? 'производство · ' : p.kind === 'friend' ? 'знакомый · ' : ''}
                   {p.messenger === 'telegram' ? (p.verified ? '✓ Telegram — бот прислал код сам, вам делать ничего не нужно' : '⏳ Telegram — подтверждает номер в боте, код придёт сам; вам делать ничего не нужно') : sent[p.id] || p.code_sent_at ? 'WhatsApp — код отправлен' : 'WhatsApp — отправьте ему код'}
                 </div>
               </div>
@@ -91,7 +107,7 @@ export default function InvitePage() {
         </div>
       )}
 
-      {(first === 'production' ? ['production', 'client'] : ['client', 'production']).map(block)}
+      {(first === 'friend' ? ['friend', 'client', 'production'] : first === 'production' ? ['production', 'friend', 'client'] : ['client', 'friend', 'production']).map(block)}
 
       {people && <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center' }}>Зарегистрировались по вашим ссылкам: {people.registered || 0}</p>}
       {err && <p className="error-text" style={{ fontSize: 12 }}>{err}</p>}
