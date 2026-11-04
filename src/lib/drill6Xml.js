@@ -39,6 +39,10 @@ import { detailHoles } from './partHoles'
 import { parsePolygonFromDetail } from './trueShapeNesting'
 import { loopElements } from './arcFit'
 import { flipDetail } from './mirrorDetail'
+import { isKdt, kdtPanel } from './kdtXml'
+import { polyPocket } from './gcode'
+import { metaDes } from './partLabel'
+import { contourSegments, segmentSide, distToPolyline } from './edgeLength'
 
 const EPS = 0.05
 const n0 = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
@@ -692,6 +696,23 @@ export const d6bOf = post => (post?.d6Beta ? { ...D6B_DEFAULT(), ...(post.d6b ||
 export const numList = s => String(s ?? '').split(/[\s,;]+/).map(v => Number(v.replace(',', '.'))).filter(v => v > 0)
 const nearestOf = (list, v) => list.reduce((b, x) => (Math.abs(x - v) < Math.abs(b - v) ? x : b), list[0])
 
+// KDT: выборка выемки (и паза по траектории) фрезой Ø D — от центра кольцами; круг — окружностями, выпуклая — по форме,
+// остальные — эквидистантами (только если кольца идут одной цепочкой, без подъёмов: в траектории KDT подъёма нет)
+function kdtPocket(m, D, stepPct) {
+  const st = Math.max(0.5, D * Math.min(100, Math.max(10, stepPct)) / 100)
+  const poly = m.poly || [m.start, ...m.segs.map(g => g.to)]
+  if (!poly || poly.length < 3) return null
+  const xs = poly.map(q => q[0]), ys = poly.map(q => q[1])
+  if (m.poly && pocketSize(m.poly).key.startsWith('d')) return circlePocket((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2, (Math.max(...xs) - Math.min(...xs)) / 2, D / 2, st)
+  const sp = isConvex(poly) ? spiralPocket(poly, D / 2, st) : null
+  if (sp) return sp
+  const rings = polyPocket(poly, D / 2, st, 'cw')
+  if (!rings || rings.some((g, i) => i && !g.link)) return null
+  const segs = []
+  rings.forEach((g, i) => { if (i) segs.push({ to: g.loop[0], angle: 0 }); g.loop.slice(1).forEach(q => segs.push({ to: q, angle: 0 })); segs.push({ to: g.loop[0], angle: 0 }) })
+  return { start: rings[0].loop[0], segs }
+}
+
 /**
  * Одна деталь -> { xml, ops, warnings } или null (нет никакой обработки и d6All выключен).
  * d — строка order_details (по готовой детали), T — толщина, id — имя детали в файле.
@@ -807,16 +828,16 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     // β: паз — пазом (Type 4) и с концом внутри детали, а не выемкой (Type 3): на станке ему можно назначить пилу
     // (несуществующую — тогда станок определяет паз верно). Концы — ровно как у паза, без продления
     if (b6?.grooveLine && (b6.grooveDir === 'all' || (b6.grooveDir === 'h') === alongX)) {
-      grooves.push({ face, line, width, depth: gd, tool: String(b6.grooveTool || '').trim() ? { name: String(b6.grooveTool).trim(), kind: 'saw' } : tool })
+      grooves.push({ face, line, width, depth: gd, rect: [x0, y0, x1, y1], ends, tool: String(b6.grooveTool || '').trim() ? { name: String(b6.grooveTool).trim(), kind: 'saw' } : tool })
       return
     }
-    if (ends[0] && ends[1]) { grooves.push({ face, line, width, depth: gd, tool }); return }
+    if (ends[0] && ends[1]) { grooves.push({ face, line, width, depth: gd, rect: [x0, y0, x1, y1], ends, tool }); return }
     const ext = width / 2
     let a0 = x0, a1 = x1, b0 = y0, b1 = y1
     if (alongX) { if (ends[0]) a0 -= ext; if (ends[1]) a1 += ext } else { if (ends[0]) b0 -= ext; if (ends[1]) b1 += ext }
     // по часовой (вид сверху), выборка внутри — фреза справа от хода
     const loop = [[a0, b1], [a1, b1], [a1, b0], [a0, b0]]
-    grooves.push({ face, width, depth: gd, tool, mill: { face, start: loop[0], segs: [...loop.slice(1), loop[0]].map(to => ({ to, angle: 0 })), closed: true, depth: gd, pocket: true, offset: '右', tool } })
+    grooves.push({ face, width, depth: gd, rect: [x0, y0, x1, y1], ends, tool, mill: { face, start: loop[0], segs: [...loop.slice(1), loop[0]].map(to => ({ to, angle: 0 })), closed: true, depth: gd, pocket: true, offset: '右', tool } })
   })
 
   // пазы в торце — на торец Face 1–4, высота от нижней пласти (лицевая сверху)
@@ -931,7 +952,38 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   const counts = { top: top.length, bottom: bottom.length, edge: edge.length, edgeGrooves: edgeGrooves.length + edgeMills.length,
     groovesTop: grooves.filter(g => g.face === fr.top).length, groovesBottom: grooves.filter(g => g.face !== fr.top).length,
     millsTop: mills.filter(m => m.face === fr.top).length, millsBottom: mills.filter(m => m.face !== fr.top).length }
-  return { xml, ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
+  // KDT (KDTPanelFormat): тот же разбор детали — другой формат файла; xml (SWJ) остаётся для просмотра и симуляции в приложении
+  let kdt = null
+  if (isKdt(post)) {
+    let outlineEls = null
+    try { const pr = parsePolygonFromDetail(raw); if (pr?.custom) outlineEls = loopToMachine(pr.polygon.map(q => (Array.isArray(q) ? q : [q.x, q.y])), fr) } catch { outlineEls = null }
+    const des = metaDes(detailMeta(raw))
+    const pocketPath = (m, D) => kdtPocket(m, D, n0(o6.ops.pocket.step) || 50)
+    // кромка по участкам контура (фигурная деталь: кромка и на дуге, и на скосе) -> толщина на элементе контура станка
+    const thickOf = (nm, side) => {
+      if (side) return n0(et[side])
+      const key = edgeKey(nm)
+      if (!key) return 0
+      if (n0(types?.[key]?.t) > 0) return n0(types[key].t)
+      const same = ['left', 'right', 'top', 'bottom'].find(sd => edgeKey(raw['edge_' + sd]) === key && n0(et[sd]) > 0)
+      if (same) return n0(et[same])
+      const m = String(nm).match(/(\d+(?:[.,]\d+)?)\s*[хx×*]\s*\d+/i)
+      return m ? n0(m[1]) : Math.max(1, ...Object.values(et).map(n0))
+    }
+    let segs = null
+    try {
+      if (Array.isArray(c.vertices) && c.vertices.length > 2) segs = contourSegments(c.vertices).map(sg => { const side = segmentSide(sg, W, H); return { pts: sg.pts.map(q => fr.at(q[0], q[1])), t: thickOf(side ? raw['edge_' + side] : sg.edge, side) } })
+    } catch { segs = null }
+    const edgeAt = segs ? (a, b, straight) => {
+      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+      const sg = segs.find(q => distToPolyline(a[0], a[1], q.pts) < 0.6 && distToPolyline(b[0], b[1], q.pts) < 0.6 && (!straight || distToPolyline(mid[0], mid[1], q.pts) < 0.6))
+      return sg ? sg.t : null
+    } : null
+    const r = kdtPanel({ fr, T, name: des ? `[${des}] ${name}` : name, outlineEls, faceEdge, edgeAt, top, bottom, edge, grooves, edgeGrooves, edgeMills, mills, pocketPath }, post)
+    kdt = r.text
+    r.warnings.forEach(w => { if (!warnings.includes(w)) warnings.push(w) })
+  }
+  return { xml, ...(kdt != null ? { kdt } : {}), ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
 }
 
 // ─── Имена файлов и папки ───────────────────────────────────────────────────
@@ -1015,7 +1067,8 @@ export function buildDrill6Files({ mat, order, post = {}, labelTpl, makeCode }) 
     }
     byCode.set(code, di)
     r.warnings.forEach(w => warnings.add(`${rawDetail(d).name || 'Деталь'}: ${w}`))
-    files.push({ name: `${code}.${ext}`, code, data: r.xml.replace('\u0000ID\u0000', esc(code)), detail: rawDetail(d).name || '', ops: r.ops })
+    const view = r.xml.replace('\u0000ID\u0000', esc(code))
+    files.push({ name: `${code}.${ext}`, code, data: r.kdt != null ? r.kdt : view, ...(r.kdt != null ? { view } : {}), detail: rawDetail(d).name || '', ops: r.ops })
   }))
   return { files, skipped: skippedDi.size, warnings: [...warnings] }
 }

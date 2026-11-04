@@ -422,7 +422,7 @@ export function Preview({ p, filter, sel, onSel, focus, dims, marks = null }) {
 export default function Drill6Viewer({ files: initial = [], onClose, title = 'Просмотр XML присадки' }) {
   useBackClose(true, onClose)   // «Назад» телефона — закрыть
   const [files, setFiles] = useState(initial)
-  const parsed = useMemo(() => files.map(f => ({ ...f, ...(f.error ? { panels: [] } : parseDrillXml(f.data, f.name)) })), [files])
+  const parsed = useMemo(() => files.map(f => ({ ...f, ...(f.error ? { panels: [] } : parseDrillXml(f.view || f.data, f.name)) })), [files])
   const panels = useMemo(() => parsed.flatMap(f => f.panels), [parsed])
   const errors = parsed.filter(f => f.error)
   const [idx, setIdx] = useState(0)

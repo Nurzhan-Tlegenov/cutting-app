@@ -3,6 +3,7 @@ import CornerPick from './CornerPick'
 import { backOf, BACK_NAME_DEFAULT } from '../lib/backSide'
 import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES, d6bOrder, d6bRuleOn } from '../lib/drill6Xml'
+import { kdtOf, isKdt } from '../lib/kdtXml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import TplInput from './TplInput'
 import Drill6LivePreview from './Drill6LivePreview'
@@ -472,6 +473,7 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
         <span style={{ display: 'block', marginTop: 4, color: 'var(--text-hint)' }}>Каждую настройку проверьте сначала на симуляции станка, потом на детали.</span>
       </div>
       <Drill6LivePreview post={post} orderCtx={orderCtx} />
+      <KdtFormat post={post} set={set} />
 
       {chk('split', 'Сквозные отверстия — двумя глухими, сверху и снизу')}
       {b.split && (
@@ -562,6 +564,57 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
   )
 }
 const FACE_OPTS = [[1, 'Face 1'], [2, 'Face 2'], [3, 'Face 3'], [4, 'Face 4']]
+
+// ─── Формат файла шестистороннего β: SWJ (Syntec) или KDT (KDTPanelFormat, как у Базис-ЧПУ «KDT CNC Drill») ───
+function KdtFormat({ post, set }) {
+  const on = isKdt(post), k = kdtOf(post)
+  const setK = patch => set({ kdt: { ...(post.kdt || {}), ...patch } })
+  const pick = v => {
+    if (v === (on ? 'kdt' : 'swj')) return
+    if (v === 'swj') { set({ d6Fmt: '' }); return }
+    // как в Базис-ЧПУ: край — по часовой, без захода за деталь и без надсечки; имя файла — заказ.обозначение
+    const o = post.d6Ops || {}
+    set({ d6Fmt: 'kdt', d6Ops: { ...o, edge: { ...(o.edge || {}), dir: 'cw', lead: 0, notch: false } },
+      ...(post.d6Name === 'own' ? {} : { d6Name: 'own', d6Qr: { ...D6_QR_DEFAULT, parts: ['order', 'des'], sep: '.', latin: true } }) })
+  }
+  const tools = (side, label) => (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</div>
+      {[...k[side], { d: '', name: '' }].map((t, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 6, marginTop: 4 }}>
+          <input type="text" placeholder="имя на станке (T2)" key={'n' + t.name} defaultValue={t.name}
+            onBlur={e => { const l = [...k[side]]; const v = e.target.value.trim(); if (v === t.name) return; if (i < l.length) l[i] = { ...l[i], name: v }; else l.push({ d: 6, name: v }); setK({ [side]: l.filter(q => q.name) }) }} style={{ padding: '7px 9px' }} />
+          <input type="text" inputMode="decimal" placeholder="Ø, мм" key={'d' + t.d} defaultValue={t.d}
+            onBlur={e => { const v = Number(e.target.value.replace(',', '.')); if (!(v > 0) || v === t.d || i >= k[side].length) return; const l = [...k[side]]; l[i] = { ...l[i], d: v }; setK({ [side]: l }) }} style={{ padding: '7px 9px' }} />
+        </div>
+      ))}
+    </div>
+  )
+  return (
+    <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+      <label className="label">Формат файла</label>
+      <Seg value={on ? 'kdt' : 'swj'} options={[['swj', 'SWJ (Syntec)'], ['kdt', 'KDT (KDTPanelFormat)']]} onChange={pick} />
+      {on && (
+        <>
+          <Hint>Как у Базис-ЧПУ (постпроцессор «KDT CNC Drill»): файл на деталь, UTF-8 без BOM, CRLF. Контур детали — с кромкой по сторонам (на стойке видно, где кромка), отверстия сверху и снизу, в торцы, пазы, фрезеровка по траектории. Пласть паза и траектории станок узнаёт по фрезе: у верхнего и нижнего шпинделя свои имена. Пазы и выемки в торце пока не выводятся.</Hint>
+          {tools('top', 'Фрезы верхнего шпинделя')}
+          {tools('bottom', 'Фрезы нижнего шпинделя')}
+          <Hint>Паз — самой широкой фрезой не шире паза; траектория и выемка — самой широкой (или ближайшей к назначенной в «Обработке»). Пустое имя — строка удаляется.</Hint>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>Quadrant торца для отверстий в торец</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6 }}>
+            {[[4, 'левый X 0'], [1, 'дальний Y макс'], [3, 'правый X макс'], [2, 'ближний Y 0']].map(([f, l]) => (
+              <Num key={f} label={l} value={k.quad[f]} onChange={v => setK({ quad: { ...k.quad, [f]: v === '' ? undefined : v } })} />
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+            <Num label="Direction дуги по часовой" value={k.arcCw} onChange={v => setK({ arcCw: v === '' ? 2 : v })} hint="против часовой — 1" />
+          </div>
+          <Hint>По образцу станка: ближний торец (Y 0) — Quadrant 4, дуга против часовой — Direction 1. Остальное — предположение: проверьте на стойке и поправьте здесь.</Hint>
+        </>
+      )}
+    </div>
+  )
+}
 
 function Drill6Basic({ post, set, router }) {
   const { user } = useAuth()
