@@ -17,7 +17,7 @@ import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
-import { parseEdgeTypes, cutDetail, edgeKey, edgeAliases, edgeAlias, allowApplied } from './edgeCut'
+import { parseEdgeTypes, cutDetail, edgeKey, edgeAliases, edgeAlias, allowApplied, narrowApplied } from './edgeCut'
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
@@ -52,6 +52,7 @@ export const LABEL_ITEMS = [
   ['edgeList', 'Кромка — списком', 'text'],
   ['allow', 'Припуск (из модели)', 'text'],
   ['glue', 'Склейка', 'text'],
+  ['narrow', 'Узкая деталь — упилить после кромки', 'text'],
   ['article', 'Артикул заказа', 'text'],
   ['length', 'Длина', 'text'],
   ['width', 'Ширина', 'text'],
@@ -512,7 +513,9 @@ export function finishedSize(order, d) {
   let l = Number(cut.length) || 0, w = Number(cut.width) || 0
   // припуск из модели (allowApplied) — в пильном размере есть, в готовой детали его нет
   const al = allowApplied({ left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }, types, raw.contour) || {}
-  const add = side => { const k = edgeKey(raw['edge_' + side]); const t = (k && types[k]) || {}; return (k ? (Number(t.t) || 0) - (Number(t.joint) || 0) : 0) - (al[side] || 0) }
+  // узкая деталь, наращённая под кромочный станок, — после кромки её упиливают в размер
+  const nr = narrowApplied({ left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }, types, Number(raw.width) || 0, Number(raw.length) || 0) || {}
+  const add = side => { const k = edgeKey(raw['edge_' + side]); const t = (k && types[k]) || {}; return (k ? (Number(t.t) || 0) - (Number(t.joint) || 0) : 0) - (al[side] || 0) - (nr[side] || 0) }
   l += add('top') + add('bottom'); w += add('left') + add('right')
   return { l: Math.round(l * 100) / 100, w: Math.round(w * 100) / 100 }
 }
@@ -541,19 +544,24 @@ export function labelInfo(order, mat, si, pi, part = null) {
     const on = Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]
     if (edgeName(v)) sides[on] = edgeName(v)
   })
-  // припуск из модели (сколько реально добавлено в раскрой) — по сторонам бирки, так же, как кромка
-  const rawD = d._raw || d
-  const alw = allowApplied({ left: rawD.edge_left, right: rawD.edge_right, top: rawD.edge_top, bottom: rawD.edge_bottom }, parseEdgeTypes(order?.edge_types), rawD.contour)
-  let allow = null
-  if (alw) {
-    allow = { top: 0, right: 0, bottom: 0, left: 0 }
+  // припуск из модели (сколько реально добавлено в раскрой) и наращивание узкой детали под кромочный станок —
+  // по сторонам бирки, так же, как кромка
+  const rawD = d._raw || d, rawEdges = { left: rawD.edge_left, right: rawD.edge_right, top: rawD.edge_top, bottom: rawD.edge_bottom }
+  const typesD = parseEdgeTypes(order?.edge_types)
+  const toLabel = bySide => {
+    if (!bySide) return null
+    const o = { top: 0, right: 0, bottom: 0, left: 0 }
     ;[['left', 0, DL / 2], ['right', DW, DL / 2], ['bottom', DW / 2, 0], ['top', DW / 2, DL]].forEach(([s0, x, y]) => {
-      if (!alw[s0]) return
+      if (!bySide[s0]) return
       const q = rotatePointTimes(x, y, DW, DL, turns), bw = Number(p.origX) || DW, bh = Number(p.origY) || DL
       const dist = { left: q.x, right: bw - q.x, bottom: q.y, top: bh - q.y }
-      allow[Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]] = alw[s0]
+      o[Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]] = bySide[s0]
     })
+    return o
   }
+  const allow = toLabel(allowApplied(rawEdges, typesD, rawD.contour))
+  const narrow = toLabel(narrowApplied(rawEdges, typesD, Number(rawD.width) || 0, Number(rawD.length) || 0))
+  const cw = o => (o ? { top: o.left, bottom: o.right, left: o.bottom, right: o.top } : null)
   // на сколько четвертей по часовой повёрнута деталь относительно положения «как в заказе»: куда ушла её верхняя сторона
   // (для элементов, привязанных к стороне детали)
   let quarter = 0
@@ -589,7 +597,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
-    allow, allowCw: allow ? { top: allow.left, bottom: allow.right, left: allow.bottom, right: allow.top } : null, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
+    allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow), curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
     backCorner: BACK.on && !part && isTwoSided(d, mat.thickness) ? backMarkCorner(p, d, BACK.corner, BACK.edge) : null,
     exit: !!part, quarter,      // деталь в положении выхода со станка (пильный центр)
@@ -785,7 +793,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
-  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
 export const canCaption = type => !NO_CAP.has(type)
 export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
@@ -844,6 +852,13 @@ function labelValue(type, info, tpl = null) {
     // припуск из модели — по сторонам бирки (как кромка): «80 слева», «80 слева, 5 снизу»
     case 'allow': {
       const a = (tpl ? tpl.rot !== false : true) ? info.allowCw : info.allow
+      if (!a) return ''
+      const SIDE = { top: 'сверху', bottom: 'снизу', left: 'слева', right: 'справа' }
+      return ['top', 'right', 'bottom', 'left'].filter(k => a[k] > 0).map(k => `${r1(a[k])} ${SIDE[k]}`).join(', ')
+    }
+    // узкая деталь, наращённая под кромочный станок: что и с какой стороны упилить после кромления
+    case 'narrow': {
+      const a = (tpl ? tpl.rot !== false : true) ? info.narrowCw : info.narrow
       if (!a) return ''
       const SIDE = { top: 'сверху', bottom: 'снизу', left: 'слева', right: 'справа' }
       return ['top', 'right', 'bottom', 'left'].filter(k => a[k] > 0).map(k => `${r1(a[k])} ${SIDE[k]}`).join(', ')

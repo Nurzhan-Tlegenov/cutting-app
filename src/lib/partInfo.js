@@ -26,6 +26,8 @@ function faceSides(detail, thickness) {
   }
   for (const g of c.grooves || []) { if (g.face === 'back') back = true; else front = true }
   for (const d of c.decor || []) { if (d.face === 'back') back = true; else if (d.face === 'front') front = true }
+  // выемки (карманы) — тоже глухая обработка: выемка с одной стороны и паз с другой — деталь двусторонняя (доприсадка)
+  for (const h of c.holes || []) { if (h.type !== 'pocket') continue; if (h.face === 'back') back = true; else front = true }
   return { front, back }
 }
 

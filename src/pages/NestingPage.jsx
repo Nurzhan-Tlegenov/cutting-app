@@ -38,7 +38,7 @@ import { loadOrderModel } from '../lib/orderModel'
 import { hasModel } from '../lib/model3d'
 import { parsePolygonFromDetail, needsTrueShape } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
-import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY, edgeKey, blankType, modelAllow, allowOf, ALLOW_KEY } from '../lib/edgeCut'
+import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY, edgeKey, blankType, modelAllow, allowOf, ALLOW_KEY, NARROW_KEY, narrowMm } from '../lib/edgeCut'
 import { saveNestingPdf } from '../lib/nestingPdf'
 import StockPicker from '../components/StockPicker'
 import { stockReserve } from '../lib/stock'
@@ -1938,6 +1938,18 @@ export default function NestingPage() {
     const next = { ...parseEdgeTypes(order.edge_types), [ALLOW_KEY]: want }
     const txt = want.mode === 'off' ? 'не учитывается' : want.mode === 'own' ? `${want.mm} мм (свой припуск производства)` : 'как в модели'
     Promise.resolve().then(() => writeEdgeTypes(next, `Припуск из модели — ${txt} (настройки производства) — пересчитайте раскрой.`))
+  }, [prodsReady, order?.production_id, allDetails.length, order?.edge_types])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Наименьшая ширина детали на кромочном станке производства (Настройки → Лист и рез): узкие детали с кромкой
+  // идут в раскрой шире, после кромки их упиливают. Значение пишется в виды кромки заказа (NARROW_KEY), как прифуговка.
+  useEffect(() => {
+    if (!order || !prodsReady || !canSetJoint() || !allDetails.length) return
+    const pr = order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)
+    if (!pr || pr.edge_min_width == null) return
+    const want = Math.max(0, Number(pr.edge_min_width) || 0)
+    if (Math.abs(narrowMm(order.edge_types) - want) < 0.001) return
+    const next = { ...parseEdgeTypes(order.edge_types) }
+    if (want > 0) next[NARROW_KEY] = { mm: want }; else delete next[NARROW_KEY]
+    Promise.resolve().then(() => writeEdgeTypes(next, want > 0 ? `Узкие детали с кромкой наращиваются до ${want} мм под кромочный станок производства (упилить после кромки) — пересчитайте раскрой.` : 'Наращивание узких деталей под кромочный станок выключено производством — пересчитайте раскрой.'))
   }, [prodsReady, order?.production_id, allDetails.length, order?.edge_types])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedOnOpenRef = useRef(false)
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })

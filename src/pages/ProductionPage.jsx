@@ -52,7 +52,7 @@ const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['all', 'В
 const MARGINS = [['kerf_width', 'Рез / фреза'], ['margin_left', 'Отступ ←'], ['margin_right', 'Отступ →'], ['margin_top', 'Отступ ↑'], ['margin_bottom', 'Отступ ↓']]
 // то же для ХДФ / ДВП (задние стенки): тонкий материал режется на пиле — рез и отступы свои
 const HDF_MARGINS = MARGINS.map(([k, l]) => ['hdf_' + k, k === 'kerf_width' ? 'Рез (пила)' : l])
-const ALLOW_HINT = 'Чтобы задать припуск из модели, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists allow_mode text;\nalter table productions add column if not exists allow_mm numeric;'
+const ALLOW_HINT = 'Чтобы задать припуск из модели, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists allow_mode text;\nalter table productions add column if not exists allow_mm numeric;\nalter table productions add column if not exists edge_min_width numeric;'
 const OFFCUT_KEYS = [['offcut_min_length', 'Вдоль текстуры (длина), от, мм'], ['offcut_min_width', 'Поперёк текстуры (ширина), от, мм']]
 const OFFCUT_HINT = 'Чтобы включить авто-обрезки, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists offcut_min_length numeric;\nalter table productions add column if not exists offcut_min_width numeric;'
 const KIND_HINT = 'Чтобы задать параметры для ХДФ и видеть число листов в заявках, выполните migration_material_kind.sql в Supabase (SQL Editor) — один раз.'
@@ -263,7 +263,7 @@ export default function ProductionPage() {
 
   const saveAllow = async patch => {
     const { error: e } = await supabase.from('productions').update(patch).eq('id', prod.id)
-    if (e) setError(/allow_/.test(String(e.message)) ? ALLOW_HINT : e.message); else setProd(p => ({ ...p, ...patch }))
+    if (e) setError(/allow_|edge_min/.test(String(e.message)) ? ALLOW_HINT : e.message); else setProd(p => ({ ...p, ...patch }))
   }
 
   // заказы в архиве — в своём разделе; в остальных разделах и счётчиках их нет
@@ -419,6 +419,21 @@ export default function ProductionPage() {
                   <Hint>Конструктор может задать в модели (Базис-Мебельщик, «Припуск» у облицовки торца) припуск на сторону детали — например, 80 мм под склейку и последующую обрезку. «Как в модели» — деталь в раскрой больше на этот припуск с той стороны. «Не учитывать» — размер как без припуска. «Свой припуск» — ваше значение вместо модельного, на тех же сторонах. Со стороны с кромкой деталь сначала упиливают в размер, потом кромят — кромка остаётся. Если там же задана прифуговка, припуск модели до 3 мм считается прифуговкой конструктора и вместо него берётся ваша прифуговка; больший припуск добавляется к прифуговке. Припуск можно вывести на бирку и подсветить кромку на этой стороне (Бирки → кромка → «Подсветить припуск»).</Hint>
                 </div>
 
+                {/* наименьшая ширина детали на кромочном станке: узкие детали наращиваются, после кромки упиливаются */}
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Кромочный станок — наименьшая ширина детали</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    <input type="text" inputMode="decimal" value={sheet.edge_min_width ?? (prod.edge_min_width ?? '')} placeholder="0 — нет" onChange={e => setSheet(s => ({ ...s, edge_min_width: e.target.value.replace(/[^0-9.,]/g, '') }))}
+                      onBlur={() => { if (sheet.edge_min_width == null) return; const v = sheet.edge_min_width === '' ? 0 : Number(String(sheet.edge_min_width).replace(',', '.')); if (isFinite(v) && v >= 0) saveAllow({ edge_min_width: v }) }} style={{ width: 70, padding: '4px 6px', fontSize: 13 }} /> мм
+                  </label>
+                  {(() => {
+                    const m = Number(String(sheet.edge_min_width ?? prod.edge_min_width ?? '').replace(',', '.')) || 0
+                    if (!(m > 0)) return null
+                    const ex = Math.max(10, Math.round(m * 0.6))
+                    return <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>Например: планка {ex} мм с кромкой по длинной стороне → в раскрой {m} мм, после кромки упилить {m - ex} мм</div>
+                  })()}
+                  <Hint>Деталь с кромкой, у которой размер поперёк кромки меньше этого значения, кромочный станок не возьмёт. Такая деталь идёт в раскрой шире — до этого размера, её кромят, а потом упиливают в нужный размер. Лишнее добавляется со стороны без кромки (если кромка с двух сторон — справа или сверху, эту сторону кромят после подрезки). Это не припуск: работает на всех станках раскроя. На бирке — элемент «Узкая деталь — упилить после кромки»: сколько и с какой стороны.</Hint>
+                </div>
                 <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
                   <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>Деловой обрезок — отмечать автоматически</div>
                   <div style={{ display: 'flex', gap: 6 }}>

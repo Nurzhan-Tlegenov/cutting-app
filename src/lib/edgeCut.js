@@ -47,6 +47,32 @@ export function edgeTrimOf(contour) {
 //   'model' — как в модели (по умолчанию); 'off' — не учитывать; 'own' — свой припуск mm там, где в модели он есть.
 // На стороне с кромкой, где задана прифуговка (производства или вида кромки), решает прифуговка — припуск модели не
 // добавляется второй раз (в Базисе припуск у кромки — это и есть прифуговка конструктора).
+// ─── Узкие детали на кромочном станке: у станка есть наименьшая ширина детали (например, 50 мм) ─────────────────
+// Деталь с кромкой, у которой размер поперёк кромки меньше, в раскрой идёт шире — до этого размера; её кромят,
+// потом упиливают лишнее. Лишнее — со стороны без кромки (обе стороны с кромкой — справа/сверху, тогда эту сторону
+// кромят после подрезки). Это не припуск: задаётся производством (Настройки → Лист и рез), пишется в виды кромки
+// заказа под ключом NARROW_KEY: { mm }.
+export const NARROW_KEY = '__narrow'
+export const narrowMm = types => Math.max(0, num(String(parseEdgeTypes(types)[NARROW_KEY]?.mm ?? '').replace(',', '.')))
+/** Сколько нарастить с каждой стороны детали W×L (готовая) -> { left|right|top|bottom: мм } | null */
+export function narrowApplied(edges, types, W, L) {
+  const min = narrowMm(types)
+  if (!(min > 0) || !edges) return null
+  const has = s => !!edgeKey(edges[s])
+  const out = {}
+  // кромка слева/справа — деталь идёт по станку вдоль длины, поперёк — ширина W
+  if ((has('left') || has('right')) && num(W) > 0 && num(W) < min - EPS) out[has('right') && !has('left') ? 'left' : 'right'] = r2(min - num(W))
+  if ((has('top') || has('bottom')) && num(L) > 0 && num(L) < min - EPS) out[has('top') && !has('bottom') ? 'bottom' : 'top'] = r2(min - num(L))
+  return Object.keys(out).length ? out : null
+}
+const withNarrow = (k, edges, types, W, L) => {
+  const n = narrowApplied(edges, types, W, L)
+  if (!n) return k
+  const d = k ? { ...k } : { l: 0, r: 0, b: 0, t: 0 }
+  for (const [s, v] of Object.entries(n)) d[s[0]] = r2((d[s[0]] || 0) - v)
+  return d
+}
+
 export const ALLOW_KEY = '__allow'
 export const ALLOW_JOINT_MAX = 3
 export const ALLOW_MODES = [['model', 'Как в модели'], ['off', 'Не учитывать'], ['own', 'Свой припуск']]
@@ -114,7 +140,7 @@ export const modelTrimmed = contour => Object.values(edgeTrimOf(contour) || {}).
  */
 export function listSize(detail, types) {
   const L = num(detail?.w), W = num(detail?.h)
-  if (!(L > 0) || !(W > 0) || !modelTrimmed(detail?.contour)) return { cut: false }
+  if (!(L > 0) || !(W > 0) || !(modelTrimmed(detail?.contour) || narrowApplied(detail?.edges, types, W, L))) return { cut: false }
   const cs = cutSize(L, W, detail.edges, types, detail.contour)
   if (!cs) return { cut: false }
   const dl = r2(L - cs[0]), dw = r2(W - cs[1])
@@ -124,7 +150,7 @@ export function listSize(detail, types) {
 
 /** Размер в раскрой: [длина, ширина] (кромка слева/справа идёт вдоль длины и уменьшает ширину); contour — для подрезки из модели */
 export function cutSize(length, width, edges, types, contour) {
-  const k = sideDeltas(edges, types, edgeTrimOf(contour), contour)
+  const k = withNarrow(sideDeltas(edges, types, edgeTrimOf(contour), contour), edges, types, width, length)
   if (!k) return null
   return [r2(num(length) - k.b - k.t), r2(num(width) - k.l - k.r)]
 }
@@ -188,9 +214,10 @@ export function cutDetail(row, types) {
   if (!row || !types) return row
   let c = row.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
-  const k = sideDeltas({ left: row.edge_left, right: row.edge_right, top: row.edge_top, bottom: row.edge_bottom }, types, edgeTrimOf(c), c)
-  if (!k) return row
   const W = num(row.width), L = num(row.length)
+  const eds = { left: row.edge_left, right: row.edge_right, top: row.edge_top, bottom: row.edge_bottom }
+  const k = withNarrow(sideDeltas(eds, types, edgeTrimOf(c), c), eds, types, W, L)
+  if (!k) return row
   if (!(W - k.l - k.r > 1) || !(L - k.b - k.t > 1)) return row
   const cc = cutContour(c || {}, W, L, k)
   return { ...row, width: r2(W - k.l - k.r), length: r2(L - k.b - k.t), contour: JSON.stringify(cc), _parsedContour: undefined, _raw: row, _cut: k }
@@ -262,6 +289,7 @@ export function typesToSave(types, names) {
   if (!ov.on || ov.mm !== OVER_DEFAULT) out[OVER_KEY] = ov          // обычные свесы (включены, 30 мм) не записываем
   if (types?.[NAMES_KEY] && Object.keys(types[NAMES_KEY]).length) out[NAMES_KEY] = types[NAMES_KEY]   // обозначения кромки от производства
   if (types?.[ALLOW_KEY]) out[ALLOW_KEY] = allowOf(types)                // выбор производства о припуске из модели
+  if (narrowMm(types) > 0) out[NARROW_KEY] = { mm: narrowMm(types) }     // наименьшая ширина детали на кромочном станке
   for (const n of ['default', ...(names || [])]) {
     const v = types?.[n]
     if (!v) continue
