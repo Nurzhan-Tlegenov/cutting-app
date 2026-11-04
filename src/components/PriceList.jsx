@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useEffect, useState } from 'react'
 import { loadPrices, savePrices, PRICE_GROUPS, HDF_ITEMS } from '../lib/pricing'
 import { useBackClose } from '../lib/backStack'
@@ -38,7 +39,7 @@ export default function PriceList({ production, onClose }) {
     return (
                   <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
                     <div style={{ fontSize: 13 }}>{title}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Цена за лист зависит от того, сколько на нём деталей: до 5 — одна цена, до 10 — другая. Строка без числа — «свыше».</div>
+                    <Hint>Цена за лист зависит от того, сколько на нём деталей: до 5 — одна цена, до 10 — другая. Строка без числа — «свыше».</Hint>
                     {list.map((t, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
                         <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: '0 0 auto' }}>{i > 0 && list[i - 1].to ? `от ${Number(String(list[i - 1].to).replace(',', '.')) + 1} ` : ''}до</span>
@@ -116,7 +117,7 @@ export default function PriceList({ production, onClose }) {
               ))}
               {tiersEditor('hdf_tiers', 'Раскрой листа ХДФ по числу деталей на листе')}
             </div>
-            <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Все заполненные цены складываются: например, «за метр реза» и «за лист» вместе. Стоимость материала и самой кромки в расчёт не входит — только работа.</p>
+            <Hint>Все заполненные цены складываются: например, «за метр реза» и «за лист» вместе. Стоимость материала и самой кромки в расчёт не входит — только работа.</Hint>
           </>
         )}
       </div>

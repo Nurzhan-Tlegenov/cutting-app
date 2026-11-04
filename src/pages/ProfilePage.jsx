@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import { MenuButton } from '../components/NavDrawer'
 import PushSettings from '../components/PushSettings'
 import { fetchNotices } from '../lib/notices'
@@ -200,7 +201,7 @@ export default function ProfilePage() {
                     <input type="text" value={loc.city} onChange={e => setLoc({ ...loc, city: e.target.value })} maxLength={80} style={{ fontSize: 14 }} />
                   </div>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>По ним в раскрое сразу предлагаются производства вашего города. Своё производство меняется в его настройках.</div>
+                <Hint>По ним в раскрое сразу предлагаются производства вашего города. Своё производство меняется в его настройках.</Hint>
                 {locErr && <p className="error-text" style={{ margin: '4px 0 0' }}>{locErr}</p>}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                   <button type="button" className="btn-primary" style={{ flex: 1, padding: 8, fontSize: 14 }} disabled={locBusy} onClick={saveLoc}>{locBusy ? 'Сохраняем…' : 'Сохранить'}</button>

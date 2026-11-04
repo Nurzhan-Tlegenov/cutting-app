@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import { nestingFaults, FAULT_TITLE } from '../lib/nestingCheck'
 import ShareBadge from '../components/ShareBadge'
 import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
@@ -474,7 +475,7 @@ export default function CncPage() {
                           <div>Основной ({mp.name}): файлы <b>.{mp.ext || 'nc'}</b></div>
                           <DirPathEditor value={mp.dirPath ?? mdef} def={mdef} preview={routerDir()} onChange={v => setPostPath(mp.id, v)} latin={mp.dirLatin !== false} onLatin={v => setPostLatin(mp.id, v)} />
                         </> })()}
-                      <div style={{ color: 'var(--text-hint)' }}>«Сохранить все файлы» кладёт программы обоих станков в одну выгрузку — каждую в свои папки.</div>
+                      <Hint>«Сохранить все файлы» кладёт программы обоих станков в одну выгрузку — каждую в свои папки.</Hint>
                     </div>
                   )}
                 </div>
@@ -487,7 +488,7 @@ export default function CncPage() {
               </div>
               {zipEdit && (
                 <TplInput value={zipTpl} def={FILE_NAME_DEFAULTS.zip} parts={FILE_NAME_PARTS} onChange={changeZipTpl} style={{ marginTop: 6 }}
-                  hint={<div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 4 }}>Имя архива «Сохранить все файлы». Внутри — PDF карт (если отмечено) и папки станков. Латиницей; пустая часть (нет клиента) пропускается.</div>} />
+                  hint={<Hint>Имя архива «Сохранить все файлы». Внутри — PDF карт (если отмечено) и папки станков. Латиницей; пустая часть (нет клиента) пропускается.</Hint>} />
               )}
             </div>
           </div>

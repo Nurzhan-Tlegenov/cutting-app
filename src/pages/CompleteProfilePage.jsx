@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import { useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { useAuth } from '../context/AuthContext'
@@ -60,7 +61,7 @@ export function CompleteProfilePage() {
           <div>
             <label className="label">Телефон *</label>
             <input type="tel" autoComplete="tel" placeholder="+7 701 000 00 00" value={form.phone} onChange={e => set('phone', e.target.value)} maxLength={40} required />
-            <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Чтобы производство и поддержка РаскройPro могли связаться с вами. В РаскройPro все знают, с кем работают.</p>
+            <Hint>Чтобы производство и поддержка РаскройPro могли связаться с вами. В РаскройPro все знают, с кем работают.</Hint>
           </div>
           {error && <p className="error-text">{error}</p>}
           <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Загрузка...' : 'Продолжить'}</button>

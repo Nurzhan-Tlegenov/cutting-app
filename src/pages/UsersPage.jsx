@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import AppStopCard from '../components/AppStopCard'
 import { MenuButton } from '../components/NavDrawer'
 import { useEffect, useRef, useState } from 'react'
@@ -412,7 +413,7 @@ export default function UsersPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 500, fontSize: 14 }}>{emailOpen ? 'Регистрация по email и Google — включена' : 'Регистрация по email и Google — выключена'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>Для зарубежных: без Telegram/WhatsApp и без вашего одобрения. Новые аккаунты появятся вверху как «без вашего одобрения».</div>
+                  <Hint>Для зарубежных: без Telegram/WhatsApp и без вашего одобрения. Новые аккаунты появятся вверху как «без вашего одобрения».</Hint>
                 </div>
                 <button type="button" disabled={busy} style={btn(emailOpen ? 'danger' : 'main')}
                   onClick={() => { if (emailOpen && !window.confirm('Выключить регистрацию по email и Google? Уже зарегистрированные по-прежнему смогут входить.')) return; act(() => adminSetEmailSignup(!emailOpen)) }}>
@@ -424,7 +425,7 @@ export default function UsersPage() {
           <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 500, fontSize: 14 }}>Telegram-бот @{TG_BOT}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Подтверждает номера в заявках и присылает коды. Нажмите один раз после установки функции бота — и при её обновлении.</div>
+              <Hint>Подтверждает номера в заявках и присылает коды. Нажмите один раз после установки функции бота — и при её обновлении.</Hint>
             </div>
             <button type="button" disabled={busy} onClick={setupBot} style={btn()}>Подключить бота</button>
           </div>
@@ -434,7 +435,7 @@ export default function UsersPage() {
             <>
               <p className="section-title">Не получается войти · {helps.filter(h => h.status === 'new').length}</p>
               <div className="card" data-focus="lh" style={{ marginBottom: 12, border: '1px solid var(--amber)' }}>
-                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Написали с экрана входа. Аккаунт есть — ниже, в «Восстановлении пароля», уже есть запрос: выдайте код и отправьте в WhatsApp. Аккаунта нет — свяжитесь с человеком или разрешите регистрацию его номеру.</p>
+                <Hint>Написали с экрана входа. Аккаунт есть — ниже, в «Восстановлении пароля», уже есть запрос: выдайте код и отправьте в WhatsApp. Аккаунта нет — свяжитесь с человеком или разрешите регистрацию его номеру.</Hint>
                 {helps.filter(h => h.status === 'new').map(h => (
                   <div key={h.id} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -460,7 +461,7 @@ export default function UsersPage() {
             <>
               <p className="section-title">Восстановление пароля · {resets.filter(r => r.status !== 'done').length}</p>
               <div className="card" style={{ marginBottom: 12, border: '1px solid var(--amber)' }}>
-                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Убедитесь, что пишет сам владелец номера, выдайте код и отправьте его. Код действует сутки, 5 попыток ввода.</p>
+                <Hint>Убедитесь, что пишет сам владелец номера, выдайте код и отправьте его. Код действует сутки, 5 попыток ввода.</Hint>
                 {resets.filter(r => r.status !== 'done').map(r => {
                   const wa = digits(r.whatsapp) || r.digits
                   const dead = r.status === 'issued' && (r.expired || r.attempts >= 5)
@@ -541,7 +542,7 @@ export default function UsersPage() {
               <summary style={{ fontSize: 12, color: 'var(--danger)', cursor: 'pointer' }}>🚫 Заблокированные номера{Array.isArray(blocked) ? ` (${blocked.length})` : ''}</summary>
               {blocked?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', margin: '6px 0' }}>{blocked.error}</p> : (
                 <>
-                  <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0' }}>С этих номеров нельзя зарегистрироваться (даже по ссылке-приглашению), оставить заявку, сменить пароль или войти. Человек не видит, что заблокирован, — у него просто не получается.</div>
+                  <Hint>С этих номеров нельзя зарегистрироваться (даже по ссылке-приглашению), оставить заявку, сменить пароль или войти. Человек не видит, что заблокирован, — у него просто не получается.</Hint>
                   <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
                     <input type="text" placeholder="+7 700 000 00 00 или почта" value={blkPhone} onChange={e => setBlkPhone(e.target.value)} style={{ flex: 1.2, minWidth: 0 }} />
                     <input type="text" placeholder="Пометка (для себя)" value={blkNote} onChange={e => setBlkNote(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
@@ -601,9 +602,9 @@ export default function UsersPage() {
           {beta?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{beta.error}</p> : beta instanceof Map && (
             <details className="card" style={{ marginBottom: 12, padding: '10px 12px' }}>
               <summary style={{ fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Бета-тест · {(users || []).filter(u => betaOf(u).length).length}</summary>
-              <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 8px' }}>
+              <Hint>
                 Новые функции видят только вы и выбранные пользователи — клиенты или производства. Включить: откройте карточку пользователя ниже → «β …».
-              </p>
+              </Hint>
               {BETA_FEATURES.map(([f, label]) => {
                 const who = (users || []).filter(u => betaOf(u).includes(f))
                 return (
@@ -618,7 +619,7 @@ export default function UsersPage() {
             <>
               <p className="section-title" style={{ color: 'var(--teal)' }}>Новые с прошлого просмотра · {newUsers.length}</p>
               <div style={{ border: '1px solid var(--teal)', borderRadius: 'var(--radius)', padding: 8, marginBottom: 12 }}>
-                <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 6px' }}>Зарегистрировались без вашего одобрения — по ссылкам-приглашениям или при открытой регистрации. После просмотра они перейдут в общий список.</p>
+                <Hint>Зарегистрировались без вашего одобрения — по ссылкам-приглашениям или при открытой регистрации. После просмотра они перейдут в общий список.</Hint>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{newUsers.map(userCard)}</div>
                 <button type="button" onClick={markSeen} style={{ ...btn('main'), width: '100%', marginTop: 8, background: 'var(--teal)' }}>Просмотрено ✓</button>
               </div>

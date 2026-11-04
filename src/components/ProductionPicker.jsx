@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useMemo, useState } from 'react'
 import ProductionForm from './ProductionForm'
 import RefShare from './RefShare'
@@ -117,7 +118,7 @@ export default function ProductionPicker({ productions, mine, lastId, profile, k
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>Отправьте приглашение цеху, где вы режете. По вашей ссылке он зарегистрируется без ожидания подтверждения и сразу появится в этом списке.</p>
           <RefShare kind="production" name={String(profile?.full_name || '').trim()} fallback={APP_URL} />
           <button type="button" style={{ ...link, color: 'var(--text-muted)', borderColor: 'var(--border-md)', marginTop: 14 }} onClick={onSkip}>Пока раскроить со своими параметрами</button>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Рез и отступы — как в заказе сейчас. Когда выберете производство, раскрой, возможно, придётся пересчитать под его рез.</p>
+          <Hint>Рез и отступы — как в заказе сейчас. Когда выберете производство, раскрой, возможно, придётся пересчитать под его рез.</Hint>
         </>}
       </div>
     </div>

@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import { createPortal } from 'react-dom'
 import DeskSplit from '../components/DeskSplit'
 import { useDesktop } from '../hooks/useDesktop'
@@ -122,7 +123,7 @@ function RemLabelSetup({ tpl, onChange, sample, previewEl = null }) {
           </span>
         ))}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Правки бирки сохраняются сразу. «Сохранить» — держать её копию под своим именем: открыть можно в любой момент, с любого устройства.</div>
+      <Hint>Правки бирки сохраняются сразу. «Сохранить» — держать её копию под своим именем: открыть можно в любой момент, с любого устройства.</Hint>
       {fromSaved.length > 0 && (
         <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
           Бирка остатка есть в «Мои шаблоны бирок» — взять её оттуда:
@@ -674,7 +675,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
             })}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>В коде: {remQrText(t, remInfo(rem))}</div>
-          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Состав кода выбираете вы. Сотрудник сканирует бирку (Производство → Деловые остатки → «📷 Сканировать бирку»): что есть в коде — размер, материал, толщина, заказ — подставляется само, остальное он впишет; остаётся указать ячейку. Удобно держать в коде размер и материал, а номер заказа — чтобы потом найти остаток от того же заказа (та же партия плиты, текстура). Повторный скан открывает этот же остаток.</div>
+          <Hint>Состав кода выбираете вы. Сотрудник сканирует бирку (Производство → Деловые остатки → «📷 Сканировать бирку»): что есть в коде — размер, материал, толщина, заказ — подставляется само, остальное он впишет; остаётся указать ячейку. Удобно держать в коде размер и материал, а номер заказа — чтобы потом найти остаток от того же заказа (та же партия плиты, текстура). Повторный скан открывает этот же остаток.</Hint>
         </div>
       )}
       {used.has('qr') && !rem && (
@@ -688,7 +689,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
           )}
           {/* тот же конструктор — у имени файла присадочного станка (ЧПУ → постпроцессор присадки) */}
           <QrPartsEditor value={tpl.qr} props={userItems(mat?.details)} onChange={qr => onChange({ ...tpl, qr })} preview={mat ? labelQr(tpl, labelInfo(order, mat, 0, 0)) : null} />
-          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6 }}>Этот же код может быть именем файла программы шестистороннего станка: на станке бирку сканируют — открывается программа детали (настройка в постпроцессоре присадки).</div>
+          <Hint>Этот же код может быть именем файла программы шестистороннего станка: на станке бирку сканируют — открывается программа детали (настройка в постпроцессоре присадки).</Hint>
         </div>
       )}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на бирку</div>
@@ -837,9 +838,9 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared, previewEl = 
             </label>
             <button type="button" onClick={() => { if (window.confirm('Вернуть раскладку по образцу?')) change(resizeLabel({ ...DEFAULT_LABEL(), rot: tpl.rot }, tpl.w, tpl.h)) }}
               style={{ padding: '6px 11px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>↺ Раскладка по образцу</button>
-            <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+            <Hint>
               Шаблон сохраняется в аккаунте. Когда он настроен, в разделе ЧПУ при создании G-кода появляется галочка «Программа для маркировочного стола».
-            </p>
+            </Hint>
     </>
   )
 }
@@ -1196,7 +1197,7 @@ export function LabelSettingsPage() {
       </div>
       {which === 'part' ? (
         <div className="card" style={{ marginBottom: 10 }}>
-          <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 4px' }}>Бирка показана на образцовой детали. Шаблон тот же, что в бирках заказа: настроили здесь — он сразу работает во всех заказах.</p>
+          <Hint>Бирка показана на образцовой детали. Шаблон тот же, что в бирках заказа: настроили здесь — он сразу работает во всех заказах.</Hint>
           <LabelSetup key="part" tpl={tpl} setTpl={setTpl} user={user} order={sample.order} mat={sample.mat} shared={false} previewEl={desk ? previewEl : null} />
         </div>
       ) : (

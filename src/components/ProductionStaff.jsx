@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useState } from 'react'
 import { useKeptDetails } from '../hooks/useKeptState'
 import { PERMS, permsText, createInvite, setMember, removeMember, cancelInvite, inviteUrl } from '../lib/workplaces'
@@ -56,7 +57,7 @@ export function StaffSection({ data, error, onReload, bare = false }) {
       {!bare && <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Сотрудники (рабочие места){members.length ? ` · ${members.filter(m => m.active).length}` : ''}</summary>}
       {error ? <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>{error}</p> : (
         <div style={{ marginTop: 6 }}>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Сотрудник заходит по ссылке-приглашению и работает в своём аккаунте (он может быть и клиентом приложения). Начальник производства видит все заказы; остальные — только заказы, которые сейчас на их рабочих постах.</p>
+          <Hint>Сотрудник заходит по ссылке-приглашению и работает в своём аккаунте (он может быть и клиентом приложения). Начальник производства видит все заказы; остальные — только заказы, которые сейчас на их рабочих постах.</Hint>
           {err && <p className="error-text" style={{ marginBottom: 6 }}>{err}</p>}
           {members.map(m => (
             <div key={m.user_id} style={{ padding: '7px 0', borderTop: '0.5px solid var(--border)', opacity: m.active ? 1 : 0.55 }}>

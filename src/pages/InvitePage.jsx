@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -103,7 +104,7 @@ export default function InvitePage() {
               </button>
             </div>
           ))}
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6 }}>Код отправляйте только на номер человека, которого вы пригласили: он подтверждает, что номер его.</p>
+          <Hint>Код отправляйте только на номер человека, которого вы пригласили: он подтверждает, что номер его.</Hint>
         </div>
       )}
 

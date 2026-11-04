@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useState } from 'react'
 import { LIMIT_KEYS, isCap } from '../lib/limits'
 
@@ -13,9 +14,9 @@ export function DefaultLimits({ defaults, onSave, busy }) {
   return (
     <details className="card" style={{ marginBottom: 12, padding: '10px 12px' }}>
       <summary style={{ fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Лимиты бесплатного использования</summary>
-      <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 8px' }}>
+      <Hint>
         Сколько чего может быть у пользователя одновременно: лимит заказов 3 — не больше трёх заказов в кабинете; удалил один — может завести ещё один. Пустое поле — без лимита. На мастер-аккаунт лимиты не действуют; отдельному пользователю их можно снять или повысить — в его карточке ниже.
-      </p>
+      </Hint>
       {GROUPS.map(([g, title]) => (
         <div key={g} style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>{title}</div>

@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -31,7 +32,7 @@ export default function ReportsSettings() {
   )
   return (
     <div>
-      <p style={{ fontSize: 12, color: 'var(--text-hint)', margin: '0 0 10px' }}>PDF карт раскроя: что выводить на странице листа и где, статистика и смета. Действует для всех PDF карт — со страницы раскроя и из ЧПУ.</p>
+      <Hint>PDF карт раскроя: что выводить на странице листа и где, статистика и смета. Действует для всех PDF карт — со страницы раскроя и из ЧПУ.</Hint>
 
       <p className="section-title">Страница листа</p>
       <div onClick={() => setLayout(true)} style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', cursor: 'pointer', marginBottom: 6 }}>
@@ -50,7 +51,7 @@ export default function ReportsSettings() {
       <div onClick={() => setSumEdit(true)} style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', cursor: 'pointer', margin: '6px 0 10px' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, color: 'var(--blue)', fontWeight: 500 }}>Конструктор страницы статистики</div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Видно, как выглядит страница: какие строки, в каком порядке, шрифт, колонки, смета, примечания</div>
+          <Hint>Видно, как выглядит страница: какие строки, в каком порядке, шрифт, колонки, смета, примечания</Hint>
         </div>
         <span style={{ color: 'var(--blue)', fontSize: 18 }}>›</span>
       </div>

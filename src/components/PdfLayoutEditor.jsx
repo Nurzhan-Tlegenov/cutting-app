@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useSideWidth } from './DeskSplit'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
@@ -208,7 +209,7 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
           </div>
         )}
 
-        <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 8px' }}>Знак RaskroyPro и адрес raskroypro.com всегда стоят в левом верхнем углу страницы — убрать или передвинуть их нельзя.</p>
+        <Hint>Знак RaskroyPro и адрес raskroypro.com всегда стоят в левом верхнем углу страницы — убрать или передвинуть их нельзя.</Hint>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Добавить на лист</div>
         {ADD_GROUPS.map(([title, keys]) => {
           const list = keys.filter(k => PDF_ITEMS.some(x => x[0] === k) && (!used.has(k) || k === 'text' || k === 'line'))
@@ -224,7 +225,7 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
             </div>
           )
         })}
-        <p style={{ fontSize: 11, color: 'var(--text-hint)' }}>Если список деталей не помещается в свою высоту, он продолжается на следующей странице. Статистика всего раскроя и смета идут отдельной последней страницей.</p>
+        <Hint>Если список деталей не помещается в свою высоту, он продолжается на следующей странице. Статистика всего раскроя и смета идут отдельной последней страницей.</Hint>
         </div>
       </div>
 

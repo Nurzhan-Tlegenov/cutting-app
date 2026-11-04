@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useEffect, useRef, useState } from 'react'
 
 // Редактор картинки для бирки: убрать фон (сделать прозрачным), обрезать пустые поля, перевернуть цвета.
@@ -117,7 +118,7 @@ export default function LabelImageEditor({ src, onDone, onCancel }) {
             )}
             {chk('trim', 'Обрезать пустые поля')}
             {chk('invert', 'Перевернуть цвета (белое ↔ чёрное)')}
-            <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0 10px' }}>Принтер бирок печатает чёрным: тёмные части картинки — чёрные точки, прозрачное и светлое — без печати.</p>
+            <Hint>Принтер бирок печатает чёрным: тёмные части картинки — чёрные точки, прозрачное и светлое — без печати.</Hint>
           </>
         )}
         <div style={{ display: 'flex', gap: 8 }}>

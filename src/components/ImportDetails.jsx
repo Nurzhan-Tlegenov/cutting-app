@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useState, useRef, useMemo, useEffect } from 'react'
 // Чтение моделей лежит в основной части приложения, а не подгружается отдельно: после обновления приложения
 // у открытой страницы адреса подгружаемых частей устаревают, и импорт падал с «Failed to fetch dynamically imported module».
@@ -547,7 +548,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                     )
                   })}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Снимите слой, если в нём то, что резать не нужно (другой вариант, старая версия). Слой детали можно вывести на бирку — свойство «Слой».</div>
+                <Hint>Снимите слой, если в нём то, что резать не нужно (другой вариант, старая версия). Слой детали можно вывести на бирку — свойство «Слой».</Hint>
               </div>
             )}
 
@@ -659,7 +660,7 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                     </div>
                   )
                 })}
-                <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.</p>
+                <Hint>Решает первый признак, который есть у детали: если лицевая сторона не назначена в модели — смотрим следующий. Ничего не решило — деталь лежит как в модели.</Hint>
                 <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                   Обработка с изнанки не теряется: она остаётся в детали и видна в редакторе контура, там же деталь можно перевернуть.
                   {chosen.length > 0 && ` Деталей с обработкой с двух сторон: ${chosen.filter(it => it.info?.back > 0).length}.`}

@@ -1,3 +1,4 @@
+import Hint from './Hint'
 // Объединённый раскрой (страница раскроя): из каких заказов, «Объединить материал» / «Разъединить»,
 // «Обновить детали из заказов», если заказы поменяли после объединения. Логика — lib/mergeOrders.js.
 import { useEffect, useMemo, useState } from 'react'
@@ -100,9 +101,9 @@ export default function MergePanel({ order, allDetails, materials, savedByMat, e
       <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.45 }}>
         {srcs.map(s => <div key={s.id}>{srcOrderLabel(s)}</div>)}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>
+      <Hint>
         Обозначение детали начинается с номера заказа: «1·…», «2·…». На бирке «Заказ» — заказ самой детали. Смета — общая.
-      </div>
+      </Hint>
       {stale.length > 0 && (
         <div style={{ marginTop: 6, fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '5px 8px' }}>
           Заказ {stale.join(', ')} изменили после объединения — детали здесь старые.

@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useEffect, useState } from 'react'
 import { useKeptState, useKeptDetails } from '../hooks/useKeptState'
 import StageParts from './StageParts'
@@ -43,7 +44,7 @@ export function PostsSection({ members, bare = false }) {
       {!bare && <summary style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>Рабочие посты (техпроцесс){posts?.length ? ` · ${posts.filter(p => p.active).length}` : ''}</summary>}
       {missing ? <p style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 6 }}>{err}</p> : (
         <div style={{ marginTop: 6 }}>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Заказ, принятый в работу, идёт по постам сверху вниз. Сотрудники поста видят заказ новым, принимают и отмечают «Выполнено» — заказ сам переходит на следующий пост. После последнего поста заказ исполнен. Порядок меняется стрелками.</p>
+          <Hint>Заказ, принятый в работу, идёт по постам сверху вниз. Сотрудники поста видят заказ новым, принимают и отмечают «Выполнено» — заказ сам переходит на следующий пост. После последнего поста заказ исполнен. Порядок меняется стрелками.</Hint>
           {err && <p className="error-text" style={{ marginBottom: 6 }}>{err}</p>}
           {(posts || []).map((p, i) => (
             <div key={p.id} style={{ padding: '7px 0', borderTop: '0.5px solid var(--border)', opacity: p.active ? 1 : 0.5 }}>
@@ -223,7 +224,7 @@ function PostLinkBox({ post }) {
   const send = async () => { try { await navigator.share({ title: `Рабочий пост «${post.name}»`, url }) } catch { /* отменили */ } }
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Ссылка на пост — открыть на компьютере со сканером (нужен вход в аккаунт сотрудника этого поста):</div>
+      <Hint>Ссылка на пост — открыть на компьютере со сканером (нужен вход в аккаунт сотрудника этого поста):</Hint>
       <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
         <input type="text" readOnly value={url} onFocus={e => e.target.select()} style={{ flex: '1 1 180px', minWidth: 0, fontSize: 12, padding: '5px 8px' }} />
         <button type="button" style={small} onClick={copy}>Копировать</button>

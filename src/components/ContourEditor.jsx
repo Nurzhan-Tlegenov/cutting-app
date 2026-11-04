@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import DeskSplit from './DeskSplit'
 import { useDesktop, isDesktop } from '../hooks/useDesktop'
 import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
@@ -1843,20 +1844,6 @@ function CollapsibleItem({ title, onRemove, children, innerRef, highlighted, ope
   )
 }
 
-// Свёрнутая по умолчанию подсказка — раскрывается по тапу, чтобы не раздувать карточку
-function Hint({ children }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div style={{ marginBottom:5 }}>
-      <button type="button" onClick={() => setOpen(o => !o)}
-        style={{ fontSize:10, padding:'2px 7px', border:'0.5px solid var(--border-md)', borderRadius:'var(--radius)',
-          background:'transparent', color:'var(--text-hint)', cursor:'pointer' }}>
-        {open ? '▲ Скрыть подсказку' : '? Подсказка'}
-      </button>
-      {open && <p style={{ fontSize:10, color:'var(--text-hint)', margin:'4px 0 0' }}>{children}</p>}
-    </div>
-  )
-}
 
 // ─── Чекбокс-строка: галочка с названием прижаты влево, доп. параметры —
 // открываются справа в этой же строке (компактно, если помещаются).
@@ -3237,9 +3224,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
                 )
               })}
             </div>
-            <p style={{ fontSize:10, color:'var(--text-hint)', margin:'6px 0 0' }}>
+            <Hint>
               Проще — кнопкой «Кромить» над чертежом: участки выбираются нажатием прямо на детали. ⌒ — криволинейный участок.
-            </p>
+            </Hint>
           </details>
         )
       })()}
@@ -3389,9 +3376,9 @@ export default function ContourEditor({ detail, onUpdate, materialThickness, onC
       {/* РАЗМЕТКА — полки, стойки, царги как визуальные ориентиры */}
       {tab==='layout' && (
         <div>
-          <p style={{ fontSize:10.5, color:'var(--text-hint)', margin:'0 0 6px' }}>
+          <Hint>
             Отметь, где будут полки, стойки и царги — потом присадку по плоскости можно привязать прямо к этим линиям.
-          </p>
+          </Hint>
           <div style={{ display:'flex', gap:4, marginBottom:5, flexWrap:'wrap' }}>
             <button type="button" onClick={() => openLayoutGenerator('shelf')}
               style={{ flex:1, padding:'6px', border: genType==='shelf' ? '1px solid var(--blue)' : '0.5px dashed var(--border-md)',

@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 // Мастер-аккаунт: «Нагрузка» — как быстро база отвечает пользователям, в какие часы просаживается, что тормозит,
 // сколько места занято (migration_load.sql; замеры — src/lib/perf.js у каждого пользователя).
 import { useEffect, useState } from 'react'
@@ -130,7 +131,7 @@ export default function LoadPage() {
         <div className="card" style={card}>
           {head('Скорость по часам — последние сутки')}
           {hours.length ? bars(hours, maxH, x => String(new Date(x.t).getHours()).padStart(2, '0')) : <div style={{ fontSize: 12.5, color: 'var(--text-hint)' }}>Замеров ещё нет — они приходят раз в 5 минут от каждого, кто в приложении.</div>}
-          <div style={{ fontSize: 10.5, color: 'var(--text-hint)' }}>Столбик — худшие ответы за час, тёмная часть — обычный ответ. Зелёный — быстро, жёлтый — тесновато, красный — просадка. Наведите на столбик — подробности.</div>
+          <Hint>Столбик — худшие ответы за час, тёмная часть — обычный ответ. Зелёный — быстро, жёлтый — тесновато, красный — просадка. Наведите на столбик — подробности.</Hint>
         </div>
         {days.length > 1 && (
           <div className="card" style={card}>
@@ -175,7 +176,7 @@ export default function LoadPage() {
           {(d.storage || []).map(b => <div key={b.bucket} style={{ fontSize: 11.5, color: 'var(--text-muted)', paddingLeft: 10 }}>{b.bucket}: {size(Number(b.bytes))} · файлов {b.files}</div>)}
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>Самые большие таблицы:</div>
           {(d.db?.tables || []).map(t => <div key={t.name} style={{ fontSize: 11.5, color: 'var(--text-muted)', paddingLeft: 10 }}>{PLACE[t.name] ? `${PLACE[t.name]} (${t.name})` : t.name}: {size(Number(t.bytes))}{t.rows > 0 ? ` · ~${t.rows} строк` : ''}</div>)}
-          <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 6 }}>Лимиты — из вашего тарифа в Supabase (Settings → Billing / Usage). Вписанные здесь — для процентов в «батарейке», на базу они не влияют.</div>
+          <Hint>Лимиты — из вашего тарифа в Supabase (Settings → Billing / Usage). Вписанные здесь — для процентов в «батарейке», на базу они не влияют.</Hint>
         </div>
 
         {Array.isArray(d.slow) && d.slow.length > 0 && (
@@ -187,7 +188,7 @@ export default function LoadPage() {
                 <div style={{ color: 'var(--text-hint)', fontFamily: 'monospace', fontSize: 10.5, wordBreak: 'break-all' }}>{s.q}</div>
               </div>
             ))}
-            <div style={{ fontSize: 10.5, color: 'var(--text-hint)', marginTop: 6 }}>Это подсказка разработчику: что оптимизировать в первую очередь. Можно переслать в «Сообщения» скриншотом.</div>
+            <Hint>Это подсказка разработчику: что оптимизировать в первую очередь. Можно переслать в «Сообщения» скриншотом.</Hint>
           </div>
         )}
       </>)}

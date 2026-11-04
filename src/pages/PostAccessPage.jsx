@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 // Мастер-аккаунт: постпроцессоры по запросу — запросы производств, кому какой постпроцессор выдан,
 // кто и каким постпроцессором выпускает программы (migration_post_access.sql).
 import { useEffect, useState } from 'react'
@@ -55,7 +56,7 @@ export default function PostAccessPage() {
 
       {d && tab === 'posts' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Постпроцессоры в каталоге (кнопка 🔑 у станка в настройках ЧПУ). Их видят только те, кому вы выдали, и сотрудники их производства; остальные — название и «Запросить».</p>
+          <Hint>Постпроцессоры в каталоге (кнопка 🔑 у станка в настройках ЧПУ). Их видят только те, кому вы выдали, и сотрудники их производства; остальные — название и «Запросить».</Hint>
           {!d.posts.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: 20 }}>В каталоге пока нет постпроцессоров.</p>}
           {d.posts.map(p => (
             <div key={p.id} className="card" style={{ padding: '10px 12px' }}>
@@ -77,7 +78,7 @@ export default function PostAccessPage() {
 
       {d && tab === 'usage' && (
         <div className="card" style={{ padding: 4 }}>
-          <p style={{ fontSize: 12, color: 'var(--text-hint)', padding: '6px 8px' }}>Кто выпускал управляющие программы за 90 дней и какими постпроцессорами (🔑 — выданный вами, без значка — свой).</p>
+          <Hint>Кто выпускал управляющие программы за 90 дней и какими постпроцессорами (🔑 — выданный вами, без значка — свой).</Hint>
           {!d.usage.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: 20 }}>Пока никто не выпускал программ (записи идут с этого обновления).</p>}
           {d.usage.map(u => (
             <div key={u.user_id} style={{ padding: '8px 8px', borderTop: '0.5px solid var(--border)' }}>
@@ -174,7 +175,7 @@ function Access({ p, act, dir }) {
           <button type="button" style={btn('var(--danger)')} onClick={() => { if (window.confirm(`Отозвать «${p.name}» у ${a.name}?\nУ него и сотрудников его производства этот постпроцессор пропадёт.`)) act(revokePost(p.id, a.user_id)) }}>Отозвать</button>
         </div>
       ))}
-      <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 8 }}>Выдать — в «Пользователи и регистрация»: фильтр «Производства», у пользователя кнопки 🔑 с названиями постпроцессоров.</div>
+      <Hint>Выдать — в «Пользователи и регистрация»: фильтр «Производства», у пользователя кнопки 🔑 с названиями постпроцессоров.</Hint>
     </div>
   )
 }

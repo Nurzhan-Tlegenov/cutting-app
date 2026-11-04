@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { getCnc, normalizeCnc, routerPost } from '../lib/cncSettings'
 import { postView } from '../lib/postTools'
@@ -3401,9 +3402,9 @@ export default function NestingPage() {
                     Включено всегда: производство режет на фрезере только прямоугольники (ЧПУ → «Обработка» → «Резать только прямоугольники»).
                   </div>
                 )}
-                <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2, marginLeft: 23 }}>
+                <Hint>
                   Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах. Включите, если производство режет только прямоугольники.
-                </div>
+                </Hint>
               </div>
             )}
 
@@ -3471,9 +3472,9 @@ export default function NestingPage() {
               </div>
             )}
             {cfg.small && cfg.sq === '' && cfg.side === '' && (
-              <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>
+              <Hint>
                 Задайте хотя бы один порог — иначе мелких деталей не будет.
-              </p>
+              </Hint>
             )}
             {/* Какие детали попадают в «мелкие» при этих порогах — видно сразу, до запуска */}
             {cfg.small && (cfg.sq !== '' || cfg.side !== '') && (() => {
@@ -3796,9 +3797,9 @@ export default function NestingPage() {
                     )}
                     {cfg.note && <p style={{ fontSize: 11, color: '#dc3545', margin: '6px 0 0' }}>{cfg.note}</p>}
                     {!cfg.buffer.length && !selPartObj && (
-                      <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: 0 }}>
+                      <Hint>
                         Тап по детали на листе → «В буфер». Затем откройте другой лист и положите её туда.
-                      </p>
+                      </Hint>
                     )}
                   </div>
                 )}
@@ -4120,9 +4121,9 @@ export default function NestingPage() {
 
                 <div style={{ borderTop: '0.5px dashed var(--border-md)', paddingTop: 8 }}>
                   <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 2 }}>Обрезки со склада</div>
-                  <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>
+                  <Hint>
                     Раскраиваются первыми (крупные — раньше), как отдельные листы. На целые листы идёт то, что не поместилось.
-                  </p>
+                  </Hint>
                   {offForm.items.map((it, i) => (
                     <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-end', marginBottom: 6 }}>
                       {[['length', 'Длина, мм'], ['width', 'Ширина, мм'], ['qty', 'Шт.']].map(([k, t]) => (
@@ -4389,9 +4390,9 @@ export default function NestingPage() {
                   background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                 {copyStatus || 'Скопировать'}
               </button>
-              <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+              <Hint>
                 Нажмите в поле выше, чтобы выделить текст, или на кнопку — чтобы скопировать. Это точные координаты контура детали, которые можно прислать разработчику.
-              </p>
+              </Hint>
             </div>
           )}
         </div>
@@ -4415,9 +4416,9 @@ export default function NestingPage() {
                   background: 'var(--bg2)', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}>
                 {resultCopyStatus || 'Скопировать'}
               </button>
-              <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+              <Hint>
                 Это координаты и полигоны того, что сейчас реально показано на листах — если сверить их не по картинке, а по цифрам, видно точное расхождение.
-              </p>
+              </Hint>
             </div>
           )}
         </div>

@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useEffect, useState } from 'react'
 import { pushStatus, enablePush, disablePush, testPush, soundOn, setSoundOn } from '../lib/push'
 
@@ -23,7 +24,7 @@ export default function PushSettings() {
   return (
     <div className="card" style={{ marginBottom: 12 }}>
       <div style={{ fontWeight: 500, fontSize: 14 }}>🔔 Уведомления на телефон</div>
-      <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>Новые заявки, статусы заказов, заказы на посту — в шторку телефона со звуком, даже когда приложение закрыто. Нажатие открывает нужную заявку.</div>
+      <Hint>Новые заявки, статусы заказов, заказы на посту — в шторку телефона со звуком, даже когда приложение закрыто. Нажатие открывает нужную заявку.</Hint>
       <div style={{ fontSize: 12.5, color, marginTop: 6 }}>{label}</div>
       <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
         {(st === 'off' || st === 'denied') && <button type="button" disabled={busy} style={btn(true)} onClick={() => run(enablePush, 'Включено. Нажмите «Проверить».')}>Включить</button>}

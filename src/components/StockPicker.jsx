@@ -1,3 +1,4 @@
+import Hint from './Hint'
 // «Взять со склада» в раскрое: остатки склада производства по материалу заказа. Точное совпадение материала —
 // сразу отмечено; похожий материал («Белый Эстетик» ↔ «Белый») — показывается с пометкой, решает человек.
 // Выбранные остатки идут в «Обрезки со склада» этого раскроя (раскраиваются первыми).
@@ -68,7 +69,7 @@ export default function StockPicker({ prodId, prodName, orderId, material, taken
             {!!groups.other.length && (all
               ? <><div style={{ fontSize: 12, fontWeight: 600, margin: '10px 0 2px', color: 'var(--text-muted)' }}>Другие материалы</div>{groups.other.map(x => row(x, 'другой материал'))}</>
               : <button type="button" style={{ ...btn(false), marginTop: 8, fontSize: 12 }} onClick={() => setAll(true)}>Показать другие материалы · {groups.other.length}</button>)}
-            <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '10px 0 0' }}>Взятые остатки раскраиваются первыми. Когда раскрой выбран («Выбрать» / «Оформить»), они резервируются за заказом и другим заказам не предлагаются; когда выпустят программы ЧПУ (или пройдут раскрой) — списываются.</p>
+            <Hint>Взятые остатки раскраиваются первыми. Когда раскрой выбран («Выбрать» / «Оформить»), они резервируются за заказом и другим заказам не предлагаются; когда выпустят программы ЧПУ (или пройдут раскрой) — списываются.</Hint>
           </>}
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button type="button" disabled={!n} style={{ ...btn(true), flex: 1, opacity: n ? 1 : 0.5 }} onClick={pick}>Взять · {n} шт</button>

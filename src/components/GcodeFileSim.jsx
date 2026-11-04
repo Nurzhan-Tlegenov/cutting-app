@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { Suspense, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { lazyRetry } from '../lib/lazyRetry'
@@ -60,10 +61,10 @@ export default function GcodeFileSim({ onClose }) {
         <div style={{ padding: 14 }}>
           <input ref={file} type="file" style={{ display: 'none' }} onChange={pick} />
           <button type="button" className="btn-primary" onClick={() => file.current?.click()}>📂 Открыть управляющую программу</button>
-          <p style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 8 }}>
+          <Hint>
             Любой G-код — из этого приложения или из других программ (.nc, .tap, .cnc, .txt…). Видно траектории, порядок обработки,
             смены инструмента и строки программы. Если в программе есть присадочная голова, она рисуется слева от шпинделя.
-          </p>
+          </Hint>
           {err && <p className="error-text" style={{ marginTop: 8 }}>{err}</p>}
         </div>
       </div>

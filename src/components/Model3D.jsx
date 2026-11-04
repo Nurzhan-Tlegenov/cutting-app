@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as THREE from 'three'
@@ -1753,9 +1754,9 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
             <button type="button" style={wideBtn(true)} onClick={() => bandVisible(edgeValue)}>Закромить видимые торцы</button>
             <button type="button" style={wideBtn(false)} onClick={() => bandVisible(null)}>Снять с видимых</button>
           </div>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+          <Hint>
             Отметьте детали (или оставьте нужный блок), выберите вид на кубе и нажмите «Закромить» — кромка встанет на торцы, которые смотрят на вас. Тап по торцу — поставить или снять.
-          </p>
+          </Hint>
         </div>
       )}
       {/* присадка по стыкам */}
@@ -1790,9 +1791,9 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
               <span style={{ color: '#ff6a00' }}>■</span> поставить · <span style={{ color: '#00a651' }}>■</span> уже стоит · <span style={{ color: '#8a8a8a' }}>■</span> пропустить
             </span>
           </div>
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '8px 0 0' }}>
+          <Hint>
             Подсвечены стыки: торец одной детали прилегает к пласти другой. Тап по стыку — включить или выключить. В пласти появится линия разметки с присадкой, в торце — ответные отверстия.
-          </p>
+          </Hint>
         </div>
       )}
       {/* новый крепёж и его схема — без перехода в редактор контура */}
@@ -1825,9 +1826,9 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
                   <div style={line}><span style={cap}>Второе в торец</span>Ø {num('pairEdgeD')} глубина {num('pairEdgeDepth')}</div>
                 </>
               )}
-              <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '2px 0 10px' }}>
+              <Hint>
                 Схема ставится на стык «торец к пласти»: отверстия в пласти одной детали и ответные в торце другой, на заданном отступе от края стыка. Крепёж запишется в вашу базу фурнитуры и будет доступен и в редакторе контура.
-              </p>
+              </Hint>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="button" style={wideBtn(true)} onClick={saveScheme}>Сохранить крепёж</button>
                 <button type="button" style={wideBtn(false)} onClick={() => setNewScheme(null)}>Отмена</button>

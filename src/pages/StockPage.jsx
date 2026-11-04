@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 // Деловые остатки — склад производства: ввод списком (как деталировка), ячейки хранения, поиск и отбор,
 // карточка остатка с быстрыми действиями (ячейка, перерезать, списать) и журналом «кто, когда, что сделал».
 // Менять склад могут владелец, начальник производства и ответственные за склад (полномочие «Склад остатков»);
@@ -233,7 +234,7 @@ export default function StockPage() {
               <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Распечатать бирки — одним PDF, по бирке на каждую штуку</div>
               {(() => { const its = remTplOf(getLabelTpl(user)).items.map(i => i.type), miss = [!its.includes('qr') && 'QR-кода (по нему скан открывает остаток)', !its.includes('cell') && 'ячейки хранения'].filter(Boolean)
                 return miss.length ? <p style={{ fontSize: 12, color: 'var(--amber)', margin: '0 0 6px' }}>В шаблоне бирки остатка нет {miss.join(' и ')}. Добавьте: Настройки производства → Бирки → «Бирка делового остатка».</p> : null })()}
-              <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>Шаблон — «Бирка делового остатка» (Настройки производства → Бирки). Отметьте остатки галочками в списке или возьмите готовый отбор. После PDF у остатков ставится «🏷 бирка выпущена».</p>
+              <Hint>Шаблон — «Бирка делового остатка» (Настройки производства → Бирки). Отметьте остатки галочками в списке или возьмите готовый отбор. После PDF у остатков ставится «🏷 бирка выпущена».</Hint>
               {pdfBusy ? <p style={{ fontSize: 13 }}>{pdfBusy}</p> : (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button type="button" disabled={!noLabel.length} style={btn('main')} onClick={() => printLabels(noLabel)}>Все без бирки · {pcs(noLabel)} шт</button>
@@ -248,7 +249,7 @@ export default function StockPage() {
         {scan && (
           <DeskSheet storeKey="stockWin" onClose={() => setScan(false)}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}><span style={{ flex: 1, fontSize: 15, fontWeight: 600 }}>Наведите камеру на бирку остатка</span><button type="button" onClick={() => setScan(false)} style={{ border: 'none', background: 'none', fontSize: 22, color: 'var(--text-hint)', cursor: 'pointer' }}>×</button></div>
-              <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Бирка из раскроя — остаток внесётся на склад (останется вписать ячейку). Уже внесённый — откроется его карточка.</p>
+              <Hint>Бирка из раскроя — остаток внесётся на склад (останется вписать ячейку). Уже внесённый — откроется его карточка.</Hint>
               <QrCamera onCode={onScan} height={280} />
               {scanMsg && <p style={{ fontSize: 13, color: 'var(--amber)', marginTop: 8 }}>{scanMsg}</p>}
               <form style={{ display: 'flex', gap: 6, marginTop: 10 }} onSubmit={e => { e.preventDefault(); const v = e.currentTarget.elements.n.value.trim(); if (v) onScan(/^\d+$/.test(v) ? `OSTATOK;R${v}` : v) }}>
@@ -350,7 +351,7 @@ function AddRows({ pid, materials, cells, onClose, onSaved }) {
   return (
     <div className="card" style={{ marginBottom: 12 }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Внести остатки</div>
-      <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>Материал и ячейка — общие для строк ниже (поменяли — следующие строки пойдут с новыми). Ячейку можно оставить пустой и вписать потом.</p>
+      <Hint>Материал и ячейка — общие для строк ниже (поменяли — следующие строки пойдут с новыми). Ячейку можно оставить пустой и вписать потом.</Hint>
       <datalist id="stock-mats">{materials.map(m => <option key={m} value={m} />)}</datalist>
       <datalist id="stock-cells">{cells.map(c => <option key={c} value={c} />)}</datalist>
       <label style={lbl}>Материал<input list="stock-mats" value={common.material} onChange={e => setCommon(c => ({ ...c, material: e.target.value }))} placeholder="ЛДСП Белый 16 мм" style={inp} /></label>
@@ -545,7 +546,7 @@ function ImportPreview({ imp, pid, materials, onClose, onSaved }) {
           ))}
           {imp.items.length > 200 && <div style={{ fontSize: 12, padding: '4px 8px', color: 'var(--text-hint)' }}>…и ещё {imp.items.length - 200}</div>}
         </div>
-        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Строки добавятся к складу как новые остатки (не заменят имеющиеся). В журнале будет записано, кто их внёс.</p>
+        <Hint>Строки добавятся к складу как новые остатки (не заменят имеющиеся). В журнале будет записано, кто их внёс.</Hint>
       </>}
       {err && <p className="error-text" style={{ marginTop: 8 }}>{err}</p>}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -647,7 +648,7 @@ function RemCard({ r, edit, cells, materials, settings, onClose, onChanged, onPr
 
         {mode === 'edit' && (
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 6 }}>Исправить ошибку ввода. Если от остатка отрезали кусок — лучше «Перерезать»: так в журнале видно, что его перерезали.</div>
+            <Hint>Исправить ошибку ввода. Если от остатка отрезали кусок — лучше «Перерезать»: так в журнале видно, что его перерезали.</Hint>
             <div style={{ display: 'flex', gap: 6 }}>
               {[['length', 'Длина'], ['width', 'Ширина'], ['qty', 'Кол-во']].map(([k, l]) => <label key={k} style={{ ...lbl, flex: 1 }}>{l}<input inputMode="decimal" value={f[k]} onChange={e => setF(x => ({ ...x, [k]: cleanNum(e.target.value) }))} style={inp} /></label>)}
             </div>
@@ -746,7 +747,7 @@ function StockSettings({ pid, settings, onSaved }) {
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Настройки склада</div>
       {row('reasonRequired', 'Требовать причину при перерезке и списании', 'Выключено — причину пишут по желанию. Кто и когда перерезал или списал, записывается всегда.')}
       {row('clients', 'Показывать остатки клиентам', 'Клиенты, выбравшие ваше производство, увидят при раскрое размер, материал и количество (ячейку и примечание — нет).')}
-      <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Кто может менять склад: владелец, начальник производства и сотрудники с правом «Склад остатков» (Настройки → Сотрудники). Остальные сотрудники — только просмотр.</p>
+      <Hint>Кто может менять склад: владелец, начальник производства и сотрудники с правом «Склад остатков» (Настройки → Сотрудники). Остальные сотрудники — только просмотр.</Hint>
       {err && <p className="error-text" style={{ marginTop: 6 }}>{err}</p>}
     </div>
   )

@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useSideWidth } from './DeskSplit'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
@@ -154,7 +155,7 @@ export default function SummaryLayoutEditor({ onClose }) {
           {cfg.parts?.on && (
             <>
               <p className="section-title" style={{ marginTop: 12 }}>Список деталей — колонки</p>
-              <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 6px' }}>Детали, которые участвуют в раскрое, — по строке на позицию. Ширина пустая — «авто» (по самому длинному тексту), или своя в мм. Название колонки можно написать своё.</p>
+              <Hint>Детали, которые участвуют в раскрое, — по строке на позицию. Ширина пустая — «авто» (по самому длинному тексту), или своя в мм. Название колонки можно написать своё.</Hint>
               {pcols.map((c, i) => (
                 <div key={c.type + i} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
                   <input value={c.title ?? ''} placeholder={colHead({ type: c.type })} onChange={e => setCol(i, { title: e.target.value || undefined })}
@@ -212,7 +213,7 @@ export default function SummaryLayoutEditor({ onClose }) {
               <button type="button" style={arrow} disabled={i === rows.length - 1} onClick={() => moveRow(r.key, 1)}>↓</button>
             </div>
           ))}
-          <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '6px 0 0' }}>Строки, которых в заказе нет (например, пазы), в PDF не выводятся. Цены сметы — из прайс-листа производства.</p>
+          <Hint>Строки, которых в заказе нет (например, пазы), в PDF не выводятся. Цены сметы — из прайс-листа производства.</Hint>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, padding: '10px 14px calc(10px + env(safe-area-inset-bottom))', background: 'var(--bg)', borderTop: '0.5px solid var(--border)' }}>

@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useEffect, useRef, useState } from 'react'
 
 // Проверка чертежа DXF перед импортом: картинка (детали, обработка, ошибки), что исправлено само,
@@ -121,9 +122,9 @@ export default function DxfCheck({ dxf, opts, onOpts, busy }) {
           {(focus || zoom > 1) && <button type="button" onClick={() => { setFocus(null); setZoom(1) }} style={{ height: 26, borderRadius: 6, border: '0.5px solid var(--border-md)', background: 'var(--bg)', fontSize: 11, padding: '0 8px', cursor: 'pointer' }}>весь чертёж</button>}
         </div>
       </div>
-      <div style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '3px 0 6px' }}>
+      <Hint>
         Нажмите на деталь на картинке — она не будет взята (серая пунктирная); ещё раз — вернётся. Красным — ошибки, синим — обработка, оранжевым — кромка.
-      </div>
+      </Hint>
 
       {/* допуск сшивания */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>

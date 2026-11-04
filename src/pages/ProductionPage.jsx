@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import { MenuButton, Ico } from '../components/NavDrawer'
 import TrainingOffer from '../components/TrainingOffer'
 import CornerPick from '../components/CornerPick'
@@ -369,7 +370,7 @@ export default function ProductionPage() {
               {setSec === 'staff' && <StaffSection bare data={staff.data} error={staff.error} onReload={loadStaff} />}
               {setSec === 'posts' && <PostsSection bare members={staff.data?.members} />}
               {setSec === 'sheet' && <>
-                <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '0 0 6px' }}>Подставляются в раскрой заказчика, когда он выбирает ваше производство, — по типу материала, который он указал в заказе.</p>
+                <Hint>Подставляются в раскрой заказчика, когда он выбирает ваше производство, — по типу материала, который он указал в заказе.</Hint>
                 {[['Плита: ЛДСП, МДФ — фрезер ЧПУ или пила', MARGINS], ['ХДФ, ДВП (задние стенки) — пила', HDF_MARGINS]].map(([title, list]) => (
                   <div key={title} style={{ marginBottom: 8 }}>
                     <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>{title}</div>
@@ -391,7 +392,7 @@ export default function ProductionPage() {
                     if (e) setError(/saw_corner/.test(String(e.message)) ? 'Чтобы задать угол укладки пилы, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists saw_corner text;' : e.message)
                     else setProd(p => ({ ...p, saw_corner: v }))
                   }} />
-                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>От какого угла листа идёт раскрой на пиле: детали прижаты к этому углу, обрезок — с противоположной стороны. Подставляется в раскрой заказчика, он видит угол на карте. У фрезера ЧПУ угол — в постпроцессоре (Постпроцессоры → Рабочее поле станка).</p>
+                  <Hint>От какого угла листа идёт раскрой на пиле: детали прижаты к этому углу, обрезок — с противоположной стороны. Подставляется в раскрой заказчика, он видит угол на карте. У фрезера ЧПУ угол — в постпроцессоре (Постпроцессоры → Рабочее поле станка).</Hint>
                 </div>
                 {/* деловой обрезок: свободные куски не меньше этого отмечаются обрезками сами — шинковка их не трогает */}
                 <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
@@ -404,11 +405,11 @@ export default function ProductionPage() {
                       </label>
                     ))}
                   </div>
-                  <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>
+                  <Hint>
                     На готовом раскрое (фрезер ЧПУ и форматно-раскроечный станок) свободный кусок листа, который не меньше этих размеров, сам отмечается деловым обрезком:
                     шинковка ЧПУ его не режет, на него печатается бирка обрезка. Снять обрезок или отметить другой можно вручную на карте («Обрезки» → «Вручную»).
                     Пусто — по умолчанию 400 × 400 мм у фрезера ЧПУ (у форматника — выключено); 0 в обоих полях — выключено везде. У пильного центра свой размер обрезка — в его настройках.
-                  </p>
+                  </Hint>
                 </div>
               </>}
               {/* настройки постпроцессора — дубль окна ЧПУ из заказа: станки можно настроить до заказов */}

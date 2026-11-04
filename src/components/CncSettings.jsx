@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { LABEL_POS, getLabelTpl, saveLabelTpl, QR_PARTS, labelQr, qrTemplateOf } from '../lib/labelMaker'
 import CornerPick from './CornerPick'
 import { backOf, BACK_NAME_DEFAULT } from '../lib/backSide'
@@ -92,7 +93,6 @@ function ToolSelect({ cnc, value, onChange, only, auto, maxD, empty }) {
     </select>
   )
 }
-const Hint = ({ children }) => <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>{children}</p>
 const Title = ({ children }) => <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 8 }}>{children}</div>
 
 // Карточка «Обработки», свёрнутая по умолчанию: заголовок и короткая сводка; нажал — развернулась, выставил настройки.
@@ -887,7 +887,7 @@ function CmdPalette({ onPick, desk }) {
       </button>
       {open && (
         <>
-          <div style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '4px 0 6px' }}>Поставьте курсор в нужное поле слева и нажмите команду — она встанет отдельной строкой. Команды разных контроллеров (NC Studio, Syntec, Weihong, Mach3…) могут отличаться — сверяйтесь с инструкцией своего станка.</div>
+          <Hint>Поставьте курсор в нужное поле слева и нажмите команду — она встанет отдельной строкой. Команды разных контроллеров (NC Studio, Syntec, Weihong, Mach3…) могут отличаться — сверяйтесь с инструкцией своего станка.</Hint>
           {CMD_HELP.map(([group, list]) => (
             <div key={group} style={{ marginTop: 6 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: 2 }}>{group}</div>

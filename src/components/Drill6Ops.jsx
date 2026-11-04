@@ -1,3 +1,4 @@
+import Hint from './Hint'
 // Инструменты и обработка шестистороннего присадочного станка (XML). Свои у каждого станка: номера инструментов
 // у всех разные. Для каждого вида обработки — «авто» (инструмент выбирает система управления станка), один инструмент
 // или (пазы) по ширине паза; у слоя заказа (паз ширина × глубина, выемка по глубине) — своё назначение.
@@ -9,7 +10,6 @@ import { SaveSnapshotButton } from './CncSettings'
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 const r1 = v => Math.round(num(v) * 10) / 10
 const Title = ({ children }) => <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 8 }}>{children}</div>
-const Hint = ({ children }) => <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>{children}</p>
 const KIND = { mill: 'Фреза', saw: 'Диск (пила)' }
 const toolText = t => `${t.name}${t.kind === 'saw' ? ' · диск' : ' · фреза'}${num(t.d) > 0 ? ` ${t.kind === 'saw' ? '' : 'Ø'}${r1(t.d)}` : ''}`
 

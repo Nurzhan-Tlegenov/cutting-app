@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import { metaPos } from '../lib/partLabel'
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
 import { saveOrderNote, NOTES_SQL_HINT } from '../lib/orderNotes'
@@ -267,9 +268,9 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
             Копировать кромки
           </label>
           {!copySize && (
-            <p style={{ fontSize:10, color:'var(--text-hint)', margin:'-4px 0 10px' }}>
+            <Hint>
               Без копирования размеров переносится только присадка и разметка (полки/стойки) — форма и вырезы детали не трогаются.
-            </p>
+            </Hint>
           )}
           <div style={{ display: 'flex', gap: 6 }}>
             <button type="button" disabled={!copySourceUid}

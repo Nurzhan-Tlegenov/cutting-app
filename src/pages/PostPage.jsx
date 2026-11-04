@@ -1,3 +1,4 @@
+import Hint from '../components/Hint'
 import OrderEdge from '../components/OrderEdge'
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -104,7 +105,7 @@ export default function PostPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{work.map(card)}</div>
         </>
       )}
-      <p style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 18 }}>Сканер-пистолет работает как клавиатура: откройте «Детали» заказа, поставьте курсор в поле кода и сканируйте бирки. Список обновляется сам каждые полминуты.</p>
+      <Hint>Сканер-пистолет работает как клавиатура: откройте «Детали» заказа, поставьте курсор в поле кода и сканируйте бирки. Список обновляется сам каждые полминуты.</Hint>
       {ret && <StageReturn orderId={ret.orderId} title={ret.title} onClose={ch => { setRet(null); if (ch) load() }} />}
       {parts && <StageParts stage={parts.stage} orderId={parts.orderId} onClose={ch => { setParts(null); if (ch) load() }} />}
     </div>

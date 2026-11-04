@@ -1,3 +1,4 @@
+import Hint from './Hint'
 import { useRef } from 'react'
 import { QR_TOKENS, QR_TOKEN_RE, qrTemplateOf } from '../lib/labelMaker'
 
@@ -82,10 +83,10 @@ export default function QrPartsEditor({ value, onChange, exclude = [], preview, 
           Перевести в латиницу
         </label>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+      <Hint>
         Части в фигурных скобках подставляются сами, всё остальное (прочерк, точка, свой текст) идёт в код как написано. Части можно повторять.
         Число символов: пусто — целиком, 8 — первые 8, −4 — последние 4; если символов меньше и задан знак дополнения — спереди дописывается он (заказ 12, 4 символа, знак 0 → 0012). Пустая часть убирается вместе с разделителем рядом. Пробелы в коде заменяются «_».
-      </div>
+      </Hint>
       {preview != null && (
         <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6, wordBreak: 'break-all' }}>
           Сейчас в коде: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{preview || '— пусто —'}</span>
