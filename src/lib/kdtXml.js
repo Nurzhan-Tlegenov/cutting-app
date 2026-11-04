@@ -15,11 +15,13 @@
  *     TypeNo 2 «Horizontal Hole» — в торец: Quadrant (какой торец), X1 Y1 — точка на торце, Z1 — от нижней пласти
  *     TypeNo 3 «Line» — паз: ToolName, BeginX/Y → EndX/Y (средняя линия), Correction 0, Width, Depth,
  *              Direction — куда идёт паз (как стрелки цифровой клавиатуры: 6 → +X, 4 → −X, 8 → +Y, 2 → −Y)
+ *     Паз в торце — TypeNo 3 с Quadrant и Z1 (середина паза от нижней пласти); выемка в торце — TypeNo 7 с Quadrant и Z1
+ *              у каждой точки (в образце их не было — так же, как отверстие в торец)
  *     TypeNo 7 «Path» — фрезеровка по траектории: ToolName, Width (Ø фрезы), Depth, Correction (1 — фреза слева от хода,
  *              2 — справа, 0 — по линии), <Vertexes> <Point> начало, <Line> X1 Y1, <Arc> X1 Y1 Radius Direction
  *              (1 — против часовой)
  * Пласть паза и траектории станок узнаёт по инструменту: у верхнего и нижнего шпинделя свои имена (T2 / SP4 …).
- * Что в образце не встречалось (номера торцов кроме Y = 0, дуга по часовой, пазы и выемки в торце) — по настройкам
+ * Что в образце не встречалось (номера торцов кроме Y = 0, дуга по часовой) — по настройкам
  * постпроцессора (post.kdt), их уточняет производство по своему станку.
  */
 
@@ -100,6 +102,8 @@ export function kdtPanel(g, post) {
   }
   L.push(`${tab(2)}</PanelOutline>`, `${tab(1)}</PANEL>`)
 
+  // торец: фреза из «Обработки» (имя как на станке); не назначена — верхняя самая широкая (станок поправит на стойке)
+  const edgeTool = t => (t && String(t.name || '').trim() ? { name: String(t.name).trim(), d: n0(t.d) || 0 } : kdtTool(k, false))
   const cad = (fields, inner = null) => {
     L.push(`${tab(1)}<CAD>`)
     for (const [t, v] of fields) tag(2, t, v)
@@ -109,21 +113,21 @@ export function kdtPanel(g, post) {
   const hole = (h, typeNo) => cad([['TypeNo', typeNo], ['TypeName', 'Vertical Hole'], ['X1', f2(h.X)], ['Y1', f2(h.Y)], ['Depth', f2(h.depth)], ['Diameter', f2(h.dia)], ['HoleNo', 1], ['IntervalX', '0.00'], ['IntervalY', '0.00']])
   // траектория: start + segs [{ to, angle }] — angle по Syntec (> 0 по часовой); радиус — из хорды и угла
   const path = (m, bottom) => {
-    if ((m.start?.length || 0) > 2) return false
-    const t = m.kdtTool || kdtTool(k, bottom, { want: n0(m.tool?.d) })
+    const z3 = (m.start?.length || 0) > 2            // на торце: точки X, Y на торце + Z1 от нижней пласти
+    const t = m.kdtTool || (z3 ? edgeTool(m.tool) : kdtTool(k, bottom, { want: n0(m.tool?.d) }))
     if (!t) { warnings.push('нет фрез для траектории (настройки KDT)'); return true }
     const corr = m.offset === '左' ? 1 : m.offset === '右' ? 2 : 0
-    const depth = Math.min(n0(m.depth), T)
-    cad([['TypeNo', 7], ['TypeName', 'Path'], ['ToolName', esc(t.name)], ['Width', f2(t.d)], ['Depth', f2(depth)], ['Correction', corr]], () => {
+    const depth = z3 ? n0(m.depth) : Math.min(n0(m.depth), T)       // на торце глубина — вглубь детали, не по толщине
+    cad([['TypeNo', 7], ['TypeName', 'Path'], ...(z3 ? [['Quadrant', n0(k.quad[m.face]) || m.face]] : []), ['ToolName', esc(t.name)], ['Width', f2(t.d)], ['Depth', f2(depth)], ['Correction', corr]], () => {
       L.push(`${tab(2)}<Vertexes>`)
-      L.push(`${tab(3)}<Point>`); tag(4, 'X1', f2(m.start[0])); tag(4, 'Y1', f2(m.start[1])); L.push(`${tab(3)}</Point>`)
+      L.push(`${tab(3)}<Point>`); tag(4, 'X1', f2(m.start[0])); tag(4, 'Y1', f2(m.start[1])); if (z3) tag(4, 'Z1', f2(m.start[2])); L.push(`${tab(3)}</Point>`)
       let cur = m.start
       for (const s of m.segs) {
         if (s.angle) {
           const ch = Math.hypot(s.to[0] - cur[0], s.to[1] - cur[1]), th = Math.abs(s.angle) * Math.PI / 180
           const R = ch / (2 * Math.sin(th / 2))
           L.push(`${tab(3)}<Arc>`); tag(4, 'X1', f2(s.to[0])); tag(4, 'Y1', f2(s.to[1])); tag(4, 'Radius', f2(R)); tag(4, 'Direction', s.angle < 0 ? 1 : n0(k.arcCw) || 2); L.push(`${tab(3)}</Arc>`)
-        } else { L.push(`${tab(3)}<Line>`); tag(4, 'X1', f2(s.to[0])); tag(4, 'Y1', f2(s.to[1])); L.push(`${tab(3)}</Line>`) }
+        } else { L.push(`${tab(3)}<Line>`); tag(4, 'X1', f2(s.to[0])); tag(4, 'Y1', f2(s.to[1])); if (z3) tag(4, 'Z1', f2(s.to[2])); L.push(`${tab(3)}</Line>`) }
         cur = s.to
       }
       L.push(`${tab(2)}</Vertexes>`)
@@ -138,7 +142,7 @@ export function kdtPanel(g, post) {
       if (sp) return path({ ...m, ...sp, offset: '中', kdtTool: t }, bottom)
       warnings.push('выемка не выпуклая или меньше фрезы — в программе только обход по контуру')
     }
-    if (!path(m, bottom)) warnings.push('фрезеровка в торце в формат KDT пока не выводится')
+    path(m, bottom)
   }
 
   const top = g.top.slice().sort((a, b) => b.Y - a.Y || a.X - b.X)
@@ -148,6 +152,20 @@ export function kdtPanel(g, post) {
   g.edge.slice().sort((a, b) => a.face - b.face || a.X - b.X || a.Y - b.Y).forEach(h => cad([
     ['TypeNo', 2], ['TypeName', 'Horizontal Hole'], ['Quadrant', n0(k.quad[h.face]) || h.face], ['X1', f2(h.X)], ['Y1', f2(h.Y)], ['Z1', f2(h.Z)],
     ['Depth', f2(h.depth)], ['Diameter', f2(h.dia)], ['HoleNo', 1], ['IntervalX', '0.00'], ['IntervalY', '0.00']]))
+  // паз в торце — как паз (Line) на торце: Quadrant, отрезок на торце, Z1 — середина паза от нижней пласти
+  for (const eg of g.edgeGrooves) {
+    const t = edgeTool(eg.tool)
+    let [ax, ay, bx, by] = eg.line
+    if (ax > bx + EPS || (Math.abs(ax - bx) <= EPS && ay > by)) [ax, ay, bx, by] = [bx, by, ax, ay]
+    cad([['TypeNo', 3], ['TypeName', 'Line'], ['Quadrant', n0(k.quad[eg.face]) || eg.face], ...(t ? [['ToolName', esc(t.name)]] : []),
+      ['BeginX', f2(ax)], ['BeginY', f2(ay)], ['EndX', f2(bx)], ['EndY', f2(by)], ['Z1', f2(eg.Z)],
+      ['Correction', 0], ['Width', f2(eg.width)], ['Depth', f2(eg.depth)], ['Direction', Math.abs(bx - ax) >= Math.abs(by - ay) ? 6 : 8]])
+  }
+  // выемка в торце — траектория на торце (Quadrant, точки с Z1)
+  for (const m of g.edgeMills) {
+    if (m.pocket) warnings.push('выемка в торце: фреза не назначена в «Обработке» — в программе только обход контура выемки')
+    path(m, false)
+  }
   for (const gr of g.grooves) {
     const bot = gr.face !== fr.top
     const t = kdtTool(k, bot, { maxD: gr.width })
@@ -165,7 +183,6 @@ export function kdtPanel(g, post) {
   }
   bottom.forEach(h => hole(h, 8))
   g.mills.filter(m => m.face !== fr.top).forEach(m => millOut(m, true))
-  if (g.edgeGrooves.length || g.edgeMills.length) warnings.push('пазы и выемки в торце в формат KDT пока не выводятся — нужен пример со станка')
   L.push('</KDTPanelFormat>', '')
   return { text: L.join('\r\n'), warnings }
 }
