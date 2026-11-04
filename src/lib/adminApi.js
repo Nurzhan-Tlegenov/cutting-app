@@ -156,3 +156,6 @@ export const adminUnblockPhone = phone => call('admin_unblock_phone', { p_phone:
 // Регистрация по email и Google (migration_email_login.sql). -> true / false; null — в базе ещё нет этой части
 export async function adminEmailSignup() { const r = await call('email_signup_open'); return r.error ? null : r.data !== false }
 export const adminSetEmailSignup = open => call('admin_set_email_signup', { p_open: !!open })
+
+// ── Кто чей сотрудник — для карточки пользователя (migration_admin_memberships.sql) ──
+export const adminMemberships = () => call('admin_memberships')

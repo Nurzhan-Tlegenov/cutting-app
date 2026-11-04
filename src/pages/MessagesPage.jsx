@@ -14,6 +14,8 @@ import { markNewsSeen, adminNewsViews } from '../lib/activity'
 import { lazyRetry } from '../lib/lazyRetry'
 const NestingFileViewer = lazyRetry(() => import('../components/NestingFileViewer'))
 import Conversation from '../components/Conversation'
+import { UserName, UserLine } from '../components/UserCard'
+import { useAdminDirectory } from '../lib/adminDirectory'
 import MsgFile from '../components/MsgFile'
 
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
@@ -26,6 +28,7 @@ const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 102
 export default function MessagesPage() {
   const navigate = useNavigate()
   const { user, profile, isMaster } = useAuth()
+  const dir = useAdminDirectory(isMaster)            // мастер: кто пишет — производство, город, постпроцессоры
   const [list, setList] = useState(null)
   const [error, setError] = useState('')
   const [filterSel, setFilter] = useState('')
@@ -193,6 +196,7 @@ export default function MessagesPage() {
                     <b style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>{d.name}</b>
                     <span style={{ fontSize: 11, color: 'var(--text-hint)', flexShrink: 0 }}>{when(d.last.created_at)}</span>
                   </span>
+                  <UserLine dir={dir} id={d.uid} />
                   <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {d.last.kind === 'reply' ? 'Вы: ' : ''}{d.last.file_name && !d.last.body ? '📎 ' + d.last.file_name : (d.last.body || d.last.title || (d.last.file_name ? '📎 ' + d.last.file_name : '')).replace(/\s+/g, ' ')}
                   </span>
@@ -221,7 +225,7 @@ export default function MessagesPage() {
                   <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{when(m.created_at)}</span>
                 </div>
                 {/* мастер-аккаунт видит, от кого пришло */}
-                {isMaster && !mine && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>От: <b style={{ color: 'var(--text)' }}>{m.from_name || 'пользователь'}</b></div>}
+                {isMaster && !mine && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>От: <b><UserName id={m.from_id} name={m.from_name || 'пользователь'} dir={dir} /></b><UserLine dir={dir} id={m.from_id} /></div>}
                 {isMaster && mine && m.kind === 'reply' && / → /.test(m.from_name || '') && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>Кому: <b style={{ color: 'var(--text)' }}>{(m.from_name || '').split(' → ').pop()}</b></div>}
                 {!isMaster && mine && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 3 }}>Вы писали</div>}
                 {m.title && <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}>{m.title}</div>}

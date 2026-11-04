@@ -6,6 +6,8 @@ import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import WriteToUser, { WriteToUserDialog } from '../components/WriteToUser'
+import { UserName, UserLine } from '../components/UserCard'
+import { useAdminDirectory, refreshAdminDirectory } from '../lib/adminDirectory'
 import { adminPostAccess, grantPost, revokePost, setRequestStatus, deleteRequest, requestProgram } from '../lib/postAccess'
 
 const dt = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—')
@@ -25,10 +27,11 @@ export default function PostAccessPage() {
   const [err, setErr] = useState('')
   const [tab, setTab] = useState('req')
   const [open, setOpen] = useState(null)              // раскрытый постпроцессор
+  const dir = useAdminDirectory(isMaster)            // кто есть кто: производство, город, постпроцессоры — под именем и в карточке
   const load = async () => { const r = await adminPostAccess(); if (r.error) { setErr(r.error); setD({ posts: [], requests: [], usage: [] }) } else { setErr(''); setD(r.data || { posts: [], requests: [], usage: [] }) } }
   useEffect(() => { Promise.resolve().then(load) }, [])
   if (!isMaster) return <div className="page"><p>Раздел доступен только мастер-аккаунту.</p><BottomNav /></div>
-  const act = async p => { const r = await p; if (r?.error) window.alert(r.error); await load() }
+  const act = async p => { const r = await p; if (r?.error) window.alert(r.error); await load(); refreshAdminDirectory() }
   const fresh = (d?.requests || []).filter(r => r.status === 'new').length
   const tabs = [['req', `Запросы${fresh ? ` · ${fresh}` : ''}`], ['posts', `Выдача · ${d?.posts?.length || 0}`], ['usage', 'Кто чем выпускает']]
 
@@ -46,7 +49,7 @@ export default function PostAccessPage() {
       {d && tab === 'req' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {!d.requests.length && <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: 20 }}>Запросов пока нет.</p>}
-          {d.requests.map(r => <Request key={r.id} r={r} posts={d.posts} act={act} />)}
+          {d.requests.map(r => <Request key={r.id} r={r} posts={d.posts} act={act} dir={dir} />)}
         </div>
       )}
 
@@ -66,7 +69,7 @@ export default function PostAccessPage() {
                 <span style={chip('var(--blue-dark)', 'var(--blue-light)')}>{KIND[p.kind] || p.kind}</span>
                 <span style={{ color: 'var(--text-hint)' }}>{open === p.id ? '▴' : '▾'}</span>
               </button>
-              {open === p.id && <Access p={p} act={act} />}
+              {open === p.id && <Access p={p} act={act} dir={dir} />}
             </div>
           ))}
         </div>
@@ -79,7 +82,7 @@ export default function PostAccessPage() {
           {d.usage.map(u => (
             <div key={u.user_id} style={{ padding: '8px 8px', borderTop: '0.5px solid var(--border)' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}>{u.name}{u.prod ? <span style={{ color: 'var(--text-hint)', fontWeight: 400 }}> · {u.prod}</span> : null}</span>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}><UserName id={u.user_id} name={u.name} dir={dir} />{u.prod ? <span style={{ color: 'var(--text-hint)', fontWeight: 400 }}> · {u.prod}</span> : null}<UserLine dir={dir} id={u.user_id} /></span>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{u.runs} раз · {ago(u.last)}</span>
                 <WriteToUser id={u.user_id} name={u.name} label="✉" />
               </div>
@@ -96,7 +99,7 @@ export default function PostAccessPage() {
 }
 
 /** Запрос производства: кто, что просит, пример программы; выдать / готово / отклонить */
-function Request({ r, posts, act }) {
+function Request({ r, posts, act, dir }) {
   const [pick, setPick] = useState(r.post_id || '')
   const [notify, setNotify] = useState(null)      // выдан постпроцессор — окно «написать пользователю» (название)
   const many = r.user_30d >= SUSPECT
@@ -119,7 +122,7 @@ function Request({ r, posts, act }) {
   return (
     <div className="card" style={{ padding: '10px 12px', border: r.status === 'new' ? '1px solid var(--blue)' : undefined, opacity: r.status === 'new' ? 1 : 0.7 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: 600 }}>{r.name}{r.prod ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {r.prod}</span> : null}</span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: 600 }}><UserName id={r.user_id} name={r.name} dir={dir} />{r.prod ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {r.prod}</span> : null}<UserLine dir={dir} id={r.user_id} style={{ fontSize: 12 }} /></span>
         {r.status !== 'new' && <span style={chip(r.status === 'done' ? 'var(--teal)' : 'var(--text-muted)', r.status === 'done' ? 'var(--teal-light)' : 'var(--bg2)')}>{r.status === 'done' ? 'выдан' : 'отклонён'}</span>}
         <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{dt(r.created_at)}</span>
       </div>
@@ -155,14 +158,14 @@ function Request({ r, posts, act }) {
 }
 
 /** Кому выдан постпроцессор: список с программами и последним выпуском, отозвать (выдают в «Пользователи и регистрация») */
-function Access({ p, act }) {
+function Access({ p, act, dir }) {
   return (
     <div style={{ marginTop: 8 }}>
       {!p.access.length && <div style={{ fontSize: 12.5, color: 'var(--text-hint)', padding: '4px 0' }}>Пока никому не выдан.</div>}
       {p.access.map(a => (
         <div key={a.user_id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '7px 0', borderTop: '0.5px solid var(--border)' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 500 }}>{a.name}{a.prod ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {a.prod}</span> : null}</div>
+            <div style={{ fontSize: 13.5, fontWeight: 500 }}><UserName id={a.user_id} name={a.name} dir={dir} />{a.prod ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {a.prod}</span> : null}<UserLine dir={dir} id={a.user_id} /></div>
             <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>
               выдан {dt(a.granted_at)}{a.note ? ` (${a.note})` : ''} · программ: <b style={{ color: a.runs ? 'var(--teal)' : 'var(--text-muted)' }}>{a.runs}</b> · {ago(a.last)}{a.phone ? ` · ${a.phone}` : ''}
             </div>

@@ -6,12 +6,15 @@ import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { listConversation, sendReplyFiles, REPORT_MAX_MB } from '../lib/messages'
 import MsgFile from './MsgFile'
+import { UserName, UserLine } from './UserCard'
+import { useAdminDirectory } from '../lib/adminDirectory'
 
 const when = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
 const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 1024 ? Math.round(n / 1024) + ' КБ' : (n || 0) + ' Б')
 
 export default function Conversation({ userId, name, onClose, onSent }) {
   const { user, profile, isMaster } = useAuth()
+  const dir = useAdminDirectory(isMaster)
   const navigate = useNavigate()
   // обращение из заказа — мастер открывает этот заказ пользователя сразу (раскрой или бланк)
   const go = path => { onClose?.(); navigate(path) }
@@ -86,7 +89,8 @@ export default function Conversation({ userId, name, onClose, onSent }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--bg)', borderBottom: '0.5px solid var(--border-md)' }}>
         <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--blue)', fontSize: 22, padding: 0, cursor: 'pointer' }}>←</button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name || 'Пользователь'}</div>
+          <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isMaster ? <UserName id={userId} name={name} dir={dir} canWrite={false} /> : (name || 'Пользователь')}</div>
+          {isMaster && <UserLine dir={dir} id={userId} />}
           <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Переписка: обращения и ответы{list ? ` · ${list.length}` : ''}</div>
         </div>
       </div>

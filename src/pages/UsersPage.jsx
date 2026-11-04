@@ -17,6 +17,7 @@ import { adminBeta, adminSetBeta, BETA_FEATURES } from '../lib/beta'
 import { adminPostAccess, adminUserPosts, grantPost, revokePost, setRequestStatus } from '../lib/postAccess'
 import { sendReply } from '../lib/messages'
 import WriteToUser, { WriteToUserDialog } from '../components/WriteToUser'
+import { useAdminDirectory } from '../lib/adminDirectory'
 import { COUNTRY_NAMES } from '../lib/phoneCountries'
 
 // Администратор: кто зарегистрирован, заявки на регистрацию и переключатель «регистрация открыта / по запросу».
@@ -53,6 +54,8 @@ export default function UsersPage() {
   const [busy, setBusy] = useState(false)
   const [phone, setPhone] = useState('')
   const [name, setName] = useState('')
+  const dir = useAdminDirectory(true)            // кто чей сотрудник (рабочие места) — в карточке
+  const openParam = useRef(new URLSearchParams(window.location.search).get('open') || '')
   const [find, setFind] = useState(() => new URLSearchParams(window.location.search).get('find') || '')   // из «Активности» — сразу нужный человек
   // карточки пользователей свёрнуты; нажатие раскрывает
   const [openU, setOpenU] = useState(() => new Set())
@@ -101,6 +104,18 @@ export default function UsersPage() {
     setResets(pr.error ? null : pr.data || [])
     if (u.error) { setError(u.error); setReady(false); setUsers([]); return }
     setError(''); setReady(true); setUsers(u.data || []); setReqs(r.data || []); setOpen(o)
+    // пришли из карточки пользователя (обращения, постпроцессоры): ?open=<id> — этот человек найден и раскрыт
+    const want = openParam.current
+    if (want) {
+      openParam.current = ''
+      const t = (u.data || []).find(x => x.id === want)
+      if (t) {
+        setKind('all'); setLand(''); setTown('')
+        setFind(String(t.phone || t.full_name || t.email || ''))
+        setOpenU(new Set([t.id]))
+        setTimeout(() => document.querySelector(`[data-focus="nu:${t.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300)
+      }
+    }
   }
   useEffect(() => { Promise.resolve().then(load) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
   useNoticeFocus()   // пришли по уведомлению — нужная заявка подсвечена
@@ -214,6 +229,7 @@ export default function UsersPage() {
                   <button type="button" onClick={() => flip(u.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, width: '100%', background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', color: 'var(--text)' }}>
                     <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.full_name || 'Без имени'}{u.id === user?.id ? ' (вы)' : ''}</span>
                     {isProd(u) && <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', flexShrink: 0 }}>произв.</span>}
+                    {!isProd(u) && dir?.members.get(u.id)?.some(m => m.active !== false) && <span title={'Сотрудник: ' + dir.members.get(u.id).map(m => m.production_name).join(', ')} style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--bg2)', color: 'var(--text-muted)', flexShrink: 0 }}>сотр.</span>}
                     {betaOf(u).length > 0 && <span title="Бета-тестер" style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--blue-light, var(--bg2))', color: 'var(--blue)', flexShrink: 0 }}>β</span>}
                     {posts?.has.get(u.id)?.size > 0 && <span title={'Выданы постпроцессоры: ' + posts.list.filter(p => posts.has.get(u.id).has(p.id)).map(p => p.name).join(', ')} style={{ fontSize: 10.5, padding: '1px 5px', borderRadius: 9, background: 'var(--teal-light)', color: 'var(--teal)', flexShrink: 0 }}>🔑{posts.has.get(u.id).size > 1 ? ' ' + posts.has.get(u.id).size : ''}</span>}
                     {posts?.own?.get(u.id) && (() => {
@@ -293,6 +309,11 @@ export default function UsersPage() {
                       Производство «{u.production_name}»{[u.production_country, u.production_city].filter(Boolean).length ? `, ${[u.production_country, u.production_city].filter(Boolean).join(', ')}` : ''}: заявок получено <b>{u.received}</b> · принято <b>{u.accepted}</b> · исполнено <b>{u.done}</b>
                     </div>
                   )}
+                  {(dir?.members.get(u.id) || []).map((m, i) => (
+                    <div key={'m' + i} style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', background: 'var(--bg2)', borderRadius: 'var(--radius)', color: 'var(--text-muted)' }}>
+                      👷 Сотрудник производства «{m.production_name}»{[m.production_country, m.production_city].filter(Boolean).length ? `, ${[m.production_country, m.production_city].filter(Boolean).join(', ')}` : ''}{m.owner_name ? ` · владелец: ${m.owner_name}` : ''}{m.name ? ` · ${m.name}` : ''}{m.active === false ? ' · отключён' : ''}
+                    </div>
+                  ))}
                   {beta instanceof Map && u.role !== 'admin' && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Бета-тест:</span>
