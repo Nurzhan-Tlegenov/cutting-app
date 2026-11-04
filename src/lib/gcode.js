@@ -63,10 +63,27 @@ function outwardAt(q, outline) {
 }
 const isAxisRect = (pts, bb) => pts.length === 4 && pts.every(([x, y]) => (Math.abs(x - bb.x0) < EPS || Math.abs(x - bb.x1) < EPS) && (Math.abs(y - bb.y0) < EPS || Math.abs(y - bb.y1) < EPS))
 
-/** Что постпроцессор не выводит в программу (вкладка «Обработка», ops.skip):
- *  contour — вырезы внутренние и наружные: деталь режется прямоугольником своего габарита;
- *  face — пазы и выемки с лицевой стороны; holes — все отверстия (присадка). */
-export const skipOf = ops => ({ contour: !!ops?.skip?.contour, face: !!ops?.skip?.face, holes: !!ops?.skip?.holes })
+/** Что постпроцессор не выводит в программу (вкладка «Обработка», ops.skip). Всё false — выводится всё (по умолчанию).
+ *  contour — фигурный внешний контур: деталь режется прямоугольником своего габарита;
+ *  cutouts — внутренние вырезы; grooves — пазы с лица; pockets — выемки с лица;
+ *  through — сквозные отверстия в пласть; blind — глухие отверстия в пласть.
+ *  Старые сохранённые настройки (до 04.11.2026): contour — и наружные, и внутренние вырезы; face — пазы и выемки;
+ *  holes — все отверстия. Новый ключ, если его нет, берётся из старого — выход программы у них не меняется. */
+/** Подписи отключённого — для предупреждений и строки у кнопки выпуска */
+export const skipLabels = sk => [sk.contour && 'фигурные контуры (детали — прямоугольником по габариту)', sk.cutouts && 'внутренние вырезы', sk.through && 'сквозные отверстия', sk.blind && 'глухие отверстия', sk.grooves && 'пазы', sk.pockets && 'выемки'].filter(Boolean)
+export const SKIP_KEYS = ['contour', 'cutouts', 'through', 'blind', 'grooves', 'pockets']
+export const skipOf = ops => {
+  const s = ops?.skip || {}
+  const has = k => s[k] !== undefined && s[k] !== null
+  return {
+    contour: !!s.contour,
+    cutouts: has('cutouts') ? !!s.cutouts : !!s.contour,
+    grooves: has('grooves') ? !!s.grooves : !!s.face,
+    pockets: has('pockets') ? !!s.pockets : !!s.face,
+    through: has('through') ? !!s.through : !!s.holes,
+    blind: has('blind') ? !!s.blind : !!s.holes,
+  }
+}
 
 /** Всё, что надо обработать на уложенной детали p — в её локальных координатах на листе (как p.polygon), мм, Y вверх.
  *  skip — см. skipOf; без него — вся обработка детали (так считает статистика и цена). */
@@ -91,7 +108,7 @@ export function partFeatures(p, detail, T, skip = null) {
     if (!poly) return
     const pts = poly.map(q => at(q.x, q.y)), bb = bboxOf(pts)
     if (hole.type === 'pocket') {
-      if (sk.face) return
+      if (sk.pockets) return
       if (hole.face === 'back') { f.skipped.back++; return }
       // выемка любой формы (круглая, с дугами, фигурная) — выбирается кольцами от центра к контуру (polyPocket).
       // Вершины на контуре детали — выемка открыта наружу: там фреза выходит на сам край (out — наружная нормаль)
@@ -99,16 +116,16 @@ export function partFeatures(p, detail, T, skip = null) {
       f.pockets.push({ ...bb, open: open(bb), depth: Number(hole.depth) || 10 })
       return
     }
-    if (sk.contour) return
+    if (sk.cutouts) return
     // вырез, выходящий на край детали, уже вошёл в её контур — отдельно не режем
     if (!pts.every(q => pointInPoly(q, outline) && distToLoop(q, outline) > 0.3)) return
     if (hole.type === 'circle') f.cutouts.push({ circle: { cx: (bb.x0 + bb.x1) / 2, cy: (bb.y0 + bb.y1) / 2, r: (bb.x1 - bb.x0) / 2 } })
     else f.cutouts.push({ pts })
   })
-  if (!sk.face) (contour.grooves || []).forEach(g => { if (g.face === 'back') f.skipped.back++ })
+  if (!sk.grooves) (contour.grooves || []).forEach(g => { if (g.face === 'back') f.skipped.back++ })
   // Паз по траектории с плоским дном (Базис: незамкнутая цепочка отрезков и дуг, ширина lo…hi от траектории) —
   // выбирается как выемка по форме полосы. Конец траектории на краю детали — паз выходит наружу.
-  if (!sk.face) (contour.decor || []).forEach(dc => {
+  if (!sk.grooves) (contour.decor || []).forEach(dc => {
     if (!(dc.flat && !dc.closed && Array.isArray(dc.path) && dc.path.length > 1 && Number(dc.depth) > 0)) return
     if (dc.face === 'back') { f.skipped.back++; return }
     const path = dc.path.map(([x, y]) => at(x, y)), lo = Number(dc.flat.lo) || 0, hi = Number(dc.flat.hi) || 0
@@ -120,15 +137,16 @@ export function partFeatures(p, detail, T, skip = null) {
     for (let i = 1; i < path.length; i++) len += Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1])
     f.grooves.push({ ...bb, open: open(bb), depth: Math.min(Number(dc.depth), T), width: Math.abs(hi - lo), pts: band, path, lo: Math.min(lo, hi), hi: Math.max(lo, hi), ends, len })
   })
-  if (!sk.face) getGrooveRects(contour, W, H, true).forEach(r => {
+  if (!sk.grooves) getGrooveRects(contour, W, H, true).forEach(r => {
     const bb = bboxOf(r.pts.map(([x, y]) => at(x, y)))
     f.grooves.push({ ...bb, open: open(bb), depth: r.depth || 0, width: r.width || Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) })
   })
-  if (sk.holes) return f
+  if (sk.through && sk.blind) return f
   ;(contour.drillings || []).forEach(dr => { if (dr.installed !== false && dr.kind !== 'edge' && dr.face === 'back') f.skipped.back++ })
   getAllDrillPoints(contour, W, H, true).forEach(pt => {
     if (pt.edge) { f.skipped.edge++; return }
     const q = at(pt.x, pt.y), d = pt.d || 8, depth = pt.depth > 0 ? pt.depth : T
+    if (depth >= T - EPS ? sk.through : sk.blind) return           // сквозные / глухие отключены в «Обработке»
     f.holes.push({ x: q[0], y: q[1], d, depth, key: holeKey(d, depth, T) })
   })
   return f
@@ -1200,7 +1218,8 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     }
     if (bad) warn.add(`Резать только прямоугольники: габариты фигурных деталей перекрываются или стоят ближе диаметра фрезы (${bad} пар) — раскрой сделан по контуру. Прямоугольный рез заденет соседние детали.`)
   }
-  if (skip.contour || skip.face || skip.holes) warn.add('Отключено в настройках «Обработка»: ' + [skip.contour && 'вырезы (детали — прямоугольником по габариту)', skip.face && 'пазы и выемки с лица', skip.holes && 'отверстия'].filter(Boolean).join(', ') + '.')
+  const offList = skipLabels(skip)
+  if (offList.length) warn.add('Не выводится в программу (настройки «Обработка»): ' + offList.join(', ') + '.')
   Object.entries(miss).forEach(([what, cnt]) => warn.add(`Не назначен инструмент: ${what} (${cnt} шт.) — в программу не попали.`))
   if (edge) warn.add(`Отверстия в торец (${edge} шт.) на этом станке не сверлятся — в программу не попали.`)
   if (back) warn.add(`Обработка с изнанки (${back} шт.) в программу не попала — деталь нужно перевернуть.`)

@@ -25,7 +25,7 @@ import Drill6Orient from '../components/Drill6Orient'
 import { cornerShift } from '../lib/sheetCorner'
 import { backOf, backParts, backJob } from '../lib/backSide'
 import { metaPos, detailMeta } from '../lib/partLabel'
-import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf } from '../lib/gcode'
+import { buildSheetGcode, collectLayers, partFeatures, holeToolFor, pocketKey, grooveOpFor, skipOf, skipLabels } from '../lib/gcode'
 import { setLabelBack, setLabelClient, getLabelTpl, buildLabelFiles, buildLabelsPdf, labelInfo, labelQr, buildBeamEmfLabels } from '../lib/labelMaker'
 import CncLoader from '../components/CncLoader'
 import { orderTitle, toLatin, programName, folderName } from '../lib/orderUtils'
@@ -143,12 +143,14 @@ export default function CncPage() {
     if (!layers) return []
     const w = [], has = t => (rview.tools || []).some(x => x.id === t), sk = skipOf(rview.ops)
     if (!has(rview.ops.outer.tool)) w.push('контур детали')
-    if (layers.cutouts && !sk.contour && !has(rview.ops.cutout.tool)) w.push(`контур выреза (${layers.cutouts} шт.)`)
-    if (!sk.face) layers.grooveLayers.forEach(l => { if (!has(grooveOpFor(rview.ops, l.key).tool)) w.push(`пазы ${l.width} × ${l.depth} (${l.count} шт.)`) })
-    if (!sk.face) layers.pockets.forEach(l => { if (!has(rview.ops.pockets?.[pocketKey(l.depth)]?.tool)) w.push(`выемки глубиной ${l.depth} (${l.count} шт.)`) })
-    if (!sk.holes) layers.holes.forEach(l => { if (!holeToolFor(l, rview)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
+    if (layers.cutouts && !sk.cutouts && !has(rview.ops.cutout.tool)) w.push(`контур выреза (${layers.cutouts} шт.)`)
+    if (!sk.grooves) layers.grooveLayers.forEach(l => { if (!has(grooveOpFor(rview.ops, l.key).tool)) w.push(`пазы ${l.width} × ${l.depth} (${l.count} шт.)`) })
+    if (!sk.pockets) layers.pockets.forEach(l => { if (!has(rview.ops.pockets?.[pocketKey(l.depth)]?.tool)) w.push(`выемки глубиной ${l.depth} (${l.count} шт.)`) })
+    layers.holes.forEach(l => { if (l.through ? sk.through : sk.blind) return; if (!holeToolFor(l, rview)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
     return w
   }, [layers, rview])
+  // что отключено в «Обработке» (Выводить в УП) — одной строкой у выпуска программ, чтобы оператор не удивлялся
+  const offOps = useMemo(() => skipLabels(skipOf(rview?.ops)), [rview])
 
   // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
   // галочка «Папки, архив и PDF латиницей» станка, которым выпускается программа (пила или фрезер): выключена — архив,
@@ -490,6 +492,9 @@ export default function CncPage() {
             </div>
           </div>
           <SimLinksBox orderId={id} refresh={linksTick} style={{ marginBottom: 10, padding: '10px 12px' }} />
+          {offOps.length > 0 && !beamMat && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>В УП не выводятся: {offOps.join(', ')} <button type="button" style={{ ...small, padding: '1px 8px', marginLeft: 4 }} onClick={() => setTab('ops')}>Обработка</button></div>
+          )}
           {pre.length > 0 && !beamMat && (
             <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)', background: 'var(--amber-light)', padding: '10px 12px' }}>
               <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--amber)', marginBottom: 4 }}>⚠ Не назначен инструмент</div>
