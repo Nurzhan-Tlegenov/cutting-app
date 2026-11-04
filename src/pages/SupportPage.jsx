@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import SupportNotes from '../components/SupportNotes'
 import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { UserName } from '../components/UserCard'
-import { useIsSupport, useSupportStaff, setSupport, supportTeam, supportBoard, supportTake, supportArchiveLegacy,
+import { useIsSupport, useSupportStaff, setSupport, supportTeam, supportBoard, supportTake, supportArchiveLegacy, supportNotes, chatSeenAt, markChatSeen,
   SUPPORT_COLS, SUPPORT_CLOSED, supAgo } from '../lib/support'
 
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '')
@@ -28,7 +29,9 @@ export default function SupportPage() {
   const [col, setCol] = useState(() => { try { return sessionStorage.getItem('supCol') || 'new' } catch { return 'new' } })
   const [archive, setArchive] = useState(false)
   const [q, setQ] = useState('')
-  const [team, setTeam] = useState(false)
+  const loc = useLocation()
+  const [team, setTeam] = useState(() => (new URLSearchParams(loc.search).get('chat') ? 'chat' : ''))   // '' — доска, 'chat' — чат команды, 'team' — команда
+  const [chatNew, setChatNew] = useState(0)
   const [busy, setBusy] = useState('')
 
   const load = useCallback(async () => {
@@ -42,10 +45,23 @@ export default function SupportPage() {
     const iv = setInterval(load, 30000)          // доска обновляется сама раз в 30 с
     return () => { clearTimeout(t); clearInterval(iv) }
   }, [ok, load, archive])
+  // новые сообщения в чате команды (с прошлого открытия чата)
+  useEffect(() => {
+    if (!ok) return
+    if (team === 'chat') return () => markChatSeen()   // ушли из чата — всё, что пришло, пока он был открыт, прочитано
+    let alive = true
+    const check = () => supportNotes(null).then(r => { if (alive && r.data) { const seen = chatSeenAt(); setChatNew(r.data.filter(n => n.author !== user?.id && (!seen || n.created_at > seen)).length) } })
+    const t = setTimeout(check, 0), iv = setInterval(check, 30000)
+    return () => { alive = false; clearTimeout(t); clearInterval(iv) }
+  }, [ok, team, user?.id])
+  const openView = v => { if (v === 'chat') { markChatSeen(); setChatNew(0) } setTeam(t => (t === v ? '' : v)) }
   const pickCol = c => { setCol(c); try { sessionStorage.setItem('supCol', c) } catch { /* без памяти */ } }
 
   const head = <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10, paddingTop: 4 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Поддержка</h1>
-    {ok && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }} onClick={() => setTeam(v => !v)}>{team ? 'К доске' : '👥 Команда'}</button>}</div>
+    {ok && team && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }} onClick={() => setTeam('')}>К доске</button>}
+    {ok && team !== 'chat' && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12, marginLeft: 4, position: 'relative' }} onClick={() => openView('chat')}>💬 Чат
+      {chatNew > 0 && <span style={{ position: 'absolute', top: -6, right: -6, minWidth: 18, height: 18, borderRadius: 9, background: 'var(--danger)', color: '#fff', fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>{chatNew}</span>}</button>}
+    {ok && team !== 'team' && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12, marginLeft: 4 }} onClick={() => openView('team')}>👥 Команда</button>}</div>
   if (ok === undefined) return <div className="page"><CncLoader label="Открываем…" /></div>
   if (!ok) return (
     <div className="page" style={{ paddingBottom: 100 }}>{head}
@@ -54,7 +70,17 @@ export default function SupportPage() {
       <BottomNav />
     </div>
   )
-  if (team) return <div className="page" style={{ paddingBottom: 100 }}>{head}<TeamBlock isMaster={isMaster} me={user?.id} /><BottomNav /></div>
+  if (team === 'team') return <div className="page" style={{ paddingBottom: 100 }}>{head}<TeamBlock isMaster={isMaster} me={user?.id} /><BottomNav /></div>
+  if (team === 'chat') return (
+    <div className="page" style={{ paddingBottom: 100 }}>{head}
+      <div className="card">
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>Чат команды поддержки</div>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Мастер-аккаунт и сотрудники поддержки. Пользователи его не видят.</p>
+        <SupportNotes me={user?.id} isMaster={isMaster} tall onSent={markChatSeen} />
+      </div>
+      <BottomNav />
+    </div>
+  )
 
   const take = async (e, c) => {
     e.stopPropagation(); setBusy(c.id)

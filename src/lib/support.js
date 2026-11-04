@@ -118,3 +118,14 @@ export function supAgo(v) {
   if (s < 172800) return 'вчера'
   return new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
+
+// ═══════════ Заметки поддержки и чат команды (migration_support_notes.sql) ═══════════
+export const NOTES_SQL_HINT = 'Заметки и чат поддержки ещё не включены в базе: выполните migration_support_notes.sql в Supabase (SQL Editor) — один раз.'
+const callN = async (fn, args) => { const r = await call(fn, args); return r.missing ? { error: NOTES_SQL_HINT, missing: true } : r }
+/** Заметки карточки (cardId) или общий чат команды (cardId пусто) */
+export const supportNotes = (cardId = null) => callN('support_notes_list', { p_card: cardId })
+export const supportNoteAdd = (cardId, body) => callN('support_note_add', { p_card: cardId, p_body: body })
+export const supportNoteDelete = id => callN('support_note_delete', { p_id: id })
+const SEEN = 'supChatSeen'
+export const chatSeenAt = () => { try { return localStorage.getItem(SEEN) || '' } catch { return '' } }
+export const markChatSeen = () => { try { localStorage.setItem(SEEN, new Date().toISOString()) } catch { /* без памяти */ } }

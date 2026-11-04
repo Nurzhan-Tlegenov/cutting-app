@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import CncLoader from '../components/CncLoader'
+import SupportNotes from '../components/SupportNotes'
 import { isImageFile, payloadBlob } from '../lib/messages'
 import { useIsSupport, supportCard, supportFile, supportTake, supportAssign, supportMove, supportReply, supportSummary,
   supportDevDecide, supportClose, supportReopen, supportMerge, supportTeam, SUPPORT_COLS, SUPPORT_CLOSED, DETAIL_TEMPLATES, DONE_TEXT, supAgo } from '../lib/support'
@@ -11,7 +12,7 @@ const COL = Object.fromEntries(SUPPORT_COLS.map(([k, t, c]) => [k, [t, c]]))
 const stLabel = s => (COL[s] || SUPPORT_CLOSED[s] || [s])[0]
 const stColor = s => (COL[s] || SUPPORT_CLOSED[s] || ['', 'var(--gray)'])[1]
 const ACT = { created: 'обращение пришло', message: 'автор написал', take: 'взял', move: 'перенёс', assign: 'передал', reply: 'ответил',
-  summary: '«Кратко»', dev_take: 'берём в разработку', dev_reject: 'не берём (разработка)', close: 'закрыл', reopen: 'вернул из архива', merge: 'объединил' }
+  summary: '«Кратко»', note: 'заметка', dev_take: 'берём в разработку', dev_reject: 'не берём (разработка)', close: 'закрыл', reopen: 'вернул из архива', merge: 'объединил' }
 const kb = n => (n > 1048576 ? `${(n * 0.75 / 1048576).toFixed(1)} МБ` : `${Math.max(1, Math.round(n * 0.75 / 1024))} КБ`)
 
 // Карточка обращения: автор (кратко, без телефона), переписка с файлами, ответ, действия по колонкам, «Кратко», история.
@@ -133,6 +134,12 @@ export default function SupportCardPage() {
         ))}
         {!d.messages.length && <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Сообщений нет.</p>}
         <div ref={endRef} />
+      </div>
+
+      {/* внутренние заметки — пользователь их не видит */}
+      <div className="card" style={{ marginTop: 14, padding: '9px 10px', background: 'var(--amber-light)', border: 'none' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>🔒 Заметки поддержки <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--text-muted)' }}>— пользователь их не видит</span></div>
+        <SupportNotes cardId={c.id} me={user?.id} isMaster={isMaster} />
       </div>
 
       {/* другие карточки автора */}
