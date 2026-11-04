@@ -526,8 +526,15 @@ function basisSrc(panel) {
     name: cleanName(val(butt, 'Mat')) || cleanName(val(butt, 'Sign')) || 'default',
     // Clip — «подрезка» в свойствах кромки Базиса: контур панели уже с кромкой, в раскрой она меньше на толщину кромки.
     // Задаётся на каждой стороне каждой детали (у фасадов есть, у корпуса той же кромкой — нет), поэтому идёт в деталь по сторонам.
-    info: { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width'), trim: val(butt, 'Clip') === true },
-  }))
+    info: { mat: String(val(butt, 'Mat', '')).replace(/[\r\n]+/g, ' / '), sign: val(butt, 'Sign', ''), thick: val(butt, 'Thick'), width: val(butt, 'Width'), trim: val(butt, 'Clip') === true,
+      // «Припуск» облицовки торца (Allowance): деталь в раскрой больше на столько с этой стороны (см. edgeCut.js, ALLOW_KEY)
+      ...(Number(val(butt, 'Allowance', 0)) > 0 ? { allow: Number(val(butt, 'Allowance', 0)) } : {}) },
+  })).map(b => {
+    // «облицовка» без толщины, только с припуском (конструктор так задаёт припуск на сторону: «припуск 80») —
+    // это не кромка: в метраж кромки и на бирку кромкой не идёт, остаётся только припуск
+    const t = Number(b.info.thick) || 0
+    return b.info.allow > 0 && !(t > 0) ? { ...b, allowOnly: true } : b
+  })
   const matFull = String(val(o, 'Mat', '')).split(/[\r\n]+/).map(x => x.trim()).filter(Boolean)
   const texDir = val(o, 'TexDir', 0)
   // свои свойства панели + унаследованные от блоков/изделия/модели; при одинаковом названии берётся ближайшее
@@ -630,12 +637,16 @@ function userProps(o) {
 // поверх основы (со стороны Z = толщина), следующий слой — поверх предыдущего. Кромка, пазы и выемки
 // остаются на основе; присадка считается для каждого слоя своя — по крепежу, который в него входит.
 const GLUE_MIN_THICK = 3
+const GLUE_LETTERS = 'абвгдежзик'
 function glueLayers(o, src) {
   const layers = (kid(o, 'Plastics')?.c || []).filter(pl => pl && val(pl, 'Thick', 0) >= GLUE_MIN_THICK)
   if (!layers.length) return [src]
   const of = layers.length + 1, id = val(o, 'ID')
   src.meta.glue = { n: 1, of, id }
+  const base = src.meta.pos || src.meta.des || ''
+  const group = base ? [base, ...layers.map((_, i) => base + GLUE_LETTERS[i])] : []
   src.meta.note = `Склейка 1/${of}`
+  if (group.length) src.meta.glue.with = group
   const out = [src]
   let z = src.T
   layers.forEach((pl, i) => {
@@ -644,10 +655,15 @@ function glueLayers(o, src) {
     out.push({
       ...src, T, texDir, rotatable: texDir === 0,
       M: mul(src.M, [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, z]),
-      butts: [], cutsRaw: [], decorRaw: [], pocketsRaw: [], edgeCutsRaw: [], warnCuts: 0, frontFace: null,
+      // кромки у слоя нет; припуск со сторон основы — и у слоя (склеенную деталь потом обрезают вместе)
+      butts: (src.butts || []).filter(b => b.info?.allow > 0).map(b => ({ ...b, allowOnly: true })),
+      cutsRaw: [], decorRaw: [], pocketsRaw: [], edgeCutsRaw: [], warnCuts: 0, frontFace: null,
       material: cleanName(val(pl, 'Mat')) || src.material,
       meta: {
-        ...src.meta, ids: [`${id}/${i + 2}`], glue: { n: i + 2, of, id }, note: `Склейка ${i + 2}/${of}`,
+        ...src.meta, ids: [`${id}/${i + 2}`], glue: { n: i + 2, of, id, ...(group.length ? { with: group } : {}) }, note: `Склейка ${i + 2}/${of}`,
+        // слой склейки — та же позиция с буквой (01-02 → 01-02а, 01-02б), как в отчётах Базиса: детали различимы
+        // на бирке, в QR и в именах программ, а по позиции видно, что они склеиваются
+        ...(src.meta.pos ? { pos: src.meta.pos + GLUE_LETTERS[i] } : {}), ...(src.meta.des ? { des: src.meta.des + GLUE_LETTERS[i] } : {}),
         material: matFull[0] || src.meta.material, materialCode: matFull.slice(1).join(' / '),
       },
     })
@@ -864,7 +880,8 @@ export function buildItem(src, holes, faceRule) {
     }
     return -1
   }
-  for (const { e, name, info } of (src.butts || [])) {
+  const allow = {}                                       // припуск из модели по сторонам детали
+  for (const { e, name, info, allowOnly } of (src.butts || [])) {
     if (!e) { warn.edges++; continue }
     if (e.t === 'C') {                                   // кромка по круглому вырезу
       const k = cutoutSrc.findIndex(lp => lp.circle && near(lp.circle.c, e.c))
@@ -879,6 +896,9 @@ export function buildItem(src, holes, faceRule) {
       else if (Math.abs(a[1]) <= EPS && Math.abs(b[1]) <= EPS) side = 'bottom'
       else if (Math.abs(a[1] - L) <= EPS && Math.abs(b[1] - L) <= EPS) side = 'top'
     }
+    if (side && info?.allow > 0) allow[side] = info.allow
+    if (side && allowOnly) continue                       // только припуск — кромки на этой стороне нет
+    if (allowOnly) continue                               // припуск на фигурном участке — пока не учитывается
     if (side) { edges[side] = name; edgeInfo[side] = info; continue }
     // фигурный участок: дуга, скос, ступенька — кромка на участке контура
     const vi = outer.circle ? -1 : findSeg(vertices, a, b)
@@ -1042,6 +1062,7 @@ export function buildItem(src, holes, faceRule) {
   if (edgeGrooves.length) contour.edgeGrooves = edgeGrooves
   if (decor.length) contour.decor = decor
   if (Object.keys(edgeTrim).length) contour.edgeTrim = edgeTrim
+  if (Object.keys(allow).length) contour.allow = allow
 
   const material = src.material
   return {

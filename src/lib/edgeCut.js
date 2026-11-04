@@ -40,26 +40,68 @@ export function edgeTrimOf(contour) {
   return t && typeof t === 'object' ? t : null
 }
 
+// ─── Припуск из модели (Базис: «Припуск» в свойствах облицовки торца — Allowance) ─────────────────────────────
+// Хранится у детали по сторонам: contour.allow = { left: 80, … } (стороны — как у детали в заказе). Деталь в раскрой
+// больше на припуск с этой стороны. Что делать с припуском — решает производство (Настройки → Лист и рез → «Припуск
+// из модели»), его выбор пишется в виды кромки заказа под служебным ключом ALLOW_KEY: { mode, mm }:
+//   'model' — как в модели (по умолчанию); 'off' — не учитывать; 'own' — свой припуск mm там, где в модели он есть.
+// На стороне с кромкой, где задана прифуговка (производства или вида кромки), решает прифуговка — припуск модели не
+// добавляется второй раз (в Базисе припуск у кромки — это и есть прифуговка конструктора).
+export const ALLOW_KEY = '__allow'
+export const ALLOW_MODES = [['model', 'Как в модели'], ['off', 'Не учитывать'], ['own', 'Свой припуск']]
+export function allowOf(types) {
+  const a = parseEdgeTypes(types)[ALLOW_KEY]
+  const mode = ['model', 'off', 'own'].includes(a?.mode) ? a.mode : 'model'
+  return { mode, mm: Math.max(0, num(String(a?.mm ?? '').replace(',', '.'))) }
+}
+/** Припуск из модели по сторонам детали (contour.allow) -> { left, right, bottom, top } | null */
+export function modelAllow(contour) {
+  let c = contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { return null } }
+  const a = c?.allow
+  if (!a || typeof a !== 'object') return null
+  const out = {}
+  for (const s of SIDES) if (num(a[s]) > 0) out[s] = num(a[s])
+  return Object.keys(out).length ? out : null
+}
+/** Сколько припуска реально добавляется с каждой стороны (с учётом выбора производства и прифуговки) -> { left, … } */
+export function allowApplied(edges, types, contour) {
+  const a = modelAllow(contour)
+  if (!a) return null
+  const set = allowOf(types)
+  if (set.mode === 'off') return null
+  const out = {}
+  for (const s of Object.keys(a)) {
+    const k = edgeKey(edges?.[s])
+    if (k && num(types?.[k]?.joint) > 0) continue            // прифуговка у кромки — главнее припуска модели
+    const v = set.mode === 'own' ? set.mm : a[s]
+    if (v > 0) out[s] = v
+  }
+  return Object.keys(out).length ? out : null
+}
+
 /**
  * edges — { left, right, top, bottom }: название кромки | 'default' | null. -> { l, r, b, t } или null, если размер не меняется.
  * trim — подрезка по сторонам из модели (edgeTrimOf): где она задана, решает она, а не галочка вида кромки —
  * в Базисе одна и та же кромка у фасада с подрезкой, а у корпуса без. Толщина и прифуговка — из вида кромки.
  */
-export function sideDeltas(edges, types, trim) {
+export function sideDeltas(edges, types, trim, contour = null) {
   if (!edges || !types) return null
   const d = {}
   let any = false
+  const al = contour ? allowApplied(edges, types, contour) : null      // припуск из модели — деталь больше с этой стороны
   for (const s of SIDES) {
     const k = edgeKey(edges[s])
     const type = k ? types[k] : null
     d[s[0]] = !k ? 0 : typeof trim?.[s] === 'boolean' ? edgeDelta(type && { ...type, trim: trim[s] }) : edgeDelta(type)
+    if (al?.[s]) d[s[0]] = r2(d[s[0]] - al[s])
     if (d[s[0]]) any = true
   }
   return any ? d : null
 }
 
 /** Деталь из модели с подрезкой хотя бы одной стороны — в списке задания у неё показывается размер в раскрой */
-export const modelTrimmed = contour => Object.values(edgeTrimOf(contour) || {}).some(v => v === true)
+export const modelTrimmed = contour => Object.values(edgeTrimOf(contour) || {}).some(v => v === true) || !!modelAllow(contour)
 
 /**
  * Что показывать в полях длины/ширины списка задания. У детали с подрезкой из модели — размер в раскрой
@@ -78,7 +120,7 @@ export function listSize(detail, types) {
 
 /** Размер в раскрой: [длина, ширина] (кромка слева/справа идёт вдоль длины и уменьшает ширину); contour — для подрезки из модели */
 export function cutSize(length, width, edges, types, contour) {
-  const k = sideDeltas(edges, types, edgeTrimOf(contour))
+  const k = sideDeltas(edges, types, edgeTrimOf(contour), contour)
   if (!k) return null
   return [r2(num(length) - k.b - k.t), r2(num(width) - k.l - k.r)]
 }
@@ -142,7 +184,7 @@ export function cutDetail(row, types) {
   if (!row || !types) return row
   let c = row.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
-  const k = sideDeltas({ left: row.edge_left, right: row.edge_right, top: row.edge_top, bottom: row.edge_bottom }, types, edgeTrimOf(c))
+  const k = sideDeltas({ left: row.edge_left, right: row.edge_right, top: row.edge_top, bottom: row.edge_bottom }, types, edgeTrimOf(c), c)
   if (!k) return row
   const W = num(row.width), L = num(row.length)
   if (!(W - k.l - k.r > 1) || !(L - k.b - k.t > 1)) return row
@@ -215,6 +257,7 @@ export function typesToSave(types, names) {
   const ov = overOf(types)
   if (!ov.on || ov.mm !== OVER_DEFAULT) out[OVER_KEY] = ov          // обычные свесы (включены, 30 мм) не записываем
   if (types?.[NAMES_KEY] && Object.keys(types[NAMES_KEY]).length) out[NAMES_KEY] = types[NAMES_KEY]   // обозначения кромки от производства
+  if (types?.[ALLOW_KEY]) out[ALLOW_KEY] = allowOf(types)                // выбор производства о припуске из модели
   for (const n of ['default', ...(names || [])]) {
     const v = types?.[n]
     if (!v) continue

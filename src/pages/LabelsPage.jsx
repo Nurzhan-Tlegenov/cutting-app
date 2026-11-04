@@ -800,6 +800,19 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared, previewEl = 
                 {label}
               </label>
             ))}
+            {/* подсветка припуска из модели: кромка с той стороны, где припуск, — в обратных цветах */}
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 4 }}>
+              <input type="checkbox" checked={!!tpl.allowHi?.on} onChange={e => change({ allowHi: { ...tpl.allowHi, on: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
+              <span>Подсветить припуск: кромка с этой стороны — в обратных цветах (белым по чёрному ↔ чёрным по белому)
+                <Hint inline>Припуск задаётся в модели (Базис: «Припуск» у облицовки торца). Если с этой стороны детали есть припуск в заданных пределах, элемент кромки этой стороны печатается в обратных цветах; кромки там нет — на её месте пишется «припуск 80». Пределы: «от» и «до», мм; «до» пусто — без верхней границы. Например, от 5 — подсвечивается только большой припуск под обрезку, а прифуговка 0,5–1 мм — нет. Сам припуск можно вывести отдельным элементом «Припуск (из модели)».</Hint>
+              </span>
+            </label>
+            {tpl.allowHi?.on && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 8px 24px' }}>
+                от <input type="text" inputMode="decimal" defaultValue={tpl.allowHi.from || ''} placeholder="0" onBlur={e => change({ allowHi: { ...tpl.allowHi, from: Number(String(e.target.value).replace(',', '.')) || 0 } })} style={{ width: 56, padding: '4px 6px', fontSize: 13 }} />
+                до <input type="text" inputMode="decimal" defaultValue={tpl.allowHi.to || ''} placeholder="∞" onBlur={e => change({ allowHi: { ...tpl.allowHi, to: Number(String(e.target.value).replace(',', '.')) || 0 } })} style={{ width: 56, padding: '4px 6px', fontSize: 13 }} /> мм
+              </div>
+            )}
             <div style={{ fontSize: 12.5, fontWeight: 500, margin: '4px 0 6px' }}>Чертёж детали</div>
             {[['contour', 'Линия контура', 0.02, 2], ['hole', 'Точка отверстия', 0.05, 2]].map(([k, label, step, dg]) => (
               <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12.5, color: 'var(--text-muted)' }}>

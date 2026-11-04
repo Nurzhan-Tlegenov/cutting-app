@@ -17,7 +17,7 @@ import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
-import { parseEdgeTypes, cutDetail, edgeKey, edgeAliases, edgeAlias } from './edgeCut'
+import { parseEdgeTypes, cutDetail, edgeKey, edgeAliases, edgeAlias, allowApplied } from './edgeCut'
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
@@ -50,6 +50,9 @@ export const LABEL_ITEMS = [
   ['cutouts', 'Вырезы', 'text'],
   ['twoSided', 'Обработка с двух сторон', 'text'],
   ['edgeList', 'Кромка — списком', 'text'],
+  ['allow', 'Припуск (из модели)', 'text'],
+  ['glue', 'Склейка', 'text'],
+  ['matCode', 'Артикул материала', 'text'],
   ['length', 'Длина', 'text'],
   ['width', 'Ширина', 'text'],
   ['thickness', 'Толщина', 'text'],
@@ -223,6 +226,15 @@ export function userItems(details) {
 export const textRot = it => ([0, 90, 180, 270].includes(it.trot) ? it.trot : it.type === 'edgeLeft' ? 270 : it.type === 'edgeRight' ? 90 : 0)
 export const isVert = it => !isBox(it) && textRot(it) % 180 !== 0
 const EDGE_TYPES = ['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight']
+/** Подсветка припуска (шаблон: tpl.allowHi): припуск с этой стороны бирки, если он в заданных пределах, иначе 0 */
+export function allowHit(tpl, info, side) {
+  const h = tpl?.allowHi
+  if (!h?.on || !info) return 0
+  const a = Number(((tpl.rot !== false) ? info.allowCw : info.allow)?.[side]) || 0
+  if (!(a > 0)) return 0
+  const lo = Number(h.from) || 0, hi = Number(h.to) || 0
+  return a >= lo - 1e-6 && (!(hi > 0) || a <= hi + 1e-6) ? a : 0
+}
 /** Размер рамки элемента на бирке, мм: [ширина, высота] */
 // у текста: длина строки (w) и толщина рамки поперёк строки — не меньше строки, можно больше (th): тогда текст в ней — вверх/центр/вниз
 export const textThick = it => Math.max(it.size * 1.25, Number(it.th) || 0)
@@ -387,7 +399,9 @@ export function normalizeLabel(raw) {
     ...(t.kind !== 'rem' && t.remTpl && Array.isArray(t.remTpl.items) ? { remTpl: normalizeLabel({ ...t.remTpl, kind: 'rem' }) } : {}),
     // бирка на обрезок: в каком углу обрезка клеить и на сколько отступить от его сторон, мм
     offcut: { corner: ['bl', 'br', 'tl', 'tr', 'center'].includes(t.offcut?.corner) ? t.offcut.corner : 'bl', dx: Math.max(0, Math.min(1000, Number(t.offcut?.dx ?? 100) || 0)), dy: Math.max(0, Math.min(1000, Number(t.offcut?.dy ?? 100) || 0)) },
-    rot: t.rot !== false, edgeDims: t.edgeDims !== false, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
+    rot: t.rot !== false, edgeDims: t.edgeDims !== false,
+    // подсветка припуска: кромка со стороны с припуском (от … до мм; «до» пусто — без верхней границы) — белым по чёрному
+    allowHi: { on: !!t.allowHi?.on, from: Math.max(0, Number(t.allowHi?.from) || 0), to: Math.max(0, Number(t.allowHi?.to) || 0) }, dpi: [203, 300, 600].includes(Number(t.dpi)) ? Number(t.dpi) : 203, items,
     // строка «Заказ»: своя подпись, номер от приложения и название заказа включаются отдельно
     order: { prefix: typeof t.order?.prefix === 'string' ? t.order.prefix.slice(0, 30) : 'Заказ', number: t.order?.number !== false, name: t.order?.name !== false },
     // чертёж детали: размеры торцевых отверстий от края и высота их цифр (мм)
@@ -449,6 +463,10 @@ export function demoLabelSample() {
     det('Крышка', 'Шкаф', 800, 560, [E2, E, E, E], '01.04', '4'),
     det('Цоколь', 'Шкаф', 764, 100, [E, null, null, null], '01.05', '5'),
   ]
+  // образец склейки и припуска из модели — чтобы в редакторе было видно, как выглядят эти элементы
+  const withMeta = (d, f) => { const c = JSON.parse(d.contour); f(c); d.contour = JSON.stringify(c) }
+  withMeta(details[3], c => { c.meta.glue = { n: 1, of: 2, with: ['01.04', '01.04а'] }; c.meta.materialCode = 'W1000 ST9' })
+  withMeta(details[4], c => { c.allow = { left: 80 } })
   const at = [[0, 0], [564, 0], [1128, 0], [0, 724], [568, 724]]
   const placed = details.map((d, i) => ({ detailIndex: i, x: at[i][0], y: at[i][1], origX: d.width, origY: d.length, label: d.name, prefix: d.prefix }))
   const order = { id: null, _client: 'Иванов Иван', order_number: '261022_001', order_name: 'Образец', material_name: 'ЛДСП Белый', material_thickness: 16, sheet_length: 2750, sheet_width: 1830, margin_left: 10, margin_right: 10, margin_top: 10, margin_bottom: 10, kerf_width: 4 }
@@ -490,7 +508,9 @@ export function finishedSize(order, d) {
   const raw = d?._raw || d || {}
   const cut = d?._raw ? d : cutDetail(raw, types) || raw
   let l = Number(cut.length) || 0, w = Number(cut.width) || 0
-  const add = side => { const k = edgeKey(raw['edge_' + side]); if (!k) return 0; const t = types[k] || {}; return (Number(t.t) || 0) - (Number(t.joint) || 0) }
+  // припуск из модели (allowApplied) — в пильном размере есть, в готовой детали его нет
+  const al = allowApplied({ left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }, types, raw.contour) || {}
+  const add = side => { const k = edgeKey(raw['edge_' + side]); const t = (k && types[k]) || {}; return (k ? (Number(t.t) || 0) - (Number(t.joint) || 0) : 0) - (al[side] || 0) }
   l += add('top') + add('bottom'); w += add('left') + add('right')
   return { l: Math.round(l * 100) / 100, w: Math.round(w * 100) / 100 }
 }
@@ -519,6 +539,19 @@ export function labelInfo(order, mat, si, pi, part = null) {
     const on = Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]
     if (edgeName(v)) sides[on] = edgeName(v)
   })
+  // припуск из модели (сколько реально добавлено в раскрой) — по сторонам бирки, так же, как кромка
+  const rawD = d._raw || d
+  const alw = allowApplied({ left: rawD.edge_left, right: rawD.edge_right, top: rawD.edge_top, bottom: rawD.edge_bottom }, parseEdgeTypes(order?.edge_types), rawD.contour)
+  let allow = null
+  if (alw) {
+    allow = { top: 0, right: 0, bottom: 0, left: 0 }
+    ;[['left', 0, DL / 2], ['right', DW, DL / 2], ['bottom', DW / 2, 0], ['top', DW / 2, DL]].forEach(([s0, x, y]) => {
+      if (!alw[s0]) return
+      const q = rotatePointTimes(x, y, DW, DL, turns), bw = Number(p.origX) || DW, bh = Number(p.origY) || DL
+      const dist = { left: q.x, right: bw - q.x, bottom: q.y, top: bh - q.y }
+      allow[Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]] = alw[s0]
+    })
+  }
   // на сколько четвертей по часовой повёрнута деталь относительно положения «как в заказе»: куда ушла её верхняя сторона
   // (для элементов, привязанных к стороне детали)
   let quarter = 0
@@ -551,7 +584,8 @@ export function labelInfo(order, mat, si, pi, part = null) {
     ...(() => { const f = finishedSize(order, d); return { finX: even ? f.w : f.l, finY: even ? f.l : f.w } })(), thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
-    sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top }, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
+    sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
+    allow, allowCw: allow ? { top: allow.left, bottom: allow.right, left: allow.bottom, right: allow.top } : null, curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
     backCorner: BACK.on && !part && isTwoSided(d, mat.thickness) ? backMarkCorner(p, d, BACK.corner, BACK.edge) : null,
     exit: !!part, quarter,      // деталь в положении выхода со станка (пильный центр)
@@ -747,7 +781,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
-  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', matCode: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
 export const canCaption = type => !NO_CAP.has(type)
 export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
@@ -786,7 +820,8 @@ function labelValue(type, info, tpl = null) {
       // сторона бирки = сторона детали на карте (карта и деталь на бирке повёрнуты одинаково)
       const rot = tpl ? tpl.rot !== false : true, side = type.slice(4).toLowerCase(), name = (rot ? info.sidesCw : info.sides)[side]
       const horiz = side === 'top' || side === 'bottom'
-      if (!name) return ''
+      // кромки нет, но с этой стороны припуск и включена его подсветка — на месте кромки пишется «припуск 80»
+      if (!name) { const a = allowHit(tpl, info, side); return a ? `припуск ${r1(a)}` : '' }
       // размер стороны с кромкой — по выбору в шаблоне («Размер стороны у кромки»), по умолчанию есть
       return tpl && tpl.edgeDims === false ? name : `${name} · ${r1(horiz === rot ? info.sizeY : info.sizeX)}`
     }
@@ -798,6 +833,20 @@ function labelValue(type, info, tpl = null) {
     case 'cutouts': return info.cutouts ? String(info.cutouts) : ''
     case 'twoSided': return info.twoSided ? '⇅ обработка с двух сторон' : ''
     case 'edgeList': return info.edgeList.length ? info.edgeList.join(', ') : ''
+    // припуск из модели — по сторонам бирки (как кромка): «80 слева», «80 слева, 5 снизу»
+    case 'allow': {
+      const a = (tpl ? tpl.rot !== false : true) ? info.allowCw : info.allow
+      if (!a) return ''
+      const SIDE = { top: 'сверху', bottom: 'снизу', left: 'слева', right: 'справа' }
+      return ['top', 'right', 'bottom', 'left'].filter(k => a[k] > 0).map(k => `${r1(a[k])} ${SIDE[k]}`).join(', ')
+    }
+    // склейка — только у склеиваемых деталей: «1/2 (01-02 + 01-02а)»
+    case 'glue': {
+      const g = info.meta?.glue
+      if (!g || !(g.of > 1)) return ''
+      return `${g.n}/${g.of}` + (Array.isArray(g.with) && g.with.length ? ` (${g.with.join(' + ')})` : '')
+    }
+    case 'matCode': return String(info.meta?.materialCode || '').trim()
     // «Длина» и «Ширина» идут за сторонами бирки, как размеры у кромки (фрезер — как деталь лежит на карте, пильный
     // центр — как выходит со станка): «Длина» — размер верхней/нижней стороны бирки, «Ширина» — левой/правой.
     // В обычном положении это и есть длина и ширина; деталь повёрнута на 90° — значения меняются местами
@@ -852,7 +901,11 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   const mm = W / tpl.w, line = Math.max(1, mm * 0.17), rot = tpl.rot !== false
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
-  const place = it0 => (it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0)
+  const place = it0 => {
+    const it = it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0
+    // подсветка припуска: кромка с этой стороны — в обратных цветах (чёрным по белому ↔ белым по чёрному)
+    return EDGE_TYPES.includes(it.type) && allowHit(tpl, info, it.type.slice(4).toLowerCase()) ? { ...it, inv: !it.inv } : it
+  }
   const px1 = v => Math.max(1, Math.round(v * mm))                      // линия не тоньше точки принтера
   // Параметра нет (нет отверстий снизу, нет кромки…) — нет и рамки (в превью шаблона рамка видна)
   const empty = it => {

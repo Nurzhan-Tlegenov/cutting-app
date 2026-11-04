@@ -38,7 +38,7 @@ import { loadOrderModel } from '../lib/orderModel'
 import { hasModel } from '../lib/model3d'
 import { parsePolygonFromDetail, needsTrueShape } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
-import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY, edgeKey, blankType } from '../lib/edgeCut'
+import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY, edgeKey, blankType, modelAllow, allowOf, ALLOW_KEY } from '../lib/edgeCut'
 import { saveNestingPdf } from '../lib/nestingPdf'
 import StockPicker from '../components/StockPicker'
 import { stockReserve } from '../lib/stock'
@@ -1926,6 +1926,19 @@ export default function NestingPage() {
     const next = applyJoint(j, true)
     if (next) Promise.resolve().then(() => writeEdgeTypes(next, `Прифуговка ${j} мм из настроек ${beamSaw ? 'пильного центра' : 'фрезера ЧПУ'} производства поставлена кромкам заказа — пересчитайте раскрой.`))
   }, [beamSaw, cuttingMethod, prodsReady, order?.production_id, allDetails.length, order?.edge_types])   // eslint-disable-line react-hooks/exhaustive-deps
+  // Припуск из модели (Базис: «Припуск» у облицовки торца): что с ним делать — решает производство
+  // (Настройки производства → Лист и рез → «Припуск из модели»). Выбор пишется в виды кромки заказа (ALLOW_KEY),
+  // и заготовка везде считается одинаково (edgeCut). Не задано у производства — как в модели.
+  useEffect(() => {
+    if (!order || !prodsReady || !canSetJoint() || !allDetails.some(d => modelAllow(d.contour))) return
+    const pr = order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)
+    if (!pr || !pr.allow_mode) return
+    const want = { mode: pr.allow_mode, mm: Math.max(0, Number(pr.allow_mm) || 0) }, cur = allowOf(order.edge_types)
+    if (cur.mode === want.mode && (want.mode !== 'own' || Math.abs(cur.mm - want.mm) < 0.001)) return
+    const next = { ...parseEdgeTypes(order.edge_types), [ALLOW_KEY]: want }
+    const txt = want.mode === 'off' ? 'не учитывается' : want.mode === 'own' ? `${want.mm} мм (свой припуск производства)` : 'как в модели'
+    Promise.resolve().then(() => writeEdgeTypes(next, `Припуск из модели — ${txt} (настройки производства) — пересчитайте раскрой.`))
+  }, [prodsReady, order?.production_id, allDetails.length, order?.edge_types])   // eslint-disable-line react-hooks/exhaustive-deps
   const askedOnOpenRef = useRef(false)
   useBackClose(!!pickProd, () => { runAfterRef.current = null; setPickProd(null) })
   useBackClose(!!needProd, () => setNeedProd(null))

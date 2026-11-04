@@ -1,3 +1,4 @@
+import { ALLOW_MODES } from '../lib/edgeCut'
 import Hint from '../components/Hint'
 import { MenuButton, Ico } from '../components/NavDrawer'
 import TrainingOffer from '../components/TrainingOffer'
@@ -51,6 +52,7 @@ const FILTERS = [['new', 'Новые'], ['work', 'В работе'], ['all', 'В
 const MARGINS = [['kerf_width', 'Рез / фреза'], ['margin_left', 'Отступ ←'], ['margin_right', 'Отступ →'], ['margin_top', 'Отступ ↑'], ['margin_bottom', 'Отступ ↓']]
 // то же для ХДФ / ДВП (задние стенки): тонкий материал режется на пиле — рез и отступы свои
 const HDF_MARGINS = MARGINS.map(([k, l]) => ['hdf_' + k, k === 'kerf_width' ? 'Рез (пила)' : l])
+const ALLOW_HINT = 'Чтобы задать припуск из модели, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists allow_mode text;\nalter table productions add column if not exists allow_mm numeric;'
 const OFFCUT_KEYS = [['offcut_min_length', 'Вдоль текстуры (длина), от, мм'], ['offcut_min_width', 'Поперёк текстуры (ширина), от, мм']]
 const OFFCUT_HINT = 'Чтобы включить авто-обрезки, выполните в Supabase (SQL Editor):\nalter table productions add column if not exists offcut_min_length numeric;\nalter table productions add column if not exists offcut_min_width numeric;'
 const KIND_HINT = 'Чтобы задать параметры для ХДФ и видеть число листов в заявках, выполните migration_material_kind.sql в Supabase (SQL Editor) — один раз.'
@@ -259,6 +261,11 @@ export default function ProductionPage() {
     if (e) setError(/offcut_min/.test(String(e.message)) ? OFFCUT_HINT : /hdf_/.test(String(e.message)) ? KIND_HINT : e.message); else setProd(p => ({ ...p, [key]: v }))
   }
 
+  const saveAllow = async patch => {
+    const { error: e } = await supabase.from('productions').update(patch).eq('id', prod.id)
+    if (e) setError(/allow_/.test(String(e.message)) ? ALLOW_HINT : e.message); else setProd(p => ({ ...p, ...patch }))
+  }
+
   // заказы в архиве — в своём разделе; в остальных разделах и счётчиках их нет
   // объединение, пущенное в работу, распалось на заказы — в списке остаются сами заказы (у них ссылка на общий раскрой)
   const splitDone = o => !!mergeInfo.get(o.id)?.merge_done_at
@@ -394,7 +401,24 @@ export default function ProductionPage() {
                   }} />
                   <Hint>От какого угла листа идёт раскрой на пиле: детали прижаты к этому углу, обрезок — с противоположной стороны. Подставляется в раскрой заказчика, он видит угол на карте. У фрезера ЧПУ угол — в постпроцессоре (Постпроцессоры → Рабочее поле станка).</Hint>
                 </div>
-                {/* деловой обрезок: свободные куски не меньше этого отмечаются обрезками сами — шинковка их не трогает */}
+                {/* припуск из модели (Базис: «Припуск» у облицовки торца) — учитывать, нет или свой */}
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Припуск из модели</div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {ALLOW_MODES.map(([k, l]) => {
+                      const on = (prod.allow_mode || 'model') === k
+                      return <button key={k} type="button" onClick={() => saveAllow({ allow_mode: k })} style={{ padding: '4px 10px', borderRadius: 16, fontSize: 12, border: `0.5px solid ${on ? 'var(--teal)' : 'var(--border-md)'}`, background: on ? 'var(--teal)' : 'transparent', color: on ? 'white' : 'var(--text-muted)' }}>{on ? '✓ ' : ''}{l}</button>
+                    })}
+                    {(prod.allow_mode || 'model') === 'own' && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                        <input type="text" inputMode="decimal" value={sheet.allow_mm ?? (prod.allow_mm ?? '')} placeholder="мм" onChange={e => setSheet(s => ({ ...s, allow_mm: e.target.value.replace(/[^0-9.,]/g, '') }))}
+                          onBlur={() => { if (sheet.allow_mm == null || sheet.allow_mm === '') return; const v = Number(String(sheet.allow_mm).replace(',', '.')); if (isFinite(v) && v >= 0) saveAllow({ allow_mm: v }) }} style={{ width: 60, padding: '4px 6px', fontSize: 13 }} /> мм
+                      </label>
+                    )}
+                  </div>
+                  <Hint>Конструктор может задать в модели (Базис-Мебельщик, «Припуск» у облицовки торца) припуск на сторону детали — например, 80 мм под склейку и последующую обрезку. «Как в модели» — деталь в раскрой больше на этот припуск с той стороны. «Не учитывать» — размер как без припуска. «Свой припуск» — ваше значение вместо модельного, на тех же сторонах. На стороне с кромкой, где задана прифуговка, решает прифуговка. Припуск можно вывести на бирку и подсветить кромку на этой стороне (Бирки → кромка → «Подсветить припуск»).</Hint>
+                </div>
+
                 <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
                   <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 3 }}>Деловой обрезок — отмечать автоматически</div>
                   <div style={{ display: 'flex', gap: 6 }}>
