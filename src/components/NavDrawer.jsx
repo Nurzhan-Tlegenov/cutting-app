@@ -266,7 +266,7 @@ export default function NavDrawer({ notices, unread }) {
   sections.push(common)
   // поддержка — мастер-аккаунту и сотрудникам поддержки (роль выдаёт мастер); разделов мастера сотрудник не видит
   if (isMaster || isSupport) sections.push({ id: 'support', icon: I.headset, title: 'Поддержка', sub: isMaster ? '' : 'Вы — сотрудник поддержки', items: [
-    { icon: I.inbox, label: 'Обращения', on: pathname === '/support', act: () => go('/support') },
+    { icon: I.inbox, label: 'Доска обращений', on: pathname.startsWith('/support'), act: () => go('/support') },
   ] })
   if (isMaster) sections.push({ id: 'master', icon: I.crown, title: 'Мастер-аккаунт', badge: n.users || 0, items: [
     { icon: I.users, label: 'Пользователи и регистрация', badge: n.users || 0, on: pathname === '/users', act: () => go('/users') },
