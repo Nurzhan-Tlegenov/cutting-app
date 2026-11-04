@@ -337,7 +337,7 @@ export default function CncPage() {
             summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {})
           } catch { summary = null }
         }
-        maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: [] }
+        maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, statsFirst: !!getUserSettings(user).pdfStatsFirst, onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: [] }
       } catch { maps = null } finally { setMapsBusy('') }
     }
     const files = [...labelFiles().map(f => ({ ...f, dir: built.labelsOwnDir ? labelsDir() : rd })), ...built.files.filter(f => !f.empty).map(f => ({ name: f.name, data: f.text, dir: rd }))]

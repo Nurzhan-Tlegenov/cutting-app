@@ -413,7 +413,7 @@ const PER_COL = Math.floor((LIST_BOTTOM - LIST_TOP - 6) / LROW)
  */
 // statsPage — «Статистика отдельно»: на странице листа только карта, список и условные обозначения (карта крупнее),
 // сведения по листам и итог по материалу — отдельной страницей после карт
-function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha = 0, statsPage = false }) {
+function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha = 0, statsPage = false, statsFirst = false }) {
   const sheets = (mat.sheets || []).filter(sh => sh?.placed?.length)
   const details = mat.details || []
   const sameOpt = sameAlpha > 0 ? { sameFill: sameColorMap(details), sameAlpha } : {}
@@ -575,6 +575,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
     text(ctx, 'черта под размером в списке: одна — кромка с одной стороны, две — с двух', 19, y, { size: 2.5, color: MUTED })
   }
   const listItem = custom ? custom.items.find(i => i.type === 'list') : null
+  const mapsFrom = pages.length                     // страницы карт — [mapsFrom, mapsTo); всё после — статистика
   sheets.forEach((sheet, si) => {
     const geo = geos[si], { rows, noOf } = sheetRows(sheet, details)
     const perCol = !custom ? PER_COL : listItem ? Math.max(1, Math.floor((listItem.h - 6) / LROW)) : rows.length
@@ -636,6 +637,7 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
       })
     }
   })
+  const mapsTo = pages.length
   // «Статистика отдельно»: сведения по каждому листу таблицей и итог по материалу — страницей после карт
   if (statsPage && !custom && sheets.length) {
     const ROW = 6.2, TOP = 58, PER = Math.floor((278 - TOP) / ROW)
@@ -724,6 +726,8 @@ function preparePages({ order, mat, summary = null, tpl = null, ctx, sameAlpha =
     for (let g = 0; st && g < 60; g++) { starts.push(st); st = drawSummaryPage(ctx, { order, matName, summary, notes: notesS, pageNo: 0, partRows, state: st }) }
     for (const s0 of starts) pages.push(() => { pageNo++; drawSummaryPage(ctx, { order, matName, summary, notes: notesS, pageNo, partRows, state: s0 }) })
   }
+  // «Сначала статистика»: страницы статистики — перед картами (номера страниц ставятся при рисовании, по порядку)
+  if (statsFirst && pages.length > mapsTo && mapsTo > mapsFrom) return { pages: [...pages.slice(0, mapsFrom), ...pages.slice(mapsTo), ...pages.slice(mapsFrom, mapsTo)], boxes }
   return { pages, boxes }
 }
 
@@ -977,10 +981,10 @@ export function drawPdfPreview(canvas, { order, mat, tpl }) {
   return boxes
 }
 
-export async function buildNestingPdf({ order, mat, onProgress, summary = null, tpl = null, same = 0, statsPage = false }) {
+export async function buildNestingPdf({ order, mat, onProgress, summary = null, tpl = null, same = 0, statsPage = false, statsFirst = false }) {
   const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
   const ctx = cv.getContext('2d')
-  const { pages } = preparePages({ order, mat, summary, tpl, ctx, sameAlpha: same, statsPage })
+  const { pages } = preparePages({ order, mat, summary, tpl, ctx, sameAlpha: same, statsPage, statsFirst })
   // PDF: страница — картинка A4
   const chunks = [], offsets = []
   let size = 0
@@ -1015,10 +1019,10 @@ export async function buildNestingPdf({ order, mat, onProgress, summary = null, 
 }
 
 /** Предварительный просмотр: те же страницы, что пойдут в PDF, — картинками (адреса blob:), без сборки файла */
-export async function renderPdfPages({ order, mat, summary = null, tpl = null, same = 0, statsPage = false, onProgress }) {
+export async function renderPdfPages({ order, mat, summary = null, tpl = null, same = 0, statsPage = false, statsFirst = false, onProgress }) {
   const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
   const ctx = cv.getContext('2d')
-  const { pages } = preparePages({ order, mat, summary, tpl, ctx, sameAlpha: same, statsPage })
+  const { pages } = preparePages({ order, mat, summary, tpl, ctx, sameAlpha: same, statsPage, statsFirst })
   const urls = []
   for (let i = 0; i < pages.length; i++) {
     pages[i]()
@@ -1070,8 +1074,8 @@ function askShare(file, title) {
  * PDF карт раскроя: на телефоне сразу открывается «Поделиться» (мессенджер, почта, облако) — файл уходит клиенту
  * без скачивания. Где так нельзя (компьютер, старый браузер) — файл скачивается, как раньше.
  */
-export async function saveNestingPdf({ order, mat, fileName, onProgress, summary = null, tpl = null, same = 0, statsPage = false }) {
-  const data = await buildNestingPdf({ order, mat, onProgress, summary, tpl, same, statsPage })
+export async function saveNestingPdf({ order, mat, fileName, onProgress, summary = null, tpl = null, same = 0, statsPage = false, statsFirst = false }) {
+  const data = await buildNestingPdf({ order, mat, onProgress, summary, tpl, same, statsPage, statsFirst })
   const file = new File([data], fileName, { type: 'application/pdf' })
   const title = `Карта раскроя · ${orderTitle(order)}`
   let can

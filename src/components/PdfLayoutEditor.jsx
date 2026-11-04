@@ -238,7 +238,7 @@ export default function PdfLayoutEditor({ order: order0, mat: mat0, onClose }) {
           let summary = null
           try { summary = pdfSummaryOf(nestingStats({ order, mat, method: order?.cutting_method || 'nesting' }), null, getUserSettings(user).pdfSummary || {}) } catch { /* без статистики */ }
           return renderPdfPages({ order, mat, summary, tpl: { custom: true, items: tpl.items }, same: userSameAlpha(user),
-            statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => prog(`${a}/${b}`) })
+            statsPage: !!getUserSettings(user).pdfStatsPage, statsFirst: !!getUserSettings(user).pdfStatsFirst, onProgress: (a, b) => prog(`${a}/${b}`) })
         }} />}
     </div>
   )

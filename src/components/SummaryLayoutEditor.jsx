@@ -222,7 +222,7 @@ export default function SummaryLayoutEditor({ onClose }) {
       </div>
       {preview && <PdfPreview title="Просмотр PDF · на образце" start="last" onClose={() => setPreview(false)}
         make={prog => renderPdfPages({ order: demo.order, mat: demo.mat, summary: pdfSummaryOf(demoStats, DEMO_QUOTE, cfg), tpl: userPdfTpl(user),
-          same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, onProgress: (a, b) => prog(`${a}/${b}`) })} />}
+          same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, statsFirst: !!getUserSettings(user).pdfStatsFirst, onProgress: (a, b) => prog(`${a}/${b}`) })} />}
     </div>
   )
 }

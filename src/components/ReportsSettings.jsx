@@ -21,6 +21,7 @@ export default function ReportsSettings() {
   const st = getUserSettings(user)
   const [statsPage, setStatsPageS] = useState(() => !!st.pdfStatsPage)
   const [estimate, setEstimateS] = useState(() => !!st.pdfEstimate)
+  const [statsFirst, setStatsFirstS] = useState(() => !!st.pdfStatsFirst)
   const custom = userPdfTpl(user)
   const check = (on, set, title, sub) => (
     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 0', borderTop: '0.5px solid var(--border)', fontSize: 13, cursor: 'pointer' }}>
@@ -45,6 +46,7 @@ export default function ReportsSettings() {
 
       <p className="section-title" style={{ marginTop: 12 }}>Последняя страница: статистика раскроя и смета</p>
       {check(estimate, v => { setEstimateS(v); saveUserSettings({ pdfEstimate: v }, user); syncProductionReports(user) }, 'Добавлять страницу статистики и сметы', 'Та же галочка «Смета» под кнопкой PDF на странице раскроя. Так же выводится и у ваших клиентов, когда они делают PDF с вашим производством')}
+      {check(statsFirst, v => { setStatsFirstS(v); saveUserSettings({ pdfStatsFirst: v }, user) }, 'Статистику — перед картами раскроя', 'Порядок страниц PDF: сначала статистика (и смета), потом карты листов. Выключено — статистика после карт')}
       <div onClick={() => setSumEdit(true)} style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', cursor: 'pointer', margin: '6px 0 10px' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, color: 'var(--blue)', fontWeight: 500 }}>Конструктор страницы статистики</div>

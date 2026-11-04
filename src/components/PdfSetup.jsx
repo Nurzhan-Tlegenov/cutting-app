@@ -26,6 +26,8 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const [cfg, setCfg] = useState(() => ({ off: [], price: 'lines', ...(getUserSettings(user).pdfSummary || {}) }))
   const [statsPage, setStatsPageState] = useState(() => !!getUserSettings(user).pdfStatsPage)
   const setStatsPage = on => { setStatsPageState(on); saveUserSettings({ pdfStatsPage: on }, user) }
+  const [statsFirst, setStatsFirstState] = useState(() => !!getUserSettings(user).pdfStatsFirst)
+  const setStatsFirst = on => { setStatsFirstState(on); saveUserSettings({ pdfStatsFirst: on }, user) }
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [layout, setLayout] = useState(false)       // открыт конструктор листа
@@ -41,7 +43,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
     try {
       syncProductionReports(user)
       const summary = pdfSummaryOf(stats, quote, cfg)
-      await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, onProgress: (a, b) => setBusy(`${a}/${b}`) })
+      await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, statsFirst, onProgress: (a, b) => setBusy(`${a}/${b}`) })
       onClose()
     } catch (e) { setError('Не удалось собрать PDF: ' + (e?.message || e)); setBusy('') }
   }
@@ -67,6 +69,11 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
               <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>На листе — только карта, список деталей и обозначения, карта крупнее; использование, кромка и обрезки по листам — таблицей в конце</span>
             </span>
           </label>
+          <label className="label">Порядок страниц</label>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+            <button type="button" style={chip(!statsFirst)} onClick={() => setStatsFirst(false)}>Сначала карты</button>
+            <button type="button" style={chip(statsFirst)} onClick={() => setStatsFirst(true)}>Сначала статистика</button>
+          </div>
           <p className="section-title">Статистика раскроя</p>
           {rows.map(r => (
             <label key={r.key + r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderTop: '0.5px solid var(--border)', fontSize: 13 }}>
@@ -112,7 +119,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
         </div>
       </div>
       {preview && <PdfPreview title="Просмотр PDF" onClose={() => setPreview(false)}
-        make={prog => renderPdfPages({ order, mat, summary: pdfSummaryOf(stats, quote, cfg), tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, onProgress: (a, b) => prog(`${a}/${b}`) })} />}
+        make={prog => renderPdfPages({ order, mat, summary: pdfSummaryOf(stats, quote, cfg), tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, statsFirst, onProgress: (a, b) => prog(`${a}/${b}`) })} />}
       {layout && <PdfLayoutEditor order={order} mat={mat} onClose={() => { setLayout(false); syncProductionReports(user) }} />}
     </div>
   )
