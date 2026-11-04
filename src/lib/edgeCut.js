@@ -44,7 +44,8 @@ export function edgeTrimOf(contour) {
 // Хранится у детали по сторонам: contour.allow = { left: 80, … } (стороны — как у детали в заказе). Деталь в раскрой
 // больше на припуск с этой стороны. Что делать с припуском — решает производство (Настройки → Лист и рез → «Припуск
 // из модели»), его выбор пишется в виды кромки заказа под служебным ключом ALLOW_KEY: { mode, mm }:
-//   'model' — как в модели (по умолчанию); 'off' — не учитывать; 'own' — свой припуск mm там, где в модели он есть.
+//   'off' — не учитывать (по умолчанию: у работающих пользователей ничего не меняется); 'model' — как в модели;
+//   'own' — свой припуск mm там, где в модели он есть.
 // На стороне с кромкой, где задана прифуговка (производства или вида кромки), решает прифуговка — припуск модели не
 // добавляется второй раз (в Базисе припуск у кромки — это и есть прифуговка конструктора).
 // ─── Узкие детали на кромочном станке: у станка есть наименьшая ширина детали (например, 50 мм) ─────────────────
@@ -75,10 +76,10 @@ const withNarrow = (k, edges, types, W, L) => {
 
 export const ALLOW_KEY = '__allow'
 export const ALLOW_JOINT_MAX = 3
-export const ALLOW_MODES = [['model', 'Как в модели'], ['off', 'Не учитывать'], ['own', 'Свой припуск']]
+export const ALLOW_MODES = [['off', 'Не учитывать'], ['model', 'Как в модели'], ['own', 'Свой припуск']]
 export function allowOf(types) {
   const a = parseEdgeTypes(types)[ALLOW_KEY]
-  const mode = ['model', 'off', 'own'].includes(a?.mode) ? a.mode : 'model'
+  const mode = ['model', 'off', 'own'].includes(a?.mode) ? a.mode : 'off'
   return { mode, mm: Math.max(0, num(String(a?.mm ?? '').replace(',', '.'))) }
 }
 /** Припуск из модели по сторонам детали (contour.allow) -> { left, right, bottom, top } | null */

@@ -8,3 +8,4 @@ alter table orders add column if not exists order_article text;
 
 -- Наименьшая ширина детали на кромочном станке производства (узкие детали наращиваются, после кромки упиливаются)
 alter table productions add column if not exists edge_min_width numeric;
+alter table productions add column if not exists edge_min_on boolean;
