@@ -570,9 +570,12 @@ export function labelInfo(order, mat, si, pi, part = null) {
   // стороны бирки — как деталь лежит на листе
   // (тем же поворотом, что и контур детали на карте): сторона бирки = сторона детали на карте раскроя
   const DW = Number(d.width) || 0, DL = Number(d.length) || 0, turns = placedTurns(p, d)
+  // размер детали в положении на карте — настоящий, а не p.origX/origY: у пильного центра узкая деталь на карте шире
+  // (пилится шириной «Пилить узкую деталь шириной», trimTo), и кромка дальней стороны уезжала на соседнюю
+  const BW = turns % 2 ? DL : DW, BH = turns % 2 ? DW : DL
   const sides = { top: '', right: '', bottom: '', left: '' }
   ;[['left', 0, DL / 2, d.edge_left], ['right', DW, DL / 2, d.edge_right], ['bottom', DW / 2, 0, d.edge_bottom], ['top', DW / 2, DL, d.edge_top]].forEach(([, x, y, v]) => {
-    const q = rotatePointTimes(x, y, DW, DL, turns), bw = Number(p.origX) || DW, bh = Number(p.origY) || DL
+    const q = rotatePointTimes(x, y, DW, DL, turns), bw = BW, bh = BH
     const dist = { left: q.x, right: bw - q.x, bottom: q.y, top: bh - q.y }
     const on = Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]
     if (edgeName(v)) sides[on] = edgeName(v)
@@ -586,7 +589,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     const o = { top: 0, right: 0, bottom: 0, left: 0 }
     ;[['left', 0, DL / 2], ['right', DW, DL / 2], ['bottom', DW / 2, 0], ['top', DW / 2, DL]].forEach(([s0, x, y]) => {
       if (!bySide[s0]) return
-      const q = rotatePointTimes(x, y, DW, DL, turns), bw = Number(p.origX) || DW, bh = Number(p.origY) || DL
+      const q = rotatePointTimes(x, y, DW, DL, turns), bw = BW, bh = BH
       const dist = { left: q.x, right: bw - q.x, bottom: q.y, top: bh - q.y }
       o[Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]] = bySide[s0]
     })
@@ -599,7 +602,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
   // (для элементов, привязанных к стороне детали)
   let quarter = 0
   {
-    const q = rotatePointTimes(DW / 2, DL, DW, DL, turns), bw = Number(p.origX) || DW, bh = Number(p.origY) || DL
+    const q = rotatePointTimes(DW / 2, DL, DW, DL, turns), bw = BW, bh = BH
     const dist = { 0: bh - q.y, 1: bw - q.x, 2: q.y, 3: q.x }
     quarter = Number(Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0])
   }
@@ -630,7 +633,13 @@ export function labelInfo(order, mat, si, pi, part = null) {
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
-    allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow), curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
+    allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow),
+    // пильный центр: узкая деталь пилится шире и потом подрезается в размер — сколько пилили и до скольких подрезать
+    beamTrim: (() => {
+      if (!p.trimTo) return null
+      const ox = Number(p.origX) || BW, oy = Number(p.origY) || BH
+      return Math.abs(ox - BW) > 0.05 ? { from: ox, to: BW } : Math.abs(oy - BH) > 0.05 ? { from: oy, to: BH } : null
+    })(), curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
     backCorner: BACK.on && !part && isTwoSided(d, mat.thickness) ? backMarkCorner(p, d, BACK.corner, BACK.edge) : null,
     exit: !!part, quarter,      // деталь в положении выхода со станка (пильный центр)
@@ -892,9 +901,11 @@ function labelValue(type, info, tpl = null) {
     // узкая деталь, наращённая под кромочный станок: что и с какой стороны упилить после кромления
     case 'narrow': {
       const a = (tpl ? tpl.rot !== false : true) ? info.narrowCw : info.narrow
-      if (!a) return ''
+      // пильный центр («Пилить узкую деталь шириной»): «120 → 50»
+      const bt = info.beamTrim ? `${r1(info.beamTrim.from)} → ${r1(info.beamTrim.to)}` : ''
+      if (!a) return bt
       const SIDE = { top: 'сверху', bottom: 'снизу', left: 'слева', right: 'справа' }
-      return ['top', 'right', 'bottom', 'left'].filter(k => a[k] > 0).map(k => `${r1(a[k])} ${SIDE[k]}`).join(', ')
+      return ['top', 'right', 'bottom', 'left'].filter(k => a[k] > 0).map(k => `${r1(a[k])} ${SIDE[k]}`).concat(bt ? [bt] : []).join(', ')
     }
     // склейка — только у склеиваемых деталей: «1/2 (01-02 + 01-02а)»
     case 'glue': {
