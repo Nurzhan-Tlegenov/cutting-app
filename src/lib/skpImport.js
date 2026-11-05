@@ -70,6 +70,9 @@ const SERVICE = /^(Z_|7_|0_|8_|03_|1_Фасад_опции|1_Фасад_откр
 const EDGE_MM = { 2: '0.4', 3: '0.4', 4: '1', 5: '1', 6: '2', 7: '2' }
 const cleanMat = s => String(s || '').replace(/_\d+(\.\d+)?$/, '').replace(/_/g, ' ').trim()
 const cleanName = s => String(s || '').replace(/#\d+$/, '').replace(/_/g, ' ').trim()
+// плагин «kot» (окно «Свойства»: Наименование, Кромка, Паз, Дополнительно…): «Дополнительно» лежит в kot_option без подписи.
+// Название — как колонка в его выгрузке в Excel, чтобы один элемент бирки работал и для .skp, и для таблицы.
+const PLAIN_KEYS = { kot_option: 'Дополнительно' }
 
 export function parseSkp(u8, opts = {}) {
   const files = unpack(u8)
@@ -131,6 +134,13 @@ export function parseSkp(u8, opts = {}) {
         if (/наимен|название|^name$/i.test(lab)) { if (!out.name) out.name = cleanName(sv); continue }
         if (SKIP_LABEL.test(lab.trim())) continue
         if (/дополн|примеч|коммент|note/i.test(lab) && !(lab.trim() in out.user)) out.user[lab.trim()] = sv.slice(0, 120)
+      }
+      // поля плагинов без подписи _formlabel в модели (подпись есть только в окне плагина): ключ -> название
+      for (const [k, lab] of Object.entries(PLAIN_KEYS)) {
+        const v = d[k]
+        if (v == null || typeof v === 'object' || lab in out.user) continue
+        const sv = String(v).trim()
+        if (sv) out.user[lab] = sv.slice(0, 120)
       }
     }
     return out
