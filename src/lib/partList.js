@@ -18,14 +18,14 @@ export function partListItems(details = [], extraTypes = []) {
   const base = [[ROW_NO, '№ строки'], ...LABEL_ITEMS.filter(([t, , k]) => k === 'text' && !SKIP.has(t)).map(([t, l]) => [t, l])]
   const more = [...metaItems(details), ...userItems(details)]
   // свойства, которые стоят на бирке (своя бирка пользователя), — даже если в образце их нет
-  for (const t of extraTypes) if ((t.startsWith('user:') || t.startsWith('meta:')) && !more.some(x => x[0] === t)) more.push([t, itemTitle(t)])
+  for (const t of extraTypes) if ((t.startsWith('user:') || t.startsWith('meta:') || t.startsWith('pick:')) && !more.some(x => x[0] === t)) more.push([t, itemTitle(t)])
   return [...base, ...more]
 }
 export const colHead = c => String(c?.title ?? '').trim() || HEAD[c?.type] || itemTitle(c?.type || '')
 
 /** Колонки по умолчанию: то, что стоит на бирке пользователя (текстом), иначе — стандартный набор */
 export function defaultPartCols(labelTpl) {
-  const fromLabel = (labelTpl?.items || []).map(i => i.type).filter(t => t && !SKIP.has(t) && (t.startsWith('user:') || t.startsWith('meta:') || LABEL_ITEMS.some(x => x[0] === t && x[2] === 'text')))
+  const fromLabel = (labelTpl?.items || []).map(i => i.type).filter(t => t && !SKIP.has(t) && (t.startsWith('user:') || t.startsWith('meta:') || t.startsWith('pick:') || LABEL_ITEMS.some(x => x[0] === t && x[2] === 'text')))
   const uniq = [...new Set(fromLabel)]
   // «Размер и количество» на бирке — в таблице удобнее отдельными колонками
   const expanded = uniq.flatMap(t => (t === 'size' ? ['length', 'width', 'qty'] : [t]))

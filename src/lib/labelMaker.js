@@ -206,11 +206,44 @@ export function labelQr(tpl, info) {
 export const itemKind = type => (LABEL_ITEMS.find(x => x[0] === type) || [])[2] || 'text'
 // свойства детали из импорта (contour.meta) — элементы вида «meta:<имя>»
 const META_NAMES = { des: 'Обозначение', pos: 'Позиция', material: 'Материал детали', product: 'Изделие', block: 'Блок', thickness: 'Толщина детали', id: 'ID детали', texDir: 'Направление текстуры', comment: 'Комментарий', note: 'Примечание' }
+// Откуда пришла деталь (contour.meta.src) — для параметров «по программе». Астра (.add и .xml) — одна программа;
+// детали, внесённые вручную, — «manual».
+export const MODEL_SRC = [['basis', 'Базис'], ['sketchup', 'SketchUp'], ['table', 'Таблица Excel/CSV'], ['astra', 'Астра'], ['k3', 'К3'],
+  ['bcad', 'bCAD'], ['pro100', 'PRO100'], ['dxf', 'DXF']]
+export const srcGroup = s => (s === 'astra-xml' ? 'astra' : s || 'manual')
+export const srcName = g => (g === '*' ? 'любая программа' : (MODEL_SRC.find(x => x[0] === g) || [])[1] || g)
+// «pick:<программа>=<параметр>|<программа>=<параметр>…» — одно поле бирки, значение берётся по тому, откуда пришла
+// деталь: из Базиса — его параметр, из SketchUp — свой. Нет подходящего (или пусто) — поле пустое: ни текста, ни рамки.
+// Программа «*» — любая. Параметр — «user:…» или «meta:…».
+export function pickParse(type) {
+  return String(type).slice(5).split('|').map(x => { const i = x.indexOf('='); return i > 0 ? { src: x.slice(0, i), type: x.slice(i + 1) } : null })
+    .filter(e => e && (e.type.startsWith('user:') || e.type.startsWith('meta:')))
+}
+export const pickType = list => (list.length ? 'pick:' + list.map(e => `${e.src}=${e.type}`).join('|') : '')
+const pickTitle = type => {
+  const l = pickParse(type)
+  const nm = t => (t.startsWith('user:') ? t.slice(5) : `Свойство: ${META_NAMES[t.slice(5)] || t.slice(5)}`)
+  if (l.length === 1 && l[0].src === '*') return nm(l[0].type)
+  return l.map(e => `${nm(e.type)} (${srcName(e.src)})`).join(' / ')
+}
+/** Пользовательские свойства деталей заказа по программам: [[программа, [[тип, название]]]] */
+export function userItemsBySrc(details) {
+  const by = new Map()
+  for (const d of details || []) {
+    const m = detailMeta(d), u = m?.user
+    if (!u || typeof u !== 'object') continue
+    const g = srcGroup(m.src)
+    for (const [k, v] of Object.entries(u)) if (String(v ?? '').trim()) { if (!by.has(g)) by.set(g, new Set()); by.get(g).add(k) }
+  }
+  const order = [...MODEL_SRC.map(x => x[0]), 'manual']
+  return [...by.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0])).map(([g, ks]) => [g, [...ks].map(k => ['user:' + k, k])])
+}
 // «user:<название>» — пользовательское свойство детали: колонка таблицы Excel/CSV при импорте или
 // пользовательское свойство панели из Базис-Мебельщика (contour.meta.user). Называется так же, как в источнике.
 export const itemTitle = type => (type.startsWith('user:') ? type.slice(5)
+  : type.startsWith('pick:') ? pickTitle(type)
   : type.startsWith('meta:') ? `Свойство: ${META_NAMES[type.slice(5)] || type.slice(5)}` : (LABEL_ITEMS.find(x => x[0] === type) || [])[1] || type)
-const knownType = type => typeof type === 'string' && (type.startsWith('meta:') || type.startsWith('user:') || LABEL_ITEMS.some(x => x[0] === type))
+const knownType = type => typeof type === 'string' && (type.startsWith('meta:') || type.startsWith('user:') || (type.startsWith('pick:') && pickParse(type).length > 0) || LABEL_ITEMS.some(x => x[0] === type))
 /** Свойства, вшитые в детали заказа, — их тоже можно вывести на бирку: [[тип, название]] */
 export function metaItems(details) {
   const keys = new Set()
@@ -887,7 +920,13 @@ function labelValue(type, info, tpl = null) {
     case 'thickness': return info.thickness ? `${r1(info.thickness)} мм` : ''
     case 'qty': return `${info.qty} шт`
     case 'image': return ' '
-    default: { const v = type.startsWith('user:') ? info.meta?.user?.[type.slice(5)] : type.startsWith('meta:') ? info.meta?.[type.slice(5)] : ''; return v == null || typeof v === 'object' ? '' : String(v) }
+    default: {
+      if (type.startsWith('pick:')) {
+        const g = srcGroup(info.meta?.src)
+        for (const e of pickParse(type)) if (e.src === '*' || e.src === g) { const v = labelValue(e.type, info, tpl); if (v) return v }
+        return ''
+      }
+      const v = type.startsWith('user:') ? info.meta?.user?.[type.slice(5)] : type.startsWith('meta:') ? info.meta?.[type.slice(5)] : ''; return v == null || typeof v === 'object' ? '' : String(v) }
   }
 }
 

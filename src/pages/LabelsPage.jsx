@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
 import { setLabelBack, setLabelClient, REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
-import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, saveRemTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, userItemsBySrc, pickParse, pickType, srcName, MODEL_SRC, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, saveRemTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc, activePost } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -344,6 +344,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
   const wrapRef = useRef(null), cvRef = useRef(null), drag = useRef(null)
   const [live, setLive] = useState(null)            // шаблон во время перетаскивания
   const [sel, setSel] = useState(null)
+  const [addFrom, setAddFrom] = useState(null)      // «+ из другой программы» у выбранного параметра: { src, name }
   const [fitScale, setFitScale] = useState(4)       // точек экрана на мм, когда бирка во всю ширину
   // увеличение бирки для точной расстановки с телефона: кнопки −/+ или щипок двумя пальцами; одним пальцем по пустому
   // месту — двигать увеличенную бирку
@@ -591,6 +592,52 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
               )}
             </>
           )}
+          {!rem && /^(user|meta|pick):/.test(cur.type) && (() => {
+            // откуда брать значение: по программе, из которой пришла деталь (Базис, SketchUp, таблица…)
+            const list = cur.type.startsWith('pick:') ? pickParse(cur.type) : [{ src: '*', type: cur.type }]
+            const setList = l => { if (l.length) edit({ type: l.length === 1 && l[0].src === '*' ? l[0].type : pickType(l) }) }
+            const nm = tp => (tp.startsWith('user:') ? tp.slice(5) : itemTitle(tp))
+            const known = userItemsBySrc(mat?.details)
+            const names = [...new Set((addFrom ? known.filter(([g]) => addFrom.src === '*' || g === addFrom.src) : known).flatMap(([, l]) => l.map(([, k]) => k)))]
+            const add = () => {
+              const n = String(addFrom?.name || '').replace(/[|=]/g, ' ').trim().slice(0, 40)
+              if (!n) return
+              const e = { src: addFrom.src, type: 'user:' + n }
+              if (!list.some(x => x.src === e.src && x.type === e.type)) setList([...list, e])
+              setAddFrom(null)
+            }
+            return (
+              <div style={{ flex: '1 1 100%', padding: '6px 8px', border: '0.5px dashed var(--border-md)', borderRadius: 'var(--radius)' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Откуда брать значение</div>
+                {list.map((e, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+                    <select value={e.src} onChange={ev => setList(list.map((x, j) => (j === i ? { ...x, src: ev.target.value } : x)))} style={{ padding: '5px 6px', fontSize: 12 }}>
+                      <option value="*">Любая программа</option>
+                      {MODEL_SRC.map(([g, l]) => <option key={g} value={g}>{l}</option>)}
+                    </select>
+                    <span style={{ fontSize: 12.5 }}>→ {nm(e.type)}</span>
+                    {list.length > 1 && <button type="button" style={chip(false)} onClick={() => setList(list.filter((_, j) => j !== i))} title="Убрать из поля">✕</button>}
+                  </div>
+                ))}
+                {addFrom ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select value={addFrom.src} onChange={ev => setAddFrom({ ...addFrom, src: ev.target.value })} style={{ padding: '5px 6px', fontSize: 12 }}>
+                      <option value="*">Любая программа</option>
+                      {MODEL_SRC.map(([g, l]) => <option key={g} value={g}>{l}</option>)}
+                    </select>
+                    <input type="text" list="lbl-pick-names" value={addFrom.name} placeholder="Название параметра" maxLength={40} autoFocus
+                      onChange={ev => setAddFrom({ ...addFrom, name: ev.target.value })} onKeyDown={ev => { if (ev.key === 'Enter') add() }} style={{ width: 160, padding: '6px 8px' }} />
+                    <datalist id="lbl-pick-names">{names.map(n => <option key={n} value={n} />)}</datalist>
+                    <button type="button" style={chip(true)} onClick={add}>Добавить</button>
+                    <button type="button" style={chip(false)} onClick={() => setAddFrom(null)}>Отмена</button>
+                  </div>
+                ) : (
+                  <button type="button" style={{ ...chip(false), borderStyle: 'dashed' }} onClick={() => setAddFrom({ src: list.some(x => x.src === 'sketchup') ? 'basis' : 'sketchup', name: '' })}>+ Из другой программы в это же поле</button>
+                )}
+                <Hint>В одном поле — параметры разных программ: деталь из Базиса печатает параметр Базиса, из SketchUp — параметр SketchUp (например, «Примечание» из Базиса и «Дополнительно» из SketchUp). Нет такого параметра у детали или он пустой — поле не печатается совсем, вместе с рамкой. «Любая программа» — берётся у всех деталей.</Hint>
+              </div>
+            )
+          })()}
           {canCaption(cur.type) && cur.type !== 'order' && !cur.img && !isBox(cur) && (
             <div style={{ flex: '1 1 100%', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>Подпись
@@ -704,22 +751,38 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
       {/* пользовательские параметры деталей: колонки таблицы при импорте Excel/CSV и пользовательские свойства из Базиса —
           под теми же названиями, что в источнике; на бирке — значение у каждой детали */}
       {!rem && (() => {
-        const list = userItems(mat?.details)
-        t.items.forEach(i => { if (i.type.startsWith('user:') && !list.some(([k]) => k === i.type)) list.push([i.type, itemTitle(i.type)]) })
+        const groups = userItemsBySrc(mat?.details)
+        const inList = new Set(groups.flatMap(([g, l]) => l.map(([k]) => `pick:${g}=${k}`)))
+        // параметры, уже стоящие на бирке, которых нет в этом заказе (поставлены заранее или из другого заказа)
+        const onTpl = [...new Set(t.items.map(i => i.type).filter(tp => (tp.startsWith('user:') || tp.startsWith('pick:')) && !inList.has(tp)))]
         return (
           <>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Параметры деталей — колонки таблицы, свойства из Базиса</div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: list.length ? 10 : 4 }}>
-              {list.map(([k, label]) => addChip(k, label))}
-              {/* параметр можно поставить заранее, ещё до импорта: по названию колонки таблицы или свойства из Базиса */}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Параметры деталей — по программам, откуда пришла деталь</div>
+            {groups.map(([g, l]) => (
+              <div key={g} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 3 }}>{g === 'manual' ? 'Внесены вручную' : `Из ${srcName(g)}`}</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {l.map(([k, label]) => addChip(`pick:${g}=${k}`, label))}
+                </div>
+              </div>
+            ))}
+            {onTpl.length > 0 && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 3 }}>Уже на бирке</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{onTpl.map(tp => addChip(tp, itemTitle(tp)))}</div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+              {/* параметр можно поставить заранее, ещё до импорта: по названию; программу — в «Откуда брать значение» */}
               <button type="button" style={{ ...chip(false), borderStyle: 'dashed' }} onClick={() => {
-                const n = (window.prompt('Название параметра — точно как колонка в таблице или пользовательское свойство в Базисе:', '') || '').trim().slice(0, 40)
+                const n = (window.prompt('Название параметра — точно как колонка в таблице или свойство в модели (Базис, SketchUp…):', '') || '').replace(/[|=]/g, ' ').trim().slice(0, 40)
                 if (!n) return
                 const it = newLabelItem('user:' + n, tpl)
                 onChange({ ...tpl, items: [...tpl.items, it] }); setSel(it.id)
               }}>+ Свой параметр…</button>
             </div>
-            {!list.length && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 10 }}>Параметры появляются после импорта таблицы (колонки «Свойство (на бирку)») или модели Базиса с пользовательскими свойствами. Можно добавить заранее — по названию.</div>}
+            <Hint>Параметр из группы печатается только у деталей из этой программы: «Примечание» из Базиса — у деталей Базиса, «Дополнительно» из SketchUp — у деталей SketchUp. Чтобы оба были в одном поле, выберите элемент на бирке → «Откуда брать значение» → «+ Из другой программы в это же поле». У детали нет параметра — поле не печатается совсем, вместе с рамкой.</Hint>
+            {!groups.length && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 10 }}>Параметры появляются после импорта таблицы (колонки «Свойство (на бирку)») или модели (Базис, SketchUp…) со свойствами деталей. Можно добавить заранее — по названию.</div>}
           </>
         )
       })()}
