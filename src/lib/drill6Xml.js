@@ -871,9 +871,6 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   mills.forEach(m => {
     if (m.cat === 'decor') { m.tool = null; return }
     if (m.cat === 'groovePath') { m.tool = toolOf('groove', m.width, m.depth, `паз по траектории ${r1(m.width)} × ${r1(m.depth)}`); return }
-    // надсечка — своим инструментом, если назначен: тот же номер фрезы в станке, но со своей (медленной) подачей —
-    // подачи в XML нет, станок берёт её из настроек инструмента
-    if (m.notch && o6.ops.edge.notchTool) { const id = o6.ops.edge.notchTool, t = o6.tools.find(q => q.id === id); if (t || id === 'auto') { m.tool = t || null; return } }
     if (m.cat !== 'pocket') { m.tool = toolOf(m.cat, 0, 0, MILL_WHAT[m.cat]); return }
     const size = m.poly ? pocketSize(m.poly) : null
     m.tool = toolOf('pocket', size?.min || 0, m.depth, `выемка ${size ? size.text + ' × ' : 'глубиной '}${r1(m.depth)}`, size)
