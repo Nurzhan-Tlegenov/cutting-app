@@ -5,6 +5,8 @@ import { saveOrderNote, NOTES_SQL_HINT, saveOrderArticle, ARTICLE_SQL_HINT } fro
 import ShareBadge from '../components/ShareBadge'
 import { useState, useEffect, useRef } from 'react'
 import DeskSplit from '../components/DeskSplit'
+import ContourResizeNote from '../components/ContourResizeNote'
+import { applyResize, resetOutline } from '../lib/contourResize'
 import { useDesktop } from '../hooks/useDesktop'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -363,7 +365,22 @@ export default function EditOrderPage() {
     setDetails(prev => [...prev, d])
   }
   const removeDetail = (u) => setDetails(d => d.filter(x => x.uid !== u))
-  const updateDetail = (u, updated) => setDetails(d => d.map(x => x.uid === u ? updated : x))
+  // правка размера детали с фигурным контуром — контур сбрасывается до прямоугольника (contourResize.js),
+  // под деталью — предупреждение с «Вернуть как было» (resetNotes: uid → деталь до правки)
+  const [resetNotes, setResetNotes] = useState({})
+  const updateDetail = (u, updated) => {
+    const prev = details.find(x => x.uid === u)
+    const r = applyResize(prev, updated)
+    if (r.reset) setResetNotes(n => (n[u] ? n : { ...n, [u]: prev }))
+    setDetails(d => d.map(x => x.uid === u ? r.detail : x))
+  }
+  const dropNote = u => setResetNotes(n => { const o = { ...n }; delete o[u]; return o })
+  const contourNote = d => (
+    <ContourResizeNote detail={d} prev={resetNotes[d.uid]}
+      onUndo={() => { const p = resetNotes[d.uid]; dropNote(d.uid); setDetails(ds => ds.map(x => (x.uid === d.uid ? p : x))) }}
+      onDismiss={() => dropNote(d.uid)}
+      onReset={() => setDetails(ds => ds.map(x => (x.uid === d.uid ? { ...x, contour: resetOutline(x.contour, x.h, x.w) } : x)))} />
+  )
 
   // Скопировать присадку/разметку (и опционально размеры+форму+кромки) из другой детали.
   // Если размеры НЕ копируются — переносим только присадку и разметку (полки/стойки),
@@ -646,7 +663,8 @@ export default function EditOrderPage() {
             {dets.map((d) => {
               const globalIndex = details.findIndex(x => x.uid === d.uid)
               return (
-                <DetailCard key={d.uid} detail={d} index={globalIndex} groupUi={groupUi}
+                <div key={d.uid}>
+                <DetailCard detail={d} index={globalIndex} groupUi={groupUi}
                   onUpdate={u => updateDetail(d.uid, u)}
                   onRemove={() => removeDetail(d.uid)}
                   activeEdgeName={activeEdge} edgeTypes={edgeTypes} showEdge={showEdge}
@@ -657,6 +675,8 @@ export default function EditOrderPage() {
                     label: `#${details.findIndex(y=>y.uid===x.uid)+1} (${x.w||'?'}×${x.h||'?'})`
                   }))}
                   onCopyFrom={(sourceUid, opts) => copyDetailConfig(d.uid, sourceUid, opts)} />
+                {contourNote(d)}
+                </div>
               )
             })}
             </div>

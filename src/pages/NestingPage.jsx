@@ -37,6 +37,7 @@ import { myProduction } from '../lib/productionApi'
 import { loadOrderModel } from '../lib/orderModel'
 import { hasModel } from '../lib/model3d'
 import { parsePolygonFromDetail, needsTrueShape } from '../lib/trueShapeNesting'
+import { contourMismatch } from '../lib/contourResize'
 import { detailHoles } from '../lib/partHoles'
 import { cutDetails, rawDetail, parseEdgeTypes, overOf, overMm, OVER_KEY, edgeKey, blankType, modelAllow, allowOf, ALLOW_KEY, NARROW_KEY, narrowMm } from '../lib/edgeCut'
 import { saveNestingPdf } from '../lib/nestingPdf'
@@ -1770,6 +1771,7 @@ export default function NestingPage() {
   const [matKey, setMatKey] = useState('')
   const [savedByMat, setSavedByMat] = useState({})   // сохранённые раскрои: ключ материала -> результат
   const materials = useMemo(() => materialsOf(allDetails, order), [allDetails, order])
+  const badContours = useMemo(() => allDetails.map(d => ({ d, m: contourMismatch(d.contour, d.width, d.length) })).filter(x => x.m), [allDetails])
   const multiMat = materials.length > 1
   // В раскрой деталь идёт заготовкой: с учётом подрезки на толщину кромки и прифуговки (edgeCut.js).
   // allDetails — строки заказа как есть (их правим и сохраняем), details — заготовки; исходная строка — rawDetail(d).
@@ -3989,6 +3991,18 @@ export default function NestingPage() {
       {order?.status === 'draft' && order.returned_at && (
         <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '6px 10px', marginBottom: 8 }}>
           ↩ Производство вернуло заказ на доработку{order.return_note ? `: ${order.return_note}` : ''}. Поправьте заказ («✎ Править заказ») и оформите его заново.
+        </div>
+      )}
+
+      {/* детали, у которых контур остался от другого размера (размер меняли после рисования контура) — в раскрое налезут на соседние */}
+      {badContours.length > 0 && (
+        <div style={{ fontSize: 12, background: 'rgba(220,53,69,0.08)', border: '1px solid rgba(220,53,69,0.45)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8, lineHeight: 1.4 }}>
+          <b style={{ color: '#dc3545' }}>⚠ Контур не совпадает с размером детали — {badContours.length} дет.</b>
+          <div style={{ color: 'var(--text-muted)' }}>
+            {badContours.slice(0, 6).map(({ d, m }) => `${d.name || 'Деталь'} ${d.length}×${d.width} (контур ${m.l}×${m.w})`).join('; ')}{badContours.length > 6 ? '…' : ''}.
+            {' '}Похоже, размер меняли после рисования контура — в раскрое такие детали налезут на соседние. Откройте заказ («✎ Редактировать»):
+            под деталью будет кнопка «Сбросить до прямоугольника».
+          </div>
         </div>
       )}
 
