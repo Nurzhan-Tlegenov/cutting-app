@@ -12,6 +12,7 @@
 // работают как у форматника. Дерево резов каждого листа — sheet.beamTree (для программы станка).
 import { beamSettings, maxLevels, trimAt } from './beamSaw'
 import { groupLinesOnSheet, posOfInstance } from './partGroups'
+import { narrowSide, narrowTrimTo } from './edgeCut'
 
 // версия алгоритма пильного центра — пишется в результат (beamVersion), меняется с каждой доработкой
 export const BEAM_SAW_VERSION = 'β0.22'
@@ -22,6 +23,19 @@ const pause = () => new Promise(r => setTimeout(r, 0))
 
 // ── детали ────────────────────────────────────────────────────────────────
 // id `${индекс детали}_${номер}` — как в nesting.js: по нему карта находит детали заказа
+// «✂» на карте: до скольких упилить узкую деталь после кромки — готовый размер − кромка стороны упила + её прифуговка
+// (как на бирке и в программе); нет настроек кромки заказа — пильный размер, как раньше
+function trimLabel(d, t, byW, types) {
+  const saw = byW ? t.width : t.length
+  if (!types) return saw
+  try {
+    const raw = d._raw || d
+    const eds = { left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }
+    const side = narrowSide(byW ? ['left', 'right'] : ['bottom', 'top'], eds, types, raw.contour, Number(raw.width) || 0, Number(raw.length) || 0)
+    const v = narrowTrimTo(d, types, side)
+    return v > 0 ? Math.round(v * 10) / 10 : saw
+  } catch { return saw }
+}
 export function buildPieces(details, kerf, s) {
   const out = []
   details.forEach((d, di) => {
@@ -35,7 +49,7 @@ export function buildPieces(details, kerf, s) {
         id: `${di}_${q}`, detailIndex: di,
         pw: W + kerf, ph: L + kerf, origX: W, origY: L,
         rotatable: !!d.rotatable,
-        label: (d.display_name || d.name || '') + (trimTo ? ` ✂${trimTo.width !== W ? trimTo.width : trimTo.length}` : ''),
+        label: (d.display_name || d.name || '') + (trimTo ? ` ✂${trimLabel(d, trimTo, W !== W0, s.edgeTypes)}` : ''),
         prefix: d.prefix, trimTo,
         edgeTop: d.edge_top, edgeRight: d.edge_right, edgeBottom: d.edge_bottom, edgeLeft: d.edge_left,
       })
@@ -842,6 +856,7 @@ export async function runBeamSaw(params, { live = false, shouldStop = () => fals
   const s = { ...beamSettings(params.beamSaw), ...(cfgDir ? { direction: cfgDir } : {}) }
   // «ступенька» на последнем листе — только у форматника (liveNesting передаёт её сам; в настройках пильного центра её нет)
   s.stairLast = !!params.beamSaw?.stairLast
+  s.edgeTypes = params.edgeTypes || null      // виды кромки заказа — для «✂ до …» у узких деталей
   // «Мелкие — в центр» с «узкой полосой до …» — узкие полосы в середину листа (narrowToMiddle)
   if (params.smallPartsToCenter && Number(params.smallPartsMaxSide) > 0) s.narrowMid = { side: Number(params.smallPartsMaxSide), gap: Math.max(0, Number(params.smallPartsEdgeGap) || 0) }
   const kerf = s.kerf

@@ -2420,7 +2420,7 @@ export default function NestingPage() {
     if (beamSaw) {
       const pr = (order.production_id && productions.find(x => x.id === order.production_id)) || productions.find(x => x.owner_id && x.owner_id === user?.id) || null
       const bs = beamSettings(pr?.beam_saw_settings)
-      Object.assign(params, { beamSaw: pr?.beam_saw_settings || {}, kerf: bs.kerf, marginL: bs.trimLeft, marginR: bs.trimRight, marginT: bs.trimTop, marginB: bs.trimBottom, byBox: false })
+      Object.assign(params, { edgeTypes: parseEdgeTypes(order.edge_types), beamSaw: pr?.beam_saw_settings || {}, kerf: bs.kerf, marginL: bs.trimLeft, marginR: bs.trimRight, marginT: bs.trimTop, marginB: bs.trimBottom, byBox: false })
     }
     if (continueFrom && cfg.result && cfg.sheetsData?.length && !(cfg.buffer || []).length && cfg.result.paramsKey === paramsKey(params)) {
       params.seed = {
