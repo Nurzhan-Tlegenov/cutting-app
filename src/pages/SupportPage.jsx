@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import SupportNotes from '../components/SupportNotes'
+import TasksPage from './TasksPage'
 import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import BottomNav from '../components/BottomNav'
 import CncLoader from '../components/CncLoader'
 import { UserName } from '../components/UserCard'
-import { useIsSupport, useSupportStaff, setSupport, supportTeam, supportBoard, supportTake, supportArchiveLegacy, supportNotes, supportConfig, setSupportStaffPack, chatSeenAt, markChatSeen,
+import { useIsSupport, useSupportStaff, setSupport, supportTeam, supportBoard, supportTake, supportClose, supportArchiveLegacy, supportNotes, supportConfig, setSupportStaffPack, chatSeenAt, markChatSeen,
   SUPPORT_COLS, SUPPORT_CLOSED, supAgo } from '../lib/support'
 
 const date = v => (v ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '')
@@ -30,6 +31,10 @@ export default function SupportPage() {
   const [archive, setArchive] = useState(false)
   const [q, setQ] = useState('')
   const loc = useLocation()
+  // «Задачи» — общий канбан команды поддержки (из головы и по обращениям); ?tasks=1 — сразу на нём (из пуша, из обращения)
+  const [tasks, setTasksRaw] = useState(() => new URLSearchParams(loc.search).get('tasks') === '1')
+  useEffect(() => { if (new URLSearchParams(loc.search).get('tasks') === '1') Promise.resolve().then(() => setTasksRaw(true)) }, [loc.search])
+  const setTasks = v => { setTasksRaw(v); if (!v && /tasks=1/.test(loc.search)) navigate('/support', { replace: true }) }
   const [team, setTeam] = useState(() => (new URLSearchParams(loc.search).get('chat') ? 'chat' : ''))   // '' — доска, 'chat' — чат команды, 'team' — команда
   const [chatNew, setChatNew] = useState(0)
   const [busy, setBusy] = useState('')
@@ -82,6 +87,15 @@ export default function SupportPage() {
     </div>
   )
 
+  // закрыть диалог: обращение решено / ответ дан — в архив, пользователю ничего не уходит. Напишет снова — будет новая карточка
+  const closeQuick = async (e, c) => {
+    e.stopPropagation()
+    if (!window.confirm(`Закрыть диалог №${c.num} (${c.author})? Он уйдёт в архив как решённый, пользователю ничего не придёт. Напишет снова — откроется новый диалог.`)) return
+    setBusy(c.id)
+    const r = await supportClose(c.id, 'done', '')
+    setBusy('')
+    if (r.error) setErr(r.error); else load()
+  }
   const take = async (e, c) => {
     e.stopPropagation(); setBusy(c.id)
     const r = await supportTake(c.id); setBusy('')
@@ -119,6 +133,8 @@ export default function SupportPage() {
           <span>💬 {c.msgs}</span>
           {c.legacy && <span>старое</span>}
           <span style={{ flex: 1 }} />
+          {!closed && !fresh && c.status !== 'dev' && c.last_staff_at && <button type="button" disabled={busy === c.id} onClick={e => closeQuick(e, c)} className="btn-secondary"
+            title="Ответ дан — закрыть диалог (в архив как решённый)" style={{ width: 'auto', padding: '3px 10px', fontSize: 11.5, color: 'var(--teal)', borderColor: 'var(--teal)' }}>🔒 Закрыть</button>}
           {!closed && !mine && <button type="button" disabled={busy === c.id} onClick={e => take(e, c)} className={c.taken_by ? 'btn-secondary' : 'btn-primary'}
             style={{ width: 'auto', padding: '3px 10px', fontSize: 11.5 }}>{c.taken_by ? 'Забрать' : 'Беру'}</button>}
         </div>
@@ -133,16 +149,18 @@ export default function SupportPage() {
   )
 
   return (
-    <div className="page" style={{ paddingBottom: 100, ...(wide ? { maxWidth: 'none' } : {}) }}>
+    <div className="page" style={{ paddingBottom: 100, ...(wide || tasks ? { maxWidth: 'none' } : {}) }}>
       {head}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button type="button" onClick={() => setArchive(false)} className={archive ? 'btn-secondary' : 'btn-primary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>Доска</button>
-        <button type="button" onClick={() => setArchive(true)} className={archive ? 'btn-primary' : 'btn-secondary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>Архив</button>
-        {archive && <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск: имя, текст, №" style={{ flex: '1 1 160px', padding: '6px 10px', fontSize: 13 }} />}
-        {!archive && isMaster && legacy > 0 && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }} onClick={archiveLegacy}>Старые ({legacy}) → в архив</button>}
+        <button type="button" onClick={() => { setArchive(false); setTasks(false) }} className={archive || tasks ? 'btn-secondary' : 'btn-primary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>Обращения</button>
+        <button type="button" onClick={() => { setArchive(true); setTasks(false) }} className={archive && !tasks ? 'btn-primary' : 'btn-secondary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>Архив</button>
+        <button type="button" onClick={() => setTasks(true)} className={tasks ? 'btn-primary' : 'btn-secondary'} style={{ width: 'auto', padding: '5px 12px', fontSize: 12.5 }}>📌 Задачи</button>
+        {archive && !tasks && <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Поиск: имя, текст, №" style={{ flex: '1 1 160px', padding: '6px 10px', fontSize: 13 }} />}
+        {!archive && !tasks && isMaster && legacy > 0 && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '5px 10px', fontSize: 12 }} onClick={archiveLegacy}>Старые ({legacy}) → в архив</button>}
       </div>
       {err && <p className="error-text" style={{ fontSize: 12, marginBottom: 8 }}>{err}</p>}
-      {cards === null ? <CncLoader label="Загружаем обращения…" />
+      {tasks ? <TasksPage team="support" />
+        : cards === null ? <CncLoader label="Загружаем обращения…" />
         : archive ? (cards.length ? cards.map(tile) : <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>{q ? 'Ничего не найдено.' : 'В архиве пока пусто.'}</p>)
           : wide ? (
             <div style={{ display: 'grid', gridTemplateColumns: `repeat(${SUPPORT_COLS.length}, minmax(0, 1fr))`, gap: 12, alignItems: 'start' }}>

@@ -5,6 +5,7 @@ import CncLoader from '../components/CncLoader'
 import SupportNotes from '../components/SupportNotes'
 import SupportOrders from '../components/SupportOrders'
 import { isImageFile, payloadBlob } from '../lib/messages'
+import { supportTaskFromCard } from '../lib/tasks'
 import { useIsSupport, supportCard, supportFile, supportTake, supportAssign, supportMove, supportReply, supportSummary,
   supportDevDecide, supportClose, supportReopen, supportMerge, supportTeam, SUPPORT_COLS, SUPPORT_CLOSED, DETAIL_TEMPLATES, DONE_TEXT, supAgo } from '../lib/support'
 
@@ -63,6 +64,23 @@ export default function SupportCardPage() {
   const mine = c.taken_by === user?.id
   const canClose = !closed && (c.status !== 'dev' || isMaster)
   const send = () => { const b = text.trim(); if (b) run(() => supportReply(c.id, b), () => setText('')) }
+  // закрыть диалог одним нажатием: решено — в архив, пользователю ничего не уходит (с сообщением — «✓ Сделано»).
+  // Напишет снова — откроется новый диалог (новая карточка), история этого остаётся в архиве
+  const closeQuick = async () => {
+    if (!window.confirm('Закрыть диалог? Он уйдёт в архив как решённый, пользователю ничего не придёт. Напишет снова — откроется новый диалог.')) return
+    if (await run(() => supportClose(c.id, 'done', ''))) navigate('/support')
+  }
+  // задача команды поддержки по этому обращению — на доску «📌 Задачи»
+  const toTask = async () => {
+    const last = [...d.messages].reverse().find(m => !m.staff && (m.body || m.file_name))
+    const title = (c.summary || '').trim() || `№${c.num} · ${c.author}`
+    const note = [`Обращение №${c.num} · ${c.author}`, last?.body ? last.body.slice(0, 600) : last?.file_name ? '📎 ' + last.file_name : ''].filter(Boolean).join('\n')
+    setBusy(true); setErr('')
+    const r = await supportTaskFromCard({ cardId: c.id, title, note })
+    setBusy(false)
+    if (r.error) { setErr(r.error); return }
+    navigate(`/support?tasks=1&card=${r.data.id}`)
+  }
   const openAssign = async () => { setDlg({ kind: 'assign' }); if (!team) { const r = await supportTeam(); setTeam(r.data || []) } }
   const btn = (label, onClick, style = {}, cls = 'btn-secondary') => <button type="button" disabled={busy} className={cls} onClick={onClick} style={{ width: 'auto', padding: '7px 11px', fontSize: 12.5, ...style }}>{label}</button>
 
@@ -75,10 +93,13 @@ export default function SupportCardPage() {
 
   return (
     <div className="page" style={{ paddingBottom: 140 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, paddingTop: 4 }}>
-        <button type="button" onClick={() => navigate('/support')} style={{ background: 'none', border: 'none', fontSize: 22, color: 'var(--blue)', cursor: 'pointer', padding: '0 4px' }}>‹</button>
+      {/* шапка закреплена сверху: выйти к доске можно из любого места переписки, не листая наверх */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, padding: '6px 0', position: 'sticky', top: 0, zIndex: 40, background: 'var(--bg)', borderBottom: '0.5px solid var(--border)' }}>
+        <button type="button" onClick={() => navigate('/support')} aria-label="К доске" style={{ background: 'none', border: 'none', fontSize: 26, lineHeight: 1, color: 'var(--blue)', cursor: 'pointer', padding: '0 6px' }}>‹</button>
         <h1 style={{ fontSize: 17, fontWeight: 500, flex: 1, minWidth: 0 }}>№{c.num} · {c.author}</h1>
         <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 12, color: '#fff', background: stColor(c.status), flexShrink: 0 }}>{stLabel(c.status)}</span>
+        {canClose && <button type="button" disabled={busy} onClick={closeQuick} title="Закрыть диалог: решено, в архив"
+          style={{ flexShrink: 0, padding: '4px 9px', fontSize: 12, borderRadius: 12, border: '1px solid var(--teal)', background: 'transparent', color: 'var(--teal)', cursor: 'pointer' }}>🔒 Закрыть</button>}
       </div>
 
       {/* автор — кратко, без телефона */}
@@ -103,9 +124,10 @@ export default function SupportCardPage() {
         {!closed && c.status !== 'dev' && btn('🛠 Нужен разработчик', () => setDlg({ kind: 'dev', text: '' }))}
         {!closed && c.status === 'dev' && isMaster && !c.dev_ok && btn('✓ Берём в разработку', () => setDlg({ kind: 'dev_take', text: '' }), { color: '#7B1FA2', borderColor: '#7B1FA2' })}
         {!closed && c.status === 'dev' && isMaster && btn('✕ Не берём', () => setDlg({ kind: 'dev_reject', text: '' }), { color: 'var(--danger)', borderColor: 'var(--danger)' })}
-        {canClose && btn('✓ Сделано', () => setDlg({ kind: 'done', text: DONE_TEXT }), { color: 'var(--teal)', borderColor: 'var(--teal)' })}
+        {canClose && btn('✓ Сделано — с сообщением', () => setDlg({ kind: 'done', text: DONE_TEXT }), { color: 'var(--teal)', borderColor: 'var(--teal)' })}
         {canClose && c.status !== 'dev' && btn('Не берём', () => setDlg({ kind: 'rejected', text: '' }), { color: 'var(--danger)', borderColor: 'var(--danger)' })}
         {closed && btn('↩ Вернуть из архива', () => run(() => supportReopen(c.id)))}
+        {btn('📌 В задачи', toTask)}
       </div>
       {c.status === 'dev' && <div style={{ fontSize: 12, color: '#7B1FA2', marginBottom: 8 }}>{c.dev_ok ? '✓ Мастер: берём в разработку. Когда будет готово — «Сделано».' : 'Ждёт решения мастер-аккаунта: «Берём в разработку» или «Не берём».'}</div>}
       {closed && c.close_note && <div style={{ fontSize: 12, color: stColor(c.status), marginBottom: 8 }}>{stLabel(c.status)} {dt(c.closed_at)}: {c.close_note}</div>}

@@ -42,29 +42,32 @@ function Progress({ done, total, big }) {
   )
 }
 
-export default function TasksPage() {
+// team = 'support' — общая доска задач команды поддержки (страница «Поддержка» → «Задачи»): те же этапы и карточки,
+// видят и правят мастер-аккаунт и сотрудники поддержки; задача может быть связана с обращением (support_card_id).
+export default function TasksPage({ team = null }) {
   const { user, isMaster } = useAuth()
   const navigate = useNavigate()
   const { search } = useLocation()
   const qs = useMemo(() => new URLSearchParams(search), [search])
-  const viewUser = isMaster && qs.get('u') ? qs.get('u') : user?.id
+  const viewUser = !team && isMaster && qs.get('u') ? qs.get('u') : user?.id
   const readOnly = viewUser !== user?.id
+  const LS = k => (team ? `${team}_${k}` : k)          // вид и масштаб доски поддержки запоминаются отдельно от «Моих задач»
   const [cols, setCols] = useState(null)
   const [cards, setCards] = useState([])
   const [orders, setOrders] = useState(new Map())
   const [error, setError] = useState('')
-  const [showDone, setShowDone] = useState(() => { try { return localStorage.getItem('tasksShowDone') === '1' } catch { return false } })
+  const [showDone, setShowDone] = useState(() => { try { return localStorage.getItem(LS('tasksShowDone')) === '1' } catch { return false } })
   const [openId, setOpenId] = useState(qs.get('card'))
   // вид доски, как у техпроцесса: дорожки (этапы сверху вниз, задачи строкой вправо) или колонки слева направо
-  const [layout, setLayoutRaw] = useState(() => { try { return localStorage.getItem('tasksLayout') || 'lanes' } catch { return 'lanes' } })
-  const setLayout = v => { setLayoutRaw(v); try { localStorage.setItem('tasksLayout', v) } catch { /* без памяти */ } }
+  const [layout, setLayoutRaw] = useState(() => { try { return localStorage.getItem(LS('tasksLayout')) || 'lanes' } catch { return 'lanes' } })
+  const setLayout = v => { setLayoutRaw(v); try { localStorage.setItem(LS('tasksLayout'), v) } catch { /* без памяти */ } }
   const lanes = layout === 'lanes'
-  const [cardW, setCardWRaw] = useState(() => { try { return Number(localStorage.getItem('tasksCardW')) || (window.innerWidth < 760 ? 180 : 230) } catch { return 180 } })
-  const setCardW = f => setCardWRaw(w => { const v = Math.max(90, Math.min(400, Math.round(f(w)))); try { localStorage.setItem('tasksCardW', String(v)) } catch { /* без памяти */ } return v })
+  const [cardW, setCardWRaw] = useState(() => { try { return Number(localStorage.getItem(LS('tasksCardW'))) || (window.innerWidth < 760 ? 180 : 230) } catch { return 180 } })
+  const setCardW = f => setCardWRaw(w => { const v = Math.max(90, Math.min(400, Math.round(f(w)))); try { localStorage.setItem(LS('tasksCardW'), String(v)) } catch { /* без памяти */ } return v })
   const CW = cardW
   // колонки: сколько этапов на экране (0 — обычная ширина колонки); щипок и «− / +» меняют, запоминается
-  const [ncols, setNcolsRaw] = useState(() => { try { return Number(localStorage.getItem('tasksCols')) || 0 } catch { return 0 } })
-  const setNcols = v => { setNcolsRaw(v); try { localStorage.setItem('tasksCols', String(v)) } catch { /* без памяти */ } }
+  const [ncols, setNcolsRaw] = useState(() => { try { return Number(localStorage.getItem(LS('tasksCols'))) || 0 } catch { return 0 } })
+  const setNcols = v => { setNcolsRaw(v); try { localStorage.setItem(LS('tasksCols'), String(v)) } catch { /* без памяти */ } }
   const desk = useDesktop()
   const [drag, setDrag] = useState(null)              // { card, x, y, x0, y0, over, idx }
   const boardRef = useRef(null), press = useRef(null), dragged = useRef(false), dragRef = useRef(null), ghostRef = useRef(null)
@@ -72,13 +75,13 @@ export default function TasksPage() {
 
   const load = useCallback(async () => {
     if (!viewUser) return
-    const r = await loadBoard(viewUser, !readOnly)
+    const r = await loadBoard(viewUser, !readOnly, team)
     if (r.error) { setError(r.error); setCols([]); return }
     setError(''); setCols(r.columns); setCards(r.cards)
     const ids = [...new Set(r.cards.map(c => c.order_id).filter(Boolean))]
     const os = await ordersByIds(ids)
     setOrders(new Map(os.map(o => [o.id, o])))
-  }, [viewUser, readOnly])
+  }, [viewUser, readOnly, team])
   useEffect(() => { Promise.resolve().then(load) }, [load])
   useEffect(() => { const c = qs.get('card'); if (c) Promise.resolve().then(() => setOpenId(c)) }, [qs])
   // вернулись из бланка заказа или вкладка снова на экране — статусы заказов могли поменяться
@@ -108,7 +111,7 @@ export default function TasksPage() {
   const newCard = async (colId, title = '') => {
     const list = byCol.get(colId) || []
     const sort = between(list.length ? list[list.length - 1].sort : null, null)
-    const r = await addCard({ column_id: colId, title, sort })
+    const r = await addCard({ column_id: colId, title, sort, ...(team ? { team } : {}) })
     if (await fail(r)) return null
     setCards(l => [...l, r.data]); return r.data
   }
@@ -122,7 +125,7 @@ export default function TasksPage() {
     const name = window.prompt('Название этапа (например: Замер, Закуп материала, Монтаж)')
     if (!name?.trim()) return
     const last = cols[cols.length - 1]
-    const r = await addColumn(name.trim(), between(last?.sort ?? null, null), COLORS[cols.length % COLORS.length])
+    const r = await addColumn(name.trim(), between(last?.sort ?? null, null), COLORS[cols.length % COLORS.length], team)
     if (!(await fail(r))) { setCols(c => [...c, r.data]); setTimeout(() => boardRef.current?.scrollTo({ left: 1e6, behavior: 'smooth' }), 50) }
   }
   const renameColumn = async c => {
@@ -296,11 +299,12 @@ export default function TasksPage() {
         <div style={{ fontSize: tiny ? '0.72rem' : '0.8rem', fontWeight: 500, lineHeight: 1.25, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: tiny ? 2 : 3, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', textDecoration: k.done_at ? 'line-through' : 'none' }}>
           {k.done_at && <span style={{ color: 'var(--teal)' }}>✓ </span>}{k.title || <span style={{ color: 'var(--text-hint)' }}>Без названия</span>}
         </div>
-        {!tiny && (due || (k.remind_at && !k.done_at) || o || p.total > 0) && (
+        {!tiny && (due || (k.remind_at && !k.done_at) || o || k.support_card_id || p.total > 0) && (
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.3 }}>
             {due && <span style={{ color: TONE[due.tone]?.[0] }}>📅 {due.text}</span>}
             {k.remind_at && !k.done_at && <span>{k.reminded_at ? '🔕' : '🔔'}</span>}
             {o && <span title={orderTitle(o)}>📋</span>}
+            {k.support_card_id && <span title="Связана с обращением">🎧</span>}
             {p.total > 0 && <span>☑ {p.done}/{p.total}</span>}
           </div>
         )}
@@ -317,11 +321,12 @@ export default function TasksPage() {
         </div>
         {k.note && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{k.note}</div>}
         <Progress {...p} />
-        {(due || k.remind_at || o) && (
+        {(due || k.remind_at || o || k.support_card_id) && (
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
             {due && <span style={chip(...TONE[due.tone])}>📅 {due.text}</span>}
             {k.remind_at && !k.done_at && <span style={chip('var(--text-muted)', 'var(--bg2)')} title="Напоминание">{k.reminded_at ? '🔕' : '🔔'}</span>}
             {o && <span style={{ ...chip('var(--blue)', 'var(--blue-light)'), whiteSpace: 'normal' }}>📋 {orderTitle(o)} · {sendState(o).label}</span>}
+            {k.support_card_id && <span style={chip('var(--blue)', 'var(--blue-light)')}>🎧 обращение</span>}
           </div>
         )}
       </div>
@@ -329,13 +334,14 @@ export default function TasksPage() {
   }
 
   const open = cards.find(k => k.id === openId) || null
-  const closeEditor = () => { setOpenId(null); if (qs.get('card')) navigate(readOnly ? `/tasks?u=${viewUser}` : '/tasks', { replace: true }) }
+  const closeEditor = () => { setOpenId(null); if (qs.get('card')) navigate(team ? '/support?tasks=1' : readOnly ? `/tasks?u=${viewUser}` : '/tasks', { replace: true }) }
 
   return (
-    <div className="page" style={{ paddingBottom: 100, maxWidth: 'none' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, paddingTop: 4, flexWrap: 'wrap' }}>
-        <MenuButton />
-        <h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>{readOnly ? 'Задачи пользователя' : 'Мои задачи'}</h1>
+    <div className={team ? undefined : 'page'} style={team ? undefined : { paddingBottom: 100, maxWidth: 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, paddingTop: team ? 0 : 4, flexWrap: 'wrap' }}>
+        {!team && <MenuButton />}
+        {team ? <div style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>Общие задачи команды поддержки — из головы и по обращениям</div>
+          : <h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>{readOnly ? 'Задачи пользователя' : 'Мои задачи'}</h1>}
         {!readOnly && cols?.length > 0 && <button type="button" onClick={() => quickAdd(cols[0].id)} style={{ padding: '7px 12px', borderRadius: 18, border: 'none', background: 'var(--blue)', color: '#fff', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>+ Задача</button>}
       </div>
       {readOnly && <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 8 }}>Мастер-аккаунт: только просмотр.</div>}
@@ -358,7 +364,7 @@ export default function TasksPage() {
             </>}
           </span>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-            <input type="checkbox" checked={showDone} onChange={e => { setShowDone(e.target.checked); try { localStorage.setItem('tasksShowDone', e.target.checked ? '1' : '0') } catch { /* без памяти */ } }} style={{ width: 15, height: 15 }} />
+            <input type="checkbox" checked={showDone} onChange={e => { setShowDone(e.target.checked); try { localStorage.setItem(LS('tasksShowDone'), e.target.checked ? '1' : '0') } catch { /* без памяти */ } }} style={{ width: 15, height: 15 }} />
             выполненные{doneCount ? ` (${doneCount})` : ''}
           </label>
         </div>
@@ -461,9 +467,9 @@ export default function TasksPage() {
           onPatch={patch => patchCard(open.id, patch)}
           onDelete={async () => { if (!window.confirm('Удалить задачу?')) return; const r = await deleteCard(open.id); if (!(await fail(r))) { setCards(l => l.filter(k => k.id !== open.id)); closeEditor() } }}
           onOrderLinked={o => setOrders(m => new Map(m).set(o.id, o))}
-          onClose={closeEditor} />
+          onClose={closeEditor} team={team} />
       )}
-      <BottomNav />
+      {!team && <BottomNav />}
     </div>
   )
 }
@@ -484,7 +490,7 @@ const remindKind = c => {
 }
 
 /** Карточка задачи: название, заметка, подзадачи, этап, срок и напоминание, заказ */
-function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, onOrderLinked, onClose }) {
+function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, onOrderLinked, onClose, team = null }) {
   const navigate = useNavigate()
   useBackClose(true, onClose)
   const [title, setTitle] = useState(card.title || '')
@@ -622,8 +628,14 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
           </div>
         )}
 
+        {/* задача поддержки: связанное обращение */}
+        {team && card.support_card_id && (
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '0.5px solid var(--border)' }}>
+            <button type="button" onClick={() => navigate(`/support/${card.support_card_id}`)} style={{ ...btn('var(--blue-light)', 'var(--blue)'), width: '100%', textAlign: 'left' }}>🎧 Открыть обращение</button>
+          </div>
+        )}
         {/* заказ */}
-        <div style={{ marginTop: 16, paddingTop: 12, borderTop: '0.5px solid var(--border)' }}>
+        {!team && <div style={{ marginTop: 16, paddingTop: 12, borderTop: '0.5px solid var(--border)' }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Заказ на раскрой</div>
           {order ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -649,7 +661,7 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
               ))}
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   )

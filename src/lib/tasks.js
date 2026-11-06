@@ -12,12 +12,37 @@ const err = e => (missing(e) ? TASKS_SQL_HINT : String(e?.message || e || 'Ош�
 const uid = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36))
 export const newItemId = uid
 
-/** Доска пользователя: { columns, cards } | { error }. Своя пустая доска создаётся с этапами по умолчанию */
-export async function loadBoard(userId, own = true) {
-  const [c, k] = await Promise.all([
-    supabase.from('task_columns').select('*').eq('user_id', userId).order('sort'),
-    supabase.from('task_cards').select('*').eq('user_id', userId).is('archived_at', null).order('sort'),
+export const SUPPORT_TASKS_SQL_HINT = 'Задачи поддержки ещё не включены в базе: выполните migration_support_tasks.sql в Supabase (SQL Editor) — один раз.'
+const noTeamCol = e => /\bteam\b|support_card_id/i.test(String(e?.message || ''))
+
+/**
+ * Доска: { columns, cards } | { error }.
+ * team пусто — личная доска пользователя userId (своя пустая создаётся с этапами по умолчанию);
+ * team = 'support' — общая доска команды поддержки (этапы по умолчанию создаёт support_tasks_init).
+ */
+export async function loadBoard(userId, own = true, team = null) {
+  if (team) {
+    const q = () => Promise.all([
+      supabase.from('task_columns').select('*').eq('team', team).order('sort'),
+      supabase.from('task_cards').select('*').eq('team', team).is('archived_at', null).order('sort'),
+    ])
+    let [c, k] = await q()
+    if (c.error || k.error) return { error: noTeamCol(c.error || k.error) ? SUPPORT_TASKS_SQL_HINT : err(c.error || k.error) }
+    if (!(c.data || []).length) {
+      const r = await supabase.rpc('support_tasks_init')
+      if (r.error) return { error: /support_tasks_init|schema cache/i.test(r.error.message || '') ? SUPPORT_TASKS_SQL_HINT : err(r.error) }
+      ;[c, k] = await q()
+      if (c.error || k.error) return { error: err(c.error || k.error) }
+    }
+    return { columns: c.data || [], cards: k.data || [] }
+  }
+  // личная доска — без задач поддержки (team). До migration_support_tasks.sql колонки team нет — тогда как раньше
+  const run = withTeam => Promise.all([
+    (withTeam ? supabase.from('task_columns').select('*').eq('user_id', userId).is('team', null) : supabase.from('task_columns').select('*').eq('user_id', userId)).order('sort'),
+    (withTeam ? supabase.from('task_cards').select('*').eq('user_id', userId).is('team', null) : supabase.from('task_cards').select('*').eq('user_id', userId)).is('archived_at', null).order('sort'),
   ])
+  let [c, k] = await run(true)
+  if ((c.error && noTeamCol(c.error)) || (k.error && noTeamCol(k.error))) [c, k] = await run(false)
   if (c.error || k.error) return { error: err(c.error || k.error), missing: missing(c.error || k.error) }
   let columns = c.data || []
   if (!columns.length && own) {
@@ -28,8 +53,18 @@ export async function loadBoard(userId, own = true) {
   return { columns, cards: k.data || [] }
 }
 
-export async function addColumn(name, sort, color) {
-  const { data, error } = await supabase.from('task_columns').insert({ name, sort, color }).select('*').single()
+/** Задача поддержки из обращения: в первый этап доски поддержки, со ссылкой на обращение -> { data } | { error } */
+export async function supportTaskFromCard({ cardId, title, note }) {
+  const b = await loadBoard(null, true, 'support')
+  if (b.error) return { error: b.error }
+  const col = b.columns[0]
+  if (!col) return { error: 'Нет этапов на доске задач поддержки' }
+  const last = b.cards.filter(k => k.column_id === col.id).reduce((m, k) => Math.max(m, Number(k.sort) || 0), 0)
+  return addCard({ team: 'support', column_id: col.id, title: title || '', note: note || null, support_card_id: cardId, sort: last + 1 })
+}
+
+export async function addColumn(name, sort, color, team = null) {
+  const { data, error } = await supabase.from('task_columns').insert({ name, sort, color, ...(team ? { team } : {}) }).select('*').single()
   return error ? { error: err(error) } : { data }
 }
 export async function updateColumn(id, patch) {
