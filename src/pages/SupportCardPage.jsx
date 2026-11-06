@@ -4,7 +4,8 @@ import { useAuth } from '../context/AuthContext'
 import CncLoader from '../components/CncLoader'
 import SupportNotes from '../components/SupportNotes'
 import SupportOrders from '../components/SupportOrders'
-import { isImageFile, payloadBlob } from '../lib/messages'
+import { isImageFile, payloadBlob, excludeRequest } from '../lib/messages'
+import ExcludeStatsRequest from '../components/ExcludeStatsRequest'
 import { supportTaskFromCard } from '../lib/tasks'
 import { useIsSupport, supportCard, supportFile, supportTake, supportAssign, supportMove, supportReply, supportSummary,
   supportDevDecide, supportClose, supportReopen, supportMerge, supportTeam, SUPPORT_COLS, SUPPORT_CLOSED, DETAIL_TEMPLATES, DONE_TEXT, supAgo } from '../lib/support'
@@ -153,6 +154,11 @@ export default function SupportCardPage() {
             {m.body && <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</div>}
             {m.file_name && <FileItem m={m} onError={setErr} />}
             {m.order_id && <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 3 }}>🧩 приложен заказ — см. «Заказы из обращения» ниже</div>}
+            {/* просьба убрать тестовый заказ из итогов — кнопки прямо здесь (раньше были только в «Сообщениях») */}
+            {isMaster && !m.staff && excludeRequest(m) && (
+              <ExcludeStatsRequest req={excludeRequest(m)} onError={setErr}
+                onDone={(o, on) => { if (on && !closed && window.confirm('Готово. Сообщить пользователю ответом?')) run(() => supportReply(c.id, `Тестовый заказ «${String(o.order_name || '').trim() || o.order_number || 'Заказ'}»${o.order_number ? ` (№ ${o.order_number})` : ''} убран из итогов.`)) }} />
+            )}
           </div>
         ))}
         {!d.messages.length && <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Сообщений нет.</p>}

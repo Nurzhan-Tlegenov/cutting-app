@@ -11,6 +11,8 @@ export const MSG_SQL_HINT = 'Сообщения пока не включены �
 const COLS = 'id,created_at,from_id,from_name,to_id,kind,title,body,file_name,file_size,order_id'
 const fail = e => ({ error: isMissing(e) ? MSG_SQL_HINT : String(e?.message || e), missing: isMissing(e) })
 const nameOf = profile => [profile?.full_name, profile?.phone].filter(Boolean).join(' · ') || profile?.email || ''
+// кто отвечает пользователям: мастер-аккаунт — «Разработчик» (своё имя пользователям не показываем)
+const senderOf = profile => (profile?.role === 'admin' ? 'Разработчик' : nameOf(profile))
 
 /** Лента сообщений, новые сверху. -> { data: [...] } | { error, missing } */
 export async function listMessages(limit = 200) {
@@ -147,7 +149,7 @@ export async function sendAppealFiles(user, profile, body, files, onProgress = n
 /** Ответ мастер-аккаунта с файлами (скриншот, проверенная модель…) — картинки пользователь видит сразу */
 export async function sendReplyFiles(user, profile, toId, body, files, toName = '', onProgress = null) {
   if (!files?.length) return sendReply(user, profile, toId, body, toName)
-  return sendWithFiles({ from_id: user.id, from_name: nameOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply' }, body, [...files], onProgress)
+  return sendWithFiles({ from_id: user.id, from_name: senderOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply' }, body, [...files], onProgress)
 }
 /** Вся переписка мастер-аккаунта с пользователем (его обращения и файлы + ответы ему), старые сверху */
 export async function listConversation(userId) {
@@ -160,10 +162,10 @@ export async function listConversation(userId) {
   } catch (e) { return fail(e) }
 }
 /** Новость от мастер-аккаунта всем пользователям */
-export const sendNews = (user, profile, title, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'news', title, body })
+export const sendNews = (user, profile, title, body) => insert({ from_id: user.id, from_name: senderOf(profile), kind: 'news', title, body })
 /** Ответ мастер-аккаунта пользователю */
 // toName — кому (личное сообщение из списка пользователей): мастер видит адресата у своих сообщений; пользователю from_name не показывается
-export const sendReply = (user, profile, toId, body, toName = '') => insert({ from_id: user.id, from_name: nameOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply', body })
+export const sendReply = (user, profile, toId, body, toName = '') => insert({ from_id: user.id, from_name: senderOf(profile) + (toName ? ` → ${toName}` : ''), to_id: toId, kind: 'reply', body })
 /** Файл для отладки с комментарием — мастер-аккаунту */
 export const sendDebugFile = (user, profile, { fileName, payload, comment, orderId, title }, onProgress = null) =>
   insert({ from_id: user.id, from_name: nameOf(profile), kind: 'debug', title: `${title || ''}${title ? ' · ' : ''}v${APP_VERSION}`, body: comment, file_name: fileName, file_size: String(payload || '').length, payload: String(payload || ''), order_id: orderId || null }, onProgress)
@@ -229,7 +231,7 @@ export async function listOrderMessages(orderId) {
   } catch (e) { return fail(e) }
 }
 /** Сообщение по заказу: адресата ставит база (заказчик → производство, производство → заказчик) */
-export const sendOrderMessage = (user, profile, orderId, body) => insert({ from_id: user.id, from_name: nameOf(profile), kind: 'order', order_id: orderId, body })
+export const sendOrderMessage = (user, profile, orderId, body) => insert({ from_id: user.id, from_name: senderOf(profile), kind: 'order', order_id: orderId, body })
 export const ORDER_CHAT_SQL_HINT = 'Переписка по заказу пока не включена в базе: выполните migration_order_chat.sql в Supabase (SQL Editor) — один раз.'
 /** Галочки у ответов мастер-аккаунта: дошло (read = false) / прочитано (read = true). Нет функции в базе — молча */
 let lastReceipt = 0
