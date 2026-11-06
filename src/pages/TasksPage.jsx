@@ -566,7 +566,6 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
             }} style={{ width: 18, height: 18 }} />Выполнено
           </label>}
           <span style={{ flex: 1 }} />
-          {!ro && <button type="button" onClick={onDelete} style={{ ...btn('transparent', 'var(--danger)'), padding: '6px 10px' }}>Удалить</button>}
           <button type="button" aria-label="Закрыть" onClick={close} style={{ width: 34, height: 34, borderRadius: 17, border: 'none', background: 'var(--bg2)', fontSize: 18, cursor: 'pointer', color: 'var(--text-muted)' }}>×</button>
         </div>
 
@@ -662,6 +661,13 @@ function CardEditor({ card, cols, order, readOnly, userId, onPatch, onDelete, on
             </div>
           )}
         </div>}
+
+        {/* удалить — в самом низу, подальше от «Закрыть» (рядом с ним задачу удаляли нечаянно) */}
+        {!ro && (
+          <div style={{ marginTop: 24, paddingTop: 12, borderTop: '0.5px solid var(--border)' }}>
+            <button type="button" onClick={onDelete} style={{ ...btn('transparent', 'var(--danger)'), border: '1px solid var(--danger)', width: '100%', padding: '9px 12px' }}>🗑 Удалить задачу</button>
+          </div>
+        )}
       </div>
     </div>
   )
