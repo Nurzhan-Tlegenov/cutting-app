@@ -11,6 +11,7 @@
 // ставится пометка cut — её учитывает getAllDrillPoints (отверстия остаются на своих местах относительно
 // готовой детали). Кромка на фигурных участках и в вырезах размер пока не меняет.
 import { trimEdgeGroove } from './edgeGrooves'
+import { getAllDrillPoints } from './drillGeometry'
 
 const num = v => Number(v) || 0
 const r2 = v => Math.round(v * 100) / 100
@@ -55,23 +56,77 @@ export function edgeTrimOf(contour) {
 // заказа под ключом NARROW_KEY: { mm }.
 export const NARROW_KEY = '__narrow'
 export const narrowMm = types => Math.max(0, num(String(parseEdgeTypes(types)[NARROW_KEY]?.mm ?? '').replace(',', '.')))
-/** Сколько нарастить с каждой стороны детали W×L (готовая) -> { left|right|top|bottom: мм } | null */
-export function narrowApplied(edges, types, W, L) {
+/**
+ * С какой стороны упиливать узкую деталь (с неё же наращивают) — одно правило для пильного центра, форматника и фрезера.
+ * pair — две стороны поперёк узкого размера, вторая — по умолчанию (['left','right'] или ['bottom','top']).
+ * По порядку: 1) сторона без присадки и пазов в торец (их нельзя отпилить); 2) без кромки (не кромить второй раз);
+ * 3) меньше присадки в пласть ближе к ней; 4) кромка тоньше (обычно лицевая — толстая); 5) справа / сверху.
+ */
+export function narrowSide(pair, edges, types, contour, W, L) {
+  let c = contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  const has = s => !!edgeKey(edges?.[s])
+  const thick = s => { const k = edgeKey(edges?.[s]); return k ? num((types || {})[k]?.t) : 0 }
+  const endOn = s => (c?.drillings || []).some(d => d?.kind === 'edge' && d.edgeSide === s) || (c?.edgeGrooves || []).some(g => g?.edgeSide === s)
+  let pts = []
+  try { pts = c && num(W) > 0 && num(L) > 0 ? getAllDrillPoints(c, num(W), num(L)).filter(q => !q.edge) : [] } catch { pts = [] }
+  const dist = (q, s) => (s === 'left' ? q.x : s === 'right' ? num(W) - q.x : s === 'bottom' ? q.y : num(L) - q.y)
+  const near = s => { const o = s === pair[0] ? pair[1] : pair[0]; return pts.filter(q => dist(q, s) < dist(q, o)).length }
+  const key = s => [endOn(s) ? 1 : 0, has(s) ? 1 : 0, near(s), thick(s)]
+  const [a, b] = [key(pair[1]), key(pair[0])]
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? pair[1] : pair[0]
+  return pair[1]
+}
+
+/** Сколько нарастить с каждой стороны детали W×L (готовая) -> { left|right|top|bottom: мм } | null; contour — присадка (сторона упила) */
+export function narrowApplied(edges, types, W, L, contour = null) {
   const min = narrowMm(types)
   if (!(min > 0) || !edges) return null
   const has = s => !!edgeKey(edges[s])
   const out = {}
   // кромка слева/справа — деталь идёт по станку вдоль длины, поперёк — ширина W
-  if ((has('left') || has('right')) && num(W) > 0 && num(W) < min - EPS) out[has('right') && !has('left') ? 'left' : 'right'] = r2(min - num(W))
-  if ((has('top') || has('bottom')) && num(L) > 0 && num(L) < min - EPS) out[has('top') && !has('bottom') ? 'bottom' : 'top'] = r2(min - num(L))
+  if ((has('left') || has('right')) && num(W) > 0 && num(W) < min - EPS) out[narrowSide(['left', 'right'], edges, types, contour, W, L)] = r2(min - num(W))
+  if ((has('top') || has('bottom')) && num(L) > 0 && num(L) < min - EPS) out[narrowSide(['bottom', 'top'], edges, types, contour, W, L)] = r2(min - num(L))
   return Object.keys(out).length ? out : null
 }
-const withNarrow = (k, edges, types, W, L) => {
-  const n = narrowApplied(edges, types, W, L)
+const withNarrow = (k, edges, types, W, L, contour = null) => {
+  const n = narrowApplied(edges, types, W, L, contour)
   if (!n) return k
   const d = k ? { ...k } : { l: 0, r: 0, b: 0, t: 0 }
   for (const [s, v] of Object.entries(n)) d[s[0]] = r2((d[s[0]] || 0) - v)
   return d
+}
+
+/**
+ * Готовый размер детали заказа (с кромкой) -> { l, w }: пильный размер + (кромка − прифуговка) по сторонам,
+ * без припуска из модели и без наращивания узкой детали. row — строка заказа (готовая деталь).
+ */
+export function finishedDims(row, types) {
+  const raw = row?._raw || row || {}
+  const t = types || {}
+  const cut = row?._raw ? row : cutDetail(raw, t) || raw
+  let l = num(cut.length), w = num(cut.width)
+  let c = raw.contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  const eds = { left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }
+  const al = allowApplied(eds, t, c) || {}
+  const nr = narrowApplied(eds, t, num(raw.width), num(raw.length), c) || {}
+  const add = side => { const k = edgeKey(eds[side]); const ty = (k && t[k]) || {}; return (k ? num(ty.t) - num(ty.joint) : 0) - (al[side] || 0) - (nr[side] || 0) }
+  l += add('top') + add('bottom'); w += add('left') + add('right')
+  return { l: r2(l), w: r2(w) }
+}
+
+/**
+ * До какого размера упиливать узкую деталь со стороны side: готовый размер поперёк минус кромка этой стороны плюс её
+ * прифуговка (кромку на эту сторону клеят после упила, прифуговка снимет своё). Без кромки — просто готовый размер.
+ * Пример: готовая 50, кромка 1 мм с прифуговкой 1 мм → упилить до 50 (прифуговка −1, кромка +1 = 50).
+ */
+export function narrowTrimTo(row, types, side) {
+  const raw = row?._raw || row || {}
+  const f = finishedDims(row, types)
+  const across = side === 'left' || side === 'right' ? f.w : f.l
+  const k = edgeKey(raw['edge_' + side]), ty = (k && (types || {})[k]) || {}
+  return r2(across - (k ? num(ty.t) - num(ty.joint) : 0))
 }
 
 export const ALLOW_KEY = '__allow'
@@ -141,7 +196,7 @@ export const modelTrimmed = contour => Object.values(edgeTrimOf(contour) || {}).
  */
 export function listSize(detail, types) {
   const L = num(detail?.w), W = num(detail?.h)
-  if (!(L > 0) || !(W > 0) || !(modelTrimmed(detail?.contour) || narrowApplied(detail?.edges, types, W, L))) return { cut: false }
+  if (!(L > 0) || !(W > 0) || !(modelTrimmed(detail?.contour) || narrowApplied(detail?.edges, types, W, L, detail?.contour))) return { cut: false }
   const cs = cutSize(L, W, detail.edges, types, detail.contour)
   if (!cs) return { cut: false }
   const dl = r2(L - cs[0]), dw = r2(W - cs[1])
@@ -151,7 +206,7 @@ export function listSize(detail, types) {
 
 /** Размер в раскрой: [длина, ширина] (кромка слева/справа идёт вдоль длины и уменьшает ширину); contour — для подрезки из модели */
 export function cutSize(length, width, edges, types, contour) {
-  const k = withNarrow(sideDeltas(edges, types, edgeTrimOf(contour), contour), edges, types, width, length)
+  const k = withNarrow(sideDeltas(edges, types, edgeTrimOf(contour), contour), edges, types, width, length, contour)
   if (!k) return null
   return [r2(num(length) - k.b - k.t), r2(num(width) - k.l - k.r)]
 }
@@ -217,7 +272,7 @@ export function cutDetail(row, types) {
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const W = num(row.width), L = num(row.length)
   const eds = { left: row.edge_left, right: row.edge_right, top: row.edge_top, bottom: row.edge_bottom }
-  const k = withNarrow(sideDeltas(eds, types, edgeTrimOf(c), c), eds, types, W, L)
+  const k = withNarrow(sideDeltas(eds, types, edgeTrimOf(c), c), eds, types, W, L, c)
   if (!k) return row
   if (!(W - k.l - k.r > 1) || !(L - k.b - k.t > 1)) return row
   const cc = cutContour(c || {}, W, L, k)

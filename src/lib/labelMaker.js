@@ -17,7 +17,7 @@ import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
-import { parseEdgeTypes, cutDetail, edgeKey, edgeAliases, edgeAlias, allowApplied, narrowApplied } from './edgeCut'
+import { parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrowApplied, narrowSide as narrowSideOf, narrowTrimTo, finishedDims } from './edgeCut'
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
@@ -540,17 +540,7 @@ function nestedQty(mat, di) {
  * d — строка заказа или уже заготовка (cutDetail: _raw — строка заказа). -> { l, w }
  */
 export function finishedSize(order, d) {
-  const types = parseEdgeTypes(order?.edge_types)
-  const raw = d?._raw || d || {}
-  const cut = d?._raw ? d : cutDetail(raw, types) || raw
-  let l = Number(cut.length) || 0, w = Number(cut.width) || 0
-  // припуск из модели (allowApplied) — в пильном размере есть, в готовой детали его нет
-  const al = allowApplied({ left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }, types, raw.contour) || {}
-  // узкая деталь, наращённая под кромочный станок, — после кромки её упиливают в размер
-  const nr = narrowApplied({ left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }, types, Number(raw.width) || 0, Number(raw.length) || 0) || {}
-  const add = side => { const k = edgeKey(raw['edge_' + side]); const t = (k && types[k]) || {}; return (k ? (Number(t.t) || 0) - (Number(t.joint) || 0) : 0) - (al[side] || 0) - (nr[side] || 0) }
-  l += add('top') + add('bottom'); w += add('left') + add('right')
-  return { l: Math.round(l * 100) / 100, w: Math.round(w * 100) / 100 }
+  return finishedDims(d, parseEdgeTypes(order?.edge_types))
 }
 
 // имя заказчика заказа (orders → профиль клиента): страница бирок / ЧПУ подгружает его и кладёт сюда
@@ -596,7 +586,11 @@ export function labelInfo(order, mat, si, pi, part = null) {
     return o
   }
   const allow = toLabel(allowApplied(rawEdges, typesD, rawD.contour))
-  const narrow = toLabel(narrowApplied(rawEdges, typesD, Number(rawD.width) || 0, Number(rawD.length) || 0))
+  const narrowD = narrowApplied(rawEdges, typesD, Number(rawD.width) || 0, Number(rawD.length) || 0, rawD.contour)
+  const narrow = toLabel(narrowD)
+  // наращённая под кромочный станок: заготовка поперёк → до скольких упилить после кромки (с прифуговкой) — по сторонам бирки
+  const narrowTrim = narrowD ? toLabel(Object.fromEntries(Object.keys(narrowD).map(s0 => [s0,
+    { from: s0 === 'left' || s0 === 'right' ? DW : DL, to: narrowTrimTo(d, typesD, s0) }]))) : null
   const cw = o => (o ? { top: o.left, bottom: o.right, left: o.bottom, right: o.top } : null)
   // на сколько четвертей по часовой повёрнута деталь относительно положения «как в заказе»: куда ушла её верхняя сторона
   // (для элементов, привязанных к стороне детали)
@@ -633,7 +627,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
-    allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow),
+    allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow), narrowTrim, narrowTrimCw: cw(narrowTrim),
     // пильный центр: узкая деталь пилится шире и потом подрезается в размер — сколько пилили и до скольких подрезать
     // side / sideCw — сторона бирки, с которой упиливать лишнее (по тому же правилу, что у кромочного станка:
     // со стороны без кромки; кромка с обеих сторон — справа / сверху детали), для элемента, привязанного к сторонам
@@ -643,12 +637,13 @@ export function labelInfo(order, mat, si, pi, part = null) {
       const t = Math.abs(ox - BW) > 0.05 ? { from: ox, to: BW, axis: 'x' } : Math.abs(oy - BH) > 0.05 ? { from: oy, to: BH, axis: 'y' } : null
       if (!t) return null
       const byWidth = (t.axis === 'x') === (turns % 2 === 0)            // на карте шире по X — в детали это ширина (если не повёрнута)
-      const has = k => !!edgeName(rawEdges[k])
-      const s0 = byWidth ? (has('right') && !has('left') ? 'left' : 'right') : (has('top') && !has('bottom') ? 'bottom' : 'top')
-      const lab = toLabel({ [s0]: Math.abs(t.from - t.to) }) || {}
+      // сторона упила — то же правило, что у кромочного станка (присадка в торец, кромка, присадка рядом, толщина кромки)
+      const s0 = narrowSideOf(byWidth ? ['left', 'right'] : ['bottom', 'top'], rawEdges, typesD, rawD.contour, Number(rawD.width) || 0, Number(rawD.length) || 0)
+      const lab = toLabel({ [s0]: Math.abs(t.from - t.to) || 1 }) || {}
       const side = Object.keys(lab).find(k => lab[k] > 0) || null
       const cwOf = { top: 'right', right: 'bottom', bottom: 'left', left: 'top' }       // как cw(): top <- left и т.д.
-      return { from: t.from, to: t.to, side, sideCw: side ? cwOf[side] : null }
+      // до скольких упилить: после кромки с прифуговкой выйдет готовый размер (не пильный)
+      return { from: t.from, to: narrowTrimTo(d, typesD, s0), side, sideCw: side ? cwOf[side] : null }
     })(), curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
     backCorner: BACK.on && !part && isTwoSided(d, mat.thickness) ? backMarkCorner(p, d, BACK.corner, BACK.edge) : null,
@@ -910,12 +905,14 @@ function labelValue(type, info, tpl = null) {
     }
     // узкая деталь, наращённая под кромочный станок: что и с какой стороны упилить после кромления
     case 'narrow': {
-      const a = (tpl ? tpl.rot !== false : true) ? info.narrowCw : info.narrow
-      // пильный центр («Пилить узкую деталь шириной»): «120 → 50»
+      const rot = tpl ? tpl.rot !== false : true
+      const a = rot ? info.narrowCw : info.narrow, tr = (rot ? info.narrowTrimCw : info.narrowTrim) || {}
+      // «заготовка → до скольких упилить» (после кромки с прифуговкой выйдет готовый размер); пильный центр — «120 → 50»
       const bt = info.beamTrim ? `${r1(info.beamTrim.from)} → ${r1(info.beamTrim.to)}` : ''
       if (!a) return bt
       const SIDE = { top: 'сверху', bottom: 'снизу', left: 'слева', right: 'справа' }
-      return ['top', 'right', 'bottom', 'left'].filter(k => a[k] > 0).map(k => `${r1(a[k])} ${SIDE[k]}`).concat(bt ? [bt] : []).join(', ')
+      return ['top', 'right', 'bottom', 'left'].filter(k => a[k] > 0)
+        .map(k => (tr[k] ? `${r1(tr[k].from)} → ${r1(tr[k].to)} ${SIDE[k]}` : `${r1(a[k])} ${SIDE[k]}`)).concat(bt ? [bt] : []).join(', ')
     }
     // склейка — только у склеиваемых деталей: «1/2 (01-02 + 01-02а)»
     case 'glue': {
