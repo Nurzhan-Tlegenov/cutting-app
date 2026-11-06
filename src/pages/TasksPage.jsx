@@ -60,8 +60,11 @@ export default function TasksPage() {
   const setLayout = v => { setLayoutRaw(v); try { localStorage.setItem('tasksLayout', v) } catch { /* без памяти */ } }
   const lanes = layout === 'lanes'
   const [cardW, setCardWRaw] = useState(() => { try { return Number(localStorage.getItem('tasksCardW')) || (window.innerWidth < 760 ? 180 : 230) } catch { return 180 } })
-  const setCardW = f => setCardWRaw(w => { const v = Math.max(150, Math.min(400, Math.round(f(w)))); try { localStorage.setItem('tasksCardW', String(v)) } catch { /* без памяти */ } return v })
+  const setCardW = f => setCardWRaw(w => { const v = Math.max(90, Math.min(400, Math.round(f(w)))); try { localStorage.setItem('tasksCardW', String(v)) } catch { /* без памяти */ } return v })
   const CW = cardW
+  // колонки: сколько этапов на экране (0 — обычная ширина колонки); щипок и «− / +» меняют, запоминается
+  const [ncols, setNcolsRaw] = useState(() => { try { return Number(localStorage.getItem('tasksCols')) || 0 } catch { return 0 } })
+  const setNcols = v => { setNcolsRaw(v); try { localStorage.setItem('tasksCols', String(v)) } catch { /* без памяти */ } }
   const desk = useDesktop()
   const [drag, setDrag] = useState(null)              // { card, x, y, x0, y0, over, idx }
   const boardRef = useRef(null), press = useRef(null), dragged = useRef(false), dragRef = useRef(null), ghostRef = useRef(null)
@@ -168,7 +171,8 @@ export default function TasksPage() {
       if (!e.isPrimary || e.button > 0 || e.target.closest('button, input, label, a, textarea')) return
       dragged.current = false
       const x = e.clientX, y = e.clientY, mouse = e.pointerType === 'mouse'
-      press.current = { x, y, mouse, t: mouse ? 0 : setTimeout(() => { press.current = null; startDrag(card, x, y) }, 450) }
+      if (!mouse && Date.now() - pinchAt.current < 600) return                 // только что был щипок
+      press.current = { x, y, mouse, t: mouse ? 0 : setTimeout(() => { press.current = null; if (pinch.current || Date.now() - pinchAt.current < 600) return; startDrag(card, x, y) }, 450) }
     },
     onPointerMove: e => {
       const p = press.current
@@ -187,6 +191,53 @@ export default function TasksPage() {
     if (colId === card.column_id && sort === card.sort) return
     patchCard(card.id, { column_id: colId, sort })
   }
+  // ── щипок по доске, как на доске техпроцесса: пока пальцы на экране — доска плавно масштабируется;
+  // отпустили — дорожки: карточки крупнее/мельче; колонки: этапов на экране во столько раз меньше/больше
+  const pinch = useRef(null), pinchAt = useRef(0)
+  const colsNow = () => {
+    if (ncols) return ncols
+    const el = boardRef.current, c = el?.querySelector('[data-col]')
+    return Math.max(1, Math.round((el?.clientWidth || window.innerWidth) / ((c?.offsetWidth || 300) + 10)))
+  }
+  const onTouchStart = e => {
+    if (e.touches.length >= 2) { cancelPress(); pinchAt.current = Date.now() }
+    if (e.touches.length !== 2 || dragRef.current) return
+    const [a, b] = e.touches, el = boardRef.current, r = el.getBoundingClientRect()
+    pinch.current = { d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, k: 1, cols: colsNow() }
+    el.style.transformOrigin = `${(a.clientX + b.clientX) / 2 - r.left}px ${(a.clientY + b.clientY) / 2 - r.top}px`
+    el.style.transition = 'none'
+  }
+  const onTouchMove = e => {
+    const P = pinch.current
+    if (!P || e.touches.length !== 2) return
+    const [a, b] = e.touches
+    P.k = Math.max(0.25, Math.min(4, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / P.d0))
+    boardRef.current.style.transform = `scale(${P.k})`
+  }
+  const onTouchEnd = e => {
+    const P = pinch.current
+    if (!P || e.touches.length >= 2) return
+    pinch.current = null
+    const el = boardRef.current
+    if (el) { el.style.transition = 'transform 160ms ease-out'; el.style.transform = 'scale(1)' }
+    if (Math.abs(P.k - 1) < 0.08) return
+    if (lanes) { setCardW(w => w * P.k); return }
+    const next = Math.max(1, Math.min((cols?.length || 1) + 1, Math.round(P.cols / P.k)))
+    if (next !== P.cols) setNcols(next)
+  }
+  const pinchProps = { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: onTouchEnd }
+  // жест двумя пальцами по доске браузеру не отдаём — масштабируется доска, а не весь экран
+  useEffect(() => {
+    const el = boardRef.current
+    if (!el) return
+    const stop2 = e => { if (e.touches && e.touches.length >= 2) e.preventDefault() }
+    const stopG = e => e.preventDefault()
+    el.addEventListener('touchstart', stop2, { passive: false })
+    el.addEventListener('touchmove', stop2, { passive: false })
+    el.addEventListener('gesturestart', stopG); el.addEventListener('gesturechange', stopG)
+    return () => { el.removeEventListener('touchstart', stop2); el.removeEventListener('touchmove', stop2); el.removeEventListener('gesturestart', stopG); el.removeEventListener('gesturechange', stopG) }
+  }, [!!cols?.length, lanes])   // eslint-disable-line react-hooks/exhaustive-deps
+
   // пока тянем — страница не листается
   useEffect(() => {
     if (!drag) return
@@ -277,6 +328,10 @@ export default function TasksPage() {
           <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, alignItems: 'center' }}>
             <button type="button" title={lanes ? 'Колонками слева направо' : 'Этапы сверху вниз, задачи строкой (как техпроцесс)'} onClick={() => setLayout(lanes ? 'cols' : 'lanes')}
               style={{ padding: '3px 9px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>{lanes ? '⇆ Колонки' : '☰ Дорожки'}</button>
+            {!lanes && <>
+              <button type="button" title="Больше этапов на экране" onClick={() => setNcols(Math.min((cols?.length || 1) + 1, colsNow() + 1))} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>−</button>
+              <button type="button" title="Крупнее" onClick={() => setNcols(Math.max(1, colsNow() - 1))} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>+</button>
+            </>}
             {lanes && <>
               <button type="button" title="Мельче" onClick={() => setCardW(w => w / 1.2)} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>−</button>
               <button type="button" title="Крупнее" onClick={() => setCardW(w => w * 1.2)} style={{ padding: '3px 9px', borderRadius: 14, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>+</button>
@@ -296,7 +351,7 @@ export default function TasksPage() {
 
       {cols && cols.length > 0 && (lanes ? (
         // дорожки, как доска техпроцесса: этапы сверху вниз, задачи этапа — строкой вправо (листаются вбок)
-        <div ref={boardRef} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 12 }}>
+        <div ref={boardRef} {...pinchProps} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 12, touchAction: 'pan-x pan-y' }}>
           {cols.map((c, ci) => {
             const list = byCol.get(c.id) || [], hot = drag && drag.over === c.id
             return (
@@ -332,11 +387,11 @@ export default function TasksPage() {
           {!readOnly && <button type="button" onClick={newColumn} style={{ minHeight: 44, borderRadius: 12, border: '1px dashed var(--border-md)', background: 'transparent', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}>+ Этап</button>}
         </div>
       ) : (
-        <div ref={boardRef} style={{ display: 'flex', gap: 10, overflowX: 'auto', alignItems: 'flex-start', paddingBottom: 12, scrollSnapType: drag ? 'none' : 'x proximity', WebkitOverflowScrolling: 'touch', margin: '0 -16px', padding: '0 16px 12px' }}>
+        <div ref={boardRef} {...pinchProps} style={{ display: 'flex', gap: ncols >= 3 ? 6 : 10, overflowX: 'auto', alignItems: 'flex-start', paddingBottom: 12, scrollSnapType: drag ? 'none' : 'x proximity', WebkitOverflowScrolling: 'touch', margin: '0 -16px', padding: '0 16px 12px', touchAction: 'pan-x pan-y' }}>
           {cols.map((c, ci) => {
             const list = byCol.get(c.id) || [], hot = drag && drag.over === c.id
             return (
-              <div key={c.id} data-col={c.id} style={{ flex: '0 0 min(300px, 84vw)', scrollSnapAlign: 'start', background: hot ? 'var(--blue-light)' : 'var(--bg3)', borderRadius: 14, padding: 8, transition: 'background .15s', minHeight: 120 }}>
+              <div key={c.id} data-col={c.id} style={{ flex: ncols ? `0 0 calc((100% - ${(ncols - 1) * (ncols >= 3 ? 6 : 10)}px) / ${ncols})` : '0 0 min(300px, 84vw)', minWidth: 0, scrollSnapAlign: 'start', background: hot ? 'var(--blue-light)' : 'var(--bg3)', borderRadius: 14, padding: ncols >= 3 ? 5 : 8, transition: 'background .15s', minHeight: 120 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 2px 8px' }}>
                   <button type="button" disabled={readOnly} onClick={() => recolor(c)} title="Цвет этапа" style={{ width: 12, height: 12, borderRadius: 6, border: 'none', padding: 0, background: c.color || 'var(--gray-mid)', cursor: readOnly ? 'default' : 'pointer', flexShrink: 0 }} />
                   <button type="button" disabled={readOnly} onClick={() => renameColumn(c)} style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 'none', background: 'transparent', padding: '2px 4px', fontWeight: 600, fontSize: 14, color: 'var(--text)', cursor: readOnly ? 'default' : 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
