@@ -1734,9 +1734,6 @@ export default function Model3D({ details, scene: savedScene = null, title, onCl
               <input type="text" inputMode="decimal" value={edgeType?.t ?? ''} onChange={e => patchEdgeType({ t: e.target.value })}
                 style={{ width: 56, padding: '4px 6px', fontSize: 12, textAlign: 'center', borderColor: numOf(edgeType?.t) > 0 ? undefined : 'var(--danger)' }} />
               <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
-                <input type="checkbox" checked={!!edgeType?.trim} onChange={e => patchEdgeType({ trim: e.target.checked })} style={{ width: 'auto' }} />Подрезка
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
                 <input type="checkbox" checked={numOf(edgeType?.joint) > 0 || edgeType?.joint === ''} onChange={e => patchEdgeType({ joint: e.target.checked ? 0.5 : 0 })} style={{ width: 'auto' }} />Прифуговка
               </label>
               {(numOf(edgeType?.joint) > 0 || edgeType?.joint === '') && (

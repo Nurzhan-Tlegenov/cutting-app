@@ -32,7 +32,7 @@
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
 import { edgeGrooveGeom, isEdgePocket, roundRect } from './edgeGrooves'
 import { bandPolygon, bandElements } from './pathBand'
-import { rawDetail, parseEdgeTypes, edgeKey } from './edgeCut'
+import { rawDetail, parseEdgeTypes, edgeKey, thickFromName } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
 import { detailHoles } from './partHoles'
@@ -962,6 +962,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
       const key = edgeKey(nm)
       if (!key) return 0
       if (n0(types?.[key]?.t) > 0) return n0(types[key].t)
+      if (thickFromName(key) > 0) return thickFromName(key)     // не задана — из названия кромки
       const same = ['left', 'right', 'top', 'bottom'].find(sd => edgeKey(raw['edge_' + sd]) === key && n0(et[sd]) > 0)
       if (same) return n0(et[same])
       const m = String(nm).match(/(\d+(?:[.,]\d+)?)\s*[хx×*]\s*\d+/i)

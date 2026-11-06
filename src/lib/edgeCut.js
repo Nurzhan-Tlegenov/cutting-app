@@ -33,6 +33,45 @@ export function edgeDelta(type) {
   return r2((type.trim ? num(type.t) : 0) - num(type.joint))
 }
 
+// ─── Толщина кромки из названия: в «Видах кромки» не задана (обычно импорт из Excel) — берём из названия кромки.
+// 0,4 / 0.4 / 04 → 0,5 мм; 0,8 / 0.8 / 1 → 1 мм; 2 → 2 мм. Сначала дробное число (≤ 3), потом «04» / «08», потом целое 1–3.
+export function thickFromName(name) {
+  const s = String(name || '')
+  if (!s) return 0
+  const toks = [...s.matchAll(/(?<![\d.,])(\d+(?:[.,]\d+)?)(?![\d])/g)].map(m => m[1])
+  const map = v => (v <= 0 ? 0 : v <= 0.6 ? 0.5 : v <= 1.5 ? 1 : Math.round(v))
+  const dec = toks.find(t => /[.,]/.test(t) && num(t.replace(',', '.')) > 0 && num(t.replace(',', '.')) <= 3)
+  if (dec) return map(num(dec.replace(',', '.')))
+  const lead0 = toks.find(t => /^0\d$/.test(t))
+  if (lead0) return map(num(lead0) / 10)
+  const int = toks.find(t => /^[123]$/.test(t))
+  return int ? map(num(int)) : 0
+}
+/** Толщина кромки name: из «Видов кромки», а не задана — из названия */
+export function edgeThick(types, name) {
+  const k = edgeKey(name)
+  if (!k) return 0
+  const t = num(String((types || {})[k]?.t ?? '').replace(',', '.'))
+  return t > 0 ? t : thickFromName(k)
+}
+
+// ─── Подрезка под кромку — только у деталей из моделей мебельных программ, как задано в самой программе (по сторонам);
+// программа не сказала — подрезать (размеры в моделях — с кромкой). Excel, DXF и детали, внесённые вручную, — без подрезки:
+// там сразу пишут нужный размер; прифуговка производства работает везде. Галочки «подрезка» у вида кромки больше нет.
+export const MODEL_SRCS = new Set(['basis', 'sketchup', 'bcad', 'k3', 'astra', 'astra-xml', 'pro100'])
+export function sideTrimOf(contour, trim = null) {
+  let c = contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  const et = trim || (c?.edgeTrim && typeof c.edgeTrim === 'object' ? c.edgeTrim : null)
+  const model = MODEL_SRCS.has(c?.meta?.src) || !!et
+  return s => {
+    if (typeof et?.[s] === 'boolean') return et[s]
+    if (!model) return false
+    const m = c?.meta?.edges?.[s]?.trim
+    return typeof m === 'boolean' ? m : true
+  }
+}
+
 /** Подрезка по сторонам, заданная самой моделью при импорте (contour.edgeTrim: { left: true, top: false, … }) */
 export function edgeTrimOf(contour) {
   let c = contour
@@ -66,7 +105,7 @@ export function narrowSide(pair, edges, types, contour, W, L) {
   let c = contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const has = s => !!edgeKey(edges?.[s])
-  const thick = s => { const k = edgeKey(edges?.[s]); return k ? num((types || {})[k]?.t) : 0 }
+  const thick = s => edgeThick(types, edges?.[s])
   const endOn = s => (c?.drillings || []).some(d => d?.kind === 'edge' && d.edgeSide === s) || (c?.edgeGrooves || []).some(g => g?.edgeSide === s)
   let pts = []
   try { pts = c && num(W) > 0 && num(L) > 0 ? getAllDrillPoints(c, num(W), num(L)).filter(q => !q.edge) : [] } catch { pts = [] }
@@ -111,7 +150,7 @@ export function finishedDims(row, types) {
   const eds = { left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }
   const al = allowApplied(eds, t, c) || {}
   const nr = narrowApplied(eds, t, num(raw.width), num(raw.length), c) || {}
-  const add = side => { const k = edgeKey(eds[side]); const ty = (k && t[k]) || {}; return (k ? num(ty.t) - num(ty.joint) : 0) - (al[side] || 0) - (nr[side] || 0) }
+  const add = side => { const k = edgeKey(eds[side]); const ty = (k && t[k]) || {}; return (k ? edgeThick(t, k) - num(ty.joint) : 0) - (al[side] || 0) - (nr[side] || 0) }
   l += add('top') + add('bottom'); w += add('left') + add('right')
   return { l: r2(l), w: r2(w) }
 }
@@ -126,7 +165,7 @@ export function narrowTrimTo(row, types, side) {
   const f = finishedDims(row, types)
   const across = side === 'left' || side === 'right' ? f.w : f.l
   const k = edgeKey(raw['edge_' + side]), ty = (k && (types || {})[k]) || {}
-  return r2(across - (k ? num(ty.t) - num(ty.joint) : 0))
+  return r2(across - (k ? edgeThick(types, k) - num(ty.joint) : 0))
 }
 
 export const ALLOW_KEY = '__allow'
@@ -176,10 +215,10 @@ export function sideDeltas(edges, types, trim, contour = null) {
   const d = {}
   let any = false
   const al = contour ? allowApplied(edges, types, contour) : null      // припуск из модели — деталь больше с этой стороны
+  const tr = sideTrimOf(contour, trim)                                   // подрезка — только модели мебельных программ
   for (const s of SIDES) {
     const k = edgeKey(edges[s])
-    const type = k ? types[k] : null
-    d[s[0]] = !k ? 0 : typeof trim?.[s] === 'boolean' ? edgeDelta(type && { ...type, trim: trim[s] }) : edgeDelta(type)
+    d[s[0]] = !k ? 0 : edgeDelta({ ...(types[k] || {}), t: edgeThick(types, k), trim: tr(s) })
     if (al?.[s]) d[s[0]] = r2(d[s[0]] - al[s])
     if (d[s[0]]) any = true
   }
@@ -187,7 +226,11 @@ export function sideDeltas(edges, types, trim, contour = null) {
 }
 
 /** Деталь из модели с подрезкой хотя бы одной стороны — в списке задания у неё показывается размер в раскрой */
-export const modelTrimmed = contour => Object.values(edgeTrimOf(contour) || {}).some(v => v === true) || !!modelAllow(contour)
+export const modelTrimmed = contour => {
+  let c = contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  return Object.values(edgeTrimOf(c) || {}).some(v => v === true) || !!modelAllow(c) || MODEL_SRCS.has(c?.meta?.src)
+}
 
 /**
  * Что показывать в полях длины/ширины списка задания. У детали с подрезкой из модели — размер в раскрой

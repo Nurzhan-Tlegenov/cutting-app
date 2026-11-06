@@ -5,7 +5,7 @@
 import { sheetGeo } from './savedNesting.js'
 import { partFeatures } from './gcode.js'
 import { detailEdgeList } from './edgeLength.js'
-import { rawDetail, overMm, parseEdgeTypes } from './edgeCut.js'
+import { rawDetail, overMm, parseEdgeTypes, edgeThick } from './edgeCut.js'
 import { decomposeCuts } from './cutLines.js'
 import { beamSheetCuts } from './beamSawXml.js'
 
@@ -41,7 +41,7 @@ export function nestingStats({ order, mat, method }) {
   const T = Number(mat.thickness) || Number(order?.material_thickness) || 16
   const types = parseEdgeTypes(order?.edge_types)
   const over = overMm(types)
-  const thickOf = name => Number(String((types[name === 'Кромка' ? 'default' : name] || {}).t ?? '').replace(',', '.')) || 0
+  const thickOf = name => edgeThick(types, name === 'Кромка' ? 'default' : name)   // не задана — из названия кромки
   for (const sh of mat.sheets || []) {
     if (!sh?.placed?.length) continue
     const geo = sheetGeo(order, mat.result, sh)

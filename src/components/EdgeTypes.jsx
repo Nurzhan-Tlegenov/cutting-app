@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { blankType, OVER_KEY, overOf } from '../lib/edgeCut'
+import { blankType, OVER_KEY, overOf, thickFromName } from '../lib/edgeCut'
 
 // Виды кромки заказа. У каждого вида: толщина (обязательна), «подрезка» — деталь идёт в раскрой меньше
 // на толщину кромки с каждой закромленной стороны, «прифуговка» — припуск в мм, который снимает станок
@@ -21,7 +21,8 @@ export default function EdgeTypes({ edgeNames, edgeTypes, activeEdge, onNames, o
   const row = (key, label) => {
     const v = edgeTypes[key] || blankType()
     const active = key !== 'default' && activeEdge === key
-    const noThick = !(numOf(v.t) > 0)
+    const fromName = numOf(v.t) > 0 ? 0 : thickFromName(key)      // не задана — берётся из названия кромки
+    const noThick = !(numOf(v.t) > 0) && !fromName
     return (
       <div key={key} style={{ padding: '7px 0', borderTop: '0.5px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -29,14 +30,10 @@ export default function EdgeTypes({ edgeNames, edgeTypes, activeEdge, onNames, o
             style={{ flex: 1, minWidth: 0, textAlign: 'left', padding: '5px 10px', borderRadius: 20, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               border: '0.5px solid var(--border-md)', background: active ? 'var(--blue)' : 'transparent', color: active ? 'white' : key === 'default' ? 'var(--text-hint)' : 'var(--text-muted)' }}>{label}</button>
           <span style={{ fontSize: 11, color: noThick ? 'var(--danger)' : 'var(--text-hint)', flexShrink: 0 }}>толщина</span>
-          <input type="text" inputMode="decimal" value={v.t ?? ''} placeholder="мм" onChange={e => patch(key, { t: e.target.value })}
+          <input type="text" inputMode="decimal" value={v.t ?? ''} placeholder={fromName ? String(fromName).replace('.', ',') : 'мм'} title={fromName ? 'Из названия кромки' : undefined} onChange={e => patch(key, { t: e.target.value })}
             style={{ ...small, borderColor: noThick ? 'var(--danger)' : undefined }} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 5, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
-            <input type="checkbox" checked={!!v.trim} onChange={e => patch(key, { trim: e.target.checked })} style={{ width: 'auto' }} />
-            Подрезка на толщину
-          </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
             <input type="checkbox" checked={numOf(v.joint) > 0 || v.joint === ''} onChange={e => patch(key, { joint: e.target.checked ? 0.5 : 0 })} style={{ width: 'auto' }} />
             Прифуговка
@@ -77,7 +74,7 @@ export default function EdgeTypes({ edgeNames, edgeTypes, activeEdge, onNames, o
         )
       })()}
       <p style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 6 }}>
-        Подрезка: деталь идёт в раскрой меньше на толщину кромки с каждой закромленной стороны. Прифуговка: припуск, который снимает станок, — на столько деталь в раскрое больше.
+        Толщина не задана — берётся из названия кромки (0,4 → 0,5 мм; 0,8 и 1 → 1 мм; 2 → 2 мм). Подрезка под кромку — только у деталей из моделей мебельных программ (Базис, SketchUp, bCAD, К3, Астра, PRO100), как задано в самой программе; из Excel и вручную — без подрезки, сразу нужный размер. Прифуговка: припуск, который снимает станок, — на столько деталь в раскрое больше.
         Ничего не отмечено — деталь идёт в раскрой как записана.
         {activeEdge && canSelect ? ` Активная: «${activeEdge}» — нажмите на сторону детали.` : ''}
       </p>
