@@ -8,8 +8,9 @@ import { orderTitle } from '../lib/orderUtils'
 
 let cache = null        // заказы производств — один раз на открытую карточку (кнопок может быть несколько)
 
-export default function ExcludeStatsRequest({ req, onDone, onError }) {
-  const navigate = useNavigate()
+export default function ExcludeStatsRequest({ req, onDone, onError, go = null }) {
+  const nav = useNavigate()
+  const navigate = go || nav        // из окна переписки — go (закрывает окно и переходит)
   const [orders, setOrders] = useState(cache)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
