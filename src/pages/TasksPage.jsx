@@ -284,8 +284,28 @@ export default function TasksPage() {
   }, [!!drag])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // карточка задачи (одна и та же в колонках и в дорожках)
+  // мелко, как на доске техпроцесса: карточки уже 175 px (дорожки) или от 3 колонок на экране — только название и значки;
+  // совсем мелко (дорожки уже 120 px) — название в 1–2 строки. Этап слева — узкий, без кнопок (они — при обычном размере).
+  const tiny = lanes && CW < 120
+  const compact = lanes ? CW < 175 : ncols >= 3
   const cardView = (k, c) => {
     const p = progress(k), due = dueInfo(k), o = k.order_id ? orders.get(k.order_id) : null
+    if (compact) return (
+      <div data-card={k.id} className="card" {...dragProps(k)} onClick={() => { if (!dragged.current) setOpenId(k.id) }} title={k.title || ''}
+        style={{ padding: tiny ? '4px 6px' : '6px 7px', cursor: 'pointer', borderLeft: `3px solid ${c.color || 'var(--gray-mid)'}`, opacity: drag?.card.id === k.id ? 0.35 : k.done_at ? 0.6 : 1, userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'pan-x pan-y' }}>
+        <div style={{ fontSize: tiny ? '0.72rem' : '0.8rem', fontWeight: 500, lineHeight: 1.25, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: tiny ? 2 : 3, WebkitBoxOrient: 'vertical', wordBreak: 'break-word', textDecoration: k.done_at ? 'line-through' : 'none' }}>
+          {k.done_at && <span style={{ color: 'var(--teal)' }}>✓ </span>}{k.title || <span style={{ color: 'var(--text-hint)' }}>Без названия</span>}
+        </div>
+        {!tiny && (due || (k.remind_at && !k.done_at) || o || p.total > 0) && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 3, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.3 }}>
+            {due && <span style={{ color: TONE[due.tone]?.[0] }}>📅 {due.text}</span>}
+            {k.remind_at && !k.done_at && <span>{k.reminded_at ? '🔕' : '🔔'}</span>}
+            {o && <span title={orderTitle(o)}>📋</span>}
+            {p.total > 0 && <span>☑ {p.done}/{p.total}</span>}
+          </div>
+        )}
+      </div>
+    )
     return (
       <div data-card={k.id} className="card" {...dragProps(k)} onClick={() => { if (!dragged.current) setOpenId(k.id) }}
         style={{ padding: '9px 10px', cursor: 'pointer', borderLeft: `3px solid ${c.color || 'var(--gray-mid)'}`, opacity: drag?.card.id === k.id ? 0.35 : k.done_at ? 0.6 : 1, userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none', touchAction: 'pan-x pan-y' }}>
@@ -355,8 +375,14 @@ export default function TasksPage() {
           {cols.map((c, ci) => {
             const list = byCol.get(c.id) || [], hot = drag && drag.over === c.id
             return (
-              <div key={c.id} data-col={c.id} style={{ display: 'flex', alignItems: 'stretch', gap: 6, minHeight: 92, borderRadius: 12, outline: hot ? '2px dashed var(--blue)' : 'none', background: hot ? 'var(--blue-light)' : 'transparent' }}>
+              <div key={c.id} data-col={c.id} style={{ display: 'flex', alignItems: 'stretch', gap: tiny ? 4 : 6, minHeight: tiny ? 40 : compact ? 60 : 92, borderRadius: 12, outline: hot ? '2px dashed var(--blue)' : 'none', background: hot ? 'var(--blue-light)' : 'transparent' }}>
                 {/* этап — слева */}
+                {compact ? (
+                  <div title={c.name} style={{ flex: `0 0 ${tiny ? 48 : 60}px`, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2, padding: '4px 5px', borderRadius: 10, background: 'var(--bg3)', borderLeft: `3px solid ${c.color || 'var(--gray-mid)'}` }}>
+                    <button type="button" disabled={readOnly} onClick={() => renameColumn(c)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontWeight: 600, fontSize: tiny ? 9 : 10.5, lineHeight: 1.15, color: 'var(--text)', cursor: readOnly ? 'default' : 'pointer', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', wordBreak: 'break-word' }}>{c.name}</button>
+                    <span style={{ fontSize: 9.5, color: 'var(--text-hint)' }}>{list.length}</span>
+                  </div>
+                ) : (
                 <div style={{ flex: `0 0 ${desk ? 150 : 86}px`, display: 'flex', flexDirection: 'column', gap: 3, padding: '6px 6px', borderRadius: 12, background: 'var(--bg3)', borderLeft: `4px solid ${c.color || 'var(--gray-mid)'}` }}>
                   <button type="button" disabled={readOnly} onClick={() => renameColumn(c)} style={{ border: 'none', background: 'transparent', padding: 0, textAlign: 'left', fontWeight: 600, fontSize: desk ? 13.5 : 12, lineHeight: 1.2, color: 'var(--text)', cursor: readOnly ? 'default' : 'pointer', wordBreak: 'break-word' }}>{c.name}</button>
                   <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>задач {list.length}</span>
@@ -369,8 +395,9 @@ export default function TasksPage() {
                     </span>
                   )}
                 </div>
+                )}
                 {/* задачи этапа — строкой вправо */}
-                <div data-lane style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, overflowX: 'auto', alignItems: 'flex-start', padding: 4, background: 'var(--bg3)', borderRadius: 12 }}>
+                <div data-lane style={{ flex: 1, minWidth: 0, display: 'flex', gap: tiny ? 4 : 6, overflowX: 'auto', alignItems: 'flex-start', padding: tiny ? 3 : 4, background: 'var(--bg3)', borderRadius: compact ? 10 : 12 }}>
                   {list.map((k, i) => (
                     <div key={k.id} style={{ display: 'flex', flex: '0 0 auto' }}>
                       {hot && drag.idx === i && drag.card.id !== k.id && <div style={{ width: 5, borderRadius: 3, background: 'var(--blue)', marginRight: 6 }} />}
@@ -378,7 +405,7 @@ export default function TasksPage() {
                     </div>
                   ))}
                   {hot && drag.idx === list.length && <div style={{ flex: '0 0 5px', alignSelf: 'stretch', borderRadius: 3, background: 'var(--blue)' }} />}
-                  {!readOnly && <button type="button" onClick={() => quickAdd(c.id)} style={{ flex: '0 0 auto', alignSelf: 'stretch', minWidth: 44, border: '1px dashed var(--border-md)', borderRadius: 10, background: 'transparent', color: 'var(--text-muted)', fontSize: 13, padding: '0 10px', cursor: 'pointer' }}>{list.length ? '+' : '+ Задача'}</button>}
+                  {!readOnly && <button type="button" onClick={() => quickAdd(c.id)} style={{ flex: '0 0 auto', alignSelf: 'stretch', minWidth: compact ? 30 : 44, border: '1px dashed var(--border-md)', borderRadius: 10, background: 'transparent', color: 'var(--text-muted)', fontSize: 13, padding: compact ? '0 6px' : '0 10px', cursor: 'pointer' }}>{list.length || compact ? '+' : '+ Задача'}</button>}
                   {readOnly && !list.length && <div style={{ alignSelf: 'center', fontSize: 12, color: 'var(--text-hint)', padding: '0 6px' }}>пусто</div>}
                 </div>
               </div>
