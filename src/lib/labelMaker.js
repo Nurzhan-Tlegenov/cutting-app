@@ -635,10 +635,20 @@ export function labelInfo(order, mat, si, pi, part = null) {
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
     allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow),
     // пильный центр: узкая деталь пилится шире и потом подрезается в размер — сколько пилили и до скольких подрезать
+    // side / sideCw — сторона бирки, с которой упиливать лишнее (по тому же правилу, что у кромочного станка:
+    // со стороны без кромки; кромка с обеих сторон — справа / сверху детали), для элемента, привязанного к сторонам
     beamTrim: (() => {
       if (!p.trimTo) return null
       const ox = Number(p.origX) || BW, oy = Number(p.origY) || BH
-      return Math.abs(ox - BW) > 0.05 ? { from: ox, to: BW } : Math.abs(oy - BH) > 0.05 ? { from: oy, to: BH } : null
+      const t = Math.abs(ox - BW) > 0.05 ? { from: ox, to: BW, axis: 'x' } : Math.abs(oy - BH) > 0.05 ? { from: oy, to: BH, axis: 'y' } : null
+      if (!t) return null
+      const byWidth = (t.axis === 'x') === (turns % 2 === 0)            // на карте шире по X — в детали это ширина (если не повёрнута)
+      const has = k => !!edgeName(rawEdges[k])
+      const s0 = byWidth ? (has('right') && !has('left') ? 'left' : 'right') : (has('top') && !has('bottom') ? 'bottom' : 'top')
+      const lab = toLabel({ [s0]: Math.abs(t.from - t.to) }) || {}
+      const side = Object.keys(lab).find(k => lab[k] > 0) || null
+      const cwOf = { top: 'right', right: 'bottom', bottom: 'left', left: 'top' }       // как cw(): top <- left и т.д.
+      return { from: t.from, to: t.to, side, sideCw: side ? cwOf[side] : null }
     })(), curved: Object.entries(curved).map(([name, mm]) => `${name} ${(mm / 1000).toFixed(2)} м`),
     work, twoSided: isTwoSided(d, mat.thickness),
     backCorner: BACK.on && !part && isTwoSided(d, mat.thickness) ? backMarkCorner(p, d, BACK.corner, BACK.edge) : null,
@@ -969,13 +979,32 @@ export function boundItem(it, k, W, H) {
   return o
 }
 
+// «Узкая деталь — упилить», привязанный к сторонам детали: ставится на ту сторону бирки, с которой упиливают лишнее
+// (кромочный станок — narrow, пильный центр — beamTrim), а не просто поворачивается вместе с деталью
+const SIDE_IX = { top: 0, right: 1, bottom: 2, left: 3 }
+export function narrowSide(info, rot) {
+  if (!info) return null
+  const n = rot ? info.narrowCw : info.narrow
+  const s = n && Object.keys(n).find(k => n[k] > 0)
+  return s || (rot ? info.beamTrim?.sideCw : info.beamTrim?.side) || null
+}
+// элемент с той стороны шаблона, где он стоит (ближайшая к его центру), — поворотами по четверти на сторону target
+export function toSide(it, target, W, H) {
+  const [bw, bh] = itemBox(it), u = (it.x + bw / 2) / W, v = (it.y + bh / 2) / H
+  const d = { top: v, bottom: 1 - v, left: u, right: 1 - u }
+  const ref = Object.keys(d).sort((a, b) => d[a] - d[b])[0]
+  const k = (SIDE_IX[target] - SIDE_IX[ref] + 4) % 4
+  return k ? boundItem(it, k, W, H) : it
+}
+
 export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height
   const mm = W / tpl.w, line = Math.max(1, mm * 0.17), rot = tpl.rot !== false
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
   const place = it0 => {
-    const it = it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0
+    const it = it0.bind && it0.type === 'narrow' && narrowSide(info, rot) ? toSide(it0, narrowSide(info, rot), tpl.w, tpl.h)
+      : it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0
     // подсветка припуска: кромка с этой стороны — в обратных цветах (чёрным по белому ↔ белым по чёрному)
     return EDGE_TYPES.includes(it.type) && allowHit(tpl, info, it.type.slice(4).toLowerCase()) ? { ...it, inv: !it.inv } : it
   }
