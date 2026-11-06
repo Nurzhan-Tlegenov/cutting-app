@@ -1,4 +1,5 @@
 import Hint from '../components/Hint'
+import CncSkipQuick from '../components/CncSkipQuick'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { getCnc, normalizeCnc, routerPost } from '../lib/cncSettings'
 import { postView } from '../lib/postTools'
@@ -1804,6 +1805,7 @@ export default function NestingPage() {
   useEffect(() => { let alive = true; if (cabinet === 'production') myOrderPerms(id).then(r => { if (alive) setWperms(r.data || null) }); return () => { alive = false } }, [id, cabinet])
   const isOper = profile?.role === 'admin' || profile?.role === 'operator'
   const canCnc = cabinet === 'production' && (isOper || !!(wperms?.all || wperms?.cnc))
+  const [, bumpCnc] = useState(0)        // сменили «Выводить в УП» на странице — пересчитать prodRectOnly («по габаритам»)
   const canLabels = cabinet === 'production' && (isOper || !!(wperms?.all || wperms?.labels))
   const canProduce = canCnc || canLabels
   const [part3d, setPart3d] = useState(null)       // { index, draft } — деталь в 3D-виде (долгое удержание на карте)
@@ -3503,6 +3505,10 @@ export default function NestingPage() {
               <Hint>
                 Задайте хотя бы один порог — иначе мелких деталей не будет.
               </Hint>
+            )}
+            {/* «Выводить в УП» — быстрый доступ для производства (те же галочки, что в ЧПУ → «Обработка»), фрезер */}
+            {canCnc && !beamSaw && cuttingMethod === 'nesting' && (
+              <CncSkipQuick prodId={order?.production_id || null} onChanged={() => bumpCnc(n => n + 1)} />
             )}
             {/* Какие детали попадают в «мелкие» при этих порогах — видно сразу, до запуска */}
             {cfg.small && (cfg.sq !== '' || cfg.side !== '') && (() => {
