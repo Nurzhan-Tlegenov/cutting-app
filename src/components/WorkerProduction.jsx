@@ -12,6 +12,7 @@ import StageParts from './StageParts'
 import StageReturn from './StageReturn'
 import StageProgress from './StageProgress'
 import ProductionBoard from './ProductionBoard'
+import StaffStats from './StaffStats'
 import { ruleOf } from '../lib/stageParts'
 import CncLoader from './CncLoader'
 import OrderEdge from './OrderEdge'
@@ -39,6 +40,8 @@ export default function WorkerProduction({ wps }) {
   const open = new Set(openIds)
   const [filter, setFilter] = useKeptState('wFilter', 'work')
   const [wtab, setWtab] = useKeptState('wTab', 'posts')
+  // что показано: начальнику — все вкладки; остальным — «Мои посты» и, с правом «Итоги производства», «Итоги»
+  const view = chief ? (wtab === 'stats' && !perms.stats ? 'posts' : wtab) : (perms.stats && wtab === 'stats' ? 'stats' : 'posts')
   const loc = useLocation()
   useEffect(() => { const t = loc.state?.wtab; if (t) Promise.resolve().then(() => setWtab(t)) }, [loc.key])   // eslint-disable-line react-hooks/exhaustive-deps
   useNoticeFocus(() => Promise.resolve().then(() => setFilter('new')))   // по уведомлению: новый заказ на посту — раздел «Новые», строка подсвечена
@@ -129,16 +132,16 @@ export default function WorkerProduction({ wps }) {
       {error && <p className="error-text" style={{ marginBottom: 10 }}>{error}</p>}
 
       {/* начальнику — вкладки: мои посты, доска техпроцесса, все заказы */}
-      {chief && (
+      {(chief || perms.stats) && (
         <div style={{ display: 'flex', gap: 4, marginBottom: 10, background: 'var(--bg2)', borderRadius: 18, padding: 3 }}>
-          {[['posts', `Мои посты${queue?.length ? ` · ${queue.length}` : ''}`], ['board', 'Техпроцесс'], ['orders', 'Все заказы']].map(([k, l]) => (
+          {[['posts', `Мои посты${queue?.length ? ` · ${queue.length}` : ''}`], ...(chief ? [['board', 'Техпроцесс'], ['orders', 'Все заказы']] : []), ...(perms.stats ? [['stats', 'Итоги']] : [])].map(([k, l]) => (
             <button key={k} type="button" onClick={() => setWtab(k)}
-              style={{ flex: 1, padding: '5px 6px', borderRadius: 15, border: 'none', fontSize: 12.5, fontWeight: wtab === k ? 600 : 400, whiteSpace: 'nowrap',
-                background: wtab === k ? 'var(--bg)' : 'transparent', color: wtab === k ? 'var(--blue)' : 'var(--text-muted)', boxShadow: wtab === k ? '0 1px 2px rgba(0,0,0,0.12)' : 'none' }}>{l}</button>
+              style={{ flex: 1, padding: '5px 6px', borderRadius: 15, border: 'none', fontSize: 12.5, fontWeight: view === k ? 600 : 400, whiteSpace: 'nowrap',
+                background: view === k ? 'var(--bg)' : 'transparent', color: view === k ? 'var(--blue)' : 'var(--text-muted)', boxShadow: view === k ? '0 1px 2px rgba(0,0,0,0.12)' : 'none' }}>{l}</button>
           ))}
         </div>
       )}
-      {(!chief || wtab === 'posts') && <>
+      {view === 'posts' && <>
       <p className="section-title">Мои посты{queue?.length ? ` · ${queue.length}` : ''}</p>
       {queue === null ? <CncLoader compact label="Загружаем заказы…" /> : !queue.length ? (
         <p style={{ fontSize: 13, color: 'var(--text-hint)', textAlign: 'center', padding: '18px 0' }}>На ваших постах сейчас нет заказов. Когда заказ дойдёт до вашего поста, он появится здесь, придёт уведомление.</p>
@@ -179,8 +182,9 @@ export default function WorkerProduction({ wps }) {
       ))}
 
       </>}
-      {chief && wtab === 'board' && <ProductionBoard prodId={wp.production_id} onChange={load} />}
-      {chief && wtab === 'orders' && <>
+      {view === 'board' && <ProductionBoard prodId={wp.production_id} onChange={load} />}
+      {view === 'stats' && <StaffStats prodId={wp.production_id} canOpen={chief} money={!!perms.prices} />}
+      {view === 'orders' && <>
       {(
         <>
           <p className="section-title" style={{ marginTop: 14 }}>Все заказы производства</p>

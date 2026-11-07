@@ -13,7 +13,7 @@ function PermChips({ perms, onChange }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
       {PERMS.map(([k, label, hint]) => {
-        const on = !!perms?.[k], implied = k !== 'all' && k !== 'prices' && perms?.all
+        const on = !!perms?.[k], implied = k !== 'all' && k !== 'prices' && k !== 'stats' && perms?.all   // цены и итоги — только своей галочкой
         return <button key={k} type="button" title={hint} style={{ ...chip(on || implied), opacity: implied && !on ? 0.6 : 1 }} onClick={() => onChange({ ...perms, [k]: !on })}>{on || implied ? '✓ ' : ''}{label}</button>
       })}
     </div>

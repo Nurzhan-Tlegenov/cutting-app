@@ -37,6 +37,11 @@ export const productionOrders = () => call('production_orders')
  */
 export const STATS_SQL_HINT = 'Статистика за период и архив производства ещё не включены: выполните migration_production_stats.sql в Supabase (SQL Editor) — один раз.'
 export async function productionStats() { const r = await call('production_stats'); return r.missing ? { error: STATS_SQL_HINT, missing: true } : r }
+/** Итоги производства для сотрудника с правом «Итоги производства» (migration_staff_stats.sql); без «Цены» — без сумм */
+export async function productionStatsOf(prodId) {
+  const r = await call('production_stats_of', { p_prod: prodId })
+  return r.missing ? { error: 'Итоги для сотрудников ещё не включены в базе: выполните migration_staff_stats.sql в Supabase (SQL Editor) — один раз.', missing: true } : r
+}
 /** Производство убирает исполненный заказ из своих списков (on = false — возвращает). Заказ клиента не меняется. -> { at } | { error } */
 export async function productionArchive(orderId, on = true) {
   const r = await call('production_archive_order', { p_order: orderId, p_on: on })
