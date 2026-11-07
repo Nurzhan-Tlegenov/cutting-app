@@ -38,6 +38,7 @@ import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import { materialsOf } from '../lib/detailMaterial'
 import { useLabelMode, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { fetchOrderDetails } from '../lib/orderDetails.js'
+import PartPrograms from '../components/PartPrograms'
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
@@ -60,6 +61,7 @@ export default function OrderPage() {
   const [loading, setLoading] = useState(true)
   const [labelMode] = useLabelMode(user)
   const [mapMat, setMapMat] = useState('')        // материал, чьи карты раскроя показаны
+  const [partSel, setPartSel] = useState([])       // производство: детали для отдельных управляющих программ (id строк)
   useEffect(() => { fetchOrder() }, [id])
   // сотрудник производства: что ему можно в этом заказе (статусы, ЧПУ, бирки, цены); null — не сотрудник
   const [wperms, setWperms] = useState(null)
@@ -138,6 +140,8 @@ export default function OrderPage() {
   const materials = materialsOf(details, order)
   const canProduce = inProduction && order.status !== 'draft' && (isOperator || !!(wperms?.all || wperms?.cnc || wperms?.labels))
   const canCnc = canProduce && (isOperator || !!(wperms?.all || wperms?.cnc)), canLabels = canProduce && (isOperator || !!(wperms?.all || wperms?.labels))
+  // управляющие программы по отдельным деталям — производство, право на ЧПУ, есть раскрой на фрезере
+  const partCnc = inProduction && canCnc && nestings.some(m => !m.result?.beamSaw)
   const showPrices = !wperms || !!wperms.prices || !!wperms.owner   // сотруднику цены — только с галочкой «Цены»
   const actBtn = main => ({ flex: 1, padding: '10px 8px', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: 'pointer',
     border: main ? 'none' : '0.5px solid var(--blue)', background: main ? 'var(--blue)' : 'var(--bg)', color: main ? 'white' : 'var(--blue)' })
@@ -433,6 +437,13 @@ export default function OrderPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: 'var(--bg2)' }}>
+                {partCnc && (
+                  <th style={{ padding: '8px 0 8px 10px', width: 26 }} title="Выбрать детали для отдельных управляющих программ">
+                    <input type="checkbox" checked={shownDetails.length > 0 && shownDetails.every(d => partSel.includes(d.id))}
+                      onChange={e => setPartSel(e.target.checked ? [...new Set([...partSel, ...shownDetails.map(d => d.id)])] : partSel.filter(x => !shownDetails.some(d => d.id === x)))}
+                      style={{ width: 17, height: 17 }} />
+                  </th>
+                )}
                 <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 500, color: 'var(--text-muted)', fontSize: 11 }}>Деталь</th>
                 <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 500, color: 'var(--text-muted)', fontSize: 11 }}>Д×Ш</th>
                 <th style={{ padding: '8px 6px', textAlign: 'center', fontWeight: 500, color: 'var(--text-muted)', fontSize: 11 }}>Кол</th>
@@ -441,7 +452,12 @@ export default function OrderPage() {
             </thead>
             <tbody>
               {(sortMode ? sortDetails(shownDetails, sortMode) : shownDetails).map((d) => (
-                <tr key={d.id} style={{ borderTop: '0.5px solid var(--border)' }}>
+                <tr key={d.id} style={{ borderTop: '0.5px solid var(--border)', background: partSel.includes(d.id) ? 'var(--blue-light)' : undefined }}>
+                  {partCnc && (
+                    <td style={{ padding: '8px 0 8px 10px', width: 26 }}>
+                      <input type="checkbox" checked={partSel.includes(d.id)} onChange={e => setPartSel(e.target.checked ? [...partSel, d.id] : partSel.filter(x => x !== d.id))} style={{ width: 17, height: 17 }} />
+                    </td>
+                  )}
                   <td style={{ padding: '8px 10px' }}>
                     {d.prefix && <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 500 }}>{d.prefix}</div>}
                     <div>{detailMeta(d)?.des ? <span style={{ color: 'var(--text-hint)', marginRight: 5 }}>{detailMeta(d).des}</span> : null}{d.name}{isTwoSided(d, order.material_thickness) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇅ 2 стороны</span>}{backSide(d, order.material_thickness) === 'back' && <span title="Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇣ снизу</span>}</div>
@@ -456,6 +472,7 @@ export default function OrderPage() {
             </tbody>
           </table>
         </div>
+        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} />}
       </div>
       {isDraft && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
