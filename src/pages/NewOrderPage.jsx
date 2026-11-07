@@ -361,6 +361,8 @@ export default function NewOrderPage() {
   const { user } = useAuth()
   // заказ из задачи («Мои задачи» → «Создать заказ из задачи»): название и примечание — из задачи, после создания заказ привязывается к ней
   const fromTask = useLocation().state?.task || null
+  const fromCad = useLocation().state?.cad || null   // детали из конструктора мебели (Конструктор → «В заказ»)
+  const cadTaken = useRef(false)
   const [orderName, setOrderName] = useState(fromTask?.title || '')
   const [orderArticle, setOrderArticle] = useState('')
   const [orderNote, setOrderNote] = useState(fromTask?.note || '')   // примечание к заказу — выводится в PDF карт раскроя
@@ -500,6 +502,14 @@ export default function NewOrderPage() {
       if (thickness) setMaterialThickness(thickness)
     } else if (thickness && !materialName.trim()) setMaterialThickness(thickness)
   }
+
+  // из конструктора: детали материала и 3D-модель — как импорт файла; state снимаем, чтобы обновление страницы не добавило их ещё раз
+  useEffect(() => {
+    if (!fromCad || cadTaken.current) return
+    cadTaken.current = true
+    handleImport({ items: fromCad.items || [], mode: 'replace', material: fromCad.material, thickness: fromCad.thickness, orderName: fromCad.orderName, model3d: fromCad.model3d })
+    navigate('/orders/new', { replace: true, state: null })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSave() {
     const valid = details.filter(d => d.w > 0 && d.h > 0)

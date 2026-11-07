@@ -6,6 +6,7 @@ import { myWorkplaces, openWorkplace, openOwnProduction, prodView, workPid } fro
 import { myProduction } from '../lib/productionApi'
 import { I } from '../lib/navIcons'
 import { useIsSupport } from '../lib/support'
+import { hasBeta } from '../lib/beta'
 import { APP_COMMIT, appVersionText, NESTING_VERSION } from '../lib/version'
 import { getUiScale, setUiScale, isTouchDevice, UI_SCALE_MIN, UI_SCALE_MAX } from '../lib/uiScale'
 
@@ -77,6 +78,9 @@ export default function NavDrawer({ notices, unread }) {
   const [drag, setDrag] = useState(null)               // px, насколько панель выдвинута, пока её ведёт палец
   const [data, setData] = useState(cache)
   const [shut, setShut] = useState({})                 // свёрнутые разделы
+  // конструктор мебели (бета): мастер-аккаунт — всегда, остальные — если мастер выдал бету «Конструктор»
+  const [cadBeta, setCadBeta] = useState(false)
+  useEffect(() => { if (!user || isMaster) return; let a = true; hasBeta('constructor').then(v => { if (a) setCadBeta(v) }); return () => { a = false } }, [user, isMaster])
   const panel = useRef(null)
   // ширина панели — по окну; после смены «Размера текста и кнопок» окно в CSS-пикселях другое — пересчитываем.
   // Обработчики жестов читают её через ref: раньше они переподписывались посреди жеста (ширина менялась), отпускание
@@ -245,6 +249,7 @@ export default function NavDrawer({ notices, unread }) {
     { icon: I.orders, label: 'Мои заказы', badge: n.orders || 0, on: isClient('/orders'), act: () => goClient('/orders') },
     { icon: I.plus, label: 'Новый заказ', on: isClient('/orders/new'), act: () => goClient('/orders/new') },
     { icon: I.tasks, label: 'Мои задачи', on: isClient('/tasks'), act: () => goClient('/tasks') },
+    ...(isMaster || cadBeta ? [{ icon: I.cube, label: 'Конструктор β', on: pathname === '/constructor', act: () => goClient('/constructor') }] : []),
   ] }
   // сотруднику — сначала рабочее место, потом клиент, потом своё производство; остальным — производство, клиент
   if (wps.length) sections.push(clientSec, prodSec); else sections.unshift(prodSec, clientSec)
