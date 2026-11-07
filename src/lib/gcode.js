@@ -1144,8 +1144,12 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const heldCutouts = new Set(jobs.filter(j => j.rank === 4 && j.holds?.length))
   // Деловые обрезки, отмеченные в раскрое: режутся прямоугольником, фреза идёт снаружи. По краю листа инструмент
   // не идёт — только по сторонам внутри листа; обрезок, окружённый деталями, обходится по всему периметру.
+  // Настройки — «Обработка» → «Деловой остаток»: инструмент и вход (пусто — как контур детали); inside — не выходить за край
+  // листа: концы реза у края не доходят до него на «радиус фрезы + недорез» — неподвижный упор листа фреза не задевает.
+  const oc = { tool: '', entry: '', angle: 45, inside: true, gap: 0, ...ops.offcut }
+  const ocOps = { ...ops.outer, ...(oc.entry ? { entry: oc.entry, angle: n0(oc.angle) || 45 } : {}) }
   for (const of of sheet.manualOffcuts || []) {
-    const t = tool(ops.outer?.tool)
+    const t = tool(oc.tool) || tool(ops.outer?.tool)
     if (!t) { noTool('контур обрезка'); continue }
     if (t.type !== 'mill') { warn.add('На контур детали назначено сверло — обрезки не отрезаются.'); continue }
     const r = n0(t.d) / 2, e = 0.5
@@ -1159,18 +1163,21 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     const zs = levels(T, -millOver, n0(t.maxPass))
     if (sides.every(s => s.skip)) continue                         // обрезок — весь лист: резать нечего
     if (!sides.some(s => s.skip)) {
-      const L = orientFromInside(sides.map(s => s.a), ops.outer.dir, sheetRect)
-      jobs.push({ stage: 2, rank: 6, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.outer, safeZ) })
+      const L = orientFromInside(sides.map(s => s.a), ocOps.dir, sheetRect)
+      jobs.push({ stage: 2, rank: 6, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ocOps, safeZ) })
       continue
     }
-    // незамкнутые цепочки из идущих подряд сторон; концы у края листа прижимаются к самому краю
-    const clamp = q => [Math.max(sheetRect.x0, Math.min(sheetRect.x1, q[0])), Math.max(sheetRect.y0, Math.min(sheetRect.y1, q[1]))]
+    // незамкнутые цепочки из идущих подряд сторон; концы у края листа прижимаются к краю: обычно центр фрезы — на самом
+    // краю (полфрезы выходит за лист), с «не выходить за край» — центр на «радиус + недорез» внутри листа
+    const lo = oc.inside !== false ? r + Math.max(0, n0(oc.gap)) : 0
+    const edgeIn = (v, a, b) => { const c = Math.max(a, Math.min(b, v)); return c <= a + 0.01 ? a + lo : c >= b - 0.01 ? b - lo : c }   // только точки на краю
+    const clamp = q => [edgeIn(q[0], sheetRect.x0, sheetRect.x1), edgeIn(q[1], sheetRect.y0, sheetRect.y1)]
     const start = sides.findIndex((s, i) => !s.skip && sides[(i + 3) % 4].skip)
     let chain = null
     for (let k = 0; k < 4; k++) {
       const s = sides[(start + k) % 4]
       if (s.skip) { chain = null; continue }
-      if (!chain) { chain = [clamp(s.a)]; const pts = chain; jobs.push({ stage: 2, rank: 6, tool: t, at: pts[0], run: out => cutOpen(out, pts, zs, t, safeZ, T, ops.outer) }) }
+      if (!chain) { chain = [clamp(s.a)]; const pts = chain; jobs.push({ stage: 2, rank: 6, tool: t, at: pts[0], run: out => cutOpen(out, pts, zs, t, safeZ, T, ocOps) }) }
       chain.push(clamp(s.b))
     }
   }

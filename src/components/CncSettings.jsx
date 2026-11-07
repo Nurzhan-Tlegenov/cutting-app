@@ -1293,6 +1293,43 @@ export function CncOps({ cnc, onChange, layers }) {
         )
       })()}
       {(() => {
+        // отрезка деловых остатков в конце программы
+        const oc = { tool: '', entry: '', angle: 45, inside: true, gap: 0, ...ops.offcut }
+        const setOc = patch => onChange({ ...cnc, ops: { ...ops, offcut: { ...oc, ...patch } } })
+        const t = (cnc.tools || []).find(x => x.id === (oc.tool || ops.outer?.tool))
+        const rr = t ? Number(t.d) / 2 || 0 : 0, g = Math.max(0, num(oc.gap))
+        return (
+          <Fold id="offcut" title="Деловой остаток" summary={`${oc.tool ? toolName(oc.tool) : 'как контур'} · ${oc.inside !== false ? `не выходить за лист${g ? ` +${r1(g)}` : ''}` : 'за край листа'}`}>
+            <Hint>Деловые остатки, отмеченные на листе, отрезаются в самом конце программы — когда все детали уже вырезаны. Фреза идёт снаружи остатка, он выходит ровно в размер; по краю листа фреза не идёт — только по сторонам внутри листа.</Hint>
+            <label className="label" style={{ marginTop: 8 }}>Инструмент</label>
+            <ToolSelect cnc={cnc} only="mill" value={oc.tool} empty="Как контур детали" onChange={v => setOc({ tool: v })} />
+            <label className="label" style={{ marginTop: 8 }}>Вход фрезы</label>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div style={{ flex: 1 }}><Seg value={oc.entry || ''} options={[['', 'Как у деталей'], ['ramp', 'Под наклоном'], ['straight', 'Прямо']]} onChange={v => setOc({ entry: v })} /></div>
+              {oc.entry === 'ramp' && (
+                <div style={{ width: 84, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input type="text" inputMode="decimal" key={String(oc.angle)} defaultValue={oc.angle}
+                    onBlur={e => { const v = Math.max(1, Math.min(89, num(e.target.value) || 45)); if (v !== oc.angle) setOc({ angle: v }) }} style={{ padding: '7px 8px', textAlign: 'center' }} />
+                  <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>°</span>
+                </div>
+              )}
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, marginTop: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={oc.inside !== false} onChange={e => setOc({ inside: e.target.checked })} style={{ width: 18, height: 18 }} />
+              <span style={{ fontWeight: 600 }}>Не выходить за край листа</span>
+            </label>
+            {oc.inside !== false && (
+              <div style={{ marginTop: 8 }}>
+                <Num label="Недорез до края листа" unit="мм" value={oc.gap} onChange={v => setOc({ gap: Math.max(0, num(v)) })} />
+              </div>
+            )}
+            <Hint>{oc.inside !== false
+              ? `Для неподвижного упора, по которому кладут лист: фреза не выходит за лист и упор не задевает. Рез у края начинается и кончается так, что режущая кромка фрезы останавливается ${g ? `в ${r1(g)} мм от края листа` : 'ровно на краю листа'}${rr ? ` — центр фрезы Ø${r1(rr * 2)} в ${r1(rr + g)} мм от края (лист 2750 → рез по ${r1(rr + g)}…${r1(2750 - rr - g)})` : ''}. Так по X и по Y, в начале и в конце. Недорез 0 — остаток отрезается полностью; больше 0 — остаётся перемычка, её доламывают руками.`
+              : 'Упор опускается во время обработки (пневмоупоры): рез идёт до самого края, центр фрезы — на краю листа, полфрезы выходит за лист — остаток отрезается полностью.'}</Hint>
+          </Fold>
+        )
+      })()}
+      {(() => {
         const sum = (arr, f) => (arr || []).reduce((a, l) => a + (f(l) ? l.count : 0), 0)
         const n = layers ? {
           cutouts: layers.cutouts,

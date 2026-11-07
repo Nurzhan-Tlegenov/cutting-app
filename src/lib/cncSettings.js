@@ -91,6 +91,9 @@ export const DEFAULT_OPS = () => ({
   // шинковка отходов (см. scoreWaste.js): надсечки по отходам листа одной прямой на глубину «толщина − недорез»,
   // чтобы крупные куски отхода ломались руками; stepX / stepY — на какие куски делить, tool — пусто: фреза контура детали
   score: { on: false, stepX: 400, stepY: 400, leave: 2, tool: '' },
+  // отрезка деловых остатков (в конце программы): tool / entry пусто — как контур детали; inside — фреза не выходит за край
+  // листа (неподвижный упор не задевает): центр фрезы не ближе «радиус + gap» к краю — режущая кромка останавливается на gap мм от края
+  offcut: { tool: '', entry: '', angle: 45, inside: true, gap: 0 },
 })
 
 // shared — общие постпроцессоры (мастер-аккаунт отметил «для всех»): видны каждому, в настройках пользователя не хранятся
@@ -138,7 +141,7 @@ export function normalizeCnc(raw, shared = [], { beam = false } = {}) {
 }
 export function normOps(raw) {
   const d = DEFAULT_OPS(), o = raw || {}
-  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes }, skip: { ...d.skip, ...o.skip }, score: { ...d.score, ...o.score } }
+  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes }, skip: { ...d.skip, ...o.skip }, score: { ...d.score, ...o.score }, offcut: { ...d.offcut, ...o.offcut } }
 }
 export { postView, postBack, hasOwnTools } from './postTools'
 
