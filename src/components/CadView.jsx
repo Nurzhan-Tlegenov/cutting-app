@@ -157,6 +157,25 @@ function hwGeometries(p) {
     // в системе модели: x профиля — наружу (N), y — вверх (U), выдавливание — вдоль L
     g.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0)))
     put(g)
+  } else if (t === 'underOuter' || t === 'underInner') {
+    // профиль скрытого монтажа вдоль глубины: корпусная шина — Г (стенка на боковине + полка под ящиком с бортиком),
+    // выдвижная — П вверх ногами (обнимает низ боковины ящика)
+    const w = sN, h = sU, sh = new THREE.Shape()
+    if (t === 'underOuter') {
+      const k = 1.6
+      sh.moveTo(-w / 2, -h / 2); sh.lineTo(w / 2, -h / 2); sh.lineTo(w / 2, -h / 2 + 7); sh.lineTo(w / 2 - k, -h / 2 + 7); sh.lineTo(w / 2 - k, -h / 2 + k)
+      sh.lineTo(-w / 2 + k, -h / 2 + k); sh.lineTo(-w / 2 + k, h / 2); sh.lineTo(-w / 2, h / 2); sh.lineTo(-w / 2, -h / 2)
+    } else {
+      const k = 1.3
+      sh.moveTo(-w / 2, -h / 2); sh.lineTo(-w / 2 + k, -h / 2); sh.lineTo(-w / 2 + k, h / 2 - k); sh.lineTo(w / 2 - k, h / 2 - k); sh.lineTo(w / 2 - k, -h / 2)
+      sh.lineTo(w / 2, -h / 2); sh.lineTo(w / 2, h / 2); sh.lineTo(-w / 2, h / 2); sh.lineTo(-w / 2, -h / 2)
+    }
+    const g = new THREE.ExtrudeGeometry(sh, { depth: sL, bevelEnabled: false })
+    g.translate(0, 0, -sL / 2)
+    g.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0)))
+    put(g)
+  } else if (t === 'clip') {
+    put(rbox(sL, sU, sN, 2))
   } else if (t === 'mside') {
     put(rbox(sL, sU, sN, Math.min(6, sN / 2.2)))
   } else {
@@ -168,7 +187,7 @@ const HANDLE_MODELS = new Set(['rail', 'bar', 'arch', 'knob', 'knobsq', 'edge', 
 const HW_LOOK = {
   rail: ['#c9cdd2', 1, 0.28], bar: ['#c9cdd2', 1, 0.3], arch: ['#c9cdd2', 1, 0.28], knob: ['#c9cdd2', 1, 0.25], knobsq: ['#3a3c40', 0.9, 0.35],
   edge: ['#b8bcc1', 1, 0.38], edgeflat: ['#b8bcc1', 1, 0.38], cup: ['#d9dcdf', 1, 0.22], arm: ['#d9dcdf', 1, 0.22], plate: ['#cfd2d6', 1, 0.3],
-  slideOuter: ['#c4c8cc', 1, 0.35], slideInner: ['#d2d5d8', 1, 0.3], underOuter: ['#bfc3c7', 1, 0.4], underInner: ['#cfd2d5', 1, 0.35], mside: ['#e4e4e2', 0.25, 0.42],
+  clip: ['#5a5e64', 0.1, 0.5], slideOuter: ['#c4c8cc', 1, 0.35], slideInner: ['#d2d5d8', 1, 0.3], underOuter: ['#bfc3c7', 1, 0.4], underInner: ['#cfd2d5', 1, 0.35], mside: ['#e4e4e2', 0.25, 0.42],
 }
 
 // подпись размера — спрайт с текстом
@@ -206,7 +225,7 @@ function texOf(src) {
 }
 function lookOf(material, looks) {
   const own = looks?.[material]
-  if (own && (own.color || own.tex)) return { color: own.color || '#ffffff', opacity: 1, tex: own.tex || null, scale: Number(own.scale) || 600, dir: own.dir || 'v' }
+  if (own && (own.color || own.tex || own.gloss != null)) return { color: own.color || (own.tex ? '#ffffff' : lookOf(material)?.color), opacity: 1, tex: own.tex || null, scale: Number(own.scale) || 600, dir: own.dir || 'v', gloss: own.gloss ?? null }
   for (const [re, c, o] of LOOKS) if (re.test(material || '')) return { color: c, opacity: o }
   let h = 0
   for (const ch of String(material || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
@@ -229,6 +248,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
   // размеры проёмов — кнопки поверх 3D: каждый кадр ставим их в проекцию точки проёма на экран
   // анимация дверей и ящиков: id -> { g: группа, a: анимация }, цель (0 закрыто / 1 открыто) и текущее положение
   const animObjs = useRef(new Map())
+  const holeObjs = useRef([])
   const qualRef = useRef('high')
   const bgRef = useRef(new THREE.Color('#eceff2'))
   const solidBg = look.bg === 'custom' ? look.bgColor : darkBg ? '#202226' : '#eceff2'
@@ -262,7 +282,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     renderer.toneMappingExposure = 0.92
     renderer.outputColorSpace = THREE.SRGBColorSpace
     try { const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; pm.dispose() } catch { /* без окружения */ }
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x6f747c, 0.55))
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x6f747c, 0.55); scene.add(hemi)
     const dl = new THREE.DirectionalLight(0xfff6ea, 1.5); dl.position.set(2500, 5000, 4200); scene.add(dl); scene.add(dl.target)
     // мягкие тени: свет отбрасывает тени, пол их принимает (сам пол невидим — только тень)
     renderer.shadowMap.enabled = true
@@ -518,7 +538,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     renderer.domElement.addEventListener('pointermove', onMove)
     renderer.domElement.addEventListener('pointerup', onUp)
     renderer.domElement.addEventListener('pointercancel', onUp)
-    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false, dl, floor, over }
+    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false, dl, floor, over, hemi }
     return () => {
       alive = false; cancelAnimationFrame(raf); ro.disconnect()
       renderer.domElement.removeEventListener('pointerdown', onDown, { capture: true })
@@ -571,7 +591,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       if (p.model) {
         // фурнитура: металл с отражениями, без контурных линий
         const isHandle = HANDLE_MODELS.has(p.model.type)
-        const fin = p.model.type === 'mside' ? null : FINISHES.find(f => f[0] === (isHandle ? look.handleFinish : look.hwFinish))
+        const fin = p.model.type === 'mside' || p.model.type === 'clip' ? null : FINISHES.find(f => f[0] === (isHandle ? look.handleFinish : look.hwFinish))
         const SIDE = { white: ['#eeeeec', 0.2, 0.4], grey: ['#a9adb2', 0.5, 0.38], anthracite: ['#3a3d42', 0.5, 0.4], steel: ['#c6cace', 1, 0.3] }
         const [hc, hm, hr] = fin ? [fin[2], fin[3], fin[4]] : p.model.type === 'mside' ? (SIDE[p.model.color] || SIDE.white) : (HW_LOOK[p.model.type] || ['#c8ccd0', 1, 0.3])
         const mat = new THREE.MeshPhysicalMaterial({ color: isPart0 || isBlk0 ? new THREE.Color(hc).lerp(new THREE.Color('#f59e0b'), 0.4) : hc, metalness: hm, roughness: hr, envMapIntensity: 1.35, side: THREE.DoubleSide,
@@ -616,15 +636,17 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const isBlk = !isPart && hiPids?.has?.(p.pid)
       const ghost = ghostFronts && p.role === 'фасад' && p.item.id === selected
       const op = ghost ? 0.18 : xray ? Math.min(lk.opacity, Math.max(0.03, Number(look.xrayOpacity ?? 0.35))) : lk.opacity
-      const gloss = /глянец|глянц|gloss|акрил|high ?gloss/i.test(p.material || ''), matte = /матов|супермат|soft ?touch/i.test(p.material || '')
+      const g0 = lk.gloss != null ? Number(lk.gloss) : null    // свой блеск материала (0 — матовый, 1 — зеркальный глянец)
+      const gloss = g0 != null ? g0 >= 0.5 : /глянец|глянц|gloss|акрил|high ?gloss/i.test(p.material || ''), matte = g0 != null ? g0 < 0.15 : /матов|супермат|soft ?touch/i.test(p.material || '')
       const glass = p.kind === 'glass' || /стекл|зеркал/i.test(p.material || '')
       const mirror = /зеркал/i.test(p.material || '')
       const mat = new THREE.MeshPhysicalMaterial({
-        clearcoat: gloss ? 1 : 0, clearcoatRoughness: 0.04, ior: glass ? 1.5 : 1.45, specularIntensity: glass ? 1 : 0.5,
+        clearcoat: g0 != null ? Math.max(0, (g0 - 0.35) / 0.65) : gloss ? 1 : 0, clearcoatRoughness: g0 != null ? 0.18 * (1 - g0) + 0.02 : 0.04, ior: glass ? 1.5 : 1.45,
+        specularIntensity: glass ? 1 : g0 != null ? 0.2 + 0.6 * g0 : gloss ? 0.6 : 0.3,
         ...(mirror ? { metalness: 1, roughness: 0.02 } : {}),
         color: isPart ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.6) : isBlk ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.35) : isSel ? new THREE.Color(lk.color).lerp(new THREE.Color('#3b82f6'), 0.45) : lk.color,
-        roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.3 : glass ? 0.04 : gloss ? 0.18 : matte ? 0.9 : 0.68, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.85 : 0,
-        envMapIntensity: p.kind === 'sheet' ? (gloss ? 0.9 : 0.32) : glass ? 1.6 : 1, map,
+        roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.3 : glass ? 0.04 : g0 != null ? 0.8 - 0.72 * g0 : gloss ? 0.18 : matte ? 0.9 : 0.7, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.85 : 0,
+        envMapIntensity: p.kind === 'sheet' ? (g0 != null ? 0.25 + 0.95 * g0 : gloss ? 0.9 : 0.28) : glass ? 1.6 : 1, map,
         transparent: op < 1, opacity: op, depthWrite: op >= 1,
       })
       if (mirror) mat.metalness = 1
@@ -709,7 +731,12 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const b = sceneBox(parts)
       const c = new THREE.Vector3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2)
       const R = Math.max(800, Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) * 0.75)
-      s.dl.position.copy(c).add(new THREE.Vector3(0.7, 1.15, 0.5).normalize().multiplyScalar(R * 2.2))
+      // свет — откуда (по кругу и по высоте) и насколько сильный — настраивается в «Отображении»
+      const az = ((Number(look.lightAz ?? 35) || 0) * Math.PI) / 180, el = ((Number(look.lightEl) || 55) * Math.PI) / 180
+      s.dl.position.copy(c).add(new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)).normalize().multiplyScalar(R * 2.2))
+      s.dl.intensity = 1.25 * (Number(look.lightKey) || 1)
+      s.hemi.intensity = 0.5 * (Number(look.lightAmb) || 1)
+      s.scene.environmentIntensity = Number(look.envInt) || 1
       s.dl.target.position.copy(c)
       const sc = s.dl.shadow.camera
       sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = R * 0.2; sc.far = R * 4.5; sc.updateProjectionMatrix()
@@ -724,21 +751,33 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     if (!s) return
     const { extra } = s
     for (const o of [...extra.children]) { extra.remove(o); o.geometry?.dispose?.(); o.material?.dispose?.() }
+    for (const o of holeObjs.current) { o.parent?.remove(o); o.geometry?.dispose?.(); o.material?.dispose?.() }
+    holeObjs.current = []
     const list = (holes || []).slice(0, 4000)
     if (list.length) {
-      const geo = new THREE.CylinderGeometry(1, 1, 1, 14)
-      const mat = new THREE.MeshBasicMaterial({ color: '#c2410c' })
-      const im = new THREE.InstancedMesh(geo, mat, list.length)
+      // отверстия двери / ящика — в их группе анимации: открыли дверь — присадка едет вместе с ней
+      const animOf = new Map((parts || []).filter(p => p.anim).map(p => [p.pid, p.anim.id]))
+      const byG = new Map()
+      for (const h of list) { const k = animOf.get(h.pid) || ''; if (!byG.has(k)) byG.set(k, []); byG.get(k).push(h) }
       const up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion(), M = new THREE.Matrix4()
-      list.forEach((h, i) => {
-        const n = new THREE.Vector3(...h.n).normalize()
-        q.setFromUnitVectors(up, n)
-        const len = Math.min(h.depth, 60) + 0.6
-        const c = new THREE.Vector3(...h.p).addScaledVector(n, len / 2 - 0.5)
-        M.compose(c, q, new THREE.Vector3(h.d / 2, len, h.d / 2))
-        im.setMatrixAt(i, M)
-      })
-      extra.add(im)
+      for (const [k, hs] of byG) {
+        const geo = new THREE.CylinderGeometry(1, 1, 1, 14)
+        const mat = new THREE.MeshBasicMaterial({ color: '#c2410c' })
+        const im = new THREE.InstancedMesh(geo, mat, hs.length)
+        hs.forEach((h, i) => {
+          const n = new THREE.Vector3(...h.n).normalize()
+          q.setFromUnitVectors(up, n)
+          const len = Math.min(h.depth, 60) + 0.6
+          const c = new THREE.Vector3(...h.p).addScaledVector(n, len / 2 - 0.5)
+          M.compose(c, q, new THREE.Vector3(h.d / 2, len, h.d / 2))
+          im.setMatrixAt(i, M)
+        })
+        const o = k && animObjs.current.get(k)
+        if (o) {
+          const pv = o.a.kind === 'rot' ? o.a.p : [0, 0, 0]
+          im.position.set(-pv[0], -pv[1], -pv[2]); o.g.add(im); holeObjs.current.push(im)
+        } else extra.add(im)
+      }
     }
     if (room) {
       const W = room.W, D = room.D, H = room.H, T = 80
@@ -750,7 +789,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       add(T, H, D, -T / 2, H / 2, D / 2, wm)                       // левая
       add(T, H, D, W + T / 2, H / 2, D / 2, wm)                    // правая
     }
-  }, [holes, room?.W, room?.D, room?.H, !!room]) // eslint-disable-line react-hooks/exhaustive-deps
+  // (те же зависимости, что у деталей: детали перестроились — группы анимации новые, присадку кладём заново)
+  }, [holes, parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook, hiPids, matLooks, JSON.stringify(look), room?.W, room?.D, room?.H, !!room]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // «Показать всё»
   useEffect(() => { if (fitKey && st.current) fit(st.current, parts || []) }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps

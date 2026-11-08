@@ -18,7 +18,7 @@ import { useDesktop } from '../hooks/useDesktop'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
-import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights, HANDLE_TYPES, slideLength, FACADE_STYLES } from '../lib/cadCabinet'
+import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights, drawerSetHeight, HANDLE_TYPES, slideLength, FACADE_STYLES } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS, partJoints } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -453,6 +453,9 @@ function MatLookEditor({ name, looks, setLooks }) {
           <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => set({ tex: null })}>убрать фото</button></>}
         {(own.color || own.tex) && <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => setLooks(Object.fromEntries(Object.entries(looks || {}).filter(([k]) => k !== name)))}>↺ по умолчанию</button>}
       </div>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, marginTop: 6 }}><span>Блеск: матовый</span>
+        <input type="range" min="0" max="1" step="0.05" value={own.gloss ?? 0.15} onChange={e => set({ gloss: Number(e.target.value) })} style={{ flex: 1, minWidth: 0 }} /><span>глянец</span>
+        {own.gloss != null && <button type="button" style={{ ...chipS(false), padding: '1px 7px' }} onClick={() => set({ gloss: null })}>авто</button>}</label>
       {cat && <DecorCatalog onClose={() => setCat(false)} onPick={v => { set(v); setCat(false) }} />}
       <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
         <input style={{ ...inp, padding: '5px 8px', fontSize: 12.5 }} placeholder="или ссылка на картинку декора (https://…)" value={url} onChange={e => setUrl(e.target.value)} />
@@ -465,6 +468,7 @@ function MatLookEditor({ name, looks, setLooks }) {
 }
 
 function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
+  const [selDr, setSelDr] = useState([])      // какие ящики блока правим (пусто — все)
   const p = { ...CAB_DEFAULTS, ...it.p }
   const tree = treeOf(p)
   const ops = useMemo(() => cabinetParts(p).openings || [], [it.p]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -579,19 +583,29 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
         <MountEditor mount={mount} setMount={setMount} only={['cup', 'cupFix', 'plate', 'handle']} />
       </>}
       {blk.t === 'front' && fr?.type === 'drawers' && (() => {
-        const sysId = fr.box || p.box, sys = { ...drawerSystem(sysId)[2], ...(fr.sys || {}) }
+        // правим все ящики блока или выбранные (свои настройки ящика — fr.per[i], снизу вверх)
+        const sel = selDr.filter(i => i < fr.n)
+        const curOf = f => (sel.length ? (fr.per?.[sel[0]]?.[f] ?? fr[f]) : fr[f])
+        const setF = (f, v) => {
+          if (!sel.length) { const per = (fr.per || []).map(o => { if (!o) return o; const c = { ...o }; delete c[f]; return Object.keys(c).length ? c : null }); apply(opFront(tree, node.id, { ...fr, [f]: v, per })); return }
+          const per = Array.from({ length: fr.n }, (_, k) => fr.per?.[k] || null)
+          for (const i of sel) per[i] = { ...(per[i] || {}), [f]: v }
+          apply(opFront(tree, node.id, { ...fr, per }))
+        }
+        const sysId = curOf('box') || p.box, sys = { ...drawerSystem(sysId)[2], ...(curOf('sys') || {}) }
         const g = num(fr.gap ?? p.gap) ?? 3
         const fParts = cabinetParts(p).parts.filter(x => x.blk?.n === node.id && x.name === 'Фасад ящика').sort((a, b) => a.box[1] - b.box[1])
         const total = fParts.length ? fParts[fParts.length - 1].box[4] - fParts[0].box[1] : 0
         const hs = drawerHeights(total, fr.n, g, fr.hs)
-        const setH = (i, v) => { const arr = Array.from({ length: fr.n }, (_, k) => fr.hs?.[k] ?? null); arr[i] = v; apply(opFront(tree, node.id, { ...fr, hs: arr })) }
-        const setSys = patchS => apply(opFront(tree, node.id, { ...fr, sys: { ...(fr.sys || {}), ...patchS } }))
+        const setH = (i, v) => apply(opFront(tree, node.id, { ...fr, hs: drawerSetHeight(hs, fr.hs, i, v, fr.pull || 'all') }))
+        const setSys = patchS => setF('sys', { ...(curOf('sys') || {}), ...patchS })
         return <>
           <Grid cols={2}>
             <NumField label="Сколько" unit="шт" value={fr.n} onChange={v => v >= 1 && apply(opFront(tree, node.id, { ...fr, n: Math.min(10, Math.round(v)), hs: (fr.hs || []).slice(0, Math.round(v)) }))} min={1} />
             <NumField label="Зазор между фасадами" value={g} onChange={v => apply(opFront(tree, node.id, { ...fr, gap: v }))} min={0} />
           </Grid>
           <div style={{ ...lbl, marginBottom: 4 }}>Высоты фасадов (сверху вниз) — заданные 📌, остальные делят остаток поровну; можно менять и на модели</div>
+          <Chips label="Поменял высоту ящика — подстраиваются" value={fr.pull || 'all'} onChange={v => apply(opFront(tree, node.id, { ...fr, pull: v }))} options={[['all', 'все незаданные'], ['up', 'только верхние ↑'], ['down', 'только нижние ↓']]} />
           {hs.map((h, i) => i).reverse().map(i => <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 13 }}>
             <span style={{ width: 92 }}>{i === fr.n - 1 ? 'Верхний' : i === 0 ? 'Нижний' : `${i + 1}-й снизу`}</span>
             <SmallNum width={70} value={Math.round(hs[i] * 10) / 10} onChange={v => v >= 40 && setH(i, v)} />
@@ -601,31 +615,39 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
           <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 6px' }}>Между фасадами ящиков — зазор {g} мм. К краю корпуса (боковина, дно, крышка) — перехлёст {r1(outerExt)} мм; к панели, за которой другой фасад, — до середины ({r1((num(p.t) || 16) / 2 - (num(p.gap) || 0) / 2)} мм); к панели без соседа — {r1(soloExt)} мм; под накладной крышкой — ниже крышки на зазор/2.</p>
           <FrontOverlap p={p} up={up} outerExt={outerExt} soloExt={soloExt} r1={r1} />
           <div style={sect}>Короб и направляющие</div>
+          <div style={{ ...lbl, marginBottom: 4 }}>Какие ящики правим (можно несколько; ничего — все ящики блока)</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
+            <button type="button" style={{ ...chipS(!sel.length), padding: '3px 9px' }} onClick={() => setSelDr([])}>Все</button>
+            {Array.from({ length: fr.n }, (_, i) => i).reverse().map(i => <button key={i} type="button" style={{ ...chipS(sel.includes(i)), padding: '3px 9px' }}
+              onClick={() => setSelDr(l => (l.includes(i) ? l.filter(x => x !== i) : [...l, i]))}>{i === fr.n - 1 ? 'Верхний' : i === 0 ? 'Нижний' : `${i + 1}-й`}{fr.per?.[i] ? ' •' : ''}</button>)}
+            {sel.length > 0 && sel.some(i => fr.per?.[i]) && <button type="button" style={{ ...chipS(false), padding: '3px 9px' }} onClick={() => { const per = Array.from({ length: fr.n }, (_, k) => (sel.includes(k) ? null : fr.per?.[k] || null)); apply(opFront(tree, node.id, { ...fr, per })) }}>↺ как у всех</button>}
+          </div>
+          {sel.length > 0 && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Меняется только у выбранных ящиков (•). «Все» — для всего блока, свои настройки ящиков по этому пункту сбрасываются.</p>}
           <label style={{ display: 'block', marginBottom: 8 }}><span style={lbl}>Система</span>
-            <select style={inp} value={sysId} onChange={e => apply(opFront(tree, node.id, { ...fr, box: e.target.value, sys: undefined }))}>{DRAWER_SYSTEMS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+            <select style={inp} value={sysId} onChange={e => { if (!sel.length) apply(opFront(tree, node.id, { ...fr, box: e.target.value, sys: undefined, per: (fr.per || []).map(o => { if (!o) return o; const r = { ...o }; delete r.box; delete r.sys; return Object.keys(r).length ? r : null }) })); else setF('box', e.target.value) }}>{DRAWER_SYSTEMS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
           <Grid cols={2}>
             <label style={{ display: 'block', minWidth: 0 }}><span style={lbl}>Направляющие (ряд системы), мм</span>
-              <select style={inp} value={fr.slideLen === 'auto' ? 'auto' : String(slideLength(sys.lens, fr.slideLen ?? p.slideLen, num(p.D) - 25).len)} onChange={e => apply(opFront(tree, node.id, { ...fr, slideLen: e.target.value === 'auto' ? 'auto' : Number(e.target.value) }))}>
+              <select style={inp} value={curOf('slideLen') === 'auto' ? 'auto' : String(slideLength(sys.lens, curOf('slideLen') ?? p.slideLen, num(p.D) - 25).len)} onChange={e => setF('slideLen', e.target.value === 'auto' ? 'auto' : Number(e.target.value))}>
                 <option value="auto">авто — самые длинные по глубине</option>
                 {(sys.lens || []).map(l => <option key={l} value={l} disabled={l > num(p.D) - 25}>{l}{l > num(p.D) - 25 ? ' (не помещается)' : ''}</option>)}
               </select></label>
-            {sys.type === 'ball' && <NumField label="Зазор на направляющую" value={fr.slideGap ?? p.slideGap} onChange={v => apply(opFront(tree, node.id, { ...fr, slideGap: v }))} min={0} />}
+            {sys.type === 'ball' && <NumField label="Зазор на направляющую" value={curOf('slideGap') ?? p.slideGap} onChange={v => setF('slideGap', v)} min={0} />}
             {sys.type === 'under' && <NumField label="Короб уже проёма с каждой стороны" value={sys.side} onChange={v => setSys({ side: v })} min={0} />}
             {sys.type === 'under' && <NumField label="Дно выше низа боковин" value={sys.bottomUp} onChange={v => setSys({ bottomUp: v })} min={0} />}
-            {sysId === 'metal' && <NumField label="Дно и задняя уже проёма на" value={fr.sys?.reduce ?? p.metalReduce} onChange={v => setSys({ reduce: v })} min={0} />}
+            {sysId === 'metal' && <NumField label="Дно и задняя уже проёма на" value={curOf('sys')?.reduce ?? p.metalReduce} onChange={v => setSys({ reduce: v })} min={0} />}
             {sys.type === 'msys' && <><NumField label="Дно уже проёма на" value={sys.bottomRed} onChange={v => setSys({ bottomRed: v })} min={0} />
               <NumField label="Задняя уже проёма на" value={sys.backRed} onChange={v => setSys({ backRed: v })} min={0} />
               <NumField label="Высота боковины" value={sys.sideH} onChange={v => setSys({ sideH: v })} min={30} />
               <NumField label="Дно короче направляющей на" value={sys.lenRed} onChange={v => setSys({ lenRed: v })} min={0} /></>}
-            <NumField label="Короб от низа фасада" value={fr.boxBottom ?? 15} onChange={v => apply(opFront(tree, node.id, { ...fr, boxBottom: v }))} min={0} />
-            <NumField label="Короб от верха фасада" value={fr.boxTop ?? Math.max(0, (num(p.boxTopGap) ?? 40) - 15)} onChange={v => apply(opFront(tree, node.id, { ...fr, boxTop: v }))} min={0} />
+            <NumField label="Короб от низа фасада" value={curOf('boxBottom') ?? 15} onChange={v => setF('boxBottom', v)} min={0} />
+            <NumField label="Короб от верха фасада" value={curOf('boxTop') ?? Math.max(0, (num(p.boxTopGap) ?? 40) - 15)} onChange={v => setF('boxTop', v)} min={0} />
           </Grid>
           {(sys.type === 'msys' || sysId === 'metal') && <Chips label="Цвет боковин" value={fr.sideColor || 'white'} onChange={v => apply(opFront(tree, node.id, { ...fr, sideColor: v }))} options={[['white', 'Белый'], ['grey', 'Серый'], ['anthracite', 'Антрацит'], ['steel', 'Нержавейка']]} />}
           {(sys.type === 'ball' || sys.type === 'under') && <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={fr.falseFront !== false} onChange={e => apply(opFront(tree, node.id, { ...fr, falseFront: e.target.checked }))} />Фальшпанель (передняя стенка короба)</label>}
           {fr.falseFront === false && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-2px 0 8px' }}>Без фальшпанели боковины короба идут до фасада, фасад — передняя стенка; паз под дно делается и в фасаде (с изнанки).</p>}
           {sys.type === 'ball' && <>
-            <Chips label="Направляющая по высоте короба" value={fr.slidePos === 'center' ? 'center' : 'bottom'} onChange={v => apply(opFront(tree, node.id, { ...fr, slidePos: v }))} options={[['bottom', 'Снизу с отступом'], ['center', 'По центру']]} />
-            {fr.slidePos !== 'center' && <Grid cols={2}><NumField label="От низа короба" value={fr.slideOff ?? 3} onChange={v => apply(opFront(tree, node.id, { ...fr, slideOff: v }))} min={0} /></Grid>}
+            <Chips label="Направляющая по высоте короба" value={curOf('slidePos') === 'center' ? 'center' : 'bottom'} onChange={v => setF('slidePos', v)} options={[['bottom', 'Снизу с отступом'], ['center', 'По центру']]} />
+            {curOf('slidePos') !== 'center' && <Grid cols={2}><NumField label="От низа короба" value={curOf('slideOff') ?? 3} onChange={v => setF('slideOff', v)} min={0} /></Grid>}
           </>}
           {sys.type !== 'ball' && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Размеры системы — типовые; сверьте с каталогом производителя (Blum, Hettich, DTC, GTV) и поправьте здесь.</p>}
           <Chips label="Фрезеровка фасадов (МДФ)" value={fr.style || p.facadeStyle || 'flat'} onChange={v => apply(opFront(tree, node.id, { ...fr, style: v }))} options={FACADE_STYLES} />
@@ -1300,7 +1322,8 @@ export default function ConstructorPage() {
     if (v == null) return
     const n2 = v.trim() === '' ? null : Number(v.replace(',', '.'))
     if (n2 != null && !(n2 >= 40)) return
-    const arr = Array.from({ length: fr.n }, (_, k) => fr.hs?.[k] ?? null); arr[i] = n2
+    const curH = (drLabels || []).map(l => Number(String(l.text).replace('↕ ', '')))
+    const arr = curH.length === fr.n ? drawerSetHeight(curH, fr.hs, i, n2, fr.pull || 'all') : (() => { const a = Array.from({ length: fr.n }, (_, k) => fr.hs?.[k] ?? null); a[i] = n2; return a })()
     setItem({ ...selCab, p: { ...p0, tree: opFront(tree, blk.n, { ...fr, hs: arr }) } })
   }
   const room = project?.settings?.room?.on ? { ...PROJECT_DEFAULTS.room, ...project.settings.room } : null
@@ -1541,6 +1564,13 @@ export default function ConstructorPage() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Яркость</span><input type="range" min="0.5" max="1.6" step="0.02" value={look.exposure ?? 1} onChange={e => { const v = Number(e.target.value); setLook({ exposure: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.exposure ?? 1) * 100)}%</span></label>
         <Chips value={look.quality} onChange={v => setLook({ quality: v })} options={[['high', 'Максимальное (тени, затенение в углах)'], ['std', 'Обычное (быстрее)']]}
           hint="Максимальное — как в программах визуализации: мягкие тени и затенение в стыках и углах. На слабом телефоне может подтормаживать — тогда «Обычное»." />
+        <div style={sect}>Свет</div>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Основной свет</span><input type="range" min="0.2" max="2" step="0.05" value={look.lightKey ?? 1} onChange={e => { const v = Number(e.target.value); setLook({ lightKey: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.lightKey ?? 1) * 100) + '%'}</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Рассеянный свет</span><input type="range" min="0.2" max="2" step="0.05" value={look.lightAmb ?? 1} onChange={e => { const v = Number(e.target.value); setLook({ lightAmb: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.lightAmb ?? 1) * 100) + '%'}</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Отражения</span><input type="range" min="0.1" max="2" step="0.05" value={look.envInt ?? 1} onChange={e => { const v = Number(e.target.value); setLook({ envInt: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.envInt ?? 1) * 100) + '%'}</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Откуда свет (по кругу)</span><input type="range" min="0" max="360" step="5" value={look.lightAz ?? 35} onChange={e => { const v = Number(e.target.value); setLook({ lightAz: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.lightAz ?? 35) + '°'}</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Высота света</span><input type="range" min="10" max="85" step="1" value={look.lightEl ?? 55} onChange={e => { const v = Number(e.target.value); setLook({ lightEl: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.lightEl ?? 55) + '°'}</span></label>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Белые фасады слепят — уменьшите основной свет или яркость; блеск каждого материала — в «Как выглядит материал».</p>
         <div style={sect}>Металл фурнитуры</div>
         <Chips label="Ручки" value={look.handleFinish} onChange={v => setLook({ handleFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />
         <Chips label="Петли и направляющие" value={look.hwFinish} onChange={v => setLook({ hwFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />

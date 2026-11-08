@@ -364,5 +364,19 @@ for (const rot of [0, 90, 180, 270]) {
   const it3 = newItem('cabinet', { p: { W: 600, H: 720, D: 500, facadeStyle: 'shaker', doors: 1 } })
   ok(projectParts({ items: [it3] }).parts.find(p => p.role === 'фасад').mill?.style === 'shaker', 'facade mill style')
 }
+
+// свои настройки отдельного ящика; высота ящика с подстройкой только верхних
+{
+  const { newNode, drawerSetHeight } = await import('../../src/lib/cadCabinet.js')
+  const it = newItem('cabinet', { p: { W: 600, H: 800, D: 500, tree: newNode({ id: 'root', front: { type: 'drawers', n: 3, boxTop: 25, per: [{ boxTop: 60 }, null, { boxTop: 30, slideLen: 300 }] } }) } })
+  const pp = projectParts({ items: [it] })
+  const sides = pp.parts.filter(p => p.name === 'Ящик: боковина' && p.place.aabb[0] < 100).sort((a, b) => a.place.aabb[1] - b.place.aabb[1])
+  const fs = pp.parts.filter(p => p.name === 'Фасад ящика').sort((a, b) => a.place.aabb[1] - b.place.aabb[1])
+  const fh = fs.map(f => f.place.aabb[4] - f.place.aabb[1]), bh = sides.map(s => s.place.aabb[4] - s.place.aabb[1])
+  ok(Math.abs(bh[0] - (fh[0] - 15 - 60)) < 0.6 && Math.abs(bh[1] - (fh[1] - 15 - 25)) < 0.6, 'per-drawer box top ' + bh + ' / ' + fh)
+  ok(Math.abs(sides[2].place.aabb[5] - sides[2].place.aabb[2] - 300) < 0.01, 'per-drawer slide 300')
+  const h = drawerSetHeight([200, 200, 200], [null, null, null], 1, 150, 'up')
+  ok(h[0] === 200 && h[1] === 150 && h[2] === null, 'pull up ' + h)
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

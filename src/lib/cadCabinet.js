@@ -85,6 +85,24 @@ export function slideLength(lens, want, avail) {
   return { len, snapped: len !== Number(want) }
 }
 export const drawerSystem = id => (DRAWER_SYSTEMS.find(s => s[0] === id) || DRAWER_SYSTEMS[0])
+/**
+ * задать высоту ящика i (снизу вверх) = v. cur — текущие высоты, pinned — заданные (null — авто).
+ * pull: 'all' — остаток делят все незаданные; 'up' — меняются только ящики выше (нижние фиксируются как есть);
+ * 'down' — только ниже (верхние фиксируются). v = null — ящик снова «авто».
+ */
+export function drawerSetHeight(cur, pinned, i, v, pull = 'all') {
+  const n = cur.length
+  const arr = Array.from({ length: n }, (_, k) => pinned?.[k] ?? null)
+  if (pull === 'up' || pull === 'down') {
+    for (let k = 0; k < n; k++) {
+      if (k === i) continue
+      const keep = pull === 'up' ? k < i : k > i
+      arr[k] = keep ? Math.round(cur[k] * 10) / 10 : null
+    }
+  }
+  arr[i] = v
+  return arr
+}
 /** высоты фасадов ящиков блока (снизу вверх): hs[i] — заданная высота или null (авто — поровну из остатка) */
 export function drawerHeights(total, n, g, hs = []) {
   const avail = total - (n - 1) * g
@@ -590,18 +608,22 @@ export function cabinetParts(params) {
       const g = num(fr.gap ?? gap, gap)
       const hs = drawerHeights(fy1 - fy0, n, g, fr.hs)
       if (hs.some(v => v < 60)) warn.push('Ящик получился ниже 60 мм — проверьте высоты ящиков')
-      const sysId = fr.box || p.box
-      const sys = { ...drawerSystem(sysId)[2], ...(fr.sys || {}) }
-      // длина направляющих — только из ряда системы и чтобы помещалась по глубине
       const avail = D - zi0 - 5
-      const sl = slideLength(sys.lens, fr.slideLen === 'auto' ? null : (fr.slideLen ?? p.slideLen), avail)
-      if (sl.tooDeep) warn.push(`Ящики: корпус мелкий — самые короткие направляющие (${sl.len} мм) не помещаются`)
-      const bd = sl.len
-      const bBot = num(fr.boxBottom, 15), bTop = num(fr.boxTop ?? num(p.boxTopGap, 40) - 15, 25)
-      const sg = sys.type === 'under' ? num(sys.side, 5) : num(fr.slideGap ?? p.slideGap, 13)
       let dy0 = fy0
       for (let i = 0; i < n; i++) {
         const fh = hs[i]
+        // у каждого ящика могут быть свои настройки (fr.per[i], снизу вверх): система, направляющие, отступы короба;
+        // чего нет у ящика — берётся у блока, затем у корпуса
+        const per = fr.per?.[i] || {}
+        const sysId = per.box || fr.box || p.box
+        const sys = { ...drawerSystem(sysId)[2], ...((per.box && per.box !== fr.box) ? {} : (fr.sys || {})), ...(per.sys || {}) }
+        // длина направляющих — только из ряда системы и чтобы помещалась по глубине
+        const want = per.slideLen ?? fr.slideLen ?? p.slideLen
+        const sl = slideLength(sys.lens, want === 'auto' ? null : want, avail)
+        if (sl.tooDeep) warn.push(`Ящики: корпус мелкий — самые короткие направляющие (${sl.len} мм) не помещаются`)
+        const bd = sl.len
+        const bBot = num(per.boxBottom ?? fr.boxBottom, 15), bTop = num(per.boxTop ?? fr.boxTop ?? num(p.boxTopGap, 40) - 15, 25)
+        const sg = sys.type === 'under' ? num(sys.side, 5) : num(per.slideGap ?? fr.slideGap ?? p.slideGap, 13)
         const k = `dr${fi}_${i}_`
         const p0 = parts.length
         const anim = { id: k, kind: 'slide', dir: [0, 0, 1], dist: r1(bd * 0.85) }
@@ -612,7 +634,7 @@ export function cabinetParts(params) {
         // короб: у скрытого монтажа — короче направляющей на lenRed (Blum Tandem: NL − 10)
         const zf = D - 2, z0 = zf - (sys.type === 'under' ? bd - num(sys.lenRed, 10) : bd)
         // направляющая по высоте короба: снизу с отступом (по умолчанию 3 мм от низа короба) или по центру короба
-        const ys = sys.type === 'under' ? by0 + 6 : fr.slidePos === 'center' ? by0 + bh / 2 : by0 + num(fr.slideOff, 3) + 22.5
+        const ys = sys.type === 'under' ? by0 - 25 : fr.slidePos === 'center' ? by0 + bh / 2 : by0 + num(fr.slideOff, 3) + 22.5
         // крепление фасада к ящику: точки на обратной пласти фасада (саморезы изнутри — без присадки, или сверлить — крепёж «Фасад ящика»)
         const fixPts = []
         for (const z of [D - 37, D - 37 - 224, D - 37 - Math.max(256, bd - 64)].filter(z => z > zi0 + 10)) {
@@ -628,8 +650,12 @@ export function cabinetParts(params) {
           }
         } else if (sys.type === 'under') {
           for (const [a, s] of [[x0, 1], [x1, -1]]) {
-            vis(k + 'rf' + s, 'Направляющая скрытого монтажа', [s > 0 ? a : a - 26, by0 - 17, z0 + 10, s > 0 ? a + 26 : a, by0 - 6, zf - 4], null, null, { type: 'underOuter', L: 'z', N: s > 0 ? '+x' : '-x' })
-            vis(k + 'rm' + s, 'Направляющая скрытого монтажа', [s > 0 ? a + sg - 2 : a - sg - 20, by0 - 6, z0 + 6, s > 0 ? a + sg + 20 : a - sg + 2, by0 - 0.5, zf - 2], blk, anim, { type: 'underInner', L: 'z', N: s > 0 ? '+x' : '-x' })
+            // как у Blum Tandem / Movento: корпусная шина — Г-профиль на боковине (уголок под ящиком), выдвижная — П-профиль под боковиной
+            // ящика, спереди под дном — замок (защёлка) ящика
+            const w = sg + t + 3
+            vis(k + 'rf' + s, 'Направляющая скрытого монтажа', [s > 0 ? a : a - w, by0 - 44, z0 + 10, s > 0 ? a + w : a, by0 - 7, zf - 4], null, null, { type: 'underOuter', L: 'z', N: s > 0 ? '+x' : '-x' })
+            vis(k + 'rm' + s, 'Направляющая скрытого монтажа', [s > 0 ? a + sg - 1.5 : a - sg - t - 1.5, by0 - 7, z0 + 6, s > 0 ? a + sg + t + 1.5 : a - sg + 1.5, by0 - 0.3, zf - 2], blk, anim, { type: 'underInner', L: 'z', N: s > 0 ? '+x' : '-x' })
+            vis(k + 'lk' + s, 'Замок ящика', [s > 0 ? a + sg + t + 2 : a - sg - t - 44, by0 - 9, zf - 70, s > 0 ? a + sg + t + 44 : a - sg - t - 2, by0 - 0.3, zf - 18], blk, anim, { type: 'clip', L: 'z', N: s > 0 ? '+x' : '-x' })
           }
         }
         if (sysId === 'metal') {
