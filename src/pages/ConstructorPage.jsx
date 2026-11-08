@@ -108,7 +108,7 @@ function SmallNum({ value, onChange, width = 64, title }) {
     onChange={e => { setTxt(e.target.value); const n = num(e.target.value); if (n != null) onChange(n) }} />
 }
 
-function OpeningTools({ it, set, sel, showSizes, setShowSizes }) {
+function OpeningTools({ it, set, sel, showSizes, setShowSizes, dimsOn, onDims }) {
   const p = { ...CAB_DEFAULTS, ...it.p }
   const tree = treeOf(p)
   const r = sel ? findNode(tree, sel) : null
@@ -123,6 +123,21 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes }) {
     apply(t)
   }
   const front = f => node && apply(opFront(tree, node.id, f))
+  // выбран корпус, а не проём: двери ставятся на весь корпус (поверх всех проёмов); фасады в проёмах — заменяются
+  const inner = []
+  ;(function w(n) { for (const c of n.children || []) { if (c.front) inner.push(c); w(c) } })(tree)
+  const rootFront = f => {
+    if (f && inner.length && !window.confirm(`В проёмах уже есть фасады (${inner.length}) — заменить их дверями на весь корпус?`)) return
+    const t = opFront(tree, 'root', f)
+    if (!t) return
+    if (f) (function w(n) { for (const c of n.children || []) { c.front = null; w(c) } })(t)
+    apply(t)
+  }
+  const R = [
+    ['d1', '▯', 'Дверь', () => rootFront({ type: 'doors', n: 1, layout: 'v', open: 'left', hinge: 'left' }), false, tree.front?.type === 'doors' && tree.front.n === 1],
+    ['d2', '▯▯', '2 двери', () => rootFront({ type: 'doors', n: 2, layout: 'v', hinge: 'auto' }), false, tree.front?.type === 'doors' && tree.front.n > 1],
+    ['nf', '∅', 'Без фас.', () => rootFront(null), !tree.front],
+  ]
   const T = [
     ['v', '│', 'Верт.', () => addPanel('v'), !node],
     ['h', '─', 'Гориз.', () => addPanel('h'), !node],
@@ -137,7 +152,12 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes }) {
   return (
     <div style={{ position: 'absolute', left: 6, top: 6, display: 'flex', flexDirection: 'column', gap: 3, zIndex: 3, pointerEvents: 'none' }}>
       <button type="button" style={{ ...toolBtn(showSizes), pointerEvents: 'auto' }} onClick={() => setShowSizes(v => !v)} title="Размеры проёмов на модели">📏<br />Разм.</button>
-      {!node && <div style={{ fontSize: 8.5, width: 40, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: 2, textAlign: 'center' }}>нажмите проём</div>}
+      {onDims && <button type="button" style={{ ...toolBtn(dimsOn), pointerEvents: 'auto' }} onClick={onDims} title="Габаритные размеры корпусов">⟷<br />Габ.</button>}
+      {!node && <>
+        <div style={{ fontSize: 8.5, width: 40, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: 2, textAlign: 'center' }}>на весь корпус</div>
+        {R.map(([k, ic, t, fn, dis, on]) => <button key={k} type="button" disabled={dis} title={t + ' — на весь корпус'} style={{ ...toolBtn(on, dis), pointerEvents: 'auto' }} onClick={fn}>{ic}<br />{t}</button>)}
+        <div style={{ fontSize: 8.5, width: 40, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: 2, textAlign: 'center' }}>или нажмите проём</div>
+      </>}
       {node && <div style={{ ...toolBtn(false), pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, padding: '2px 1px' }} title="Сколько панелей ставить за одно нажатие">
         <button type="button" style={{ border: 'none', background: 'none', fontSize: 12, lineHeight: 1, padding: 0, cursor: 'pointer' }} onClick={() => setCnt(c => Math.min(20, c + 1))}>＋</button>
         <b style={{ fontSize: 12 }}>×{cnt}</b>
@@ -1556,6 +1576,7 @@ export default function ConstructorPage() {
  <button type="button" title="Отображение: подписи, линии, фон, кромка, тема" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => { setTab('scene'); foldApi.toggle('look', true) }}>⚙</button>
         <button type="button" title="Подсветка кромки" style={{ ...btnS(), padding: '6px 9px', ...(edgeLook.on ? { color: edgeLook.color, borderColor: edgeLook.color } : {}) }} onClick={() => setEdgeLook({ on: !edgeLook.on })}>▭</button>
         <button type="button" title="Двигать выбранный элемент пальцем по полу" style={{ ...btnS(), padding: '6px 9px', ...(moveMode ? { color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setMoveMode(v => !v)}>✥</button>
+        <button type="button" title="Габаритные размеры корпусов" style={{ ...btnS(), padding: '6px 9px', ...(look.dims !== false ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setLook({ dims: look.dims === false })}>⟷</button>
         <button type="button" title="Показать присадку" style={{ ...btnS(), padding: '6px 9px', ...(showHoles ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowHoles(v => !v)}>⊙</button>
       </div>
       {project.items.length > 0 && (() => { const b = sceneBox(parts); return <div style={{ position: 'absolute', right: 8, bottom: 4, fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: '1px 6px' }}>{Math.round(b[3] - b[0])} × {Math.round(b[4] - b[1])} × {Math.round(b[5] - b[2])}</div> })()}
