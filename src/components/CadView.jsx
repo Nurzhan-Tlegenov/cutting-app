@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { sceneBox, isFigured, partEdges, partVerts } from '../lib/cadModel'
 import { contourSegments, segmentSide } from '../lib/edgeLength'
 import { CAD_LOOK } from '../lib/cadLook'
@@ -27,6 +29,75 @@ const isDarkBg = look => look.bg === 'dark' || (look.bg === 'auto' && look.dark)
 const bgOf = look => (look.bg === 'custom' ? look.bgColor : isDarkBg(look) ? 'linear-gradient(#26282d, #1a1b1f)' : 'linear-gradient(#f4f6f8, #e6eaee)')
 const labelBg = (look, op) => (isDarkBg(look) ? `rgba(30,32,37,${op})` : `rgba(255,255,255,${op})`)
 
+// ── фурнитура как настоящая: ручки, петли, направляющие, металлические боковины ящиков ──
+// Модель строится в своей системе: x — вдоль длины (L), y — «вверх» (U = N × L), z — наружу (N); затем — в сцену по брусу детали
+const rbox = (x, y, z, r = 1.5) => new RoundedBoxGeometry(Math.max(x, 0.2), Math.max(y, 0.2), Math.max(z, 0.2), 2, Math.min(r, x / 2 - 0.01, y / 2 - 0.01, z / 2 - 0.01) || 0.05)
+const cylZ = (r, h, seg = 24) => new THREE.CylinderGeometry(r, r, h, seg).rotateX(Math.PI / 2)   // ось по z
+const cylX = (r, h, seg = 24) => new THREE.CylinderGeometry(r, r, h, seg).rotateZ(Math.PI / 2)   // ось по x
+function hwGeometries(p) {
+  const md = p.model, b = p.place.aabb
+  const L = new THREE.Vector3(...md.Lv).normalize(), N = new THREE.Vector3(...md.Nv).normalize(), U = new THREE.Vector3().crossVectors(N, L).normalize()
+  const ext = [b[3] - b[0], b[4] - b[1], b[5] - b[2]]
+  const size = v => Math.abs(v.x) * ext[0] + Math.abs(v.y) * ext[1] + Math.abs(v.z) * ext[2]
+  const sL = size(L), sU = size(U), sN = size(N)
+  const C = new THREE.Vector3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2)
+  const M = new THREE.Matrix4().makeBasis(L, U, N).setPosition(C)
+  const out = []
+  const put = (g, x = 0, y = 0, z = 0) => { g.translate(x, y, z); g.applyMatrix4(M); out.push(g) }
+  const t = md.type, e = md.ext ?? 12
+  if (t === 'rail') {
+    const a = sL / 2 - e
+    for (const x of [-a, a]) put(cylZ(5, sN - 6), x, 0, -3)
+    put(cylX(6, sL), 0, 0, sN / 2 - 6)
+  } else if (t === 'bar') {
+    const a = sL / 2 - e
+    for (const x of [-a, a]) put(rbox(10, 10, sN - 4, 2), x, 0, -2)
+    put(rbox(sL, 12, 8, 2.5), 0, 0, sN / 2 - 4)
+  } else if (t === 'arch') {
+    const a = sL / 2 - e
+    const curve = new THREE.CubicBezierCurve3(new THREE.Vector3(-a, 0, -sN / 2), new THREE.Vector3(-a * 0.95, 0, sN * 0.75), new THREE.Vector3(a * 0.95, 0, sN * 0.75), new THREE.Vector3(a, 0, -sN / 2))
+    put(new THREE.TubeGeometry(curve, 40, 5, 12, false))
+  } else if (t === 'knob') {
+    put(cylZ(7, sN * 0.55), 0, 0, -sN / 2 + sN * 0.275)
+    put(new THREE.SphereGeometry(14, 28, 18).scale(1, 1, 0.75), 0, 0, sN / 2 - 10)
+  } else if (t === 'knobsq') {
+    put(rbox(12, 12, sN * 0.55, 2), 0, 0, -sN / 2 + sN * 0.275)
+    put(rbox(28, 28, 12, 3), 0, 0, sN / 2 - 6)
+  } else if (t === 'edge' || t === 'edgeflat') {
+    // полка за фасадом, тонкий профиль в зазоре над фасадом, у «с язычком» — язычок на лицо фасада
+    put(rbox(sL, sU, 1.6, 0.5), 0, 0, -sN / 2 + 0.8)
+    put(rbox(sL, 2, sN, 0.6), 0, sU / 2 - 1, 0)
+    if (t === 'edge') put(rbox(sL, 14, 2, 0.6), 0, sU / 2 - 7, sN / 2 - 1)
+  } else if (t === 'cup') {
+    // чашка Ø35 в фасаде + фланец с ушками для крепления на обратной пласти
+    put(cylZ(17.5, 11.5, 32), 0, 0, sN / 2 - 5.75)
+    const vert = !md.side      // у петель сбоку ушки вдоль высоты двери
+    put(rbox(md.side ? 22 : 46, md.side ? 46 : 22, 1.6, 0.7), 0, 0, -sN / 2 + 3.2)
+    if (md.side) { const S = new THREE.Vector3(...md.Sv); const dir = S.dot(L) > 0 ? 1 : -1; put(rbox(14, 16, 4, 1.5), dir * 14, 0, -sN / 2 + 1.5) } else if (vert) put(rbox(16, 14, 4, 1.5), 0, 0, -sN / 2 + 1.5)
+  } else if (t === 'slideOuter' || t === 'slideInner') {
+    // профиль направляющей — швеллер (C) вдоль глубины
+    const sh = new THREE.Shape()
+    const w = sN, h = sU, k = t === 'slideOuter' ? 1.1 : 1
+    sh.moveTo(-w / 2, -h / 2); sh.lineTo(w / 2, -h / 2); sh.lineTo(w / 2, -h / 2 + 2.2); sh.lineTo(-w / 2 + k, -h / 2 + 2.2)
+    sh.lineTo(-w / 2 + k, h / 2 - 2.2); sh.lineTo(w / 2, h / 2 - 2.2); sh.lineTo(w / 2, h / 2); sh.lineTo(-w / 2, h / 2); sh.lineTo(-w / 2, -h / 2)
+    const g = new THREE.ExtrudeGeometry(sh, { depth: sL, bevelEnabled: false })
+    g.translate(0, 0, -sL / 2)
+    // в системе модели: x профиля — наружу (N), y — вверх (U), выдавливание — вдоль L
+    g.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0)))
+    put(g)
+  } else if (t === 'mside') {
+    put(rbox(sL, sU, sN, Math.min(6, sN / 2.2)))
+  } else {
+    put(rbox(sL, sU, sN, Math.min(3, sU / 2.5, sN / 2.5)))
+  }
+  return out
+}
+const HW_LOOK = {
+  rail: ['#c9cdd2', 1, 0.28], bar: ['#c9cdd2', 1, 0.3], arch: ['#c9cdd2', 1, 0.28], knob: ['#c9cdd2', 1, 0.25], knobsq: ['#3a3c40', 0.9, 0.35],
+  edge: ['#b8bcc1', 1, 0.38], edgeflat: ['#b8bcc1', 1, 0.38], cup: ['#d9dcdf', 1, 0.22], arm: ['#d9dcdf', 1, 0.22], plate: ['#cfd2d6', 1, 0.3],
+  slideOuter: ['#c4c8cc', 1, 0.35], slideInner: ['#d2d5d8', 1, 0.3], underOuter: ['#bfc3c7', 1, 0.4], underInner: ['#cfd2d5', 1, 0.35], mside: ['#e4e4e2', 0.25, 0.42],
+}
+
 // подпись размера — спрайт с текстом
 function label(text, h, look = CAD_LOOK) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64
@@ -46,14 +117,23 @@ const LOOKS = [
   [/ч[её]рн|графит|антрацит/i, '#45474a', 1], [/бел/i, '#f2f1ec', 1], [/сер/i, '#a3a6aa', 1], [/дуб|сонома|ясень|бук|орех|вотан/i, '#c8a777', 1],
 ]
 const PAL = ['#d9cdb4', '#b8c5d0', '#c9d6b8', '#d8bcae', '#c6bfdc']
-function lookOf(material) {
+// свои цвета / текстуры материалов (за аккаунтом): { [материал]: { color, tex (картинка), scale (мм на картинку) } }
+const TEX = new Map()
+function texOf(src) {
+  if (!src) return null
+  if (!TEX.has(src)) { const t = new THREE.TextureLoader().load(src); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; TEX.set(src, t) }
+  return TEX.get(src)
+}
+function lookOf(material, looks) {
+  const own = looks?.[material]
+  if (own && (own.color || own.tex)) return { color: own.color || '#ffffff', opacity: 1, tex: own.tex || null, scale: Number(own.scale) || 600 }
   for (const [re, c, o] of LOOKS) if (re.test(material || '')) return { color: c, opacity: o }
   let h = 0
   for (const ch of String(material || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, edgeLook = null, hiPids = null, look: look0 = null, children, style }) {
+export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, edgeLook = null, hiPids = null, look: look0 = null, matLooks = null, children, style }) {
   const look = { ...CAD_LOOK, ...(look0 || {}) }
   // на тёмном фоне стандартный синий плохо видно — светлее
   if (isDarkBg(look) && look.labelColor === CAD_LOOK.labelColor) look.labelColor = '#8ab4f8'
@@ -90,9 +170,14 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.12
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f96, 2.2))
-    const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(3000, 5000, 4000); scene.add(dl)
-    const dl2 = new THREE.DirectionalLight(0xffffff, 0.5); dl2.position.set(-4000, 2000, -2000); scene.add(dl2)
+    // свет как в студии: окружение для отражений металла и мягкого света + направленный свет; тональная обработка — без «мультяшности»
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 0.92
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    try { const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; pm.dispose() } catch { /* без окружения */ }
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x7d828a, 0.75))
+    const dl = new THREE.DirectionalLight(0xfff6ea, 1.5); dl.position.set(2500, 5000, 4200); scene.add(dl)
+    const dl2 = new THREE.DirectionalLight(0xffffff, 0.45); dl2.position.set(-4000, 2000, -2000); scene.add(dl2)
     // оси координат в углу (как в CAD-программах): X — красная, Y — зелёная, Z — синяя; начало — левый нижний задний угол
     const grid = new THREE.Group()        // (пол-сетку убрали; объект оставлен для совместимости)
     const axScene = new THREE.Scene(), axCam = new THREE.PerspectiveCamera(40, 1, 1, 100)
@@ -284,9 +369,42 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const b = p.place.aabb
       const sx = b[3] - b[0], sy = b[4] - b[1], sz = b[5] - b[2]
       if (!(sx > 0 && sy > 0 && sz > 0)) continue
+      const isSel0 = selected && p.item.id === selected, isPart0 = selectedPid && p.pid === selectedPid, isBlk0 = !isPart0 && hiPids?.has?.(p.pid)
+      if (p.model) {
+        // фурнитура: металл с отражениями, без контурных линий
+        const [hc, hm, hr] = HW_LOOK[p.model.type] || ['#c8ccd0', 1, 0.3]
+        const mat = new THREE.MeshStandardMaterial({ color: isPart0 || isBlk0 ? new THREE.Color(hc).lerp(new THREE.Color('#f59e0b'), 0.4) : hc, metalness: hm, roughness: hr, envMapIntensity: 1.2, side: THREE.DoubleSide,
+          transparent: xray, opacity: xray ? 0.5 : 1 })
+        const { g: hg, off } = holder(p.anim)
+        let geos
+        try { geos = hwGeometries(p) } catch { geos = [] }
+        for (const g of geos) {
+          const m = new THREE.Mesh(g, mat)
+          m.position.set(-off[0], -off[1], -off[2])
+          m.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, anim: p.anim?.id || null }
+          hg.add(m)
+        }
+        continue
+      }
       const fig = isFigured(p) ? figuredGeometry(p) : null
       const geo = fig || new THREE.BoxGeometry(sx, sy, sz)
-      const lk = lookOf(p.material)
+      const lk = lookOf(p.material, matLooks)
+      // текстура материала: повтор по размеру детали, волокно — вдоль длины детали
+      let map = null
+      if (lk.tex && p.kind !== 'hw') {
+        const base = texOf(lk.tex)
+        if (base) {
+          map = base.clone(); map.needsUpdate = true
+          const sc = lk.scale
+          if (fig) map.repeat.set(1 / sc, 1 / sc)
+          else {
+            const dims = [sx, sy, sz], ti = dims.indexOf(Math.min(...dims))
+            const [ua, va] = ti === 0 ? [2, 1] : ti === 1 ? [0, 2] : [0, 1]
+            const m = p.place.m, ey = [Math.abs(m[1]), Math.abs(m[4]), Math.abs(m[7])], la = ey.indexOf(Math.max(...ey))
+            if (la === ua) { map.rotation = Math.PI / 2; map.repeat.set(dims[va] / sc, dims[ua] / sc) } else map.repeat.set(dims[ua] / sc, dims[va] / sc)
+          }
+        }
+      }
       const isSel = selected && p.item.id === selected
       const isPart = selectedPid && p.pid === selectedPid
       const isBlk = !isPart && hiPids?.has?.(p.pid)
@@ -294,9 +412,11 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const op = ghost ? 0.18 : xray ? Math.min(lk.opacity, 0.35) : lk.opacity
       const mat = new THREE.MeshStandardMaterial({
         color: isPart ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.6) : isBlk ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.35) : isSel ? new THREE.Color(lk.color).lerp(new THREE.Color('#3b82f6'), 0.45) : lk.color,
-        roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.35 : 0.8, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.6 : 0,
+        roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.3 : p.kind === 'glass' ? 0.05 : 0.72, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.85 : 0,
+        envMapIntensity: p.kind === 'sheet' ? 0.3 : 1, map,
         transparent: op < 1, opacity: op, depthWrite: op >= 1,
       })
+      if (map && !isPart0 && !isBlk0 && !isSel0) mat.color.set('#ffffff')
       const mesh = new THREE.Mesh(geo, mat)
       const { g: hg, off } = holder(p.anim)
       if (!fig) mesh.position.set(b[0] + sx / 2 - off[0], b[1] + sy / 2 - off[1], b[2] + sz / 2 - off[2])
@@ -354,7 +474,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       dim([b[0] - off, b[1], b[2]], [b[0] - off, b[1], b[5]], r(b[5] - b[2]), [b[0] - off - lh * 1.6, b[1] + lh * 0.7, (b[2] + b[5]) / 2])
     }
     if (!s.fitted && parts?.length) { fit(s, parts); s.fitted = true }
-  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook, hiPids, JSON.stringify(look)]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook, hiPids, matLooks, JSON.stringify(look)]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // присадка (цилиндры по оси отверстия) и комната (пол и три стены)
   useEffect(() => {

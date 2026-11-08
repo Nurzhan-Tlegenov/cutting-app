@@ -41,14 +41,19 @@ export const CAB_DEFAULTS = {
   // knob — кнопка, edge — торцевая (крепится сзади фасада, выходит за верхний торец), none — нет;
   // orient h / v; anchor — привязка: c (центр), tc / bc, tl / tr / bl / br (углы), ml / mr, free-t / free-c / free-b (свободная сторона двери — против петель);
   // dx, dy — от края фасада до первого отверстия (или до линии ручки)
-  handleDoor: { on: true, type: 'bar', cc: 128, orient: 'v', anchor: 'free-t', dx: 40, dy: 80 },
-  handleDrawer: { on: true, type: 'bar', cc: 128, orient: 'h', anchor: 'c', dx: 40, dy: 40 },
+  handleDoor: { on: true, type: 'rail', cc: 128, orient: 'v', anchor: 'free-t', dx: 40, dy: 80 },
+  handleDrawer: { on: true, type: 'rail', cc: 128, orient: 'h', anchor: 'c', dx: 40, dy: 40 },
 }
 
 // системы ящиков: ball — ЛДСП-короб на шариковых направляющих (зазор на сторону slideGap); under — ЛДСП-короб на направляющих скрытого монтажа
 // (короб уже проёма на side с каждой стороны, дно в паз выше низа боковин на bottomUp); metal — металлобокс (дно и задняя ЛДСП уже проёма на reduce);
 // msys — система с металлическими боковинами: дно уже проёма на bottomRed, задняя — на backRed, высота боковины sideH, дно короче направляющей на lenRed.
 // Значения — типовые, их нужно сверить с каталогом производителя (меняются в блоке ящиков).
+// ручки: скобы и рейлинги (межцентровое), кнопки (одно отверстие), торцевые (крепятся сзади фасада, профиль — в зазоре над фасадом)
+export const HANDLE_TYPES = [
+  ['rail', 'Рейлинг'], ['bar', 'Скоба прямоугольная'], ['arch', 'Скоба-дуга'], ['knob', 'Кнопка круглая'], ['knobsq', 'Кнопка квадратная'],
+  ['edge', 'Торцевая с язычком'], ['edgeflat', 'Торцевая плоская'],
+]
 export const DRAWER_SYSTEMS = [
   ['ldsp_overlay', 'ЛДСП, дно накладное · шариковые', { type: 'ball' }],
   ['ldsp_groove', 'ЛДСП, дно в паз · шариковые', { type: 'ball' }],
@@ -501,22 +506,25 @@ export function cabinetParts(params) {
   const bT = num(p.boxBottomT, 3), bMat = p.boxBottomMaterial || 'ХДФ'
   let hingesN = 0
   const MET = 'Фурнитура металл'
-  // видимая фурнитура (петли, направляющие, ручки) — только для картинки и анимации, в раскрой не идёт
-  const vis = (key, name, box, blk, anim) => parts.push({ ...mk(key, name, 'фурнитура', box, 1, +1, 0, MET), kind: 'hw', vis: true, blk, anim })
+  // видимая фурнитура (петли, направляющие, ручки) — только для картинки и анимации, в раскрой не идёт.
+  // model — как рисовать (CadView): type, L — ось длины, N — куда «наружу» (ось вылета / вглубь)
+  const vis = (key, name, box, blk, anim, model) => parts.push({ ...mk(key, name, 'фурнитура', box, 1, +1, 0, MET), kind: 'hw', vis: true, blk, anim, ...(model ? { model } : {}) })
   const hwCount = new Map()
   const addHw = name => hwCount.set(name, (hwCount.get(name) || 0) + 1)
-  // ручка на фасаде [fx0..fx1]×[fy0..fy1] (фасад — z от D до D+fT); free — свободная сторона ('l' / 'r' / 't' / 'b')
+  // ручка на фасаде [fx0..fx1]×[fy0..fy1] (фасад — z от D до D+fT); free — свободная сторона ('l' / 'r' / 't' / 'b').
+  // Отверстия под ручку — от обратной пласти насквозь; как сверлить (насквозь / глухие с изнанки / с лица) — крепёж «Ручки»
   const putHandle = (fr, isDrawer, key, fkey, x0f, y0f, x1f, y1f, free, blk, anim) => {
     const h = { ...(isDrawer ? p.handleDrawer : p.handleDoor), ...(fr.handle || {}) }
     if (!h || h.on === false || h.type === 'none') return
+    const type = HANDLE_TYPES.some(t => t[0] === h.type) ? h.type : 'rail'
     const dx = num(h.dx, 40), dy = num(h.dy, 40)
     const cx = (x0f + x1f) / 2, cy = (y0f + y1f) / 2, zf = D + fT
-    if (h.type === 'edge') {
-      // торцевая: крепится к обратной пласти фасада у верхнего торца и выходит над ним
+    if (type === 'edge' || type === 'edgeflat') {
+      // торцевая: полка крепится к обратной пласти фасада у верхнего торца, тонкий профиль (2 мм) лежит в зазоре над фасадом,
+      // у «с язычком» — язычок спускается на лицевую сторону фасада
       const len = Math.min(num(h.len, x1f - x0f), x1f - x0f)
       const a0 = cx - len / 2, a1 = cx + len / 2
-      vis(key + 'h', 'Ручка торцевая', [a0, y1f - 30, D - 4, a1, y1f + 12, D], blk, anim)
-      vis(key + 'h2', 'Ручка торцевая', [a0, y1f, D - 4, a1, y1f + 12, zf + 2], blk, anim)
+      vis(key + 'h', 'Ручка торцевая', [a0, y1f - 28, D - 2, a1, y1f + 2, zf + (type === 'edge' ? 2 : 0)], blk, anim, { type, L: 'x', N: '+z' })
       for (const x of len > 120 ? [a0 + 25, a1 - 25] : [cx]) holes.push({ p: [x, y1f - 15, D], n: '+z', d: 3, depth: Math.min(10, fT - 4), note: 'Ручка торцевая', key: fkey })
       addHw(`Ручка торцевая ${r1(len)} мм`)
       return
@@ -527,8 +535,9 @@ export function cabinetParts(params) {
       a = free === 'l' || free === 'r' ? pos + free : free + 'c'
     }
     if (a === 'c') a = 'mc'
+    const knob = type === 'knob' || type === 'knobsq'
     const horiz = h.orient !== 'v'
-    const cc = h.type === 'knob' ? 0 : num(h.cc, 128)
+    const cc = knob ? 0 : num(h.cc, 128)
     let pts
     if (horiz) {
       const y = a[0] === 't' ? y1f - dy : a[0] === 'b' ? y0f + dy : cy
@@ -541,10 +550,11 @@ export function cabinetParts(params) {
     }
     for (const [x, y] of pts) holes.push({ p: [x, y, D], n: '+z', d: 5, depth: fT, note: 'Ручка', key: fkey })
     const xs = pts.map(q => q[0]), ys = pts.map(q => q[1])
-    if (cc) vis(key + 'h', 'Ручка', horiz ? [Math.min(...xs) - 12, ys[0] - 6, zf, Math.max(...xs) + 12, ys[0] + 6, zf + 30] : [xs[0] - 6, Math.min(...ys) - 12, zf, xs[0] + 6, Math.max(...ys) + 12, zf + 30], blk, anim)
-    else vis(key + 'h', 'Ручка-кнопка', [xs[0] - 12, ys[0] - 12, zf, xs[0] + 12, ys[0] + 12, zf + 26], blk, anim)
+    const out = num(h.out, type === 'arch' ? 32 : 30), ext = type === 'rail' ? 20 : 12
+    if (cc) vis(key + 'h', 'Ручка', horiz ? [Math.min(...xs) - ext, ys[0] - 7, zf, Math.max(...xs) + ext, ys[0] + 7, zf + out] : [xs[0] - 7, Math.min(...ys) - ext, zf, xs[0] + 7, Math.max(...ys) + ext, zf + out], blk, anim, { type, L: horiz ? 'x' : 'y', N: '+z', ext })
+    else vis(key + 'h', 'Ручка-кнопка', [xs[0] - 15, ys[0] - 15, zf, xs[0] + 15, ys[0] + 15, zf + 28], blk, anim, { type, L: 'x', N: '+z' })
     if (pts.some(([x, y]) => x < x0f + 5 || x > x1f - 5 || y < y0f + 5 || y > y1f - 5)) warn.push('Ручка выходит за фасад — проверьте привязку и отступы')
-    addHw(cc ? `Ручка ${cc} мм` : 'Ручка-кнопка')
+    addHw(cc ? `${HANDLE_TYPES.find(t => t[0] === type)[1]} ${cc} мм` : HANDLE_TYPES.find(t => t[0] === type)[1])
   }
   fronts.forEach((F, fi) => {
     const { node, x0, x1, y0, y1 } = F
@@ -574,7 +584,10 @@ export function cabinetParts(params) {
         const by0 = Math.max(dy0, y0) + bBot
         const bh = Math.max(60, Math.min(fh - bBot - bTop, y1 - by0 - 5))
         const zf = D - 2, z0 = zf - bd
-        const ys = sys.type === 'under' ? by0 + 6 : by0 + 20
+        // направляющая по высоте короба: снизу с отступом (по умолчанию 3 мм от низа короба) или по центру короба
+        const ys = sys.type === 'under' ? by0 + 6 : fr.slidePos === 'center' ? by0 + bh / 2 : by0 + num(fr.slideOff, 3) + 22.5
+        // крепление фасада к ящику: точки на обратной пласти фасада (саморезы изнутри — без присадки, или сверлить — крепёж «Фасад ящика»)
+        const fixPts = []
         for (const z of [D - 37, D - 37 - 224, D - 37 - Math.max(256, bd - 64)].filter(z => z > zi0 + 10)) {
           holes.push({ p: [x0, ys, z], n: '-x', d: 4, depth: 10, note: 'Направляющая' })
           holes.push({ p: [x1, ys, z], n: '+x', d: 4, depth: 10, note: 'Направляющая' })
@@ -583,27 +596,29 @@ export function cabinetParts(params) {
         if (sys.type === 'ball') {
           for (const [a, s] of [[x0, 1], [x1, -1]]) {
             const xa = s > 0 ? a : a - 6, xb = s > 0 ? a + 6 : a
-            vis(k + 'rf' + s, 'Направляющая', [xa, ys - 22, z0, xb, ys + 22, zf], null, null)
-            vis(k + 'rm' + s, 'Направляющая', [s > 0 ? a + 6 : a - 12.5, ys - 18, z0, s > 0 ? a + 12.5 : a - 6, ys + 18, zf], blk, anim)
+            vis(k + 'rf' + s, 'Направляющая', [xa, ys - 22.5, z0, xb, ys + 22.5, zf], null, null, { type: 'slideOuter', L: 'z', N: s > 0 ? '+x' : '-x' })
+            vis(k + 'rm' + s, 'Направляющая', [s > 0 ? a + 6 : a - Math.min(12.5, sg), ys - 17, z0 + 4, s > 0 ? a + Math.min(12.5, sg) : a - 6, ys + 17, zf], blk, anim, { type: 'slideInner', L: 'z', N: s > 0 ? '+x' : '-x' })
           }
         } else if (sys.type === 'under') {
           for (const [a, s] of [[x0, 1], [x1, -1]]) {
-            vis(k + 'rf' + s, 'Направляющая', [s > 0 ? a : a - 22, by0 - 14, z0, s > 0 ? a + 22 : a, by0 - 6, zf], null, null)
-            vis(k + 'rm' + s, 'Направляющая', [s > 0 ? a + sg : a - sg - 16, by0 - 6, z0, s > 0 ? a + sg + 16 : a - sg, by0, zf], blk, anim)
+            vis(k + 'rf' + s, 'Направляющая скрытого монтажа', [s > 0 ? a : a - 26, by0 - 17, z0 + 10, s > 0 ? a + 26 : a, by0 - 6, zf - 4], null, null, { type: 'underOuter', L: 'z', N: s > 0 ? '+x' : '-x' })
+            vis(k + 'rm' + s, 'Направляющая скрытого монтажа', [s > 0 ? a + sg - 2 : a - sg - 20, by0 - 6, z0 + 6, s > 0 ? a + sg + 20 : a - sg + 2, by0 - 0.5, zf - 2], blk, anim, { type: 'underInner', L: 'z', N: s > 0 ? '+x' : '-x' })
           }
         }
         if (sysId === 'metal') {
           const red = num(fr.sys?.reduce ?? p.metalReduce, 42)
           parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [x0 + red / 2, by0, z0, x1 - red / 2, by0 + t, zf], 1, +1, 0, mat))
           parts.push(mk(k + 'back', 'Ящик: задняя', 'ящик', [x0 + red / 2, by0 + t, z0, x1 - red / 2, by0 + bh, z0 + t], 2, +1, 0, mat))
-          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Металлобокс: боковина', [s > 0 ? a + 3 : a - red / 2, by0, z0, s > 0 ? a + red / 2 : a - 3, by0 + Math.min(bh, 150), zf], blk, anim)
+          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Металлобокс: боковина', [s > 0 ? a + 3 : a - red / 2, by0, z0, s > 0 ? a + red / 2 : a - 3, by0 + Math.min(bh, 150), zf], blk, anim, { type: 'mside', L: 'z', N: s > 0 ? '+x' : '-x' })
+          for (const s of [1, -1]) { const xc = s > 0 ? x0 + red / 4 + 1.5 : x1 - red / 4 - 1.5; fixPts.push([xc, by0 + 25], [xc, by0 + Math.min(bh, 150) - 25]) }
           hw.push({ name: `Металлобокс ${bd} мм (боковины)`, qty: 1 })
         } else if (sys.type === 'msys') {
           const bR = num(sys.bottomRed, 75), kR = num(sys.backRed, 87), sh = num(sys.sideH, 83), lr = num(sys.lenRed, 10)
           const w = x1 - x0
           parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [x0 + bR / 2, by0, zf - (bd - lr), x1 - bR / 2, by0 + t, zf], 1, +1, 0, mat, { edges: { '+z': eB } }))
           parts.push(mk(k + 'back', 'Ящик: задняя', 'ящик', [x0 + kR / 2, by0 + t, zf - (bd - lr), x1 - kR / 2, by0 + Math.max(t + 20, sh - 15), zf - (bd - lr) + t], 2, +1, 0, mat, { edges: { '+y': eB } }))
-          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Боковина ящика (металл)', [s > 0 ? a + 3 : a - bR / 2 + 3, by0 - 5, z0, s > 0 ? a + bR / 2 - 3 : a - 3, by0 + sh, zf], blk, anim)
+          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Боковина ящика (металл)', [s > 0 ? a + 3 : a - bR / 2 + 3, by0 - 5, z0, s > 0 ? a + bR / 2 - 3 : a - 3, by0 + sh, zf], blk, anim, { type: 'mside', L: 'z', N: s > 0 ? '+x' : '-x' })
+          for (const s of [1, -1]) { const xc = s > 0 ? x0 + bR / 4 : x1 - bR / 4; fixPts.push([xc, by0 + 15], [xc, by0 + sh - 20]) }
           if (w - bR < 100) warn.push('Ящик слишком узкий для этой системы')
           hw.push({ name: `${drawerSystem(sysId)[1]} ${bd} мм, комплект`, qty: 1 })
         } else {
@@ -611,20 +626,29 @@ export function cabinetParts(params) {
           const grooveBot = sysId === 'ldsp_groove' || sys.type === 'under'
           const sy0 = grooveBot ? by0 : by0 + bT
           const bE = { '+y': eB }
-          parts.push(mk(k + 'sL', 'Ящик: боковина', 'ящик', [bxa, sy0, z0, bxa + t, sy0 + bh, zf], 0, +1, 2, mat, { edges: bE }))
-          parts.push(mk(k + 'sR', 'Ящик: боковина', 'ящик', [bxb - t, sy0, z0, bxb, sy0 + bh, zf], 0, -1, 2, mat, { edges: bE }))
-          parts.push(mk(k + 'ff', 'Ящик: передняя', 'ящик', [bxa + t, sy0, zf - t, bxb - t, sy0 + bh, zf], 2, -1, 0, mat, { edges: bE }))
+          // фальшпанель (передняя стенка короба) — по галочке, по умолчанию есть; нет — боковины до фасада, фасад — передняя стенка короба
+          const ffOn = fr.falseFront !== false
+          const zs1 = ffOn ? zf : D
+          parts.push(mk(k + 'sL', 'Ящик: боковина', 'ящик', [bxa, sy0, z0, bxa + t, sy0 + bh, zs1], 0, +1, 2, mat, { edges: bE }))
+          parts.push(mk(k + 'sR', 'Ящик: боковина', 'ящик', [bxb - t, sy0, z0, bxb, sy0 + bh, zs1], 0, -1, 2, mat, { edges: bE }))
+          if (ffOn) {
+            parts.push(mk(k + 'ff', 'Ящик: передняя', 'ящик', [bxa + t, sy0, zf - t, bxb - t, sy0 + bh, zf], 2, -1, 0, mat, { edges: bE }))
+            for (const x of [bxa + t + 40, bxb - t - 40]) for (const yy of [sy0 + bh * 0.3, sy0 + bh * 0.7]) fixPts.push([x, yy])
+          } else for (const x of [bxa + t / 2, bxb - t / 2]) for (const yy of [sy0 + bh * 0.25, sy0 + bh * 0.75]) fixPts.push([x, yy])
           parts.push(mk(k + 'b', 'Ящик: задняя', 'ящик', [bxa + t, sy0, z0, bxb - t, sy0 + bh, z0 + t], 2, +1, 0, mat, { edges: bE }))
           if (grooveBot) {
             const go = sys.type === 'under' ? num(sys.bottomUp, 13) : 10, gd = 6, gw = bT + 1
             const yB = sy0 + go + (gw - bT) / 2
-            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t - gd + 1, yB, z0 + t - gd + 1, bxb - t + gd - 1, yB + bT, zf - t + gd - 1], 1, +1, 0, bMat, { t: bT }))
+            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t - gd + 1, yB, z0 + t - gd + 1, bxb - t + gd - 1, yB + bT, ffOn ? zf - t + gd - 1 : D + gd - 1], 1, +1, 0, bMat, { t: bT }))
             for (const pr of parts.filter(q => [k + 'sL', k + 'sR', k + 'ff', k + 'b'].includes(q.key))) pr.grooves.push({ from: '-y', offset: go, width: gw, depth: gd, along: 'L', note: 'Паз под дно ящика' })
+            // без фальшпанели паз под дно — в самом фасаде (с обратной стороны), на той же высоте
+            if (!ffOn) { const fp = parts.find(q => q.key === k + 'f'); fp.grooves.push({ from: '-y', offset: r1(sy0 + go - dy0), width: gw, depth: gd, along: 'L', face: 'back', note: 'Паз под дно ящика' }) }
           } else {
-            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa, by0, z0, bxb, by0 + bT, zf], 1, +1, 0, bMat, { t: bT }))
+            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa, by0, z0, bxb, by0 + bT, ffOn ? zf : D], 1, +1, 0, bMat, { t: bT }))
           }
           hw.push({ name: sys.type === 'under' ? `Направляющие скрытого монтажа ${bd} мм, пара` : `Направляющие ${bd} мм, пара`, qty: 1 })
         }
+        for (const [x, yy] of fixPts) holes.push({ p: [x, yy, D], n: '+z', d: 5, depth: 10, note: 'Крепление фасада ящика', key: k + 'f' })
         for (const pr of parts.slice(p0)) { if (!pr.blk) pr.blk = blk; if (pr.anim === undefined) pr.anim = anim }
         for (const pr of parts.slice(p0)) if (pr.anim === null) delete pr.anim
         dy0 += fh + g
@@ -660,14 +684,14 @@ export function cabinetParts(params) {
         along(dy0, dy1, k).forEach((y, j) => {
           holes.push({ p: [xc, y, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)', key })
           for (const d of [-22.5, 22.5]) holes.push({ p: [left ? xc + 9.5 : xc - 9.5, y + d, D], n: '+z', d: 8, depth: 11.5, note: 'Петля (крепёж чашки)', key })
-          vis(`${key}c${j}`, 'Петля', [xc - 17.5, y - 17.5, D - 0.5, xc + 17.5, y + 17.5, D + 11], blk, anim)
+          vis(`${key}c${j}`, 'Петля', [xc - 24, y - 24, D - 4, xc + 24, y + 24, D + 11.5], blk, anim, { type: 'cup', L: 'x', N: '+z', side: left ? '-x' : '+x' })
           // планка — на стенке проёма со стороны петель (боковина или вертикальная панель); у средних дверей при n > 2 — нет стенки
           const wall = left ? (lay === 'h' || i === 0) : (lay === 'h' || i === n - 1)
           if (wall) {
             const wx = left ? x0 : x1
             for (const d of [-16, 16]) holes.push({ p: [wx, y + d, D - pf], n: left ? '-x' : '+x', d: 5, depth: 12, note: 'Планка петли' })
-            vis(`${key}p${j}`, 'Петля: планка', left ? [wx, y - 20, D - pf - 16, wx + 10, y + 20, D - pf + 16] : [wx - 10, y - 20, D - pf - 16, wx, y + 20, D - pf + 16], null, null)
-            vis(`${key}a${j}`, 'Петля: плечо', left ? [wx + 4, y - 9, D - pf - 10, Math.max(wx + 16, xc - 10), y + 9, D - 1] : [Math.min(wx - 16, xc + 10), y - 9, D - pf - 10, wx - 4, y + 9, D - 1], blk, anim)
+            vis(`${key}p${j}`, 'Петля: планка', left ? [wx, y - 25, D - pf - 9, wx + 4, y + 25, D - pf + 9] : [wx - 4, y - 25, D - pf - 9, wx, y + 25, D - pf + 9], null, null, { type: 'plate', L: 'y', N: left ? '+x' : '-x' })
+            vis(`${key}a${j}`, 'Петля: плечо', left ? [wx + 4, y - 8, D - pf - 20, Math.max(wx + 20, xc - 6), y + 8, D - 3] : [Math.min(wx - 20, xc + 6), y - 8, D - pf - 20, wx - 4, y + 8, D - 3], null, null, { type: 'arm', L: 'z', N: left ? '+x' : '-x' })
           }
         })
       } else {
@@ -677,13 +701,13 @@ export function cabinetParts(params) {
         along(dx0, dx1, k).forEach((x, j) => {
           holes.push({ p: [x, yc, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)', key })
           for (const d of [-22.5, 22.5]) holes.push({ p: [x + d, up ? yc - 9.5 : yc + 9.5, D], n: '+z', d: 8, depth: 11.5, note: 'Петля (крепёж чашки)', key })
-          vis(`${key}c${j}`, 'Петля', [x - 17.5, yc - 17.5, D - 0.5, x + 17.5, yc + 17.5, D + 11], blk, anim)
+          vis(`${key}c${j}`, 'Петля', [x - 24, yc - 24, D - 4, x + 24, yc + 24, D + 11.5], blk, anim, { type: 'cup', L: 'x', N: '+z' })
           const wall = up ? (lay === 'v' || i === n - 1) : (lay === 'v' || i === 0)
           if (wall) {
             const wy = up ? y1 : y0
             for (const d of [-16, 16]) holes.push(up ? { p: [x + d, wy, D - pf], n: '+y', d: 5, depth: 12, note: 'Планка петли' } : { p: [x + d, wy, D - pf], n: '-y', d: 5, depth: 12, note: 'Планка петли' })
-            vis(`${key}p${j}`, 'Петля: планка', up ? [x - 20, wy - 10, D - pf - 16, x + 20, wy, D - pf + 16] : [x - 20, wy, D - pf - 16, x + 20, wy + 10, D - pf + 16], null, null)
-            vis(`${key}a${j}`, 'Петля: плечо', up ? [x - 9, Math.min(wy - 16, yc + 10), D - pf - 10, x + 9, wy - 4, D - 1] : [x - 9, wy + 4, D - pf - 10, x + 9, Math.max(wy + 16, yc - 10), D - 1], blk, anim)
+            vis(`${key}p${j}`, 'Петля: планка', up ? [x - 25, wy - 4, D - pf - 9, x + 25, wy, D - pf + 9] : [x - 25, wy, D - pf - 9, x + 25, wy + 4, D - pf + 9], null, null, { type: 'plate', L: 'x', N: up ? '-y' : '+y' })
+            vis(`${key}a${j}`, 'Петля: плечо', up ? [x - 8, Math.min(wy - 20, yc + 6), D - pf - 20, x + 8, wy - 4, D - 3] : [x - 8, wy + 4, D - pf - 20, x + 8, Math.max(wy + 20, yc - 6), D - 3], null, null, { type: 'arm', L: 'z', N: up ? '-y' : '+y' })
           }
         })
       }

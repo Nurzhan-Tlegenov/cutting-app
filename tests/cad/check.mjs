@@ -292,5 +292,28 @@ for (const rot of [0, 90, 180, 270]) {
   const rod = p4.parts.find(p => p.name === 'Штанга')
   ok(rod && rod.kind === 'profile' && Math.abs(rod.place.L - 766) < 0.01, 'rod ' + rod?.place.L)
 }
+
+// ручки: глухие с изнанки / с лица; ящик без фальшпанели — паз под дно в фасаде; крепление фасада; свой материал детали
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const mk = fr => newItem('cabinet', { p: { W: 600, H: 400, D: 500, tree: newNode({ id: 'root', front: fr }) } })
+  const it = mk({ type: 'drawers', n: 1 })
+  const fac = mount => exportAll({ items: [it], settings: { mount } }).details.find(d => d.name === 'Фасад ящика')
+  const hb = fac({ handle: { mode: 'back', depth: 10 } }).contour.drillings.filter(d => d.note === 'Ручка')
+  ok(hb.length === 2 && hb.every(d => d.depth === 10 && d.face === 'back'), 'handle blind from back ' + JSON.stringify(hb.map(d => [d.depth, d.face])))
+  const hf = fac({ handle: { mode: 'front', depth: 8 } }).contour.drillings.filter(d => d.note === 'Ручка')
+  ok(hf.length === 2 && hf.every(d => d.depth === 8 && d.face === 'front'), 'handle blind from front ' + JSON.stringify(hf.map(d => [d.depth, d.face])))
+  ok(fac({}).contour.drillings.filter(d => d.note === 'Крепление фасада ящика').length === 0, 'drawer front on screws: no holes')
+  ok(fac({ dfront: { mode: 'drill', d: 5, depth: 10 } }).contour.drillings.filter(d => d.note === 'Крепление фасада ящика').length === 4, 'drawer front fixing holes')
+  const it2 = mk({ type: 'drawers', n: 1, box: 'ldsp_groove', falseFront: false })
+  const pp2 = projectParts({ items: [it2] })
+  ok(!pp2.parts.some(p => p.name === 'Ящик: передняя'), 'no false front')
+  const f2 = exportAll({ items: [it2] }).details.find(d => d.name === 'Фасад ящика')
+  ok(f2.contour.grooves.some(g => g.face === 'back' && /дно/.test(g.note)), 'bottom groove in facade')
+  ok(pp2.parts.some(p => p.model?.type === 'rail') && pp2.parts.some(p => p.model?.type === 'slideOuter'), 'hardware models')
+  const it3 = { ...mk({ type: 'doors', n: 1 }), mat: { door0_0: 'МДФ Белый глянец 18' } }
+  const door = projectParts({ items: [it3] }).parts.find(p => p.name === 'Дверь')
+  ok(door.material === 'МДФ Белый глянец 18', 'part material override')
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

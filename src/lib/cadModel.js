@@ -35,10 +35,11 @@ export const MOUNT_DEFAULTS = {
   cup: { d: 35, depth: 12 },                      // чашка петли — сверлится всегда
   cupFix: { mode: 'none', d: 8, depth: 11.5 },    // крепёж чашки: саморезы или впрессовка (2 отв. рядом с чашкой)
   pin: { d: 5, depth: 12 },                       // полкодержатели — сверлятся всегда
-  handle: { d: 5 },                               // ручки — сквозные
+  handle: { mode: 'through', d: 5, depth: 10 },   // ручки: насквозь; back — глухие с изнанки (можно пересверлить под другую ручку); front — глухие с лица
+  dfront: { mode: 'none', d: 5, depth: 10 },      // крепление фасада к ящику: саморезы изнутри (без присадки) или сверлить в обратной пласти фасада
   rod: { mode: 'none', d: 4, depth: 12 },         // штангодержатели
 }
-const MOUNT_OF = { 'Направляющая': 'slide', 'Планка петли': 'plate', 'Петля (чашка)': 'cup', 'Петля (крепёж чашки)': 'cupFix', 'Полкодержатель': 'pin', 'Ручка': 'handle', 'Штангодержатель': 'rod' }
+const MOUNT_OF = { 'Крепление фасада ящика': 'dfront', 'Направляющая': 'slide', 'Планка петли': 'plate', 'Петля (чашка)': 'cup', 'Петля (крепёж чашки)': 'cupFix', 'Полкодержатель': 'pin', 'Ручка': 'handle', 'Штангодержатель': 'rod' }
 export const mountOf = mount => Object.fromEntries(Object.keys(MOUNT_DEFAULTS).map(k => [k, { ...MOUNT_DEFAULTS[k], ...(mount?.[k] || {}) }]))
 /** отверстия фурнитуры -> с диаметром и глубиной по крепежу пользователя; «на саморезы» — без отверстий */
 export function applyMount(holes, mount) {
@@ -49,7 +50,18 @@ export function applyMount(holes, mount) {
     if (!g) { out.push(h); continue }
     const m = M[g]
     if (m.mode === 'none') continue
-    out.push({ ...h, d: num(m.d, h.d), depth: g === 'handle' ? h.depth : num(m.depth, h.depth) })
+    if (g === 'handle') {
+      // ручка: отверстие задано от обратной пласти насквозь (depth = толщина фасада)
+      const T = h.depth, d = num(m.d, h.d)
+      if (m.mode === 'back') out.push({ ...h, d, depth: Math.min(T - 1, num(m.depth, 10)) })
+      else if (m.mode === 'front') {
+        const nv = Array.isArray(h.n) ? h.n : null
+        if (nv) out.push({ ...h, d, depth: Math.min(T - 1, num(m.depth, 10)), p: h.p.map((v, i) => v + nv[i] * T), n: nv.map(v => -v) })
+        else { const a = 'xyz'.indexOf(h.n[1]), sg = h.n[0] === '-' ? -1 : 1, p2 = [...h.p]; p2[a] += sg * T; out.push({ ...h, d, depth: Math.min(T - 1, num(m.depth, 10)), p: p2, n: (sg > 0 ? '-' : '+') + h.n[1] }) }
+      } else out.push({ ...h, d })
+      continue
+    }
+    out.push({ ...h, d: num(m.d, h.d), depth: num(m.depth, h.depth) })
   }
   return out
 }
@@ -152,6 +164,13 @@ export function projectParts(project) {
     const r = itemRecords(it)
     r.parts.forEach(rec => {
       const sp = { ...rec, item: it, ii, pid: `${it.id}:${rec.key}`, place: placeRecord(rec, it) }
+      // свой материал (цвет / декор) у отдельной детали: item.mat[ключ]
+      if (it.mat?.[rec.key]) sp.material = it.mat[rec.key]
+      // как рисовать фурнитуру: оси модели — в координаты сцены
+      if (rec.model) {
+        const Rm = rotYMat(it.rotY), dv = k => { const a = 'xyz'.indexOf(k[k.length - 1]), v = [0, 0, 0]; v[a] = k[0] === '-' ? -1 : 1; return mulMV(Rm, v) }
+        sp.model = { ...rec.model, Lv: dv(rec.model.L), Nv: dv(rec.model.N), ...(rec.model.side ? { Sv: dv(rec.model.side) } : {}) }
+      }
       // анимация (дверь — поворот на петлях, ящик — выезд): в координаты сцены
       if (rec.anim) {
         const Rr = rotYMat(it.rotY), ps = [num(it.pos?.x), num(it.pos?.y), num(it.pos?.z)]
@@ -392,7 +411,7 @@ export function explodeCabinet(it) {
     return {
       id: newId(), type: r.kind === 'glass' ? 'glass' : 'panel', name: r.name, rotY: it.rotY || 0,
       pos: { x: r1(o[0] + num(it.pos?.x)), y: r1(o[1] + num(it.pos?.y)), z: r1(o[2] + num(it.pos?.z)) },
-      p: { dx: r1(b[3] - b[0]), dy: r1(b[4] - b[1]), dz: r1(b[5] - b[2]), tAxis: r.tAxis, lAxis: r.lAxis, tSign: r.tSign, material: r.material, edgeAll: r.edges?.all || '', edges: r.edges?.all ? {} : { ...r.edges }, grooves: r.grooves || [], holes: own.get(r) || [], role: r.role, from: it.name },
+      p: { dx: r1(b[3] - b[0]), dy: r1(b[4] - b[1]), dz: r1(b[5] - b[2]), tAxis: r.tAxis, lAxis: r.lAxis, tSign: r.tSign, material: it.mat?.[r.key] || r.material, edgeAll: r.edges?.all || '', edges: r.edges?.all ? {} : { ...r.edges }, grooves: r.grooves || [], holes: own.get(r) || [], role: r.role, from: it.name },
       ...(it.ov?.[r.key] ? { ov: { p: it.ov[r.key] } } : {}),
     }
   })

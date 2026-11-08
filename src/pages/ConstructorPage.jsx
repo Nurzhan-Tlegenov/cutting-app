@@ -18,7 +18,7 @@ import { useDesktop } from '../hooks/useDesktop'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
-import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights } from '../lib/cadCabinet'
+import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights, HANDLE_TYPES } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -238,20 +238,20 @@ function HandleEditor({ h, onChange, door }) {
   return (<>
     <label style={{ fontSize: 13.5, fontWeight: 600, display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0 6px' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={on} onChange={e => set({ on: e.target.checked, type: h.type === 'none' ? 'bar' : h.type })} />Ручки</label>
     {on && <Sub>
-      <Chips label="Вид" value={h.type || 'bar'} onChange={v => set({ type: v })} options={[['bar', 'Скоба'], ['knob', 'Кнопка'], ['edge', 'Торцевая']]} />
-      {h.type === 'edge' ? <>
+      <Chips label="Вид" value={HANDLE_TYPES.some(t => t[0] === h.type) ? h.type : 'rail'} onChange={v => set({ type: v })} options={HANDLE_TYPES} />
+      {h.type === 'edge' || h.type === 'edgeflat' ? <>
         <Grid cols={2}><NumField label="Длина (пусто — по ширине фасада)" value={h.len ?? ''} onChange={v => set({ len: v || null })} min={0} /></Grid>
-        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Торцевая ручка крепится сзади фасада у верхнего торца (глухие отверстия в обратной пласти) и выходит над фасадом.</p>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Торцевая ручка крепится сзади фасада у верхнего торца (глухие отверстия в обратной пласти); тонкий профиль лежит в зазоре над фасадом, у «с язычком» — язычок выходит на лицо фасада.</p>
       </> : <>
-        {h.type !== 'knob' && <Chips label="Расположение" value={h.orient || 'h'} onChange={v => set({ orient: v })} options={[['h', 'Горизонтально'], ['v', 'Вертикально']]} />}
+        {h.type !== 'knob' && h.type !== 'knobsq' && <Chips label="Расположение" value={h.orient || 'h'} onChange={v => set({ orient: v })} options={[['h', 'Горизонтально'], ['v', 'Вертикально']]} />}
         <Chips label="Привязка" value={h.anchor || 'c'} onChange={v => set({ anchor: v })} options={door ? ANCHORS : ANCHORS.slice(0, 7)} />
         <Grid cols={3}>
-          {h.type !== 'knob' && <label style={{ display: 'block', minWidth: 0 }}><span style={lbl}>Межцентровое, мм</span>
+          {h.type !== 'knob' && h.type !== 'knobsq' && <label style={{ display: 'block', minWidth: 0 }}><span style={lbl}>Межцентровое, мм</span>
             <select style={inp} value={h.cc || 128} onChange={e => set({ cc: Number(e.target.value) })}>{(CC.includes(Number(h.cc)) ? CC : [...CC, Number(h.cc)].sort((a, b) => a - b)).map(v => <option key={v} value={v}>{v}</option>)}</select></label>}
           <NumField label="От края сбоку" value={h.dx ?? 40} onChange={v => set({ dx: v })} />
           <NumField label="От верха / низа" value={h.dy ?? 40} onChange={v => set({ dy: v })} />
         </Grid>
-        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Отступы — от края фасада до первого отверстия (по центру — не нужны). Отверстия ручки — сквозные, диаметр — в «Крепёж».</p>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Отступы — от края фасада до первого отверстия (по центру — не нужны). Как сверлить (насквозь / глухие с изнанки / с лица) и диаметр — в «Крепёж» ниже.</p>
       </>}
     </Sub>}
   </>)
@@ -262,13 +262,26 @@ const CAB_REMEMBER = ['material', 't', 'facadeMaterial', 'facadeT', 'backMateria
   'backGapL', 'backGapR', 'backGapB', 'backGapT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'hingeCup', 'hingeEnd', 'plateFront', 'box', 'slideGap', 'slideLen',
   'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce', 'handleDoor', 'handleDrawer', 'pinFront', 'pinBelow']
 // ── крепёж фурнитуры: на саморезы (без присадки) или сверлить d × глубина; запоминается за аккаунтом ──
-const MOUNT_ROWS = [['slide', 'Направляющие ящиков', true], ['plate', 'Планки петель', true], ['cup', 'Чашка петли', false], ['cupFix', 'Крепёж чашки', true], ['pin', 'Полкодержатели', false], ['handle', 'Ручки (сквозные)', false], ['rod', 'Штангодержатели', true]]
+const MOUNT_ROWS = [['slide', 'Направляющие ящиков', true], ['dfront', 'Фасад к ящику', true], ['plate', 'Планки петель', true], ['cup', 'Чашка петли', false], ['cupFix', 'Крепёж чашки', true], ['pin', 'Полкодержатели', false], ['handle', 'Ручки', 'handle'], ['rod', 'Штангодержатели', true]]
 function MountEditor({ mount, setMount, only }) {
   const M = mountOf(mount)
   const set = (k, patch) => setMount({ ...(mount || {}), [k]: { ...M[k], ...patch } })
   return (<>
     {MOUNT_ROWS.filter(([k]) => !only || only.includes(k)).map(([k, name, canNone]) => {
-      const m = M[k], drill = !canNone || m.mode === 'drill'
+      const m = M[k]
+      if (canNone === 'handle') return <div key={k} style={{ marginBottom: 6 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', fontSize: 13 }}>
+          <span style={{ minWidth: 130, fontWeight: 600 }}>{name}</span>
+          {[['through', 'насквозь'], ['back', 'глухие с изнанки'], ['front', 'глухие с лица']].map(([v, tt]) =>
+            <button key={v} type="button" style={{ ...chipS((m.mode || 'through') === v), padding: '3px 8px' }} onClick={() => set(k, { mode: v })}>{tt}</button>)}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', fontSize: 12.5, marginTop: 3, paddingLeft: 6 }}>
+          <span>Ø</span><SmallNum width={52} value={m.d} onChange={v => v > 0 && set(k, { d: v })} />
+          {m.mode !== 'through' && m.mode && <><span>глубина</span><SmallNum width={52} value={m.depth} onChange={v => v > 0 && set(k, { depth: v })} /></>}
+        </div>
+        {m.mode === 'back' && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '3px 0 0 6px' }}>Глухие с изнанки — лицо фасада целое: если ручка поменяется (например, 96 → 128), можно пересверлить.</p>}
+      </div>
+      const drill = !canNone || m.mode === 'drill'
       return <div key={k} style={{ marginBottom: 6 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', fontSize: 13 }}>
           <span style={{ minWidth: 130, fontWeight: 600 }}>{name}</span>
@@ -277,7 +290,7 @@ function MountEditor({ mount, setMount, only }) {
         </div>
         {drill && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', fontSize: 12.5, marginTop: 3, paddingLeft: 6 }}>
           <span>Ø</span><SmallNum width={52} value={m.d} onChange={v => v > 0 && set(k, { d: v })} />
-          {k !== 'handle' && <><span>глубина</span><SmallNum width={52} value={m.depth} onChange={v => v > 0 && set(k, { depth: v })} /></>}
+          <span>глубина</span><SmallNum width={52} value={m.depth} onChange={v => v > 0 && set(k, { depth: v })} />
           {canNone && <>{[[2.5, 3, 'наколка'], [5, 13, 'евровинт'], ...(k === 'cupFix' ? [[8, 11.5, 'впрессовка']] : [])].map(([d, dp, t]) =>
             <button key={t} type="button" style={{ ...chipS(m.d === d && m.depth === dp), padding: '2px 7px', fontSize: 11.5 }} onClick={() => set(k, { d, depth: dp })}>{t} {d}×{dp}</button>)}</>}
         </div>}
@@ -285,6 +298,59 @@ function MountEditor({ mount, setMount, only }) {
     })}
     <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '2px 0 6px' }}>Запоминается за вашим аккаунтом — так считается присадка для раскроя и ЧПУ во всех проектах.</p>
   </>)
+}
+
+// ── цвет / текстура материала (за аккаунтом): фото декора с телефона или картинка из интернета ──
+function shrinkImage(file, max = 512) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader()
+    fr.onerror = rej
+    fr.onload = () => {
+      const img = new Image()
+      img.onerror = rej
+      img.onload = () => {
+        const k = Math.min(1, max / Math.max(img.width, img.height))
+        const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k)
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+        res(c.toDataURL('image/jpeg', 0.82))
+      }
+      img.src = fr.result
+    }
+    fr.readAsDataURL(file)
+  })
+}
+// материал (декор) для выбранных деталей: другой материал — это и другой раскрой (детали уйдут в свою группу)
+function MatPick({ materials, value, onApply, onReset }) {
+  const [v, setV] = useState(value || '')
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+      <div style={{ flex: 1, minWidth: 160 }}><TextField label="Материал (декор)" value={v} onChange={setV} list="cad-mats" /></div>
+      <button type="button" style={btnS(true)} disabled={!v.trim()} onClick={() => onApply(v.trim())}>Применить</button>
+      {onReset ? <button type="button" style={btnS()} onClick={onReset}>↺ как в корпусе</button> : <button type="button" style={btnS()} onClick={() => onApply(null)}>↺ как в корпусе</button>}
+      {void materials}
+    </div>
+  )
+}
+function MatLookEditor({ name, looks, setLooks }) {
+  if (!name) return null
+  const own = looks?.[name] || {}
+  const set = patch => { const n = { ...own, ...patch }; Object.keys(n).forEach(k => (n[k] == null || n[k] === '') && delete n[k]); const all = { ...(looks || {}) }; if (Object.keys(n).length) all[name] = n; else delete all[name]; setLooks(all) }
+  return (
+    <div style={{ marginTop: 8, padding: '6px 8px', border: '0.5px solid var(--border)', borderRadius: 8 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 5 }}>Как выглядит «{name}»</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
+        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}>цвет<input type="color" value={own.color || '#d9cdb4'} onChange={e => set({ color: e.target.value })} style={{ width: 36, height: 24, padding: 0, border: 'none', background: 'none' }} /></label>
+        <label style={{ ...btnS(), padding: '4px 9px', fontSize: 12.5 }}>📷 Фото декора
+          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; try { set({ tex: await shrinkImage(f) }) } catch { window.alert('Не удалось открыть картинку') } }} /></label>
+        <a href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(name + ' декор текстура')}`} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: 'var(--blue)' }}>🔎 найти в интернете</a>
+        {own.tex && <><img src={own.tex} alt="" style={{ width: 34, height: 24, objectFit: 'cover', borderRadius: 4 }} />
+          <span>размер картинки</span><SmallNum width={56} value={own.scale || 600} onChange={v => v > 50 && set({ scale: v })} /><span>мм</span>
+          <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => set({ tex: null })}>убрать фото</button></>}
+        {(own.color || own.tex) && <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => setLooks(Object.fromEntries(Object.entries(looks || {}).filter(([k]) => k !== name)))}>↺ по умолчанию</button>}
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>Сфотографируйте образец или сохраните картинку из интернета и загрузите её — так деталь и все детали этого материала будут выглядеть на модели. Запоминается за аккаунтом.</p>
+    </div>
+  )
 }
 
 function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
@@ -438,6 +504,12 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
             <NumField label="Короб от низа фасада" value={fr.boxBottom ?? 15} onChange={v => apply(opFront(tree, node.id, { ...fr, boxBottom: v }))} min={0} />
             <NumField label="Короб от верха фасада" value={fr.boxTop ?? Math.max(0, (num(p.boxTopGap) ?? 40) - 15)} onChange={v => apply(opFront(tree, node.id, { ...fr, boxTop: v }))} min={0} />
           </Grid>
+          {(sys.type === 'ball' || sys.type === 'under') && <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={fr.falseFront !== false} onChange={e => apply(opFront(tree, node.id, { ...fr, falseFront: e.target.checked }))} />Фальшпанель (передняя стенка короба)</label>}
+          {fr.falseFront === false && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-2px 0 8px' }}>Без фальшпанели боковины короба идут до фасада, фасад — передняя стенка; паз под дно делается и в фасаде (с изнанки).</p>}
+          {sys.type === 'ball' && <>
+            <Chips label="Направляющая по высоте короба" value={fr.slidePos === 'center' ? 'center' : 'bottom'} onChange={v => apply(opFront(tree, node.id, { ...fr, slidePos: v }))} options={[['bottom', 'Снизу с отступом'], ['center', 'По центру']]} />
+            {fr.slidePos !== 'center' && <Grid cols={2}><NumField label="От низа короба" value={fr.slideOff ?? 3} onChange={v => apply(opFront(tree, node.id, { ...fr, slideOff: v }))} min={0} /></Grid>}
+          </>}
           {sys.type !== 'ball' && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Размеры системы — типовые; сверьте с каталогом производителя (Blum, Hettich, DTC, GTV) и поправьте здесь.</p>}
           <HandleEditor h={{ ...p.handleDrawer, ...(fr.handle || {}) }} onChange={h => apply(opFront(tree, node.id, { ...fr, handle: h }))} />
           <div style={row}>
@@ -445,7 +517,7 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
             <button type="button" style={btnS()} onClick={() => up({ handleDrawer: { ...p.handleDrawer, ...(fr.handle || {}) } })} title="Новые ящики получат эту ручку; запоминается за аккаунтом">Сделать основной для ящиков</button>
           </div>
           <div style={sect}>Крепёж</div>
-          <MountEditor mount={mount} setMount={setMount} only={['slide', 'handle']} />
+          <MountEditor mount={mount} setMount={setMount} only={['slide', 'dfront', 'handle']} />
         </>
       })()}
 
@@ -983,6 +1055,12 @@ export default function ConstructorPage() {
   const [theme, setThemeS] = useState(() => getTheme())
   useEffect(() => { const on = e => setThemeS(e.detail === 'dark' ? 'dark' : 'light'); window.addEventListener('themechange', on); return () => window.removeEventListener('themechange', on) }, [])
   const viewLook = useMemo(() => ({ ...look, dark: theme === 'dark' }), [look, theme])
+  // цвета / текстуры материалов — за аккаунтом
+  const [matLooks, setMatLooksS] = useState(() => { try { return getUserSettings(user)?.cadMatLooks || {} } catch { return {} } })
+  const setMatLooks = v => { setMatLooksS(v); saveUserSettings({ cadMatLooks: v }, user) }
+  // выбор нескольких деталей (сменить материал / цвет сразу у всех)
+  const [multi, setMulti] = useState(false)
+  const [multiSel, setMultiSel] = useState([])
   const [moveMode, setMoveMode] = useState(false)    // «✥ Двигать»: только тогда пальцем двигаем элемент по полу
   const [pull, setPull] = useState('after')          // при смене размера проёма тянутся соседи: after — выше/правее, before — ниже/левее        // выбранная деталь внутри элемента (нажатие в 3D)
   const [editPart, setEditPart] = useState(null)    // редактор контура детали: { pid, draft }
@@ -1059,6 +1137,13 @@ export default function ConstructorPage() {
   }, [selCab, cabOpenings, showSizes, selOpening])
   const blk = selBlock && selCab && selBlock.item === selCab.id ? selBlock : null
   const hiPids = useMemo(() => (blk ? new Set(parts.filter(sp => sp.item.id === blk.item && sp.blk && sp.blk.n === blk.n && sp.blk.t === blk.t).map(sp => sp.pid)) : null), [blk, parts])
+  const multiSet = useMemo(() => new Set(multiSel), [multiSel])
+  // свой материал выбранным деталям (item.mat[ключ]); null — как в корпусе
+  const applyMultiMat = v => {
+    const by = new Map()
+    for (const sp of parts) if (multiSet.has(sp.pid)) { if (!by.has(sp.item.id)) by.set(sp.item.id, []); by.get(sp.item.id).push(sp.key) }
+    setProject({ ...project, items: project.items.map(it => { const ks = by.get(it.id); if (!ks) return it; const m = { ...(it.mat || {}) }; for (const k of ks) { if (v) m[k] = v; else delete m[k] } return { ...it, mat: m } }) })
+  }
   const hiPidsRef = useRef(null)
   useEffect(() => { hiPidsRef.current = hiPids }, [hiPids])
   // высоты ящиков выбранного блока — подписи на модели; нажать — ввести высоту (остальные ящики перестроятся)
@@ -1185,6 +1270,7 @@ export default function ConstructorPage() {
     setSelected(it.id); setTab('props')
   }
   const select = (id, pid = null, opening = null, extra = null) => {
+    if (multi) { if (pid) setMultiSel(l => (l.includes(pid) ? l.filter(x => x !== pid) : [...l, pid])); return }
     setSelected(id); setSelPid(id ? pid : null); setSelOpening(id ? opening : null)
     // тап по детали уже выбранного блока (например, первый тап двойного — открыть ящик) — блок остаётся выбранным
     if (id && extra?.blk) setSelBlock({ item: id, ...extra.blk })
@@ -1260,10 +1346,14 @@ export default function ConstructorPage() {
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room}
-        labels={drLabels || sizeLabels} onLabel={onLabel} moveMode={moveMode} edgeLook={edgeLook} hiPids={hiPids} look={viewLook}>
+        labels={drLabels || sizeLabels} onLabel={onLabel} moveMode={moveMode} edgeLook={edgeLook} hiPids={multi ? multiSet : hiPids} look={viewLook} matLooks={matLooks}>
         {selCab && <OpeningTools it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} showSizes={showSizes} setShowSizes={setShowSizes} />}
         {selCab && selOpening && !blk && <OpeningPanel it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} pull={pull} setPull={setPull} onBlock={b => { setSelBlock({ item: selCab.id, ...b }); setSelPid(null); setTab('props') }} />}
-        {blk && <div style={{ position: 'absolute', left: 58, bottom: 6, zIndex: 3, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--bg)', border: '1px solid #f59e0b', borderRadius: 14, padding: '3px 4px 3px 10px', fontSize: 12.5 }}>
+        {multi && <div style={{ position: 'absolute', left: 58, bottom: 6, zIndex: 4, display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg)', border: '1px solid #f59e0b', borderRadius: 14, padding: '4px 6px 4px 10px', fontSize: 12.5 }}>
+          <b>Выбрано: {multiSel.length}</b><span style={{ color: 'var(--text-muted)' }}>нажимайте детали</span>
+          <button type="button" style={{ ...chipS(true), padding: '2px 9px' }} onClick={() => { setMulti(false); setMultiSel([]) }}>Готово</button>
+        </div>}
+        {blk && !multi && <div style={{ position: 'absolute', left: 58, bottom: 6, zIndex: 3, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--bg)', border: '1px solid #f59e0b', borderRadius: 14, padding: '3px 4px 3px 10px', fontSize: 12.5 }}>
           <b>{blockTitle(findNode(treeOf({ ...CAB_DEFAULTS, ...selCab.p }), blk.n)?.node, blk.t)}</b>
           <button type="button" style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setSelBlock(null)}>✕</button>
         </div>}
@@ -1309,6 +1399,17 @@ export default function ConstructorPage() {
     {tab === 'scene' && <SceneList project={project} setProject={setProject} parts={parts} selected={selected} onSelect={select} onAdd={addItem}
       library={library} onLibraryDelete={id => { if (window.confirm('Убрать из библиотеки?')) saveLibrary(library.filter(l => l.id !== id)) }}
       onFromLibrary={l => { const b = parts.length ? sceneBox(parts) : [0, 0, 0, 0, 0, 0]; const it = { ...JSON.parse(JSON.stringify(l.item)), id: newId(), pos: { x: parts.length ? Math.round(b[3]) : 0, y: 0, z: 0 } }; setProject({ ...project, items: [...project.items, it] }); setSelected(it.id); setTab('props') }} />}
+    {tab === 'props' && multi && (() => {
+      const sel = parts.filter(sp => multiSet.has(sp.pid))
+      const mats = [...new Set(sel.map(sp => sp.material))]
+      return <div className="card" style={{ padding: '8px 10px', marginBottom: 10, border: '1px solid #f59e0b' }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>Выбрано деталей: {sel.length}{mats.length ? ` · ${mats.join(', ')}` : ''}</div>
+        {sel.length > 0 ? <>
+          <MatPick materials={materials} value={mats.length === 1 ? mats[0] : ''} onApply={applyMultiMat} />
+          {mats.length === 1 && <MatLookEditor name={mats[0]} looks={matLooks} setLooks={setMatLooks} />}
+        </> : <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Нажимайте детали на модели — они добавятся в выбор (ещё раз — убрать).</p>}
+      </div>
+    })()}
     {tab === 'props' && blk && <BlockCard key={blk.n + blk.t} it={selCab} set={setItem} blk={blk} mount={mount} setMount={setMount} setBlk={b => setSelBlock(b ? { item: selCab.id, ...b } : null)} onClose={() => { setSelBlock(null); setSelPid(null) }} />}
     {tab === 'props' && selItem && (() => {
       const own = parts.filter(p => p.item.id === selItem.id && (p.kind === 'sheet'))
@@ -1318,6 +1419,7 @@ export default function ConstructorPage() {
         <div className="card" style={{ padding: '8px 10px', marginBottom: 10 }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Деталь:</span>
+            <button type="button" style={{ ...btnS(), padding: '5px 9px' }} title="Выбрать несколько деталей и сменить им материал / цвет" onClick={() => { setMulti(true); setMultiSel(sp ? [sp.pid] : []); setSelBlock(null) }}>☑ Несколько</button>
             <select style={{ ...inp, width: 'auto', flex: 1, minWidth: 160, padding: '5px 6px' }} value={sp?.pid || ''} onChange={e => setSelPid(e.target.value || null)}>
               <option value="">— выберите (или нажмите в 3D) —</option>
               {own.map(p => <option key={p.pid} value={p.pid}>{p.name} · {p.place.L}×{p.place.W}{p.ov ? ' ✎' : ''}</option>)}
@@ -1337,6 +1439,10 @@ export default function ConstructorPage() {
                 const ov = { ...(selItem.ov || {}) }; delete ov[sp.key]
                 setItem({ ...selItem, ov })
               }}>↺ Сбросить правку</button>}
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <MatPick key={sp.pid} materials={materials} value={sp.material} onApply={v => { const m = { ...(selItem.mat || {}) }; if (v) m[sp.key] = v; else delete m[sp.key]; setItem({ ...selItem, mat: m }) }} />
+              <MatLookEditor name={sp.material} looks={matLooks} setLooks={setMatLooks} />
             </div>
             <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Присадка по стыкам и под фурнитуру пересчитывается сама; в редакторе добавляйте фигурный контур, вырезы, свою присадку и пазы. Поменяется размер детали — контур сбросится до прямоугольника.</p>
           </>}
