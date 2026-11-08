@@ -157,7 +157,7 @@ export function projectDrill(project, pp = projectParts(project)) {
 }
 
 // кромка записи по сторонам редактора
-function editorEdges(rec, place) {
+export function editorEdges(rec, place) {
   const e = { top: null, right: null, bottom: null, left: null }
   const all = rec.edges?.all
   for (const s of Object.keys(e)) {
@@ -178,7 +178,7 @@ function editorGrooves(rec, place) {
       dir: alongL ? 'vertical' : 'horizontal',
       length: alongL ? place.L : place.W, width: num(g.width, 4), depth: num(g.depth, 8),
       sides: alongL ? ['top', 'bottom', side] : ['left', 'right', side],
-      offsets: { [side]: num(g.offset, 16) }, face: 'front', note: g.note || AUTO_GROOVE, auto: true,
+      offsets: { [side]: num(g.offset, 16) }, face: g.face || 'front', note: g.note || AUTO_GROOVE, auto: true,
     })
   }
   return out
@@ -362,6 +362,13 @@ export function explodeCabinet(it) {
       ...(it.ov?.[r.key] ? { ov: { p: it.ov[r.key] } } : {}),
     }
   })
+}
+
+/** Кромка детали сцены по сторонам редактора (с учётом правки) и её вершины контура — для подсветки кромки в 3D */
+export const partEdges = sp => sp.ov?.edges || editorEdges(sp, sp.place)
+export const partVerts = sp => {
+  const { W, L } = sp.place
+  return sp.ov?.vertices?.length > 2 ? sp.ov.vertices : sp.shape?.length > 2 ? sp.shape : [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: L }, { x: 0, y: L }]
 }
 
 /** Деталь фигурная (не прямоугольник) или с вырезами — тогда в 3D рисуется по контуру */

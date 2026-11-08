@@ -113,9 +113,10 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes }) {
   const node = r?.node
   const apply = t => { if (t) set({ ...it, p: { ...p, tree: t } }) }
   const leaf = node && !(node.split && node.children?.length)
+  const [cnt, setCnt] = useState(1)
   const addPanel = kind => {
     if (!node) return
-    const t = opSplit(tree, node.id, kind, 1)
+    const t = opSplit(tree, node.id, kind, cnt)
     if (!t) { window.alert('Этот проём уже разделён панелями другого направления — выберите один из его проёмов'); return }
     apply(t)
   }
@@ -134,6 +135,11 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes }) {
     <div style={{ position: 'absolute', left: 6, top: 6, display: 'flex', flexDirection: 'column', gap: 3, zIndex: 3, pointerEvents: 'none' }}>
       <button type="button" style={{ ...toolBtn(showSizes), pointerEvents: 'auto' }} onClick={() => setShowSizes(v => !v)} title="Размеры проёмов на модели">📏<br />Разм.</button>
       {!node && <div style={{ fontSize: 8.5, width: 40, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.8)', borderRadius: 6, padding: 2, textAlign: 'center' }}>нажмите проём</div>}
+      {node && <div style={{ ...toolBtn(false), pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, padding: '2px 1px' }} title="Сколько панелей ставить за одно нажатие">
+        <button type="button" style={{ border: 'none', background: 'none', fontSize: 12, lineHeight: 1, padding: 0, cursor: 'pointer' }} onClick={() => setCnt(c => Math.min(20, c + 1))}>＋</button>
+        <b style={{ fontSize: 12 }}>×{cnt}</b>
+        <button type="button" style={{ border: 'none', background: 'none', fontSize: 12, lineHeight: 1, padding: 0, cursor: 'pointer' }} onClick={() => setCnt(c => Math.max(1, c - 1))}>－</button>
+      </div>}
       {node && T.map(([k, ic, t, fn, dis, on]) => <button key={k} type="button" disabled={dis} title={t} style={{ ...toolBtn(on, dis), pointerEvents: 'auto' }} onClick={fn}>{ic}<br />{t}</button>)}
     </div>
   )
@@ -168,7 +174,15 @@ function OpeningPanel({ it, set, sel, setSel, pull, setPull }) {
         <button type="button" style={{ marginLeft: 'auto', border: 'none', background: 'none', fontSize: 16, cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setSel(null)}>✕</button>
       </div>
       {node.split && node.children?.length > 0 && <div style={row}>
-        <span>{node.split === 'v' ? 'Верт. панели' : 'Гориз. панели'}: отступ спереди</span>
+        <span>{node.split === 'v' ? 'Верт. панелей' : 'Гориз. панелей'}</span>
+        <SmallNum width={44} value={node.children.length - 1} onChange={x => {
+          const n = Math.max(1, Math.min(20, Math.round(x)))
+          if (n === node.children.length - 1) return
+          const drop = node.children.slice(n + 1)
+          if (drop.some(c => c.split || c.front || c.fpanel) && !window.confirm('В убираемых проёмах есть наполнение — убрать?')) return
+          patch(nd => { if (n + 1 > nd.children.length) for (let i = nd.children.length; i < n + 1; i++) nd.children.push({ id: 'o' + Math.random().toString(36).slice(2, 8), size: null, split: null, children: [], front: null, shelfType: 'fixed' }); else nd.children = nd.children.slice(0, n + 1); nd.children.forEach(c => { c.size = null }) })
+        }} />
+        <span>· отступ спереди</span>
         <SmallNum width={52} value={node.setFront ?? (node.split === 'h' ? (node.shelfType === 'loose' ? Math.max(num(p.shelfSetback) || 0, 2) : num(p.shelfSetback) || 0) : 0)} onChange={x => patch(n => { n.setFront = x })} />
         <span>сзади</span><SmallNum width={52} value={node.setBack ?? 0} onChange={x => patch(n => { n.setBack = x })} />
         {node.split === 'h' && [['fixed', 'неподвижные'], ['loose', 'съёмные']].map(([k, t]) => <button key={k} type="button" style={{ ...chipS((node.shelfType || 'fixed') === k), padding: '3px 8px' }} onClick={() => patch(n => { n.shelfType = k })}>{t}</button>)}
@@ -321,7 +335,13 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
       <Chips value={p.top} onChange={v => up({ top: v })} options={[['inset', 'Вкладная'], ['overlay', 'Накладная'], ['rails', 'Царги (планки)']]}
         hint="Вкладная — между боковинами, её можно опустить и отступить спереди/сзади (минус — выступает). Накладная — сверху на боковинах, со свесом. Царги — 1 (передняя) или 2 планки с отступом от верха: например, сверху ляжет стекло." />
       {p.top === 'overlay' && <Sub>
-        <Grid cols={2}><NumField label="Свес вперёд (козырёк)" value={p.overhangFront} onChange={v => up({ overhangFront: v })} min={0} /><NumField label="Свес в стороны" value={p.overhangSide} onChange={v => up({ overhangSide: v })} min={0} /></Grid>
+        <Grid><NumField label="Свес вперёд" value={p.overhangFront} onChange={v => up({ overhangFront: v })} min={0} /><NumField label="Свес слева" value={p.overhangL ?? p.overhangSide} onChange={v => up({ overhangL: v })} min={0} /><NumField label="Свес справа" value={p.overhangR ?? p.overhangSide} onChange={v => up({ overhangR: v })} min={0} /></Grid>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 6, fontSize: 13 }}>
+          <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={num(p.topRL) > 0} onChange={e => up({ topRL: e.target.checked ? 50 : 0 })} />Скруглить левый угол</label>
+          {num(p.topRL) > 0 && <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>R<SmallNum width={56} value={p.topRL} onChange={v => v > 0 && up({ topRL: v })} /></span>}
+          <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={num(p.topRR) > 0} onChange={e => up({ topRR: e.target.checked ? 50 : 0 })} />правый угол</label>
+          {num(p.topRR) > 0 && <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>R<SmallNum width={56} value={p.topRR} onChange={v => v > 0 && up({ topRR: v })} /></span>}
+        </div>
         <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.underTop !== false} onChange={e => up({ underTop: e.target.checked })} />Фасады под крышкой (свес — от фасадов)</label>
       </Sub>}
       {p.top === 'inset' && <Sub><Grid><NumField label="Отступ от верха" value={p.topDown} onChange={v => up({ topDown: v })} /><NumField label="от переда" value={p.topFront} onChange={v => up({ topFront: v })} /><NumField label="от зада" value={p.topBack} onChange={v => up({ topBack: v })} /></Grid></Sub>}
@@ -352,8 +372,10 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
       </Sub>}
     </Fold>
 
-    <Fold id="back" title="Задняя стенка" right={{ groove: 'в паз', overlay: 'накладная', inset: 'вкладная', none: 'нет' }[p.back] || ''}>
-      <Chips value={p.back} onChange={v => up({ back: v })} options={[['groove', 'В паз'], ['overlay', 'Накладная'], ['inset', 'Вкладная ЛДСП'], ['none', 'Нет']]} />
+    <Fold id="back" title="Задняя стенка" on={p.back !== 'none'} onToggle={on => up(on ? { back: p.backLast && p.backLast !== 'none' ? p.backLast : 'groove' } : { back: 'none', backLast: p.back })}
+      right={{ groove: 'в паз', overlay: 'накладная', inset: 'вкладная' }[p.back] || ''}>
+      <Chips value={p.back} onChange={v => up({ back: v })} options={[['groove', 'В паз'], ['overlay', 'Накладная'], ['inset', 'Вкладная ЛДСП']]}
+        hint="Нет боковины, но есть крайняя вертикальная панель — задняя стенка идёт до неё (панель становится на всю глубину и получает паз)." />
       {(p.back === 'groove' || p.back === 'overlay') && <Sub>
         <Grid cols={2}><TextField label="Материал" value={p.backMaterial} onChange={v => up({ backMaterial: v })} list="cad-mats" /><NumField label="Толщина" value={p.backT} onChange={v => up({ backT: v })} min={1} /></Grid>
         {p.back === 'groove' && <Grid><NumField label="Паз от зад. торца" value={p.grooveOffset} onChange={v => up({ grooveOffset: v })} min={0} /><NumField label="Глубина паза" value={p.grooveDepth} onChange={v => up({ grooveDepth: v })} min={1} /><NumField label="Ширина паза" value={p.grooveWidth} onChange={v => up({ grooveWidth: v })} min={1} /></Grid>}
@@ -687,6 +709,9 @@ export default function ConstructorPage() {
     toggle: (id, v) => { const next = { ...fold, [id]: v }; setFold(next); saveUserSettings({ cadFold: next }, user) },
   }), [fold, user])
   const [splitPx, setSplitPx] = useState(() => { try { return getUserSettings(user)?.cadSplit || 0 } catch { return 0 } })
+  // подсветка кромки в 3D: цвет, прозрачность, «яркая» (светится сквозь детали) — за аккаунтом
+  const [edgeLook, setEdgeLookS] = useState(() => { try { return { on: true, color: '#f97316', opacity: 1, glow: false, ...(getUserSettings(user)?.cadEdgeLook || {}) } } catch { return { on: true, color: '#f97316', opacity: 1, glow: false } } })
+  const setEdgeLook = patch => setEdgeLookS(l => { const n = { ...l, ...patch }; saveUserSettings({ cadEdgeLook: n }, user); return n })
   const [moveMode, setMoveMode] = useState(false)    // «✥ Двигать»: только тогда пальцем двигаем элемент по полу
   const [pull, setPull] = useState('after')          // при смене размера проёма тянутся соседи: after — выше/правее, before — ниже/левее        // выбранная деталь внутри элемента (нажатие в 3D)
   const [editPart, setEditPart] = useState(null)    // редактор контура детали: { pid, draft }
@@ -915,13 +940,14 @@ export default function ConstructorPage() {
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room}
-        labels={sizeLabels} onLabel={id => { setSelOpening(id); setTab('props') }} moveMode={moveMode}>
+        labels={sizeLabels} onLabel={id => { setSelOpening(id); setTab('props') }} moveMode={moveMode} edgeLook={edgeLook}>
         {selCab && <OpeningTools it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} showSizes={showSizes} setShowSizes={setShowSizes} />}
         {selCab && selOpening && <OpeningPanel it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} pull={pull} setPull={setPull} />}
       </CadView>
       <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
         <button type="button" title="Полупрозрачный вид" style={{ ...btnS(), padding: '6px 9px', ...(xray ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setXray(v => !v)}>◫</button>
+        <button type="button" title="Подсветка кромки" style={{ ...btnS(), padding: '6px 9px', ...(edgeLook.on ? { color: edgeLook.color, borderColor: edgeLook.color } : {}) }} onClick={() => setEdgeLook({ on: !edgeLook.on })}>▭</button>
         <button type="button" title="Двигать выбранный элемент пальцем по полу" style={{ ...btnS(), padding: '6px 9px', ...(moveMode ? { color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setMoveMode(v => !v)}>✥</button>
         <button type="button" title="Показать присадку" style={{ ...btnS(), padding: '6px 9px', ...(showHoles ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowHoles(v => !v)}>⊙</button>
       </div>
@@ -933,6 +959,14 @@ export default function ConstructorPage() {
     <div style={{ display: 'flex', gap: 5, marginBottom: 10, flexWrap: 'wrap' }}>
       {[['scene', 'Сцена'], ['props', 'Свойства'], ['spec', 'Смета']].map(([k, t]) => <button key={k} type="button" style={chipS(tab === k)} onClick={() => setTab(k)}>{t}</button>)}
     </div>
+    {tab === 'scene' && <div className="card" style={{ padding: '8px 10px', marginBottom: 10 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', fontSize: 13 }}>
+        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={edgeLook.on} onChange={e => setEdgeLook({ on: e.target.checked })} /><b>Подсветка кромки</b></label>
+        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}>цвет<input type="color" value={edgeLook.color} onChange={e => setEdgeLook({ color: e.target.value })} style={{ width: 34, height: 24, padding: 0, border: 'none', background: 'none' }} /></label>
+        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}>прозрачность<input type="range" min="0.1" max="1" step="0.05" value={edgeLook.opacity} onChange={e => setEdgeLook({ opacity: Number(e.target.value) })} style={{ width: 90 }} /></label>
+        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!edgeLook.glow} onChange={e => setEdgeLook({ glow: e.target.checked })} />яркая (видна сквозь детали)</label>
+      </div>
+    </div>}
     {tab === 'scene' && <SceneList project={project} setProject={setProject} parts={parts} selected={selected} onSelect={select} onAdd={addItem}
       library={library} onLibraryDelete={id => { if (window.confirm('Убрать из библиотеки?')) saveLibrary(library.filter(l => l.id !== id)) }}
       onFromLibrary={l => { const b = parts.length ? sceneBox(parts) : [0, 0, 0, 0, 0, 0]; const it = { ...JSON.parse(JSON.stringify(l.item)), id: newId(), pos: { x: parts.length ? Math.round(b[3]) : 0, y: 0, z: 0 } }; setProject({ ...project, items: [...project.items, it] }); setSelected(it.id); setTab('props') }} />}

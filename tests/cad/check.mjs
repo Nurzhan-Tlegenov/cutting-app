@@ -203,5 +203,22 @@ for (const rot of [0, 90, 180, 270]) {
   ok(v.some(x => x.r === 150) && v.filter(x => x.r > 0).length === 1, 'one rounded front corner ' + JSON.stringify(v))
   ok(d.contour.vertices.find(x => x.r === 150).y === d.w, 'rounded at free (right) side')
 }
+// тумба без правой боковины: вертикальная панель в 300 от края — задняя стенка (в паз) до неё, панель на всю глубину с пазом
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const it = newItem('cabinet', { p: { W: 900, H: 800, D: 500, sideR: false, top: 'overlay', topRR: 200, overhangR: 20, tree: newNode({ id: 'root', split: 'v', children: [newNode(), newNode({ size: 300 })] }) } })
+  const { parts, warn } = projectParts({ items: [it] })
+  ok(!warn.length, 'tumba warn ' + warn)
+  const back = parts.find(p => p.name === 'Задняя стенка'), div = parts.find(p => p.name === 'Вертикальная панель')
+  ok(div.place.aabb[2] === 0, 'end divider full depth ' + div.place.aabb)
+  ok(Math.abs(back.place.aabb[3] - (div.place.aabb[0] + 7)) < 0.01, 'back to divider ' + back.place.aabb + ' / ' + div.place.aabb)
+  const det = exportAll({ items: [it] }).details
+  const dv = det.find(d => d.name === 'Вертикальная панель')
+  ok(dv.contour.grooves.length === 1 && dv.contour.grooves[0].face === 'back', 'groove on divider back face')
+  const top = det.find(d => d.name === 'Крышка')
+  ok(top.contour.vertices.some(v => v.r === 200 && v.edgeR), 'top rounded corner with edge')
+  const bot = det.find(d => d.name === 'Дно')
+  ok(Object.values(bot.edges).filter(Boolean).length === 2, 'bottom front + open end edged ' + JSON.stringify(bot.edges))
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

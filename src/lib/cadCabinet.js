@@ -42,7 +42,7 @@ export const CAB_DEFAULTS = {
 export const CAB_KINDS = [['wardrobe', 'Шкаф'], ['base', 'Кухня: нижний'], ['wall', 'Кухня: верхний'], ['shelf', 'Стеллаж'], ['dresser', 'Комод'], ['other', 'Другое']]
 // какие параметры переносятся «на все корпуса этого типа» — по группам
 export const CAB_GROUPS = {
-  body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'plinthBack', 'plinthBackOffset', 'railDepth', 'overhangFront', 'overhangSide', 'underTop', 'edgeFront', 'edgeBody',
+  body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'plinthBack', 'plinthBackOffset', 'railDepth', 'overhangFront', 'overhangSide', 'overhangL', 'overhangR', 'topRL', 'topRR', 'underTop', 'edgeFront', 'edgeBody',
     'sideL', 'sideR', 'sideFront', 'sideBack', 'topRails', 'topRailOffset', 'topDown', 'topFront', 'topBack', 'bottomRails', 'bottomRailOffset', 'bottomRailDepth', 'bottomUp', 'bottomFront', 'bottomBack'],
   back: ['back', 'backT', 'backMaterial', 'grooveOffset', 'grooveDepth', 'grooveWidth'],
   fronts: ['facadeMaterial', 'facadeT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'hingeCount'],
@@ -141,6 +141,18 @@ export function childSizes(node, span, t) {
   return ch.map(c => (c.size != null ? num(c.size) : auto))
 }
 
+// горизонтальная деталь (длина вдоль X) со скруглёнными передними углами: rl — слева, rr — справа (0 — без скругления).
+// Перед детали в редакторе контура: tSign > 0 — сторона x = W, иначе x = 0; кромка на дуге — edgeR вершины
+export function roundShape(box, tSign, rl, rr, edge) {
+  const Wd = box[5] - box[2], L = box[3] - box[0]
+  const v = [{ x: 0, y: 0, r: 0 }, { x: Wd, y: 0, r: 0 }, { x: Wd, y: L, r: 0 }, { x: 0, y: L, r: 0 }]
+  const fl = tSign > 0 ? 1 : 0, fr = tSign > 0 ? 2 : 3
+  const lim = x => Math.max(0, Math.min(x, Wd - 1, (rl > 0 && rr > 0 ? L / 2 : L) - 1))
+  if (rl > 0) { v[fl].r = lim(rl); if (edge) v[fl].edgeR = edge }
+  if (rr > 0) { v[fr].r = lim(rr); if (edge) v[fr].edgeR = edge }
+  return v
+}
+
 function mk(key, name, role, box, tAxis, tSign, lAxis, material, extra = {}) {
   return { key, name, role, kind: 'sheet', box: box.map(r1), tAxis, tSign, lAxis, material, edges: {}, grooves: [], ...extra }
 }
@@ -169,12 +181,15 @@ export function cabinetParts(params) {
   if (hasL) parts.push(mk('sideL', 'Боковина левая', 'каркас', [0, sideY0, zb + sB, t, sideY1, D - sF], 0, +1, 1, mat, { edges: front }))
   if (hasR) parts.push(mk('sideR', 'Боковина правая', 'каркас', [W - t, sideY0, zb + sB, W, sideY1, D - sF], 0, -1, 1, mat, { edges: front }))
   const xi0 = hasL ? t : 0, xi1 = hasR ? W - t : W
+  // нет боковины — торцы крышки, дна, царг, полок с этой стороны на виду: кромка как спереди
+  const ends = { ...(hasL ? {} : { '-x': eF }), ...(hasR ? {} : { '+x': eF }) }
+  const frontEnds = { ...front, ...ends }
 
   // царги (планки): 1 — передняя, 2 — передняя и задняя; лежат плашмя между боковинами с отступом от верха / низа
   const rails = (pos, y0, count, depth, key, name, sign) => {
     const rd = Math.min(num(depth, 100), (D - zb) / 2)
-    parts.push(mk(key + 'F', name + ' передняя', 'каркас', [xi0, y0, D - rd, xi1, y0 + t, D], 1, sign, 0, mat, { edges: front }))
-    if (num(count, 2) >= 2) parts.push(mk(key + 'B', name + ' задняя', 'каркас', [xi0, y0, zb, xi1, y0 + t, zb + rd], 1, sign, 0, mat))
+    parts.push(mk(key + 'F', name + ' передняя', 'каркас', [xi0, y0, D - rd, xi1, y0 + t, D], 1, sign, 0, mat, { edges: frontEnds }))
+    if (num(count, 2) >= 2) parts.push(mk(key + 'B', name + ' задняя', 'каркас', [xi0, y0, zb, xi1, y0 + t, zb + rd], 1, sign, 0, mat, { edges: ends }))
   }
 
   // ── дно: вкладное (с отступами снизу / спереди / сзади; минус — выступает), накладное, царги или нет ──
@@ -188,7 +203,7 @@ export function cabinetParts(params) {
     yi0 = y + t
   } else if (p.bottom !== 'none') {
     const y = yb + num(p.bottomUp, 0)
-    parts.push(mk('bottom', 'Дно', 'каркас', [xi0, y, zb + num(p.bottomBack, 0), xi1, y + t, D - num(p.bottomFront, 0)], 1, +1, 0, mat, { edges: front }))
+    parts.push(mk('bottom', 'Дно', 'каркас', [xi0, y, zb + num(p.bottomBack, 0), xi1, y + t, D - num(p.bottomFront, 0)], 1, +1, 0, mat, { edges: frontEnds }))
     yi0 = y + t
   }
 
@@ -199,13 +214,16 @@ export function cabinetParts(params) {
   const fT0 = num(p.facadeT, 16)
   if (topOver) {
     // накладная крышка: свес в стороны и вперёд (козырёк) — вперёд считается от фасадов, если фасады под крышкой
-    const os = num(p.overhangSide, 0)
+    // свес слева и справа — отдельно (по умолчанию — «в стороны»); передние углы можно скруглить радиусом
+    const oL = num(p.overhangL ?? p.overhangSide, 0), oR = num(p.overhangR ?? p.overhangSide, 0)
     const zf = D + (hasFronts && p.underTop !== false ? fT0 : 0) + num(p.overhangFront, 0)
-    parts.push(mk('top', 'Крышка', 'каркас', [-os, H - t, zb, W + os, H, Math.max(D, zf)], 1, -1, 0, mat, { edges: { '+z': eF, '-x': eF, '+x': eF } }))
+    const box = [-oL, H - t, zb, W + oR, H, Math.max(D, zf)]
+    const rl = num(p.topRL, 0), rr = num(p.topRR, 0)
+    parts.push(mk('top', 'Крышка', 'каркас', box, 1, -1, 0, mat, { edges: { '+z': eF, '-x': eF, '+x': eF }, ...(rl > 0 || rr > 0 ? { shape: roundShape(box, -1, rl, rr, eF) } : {}) }))
     yi1 = H - t
   } else if (p.top === 'inset') {
     const y = H - t - num(p.topDown, 0)
-    parts.push(mk('top', 'Крышка', 'каркас', [xi0, y, zb + num(p.topBack, 0), xi1, y + t, D - num(p.topFront, 0)], 1, -1, 0, mat, { edges: front }))
+    parts.push(mk('top', 'Крышка', 'каркас', [xi0, y, zb + num(p.topBack, 0), xi1, y + t, D - num(p.topFront, 0)], 1, -1, 0, mat, { edges: frontEnds }))
     yi1 = y
   } else if (p.top === 'rails') {
     const y = H - t - num(p.topRailOffset, 0)
@@ -214,10 +232,25 @@ export function cabinetParts(params) {
   }
 
   // ── задняя стенка ──
+  // нет боковины, но есть вертикальная панель корпуса — задняя стенка идёт до крайней вертикальной панели;
+  // эта панель тогда идёт на всю глубину, как боковина (и получает паз, если стенка в паз)
+  const rootDiv = []
+  if (tree.split === 'v' && tree.children?.length > 1) {
+    const sz = childSizes(tree, xi1 - xi0, t)
+    let pos = xi0
+    for (let i = 0; i < sz.length - 1; i++) { pos += sz[i]; rootDiv.push(pos); pos += t }
+  }
+  const divL = !hasL && rootDiv.length ? rootDiv[0] : null
+  const divR = !hasR && rootDiv.length ? rootDiv[rootDiv.length - 1] : null
+  const endDivs = new Map()   // x левой грани крайней панели -> на какой стороне у неё задняя стенка: '+x' (справа от неё) / '-x'
+  if (divL != null) endDivs.set(r1(divL), '+x')
+  if (divR != null) endDivs.set(r1(divR), '-x')
   let zi0 = zb
+  let backGroove = null
   if (p.back === 'overlay') {
     const by0 = Math.min(sideY0, yb)
-    parts.push(mk('back', 'Задняя стенка', 'задняя', [1, by0 + 1, 0, W - 1, H - 1, backT], 2, +1, 1, p.backMaterial || 'ХДФ', { t: backT }))
+    const bx0 = hasL ? 1 : divL != null ? divL + 1 : 1, bx1 = hasR ? W - 1 : divR != null ? divR + t - 1 : W - 1
+    parts.push(mk('back', 'Задняя стенка', 'задняя', [bx0, by0 + 1, 0, bx1, H - 1, backT], 2, +1, 1, p.backMaterial || 'ХДФ', { t: backT }))
     zi0 = backT
   } else if (p.back === 'groove') {
     const go = num(p.grooveOffset, 16), gd = num(p.grooveDepth, 8), gw = num(p.grooveWidth, backT + 1)
@@ -226,13 +259,16 @@ export function cabinetParts(params) {
     const botHas = p.bottom === 'inset' || p.bottom === 'overlay' || p.bottom == null
     const y1 = topHas ? yi1 + gd - 1 : H - 1
     const y0 = botHas ? yi0 - gd + 1 : Math.min(sideY0, yb) + 1
-    parts.push(mk('back', 'Задняя стенка', 'задняя', [hasL ? xi0 - gd + 1 : 1, y0, z0, hasR ? xi1 + gd - 1 : W - 1, y1, z0 + backT], 2, +1, 1, p.backMaterial || 'ХДФ', { t: backT }))
+    const bx0 = hasL ? xi0 - gd + 1 : divL != null ? divL + t - gd + 1 : 1
+    const bx1 = hasR ? xi1 + gd - 1 : divR != null ? divR + gd - 1 : W - 1
+    parts.push(mk('back', 'Задняя стенка', 'задняя', [bx0, y0, z0, bx1, y1, z0 + backT], 2, +1, 1, p.backMaterial || 'ХДФ', { t: backT }))
+    backGroove = { from: '-z', offset: go, width: gw, depth: gd, along: 'L' }
     const g = { from: '-z', offset: go, width: gw, depth: gd, along: 'L' }
     for (const pr of parts) if (['sideL', 'sideR', ...(botHas ? ['bottom'] : []), ...(topHas ? ['top'] : [])].includes(pr.key)) pr.grooves.push({ ...g })
     if (go + gw > D - 50) warn.push('Паз под заднюю стенку слишком далеко от заднего торца')
     zi0 = z0 + backT
   } else if (p.back === 'inset') {
-    parts.push(mk('back', 'Задняя стенка', 'задняя', [xi0, yi0, zb, xi1, yi1, zb + t], 2, +1, 1, mat))
+    parts.push(mk('back', 'Задняя стенка', 'задняя', [hasL || divL == null ? xi0 : divL + t, yi0, zb, hasR || divR == null ? xi1 : divR, yi1, zb + t], 2, +1, 1, mat))
     zi0 = zb + t
   }
 
@@ -270,8 +306,10 @@ export function cabinetParts(params) {
     if (node.fpanel) {
       const f = node.fpanel, d = num(f.dist, 0)
       const fz0 = f.from === 'front' ? ze - d - t : zs + d
+      const fL = !hasL && Math.abs(x0 - xi0) < 0.05, fR = !hasR && Math.abs(x1 - xi1) < 0.05
       parts.push(mk('fp_' + node.id, 'Фронтальная панель', 'наполнение',
-        [x0 + num(f.l, 0), y0 + num(f.b, 0), fz0, x1 - num(f.r, 0), y1 - num(f.t, 0), fz0 + t], 2, f.from === 'front' ? -1 : +1, 1, mat))
+        [x0 + num(f.l, 0), y0 + num(f.b, 0), fz0, x1 - num(f.r, 0), y1 - num(f.t, 0), fz0 + t], 2, f.from === 'front' ? -1 : +1, 1, mat,
+        { edges: { ...(fL ? { '-x': eF } : {}), ...(fR ? { '+x': eF } : {}) } }))
       if (fz0 < zs - 0.05 || fz0 + t > ze + 0.05) warn.push('Фронтальная панель выходит за глубину проёма')
       if (f.from === 'front') ze = fz0; else zs = fz0 + t
     }
@@ -290,19 +328,23 @@ export function cabinetParts(params) {
       if (i < ch.length - 1) {
         // отступы панелей этого деления спереди и сзади (короче по глубине)
         const setF = node.setFront != null ? num(node.setFront) : null, setB = num(node.setBack, 0)
-        if (node.split === 'v') parts.push(mk('st_' + c.id, 'Вертикальная панель', 'наполнение', [b, y0, zs + setB, b + t, y1, ze - (setF ?? 0)], 0, +1, 1, mat, { edges: front }))
+        const endSide = depth === 0 && node === tree ? endDivs.get(r1(b)) : null
+        if (node.split === 'v' && endSide) {
+          // крайняя вертикальная панель вместо боковины: на всю глубину, как боковина; паз под заднюю стенку — со стороны стенки
+          const rec = mk('st_' + c.id, 'Вертикальная панель', 'наполнение', [b, y0, zb + sB, b + t, y1, D - (setF ?? sF)], 0, +1, 1, mat, { edges: front })
+          if (backGroove) rec.grooves.push({ ...backGroove, face: endSide === '+x' ? 'front' : 'back' })
+          parts.push(rec)
+        } else if (node.split === 'v') parts.push(mk('st_' + c.id, 'Вертикальная панель', 'наполнение', [b, y0, zs + setB, b + t, y1, ze - (setF ?? 0)], 0, +1, 1, mat, { edges: front }))
         else {
           const loose = node.shelfType === 'loose', g = loose ? 1 : 0
           const sb = setF ?? (loose ? Math.max(shelfSetback, 2) : shelfSetback)
           const box = [x0 + g, b, zs + g + setB, x1 - g, b + t, ze - sb]
-          const extra = { edges: front }
-          // скруглённая полка: передние углы со свободной стороны (нет боковины); свободной стороны нет — оба передних угла.
-          // Полка: длина — вдоль X (по ширине), ширина — по глубине; в редакторе контура перед полки — правая сторона (x = W)
+          // открытый торец полки (со стороны без боковины) — с кромкой, как перед
+          const extra = { edges: { ...front, ...(freeL ? { '-x': eF } : {}), ...(freeR ? { '+x': eF } : {}) } }
+          // скруглённая полка: передние углы со свободной стороны (нет боковины); свободной стороны нет — оба передних угла
           if (node.shelfShape === 'round' && num(node.shelfR, 0) > 0) {
-            const Wd = box[5] - box[2], L = box[3] - box[0]
-            const r = Math.min(num(node.shelfR), Wd - 1, (freeL && freeR) || (!freeL && !freeR) ? L / 2 - 1 : L - 1)
-            const rl = freeL || !freeR ? r : 0, rr = freeR || !freeL ? r : 0
-            extra.shape = [{ x: 0, y: 0, r: 0 }, { x: Wd, y: 0, r: rl }, { x: Wd, y: L, r: rr }, { x: 0, y: L, r: 0 }]
+            const r = num(node.shelfR), rl = freeL || !freeR ? r : 0, rr = freeR || !freeL ? r : 0
+            extra.shape = roundShape(box, +1, rl, rr, eF)
           }
           parts.push(mk('sh_' + c.id, loose ? 'Горизонтальная панель (съёмная)' : 'Горизонтальная панель', 'наполнение', box, 1, +1, 0, mat, extra))
           if (loose) {

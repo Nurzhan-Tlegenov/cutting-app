@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { sceneBox, isFigured } from '../lib/cadModel'
+import { sceneBox, isFigured, partEdges, partVerts } from '../lib/cadModel'
+import { contourSegments, segmentSide } from '../lib/edgeLength'
 import { verticesToPolygon } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 
@@ -47,7 +48,7 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, children, style }) {
+export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, edgeLook = null, children, style }) {
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
@@ -236,6 +237,32 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       edges.position.copy(mesh.position)
       group.add(edges)
     }
+    // подсветка кромки: линии контура кромленых торцов (по низу и верху торца + вертикали на концах участка)
+    if (edgeLook?.on) {
+      const pts = []
+      const v3 = (m, x, y, z) => new THREE.Vector3(m[0] * x + m[1] * y + m[2] * z + m[9], m[3] * x + m[4] * y + m[5] * z + m[10], m[6] * x + m[7] * y + m[8] * z + m[11])
+      for (const sp of parts || []) {
+        if (sp.kind !== 'sheet') continue
+        const ed = partEdges(sp)
+        const { W, L, T, m } = sp.place
+        let segs
+        try { segs = contourSegments(partVerts(sp)) } catch { segs = [] }
+        for (const seg of segs) {
+          const side = segmentSide(seg, W, L)
+          if (!((side && ed?.[side]) || seg.edge)) continue
+          for (const z of [0, T]) for (let i = 0; i + 1 < seg.pts.length; i++) pts.push(v3(m, seg.pts[i][0], seg.pts[i][1], z), v3(m, seg.pts[i + 1][0], seg.pts[i + 1][1], z))
+          for (const q of [seg.pts[0], seg.pts[seg.pts.length - 1]]) pts.push(v3(m, q[0], q[1], 0), v3(m, q[0], q[1], T))
+        }
+      }
+      if (pts.length) {
+        const glow = !!edgeLook.glow
+        const mat = new THREE.LineBasicMaterial({ color: edgeLook.color || '#f97316', transparent: true, opacity: Math.max(0.1, Math.min(1, Number(edgeLook.opacity ?? 1))),
+          blending: glow ? THREE.AdditiveBlending : THREE.NormalBlending, depthTest: !glow, toneMapped: false })
+        const ls = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), mat)
+        ls.renderOrder = 8
+        group.add(ls)
+      }
+    }
     // размеры выбранного элемента: ширина — по низу спереди, высота — слева спереди, глубина — по низу слева
     const own = selected ? (parts || []).filter(p => p.item.id === selected) : []
     if (dims && own.length) {
@@ -251,7 +278,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       dim([b[0] - off, b[1], b[2]], [b[0] - off, b[1], b[5]], r(b[5] - b[2]), [b[0] - off - lh * 1.6, b[1] + lh * 0.7, (b[2] + b[5]) / 2])
     }
     if (!s.fitted && parts?.length) { fit(s, parts); s.fitted = true }
-  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening])
+  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook])
 
   // присадка (цилиндры по оси отверстия) и комната (пол и три стены)
   useEffect(() => {
