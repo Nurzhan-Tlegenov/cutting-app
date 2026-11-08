@@ -18,7 +18,7 @@ import { useDesktop } from '../hooks/useDesktop'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
-import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights, HANDLE_TYPES } from '../lib/cadCabinet'
+import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights, HANDLE_TYPES, slideLength } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -503,7 +503,11 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
           <label style={{ display: 'block', marginBottom: 8 }}><span style={lbl}>Система</span>
             <select style={inp} value={sysId} onChange={e => apply(opFront(tree, node.id, { ...fr, box: e.target.value, sys: undefined }))}>{DRAWER_SYSTEMS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
           <Grid cols={2}>
-            <NumField label="Длина направляющих" value={fr.slideLen ?? p.slideLen} onChange={v => v >= 150 && apply(opFront(tree, node.id, { ...fr, slideLen: v }))} min={0} />
+            <label style={{ display: 'block', minWidth: 0 }}><span style={lbl}>Направляющие (ряд системы), мм</span>
+              <select style={inp} value={fr.slideLen === 'auto' ? 'auto' : String(slideLength(sys.lens, fr.slideLen ?? p.slideLen, num(p.D) - 25).len)} onChange={e => apply(opFront(tree, node.id, { ...fr, slideLen: e.target.value === 'auto' ? 'auto' : Number(e.target.value) }))}>
+                <option value="auto">авто — самые длинные по глубине</option>
+                {(sys.lens || []).map(l => <option key={l} value={l} disabled={l > num(p.D) - 25}>{l}{l > num(p.D) - 25 ? ' (не помещается)' : ''}</option>)}
+              </select></label>
             {sys.type === 'ball' && <NumField label="Зазор на направляющую" value={fr.slideGap ?? p.slideGap} onChange={v => apply(opFront(tree, node.id, { ...fr, slideGap: v }))} min={0} />}
             {sys.type === 'under' && <NumField label="Короб уже проёма с каждой стороны" value={sys.side} onChange={v => setSys({ side: v })} min={0} />}
             {sys.type === 'under' && <NumField label="Дно выше низа боковин" value={sys.bottomUp} onChange={v => setSys({ bottomUp: v })} min={0} />}
@@ -1397,6 +1401,9 @@ export default function ConstructorPage() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Размер подписей проёмов</span><input type="range" min="0.6" max="1.8" step="0.05" value={look.labelSize} onChange={e => { const v = Number(e.target.value); setLook({ labelSize: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.labelSize * 100)}%</span></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Размер габаритных размеров</span><input type="range" min="0.4" max="2" step="0.05" value={look.dimSize} onChange={e => { const v = Number(e.target.value); setLook({ dimSize: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.dimSize * 100)}%</span></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет подписей</span><input type="color" value={look.labelColor} onChange={e => setLook({ labelColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>
+        <div style={sect}>Вид деталей</div>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={look.lines !== false} onChange={e => setLook({ lines: e.target.checked })} />Линии контуров деталей (без них — сплошной вид, только материал и текстура)</label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Прозрачный вид ◫: насколько видно детали</span><input type="range" min="0.03" max="0.8" step="0.01" value={look.xrayOpacity ?? 0.3} onChange={e => { const v = Number(e.target.value); setLook({ xrayOpacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.xrayOpacity ?? 0.3) * 100)}%</span></label>
         <div style={sect}>Линии деталей</div>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет линий каркаса</span><input type="color" value={look.lineColor} onChange={e => setLook({ lineColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Яркость линий</span><input type="range" min="0.05" max="1" step="0.05" value={look.lineOpacity} onChange={e => { const v = Number(e.target.value); setLook({ lineOpacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.lineOpacity * 100)}%</span></label>

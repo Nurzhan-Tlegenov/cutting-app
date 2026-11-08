@@ -206,11 +206,71 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const g = c.getContext('2d'); g.fillStyle = color; g.font = '700 44px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, 32, 34)
       const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); s.scale.set(0.5, 0.5, 1); return s
     }
-    ;[[[1, 0, 0], '#dc2626', 'X'], [[0, 1, 0], '#16a34a', 'Y'], [[0, 0, 1], '#2563eb', 'Z']].forEach(([d, c, n]) => {
-      const v = new THREE.Vector3(...d)
-      axScene.add(new THREE.ArrowHelper(v, new THREE.Vector3(), 1, c, 0.25, 0.12))
-      const l = axLabel(n, c); l.position.copy(v.clone().multiplyScalar(1.35)); axScene.add(l)
-    })
+    // куб видов (как в CAD): грани — вид спереди / сзади / слева / справа / сверху / снизу, скошенные рёбра и углы — вид с угла;
+    // нажать — камера поворачивается туда (в перспективе). Оси X Y Z — у ближнего нижнего угла куба
+    const cubeMeshes = []
+    {
+      const H = 0.5, C = 0.17, I = H - C
+      const faceTex = txt => {
+        const c = document.createElement('canvas'); c.width = 128; c.height = 128
+        const g = c.getContext('2d'); g.fillStyle = '#f5f7f9'; g.fillRect(0, 0, 128, 128)
+        g.fillStyle = '#3b4552'; g.font = `700 ${txt.length > 6 ? 24 : 29}px Arial`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, 64, 66)
+        const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t
+      }
+      const names = { '1,0,0': 'СПРАВА', '-1,0,0': 'СЛЕВА', '0,1,0': 'СВЕРХУ', '0,-1,0': 'СНИЗУ', '0,0,1': 'СПЕРЕДИ', '0,0,-1': 'СЗАДИ' }
+      const lineMat = new THREE.LineBasicMaterial({ color: '#8f99a5', toneMapped: false })
+      for (const x of [-1, 0, 1]) for (const y of [-1, 0, 1]) for (const z of [-1, 0, 1]) {
+        const d = [x, y, z], n = d.filter(Boolean).length
+        if (!n) continue
+        let geo
+        if (n === 1) {
+          geo = new THREE.PlaneGeometry(2 * I, 2 * I)
+          if (x) geo.rotateY(x * Math.PI / 2); if (y) geo.rotateX(-y * Math.PI / 2); if (z < 0) geo.rotateY(Math.PI)
+          geo.translate(x * H, y * H, z * H)
+        } else {
+          const pts = []
+          if (n === 2) {
+            const [a, b] = [0, 1, 2].filter(i => d[i]), t = 3 - a - b
+            for (const [pa, pb] of [[H, I], [I, H]]) for (const tv of [-I, I]) { const v = [0, 0, 0]; v[a] = d[a] * pa; v[b] = d[b] * pb; v[t] = tv; pts.push(new THREE.Vector3(...v)) }
+            geo = new THREE.BufferGeometry().setFromPoints([pts[0], pts[1], pts[3], pts[0], pts[3], pts[2]])
+          } else {
+            for (let i = 0; i < 3; i++) { const v = d.map((s, j) => s * (j === i ? H : I)); pts.push(new THREE.Vector3(...v)) }
+            geo = new THREE.BufferGeometry().setFromPoints(pts)
+          }
+          geo.computeVertexNormals()
+        }
+        const mat = n === 1 ? new THREE.MeshBasicMaterial({ map: faceTex(names[d.join(',')]), toneMapped: false })
+          : new THREE.MeshBasicMaterial({ color: n === 2 ? '#dde2e8' : '#c9d0d8', side: THREE.DoubleSide, toneMapped: false })
+        const m = new THREE.Mesh(geo, mat)
+        m.userData.dir = new THREE.Vector3(x, y, z).normalize()
+        m.userData.base = n === 1 ? null : mat.color.clone()
+        axScene.add(m); cubeMeshes.push(m)
+        axScene.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), lineMat))
+      }
+      ;[[[1, 0, 0], '#dc2626', 'X'], [[0, 1, 0], '#16a34a', 'Y'], [[0, 0, 1], '#2563eb', 'Z']].forEach(([dd, c, nm]) => {
+        const v = new THREE.Vector3(...dd), o = new THREE.Vector3(-0.56, -0.56, 0.56)
+        const ah = new THREE.ArrowHelper(v, o, 0.42, c, 0.12, 0.07); ah.line.material.toneMapped = false; ah.cone.material.toneMapped = false; axScene.add(ah)
+        const l = axLabel(nm, c); l.material.toneMapped = false; l.scale.set(0.22, 0.22, 1); l.position.copy(o.clone().add(v.clone().multiplyScalar(0.58))); axScene.add(l)
+      })
+    }
+    const cubeSize = () => { const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight; return { w, h, s: Math.min(104, Math.round(Math.min(w, h) * 0.26)) } }
+    // точка экрана в кубе? -> направление вида или null
+    const cubeHit = e => {
+      const r = renderer.domElement.getBoundingClientRect(), { w, h, s } = cubeSize()
+      const x = e.clientX - r.left, y = e.clientY - r.top
+      const x0 = w - s - 4, y0 = h - 22 - s
+      if (x < x0 || x > x0 + s || y < y0 || y > y0 + s) return null
+      const rc = new THREE.Raycaster()
+      rc.setFromCamera(new THREE.Vector2(((x - x0) / s) * 2 - 1, -((y - y0) / s) * 2 + 1), axCam)
+      const hit = rc.intersectObjects(cubeMeshes, false)[0]
+      return hit ? hit.object : 'cube'
+    }
+    let camAnim = null
+    const viewFrom = dir => {
+      const t = controls.target.clone(), dist = camera.position.distanceTo(t)
+      const d = dir.clone(); if (Math.abs(d.y) > 0.999) d.z += 0.002   // строго сверху / снизу — чуть сдвинуть, чтобы камера не «перевернулась»
+      camAnim = { p0: camera.position.clone(), p1: t.clone().add(d.normalize().multiplyScalar(dist)), t0: performance.now() }
+    }
     // небольшая метка начала координат в самой сцене
     const origin = new THREE.AxesHelper(150); origin.material.depthTest = false; origin.renderOrder = 5; scene.add(origin)
     const group = new THREE.Group(); scene.add(group)
@@ -218,6 +278,11 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     let raf = 0, alive = true, comp = null
     const tick = () => {
       if (!alive) return
+      if (camAnim) {
+        const k = Math.min(1, (performance.now() - camAnim.t0) / 380), e = 1 - Math.pow(1 - k, 3)
+        camera.position.lerpVectors(camAnim.p0, camAnim.p1, e)
+        if (k >= 1) camAnim = null
+      }
       controls.update()
       for (const [id, { g, a }] of animObjs.current) {
         const tg = animTarget.current.get(id) || 0
@@ -251,8 +316,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         comp.render()
       } else { scene.background = null; renderer.render(scene, camera) }
       // мини-оси в правом нижнем углу поворачиваются вместе с камерой (слева — кнопки проёмов)
-      const s = Math.min(90, Math.round(Math.min(w, h) * 0.22))
-      axCam.position.copy(camera.position).sub(controls.target).setLength(4.2); axCam.lookAt(0, 0, 0); axCam.up.copy(camera.up)
+      const s = cubeSize().s
+      axCam.position.copy(camera.position).sub(controls.target).setLength(3.1); axCam.lookAt(0, 0, 0); axCam.up.copy(camera.up)
       renderer.autoClear = false; renderer.clearDepth()
       renderer.setScissorTest(true); renderer.setScissor(w - s - 4, 22, s, s); renderer.setViewport(w - s - 4, 22, s, s)
       renderer.render(axScene, axCam)
@@ -294,6 +359,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     const clearLp = () => { clearTimeout(lp); lp = 0 }
     renderer.domElement.addEventListener('contextmenu', e => e.preventDefault())
     const onDown = e => {
+      // нажатие в кубе видов — только куб (камеру не крутим)
+      if (cubeHit(e)) { e.stopImmediatePropagation(); down = { x: e.clientX, y: e.clientY, t: Date.now(), cube: true }; return }
       pointers.add(e.pointerId)
       if (pointers.size > 1) { clearLp(); if (dragging) { drag.current?.(dragging.id, 'cancel', 0, 0); dragging = null; controls.enabled = true } down = null; return }
       down = { x: e.clientX, y: e.clientY, t: Date.now() }
@@ -330,6 +397,14 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       drag.current?.(dragging.id, 'move', dx, dz)
     }
     const onUp = e => {
+      if (down?.cube) {
+        const o = cubeHit(e); down = null
+        if (o && o !== 'cube') {
+          viewFrom(o.userData.dir)
+          if (o.userData.base) { o.material.color.set('#93c5fd'); setTimeout(() => o.material.color.copy(o.userData.base), 350) }
+        }
+        return
+      }
       pointers.delete(e.pointerId)
       clearLp()
       if (dragging) {
@@ -453,7 +528,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const isPart = selectedPid && p.pid === selectedPid
       const isBlk = !isPart && hiPids?.has?.(p.pid)
       const ghost = ghostFronts && p.role === 'фасад' && p.item.id === selected
-      const op = ghost ? 0.18 : xray ? Math.min(lk.opacity, 0.35) : lk.opacity
+      const op = ghost ? 0.18 : xray ? Math.min(lk.opacity, Math.max(0.03, Number(look.xrayOpacity ?? 0.35))) : lk.opacity
       const gloss = /глянец|глянц|gloss|акрил|high ?gloss/i.test(p.material || ''), matte = /матов|супермат|soft ?touch/i.test(p.material || '')
       const glass = p.kind === 'glass' || /стекл|зеркал/i.test(p.material || '')
       const mirror = /зеркал/i.test(p.material || '')
@@ -474,9 +549,12 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       else mesh.position.set(-off[0], -off[1], -off[2])
       mesh.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, anim: p.anim?.id || null, ...(ghost ? { ghost: true } : {}) }
       hg.add(mesh)
+      // контуры деталей — по настройке «Линии контуров» (выбранное — всегда с линиями)
+      if (look.lines !== false || isSel || isPart || isBlk) {
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : look.lineColor, transparent: true, opacity: isSel ? 1 : Math.max(0.05, Math.min(1, Number(look.lineOpacity))) }))
       edges.position.copy(mesh.position)
       hg.add(edges)
+      }
     }
     // подсветка кромки: линии контура кромленых торцов (по низу и верху торца + вертикали на концах участка)
     if (edgeLook?.on) {

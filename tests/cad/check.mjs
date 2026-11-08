@@ -328,5 +328,17 @@ for (const rot of [0, 90, 180, 270]) {
   const bot = det.find(d => d.name === 'Дно')
   ok(bot.contour.drillings.some(d => d.d === 5 && d.note === 'Конфирмат'), 'other joints keep project scheme')
 }
+
+// направляющие — только из ряда системы
+{
+  const { slideLength, newNode } = await import('../../src/lib/cadCabinet.js')
+  ok(slideLength([250, 270, 300, 350, 400, 450, 500], 410, 540).len === 400, 'snap 410 -> 400')
+  ok(slideLength([250, 270, 300, 350, 400, 450, 500], null, 470).len === 450, 'auto by depth')
+  const it = newItem('cabinet', { p: { W: 600, H: 400, D: 500, tree: newNode({ id: 'root', front: { type: 'drawers', n: 1, box: 'hidden', slideLen: 410 } }) } })
+  const pp = projectParts({ items: [it] })
+  ok(pp.hw.some(h => /400 мм/.test(h.name)), 'hidden slides 400 ' + pp.hw.map(h => h.name))
+  const side = pp.parts.find(p => p.name === 'Ящик: боковина')
+  ok(Math.abs(side.place.aabb[5] - side.place.aabb[2] - 390) < 0.01, 'box NL-10 ' + side.place.aabb)
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

@@ -54,16 +54,29 @@ export const HANDLE_TYPES = [
   ['rail', 'Рейлинг'], ['bar', 'Скоба прямоугольная'], ['arch', 'Скоба-дуга'], ['knob', 'Кнопка круглая'], ['knobsq', 'Кнопка квадратная'],
   ['edge', 'Торцевая с язычком'], ['edgeflat', 'Торцевая плоская'],
 ]
+// lens — ряд номинальных длин направляющих (NL) системы: длина берётся только из ряда (410 мм не бывает — встанет 400);
+// значения — типовые по каталогам, сверить с каталогом поставщика
+const BALL_LENS = [250, 300, 350, 400, 450, 500, 550, 600, 650, 700]
+const BLUM_LENS = [270, 300, 350, 400, 450, 500, 550, 600, 650]
 export const DRAWER_SYSTEMS = [
-  ['ldsp_overlay', 'ЛДСП, дно накладное · шариковые', { type: 'ball' }],
-  ['ldsp_groove', 'ЛДСП, дно в паз · шариковые', { type: 'ball' }],
-  ['hidden', 'ЛДСП · скрытого монтажа (Blum Tandem / Movento, Hettich Quadro, DTC, GTV)', { type: 'under', side: 5, bottomUp: 13 }],
-  ['metal', 'Метабокс (металлобокс)', { type: 'metal' }],
-  ['tandembox', 'Blum Tandembox / Antaro', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 83, lenRed: 10 }],
-  ['legrabox', 'Blum Legrabox', { type: 'msys', bottomRed: 35, backRed: 38, sideH: 90, lenRed: 10 }],
-  ['innotech', 'Hettich InnoTech Atira', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 70, lenRed: 10 }],
-  ['dtc', 'DTC Modern Box', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 84, lenRed: 10 }],
+  ['ldsp_overlay', 'ЛДСП, дно накладное · шариковые', { type: 'ball', lens: BALL_LENS }],
+  ['ldsp_groove', 'ЛДСП, дно в паз · шариковые', { type: 'ball', lens: BALL_LENS }],
+  ['hidden', 'ЛДСП · скрытого монтажа (Blum Tandem / Movento, Hettich Quadro, DTC, GTV)', { type: 'under', side: 5, bottomUp: 13, lenRed: 10, lens: [250, 270, 300, 350, 400, 450, 500, 550, 600] }],
+  ['metal', 'Метабокс (металлобокс)', { type: 'metal', lens: [270, 300, 350, 400, 450, 500, 550] }],
+  ['tandembox', 'Blum Tandembox / Antaro', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 83, lenRed: 10, lens: BLUM_LENS }],
+  ['legrabox', 'Blum Legrabox', { type: 'msys', bottomRed: 35, backRed: 38, sideH: 90, lenRed: 10, lens: BLUM_LENS }],
+  ['innotech', 'Hettich InnoTech Atira', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 70, lenRed: 10, lens: [270, 300, 350, 400, 420, 450, 470, 500, 520, 550, 600] }],
+  ['dtc', 'DTC Modern Box', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 84, lenRed: 10, lens: [270, 300, 350, 400, 450, 500, 550] }],
 ]
+/** длина направляющих из ряда системы: want — желаемая (null — самая длинная, что помещается), avail — свободная глубина */
+export function slideLength(lens, want, avail) {
+  const fit = (lens || BALL_LENS).filter(l => l <= avail)
+  if (!fit.length) return { len: Math.min(...(lens || BALL_LENS)), tooDeep: true }
+  if (want == null || want === '' || !Number.isFinite(Number(want))) return { len: fit[fit.length - 1] }
+  const below = fit.filter(l => l <= Number(want))
+  const len = below.length ? below[below.length - 1] : fit[0]
+  return { len, snapped: len !== Number(want) }
+}
 export const drawerSystem = id => (DRAWER_SYSTEMS.find(s => s[0] === id) || DRAWER_SYSTEMS[0])
 /** высоты фасадов ящиков блока (снизу вверх): hs[i] — заданная высота или null (авто — поровну из остатка) */
 export function drawerHeights(total, n, g, hs = []) {
@@ -570,7 +583,11 @@ export function cabinetParts(params) {
       if (hs.some(v => v < 60)) warn.push('Ящик получился ниже 60 мм — проверьте высоты ящиков')
       const sysId = fr.box || p.box
       const sys = { ...drawerSystem(sysId)[2], ...(fr.sys || {}) }
-      const bd = Math.min(num(fr.slideLen ?? p.slideLen, 450), D - zi0 - 10)
+      // длина направляющих — только из ряда системы и чтобы помещалась по глубине
+      const avail = D - zi0 - 5
+      const sl = slideLength(sys.lens, fr.slideLen === 'auto' ? null : (fr.slideLen ?? p.slideLen), avail)
+      if (sl.tooDeep) warn.push(`Ящики: корпус мелкий — самые короткие направляющие (${sl.len} мм) не помещаются`)
+      const bd = sl.len
       const bBot = num(fr.boxBottom, 15), bTop = num(fr.boxTop ?? num(p.boxTopGap, 40) - 15, 25)
       const sg = sys.type === 'under' ? num(sys.side, 5) : num(fr.slideGap ?? p.slideGap, 13)
       let dy0 = fy0
@@ -583,7 +600,8 @@ export function cabinetParts(params) {
         putHandle(fr, true, k, k + 'f', fx0, dy0, fx1, dy0 + fh, 'r', blk, anim)
         const by0 = Math.max(dy0, y0) + bBot
         const bh = Math.max(60, Math.min(fh - bBot - bTop, y1 - by0 - 5))
-        const zf = D - 2, z0 = zf - bd
+        // короб: у скрытого монтажа — короче направляющей на lenRed (Blum Tandem: NL − 10)
+        const zf = D - 2, z0 = zf - (sys.type === 'under' ? bd - num(sys.lenRed, 10) : bd)
         // направляющая по высоте короба: снизу с отступом (по умолчанию 3 мм от низа короба) или по центру короба
         const ys = sys.type === 'under' ? by0 + 6 : fr.slidePos === 'center' ? by0 + bh / 2 : by0 + num(fr.slideOff, 3) + 22.5
         // крепление фасада к ящику: точки на обратной пласти фасада (саморезы изнутри — без присадки, или сверлить — крепёж «Фасад ящика»)
