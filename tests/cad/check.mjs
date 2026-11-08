@@ -21,7 +21,7 @@ for (const rot of [0, 90, 180, 270]) for (const [, name, p] of CAB_PRESETS) for 
 }
 // шкаф 800×2100×560: боковина = 2100 × 560 (вкладные крышка/дно, задняя в паз), полка 768
 const pr = newProject('Шкаф')
-pr.items.push(newItem('cabinet'))
+pr.items.push(newItem('cabinet', { p: { shelves: 2, doors: 2 } }))
 const g = exportForOrder(pr, sheetGroups(pr)[0].key)
 const side = g.items.find(x => x.name === 'Боковина левая'), shelf = g.items.find(x => x.name === 'Горизонтальная панель'), back = projectParts(pr).parts.find(x => x.key === 'back')
 ok(side.w === 2100 && side.h === 560, `side ${side.w}x${side.h}`)
@@ -37,7 +37,7 @@ ok(n.bars.length === 2, 'bars ' + n.bars.length)
 ok(explodeCabinet(pr.items[0]).length > 5, 'explode')
 // разобранный корпус лежит там же, где был (при любом повороте)
 for (const rot of [0, 90, 180, 270]) {
-  const it = { ...newItem('cabinet'), rotY: rot, pos: { x: 300, y: 10, z: -40 } }
+  const it = { ...newItem('cabinet', { p: { shelves: 2, doors: 2 } }), rotY: rot, pos: { x: 300, y: 10, z: -40 } }
   const a = projectParts({ items: [it] }).parts.filter(x => x.kind === 'sheet').map(x => x.place.aabb.join(',')).sort()
   const b = projectParts({ items: explodeCabinet(it) }).parts.map(x => x.place.aabb.join(',')).sort()
   ok(a.join('|') === b.join('|'), 'explode rot ' + rot)
@@ -45,7 +45,7 @@ for (const rot of [0, 90, 180, 270]) {
 // присадка: конфирматы на боковине, торец дна, чашки петель на дверях, планки на боковинах
 {
   const pr2 = newProject('Присадка')
-  pr2.items.push({ ...newItem('cabinet', { p: { shelfType: 'loose' } }), rotY: 90, pos: { x: 500, y: 0, z: 200 } })
+  pr2.items.push({ ...newItem('cabinet', { p: { shelfType: 'loose', shelves: 2, doors: 2 } }), rotY: 90, pos: { x: 500, y: 0, z: 200 } })
   const all = exportAll(pr2).details
   const by = n => all.filter(d => d.name === n)
   const sL = by('Боковина левая')[0], bot = by('Дно')[0], door = by('Дверь левая')[0], doorR = by('Дверь правая')[0]
@@ -104,7 +104,7 @@ for (const rot of [0, 90, 180, 270]) {
 // правка детали: вырез и своя присадка уходят в заказ; размер поменялся — контур сброшен с предупреждением
 {
   const pr5 = newProject('Фигурная')
-  const it = newItem('cabinet')
+  const it = newItem('cabinet', { p: { shelves: 2, doors: 2 } })
   const hole = { type: 'rect', vertices: [{ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 200, y: 300 }, { x: 100, y: 300 }] }
   it.ov = { sideL: { W: 560, L: 2100, vertices: null, holes: [hole], grooves: [], drillings: [{ id: 'u1', kind: 'face', face: 'front', d: 10, depth: 5, sides: ['left', 'bottom'], offsets: { left: 50, bottom: 50 } }], edges: null } }
   pr5.items.push(it)
@@ -170,6 +170,23 @@ for (const rot of [0, 90, 180, 270]) {
   ok(door.place.aabb[3] === 616 + 14.5, 'solo overlap ' + door.place.aabb[3])
   const top = all.find(d => d.name === 'Крышка')
   ok(top.contour.drillings.filter(d => d.d === 5 && d.note === 'Планка петли').length === 4, 'plates on top panel')
+}
+// каркас: без левой боковины, крышка — 1 царга с отступом 50 от верха (витрина: сверху стекло), дно — царги, вкладная крышка с отступами
+{
+  const it = newItem('cabinet', { p: { W: 1000, H: 900, D: 400, sideL: false, top: 'rails', topRails: 1, topRailOffset: 50, bottom: 'rails', bottomRails: 2, bottomRailOffset: 100, back: 'none' } })
+  const { parts, warn } = projectParts({ items: [it] })
+  ok(!warn.length, 'carcass warn ' + warn)
+  ok(!parts.some(p => p.name === 'Боковина левая'), 'no left side')
+  const rails = parts.filter(p => p.name.startsWith('Царга'))
+  ok(rails.length === 3, 'rails ' + rails.map(r => r.name))
+  const tr = rails.find(r => r.name === 'Царга передняя')
+  ok(tr.place.aabb[4] === 900 - 50 && tr.place.aabb[0] === 0, 'top rail pos ' + tr.place.aabb)
+  ok(rails.find(r => r.name === 'Царга нижняя задняя').place.aabb[1] === 100, 'bottom rail offset')
+  const it2 = newItem('cabinet', { p: { topDown: 20, topFront: -10, bottomUp: 30, bottomFront: 15, sideFront: 5 } })
+  const pp = projectParts({ items: [it2] }).parts
+  const top = pp.find(p => p.name === 'Крышка'), bot = pp.find(p => p.name === 'Дно'), side = pp.find(p => p.name === 'Боковина правая')
+  ok(top.place.aabb[4] === 2100 - 20 && top.place.aabb[5] === 570, 'inset top offsets ' + top.place.aabb)
+  ok(bot.place.aabb[1] === 30 && bot.place.aabb[5] === 545 && side.place.aabb[5] === 555, 'bottom/side offsets')
 }
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

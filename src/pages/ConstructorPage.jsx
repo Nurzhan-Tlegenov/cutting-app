@@ -281,13 +281,32 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
 
     <div style={sect}>Каркас</div>
     <Grid cols={2}><TextField label="Материал" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><NumField label="Толщина" value={p.t} onChange={v => up({ t: v })} min={1} /></Grid>
-    <Chips label="Крышка" value={p.top} onChange={v => up({ top: v })} options={[['inset', 'Вкладная'], ['overlay', 'Накладная'], ['rails', 'Планки (царги)'], ['none', 'Нет']]} />
+
+    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '4px 0 6px' }}>
+      <label style={{ fontSize: 13.5, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.sideL !== false} onChange={e => up({ sideL: e.target.checked })} />Боковина левая</label>
+      <label style={{ fontSize: 13.5, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.sideR !== false} onChange={e => up({ sideR: e.target.checked })} />Боковина правая</label>
+    </div>
+    {(p.sideL !== false || p.sideR !== false) && <Sub><Grid cols={2}><NumField label="Боковины: отступ спереди" value={p.sideFront} onChange={v => up({ sideFront: v })} /><NumField label="отступ сзади" value={p.sideBack} onChange={v => up({ sideBack: v })} /></Grid></Sub>}
+
+    <Chips label="Крышка" value={p.top} onChange={v => up({ top: v })} options={[['inset', 'Вкладная'], ['overlay', 'Накладная'], ['rails', 'Царги (планки)'], ['none', 'Нет']]}
+      hint="Вкладная — между боковинами, её можно опустить и отступить спереди/сзади (минус — выступает). Накладная — сверху на боковинах, со свесом. Царги — 1 (передняя) или 2 планки с отступом от верха: например, сверху ляжет стекло." />
     {p.top === 'overlay' && <Sub>
       <Grid cols={2}><NumField label="Свес вперёд (козырёк)" value={p.overhangFront} onChange={v => up({ overhangFront: v })} min={0} /><NumField label="Свес в стороны" value={p.overhangSide} onChange={v => up({ overhangSide: v })} min={0} /></Grid>
       <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.underTop !== false} onChange={e => up({ underTop: e.target.checked })} />Фасады под крышкой (свес — от фасадов)</label>
     </Sub>}
-    {p.top === 'rails' && <Sub><Grid><NumField label="Ширина планки" value={p.railDepth} onChange={v => up({ railDepth: v })} min={20} /></Grid></Sub>}
-    <Chips label="Дно" value={p.bottom} onChange={v => up({ bottom: v })} options={[['inset', 'Вкладное'], ['overlay', 'Накладное']]} />
+    {p.top === 'inset' && <Sub><Grid><NumField label="Отступ от верха" value={p.topDown} onChange={v => up({ topDown: v })} /><NumField label="от переда" value={p.topFront} onChange={v => up({ topFront: v })} /><NumField label="от зада" value={p.topBack} onChange={v => up({ topBack: v })} /></Grid></Sub>}
+    {p.top === 'rails' && <Sub>
+      <Chips label="Царг" value={num(p.topRails) >= 2 ? 2 : 1} onChange={v => up({ topRails: v })} options={[[1, '1 — передняя'], [2, '2 — передняя и задняя']]} />
+      <Grid cols={2}><NumField label="Отступ от верха" value={p.topRailOffset} onChange={v => up({ topRailOffset: v })} min={0} /><NumField label="Ширина планки" value={p.railDepth} onChange={v => up({ railDepth: v })} min={20} /></Grid>
+    </Sub>}
+
+    <Chips label="Дно" value={p.bottom} onChange={v => up({ bottom: v })} options={[['inset', 'Вкладное'], ['overlay', 'Накладное'], ['rails', 'Царги (планки)'], ['none', 'Нет']]} />
+    {p.bottom === 'inset' && <Sub><Grid><NumField label="Отступ от низа" value={p.bottomUp} onChange={v => up({ bottomUp: v })} /><NumField label="от переда" value={p.bottomFront} onChange={v => up({ bottomFront: v })} /><NumField label="от зада" value={p.bottomBack} onChange={v => up({ bottomBack: v })} /></Grid></Sub>}
+    {p.bottom === 'rails' && <Sub>
+      <Chips label="Царг" value={num(p.bottomRails) >= 2 ? 2 : 1} onChange={v => up({ bottomRails: v })} options={[[1, '1 — передняя'], [2, '2 — передняя и задняя']]} />
+      <Grid cols={2}><NumField label="Отступ от низа" value={p.bottomRailOffset} onChange={v => up({ bottomRailOffset: v })} min={0} /><NumField label="Ширина планки" value={p.bottomRailDepth ?? p.railDepth} onChange={v => up({ bottomRailDepth: v })} min={20} /></Grid>
+    </Sub>}
+
     <Chips label="Опора" value={p.base} onChange={v => up({ base: v })} options={[['none', 'Без опоры'], ['legs', 'Ножки'], ['plinth', 'Цоколь']]} />
     {p.base === 'legs' && <Sub><Grid><NumField label="Высота ножек" value={p.legH} onChange={v => up({ legH: v })} min={0} /></Grid></Sub>}
     {p.base === 'plinth' && <Sub><Grid cols={2}><NumField label="Высота цоколя" value={p.plinthH} onChange={v => up({ plinthH: v })} min={0} /><NumField label="Отступ цоколя" value={p.plinthInset} onChange={v => up({ plinthInset: v })} min={0} /></Grid></Sub>}

@@ -11,18 +11,21 @@ export const CAB_DEFAULTS = {
   W: 800, H: 2100, D: 560,
   t: 16, material: 'ЛДСП Белый 16',
   top: 'inset',          // крышка: inset — вкладная (между боковинами), overlay — накладная, rails — царги, none — нет
-  bottom: 'inset',       // дно: inset — вкладное, overlay — накладное
+  bottom: 'inset',       // дно: inset — вкладное, overlay — накладное, rails — царги, none — нет
   base: 'none',          // опора: none — стоит на дне/боковинах, legs — ножки, plinth — цоколь
   legH: 100, plinthH: 80, plinthInset: 50,
   back: 'groove',        // задняя стенка: groove — в паз, overlay — накладная, inset — вкладная (ЛДСП), none — нет
   backT: 3, backMaterial: 'ХДФ Белый 3',
   grooveOffset: 16, grooveDepth: 8, grooveWidth: 4,   // паз под заднюю стенку: от заднего торца до паза, глубина, ширина
   railDepth: 100,
+  sideL: true, sideR: true, sideFront: 0, sideBack: 0,      // боковины: есть / нет, отступ спереди и сзади
+  topRails: 2, topRailOffset: 0, topDown: 0, topFront: 0, topBack: 0,          // крышка: царг 1/2 и отступ от верха; вкладная — отступы (минус — выступает)
+  bottomRails: 2, bottomRailOffset: 0, bottomRailDepth: null, bottomUp: 0, bottomFront: 0, bottomBack: 0,  // дно — так же
   partitions: 0,         // вертикальные стойки — делят корпус на секции
   fill: 'shelves',       // наполнение: shelves — полки, drawers — ящики (комод)
-  shelves: 2, shelfType: 'fixed', shelfSetback: 0,    // fixed — неподвижные, loose — съёмные (меньше на зазор)
+  shelves: 0, shelfType: 'fixed', shelfSetback: 0,   // новый корпус — только каркас: полки, фасады, ящики включаются галочками    // fixed — неподвижные, loose — съёмные (меньше на зазор)
   drawers: 3, box: 'ldsp_overlay', slideGap: 13, slideLen: 450, boxTopGap: 40, boxBottomT: 3, boxBottomMaterial: 'ХДФ Белый 3', metalReduce: 42,
-  doors: 2, gap: 3, facadeT: 16, facadeMaterial: 'ЛДСП Белый 16',
+  doors: 0, gap: 3, facadeT: 16, facadeMaterial: 'ЛДСП Белый 16',
   edgeBody: '0,4', edgeFront: '1', edgeFacade: '1',
   kind: 'wardrobe',                       // тип корпуса: для «применить ко всем корпусам этого типа» (верхний / нижний кухни, шкаф…)
   doorLayout: 'v', doorOpen: 'left',      // фасады на весь корпус (быстрый режим): v — рядом, h — друг над другом; открывание одной двери
@@ -39,14 +42,15 @@ export const CAB_DEFAULTS = {
 export const CAB_KINDS = [['wardrobe', 'Шкаф'], ['base', 'Кухня: нижний'], ['wall', 'Кухня: верхний'], ['shelf', 'Стеллаж'], ['dresser', 'Комод'], ['other', 'Другое']]
 // какие параметры переносятся «на все корпуса этого типа» — по группам
 export const CAB_GROUPS = {
-  body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'railDepth', 'overhangFront', 'overhangSide', 'underTop', 'edgeFront', 'edgeBody'],
+  body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'railDepth', 'overhangFront', 'overhangSide', 'underTop', 'edgeFront', 'edgeBody',
+    'sideL', 'sideR', 'sideFront', 'sideBack', 'topRails', 'topRailOffset', 'topDown', 'topFront', 'topBack', 'bottomRails', 'bottomRailOffset', 'bottomRailDepth', 'bottomUp', 'bottomFront', 'bottomBack'],
   back: ['back', 'backT', 'backMaterial', 'grooveOffset', 'grooveDepth', 'grooveWidth'],
   fronts: ['facadeMaterial', 'facadeT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'hingeCount'],
   boxes: ['box', 'slideGap', 'slideLen', 'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce'],
 }
 
 export const CAB_PRESETS = [
-  ['wardrobe', 'Шкаф распашной', { kind: 'wardrobe' }],
+  ['wardrobe', 'Шкаф распашной', { kind: 'wardrobe', shelves: 2, doors: 2 }],
   ['base', 'Кухня: нижний модуль', { kind: 'base', W: 600, H: 820, D: 560, top: 'rails', base: 'legs', legH: 100, shelves: 1, doors: 2 }],
   ['wall', 'Кухня: верхний модуль', { kind: 'wall', W: 600, H: 720, D: 300, top: 'inset', base: 'none', shelves: 2, doors: 2 }],
   ['dresser', 'Комод с ящиками', { kind: 'dresser', W: 800, H: 900, D: 450, top: 'overlay', base: 'plinth', fill: 'drawers', drawers: 4, doors: 0 }],
@@ -159,30 +163,55 @@ export function cabinetParts(params) {
   const topOver = p.top === 'overlay'
   const sideY1 = topOver ? H - t : H
   const front = { '+z': eF }
+  // боковины можно убрать (галочки) и укоротить по глубине: отступ спереди / сзади
+  const hasL = p.sideL !== false, hasR = p.sideR !== false
+  const sF = num(p.sideFront, 0), sB = num(p.sideBack, 0)
+  if (hasL) parts.push(mk('sideL', 'Боковина левая', 'каркас', [0, sideY0, zb + sB, t, sideY1, D - sF], 0, +1, 1, mat, { edges: front }))
+  if (hasR) parts.push(mk('sideR', 'Боковина правая', 'каркас', [W - t, sideY0, zb + sB, W, sideY1, D - sF], 0, -1, 1, mat, { edges: front }))
+  const xi0 = hasL ? t : 0, xi1 = hasR ? W - t : W
 
-  parts.push(mk('sideL', 'Боковина левая', 'каркас', [0, sideY0, zb, t, sideY1, D], 0, +1, 1, mat, { edges: front }))
-  parts.push(mk('sideR', 'Боковина правая', 'каркас', [W - t, sideY0, zb, W, sideY1, D], 0, -1, 1, mat, { edges: front }))
-  const bx0 = bottomInset ? t : 0, bx1 = bottomInset ? W - t : W
-  parts.push(mk('bottom', 'Дно', 'каркас', [bx0, yb, zb, bx1, yb + t, D], 1, +1, 0, mat, { edges: front }))
+  // царги (планки): 1 — передняя, 2 — передняя и задняя; лежат плашмя между боковинами с отступом от верха / низа
+  const rails = (pos, y0, count, depth, key, name, sign) => {
+    const rd = Math.min(num(depth, 100), (D - zb) / 2)
+    parts.push(mk(key + 'F', name + ' передняя', 'каркас', [xi0, y0, D - rd, xi1, y0 + t, D], 1, sign, 0, mat, { edges: front }))
+    if (num(count, 2) >= 2) parts.push(mk(key + 'B', name + ' задняя', 'каркас', [xi0, y0, zb, xi1, y0 + t, zb + rd], 1, sign, 0, mat))
+  }
+
+  // ── дно: вкладное (с отступами снизу / спереди / сзади; минус — выступает), накладное, царги или нет ──
+  let yi0 = yb
+  if (p.bottom === 'overlay') {
+    parts.push(mk('bottom', 'Дно', 'каркас', [0, yb, zb, W, yb + t, D], 1, +1, 0, mat, { edges: front }))
+    yi0 = yb + t
+  } else if (p.bottom === 'rails') {
+    const y = yb + num(p.bottomRailOffset, 0)
+    rails('b', y, p.bottomRails, p.bottomRailDepth ?? p.railDepth, 'brail', 'Царга нижняя', +1)
+    yi0 = y + t
+  } else if (p.bottom !== 'none') {
+    const y = yb + num(p.bottomUp, 0)
+    parts.push(mk('bottom', 'Дно', 'каркас', [xi0, y, zb + num(p.bottomBack, 0), xi1, y + t, D - num(p.bottomFront, 0)], 1, +1, 0, mat, { edges: front }))
+    yi0 = y + t
+  }
+
+  // ── крышка: вкладная (с отступами сверху / спереди / сзади), накладная (свесы), царги или нет ──
   let yi1 = H
   const tree = treeOf(p)
   const hasFronts = anyFront(tree)
   const fT0 = num(p.facadeT, 16)
-  if (p.top === 'inset' || topOver) {
+  if (topOver) {
     // накладная крышка: свес в стороны и вперёд (козырёк) — вперёд считается от фасадов, если фасады под крышкой
-    const os = topOver ? num(p.overhangSide, 0) : 0
-    const zf = topOver ? D + (hasFronts && p.underTop !== false ? fT0 : 0) + num(p.overhangFront, 0) : D
-    const tx0 = topOver ? -os : t, tx1 = topOver ? W + os : W - t
-    parts.push(mk('top', 'Крышка', 'каркас', [tx0, H - t, zb, tx1, H, topOver ? Math.max(D, zf) : D], 1, -1, 0, mat, { edges: topOver ? { '+z': eF, '-x': eF, '+x': eF } : front }))
+    const os = num(p.overhangSide, 0)
+    const zf = D + (hasFronts && p.underTop !== false ? fT0 : 0) + num(p.overhangFront, 0)
+    parts.push(mk('top', 'Крышка', 'каркас', [-os, H - t, zb, W + os, H, Math.max(D, zf)], 1, -1, 0, mat, { edges: { '+z': eF, '-x': eF, '+x': eF } }))
     yi1 = H - t
+  } else if (p.top === 'inset') {
+    const y = H - t - num(p.topDown, 0)
+    parts.push(mk('top', 'Крышка', 'каркас', [xi0, y, zb + num(p.topBack, 0), xi1, y + t, D - num(p.topFront, 0)], 1, -1, 0, mat, { edges: front }))
+    yi1 = y
   } else if (p.top === 'rails') {
-    const rd = Math.min(num(p.railDepth, 100), (D - zb) / 2)
-    parts.push(mk('railF', 'Царга передняя', 'каркас', [t, H - t, D - rd, W - t, H, D], 1, -1, 0, mat, { edges: front }))
-    parts.push(mk('railB', 'Царга задняя', 'каркас', [t, H - t, zb, W - t, H, zb + rd], 1, -1, 0, mat))
-    yi1 = H - t
+    const y = H - t - num(p.topRailOffset, 0)
+    rails('t', y, p.topRails, p.railDepth, 'rail', 'Царга', -1)
+    yi1 = y
   }
-  const yi0 = yb + t
-  const xi0 = t, xi1 = W - t
 
   // ── задняя стенка ──
   let zi0 = zb
@@ -194,10 +223,12 @@ export function cabinetParts(params) {
     const go = num(p.grooveOffset, 16), gd = num(p.grooveDepth, 8), gw = num(p.grooveWidth, backT + 1)
     const z0 = go + (gw - backT) / 2
     const topHas = p.top === 'inset' || topOver
+    const botHas = p.bottom === 'inset' || p.bottom === 'overlay' || p.bottom == null
     const y1 = topHas ? yi1 + gd - 1 : H - 1
-    parts.push(mk('back', 'Задняя стенка', 'задняя', [xi0 - gd + 1, yi0 - gd + 1, z0, xi1 + gd - 1, y1, z0 + backT], 2, +1, 1, p.backMaterial || 'ХДФ', { t: backT }))
+    const y0 = botHas ? yi0 - gd + 1 : Math.min(sideY0, yb) + 1
+    parts.push(mk('back', 'Задняя стенка', 'задняя', [hasL ? xi0 - gd + 1 : 1, y0, z0, hasR ? xi1 + gd - 1 : W - 1, y1, z0 + backT], 2, +1, 1, p.backMaterial || 'ХДФ', { t: backT }))
     const g = { from: '-z', offset: go, width: gw, depth: gd, along: 'L' }
-    for (const pr of parts) if (['sideL', 'sideR', 'bottom', ...(topHas ? ['top'] : [])].includes(pr.key)) pr.grooves.push({ ...g })
+    for (const pr of parts) if (['sideL', 'sideR', ...(botHas ? ['bottom'] : []), ...(topHas ? ['top'] : [])].includes(pr.key)) pr.grooves.push({ ...g })
     if (go + gw > D - 50) warn.push('Паз под заднюю стенку слишком далеко от заднего торца')
     zi0 = z0 + backT
   } else if (p.back === 'inset') {
