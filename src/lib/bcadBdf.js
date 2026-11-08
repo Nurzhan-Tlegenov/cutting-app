@@ -213,21 +213,25 @@ export function parseBdf(u8, opts = {}) {
   }
 
   // ── обход: детали и крепёж ──
-  const panels = [], fasteners = []
-  const walk = (ob, layer, depth) => {
+  // Отверстие крепежа — любой объект с именем «Отверстие 8x17» / «Отверстие 7х16» / «Отверстие D8/L13.5»
+  // (сетка, ломаная или контейнер из трёх линий-осей и поверхности). Ось записана в его свойствах (0x40b).
+  // Внутрь найденного отверстия не спускаемся — там его же линии и поверхность с тем же именем.
+  const panels = [], holeObs = []
+  const HOLE_RE = /^Отверстие(?![а-яё])/i
+  const walk = (ob, layer, depth, owner) => {
     if (depth > 30) return
     const ch = childrenOf(ob)
     if (ob.type === 'CONTAINER') {
       const names = ch.filter(c => c.type === 'MESH3').map(c => c.name)
       if (names.includes('Лицевая') && names.includes('Тыльная')) { panels.push({ ob, ch, layer }); return }
-      const holes = ch.filter(c => c.type === 'MESH3' && /^Отверстие\s*\d/i.test(c.name))
-      if (holes.length) fasteners.push({ ob, holes, layer })
     }
-    for (const c of ch) walk(c, layer, depth + 1)
+    if (HOLE_RE.test(ob.name) && depth > 0) { holeObs.push({ ob, owner, layer }); return }
+    const own = ob.type === 'CONTAINER' && ob.name && !HOLE_RE.test(ob.name) ? ob.name : owner
+    for (const c of ch) walk(c, layer, depth + 1, own)
   }
   for (const [, a, l] of root) {
     const ob = objOf(a, l)
-    if (ob && ob.type === 'LAYER') walk(ob, (ob.k.get(0x400)?.[0] && str(...ob.k.get(0x400)[0])) || '', 0)
+    if (ob && ob.type === 'LAYER') walk(ob, (ob.k.get(0x400)?.[0] && str(...ob.k.get(0x400)[0])) || '', 0, '')
   }
   if (!panels.length) throw new Error('в модели bCAD не найдено панелей (контейнеров с гранями «Лицевая» и «Тыльная»)')
 
@@ -238,28 +242,49 @@ export function parseBdf(u8, opts = {}) {
   const holeName = (fx, dia) => (/еврик|конфирм/i.test(fx) ? 'Конфирмат' : /эксцентр|минификс/i.test(fx) ? (dia >= 13 ? 'Эксцентрик' : 'Минификс')
     : /петл|чашк/i.test(fx) ? 'Петля' : /шкант/i.test(fx) ? 'Шкант' : /шуруп/i.test(fx) ? 'Шуруп' : /полкодерж/i.test(fx) ? 'Полкодержатель' : `Ø${dia}`)
   const holePairs = []
-  for (const f of fasteners) {
-    for (const h of f.holes) {
-      const m = /(\d+(?:[.,]\d+)?)\s*[xхX×*]\s*(\d+(?:[.,]\d+)?)/.exec(h.name)
-      const dia = m ? Number(m[1].replace(',', '.')) : 0, len = m ? Number(m[2].replace(',', '.')) : 0
-      const b = h.k.get(0x40b)?.[0]
-      let A = null, B = null
-      if (b && dia > 0) {
-        const [o, l] = b
-        for (let i = o; i + 48 <= o + l; i++) {
-          const v = []
-          for (let j = 0; j < 6; j++) v.push(dv.getFloat64(i + 8 * j, true))
-          if (v.some(x => !Number.isFinite(x) || Math.abs(x) > 1e5)) continue
-          const L = Math.hypot(v[3] - v[0], v[4] - v[1], v[5] - v[2])
-          if (len > 0 ? Math.abs(L - len) < 0.05 : L > 0.5) { A = v.slice(0, 3); B = v.slice(3); break }
-        }
-      }
-      const nm = holeName(f.ob.name + ' ' + h.name, dia)
-      if (!A) { lostAdd(`${f.ob.name}: ${h.name}`, 'size'); continue }
-      const P = up(A), Q = up(B), D = norm(sub(Q, P)), depth = r1(vlen(sub(Q, P)))
-      const h1 = { P, D, r: dia / 2, depth, name: nm }, h2 = { P: Q, D: D.map(x => -x), r: dia / 2, depth, name: nm }
-      holes.push(h1, h2); holePairs.push([h1, h2, `${f.ob.name}: ${h.name}`])
+  // размер из имени: «8x17», «7х16», «15 × 13», «D8/L13.5», «Ø8 L10»
+  const holeSize = nm => {
+    let m = /(\d+(?:[.,]\d+)?)\s*[xхX×*]\s*(\d+(?:[.,]\d+)?)/.exec(nm)
+    if (!m) m = /[DØдД]\s*(\d+(?:[.,]\d+)?)\s*[/\\,;\s]\s*[LГлг]\s*(\d+(?:[.,]\d+)?)/.exec(nm)
+    return m ? [Number(m[1].replace(',', '.')), Number(m[2].replace(',', '.'))] : [0, 0]
+  }
+  // ось — две точки (6 чисел double) в свойствах; сначала — на обычном месте (смещение 42), иначе ищем пару точек на расстоянии = глубине
+  const holeAxis = (ob, len) => {
+    const b = ob.k.get(0x40b)?.[0]; if (!b) return null
+    const [o, l] = b
+    const at = i => { const v = []; for (let j = 0; j < 6; j++) v.push(dv.getFloat64(i + 8 * j, true)); return v }
+    const ok = v => !v.some(x => !Number.isFinite(x) || Math.abs(x) > 1e5)
+    const dist = v => Math.hypot(v[3] - v[0], v[4] - v[1], v[5] - v[2])
+    const fits = v => ok(v) && (len > 0 ? Math.abs(dist(v) - len) < 0.05 : dist(v) > 0.5)
+    if (o + 42 + 48 <= o + l) { const v = at(o + 42); if (fits(v)) return [v.slice(0, 3), v.slice(3)] }
+    for (let i = o; i + 48 <= o + l; i++) {
+      const v = at(i)
+      // пара точек, у которых обе не нулевые (иначе это вектор размеров в свойствах, а не ось в модели)
+      if (fits(v) && (Math.abs(v[0]) + Math.abs(v[1]) + Math.abs(v[2])) > 1 && (Math.abs(v[3]) + Math.abs(v[4]) + Math.abs(v[5])) > 1) return [v.slice(0, 3), v.slice(3)]
     }
+    return null
+  }
+  // ось из трёх линий внутри контейнера отверстия: самая длинная линия = глубина
+  const holeAxisLines = (ob, len) => {
+    const lines = childrenOf(ob).filter(c => c.type === 'XPLINE').map(c => plinePts(c)).filter(P => P.length === 2)
+    const L = lines.find(P => len > 0 && Math.abs(vlen(sub(P[1], P[0])) - len) < 0.05)
+    return L ? [L[0], L[1]] : null
+  }
+  for (const { ob, owner } of holeObs) {
+    const [dia, len] = holeSize(ob.name)
+    const label = owner ? `${owner}: ${ob.name}` : ob.name
+    if (!(dia > 0)) {
+      // «Отверстие» без размера — так bCAD называет и стенки выреза в детали; у крепежа размер есть всегда
+      if (owner) lostAdd(label, 'size')
+      continue
+    }
+    const ax = holeAxis(ob, len) || (ob.type === 'CONTAINER' ? holeAxisLines(ob, len) : null)
+    if (!ax) { lostAdd(label, 'size'); continue }
+    const [A, B] = ax
+    const nm = holeName(`${owner} ${ob.name}`, dia)
+    const P = up(A), Q = up(B), D = norm(sub(Q, P)), depth = r1(vlen(sub(Q, P)))
+    const h1 = { P, D, r: dia / 2, depth, name: nm }, h2 = { P: Q, D: D.map(x => -x), r: dia / 2, depth, name: nm }
+    holes.push(h1, h2); holePairs.push([h1, h2, label])
   }
 
   // ── детали ──
@@ -385,11 +410,20 @@ export function parseBdf(u8, opts = {}) {
     // кромка: у каждого торца — номер материала из списка материалов панели (−1 — без кромки). Торцы идут по порядку сторон
     // контура, как сетки «Торец» внутри панели: участок контура — проекция своей сетки на пласть
     const butts = []
-    const torecs = pn.ch.filter(c => c.type === 'MESH3' && c.name === 'Торец')
+    // одна и та же сетка торца бывает записана в детали дважды (bCAD дублирует набор граней) — берём по одной
+    const seenT = new Set()
+    const torecs = pn.ch.filter(c => c.type === 'MESH3' && c.name === 'Торец').filter(c => {
+      const key = meshVerts(c).map(p => p.map(x => x.toFixed(1)).join(',')).sort().join(' ')
+      if (seenT.has(key)) return false
+      seenT.add(key); return true
+    })
     const banded = props.edges.filter(e => e.mat >= 0 && props.mats[e.mat])
+    // торцов в свойствах может быть больше, чем сеток «Торец»: лишние — стороны вырезов (у их стенок сетки «Отверстие»).
+    // Наружные стороны идут первыми — их и сопоставляем; кромку на вырезах пока не переносим (и честно говорим)
+    const extraBanded = props.edges.slice(torecs.length).filter(e => e.mat >= 0 && props.mats[e.mat]).length
     if (banded.length) {
-      if (torecs.length !== props.edges.length) lostAdd(`${pn.ob.name}: кромка`, 'edge', banded.length)
-      else props.edges.forEach((e, k) => {
+      if (torecs.length > props.edges.length || !torecs.length) lostAdd(`${pn.ob.name}: кромка`, 'edge', banded.length)
+      else props.edges.slice(0, torecs.length).forEach((e, k) => {
         const m = e.mat >= 0 ? props.mats[e.mat] : null
         if (!m) return
         const P = meshVerts(torecs[k]).map(up).map(p => toL(p)).filter(p => p[2] < T / 2).map(p => [p[0], p[1]])
@@ -402,6 +436,7 @@ export function parseBdf(u8, opts = {}) {
         const nm = thick && !/мм|mm/i.test(m.name) ? `${m.name} (${thick} мм)` : m.name
         butts.push({ e: { t: curved ? 'A' : 'L', a, b }, name: nm, info: { mat: m.name, thick } })
       })
+      if (extraBanded && torecs.length && torecs.length <= props.edges.length) lostAdd(`${pn.ob.name}: кромка на вырезе`, 'edge', extraBanded)
     }
     const Mp = [u[0], v[0], n[0], u[1], v[1], n[1], u[2], v[2], n[2], o[0], o[1], o[2]]
     // «Шкаф. Прав. ст.» — изделие «Шкаф», деталь «Прав. ст.»; «Стойка лев.» — просто деталь

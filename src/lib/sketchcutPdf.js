@@ -3,6 +3,8 @@
 //   — таблица «Детали»: #, Длина, Ширина, Кол-во, Поворот, Наименование;
 //   — кромка показана чёрточками под размером: одна чёрточка под длиной — кромка на одной стороне
 //     по длине, две — на обеих; так же под шириной;
+//   — кромка в новых версиях — пунктиром (каждая чёрточка — отдельная линия, склеиваем — joinDashes);
+//   — паз — словом «паз» в названии детали («паз 20» — отступ 20), ширина и глубина — из блока «Пазы» на первой странице;
 //   — на первой странице — виды кромки («Тип 1: 2») и их метраж («Длина 2 — 21,96 м.»): по метражу
 //     проверяем, что кромку прочитали верно, и определяем, какой вид кромки нарисован какой линией.
 // Модуль без React. parseSketchCut — чистая функция (её можно проверить без браузера).
@@ -97,7 +99,34 @@ export async function pageGeometry(page, OPS) {
       } else if (h >= 8) rects.push({ x0, y0, x1, y1 })
     }
   }
-  return { texts, lines, rects }
+  return { texts, lines: joinDashes(lines), rects }
+}
+
+// Кромка в новых версиях SketchCut нарисована пунктиром: каждая чёрточка — отдельная короткая линия
+// («— — —» под размером, две строки — кромка на обеих сторонах). Чёрточки одной строки (тот же стиль, та же высота,
+// промежуток меньше самой чёрточки) склеиваем в одну линию; у пунктира в стиле — длина чёрточки и промежутка,
+// чтобы разные виды кромки, нарисованные разным пунктиром, не слились в один.
+export function joinDashes(lines) {
+  const out = [], used = new Set()
+  const sorted = lines.map((l, i) => [l, i]).sort((a, b) => a[0].y - b[0].y || a[0].x0 - b[0].x0)
+  for (let k = 0; k < sorted.length; k++) {
+    const [l, i] = sorted[k]
+    if (used.has(i)) continue
+    used.add(i)
+    const run = [l]
+    let last = l
+    for (let m = k + 1; m < sorted.length; m++) {
+      const [n, j] = sorted[m]
+      if (n.y - last.y > 0.3) break
+      if (used.has(j) || n.style !== l.style || Math.abs(n.y - last.y) > 0.3) continue
+      const gap = n.x0 - last.x1, seg = last.x1 - last.x0
+      if (gap > 0.3 && gap <= Math.max(seg, n.x1 - n.x0) * 1.2 && gap < 20) { run.push(n); used.add(j); last = n }
+    }
+    if (run.length === 1) { out.push(l); continue }
+    const seg = run[0].x1 - run[0].x0, gap = run[1].x0 - run[0].x1
+    out.push({ x0: run[0].x0, x1: run[run.length - 1].x1, y: l.y, lw: l.lw, style: `${l.style}|p${seg.toFixed(1)}-${gap.toFixed(1)}`, dashes: run.length })
+  }
+  return out
 }
 
 export async function readPdfPages(file) {
@@ -202,6 +231,38 @@ function headerValue(pg, labelRe, stopRe) {
     parts.push(t.str)
   }
   return parts.join(' ').trim()
+}
+
+// Число справа от надписи на той же строке («Отступ   15», «Длина пазов:   0 м.») — по всем страницам, первое найденное
+function valueRight(pages, labelRe) {
+  for (const pg of pages) {
+    for (const lab of pg.texts.filter(t => labelRe.test(t.str))) {
+      const v = pg.texts
+        .filter(o => o !== lab && Math.abs(o.y - lab.y) < 3 && o.x > lab.x)
+        .sort((a, b) => a.x - b.x)
+        .map(o => num(o.str.replace(/\s*(м\.?|m\.?|мм|mm)$/i, ''))).find(n => !Number.isNaN(n))
+      if (v != null) return v
+    }
+  }
+  return null
+}
+
+// Параметры паза из блока «Пазы» на странице «Результаты»: Отступ / Глубина / Ширина
+function readGrooveParams(pages) {
+  return {
+    offset: valueRight(pages, /^(Отступ|Offset)\s*:?$/i),
+    depth: valueRight(pages, /^(Глубина|Depth)\s*:?$/i),
+    width: valueRight(pages, /^(Ширина|Width)\s*:?$/i),
+    meters: valueRight(pages, /^(Длина пазов|Grooves? length)\s*:?$/i),
+  }
+}
+
+// «паз 20», «Паз», «пах 20» (опечатка) в названии детали -> { offset } или null.
+// Число после слова — отступ паза от края, мм; без числа — отступ из блока «Пазы».
+export function grooveFromName(name) {
+  const m = /(?:^|[^а-яёa-z])па[зх](?![а-яё])\s*[:\-–]?\s*(\d+(?:[.,]\d+)?)?/i.exec(String(name || ''))
+  if (!m) return null
+  return { offset: m[1] ? parseFloat(m[1].replace(',', '.')) : null }
 }
 
 // Виды кромки и их метраж со страницы «Результаты»
@@ -327,6 +388,24 @@ export function parseSketchCut(pages) {
       bottom: r.widLines[1] ? match.map[r.widLines[1]] || 'default' : null,
     },
   }))
+  // Пазы. В таблице SketchCut паз отдельно не рисуется — конструктор пишет его в названии («паз 20»).
+  // Ширина и глубина — из блока «Пазы», отступ — число из названия, а без него — из блока «Пазы».
+  // Паз идёт вдоль длины детали по всей длине, отступ — от нижнего длинного края (в редакторе можно перенести).
+  const gp = readGrooveParams(pages)
+  const gW = gp.width > 0 ? gp.width : 4, gD = gp.depth > 0 ? gp.depth : 8
+  const grooveRows = []
+  items.forEach((it, i) => {
+    const g = grooveFromName(rows[i].name)
+    if (!g) return
+    const off = g.offset != null ? g.offset : gp.offset > 0 ? gp.offset : 16
+    it.contour = {
+      vertices: [{ x: 0, y: 0, r: 0 }, { x: it.w, y: 0, r: 0 }, { x: it.w, y: it.h, r: 0 }, { x: 0, y: it.h, r: 0 }],
+      holes: [], drillings: [], layout: [],
+      grooves: [{ dir: 'horizontal', length: it.w, width: gW, depth: gD, sides: ['left', 'right', 'bottom'], offsets: { left: 0, right: 0, bottom: off }, face: 'front', note: rows[i].name }],
+      meta: { src: 'sketchcut' },
+    }
+    grooveRows.push({ name: rows[i].name, w: it.w, h: it.h, qty: it.qty, offset: off, fromName: g.offset != null })
+  })
   const pieces = items.reduce((s, it) => s + it.qty, 0)
 
   // сколько деталей должно быть по самому файлу («Количество деталей: 20»)
@@ -351,6 +430,12 @@ export function parseSketchCut(pages) {
       edgeMeters: Math.round(match.total * 100) / 100, fileEdgeMeters: match.fileTotal,
       edgeChecked: match.checked, edgeOk: match.ok,
       edgeTypes: types.map(t => ({ name: t.name, meters: t.meters })),
+      grooves: {
+        parts: grooveRows.length, pieces: grooveRows.reduce((s, r) => s + r.qty, 0),
+        width: gW, depth: gD, fileOffset: gp.offset, fileMeters: gp.meters,
+        meters: Math.round(grooveRows.reduce((s, r) => s + r.w * r.qty, 0) / 10) / 100,
+        offsets: [...new Set(grooveRows.map(r => r.offset))],
+      },
     },
   }
 }
