@@ -1054,7 +1054,6 @@ export default function ConstructorPage() {
   const [selPid, setSelPid] = useState(null)
   const [selOpening, setSelOpening] = useState(null) // выбранный проём корпуса
   const [selBlock, setSelBlock] = useState(null)     // выбранный параметрический блок (двойной тап по детали): { item, n, t, c }
-  const [showSizes, setShowSizes] = useState(true)   // размеры проёмов на модели
   // свернутые / развёрнутые разделы карточки и высота картинки на телефоне — запоминаются за аккаунтом
   const [fold, setFold] = useState(() => { try { return getUserSettings(user)?.cadFold || {} } catch { return {} } })
   const foldApi = useMemo(() => ({
@@ -1062,6 +1061,10 @@ export default function ConstructorPage() {
     toggle: (id, v) => { const next = { ...fold, [id]: v }; setFold(next); saveUserSettings({ cadFold: next }, user) },
   }), [fold, user])
   const [splitPx, setSplitPx] = useState(() => { try { return getUserSettings(user)?.cadSplit || 0 } catch { return 0 } })
+  // боком / на компьютере: ширина карточки и её сторона — за аккаунтом
+  const [sideW, setSideW] = useState(() => { try { return getUserSettings(user)?.cadSideW || 0 } catch { return 0 } })
+  const [cardSide, setCardSideS] = useState(() => { try { return getUserSettings(user)?.cadSide || 'right' } catch { return 'right' } })
+  const setCardSide = v => { setCardSideS(v); saveUserSettings({ cadSide: v }, user) }
   // подсветка кромки в 3D: цвет, прозрачность, «яркая» (светится сквозь детали) — за аккаунтом
   const [edgeLook, setEdgeLookS] = useState(() => { try { return { on: true, color: '#f97316', opacity: 1, glow: false, ...(getUserSettings(user)?.cadEdgeLook || {}) } } catch { return { on: true, color: '#f97316', opacity: 1, glow: false } } })
   const setEdgeLook = patch => setEdgeLookS(l => { const n = { ...l, ...patch }; saveUserSettings({ cadEdgeLook: n }, user); return n })
@@ -1071,6 +1074,9 @@ export default function ConstructorPage() {
   const [theme, setThemeS] = useState(() => getTheme())
   useEffect(() => { const on = e => setThemeS(e.detail === 'dark' ? 'dark' : 'light'); window.addEventListener('themechange', on); return () => window.removeEventListener('themechange', on) }, [])
   const viewLook = useMemo(() => ({ ...look, dark: theme === 'dark' }), [look, theme])
+  // размеры проёмов на модели (кнопка 📏) — тоже за аккаунтом
+  const showSizes = look.openSizes !== false
+  const setShowSizes = f => setLook({ openSizes: typeof f === 'function' ? f(showSizes) : !!f })
   // цвета / текстуры материалов — за аккаунтом
   const [matLooks, setMatLooksS] = useState(() => { try { return getUserSettings(user)?.cadMatLooks || {} } catch { return {} } })
   const setMatLooks = v => { setMatLooksS(v); saveUserSettings({ cadMatLooks: v }, user) }
@@ -1401,7 +1407,13 @@ export default function ConstructorPage() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Фон подписи (прозрачность)</span><input type="range" min="0" max="1" step="0.05" value={look.labelOpacity} onChange={e => { const v = Number(e.target.value); setLook({ labelOpacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.labelOpacity * 100)}%</span></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Размер подписей проёмов</span><input type="range" min="0.6" max="1.8" step="0.05" value={look.labelSize} onChange={e => { const v = Number(e.target.value); setLook({ labelSize: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.labelSize * 100)}%</span></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Размер габаритных размеров</span><input type="range" min="0.4" max="2" step="0.05" value={look.dimSize} onChange={e => { const v = Number(e.target.value); setLook({ dimSize: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.dimSize * 100)}%</span></label>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет подписей</span><input type="color" value={look.labelColor} onChange={e => setLook({ labelColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={look.dims !== false} onChange={e => setLook({ dims: e.target.checked })} />Габаритные размеры корпусов (ничего не выбрано — у всех корпусов)</label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={look.openSizes !== false} onChange={e => setLook({ openSizes: e.target.checked })} />Размеры проёмов (кнопка 📏)</label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={look.labelBgOn !== false} onChange={e => setLook({ labelBgOn: e.target.checked })} />Фон под цифрами (без фона — только цифры)</label>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6, flexWrap: 'wrap' }}><span style={{ width: 150 }}>Цвет подписей</span>
+          {[['#1d4ed8', 'синий'], ['#ffffff', 'белый'], ['#9aa0a6', 'серый'], ['#111827', 'чёрный'], ['#f97316', 'оранжевый']].map(([c, t]) =>
+            <button key={c} type="button" title={t} onClick={() => setLook({ labelColor: c })} style={{ width: 26, height: 26, borderRadius: 13, background: c, cursor: 'pointer', border: look.labelColor === c ? '3px solid var(--blue)' : '1px solid var(--border-md)' }} />)}
+          <input type="color" value={look.labelColor} onChange={e => setLook({ labelColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></div>
         <div style={sect}>Вид деталей</div>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={look.lines !== false} onChange={e => setLook({ lines: e.target.checked })} />Линии контуров деталей (без них — сплошной вид, только материал и текстура)</label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Прозрачный вид ◫: насколько видно детали</span><input type="range" min="0.03" max="0.8" step="0.01" value={look.xrayOpacity ?? 0.3} onChange={e => { const v = Number(e.target.value); setLook({ xrayOpacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.xrayOpacity ?? 0.3) * 100)}%</span></label>
@@ -1419,6 +1431,8 @@ export default function ConstructorPage() {
         <div style={sect}>Металл фурнитуры</div>
         <Chips label="Ручки" value={look.handleFinish} onChange={v => setLook({ handleFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />
         <Chips label="Петли и направляющие" value={look.hwFinish} onChange={v => setLook({ hwFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />
+        <div style={sect}>Экран боком и компьютер</div>
+        <Chips label="Карточка параметров" value={cardSide} onChange={setCardSide} options={[['left', '◧ Слева (под левую руку)'], ['right', 'Справа ◨']]} />
         <div style={sect}>Фон и тема</div>
         <Chips value={look.bg} onChange={v => setLook({ bg: v })} options={[['auto', 'По теме'], ['light', 'Светлый'], ['dark', 'Тёмный'], ['custom', 'Свой цвет']]} />
         {look.bg === 'custom' && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет фона</span><input type="color" value={look.bgColor} onChange={e => setLook({ bgColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>}
@@ -1537,16 +1551,40 @@ export default function ConstructorPage() {
   </>)
   // нижнее меню в конструкторе не показываем — оно дублирует боковое (☰); вся высота — под картинку и карточку
   const navH = 8
-  if (desk || land) return (
-    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {head}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 8, padding: '0 10px', paddingBottom: navH }}>
-        <div style={{ flex: desk ? '1 1 62%' : '1 1 55%', minWidth: 0 }}>{view}</div>
-        <div style={{ flex: desk ? '0 0 420px' : '0 0 45%', minWidth: 0, overflowY: 'auto', paddingRight: 2 }}>{panel}</div>
+  // телефон боком и компьютер: картинка и карточка рядом, между ними — ползунок; ширина карточки и сторона (слева / справа) — за аккаунтом
+  if (desk || land) {
+    const W = typeof window !== 'undefined' ? window.innerWidth : 1000
+    const cardW = Math.max(260, Math.min(W - 260, sideW > 0 ? sideW : desk ? 420 : Math.round(W * 0.45)))
+    const left = cardSide === 'left'
+    const startSide = e => {
+      e.preventDefault()
+      const x0 = e.clientX, w0 = cardW
+      let last = w0
+      const mv = ev => { last = Math.max(260, Math.min(W - 260, w0 + (left ? ev.clientX - x0 : x0 - ev.clientX))); setSideW(last) }
+      const upFn = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', upFn); saveUserSettings({ cadSideW: last }, user) }
+      window.addEventListener('pointermove', mv); window.addEventListener('pointerup', upFn)
+    }
+    // ползунок между картинкой и карточкой (тянуть — шире / уже) и кнопка ⇄ — карточку на другую сторону
+    const grip = <div style={{ flex: '0 0 22px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+      <button type="button" title="Карточку — на другую сторону" onClick={() => setCardSide(left ? 'right' : 'left')}
+        style={{ width: 22, height: 22, borderRadius: 11, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text-muted)', fontSize: 12, padding: 0, cursor: 'pointer' }}>⇄</button>
+      <div onPointerDown={startSide} style={{ width: 22, height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', cursor: 'col-resize' }}>
+        <div style={{ width: 6, height: 80, borderRadius: 3, background: 'var(--text-hint)' }} />
       </div>
-      {dialog}
     </div>
-  )
+    const card = <div style={{ flex: `0 0 ${cardW}px`, minWidth: 0, overflowY: 'auto', paddingRight: 2 }}>{panel}</div>
+    return (
+      <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {head}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', padding: '0 10px', paddingBottom: navH }}>
+          {left && card}{left && grip}
+          <div style={{ flex: '1 1 auto', minWidth: 0 }}>{view}</div>
+          {!left && grip}{!left && card}
+        </div>
+        {dialog}
+      </div>
+    )
+  }
   // телефон вертикально: экран делится на картинку и карточку параметров, между ними — ползунок (как у симуляции и карт раскроя);
   // карточка прокручивается сама, картинка стоит на месте; высота картинки запоминается за аккаунтом
   const viewH = splitPx > 0 ? splitPx : Math.round(window.innerHeight * (selCab ? 0.5 : 0.45))

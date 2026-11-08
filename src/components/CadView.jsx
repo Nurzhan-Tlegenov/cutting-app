@@ -105,12 +105,19 @@ const HW_LOOK = {
 
 // подпись размера — спрайт с текстом
 function label(text, h, look = CAD_LOOK) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 64
+  // холст — по ширине текста, чтобы цифры были крупными, а фон — только под ними
+  const c = document.createElement('canvas'), g0 = c.getContext('2d')
+  g0.font = '700 52px Arial'
+  const tw = Math.ceil(g0.measureText(text).width) + 28
+  c.width = tw; c.height = 72
   const g = c.getContext('2d')
-  g.fillStyle = labelBg(look, Number(look.labelOpacity ?? 0.9)); g.fillRect(0, 8, 256, 48)
-  g.fillStyle = look.labelColor || '#1d4ed8'; g.font = '600 38px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 128, 33)
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }))
-  sp.scale.set(h * 4, h, 1); sp.renderOrder = 10
+  if (look.labelBgOn !== false) { g.fillStyle = labelBg(look, Number(look.labelOpacity ?? 0.9)); g.beginPath(); g.roundRect?.(0, 4, tw, 64, 12); if (!g.roundRect) g.rect(0, 4, tw, 64); g.fill() }
+  else { g.shadowColor = isDarkBg(look) ? 'rgba(0,0,0,0.95)' : 'rgba(255,255,255,0.95)'; g.shadowBlur = 8 }
+  g.fillStyle = look.labelColor || '#1d4ed8'; g.font = '700 52px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, tw / 2, 38)
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace
+  // подпись — без тональной обработки, иначе на тёмной сцене она темнеет
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, toneMapped: false }))
+  sp.scale.set(h * tw / 72, h, 1); sp.renderOrder = 10
   return sp
 }
 
@@ -274,6 +281,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     // небольшая метка начала координат в самой сцене
     const origin = new THREE.AxesHelper(150); origin.material.depthTest = false; origin.renderOrder = 5; scene.add(origin)
     const group = new THREE.Group(); scene.add(group)
+    // размеры — отдельной сценой поверх картинки: их не трогают тени, затенение и тональная обработка
+    const over = new THREE.Scene()
     const extra = new THREE.Group(); scene.add(extra)   // присадка и стены комнаты — без выбора нажатием
     let raf = 0, alive = true, comp = null
     const tick = () => {
@@ -315,6 +324,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         if (comp.__w !== w || comp.__h !== h) { comp.setSize(w, h); comp.__w = w; comp.__h = h }
         comp.render()
       } else { scene.background = null; renderer.render(scene, camera) }
+      renderer.autoClear = false; renderer.render(over, camera); renderer.autoClear = true
       // мини-оси в правом нижнем углу поворачиваются вместе с камерой (слева — кнопки проёмов)
       const s = cubeSize().s
       axCam.position.copy(camera.position).sub(controls.target).setLength(3.1); axCam.lookAt(0, 0, 0); axCam.up.copy(camera.up)
@@ -434,7 +444,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     renderer.domElement.addEventListener('pointermove', onMove)
     renderer.domElement.addEventListener('pointerup', onUp)
     renderer.domElement.addEventListener('pointercancel', onUp)
-    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false, dl, floor }
+    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false, dl, floor, over }
     return () => {
       alive = false; cancelAnimationFrame(raf); ro.disconnect()
       renderer.domElement.removeEventListener('pointerdown', onDown, { capture: true })
@@ -454,6 +464,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     if (!s) return
     const { group } = s
     for (const o of [...group.children]) { group.remove(o); o.traverse(c => { c.geometry?.dispose?.(); c.material?.dispose?.() }) }
+    for (const o of [...s.over.children]) { s.over.remove(o); o.geometry?.dispose?.(); o.material?.map?.dispose?.(); o.material?.dispose?.() }
     animObjs.current = new Map()
     // группа анимации: дверь (поворот вокруг оси петель) или ящик (выезд) со всем, что на них (ручка, короб, подвижная часть направляющей)
     const pivotOf = a => (a.kind === 'rot' ? a.p : [0, 0, 0])
@@ -590,18 +601,33 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       }
     }
     // размеры выбранного элемента: ширина — по низу спереди, высота — слева спереди, глубина — по низу слева
-    const own = selected ? (parts || []).filter(p => p.item.id === selected) : []
-    if (dims && own.length) {
+    // габаритные размеры: выбранного элемента, а если ничего не выбрано — каждого корпуса; чертёжный вид —
+    // выносные линии от углов, размерная линия с засечками, число над серединой
+    const dimItems = selected ? [selected] : [...new Set((parts || []).filter(p => p.item.type === 'cabinet').map(p => p.item.id))]
+    const allB = parts?.length ? sceneBox(parts) : [0, 0, 0, 1, 1, 1]
+    const sceneBig = Math.max(allB[3] - allB[0], allB[4] - allB[1], allB[5] - allB[2])
+    if (dims && look.dims !== false) for (const iid of dimItems) {
+      const own = (parts || []).filter(p => p.item.id === iid && !p.vis)
+      if (!own.length) continue
       const b = sceneBox(own)
       const big = Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2])
-      const off = Math.max(40, big * 0.06), lh = Math.max(35, big * 0.05) * Math.max(0.4, Number(look.dimSize) || 1)
-      const lm = new THREE.LineBasicMaterial({ color: look.labelColor || '#1d4ed8', depthTest: false, transparent: true })
-      const line = (a, c) => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a), new THREE.Vector3(...c)]), lm); l.renderOrder = 9; group.add(l) }
-      const dim = (a, c, txt, at) => { line(a, c); const s = label(txt, lh, look); s.position.set(...at); group.add(s) }
+      const off = Math.max(60, big * 0.08), lh = Math.max(40, sceneBig * 0.045) * Math.max(0.4, Number(look.dimSize) || 1)   // цифры одного размера у всех корпусов
+      const lm = new THREE.LineBasicMaterial({ color: look.labelColor || '#1d4ed8', depthTest: false, transparent: true, toneMapped: false })
+      const V = a => new THREE.Vector3(...a)
+      const seg = pts => { const l = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), lm); l.renderOrder = 9; s.over.add(l) }
+      // a, c — точки на детали; e — куда выносим (единичный вектор); t — где число
+      const dim = (a, c, e, txt, tOff) => {
+        const A = V(a), C = V(c), E = V(e)
+        const A1 = A.clone().addScaledVector(E, off), C1 = C.clone().addScaledVector(E, off)
+        const d = C1.clone().sub(A1).normalize(), tk = d.clone().add(E).normalize().multiplyScalar(lh * 0.22)
+        seg([A.clone().addScaledVector(E, off * 0.15), A1.clone().addScaledVector(E, off * 0.25), C.clone().addScaledVector(E, off * 0.15), C1.clone().addScaledVector(E, off * 0.25),
+          A1, C1, A1.clone().sub(tk), A1.clone().add(tk), C1.clone().sub(tk), C1.clone().add(tk)])
+        const sp = label(txt, lh, look); sp.position.copy(A1.clone().add(C1).multiplyScalar(0.5).addScaledVector(V(tOff), lh * 0.62)); s.over.add(sp)
+      }
       const r = v => String(Math.round(v * 10) / 10)
-      dim([b[0], b[1], b[5] + off], [b[3], b[1], b[5] + off], r(b[3] - b[0]), [(b[0] + b[3]) / 2, b[1] + lh * 0.7, b[5] + off])
-      dim([b[0] - off, b[1], b[5]], [b[0] - off, b[4], b[5]], r(b[4] - b[1]), [b[0] - off - lh * 1.6, (b[1] + b[4]) / 2, b[5]])
-      dim([b[0] - off, b[1], b[2]], [b[0] - off, b[1], b[5]], r(b[5] - b[2]), [b[0] - off - lh * 1.6, b[1] + lh * 0.7, (b[2] + b[5]) / 2])
+      dim([b[0], b[1], b[5]], [b[3], b[1], b[5]], [0, 0, 1], r(b[3] - b[0]), [0, 1, 0])
+      dim([b[0], b[1], b[5]], [b[0], b[4], b[5]], [-1, 0, 0], r(b[4] - b[1]), [-1.6, 0, 0])
+      dim([b[0], b[1], b[2]], [b[0], b[1], b[5]], [-1, 0, 0], r(b[5] - b[2]), [0, 1, 0])
     }
     // тени и пол — под всю сцену
     if (parts?.length && s.dl) {
@@ -661,7 +687,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         <button key={l.id} type="button" ref={el => { if (el) labelEls.current.set(l.id, el); else labelEls.current.delete(l.id) }}
           onClick={() => onLabel?.(l.id)}
           style={{ position: 'absolute', left: 0, top: 0, display: 'none', padding: `${2 * look.labelSize}px ${6 * look.labelSize}px`, fontSize: 12 * look.labelSize, fontWeight: 600, borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
-            border: `1px solid ${l.on ? look.labelColor : look.labelColor + '66'}`, background: l.on ? look.labelColor : labelBg(look, Number(look.labelOpacity)), color: l.on ? 'white' : look.labelColor, zIndex: 2 }}>{l.text}</button>
+            border: `1px solid ${l.on ? look.labelColor : look.labelColor + '66'}`, background: l.on ? look.labelColor : look.labelBgOn === false ? 'transparent' : labelBg(look, Number(look.labelOpacity)), color: l.on ? 'white' : look.labelColor, zIndex: 2,
+            ...(look.labelBgOn === false && !l.on ? { border: 'none', textShadow: darkBg ? '0 0 3px #000, 0 0 2px #000' : '0 0 3px #fff, 0 0 2px #fff' } : {}) }}>{l.text}</button>
       ))}
       {children}
     </div>
