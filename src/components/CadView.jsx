@@ -842,7 +842,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion(), M = new THREE.Matrix4()
       // выемка: тёмное «дно» с затенённой стенкой и светлой фаской по краю — как настоящее отверстие в плите
       // (или, по настройке, цветные метки — цилиндры на всю глубину, как раньше)
-      const recess = look.holeStyle !== 'marker'
+      const recess = look.holeStyle === 'recess'
       const zf = new THREE.Vector3(0, 0, 1)
       for (const [k, hs] of byG) {
         const geo = recess ? new THREE.CircleGeometry(0.5, 28) : new THREE.CylinderGeometry(1, 1, 1, 14)

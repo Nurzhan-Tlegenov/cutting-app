@@ -1239,7 +1239,8 @@ export default function ConstructorPage() {
   const [edgeLook, setEdgeLookS] = useState(() => { try { return { on: true, color: '#f97316', opacity: 1, glow: false, ...(getUserSettings(user)?.cadEdgeLook || {}) } } catch { return { on: true, color: '#f97316', opacity: 1, glow: false } } })
   const setEdgeLook = patch => setEdgeLookS(l => { const n = { ...l, ...patch }; saveUserSettings({ cadEdgeLook: n }, user); return n })
   // вид сцены (подписи размеров, линии, фон) — за аккаунтом; тема — светлая / тёмная
-  const [look, setLookS] = useState(() => { try { return { ...CAD_LOOK, ...(getUserSettings(user)?.cadLook || {}) } } catch { return { ...CAD_LOOK } } })
+  // holeV: 2 — присадка снова по умолчанию цилиндрами на всю глубину (выемки — по выбору); старое сохранённое «выемки» сбрасываем один раз
+  const [look, setLookS] = useState(() => { try { const sv = getUserSettings(user)?.cadLook || {}; return { ...CAD_LOOK, ...sv, ...(sv.holeV !== 2 ? { holeStyle: 'marker', holeV: 2 } : {}) } } catch { return { ...CAD_LOOK, holeV: 2 } } })
   const setLook = patch => setLookS(l => { const n = { ...l, ...patch }; saveUserSettings({ cadLook: n }, user); return n })
   const [theme, setThemeS] = useState(() => getTheme())
   useEffect(() => { const on = e => setThemeS(e.detail === 'dark' ? 'dark' : 'light'); window.addEventListener('themechange', on); return () => window.removeEventListener('themechange', on) }, [])
@@ -1636,7 +1637,7 @@ export default function ConstructorPage() {
           <input type="color" value={look.bandColor || '#d9cdb4'} onChange={e => setLook({ bandColor: e.target.value })} style={{ width: 36, height: 24, padding: 0, border: 'none', background: 'none' }} />
         </div>}
         <div style={sect}>Присадка (кнопка ⊙)</div>
-        <Chips value={look.holeStyle || 'recess'} onChange={v => setLook({ holeStyle: v })} options={[['recess', 'Выемки (как настоящие отверстия)'], ['marker', 'Цветные метки на всю глубину']]} />
+        <Chips value={look.holeStyle || 'marker'} onChange={v => setLook({ holeStyle: v })} options={[['marker', 'Отверстия на всю глубину'], ['recess', 'Только выемки на поверхности']]} />
         <div style={sect}>Металл фурнитуры</div>
         <Chips label="Ручки" value={look.handleFinish} onChange={v => setLook({ handleFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />
         <Chips label="Петли и направляющие" value={look.hwFinish} onChange={v => setLook({ hwFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />
