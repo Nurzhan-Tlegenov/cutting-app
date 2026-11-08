@@ -260,7 +260,7 @@ function HandleEditor({ h, onChange, door }) {
 // параметры корпуса, которые запоминаются за аккаунтом: поменял в любом корпусе — так будет и в новых
 const CAB_REMEMBER = ['material', 't', 'facadeMaterial', 'facadeT', 'backMaterial', 'backT', 'edgeFront', 'edgeFacade', 'edgeBody', 'grooveOffset', 'grooveDepth', 'grooveWidth',
   'backGapL', 'backGapR', 'backGapB', 'backGapT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'hingeCup', 'hingeEnd', 'plateFront', 'box', 'slideGap', 'slideLen',
-  'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce', 'handleDoor', 'handleDrawer', 'pinFront', 'pinBelow']
+  'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce', 'handleDoor', 'handleDrawer', 'pinFront', 'pinBelow', 'plateType']
 // ── крепёж фурнитуры: на саморезы (без присадки) или сверлить d × глубина; запоминается за аккаунтом ──
 const MOUNT_ROWS = [['slide', 'Направляющие ящиков', true], ['dfront', 'Фасад к ящику', true], ['plate', 'Планки петель', true], ['cup', 'Чашка петли', false], ['cupFix', 'Крепёж чашки', true], ['pin', 'Полкодержатели', false], ['handle', 'Ручки', 'handle'], ['rod', 'Штангодержатели', true]]
 function MountEditor({ mount, setMount, only }) {
@@ -579,6 +579,7 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
         <FrontOverlap p={p} up={up} outerExt={outerExt} soloExt={soloExt} r1={r1} />
         <div style={sect}>Петли (весь корпус)</div>
         <Grid><NumField label="Чашка от края двери" value={p.hingeCup} onChange={v => up({ hingeCup: v })} min={5} /><NumField label="Крайние от торца" value={p.hingeEnd} onChange={v => up({ hingeEnd: v })} min={20} /><NumField label="Планка от переда" value={p.plateFront} onChange={v => up({ plateFront: v })} min={5} /></Grid>
+        <Chips label="Ответная планка" value={p.plateType || 'cross'} onChange={v => up({ plateType: v })} options={[['cross', 'Крестообразная (2 отв. по вертикали)'], ['straight', 'Прямая (2 отв. по глубине, шаг 32)']]} />
         <div style={sect}>Крепёж</div>
         <MountEditor mount={mount} setMount={setMount} only={['cup', 'cupFix', 'plate', 'handle']} />
       </>}
@@ -891,6 +892,7 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
       <FrontOverlap p={p} up={up} outerExt={outerExt} soloExt={soloExt} r1={r1} />
       <div style={{ ...sect, marginTop: 6 }}>Петли<Hint inline>Чашка Ø35 в обратной пласти двери, планка — 2 отверстия Ø5 на стенке проёма. Всё пересчитывается сразу — видно на модели (⊙) и в присадке деталей.</Hint></div>
       <Grid><NumField label="Чашка от края двери" value={p.hingeCup} onChange={v => up({ hingeCup: v })} min={5} /><NumField label="Крайние от торца" value={p.hingeEnd} onChange={v => up({ hingeEnd: v })} min={20} /><NumField label="Планка от переда" value={p.plateFront} onChange={v => up({ plateFront: v })} min={5} /></Grid>
+        <Chips label="Ответная планка" value={p.plateType || 'cross'} onChange={v => up({ plateType: v })} options={[['cross', 'Крестообразная (2 отв. по вертикали)'], ['straight', 'Прямая (2 отв. по глубине, шаг 32)']]} />
       <Grid><NumField label="Петель на дверь" unit={num(p.hingeCount) ? 'шт' : 'авто'} value={p.hingeCount || 0} onChange={v => up({ hingeCount: Math.max(0, Math.round(v)) })} min={0} /></Grid>
     </Sub>}
 
@@ -1571,6 +1573,8 @@ export default function ConstructorPage() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Откуда свет (по кругу)</span><input type="range" min="0" max="360" step="5" value={look.lightAz ?? 35} onChange={e => { const v = Number(e.target.value); setLook({ lightAz: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.lightAz ?? 35) + '°'}</span></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Высота света</span><input type="range" min="10" max="85" step="1" value={look.lightEl ?? 55} onChange={e => { const v = Number(e.target.value); setLook({ lightEl: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.lightEl ?? 55) + '°'}</span></label>
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Белые фасады слепят — уменьшите основной свет или яркость; блеск каждого материала — в «Как выглядит материал».</p>
+        <div style={sect}>Присадка (кнопка ⊙)</div>
+        <Chips value={look.holeStyle || 'recess'} onChange={v => setLook({ holeStyle: v })} options={[['recess', 'Выемки (как настоящие отверстия)'], ['marker', 'Цветные метки на всю глубину']]} />
         <div style={sect}>Металл фурнитуры</div>
         <Chips label="Ручки" value={look.handleFinish} onChange={v => setLook({ handleFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />
         <Chips label="Петли и направляющие" value={look.hwFinish} onChange={v => setLook({ hwFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />

@@ -120,7 +120,7 @@ export const CAB_GROUPS = {
   body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'plinthBack', 'plinthBackOffset', 'railDepth', 'overhangFront', 'overhangSide', 'overhangL', 'overhangR', 'topRL', 'topRR', 'underTop', 'edgeFront', 'edgeBody',
     'sideL', 'sideR', 'sideFront', 'sideBack', 'topRails', 'topRailOffset', 'topDown', 'topFront', 'topBack', 'bottomRails', 'bottomRailOffset', 'bottomRailDepth', 'bottomUp', 'bottomFront', 'bottomBack'],
   back: ['back', 'backT', 'backMaterial', 'grooveOffset', 'grooveDepth', 'grooveWidth', 'backGapL', 'backGapR', 'backGapB', 'backGapT'],
-  fronts: ['facadeMaterial', 'facadeT', 'facadeStyle', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'hingeCount', 'handleDoor', 'handleDrawer'],
+  fronts: ['facadeMaterial', 'facadeT', 'facadeStyle', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'plateType', 'hingeCount', 'handleDoor', 'handleDrawer'],
   boxes: ['box', 'slideGap', 'slideLen', 'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce'],
 }
 
@@ -541,6 +541,7 @@ export function cabinetParts(params) {
     return outerExt
   }
   const he = num(p.hingeEnd, 100), hc = num(p.hingeCup, 22), pf = num(p.plateFront, 37)
+  const straight = p.plateType === 'straight'      // ответная планка петли: cross — крестообразная (по умолчанию), straight — прямая
   const bT = num(p.boxBottomT, 3), bMat = p.boxBottomMaterial || 'ХДФ'
   let hingesN = 0
   const MET = 'Фурнитура металл'
@@ -742,11 +743,17 @@ export function cabinetParts(params) {
           const wall = left ? (lay === 'h' || i === 0) : (lay === 'h' || i === n - 1)
           if (wall) {
             const wx = left ? x0 : x1
-            for (const d of [-16, 16]) holes.push({ p: [wx, y + d, D - pf], n: left ? '-x' : '+x', d: 5, depth: 12, note: 'Планка петли' })
-            vis(`${key}p${j}`, 'Петля: планка', left ? [wx, y - 25, D - pf - 9, wx + 4, y + 25, D - pf + 9] : [wx - 4, y - 25, D - pf - 9, wx, y + 25, D - pf + 9], null, null, { type: 'plate', L: 'y', N: left ? '+x' : '-x' })
-            // плечо петли поворачивается вокруг планки вслед за дверью (примерно на половину угла) — видно, как работает петля
-            vis(`${key}a${j}`, 'Петля: плечо', left ? [wx + 4, y - 8, D - pf - 20, Math.max(wx + 20, xc - 6), y + 8, D - 3] : [Math.min(wx - 20, xc + 6), y - 8, D - pf - 20, wx - 4, y + 8, D - 3], blk,
-              { id: `${key}arm${j}`, link: key, kind: 'rot', p: [wx, 0, D - pf], axis: [0, 1, 0], ang: anim.ang * 0.55 }, { type: 'arm', L: 'z', N: left ? '+x' : '-x' })
+            const nw = left ? '-x' : '+x', N = left ? '+x' : '-x', a0 = left ? wx : wx - 4, a1 = left ? wx + 4 : wx
+            // ответная планка: крестообразная (2 отв. по вертикали ±16 на линии pf) или прямая (2 отв. по глубине: pf и pf + 32)
+            if (straight) {
+              for (const z of [D - pf, D - pf - 32]) holes.push({ p: [wx, y, z], n: nw, d: 5, depth: 12, note: 'Планка петли' })
+              vis(`${key}p${j}`, 'Петля: планка', [a0, y - 9, D - pf - 46, a1, y + 9, D - pf + 14], blk, null, { type: 'plate', L: 'z', N })
+            } else {
+              for (const d of [-16, 16]) holes.push({ p: [wx, y + d, D - pf], n: nw, d: 5, depth: 12, note: 'Планка петли' })
+              vis(`${key}p${j}`, 'Петля: планка', [a0, y - 25, D - pf - 17, a1, y + 25, D - pf + 17], blk, null, { type: 'plateCross', L: 'y', N })
+            }
+            // плечо петли — на планке, неподвижно (двигаются дверь и чашка)
+            vis(`${key}a${j}`, 'Петля: плечо', left ? [wx + 4, y - 8, D - pf - 20, Math.max(wx + 20, xc - 6), y + 8, D - 3] : [Math.min(wx - 20, xc + 6), y - 8, D - pf - 20, wx - 4, y + 8, D - 3], blk, null, { type: 'arm', L: 'z', N })
           }
         })
       } else {
@@ -760,10 +767,15 @@ export function cabinetParts(params) {
           const wall = up ? (lay === 'v' || i === n - 1) : (lay === 'v' || i === 0)
           if (wall) {
             const wy = up ? y1 : y0
-            for (const d of [-16, 16]) holes.push(up ? { p: [x + d, wy, D - pf], n: '+y', d: 5, depth: 12, note: 'Планка петли' } : { p: [x + d, wy, D - pf], n: '-y', d: 5, depth: 12, note: 'Планка петли' })
-            vis(`${key}p${j}`, 'Петля: планка', up ? [x - 25, wy - 4, D - pf - 9, x + 25, wy, D - pf + 9] : [x - 25, wy, D - pf - 9, x + 25, wy + 4, D - pf + 9], null, null, { type: 'plate', L: 'x', N: up ? '-y' : '+y' })
-            vis(`${key}a${j}`, 'Петля: плечо', up ? [x - 8, Math.min(wy - 20, yc + 6), D - pf - 20, x + 8, wy - 4, D - 3] : [x - 8, wy + 4, D - pf - 20, x + 8, Math.max(wy + 20, yc - 6), D - 3], blk,
-              { id: `${key}arm${j}`, link: key, kind: 'rot', p: [0, wy, D - pf], axis: [1, 0, 0], ang: anim.ang * 0.55 }, { type: 'arm', L: 'z', N: up ? '-y' : '+y' })
+            const nw = up ? '+y' : '-y', N = up ? '-y' : '+y', b0 = up ? wy - 4 : wy, b1 = up ? wy : wy + 4
+            if (straight) {
+              for (const z of [D - pf, D - pf - 32]) holes.push({ p: [x, wy, z], n: nw, d: 5, depth: 12, note: 'Планка петли' })
+              vis(`${key}p${j}`, 'Петля: планка', [x - 9, b0, D - pf - 46, x + 9, b1, D - pf + 14], blk, null, { type: 'plate', L: 'z', N })
+            } else {
+              for (const d of [-16, 16]) holes.push({ p: [x + d, wy, D - pf], n: nw, d: 5, depth: 12, note: 'Планка петли' })
+              vis(`${key}p${j}`, 'Петля: планка', [x - 25, b0, D - pf - 17, x + 25, b1, D - pf + 17], blk, null, { type: 'plateCross', L: 'x', N })
+            }
+            vis(`${key}a${j}`, 'Петля: плечо', up ? [x - 8, Math.min(wy - 20, yc + 6), D - pf - 20, x + 8, wy - 4, D - 3] : [x - 8, wy + 4, D - pf - 20, x + 8, Math.max(wy + 20, yc - 6), D - 3], blk, null, { type: 'arm', L: 'z', N })
           }
         })
       }

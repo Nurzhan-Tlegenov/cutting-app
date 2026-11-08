@@ -378,5 +378,16 @@ for (const rot of [0, 90, 180, 270]) {
   const h = drawerSetHeight([200, 200, 200], [null, null, null], 1, 150, 'up')
   ok(h[0] === 200 && h[1] === 150 && h[2] === null, 'pull up ' + h)
 }
+
+// прямая ответная планка: 2 отверстия по глубине с шагом 32; плечо петли не анимируется
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const it = newItem('cabinet', { p: { W: 600, H: 720, D: 500, plateType: 'straight', tree: newNode({ id: 'root', front: { type: 'doors', n: 1, open: 'left' } }) } })
+  const pp = projectParts({ items: [it] })
+  const pl = pp.holes.filter(h => h.note === 'Планка петли')
+  ok(pl.length === 4 && Math.abs(Math.abs(pl[0].p[2] - pl[1].p[2]) - 32) < 0.01 && pl[0].p[1] === pl[1].p[1], 'straight plate holes ' + pl.map(h => h.p))
+  ok(pp.parts.filter(p => p.name === 'Петля: плечо').every(p => !p.anim), 'hinge arm static')
+  ok(pp.parts.filter(p => p.name === 'Петля').every(p => p.anim), 'hinge cup moves')
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

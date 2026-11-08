@@ -176,6 +176,9 @@ function hwGeometries(p) {
     put(g)
   } else if (t === 'clip') {
     put(rbox(sL, sU, sN, 2))
+  } else if (t === 'plateCross') {
+    // крестообразная планка: длинная перекладина вдоль L и короткая поперёк
+    put(rbox(sL, 15, sN, 1.2)); put(rbox(18, sU, sN, 1.2))
   } else if (t === 'mside') {
     put(rbox(sL, sU, sN, Math.min(6, sN / 2.2)))
   } else {
@@ -186,8 +189,21 @@ function hwGeometries(p) {
 const HANDLE_MODELS = new Set(['rail', 'bar', 'arch', 'knob', 'knobsq', 'edge', 'edgeflat'])
 const HW_LOOK = {
   rail: ['#c9cdd2', 1, 0.28], bar: ['#c9cdd2', 1, 0.3], arch: ['#c9cdd2', 1, 0.28], knob: ['#c9cdd2', 1, 0.25], knobsq: ['#3a3c40', 0.9, 0.35],
-  edge: ['#b8bcc1', 1, 0.38], edgeflat: ['#b8bcc1', 1, 0.38], cup: ['#d9dcdf', 1, 0.22], arm: ['#d9dcdf', 1, 0.22], plate: ['#cfd2d6', 1, 0.3],
+  plateCross: ['#cfd2d6', 1, 0.3], edge: ['#b8bcc1', 1, 0.38], edgeflat: ['#b8bcc1', 1, 0.38], cup: ['#d9dcdf', 1, 0.22], arm: ['#d9dcdf', 1, 0.22], plate: ['#cfd2d6', 1, 0.3],
   clip: ['#5a5e64', 0.1, 0.5], slideOuter: ['#c4c8cc', 1, 0.35], slideInner: ['#d2d5d8', 1, 0.3], underOuter: ['#bfc3c7', 1, 0.4], underInner: ['#cfd2d5', 1, 0.35], mside: ['#e4e4e2', 0.25, 0.42],
+}
+
+// текстура «выемки» отверстия: глубокое тёмное дно, затенённая стенка, светлая фаска по краю
+let HOLE_TEX = null
+function holeTex() {
+  if (HOLE_TEX) return HOLE_TEX
+  const c = document.createElement('canvas'); c.width = c.height = 128
+  const g = c.getContext('2d')
+  const gr = g.createRadialGradient(58, 70, 4, 64, 64, 64)
+  gr.addColorStop(0, '#060606'); gr.addColorStop(0.55, '#15110e'); gr.addColorStop(0.82, '#3b322b'); gr.addColorStop(0.9, '#8c7b6c'); gr.addColorStop(0.97, '#c9b8a6'); gr.addColorStop(1, 'rgba(201,184,166,0)')
+  g.fillStyle = gr; g.beginPath(); g.arc(64, 64, 64, 0, Math.PI * 2); g.fill()
+  HOLE_TEX = new THREE.CanvasTexture(c); HOLE_TEX.colorSpace = THREE.SRGBColorSpace
+  return HOLE_TEX
 }
 
 // подпись размера — спрайт с текстом
@@ -760,16 +776,26 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const byG = new Map()
       for (const h of list) { const k = animOf.get(h.pid) || ''; if (!byG.has(k)) byG.set(k, []); byG.get(k).push(h) }
       const up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion(), M = new THREE.Matrix4()
+      // выемка: тёмное «дно» с затенённой стенкой и светлой фаской по краю — как настоящее отверстие в плите
+      // (или, по настройке, цветные метки — цилиндры на всю глубину, как раньше)
+      const recess = look.holeStyle !== 'marker'
+      const zf = new THREE.Vector3(0, 0, 1)
       for (const [k, hs] of byG) {
-        const geo = new THREE.CylinderGeometry(1, 1, 1, 14)
-        const mat = new THREE.MeshBasicMaterial({ color: '#c2410c' })
+        const geo = recess ? new THREE.CircleGeometry(0.5, 28) : new THREE.CylinderGeometry(1, 1, 1, 14)
+        const mat = recess ? new THREE.MeshBasicMaterial({ map: holeTex(), transparent: true, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+          : new THREE.MeshBasicMaterial({ color: '#c2410c' })
         const im = new THREE.InstancedMesh(geo, mat, hs.length)
         hs.forEach((h, i) => {
           const n = new THREE.Vector3(...h.n).normalize()
-          q.setFromUnitVectors(up, n)
-          const len = Math.min(h.depth, 60) + 0.6
-          const c = new THREE.Vector3(...h.p).addScaledVector(n, len / 2 - 0.5)
-          M.compose(c, q, new THREE.Vector3(h.d / 2, len, h.d / 2))
+          if (recess) {
+            q.setFromUnitVectors(zf, n.clone().negate())
+            M.compose(new THREE.Vector3(...h.p).addScaledVector(n, -0.15), q, new THREE.Vector3(h.d, h.d, 1))
+          } else {
+            q.setFromUnitVectors(up, n)
+            const len = Math.min(h.depth, 60) + 0.6
+            const c = new THREE.Vector3(...h.p).addScaledVector(n, len / 2 - 0.5)
+            M.compose(c, q, new THREE.Vector3(h.d / 2, len, h.d / 2))
+          }
           im.setMatrixAt(i, M)
         })
         const o = k && animObjs.current.get(k)
