@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { sceneBox, isFigured, partEdges, partVerts } from '../lib/cadModel'
 import { contourSegments, segmentSide } from '../lib/edgeLength'
 import { CAD_LOOK, FINISHES } from '../lib/cadLook'
@@ -32,6 +33,73 @@ function figuredGeometry(sp) {
 const isDarkBg = look => look.bg === 'dark' || (look.bg === 'auto' && look.dark) || (look.bg === 'custom' && (() => { const c = (look.bgColor || '#fff').replace('#', ''); const n = parseInt(c.length === 3 ? c.split('').map(x => x + x).join('') : c, 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 128 })())
 const bgOf = look => (look.bg === 'custom' ? look.bgColor : isDarkBg(look) ? 'linear-gradient(#26282d, #1a1b1f)' : 'linear-gradient(#f4f6f8, #e6eaee)')
 const labelBg = (look, op) => (isDarkBg(look) ? `rgba(30,32,37,${op})` : `rgba(255,255,255,${op})`)
+
+// ── фрезерованный фасад МДФ: рамка / филёнка, рифление, V-пазы, волна, интегрированная ручка ──
+// Строим в «своей» системе фасада: X — по горизонтали, Y — по вертикали (как фасад стоит в мебели), Z — от изнанки (0) к лицу (T),
+// затем — в систему детали (у ящика длина детали идёт вдоль ширины) и матрицей детали — в сцену
+function profileGeo(pts, depth, along) {
+  // pts — сечение в плоскости (поперёк, Z); выдавливаем вдоль оси along ('y' — по высоте, 'x' — по ширине)
+  const sh = new THREE.Shape(pts.map(([a, z]) => new THREE.Vector2(a, z)))
+  const g = new THREE.ExtrudeGeometry(sh, { depth, bevelEnabled: false, curveSegments: 4 })
+  // сечение: a -> X (или Y), z -> Z; выдавливание -> Y (или X)
+  const M = along === 'y'
+    ? new THREE.Matrix4().makeBasis(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, -1, 0)).setPosition(0, depth, 0)
+    : new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0))
+  g.applyMatrix4(M)
+  return g
+}
+function millGeometry(sp) {
+  const { W, L, T, m } = sp.place
+  const vertY = Math.abs(m[4]) > 0.5                       // ось Y детали смотрит вверх (двери); иначе — у ящиков
+  const Wc = vertY ? W : L, Hc = vertY ? L : W
+  const st = sp.mill?.style || 'flat', geos = []
+  const box = (x0, y0, z0, x1, y1, z1) => { const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0); g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); geos.push(g) }
+  const front = (fn, step = 2) => {   // сечение поперёк ширины с лицевым профилем z = fn(x)
+    const pts = [[0, 0], [Wc, 0]]
+    for (let x = Wc; x >= 0; x -= step) pts.push([x, Math.min(T, fn(x))])
+    pts.push([0, Math.min(T, fn(0))])
+    geos.push(profileGeo(pts, Hc, 'y'))
+  }
+  if (st === 'shaker' || st === 'slim' || st === 'classic') {
+    const fw = Math.min(st === 'slim' ? 25 : 65, Wc / 3, Hc / 3), dp = st === 'classic' ? 7 : 5
+    box(0, 0, 0, fw, Hc, T); box(Wc - fw, 0, 0, Wc, Hc, T); box(fw, 0, 0, Wc - fw, fw, T); box(fw, Hc - fw, 0, Wc - fw, Hc, T)
+    // скос внутренней кромки рамки (фреза) — тонкая наклонная полоса по периметру филёнки
+    const bev = 4
+    box(fw, fw, 0, Wc - fw, Hc - fw, T - dp)
+    for (const [x0, y0, x1, y1] of [[fw, fw, fw + bev, Hc - fw], [Wc - fw - bev, fw, Wc - fw, Hc - fw], [fw, fw, Wc - fw, fw + bev], [fw, Hc - fw - bev, Wc - fw, Hc - fw]]) box(x0, y0, T - dp, x1, y1, T - dp + 2)
+    if (st === 'classic') {
+      // выпуклая филёнка с фаской
+      const ins = 22, sh = new THREE.Shape()
+      const a0 = fw + ins, b0 = fw + ins, a1 = Wc - fw - ins, b1 = Hc - fw - ins
+      if (a1 - a0 > 20 && b1 - b0 > 20) {
+        sh.moveTo(a0, b0); sh.lineTo(a1, b0); sh.lineTo(a1, b1); sh.lineTo(a0, b1); sh.lineTo(a0, b0)
+        const g = new THREE.ExtrudeGeometry(sh, { depth: 1, bevelEnabled: true, bevelThickness: dp - 2, bevelSize: ins - 2, bevelSegments: 1 })
+        g.translate(0, 0, T - dp + (dp - 2) - 0.5)
+        geos.push(g)
+      }
+    }
+  } else if (st === 'fluted') {
+    const p = 20, d = 4
+    front(x => { const u = ((x % p) + p) % p - p / 2; return T - d + d * Math.sqrt(Math.max(0, 1 - (u / (p / 2)) ** 2)) }, 1)
+  } else if (st === 'vgroove') {
+    const p = 60, d = 3, w = 3
+    front(x => { const u = Math.abs((((x - p / 2) % p) + p) % p - p / 2); return u < w ? T - d * (1 - u / w) : T }, 1)
+  } else if (st === 'wave') {
+    const p = 120, d = 5
+    front(x => T - d / 2 + (d / 2) * Math.cos((2 * Math.PI * x) / p), 3)
+  } else if (st === 'gola') {
+    // интегрированная ручка: скос по верхнему краю с лица
+    const c = Math.min(14, T - 2)
+    geos.push(profileGeo([[0, 0], [Hc, 0], [Hc, T - c], [Hc - 18, T], [0, T]], Wc, 'x'))
+  } else box(0, 0, 0, Wc, Hc, T)
+  // из своей системы — в систему детали: у дверей X, Y те же; у ящиков (длина вдоль ширины) — поворот на 90°
+  const toPart = vertY ? new THREE.Matrix4() : new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, 1)).setPosition(W, 0, 0)
+  const M = new THREE.Matrix4().set(m[0], m[1], m[2], m[9], m[3], m[4], m[5], m[10], m[6], m[7], m[8], m[11], 0, 0, 0, 1).multiply(toPart)
+  const flat = geos.map(g => { const n = g.index ? g.toNonIndexed() : g; for (const k of Object.keys(n.attributes)) if (!['position', 'normal', 'uv'].includes(k)) n.deleteAttribute(k); return n })
+  const merged = mergeGeometries(flat, false)
+  merged.applyMatrix4(M)
+  return merged
+}
 
 // ── фурнитура как настоящая: ручки, петли, направляющие, металлические боковины ящиков ──
 // Модель строится в своей системе: x — вдоль длины (L), y — «вверх» (U = N × L), z — наружу (N); затем — в сцену по брусу детали
@@ -133,7 +201,7 @@ const PAL = ['#d9cdb4', '#b8c5d0', '#c9d6b8', '#d8bcae', '#c6bfdc']
 const TEX = new Map()
 function texOf(src) {
   if (!src) return null
-  if (!TEX.has(src)) { const t = new THREE.TextureLoader().load(src); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; TEX.set(src, t) }
+  if (!TEX.has(src)) { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); const t = ld.load(src, undefined, undefined, () => { /* сайт не отдал картинку — останется цвет */ }); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; TEX.set(src, t) }
   return TEX.get(src)
 }
 function lookOf(material, looks) {
@@ -165,6 +233,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
   const bgRef = useRef(new THREE.Color('#eceff2'))
   const solidBg = look.bg === 'custom' ? look.bgColor : darkBg ? '#202226' : '#eceff2'
   useEffect(() => { qualRef.current = look.quality; bgRef.current = new THREE.Color(solidBg) }, [look.quality, solidBg])
+  // яркость картинки (ползунок в «Отображении»)
+  useEffect(() => { if (st.current?.renderer) st.current.renderer.toneMappingExposure = 0.92 * (Number(look.exposure) || 1) }, [look.exposure])
   const hiRef = useRef(hiPids)
   useEffect(() => { hiRef.current = hiPids }, [hiPids])
   const animTarget = useRef(new Map())
@@ -365,6 +435,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     // все детали, включая вложенные в группы анимации
     const meshes = (f = () => true) => { const l = []; group.traverse(o => { if (o.isMesh && f(o)) l.push(o) }); return l }
     let lastTap = null   // двойной тап по двери / ящику — открыть или закрыть (анимация)
+    let pendSel = 0      // отложенный выбор (первый тап по двери / ящику)
     let lp = 0           // удержание пальца на детали — свойства её параметрического блока
     const clearLp = () => { clearTimeout(lp); lp = 0 }
     renderer.domElement.addEventListener('contextmenu', e => e.preventDefault())
@@ -430,15 +501,18 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const now = Date.now()
       const dbl = lastTap && now - lastTap.t < 380 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30
       lastTap = dbl ? null : { t: now, x: e.clientX, y: e.clientY }
+      const ha = ray.intersectObjects(meshes(o => o.userData.pid), false).find(h => h.object.userData.anim)
       if (dbl) {
-        // по двойному тапу видны и полупрозрачные фасады; проёмы пропускаем — ищем дверь или ящик
-        const ha = ray.intersectObjects(meshes(o => o.userData.pid), false).find(h => h.object.userData.anim)
+        // двойной тап по двери / ящику — только открыть / закрыть, без выбора детали (первый тап не выбирал — ждали второго)
+        clearTimeout(pendSel); pendSel = 0
         if (ha) { const id = ha.object.userData.anim; animTarget.current.set(id, (animTarget.current.get(id) || 0) > 0.5 ? 0 : 1); return }
       }
       // деталь выбранного блока (даже за проёмом или полупрозрачная) — в приоритете: тап по ней не сбрасывает блок
       const hb = hiRef.current?.size ? ray.intersectObjects(meshes(o => hiRef.current.has(o.userData.pid)), false)[0] : null
       const hit = hb || ray.intersectObjects(meshes(o => !o.userData.ghost), false)[0]
-      sel.current?.(hit ? hit.object.userData.itemId : null, hit ? hit.object.userData.pid || null : null, hit ? hit.object.userData.opening || null : null)
+      const doSel = () => { pendSel = 0; sel.current?.(hit ? hit.object.userData.itemId : null, hit ? hit.object.userData.pid || null : null, hit ? hit.object.userData.opening || null : null) }
+      // под пальцем дверь или ящик — выбор чуть позже: вдруг это первый тап двойного (тогда только анимация)
+      if (ha && !dbl) { clearTimeout(pendSel); pendSel = setTimeout(doSel, 330) } else doSel()
     }
     renderer.domElement.addEventListener('pointerdown', onDown, { capture: true })
     renderer.domElement.addEventListener('pointermove', onMove)
@@ -515,7 +589,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         }
         continue
       }
-      const fig = isFigured(p) ? figuredGeometry(p) : null
+      let fig = isFigured(p) ? figuredGeometry(p) : null
+      if (!fig && p.mill && p.mill.style !== 'flat') { try { fig = millGeometry(p) } catch { fig = null } }
       const geo = fig || new THREE.BoxGeometry(sx, sy, sz)
       const lk = lookOf(p.material, matLooks)
       // текстура материала: повтор по размеру детали, волокно — вдоль длины детали
@@ -563,7 +638,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       hg.add(mesh)
       // контуры деталей — по настройке «Линии контуров» (выбранное — всегда с линиями)
       if (look.lines !== false || isSel || isPart || isBlk) {
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : look.lineColor, transparent: true, opacity: isSel ? 1 : Math.max(0.05, Math.min(1, Number(look.lineOpacity))) }))
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, p.mill ? 50 : 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : look.lineColor, transparent: true, opacity: isSel ? 1 : Math.max(0.05, Math.min(1, Number(look.lineOpacity))) }))
       edges.position.copy(mesh.position)
       hg.add(edges)
       }

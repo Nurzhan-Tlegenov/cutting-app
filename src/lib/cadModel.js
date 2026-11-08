@@ -168,6 +168,7 @@ export function projectParts(project) {
       if (it.mat?.[rec.key]) sp.material = it.mat[rec.key]
       // своя схема крепежа стыков этой детали и поворот текстуры на ней
       if (it.joint?.[rec.key]) sp.joint = it.joint[rec.key]
+      if (it.jointPair) sp.jointPair = it.jointPair
       if (it.grain?.[rec.key]) sp.grainFlip = true
       // как рисовать фурнитуру: оси модели — в координаты сцены
       if (rec.model) {
@@ -208,7 +209,7 @@ export function projectParts(project) {
 /** Присадка всего проекта: стыки по схеме крепежа + отверстия фурнитуры -> { map: pid -> присадка детали, holes } */
 export function projectDrill(project, pp = projectParts(project)) {
   const st = { ...PROJECT_DEFAULTS, ...(project?.settings || {}) }
-  return projectDrillings(pp.parts, st.joint, st.hardwareHoles === false ? [] : applyMount(pp.holes, st.mount))
+  return projectDrillings(pp.parts, st.joint, st.hardwareHoles === false ? [] : applyMount(pp.holes, st.mount), st.jointSchemes || {})
 }
 
 // кромка записи по сторонам редактора

@@ -18,9 +18,9 @@ import { useDesktop } from '../hooks/useDesktop'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
-import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights, HANDLE_TYPES, slideLength } from '../lib/cadCabinet'
+import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights, HANDLE_TYPES, slideLength, FACADE_STYLES } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
-import { JOINTS } from '../lib/cadDrill'
+import { JOINTS, partJoints } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { newLinearJob, readJobs, writeJobs, LINEAR_FEATURE } from '../lib/linearJobs'
 import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, partToDetail, overrideFromDraft, isFigured, PROJECT_DEFAULTS, mountOf } from '../lib/cadModel'
@@ -320,14 +320,60 @@ function shrinkImage(file, max = 512) {
   })
 }
 // крепёж стыков детали: своя схема (например, столешница на минификсах — без сквозных отверстий в лице)
-function JointPick({ value, onChange }) {
+const jointOptions = customs => [...JOINTS, ...Object.entries(customs || {}).map(([id, c]) => ['u:' + id, '★ ' + (c.name || 'Своя схема')])]
+const jointName = (id, customs) => (jointOptions(customs).find(o => o[0] === id) || [0, id])[1]
+function JointPick({ value, onChange, customs, label = 'Крепёж всех стыков этой детали', emptyText = 'Как в проекте' }) {
   return (
-    <label style={{ display: 'block', marginTop: 8 }}><span style={lbl}>Крепёж стыков этой детали</span>
+    <label style={{ display: 'block', marginTop: 8 }}><span style={lbl}>{label}</span>
       <select style={inp} value={value || ''} onChange={e => onChange(e.target.value || null)}>
-        <option value="">Как в проекте</option>
-        {JOINTS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+        {emptyText && <option value="">{emptyText}</option>}
+        {jointOptions(customs).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
       </select></label>
   )
+}
+// стыки выбранной детали: с кем и какой длины; у каждого стыка — своя схема (например, у стойки сверху стяжки, снизу конфирматы)
+function PartJoints({ parts, sp, project, setProject, customs }) {
+  const st = { ...PROJECT_DEFAULTS, ...(project.settings || {}) }
+  const js = partJoints(parts, sp.pid, st.joint)
+  const setPair = (j, v) => setProject({ ...project, items: project.items.map(it => { if (it.id !== sp.item.id) return it; const jp = { ...(it.jointPair || {}) }; const [a, b] = j.key.split('|'); delete jp[`${b}|${a}`]; if (v) jp[j.key] = v; else delete jp[j.key]; return { ...it, jointPair: jp } }) })
+  if (!js.length) return <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0' }}>Стыков с другими плитами у этой детали нет.</p>
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ ...lbl, marginBottom: 4 }}>Стыки этой детали ({js.length}) — схема у каждого стыка</div>
+      {js.map(j => <div key={j.key} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12.5 }}>
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>↔ {j.other.item !== sp.item ? j.other.item.name + ' · ' : ''}{j.other.name} · {j.len} мм</span>
+        <select style={{ ...inp, width: 'auto', maxWidth: 190, padding: '4px 6px', fontSize: 12.5 }} value={j.own || ''} disabled={!j.sameItem} onChange={e => setPair(j, e.target.value || null)}>
+          <option value="">как у детали ({jointName(j.scheme, customs)})</option>
+          {jointOptions(customs).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+        </select>
+      </div>)}
+    </div>
+  )
+}
+// свои схемы крепежа (за аккаунтом): какой крепёж, шканты рядом, отступы от концов (можно несимметрично), шаг, шкант от крепежа
+function JointSchemes({ customs, setCustoms }) {
+  const list = Object.entries(customs || {})
+  const upd = (id, patch) => setCustoms({ ...customs, [id]: { ...customs[id], ...patch } })
+  return (<>
+    {list.map(([id, c]) => <div key={id} style={{ border: '0.5px solid var(--border)', borderRadius: 8, padding: '6px 8px', marginBottom: 6 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+        <div style={{ flex: 1 }}><TextField label="Название" value={c.name} onChange={v => upd(id, { name: v })} /></div>
+        <button type="button" style={{ ...btnS(), color: 'var(--danger)' }} onClick={() => { if (window.confirm(`Удалить схему «${c.name}»?`)) { const n = { ...customs }; delete n[id]; setCustoms(n) } }}>🗑</button>
+      </div>
+      <Chips label="Крепёж" value={c.fast || 'confirmat'} onChange={v => upd(id, { fast: v })} options={[['confirmat', 'Конфирмат'], ['minifix', 'Минификс'], ['dowel', 'Только шканты'], ['none', 'Без присадки (уголки, стяжки)']]} />
+      {c.fast !== 'dowel' && c.fast !== 'none' && <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!c.dowel} onChange={e => upd(id, { dowel: e.target.checked })} />Шканты рядом с крепежом</label>}
+      {c.fast !== 'none' && <Grid cols={3}>
+        <NumField label="От начала стыка" value={c.end ?? 50} onChange={v => upd(id, { end: v })} min={0} />
+        <NumField label="От конца (пусто — так же)" value={c.endB ?? ''} onChange={v => upd(id, { endB: v })} min={0} />
+        <NumField label="Шаг не больше" value={c.step ?? 600} onChange={v => upd(id, { step: v })} min={50} />
+        {c.dowel && c.fast !== 'dowel' && <NumField label="Шкант от крепежа" value={c.shift ?? 32} onChange={v => upd(id, { shift: v })} min={0} />}
+        {c.dowel && <NumField label="Шканты, если стык от" value={c.dowelMin ?? 200} onChange={v => upd(id, { dowelMin: v })} min={0} />}
+      </Grid>}
+      {c.endB != null && c.endB !== '' && <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => upd(id, { endB: null })}>симметрично</button>}
+    </div>)}
+    <button type="button" style={btnS()} onClick={() => { const id = Math.random().toString(36).slice(2, 8); setCustoms({ ...(customs || {}), [id]: { name: 'Моя схема', fast: 'confirmat', dowel: true, end: 50, step: 600, shift: 32, dowelMin: 200 } }) }}>+ Своя схема крепежа</button>
+    <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Свои схемы запоминаются за аккаунтом и появляются в выборе крепежа (★). Отступы от начала и конца стыка разные — несимметрично.</p>
+  </>)
 }
 // материал (декор) для выбранных деталей: другой материал — это и другой раскрой (детали уйдут в свою группу)
 function MatPick({ materials, value, onApply, onReset }) {
@@ -341,7 +387,55 @@ function MatPick({ materials, value, onApply, onReset }) {
     </div>
   )
 }
+// каталог декоров из интернета (Poly Haven, бесплатные текстуры CC0): картинка не скачивается на телефон —
+// запоминается только ссылка, модель берёт её прямо с сайта
+const DECOR_CATS = [['wood', 'Дерево'], ['stone', 'Камень'], ['marble', 'Мрамор'], ['concrete', 'Бетон'], ['fabric', 'Ткань'], ['metal', 'Металл'], ['plaster', 'Штукатурка']]
+function DecorCatalog({ onPick, onClose }) {
+  const [cat, setCat] = useState('wood')
+  const [list, setList] = useState(null)
+  const [q, setQ] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  useEffect(() => {
+    let a = true
+    fetch(`https://api.polyhaven.com/assets?type=textures&categories=${cat}`).then(r => r.json())
+      .then(d => { if (a) { setErr(''); setList(Object.entries(d).map(([id, v]) => ({ id, name: v.name, dim: v.dimensions?.[0] || 1000 }))) } })
+      .catch(() => { if (a) { setList([]); setErr('Каталог не открылся — проверьте интернет') } })
+    return () => { a = false }
+  }, [cat])
+  const pick = async it => {
+    setBusy(it.id)
+    try {
+      const f = await (await fetch(`https://api.polyhaven.com/files/${it.id}`)).json()
+      const url = f?.Diffuse?.['1k']?.jpg?.url || `https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/${it.id}/${it.id}_diff_1k.jpg`
+      onPick({ tex: url, scale: Math.round(it.dim) || 1000, src: 'Poly Haven · ' + it.name })
+    } catch { setErr('Не удалось взять текстуру — попробуйте другую') }
+    setBusy('')
+  }
+  const shown = (list || []).filter(x => !q || x.name.toLowerCase().includes(q.toLowerCase())).slice(0, 60)
+  return (
+    <div style={{ marginTop: 6, padding: 6, border: '0.5px solid var(--border-md)', borderRadius: 8 }}>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
+        {DECOR_CATS.map(([k, t]) => <button key={k} type="button" style={{ ...chipS(cat === k), padding: '2px 8px' }} onClick={() => { setList(null); setCat(k) }}>{t}</button>)}
+        <button type="button" style={{ marginLeft: 'auto', border: 'none', background: 'none', fontSize: 16, cursor: 'pointer', color: 'var(--text-muted)' }} onClick={onClose}>✕</button>
+      </div>
+      <input style={{ ...inp, padding: '5px 8px', marginBottom: 6 }} placeholder="Поиск (по-английски: oak, walnut, pine…)" value={q} onChange={e => setQ(e.target.value)} />
+      {err && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '0 0 6px' }}>{err}</p>}
+      {list === null ? <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Загружаем…</p> :
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 5, maxHeight: 260, overflowY: 'auto' }}>
+          {shown.map(it => <button key={it.id} type="button" title={it.name} onClick={() => pick(it)} disabled={!!busy}
+            style={{ padding: 0, border: '0.5px solid var(--border)', borderRadius: 6, overflow: 'hidden', background: 'var(--bg2)', cursor: 'pointer', opacity: busy && busy !== it.id ? 0.5 : 1 }}>
+            <img src={`https://cdn.polyhaven.com/asset_img/thumbs/${it.id}.png?width=144&height=144`} alt="" loading="lazy" style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block' }} />
+            <span style={{ display: 'block', fontSize: 10, padding: '2px 3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text)' }}>{busy === it.id ? '…' : it.name}</span>
+          </button>)}
+        </div>}
+      <p style={{ fontSize: 10.5, color: 'var(--text-hint)', margin: '5px 0 0' }}>Текстуры Poly Haven (бесплатные, CC0). На телефон не скачиваются — запоминается ссылка.</p>
+    </div>
+  )
+}
 function MatLookEditor({ name, looks, setLooks }) {
+  const [cat, setCat] = useState(false)
+  const [url, setUrl] = useState('')
   if (!name) return null
   const own = looks?.[name] || {}
   const set = patch => { const n = { ...own, ...patch }; Object.keys(n).forEach(k => (n[k] == null || n[k] === '') && delete n[k]); const all = { ...(looks || {}) }; if (Object.keys(n).length) all[name] = n; else delete all[name]; setLooks(all) }
@@ -352,14 +446,20 @@ function MatLookEditor({ name, looks, setLooks }) {
         <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}>цвет<input type="color" value={own.color || '#d9cdb4'} onChange={e => set({ color: e.target.value })} style={{ width: 36, height: 24, padding: 0, border: 'none', background: 'none' }} /></label>
         <label style={{ ...btnS(), padding: '4px 9px', fontSize: 12.5 }}>📷 Фото декора
           <input type="file" accept="image/*" style={{ display: 'none' }} onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; try { set({ tex: await shrinkImage(f) }) } catch { window.alert('Не удалось открыть картинку') } }} /></label>
-        <a href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(name + ' декор текстура')}`} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: 'var(--blue)' }}>🔎 найти в интернете</a>
+        <button type="button" style={{ ...btnS(true), padding: '4px 9px', fontSize: 12.5 }} onClick={() => setCat(v => !v)}>🌐 Декор из интернета</button>
         {own.tex && <><img src={own.tex} alt="" style={{ width: 34, height: 24, objectFit: 'cover', borderRadius: 4 }} />
           <span>размер картинки</span><SmallNum width={56} value={own.scale || 600} onChange={v => v > 50 && set({ scale: v })} /><span>мм</span>
           <span>декор на фото</span>{[['v', '↕ вертикально'], ['h', '↔ горизонтально']].map(([k, t]) => <button key={k} type="button" style={{ ...chipS((own.dir || 'v') === k), padding: '2px 8px' }} onClick={() => set({ dir: k === 'v' ? null : k })}>{t}</button>)}
           <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => set({ tex: null })}>убрать фото</button></>}
         {(own.color || own.tex) && <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => setLooks(Object.fromEntries(Object.entries(looks || {}).filter(([k]) => k !== name)))}>↺ по умолчанию</button>}
       </div>
-      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>Направление декора на фото укажите, как он идёт на картинке, — на детали он ляжет вдоль её длины (как волокно при раскрое); на отдельной детали можно повернуть. Сфотографируйте образец или сохраните картинку из интернета и загрузите её — так деталь и все детали этого материала будут выглядеть на модели. Запоминается за аккаунтом.</p>
+      {cat && <DecorCatalog onClose={() => setCat(false)} onPick={v => { set(v); setCat(false) }} />}
+      <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
+        <input style={{ ...inp, padding: '5px 8px', fontSize: 12.5 }} placeholder="или ссылка на картинку декора (https://…)" value={url} onChange={e => setUrl(e.target.value)} />
+        <button type="button" style={{ ...btnS(), padding: '4px 9px' }} disabled={!/^https?:\/\//.test(url.trim())} onClick={() => { set({ tex: url.trim(), src: 'ссылка' }); setUrl('') }}>Взять</button>
+      </div>
+      {own.src && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '4px 0 0' }}>Декор: {own.src}</p>}
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>Картинку по ссылке видно, только если сайт её разрешает (не все сайты отдают картинки другим приложениям). Направление декора на фото укажите, как он идёт на картинке, — на детали он ляжет вдоль её длины (как волокно при раскрое); на отдельной детали можно повернуть. Сфотографируйте образец или сохраните картинку из интернета и загрузите её — так деталь и все детали этого материала будут выглядеть на модели. Запоминается за аккаунтом.</p>
     </div>
   )
 }
@@ -465,6 +565,7 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
         <Grid cols={3}><NumField label="Сколько" unit="шт" value={fr.n} onChange={v => v >= 1 && apply(opFront(tree, node.id, { ...fr, n: Math.min(6, Math.round(v)) }))} min={1} /></Grid>
         <Chips label="Расположение" value={fr.layout || 'v'} onChange={v => apply(opFront(tree, node.id, { ...fr, layout: v }))} options={[['v', 'Рядом'], ['h', 'Друг над другом']]} />
         {(fr.n === 1 || fr.layout === 'h') && <Chips label="Открывание" value={fr.open || (fr.hinge === 'right' ? 'right' : 'left')} onChange={v => apply(opFront(tree, node.id, { ...fr, open: v, hinge: v }))} options={[['left', '← влево'], ['right', 'вправо →'], ['up', '↑ вверх'], ['down', '↓ вниз']]} />}
+        <Chips label="Фрезеровка фасада (МДФ)" value={fr.style || p.facadeStyle || 'flat'} onChange={v => apply(opFront(tree, node.id, { ...fr, style: v }))} options={FACADE_STYLES} />
         <HandleEditor door h={{ ...p.handleDoor, ...(fr.handle || {}) }} onChange={h => apply(opFront(tree, node.id, { ...fr, handle: h }))} />
         <div style={row}>
           {fr.handle && <button type="button" style={btnS()} onClick={() => apply(opFront(tree, node.id, { ...fr, handle: undefined }))}>↺ Ручка как в корпусе</button>}
@@ -527,6 +628,7 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
             {fr.slidePos !== 'center' && <Grid cols={2}><NumField label="От низа короба" value={fr.slideOff ?? 3} onChange={v => apply(opFront(tree, node.id, { ...fr, slideOff: v }))} min={0} /></Grid>}
           </>}
           {sys.type !== 'ball' && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Размеры системы — типовые; сверьте с каталогом производителя (Blum, Hettich, DTC, GTV) и поправьте здесь.</p>}
+          <Chips label="Фрезеровка фасадов (МДФ)" value={fr.style || p.facadeStyle || 'flat'} onChange={v => apply(opFront(tree, node.id, { ...fr, style: v }))} options={FACADE_STYLES} />
           <HandleEditor h={{ ...p.handleDrawer, ...(fr.handle || {}) }} onChange={h => apply(opFront(tree, node.id, { ...fr, handle: h }))} />
           <div style={row}>
             {fr.handle && <button type="button" style={btnS()} onClick={() => apply(opFront(tree, node.id, { ...fr, handle: undefined }))}>↺ Ручка как в корпусе</button>}
@@ -667,6 +769,11 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
       <Grid><NumField label="Ширина" value={p.W} onChange={v => up({ W: v })} min={50} /><NumField label="Высота" value={p.H} onChange={v => up({ H: v })} min={50} /><NumField label="Глубина" value={p.D} onChange={v => up({ D: v })} min={50} /></Grid>
     </Fold>
 
+    <Fold id="mats" title="Материалы" def right={`${p.material} / ${p.facadeMaterial}`}>
+      <Grid cols={2}><TextField label="Корпус (весь)" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><TextField label="Фасады (все)" value={p.facadeMaterial} onChange={v => up({ facadeMaterial: v })} list="cad-mats" /></Grid>
+      <Chips label="Фрезеровка фасадов (по умолчанию для всех)" value={p.facadeStyle || 'flat'} onChange={v => up({ facadeStyle: v })} options={FACADE_STYLES} />
+      {Object.keys(it.mat || {}).length > 0 && <button type="button" style={{ ...btnS(), marginBottom: 6 }} onClick={() => set({ ...it, p, mat: {} })}>↺ Убрать свои материалы у отдельных деталей ({Object.keys(it.mat).length})</button>}
+    </Fold>
     <Fold id="body" title="Каркас" def right={p.material}>
       <Grid cols={2}><TextField label="Материал" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><NumField label="Толщина" value={p.t} onChange={v => up({ t: v })} min={1} /></Grid>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '4px 0 6px' }}>
@@ -1112,6 +1219,8 @@ export default function ConstructorPage() {
       if (!a) return; if (!p) { setError('Проект не найден'); return }
       // крепёж фурнитуры — за аккаунтом: в проекте его ещё нет — берём из настроек аккаунта
       if (!p.settings?.mount) { try { const am = getUserSettings(user)?.cadMount; if (am) p = { ...p, settings: { ...(p.settings || {}), mount: am } } } catch { /* нет */ } }
+      // свои схемы крепежа — за аккаунтом: добавляем к схемам проекта, чтобы ★ в проекте работали
+      try { const aj = getUserSettings(user)?.cadJointSchemes; if (aj) p = { ...p, settings: { ...(p.settings || {}), jointSchemes: { ...aj, ...(p.settings?.jointSchemes || {}) } } } } catch { /* нет */ }
       projRef.current = p; setProjectState(p); setSelected(null); setFitKey(k => k + 1) }).catch(e => { if (a) setError(e.message) })
     return () => { a = false }
   }, [pid, allowed, user])
@@ -1285,6 +1394,8 @@ export default function ConstructorPage() {
     }
     setProject({ ...project, items: project.items.map(i => (i.id === next.id ? next : i)) })
   }
+  const jointSchemes = project?.settings?.jointSchemes || {}
+  const setJointSchemes = v => { setProject({ ...project, settings: { ...project.settings, jointSchemes: v } }); saveUserSettings({ cadJointSchemes: v }, user) }
   const mount = project?.settings?.mount
   const setMount = m => { setProject({ ...project, settings: { ...project.settings, mount: m } }); saveUserSettings({ cadMount: m }, user) }
 
@@ -1427,6 +1538,7 @@ export default function ConstructorPage() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Яркость кромки</span><input type="range" min="0.1" max="1" step="0.05" value={edgeLook.opacity} onChange={e => { const v = Number(e.target.value); setEdgeLook({ opacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(edgeLook.opacity * 100)}%</span></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!edgeLook.glow} onChange={e => setEdgeLook({ glow: e.target.checked })} />Светящаяся (видна сквозь детали)</label>
         <div style={sect}>Качество картинки</div>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Яркость</span><input type="range" min="0.5" max="1.6" step="0.02" value={look.exposure ?? 1} onChange={e => { const v = Number(e.target.value); setLook({ exposure: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.exposure ?? 1) * 100)}%</span></label>
         <Chips value={look.quality} onChange={v => setLook({ quality: v })} options={[['high', 'Максимальное (тени, затенение в углах)'], ['std', 'Обычное (быстрее)']]}
           hint="Максимальное — как в программах визуализации: мягкие тени и затенение в стыках и углах. На слабом телефоне может подтормаживать — тогда «Обычное»." />
         <div style={sect}>Металл фурнитуры</div>
@@ -1452,7 +1564,7 @@ export default function ConstructorPage() {
         {sel.length > 0 ? <>
           <MatPick materials={materials} value={mats.length === 1 ? mats[0] : ''} onApply={applyMultiMat} />
           {mats.length === 1 && <MatLookEditor name={mats[0]} looks={matLooks} setLooks={setMatLooks} />}
-          <JointPick value="" onChange={applyMultiJoint} />
+          <JointPick customs={jointSchemes} value="" onChange={applyMultiJoint} label="Крепёж стыков выбранных деталей" />
         </> : <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Нажимайте детали на модели — они добавятся в выбор (ещё раз — убрать).</p>}
       </div>
     })()}
@@ -1490,7 +1602,12 @@ export default function ConstructorPage() {
               <MatPick key={sp.pid} materials={materials} value={sp.material} onApply={v => { const m = { ...(selItem.mat || {}) }; if (v) m[sp.key] = v; else delete m[sp.key]; setItem({ ...selItem, mat: m }) }} />
               <MatLookEditor name={sp.material} looks={matLooks} setLooks={setMatLooks} />
               {matLooks?.[sp.material]?.tex && <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!selItem.grain?.[sp.key]} onChange={e => { const g = { ...(selItem.grain || {}) }; if (e.target.checked) g[sp.key] = true; else delete g[sp.key]; setItem({ ...selItem, grain: g }) }} />Повернуть декор на этой детали</label>}
-              {sp.kind === 'sheet' && <JointPick value={selItem.joint?.[sp.key]} onChange={v => { const j = { ...(selItem.joint || {}) }; if (v) j[sp.key] = v; else delete j[sp.key]; setItem({ ...selItem, joint: j }) }} />}
+              {sp.kind === 'sheet' && <>
+                <JointPick customs={jointSchemes} value={selItem.joint?.[sp.key]} onChange={v => { const j = { ...(selItem.joint || {}) }; if (v) j[sp.key] = v; else delete j[sp.key]; setItem({ ...selItem, joint: j }) }} />
+                <PartJoints parts={parts} sp={sp} project={project} setProject={setProject} customs={jointSchemes} />
+                <JointPick customs={jointSchemes} label="Крепёж во всём проекте (все стыки без своей схемы)" emptyText="" value={project.settings?.joint || PROJECT_DEFAULTS.joint} onChange={v => setProject({ ...project, settings: { ...project.settings, joint: v } })} />
+                <Fold id="jschemes" title="Свои схемы крепежа" right="за аккаунтом"><JointSchemes customs={jointSchemes} setCustoms={setJointSchemes} /></Fold>
+              </>}
             </div>
             <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Присадка по стыкам и под фурнитуру пересчитывается сама; в редакторе добавляйте фигурный контур, вырезы, свою присадку и пазы. Поменяется размер детали — контур сбросится до прямоугольника.</p>
           </>}

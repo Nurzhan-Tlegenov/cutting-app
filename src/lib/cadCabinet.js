@@ -49,6 +49,13 @@ export const CAB_DEFAULTS = {
 // (короб уже проёма на side с каждой стороны, дно в паз выше низа боковин на bottomUp); metal — металлобокс (дно и задняя ЛДСП уже проёма на reduce);
 // msys — система с металлическими боковинами: дно уже проёма на bottomRed, задняя — на backRed, высота боковины sideH, дно короче направляющей на lenRed.
 // Значения — типовые, их нужно сверить с каталогом производителя (меняются в блоке ящиков).
+// фрезеровка фасадов МДФ (как выглядят на модели; программы фрезеровки для ЧПУ — следующим этапом):
+// flat — гладкий, shaker — рамка 65 / филёнка, slim — тонкая рамка 25, classic — рамка с выпуклой филёнкой,
+// fluted — рифлёный (полукруглые рейки), vgroove — вертикальные V-пазы, wave — 3D-волна, gola — интегрированная ручка (скос по верху)
+export const FACADE_STYLES = [
+  ['flat', 'Гладкий'], ['shaker', 'Шейкер (рамка)'], ['slim', 'Тонкая рамка'], ['classic', 'Классика (филёнка)'],
+  ['fluted', 'Рифлёный'], ['vgroove', 'V-пазы'], ['wave', '3D-волна'], ['gola', 'Интегрированная ручка'],
+]
 // ручки: скобы и рейлинги (межцентровое), кнопки (одно отверстие), торцевые (крепятся сзади фасада, профиль — в зазоре над фасадом)
 export const HANDLE_TYPES = [
   ['rail', 'Рейлинг'], ['bar', 'Скоба прямоугольная'], ['arch', 'Скоба-дуга'], ['knob', 'Кнопка круглая'], ['knobsq', 'Кнопка квадратная'],
@@ -95,7 +102,7 @@ export const CAB_GROUPS = {
   body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'plinthBack', 'plinthBackOffset', 'railDepth', 'overhangFront', 'overhangSide', 'overhangL', 'overhangR', 'topRL', 'topRR', 'underTop', 'edgeFront', 'edgeBody',
     'sideL', 'sideR', 'sideFront', 'sideBack', 'topRails', 'topRailOffset', 'topDown', 'topFront', 'topBack', 'bottomRails', 'bottomRailOffset', 'bottomRailDepth', 'bottomUp', 'bottomFront', 'bottomBack'],
   back: ['back', 'backT', 'backMaterial', 'grooveOffset', 'grooveDepth', 'grooveWidth', 'backGapL', 'backGapR', 'backGapB', 'backGapT'],
-  fronts: ['facadeMaterial', 'facadeT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'hingeCount', 'handleDoor', 'handleDrawer'],
+  fronts: ['facadeMaterial', 'facadeT', 'facadeStyle', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'hingeCount', 'handleDoor', 'handleDrawer'],
   boxes: ['box', 'slideGap', 'slideLen', 'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce'],
 }
 
@@ -522,6 +529,8 @@ export function cabinetParts(params) {
   // видимая фурнитура (петли, направляющие, ручки) — только для картинки и анимации, в раскрой не идёт.
   // model — как рисовать (CadView): type, L — ось длины, N — куда «наружу» (ось вылета / вглубь)
   const vis = (key, name, box, blk, anim, model) => parts.push({ ...mk(key, name, 'фурнитура', box, 1, +1, 0, MET), kind: 'hw', vis: true, blk, anim, ...(model ? { model } : {}) })
+  // фрезеровка фасада: у блока своя (front.style), иначе — как в корпусе (facadeStyle)
+  const millOf = fr => { const st = fr.style || p.facadeStyle || 'flat'; return st === 'flat' ? {} : { mill: { style: st } } }
   const hwCount = new Map()
   const addHw = name => hwCount.set(name, (hwCount.get(name) || 0) + 1)
   // ручка на фасаде [fx0..fx1]×[fy0..fy1] (фасад — z от D до D+fT); free — свободная сторона ('l' / 'r' / 't' / 'b').
@@ -596,7 +605,7 @@ export function cabinetParts(params) {
         const k = `dr${fi}_${i}_`
         const p0 = parts.length
         const anim = { id: k, kind: 'slide', dir: [0, 0, 1], dist: r1(bd * 0.85) }
-        parts.push(mk(k + 'f', 'Фасад ящика', 'фасад', [fx0, dy0, D, fx1, dy0 + fh, D + fT], 2, +1, 0, fMat, { edges: allE, t: fT }))
+        parts.push(mk(k + 'f', 'Фасад ящика', 'фасад', [fx0, dy0, D, fx1, dy0 + fh, D + fT], 2, +1, 0, fMat, { edges: allE, t: fT, ...millOf(fr) }))
         putHandle(fr, true, k, k + 'f', fx0, dy0, fx1, dy0 + fh, 'r', blk, anim)
         const by0 = Math.max(dy0, y0) + bBot
         const bh = Math.max(60, Math.min(fh - bBot - bTop, y1 - by0 - 5))
@@ -692,7 +701,7 @@ export function cabinetParts(params) {
         : open === 'right' ? { id: key, kind: 'rot', p: [dx1, 0, D + fT], axis: [0, 1, 0], ang: AN }
           : open === 'up' ? { id: key, kind: 'rot', p: [0, dy1, D + fT], axis: [1, 0, 0], ang: -AN }
             : { id: key, kind: 'rot', p: [0, dy0, D + fT], axis: [1, 0, 0], ang: AN }
-      parts.push(mk(key, name, 'фасад', [dx0, dy0, D, dx1, dy1, D + fT], 2, +1, 1, fMat, { edges: allE, t: fT, blk, anim }))
+      parts.push(mk(key, name, 'фасад', [dx0, dy0, D, dx1, dy1, D + fT], 2, +1, 1, fMat, { edges: allE, t: fT, blk, anim, ...millOf(fr) }))
       putHandle(fr, false, key, key, dx0, dy0, dx1, dy1, { left: 'r', right: 'l', up: 'b', down: 't' }[open], blk, anim)
       let k
       if (open === 'left' || open === 'right') {

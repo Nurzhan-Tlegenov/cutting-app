@@ -340,5 +340,29 @@ for (const rot of [0, 90, 180, 270]) {
   const side = pp.parts.find(p => p.name === 'Ящик: боковина')
   ok(Math.abs(side.place.aabb[5] - side.place.aabb[2] - 390) < 0.01, 'box NL-10 ' + side.place.aabb)
 }
+
+// стык со своей схемой (сверху стяжки — без присадки, снизу конфирматы); своя схема несимметрично
+{
+  const { partJoints } = await import('../../src/lib/cadDrill.js')
+  const base = newItem('cabinet', { p: { W: 800, H: 800, D: 500 } })
+  const it = { ...base, jointPair: { 'sideL|top': 'none' } }
+  const pp = projectParts({ items: [it] })
+  const sL = pp.parts.find(p => p.key === 'sideL')
+  const js = partJoints(pp.parts, sL.pid, 'confirmat_dowel')
+  ok(js.length === 2 && js.some(j => j.own === 'none'), 'side joints listed ' + js.map(j => j.other.name + ':' + j.scheme))
+  const det = exportAll({ items: [it] }).details
+  const top = det.find(d => d.name === 'Крышка'), bot = det.find(d => d.name === 'Дно')
+  const side = det.find(d => d.name === 'Боковина левая')
+  ok(!top.contour.drillings.some(d => d.note === 'Конфирмат' && d.kind === 'edge' && d.edgeSide === 'left'), 'top-left joint without confirmat')
+  ok(bot.contour.drillings.filter(d => d.note === 'Конфирмат').length === 4, 'bottom joints keep confirmat')
+  ok(side.contour.drillings.filter(d => d.d === 7).length === 2, 'side: only bottom confirmats ' + side.contour.drillings.filter(d => d.d === 7).length)
+  // своя схема: конфирмат 100 от начала, 30 от конца, без шкантов
+  const pr = { items: [{ ...base, joint: { sideL: 'u:a1' } }], settings: { jointSchemes: { a1: { name: 'Моя', fast: 'confirmat', dowel: false, end: 100, endB: 30, step: 600 } } } }
+  const s2 = exportAll(pr).details.find(d => d.name === 'Боковина левая')
+  ok(s2.contour.drillings.filter(d => d.d === 7).length === 4 && !s2.contour.drillings.some(d => d.note === 'Шкант'), 'custom scheme on side')
+  // фасады с фрезеровкой — в модели как обычные детали (для раскроя)
+  const it3 = newItem('cabinet', { p: { W: 600, H: 720, D: 500, facadeStyle: 'shaker', doors: 1 } })
+  ok(projectParts({ items: [it3] }).parts.find(p => p.role === 'фасад').mill?.style === 'shaker', 'facade mill style')
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

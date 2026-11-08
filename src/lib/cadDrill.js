@@ -27,47 +27,83 @@ const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 const frame = m => ({ ex: [m[0], m[3], m[6]], ey: [m[1], m[4], m[7]], ez: [m[2], m[5], m[8]], o: [m[9], m[10], m[11]] })
 
-// позиции крепежа вдоль стыка длиной len: 50 мм от концов, длинный стык — ещё посередине (шаг не больше 600)
-function spots(len, end = 50) {
+// позиции крепежа вдоль стыка длиной len: ea мм от начала, eb — от конца (симметрично — равны), между ними — шаг не больше step
+function spots(len, ea = 50, eb = ea, step = 600) {
   if (len < 70) return []
-  if (len < 2 * end + 40) return [len / 2]
-  const a = end, b = len - end
-  const n = Math.max(1, Math.ceil((b - a) / 600))
+  if (len < ea + eb + 40) return [len / 2]
+  const a = ea, b = len - eb
+  const n = Math.max(1, Math.ceil((b - a) / Math.max(50, step)))
   return Array.from({ length: n + 1 }, (_, i) => a + ((b - a) * i) / n)
 }
 
-/** Стыки и отверстия от них: [{ pid, p: [x,y,z] вход, n: [dx,dy,dz] внутрь детали, d, depth, note }] */
-export function jointHoles(parts, scheme0 = 'confirmat_dowel') {
-  const out = []
+// схема крепежа -> правила. Готовые — по названию; свои — 'u:<id>' из списка схем пользователя:
+// { name, fast: 'confirmat' | 'minifix' | 'dowel' | 'none', dowel: шканты рядом, end, endB (несимметрично), step, shift (шкант от крепежа), dowelMin }
+const BUILTIN = {
+  confirmat_dowel: { fast: 'confirmat', dowel: true }, confirmat: { fast: 'confirmat' },
+  minifix_dowel: { fast: 'minifix', dowel: true }, minifix: { fast: 'minifix' }, dowel: { fast: 'dowel' }, none: { fast: 'none' },
+}
+export function schemeRules(id, customs = {}) {
+  const c = String(id || '').startsWith('u:') ? customs?.[String(id).slice(2)] : BUILTIN[id]
+  const r = { fast: 'confirmat', dowel: false, end: 50, endB: null, step: 600, shift: 32, dowelMin: 200, ...(c || BUILTIN.confirmat_dowel) }
+  r.endB = r.endB == null || r.endB === '' ? r.end : Number(r.endB)
+  return r
+}
+/** все стыки плит: торец B упирается в пласть A */
+function findJoins(parts) {
   const cand = parts.filter(sp => sp.kind === 'sheet' && !NO_JOINT_ROLES.has(sp.role) && sp.place.T >= 10)
+  const out = []
   for (const A of cand) {
-    const fa = frame(A.place.m)
-    const k = axisOf(fa.ez)                       // ось толщины A в сцене
-    const a = A.place.aabb
-    const TA = a[k + 3] - a[k]
-    const joins = []
+    const k = axisOf(frame(A.place.m).ez), a = A.place.aabb
     for (const B of cand) {
       if (B === A) continue
       const b = B.place.aabb
       const kb = axisOf(frame(B.place.m).ez)
-      if (kb === k) continue                      // пласть к пласти — не наш стык
+      if (kb === k) continue
       let side = 0
-      if (Math.abs(b[k] - a[k + 3]) <= EPS) side = +1          // B стоит на пласти A со стороны +k
+      if (Math.abs(b[k] - a[k + 3]) <= EPS) side = +1
       else if (Math.abs(b[k + 3] - a[k]) <= EPS) side = -1
       if (!side) continue
       const m = 3 - k - kb
       const o0 = Math.max(a[kb], b[kb]), o1 = Math.min(a[kb + 3], b[kb + 3])
       const m0 = Math.max(a[m], b[m]), m1 = Math.min(a[m + 3], b[m + 3])
       if (o1 - o0 < 6 || m1 - m0 < 40) continue
-      joins.push({ B, kb, side, m, o0, o1, m0, m1 })
+      out.push({ A, B, k, kb, side, m, o0, o1, m0, m1 })
     }
+  }
+  return out
+}
+const pairKey = (A, B) => `${A.key}|${B.key}`
+/** какая схема у стыка: своя у стыка (item.jointPair) -> у детали A -> у детали B -> проекта */
+export function jointSchemeOf(A, B, scheme0) {
+  const own = A.item === B.item ? (A.jointPair?.[pairKey(A, B)] || A.jointPair?.[pairKey(B, A)]) : null
+  return own || A.joint || B.joint || scheme0
+}
+/** стыки одной детали (для карточки детали): [{ key, other, len, scheme, own }] */
+export function partJoints(parts, pid, scheme0 = 'confirmat_dowel') {
+  return findJoins(parts).filter(j => j.A.pid === pid || j.B.pid === pid).map(j => {
+    const other = j.A.pid === pid ? j.B : j.A
+    const own = j.A.item === j.B.item ? (j.A.jointPair?.[pairKey(j.A, j.B)] || j.A.jointPair?.[pairKey(j.B, j.A)]) : null
+    return { key: pairKey(j.A, j.B), other, len: Math.round(j.m1 - j.m0), scheme: jointSchemeOf(j.A, j.B, scheme0), own: own || null, sameItem: j.A.item === j.B.item }
+  })
+}
+
+/** Стыки и отверстия от них: [{ pid, p: [x,y,z] вход, n: [dx,dy,dz] внутрь детали, d, depth, note }] */
+export function jointHoles(parts, scheme0 = 'confirmat_dowel', customs = {}) {
+  const out = []
+  const all = findJoins(parts)
+  const byA = new Map()
+  for (const j of all) { if (!byA.has(j.A)) byA.set(j.A, []); byA.get(j.A).push(j) }
+  for (const [A, joins] of byA) {
+    const k = joins[0].k
+    const a = A.place.aabb
+    const TA = a[k + 3] - a[k]
     // детали с двух сторон одной пласти напротив друг друга (полки по обе стороны стойки) — крепёж второй стороны
     // сдвигаем, чтобы сквозной конфирмат и шканты не попали в одно место
     const facing = j => joins.some(o => o.side !== j.side && o.kb === j.kb && Math.min(o.o1, j.o1) - Math.max(o.o0, j.o0) > 0 && Math.min(o.m1, j.m1) - Math.max(o.m0, j.m0) > 0)
     for (const { B, kb, side, m, o0, o1, m0, m1 } of joins) {
-      // своя схема у детали (например, столешница на минификсах — без сквозных отверстий): A, затем B, иначе — проекта
-      const scheme = A.joint || B.joint || scheme0
-      if (scheme === 'none') continue
+      // схема стыка: своя у стыка, у детали (например, столешница на минификсах — без сквозных отверстий), иначе — проекта
+      const R = schemeRules(jointSchemeOf(A, B, scheme0), customs)
+      if (R.fast === 'none') continue
       const shifted = side < 0 && facing({ kb, side, o0, o1, m0, m1 })
       const c = (o0 + o1) / 2                      // середина торца B
       const face = side > 0 ? a[k + 3] : a[k]       // общая плоскость стыка
@@ -76,10 +112,12 @@ export function jointHoles(parts, scheme0 = 'confirmat_dowel') {
       const back = AXV[k].map(v => -v * side)
       const at = (kv, mv) => { const p = [0, 0, 0]; p[k] = kv; p[kb] = c; p[m] = mv; return p.map(r1) }
       const len = m1 - m0
-      const ss = spots(len, shifted ? 100 : 50)
-      const conf = scheme === 'confirmat' || scheme === 'confirmat_dowel'
-      const mfx = scheme === 'minifix' || scheme === 'minifix_dowel'
-      const dow = scheme === 'dowel' || ((scheme === 'confirmat_dowel' || scheme === 'minifix_dowel') && len >= 200)
+      const sh = shifted ? 50 : 0
+      const ss = spots(len, Number(R.end) + sh, Number(R.endB) + sh, Number(R.step))
+      const conf = R.fast === 'confirmat'
+      const mfx = R.fast === 'minifix'
+      const dowelOnly = R.fast === 'dowel'
+      const dow = dowelOnly || (R.dowel && len >= Number(R.dowelMin))
       const b = B.place.aabb, TB = b[kb + 3] - b[kb]
       ss.forEach((s, i) => {
         const mv = m0 + s
@@ -98,7 +136,8 @@ export function jointHoles(parts, scheme0 = 'confirmat_dowel') {
         }
         if (dow) {
           // шкант — на 32 мм от конфирмата внутрь стыка (без конфирмата — на месте конфирмата)
-          const dm = scheme === 'dowel' ? mv : mv + (i === ss.length - 1 ? -32 : 32)
+          const shf = Number(R.shift) || 32
+          const dm = dowelOnly ? mv : mv + (i === ss.length - 1 ? -shf : shf)
           if (dm < m0 + 20 || dm > m1 - 20) return
           out.push({ pid: A.pid, p: at(face, dm), n: back, d: 8, depth: r1(Math.min(12, TA - 4)), note: 'Шкант' })
           out.push({ pid: B.pid, p: at(face, dm), n: into, d: 8, depth: 20, note: 'Шкант' })
@@ -156,8 +195,8 @@ export function holeToDrilling(sp, h) {
 }
 
 /** Вся присадка проекта: Map pid -> [присадка детали], и список отверстий сцены для показа в 3D */
-export function projectDrillings(parts, scheme, extraHoles = []) {
-  const all = [...jointHoles(parts, scheme), ...attachHoles(parts, extraHoles)]
+export function projectDrillings(parts, scheme, extraHoles = [], customs = {}) {
+  const all = [...jointHoles(parts, scheme, customs), ...attachHoles(parts, extraHoles)]
   const byPid = new Map(parts.map(sp => [sp.pid, sp]))
   const map = new Map()
   const seen = new Set()
