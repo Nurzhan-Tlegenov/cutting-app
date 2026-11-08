@@ -31,7 +31,7 @@
  */
 import { getDrillPoints, getGrooveRects } from './drillGeometry'
 import { edgeGrooveGeom, isEdgePocket, roundRect } from './edgeGrooves'
-import { bandPolygon, bandElements } from './pathBand'
+import { bandPolygon, bandElements, flatOf, closedOffset } from './pathBand'
 import { rawDetail, parseEdgeTypes, edgeKey, thickFromName } from './edgeCut'
 import { detailMeta } from './partLabel'
 import { toLatin, folderName } from './orderUtils'
@@ -452,6 +452,18 @@ function millPaths(raw, c, W, H, T, fr, set = {}) {
   // 3) фрезеровка фасада из импорта (выборки и профильные траектории)
   ;(c.decor || []).forEach(dc => {
     const face = dc.face === 'back' ? fr.bottom : fr.top
+    // паз-рамка по ЗАМКНУТОЙ траектории с плоским дном: витки вдоль петли по середине паза (ToolOffset 中);
+    // паз шире фрезы — витки добавляются, когда известен инструмент (ниже, ring)
+    const fl = flatOf(dc)
+    if (fl?.closed) {
+      const mid = closedOffset(dc.path, (fl.lo + fl.hi) / 2)
+      let els = mid ? loopToMachine(mid, fr) : []
+      if (els.length > 2) {
+        if (loopArea(els) > 0) els = reverseEls(els)
+        out.push({ ...closedPath(els, { face, depth: Math.min(n0(dc.depth), T), pocket: false, offset: '中', cat: 'groovePath' }), width: fl.hi - fl.lo, name: dc.sign || dc.name, ring: { path: dc.path, lo: fl.lo, hi: fl.hi } })
+      }
+      return
+    }
     // паз по траектории с плоским дном (Базис: отрезки и дуги, незамкнутый) — замкнутый контур полосы с выборкой внутри:
     // станок держит фрезу внутри при любом её диаметре. Контур — точно как в модели, ничего не дорисовываем.
     if (dc.flat && !dc.closed && Array.isArray(dc.path) && dc.path.length > 1 && n0(dc.depth) > 0) {
@@ -870,7 +882,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   const MILL_WHAT = { edge: 'фигурный край', cutout: 'вырез', pocket: 'выемка' }
   mills.forEach(m => {
     if (m.cat === 'decor') { m.tool = null; return }
-    if (m.cat === 'groovePath') { m.tool = toolOf('groove', m.width, m.depth, `паз по траектории ${r1(m.width)} × ${r1(m.depth)}`); return }
+    if (m.cat === 'groovePath') { m.tool = toolOf('groove', m.width, m.depth, `паз по ${m.ring ? 'замкнутой ' : ''}траектории ${r1(m.width)} × ${r1(m.depth)}`); return }
     if (m.cat !== 'pocket') { m.tool = toolOf(m.cat, 0, 0, MILL_WHAT[m.cat]); return }
     const size = m.poly ? pocketSize(m.poly) : null
     m.tool = toolOf('pocket', size?.min || 0, m.depth, `выемка ${size ? size.text + ' × ' : 'глубиной '}${r1(m.depth)}`, size)
@@ -885,6 +897,24 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     if (!sp) { warnings.push(`выемка ${size?.text || ''}: ${isConvex(m.poly) ? 'фреза больше выемки' : 'контур не выпуклый'} — выборку строит станок`); return }
     Object.assign(m, { start: sp.start, segs: sp.segs, closed: false, pocket: false, offset: '中' })
   })
+  // паз-рамка шире фрезы: витки по петле от края к краю (каждый — по середине фрезы, ToolOffset 中)
+  for (let i = mills.length - 1; i >= 0; i--) {
+    const m = mills[i]
+    if (!m.ring) continue
+    const D = n0(m.tool?.d), wdt = m.ring.hi - m.ring.lo
+    if (!(D > 0) || wdt <= D + 0.3) continue
+    if (D < 0.5) continue
+    const a = m.ring.lo + D / 2, b = m.ring.hi - D / 2, st = Math.max(0.5, D * 0.5), n = Math.max(1, Math.ceil((b - a) / st - 1e-9))
+    const extra = []
+    for (let k = 0; k <= n; k++) {
+      const L = closedOffset(m.ring.path, a + (b - a) * k / n)
+      let els = L ? loopToMachine(L, fr) : []
+      if (els.length < 3) continue
+      if (loopArea(els) > 0) els = reverseEls(els)
+      extra.push({ ...m, start: els[0].a, segs: els.map(e => ({ to: e.b, angle: e.angle })), closed: true })
+    }
+    if (extra.length) mills.splice(i, 1, ...extra)
+  }
   mills.forEach(m => { if ((m.cat === 'cutout' || m.cat === 'edge') && !m.notch) layers.push({ key: m.cat, cat: m.cat }) })
   b6Warn.forEach(w => warnings.push(w))
   const ops = top.length + bottom.length + edge.length + grooves.length + edgeGrooves.length + edgeMills.length + mills.length

@@ -513,7 +513,8 @@ function basisSrc(panel) {
     const open = tl ? null : chainOpen(traj)
     const path = tl ? tl.fine : open
     // паз с плоским дном (прямоугольный профиль) по незамкнутой траектории — его можно фрезеровать: ширина u0…u1
-    const flat = !tl && open && rectProfile && top !== bottom ? { lo: r2(u0), hi: r2(u1) } : null
+    // по замкнутой траектории (рамка) с прямоугольным профилем — тоже паз (полоса-кольцо)
+    const flat = (tl || open) && rectProfile && top !== bottom ? { lo: r2(u0), hi: r2(u1) } : null
     const polys = round ? []
       : open ? [bandPolygon(open, u0, u1)].filter(Boolean)
       : lines.map(l => band(l.a, l.b, u0, u1)).filter(Boolean)

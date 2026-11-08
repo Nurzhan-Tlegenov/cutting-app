@@ -8,6 +8,7 @@
 // Какой угол детали прижать к упору, показывает тёмный уголок на бирке (backMarkCorner): бирка на лицевой стороне,
 // после переворота этот угол бирки — у упора.
 import { mirrorContour } from './mirrorDetail'
+import { flatOf } from './pathBand'
 import { placedTurns } from './partHoles'
 import { rotatePointTimes } from './drillGeometry'
 import { roughShapePolygons } from './trueShapeNesting'
@@ -37,8 +38,8 @@ function backContour(c, T, o) {
   }) : []
   const grooves = o.grooves ? (c.grooves || []).map(g => ({ ...g, face: swap(g.face || 'front') })) : []
   const holes = (c.holes || []).filter(h => (h.type === 'pocket' ? o.pockets : o.contour)).map(h => (h.type === 'pocket' ? { ...h, face: swap(h.face || 'front') } : h))
-  // паз по траектории с плоским дном (Базис) — как обычный паз; прочая фрезеровка «для вида» не выводится
-  const decor = o.grooves ? (c.decor || []).filter(dc => dc.flat && !dc.closed && Array.isArray(dc.path)).map(dc => ({ ...dc, face: swap(dc.face || 'front') })) : []
+  // паз по траектории с плоским дном (Базис; и по замкнутой — рамка) — как обычный паз; прочая фрезеровка «для вида» не выводится
+  const decor = o.grooves ? (c.decor || []).filter(dc => flatOf(dc)).map(dc => ({ ...dc, face: swap(dc.face || 'front') })) : []
   return { ...c, drillings, grooves, holes, edgeGrooves: [], decor }
 }
 // mirrorContour траекторию паза не отражает: x -> W − x и путь в обратную сторону (левый край полосы остаётся левым)

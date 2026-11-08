@@ -174,3 +174,38 @@ export function bandElements(path, lo, hi, ext0 = 0, ext1 = 0) {
   const left = joinSide(L), right = joinSide(R.reverse().map(rev))
   return [...left, { a: left[left.length - 1].b, b: right[0].a }, ...right, { a: right[right.length - 1].b, b: left[0].a }]
 }
+
+// ── Паз по ЗАМКНУТОЙ траектории (Базис: рамка 4 мм по прямоугольнику и т. п.) ──
+
+/**
+ * Паз с плоским дном у фрезеровки из импорта -> { lo, hi, closed } или null.
+ * dc.flat — уже распознан при импорте; иначе замкнутая траектория с прямоугольным профилем от пласти
+ * (profile: [смещение от траектории, глубина от пласти], 4 точки) — тоже паз (раньше такие шли только «для вида»).
+ */
+export function flatOf(dc) {
+  if (!dc || !Array.isArray(dc.path) || dc.path.length < 2 || !(Number(dc.depth) > 0)) return null
+  if (dc.flat) return { lo: Math.min(Number(dc.flat.lo) || 0, Number(dc.flat.hi) || 0), hi: Math.max(Number(dc.flat.lo) || 0, Number(dc.flat.hi) || 0), closed: !!dc.closed }
+  if (!dc.closed || !Array.isArray(dc.profile) || dc.profile.length !== 4 || dc.path.length < 3) return null
+  const us = [...new Set(dc.profile.map(q => Math.round(Number(q?.[0]) * 100) / 100))]
+  const ds = [...new Set(dc.profile.map(q => Math.round(Number(q?.[1]) * 100) / 100))]
+  if (us.length !== 2 || ds.length !== 2 || us.some(Number.isNaN) || Math.min(...ds) > 0.05) return null
+  // прямоугольник: каждая точка — сочетание одного из двух смещений и одной из двух глубин
+  const keys = new Set(dc.profile.map(q => `${Math.round(Number(q[0]) * 100) / 100}|${Math.round(Number(q[1]) * 100) / 100}`))
+  if (keys.size !== 4) return null
+  return { lo: Math.min(...us), hi: Math.max(...us), closed: true }
+}
+
+/** Замкнутая ломаная, смещённая на off по левой нормали хода (углы — митра, не длиннее 4×). Первая точка не повторяется. */
+export function closedOffset(path, off) {
+  const P = cleanPath(path)
+  if (P.length > 2 && D2(P[0], P[P.length - 1]) < 0.01) P.pop()
+  const n = P.length
+  if (n < 3) return null
+  const nrm = i => { const a = P[i], b = P[(i + 1) % n]; const t = unit(b[0] - a[0], b[1] - a[1]); return [-t[1], t[0]] }
+  return P.map((p, i) => {
+    const a = nrm((i - 1 + n) % n), b = nrm(i)
+    const m = unit(a[0] + b[0], a[1] + b[1]), c = m[0] * a[0] + m[1] * a[1]
+    const k = off / Math.max(0.25, c)
+    return [p[0] + m[0] * k, p[1] + m[1] * k]
+  })
+}

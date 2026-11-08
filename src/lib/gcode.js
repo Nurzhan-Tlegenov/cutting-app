@@ -15,7 +15,7 @@
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeometry'
 import { detailHoles, placedTurns } from './partHoles'
 import { smoothLoop, arcRuns } from './arcFit'
-import { bandPolygon, extendEnd } from './pathBand'
+import { bandPolygon, extendEnd, flatOf, closedOffset } from './pathBand'
 import { postView } from './postTools'
 import { scoreLines } from './scoreWaste'
 import { cornerShift, cornerOf, cornerLabel } from './sheetCorner'
@@ -126,9 +126,20 @@ export function partFeatures(p, detail, T, skip = null) {
   // Паз по траектории с плоским дном (Базис: незамкнутая цепочка отрезков и дуг, ширина lo…hi от траектории) —
   // выбирается как выемка по форме полосы. Конец траектории на краю детали — паз выходит наружу.
   if (!sk.grooves) (contour.decor || []).forEach(dc => {
-    if (!(dc.flat && !dc.closed && Array.isArray(dc.path) && dc.path.length > 1 && Number(dc.depth) > 0)) return
+    const fl = flatOf(dc)
+    if (!fl) return
     if (dc.face === 'back') { f.skipped.back++; return }
-    const path = dc.path.map(([x, y]) => at(x, y)), lo = Number(dc.flat.lo) || 0, hi = Number(dc.flat.hi) || 0
+    const path = dc.path.map(([x, y]) => at(x, y)), lo = fl.lo, hi = fl.hi
+    // замкнутая траектория (рамка): полоса — кольцо между двумя смещёнными петлями; концов нет
+    if (fl.closed) {
+      const outerL = closedOffset(path, lo), innerL = closedOffset(path, hi)
+      if (!outerL || !innerL || hi - lo < 0.1) return
+      const bb = bboxOf([...outerL, ...innerL])
+      let len = 0
+      for (let i = 0; i < path.length; i++) { const a = path[i], b = path[(i + 1) % path.length]; len += Math.hypot(b[0] - a[0], b[1] - a[1]) }
+      f.grooves.push({ ...bb, open: open(bb), depth: Math.min(Number(dc.depth), T), width: hi - lo, pts: outerL, path, lo, hi, ends: [false, false], len, closed: true })
+      return
+    }
     const band = bandPolygon(path, Math.min(lo, hi), Math.max(lo, hi))
     if (!band || Math.abs(hi - lo) < 0.1) return
     const bb = bboxOf(band)
@@ -1050,6 +1061,16 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
         edgeOk(k.t, k.depth >= T - EPS ? T + millOver : k.depth, k.label)
         const zs = levels(T, k.depth >= T - EPS ? -millOver : T - k.depth, n0(k.t.maxPass))
         let Q
+        if (k.path && k.closed) {                      // паз-рамка по замкнутой траектории: витки вдоль петли, от края к краю
+          if (k.width < dt - 0.3) { warn.add(`Фреза Ø${num(dt)} шире, чем ${k.label} — пропущено.`); continue }
+          const a = k.lo + r, b = k.hi - r
+          const offs = k.width <= dt + 0.3 ? [(k.lo + k.hi) / 2]
+            : (() => { const st = Math.max(0.5, Math.min(n0(k.t.step) > 0 ? n0(k.t.step) : r, 2 * r * 0.7)), n = Math.max(1, Math.ceil((b - a) / st - 1e-9)); return Array.from({ length: n + 1 }, (_, i) => a + (b - a) * i / n) })()
+          const loops = offs.map(o => closedOffset(k.path, o)).filter(Boolean).map(L => { const M = L.map(G); return [...M, M[0]] })
+          if (!loops.length) { warn.add(`Не удалось построить ${k.label} по замкнутой траектории — пропущено.`); continue }
+          loops.forEach(line => jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: line[0], run: out => cutOpen(out, line, zs, k.t, safeZ, T, k.op) }))
+          continue
+        }
         if (k.path) {
           let P = k.path
           if (k.ends[0]) P = extendEnd(P, 0, r)        // паз выходит на край детали — фреза доходит до самого края
