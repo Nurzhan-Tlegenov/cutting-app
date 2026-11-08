@@ -8,7 +8,6 @@ import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useM
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
-import BottomNav from '../components/BottomNav'
 import Hint from '../components/Hint'
 import CadView from '../components/CadView'
 import Model3DButton from '../components/Model3DButton'
@@ -877,7 +876,7 @@ export default function ConstructorPage() {
   if (allowed === null) return <div className="page"><CncLoader label="Открываем конструктор…" /></div>
   if (!allowed) return (
     <div className="page"><div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Конструктор</h1></div>
-      <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Конструктор мебели сейчас в бета-тесте. Доступ выдаёт мастер-аккаунт.</p><BottomNav /></div>
+      <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Конструктор мебели сейчас в бета-тесте. Доступ выдаёт мастер-аккаунт.</p></div>
   )
 
   // ── список проектов ──
@@ -901,11 +900,10 @@ export default function ConstructorPage() {
         ))}
         {!list.length && <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Проектов пока нет.</p>}
       </>}
-      <BottomNav />
     </div>
   )
 
-  if (!project) return <div className="page">{error ? <p className="error-text">{error}</p> : <CncLoader label="Открываем проект…" />}<BottomNav /></div>
+  if (!project) return <div className="page">{error ? <p className="error-text">{error}</p> : <CncLoader label="Открываем проект…" />}</div>
 
   const info = selItem ? (() => {
     const own = parts.filter(p => p.item.id === selItem.id)
@@ -992,13 +990,13 @@ export default function ConstructorPage() {
   </FoldCtx.Provider>)
 
   const head = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: desk || land ? '6px 10px' : '4px 0 8px', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: desk ? 6 : 4, padding: desk || land ? '6px 10px' : '4px 0 6px', flexWrap: desk ? 'wrap' : 'nowrap', flex: '0 0 auto' }}>
       <MenuButton />
-      <button type="button" onClick={() => { flush(); navigate('/constructor') }} style={{ border: 'none', background: 'none', color: 'var(--blue)', fontSize: 13, cursor: 'pointer', padding: 0 }}>‹ Проекты</button>
-      <input value={project.name} onChange={e => setProject({ ...project, name: e.target.value })} style={{ ...inp, flex: 1, minWidth: 120, fontWeight: 500, border: '0.5px solid transparent', background: 'transparent' }} />
-      <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{status}</span>
-      {all3d && all3d.details.length > 0 && <Model3DButton details={all3d.details} title={project.name} getScene={async () => all3d.scene} label={desk ? "3D-просмотр" : "3D"} style={{ ...btnS(), width: 'auto' }} />}
-      <button type="button" style={btnS(true)} onClick={() => setToOrder(true)}>В заказ →</button>
+      <button type="button" title="Все проекты" onClick={() => { flush(); navigate('/constructor') }} style={{ border: 'none', background: 'none', color: 'var(--blue)', fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap' }}>{desk ? '‹ Проекты' : '‹'}</button>
+      <input value={project.name} onChange={e => setProject({ ...project, name: e.target.value })} style={{ ...inp, flex: 1, minWidth: desk ? 120 : 60, fontWeight: 500, border: '0.5px solid transparent', background: 'transparent', padding: '6px 4px' }} />
+      {desk && <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{status}</span>}
+      {all3d && all3d.details.length > 0 && <Model3DButton details={all3d.details} title={project.name} getScene={async () => all3d.scene} label={desk ? '3D-просмотр' : '3D'} style={{ ...btnS(), width: 'auto', padding: desk ? '8px 12px' : '7px 9px' }} />}
+      <button type="button" style={{ ...btnS(true), padding: desk ? '8px 12px' : '7px 10px' }} onClick={() => setToOrder(true)}>{desk ? 'В заказ →' : 'В заказ'}</button>
     </div>
   )
 
@@ -1024,8 +1022,8 @@ export default function ConstructorPage() {
       </div>
     )}
   </>)
-  // телефон боком: нижнее меню не показываем — вся высота под сцену и свойства (меню — кнопкой ☰)
-  const navH = desk ? 64 : 8
+  // нижнее меню в конструкторе не показываем — оно дублирует боковое (☰); вся высота — под картинку и карточку
+  const navH = 8
   if (desk || land) return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {head}
@@ -1034,22 +1032,21 @@ export default function ConstructorPage() {
         <div style={{ flex: desk ? '0 0 420px' : '0 0 45%', minWidth: 0, overflowY: 'auto', paddingRight: 2 }}>{panel}</div>
       </div>
       {dialog}
-      {desk && <BottomNav />}
     </div>
   )
   // телефон вертикально: экран делится на картинку и карточку параметров, между ними — ползунок (как у симуляции и карт раскроя);
   // карточка прокручивается сама, картинка стоит на месте; высота картинки запоминается за аккаунтом
-  const viewH = splitPx > 0 ? splitPx : Math.round(window.innerHeight * (selCab ? 0.5 : 0.42))
+  const viewH = splitPx > 0 ? splitPx : Math.round(window.innerHeight * (selCab ? 0.5 : 0.45))
   const startSplit = e => {
     e.preventDefault()
     const y0 = e.clientY, h0 = viewH
     let last = h0
-    const mv = ev => { last = Math.max(160, Math.min(window.innerHeight - 220, h0 + ev.clientY - y0)); setSplitPx(last) }
+    const mv = ev => { last = Math.max(160, Math.min(window.innerHeight - 160, h0 + ev.clientY - y0)); setSplitPx(last) }
     const upFn = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', upFn); saveUserSettings({ cadSplit: last }, user) }
     window.addEventListener('pointermove', mv); window.addEventListener('pointerup', upFn)
   }
   return (
-    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 12px', paddingBottom: 64, boxSizing: 'border-box' }}>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 12px', paddingBottom: 'env(safe-area-inset-bottom)', boxSizing: 'border-box' }}>
       {head}
       <div style={{ height: viewH, flex: '0 0 auto' }}>{view}</div>
       <div onPointerDown={startSplit} style={{ flex: '0 0 auto', height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', cursor: 'row-resize' }}>
@@ -1057,7 +1054,6 @@ export default function ConstructorPage() {
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 12 }}>{panel}</div>
       {dialog}
-      <BottomNav />
     </div>
   )
 }
