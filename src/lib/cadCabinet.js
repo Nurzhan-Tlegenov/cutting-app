@@ -701,7 +701,7 @@ export function cabinetParts(params) {
           } else for (const x of [bxa + t / 2, bxb - t / 2]) for (const yy of [sy0 + bh * 0.25, sy0 + bh * 0.75]) fixPts.push([x, yy])
           parts.push(mk(k + 'b', 'Ящик: задняя', 'ящик', [bxa + t, sy0 + (under ? rec + t : 0), z0, bxb - t, sy0 + bh, z0 + t], 2, +1, 0, mat, { edges: bE }))
           if (under) {
-            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t, sy0 + rec, z0, bxb - t, sy0 + rec + t, ffOn ? zf - t : D], 1, +1, 0, mat, { edges: { '-z': eB } }))
+            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t, sy0 + rec, z0, bxb - t, sy0 + rec + t, ffOn ? zf - t : D], 1, +1, 0, mat))
             // отверстия под задние крючки направляющих: в торце дна сзади, Ø6×10, 7 мм от боковины, 11 мм от низа дна
             for (const x of [bxa + t + 7, bxb - t - 7]) holes.push({ p: [x, sy0 + rec + 11, z0], n: '+z', d: 6, depth: 10, note: 'Крючок направляющей', key: k + 'bot' })
           } else if (grooveBot) {

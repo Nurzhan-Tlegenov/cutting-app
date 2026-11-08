@@ -24,7 +24,7 @@ const pr = newProject('Шкаф')
 pr.items.push(newItem('cabinet', { p: { shelves: 2, doors: 2 } }))
 const g = exportForOrder(pr, sheetGroups(pr)[0].key)
 const side = g.items.find(x => x.name === 'Боковина левая'), shelf = g.items.find(x => x.name === 'Горизонтальная панель'), back = projectParts(pr).parts.find(x => x.key === 'back')
-ok(side.w === 2100 && side.h === 560, `side ${side.w}x${side.h}`)
+ok(side.w === 2100 && side.h === 561 && side.contour.edgeTrim, `side ${side.w}x${side.h} (кромка 1 спереди — наружу, в раскрой подрезка)`)
 ok(shelf.h === 768 || shelf.w === 768, `shelf ${shelf.w}x${shelf.h}`)
 ok(side.contour.grooves.length === 1, 'groove on side')
 ok(side.edges.left === '1' || side.edges.right === '1', 'front edge on side ' + JSON.stringify(side.edges))
@@ -132,7 +132,7 @@ for (const rot of [0, 90, 180, 270]) {
   ok(door && door.place.aabb[0] === 1.5 && door.place.aabb[3] === 622.5, 'door overlap ' + door?.place.aabb)
   ok(door.place.aabb[4] === 2100 - 16 - 1.5, 'door under overlay top ' + door.place.aabb[4])
   const top = parts.find(p => p.name === 'Крышка')
-  ok(top.place.aabb[5] === 560 + 16 + 20 && top.place.aabb[0] === -10 && top.place.aabb[3] === 2010, 'overhang ' + top.place.aabb)
+  ok(top.place.aabb[5] === 560 + 16 + 20 + 1 && top.place.aabb[0] === -11 && top.place.aabb[3] === 2011, 'overhang + edge ' + top.place.aabb)
   ok(parts.filter(p => p.name === 'Горизонтальная панель').length === 2 && parts.filter(p => p.name === 'Фасад ящика').length === 2, 'shelves + drawers')
   ok(openings.length === 6, 'openings ' + openings.length)
   const right = openings.find(o => o.id === R.id)
@@ -181,13 +181,13 @@ for (const rot of [0, 90, 180, 270]) {
   const rails = parts.filter(p => p.name.startsWith('Царга'))
   ok(rails.length === 3, 'rails ' + rails.map(r => r.name))
   const tr = rails.find(r => r.name === 'Царга передняя')
-  ok(tr.place.aabb[4] === 900 - 50 && tr.place.aabb[0] === 0, 'top rail pos ' + tr.place.aabb)
+  ok(tr.place.aabb[4] === 900 - 50 && tr.place.aabb[0] === -1, 'top rail pos (+ кромка торца) ' + tr.place.aabb)
   ok(rails.find(r => r.name === 'Царга нижняя задняя').place.aabb[1] === 100, 'bottom rail offset')
   const it2 = newItem('cabinet', { p: { topDown: 20, topFront: -10, bottomUp: 30, bottomFront: 15, sideFront: 5 } })
   const pp = projectParts({ items: [it2] }).parts
   const top = pp.find(p => p.name === 'Крышка'), bot = pp.find(p => p.name === 'Дно'), side = pp.find(p => p.name === 'Боковина правая')
-  ok(top.place.aabb[4] === 2100 - 20 && top.place.aabb[5] === 570, 'inset top offsets ' + top.place.aabb)
-  ok(bot.place.aabb[1] === 30 && bot.place.aabb[5] === 545 && side.place.aabb[5] === 555, 'bottom/side offsets')
+  ok(top.place.aabb[4] === 2100 - 20 && top.place.aabb[5] === 571, 'inset top offsets ' + top.place.aabb)
+  ok(bot.place.aabb[1] === 30 && bot.place.aabb[5] === 546 && side.place.aabb[5] === 556, 'bottom/side offsets')
 }
 // торцевой шкаф: нет правой боковины, справа проём 300 с фронтальной панелью у зада, в нём скруглённые полки R150
 {
@@ -238,7 +238,7 @@ for (const rot of [0, 90, 180, 270]) {
   ok(sh.length === 2 && sh.find(p => p.key === 'sh_h0').name.includes('съёмная') && !sh.find(p => p.key === 'sh_h1').name.includes('съёмная'), 'one loose shelf')
   ok(sh.every(p => p.blk?.n === 'a' && p.blk.t === 'split'), 'shelf blk')
   const sh1 = sh.find(p => p.key === 'sh_h1')
-  ok(Math.abs(sh1.place.aabb[3] - (div.place.aabb[0] - 30)) < 0.01 && sh1.edges['+x'], 'shelf set from right 30 + edge ' + sh1.place.aabb)
+  ok(Math.abs(sh1.place.aabb[3] - (div.place.aabb[0] - 30 + 1)) < 0.01 && sh1.edges['+x'], 'shelf set from right 30 + edge ' + sh1.place.aabb)
   const t2 = opRemovePanel(root, 'a', 'h0')
   ok(t2.children[0].children.length === 2 && !t2.children[0].pan?.h0, 'remove one panel')
   ok(opCount(root, 'a', 4).children[0].children.length === 5, 'count 4')
@@ -364,6 +364,19 @@ for (const rot of [0, 90, 180, 270]) {
   ok(r.hinges[1].y === r.hinges[1].base - 64 && !r.hinges[1].hit, 'manual shift -64')
   const cup = r.holes.filter(h => h.note === 'Петля (чашка)')
   ok(cup.length === 3 && cup.some(h => Math.abs(h.p[1] - r.hinges[1].y) < 0.01), 'cup follows shift')
+}
+
+// кромка: каркас — наружу (накладная крышка 800 + кромка 1 с боков = 802, в раскрой 800), фасад — внутри (400 → в раскрой 398)
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const { sideDeltas } = await import('../../src/lib/edgeCut.js').catch(() => ({}))
+  const it = newItem('cabinet', { p: { W: 800, H: 720, D: 560, top: 'overlay', edgeFront: '1', edgeFacade: '1', tree: newNode({ id: 'root', front: { type: 'doors', n: 1 } }) } })
+  const det = exportAll({ items: [it] }).details
+  const top = det.find(d => d.name === 'Крышка'), door = det.find(d => d.role === 'фасад' || /Дверь/.test(d.name))
+  ok(Math.max(top.w, top.h) === 802, 'overlay top finished 802 ' + top.w + 'x' + top.h + ' ' + JSON.stringify(top.edges))
+  ok(top.contour.edgeTrim && Object.values(top.contour.edgeTrim).every(Boolean), 'top trimmed in cutting')
+  ok(door.contour.edgeTrim && ['left', 'right', 'top', 'bottom'].every(s => door.contour.edgeTrim[s]), 'facade trimmed all round')
+  if (sideDeltas) { const d = sideDeltas(door.edges, {}, door.contour.edgeTrim, door.contour); ok(d && d.l === 1 && d.r === 1 && d.t === 1 && d.b === 1, 'facade -1 each side ' + JSON.stringify(d)) }
 }
 
 // фасады МДФ — без кромки

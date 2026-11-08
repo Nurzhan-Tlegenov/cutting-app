@@ -155,11 +155,10 @@ export function attachHoles(parts, holes) {
     const n = Array.isArray(h.n) ? h.n : dirVec(h.n)
     const ax = axisOf(n), sg = n[ax]
     const own = parts.filter(sp => sp.kind === 'sheet' && (!h.item || sp.item.id === h.item) && (!h.key || sp.key === h.key))
-    const hit = own.find(sp => {
-      const b = sp.place.aabb
-      if (Math.abs((sg > 0 ? b[ax] : b[ax + 3]) - h.p[ax]) > EPS) return false
-      return [0, 1, 2].every(i => i === ax || (h.p[i] >= b[i] - 0.01 && h.p[i] <= b[i + 3] + 0.01))
-    })
+    const inside = (sp, b) => [0, 1, 2].every(i => i === ax || (h.p[i] >= b[i] - 0.01 && h.p[i] <= b[i + 3] + 0.01))
+    // точно на грани; не нашлось — у детали, выросшей на кромку (кромка каркаса наружу), грань дальше на её толщину
+    const hit = own.find(sp => { const b = sp.place.aabb; return Math.abs((sg > 0 ? b[ax] : b[ax + 3]) - h.p[ax]) <= EPS && inside(sp, b) })
+      || own.find(sp => { if (!sp.grown) return false; const b = sp.place.aabb, d = sg > 0 ? h.p[ax] - b[ax] : b[ax + 3] - h.p[ax]; return d >= -EPS && d <= 2.6 && inside(sp, b) })
     if (hit) out.push({ ...h, n, pid: hit.pid })
   }
   return out

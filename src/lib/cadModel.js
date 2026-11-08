@@ -9,6 +9,7 @@
 import { cabinetParts, CAB_DEFAULTS } from './cadCabinet.js'
 import { frameParts, FRAME_DEFAULTS } from './cadFrame.js'
 import { projectDrillings } from './cadDrill.js'
+import { thickFromName } from './edgeThick.js'
 import { linearCut, parseStocks } from './linearNest.js'
 
 export const CAD_VERSION = 1
@@ -158,11 +159,33 @@ export function placeRecord(rec, it) {
 }
 
 /** Весь проект -> плоский список деталей сцены (для 3D и спецификации) */
+/**
+ * Кромка каркаса — наружу: панель корпуса — это размер в раскрой, кромка добавляет свою толщину с кромленой стороны
+ * (накладная крышка 800 с кромкой 1 по бокам — готовая 802, выступает за корпус). Фасады — нет: их размер задан
+ * зазорами, кромка внутри (400 × 400 с кромкой по кругу — в раскрой 398 × 398). Толщина — из названия кромки, как в бланке.
+ * Детали с фигурным контуром или своей правкой (ov) не трогаем.
+ */
+export function growByEdge(rec, it) {
+  if (it?.type !== 'cabinet' || rec.kind !== 'sheet' || rec.role === 'фасад' || !rec.edges || rec.edges.all || rec.shape?.length > 2 || it.ov?.[rec.key]) return rec
+  const b = [...rec.box]
+  let ch = false
+  for (const [d, v] of Object.entries(rec.edges)) {
+    if (!v || !/^[+-][xyz]$/.test(d)) continue
+    const t = thickFromName(v)
+    if (!(t > 0)) continue
+    const a = 'xyz'.indexOf(d[1])
+    if (d[0] === '+') b[a + 3] += t; else b[a] -= t
+    ch = true
+  }
+  return ch ? { ...rec, box: b, grown: true } : rec
+}
+
 export function projectParts(project) {
   const out = [], hw = [], warn = [], holes = [], openings = []
   ;(project?.items || []).forEach((it, ii) => {
     const r = itemRecords(it)
-    r.parts.forEach(rec => {
+    r.parts.forEach(rec0 => {
+      const rec = growByEdge(rec0, it)
       const sp = { ...rec, item: it, ii, pid: `${it.id}:${rec.key}`, place: placeRecord(rec, it) }
       // свой материал (цвет / декор) у отдельной детали: item.mat[ключ]
       if (it.mat?.[rec.key]) sp.material = it.mat[rec.key]
@@ -255,7 +278,12 @@ export function partToDetail(sp, pos, drill = []) {
     vertices: ov?.vertices?.length > 2 ? ov.vertices : sp.shape?.length > 2 ? sp.shape : [{ x: 0, y: 0, r: 0 }, { x: W, y: 0, r: 0 }, { x: W, y: L, r: 0 }, { x: 0, y: L, r: 0 }],
     holes: ov?.holes || [], grooves: [...editorGrooves(sp, place), ...(ov?.grooves || [])], drillings: [...drill, ...(ov?.drillings || [])], layout: [], meta,
   }
-  return { name: sp.name, w: L, h: W, qty: 1, edges: ov?.edges || editorEdges(sp, place), material: sp.material, thickness: T, contour, rotatable: true }
+  const edges = ov?.edges || editorEdges(sp, place)
+  // в раскрой — меньше на кромку с каждой кромленой стороны (размер в заказе — готовая деталь)
+  const trim = {}
+  for (const s of ['left', 'right', 'bottom', 'top']) if (edges?.[s]) trim[s] = true
+  if (Object.keys(trim).length) contour.edgeTrim = trim
+  return { name: sp.name, w: L, h: W, qty: 1, edges, material: sp.material, thickness: T, contour, rotatable: true }
 }
 
 // погонный элемент / стекло / опора -> «деталь окружения» 3D-модели (scene.extras)
@@ -399,13 +427,15 @@ export function projectSpec(project) {
 export function explodeCabinet(it) {
   const { parts, holes = [] } = itemRecords(it)
   const R = rotYMat(it.rotY)
-  const sheets = parts.filter(r => r.kind === 'sheet' || r.kind === 'glass')
+  // готовые размеры — как в сцене (кромка каркаса наружу)
+  const sheets = parts.filter(r => r.kind === 'sheet' || r.kind === 'glass').map(r => growByEdge(r, it))
   // отверстия фурнитуры (петли, полкодержатели…) — к той панели, в которую входят, в её собственных координатах
   const own = new Map()
   for (const h of holes) {
     const ax = 'xyz'.indexOf(h.n[1]), plus = h.n[0] === '+'
-    const r = sheets.find(r => Math.abs((plus ? r.box[ax] : r.box[ax + 3]) - h.p[ax]) <= 0.2 &&
-      [0, 1, 2].every(i => i === ax || (h.p[i] >= r.box[i] - 0.01 && h.p[i] <= r.box[i + 3] + 0.01)))
+    const inn = r => [0, 1, 2].every(i => i === ax || (h.p[i] >= r.box[i] - 0.01 && h.p[i] <= r.box[i + 3] + 0.01))
+    const r = sheets.find(r => Math.abs((plus ? r.box[ax] : r.box[ax + 3]) - h.p[ax]) <= 0.2 && inn(r))
+      || sheets.find(r => { if (!r.grown) return false; const d = plus ? h.p[ax] - r.box[ax] : r.box[ax + 3] - h.p[ax]; return d >= -0.2 && d <= 2.6 && inn(r) })
     if (!r) continue
     if (!own.has(r)) own.set(r, [])
     const { key: _k, ...hh } = h   // eslint-disable-line no-unused-vars
