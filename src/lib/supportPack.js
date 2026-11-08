@@ -88,7 +88,7 @@ export async function buildSupportPack(cardId, onStep = () => {}) {
     '',
     '## Переписка',
     ...messages.flatMap(m => [
-      `### ${dt(m.created_at)} — ${m.staff ? `Поддержка (${m.staff_name})` : c.author}${m.kind === 'debug' ? ' · файл для отладки' : ''}`,
+      `### ${dt(m.created_at)} — ${m.staff ? (/^Поддержка/.test(m.staff_name || '') ? m.staff_name : `Поддержка (${m.staff_name})`) : c.author}${m.kind === 'debug' ? ' · файл для отладки' : ''}`,
       m.title ? `_${m.title}_` : '',
       m.body ? quote(m.body) : '',
       m.file_name ? `📎 ${m.file_name} → \`${fileOf[m.id] || '—'}\`` : '',

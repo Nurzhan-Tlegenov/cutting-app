@@ -148,7 +148,7 @@ export default function SupportCardPage() {
           <div key={m.id} style={{ alignSelf: m.staff ? 'flex-end' : 'flex-start', maxWidth: '88%', background: m.staff ? 'var(--teal-light)' : 'var(--bg)', border: m.staff ? 'none' : '0.5px solid var(--border)',
             borderRadius: 12, padding: '7px 10px', fontSize: 13 }}>
             <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 2 }}>
-              {m.staff ? `Поддержка · ${m.staff_name}` : c.author}{m.kind === 'debug' ? ' · файл для отладки' : ''} · {dt(m.created_at)}{m.staff && m.read_at ? ' · ✓✓' : ''}
+              {m.staff ? (/^Поддержка/.test(m.staff_name || '') ? m.staff_name : `Поддержка · ${m.staff_name}`) : c.author}{m.kind === 'debug' ? ' · файл для отладки' : ''} · {dt(m.created_at)}{m.staff && m.read_at ? ' · ✓✓' : ''}
             </div>
             {m.title && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{m.title}</div>}
             {m.body && <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</div>}
