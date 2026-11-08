@@ -373,6 +373,53 @@ function PartJoints({ parts, sp, project, setProject, customs }) {
   )
 }
 // свои схемы крепежа (за аккаунтом): какой крепёж, шканты рядом, отступы от концов (можно несимметрично), шаг, шкант от крепежа
+// свой составной крепёж: отверстия в двух деталях стыка (A — в чью пласть упирается, B — торцом в A)
+const HOLE_TYPES = [['A_through', 'В пласть A снаружи (сквозное, как конфирмат)'], ['A_blind', 'В пласть A со стороны стыка (глухое)'], ['B_edge', 'В торец B'], ['B_face', 'В пласть B (как эксцентрик)']]
+const HOLE_COLORS = ['#dc2626', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2']
+function FastenerPreview({ holes }) {
+  // разрез стыка: A — вертикальная деталь слева, B — горизонтальная, торцом в A (масштаб 2 px = 1 мм)
+  const k = 2, ax0 = 24, ax1 = ax0 + 16 * k, by = 70, bT = 16 * k
+  return (
+    <svg viewBox="0 0 300 150" style={{ width: '100%', maxWidth: 360, background: 'var(--bg2)', borderRadius: 8, margin: '4px 0 6px' }}>
+      <rect x={ax0} y={8} width={ax1 - ax0} height={134} fill="#d9cdb4" stroke="#8a7a5c" />
+      <rect x={ax1} y={by} width={250} height={bT} fill="#e8dcc2" stroke="#8a7a5c" />
+      <text x={ax0 + 2} y={20} fontSize="10" fill="#5b4b2c">A</text><text x={ax1 + 236} y={by - 4} fontSize="10" fill="#5b4b2c">B</text>
+      {holes.map((h, i) => {
+        const d = (Number(h.d) || 5) * k, dep = (Number(h.depth) || 0) * k, col = HOLE_COLORS[i % HOLE_COLORS.length], cy = by + bT / 2 + (Number(h.across) || 0) * k
+        const r = h.type === 'A_through' ? [ax0, cy - d / 2, dep > 0 ? Math.min(dep, ax1 - ax0) : ax1 - ax0, d]
+          : h.type === 'A_blind' ? [ax1 - Math.min(dep || 24, ax1 - ax0 - 2), cy - d / 2, Math.min(dep || 24, ax1 - ax0 - 2), d]
+            : h.type === 'B_edge' ? [ax1, cy - d / 2, dep || 40, d]
+              : [ax1 + (Number(h.inB) || 24) * k - d / 2, h.faceSide === 'outer' ? by + bT - Math.min(dep || 25, bT - 2) : by, d, Math.min(dep || 25, bT - 2)]
+        return <g key={h.id || i}><rect x={r[0]} y={r[1]} width={r[2]} height={r[3]} fill={col} fillOpacity="0.55" stroke={col} />
+          {Number(h.along) ? <text x={r[0] + r[2] + 2} y={r[1] + 8} fontSize="9" fill={col}>{(Number(h.along) > 0 ? '+' : '') + h.along}</text> : null}</g>
+      })}
+    </svg>
+  )
+}
+function FastenerHoles({ holes, onChange }) {
+  const upd = (i, patch) => onChange(holes.map((h, j) => (j === i ? { ...h, ...patch } : h)))
+  return (<>
+    <FastenerPreview holes={holes} />
+    {holes.map((h, i) => <div key={h.id || i} style={{ borderLeft: `3px solid ${HOLE_COLORS[i % HOLE_COLORS.length]}`, paddingLeft: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <b style={{ fontSize: 12.5, flex: 1 }}>Отверстие {i + 1}</b>
+        <button type="button" style={{ ...chipS(false), padding: '1px 8px' }} onClick={() => onChange([...holes.slice(0, i + 1), { ...h, id: Math.random().toString(36).slice(2, 7), along: (Number(h.along) || 0) + 32 }, ...holes.slice(i + 1)])} title="Ещё такое же через 32 мм">⧉ +32</button>
+        <button type="button" style={{ ...chipS(false), padding: '1px 8px', color: 'var(--danger)' }} onClick={() => onChange(holes.filter((_, j) => j !== i))}>✕</button>
+      </div>
+      <Chips value={h.type || 'B_edge'} onChange={v => upd(i, { type: v })} options={HOLE_TYPES} />
+      <Grid cols={3}>
+        <NumField label="Диаметр" value={h.d ?? 5} onChange={v => upd(i, { d: v })} min={1} />
+        <NumField label={h.type === 'A_through' ? 'Глубина (пусто — насквозь)' : 'Глубина'} value={h.depth ?? ''} onChange={v => upd(i, { depth: v })} min={0} />
+        <NumField label="Сдвиг вдоль стыка" value={h.along ?? 0} onChange={v => upd(i, { along: v })} />
+        {h.type === 'B_face' ? <NumField label="От торца B вглубь" value={h.inB ?? 24} onChange={v => upd(i, { inB: v })} min={0} />
+          : <NumField label="Поперёк (от середины торца B)" value={h.across ?? 0} onChange={v => upd(i, { across: v })} />}
+      </Grid>
+      {h.type === 'B_face' && <Chips value={h.faceSide || 'inner'} onChange={v => upd(i, { faceSide: v })} options={[['inner', 'Внутренняя пласть (не видно снаружи)'], ['outer', 'Наружная пласть']]} />}
+      <TextField label="Подпись в присадке" value={h.note || ''} onChange={v => upd(i, { note: v })} />
+    </div>)}
+    <button type="button" style={btnS()} onClick={() => onChange([...holes, { id: Math.random().toString(36).slice(2, 7), type: 'B_edge', d: 8, depth: 20, along: 0 }])}>+ Отверстие</button>
+  </>)
+}
 function JointSchemes({ customs, setCustoms }) {
   const list = Object.entries(customs || {})
   const upd = (id, patch) => setCustoms({ ...customs, [id]: { ...customs[id], ...patch } })
@@ -382,8 +429,9 @@ function JointSchemes({ customs, setCustoms }) {
         <div style={{ flex: 1 }}><TextField label="Название" value={c.name} onChange={v => upd(id, { name: v })} /></div>
         <button type="button" style={{ ...btnS(), color: 'var(--danger)' }} onClick={() => { if (window.confirm(`Удалить схему «${c.name}»?`)) { const n = { ...customs }; delete n[id]; setCustoms(n) } }}>🗑</button>
       </div>
-      <Chips label="Крепёж" value={c.fast || 'confirmat'} onChange={v => upd(id, { fast: v })} options={[['confirmat', 'Конфирмат'], ['minifix', 'Минификс'], ['dowel', 'Только шканты'], ['none', 'Без присадки (уголки, стяжки)']]} />
-      {c.fast !== 'dowel' && c.fast !== 'none' && <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!c.dowel} onChange={e => upd(id, { dowel: e.target.checked })} />Шканты рядом с крепежом</label>}
+      <Chips label="Крепёж" value={c.fast || 'confirmat'} onChange={v => upd(id, { fast: v, ...(v === 'custom' ? { dowel: false } : {}), ...(v === 'custom' && !c.holes?.length ? { holes: [{ id: 'h1', type: 'A_through', d: 7, depth: '', along: 0 }, { id: 'h2', type: 'B_edge', d: 5, depth: 34, along: 0 }] } : {}) })} options={[['confirmat', 'Конфирмат'], ['minifix', 'Минификс'], ['dowel', 'Только шканты'], ['custom', 'Свой (составной)'], ['none', 'Без присадки (уголки, стяжки)']]} />
+      {c.fast === 'custom' && <FastenerHoles holes={c.holes || []} onChange={hs => upd(id, { holes: hs })} />}
+      {c.fast !== 'dowel' && c.fast !== 'none' && c.fast !== 'custom' && <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!c.dowel} onChange={e => upd(id, { dowel: e.target.checked })} />Шканты рядом с крепежом</label>}
       {c.fast !== 'none' && <Grid cols={3}>
         <NumField label="От начала стыка" value={c.end ?? 50} onChange={v => upd(id, { end: v })} min={0} />
         <NumField label="От конца (пусто — так же)" value={c.endB ?? ''} onChange={v => upd(id, { endB: v })} min={0} />
@@ -394,7 +442,7 @@ function JointSchemes({ customs, setCustoms }) {
       {c.endB != null && c.endB !== '' && <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => upd(id, { endB: null })}>симметрично</button>}
     </div>)}
     <button type="button" style={btnS()} onClick={() => { const id = Math.random().toString(36).slice(2, 8); setCustoms({ ...(customs || {}), [id]: { name: 'Моя схема', fast: 'confirmat', dowel: true, end: 50, step: 600, shift: 32, dowelMin: 200 } }) }}>+ Своя схема крепежа</button>
-    <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Свои схемы запоминаются за аккаунтом и появляются в выборе крепежа (★). Отступы от начала и конца стыка разные — несимметрично.</p>
+    <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Свои схемы запоминаются за аккаунтом и появляются в выборе крепежа (★). Отступы от начала и конца стыка разные — несимметрично. «Свой (составной)» — сами задаёте отверстия крепежа: в какую деталь, диаметр, глубину, сдвиг вдоль стыка (+1 отверстие, +1 отверстие — как составная присадка в редакторе контура). A — деталь, в пласть которой упирается стык (боковина), B — деталь, которая упирается торцом (полка).</p>
   </>)
 }
 // материал (декор) для выбранных деталей: другой материал — это и другой раскрой (детали уйдут в свою группу)

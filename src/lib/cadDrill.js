@@ -117,6 +117,7 @@ export function jointHoles(parts, scheme0 = 'confirmat_dowel', customs = {}) {
       const conf = R.fast === 'confirmat'
       const mfx = R.fast === 'minifix'
       const dowelOnly = R.fast === 'dowel'
+      const own = R.fast === 'custom' && Array.isArray(R.holes) ? R.holes : null
       const dow = dowelOnly || (R.dowel && len >= Number(R.dowelMin))
       const b = B.place.aabb, TB = b[kb + 3] - b[kb]
       ss.forEach((s, i) => {
@@ -133,6 +134,28 @@ export function jointHoles(parts, scheme0 = 'confirmat_dowel', customs = {}) {
           const pc = [0, 0, 0]; pc[k] = face + side * MINIFIX.camFrom; pc[kb] = inward ? b[kb + 3] : b[kb]; pc[m] = mv
           const nc = [0, 0, 0]; nc[kb] = inward ? -1 : 1
           out.push({ pid: B.pid, p: pc.map(r1), n: nc, d: MINIFIX.cam, depth: r1(Math.min(MINIFIX.camDepth, TB - 3)), note: 'Минификс: эксцентрик' })
+        }
+        if (own) {
+          // свой составной крепёж: каждое отверстие — в пласть A (снаружи насквозь / со стороны стыка), в торец B или в пласть B;
+          // along — сдвиг вдоль стыка от точки крепежа, across — поперёк (от середины торца B), inB — от плоскости стыка вглубь B
+          for (const h of own) {
+            const mv2 = mv + (Number(h.along) || 0)
+            if (mv2 < m0 + 3 || mv2 > m1 - 3) continue
+            const d = Number(h.d) || 5, dep = Number(h.depth) || 0
+            const p = kv => { const q = [0, 0, 0]; q[k] = kv; q[kb] = c + (Number(h.across) || 0); q[m] = mv2; return q.map(r1) }
+            const note = h.note || R.name || 'Свой крепёж'
+            if (h.type === 'A_through') out.push({ pid: A.pid, p: p(outer), n: into, d, depth: r1(dep > 0 ? Math.min(dep, TA) : TA), note })
+            else if (h.type === 'A_blind') out.push({ pid: A.pid, p: p(face), n: back, d, depth: r1(Math.min(dep || 12, TA - 1)), note })
+            else if (h.type === 'B_edge') out.push({ pid: B.pid, p: p(face), n: into, d, depth: r1(dep || 20), note })
+            else if (h.type === 'B_face') {
+              // в пласть B: внутренняя (смотрит к середине A) или наружная сторона
+              const inward = (a[kb] + a[kb + 3]) / 2 > (b[kb] + b[kb + 3]) / 2
+              const top = h.faceSide === 'outer' ? !inward : inward
+              const pc = [0, 0, 0]; pc[k] = face + side * (Number(h.inB) || 24); pc[kb] = top ? b[kb + 3] : b[kb]; pc[m] = mv2
+              const nc = [0, 0, 0]; nc[kb] = top ? -1 : 1
+              out.push({ pid: B.pid, p: pc.map(r1), n: nc, d, depth: r1(Math.min(dep || 12.5, TB - 1)), note })
+            }
+          }
         }
         if (dow) {
           // шкант — на 32 мм от конфирмата внутрь стыка (без конфирмата — на месте конфирмата)

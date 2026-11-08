@@ -352,6 +352,19 @@ for (const rot of [0, 90, 180, 270]) {
   ok(hk.length === 2 && hk.every(d => d.d === 6), 'hook holes in bottom rear ' + JSON.stringify(hk))
 }
 
+// свой составной крепёж: отверстия в A и B по списку, со сдвигом вдоль стыка
+{
+  const base = newItem('cabinet', { p: { W: 800, H: 800, D: 500 } })
+  const pr = { items: [{ ...base, joint: { sideL: 'u:c1' } }], settings: { jointSchemes: { c1: { name: 'Евровинт+шкант', fast: 'custom', end: 50, step: 600, holes: [
+    { type: 'A_through', d: 7, along: 0 }, { type: 'B_edge', d: 5, depth: 40, along: 0 }, { type: 'A_blind', d: 8, depth: 12, along: 32 }, { type: 'B_edge', d: 8, depth: 25, along: 32 }, { type: 'B_face', d: 15, depth: 13, inB: 24, along: 64 }] } } } }
+  const det = exportAll(pr).details
+  const side = det.find(d => d.name === 'Боковина левая'), top = det.find(d => d.name === 'Крышка')
+  const sd = side.contour.drillings.filter(d => d.note === 'Евровинт+шкант')
+  ok(sd.some(d => d.d === 7) && sd.some(d => d.d === 8), 'custom holes in A ' + JSON.stringify(sd.map(d => [d.d, d.kind])))
+  const td = top.contour.drillings.filter(d => d.note === 'Евровинт+шкант')
+  ok(td.some(d => d.d === 5 && d.kind === 'edge') && td.some(d => d.d === 8 && d.kind === 'edge') && td.some(d => d.d === 15 && d.kind === 'face'), 'custom holes in B ' + JSON.stringify(td.map(d => [d.d, d.kind])))
+}
+
 // петли блока: количество, обход полок по 32 мм, ручной сдвиг
 {
   const { cabinetParts, CAB_DEFAULTS } = await import('../../src/lib/cadCabinet.js')
