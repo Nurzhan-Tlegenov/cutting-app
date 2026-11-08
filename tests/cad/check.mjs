@@ -188,5 +188,20 @@ for (const rot of [0, 90, 180, 270]) {
   ok(top.place.aabb[4] === 2100 - 20 && top.place.aabb[5] === 570, 'inset top offsets ' + top.place.aabb)
   ok(bot.place.aabb[1] === 30 && bot.place.aabb[5] === 545 && side.place.aabb[5] === 555, 'bottom/side offsets')
 }
+// торцевой шкаф: нет правой боковины, справа проём 300 с фронтальной панелью у зада, в нём скруглённые полки R150
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const R = newNode({ size: 300, fpanel: { from: 'back', dist: 0, l: 0, r: 0, b: 0, t: 0 }, split: 'h', shelfShape: 'round', shelfR: 150, children: [newNode(), newNode(), newNode()] })
+  const it = newItem('cabinet', { p: { W: 1000, H: 2000, D: 400, sideR: false, back: 'none', tree: newNode({ id: 'root', split: 'v', children: [newNode(), R] }) } })
+  const { parts, warn } = projectParts({ items: [it] })
+  ok(!warn.length, 'end cab warn ' + warn)
+  const fp = parts.find(p => p.name === 'Фронтальная панель')
+  const sh = parts.filter(p => p.name === 'Горизонтальная панель')
+  ok(fp && sh.length === 2 && sh.every(s => s.place.aabb[2] === fp.place.aabb[5]), 'shelves start after frontal panel')
+  const d = exportAll({ items: [it] }).details.find(x => x.name === 'Горизонтальная панель')
+  const v = d.contour.vertices
+  ok(v.some(x => x.r === 150) && v.filter(x => x.r > 0).length === 1, 'one rounded front corner ' + JSON.stringify(v))
+  ok(d.contour.vertices.find(x => x.r === 150).y === d.w, 'rounded at free (right) side')
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

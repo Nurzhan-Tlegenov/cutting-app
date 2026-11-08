@@ -8,11 +8,12 @@ import { detailHoles } from '../lib/partHoles'
 // фигурная деталь: контур и вырезы из правки -> выдавливание на толщину в системе детали, затем матрица детали
 function figuredGeometry(sp) {
   const { W, L, T, m } = sp.place
-  const pts = verticesToPolygon(sp.ov.vertices).map(p => (Array.isArray(p) ? p : [p.x, p.y]))
+  const verts = sp.ov?.vertices?.length > 2 ? sp.ov.vertices : sp.shape?.length > 2 ? sp.shape : [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: L }, { x: 0, y: L }]
+  const pts = verticesToPolygon(verts).map(p => (Array.isArray(p) ? p : [p.x, p.y]))
   if (pts.length < 3) return null
   const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)))
   let holes
-  try { holes = detailHoles({ width: W, length: L, contour: JSON.stringify({ holes: (sp.ov.holes || []).filter(h => h.type !== 'pocket') }) }) } catch { holes = [] }
+  try { holes = detailHoles({ width: W, length: L, contour: JSON.stringify({ holes: (sp.ov?.holes || []).filter(h => h.type !== 'pocket') }) }) } catch { holes = [] }
   for (const h of holes) if (h?.length > 2) shape.holes.push(new THREE.Path(h.map(p => new THREE.Vector2(p.x ?? p[0], p.y ?? p[1]))))
   const geo = new THREE.ExtrudeGeometry(shape, { depth: T, bevelEnabled: false, curveSegments: 6 })
   const M = new THREE.Matrix4().set(m[0], m[1], m[2], m[9], m[3], m[4], m[5], m[10], m[6], m[7], m[8], m[11], 0, 0, 0, 1)
@@ -215,7 +216,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const b = p.place.aabb
       const sx = b[3] - b[0], sy = b[4] - b[1], sz = b[5] - b[2]
       if (!(sx > 0 && sy > 0 && sz > 0)) continue
-      const fig = p.ov && isFigured(p) ? figuredGeometry(p) : null
+      const fig = isFigured(p) ? figuredGeometry(p) : null
       const geo = fig || new THREE.BoxGeometry(sx, sy, sz)
       const lk = lookOf(p.material)
       const isSel = selected && p.item.id === selected

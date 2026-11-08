@@ -4,7 +4,7 @@
 // полки, стойки, ящики, фасады) — детали пересчитываются сами. «Разобрать» превращает корпус в свободные панели.
 // «В заказ» — детали выбранного материала уходят в бланк нового заказа вместе с 3D-моделью
 // (дальше — обычный раскрой, бирки, ЧПУ); «Смета» — плита и стекло в м², профили в метрах и хлыстах, фурнитура.
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
@@ -173,6 +173,10 @@ function OpeningPanel({ it, set, sel, setSel, pull, setPull }) {
         <SmallNum width={52} value={node.setFront ?? (node.split === 'h' ? (node.shelfType === 'loose' ? Math.max(num(p.shelfSetback) || 0, 2) : num(p.shelfSetback) || 0) : 0)} onChange={x => patch(n => { n.setFront = x })} />
         <span>сзади</span><SmallNum width={52} value={node.setBack ?? 0} onChange={x => patch(n => { n.setBack = x })} />
         {node.split === 'h' && [['fixed', 'неподвижные'], ['loose', 'съёмные']].map(([k, t]) => <button key={k} type="button" style={{ ...chipS((node.shelfType || 'fixed') === k), padding: '3px 8px' }} onClick={() => patch(n => { n.shelfType = k })}>{t}</button>)}
+        {node.split === 'h' && <>
+          {[['rect', 'прямые'], ['round', 'скруглённые']].map(([k, t]) => <button key={k} type="button" style={{ ...chipS((node.shelfShape || 'rect') === k), padding: '3px 8px' }} onClick={() => patch(n => { n.shelfShape = k; if (k === 'round' && !n.shelfR) n.shelfR = 150 })}>{t}</button>)}
+          {node.shelfShape === 'round' && <><span>R</span><SmallNum width={52} value={node.shelfR || 150} onChange={x => x > 0 && patch(n => { n.shelfR = x })} /></>}
+        </>}
       </div>}
       {fp && <div style={row}>
         <span>Фронт. панель:</span>
@@ -194,6 +198,27 @@ function OpeningPanel({ it, set, sel, setSel, pull, setPull }) {
 }
 
 // ── редактор корпуса ──
+// ── сворачиваемые разделы карточки: что свернуто / развёрнуто — запоминается за аккаунтом (настройка cadFold) ──
+const FoldCtx = createContext({ isOpen: (id, def) => def, toggle: () => {} })
+function Fold({ id, title, def = false, on, onToggle, right, children }) {
+  const { isOpen, toggle } = useContext(FoldCtx)
+  const open = isOpen(id, def)
+  const enabled = on === undefined || on
+  return (
+    <div style={{ borderTop: '0.5px solid var(--border)', padding: '7px 0 4px', marginTop: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        {on !== undefined && <input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!on} onChange={e => onToggle?.(e.target.checked)} />}
+        <button type="button" onClick={() => toggle(id, !open)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'none', padding: 0, cursor: 'pointer', color: 'var(--text)', textAlign: 'left', minWidth: 0 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600, color: enabled ? 'var(--text)' : 'var(--text-hint)' }}>{title}</span>
+          {right && <span style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>· {right}</span>}
+          <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>{open ? '▾' : '▸'}</span>
+        </button>
+      </div>
+      {open && enabled && <div style={{ paddingTop: 6 }}>{children}</div>}
+    </div>
+  )
+}
+
 // ── карточка корпуса: по порядку постройки — тип, габарит, каркас, задняя стенка, затем галочки: вертикальные панели,
 // полки, фасады, ящики (включил — сразу вопросы по делу), кромка, «применить к корпусам этого типа» ──
 const Check = ({ on, onChange, children }) => (
@@ -269,54 +294,72 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
   const clearFronts = type => { const T = JSON.parse(JSON.stringify(tree)); (function w(n) { if (n.front?.type === type) n.front = null; (n.children || []).forEach(w) })(T); return T }
 
   return (<>
-    <Chips label="Тип корпуса" value={p.kind || 'other'} onChange={v => up({ kind: v })} options={CAB_KINDS}
-      hint="Тип нужен, чтобы менять сразу все корпуса одного типа: например, все верхние модули кухни — задняя стенка в паз." />
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
-      {CAB_PRESETS.map(([k, tt, v]) => <button key={k} type="button" style={chipS(false)}
-        onClick={() => { if (window.confirm(`Заменить параметры корпуса шаблоном «${tt}»?`)) set({ ...it, name: tt, p: { ...CAB_DEFAULTS, ...v, material: p.material, t: p.t, facadeMaterial: p.facadeMaterial, backMaterial: p.backMaterial } }) }}>{tt}</button>)}
-    </div>
+    <Fold id="kind" title="Тип корпуса" def>
+      <Chips value={p.kind || 'other'} onChange={v => up({ kind: v })} options={CAB_KINDS}
+        hint="Тип нужен, чтобы менять сразу все корпуса одного типа: например, все верхние модули кухни — задняя стенка в паз." />
+    </Fold>
+    <Fold id="tpl" title="Шаблоны">
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
+        {CAB_PRESETS.map(([k, tt, v]) => <button key={k} type="button" style={chipS(false)}
+          onClick={() => { if (window.confirm(`Заменить параметры корпуса шаблоном «${tt}»?`)) set({ ...it, name: tt, p: { ...CAB_DEFAULTS, ...v, material: p.material, t: p.t, facadeMaterial: p.facadeMaterial, backMaterial: p.backMaterial } }) }}>{tt}</button>)}
+      </div>
+    </Fold>
+    <Fold id="size" title="Габарит" def right={`${p.W}×${p.H}×${p.D}`}>
+      <Grid><NumField label="Ширина" value={p.W} onChange={v => up({ W: v })} min={50} /><NumField label="Высота" value={p.H} onChange={v => up({ H: v })} min={50} /><NumField label="Глубина" value={p.D} onChange={v => up({ D: v })} min={50} /></Grid>
+    </Fold>
 
-    <div style={sect}>Габарит</div>
-    <Grid><NumField label="Ширина" value={p.W} onChange={v => up({ W: v })} min={50} /><NumField label="Высота" value={p.H} onChange={v => up({ H: v })} min={50} /><NumField label="Глубина" value={p.D} onChange={v => up({ D: v })} min={50} /></Grid>
+    <Fold id="body" title="Каркас" def right={p.material}>
+      <Grid cols={2}><TextField label="Материал" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><NumField label="Толщина" value={p.t} onChange={v => up({ t: v })} min={1} /></Grid>
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '4px 0 6px' }}>
+        <label style={{ fontSize: 13.5, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.sideL !== false} onChange={e => up({ sideL: e.target.checked })} />Боковина левая</label>
+        <label style={{ fontSize: 13.5, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.sideR !== false} onChange={e => up({ sideR: e.target.checked })} />Боковина правая</label>
+      </div>
+      {(p.sideL !== false || p.sideR !== false) && <Sub><Grid cols={2}><NumField label="Боковины: отступ спереди" value={p.sideFront} onChange={v => up({ sideFront: v })} /><NumField label="отступ сзади" value={p.sideBack} onChange={v => up({ sideBack: v })} /></Grid></Sub>}
+    </Fold>
 
-    <div style={sect}>Каркас</div>
-    <Grid cols={2}><TextField label="Материал" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><NumField label="Толщина" value={p.t} onChange={v => up({ t: v })} min={1} /></Grid>
+    <Fold id="top" title="Крышка" def on={p.top !== 'none'} onToggle={on => up(on ? { top: p.topLast && p.topLast !== 'none' ? p.topLast : 'inset' } : { top: 'none', topLast: p.top })}
+      right={{ inset: 'вкладная', overlay: 'накладная', rails: 'царги' }[p.top] || ''}>
+      <Chips value={p.top} onChange={v => up({ top: v })} options={[['inset', 'Вкладная'], ['overlay', 'Накладная'], ['rails', 'Царги (планки)']]}
+        hint="Вкладная — между боковинами, её можно опустить и отступить спереди/сзади (минус — выступает). Накладная — сверху на боковинах, со свесом. Царги — 1 (передняя) или 2 планки с отступом от верха: например, сверху ляжет стекло." />
+      {p.top === 'overlay' && <Sub>
+        <Grid cols={2}><NumField label="Свес вперёд (козырёк)" value={p.overhangFront} onChange={v => up({ overhangFront: v })} min={0} /><NumField label="Свес в стороны" value={p.overhangSide} onChange={v => up({ overhangSide: v })} min={0} /></Grid>
+        <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.underTop !== false} onChange={e => up({ underTop: e.target.checked })} />Фасады под крышкой (свес — от фасадов)</label>
+      </Sub>}
+      {p.top === 'inset' && <Sub><Grid><NumField label="Отступ от верха" value={p.topDown} onChange={v => up({ topDown: v })} /><NumField label="от переда" value={p.topFront} onChange={v => up({ topFront: v })} /><NumField label="от зада" value={p.topBack} onChange={v => up({ topBack: v })} /></Grid></Sub>}
+      {p.top === 'rails' && <Sub>
+        <Chips label="Царг" value={num(p.topRails) >= 2 ? 2 : 1} onChange={v => up({ topRails: v })} options={[[1, '1 — передняя'], [2, '2 — передняя и задняя']]} />
+        <Grid cols={2}><NumField label="Отступ от верха" value={p.topRailOffset} onChange={v => up({ topRailOffset: v })} min={0} /><NumField label="Ширина планки" value={p.railDepth} onChange={v => up({ railDepth: v })} min={20} /></Grid>
+      </Sub>}
+    </Fold>
 
-    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '4px 0 6px' }}>
-      <label style={{ fontSize: 13.5, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.sideL !== false} onChange={e => up({ sideL: e.target.checked })} />Боковина левая</label>
-      <label style={{ fontSize: 13.5, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.sideR !== false} onChange={e => up({ sideR: e.target.checked })} />Боковина правая</label>
-    </div>
-    {(p.sideL !== false || p.sideR !== false) && <Sub><Grid cols={2}><NumField label="Боковины: отступ спереди" value={p.sideFront} onChange={v => up({ sideFront: v })} /><NumField label="отступ сзади" value={p.sideBack} onChange={v => up({ sideBack: v })} /></Grid></Sub>}
+    <Fold id="bottom" title="Дно" def on={p.bottom !== 'none'} onToggle={on => up(on ? { bottom: p.bottomLast && p.bottomLast !== 'none' ? p.bottomLast : 'inset' } : { bottom: 'none', bottomLast: p.bottom })}
+      right={{ inset: 'вкладное', overlay: 'накладное', rails: 'царги' }[p.bottom] || ''}>
+      <Chips value={p.bottom} onChange={v => up({ bottom: v })} options={[['inset', 'Вкладное'], ['overlay', 'Накладное'], ['rails', 'Царги (планки)']]} />
+      {p.bottom === 'inset' && <Sub><Grid><NumField label="Отступ от низа" value={p.bottomUp} onChange={v => up({ bottomUp: v })} /><NumField label="от переда" value={p.bottomFront} onChange={v => up({ bottomFront: v })} /><NumField label="от зада" value={p.bottomBack} onChange={v => up({ bottomBack: v })} /></Grid></Sub>}
+      {p.bottom === 'rails' && <Sub>
+        <Chips label="Царг" value={num(p.bottomRails) >= 2 ? 2 : 1} onChange={v => up({ bottomRails: v })} options={[[1, '1 — передняя'], [2, '2 — передняя и задняя']]} />
+        <Grid cols={2}><NumField label="Отступ от низа" value={p.bottomRailOffset} onChange={v => up({ bottomRailOffset: v })} min={0} /><NumField label="Ширина планки" value={p.bottomRailDepth ?? p.railDepth} onChange={v => up({ bottomRailDepth: v })} min={20} /></Grid>
+      </Sub>}
+    </Fold>
 
-    <Chips label="Крышка" value={p.top} onChange={v => up({ top: v })} options={[['inset', 'Вкладная'], ['overlay', 'Накладная'], ['rails', 'Царги (планки)'], ['none', 'Нет']]}
-      hint="Вкладная — между боковинами, её можно опустить и отступить спереди/сзади (минус — выступает). Накладная — сверху на боковинах, со свесом. Царги — 1 (передняя) или 2 планки с отступом от верха: например, сверху ляжет стекло." />
-    {p.top === 'overlay' && <Sub>
-      <Grid cols={2}><NumField label="Свес вперёд (козырёк)" value={p.overhangFront} onChange={v => up({ overhangFront: v })} min={0} /><NumField label="Свес в стороны" value={p.overhangSide} onChange={v => up({ overhangSide: v })} min={0} /></Grid>
-      <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.underTop !== false} onChange={e => up({ underTop: e.target.checked })} />Фасады под крышкой (свес — от фасадов)</label>
-    </Sub>}
-    {p.top === 'inset' && <Sub><Grid><NumField label="Отступ от верха" value={p.topDown} onChange={v => up({ topDown: v })} /><NumField label="от переда" value={p.topFront} onChange={v => up({ topFront: v })} /><NumField label="от зада" value={p.topBack} onChange={v => up({ topBack: v })} /></Grid></Sub>}
-    {p.top === 'rails' && <Sub>
-      <Chips label="Царг" value={num(p.topRails) >= 2 ? 2 : 1} onChange={v => up({ topRails: v })} options={[[1, '1 — передняя'], [2, '2 — передняя и задняя']]} />
-      <Grid cols={2}><NumField label="Отступ от верха" value={p.topRailOffset} onChange={v => up({ topRailOffset: v })} min={0} /><NumField label="Ширина планки" value={p.railDepth} onChange={v => up({ railDepth: v })} min={20} /></Grid>
-    </Sub>}
+    <Fold id="base" title="Опора" right={{ none: 'нет', legs: `ножки ${p.legH}`, plinth: `цоколь ${p.plinthH}` }[p.base] || ''}>
+      <Chips value={p.base} onChange={v => up({ base: v })} options={[['none', 'Без опоры'], ['legs', 'Ножки'], ['plinth', 'Цоколь (царги)']]}
+        hint="Цоколь: при вкладном дне боковины идут до пола, под дном — передняя царга с отступом от фасада; задняя царга — по галочке, с отступом от зада." />
+      {p.base === 'legs' && <Sub><Grid><NumField label="Высота ножек" value={p.legH} onChange={v => up({ legH: v })} min={0} /></Grid></Sub>}
+      {p.base === 'plinth' && <Sub>
+        <Grid cols={2}><NumField label="Высота цоколя" value={p.plinthH} onChange={v => up({ plinthH: v })} min={0} /><NumField label="Передняя царга: отступ от переда" value={p.plinthInset} onChange={v => up({ plinthInset: v })} min={0} /></Grid>
+        <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!(p.plinthBack ?? p.bottom === 'overlay')} onChange={e => up({ plinthBack: e.target.checked })} />Задняя царга</label>
+        {!!(p.plinthBack ?? p.bottom === 'overlay') && <Grid><NumField label="Отступ от зада" value={p.plinthBackOffset} onChange={v => up({ plinthBackOffset: v })} min={0} /></Grid>}
+      </Sub>}
+    </Fold>
 
-    <Chips label="Дно" value={p.bottom} onChange={v => up({ bottom: v })} options={[['inset', 'Вкладное'], ['overlay', 'Накладное'], ['rails', 'Царги (планки)'], ['none', 'Нет']]} />
-    {p.bottom === 'inset' && <Sub><Grid><NumField label="Отступ от низа" value={p.bottomUp} onChange={v => up({ bottomUp: v })} /><NumField label="от переда" value={p.bottomFront} onChange={v => up({ bottomFront: v })} /><NumField label="от зада" value={p.bottomBack} onChange={v => up({ bottomBack: v })} /></Grid></Sub>}
-    {p.bottom === 'rails' && <Sub>
-      <Chips label="Царг" value={num(p.bottomRails) >= 2 ? 2 : 1} onChange={v => up({ bottomRails: v })} options={[[1, '1 — передняя'], [2, '2 — передняя и задняя']]} />
-      <Grid cols={2}><NumField label="Отступ от низа" value={p.bottomRailOffset} onChange={v => up({ bottomRailOffset: v })} min={0} /><NumField label="Ширина планки" value={p.bottomRailDepth ?? p.railDepth} onChange={v => up({ bottomRailDepth: v })} min={20} /></Grid>
-    </Sub>}
-
-    <Chips label="Опора" value={p.base} onChange={v => up({ base: v })} options={[['none', 'Без опоры'], ['legs', 'Ножки'], ['plinth', 'Цоколь']]} />
-    {p.base === 'legs' && <Sub><Grid><NumField label="Высота ножек" value={p.legH} onChange={v => up({ legH: v })} min={0} /></Grid></Sub>}
-    {p.base === 'plinth' && <Sub><Grid cols={2}><NumField label="Высота цоколя" value={p.plinthH} onChange={v => up({ plinthH: v })} min={0} /><NumField label="Отступ цоколя" value={p.plinthInset} onChange={v => up({ plinthInset: v })} min={0} /></Grid></Sub>}
-
-    <div style={sect}>Задняя стенка</div>
-    <Chips value={p.back} onChange={v => up({ back: v })} options={[['groove', 'В паз'], ['overlay', 'Накладная'], ['inset', 'Вкладная ЛДСП'], ['none', 'Нет']]} />
-    {(p.back === 'groove' || p.back === 'overlay') && <Sub>
-      <Grid cols={2}><TextField label="Материал" value={p.backMaterial} onChange={v => up({ backMaterial: v })} list="cad-mats" /><NumField label="Толщина" value={p.backT} onChange={v => up({ backT: v })} min={1} /></Grid>
-      {p.back === 'groove' && <Grid><NumField label="Паз от зад. торца" value={p.grooveOffset} onChange={v => up({ grooveOffset: v })} min={0} /><NumField label="Глубина паза" value={p.grooveDepth} onChange={v => up({ grooveDepth: v })} min={1} /><NumField label="Ширина паза" value={p.grooveWidth} onChange={v => up({ grooveWidth: v })} min={1} /></Grid>}
-    </Sub>}
+    <Fold id="back" title="Задняя стенка" right={{ groove: 'в паз', overlay: 'накладная', inset: 'вкладная', none: 'нет' }[p.back] || ''}>
+      <Chips value={p.back} onChange={v => up({ back: v })} options={[['groove', 'В паз'], ['overlay', 'Накладная'], ['inset', 'Вкладная ЛДСП'], ['none', 'Нет']]} />
+      {(p.back === 'groove' || p.back === 'overlay') && <Sub>
+        <Grid cols={2}><TextField label="Материал" value={p.backMaterial} onChange={v => up({ backMaterial: v })} list="cad-mats" /><NumField label="Толщина" value={p.backT} onChange={v => up({ backT: v })} min={1} /></Grid>
+        {p.back === 'groove' && <Grid><NumField label="Паз от зад. торца" value={p.grooveOffset} onChange={v => up({ grooveOffset: v })} min={0} /><NumField label="Глубина паза" value={p.grooveDepth} onChange={v => up({ grooveDepth: v })} min={1} /><NumField label="Ширина паза" value={p.grooveWidth} onChange={v => up({ grooveWidth: v })} min={1} /></Grid>}
+      </Sub>}
+    </Fold>
 
     <Check on={hasV} onChange={on => { if (!on && !window.confirm('Убрать вертикальные панели? Останется содержимое первой секции.')) return; setV(on ? 1 : 0) }}>Вертикальные панели</Check>
     {hasV && <Sub>
@@ -330,6 +373,9 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
         <NumField label="Отступ от переда" value={shelfNode.setFront ?? p.shelfSetback} onChange={v => setH(shelfK, { setFront: v })} min={0} />
         <NumField label="Отступ от зада" value={shelfNode.setBack ?? 0} onChange={v => setH(shelfK, { setBack: v })} min={0} /></Grid>
       <Chips value={shelfNode.shelfType || 'fixed'} onChange={v => setH(shelfK, { shelfType: v })} options={[['fixed', 'Неподвижные (конфирмат)'], ['loose', 'Съёмные (полкодержатели)']]} />
+      <Chips label="Форма" value={shelfNode.shelfShape || 'rect'} onChange={v => setH(shelfK, { shelfShape: v, shelfR: shelfNode.shelfR || 150 })} options={[['rect', 'Прямые'], ['round', 'Скруглённые']]}
+        hint="Скруглённые — передний угол со свободной стороны (где нет боковины) — радиусом R; свободной стороны нет — оба передних угла. Например, торцевой шкаф: правой боковины нет, вертикальная панель в 300 мм от края, в проёме фронтальная панель у зада и скруглённые открытые полки." />
+      {shelfNode.shelfShape === 'round' && <Grid><NumField label="Радиус" value={shelfNode.shelfR || 150} onChange={v => setH(shelfK, { shelfR: v })} min={1} /></Grid>}
     </Sub>}
 
     <Check on={doorNodes.length > 0} onChange={on => {
@@ -472,11 +518,13 @@ function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, onToLibrary, in
   return (
     <div>
       <Grid cols={1}><TextField label="Название" value={it.name} onChange={v => set({ ...it, name: v })} /></Grid>
-      <div style={sect}>Положение в сцене<Hint inline>X, Y, Z — левый нижний задний угол элемента. Поворот — вокруг вертикали.</Hint></div>
-      <Grid>{['x', 'y', 'z'].map(k => <NumField key={k} label={k.toUpperCase()} value={it.pos?.[k] ?? 0} onChange={v => set({ ...it, pos: { ...it.pos, [k]: v } })} />)}</Grid>
-      <Nudge it={it} set={set} />
-      <Chips label="Поворот" value={it.rotY || 0} onChange={v => set({ ...it, rotY: v })} options={[[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']]} />
-      {info && <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 6px' }}>{info}</p>}
+      <Fold id="pos" title="Положение в сцене" right={`${it.pos?.x ?? 0}; ${it.pos?.y ?? 0}; ${it.pos?.z ?? 0}${it.rotY ? ` · ${it.rotY}°` : ''}`}>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>X, Y, Z — левый нижний задний угол элемента. Поворот — вокруг вертикали.</p>
+        <Grid>{['x', 'y', 'z'].map(k => <NumField key={k} label={k.toUpperCase()} value={it.pos?.[k] ?? 0} onChange={v => set({ ...it, pos: { ...it.pos, [k]: v } })} />)}</Grid>
+        <Nudge it={it} set={set} />
+        <Chips label="Поворот" value={it.rotY || 0} onChange={v => set({ ...it, rotY: v })} options={[[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']]} />
+      </Fold>
+      {info && <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0' }}>{info}</p>}
       {it.type === 'cabinet' && <CabinetEditor it={it} set={set} selOpening={selOpening} setSelOpening={setSelOpening} sameKind={sameKind} onApplyKind={onApplyKind} />}
       {it.type === 'frame' && <FrameEditor it={it} set={set} />}
       {(it.type === 'panel' || it.type === 'glass') && <PanelEditor it={it} set={set} />}
@@ -633,6 +681,13 @@ export default function ConstructorPage() {
   const [selPid, setSelPid] = useState(null)
   const [selOpening, setSelOpening] = useState(null) // выбранный проём корпуса
   const [showSizes, setShowSizes] = useState(true)   // размеры проёмов на модели
+  // свернутые / развёрнутые разделы карточки и высота картинки на телефоне — запоминаются за аккаунтом
+  const [fold, setFold] = useState(() => { try { return getUserSettings(user)?.cadFold || {} } catch { return {} } })
+  const foldApi = useMemo(() => ({
+    isOpen: (id, def) => (fold[id] == null ? def : !!fold[id]),
+    toggle: (id, v) => { const next = { ...fold, [id]: v }; setFold(next); saveUserSettings({ cadFold: next }, user) },
+  }), [fold, user])
+  const [splitPx, setSplitPx] = useState(() => { try { return getUserSettings(user)?.cadSplit || 0 } catch { return 0 } })
   const [moveMode, setMoveMode] = useState(false)    // «✥ Двигать»: только тогда пальцем двигаем элемент по полу
   const [pull, setPull] = useState('after')          // при смене размера проёма тянутся соседи: after — выше/правее, before — ниже/левее        // выбранная деталь внутри элемента (нажатие в 3D)
   const [editPart, setEditPart] = useState(null)    // редактор контура детали: { pid, draft }
@@ -875,7 +930,7 @@ export default function ConstructorPage() {
       {project.items.length > 0 && (() => { const b = sceneBox(parts); return <div style={{ position: 'absolute', right: 8, bottom: 4, fontSize: 11, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.75)', borderRadius: 6, padding: '1px 6px' }}>{Math.round(b[3] - b[0])} × {Math.round(b[4] - b[1])} × {Math.round(b[5] - b[2])}</div> })()}
     </div>
   )
-  const panel = (<>
+  const panel = (<FoldCtx.Provider value={foldApi}>
     <datalist id="cad-mats">{materials.map(m => <option key={m} value={m} />)}</datalist>
     <div style={{ display: 'flex', gap: 5, marginBottom: 10, flexWrap: 'wrap' }}>
       {[['scene', 'Сцена'], ['props', 'Свойства'], ['spec', 'Смета']].map(([k, t]) => <button key={k} type="button" style={chipS(tab === k)} onClick={() => setTab(k)}>{t}</button>)}
@@ -934,7 +989,7 @@ export default function ConstructorPage() {
           onExplode={() => { if (!window.confirm('Разобрать корпус на отдельные панели? Параметры корпуса (пересчёт по габариту) пропадут — каждую панель можно будет менять отдельно.')) return; const ps = explodeCabinet(selItem); const idx = project.items.findIndex(i => i.id === selItem.id); const items = [...project.items]; items.splice(idx, 1, ...ps); setProject({ ...project, items }); setSelected(null); setTab('scene') }} />
       : <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Нажмите на деталь в 3D или выберите элемент во вкладке «Сцена». Чтобы передвинуть элемент, включите ✥ (справа на модели) и тащите его пальцем по полу — он прилипает к стенам и к соседям.</p>)}
     {tab === 'spec' && <SpecPanel project={project} setProject={setProject} onLinear={linearOk ? toLinear : null} />}
-  </>)
+  </FoldCtx.Provider>)
 
   const head = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: desk || land ? '6px 10px' : '4px 0 8px', flexWrap: 'wrap' }}>
@@ -942,7 +997,7 @@ export default function ConstructorPage() {
       <button type="button" onClick={() => { flush(); navigate('/constructor') }} style={{ border: 'none', background: 'none', color: 'var(--blue)', fontSize: 13, cursor: 'pointer', padding: 0 }}>‹ Проекты</button>
       <input value={project.name} onChange={e => setProject({ ...project, name: e.target.value })} style={{ ...inp, flex: 1, minWidth: 120, fontWeight: 500, border: '0.5px solid transparent', background: 'transparent' }} />
       <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{status}</span>
-      {all3d && all3d.details.length > 0 && <Model3DButton details={all3d.details} title={project.name} getScene={async () => all3d.scene} label="3D-просмотр" style={{ ...btnS(), width: 'auto' }} />}
+      {all3d && all3d.details.length > 0 && <Model3DButton details={all3d.details} title={project.name} getScene={async () => all3d.scene} label={desk ? "3D-просмотр" : "3D"} style={{ ...btnS(), width: 'auto' }} />}
       <button type="button" style={btnS(true)} onClick={() => setToOrder(true)}>В заказ →</button>
     </div>
   )
@@ -982,11 +1037,25 @@ export default function ConstructorPage() {
       {desk && <BottomNav />}
     </div>
   )
+  // телефон вертикально: экран делится на картинку и карточку параметров, между ними — ползунок (как у симуляции и карт раскроя);
+  // карточка прокручивается сама, картинка стоит на месте; высота картинки запоминается за аккаунтом
+  const viewH = splitPx > 0 ? splitPx : Math.round(window.innerHeight * (selCab ? 0.5 : 0.42))
+  const startSplit = e => {
+    e.preventDefault()
+    const y0 = e.clientY, h0 = viewH
+    let last = h0
+    const mv = ev => { last = Math.max(160, Math.min(window.innerHeight - 220, h0 + ev.clientY - y0)); setSplitPx(last) }
+    const upFn = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', upFn); saveUserSettings({ cadSplit: last }, user) }
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', upFn)
+  }
   return (
-    <div className="page" style={{ paddingBottom: 100 }}>
+    <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 12px', paddingBottom: 64, boxSizing: 'border-box' }}>
       {head}
-      <div style={{ height: selCab ? '56vh' : '44vh', minHeight: 300, marginBottom: 10 }}>{view}</div>
-      {panel}
+      <div style={{ height: viewH, flex: '0 0 auto' }}>{view}</div>
+      <div onPointerDown={startSplit} style={{ flex: '0 0 auto', height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', cursor: 'row-resize' }}>
+        <div style={{ width: 54, height: 5, borderRadius: 3, background: 'var(--border-md)' }} />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 12 }}>{panel}</div>
       {dialog}
       <BottomNav />
     </div>

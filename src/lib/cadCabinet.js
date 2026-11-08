@@ -13,7 +13,7 @@ export const CAB_DEFAULTS = {
   top: 'inset',          // крышка: inset — вкладная (между боковинами), overlay — накладная, rails — царги, none — нет
   bottom: 'inset',       // дно: inset — вкладное, overlay — накладное, rails — царги, none — нет
   base: 'none',          // опора: none — стоит на дне/боковинах, legs — ножки, plinth — цоколь
-  legH: 100, plinthH: 80, plinthInset: 50,
+  legH: 100, plinthH: 80, plinthInset: 50, plinthBack: null, plinthBackOffset: 20,   // цоколь: передняя царга с отступом от фасада, задняя — по галочке с отступом от зада
   back: 'groove',        // задняя стенка: groove — в паз, overlay — накладная, inset — вкладная (ЛДСП), none — нет
   backT: 3, backMaterial: 'ХДФ Белый 3',
   grooveOffset: 16, grooveDepth: 8, grooveWidth: 4,   // паз под заднюю стенку: от заднего торца до паза, глубина, ширина
@@ -42,7 +42,7 @@ export const CAB_DEFAULTS = {
 export const CAB_KINDS = [['wardrobe', 'Шкаф'], ['base', 'Кухня: нижний'], ['wall', 'Кухня: верхний'], ['shelf', 'Стеллаж'], ['dresser', 'Комод'], ['other', 'Другое']]
 // какие параметры переносятся «на все корпуса этого типа» — по группам
 export const CAB_GROUPS = {
-  body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'railDepth', 'overhangFront', 'overhangSide', 'underTop', 'edgeFront', 'edgeBody',
+  body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'plinthBack', 'plinthBackOffset', 'railDepth', 'overhangFront', 'overhangSide', 'underTop', 'edgeFront', 'edgeBody',
     'sideL', 'sideR', 'sideFront', 'sideBack', 'topRails', 'topRailOffset', 'topDown', 'topFront', 'topBack', 'bottomRails', 'bottomRailOffset', 'bottomRailDepth', 'bottomUp', 'bottomFront', 'bottomBack'],
   back: ['back', 'backT', 'backMaterial', 'grooveOffset', 'grooveDepth', 'grooveWidth'],
   fronts: ['facadeMaterial', 'facadeT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'hingeCount'],
@@ -239,9 +239,13 @@ export function cabinetParts(params) {
   // ── опора ──
   if (plinth) {
     const ph = num(p.plinthH, 80), pi = num(p.plinthInset, 50)
-    const px0 = bottomInset ? t : 0, px1 = bottomInset ? W - t : W
+    const px0 = bottomInset ? xi0 : 0, px1 = bottomInset ? xi1 : W
     parts.push(mk('plinthF', 'Цоколь передний', 'цоколь', [px0, 0, D - pi - t, px1, ph, D - pi], 2, -1, 0, mat, { edges: { '+z': eB } }))
-    if (!bottomInset) parts.push(mk('plinthB', 'Цоколь задний', 'цоколь', [px0, 0, zb + 20, px1, ph, zb + 20 + t], 2, +1, 0, mat))
+    // задняя царга цоколя — по галочке, с отступом от зада (накладное дно — по умолчанию есть)
+    if (p.plinthBack ?? !bottomInset) {
+      const bo = num(p.plinthBackOffset, 20)
+      parts.push(mk('plinthB', 'Цоколь задний', 'цоколь', [px0, 0, zb + bo, px1, ph, zb + bo + t], 2, +1, 0, mat))
+    }
   }
   if (legs) {
     const s = 40, ins = 40
@@ -258,41 +262,55 @@ export function cabinetParts(params) {
   const fronts = []          // проёмы с фасадом
   const shelfSetback = num(p.shelfSetback, 0)
   let shelfLoose = 0
-  const walk = (node, x0, x1, y0, y1, depth) => {
-    openings.push({ id: node.id, box: [x0, y0, zi0, x1, y1, D].map(r1), w: r1(x1 - x0), h: r1(y1 - y0), leaf: !(node.split && node.children?.length), depth })
+  // zs..ze — глубина проёма: фронтальная панель у зада (или у переда) сужает её для всего, что внутри проёма
+  const walk = (node, x0, x1, y0, y1, depth, zs = zi0, ze = D) => {
     if (x1 - x0 < 50 || y1 - y0 < 30) warn.push(`Проём ${r1(x1 - x0)}×${r1(y1 - y0)} — слишком маленький`)
     if (node.front) fronts.push({ node, x0, x1, y0, y1 })
     // фронтальная панель в проёме: параллельно фасаду, по глубине — от зада или от переда проёма, с отступами от сторон проёма
     if (node.fpanel) {
       const f = node.fpanel, d = num(f.dist, 0)
-      const fz0 = f.from === 'front' ? D - d - t : zi0 + d
+      const fz0 = f.from === 'front' ? ze - d - t : zs + d
       parts.push(mk('fp_' + node.id, 'Фронтальная панель', 'наполнение',
-        [x0 + num(f.l, 0), y0 + num(f.b, 0), fz0, x1 - num(f.r, 0), y1 - num(f.t, 0), fz0 + t], 2, f.from === 'front' ? -1 : +1, 1, mat, { edges: f.from === 'front' ? {} : {} }))
-      if (fz0 < zi0 - 0.05 || fz0 + t > D + 0.05) warn.push('Фронтальная панель выходит за глубину проёма')
+        [x0 + num(f.l, 0), y0 + num(f.b, 0), fz0, x1 - num(f.r, 0), y1 - num(f.t, 0), fz0 + t], 2, f.from === 'front' ? -1 : +1, 1, mat))
+      if (fz0 < zs - 0.05 || fz0 + t > ze + 0.05) warn.push('Фронтальная панель выходит за глубину проёма')
+      if (f.from === 'front') ze = fz0; else zs = fz0 + t
     }
+    openings.push({ id: node.id, box: [x0, y0, zs, x1, y1, ze].map(r1), w: r1(x1 - x0), h: r1(y1 - y0), leaf: !(node.split && node.children?.length), depth })
     const ch = node.children || []
     if (!node.split || !ch.length) return
     const sizes = childSizes(node, node.split === 'v' ? x1 - x0 : y1 - y0, t)
     if (sizes.some(v => v < 0)) warn.push('Проёмы не помещаются — уменьшите заданные размеры проёмов')
     let pos = node.split === 'v' ? x0 : y0
+    // свободная сторона проёма (там нет боковины) — у полок можно скруглить передний угол с этой стороны
+    const freeL = !hasL && Math.abs(x0 - xi0) < 0.05, freeR = !hasR && Math.abs(x1 - xi1) < 0.05
     ch.forEach((c, i) => {
       const a = pos, b = pos + sizes[i]
-      if (node.split === 'v') walk(c, a, b, y0, y1, depth + 1)
-      else walk(c, x0, x1, a, b, depth + 1)
+      if (node.split === 'v') walk(c, a, b, y0, y1, depth + 1, zs, ze)
+      else walk(c, x0, x1, a, b, depth + 1, zs, ze)
       if (i < ch.length - 1) {
         // отступы панелей этого деления спереди и сзади (короче по глубине)
         const setF = node.setFront != null ? num(node.setFront) : null, setB = num(node.setBack, 0)
-        if (node.split === 'v') parts.push(mk('st_' + c.id, 'Вертикальная панель', 'наполнение', [b, y0, zi0 + setB, b + t, y1, D - (setF ?? 0)], 0, +1, 1, mat, { edges: front }))
+        if (node.split === 'v') parts.push(mk('st_' + c.id, 'Вертикальная панель', 'наполнение', [b, y0, zs + setB, b + t, y1, ze - (setF ?? 0)], 0, +1, 1, mat, { edges: front }))
         else {
           const loose = node.shelfType === 'loose', g = loose ? 1 : 0
           const sb = setF ?? (loose ? Math.max(shelfSetback, 2) : shelfSetback)
-          parts.push(mk('sh_' + c.id, loose ? 'Горизонтальная панель (съёмная)' : 'Горизонтальная панель', 'наполнение', [x0 + g, b, zi0 + g + setB, x1 - g, b + t, D - sb], 1, +1, 0, mat, { edges: front }))
+          const box = [x0 + g, b, zs + g + setB, x1 - g, b + t, ze - sb]
+          const extra = { edges: front }
+          // скруглённая полка: передние углы со свободной стороны (нет боковины); свободной стороны нет — оба передних угла.
+          // Полка: длина — вдоль X (по ширине), ширина — по глубине; в редакторе контура перед полки — правая сторона (x = W)
+          if (node.shelfShape === 'round' && num(node.shelfR, 0) > 0) {
+            const Wd = box[5] - box[2], L = box[3] - box[0]
+            const r = Math.min(num(node.shelfR), Wd - 1, (freeL && freeR) || (!freeL && !freeR) ? L / 2 - 1 : L - 1)
+            const rl = freeL || !freeR ? r : 0, rr = freeR || !freeL ? r : 0
+            extra.shape = [{ x: 0, y: 0, r: 0 }, { x: Wd, y: 0, r: rl }, { x: Wd, y: L, r: rr }, { x: 0, y: L, r: 0 }]
+          }
+          parts.push(mk('sh_' + c.id, loose ? 'Горизонтальная панель (съёмная)' : 'Горизонтальная панель', 'наполнение', box, 1, +1, 0, mat, extra))
           if (loose) {
             shelfLoose++
             const pf = num(p.pinFront, 37), yp = b - num(p.pinBelow, 8)
-            for (const z of [D - sb - pf, zi0 + g + setB + pf]) {
-              holes.push({ p: [x0, yp, z], n: '-x', d: 5, depth: 12, note: 'Полкодержатель' })
-              holes.push({ p: [x1, yp, z], n: '+x', d: 5, depth: 12, note: 'Полкодержатель' })
+            for (const z of [ze - sb - pf, zs + g + setB + pf]) {
+              if (!freeL) holes.push({ p: [x0, yp, z], n: '-x', d: 5, depth: 12, note: 'Полкодержатель' })
+              if (!freeR) holes.push({ p: [x1, yp, z], n: '+x', d: 5, depth: 12, note: 'Полкодержатель' })
             }
           }
         }

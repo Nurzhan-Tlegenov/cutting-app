@@ -196,7 +196,7 @@ export function partToDetail(sp, pos, drill = []) {
   }
   const ov = sp.ov
   const contour = {
-    vertices: ov?.vertices?.length > 2 ? ov.vertices : [{ x: 0, y: 0, r: 0 }, { x: W, y: 0, r: 0 }, { x: W, y: L, r: 0 }, { x: 0, y: L, r: 0 }],
+    vertices: ov?.vertices?.length > 2 ? ov.vertices : sp.shape?.length > 2 ? sp.shape : [{ x: 0, y: 0, r: 0 }, { x: W, y: 0, r: 0 }, { x: W, y: L, r: 0 }, { x: 0, y: L, r: 0 }],
     holes: ov?.holes || [], grooves: [...editorGrooves(sp, place), ...(ov?.grooves || [])], drillings: [...drill, ...(ov?.drillings || [])], layout: [], meta,
   }
   return { name: sp.name, w: L, h: W, qty: 1, edges: ov?.edges || editorEdges(sp, place), material: sp.material, thickness: T, contour, rotatable: true }
@@ -365,7 +365,10 @@ export function explodeCabinet(it) {
 }
 
 /** Деталь фигурная (не прямоугольник) или с вырезами — тогда в 3D рисуется по контуру */
-export const isFigured = sp => !!sp.ov && ((sp.ov.holes || []).length > 0 || (sp.ov.vertices || []).length > 4 || (sp.ov.vertices || []).some(v => num(v.r) > 0 || v.type === 'arc' || v.arc || v.bulge))
+export const isFigured = sp => {
+  const v = sp.ov?.vertices?.length > 2 ? sp.ov.vertices : sp.shape || []
+  return (sp.ov?.holes || []).length > 0 || v.length > 4 || v.some(x => num(x.r) > 0 || x.type === 'arc' || x.arc || x.bulge)
+}
 
 /** Из черновика редактора контура -> правка детали (автоприсадка «cad…» и пазы корпуса не хранятся — они пересчитываются) */
 export function overrideFromDraft(sp, draft) {
