@@ -4,7 +4,7 @@
 //   — кромка показана чёрточками под размером: одна чёрточка под длиной — кромка на одной стороне
 //     по длине, две — на обеих; так же под шириной;
 //   — кромка в новых версиях — пунктиром (каждая чёрточка — отдельная линия, склеиваем — joinDashes);
-//   — паз — словом «паз» в названии детали («паз 20» — отступ 20), ширина и глубина — из блока «Пазы» на первой странице;
+//   — паз — словом «паз» в названии детали; отступ, ширина и глубина — только из блока «Пазы» на первой странице;
 //   — на первой странице — виды кромки («Тип 1: 2») и их метраж («Длина 2 — 21,96 м.»): по метражу
 //     проверяем, что кромку прочитали верно, и определяем, какой вид кромки нарисован какой линией.
 // Модуль без React. parseSketchCut — чистая функция (её можно проверить без браузера).
@@ -257,12 +257,10 @@ function readGrooveParams(pages) {
   }
 }
 
-// «паз 20», «Паз», «пах 20» (опечатка) в названии детали -> { offset } или null.
-// Число после слова — отступ паза от края, мм; без числа — отступ из блока «Пазы».
+// «паз 20», «Паз», «пах 20» (опечатка) в названии детали — признак, что у детали есть паз.
+// Число после слова ничего не задаёт (это просто название): отступ, ширина и глубина — только из блока «Пазы».
 export function grooveFromName(name) {
-  const m = /(?:^|[^а-яёa-z])па[зх](?![а-яё])\s*[:\-–]?\s*(\d+(?:[.,]\d+)?)?/i.exec(String(name || ''))
-  if (!m) return null
-  return { offset: m[1] ? parseFloat(m[1].replace(',', '.')) : null }
+  return /(?:^|[^а-яёa-z])па[зх](?![а-яё])/i.test(String(name || ''))
 }
 
 // Виды кромки и их метраж со страницы «Результаты»
@@ -388,23 +386,23 @@ export function parseSketchCut(pages) {
       bottom: r.widLines[1] ? match.map[r.widLines[1]] || 'default' : null,
     },
   }))
-  // Пазы. В таблице SketchCut паз отдельно не рисуется — конструктор пишет его в названии («паз 20»).
-  // Ширина и глубина — из блока «Пазы», отступ — число из названия, а без него — из блока «Пазы».
-  // Паз идёт вдоль длины детали по всей длине, отступ — от нижнего длинного края (в редакторе можно перенести).
+  // Пазы. В таблице SketchCut паз отдельно не рисуется — конструктор пишет «паз» в названии детали.
+  // Отступ, ширина и глубина — строго из блока «Пазы» на странице «Результаты» (число в названии — просто название).
+  // Паз идёт вдоль первого размера таблицы («Длина» — он же направление текстуры) по всей длине,
+  // отступ — от нижнего края (в редакторе детали можно перенести).
   const gp = readGrooveParams(pages)
   const gW = gp.width > 0 ? gp.width : 4, gD = gp.depth > 0 ? gp.depth : 8
+  const gOff = gp.offset != null && gp.offset >= 0 ? gp.offset : 16
   const grooveRows = []
   items.forEach((it, i) => {
-    const g = grooveFromName(rows[i].name)
-    if (!g) return
-    const off = g.offset != null ? g.offset : gp.offset > 0 ? gp.offset : 16
+    if (!grooveFromName(rows[i].name)) return
     it.contour = {
       vertices: [{ x: 0, y: 0, r: 0 }, { x: it.w, y: 0, r: 0 }, { x: it.w, y: it.h, r: 0 }, { x: 0, y: it.h, r: 0 }],
       holes: [], drillings: [], layout: [],
-      grooves: [{ dir: 'horizontal', length: it.w, width: gW, depth: gD, sides: ['left', 'right', 'bottom'], offsets: { left: 0, right: 0, bottom: off }, face: 'front', note: rows[i].name }],
+      grooves: [{ dir: 'horizontal', length: it.w, width: gW, depth: gD, sides: ['left', 'right', 'bottom'], offsets: { left: 0, right: 0, bottom: gOff }, face: 'front', note: rows[i].name }],
       meta: { src: 'sketchcut' },
     }
-    grooveRows.push({ name: rows[i].name, w: it.w, h: it.h, qty: it.qty, offset: off, fromName: g.offset != null })
+    grooveRows.push({ w: it.w, qty: it.qty })
   })
   const pieces = items.reduce((s, it) => s + it.qty, 0)
 
@@ -432,9 +430,8 @@ export function parseSketchCut(pages) {
       edgeTypes: types.map(t => ({ name: t.name, meters: t.meters })),
       grooves: {
         parts: grooveRows.length, pieces: grooveRows.reduce((s, r) => s + r.qty, 0),
-        width: gW, depth: gD, fileOffset: gp.offset, fileMeters: gp.meters,
+        width: gW, depth: gD, offset: gOff, fromFile: gp.offset != null, fileMeters: gp.meters,
         meters: Math.round(grooveRows.reduce((s, r) => s + r.w * r.qty, 0) / 10) / 100,
-        offsets: [...new Set(grooveRows.map(r => r.offset))],
       },
     },
   }

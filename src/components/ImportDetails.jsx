@@ -62,7 +62,7 @@ const SOURCES = [
   { id: 'dxf', icon: '📏', label: 'DXF',
     hint: 'Выберите чертёж DXF — каждый замкнутый внешний контур станет деталью, а всё внутри него — её обработкой по слоям: вырезы, отверстия D<диаметр>_Z<глубина>, пазы PAZ, выемки, отверстия в торец TOREC, кромка — как в нашем экспорте DXF.' },
   { id: 'sketchcut', icon: '📄', label: 'SketchCut',
-    hint: 'Выберите PDF, сохранённый из SketchCut, — возьмём детали из таблицы «Детали» и кромку: чёрточки (сплошные или пунктир) под размером показывают, на скольких сторонах она стоит (одна — на одной, две — на обеих). Паз — по слову «паз» в названии детали («паз 20» — отступ 20 мм), ширина и глубина — из блока «Пазы».' },
+    hint: 'Выберите PDF, сохранённый из SketchCut, — возьмём детали из таблицы «Детали» и кромку: чёрточки (сплошные или пунктир) под размером показывают, на скольких сторонах она стоит (одна — на одной, две — на обеих). Паз — у деталей со словом «паз» в названии: вдоль длины, отступ, ширина и глубина — из блока «Пазы».' },
 ]
 
 const ACCEPT = '.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain'
@@ -706,9 +706,8 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                   </div>
                   {p.grooves?.parts > 0 && (
                     <div>
-                      Пазы: {p.grooves.pieces} шт. ({p.grooves.parts} {p.grooves.parts === 1 ? 'строка' : 'строк'} со словом «паз» в названии) — {p.grooves.width}×{p.grooves.depth} мм,
-                      {' '}отступ {p.grooves.offsets.map(m).join(' / ')} мм{p.grooves.fileOffset != null && !p.grooves.offsets.includes(p.grooves.fileOffset) ? ` (число из названия; в блоке «Пазы» — ${m(p.grooves.fileOffset)})` : ''},
-                      {' '}вдоль длины от нижнего края. Сторону паза проверьте в редакторе детали.
+                      Пазы: {p.grooves.pieces} шт. ({p.grooves.parts} {p.grooves.parts === 1 ? 'строка' : 'строк'} со словом «паз» в названии) — {m(p.grooves.width)}×{m(p.grooves.depth)} мм,
+                      {' '}отступ {m(p.grooves.offset)} мм{p.grooves.fromFile ? ' (из блока «Пазы»)' : ' (в файле не указан — проверьте)'}, вдоль длины от нижнего края. Сторону паза проверьте в редакторе детали.
                     </div>
                   )}
                   {!(p.grooves?.parts > 0) && p.grooves?.fileMeters > 0 && (
