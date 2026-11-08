@@ -339,6 +339,44 @@ for (const rot of [0, 90, 180, 270]) {
   ok(pp.hw.some(h => /400 мм/.test(h.name)), 'hidden slides 400 ' + pp.hw.map(h => h.name))
   const side = pp.parts.find(p => p.name === 'Ящик: боковина')
   ok(Math.abs(side.place.aabb[5] - side.place.aabb[2] - 390) < 0.01, 'box NL-10 ' + side.place.aabb)
+  // скрытый монтаж по Blum: дно из ЛДСП короба (16), без паза, поднято на 13; задняя стоит на дне; ХДФ нет
+  const bot = pp.parts.find(p => p.name === 'Ящик: дно'), back = pp.parts.find(p => p.name === 'Ящик: задняя')
+  ok(bot.material === it.p.material || bot.material === 'ЛДСП 16' || !/ХДФ/.test(bot.material), 'hidden bottom chipboard ' + bot.material)
+  ok(Math.abs(bot.place.aabb[1] - side.place.aabb[1] - 13) < 0.01 && Math.abs(bot.place.aabb[4] - bot.place.aabb[1] - 16) < 0.01, 'bottom raised 13, t16 ' + bot.place.aabb)
+  ok(!pp.parts.some(p => (p.grooves || []).some(g => /дно ящика/.test(g.note || ''))), 'no bottom groove')
+  ok(Math.abs(back.place.aabb[1] - bot.place.aabb[4]) < 0.01, 'back on bottom')
+  ok(Math.abs(bot.place.aabb[2] - side.place.aabb[2]) < 0.01, 'bottom to rear end')
+  const rf = pp.parts.find(p => p.model?.type === 'underOuter')
+  ok(rf.place.aabb[4] > side.place.aabb[1] + 10 && rf.place.aabb[1] < side.place.aabb[1], 'cabinet profile flange goes up beside drawer ' + rf.place.aabb)
+  const hk = exportAll({ items: [it] }).details.find(d => d.name === 'Ящик: дно').contour.drillings.filter(d => d.note === 'Крючок направляющей')
+  ok(hk.length === 2 && hk.every(d => d.d === 6), 'hook holes in bottom rear ' + JSON.stringify(hk))
+}
+
+// торцевая ручка с язычком: козырёк выступает от лица фасада на 20 мм
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const it = newItem('cabinet', { p: { W: 600, H: 720, D: 560, tree: newNode({ id: 'root', front: { type: 'doors', n: 1, handle: { type: 'edge' } } }) } })
+  const pp = projectParts({ items: [it] })
+  const door = pp.parts.find(p => p.role === 'фасад'), h = pp.parts.find(p => p.model?.type === 'edge')
+  ok(Math.abs(h.place.aabb[5] - door.place.aabb[5] - 20) < 0.01, 'edge handle proj 20 ' + h.place.aabb + ' / ' + door.place.aabb)
+}
+
+// скруглённая деталь: радиус только на кромленых торцах, не больше толщины кромки
+{
+  const { slabRadii } = await import('../../src/lib/cadSlab.js')
+  if (slabRadii) {
+    const it = newItem('cabinet', { p: { W: 600, H: 720, D: 560 } })
+    const pp = projectParts({ items: [it] })
+    const sL = pp.parts.find(p => p.key === 'sideL')
+    const r = slabRadii(sL, 1)
+    ok(Object.keys(r).length === 1 && Object.values(r)[0] === 1, 'side: only front edge rounded ' + JSON.stringify(r))
+    ok(Object.values(slabRadii(pp.parts.find(p => p.key === 'bottom'), 2)).every(v => v === 1), 'radius limited by band thickness')
+    const { roundedSlab } = await import('../../src/lib/cadSlab.js')
+    const g = roundedSlab([16, 720, 560], 0, r)
+    g.computeBoundingBox()
+    const bb = g.boundingBox
+    ok(Math.abs(bb.max.x - bb.min.x - 16) < 1e-6 && Math.abs(bb.max.z - bb.min.z - 560) < 1e-6 && Math.abs(bb.max.y - bb.min.y - 720) < 1e-6, 'slab keeps size')
+  }
 }
 
 // стык со своей схемой (сверху стяжки — без присадки, снизу конфирматы); своя схема несимметрично

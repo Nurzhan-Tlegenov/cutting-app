@@ -12,6 +12,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { verticesToPolygon } from '../lib/trueShapeNesting'
+import { roundedSlab, slabRadii } from '../lib/cadSlab'
 import { detailHoles } from '../lib/partHoles'
 
 // фигурная деталь: контур и вырезы из правки -> выдавливание на толщину в системе детали, затем матрица детали
@@ -109,6 +110,9 @@ const cylX = (r, h, seg = 24) => new THREE.CylinderGeometry(r, r, h, seg).rotate
 function hwGeometries(p) {
   const md = p.model, b = p.place.aabb
   const L = new THREE.Vector3(...md.Lv).normalize(), N = new THREE.Vector3(...md.Nv).normalize(), U = new THREE.Vector3().crossVectors(N, L).normalize()
+  // у профилей направляющих «вверх» модели — всегда вверх в сцене (иначе у левой и правой сторон профиль переворачивался):
+  // разворачиваем L вместе с U — базис остаётся правым, профиль вдоль L симметричный
+  if (['underOuter', 'underInner', 'clip', 'slideOuter', 'slideInner'].includes(md.type) && U.y < -0.5) { L.negate(); U.negate() }
   const ext = [b[3] - b[0], b[4] - b[1], b[5] - b[2]]
   const size = v => Math.abs(v.x) * ext[0] + Math.abs(v.y) * ext[1] + Math.abs(v.z) * ext[2]
   const sL = size(L), sU = size(U), sN = size(N)
@@ -415,7 +419,9 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const hq = qualRef.current === 'high'
       if (hq && !comp) {
         try {
-          comp = new EffectComposer(renderer)
+          // сглаживание (MSAA) и в режиме «Максимальное»: без него линии контура получаются «лесенкой»
+          const pr = renderer.getPixelRatio()
+          comp = new EffectComposer(renderer, new THREE.WebGLRenderTarget(Math.max(1, w * pr), Math.max(1, h * pr), { type: THREE.HalfFloatType, samples: 4 }))
           comp.addPass(new RenderPass(scene, camera))
           const ao = new GTAOPass(scene, camera, w, h)
           ao.updateGtaoMaterial({ radius: 140, distanceExponent: 1.3, thickness: 60, scale: 1.25, samples: 16 })
@@ -627,7 +633,18 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       }
       let fig = isFigured(p) ? figuredGeometry(p) : null
       if (!fig && p.mill && p.mill.style !== 'flat') { try { fig = millGeometry(p) } catch { fig = null } }
-      const geo = fig || new THREE.BoxGeometry(sx, sy, sz)
+      // скругление кромки (Отображение → Радиус кромки): у прямоугольных листовых деталей по кромленым торцам
+      let rounded = null
+      const R = Number(look.edgeR) || 0
+      if (!fig && R > 0 && p.kind === 'sheet' && p.place?.sideDir) {
+        const rr = slabRadii(p, R)
+        if (Object.keys(rr).length) {
+          const dirs = Object.values(p.place.sideDir).map(d => 'xyz'.indexOf(d[1]))
+          const ta = [0, 1, 2].find(a => !dirs.includes(a))
+          if (ta != null) { try { rounded = roundedSlab([sx, sy, sz], ta, rr) } catch { rounded = null } }
+        }
+      }
+      const geo = fig || rounded || new THREE.BoxGeometry(sx, sy, sz)
       const lk = lookOf(p.material, matLooks)
       // текстура материала: повтор по размеру детали, волокно — вдоль длины детали
       let map = null
@@ -664,6 +681,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.3 : glass ? 0.04 : g0 != null ? 0.8 - 0.72 * g0 : gloss ? 0.18 : matte ? 0.9 : 0.7, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.85 : 0,
         envMapIntensity: p.kind === 'sheet' ? (g0 != null ? 0.25 + 0.95 * g0 : gloss ? 0.9 : 0.28) : glass ? 1.6 : 1, map,
         transparent: op < 1, opacity: op, depthWrite: op >= 1,
+        // пласти чуть «отодвинуты» в глубину — линии контура по рёбрам рисуются целиком, без разрывов
+        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
       })
       if (mirror) mat.metalness = 1
       if (map && !isPart0 && !isBlk0 && !isSel0) mat.color.set('#ffffff')
@@ -676,7 +695,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       hg.add(mesh)
       // контуры деталей — по настройке «Линии контуров» (выбранное — всегда с линиями)
       if (look.lines !== false || isSel || isPart || isBlk) {
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, p.mill ? 50 : 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : look.lineColor, transparent: true, opacity: isSel ? 1 : Math.max(0.05, Math.min(1, Number(look.lineOpacity))) }))
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(rounded ? new THREE.BoxGeometry(sx, sy, sz) : geo, p.mill ? 50 : 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : look.lineColor, transparent: true, opacity: isSel ? 1 : Math.max(0.05, Math.min(1, Number(look.lineOpacity))) }))
       edges.position.copy(mesh.position)
       hg.add(edges)
       }

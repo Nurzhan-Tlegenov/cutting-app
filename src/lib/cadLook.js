@@ -2,7 +2,7 @@
 // подписи размеров (прозрачность фона, размер, цвет), размерные линии, линии деталей, фон (авто — по теме, светлый, тёмный, свой цвет)
 export const CAD_LOOK = { labelOpacity: 0.9, labelSize: 1, labelColor: '#1d4ed8', dimSize: 1, lineColor: '#5b6672', lineOpacity: 0.55, bg: 'auto', bgColor: '#e9edf1',
   quality: 'high', hwFinish: 'nickel', handleFinish: 'satin', xrayOpacity: 0.3, lines: true, dims: true, labelBgOn: true, openSizes: true,
-  holeStyle: 'recess', exposure: 0.92, lightKey: 1, lightAmb: 1, lightAz: 35, lightEl: 55, envInt: 1 }
+  holeStyle: 'recess', edgeR: 0.5, exposure: 0.92, lightKey: 1, lightAmb: 1, lightAz: 35, lightEl: 55, envInt: 1 }
 // отделка металла: цвет, металличность, шероховатость, «шлифовка» (анизотропия)
 export const FINISHES = [
   ['chrome', 'Хром', '#eef0f2', 1, 0.06, 0],

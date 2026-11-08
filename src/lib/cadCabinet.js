@@ -565,7 +565,9 @@ export function cabinetParts(params) {
       // у «с язычком» — язычок спускается на лицевую сторону фасада
       const len = Math.min(num(h.len, x1f - x0f), x1f - x0f)
       const a0 = cx - len / 2, a1 = cx + len / 2
-      vis(key + 'h', 'Ручка торцевая', [a0, y1f - 28, D - 2, a1, y1f + 2, zf + (type === 'edge' ? 2 : 0)], blk, anim, { type, L: 'x', N: '+z' })
+      // у «с язычком» — козырёк выступает вперёд от лица фасада (proj, по умолчанию 20 мм) и загнут вниз: под него заводят пальцы
+      const proj = type === 'edge' ? Math.max(2, num(h.proj, 20)) : 0
+      vis(key + 'h', 'Ручка торцевая', [a0, y1f - 28, D - 2, a1, y1f + 2, zf + proj], blk, anim, { type, L: 'x', N: '+z' })
       for (const x of len > 120 ? [a0 + 25, a1 - 25] : [cx]) holes.push({ p: [x, y1f - 15, D], n: '+z', d: 3, depth: Math.min(10, fT - 4), note: 'Ручка торцевая', key: fkey })
       addHw(`Ручка торцевая ${r1(len)} мм`)
       return
@@ -635,7 +637,8 @@ export function cabinetParts(params) {
         // короб: у скрытого монтажа — короче направляющей на lenRed (Blum Tandem: NL − 10)
         const zf = D - 2, z0 = zf - (sys.type === 'under' ? bd - num(sys.lenRed, 10) : bd)
         // направляющая по высоте короба: снизу с отступом (по умолчанию 3 мм от низа короба) или по центру короба
-        const ys = sys.type === 'under' ? by0 - 25 : fr.slidePos === 'center' ? by0 + bh / 2 : by0 + num(fr.slideOff, 3) + 22.5
+        // скрытый монтаж: шуруп в вертикальную стенку корпусной шины — она поднимается вдоль боковины корпуса в зазоре у ящика
+        const ys = sys.type === 'under' ? by0 + 12 : fr.slidePos === 'center' ? by0 + bh / 2 : by0 + num(fr.slideOff, 3) + 22.5
         // крепление фасада к ящику: точки на обратной пласти фасада (саморезы изнутри — без присадки, или сверлить — крепёж «Фасад ящика»)
         const fixPts = []
         for (const z of [D - 37, D - 37 - 224, D - 37 - Math.max(256, bd - 64)].filter(z => z > zi0 + 10)) {
@@ -651,12 +654,13 @@ export function cabinetParts(params) {
           }
         } else if (sys.type === 'under') {
           for (const [a, s] of [[x0, 1], [x1, -1]]) {
-            // как у Blum Tandem / Movento: корпусная шина — Г-профиль на боковине (уголок под ящиком), выдвижная — П-профиль под боковиной
-            // ящика, спереди под дном — замок (защёлка) ящика
-            const w = sg + t + 3
-            vis(k + 'rf' + s, 'Направляющая скрытого монтажа', [s > 0 ? a : a - w, by0 - 44, z0 + 10, s > 0 ? a + w : a, by0 - 7, zf - 4], null, null, { type: 'underOuter', L: 'z', N: s > 0 ? '+x' : '-x' })
-            vis(k + 'rm' + s, 'Направляющая скрытого монтажа', [s > 0 ? a + sg - 1.5 : a - sg - t - 1.5, by0 - 7, z0 + 6, s > 0 ? a + sg + t + 1.5 : a - sg + 1.5, by0 - 0.3, zf - 2], blk, anim, { type: 'underInner', L: 'z', N: s > 0 ? '+x' : '-x' })
-            vis(k + 'lk' + s, 'Замок ящика', [s > 0 ? a + sg + t + 2 : a - sg - t - 44, by0 - 9, zf - 70, s > 0 ? a + sg + t + 44 : a - sg - t - 2, by0 - 0.3, zf - 18], blk, anim, { type: 'clip', L: 'z', N: s > 0 ? '+x' : '-x' })
+            // как у Blum Tandem / Movento: короб из ЛДСП, дно поднято на 13 мм (bottomUp) — под ним спрятана направляющая.
+            // Корпусная шина — Г-профиль: полка внизу под боковиной ящика, стенка вверх по боковине корпуса (в зазоре 5 мм),
+            // через неё шурупы в корпус; выдвижная — П-профиль под дном у боковины ящика; спереди под дном — замок
+            const rec = num(sys.bottomUp, 13), xi = s > 0 ? a + sg + t : a - sg - t
+            vis(k + 'rf' + s, 'Направляющая скрытого монтажа', [s > 0 ? a : xi - 12, by0 - 6, z0 + 10, s > 0 ? xi + 12 : a, by0 + 22, zf - 4], null, null, { type: 'underOuter', L: 'z', N: s > 0 ? '+x' : '-x' })
+            vis(k + 'rm' + s, 'Направляющая скрытого монтажа', [s > 0 ? xi - 1 : xi - 12, by0 + 0.5, z0 + 6, s > 0 ? xi + 12 : xi + 1, by0 + rec - 0.5, zf - 2], blk, anim, { type: 'underInner', L: 'z', N: s > 0 ? '+x' : '-x' })
+            vis(k + 'lk' + s, 'Замок ящика', [s > 0 ? xi + 13 : xi - 55, by0 + 3, zf - 70, s > 0 ? xi + 55 : xi - 13, by0 + rec - 0.3, zf - 22], blk, anim, { type: 'clip', L: 'z', N: s > 0 ? '+x' : '-x' })
           }
         }
         if (sysId === 'metal') {
@@ -677,8 +681,12 @@ export function cabinetParts(params) {
           hw.push({ name: `${drawerSystem(sysId)[1]} ${bd} мм, комплект`, qty: 1 })
         } else {
           const bxa = x0 + sg, bxb = x1 - sg
-          const grooveBot = sysId === 'ldsp_groove' || sys.type === 'under'
-          const sy0 = grooveBot ? by0 : by0 + bT
+          const under = sys.type === 'under'
+          const grooveBot = sysId === 'ldsp_groove'
+          // скрытый монтаж: дно из ЛДСП короба между боковинами, поднято на rec; передняя стенка — над низом дна,
+          // задняя стоит на дне (Blum: «дно до конца ящика, задняя короче»)
+          const rec = under ? num(sys.bottomUp, 13) : 0
+          const sy0 = grooveBot || under ? by0 : by0 + bT
           const bE = { '+y': eB }
           // фальшпанель (передняя стенка короба) — по галочке, по умолчанию есть; нет — боковины до фасада, фасад — передняя стенка короба
           const ffOn = fr.falseFront !== false
@@ -686,12 +694,16 @@ export function cabinetParts(params) {
           parts.push(mk(k + 'sL', 'Ящик: боковина', 'ящик', [bxa, sy0, z0, bxa + t, sy0 + bh, zs1], 0, +1, 2, mat, { edges: bE }))
           parts.push(mk(k + 'sR', 'Ящик: боковина', 'ящик', [bxb - t, sy0, z0, bxb, sy0 + bh, zs1], 0, -1, 2, mat, { edges: bE }))
           if (ffOn) {
-            parts.push(mk(k + 'ff', 'Ящик: передняя', 'ящик', [bxa + t, sy0, zf - t, bxb - t, sy0 + bh, zf], 2, -1, 0, mat, { edges: bE }))
+            parts.push(mk(k + 'ff', 'Ящик: передняя', 'ящик', [bxa + t, sy0 + rec, zf - t, bxb - t, sy0 + bh, zf], 2, -1, 0, mat, { edges: bE }))
             for (const x of [bxa + t + 40, bxb - t - 40]) for (const yy of [sy0 + bh * 0.3, sy0 + bh * 0.7]) fixPts.push([x, yy])
           } else for (const x of [bxa + t / 2, bxb - t / 2]) for (const yy of [sy0 + bh * 0.25, sy0 + bh * 0.75]) fixPts.push([x, yy])
-          parts.push(mk(k + 'b', 'Ящик: задняя', 'ящик', [bxa + t, sy0, z0, bxb - t, sy0 + bh, z0 + t], 2, +1, 0, mat, { edges: bE }))
-          if (grooveBot) {
-            const go = sys.type === 'under' ? num(sys.bottomUp, 13) : 10, gd = 6, gw = bT + 1
+          parts.push(mk(k + 'b', 'Ящик: задняя', 'ящик', [bxa + t, sy0 + (under ? rec + t : 0), z0, bxb - t, sy0 + bh, z0 + t], 2, +1, 0, mat, { edges: bE }))
+          if (under) {
+            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t, sy0 + rec, z0, bxb - t, sy0 + rec + t, ffOn ? zf - t : D], 1, +1, 0, mat, { edges: { '-z': eB } }))
+            // отверстия под задние крючки направляющих: в торце дна сзади, Ø6×10, 7 мм от боковины, 11 мм от низа дна
+            for (const x of [bxa + t + 7, bxb - t - 7]) holes.push({ p: [x, sy0 + rec + 11, z0], n: '+z', d: 6, depth: 10, note: 'Крючок направляющей', key: k + 'bot' })
+          } else if (grooveBot) {
+            const go = 10, gd = 6, gw = bT + 1
             const yB = sy0 + go + (gw - bT) / 2
             parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t - gd + 1, yB, z0 + t - gd + 1, bxb - t + gd - 1, yB + bT, ffOn ? zf - t + gd - 1 : D + gd - 1], 1, +1, 0, bMat, { t: bT }))
             for (const pr of parts.filter(q => [k + 'sL', k + 'sR', k + 'ff', k + 'b'].includes(q.key))) pr.grooves.push({ from: '-y', offset: go, width: gw, depth: gd, along: 'L', note: 'Паз под дно ящика' })

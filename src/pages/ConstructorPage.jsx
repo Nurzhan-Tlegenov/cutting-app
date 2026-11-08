@@ -240,8 +240,9 @@ function HandleEditor({ h, onChange, door }) {
     {on && <Sub>
       <Chips label="Вид" value={HANDLE_TYPES.some(t => t[0] === h.type) ? h.type : 'rail'} onChange={v => set({ type: v })} options={HANDLE_TYPES} />
       {h.type === 'edge' || h.type === 'edgeflat' ? <>
-        <Grid cols={2}><NumField label="Длина (пусто — по ширине фасада)" value={h.len ?? ''} onChange={v => set({ len: v || null })} min={0} /></Grid>
-        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Торцевая ручка крепится сзади фасада у верхнего торца (глухие отверстия в обратной пласти); тонкий профиль лежит в зазоре над фасадом, у «с язычком» — язычок выходит на лицо фасада.</p>
+        <Grid cols={2}><NumField label="Длина (пусто — по ширине фасада)" value={h.len ?? ''} onChange={v => set({ len: v || null })} min={0} />
+          {h.type === 'edge' && <NumField label="Вылет козырька от лица" unit="мм" value={h.proj ?? 20} onChange={v => set({ proj: v })} min={2} />}</Grid>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Торцевая ручка крепится сзади фасада у верхнего торца (глухие отверстия в обратной пласти); тонкий профиль лежит в зазоре над фасадом, у «с язычком» — козырёк выступает вперёд от лица фасада и загнут вниз — под него заводят пальцы.</p>
       </> : <>
         {h.type !== 'knob' && h.type !== 'knobsq' && <Chips label="Расположение" value={h.orient || 'h'} onChange={v => set({ orient: v })} options={[['h', 'Горизонтально'], ['v', 'Вертикально']]} />}
         <Chips label="Привязка" value={h.anchor || 'c'} onChange={v => set({ anchor: v })} options={door ? ANCHORS : ANCHORS.slice(0, 7)} />
@@ -459,10 +460,13 @@ function MatLookEditor({ name, looks, setLooks }) {
       {cat && <DecorCatalog onClose={() => setCat(false)} onPick={v => { set(v); setCat(false) }} />}
       <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
         <input style={{ ...inp, padding: '5px 8px', fontSize: 12.5 }} placeholder="или ссылка на картинку декора (https://…)" value={url} onChange={e => setUrl(e.target.value)} />
+        {navigator.clipboard?.readText && <button type="button" title="Вставить ссылку из буфера" style={{ ...btnS(), padding: '4px 9px' }} onClick={async () => { try { const t = (await navigator.clipboard.readText()).trim(); if (t) setUrl(t) } catch { window.alert('Нет доступа к буферу — вставьте ссылку вручную (долгое нажатие в поле → Вставить)') } }}>📋</button>}
         <button type="button" style={{ ...btnS(), padding: '4px 9px' }} disabled={!/^https?:\/\//.test(url.trim())} onClick={() => { set({ tex: url.trim(), src: 'ссылка' }); setUrl('') }}>Взять</button>
       </div>
+      {/* поиск картинки декора по названию материала: открывается поиск картинок, долгое нажатие на картинку → «Копировать адрес» → 📋 → Взять */}
+      <button type="button" style={{ ...btnS(true), padding: '4px 9px', fontSize: 12.5, marginTop: 6 }} onClick={() => window.open('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(name + ' декор текстура'), '_blank', 'noopener')}>🔍 Найти текстуру «{name}» в интернете</button>
       {own.src && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '4px 0 0' }}>Декор: {own.src}</p>}
-      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>Картинку по ссылке видно, только если сайт её разрешает (не все сайты отдают картинки другим приложениям). Направление декора на фото укажите, как он идёт на картинке, — на детали он ляжет вдоль её длины (как волокно при раскрое); на отдельной детали можно повернуть. Сфотографируйте образец или сохраните картинку из интернета и загрузите её — так деталь и все детали этого материала будут выглядеть на модели. Запоминается за аккаунтом.</p>
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>«Найти текстуру» открывает поиск картинок по названию материала: нажмите на картинку, затем долгое нажатие → «Копировать адрес изображения», вернитесь сюда — 📋 и «Взять». Картинку по ссылке видно, только если сайт её разрешает (не все сайты отдают картинки другим приложениям). Направление декора на фото укажите, как он идёт на картинке, — на детали он ляжет вдоль её длины (как волокно при раскрое); на отдельной детали можно повернуть. Сфотографируйте образец или сохраните картинку из интернета и загрузите её — так деталь и все детали этого материала будут выглядеть на модели. Запоминается за аккаунтом.</p>
     </div>
   )
 }
@@ -794,6 +798,9 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
 
     <Fold id="mats" title="Материалы" def right={`${p.material} / ${p.facadeMaterial}`}>
       <Grid cols={2}><TextField label="Корпус (весь)" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><TextField label="Фасады (все)" value={p.facadeMaterial} onChange={v => up({ facadeMaterial: v })} list="cad-mats" /></Grid>
+      {/* кромка разом: весь каркас (передние торцы и прочее) или все фасады */}
+      <Chips label="Кромка каркаса (вся)" value={String(p.edgeFront || '') === String(p.edgeBody || '') ? String(p.edgeFront || '') : '~'} onChange={v => up({ edgeFront: v, edgeBody: v })} options={[['0,4', '0,4'], ['1', '1'], ['2', '2'], ['', 'без кромки']]} />
+      <Chips label="Кромка фасадов (вся)" value={String(p.edgeFacade || '')} onChange={v => up({ edgeFacade: v })} options={[['0,4', '0,4'], ['1', '1'], ['2', '2'], ['', 'без кромки']]} />
       <Chips label="Фрезеровка фасадов (по умолчанию для всех)" value={p.facadeStyle || 'flat'} onChange={v => up({ facadeStyle: v })} options={FACADE_STYLES} />
       {Object.keys(it.mat || {}).length > 0 && <button type="button" style={{ ...btnS(), marginBottom: 6 }} onClick={() => set({ ...it, p, mat: {} })}>↺ Убрать свои материалы у отдельных деталей ({Object.keys(it.mat).length})</button>}
     </Fold>
@@ -1573,6 +1580,9 @@ export default function ConstructorPage() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Откуда свет (по кругу)</span><input type="range" min="0" max="360" step="5" value={look.lightAz ?? 35} onChange={e => { const v = Number(e.target.value); setLook({ lightAz: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.lightAz ?? 35) + '°'}</span></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Высота света</span><input type="range" min="10" max="85" step="1" value={look.lightEl ?? 55} onChange={e => { const v = Number(e.target.value); setLook({ lightEl: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.lightEl ?? 55) + '°'}</span></label>
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Белые фасады слепят — уменьшите основной свет или яркость; блеск каждого материала — в «Как выглядит материал».</p>
+        <div style={sect}>Скругление кромки</div>
+        <Chips value={String(look.edgeR ?? 0.5)} onChange={v => setLook({ edgeR: Number(v) })} options={[['0', 'Острые'], ['0.5', 'R 0,5'], ['1', 'R 1'], ['2', 'R 2']]} />
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Только на кромленых торцах и не больше толщины кромки (кромка 0,4 — радиус 0,4); торцы без кромки остаются острыми. Влияет только на картинку.</p>
         <div style={sect}>Присадка (кнопка ⊙)</div>
         <Chips value={look.holeStyle || 'recess'} onChange={v => setLook({ holeStyle: v })} options={[['recess', 'Выемки (как настоящие отверстия)'], ['marker', 'Цветные метки на всю глубину']]} />
         <div style={sect}>Металл фурнитуры</div>
