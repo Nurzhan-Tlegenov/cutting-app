@@ -10,6 +10,8 @@ import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import Hint from '../components/Hint'
 import CadView from '../components/CadView'
+import { CAD_LOOK } from '../lib/cadLook'
+import { getTheme, setTheme } from '../lib/theme'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
 import { useDesktop } from '../hooks/useDesktop'
@@ -95,7 +97,7 @@ function TreeEditor({ it, sel, setSel }) {
 
 // ── проёмы прямо на картинке: панель инструментов слева от модели и окно выбранного проёма поверх неё ──
 const toolBtn = (on, dis) => ({ width: 40, minHeight: 34, padding: '3px 1px', borderRadius: 8, fontSize: 8.5, lineHeight: 1.1, cursor: dis ? 'default' : 'pointer', textAlign: 'center',
-  border: `1px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'rgba(255,255,255,0.94)', color: on ? 'white' : dis ? '#aab' : 'var(--text)', opacity: dis ? 0.6 : 1 })
+  border: `1px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'var(--bg)', color: on ? 'white' : dis ? '#aab' : 'var(--text)', opacity: dis ? 0.6 : 1 })
 const smallInp = { width: 64, padding: '4px 5px', fontSize: 13, border: '0.5px solid var(--border-md)', borderRadius: 7, background: 'var(--bg)', color: 'var(--text)' }
 
 function SmallNum({ value, onChange, width = 64, title }) {
@@ -135,7 +137,7 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes }) {
   return (
     <div style={{ position: 'absolute', left: 6, top: 6, display: 'flex', flexDirection: 'column', gap: 3, zIndex: 3, pointerEvents: 'none' }}>
       <button type="button" style={{ ...toolBtn(showSizes), pointerEvents: 'auto' }} onClick={() => setShowSizes(v => !v)} title="Размеры проёмов на модели">📏<br />Разм.</button>
-      {!node && <div style={{ fontSize: 8.5, width: 40, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.8)', borderRadius: 6, padding: 2, textAlign: 'center' }}>нажмите проём</div>}
+      {!node && <div style={{ fontSize: 8.5, width: 40, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: 2, textAlign: 'center' }}>нажмите проём</div>}
       {node && <div style={{ ...toolBtn(false), pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, padding: '2px 1px' }} title="Сколько панелей ставить за одно нажатие">
         <button type="button" style={{ border: 'none', background: 'none', fontSize: 12, lineHeight: 1, padding: 0, cursor: 'pointer' }} onClick={() => setCnt(c => Math.min(20, c + 1))}>＋</button>
         <b style={{ fontSize: 12 }}>×{cnt}</b>
@@ -161,7 +163,7 @@ function OpeningPanel({ it, set, sel, setSel, pull, setPull, onBlock }) {
   const row = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 5, fontSize: 12.5 }
   const fp = node.fpanel
   return (
-    <div style={{ position: 'absolute', left: 58, right: 6, bottom: 6, maxHeight: '48%', overflowY: 'auto', zIndex: 3, background: 'rgba(255,255,255,0.96)', border: '1px solid var(--blue)', borderRadius: 10, padding: '6px 9px', boxShadow: '0 2px 10px rgba(0,0,0,0.12)' }}>
+    <div style={{ position: 'absolute', left: 58, right: 6, bottom: 6, maxHeight: '48%', overflowY: 'auto', zIndex: 3, background: 'var(--bg)', border: '1px solid var(--blue)', borderRadius: 10, padding: '6px 9px', boxShadow: '0 2px 10px rgba(0,0,0,0.12)' }}>
       <div style={{ ...row, marginTop: 0 }}>
         <b>Проём {o.w}×{o.h}</b>
         {parent && <>
@@ -975,6 +977,12 @@ export default function ConstructorPage() {
   // подсветка кромки в 3D: цвет, прозрачность, «яркая» (светится сквозь детали) — за аккаунтом
   const [edgeLook, setEdgeLookS] = useState(() => { try { return { on: true, color: '#f97316', opacity: 1, glow: false, ...(getUserSettings(user)?.cadEdgeLook || {}) } } catch { return { on: true, color: '#f97316', opacity: 1, glow: false } } })
   const setEdgeLook = patch => setEdgeLookS(l => { const n = { ...l, ...patch }; saveUserSettings({ cadEdgeLook: n }, user); return n })
+  // вид сцены (подписи размеров, линии, фон) — за аккаунтом; тема — светлая / тёмная
+  const [look, setLookS] = useState(() => { try { return { ...CAD_LOOK, ...(getUserSettings(user)?.cadLook || {}) } } catch { return { ...CAD_LOOK } } })
+  const setLook = patch => setLookS(l => { const n = { ...l, ...patch }; saveUserSettings({ cadLook: n }, user); return n })
+  const [theme, setThemeS] = useState(() => getTheme())
+  useEffect(() => { const on = e => setThemeS(e.detail === 'dark' ? 'dark' : 'light'); window.addEventListener('themechange', on); return () => window.removeEventListener('themechange', on) }, [])
+  const viewLook = useMemo(() => ({ ...look, dark: theme === 'dark' }), [look, theme])
   const [moveMode, setMoveMode] = useState(false)    // «✥ Двигать»: только тогда пальцем двигаем элемент по полу
   const [pull, setPull] = useState('after')          // при смене размера проёма тянутся соседи: after — выше/правее, before — ниже/левее        // выбранная деталь внутри элемента (нажатие в 3D)
   const [editPart, setEditPart] = useState(null)    // редактор контура детали: { pid, draft }
@@ -1252,10 +1260,10 @@ export default function ConstructorPage() {
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room}
-        labels={drLabels || sizeLabels} onLabel={onLabel} moveMode={moveMode} edgeLook={edgeLook} hiPids={hiPids}>
+        labels={drLabels || sizeLabels} onLabel={onLabel} moveMode={moveMode} edgeLook={edgeLook} hiPids={hiPids} look={viewLook}>
         {selCab && <OpeningTools it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} showSizes={showSizes} setShowSizes={setShowSizes} />}
         {selCab && selOpening && !blk && <OpeningPanel it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} pull={pull} setPull={setPull} onBlock={b => { setSelBlock({ item: selCab.id, ...b }); setSelPid(null); setTab('props') }} />}
-        {blk && <div style={{ position: 'absolute', left: 58, bottom: 6, zIndex: 3, display: 'flex', gap: 4, alignItems: 'center', background: 'rgba(255,255,255,0.95)', border: '1px solid #f59e0b', borderRadius: 14, padding: '3px 4px 3px 10px', fontSize: 12.5 }}>
+        {blk && <div style={{ position: 'absolute', left: 58, bottom: 6, zIndex: 3, display: 'flex', gap: 4, alignItems: 'center', background: 'var(--bg)', border: '1px solid #f59e0b', borderRadius: 14, padding: '3px 4px 3px 10px', fontSize: 12.5 }}>
           <b>{blockTitle(findNode(treeOf({ ...CAB_DEFAULTS, ...selCab.p }), blk.n)?.node, blk.t)}</b>
           <button type="button" style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setSelBlock(null)}>✕</button>
         </div>}
@@ -1263,11 +1271,12 @@ export default function ConstructorPage() {
       <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
         <button type="button" title="Полупрозрачный вид" style={{ ...btnS(), padding: '6px 9px', ...(xray ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setXray(v => !v)}>◫</button>
+ <button type="button" title="Отображение: подписи, линии, фон, кромка, тема" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => { setTab('scene'); foldApi.toggle('look', true) }}>⚙</button>
         <button type="button" title="Подсветка кромки" style={{ ...btnS(), padding: '6px 9px', ...(edgeLook.on ? { color: edgeLook.color, borderColor: edgeLook.color } : {}) }} onClick={() => setEdgeLook({ on: !edgeLook.on })}>▭</button>
         <button type="button" title="Двигать выбранный элемент пальцем по полу" style={{ ...btnS(), padding: '6px 9px', ...(moveMode ? { color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setMoveMode(v => !v)}>✥</button>
         <button type="button" title="Показать присадку" style={{ ...btnS(), padding: '6px 9px', ...(showHoles ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowHoles(v => !v)}>⊙</button>
       </div>
-      {project.items.length > 0 && (() => { const b = sceneBox(parts); return <div style={{ position: 'absolute', right: 8, bottom: 4, fontSize: 11, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.75)', borderRadius: 6, padding: '1px 6px' }}>{Math.round(b[3] - b[0])} × {Math.round(b[4] - b[1])} × {Math.round(b[5] - b[2])}</div> })()}
+      {project.items.length > 0 && (() => { const b = sceneBox(parts); return <div style={{ position: 'absolute', right: 8, bottom: 4, fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: '1px 6px' }}>{Math.round(b[3] - b[0])} × {Math.round(b[4] - b[1])} × {Math.round(b[5] - b[2])}</div> })()}
     </div>
   )
   const panel = (<FoldCtx.Provider value={foldApi}>
@@ -1275,13 +1284,27 @@ export default function ConstructorPage() {
     <div style={{ display: 'flex', gap: 5, marginBottom: 10, flexWrap: 'wrap' }}>
       {[['scene', 'Сцена'], ['props', 'Свойства'], ['spec', 'Смета']].map(([k, t]) => <button key={k} type="button" style={chipS(tab === k)} onClick={() => setTab(k)}>{t}</button>)}
     </div>
-    {tab === 'scene' && <div className="card" style={{ padding: '8px 10px', marginBottom: 10 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', fontSize: 13 }}>
-        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={edgeLook.on} onChange={e => setEdgeLook({ on: e.target.checked })} /><b>Подсветка кромки</b></label>
-        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}>цвет<input type="color" value={edgeLook.color} onChange={e => setEdgeLook({ color: e.target.value })} style={{ width: 34, height: 24, padding: 0, border: 'none', background: 'none' }} /></label>
-        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}>прозрачность<input type="range" min="0.1" max="1" step="0.05" value={edgeLook.opacity} onChange={e => setEdgeLook({ opacity: Number(e.target.value) })} style={{ width: 90 }} /></label>
-        <label style={{ display: 'flex', gap: 5, alignItems: 'center' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!edgeLook.glow} onChange={e => setEdgeLook({ glow: e.target.checked })} />яркая (видна сквозь детали)</label>
-      </div>
+    {tab === 'scene' && <div className="card" style={{ padding: '4px 10px 8px', marginBottom: 10 }}>
+      <Fold id="look" title="Отображение" right="за аккаунтом">
+        <div style={{ ...sect, marginTop: 0 }}>Подписи размеров</div>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Фон подписи (прозрачность)</span><input type="range" min="0" max="1" step="0.05" value={look.labelOpacity} onChange={e => { const v = Number(e.target.value); setLook({ labelOpacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.labelOpacity * 100)}%</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Размер подписей проёмов</span><input type="range" min="0.6" max="1.8" step="0.05" value={look.labelSize} onChange={e => { const v = Number(e.target.value); setLook({ labelSize: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.labelSize * 100)}%</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Размер габаритных размеров</span><input type="range" min="0.4" max="2" step="0.05" value={look.dimSize} onChange={e => { const v = Number(e.target.value); setLook({ dimSize: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.dimSize * 100)}%</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет подписей</span><input type="color" value={look.labelColor} onChange={e => setLook({ labelColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>
+        <div style={sect}>Линии деталей</div>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет линий каркаса</span><input type="color" value={look.lineColor} onChange={e => setLook({ lineColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Яркость линий</span><input type="range" min="0.05" max="1" step="0.05" value={look.lineOpacity} onChange={e => { const v = Number(e.target.value); setLook({ lineOpacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(look.lineOpacity * 100)}%</span></label>
+        <div style={sect}>Подсветка кромки</div>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={edgeLook.on} onChange={e => setEdgeLook({ on: e.target.checked })} />Показывать кромку
+          <input type="color" value={edgeLook.color} onChange={e => setEdgeLook({ color: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none', marginLeft: 8 }} /></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Яркость кромки</span><input type="range" min="0.1" max="1" step="0.05" value={edgeLook.opacity} onChange={e => { const v = Number(e.target.value); setEdgeLook({ opacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(edgeLook.opacity * 100)}%</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!edgeLook.glow} onChange={e => setEdgeLook({ glow: e.target.checked })} />Светящаяся (видна сквозь детали)</label>
+        <div style={sect}>Фон и тема</div>
+        <Chips value={look.bg} onChange={v => setLook({ bg: v })} options={[['auto', 'По теме'], ['light', 'Светлый'], ['dark', 'Тёмный'], ['custom', 'Свой цвет']]} />
+        {look.bg === 'custom' && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет фона</span><input type="color" value={look.bgColor} onChange={e => setLook({ bgColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>}
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={theme === 'dark'} onChange={e => setThemeS(setTheme(e.target.checked ? 'dark' : 'light'))} />🌙 Тёмная тема всего приложения</label>
+        <button type="button" style={{ ...btnS(), marginTop: 4 }} onClick={() => { setLookS({ ...CAD_LOOK }); saveUserSettings({ cadLook: { ...CAD_LOOK } }, user) }}>↺ Как было</button>
+      </Fold>
     </div>}
     {tab === 'scene' && <SceneList project={project} setProject={setProject} parts={parts} selected={selected} onSelect={select} onAdd={addItem}
       library={library} onLibraryDelete={id => { if (window.confirm('Убрать из библиотеки?')) saveLibrary(library.filter(l => l.id !== id)) }}

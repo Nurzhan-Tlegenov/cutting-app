@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { sceneBox, isFigured, partEdges, partVerts } from '../lib/cadModel'
 import { contourSegments, segmentSide } from '../lib/edgeLength'
+import { CAD_LOOK } from '../lib/cadLook'
 import { verticesToPolygon } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 
@@ -22,12 +23,16 @@ function figuredGeometry(sp) {
   return geo
 }
 
+const isDarkBg = look => look.bg === 'dark' || (look.bg === 'auto' && look.dark) || (look.bg === 'custom' && (() => { const c = (look.bgColor || '#fff').replace('#', ''); const n = parseInt(c.length === 3 ? c.split('').map(x => x + x).join('') : c, 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 128 })())
+const bgOf = look => (look.bg === 'custom' ? look.bgColor : isDarkBg(look) ? 'linear-gradient(#26282d, #1a1b1f)' : 'linear-gradient(#f4f6f8, #e6eaee)')
+const labelBg = (look, op) => (isDarkBg(look) ? `rgba(30,32,37,${op})` : `rgba(255,255,255,${op})`)
+
 // подпись размера — спрайт с текстом
-function label(text, h) {
+function label(text, h, look = CAD_LOOK) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64
   const g = c.getContext('2d')
-  g.fillStyle = 'rgba(255,255,255,0.92)'; g.fillRect(0, 8, 256, 48)
-  g.fillStyle = '#1d4ed8'; g.font = '600 38px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 128, 33)
+  g.fillStyle = labelBg(look, Number(look.labelOpacity ?? 0.9)); g.fillRect(0, 8, 256, 48)
+  g.fillStyle = look.labelColor || '#1d4ed8'; g.font = '600 38px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 128, 33)
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }))
   sp.scale.set(h * 4, h, 1); sp.renderOrder = 10
   return sp
@@ -48,7 +53,11 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, edgeLook = null, hiPids = null, children, style }) {
+export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, edgeLook = null, hiPids = null, look: look0 = null, children, style }) {
+  const look = { ...CAD_LOOK, ...(look0 || {}) }
+  // на тёмном фоне стандартный синий плохо видно — светлее
+  if (isDarkBg(look) && look.labelColor === CAD_LOOK.labelColor) look.labelColor = '#8ab4f8'
+  if (isDarkBg(look) && look.lineColor === CAD_LOOK.lineColor) look.lineColor = '#9aa3ad'
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
@@ -294,7 +303,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       else mesh.position.set(-off[0], -off[1], -off[2])
       mesh.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, anim: p.anim?.id || null, ...(ghost ? { ghost: true } : {}) }
       hg.add(mesh)
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : '#5b6672', transparent: true, opacity: isSel ? 1 : 0.55 }))
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : look.lineColor, transparent: true, opacity: isSel ? 1 : Math.max(0.05, Math.min(1, Number(look.lineOpacity))) }))
       edges.position.copy(mesh.position)
       hg.add(edges)
     }
@@ -335,17 +344,17 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     if (dims && own.length) {
       const b = sceneBox(own)
       const big = Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2])
-      const off = Math.max(40, big * 0.06), lh = Math.max(35, big * 0.05)
-      const lm = new THREE.LineBasicMaterial({ color: '#1d4ed8', depthTest: false, transparent: true })
+      const off = Math.max(40, big * 0.06), lh = Math.max(35, big * 0.05) * Math.max(0.4, Number(look.dimSize) || 1)
+      const lm = new THREE.LineBasicMaterial({ color: look.labelColor || '#1d4ed8', depthTest: false, transparent: true })
       const line = (a, c) => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a), new THREE.Vector3(...c)]), lm); l.renderOrder = 9; group.add(l) }
-      const dim = (a, c, txt, at) => { line(a, c); const s = label(txt, lh); s.position.set(...at); group.add(s) }
+      const dim = (a, c, txt, at) => { line(a, c); const s = label(txt, lh, look); s.position.set(...at); group.add(s) }
       const r = v => String(Math.round(v * 10) / 10)
       dim([b[0], b[1], b[5] + off], [b[3], b[1], b[5] + off], r(b[3] - b[0]), [(b[0] + b[3]) / 2, b[1] + lh * 0.7, b[5] + off])
       dim([b[0] - off, b[1], b[5]], [b[0] - off, b[4], b[5]], r(b[4] - b[1]), [b[0] - off - lh * 1.6, (b[1] + b[4]) / 2, b[5]])
       dim([b[0] - off, b[1], b[2]], [b[0] - off, b[1], b[5]], r(b[5] - b[2]), [b[0] - off - lh * 1.6, b[1] + lh * 0.7, (b[2] + b[5]) / 2])
     }
     if (!s.fitted && parts?.length) { fit(s, parts); s.fitted = true }
-  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook, hiPids])
+  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook, hiPids, JSON.stringify(look)]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // присадка (цилиндры по оси отверстия) и комната (пол и три стены)
   useEffect(() => {
@@ -386,12 +395,12 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 200, borderRadius: 8, overflow: 'hidden', ...style }}>
-      <div ref={box} style={{ position: 'absolute', inset: 0, background: 'linear-gradient(#f4f6f8, #e6eaee)' }} />
+      <div ref={box} style={{ position: 'absolute', inset: 0, background: bgOf(look) }} />
       {(labels || []).map(l => (
         <button key={l.id} type="button" ref={el => { if (el) labelEls.current.set(l.id, el); else labelEls.current.delete(l.id) }}
           onClick={() => onLabel?.(l.id)}
-          style={{ position: 'absolute', left: 0, top: 0, display: 'none', padding: '2px 6px', fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
-            border: `1px solid ${l.on ? '#1d4ed8' : '#93c5fd'}`, background: l.on ? '#1d4ed8' : 'rgba(255,255,255,0.9)', color: l.on ? 'white' : '#1d4ed8', zIndex: 2 }}>{l.text}</button>
+          style={{ position: 'absolute', left: 0, top: 0, display: 'none', padding: `${2 * look.labelSize}px ${6 * look.labelSize}px`, fontSize: 12 * look.labelSize, fontWeight: 600, borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+            border: `1px solid ${l.on ? look.labelColor : look.labelColor + '66'}`, background: l.on ? look.labelColor : labelBg(look, Number(look.labelOpacity)), color: l.on ? 'white' : look.labelColor, zIndex: 2 }}>{l.text}</button>
       ))}
       {children}
     </div>

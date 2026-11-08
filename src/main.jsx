@@ -6,6 +6,7 @@ import App from './App.jsx'
 import { startI18n } from './i18n'
 import { registerSW } from './lib/push'
 import { initUiScale } from './lib/uiScale'
+import { applyTheme } from './lib/theme'
 import { catchInstallPrompt } from './lib/install'
 
 registerSW()   // только для push-уведомлений, ничего не кэширует
@@ -16,6 +17,7 @@ if (!/^\/(v|view)\//.test(window.location.pathname)) document.title = 'Раск�
 
 // масштаб интерфейса (текст и кнопки) — до первого показа, чтобы не прыгало
 initUiScale()
+applyTheme()
 
 // язык интерфейса: словарь загружается до первого показа, чтобы русский текст не мелькал
 startI18n().finally(() => createRoot(document.getElementById('root')).render(

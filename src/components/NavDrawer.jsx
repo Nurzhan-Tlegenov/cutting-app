@@ -9,6 +9,7 @@ import { useIsSupport } from '../lib/support'
 import { hasBeta } from '../lib/beta'
 import { APP_COMMIT, appVersionText, NESTING_VERSION } from '../lib/version'
 import { getUiScale, setUiScale, isTouchDevice, UI_SCALE_MIN, UI_SCALE_MAX } from '../lib/uiScale'
+import { getTheme, setTheme } from '../lib/theme'
 
 // Боковое меню (кнопка ☰ слева вверху или свайп от левого края): все кабинеты и их разделы в одном месте —
 // производство (заказы, техпроцесс, настройки), рабочие места, клиент (заказы, новый заказ), мастер-аккаунт.
@@ -369,6 +370,7 @@ export default function NavDrawer({ notices, unread }) {
         {/* внизу меню — обучение: интерактивные туры для клиента и производства */}
         <div style={{ padding: '6px 10px 10px', borderTop: '0.5px solid var(--border)', opacity: k }}>
           <UiScaleRow />
+          {isMaster && <ThemeRow />}
           <button type="button" onClick={() => go('/help')} className="nav-item"
             style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, border: 'none', textAlign: 'left', cursor: 'pointer',
               background: pathname === '/help' ? 'var(--blue-light)' : 'transparent', color: pathname === '/help' ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: pathname === '/help' ? 600 : 400 }}>
@@ -401,6 +403,17 @@ export default function NavDrawer({ notices, unread }) {
     </div>
   </>,
     document.body,
+  )
+}
+
+// «Тёмная тема» — пока для мастер-аккаунта (бета: часть экранов ещё со своими светлыми цветами)
+function ThemeRow() {
+  const [t, setT] = useState(() => getTheme())
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px 8px', fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer' }}>
+      <span style={{ flex: 1 }}>🌙 Тёмная тема <span style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 600 }}>β</span></span>
+      <input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={t === 'dark'} onChange={e => setT(setTheme(e.target.checked ? 'dark' : 'light'))} />
+    </label>
   )
 }
 

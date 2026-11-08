@@ -33,6 +33,34 @@ html, body { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; text-siz
   --amber-light: #FAEEDA;
 }
 
+/* тёмная тема (меню → «Тёмная тема»): те же переменные, тёмные значения */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --blue: #5B9BE0;
+  --blue-light: #1B2A3B;
+  --blue-mid: #2A4766;
+  --blue-dark: #A9CBF2;
+  --teal: #3DBB92;
+  --teal-light: #12302A;
+  --gray: #A7A59E;
+  --gray-light: #2A2A2D;
+  --gray-mid: #48484C;
+  --text: #E7E5E0;
+  --text-muted: #B3B1AA;
+  --text-hint: #8C8A84;
+  --border: rgba(255,255,255,0.13);
+  --border-md: rgba(255,255,255,0.27);
+  --bg: #1E1F23;
+  --bg2: #141518;
+  --bg3: #2A2B30;
+  --danger: #F06A69;
+  --danger-light: #3A1E20;
+  --success: #3DBB92;
+  --success-light: #12302A;
+  --amber: #E0A34A;
+  --amber-light: #3A2C14;
+}
+
 /* Страница никогда не листается вбок: если какой-то элемент выпирает на пару пикселей, он обрезается, а не делает
    страницу шире экрана (после симулятора масштаб 1:1, и такой лишний край телефон давал сдвигать пальцем влево).
    clip — без своей прокрутки, поэтому липкие (sticky) блоки работают как раньше. Ленты, что листаются вбок, — со своей прокруткой. */
