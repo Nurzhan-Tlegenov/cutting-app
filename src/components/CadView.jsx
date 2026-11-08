@@ -46,7 +46,7 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, style }) {
+export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, style }) {
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
@@ -71,12 +71,39 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f96, 2.2))
     const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(3000, 5000, 4000); scene.add(dl)
     const dl2 = new THREE.DirectionalLight(0xffffff, 0.5); dl2.position.set(-4000, 2000, -2000); scene.add(dl2)
-    const grid = new THREE.GridHelper(10000, 50, 0xb8c0c8, 0xdde2e7)
-    scene.add(grid)
+    // оси координат в углу (как в CAD-программах): X — красная, Y — зелёная, Z — синяя; начало — левый нижний задний угол
+    const grid = new THREE.Group()        // (пол-сетку убрали; объект оставлен для совместимости)
+    const axScene = new THREE.Scene(), axCam = new THREE.PerspectiveCamera(40, 1, 1, 100)
+    const axLabel = (txt, color) => {
+      const c = document.createElement('canvas'); c.width = 64; c.height = 64
+      const g = c.getContext('2d'); g.fillStyle = color; g.font = '700 44px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, 32, 34)
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); s.scale.set(0.5, 0.5, 1); return s
+    }
+    ;[[[1, 0, 0], '#dc2626', 'X'], [[0, 1, 0], '#16a34a', 'Y'], [[0, 0, 1], '#2563eb', 'Z']].forEach(([d, c, n]) => {
+      const v = new THREE.Vector3(...d)
+      axScene.add(new THREE.ArrowHelper(v, new THREE.Vector3(), 1, c, 0.25, 0.12))
+      const l = axLabel(n, c); l.position.copy(v.clone().multiplyScalar(1.35)); axScene.add(l)
+    })
+    // небольшая метка начала координат в самой сцене
+    const origin = new THREE.AxesHelper(150); origin.material.depthTest = false; origin.renderOrder = 5; scene.add(origin)
     const group = new THREE.Group(); scene.add(group)
     const extra = new THREE.Group(); scene.add(extra)   // присадка и стены комнаты — без выбора нажатием
     let raf = 0, alive = true
-    const tick = () => { if (!alive) return; controls.update(); renderer.render(scene, camera); raf = requestAnimationFrame(tick) }
+    const tick = () => {
+      if (!alive) return
+      controls.update()
+      const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight
+      renderer.setViewport(0, 0, w, h); renderer.setScissorTest(false)
+      renderer.render(scene, camera)
+      // мини-оси в левом нижнем углу поворачиваются вместе с камерой
+      const s = Math.min(90, Math.round(Math.min(w, h) * 0.22))
+      axCam.position.copy(camera.position).sub(controls.target).setLength(4.2); axCam.lookAt(0, 0, 0); axCam.up.copy(camera.up)
+      renderer.autoClear = false; renderer.clearDepth()
+      renderer.setScissorTest(true); renderer.setScissor(6, 22, s, s); renderer.setViewport(6, 22, s, s)
+      renderer.render(axScene, axCam)
+      renderer.setScissorTest(false); renderer.autoClear = true
+      raf = requestAnimationFrame(tick)
+    }
     tick()
     const resize = () => {
       const w = el.clientWidth || 300, h = el.clientHeight || 300
@@ -103,7 +130,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       down = { x: e.clientX, y: e.clientY, t: Date.now() }
       if (!selId.current || !drag.current) return
       pick(e)
-      const hit = ray.intersectObjects(group.children.filter(o => o.isMesh), false)[0]
+      const hit = ray.intersectObjects(group.children.filter(o => o.isMesh && !o.userData.ghost), false)[0]
       if (!hit || hit.object.userData.itemId !== selId.current) return
       const start = onFloor(e, hit.point.y)
       if (!start) return
@@ -132,8 +159,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       down = null
       if (moved > 6 || dt > 450) return
       pick(e)
-      const hit = ray.intersectObjects(group.children.filter(o => o.isMesh), false)[0]
-      sel.current?.(hit ? hit.object.userData.itemId : null, hit ? hit.object.userData.pid : null)
+      const hit = ray.intersectObjects(group.children.filter(o => o.isMesh && !o.userData.ghost), false)[0]
+      sel.current?.(hit ? hit.object.userData.itemId : null, hit ? hit.object.userData.pid || null : null, hit ? hit.object.userData.opening || null : null)
     }
     renderer.domElement.addEventListener('pointerdown', onDown, { capture: true })
     renderer.domElement.addEventListener('pointermove', onMove)
@@ -159,6 +186,18 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     if (!s) return
     const { group } = s
     for (const o of [...group.children]) { group.remove(o); o.geometry?.dispose?.(); o.material?.dispose?.() }
+    const ghostFronts = (openings || []).length > 0
+    for (const o of openings || []) {
+      const b = o.aabb, sx = b[3] - b[0], sy = b[4] - b[1], sz = b[5] - b[2]
+      if (!(sx > 1 && sy > 1 && sz > 1)) continue
+      const on = o.id === selectedOpening
+      if (!o.leaf && !on) continue
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx - 2, sy - 2, sz - 2), new THREE.MeshBasicMaterial({ color: on ? '#2563eb' : '#60a5fa', transparent: true, opacity: on ? 0.28 : 0.07, depthWrite: false }))
+      m.position.set(b[0] + sx / 2, b[1] + sy / 2, b[2] + sz / 2)
+      m.userData = { itemId: o.item, opening: o.id }
+      group.add(m)
+      if (on) { const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color: '#1d4ed8' })); e.position.copy(m.position); group.add(e) }
+    }
     for (const p of parts || []) {
       const b = p.place.aabb
       const sx = b[3] - b[0], sy = b[4] - b[1], sz = b[5] - b[2]
@@ -168,7 +207,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const lk = lookOf(p.material)
       const isSel = selected && p.item.id === selected
       const isPart = selectedPid && p.pid === selectedPid
-      const op = xray ? Math.min(lk.opacity, 0.35) : lk.opacity
+      const ghost = ghostFronts && p.role === 'фасад' && p.item.id === selected
+      const op = ghost ? 0.18 : xray ? Math.min(lk.opacity, 0.35) : lk.opacity
       const mat = new THREE.MeshStandardMaterial({
         color: isPart ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.6) : isSel ? new THREE.Color(lk.color).lerp(new THREE.Color('#3b82f6'), 0.45) : lk.color,
         roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.35 : 0.8, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.6 : 0,
@@ -176,7 +216,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       })
       const mesh = new THREE.Mesh(geo, mat)
       if (!fig) mesh.position.set(b[0] + sx / 2, b[1] + sy / 2, b[2] + sz / 2)
-      mesh.userData = { itemId: p.item.id, pid: p.pid }
+      mesh.userData = ghost ? { itemId: p.item.id, pid: p.pid, ghost: true } : { itemId: p.item.id, pid: p.pid }
       group.add(mesh)
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: isPart ? '#b45309' : isSel ? '#1d4ed8' : '#5b6672', transparent: true, opacity: isSel ? 1 : 0.55 }))
       edges.position.copy(mesh.position)
@@ -197,7 +237,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       dim([b[0] - off, b[1], b[2]], [b[0] - off, b[1], b[5]], r(b[5] - b[2]), [b[0] - off - lh * 1.6, b[1] + lh * 0.7, (b[2] + b[5]) / 2])
     }
     if (!s.fitted && parts?.length) { fit(s, parts); s.fitted = true }
-  }, [parts, selected, selectedPid, xray, dims])
+  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening])
 
   // присадка (цилиндры по оси отверстия) и комната (пол и три стены)
   useEffect(() => {
@@ -231,7 +271,6 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       add(T, H, D, -T / 2, H / 2, D / 2, wm)                       // левая
       add(T, H, D, W + T / 2, H / 2, D / 2, wm)                    // правая
     }
-    s.grid.visible = !room
   }, [holes, room?.W, room?.D, room?.H, !!room]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // «Показать всё»
@@ -249,5 +288,4 @@ function fit(s, parts) {
   s.camera.position.copy(c.clone().add(dir.multiplyScalar(dist)))
   s.controls.target.copy(c)
   s.camera.near = Math.max(1, dist / 200); s.camera.far = dist * 50; s.camera.updateProjectionMatrix()
-  s.grid.position.set(c.x, 0, c.z)
 }

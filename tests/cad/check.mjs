@@ -117,5 +117,25 @@ for (const rot of [0, 90, 180, 270]) {
   ok(r.warn.some(w => w.includes('размер изменился')), 'stale warn')
   ok(exportAll(pr5).details.find(d => d.name === 'Боковина левая').contour.holes.length === 0, 'stale reset')
 }
+// проёмы: шкаф 2000, одна стойка, левый проём 600 — стойка встаёт по нему, габарит не меняется
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const L = newNode({ size: 600, front: { type: 'doors', n: 1, hinge: 'left' } })
+  const R = newNode({ split: 'h', children: [newNode({ front: { type: 'drawers', n: 2 } }), newNode(), newNode()] })
+  const it = newItem('cabinet', { p: { W: 2000, H: 2100, D: 560, top: 'overlay', overhangFront: 20, overhangSide: 10, tree: newNode({ id: 'root', split: 'v', children: [L, R] }) } })
+  const { parts, warn, openings } = projectParts({ items: [it] })
+  ok(!warn.length, 'tree warn ' + warn)
+  const st = parts.find(p => p.name === 'Стойка')
+  ok(st && st.place.aabb[0] === 616, 'partition at 616: ' + st?.place.aabb[0])
+  const door = parts.find(p => p.name === 'Дверь')
+  ok(door && door.place.aabb[0] === 1.5 && door.place.aabb[3] === 622.5, 'door overlap ' + door?.place.aabb)
+  ok(door.place.aabb[4] === 2100 - 16 - 1.5, 'door under overlay top ' + door.place.aabb[4])
+  const top = parts.find(p => p.name === 'Крышка')
+  ok(top.place.aabb[5] === 560 + 16 + 20 && top.place.aabb[0] === -10 && top.place.aabb[3] === 2010, 'overhang ' + top.place.aabb)
+  ok(parts.filter(p => p.name === 'Полка').length === 2 && parts.filter(p => p.name === 'Фасад ящика').length === 2, 'shelves + drawers')
+  ok(openings.length === 6, 'openings ' + openings.length)
+  const right = openings.find(o => o.id === R.id)
+  ok(Math.abs(right.w - (2000 - 32 - 600 - 16)) < 0.01, 'right opening width ' + right.w)
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

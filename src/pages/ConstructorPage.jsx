@@ -17,7 +17,7 @@ import { useDesktop } from '../hooks/useDesktop'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
-import { CAB_DEFAULTS, CAB_PRESETS } from '../lib/cadCabinet'
+import { CAB_DEFAULTS, CAB_PRESETS, treeOf, findNode, newNode, cabinetParts } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -71,8 +71,95 @@ function Chips({ label, value, options, onChange, hint }) {
 }
 const Grid = ({ children, cols = 3 }) => <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 6, marginBottom: 8 }}>{children}</div>
 
+// ── проёмы корпуса ──
+const cloneTree = n => JSON.parse(JSON.stringify(n))
+function TreeEditor({ it, set, sel, setSel }) {
+  const p = { ...CAB_DEFAULTS, ...it.p }
+  const tree = treeOf(p)
+  const info = useMemo(() => new Map((cabinetParts(p).openings || []).map(o => [o.id, o])), [it.p]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [cnt, setCnt] = useState(1)
+  const [dn, setDn] = useState(3)
+  const edit = fn => { const t = cloneTree(tree); fn(t); set({ ...it, p: { ...p, tree: t } }) }
+  const found = sel ? findNode(tree, sel) : null
+  const node = found?.node, parent = found?.parent
+  const ancestorFront = id => { const path = []; const walk = (n, acc) => { if (n.id === id) { path.push(...acc); return true } return (n.children || []).some(c => walk(c, [...acc, n])) }; walk(tree, []); return path.some(n => n.front) }
+  const descFront = n => (n.children || []).some(c => c.front || descFront(c))
+  const label = (n, par) => {
+    const o = info.get(n.id)
+    const sz = o ? `${o.w}×${o.h}` : ''
+    if (!par) return `Весь проём ${sz}`
+    const idx = par.children.indexOf(n) + 1
+    return `${par.split === 'v' ? 'Секция' : 'Ярус'} ${idx} · ${sz}${n.size != null ? ' 📌' : ''}`
+  }
+  const frontTxt = f => (!f ? '' : f.type === 'drawers' ? ` · ящиков ${f.n}` : f.n > 1 ? ` · ${f.n} двери` : ` · дверь (${f.hinge === 'right' ? 'петли справа' : 'петли слева'})`)
+  const rows = []
+  const walk = (n, par, depth) => {
+    rows.push(
+      <button key={n.id} type="button" onClick={() => setSel(n.id === sel ? null : n.id)}
+        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', marginBottom: 3, marginLeft: depth * 14, maxWidth: `calc(100% - ${depth * 14}px)`, borderRadius: 8, cursor: 'pointer', fontSize: 13,
+          border: `1px solid ${n.id === sel ? 'var(--blue)' : 'var(--border)'}`, background: n.id === sel ? 'var(--blue-light, #e8f0fe)' : 'var(--bg)', color: 'var(--text)' }}>
+        {label(n, par)}<span style={{ color: 'var(--text-muted)' }}>{n.split ? (n.split === 'v' ? ` · стоек ${n.children.length - 1}` : ` · полок ${n.children.length - 1}`) : ''}{frontTxt(n.front)}</span>
+      </button>)
+    ;(n.children || []).forEach(c => walk(c, n, depth + 1))
+  }
+  walk(tree, null, 0)
+  const o = node ? info.get(node.id) : null
+  const split = (kind, k) => edit(t => {
+    const n = findNode(t, node.id).node
+    n.split = kind; n.children = Array.from({ length: k + 1 }, () => newNode()); n.shelfType = n.shelfType || 'fixed'
+    if (n.front?.type === 'drawers') n.front = null
+  })
+  const setSize = v => edit(t => {
+    const r = findNode(t, node.id)
+    r.node.size = v
+    const sib = r.parent.children
+    if (v != null && sib.every(c => c.size != null)) {
+      const i = sib.indexOf(r.node)
+      const nb = sib[i + 1] || sib[i - 1]
+      if (nb) nb.size = null      // хотя бы один соседний проём — «авто», чтобы габарит корпуса не менялся
+    }
+  })
+  const setFront = f => edit(t => {
+    const n = findNode(t, node.id).node
+    n.front = f
+    if (f) { const clear = x => (x.children || []).forEach(c => { c.front = null; clear(c) }); clear(n) }
+  })
+  return (<>
+    {rows}
+    {node && o && <div className="card" style={{ padding: '8px 10px', margin: '6px 0 10px', border: '1px solid var(--blue)' }}>
+      <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>Проём {o.w} × {o.h} мм</div>
+      {parent && <Grid cols={2}>
+        <NumField label={parent.split === 'v' ? 'Ширина в свету' : 'Высота в свету'} value={parent.split === 'v' ? o.w : o.h} onChange={v => setSize(v)} min={1} />
+        <button type="button" style={{ ...btnS(), alignSelf: 'end', ...(node.size == null ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setSize(null)}>{node.size == null ? 'авто ✓' : 'сделать авто'}</button>
+      </Grid>}
+      {!node.split || !node.children?.length ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'end', marginBottom: 8 }}>
+          <label style={{ width: 64 }}><span style={lbl}>Кол-во</span><input style={inp} inputMode="numeric" value={cnt} onChange={e => setCnt(Math.max(1, Math.min(20, Math.round(num(e.target.value) || 1))))} /></label>
+          <button type="button" style={btnS()} onClick={() => split('v', cnt)}>+ Стойки</button>
+          <button type="button" style={btnS()} onClick={() => split('h', cnt)}>+ Полки</button>
+        </div>
+      ) : (<>
+        {node.split === 'h' && <Chips label="Полки" value={node.shelfType || 'fixed'} onChange={v => edit(t => { findNode(t, node.id).node.shelfType = v })} options={[['fixed', 'Неподвижные'], ['loose', 'Съёмные']]} />}
+        <button type="button" style={{ ...btnS(), marginBottom: 8 }} onClick={() => { if (window.confirm('Убрать деление проёма (стойки / полки и всё внутри)?')) edit(t => { const n = findNode(t, node.id).node; n.split = null; n.children = [] }) }}>✕ Убрать {node.split === 'v' ? 'стойки' : 'полки'}</button>
+      </>)}
+      {ancestorFront(node.id)
+        ? <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Этот проём уже закрыт фасадом внешнего проёма.</p>
+        : <>
+          <Chips label="Фасад" value={!node.front ? 'none' : node.front.type === 'drawers' ? 'drawers' : node.front.n > 1 ? 'doors2' : 'door'}
+            onChange={v => {
+              if (v !== 'none' && descFront(node) && !window.confirm('Внутри уже есть фасады — заменить их одним фасадом на весь проём?')) return
+              setFront(v === 'none' ? null : v === 'door' ? { type: 'doors', n: 1, hinge: 'left' } : v === 'doors2' ? { type: 'doors', n: 2, hinge: 'auto' } : { type: 'drawers', n: dn })
+            }}
+            options={[['none', 'Нет'], ['door', 'Дверь'], ['doors2', '2 двери'], ...(!node.split || !node.children?.length ? [['drawers', 'Ящики']] : [])]} />
+          {node.front?.type === 'doors' && node.front.n === 1 && <Chips label="Петли" value={node.front.hinge === 'right' ? 'right' : 'left'} onChange={v => setFront({ ...node.front, hinge: v })} options={[['left', 'Слева'], ['right', 'Справа']]} />}
+          {node.front?.type === 'drawers' && <Grid><NumField label="Ящиков" unit="" value={node.front.n} onChange={v => { const n = Math.max(1, Math.min(10, Math.round(v))); setDn(n); setFront({ ...node.front, n }) }} min={1} /></Grid>}
+        </>}
+    </div>}
+  </>)
+}
+
 // ── редактор корпуса ──
-function CabinetEditor({ it, set }) {
+function CabinetEditor({ it, set, selOpening, setSelOpening }) {
   const p = { ...CAB_DEFAULTS, ...it.p }
   const up = patch => set({ ...it, p: { ...p, ...patch } })
   return (<>
@@ -100,24 +187,26 @@ function CabinetEditor({ it, set }) {
     {(p.back === 'groove' || p.back === 'overlay') && <Grid cols={2}><TextField label="Материал задней" value={p.backMaterial} onChange={v => up({ backMaterial: v })} list="cad-mats" /><NumField label="Толщина" value={p.backT} onChange={v => up({ backT: v })} min={1} /></Grid>}
     {p.back === 'groove' && <Grid><NumField label="Паз от зад. торца" value={p.grooveOffset} onChange={v => up({ grooveOffset: v })} min={0} /><NumField label="Глубина паза" value={p.grooveDepth} onChange={v => up({ grooveDepth: v })} min={1} /><NumField label="Ширина паза" value={p.grooveWidth} onChange={v => up({ grooveWidth: v })} min={1} /></Grid>}
 
-    <div style={sect}>Наполнение</div>
-    <Chips value={p.fill} onChange={v => up({ fill: v })} options={[['shelves', 'Полки и стойки'], ['drawers', 'Ящики']]} />
-    {p.fill !== 'drawers' ? <>
-      <Grid><NumField label="Стоек" unit="" value={p.partitions} onChange={v => up({ partitions: Math.max(0, Math.round(v)) })} min={0} /><NumField label="Полок в секции" unit="" value={p.shelves} onChange={v => up({ shelves: Math.max(0, Math.round(v)) })} min={0} /><NumField label="Отступ полки от переда" value={p.shelfSetback} onChange={v => up({ shelfSetback: v })} min={0} /></Grid>
-      <Chips label="Полки" value={p.shelfType} onChange={v => up({ shelfType: v })} options={[['fixed', 'Неподвижные'], ['loose', 'Съёмные']]}
-        hint="Съёмная полка на полкодержателях — меньше проёма на 1 мм с каждой стороны." />
-    </> : <>
-      <Grid><NumField label="Ящиков" unit="" value={p.drawers} onChange={v => up({ drawers: Math.max(1, Math.round(v)) })} min={1} /><NumField label="Длина направл." value={p.slideLen} onChange={v => up({ slideLen: v })} min={150} /><NumField label="Зазор на направл." value={p.slideGap} onChange={v => up({ slideGap: v })} min={0} /></Grid>
-      <Chips label="Короб ящика" value={p.box} onChange={v => up({ box: v })} options={[['ldsp_overlay', 'ЛДСП, дно накладное'], ['ldsp_groove', 'ЛДСП, дно в паз'], ['metal', 'Металлобокс']]}
-        hint="Металлобокс — металлические боковины (в фурнитуру), из плиты только дно и задняя стенка; ширину дна уменьшаем на величину из каталога производителя." />
-      {p.box === 'metal'
-        ? <Grid><NumField label="Дно уже проёма на" value={p.metalReduce} onChange={v => up({ metalReduce: v })} min={0} /></Grid>
-        : <Grid><NumField label="Короб ниже фасада на" value={p.boxTopGap} onChange={v => up({ boxTopGap: v })} min={0} /><NumField label="Толщина дна" value={p.boxBottomT} onChange={v => up({ boxBottomT: v })} min={1} /><TextField label="Материал дна" value={p.boxBottomMaterial} onChange={v => up({ boxBottomMaterial: v })} list="cad-mats" /></Grid>}
-    </>}
+    <div style={sect}>Проёмы и наполнение<Hint inline>Нажмите проём в списке или в 3D (подсветится синим). Проём можно разделить стойками или полками — части делятся поровну, а размер любого проёма можно задать: соседние «авто» проёмы подстроятся, габарит корпуса не меняется. На проём ставятся двери или ящики — фасад закрывает проём с перехлёстом.</Hint></div>
+    <TreeEditor it={it} set={set} sel={selOpening} setSel={setSelOpening} />
 
     <div style={sect}>Фасады</div>
-    {p.fill !== 'drawers' && <Chips label="Дверей" value={p.doors} onChange={v => up({ doors: v })} options={[[0, 'Нет'], [1, '1'], [2, '2'], [3, '3'], [4, '4']]} />}
-    <Grid><NumField label="Зазор" value={p.gap} onChange={v => up({ gap: v })} min={0} /><NumField label="Толщина фасада" value={p.facadeT} onChange={v => up({ facadeT: v })} min={1} /><TextField label="Материал фасада" value={p.facadeMaterial} onChange={v => up({ facadeMaterial: v })} list="cad-mats" /></Grid>
+    <Chips label="Фасад на боковине, дне, крышке" value={p.frontMode} onChange={v => up({ frontMode: v })} options={[['full', 'Перекрывает полностью'], ['half', 'До середины торца']]}
+      hint="На стойке и полке фасад всегда доходит до середины торца (между соседними фасадами — зазор). На боковине, дне и крышке — полностью с отступом от края или до середины." />
+    <Grid>{p.frontMode !== 'half' && <NumField label="Отступ от края" value={p.frontOffset} onChange={v => up({ frontOffset: v })} min={0} />}<NumField label="Зазор" value={p.gap} onChange={v => up({ gap: v })} min={0} /><NumField label="Толщина фасада" value={p.facadeT} onChange={v => up({ facadeT: v })} min={1} /></Grid>
+    <Grid cols={1}><TextField label="Материал фасада" value={p.facadeMaterial} onChange={v => up({ facadeMaterial: v })} list="cad-mats" /></Grid>
+    {p.top === 'overlay' && <>
+      <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={p.underTop !== false} onChange={e => up({ underTop: e.target.checked })} />Фасады под крышкой (крышка над фасадами)</label>
+      <Grid cols={2}><NumField label="Свес крышки вперёд" value={p.overhangFront} onChange={v => up({ overhangFront: v })} min={0} /><NumField label="Свес в стороны" value={p.overhangSide} onChange={v => up({ overhangSide: v })} min={0} /></Grid>
+    </>}
+
+    <div style={sect}>Ящики: короб</div>
+    <Grid><NumField label="Длина направл." value={p.slideLen} onChange={v => up({ slideLen: v })} min={150} /><NumField label="Зазор на направл." value={p.slideGap} onChange={v => up({ slideGap: v })} min={0} /><NumField label="Отступ полки от переда" value={p.shelfSetback} onChange={v => up({ shelfSetback: v })} min={0} /></Grid>
+    <Chips value={p.box} onChange={v => up({ box: v })} options={[['ldsp_overlay', 'ЛДСП, дно накладное'], ['ldsp_groove', 'ЛДСП, дно в паз'], ['metal', 'Металлобокс']]}
+      hint="Металлобокс — металлические боковины (в фурнитуру), из плиты только дно и задняя стенка; ширину дна уменьшаем на величину из каталога производителя." />
+    {p.box === 'metal'
+      ? <Grid><NumField label="Дно уже проёма на" value={p.metalReduce} onChange={v => up({ metalReduce: v })} min={0} /></Grid>
+      : <Grid><NumField label="Короб ниже фасада на" value={p.boxTopGap} onChange={v => up({ boxTopGap: v })} min={0} /><NumField label="Толщина дна" value={p.boxBottomT} onChange={v => up({ boxBottomT: v })} min={1} /><TextField label="Материал дна" value={p.boxBottomMaterial} onChange={v => up({ boxBottomMaterial: v })} list="cad-mats" /></Grid>}
 
     <div style={sect}>Кромка<Hint inline>Название вида кромки — как в бланке заказа (толщину и подрезку задаёте там). Каркас — передние торцы, фасады — по периметру.</Hint></div>
     <Grid><TextField label="Каркас спереди" value={p.edgeFront} onChange={v => up({ edgeFront: v })} /><TextField label="Фасады" value={p.edgeFacade} onChange={v => up({ edgeFacade: v })} /><TextField label="Прочее" value={p.edgeBody} onChange={v => up({ edgeBody: v })} /></Grid>
@@ -176,7 +265,7 @@ function FrameEditor({ it, set }) {
     <div style={sect}>Полки</div>
     <Chips value={p.shelf} onChange={v => up({ shelf: v, shelfT: v === 'glass' ? 6 : 16, shelfMaterial: v === 'glass' ? 'Стекло прозрачное 6 мм' : 'ЛДСП Белый 16' })} options={[['glass', 'Стекло'], ['sheet', 'ЛДСП'], ['none', 'Нет']]} />
     {p.shelf !== 'none' && <Grid><NumField label="Толщина" value={p.shelfT} onChange={v => up({ shelfT: v })} min={1} /><TextField label="Материал полок" value={p.shelfMaterial} onChange={v => up({ shelfMaterial: v })} list="cad-mats" />
-      <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 5, alignSelf: 'end', paddingBottom: 8 }}><input type="checkbox" checked={!!p.topShelf} onChange={e => up({ topShelf: e.target.checked })} />верхняя</label></Grid>}
+      <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 5, alignSelf: 'end', paddingBottom: 8 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!p.topShelf} onChange={e => up({ topShelf: e.target.checked })} />верхняя</label></Grid>}
     <div style={sect}>Стенки из стекла<Hint inline>Стекло ставится внутрь каркаса и крепится стеклодержателями (число — на одну стенку). Держатели идут в фурнитуру сметы.</Hint></div>
     <Chips value={p.walls} onChange={v => up({ walls: v })} options={[['none', 'Нет'], ['sides', 'Бока'], ['back', 'Задняя'], ['sides_back', 'Бока и задняя']]} />
     {p.walls !== 'none' && <Grid><NumField label="Толщина стекла" value={p.glassT} onChange={v => up({ glassT: v })} min={2} /><TextField label="Стекло" value={p.glassMaterial} onChange={v => up({ glassMaterial: v })} list="cad-mats" /><NumField label="Держателей на стенку" unit="" value={p.holders} onChange={v => up({ holders: Math.max(0, Math.round(v)) })} min={0} /></Grid>}
@@ -198,7 +287,7 @@ function Nudge({ it, set }) {
   )
 }
 
-function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, onToLibrary, info }) {
+function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, onToLibrary, info, selOpening, setSelOpening }) {
   return (
     <div>
       <Grid cols={1}><TextField label="Название" value={it.name} onChange={v => set({ ...it, name: v })} /></Grid>
@@ -207,7 +296,7 @@ function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, onToLibrary, in
       <Nudge it={it} set={set} />
       <Chips label="Поворот" value={it.rotY || 0} onChange={v => set({ ...it, rotY: v })} options={[[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']]} />
       {info && <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 6px' }}>{info}</p>}
-      {it.type === 'cabinet' && <CabinetEditor it={it} set={set} />}
+      {it.type === 'cabinet' && <CabinetEditor it={it} set={set} selOpening={selOpening} setSelOpening={setSelOpening} />}
       {it.type === 'frame' && <FrameEditor it={it} set={set} />}
       {(it.type === 'panel' || it.type === 'glass') && <PanelEditor it={it} set={set} />}
       {it.type === 'glass' && <>
@@ -268,9 +357,9 @@ function ProjectSettings({ project, setProject }) {
     <summary style={{ ...sect, cursor: 'pointer', margin: '0 0 6px' }}>Настройки проекта и комната</summary>
     <Chips label="Крепёж на стыках плит" value={st.joint} onChange={v => setSt({ joint: v })} options={JOINTS}
       hint="Стыки находятся сами: торец детали упирается в пласть другой. Конфирмат — сквозное Ø7 в пласть и Ø5 в торец; шкант — Ø8×12 в пласть и Ø8×20 в торец. 50 мм от концов стыка, длинный стык — ещё посередине. Присадка уходит в детали заказа." />
-    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" checked={st.hardwareHoles !== false} onChange={e => setSt({ hardwareHoles: e.target.checked })} />Отверстия фурнитуры: петли (чашка Ø35 и планка), полкодержатели, направляющие</label>
-    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}><input type="checkbox" checked={st.rotatable !== false} onChange={e => setSt({ rotatable: e.target.checked })} />Детали можно вращать при раскрое (без текстуры)</label>
-    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" checked={!!room.on} onChange={e => setSt({ room: { ...room, on: e.target.checked } })} />Комната: стены слева, сзади и справа</label>
+    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={st.hardwareHoles !== false} onChange={e => setSt({ hardwareHoles: e.target.checked })} />Отверстия фурнитуры: петли (чашка Ø35 и планка), полкодержатели, направляющие</label>
+    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={st.rotatable !== false} onChange={e => setSt({ rotatable: e.target.checked })} />Детали можно вращать при раскрое (без текстуры)</label>
+    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!room.on} onChange={e => setSt({ room: { ...room, on: e.target.checked } })} />Комната: стены слева, сзади и справа</label>
     {room.on && <Grid><NumField label="Ширина комнаты" value={room.W} onChange={v => setSt({ room: { ...room, W: v } })} min={500} /><NumField label="Глубина" value={room.D} onChange={v => setSt({ room: { ...room, D: v } })} min={500} /><NumField label="Высота" value={room.H} onChange={v => setSt({ room: { ...room, H: v } })} min={500} /></Grid>}
   </details>)
 }
@@ -360,7 +449,8 @@ export default function ConstructorPage() {
   const [list, setList] = useState(null)
   const [project, setProjectState] = useState(null)
   const [selected, setSelected] = useState(null)
-  const [selPid, setSelPid] = useState(null)        // выбранная деталь внутри элемента (нажатие в 3D)
+  const [selPid, setSelPid] = useState(null)
+  const [selOpening, setSelOpening] = useState(null) // выбранный проём корпуса        // выбранная деталь внутри элемента (нажатие в 3D)
   const [editPart, setEditPart] = useState(null)    // редактор контура детали: { pid, draft }
   const [tab, setTab] = useState('scene')
   const [status, setStatus] = useState('')
@@ -413,6 +503,8 @@ export default function ConstructorPage() {
   const pp = useMemo(() => (project ? projectParts(project) : { parts: [], holes: [] }), [project])
   const { parts } = pp
   const holes = useMemo(() => (project && showHoles ? projectDrill(project, pp).holes : []), [project, pp, showHoles])
+  // проёмы выбранного корпуса — видны и нажимаются в 3D, фасады этого корпуса при этом полупрозрачные
+  const cabOpenings = useMemo(() => (selected && tab === 'props' && project?.items.find(i => i.id === selected)?.type === 'cabinet' ? (pp.openings || []).filter(o => o.item === selected) : []), [pp, selected, tab, project])
   const room = project?.settings?.room?.on ? { ...PROJECT_DEFAULTS.room, ...project.settings.room } : null
   // линейный раскрой — только если он открыт этому аккаунту (мастер или бета «Линейный раскрой»)
   const [linearOk, setLinearOk] = useState(!!isMaster)
@@ -504,7 +596,7 @@ export default function ConstructorPage() {
     setProject({ ...project, items: [...project.items, it] })
     setSelected(it.id); setTab('props')
   }
-  const select = (id, pid = null) => { setSelected(id); setSelPid(id ? pid : null); if (id) setTab('props') }
+  const select = (id, pid = null, opening = null) => { setSelected(id); setSelPid(id ? pid : null); setSelOpening(id ? opening : null); if (id) setTab('props') }
 
   const createNew = async () => {
     const name = window.prompt('Название проекта:', 'Новый проект')
@@ -571,7 +663,7 @@ export default function ConstructorPage() {
 
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <CadView parts={parts} selected={selected} selectedPid={selPid} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room} />
+      <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room} />
       <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
         <button type="button" title="Полупрозрачный вид" style={{ ...btnS(), padding: '6px 9px', ...(xray ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setXray(v => !v)}>◫</button>
@@ -622,7 +714,7 @@ export default function ConstructorPage() {
       )
     })()}
     {tab === 'props' && (selItem
-      ? <ItemEditor key={selItem.id} it={selItem} set={setItem} info={info}
+      ? <ItemEditor key={selItem.id} it={selItem} set={setItem} info={info} selOpening={selOpening} setSelOpening={setSelOpening}
           onToLibrary={() => { const name = window.prompt('Название в библиотеке:', selItem.name); if (!name) return; const item = { ...JSON.parse(JSON.stringify(selItem)), name: name.trim() }; saveLibrary([{ id: newId(), name: name.trim(), type: selItem.type, item }, ...library]); window.alert('Сохранено в «Моя библиотека» (вкладка «Сцена»)') }}
           onDelete={() => { if (!window.confirm(`Удалить «${selItem.name}»?`)) return; setProject({ ...project, items: project.items.filter(i => i.id !== selItem.id) }); setSelected(null); setTab('scene') }}
           onDuplicate={() => { const c = { ...JSON.parse(JSON.stringify(selItem)), id: newId(), name: selItem.name + ' (копия)' }; const own = parts.filter(p => p.item.id === selItem.id); const b = sceneBox(own); c.pos = { ...c.pos, x: Math.round((c.pos?.x || 0) + (b[3] - b[0])) }; setProject({ ...project, items: [...project.items, c] }); setSelected(c.id) }}

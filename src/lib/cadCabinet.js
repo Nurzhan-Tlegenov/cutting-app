@@ -24,6 +24,10 @@ export const CAB_DEFAULTS = {
   drawers: 3, box: 'ldsp_overlay', slideGap: 13, slideLen: 450, boxTopGap: 40, boxBottomT: 3, boxBottomMaterial: 'ХДФ Белый 3', metalReduce: 42,
   doors: 2, gap: 3, facadeT: 16, facadeMaterial: 'ЛДСП Белый 16',
   edgeBody: '0,4', edgeFront: '1', edgeFacade: '1',
+  frontMode: 'full', frontOffset: 1.5,   // фасад на боковине/дне/крышке: full — перекрывает торец полностью с отступом, half — до середины торца
+  underTop: true,                         // при накладной крышке фасады — под крышкой (крышка над фасадами), иначе перекрывают её торец
+  overhangFront: 0, overhangSide: 0,      // свес (козырёк) накладной крышки: вперёд от фасадов и в стороны
+  tree: null,                             // проёмы и наполнение (см. ниже); нет — строится из старых параметров (стойки, полки, двери, ящики)
   hingeCup: 22, hingeEnd: 100, plateFront: 37,   // петли: центр чашки от края двери, первая/последняя от торца двери, планка от переднего торца
   pinFront: 37, pinBelow: 8,                       // полкодержатели: от переднего/заднего торца полки, центр ниже полки
 }
@@ -36,8 +40,53 @@ export const CAB_PRESETS = [
   ['shelf', 'Стеллаж открытый', { W: 800, H: 1800, D: 350, back: 'none', shelves: 4, doors: 0 }],
 ]
 
-const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d)
+const num = (v, d = 0) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d)
 const r1 = v => Math.round(v * 10) / 10
+
+// ── Проёмы ──
+// Внутренность корпуса — дерево проёмов. Проём можно разделить стойками (split 'v', дети слева направо)
+// или полками (split 'h', дети снизу вверх). size ребёнка — ширина (v) или высота (h) проёма в свету, мм;
+// null — «авто»: свободное место делится поровну между авто-проёмами. Габарит корпуса при этом не меняется.
+// На проём ставится фасад: двери (n, сторона петель) или ящики (n) — фасад закрывает проём с перехлёстом.
+export const nodeId = () => 'o' + Math.random().toString(36).slice(2, 8)
+export const newNode = (extra = {}) => ({ id: nodeId(), size: null, split: null, children: [], front: null, shelfType: 'fixed', ...extra })
+
+/** дерево из старых параметров (стойки, полки, двери/ящики) — чтобы старые проекты и шаблоны работали как раньше */
+export function legacyTree(p) {
+  // id — по месту в дереве (не случайные): дерево из параметров строится заново при каждом расчёте
+  const mkN = (id, extra = {}) => ({ id, size: null, split: null, children: [], front: null, shelfType: 'fixed', ...extra })
+  const root = mkN('root')
+  if (p.fill === 'drawers') { root.front = { type: 'drawers', n: Math.max(1, Math.round(num(p.drawers, 3))) }; return root }
+  const k = Math.max(0, Math.round(num(p.shelves, 0)))
+  const shelvesNode = node => {
+    if (k > 0) { node.split = 'h'; node.shelfType = p.shelfType || 'fixed'; node.children = Array.from({ length: k + 1 }, (_, i) => mkN(`${node.id}_${i}`)) }
+    return node
+  }
+  const nPart = Math.max(0, Math.round(num(p.partitions, 0)))
+  if (nPart > 0) { root.split = 'v'; root.children = Array.from({ length: nPart + 1 }, (_, i) => shelvesNode(mkN(`s${i}`))) }
+  else shelvesNode(root)
+  const doors = Math.max(0, Math.round(num(p.doors, 0)))
+  if (doors) root.front = { type: 'doors', n: doors, hinge: 'auto' }
+  return root
+}
+export const treeOf = p => (p?.tree && typeof p.tree === 'object' ? p.tree : legacyTree({ ...CAB_DEFAULTS, ...(p || {}) }))
+export function findNode(node, id, parent = null) {
+  if (!node) return null
+  if (node.id === id) return { node, parent }
+  for (const c of node.children || []) { const r = findNode(c, id, node); if (r) return r }
+  return null
+}
+const anyFront = n => !!n && (!!n.front || (n.children || []).some(anyFront))
+
+/** размеры детей проёма: span — свет проёма по оси деления, t — толщина разделителя */
+export function childSizes(node, span, t) {
+  const ch = node.children || []
+  const free = span - (ch.length - 1) * t
+  const fixed = ch.reduce((a, c) => a + (c.size != null ? num(c.size) : 0), 0)
+  const autos = ch.filter(c => c.size == null).length
+  const auto = autos ? (free - fixed) / autos : 0
+  return ch.map(c => (c.size != null ? num(c.size) : auto))
+}
 
 function mk(key, name, role, box, tAxis, tSign, lAxis, material, extra = {}) {
   return { key, name, role, kind: 'sheet', box: box.map(r1), tAxis, tSign, lAxis, material, edges: {}, grooves: [], ...extra }
@@ -67,9 +116,15 @@ export function cabinetParts(params) {
   const bx0 = bottomInset ? t : 0, bx1 = bottomInset ? W - t : W
   parts.push(mk('bottom', 'Дно', 'каркас', [bx0, yb, zb, bx1, yb + t, D], 1, +1, 0, mat, { edges: front }))
   let yi1 = H
+  const tree = treeOf(p)
+  const hasFronts = anyFront(tree)
+  const fT0 = num(p.facadeT, 16)
   if (p.top === 'inset' || topOver) {
-    const tx0 = topOver ? 0 : t, tx1 = topOver ? W : W - t
-    parts.push(mk('top', 'Крышка', 'каркас', [tx0, H - t, zb, tx1, H, D], 1, -1, 0, mat, { edges: topOver ? { '+z': eF, '-x': eF, '+x': eF } : front }))
+    // накладная крышка: свес в стороны и вперёд (козырёк) — вперёд считается от фасадов, если фасады под крышкой
+    const os = topOver ? num(p.overhangSide, 0) : 0
+    const zf = topOver ? D + (hasFronts && p.underTop !== false ? fT0 : 0) + num(p.overhangFront, 0) : D
+    const tx0 = topOver ? -os : t, tx1 = topOver ? W + os : W - t
+    parts.push(mk('top', 'Крышка', 'каркас', [tx0, H - t, zb, tx1, H, topOver ? Math.max(D, zf) : D], 1, -1, 0, mat, { edges: topOver ? { '+z': eF, '-x': eF, '+x': eF } : front }))
     yi1 = H - t
   } else if (p.top === 'rails') {
     const rd = Math.min(num(p.railDepth, 100), (D - zb) / 2)
@@ -116,117 +171,141 @@ export function cabinetParts(params) {
     hw.push({ name: `Ножка ${raise} мм`, qty: pts.length })
   }
 
-  // ── наполнение ──
-  const drawerMode = p.fill === 'drawers'
-  const nPart = drawerMode ? 0 : Math.max(0, Math.round(num(p.partitions, 0)))
-  const secW = (xi1 - xi0 - nPart * t) / (nPart + 1)
-  if (secW < 100) warn.push('Секции уже 100 мм — уменьшите число стоек')
-  const sections = []
-  for (let i = 0; i <= nPart; i++) {
-    const sx0 = xi0 + i * (secW + t)
-    sections.push([sx0, sx0 + secW])
-    if (i < nPart) parts.push(mk('part' + i, 'Стойка', 'наполнение', [sx0 + secW, yi0, zi0, sx0 + secW + t, yi1, D], 0, +1, 1, mat, { edges: front }))
-  }
-  if (!drawerMode) {
-    const k = Math.max(0, Math.round(num(p.shelves, 0)))
-    const loose = p.shelfType === 'loose'
-    const g = loose ? 1 : 0
-    const setback = num(p.shelfSetback, loose ? 2 : 0)
-    const step = (yi1 - yi0 - k * t) / (k + 1)
-    sections.forEach(([sx0, sx1], si) => {
-      for (let j = 0; j < k; j++) {
-        const y0 = yi0 + (j + 1) * step + j * t
-        parts.push(mk(`sh${si}_${j}`, loose ? 'Полка съёмная' : 'Полка', 'наполнение', [sx0 + g, y0, zi0 + g, sx1 - g, y0 + t, D - setback], 1, +1, 0, mat, { edges: front }))
-        if (loose) {
-          const pf = num(p.pinFront, 37), yp = y0 - num(p.pinBelow, 8)
-          for (const z of [D - setback - pf, zi0 + g + pf]) {
-            holes.push({ p: [sx0, yp, z], n: '-x', d: 5, depth: 12, note: 'Полкодержатель' })
-            holes.push({ p: [sx1, yp, z], n: '+x', d: 5, depth: 12, note: 'Полкодержатель' })
+  // ── наполнение: дерево проёмов ──
+  const gap = num(p.gap, 3), fT = fT0, fMat = p.facadeMaterial || mat
+  const allE = { all: p.edgeFacade }
+  const openings = []        // проёмы в свету: { id, box, w, h, leaf, depth }
+  const fronts = []          // проёмы с фасадом
+  const shelfSetback = num(p.shelfSetback, 0)
+  let shelfLoose = 0
+  const walk = (node, x0, x1, y0, y1, depth) => {
+    openings.push({ id: node.id, box: [x0, y0, zi0, x1, y1, D].map(r1), w: r1(x1 - x0), h: r1(y1 - y0), leaf: !(node.split && node.children?.length), depth })
+    if (x1 - x0 < 50 || y1 - y0 < 30) warn.push(`Проём ${r1(x1 - x0)}×${r1(y1 - y0)} — слишком маленький`)
+    if (node.front) fronts.push({ node, x0, x1, y0, y1 })
+    const ch = node.children || []
+    if (!node.split || !ch.length) return
+    const sizes = childSizes(node, node.split === 'v' ? x1 - x0 : y1 - y0, t)
+    if (sizes.some(v => v < 0)) warn.push('Проёмы не помещаются — уменьшите заданные размеры проёмов')
+    let pos = node.split === 'v' ? x0 : y0
+    ch.forEach((c, i) => {
+      const a = pos, b = pos + sizes[i]
+      if (node.split === 'v') walk(c, a, b, y0, y1, depth + 1)
+      else walk(c, x0, x1, a, b, depth + 1)
+      if (i < ch.length - 1) {
+        if (node.split === 'v') parts.push(mk('st_' + c.id, 'Стойка', 'наполнение', [b, y0, zi0, b + t, y1, D], 0, +1, 1, mat, { edges: front }))
+        else {
+          const loose = node.shelfType === 'loose', g = loose ? 1 : 0
+          const sb = loose ? Math.max(shelfSetback, 2) : shelfSetback
+          parts.push(mk('sh_' + c.id, loose ? 'Полка съёмная' : 'Полка', 'наполнение', [x0 + g, b, zi0 + g, x1 - g, b + t, D - sb], 1, +1, 0, mat, { edges: front }))
+          if (loose) {
+            shelfLoose++
+            const pf = num(p.pinFront, 37), yp = b - num(p.pinBelow, 8)
+            for (const z of [D - sb - pf, zi0 + g + pf]) {
+              holes.push({ p: [x0, yp, z], n: '-x', d: 5, depth: 12, note: 'Полкодержатель' })
+              holes.push({ p: [x1, yp, z], n: '+x', d: 5, depth: 12, note: 'Полкодержатель' })
+            }
           }
         }
       }
+      pos = b + t
     })
-    if (loose && k) hw.push({ name: 'Полкодержатель', qty: 4 * k * sections.length })
   }
+  walk(tree, xi0, xi1, yi0, yi1, 0)
+  if (shelfLoose) hw.push({ name: 'Полкодержатель', qty: 4 * shelfLoose })
 
-  // ── фасады ──
-  const gap = num(p.gap, 3), fT = num(p.facadeT, 16), fMat = p.facadeMaterial || mat
-  const fy0 = plinth && bottomInset ? num(p.plinthH, 80) : Math.min(sideY0, yb)
-  const allE = { all: p.edgeFacade }
-  if (drawerMode) {
-    const m = Math.max(1, Math.round(num(p.drawers, 3)))
-    const fh = (H - fy0 - gap * m) / m
-    const sg = num(p.slideGap, 13)
-    const bd = Math.min(num(p.slideLen, 450), D - zi0 - 10)
-    const bxa = xi0 + sg, bxb = xi1 - sg
-    const bT = num(p.boxBottomT, 3), bMat = p.boxBottomMaterial || 'ХДФ'
-    for (let i = 0; i < m; i++) {
-      const y0 = fy0 + gap / 2 + i * (fh + gap)
-      parts.push(mk('df' + i, 'Фасад ящика', 'фасад', [gap / 2, y0, D, W - gap / 2, y0 + fh, D + fT], 2, +1, 0, fMat, { edges: allE, t: fT }))
-      // короб ящика: от низа проёма + 15 мм, высота = фасад − зазор сверху
-      const by0 = Math.max(y0, yi0) + 15
-      const bh = Math.max(60, fh - num(p.boxTopGap, 40))
-      const zf = D - 2, z0 = zf - bd
-      const k = 'dr' + i + '_'
-      // направляющие: крепление к боковине корпуса — 3 отверстия на оси короба (37 от переда, далее по 32×N)
-      const ys = by0 + 20
-      for (const z of [D - 37, D - 37 - 224, D - 37 - Math.max(256, bd - 64)].filter(z => z > zi0 + 10)) {
-        holes.push({ p: [xi0, ys, z], n: '-x', d: 4, depth: 10, note: 'Направляющая' })
-        holes.push({ p: [xi1, ys, z], n: '+x', d: 4, depth: 10, note: 'Направляющая' })
+  // фасад закрывает проём с перехлёстом: на боковину / дно / крышку — полностью с отступом (или до середины торца),
+  // на стойку / полку — до середины (зазор между соседними фасадами = зазор); под накладной крышкой — ниже крышки на зазор/2
+  const off = num(p.frontOffset, gap / 2), half = p.frontMode === 'half'
+  const outerExt = half ? t / 2 - gap / 2 : t - off
+  const innerExt = t / 2 - gap / 2
+  const EPS = 0.05
+  const extOf = (edge, v) => {
+    if (edge === 'l') return Math.abs(v - xi0) < EPS ? outerExt : innerExt
+    if (edge === 'r') return Math.abs(v - xi1) < EPS ? outerExt : innerExt
+    if (edge === 'b') return Math.abs(v - yi0) < EPS ? outerExt : innerExt
+    if (Math.abs(v - yi1) > EPS) return innerExt
+    if (topOver && p.underTop !== false) return -gap / 2
+    if (p.top === 'none') return -off
+    return outerExt
+  }
+  const he = num(p.hingeEnd, 100), hc = num(p.hingeCup, 22), pf = num(p.plateFront, 37)
+  const sg = num(p.slideGap, 13)
+  const bT = num(p.boxBottomT, 3), bMat = p.boxBottomMaterial || 'ХДФ'
+  let doorsN = 0, hingesN = 0, drawersN = 0
+  fronts.forEach(({ node, x0, x1, y0, y1 }, fi) => {
+    const fx0 = x0 - extOf('l', x0), fx1 = x1 + extOf('r', x1), fy0 = y0 - extOf('b', y0), fy1 = y1 + extOf('t', y1)
+    const fr = node.front
+    const n = Math.max(1, Math.round(num(fr.n, 1)))
+    if (fr.type === 'drawers') {
+      const fh = (fy1 - fy0 - (n - 1) * gap) / n
+      const bd = Math.min(num(p.slideLen, 450), D - zi0 - 10)
+      const bxa = x0 + sg, bxb = x1 - sg
+      for (let i = 0; i < n; i++) {
+        const dy0 = fy0 + i * (fh + gap)
+        const k = `dr${fi}_${i}_`
+        parts.push(mk(k + 'f', 'Фасад ящика', 'фасад', [fx0, dy0, D, fx1, dy0 + fh, D + fT], 2, +1, 0, fMat, { edges: allE, t: fT }))
+        const by0 = Math.max(dy0, y0) + 15
+        const bh = Math.max(60, Math.min(fh - num(p.boxTopGap, 40), y1 - by0 - 5))
+        const zf = D - 2, z0 = zf - bd
+        const ys = by0 + 20
+        for (const z of [D - 37, D - 37 - 224, D - 37 - Math.max(256, bd - 64)].filter(z => z > zi0 + 10)) {
+          holes.push({ p: [x0, ys, z], n: '-x', d: 4, depth: 10, note: 'Направляющая' })
+          holes.push({ p: [x1, ys, z], n: '+x', d: 4, depth: 10, note: 'Направляющая' })
+        }
+        if (p.box === 'metal') {
+          const red = num(p.metalReduce, 42)
+          parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [x0 + red / 2, by0, z0, x1 - red / 2, by0 + t, zf], 1, +1, 0, mat))
+          parts.push(mk(k + 'back', 'Ящик: задняя', 'ящик', [x0 + red / 2, by0 + t, z0, x1 - red / 2, by0 + bh, z0 + t], 2, +1, 0, mat))
+          hw.push({ name: `Металлобокс ${bd} мм (боковины)`, qty: 1 })
+          continue
+        }
+        const grooveBot = p.box === 'ldsp_groove'
+        const sy0 = grooveBot ? by0 : by0 + bT
+        const bE = { '+y': eB }
+        parts.push(mk(k + 'sL', 'Ящик: боковина', 'ящик', [bxa, sy0, z0, bxa + t, sy0 + bh, zf], 0, +1, 2, mat, { edges: bE }))
+        parts.push(mk(k + 'sR', 'Ящик: боковина', 'ящик', [bxb - t, sy0, z0, bxb, sy0 + bh, zf], 0, -1, 2, mat, { edges: bE }))
+        parts.push(mk(k + 'ff', 'Ящик: передняя', 'ящик', [bxa + t, sy0, zf - t, bxb - t, sy0 + bh, zf], 2, -1, 0, mat, { edges: bE }))
+        parts.push(mk(k + 'b', 'Ящик: задняя', 'ящик', [bxa + t, sy0, z0, bxb - t, sy0 + bh, z0 + t], 2, +1, 0, mat, { edges: bE }))
+        if (grooveBot) {
+          const go = 10, gd = 6, gw = bT + 1
+          const yB = sy0 + go + (gw - bT) / 2
+          parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t - gd + 1, yB, z0 + t - gd + 1, bxb - t + gd - 1, yB + bT, zf - t + gd - 1], 1, +1, 0, bMat, { t: bT }))
+          for (const pr of parts.slice(-5, -1)) pr.grooves.push({ from: '-y', offset: go, width: gw, depth: gd, along: 'L', note: 'Паз под дно ящика' })
+        } else {
+          parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa, by0, z0, bxb, by0 + bT, zf], 1, +1, 0, bMat, { t: bT }))
+        }
+        drawersN++
+        hw.push({ name: `Направляющие ${bd} мм, пара`, qty: 1 })
       }
-      if (p.box === 'metal') {
-        const red = num(p.metalReduce, 42)
-        parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [xi0 + red / 2, by0, z0, xi1 - red / 2, by0 + t, zf], 1, +1, 0, mat))
-        parts.push(mk(k + 'back', 'Ящик: задняя', 'ящик', [xi0 + red / 2, by0 + t, z0, xi1 - red / 2, by0 + bh, z0 + t], 2, +1, 0, mat))
-        hw.push({ name: `Металлобокс ${bd} мм (боковины)`, qty: 1 })
-        continue
-      }
-      const grooveBot = p.box === 'ldsp_groove'
-      const sy0 = grooveBot ? by0 : by0 + bT
-      const bE = { '+y': eB }
-      parts.push(mk(k + 'sL', 'Ящик: боковина', 'ящик', [bxa, sy0, z0, bxa + t, sy0 + bh, zf], 0, +1, 2, mat, { edges: bE }))
-      parts.push(mk(k + 'sR', 'Ящик: боковина', 'ящик', [bxb - t, sy0, z0, bxb, sy0 + bh, zf], 0, -1, 2, mat, { edges: bE }))
-      parts.push(mk(k + 'f', 'Ящик: передняя', 'ящик', [bxa + t, sy0, zf - t, bxb - t, sy0 + bh, zf], 2, -1, 0, mat, { edges: bE }))
-      parts.push(mk(k + 'b', 'Ящик: задняя', 'ящик', [bxa + t, sy0, z0, bxb - t, sy0 + bh, z0 + t], 2, +1, 0, mat, { edges: bE }))
-      if (grooveBot) {
-        const go = 10, gd = 6, gw = bT + 1
-        const yB = sy0 + go + (gw - bT) / 2
-        parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t - gd + 1, yB, z0 + t - gd + 1, bxb - t + gd - 1, yB + bT, zf - t + gd - 1], 1, +1, 0, bMat, { t: bT }))
-        for (const pr of parts.slice(-5, -1)) pr.grooves.push({ from: '-y', offset: go, width: gw, depth: gd, along: 'L', note: 'Паз под дно ящика' })
-      } else {
-        parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa, by0, z0, bxb, by0 + bT, zf], 1, +1, 0, bMat, { t: bT }))
-      }
+      return
     }
-    hw.push({ name: `Направляющие ${bd} мм, пара`, qty: m }, { name: 'Ручка', qty: m })
-  } else {
-    const n = Math.max(0, Math.round(num(p.doors, 0)))
-    const dh = H - fy0
+    // двери: n по ширине; петли — у левой двери слева, у правой справа (одна дверь — сторона из настройки, по умолчанию слева)
+    const dw = (fx1 - fx0 - (n - 1) * gap) / n
+    const dh = fy1 - fy0
     const hinges = dh < 900 ? 2 : dh < 1600 ? 3 : dh < 2000 ? 4 : 5
-    const he = num(p.hingeEnd, 100), hc = num(p.hingeCup, 22), pf = num(p.plateFront, 37)
-    const dy0 = fy0 + gap / 2, dy1 = H - gap / 2
-    const hy = Array.from({ length: hinges }, (_, j) => dy0 + he + ((dy1 - dy0 - 2 * he) * j) / (hinges - 1))
+    const hy = Array.from({ length: hinges }, (_, j) => fy0 + he + ((dh - 2 * he) * j) / (hinges - 1))
     for (let i = 0; i < n; i++) {
-      const x0 = (i * W) / n + gap / 2, x1 = ((i + 1) * W) / n - gap / 2
-      parts.push(mk('door' + i, n > 1 ? (i === 0 ? 'Дверь левая' : i === n - 1 ? 'Дверь правая' : 'Дверь') : 'Дверь', 'фасад',
-        [x0, dy0, D, x1, dy1, D + fT], 2, +1, 1, fMat, { edges: allE, t: fT }))
-      // петли: левые двери — на левой кромке, правые — на правой; чашка Ø35 в обратной пласти двери, планка — на боковине
-      const left = n === 1 || i < n / 2
-      const xc = left ? x0 + hc : x1 - hc
+      const dx0 = fx0 + i * (dw + gap), dx1 = dx0 + dw
+      const left = n === 1 ? fr.hinge !== 'right' : i < n / 2
+      parts.push(mk(`door${fi}_${i}`, n > 1 ? (i === 0 ? 'Дверь левая' : i === n - 1 ? 'Дверь правая' : 'Дверь') : 'Дверь', 'фасад',
+        [dx0, fy0, D, dx1, fy1, D + fT], 2, +1, 1, fMat, { edges: allE, t: fT }))
+      const xc = left ? dx0 + hc : dx1 - hc
       for (const y of hy) {
         holes.push({ p: [xc, y, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)' })
-        if (left && i === 0) for (const dy of [-16, 16]) holes.push({ p: [t, y + dy, D - pf], n: '-x', d: 5, depth: 12, note: 'Планка петли' })
-        if (!left && i === n - 1) for (const dy of [-16, 16]) holes.push({ p: [W - t, y + dy, D - pf], n: '+x', d: 5, depth: 12, note: 'Планка петли' })
+        // планка — на стенке проёма со стороны петель (боковина или стойка); у средних дверей при n > 2 — нет стенки
+        if (left && i === 0) for (const dy of [-16, 16]) holes.push({ p: [x0, y + dy, D - pf], n: '-x', d: 5, depth: 12, note: 'Планка петли' })
+        if (!left && i === n - 1) for (const dy of [-16, 16]) holes.push({ p: [x1, y + dy, D - pf], n: '+x', d: 5, depth: 12, note: 'Планка петли' })
       }
+      doorsN++; hingesN += hinges
     }
-    if (n) {
-      hw.push({ name: 'Петля накладная', qty: hinges * n }, { name: 'Ручка', qty: n })
-    }
-  }
+  })
+  if (hingesN) hw.push({ name: 'Петля накладная', qty: hingesN })
+  if (doorsN + drawersN) hw.push({ name: 'Ручка', qty: doorsN + drawersN })
 
   // проверки
   for (const pr of parts) {
     const b = pr.box
     if (b[3] - b[0] <= 0 || b[4] - b[1] <= 0 || b[5] - b[2] <= 0) warn.push(`«${pr.name}»: размер получился нулевым или отрицательным — проверьте параметры`)
   }
-  return { parts, hw, warn, holes }
+  return { parts, hw, warn, holes, openings }
 }

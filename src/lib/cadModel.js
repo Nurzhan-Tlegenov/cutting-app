@@ -120,7 +120,7 @@ export function placeRecord(rec, it) {
 
 /** Весь проект -> плоский список деталей сцены (для 3D и спецификации) */
 export function projectParts(project) {
-  const out = [], hw = [], warn = [], holes = []
+  const out = [], hw = [], warn = [], holes = [], openings = []
   ;(project?.items || []).forEach((it, ii) => {
     const r = itemRecords(it)
     r.parts.forEach(rec => {
@@ -138,12 +138,16 @@ export function projectParts(project) {
     r.warn.forEach(w => warn.push(`${it.name}: ${w}`))
     // отверстия фурнитуры элемента -> в координаты сцены
     const R = rotYMat(it.rotY), pos = [num(it.pos?.x), num(it.pos?.y), num(it.pos?.z)]
+    for (const o of r.openings || []) {
+      const b = o.box, c0 = mulMV(R, [b[0], b[1], b[2]]), c1 = mulMV(R, [b[3], b[4], b[5]])
+      openings.push({ ...o, item: it.id, aabb: [0, 1, 2].map(i => Math.min(c0[i], c1[i]) + pos[i]).concat([0, 1, 2].map(i => Math.max(c0[i], c1[i]) + pos[i])) })
+    }
     for (const h of r.holes || []) {
       const a = 'xyz'.indexOf(h.n[1]), n = [0, 0, 0]; n[a] = h.n[0] === '-' ? -1 : 1
       holes.push({ ...h, item: it.id, p: mulMV(R, h.p).map((v, i) => r2(v + pos[i])), n: mulMV(R, n).map(v => Math.round(v)) })
     }
   })
-  return { parts: out, hw, warn, holes }
+  return { parts: out, hw, warn, holes, openings }
 }
 
 /** Присадка всего проекта: стыки по схеме крепежа + отверстия фурнитуры -> { map: pid -> присадка детали, holes } */
