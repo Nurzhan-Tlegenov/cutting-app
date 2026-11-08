@@ -18,7 +18,10 @@ import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
 import { CAB_DEFAULTS, CAB_PRESETS } from '../lib/cadCabinet'
-import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, PROJECT_DEFAULTS } from '../lib/cadModel'
+import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
+import { JOINTS } from '../lib/cadDrill'
+import { getUserSettings, saveUserSettings } from '../lib/userSettings'
+import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, PROJECT_DEFAULTS } from '../lib/cadModel'
 import { listProjects, loadProject, saveProject, deleteProject, isLocal, CAD_SQL_HINT } from '../lib/cadStore'
 
 export const CAD_FEATURE = 'constructor'
@@ -154,19 +157,66 @@ function ProfileEditor({ it, set }) {
   </>)
 }
 
-function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, info }) {
+function FrameEditor({ it, set }) {
+  const p = { ...FRAME_DEFAULTS, ...it.p }
+  const up = patch => set({ ...it, p: { ...p, ...patch } })
+  return (<>
+    <div style={sect}>Шаблон</div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
+      {FRAME_PRESETS.map(([k, t, v]) => <button key={k} type="button" style={chipS(false)}
+        onClick={() => { if (window.confirm(`Заменить параметры каркаса шаблоном «${t}»?`)) set({ ...it, name: t, p: { ...FRAME_DEFAULTS, ...v } }) }}>{t}</button>)}
+    </div>
+    <div style={sect}>Габарит</div>
+    <Grid><NumField label="Ширина" value={p.W} onChange={v => up({ W: v })} min={100} /><NumField label="Высота" value={p.H} onChange={v => up({ H: v })} min={100} /><NumField label="Глубина" value={p.D} onChange={v => up({ D: v })} min={100} /></Grid>
+    <div style={sect}>Профиль<Hint inline>Сечение A — по ширине и глубине каркаса, B — высота перемычки. Профиль раскраивается на хлысты во вкладке «Смета».</Hint></div>
+    <Grid><NumField label="Сечение A" value={p.a} onChange={v => up({ a: v })} min={5} /><NumField label="Сечение B" value={p.b} onChange={v => up({ b: v })} min={5} /><TextField label="Материал" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /></Grid>
+    <Grid><NumField label="Уровней обвязки" unit="" value={p.levels} onChange={v => up({ levels: Math.max(2, Math.round(v)) })} min={2} /><NumField label="Нижняя от пола" value={p.foot} onChange={v => up({ foot: v })} min={0} /></Grid>
+    <div style={sect}>Полки</div>
+    <Chips value={p.shelf} onChange={v => up({ shelf: v, shelfT: v === 'glass' ? 6 : 16, shelfMaterial: v === 'glass' ? 'Стекло прозрачное 6 мм' : 'ЛДСП Белый 16' })} options={[['glass', 'Стекло'], ['sheet', 'ЛДСП'], ['none', 'Нет']]} />
+    {p.shelf !== 'none' && <Grid><NumField label="Толщина" value={p.shelfT} onChange={v => up({ shelfT: v })} min={1} /><TextField label="Материал полок" value={p.shelfMaterial} onChange={v => up({ shelfMaterial: v })} list="cad-mats" />
+      <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 5, alignSelf: 'end', paddingBottom: 8 }}><input type="checkbox" checked={!!p.topShelf} onChange={e => up({ topShelf: e.target.checked })} />верхняя</label></Grid>}
+    <div style={sect}>Стенки из стекла<Hint inline>Стекло ставится внутрь каркаса и крепится стеклодержателями (число — на одну стенку). Держатели идут в фурнитуру сметы.</Hint></div>
+    <Chips value={p.walls} onChange={v => up({ walls: v })} options={[['none', 'Нет'], ['sides', 'Бока'], ['back', 'Задняя'], ['sides_back', 'Бока и задняя']]} />
+    {p.walls !== 'none' && <Grid><NumField label="Толщина стекла" value={p.glassT} onChange={v => up({ glassT: v })} min={2} /><TextField label="Стекло" value={p.glassMaterial} onChange={v => up({ glassMaterial: v })} list="cad-mats" /><NumField label="Держателей на стенку" unit="" value={p.holders} onChange={v => up({ holders: Math.max(0, Math.round(v)) })} min={0} /></Grid>}
+  </>)
+}
+
+// сдвиг кнопками: шаг 1 / 10 / 100 мм, по каждой оси ± (удобно пальцем на телефоне)
+function Nudge({ it, set }) {
+  const [step, setStep] = useState(10)
+  const mv = (k, d) => set({ ...it, pos: { ...it.pos, [k]: Math.round(((it.pos?.[k] || 0) + d * step) * 10) / 10 } })
+  const b = { ...btnS(), padding: '5px 0', width: 34, textAlign: 'center' }
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+      {['x', 'y', 'z'].map(k => <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+        <button type="button" style={b} onClick={() => mv(k, -1)}>−</button><span style={{ fontSize: 12, width: 12, textAlign: 'center' }}>{k.toUpperCase()}</span><button type="button" style={b} onClick={() => mv(k, 1)}>+</button>
+      </span>)}
+      {[1, 10, 100].map(v => <button key={v} type="button" style={{ ...chipS(step === v), padding: '3px 8px' }} onClick={() => setStep(v)}>{v}</button>)}
+    </div>
+  )
+}
+
+function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, onToLibrary, info }) {
   return (
     <div>
       <Grid cols={1}><TextField label="Название" value={it.name} onChange={v => set({ ...it, name: v })} /></Grid>
       <div style={sect}>Положение в сцене<Hint inline>X, Y, Z — левый нижний задний угол элемента. Поворот — вокруг вертикали.</Hint></div>
       <Grid>{['x', 'y', 'z'].map(k => <NumField key={k} label={k.toUpperCase()} value={it.pos?.[k] ?? 0} onChange={v => set({ ...it, pos: { ...it.pos, [k]: v } })} />)}</Grid>
+      <Nudge it={it} set={set} />
       <Chips label="Поворот" value={it.rotY || 0} onChange={v => set({ ...it, rotY: v })} options={[[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']]} />
       {info && <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 6px' }}>{info}</p>}
       {it.type === 'cabinet' && <CabinetEditor it={it} set={set} />}
+      {it.type === 'frame' && <FrameEditor it={it} set={set} />}
       {(it.type === 'panel' || it.type === 'glass') && <PanelEditor it={it} set={set} />}
+      {it.type === 'glass' && <>
+        <Chips label="Крепление стекла" value={it.p.mount || 'none'} onChange={v => set({ ...it, p: { ...it.p, mount: v, mountQty: it.p.mountQty || (v === 'hinges' ? 2 : 4) } })}
+          options={[['none', 'Нет'], ['holders', 'Стеклодержатели'], ['hinges', 'Петли (дверь)']]} />
+        {it.p.mount && it.p.mount !== 'none' && <Grid><NumField label="Штук" unit="" value={it.p.mountQty} onChange={v => set({ ...it, p: { ...it.p, mountQty: Math.max(0, Math.round(v)) } })} min={0} /></Grid>}
+      </>}
       {it.type === 'profile' && <ProfileEditor it={it} set={set} />}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 14 }}>
         <button type="button" style={btnS()} onClick={onDuplicate}>⧉ Копия</button>
+        {onToLibrary && <button type="button" style={btnS()} onClick={onToLibrary} title="Сохранить элемент со всеми параметрами в свою библиотеку — потом ставить в любой проект">★ В библиотеку</button>}
         {it.type === 'cabinet' && <button type="button" style={btnS()} onClick={onExplode} title="Корпус станет набором свободных панелей — каждую можно двигать и менять отдельно">⇲ Разобрать на панели</button>}
         <button type="button" style={{ ...btnS(), color: 'var(--danger)' }} onClick={onDelete}>🗑 Удалить</button>
       </div>
@@ -174,16 +224,26 @@ function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, info }) {
   )
 }
 
-const TYPE_ICON = { cabinet: '▦', panel: '▭', glass: '◇', profile: '┃' }
-function SceneList({ project, parts, selected, onSelect, onAdd }) {
+const TYPE_ICON = { cabinet: '▦', panel: '▭', glass: '◇', profile: '┃', frame: '⌗' }
+function SceneList({ project, setProject, parts, selected, onSelect, onAdd, library, onFromLibrary, onLibraryDelete }) {
   const counts = useMemo(() => { const m = new Map(); for (const p of parts) m.set(p.item.id, (m.get(p.item.id) || 0) + 1); return m }, [parts])
   return (<>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
       <button type="button" style={btnS(true)} onClick={() => onAdd('cabinet')}>+ Корпус</button>
       <button type="button" style={btnS()} onClick={() => onAdd('panel')}>+ Панель</button>
       <button type="button" style={btnS()} onClick={() => onAdd('glass')}>+ Стекло</button>
-      <button type="button" style={btnS()} onClick={() => onAdd('profile')}>+ Профиль / металл</button>
+      <button type="button" style={btnS()} onClick={() => onAdd('frame')}>+ Каркас (металл)</button>
+      <button type="button" style={btnS()} onClick={() => onAdd('profile')}>+ Профиль</button>
     </div>
+    {library.length > 0 && <details style={{ marginBottom: 10 }}>
+      <summary style={{ fontSize: 13, cursor: 'pointer', color: 'var(--blue)' }}>★ Моя библиотека ({library.length})</summary>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+        {library.map(l => <div key={l.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button type="button" style={{ ...btnS(), flex: 1, textAlign: 'left' }} onClick={() => onFromLibrary(l)}>+ {l.name}</button>
+          <button type="button" style={{ ...btnS(), color: 'var(--danger)' }} onClick={() => onLibraryDelete(l.id)}>🗑</button>
+        </div>)}
+      </div>
+    </details>}
     {!project.items.length && <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Сцена пустая. Добавьте корпус — шкаф, тумбу, комод — и задайте размеры, или поставьте свободную панель.</p>}
     {project.items.map(it => (
       <button key={it.id} type="button" onClick={() => onSelect(it.id)}
@@ -191,10 +251,26 @@ function SceneList({ project, parts, selected, onSelect, onAdd }) {
           border: `1px solid ${selected === it.id ? 'var(--blue)' : 'var(--border)'}`, background: selected === it.id ? 'var(--blue-light, #e8f0fe)' : 'var(--bg)', color: 'var(--text)' }}>
         <span style={{ width: 20, textAlign: 'center', color: 'var(--text-muted)' }}>{TYPE_ICON[it.type] || '•'}</span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 14 }}>{it.name}</span>
-        <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{it.type === 'cabinet' ? `${it.p.W}×${it.p.H}×${it.p.D} · ${counts.get(it.id) || 0} дет.` : it.type === 'profile' ? `${it.p.len} мм` : `${[it.p.dx, it.p.dy, it.p.dz].join('×')}`}</span>
+        <span style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>{it.type === 'cabinet' || it.type === 'frame' ? `${it.p.W}×${it.p.H}×${it.p.D} · ${counts.get(it.id) || 0} дет.` : it.type === 'profile' ? `${it.p.len} мм` : `${[it.p.dx, it.p.dy, it.p.dz].join('×')}`}</span>
       </button>
     ))}
+    <ProjectSettings project={project} setProject={setProject} />
   </>)
+}
+
+function ProjectSettings({ project, setProject }) {
+  const st = { ...PROJECT_DEFAULTS, ...project.settings }
+  const room = { ...PROJECT_DEFAULTS.room, ...(st.room || {}) }
+  const setSt = patch => setProject({ ...project, settings: { ...st, ...patch } })
+  return (<details style={{ marginTop: 14 }} open={false}>
+    <summary style={{ ...sect, cursor: 'pointer', margin: '0 0 6px' }}>Настройки проекта и комната</summary>
+    <Chips label="Крепёж на стыках плит" value={st.joint} onChange={v => setSt({ joint: v })} options={JOINTS}
+      hint="Стыки находятся сами: торец детали упирается в пласть другой. Конфирмат — сквозное Ø7 в пласть и Ø5 в торец; шкант — Ø8×12 в пласть и Ø8×20 в торец. 50 мм от концов стыка, длинный стык — ещё посередине. Присадка уходит в детали заказа." />
+    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" checked={st.hardwareHoles !== false} onChange={e => setSt({ hardwareHoles: e.target.checked })} />Отверстия фурнитуры: петли (чашка Ø35 и планка), полкодержатели, направляющие</label>
+    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}><input type="checkbox" checked={st.rotatable !== false} onChange={e => setSt({ rotatable: e.target.checked })} />Детали можно вращать при раскрое (без текстуры)</label>
+    <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" checked={!!room.on} onChange={e => setSt({ room: { ...room, on: e.target.checked } })} />Комната: стены слева, сзади и справа</label>
+    {room.on && <Grid><NumField label="Ширина комнаты" value={room.W} onChange={v => setSt({ room: { ...room, W: v } })} min={500} /><NumField label="Глубина" value={room.D} onChange={v => setSt({ room: { ...room, D: v } })} min={500} /><NumField label="Высота" value={room.H} onChange={v => setSt({ room: { ...room, H: v } })} min={500} /></Grid>}
+  </details>)
 }
 
 const KIND_T = { sheet: 'Плита', glass: 'Стекло', profile: 'Погонные (профиль, металл)', edge: 'Кромка', hw: 'Фурнитура' }
@@ -282,6 +358,8 @@ export default function ConstructorPage() {
   const [xray, setXray] = useState(false)
   const [fitKey, setFitKey] = useState(0)
   const [toOrder, setToOrder] = useState(false)
+  const [showHoles, setShowHoles] = useState(true)
+  const [library, setLibrary] = useState(() => { try { return getUserSettings(user)?.cadLibrary || [] } catch { return [] } })
   const [land, setLand] = useState(() => typeof window !== 'undefined' && window.innerWidth > window.innerHeight && window.innerHeight < 600)
   const dirty = useRef(false)
   const projRef = useRef(null)
@@ -322,7 +400,11 @@ export default function ConstructorPage() {
     timer.current = setTimeout(flush, 1200)
   }, [flush])
 
-  const { parts } = useMemo(() => (project ? projectParts(project) : { parts: [] }), [project])
+  const pp = useMemo(() => (project ? projectParts(project) : { parts: [], holes: [] }), [project])
+  const { parts } = pp
+  const holes = useMemo(() => (project && showHoles ? projectDrill(project, pp).holes : []), [project, pp, showHoles])
+  const room = project?.settings?.room?.on ? { ...PROJECT_DEFAULTS.room, ...project.settings.room } : null
+  const saveLibrary = next => { setLibrary(next); saveUserSettings({ cadLibrary: next }, user) }
   const materials = useMemo(() => {
     const s = new Set(['ЛДСП Белый 16', 'ХДФ Белый 3', 'МДФ 16', 'Стекло прозрачное 4 мм', 'Зеркало 4 мм', 'Профиль 20×20 сталь', 'Профиль 40×20 сталь', 'Труба Ø25 хром'])
     for (const p of parts) if (p.material) s.add(p.material)
@@ -406,10 +488,11 @@ export default function ConstructorPage() {
 
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <CadView parts={parts} selected={selected} onSelect={select} xray={xray} fitKey={fitKey} />
+      <CadView parts={parts} selected={selected} onSelect={select} xray={xray} fitKey={fitKey} holes={holes} room={room} />
       <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
         <button type="button" title="Полупрозрачный вид" style={{ ...btnS(), padding: '6px 9px', ...(xray ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setXray(v => !v)}>◫</button>
+        <button type="button" title="Показать присадку" style={{ ...btnS(), padding: '6px 9px', ...(showHoles ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowHoles(v => !v)}>⊙</button>
       </div>
       {project.items.length > 0 && (() => { const b = sceneBox(parts); return <div style={{ position: 'absolute', left: 8, bottom: 6, fontSize: 11, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.75)', borderRadius: 6, padding: '1px 6px' }}>{Math.round(b[3] - b[0])} × {Math.round(b[4] - b[1])} × {Math.round(b[5] - b[2])}</div> })()}
     </div>
@@ -419,9 +502,12 @@ export default function ConstructorPage() {
     <div style={{ display: 'flex', gap: 5, marginBottom: 10, flexWrap: 'wrap' }}>
       {[['scene', 'Сцена'], ['props', 'Свойства'], ['spec', 'Смета']].map(([k, t]) => <button key={k} type="button" style={chipS(tab === k)} onClick={() => setTab(k)}>{t}</button>)}
     </div>
-    {tab === 'scene' && <SceneList project={project} parts={parts} selected={selected} onSelect={select} onAdd={addItem} />}
+    {tab === 'scene' && <SceneList project={project} setProject={setProject} parts={parts} selected={selected} onSelect={select} onAdd={addItem}
+      library={library} onLibraryDelete={id => { if (window.confirm('Убрать из библиотеки?')) saveLibrary(library.filter(l => l.id !== id)) }}
+      onFromLibrary={l => { const b = parts.length ? sceneBox(parts) : [0, 0, 0, 0, 0, 0]; const it = { ...JSON.parse(JSON.stringify(l.item)), id: newId(), pos: { x: parts.length ? Math.round(b[3]) : 0, y: 0, z: 0 } }; setProject({ ...project, items: [...project.items, it] }); setSelected(it.id); setTab('props') }} />}
     {tab === 'props' && (selItem
       ? <ItemEditor key={selItem.id} it={selItem} set={setItem} info={info}
+          onToLibrary={() => { const name = window.prompt('Название в библиотеке:', selItem.name); if (!name) return; const item = { ...JSON.parse(JSON.stringify(selItem)), name: name.trim() }; saveLibrary([{ id: newId(), name: name.trim(), type: selItem.type, item }, ...library]); window.alert('Сохранено в «Моя библиотека» (вкладка «Сцена»)') }}
           onDelete={() => { if (!window.confirm(`Удалить «${selItem.name}»?`)) return; setProject({ ...project, items: project.items.filter(i => i.id !== selItem.id) }); setSelected(null); setTab('scene') }}
           onDuplicate={() => { const c = { ...JSON.parse(JSON.stringify(selItem)), id: newId(), name: selItem.name + ' (копия)' }; const own = parts.filter(p => p.item.id === selItem.id); const b = sceneBox(own); c.pos = { ...c.pos, x: Math.round((c.pos?.x || 0) + (b[3] - b[0])) }; setProject({ ...project, items: [...project.items, c] }); setSelected(c.id) }}
           onExplode={() => { if (!window.confirm('Разобрать корпус на отдельные панели? Параметры корпуса (пересчёт по габариту) пропадут — каждую панель можно будет менять отдельно.')) return; const ps = explodeCabinet(selItem); const idx = project.items.findIndex(i => i.id === selItem.id); const items = [...project.items]; items.splice(idx, 1, ...ps); setProject({ ...project, items }); setSelected(null); setTab('scene') }} />

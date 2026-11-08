@@ -7,6 +7,8 @@
 // Всё переводится в «записи» деталей (брусок + оси), а из них — в детали заказа с 3D-положением (как импорт из Базиса),
 // поэтому дальше работают уже готовые раскрой, 3D-просмотр, редактор контура, бирки и ЧПУ.
 import { cabinetParts, CAB_DEFAULTS } from './cadCabinet.js'
+import { frameParts, FRAME_DEFAULTS } from './cadFrame.js'
+import { projectDrillings } from './cadDrill.js'
 
 export const CAD_VERSION = 1
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d)
@@ -16,6 +18,9 @@ export const newId = () => Math.random().toString(36).slice(2, 9)
 
 export const PROJECT_DEFAULTS = {
   rotatable: true,               // детали без текстуры можно вращать при раскрое
+  joint: 'confirmat_dowel',      // крепёж на стыках плит (cadDrill.js)
+  hardwareHoles: true,           // отверстия под петли, планки, полкодержатели, направляющие
+  room: { on: false, W: 3500, D: 3000, H: 2700 },   // комната: стены слева, сзади, справа
   stockLen: 6000, linearKerf: 3, // хлыст погонного материала и пропил при линейном раскрое
   prices: {},                    // цена материала: { [название]: число } — за м², за метр или за штуку (по виду)
 }
@@ -29,6 +34,7 @@ export function newItem(type, extra = {}) {
   if (type === 'cabinet') return { ...base, name: 'Корпус', ...extra, p: { ...CAB_DEFAULTS, ...(extra.p || {}) } }
   if (type === 'panel') return { ...base, name: 'Панель', p: { dx: 600, dy: 16, dz: 400, tAxis: 1, lAxis: 0, tSign: 1, material: 'ЛДСП Белый 16', edgeAll: '', edges: {}, grooves: [] }, ...extra }
   if (type === 'glass') return { ...base, name: 'Стекло', p: { dx: 600, dy: 4, dz: 400, tAxis: 1, lAxis: 0, tSign: 1, material: 'Стекло прозрачное 4 мм' }, ...extra }
+  if (type === 'frame') return { ...base, name: 'Каркас металл', ...extra, p: { ...FRAME_DEFAULTS, ...(extra.p || {}) } }
   if (type === 'profile') return { ...base, name: 'Профиль', p: { axis: 0, len: 1000, a: 20, b: 20, material: 'Профиль 20×20 сталь' }, ...extra }
   return { ...base, ...extra }
 }
@@ -40,10 +46,8 @@ const dirKey = v => { const i = v.findIndex(c => Math.abs(c) > 0.5); return (v[i
 
 // Записи деталей одного элемента — в его собственной системе (до поворота и сдвига)
 export function itemRecords(it) {
-  if (it.type === 'cabinet') {
-    const r = cabinetParts(it.p)
-    return { parts: r.parts, hw: r.hw, warn: r.warn }
-  }
+  if (it.type === 'cabinet') return cabinetParts(it.p)
+  if (it.type === 'frame') return frameParts(it.p)
   const p = it.p || {}
   if (it.type === 'panel' || it.type === 'glass') {
     const dx = num(p.dx, 600), dy = num(p.dy, 16), dz = num(p.dz, 400)
@@ -57,7 +61,10 @@ export function itemRecords(it) {
         kind: it.type === 'glass' ? 'glass' : 'sheet', box: [0, 0, 0, dx, dy, dz], tAxis, tSign: p.tSign === -1 ? -1 : 1, lAxis,
         material: p.material || '', edges: it.type === 'glass' ? {} : edges, grooves: p.grooves || [],
       }],
-      hw: [], warn: [],
+      holes: it.type === 'panel' ? (p.holes || []) : [],
+      hw: it.type === 'glass' && p.mount && p.mount !== 'none' && num(p.mountQty, 0) > 0
+        ? [{ name: p.mount === 'hinges' ? 'Петля для стеклянной двери' : 'Стеклодержатель', qty: num(p.mountQty, 0) }] : [],
+      warn: [],
     }
   }
   if (it.type === 'profile') {
@@ -111,14 +118,26 @@ export function placeRecord(rec, it) {
 
 /** Весь проект -> плоский список деталей сцены (для 3D и спецификации) */
 export function projectParts(project) {
-  const out = [], hw = [], warn = []
+  const out = [], hw = [], warn = [], holes = []
   ;(project?.items || []).forEach((it, ii) => {
     const r = itemRecords(it)
     r.parts.forEach(rec => out.push({ ...rec, item: it, ii, pid: `${it.id}:${rec.key}`, place: placeRecord(rec, it) }))
     r.hw.forEach(h => hw.push({ ...h, item: it.name }))
     r.warn.forEach(w => warn.push(`${it.name}: ${w}`))
+    // отверстия фурнитуры элемента -> в координаты сцены
+    const R = rotYMat(it.rotY), pos = [num(it.pos?.x), num(it.pos?.y), num(it.pos?.z)]
+    for (const h of r.holes || []) {
+      const a = 'xyz'.indexOf(h.n[1]), n = [0, 0, 0]; n[a] = h.n[0] === '-' ? -1 : 1
+      holes.push({ ...h, item: it.id, p: mulMV(R, h.p).map((v, i) => r2(v + pos[i])), n: mulMV(R, n).map(v => Math.round(v)) })
+    }
   })
-  return { parts: out, hw, warn }
+  return { parts: out, hw, warn, holes }
+}
+
+/** Присадка всего проекта: стыки по схеме крепежа + отверстия фурнитуры -> { map: pid -> присадка детали, holes } */
+export function projectDrill(project, pp = projectParts(project)) {
+  const st = { ...PROJECT_DEFAULTS, ...(project?.settings || {}) }
+  return projectDrillings(pp.parts, st.joint, st.hardwareHoles === false ? [] : pp.holes)
 }
 
 // кромка записи по сторонам редактора
@@ -149,7 +168,7 @@ function editorGrooves(rec, place) {
 }
 
 /** Деталь сцены -> строка заказа (как из импорта): размеры, кромка, пазы и 3D-положение в contour.meta */
-export function partToDetail(sp, pos) {
+export function partToDetail(sp, pos, drill = []) {
   const { place } = sp
   const W = place.W, L = place.L, T = place.T
   const meta = {
@@ -160,7 +179,7 @@ export function partToDetail(sp, pos) {
   }
   const contour = {
     vertices: [{ x: 0, y: 0, r: 0 }, { x: W, y: 0, r: 0 }, { x: W, y: L, r: 0 }, { x: 0, y: L, r: 0 }],
-    holes: [], grooves: editorGrooves(sp, place), drillings: [], layout: [], meta,
+    holes: [], grooves: editorGrooves(sp, place), drillings: drill, layout: [], meta,
   }
   return { name: sp.name, w: L, h: W, qty: 1, edges: editorEdges(sp, place), material: sp.material, thickness: T, contour, rotatable: true }
 }
@@ -193,17 +212,21 @@ export function exportForOrder(project, groupKey) {
   const g = groups.find(x => x.key === groupKey) || groups[0]
   if (!g) return null
   const rot = project.settings?.rotatable !== false
-  const items = g.parts.map((sp, i) => ({ ...partToDetail(sp, i + 1), rotatable: rot }))
-  const others = groups.filter(x => x !== g).flatMap(x => x.parts).map((sp, i) => partToDetail(sp, i + 1))
-  const { parts } = projectParts(project)
+  const pp = projectParts(project)
+  const { map } = projectDrill(project, pp)
+  const items = g.parts.map((sp, i) => ({ ...partToDetail(sp, i + 1, map.get(sp.pid) || []), rotatable: rot }))
+  const others = groups.filter(x => x !== g).flatMap(x => x.parts).map((sp, i) => partToDetail(sp, i + 1, map.get(sp.pid) || []))
+  const { parts } = pp
   const extras = parts.filter(sp => sp.kind !== 'sheet').map(partToExtra)
   return { items, material: g.material, thickness: g.thickness, orderName: project.name || '', scene: { parts: others, extras, hardware: [], meshes: [] } }
 }
 
 /** Все детали проекта как детали формы (для 3D-просмотра всей модели) */
 export function exportAll(project) {
-  const { parts } = projectParts(project)
-  const sheets = parts.filter(sp => sp.kind === 'sheet').map((sp, i) => partToDetail(sp, i + 1))
+  const pp = projectParts(project)
+  const { parts } = pp
+  const { map } = projectDrill(project, pp)
+  const sheets = parts.filter(sp => sp.kind === 'sheet').map((sp, i) => partToDetail(sp, i + 1, map.get(sp.pid) || []))
   const extras = parts.filter(sp => sp.kind !== 'sheet').map(partToExtra)
   return { details: sheets, scene: { parts: [], extras, hardware: [], meshes: [] } }
 }
@@ -238,7 +261,8 @@ export function linearNest(lengths, stock = 6000, kerf = 3) {
 export function projectSpec(project) {
   const st = { ...PROJECT_DEFAULTS, ...(project?.settings || {}) }
   const price = name => num(st.prices?.[name], 0)
-  const { parts, hw, warn } = projectParts(project)
+  const pp0 = projectParts(project)
+  const { parts, hw, warn } = pp0
   const rows = new Map()
   const row = (kind, name, unitName) => {
     const k = kind + '|' + name
@@ -260,6 +284,12 @@ export function projectSpec(project) {
     } else if (sp.kind === 'hw' && sp.role === 'опора') { /* ножки — в фурнитуре */ }
   }
   for (const h of hw) { const r = row('hw', h.name, 'шт'); r.qty += h.qty; r.count += h.qty }
+  // крепёж на стыках (по присадке): конфирматы и шканты — штук
+  const { holes: dh } = projectDrill(project, pp0)
+  const conf = dh.filter(h => h.note === 'Конфирмат' && h.d === 7).length
+  const dow = dh.filter(h => h.note === 'Шкант').length / 2
+  if (conf) { const r = row('hw', 'Конфирмат 7×50', 'шт'); r.qty += conf; r.count += conf }
+  if (dow) { const r = row('hw', 'Шкант 8×30', 'шт'); r.qty += Math.round(dow); r.count += Math.round(dow) }
   const list = [...rows.values()].map(r => {
     const out = { ...r, qty: r.unit === 'шт' ? r.qty : Math.round(r.qty * 1000) / 1000 }
     if (r.kind === 'profile') {
@@ -279,15 +309,26 @@ export function projectSpec(project) {
 
 /** «Разобрать» корпус на свободные панели: дальше каждую можно двигать и менять отдельно */
 export function explodeCabinet(it) {
-  const { parts } = itemRecords(it)
+  const { parts, holes = [] } = itemRecords(it)
   const R = rotYMat(it.rotY)
-  return parts.filter(r => r.kind === 'sheet' || r.kind === 'glass').map(r => {
+  const sheets = parts.filter(r => r.kind === 'sheet' || r.kind === 'glass')
+  // отверстия фурнитуры (петли, полкодержатели…) — к той панели, в которую входят, в её собственных координатах
+  const own = new Map()
+  for (const h of holes) {
+    const ax = 'xyz'.indexOf(h.n[1]), plus = h.n[0] === '+'
+    const r = sheets.find(r => Math.abs((plus ? r.box[ax] : r.box[ax + 3]) - h.p[ax]) <= 0.2 &&
+      [0, 1, 2].every(i => i === ax || (h.p[i] >= r.box[i] - 0.01 && h.p[i] <= r.box[i + 3] + 0.01)))
+    if (!r) continue
+    if (!own.has(r)) own.set(r, [])
+    own.get(r).push({ ...h, p: h.p.map((v, i) => r1(v - r.box[i])) })
+  }
+  return sheets.map(r => {
     const b = r.box
     const o = mulMV(R, [b[0], b[1], b[2]])
     return {
-      id: newId(), type: 'panel', name: r.name, rotY: it.rotY || 0,
+      id: newId(), type: r.kind === 'glass' ? 'glass' : 'panel', name: r.name, rotY: it.rotY || 0,
       pos: { x: r1(o[0] + num(it.pos?.x)), y: r1(o[1] + num(it.pos?.y)), z: r1(o[2] + num(it.pos?.z)) },
-      p: { dx: r1(b[3] - b[0]), dy: r1(b[4] - b[1]), dz: r1(b[5] - b[2]), tAxis: r.tAxis, lAxis: r.lAxis, tSign: r.tSign, material: r.material, edgeAll: r.edges?.all || '', edges: r.edges?.all ? {} : { ...r.edges }, grooves: r.grooves || [], role: r.role, from: it.name },
+      p: { dx: r1(b[3] - b[0]), dy: r1(b[4] - b[1]), dz: r1(b[5] - b[2]), tAxis: r.tAxis, lAxis: r.lAxis, tSign: r.tSign, material: r.material, edgeAll: r.edges?.all || '', edges: r.edges?.all ? {} : { ...r.edges }, grooves: r.grooves || [], holes: own.get(r) || [], role: r.role, from: it.name },
     }
   })
 }

@@ -18,7 +18,7 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, onSelect, xray = false, fitKey = 0, style }) {
+export default function CadView({ parts, selected, onSelect, xray = false, fitKey = 0, holes = [], room = null, style }) {
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
@@ -44,6 +44,7 @@ export default function CadView({ parts, selected, onSelect, xray = false, fitKe
     const grid = new THREE.GridHelper(10000, 50, 0xb8c0c8, 0xdde2e7)
     scene.add(grid)
     const group = new THREE.Group(); scene.add(group)
+    const extra = new THREE.Group(); scene.add(extra)   // присадка и стены комнаты — без выбора нажатием
     let raf = 0, alive = true
     const tick = () => { if (!alive) return; controls.update(); renderer.render(scene, camera); raf = requestAnimationFrame(tick) }
     tick()
@@ -71,13 +72,14 @@ export default function CadView({ parts, selected, onSelect, xray = false, fitKe
     }
     renderer.domElement.addEventListener('pointerdown', onDown)
     renderer.domElement.addEventListener('pointerup', onUp)
-    st.current = { renderer, scene, camera, controls, group, grid, fitted: false }
+    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false }
     return () => {
       alive = false; cancelAnimationFrame(raf); ro.disconnect()
       renderer.domElement.removeEventListener('pointerdown', onDown)
       renderer.domElement.removeEventListener('pointerup', onUp)
       controls.dispose(); renderer.dispose()
       group.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.() })
+      extra.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.() })
       el.removeChild(renderer.domElement)
     }
   }, [])
@@ -111,6 +113,41 @@ export default function CadView({ parts, selected, onSelect, xray = false, fitKe
     }
     if (!s.fitted && parts?.length) { fit(s, parts); s.fitted = true }
   }, [parts, selected, xray])
+
+  // присадка (цилиндры по оси отверстия) и комната (пол и три стены)
+  useEffect(() => {
+    const s = st.current
+    if (!s) return
+    const { extra } = s
+    for (const o of [...extra.children]) { extra.remove(o); o.geometry?.dispose?.(); o.material?.dispose?.() }
+    const list = (holes || []).slice(0, 4000)
+    if (list.length) {
+      const geo = new THREE.CylinderGeometry(1, 1, 1, 14)
+      const mat = new THREE.MeshBasicMaterial({ color: '#c2410c' })
+      const im = new THREE.InstancedMesh(geo, mat, list.length)
+      const up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion(), M = new THREE.Matrix4()
+      list.forEach((h, i) => {
+        const n = new THREE.Vector3(...h.n).normalize()
+        q.setFromUnitVectors(up, n)
+        const len = Math.min(h.depth, 60) + 0.6
+        const c = new THREE.Vector3(...h.p).addScaledVector(n, len / 2 - 0.5)
+        M.compose(c, q, new THREE.Vector3(h.d / 2, len, h.d / 2))
+        im.setMatrixAt(i, M)
+      })
+      extra.add(im)
+    }
+    if (room) {
+      const W = room.W, D = room.D, H = room.H, T = 80
+      const wm = new THREE.MeshStandardMaterial({ color: '#e9e4da', transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+      const fm = new THREE.MeshStandardMaterial({ color: '#d8cbb3', side: THREE.DoubleSide })
+      const add = (sx, sy, sz, x, y, z, m) => { const w = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m); w.position.set(x, y, z); extra.add(w) }
+      add(W + 2 * T, T, D + T, W / 2, -T / 2, D / 2 - T / 2, fm)   // пол
+      add(W + 2 * T, H, T, W / 2, H / 2, -T / 2, wm)               // задняя стена
+      add(T, H, D, -T / 2, H / 2, D / 2, wm)                       // левая
+      add(T, H, D, W + T / 2, H / 2, D / 2, wm)                    // правая
+    }
+    s.grid.visible = !room
+  }, [holes, room?.W, room?.D, room?.H, !!room]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // «Показать всё»
   useEffect(() => { if (fitKey && st.current) fit(st.current, parts || []) }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps

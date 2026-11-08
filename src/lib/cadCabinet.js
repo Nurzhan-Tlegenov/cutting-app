@@ -24,6 +24,8 @@ export const CAB_DEFAULTS = {
   drawers: 3, box: 'ldsp_overlay', slideGap: 13, slideLen: 450, boxTopGap: 40, boxBottomT: 3, boxBottomMaterial: 'ХДФ Белый 3', metalReduce: 42,
   doors: 2, gap: 3, facadeT: 16, facadeMaterial: 'ЛДСП Белый 16',
   edgeBody: '0,4', edgeFront: '1', edgeFacade: '1',
+  hingeCup: 22, hingeEnd: 100, plateFront: 37,   // петли: центр чашки от края двери, первая/последняя от торца двери, планка от переднего торца
+  pinFront: 37, pinBelow: 8,                       // полкодержатели: от переднего/заднего торца полки, центр ниже полки
 }
 
 export const CAB_PRESETS = [
@@ -46,7 +48,7 @@ export function cabinetParts(params) {
   const p = { ...CAB_DEFAULTS, ...(params || {}) }
   const W = num(p.W, 800), H = num(p.H, 2100), D = num(p.D, 560), t = num(p.t, 16)
   const mat = p.material || 'ЛДСП'
-  const parts = [], hw = [], warn = []
+  const parts = [], hw = [], warn = [], holes = []   // holes — отверстия фурнитуры: точка входа + направление внутрь детали
   const eB = p.edgeBody, eF = p.edgeFront
   const backT = num(p.backT, 3)
   const zb = p.back === 'overlay' ? backT : 0               // накладная задняя — сзади на торцах, корпус начинается за ней
@@ -135,6 +137,13 @@ export function cabinetParts(params) {
       for (let j = 0; j < k; j++) {
         const y0 = yi0 + (j + 1) * step + j * t
         parts.push(mk(`sh${si}_${j}`, loose ? 'Полка съёмная' : 'Полка', 'наполнение', [sx0 + g, y0, zi0 + g, sx1 - g, y0 + t, D - setback], 1, +1, 0, mat, { edges: front }))
+        if (loose) {
+          const pf = num(p.pinFront, 37), yp = y0 - num(p.pinBelow, 8)
+          for (const z of [D - setback - pf, zi0 + g + pf]) {
+            holes.push({ p: [sx0, yp, z], n: '-x', d: 5, depth: 12, note: 'Полкодержатель' })
+            holes.push({ p: [sx1, yp, z], n: '+x', d: 5, depth: 12, note: 'Полкодержатель' })
+          }
+        }
       }
     })
     if (loose && k) hw.push({ name: 'Полкодержатель', qty: 4 * k * sections.length })
@@ -153,12 +162,18 @@ export function cabinetParts(params) {
     const bT = num(p.boxBottomT, 3), bMat = p.boxBottomMaterial || 'ХДФ'
     for (let i = 0; i < m; i++) {
       const y0 = fy0 + gap / 2 + i * (fh + gap)
-      parts.push(mk('df' + i, 'Фасад ящика', 'фасад', [gap / 2, y0, D, W - gap / 2, y0 + fh, D + fT], 2, -1, 0, fMat, { edges: allE, t: fT }))
+      parts.push(mk('df' + i, 'Фасад ящика', 'фасад', [gap / 2, y0, D, W - gap / 2, y0 + fh, D + fT], 2, +1, 0, fMat, { edges: allE, t: fT }))
       // короб ящика: от низа проёма + 15 мм, высота = фасад − зазор сверху
       const by0 = Math.max(y0, yi0) + 15
       const bh = Math.max(60, fh - num(p.boxTopGap, 40))
       const zf = D - 2, z0 = zf - bd
       const k = 'dr' + i + '_'
+      // направляющие: крепление к боковине корпуса — 3 отверстия на оси короба (37 от переда, далее по 32×N)
+      const ys = by0 + 20
+      for (const z of [D - 37, D - 37 - 224, D - 37 - Math.max(256, bd - 64)].filter(z => z > zi0 + 10)) {
+        holes.push({ p: [xi0, ys, z], n: '-x', d: 4, depth: 10, note: 'Направляющая' })
+        holes.push({ p: [xi1, ys, z], n: '+x', d: 4, depth: 10, note: 'Направляющая' })
+      }
       if (p.box === 'metal') {
         const red = num(p.metalReduce, 42)
         parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [xi0 + red / 2, by0, z0, xi1 - red / 2, by0 + t, zf], 1, +1, 0, mat))
@@ -185,14 +200,25 @@ export function cabinetParts(params) {
     hw.push({ name: `Направляющие ${bd} мм, пара`, qty: m }, { name: 'Ручка', qty: m })
   } else {
     const n = Math.max(0, Math.round(num(p.doors, 0)))
+    const dh = H - fy0
+    const hinges = dh < 900 ? 2 : dh < 1600 ? 3 : dh < 2000 ? 4 : 5
+    const he = num(p.hingeEnd, 100), hc = num(p.hingeCup, 22), pf = num(p.plateFront, 37)
+    const dy0 = fy0 + gap / 2, dy1 = H - gap / 2
+    const hy = Array.from({ length: hinges }, (_, j) => dy0 + he + ((dy1 - dy0 - 2 * he) * j) / (hinges - 1))
     for (let i = 0; i < n; i++) {
       const x0 = (i * W) / n + gap / 2, x1 = ((i + 1) * W) / n - gap / 2
       parts.push(mk('door' + i, n > 1 ? (i === 0 ? 'Дверь левая' : i === n - 1 ? 'Дверь правая' : 'Дверь') : 'Дверь', 'фасад',
-        [x0, fy0 + gap / 2, D, x1, H - gap / 2, D + fT], 2, -1, 1, fMat, { edges: allE, t: fT }))
+        [x0, dy0, D, x1, dy1, D + fT], 2, +1, 1, fMat, { edges: allE, t: fT }))
+      // петли: левые двери — на левой кромке, правые — на правой; чашка Ø35 в обратной пласти двери, планка — на боковине
+      const left = n === 1 || i < n / 2
+      const xc = left ? x0 + hc : x1 - hc
+      for (const y of hy) {
+        holes.push({ p: [xc, y, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)' })
+        if (left && i === 0) for (const dy of [-16, 16]) holes.push({ p: [t, y + dy, D - pf], n: '-x', d: 5, depth: 12, note: 'Планка петли' })
+        if (!left && i === n - 1) for (const dy of [-16, 16]) holes.push({ p: [W - t, y + dy, D - pf], n: '+x', d: 5, depth: 12, note: 'Планка петли' })
+      }
     }
     if (n) {
-      const dh = H - fy0
-      const hinges = dh < 900 ? 2 : dh < 1600 ? 3 : dh < 2000 ? 4 : 5
       hw.push({ name: 'Петля накладная', qty: hinges * n }, { name: 'Ручка', qty: n })
     }
   }
@@ -202,5 +228,5 @@ export function cabinetParts(params) {
     const b = pr.box
     if (b[3] - b[0] <= 0 || b[4] - b[1] <= 0 || b[5] - b[2] <= 0) warn.push(`«${pr.name}»: размер получился нулевым или отрицательным — проверьте параметры`)
   }
-  return { parts, hw, warn }
+  return { parts, hw, warn, holes }
 }
