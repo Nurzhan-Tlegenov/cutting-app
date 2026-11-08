@@ -1583,6 +1583,13 @@ export default function ConstructorPage() {
         <div style={sect}>Скругление кромки</div>
         <Chips value={String(look.edgeR ?? 0.5)} onChange={v => setLook({ edgeR: Number(v) })} options={[['0', 'Острые'], ['0.5', 'R 0,5'], ['1', 'R 1'], ['2', 'R 2']]} />
         <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Только на кромленых торцах и не больше толщины кромки (кромка 0,4 — радиус 0,4); торцы без кромки остаются острыми. Влияет только на картинку.</p>
+        <div style={sect}>Кромка на модели</div>
+        <label style={{ fontSize: 13.5, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={look.bandShow !== false} onChange={e => setLook({ bandShow: e.target.checked })} />Показывать кромку отдельным слоем (торец и полоска её толщины на пласти)</label>
+        {look.bandShow !== false && <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 13, marginBottom: 6 }}>
+          <span>Цвет кромки</span>
+          <button type="button" style={{ ...chipS(!look.bandColor), padding: '2px 8px' }} onClick={() => setLook({ bandColor: '' })}>в тон детали</button>
+          <input type="color" value={look.bandColor || '#d9cdb4'} onChange={e => setLook({ bandColor: e.target.value })} style={{ width: 36, height: 24, padding: 0, border: 'none', background: 'none' }} />
+        </div>}
         <div style={sect}>Присадка (кнопка ⊙)</div>
         <Chips value={look.holeStyle || 'recess'} onChange={v => setLook({ holeStyle: v })} options={[['recess', 'Выемки (как настоящие отверстия)'], ['marker', 'Цветные метки на всю глубину']]} />
         <div style={sect}>Металл фурнитуры</div>

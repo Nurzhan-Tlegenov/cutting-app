@@ -3,11 +3,13 @@ import { partEdges } from './cadModel.js'
 
 // ── деталь со скруглёнными кромками (как в программах визуализации): радиус — только на кромленых сторонах и не больше
 // толщины кромки; торцы без кромки — острые. Размеры — по брусу в сцене; ta — ось толщины, r — { '+x': радиус, … } ──
-export function roundedSlab(size, ta, r, N = 4) {
+// bands — { '+x': толщина кромки, … }: если задано, кромка — отдельная группа граней (своим материалом): торец целиком
+// и полоска толщиной кромки на пластях у кромленого торца; группа 0 — пласти и торцы без кромки, 1 — кромка
+export function roundedSlab(size, ta, r, N = 4, bands = null) {
   const [ua, va] = [0, 1, 2].filter(a => a !== ta)
   const hu = size[ua] / 2, hv = size[va] / 2, ht = size[ta] / 2
   const ax = ['x', 'y', 'z']
-  const sides = [[1, 0, '+' + ax[ua]], [0, 1, '+' + ax[va]], [-1, 0, '-' + ax[ua]], [0, -1, '-' + ax[va]]].map(([nu, nv, k]) => ({ nu, nv, r: Math.max(0, Math.min(Number(r[k]) || 0, ht * 0.9, hu * 0.9, hv * 0.9)) }))
+  const sides = [[1, 0, '+' + ax[ua]], [0, 1, '+' + ax[va]], [-1, 0, '-' + ax[ua]], [0, -1, '-' + ax[va]]].map(([nu, nv, k]) => ({ nu, nv, k, r: Math.max(0, Math.min(Number(r[k]) || 0, ht * 0.9, hu * 0.9, hv * 0.9)), b: Number(bands?.[k]) || 0 }))
   // профиль торца: сверху дуга, вниз по торцу, снизу дуга — out (наружу от линии торца), z, нормаль (наружу, вверх)
   const prof = rr => {
     const out = []
@@ -17,7 +19,10 @@ export function roundedSlab(size, ta, r, N = 4) {
   }
   const P = sides.map(sd => prof(sd.r))
   const corner = i => { const a = sides[i], b = sides[(i + 1) % 4]; return [a.nu * hu + b.nu * hu, a.nv * hv + b.nv * hv] }   // угол между стороной i и i+1
-  const pos = [], nor = [], uv = []
+  const buf = [{ pos: [], nor: [], uv: [] }, { pos: [], nor: [], uv: [] }]
+  let pos, nor, uv
+  const toGroup = gi => { ({ pos, nor, uv } = buf[gi]) }
+  toGroup(0)
   const V = (u, v, z, n) => {
     const p3 = [0, 0, 0]; p3[ua] = u; p3[va] = v; p3[ta] = z; pos.push(...p3)
     const n3 = [0, 0, 0]; n3[ua] = n[0]; n3[va] = n[1]; n3[ta] = n[2]; nor.push(...n3)
@@ -35,26 +40,38 @@ export function roundedSlab(size, ta, r, N = 4) {
   const J = P[0].length
   for (let i = 0; i < 4; i++) {
     const prev = (i + 3) % 4, next = (i + 1) % 4
+    toGroup(sides[i].b > 0 ? 1 : 0)
     for (let j = 0; j + 1 < J; j++) {
       const a = at(i, prev, j), b = at(i, next, j), c = at(i, next, j + 1), d = at(i, prev, j + 1)
       tri(a, d, c); tri(a, c, b)
     }
     // шов в углу между сторонами i и next (если радиусы разные — закрывает щель)
+    toGroup(sides[i].b > 0 || sides[next].b > 0 ? 1 : 0)
     if (Math.abs(sides[i].r - sides[next].r) > 1e-6) for (let j = 0; j + 1 < J; j++) {
       const a = at(i, next, j), b = at(next, i, j), c = at(next, i, j + 1), d = at(i, next, j + 1)
       const n = [sides[i].nu + sides[next].nu, sides[i].nv + sides[next].nv, 0]
       tri([...a.slice(0, 3), n], [...d.slice(0, 3), n], [...c.slice(0, 3), n]); tri([...a.slice(0, 3), n], [...c.slice(0, 3), n], [...b.slice(0, 3), n])
     }
   }
-  // пласти
+  // пласти: сетка 3×3 — середина (материал) и полоски толщиной кромки у кромленых торцов (кромка)
+  const e = i => (sides[i].b > 0 ? Math.max(sides[i].r, Math.min(sides[i].b, (i % 2 ? hv : hu) * 0.45)) : sides[i].r)
+  const us = [-hu + sides[2].r, -hu + e(2), hu - e(0), hu - sides[0].r], vs = [-hv + sides[3].r, -hv + e(3), hv - e(1), hv - sides[1].r]
   for (const [z, top] of [[ht, true], [-ht, false]]) {
-    const q = [0, 1, 2, 3].map(i => { const a = sides[i], b = sides[(i + 1) % 4], c = corner(i); return [c[0] - a.nu * a.r - b.nu * b.r, c[1] - a.nv * a.r - b.nv * b.r, z, [0, 0, top ? 1 : -1]] })
-    if (top) { tri(q[0], q[1], q[2]); tri(q[0], q[2], q[3]) } else { tri(q[0], q[2], q[1]); tri(q[0], q[3], q[2]) }
+    const n = [0, 0, top ? 1 : -1]
+    for (let iu = 0; iu < 3; iu++) for (let iv = 0; iv < 3; iv++) {
+      const band = (iu === 0 && sides[2].b > 0) || (iu === 2 && sides[0].b > 0) || (iv === 0 && sides[3].b > 0) || (iv === 2 && sides[1].b > 0)
+      if (us[iu + 1] - us[iu] < 1e-9 || vs[iv + 1] - vs[iv] < 1e-9) continue
+      toGroup(band ? 1 : 0)
+      const q = [[us[iu], vs[iv], z, n], [us[iu + 1], vs[iv], z, n], [us[iu + 1], vs[iv + 1], z, n], [us[iu], vs[iv + 1], z, n]]
+      tri(q[0], q[1], q[2]); tri(q[0], q[2], q[3])
+    }
   }
   const g = new THREE.BufferGeometry()
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3))
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
+  const n0 = buf[0].pos.length / 3, n1 = buf[1].pos.length / 3
+  g.setAttribute('position', new THREE.Float32BufferAttribute([...buf[0].pos, ...buf[1].pos], 3))
+  g.setAttribute('normal', new THREE.Float32BufferAttribute([...buf[0].nor, ...buf[1].nor], 3))
+  g.setAttribute('uv', new THREE.Float32BufferAttribute([...buf[0].uv, ...buf[1].uv], 2))
+  g.addGroup(0, n0, 0); if (n1) g.addGroup(n0, n1, 1)
   // обход граней — наружу (проверка по нормали первого треугольника каждой тройки; при развёрнутом базисе — переворачиваем)
   const p3 = g.attributes.position.array, n3 = g.attributes.normal.array
   for (let k = 0; k < p3.length; k += 9) {
@@ -80,3 +97,18 @@ export function slabRadii(sp, R) {
   return out
 }
 
+
+/** толщина кромки по сторонам детали в сцене: { '+x': 0.4, … } (кромка без числа — 1 мм) */
+export function slabBands(sp) {
+  const out = {}
+  if (!sp.place?.sideDir) return out
+  let ed
+  try { ed = partEdges(sp) } catch { return out }
+  for (const [side, dir] of Object.entries(sp.place.sideDir)) {
+    const v = ed?.[side]
+    if (!v) continue
+    const th = parseFloat(String(v).replace(',', '.'))
+    out[dir] = th > 0 ? th : 1
+  }
+  return out
+}

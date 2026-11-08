@@ -12,7 +12,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { verticesToPolygon } from '../lib/trueShapeNesting'
-import { roundedSlab, slabRadii } from '../lib/cadSlab'
+import { roundedSlab, slabRadii, slabBands } from '../lib/cadSlab'
 import { detailHoles } from '../lib/partHoles'
 
 // фигурная деталь: контур и вырезы из правки -> выдавливание на толщину в системе детали, затем матрица детали
@@ -568,8 +568,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       renderer.domElement.removeEventListener('pointerup', onUp)
       renderer.domElement.removeEventListener('pointercancel', onUp)
       controls.dispose(); comp?.dispose?.(); renderer.dispose()
-      group.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.() })
-      extra.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.() })
+      group.traverse(o => { o.geometry?.dispose?.(); [].concat(o.material || []).forEach(m => m.dispose?.()) })
+      extra.traverse(o => { o.geometry?.dispose?.(); [].concat(o.material || []).forEach(m => m.dispose?.()) })
       el.removeChild(renderer.domElement)
     }
   }, [])
@@ -579,8 +579,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     const s = st.current
     if (!s) return
     const { group } = s
-    for (const o of [...group.children]) { group.remove(o); o.traverse(c => { c.geometry?.dispose?.(); c.material?.dispose?.() }) }
-    for (const o of [...s.over.children]) { s.over.remove(o); o.geometry?.dispose?.(); o.material?.map?.dispose?.(); o.material?.dispose?.() }
+    for (const o of [...group.children]) { group.remove(o); o.traverse(c => { c.geometry?.dispose?.(); [].concat(c.material || []).forEach(m => m.dispose?.()) }) }
+    for (const o of [...s.over.children]) { s.over.remove(o); o.geometry?.dispose?.(); o.material?.map?.dispose?.(); [].concat(o.material || []).forEach(m => m.dispose?.()) }
     animObjs.current = new Map()
     // группа анимации: дверь (поворот вокруг оси петель) или ящик (выезд) со всем, что на них (ручка, короб, подвижная часть направляющей)
     const pivotOf = a => (a.kind === 'rot' ? a.p : [0, 0, 0])
@@ -636,12 +636,15 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       // скругление кромки (Отображение → Радиус кромки): у прямоугольных листовых деталей по кромленым торцам
       let rounded = null
       const R = Number(look.edgeR) || 0
-      if (!fig && R > 0 && p.kind === 'sheet' && p.place?.sideDir) {
-        const rr = slabRadii(p, R)
-        if (Object.keys(rr).length) {
+      // кромка на модели отдельным слоем (Отображение → Кромка на модели): торец и полоска её толщины на пластях — своим цветом
+      const showBand = look.bandShow !== false
+      if (!fig && (R > 0 || showBand) && p.kind === 'sheet' && p.place?.sideDir) {
+        const bands = slabBands(p)
+        if (Object.keys(bands).length) {
+          const rr = R > 0 ? slabRadii(p, R) : {}
           const dirs = Object.values(p.place.sideDir).map(d => 'xyz'.indexOf(d[1]))
           const ta = [0, 1, 2].find(a => !dirs.includes(a))
-          if (ta != null) { try { rounded = roundedSlab([sx, sy, sz], ta, rr) } catch { rounded = null } }
+          if (ta != null) { try { rounded = roundedSlab([sx, sy, sz], ta, rr, 4, showBand ? bands : null) } catch { rounded = null } }
         }
       }
       const geo = fig || rounded || new THREE.BoxGeometry(sx, sy, sz)
@@ -686,7 +689,14 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       })
       if (mirror) mat.metalness = 1
       if (map && !isPart0 && !isBlk0 && !isSel0) mat.color.set('#ffffff')
-      const mesh = new THREE.Mesh(geo, mat)
+      let mesh
+      if (rounded && rounded.groups.length > 1) {
+        // материал кромки: свой цвет из «Отображения» или цвет детали чуть темнее (как настоящая кромка в тон)
+        const bm = mat.clone()
+        if (look.bandColor) { bm.color.set(look.bandColor); bm.map = null } else bm.color.multiplyScalar(0.9)
+        bm.clearcoat = Math.max(bm.clearcoat, 0.15)
+        mesh = new THREE.Mesh(geo, [mat, bm])
+      } else mesh = new THREE.Mesh(geo, mat)
       mesh.castShadow = op >= 1; mesh.receiveShadow = true
       const { g: hg, off } = holder(p.anim)
       if (!fig) mesh.position.set(b[0] + sx / 2 - off[0], b[1] + sy / 2 - off[1], b[2] + sz / 2 - off[2])
@@ -785,8 +795,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     const s = st.current
     if (!s) return
     const { extra } = s
-    for (const o of [...extra.children]) { extra.remove(o); o.geometry?.dispose?.(); o.material?.dispose?.() }
-    for (const o of holeObjs.current) { o.parent?.remove(o); o.geometry?.dispose?.(); o.material?.dispose?.() }
+    for (const o of [...extra.children]) { extra.remove(o); o.geometry?.dispose?.(); [].concat(o.material || []).forEach(m => m.dispose?.()) }
+    for (const o of holeObjs.current) { o.parent?.remove(o); o.geometry?.dispose?.(); [].concat(o.material || []).forEach(m => m.dispose?.()) }
     holeObjs.current = []
     const list = (holes || []).slice(0, 4000)
     if (list.length) {

@@ -376,6 +376,14 @@ for (const rot of [0, 90, 180, 270]) {
     g.computeBoundingBox()
     const bb = g.boundingBox
     ok(Math.abs(bb.max.x - bb.min.x - 16) < 1e-6 && Math.abs(bb.max.z - bb.min.z - 560) < 1e-6 && Math.abs(bb.max.y - bb.min.y - 720) < 1e-6, 'slab keeps size')
+    // кромка отдельным слоем: группа 1 — торец с кромкой и полоска на пластях
+    const { slabBands } = await import('../../src/lib/cadSlab.js')
+    const bd = slabBands(sL)
+    const g2 = roundedSlab([16, 720, 560], 0, r, 4, bd)
+    ok(g2.groups.length === 2 && g2.groups[1].count > 0, 'band group ' + JSON.stringify(g2.groups) + JSON.stringify(bd))
+    const g3 = roundedSlab([16, 720, 560], 0, {}, 4, bd)
+    g3.computeBoundingBox()
+    ok(Math.abs(g3.boundingBox.max.z - g3.boundingBox.min.z - 560) < 1e-6 && g3.groups.length === 2, 'band without radius')
   }
 }
 
