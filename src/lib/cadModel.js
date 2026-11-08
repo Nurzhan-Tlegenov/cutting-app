@@ -123,7 +123,17 @@ export function projectParts(project) {
   const out = [], hw = [], warn = [], holes = []
   ;(project?.items || []).forEach((it, ii) => {
     const r = itemRecords(it)
-    r.parts.forEach(rec => out.push({ ...rec, item: it, ii, pid: `${it.id}:${rec.key}`, place: placeRecord(rec, it) }))
+    r.parts.forEach(rec => {
+      const sp = { ...rec, item: it, ii, pid: `${it.id}:${rec.key}`, place: placeRecord(rec, it) }
+      // правка детали в редакторе контура (фигурный контур, вырезы, своя присадка, кромка) — пока размер детали тот же;
+      // размер поменялся — контур сбрасывается до прямоугольника с предупреждением (как в бланке заказа)
+      const ov = it.ov?.[rec.key]
+      if (ov) {
+        if (Math.abs(num(ov.W) - sp.place.W) < 0.05 && Math.abs(num(ov.L) - sp.place.L) < 0.05) sp.ov = ov
+        else { sp.ovStale = true; warn.push(`${it.name}: «${rec.name}» — размер изменился (${ov.L}×${ov.W} → ${sp.place.L}×${sp.place.W}), фигурный контур и вырезы сброшены до прямоугольника`) }
+      }
+      out.push(sp)
+    })
     r.hw.forEach(h => hw.push({ ...h, item: it.name }))
     r.warn.forEach(w => warn.push(`${it.name}: ${w}`))
     // отверстия фурнитуры элемента -> в координаты сцены
@@ -152,6 +162,7 @@ function editorEdges(rec, place) {
   }
   return e
 }
+const AUTO_GROOVE = 'Паз под заднюю стенку'   // пазы корпуса пересчитываются сами, в правке детали — только свои
 // пазы записи -> пазы детали в формате бланка (вдоль длины — вертикальный, со смещением от стороны)
 function editorGrooves(rec, place) {
   const out = []
@@ -163,7 +174,7 @@ function editorGrooves(rec, place) {
       dir: alongL ? 'vertical' : 'horizontal',
       length: alongL ? place.L : place.W, width: num(g.width, 4), depth: num(g.depth, 8),
       sides: alongL ? ['top', 'bottom', side] : ['left', 'right', side],
-      offsets: { [side]: num(g.offset, 16) }, face: 'front', note: 'Паз под заднюю стенку',
+      offsets: { [side]: num(g.offset, 16) }, face: 'front', note: g.note || AUTO_GROOVE, auto: true,
     })
   }
   return out
@@ -179,11 +190,12 @@ export function partToDetail(sp, pos, drill = []) {
     material: sp.material, materialCode: '', thickness: T, texDir: 0, flipped: false, turned: false,
     local: { x0: 0, y0: 0, dx: W, dy: L }, inst: [place.m], anims: [null], role: sp.role,
   }
+  const ov = sp.ov
   const contour = {
-    vertices: [{ x: 0, y: 0, r: 0 }, { x: W, y: 0, r: 0 }, { x: W, y: L, r: 0 }, { x: 0, y: L, r: 0 }],
-    holes: [], grooves: editorGrooves(sp, place), drillings: drill, layout: [], meta,
+    vertices: ov?.vertices?.length > 2 ? ov.vertices : [{ x: 0, y: 0, r: 0 }, { x: W, y: 0, r: 0 }, { x: W, y: L, r: 0 }, { x: 0, y: L, r: 0 }],
+    holes: ov?.holes || [], grooves: [...editorGrooves(sp, place), ...(ov?.grooves || [])], drillings: [...drill, ...(ov?.drillings || [])], layout: [], meta,
   }
-  return { name: sp.name, w: L, h: W, qty: 1, edges: editorEdges(sp, place), material: sp.material, thickness: T, contour, rotatable: true }
+  return { name: sp.name, w: L, h: W, qty: 1, edges: ov?.edges || editorEdges(sp, place), material: sp.material, thickness: T, contour, rotatable: true }
 }
 
 // погонный элемент / стекло / опора -> «деталь окружения» 3D-модели (scene.extras)
@@ -286,7 +298,7 @@ export function projectSpec(project) {
       const r = row(sp.kind, sp.material, 'м²'); r.qty += (W * L) / 1e6; r.count++
       const all = sp.edges?.all
       if (sp.kind === 'sheet') for (const s of ['top', 'right', 'bottom', 'left']) {
-        const e = all || sp.edges?.[sp.place.sideDir[s]]
+        const e = sp.ov?.edges ? sp.ov.edges[s] : all || sp.edges?.[sp.place.sideDir[s]]
         if (!e) continue
         const er = row('edge', `Кромка ${e}`, 'м'); er.qty += (s === 'top' || s === 'bottom' ? W : L) / 1000
       }
@@ -343,8 +355,23 @@ export function explodeCabinet(it) {
       id: newId(), type: r.kind === 'glass' ? 'glass' : 'panel', name: r.name, rotY: it.rotY || 0,
       pos: { x: r1(o[0] + num(it.pos?.x)), y: r1(o[1] + num(it.pos?.y)), z: r1(o[2] + num(it.pos?.z)) },
       p: { dx: r1(b[3] - b[0]), dy: r1(b[4] - b[1]), dz: r1(b[5] - b[2]), tAxis: r.tAxis, lAxis: r.lAxis, tSign: r.tSign, material: r.material, edgeAll: r.edges?.all || '', edges: r.edges?.all ? {} : { ...r.edges }, grooves: r.grooves || [], holes: own.get(r) || [], role: r.role, from: it.name },
+      ...(it.ov?.[r.key] ? { ov: { p: it.ov[r.key] } } : {}),
     }
   })
+}
+
+/** Деталь фигурная (не прямоугольник) или с вырезами — тогда в 3D рисуется по контуру */
+export const isFigured = sp => !!sp.ov && ((sp.ov.holes || []).length > 0 || (sp.ov.vertices || []).length > 4 || (sp.ov.vertices || []).some(v => num(v.r) > 0 || v.type === 'arc' || v.arc || v.bulge))
+
+/** Из черновика редактора контура -> правка детали (автоприсадка «cad…» и пазы корпуса не хранятся — они пересчитываются) */
+export function overrideFromDraft(sp, draft) {
+  const c = draft.contour || {}
+  return {
+    W: sp.place.W, L: sp.place.L,
+    vertices: c.vertices || null, holes: c.holes || [], grooves: (c.grooves || []).filter(g => !g.auto && g.note !== AUTO_GROOVE),
+    drillings: (c.drillings || []).filter(d => !String(d.id || '').startsWith('cad')),
+    edges: draft.edges || null,
+  }
 }
 
 /** Габарит всей сцены [x0,y0,z0,x1,y1,z1] */

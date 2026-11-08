@@ -4,7 +4,7 @@
 // полки, стойки, ящики, фасады) — детали пересчитываются сами. «Разобрать» превращает корпус в свободные панели.
 // «В заказ» — детали выбранного материала уходят в бланк нового заказа вместе с 3D-моделью
 // (дальше — обычный раскрой, бирки, ЧПУ); «Смета» — плита и стекло в м², профили в метрах и хлыстах, фурнитура.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
@@ -22,9 +22,10 @@ import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { newLinearJob, readJobs, writeJobs, LINEAR_FEATURE } from '../lib/linearJobs'
-import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, PROJECT_DEFAULTS } from '../lib/cadModel'
+import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, partToDetail, overrideFromDraft, isFigured, PROJECT_DEFAULTS } from '../lib/cadModel'
 import { listProjects, loadProject, saveProject, deleteProject, isLocal, CAD_SQL_HINT } from '../lib/cadStore'
 
+const ContourEditor = lazy(() => import('../components/ContourEditor'))
 export const CAD_FEATURE = 'constructor'
 const num = v => { const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null }
 const fmt = v => (Math.round(v * 100) / 100).toLocaleString('ru-RU')
@@ -359,6 +360,8 @@ export default function ConstructorPage() {
   const [list, setList] = useState(null)
   const [project, setProjectState] = useState(null)
   const [selected, setSelected] = useState(null)
+  const [selPid, setSelPid] = useState(null)        // выбранная деталь внутри элемента (нажатие в 3D)
+  const [editPart, setEditPart] = useState(null)    // редактор контура детали: { pid, draft }
   const [tab, setTab] = useState('scene')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
@@ -501,7 +504,7 @@ export default function ConstructorPage() {
     setProject({ ...project, items: [...project.items, it] })
     setSelected(it.id); setTab('props')
   }
-  const select = id => { setSelected(id); if (id) setTab('props') }
+  const select = (id, pid = null) => { setSelected(id); setSelPid(id ? pid : null); if (id) setTab('props') }
 
   const createNew = async () => {
     const name = window.prompt('Название проекта:', 'Новый проект')
@@ -568,7 +571,7 @@ export default function ConstructorPage() {
 
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <CadView parts={parts} selected={selected} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room} />
+      <CadView parts={parts} selected={selected} selectedPid={selPid} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room} />
       <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
         <button type="button" title="Полупрозрачный вид" style={{ ...btnS(), padding: '6px 9px', ...(xray ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setXray(v => !v)}>◫</button>
@@ -585,6 +588,39 @@ export default function ConstructorPage() {
     {tab === 'scene' && <SceneList project={project} setProject={setProject} parts={parts} selected={selected} onSelect={select} onAdd={addItem}
       library={library} onLibraryDelete={id => { if (window.confirm('Убрать из библиотеки?')) saveLibrary(library.filter(l => l.id !== id)) }}
       onFromLibrary={l => { const b = parts.length ? sceneBox(parts) : [0, 0, 0, 0, 0, 0]; const it = { ...JSON.parse(JSON.stringify(l.item)), id: newId(), pos: { x: parts.length ? Math.round(b[3]) : 0, y: 0, z: 0 } }; setProject({ ...project, items: [...project.items, it] }); setSelected(it.id); setTab('props') }} />}
+    {tab === 'props' && selItem && (() => {
+      const own = parts.filter(p => p.item.id === selItem.id && (p.kind === 'sheet'))
+      const sp = own.find(p => p.pid === selPid)
+      if (!own.length) return null
+      return (
+        <div className="card" style={{ padding: '8px 10px', marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Деталь:</span>
+            <select style={{ ...inp, width: 'auto', flex: 1, minWidth: 160, padding: '5px 6px' }} value={sp?.pid || ''} onChange={e => setSelPid(e.target.value || null)}>
+              <option value="">— выберите (или нажмите в 3D) —</option>
+              {own.map(p => <option key={p.pid} value={p.pid}>{p.name} · {p.place.L}×{p.place.W}{p.ov ? ' ✎' : ''}</option>)}
+            </select>
+          </div>
+          {sp && <>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0' }}>{sp.place.L} × {sp.place.W} × {sp.place.T} мм · {sp.material}{sp.ov ? ' · изменена в редакторе' + (isFigured(sp) ? ' (фигурная / вырезы)' : '') : ''}</p>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button type="button" style={btnS(true)} onClick={() => {
+                const map = projectDrill(project, pp).map
+                const own2 = parts.filter(p => p.item.id === selItem.id)
+                const d = partToDetail(sp, own2.indexOf(sp) + 1, map.get(sp.pid) || [])
+                setEditPart({ pid: sp.pid, itemId: selItem.id, key: sp.key, draft: d })
+              }}>✎ Контур, вырезы, присадка</button>
+              {(sp.ov || sp.ovStale) && <button type="button" style={btnS()} onClick={() => {
+                if (!window.confirm('Убрать правку детали (контур, вырезы, свою присадку и кромку)?')) return
+                const ov = { ...(selItem.ov || {}) }; delete ov[sp.key]
+                setItem({ ...selItem, ov })
+              }}>↺ Сбросить правку</button>}
+            </div>
+            <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Присадка по стыкам и под фурнитуру пересчитывается сама; в редакторе добавляйте фигурный контур, вырезы, свою присадку и пазы. Поменяется размер детали — контур сбросится до прямоугольника.</p>
+          </>}
+        </div>
+      )
+    })()}
     {tab === 'props' && (selItem
       ? <ItemEditor key={selItem.id} it={selItem} set={setItem} info={info}
           onToLibrary={() => { const name = window.prompt('Название в библиотеке:', selItem.name); if (!name) return; const item = { ...JSON.parse(JSON.stringify(selItem)), name: name.trim() }; saveLibrary([{ id: newId(), name: name.trim(), type: selItem.type, item }, ...library]); window.alert('Сохранено в «Моя библиотека» (вкладка «Сцена»)') }}
@@ -606,7 +642,28 @@ export default function ConstructorPage() {
     </div>
   )
 
-  const dialog = toOrder && <ToOrderDialog project={project} onClose={() => setToOrder(false)} onGo={goOrder} />
+  const closePartEditor = () => {
+    const ep = editPart
+    setEditPart(null)
+    if (!ep) return
+    const cur = projRef.current
+    const it = cur.items.find(i => i.id === ep.itemId)
+    const sp = parts.find(p => p.pid === ep.pid)
+    if (!it || !sp) return
+    setProject({ ...cur, items: cur.items.map(i => (i.id === it.id ? { ...i, ov: { ...(i.ov || {}), [ep.key]: overrideFromDraft(sp, ep.draft) } } : i)) })
+  }
+  const dialog = (<>
+    {toOrder && <ToOrderDialog project={project} onClose={() => setToOrder(false)} onGo={goOrder} />}
+    {editPart && (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 950, background: 'var(--bg2)', overflowY: 'auto' }}>
+        <Suspense fallback={<CncLoader label="Открываем редактор…" />}>
+          <ContourEditor detail={editPart.draft} materialThickness={editPart.draft.thickness}
+            onUpdate={u => setEditPart(ep => (ep ? { ...ep, draft: { ...ep.draft, contour: u.contour, edges: u.edges || ep.draft.edges } } : ep))}
+            onClose={closePartEditor} />
+        </Suspense>
+      </div>
+    )}
+  </>)
   // телефон боком: нижнее меню не показываем — вся высота под сцену и свойства (меню — кнопкой ☰)
   const navH = desk ? 64 : 8
   if (desk || land) return (

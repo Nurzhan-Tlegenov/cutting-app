@@ -1,7 +1,35 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { sceneBox } from '../lib/cadModel'
+import { sceneBox, isFigured } from '../lib/cadModel'
+import { verticesToPolygon } from '../lib/trueShapeNesting'
+import { detailHoles } from '../lib/partHoles'
+
+// фигурная деталь: контур и вырезы из правки -> выдавливание на толщину в системе детали, затем матрица детали
+function figuredGeometry(sp) {
+  const { W, L, T, m } = sp.place
+  const pts = verticesToPolygon(sp.ov.vertices).map(p => (Array.isArray(p) ? p : [p.x, p.y]))
+  if (pts.length < 3) return null
+  const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)))
+  let holes
+  try { holes = detailHoles({ width: W, length: L, contour: JSON.stringify({ holes: (sp.ov.holes || []).filter(h => h.type !== 'pocket') }) }) } catch { holes = [] }
+  for (const h of holes) if (h?.length > 2) shape.holes.push(new THREE.Path(h.map(p => new THREE.Vector2(p.x ?? p[0], p.y ?? p[1]))))
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: T, bevelEnabled: false, curveSegments: 6 })
+  const M = new THREE.Matrix4().set(m[0], m[1], m[2], m[9], m[3], m[4], m[5], m[10], m[6], m[7], m[8], m[11], 0, 0, 0, 1)
+  geo.applyMatrix4(M)
+  return geo
+}
+
+// подпись размера — спрайт с текстом
+function label(text, h) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64
+  const g = c.getContext('2d')
+  g.fillStyle = 'rgba(255,255,255,0.92)'; g.fillRect(0, 8, 256, 48)
+  g.fillStyle = '#1d4ed8'; g.font = '600 38px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 128, 33)
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }))
+  sp.scale.set(h * 4, h, 1); sp.renderOrder = 10
+  return sp
+}
 
 // 3D-сцена конструктора: детали — бруски (все детали пока прямоугольные и стоят по осям).
 // Вращение — пальцем / левой кнопкой, сдвиг — двумя пальцами / правой кнопкой, масштаб — щипком / колёсиком.
@@ -18,7 +46,7 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, style }) {
+export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, style }) {
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
@@ -135,25 +163,41 @@ export default function CadView({ parts, selected, onSelect, onDrag, xray = fals
       const b = p.place.aabb
       const sx = b[3] - b[0], sy = b[4] - b[1], sz = b[5] - b[2]
       if (!(sx > 0 && sy > 0 && sz > 0)) continue
-      const geo = new THREE.BoxGeometry(sx, sy, sz)
+      const fig = p.ov && isFigured(p) ? figuredGeometry(p) : null
+      const geo = fig || new THREE.BoxGeometry(sx, sy, sz)
       const lk = lookOf(p.material)
       const isSel = selected && p.item.id === selected
+      const isPart = selectedPid && p.pid === selectedPid
       const op = xray ? Math.min(lk.opacity, 0.35) : lk.opacity
       const mat = new THREE.MeshStandardMaterial({
-        color: isSel ? new THREE.Color(lk.color).lerp(new THREE.Color('#3b82f6'), 0.45) : lk.color,
+        color: isPart ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.6) : isSel ? new THREE.Color(lk.color).lerp(new THREE.Color('#3b82f6'), 0.45) : lk.color,
         roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.35 : 0.8, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.6 : 0,
         transparent: op < 1, opacity: op, depthWrite: op >= 1,
       })
       const mesh = new THREE.Mesh(geo, mat)
-      mesh.position.set(b[0] + sx / 2, b[1] + sy / 2, b[2] + sz / 2)
+      if (!fig) mesh.position.set(b[0] + sx / 2, b[1] + sy / 2, b[2] + sz / 2)
       mesh.userData = { itemId: p.item.id, pid: p.pid }
       group.add(mesh)
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: isSel ? '#1d4ed8' : '#5b6672', transparent: true, opacity: isSel ? 1 : 0.55 }))
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: isPart ? '#b45309' : isSel ? '#1d4ed8' : '#5b6672', transparent: true, opacity: isSel ? 1 : 0.55 }))
       edges.position.copy(mesh.position)
       group.add(edges)
     }
+    // размеры выбранного элемента: ширина — по низу спереди, высота — слева спереди, глубина — по низу слева
+    const own = selected ? (parts || []).filter(p => p.item.id === selected) : []
+    if (dims && own.length) {
+      const b = sceneBox(own)
+      const big = Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2])
+      const off = Math.max(40, big * 0.06), lh = Math.max(35, big * 0.05)
+      const lm = new THREE.LineBasicMaterial({ color: '#1d4ed8', depthTest: false, transparent: true })
+      const line = (a, c) => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a), new THREE.Vector3(...c)]), lm); l.renderOrder = 9; group.add(l) }
+      const dim = (a, c, txt, at) => { line(a, c); const s = label(txt, lh); s.position.set(...at); group.add(s) }
+      const r = v => String(Math.round(v * 10) / 10)
+      dim([b[0], b[1], b[5] + off], [b[3], b[1], b[5] + off], r(b[3] - b[0]), [(b[0] + b[3]) / 2, b[1] + lh * 0.7, b[5] + off])
+      dim([b[0] - off, b[1], b[5]], [b[0] - off, b[4], b[5]], r(b[4] - b[1]), [b[0] - off - lh * 1.6, (b[1] + b[4]) / 2, b[5]])
+      dim([b[0] - off, b[1], b[2]], [b[0] - off, b[1], b[5]], r(b[5] - b[2]), [b[0] - off - lh * 1.6, b[1] + lh * 0.7, (b[2] + b[5]) / 2])
+    }
     if (!s.fitted && parts?.length) { fit(s, parts); s.fitted = true }
-  }, [parts, selected, xray])
+  }, [parts, selected, selectedPid, xray, dims])
 
   // присадка (цилиндры по оси отверстия) и комната (пол и три стены)
   useEffect(() => {

@@ -101,5 +101,21 @@ for (const rot of [0, 90, 180, 270]) {
   const { computeJob } = await import('../../src/lib/linearJobs.js').catch(() => ({}))
   if (computeJob) ok(computeJob({ ...ex.linear[0], pieces: [...ex.linear[0].pieces, { len: 500, qty: 2, angles: '45/45' }] }).bars.some(b => b.cuts.some(c => c.angles === '45/45')), 'angles carried')
 }
+// правка детали: вырез и своя присадка уходят в заказ; размер поменялся — контур сброшен с предупреждением
+{
+  const pr5 = newProject('Фигурная')
+  const it = newItem('cabinet')
+  const hole = { type: 'rect', vertices: [{ x: 100, y: 100 }, { x: 200, y: 100 }, { x: 200, y: 300 }, { x: 100, y: 300 }] }
+  it.ov = { sideL: { W: 560, L: 2100, vertices: null, holes: [hole], grooves: [], drillings: [{ id: 'u1', kind: 'face', face: 'front', d: 10, depth: 5, sides: ['left', 'bottom'], offsets: { left: 50, bottom: 50 } }], edges: null } }
+  pr5.items.push(it)
+  const sL = exportAll(pr5).details.find(d => d.name === 'Боковина левая')
+  ok(sL.contour.holes.length === 1, 'override hole exported')
+  ok(sL.contour.drillings.some(d => d.id === 'u1') && sL.contour.drillings.some(d => String(d.id).startsWith('cad')), 'manual + auto drillings')
+  ok(sL.contour.grooves.length === 1, 'auto groove kept')
+  it.p.H = 2000
+  const r = projectParts(pr5)
+  ok(r.warn.some(w => w.includes('размер изменился')), 'stale warn')
+  ok(exportAll(pr5).details.find(d => d.name === 'Боковина левая').contour.holes.length === 0, 'stale reset')
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)
