@@ -12,12 +12,12 @@ import Hint from '../components/Hint'
 import CncLoader from '../components/CncLoader'
 import { useDesktop } from '../hooks/useDesktop'
 import { hasBeta } from '../lib/beta'
-import { LINEAR_FEATURE, nid, newLinearJob, readJobs, writeJobs } from '../lib/linearJobs'
-import { linearCut, groupBars } from '../lib/linearNest'
-import { shareLinearPdf } from '../lib/linearPdf'
+import { LINEAR_FEATURE, nid, newLinearJob, readJobs, writeJobs, computeJob, LINEAR_SQL_HINT } from '../lib/linearJobs'
+import LinearResult from '../components/LinearResult'
+import { supabase } from '../lib/supabase'
+import { orderTitle } from '../lib/orderUtils'
 
 const num = v => { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : null }
-const fmt = v => (Math.round(v * 10) / 10).toLocaleString('ru-RU')
 const inp = { width: '100%', padding: '7px 8px', fontSize: 14, border: '0.5px solid var(--border-md)', borderRadius: 8, background: 'var(--bg)', color: 'var(--text)', boxSizing: 'border-box' }
 const lbl = { fontSize: 11.5, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }
 const sect = { fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.3, margin: '12px 0 6px' }
@@ -39,20 +39,6 @@ function parsePaste(text) {
   return out
 }
 
-function BarView({ g, maxLen, trim, kerf }) {
-  return (
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
-        <b>{g.count > 1 ? `${g.count} × ` : ''}хлыст {g.stock}</b><span style={{ color: 'var(--text-muted)' }}>остаток {fmt(g.rest)} мм</span>
-      </div>
-      <div style={{ position: 'relative', display: 'flex', height: 22, width: `${(g.stock / maxLen) * 100}%`, borderRadius: 3, overflow: 'hidden', background: 'var(--bg2)', border: '1px solid var(--border-md)', paddingLeft: `${(trim / g.stock) * 100}%`, boxSizing: 'border-box' }}>
-        {g.cuts.map((c, j) => <div key={j} title={`${c.len} мм ${c.name || ''}`} style={{ flex: `0 0 ${(c.len / g.stock) * 100}%`, marginRight: `${(kerf / g.stock) * 100}%`, background: j % 2 ? '#9fb3c8' : '#b8c8d8', fontSize: 10.5, color: '#123', overflow: 'hidden', textAlign: 'center', lineHeight: '22px', whiteSpace: 'nowrap' }}>{c.len}</div>)}
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{g.cuts.map(c => c.name ? `${c.len} ${c.name}` : c.len).join(' + ')}</div>
-    </div>
-  )
-}
-
 export default function LinearCutPage() {
   const { user, isMaster } = useAuth()
   const navigate = useNavigate()
@@ -62,19 +48,14 @@ export default function LinearCutPage() {
   const [allowed, setAllowed] = useState(isMaster ? true : null)
   const [jobs, setJobs] = useState(() => readJobs(user))
   const [paste, setPaste] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [attach, setAttach] = useState(null)      // выбор заказа, к которому прикрепить раскрой: null | [] | [заказы]
 
   useEffect(() => { if (isMaster) return; let a = true; hasBeta(LINEAR_FEATURE).then(v => { if (a) setAllowed(v) }); return () => { a = false } }, [isMaster])
   const job = jobs.find(j => j.id === jid) || null
   const save = next => { setJobs(next); writeJobs(next, user) }
   const setJob = j => save(jobs.map(x => (x.id === j.id ? { ...j, updated: new Date().toISOString() } : x)))
 
-  const res = useMemo(() => (job ? linearCut({
-    pieces: job.pieces.map(p => ({ len: num(p.len), qty: num(p.qty) ?? 1, name: p.name })),
-    stocks: job.stocks.map(s => ({ len: num(s.len), qty: s.qty === '' || s.qty == null ? null : num(s.qty) })),
-    kerf: num(job.kerf) ?? 0, trim: num(job.trim) ?? 0,
-  }) : null), [job])
-  const groups = useMemo(() => (res ? groupBars(res.bars) : []), [res])
+  const res = useMemo(() => (job ? computeJob(job) : null), [job])
 
   if (allowed === null) return <div className="page"><CncLoader label="Открываем…" /></div>
   if (!allowed) return (
@@ -105,7 +86,21 @@ export default function LinearCutPage() {
   const setStock = (i, patch) => up({ stocks: job.stocks.map((s, k) => (k === i ? { ...s, ...patch } : s)) })
   const setPiece = (id, patch) => up({ pieces: job.pieces.map(p => (p.id === id ? { ...p, ...patch } : p)) })
   const total = job.pieces.reduce((a, p) => a + (num(p.qty) || 0), 0)
-  const maxLen = Math.max(1, ...(res?.bars || []).map(b => b.stock))
+  // прикрепить к своему заказу: блок «Погонные материалы» увидят и производство, и клиент
+  const openAttach = async () => {
+    setAttach([])
+    const { data, error } = await supabase.from('orders').select('id, order_number, order_name, material_name, status, created_at, linear').eq('user_id', user.id).order('created_at', { ascending: false }).limit(30)
+    if (error) { setAttach(null); window.alert(/linear/.test(error.message) ? LINEAR_SQL_HINT : error.message); return }
+    setAttach(data || [])
+  }
+  const doAttach = async o => {
+    const rest = { ...job }; delete rest.id; delete rest.updated
+    const list = [...(Array.isArray(o.linear) ? o.linear.filter(x => x.src !== job.id) : []), { ...rest, src: job.id }]
+    const { error } = await supabase.from('orders').update({ linear: list }).eq('id', o.id)
+    if (error) { window.alert(/linear/.test(error.message) ? LINEAR_SQL_HINT : error.message); return }
+    setAttach(null)
+    window.alert(`Прикреплено к заказу «${orderTitle(o)}» — блок «Погонные материалы» в заказе`)
+  }
 
   const inputs = (<>
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
@@ -129,12 +124,15 @@ export default function LinearCutPage() {
       <label><span style={lbl}>Торцовка с конца, мм<Hint inline>Сколько отрезать с каждого конца хлыста, чтобы получить ровный торец (кривой заводской торец, заусенец).</Hint></span><input style={inp} inputMode="decimal" value={job.trim} onChange={e => up({ trim: e.target.value })} /></label>
     </div>
     <div style={sect}>Отрезки · {total} шт</div>
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) minmax(0,1fr) 64px auto', gap: 5, fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}><span>Название</span><span>Длина, мм</span><span>Шт</span><span /></div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.3fr) minmax(0,1fr) 56px 70px auto', gap: 5, fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 3 }}><span>Название</span><span>Длина, мм</span><span>Шт</span><span>Рез<Hint inline>Угол реза концов: 90° — прямой, 45° — один конец под углом, 45/45 — оба. Длина — по длинной стороне отрезка; угол виден на карте хлыста и на бирке.</Hint></span><span /></div>
     {job.pieces.map(p => (
-      <div key={p.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.4fr) minmax(0,1fr) 64px auto', gap: 5, marginBottom: 4 }}>
+      <div key={p.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.3fr) minmax(0,1fr) 56px 70px auto', gap: 5, marginBottom: 4 }}>
         <input style={inp} value={p.name} placeholder="Стойка" onChange={e => setPiece(p.id, { name: e.target.value })} />
         <input style={inp} inputMode="decimal" value={p.len} onChange={e => setPiece(p.id, { len: e.target.value })} />
         <input style={inp} inputMode="numeric" value={p.qty} onChange={e => setPiece(p.id, { qty: e.target.value })} />
+        <select style={{ ...inp, padding: '7px 2px' }} value={p.angles || ''} onChange={e => setPiece(p.id, { angles: e.target.value })}>
+          <option value="">90°</option><option value="45">45°</option><option value="45/45">45/45</option>
+        </select>
         <button type="button" style={xBtn} onClick={() => up({ pieces: job.pieces.filter(x => x.id !== p.id) })}>✕</button>
       </div>
     ))}
@@ -152,14 +150,13 @@ export default function LinearCutPage() {
   </>)
 
   const result = res && (<>
-    <div className="card" style={{ padding: '10px 12px', marginBottom: 10 }}>
-      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>Хлысты: {res.byStock.map(b => `${b.len} × ${b.count}`).join(', ') || '—'}</div>
-      <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Закупить {fmt(res.total / 1000)} м · в отрезках {fmt(res.cutLen / 1000)} м · отход {fmt(res.waste)}%</div>
-      {res.unplaced.length > 0 && <p className="error-text" style={{ fontSize: 12.5, marginTop: 4 }}>Не разложены: {res.unplaced.map(u => `${u.len}${u.name ? ' ' + u.name : ''} × ${u.qty}`).join(', ')} — длиннее хлыста или хлысты кончились</p>}
-      <button type="button" style={{ ...btnS(true), marginTop: 8 }} disabled={busy || !res.bars.length}
-        onClick={async () => { setBusy(true); try { await shareLinearPdf(job, res) } finally { setBusy(false) } }}>{busy ? 'Готовлю…' : 'PDF'}</button>
-    </div>
-    {groups.map((g, i) => <BarView key={i} g={g} maxLen={maxLen} trim={num(job.trim) || 0} kerf={num(job.kerf) || 0} />)}
+    <LinearResult job={job} res={res} />
+    <button type="button" style={{ ...btnS(), marginTop: 4 }} onClick={openAttach}>📎 Прикрепить к заказу</button>
+    {attach && <div className="card" style={{ marginTop: 8, padding: '8px 10px' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>К какому заказу? <button type="button" style={{ ...xBtn, color: 'var(--text-muted)' }} onClick={() => setAttach(null)}>✕</button></div>
+      {!attach.length && <p style={{ fontSize: 12.5, color: 'var(--text-hint)' }}>Загружаю заказы…</p>}
+      {attach.map(o => <button key={o.id} type="button" style={{ ...btnS(), width: '100%', textAlign: 'left', marginBottom: 4 }} onClick={() => doAttach(o)}>{orderTitle(o)} <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>· {o.material_name}{Array.isArray(o.linear) && o.linear.length ? ` · погонных: ${o.linear.length}` : ''}</span></button>)}
+    </div>}
   </>)
 
   const head = (

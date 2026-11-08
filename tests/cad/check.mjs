@@ -90,5 +90,16 @@ for (const rot of [0, 90, 180, 270]) {
   ok(big.unplaced.length === 1 && big.unplaced[0].len === 7000, 'too long')
   ok(Math.abs(big.bars[0].used - (20 + 1000 + 3)) < 0.01, 'trim+kerf ' + big.bars[0].used)
 }
+// конструктор -> заказ: погонные материалы уходят заданием линейного раскроя
+{
+  const pr4 = newProject('Стеллаж')
+  pr4.items.push(newItem('frame', { p: { shelf: 'sheet', shelfMaterial: 'ЛДСП Белый 16', shelfT: 16 } }))
+  pr4.settings.stocks = { 'Профиль 20×20 сталь': '3000, 6000' }
+  const ex = exportForOrder(pr4, sheetGroups(pr4)[0].key)
+  ok(ex.linear.length === 1 && ex.linear[0].stocks.length === 2, 'linear jobs ' + JSON.stringify(ex.linear.map(j => j.stocks)))
+  ok(ex.linear[0].pieces.reduce((a, p) => a + p.qty, 0) === 24, 'linear pieces count')
+  const { computeJob } = await import('../../src/lib/linearJobs.js').catch(() => ({}))
+  if (computeJob) ok(computeJob({ ...ex.linear[0], pieces: [...ex.linear[0].pieces, { len: 500, qty: 2, angles: '45/45' }] }).bars.some(b => b.cuts.some(c => c.angles === '45/45')), 'angles carried')
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

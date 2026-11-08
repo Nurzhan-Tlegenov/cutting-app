@@ -39,6 +39,7 @@ import { materialsOf } from '../lib/detailMaterial'
 import { useLabelMode, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { fetchOrderDetails } from '../lib/orderDetails.js'
 import PartPrograms from '../components/PartPrograms'
+import { OrderLinear } from '../components/LinearResult'
 const STATUSES = ['new', 'discussion', 'inwork', 'done']
 export default function OrderPage() {
   const { id } = useParams()
@@ -414,6 +415,8 @@ export default function OrderPage() {
         <OrderNotes key={order.id} order={order} canEdit={inProduction && order.status !== 'draft'} style={{ marginBottom: 12 }}
           onSaved={v => setOrder(o => ({ ...o, prod_note: v }))} />
       ) : null}
+      {/* погонные материалы (линейный раскрой) — если к заказу прикреплены из конструктора или со страницы «Линейный раскрой» */}
+      <OrderLinear order={order} />
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 6, flexWrap: 'wrap' }}>
           <p className="section-title" style={{ marginBottom: 0 }}>Детали ({details.length})</p>

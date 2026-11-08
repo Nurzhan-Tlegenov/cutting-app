@@ -10,6 +10,7 @@ import ContourResizeNote from '../components/ContourResizeNote'
 import { applyResize, resetOutline } from '../lib/contourResize'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { linkOrder } from '../lib/tasks'
+import { LINEAR_SQL_HINT } from '../lib/linearJobs'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { reached, limitFromError, resetLimitsCache } from '../lib/limits'
@@ -363,6 +364,7 @@ export default function NewOrderPage() {
   const fromTask = useLocation().state?.task || null
   const fromCad = useLocation().state?.cad || null   // детали из конструктора мебели (Конструктор → «В заказ»)
   const cadTaken = useRef(false)
+  const cadLinear = useRef(null)                      // погонные материалы из конструктора -> orders.linear после сохранения
   const [orderName, setOrderName] = useState(fromTask?.title || '')
   const [orderArticle, setOrderArticle] = useState('')
   const [orderNote, setOrderNote] = useState(fromTask?.note || '')   // примечание к заказу — выводится в PDF карт раскроя
@@ -507,6 +509,7 @@ export default function NewOrderPage() {
   useEffect(() => {
     if (!fromCad || cadTaken.current) return
     cadTaken.current = true
+    cadLinear.current = Array.isArray(fromCad.linear) && fromCad.linear.length ? fromCad.linear : null
     handleImport({ items: fromCad.items || [], mode: 'replace', material: fromCad.material, thickness: fromCad.thickness, orderName: fromCad.orderName, model3d: fromCad.model3d })
     navigate('/orders/new', { replace: true, state: null })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -568,6 +571,10 @@ export default function NewOrderPage() {
       if (orderNote.trim() && !(await saveOrderNote(order.id, orderNote))) window.alert(NOTES_SQL_HINT)
       if (orderArticle.trim() && !(await saveOrderArticle(order.id, orderArticle))) window.alert(ARTICLE_SQL_HINT)
       if (fromTask?.id) await linkOrder(fromTask.id, order.id)   // ошибка привязки не мешает заказу
+      if (cadLinear.current) {                                   // погонные из конструктора: нет колонки — заказ всё равно создан
+        const { error: lErr } = await supabase.from('orders').update({ linear: cadLinear.current }).eq('id', order.id)
+        if (lErr) window.alert(LINEAR_SQL_HINT)
+      }
 
       const rows = details.map((d, i) => {
         const pfx = d.prefix || null

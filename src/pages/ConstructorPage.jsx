@@ -335,7 +335,7 @@ function ToOrderDialog({ project, onClose, onGo }) {
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div onClick={e => e.stopPropagation()} className="card" style={{ width: '100%', maxWidth: 420 }}>
         <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Детали в заказ</h3>
-        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>Заказ — на один материал. Выберите материал: его детали уйдут в бланк нового заказа (с кромкой, пазами и 3D-моделью), остальное будет видно в 3D для понимания.</p>
+        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>Заказ — на один материал. Выберите материал: его детали уйдут в бланк нового заказа (с кромкой, присадкой, пазами и 3D-моделью), остальное будет видно в 3D для понимания. Профиль и другие погонные материалы прикрепятся к заказу блоком «Погонные материалы» (линейный раскрой).</p>
         {groups.map(g => (
           <button key={g.key} type="button" onClick={() => onGo(g.key)} style={{ ...btnS(), width: '100%', textAlign: 'left', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
             <span>{g.material || 'Без названия'} · {g.thickness} мм</span><span style={{ color: 'var(--text-muted)' }}>{g.parts.length} дет.</span>
@@ -522,7 +522,7 @@ export default function ConstructorPage() {
     setToOrder(false)
     flush()
     setCabinet?.('client')
-    navigate('/orders/new', { state: { cad: { items: ex.items, material: ex.material, thickness: ex.thickness, orderName: ex.orderName, model3d } } })
+    navigate('/orders/new', { state: { cad: { items: ex.items, material: ex.material, thickness: ex.thickness, orderName: ex.orderName, model3d, linear: ex.linear } } })
   }
   const all3d = useMemo(() => (project ? exportAll(project) : null), [project])
 

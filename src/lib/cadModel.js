@@ -220,7 +220,26 @@ export function exportForOrder(project, groupKey) {
   const others = groups.filter(x => x !== g).flatMap(x => x.parts).map((sp, i) => partToDetail(sp, i + 1, map.get(sp.pid) || []))
   const { parts } = pp
   const extras = parts.filter(sp => sp.kind !== 'sheet').map(partToExtra)
-  return { items, material: g.material, thickness: g.thickness, orderName: project.name || '', scene: { parts: others, extras, hardware: [], meshes: [] } }
+  return { items, material: g.material, thickness: g.thickness, orderName: project.name || '', scene: { parts: others, extras, hardware: [], meshes: [] }, linear: linearJobs(project, parts) }
+}
+
+/** Погонные материалы проекта -> задания линейного раскроя для заказа (orders.linear) */
+export function linearJobs(project, parts = projectParts(project).parts) {
+  const st = { ...PROJECT_DEFAULTS, ...(project?.settings || {}) }
+  const byMat = new Map()
+  for (const sp of parts) {
+    if (sp.kind !== 'profile') continue
+    if (!byMat.has(sp.material)) byMat.set(sp.material, new Map())
+    const name = [sp.item?.name, sp.name].filter(Boolean).join(' · ')
+    const k = `${sp.place.L}|${name}`
+    const m = byMat.get(sp.material)
+    m.set(k, (m.get(k) || 0) + 1)
+  }
+  return [...byMat.entries()].map(([material, m]) => ({
+    name: `${project.name || ''} · ${material}`, material, kerf: num(st.linearKerf, 3), trim: 0,
+    stocks: stocksOf(st, material).map(s => ({ len: s.len, qty: '' })),
+    pieces: [...m.entries()].map(([k, qty], i) => { const [len, name] = k.split('|'); return { id: 'p' + i, len: Number(len), qty, name } }),
+  }))
 }
 
 /** Все детали проекта как детали формы (для 3D-просмотра всей модели) */

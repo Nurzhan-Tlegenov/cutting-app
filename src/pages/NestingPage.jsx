@@ -1,4 +1,5 @@
 import Hint from '../components/Hint'
+import { OrderLinear } from '../components/LinearResult'
 import CncSkipQuick from '../components/CncSkipQuick'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { getCnc, normalizeCnc, routerPost } from '../lib/cncSettings'
@@ -4375,6 +4376,9 @@ export default function NestingPage() {
         Алгоритм раскроя v{NESTING_VERSION}
       </div>
       <style>{`@keyframes nesting-spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
+
+      {/* Погонные материалы (линейный раскрой) — если прикреплены к заказу */}
+      <OrderLinear order={order} />
 
       {/* Список деталей — под картами, свёрнут */}
       {details.length > 0 && (

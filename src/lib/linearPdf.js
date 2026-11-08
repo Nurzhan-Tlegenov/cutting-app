@@ -4,12 +4,12 @@
 import { zlibSync, strToU8 } from 'fflate'
 import { groupBars } from './linearNest'
 
-const PW = 1654, PH = 2339, K = PW / 210
+let PW = 1654, PH = 2339, K = PW / 210
 const mm = v => v * K
 const INK = '#1F1F1D', MUTED = '#6B6A66', BRAND = '#009BDE'
 const fmt = v => String(Math.round(v * 10) / 10).replace('.', ',')
 
-function pdfFromCanvas(ctx, pages) {
+function pdfFromCanvas(ctx, pages, ptW = 595.28, ptH = 841.89) {
   const chunks = [], offsets = []
   let size = 0
   const put = d => { const b = typeof d === 'string' ? strToU8(d) : d; chunks.push(b); size += b.length }
@@ -21,10 +21,10 @@ function pdfFromCanvas(ctx, pages) {
     draw()
     const px = ctx.getImageData(0, 0, PW, PH).data, rgb = new Uint8Array(PW * PH * 3)
     for (let a = 0, b = 0; a < px.length; a += 4, b += 3) { rgb[b] = px[a]; rgb[b + 1] = px[a + 1]; rgb[b + 2] = px[a + 2] }
-    const img = zlibSync(rgb, { level: 6 }), content = 'q 595.28 0 0 841.89 0 0 cm /Im0 Do Q'
+    const img = zlibSync(rgb, { level: 6 }), content = `q ${ptW} 0 0 ${ptH} 0 0 cm /Im0 Do Q`
     const page = n, cont = n + 1, im = n + 2; n += 3
     kids.push(`${page} 0 R`)
-    obj(page, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${cont} 0 R >>`)
+    obj(page, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${ptW} ${ptH}] /Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${cont} 0 R >>`)
     obj(cont, `<< /Length ${content.length} >>`, content)
     obj(im, `<< /Type /XObject /Subtype /Image /Width ${PW} /Height ${PH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${img.length} >>`, img)
   }
@@ -42,6 +42,7 @@ function pdfFromCanvas(ctx, pages) {
 
 /** job — { name, material, kerf, trim }, res — результат linearCut -> Uint8Array PDF */
 export function buildLinearPdf(job, res) {
+  PW = 1654; PH = 2339; K = PW / 210
   const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
   const ctx = cv.getContext('2d')
   const groups = groupBars(res.bars)
@@ -86,8 +87,8 @@ export function buildLinearPdf(job, res) {
       y += 13
       // отрезки этого хлыста: длина × кол-во и названия
       const cnt = new Map()
-      for (const c of g.cuts) { const k = `${c.len}|${c.name || ''}`; cnt.set(k, (cnt.get(k) || 0) + 1) }
-      const line = [...cnt.entries()].map(([k, q]) => { const [l, nm] = k.split('|'); return `${fmt(Number(l))}${q > 1 ? ' × ' + q : ''}${nm ? ' — ' + nm : ''}` }).join(';   ')
+      for (const c of g.cuts) { const k = `${c.len}|${c.name || ''}|${c.angles || ''}`; cnt.set(k, (cnt.get(k) || 0) + 1) }
+      const line = [...cnt.entries()].map(([k, q]) => { const [l, nm, an] = k.split('|'); return `${fmt(Number(l))}${an ? ' ∠' + an : ''}${q > 1 ? ' × ' + q : ''}${nm ? ' — ' + nm : ''}` }).join(';   ')
       text(line.length > 150 ? line.slice(0, 147) + '…' : line, 15, y, 3.1, { color: MUTED })
       y += rowH - 15.5
     }
@@ -95,9 +96,7 @@ export function buildLinearPdf(job, res) {
   return pdfFromCanvas(ctx, pages)
 }
 
-export async function shareLinearPdf(job, res) {
-  const data = buildLinearPdf(job, res)
-  const name = `Линейный раскрой ${job.name || ''}`.trim().replace(/[\\/:*?"<>|]+/g, '_') + '.pdf'
+async function shareFile(data, name) {
   const file = new File([data], name, { type: 'application/pdf' })
   let can
   try { can = !!navigator.share && !!navigator.canShare && navigator.canShare({ files: [file] }) } catch { can = false }
@@ -109,4 +108,47 @@ export async function shareLinearPdf(job, res) {
   const a = document.createElement('a'); a.href = url; a.download = name
   document.body.appendChild(a); a.click(); a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 5000)
+}
+
+const safeName = s => String(s || '').trim().replace(/[\\/:*?"<>|]+/g, '_')
+export async function shareLinearPdf(job, res) {
+  return shareFile(buildLinearPdf(job, res), safeName(`Линейный раскрой ${job.name || ''}`) + '.pdf')
+}
+
+/**
+ * Бирки на отрезки: одна бирка — страница размером с бирку (как бирки деталей), по порядку хлыстов.
+ * На бирке: длина крупно, углы реза, название отрезка, материал, заказ/раскрой, «хлыст N · отрезок k», номер из общего числа.
+ */
+export function buildLinearLabels(job, res, { w = 58, h = 40 } = {}) {
+  PW = Math.round(w * 12); PH = Math.round(h * 12); K = 12
+  const cv = document.createElement('canvas'); cv.width = PW; cv.height = PH
+  const ctx = cv.getContext('2d')
+  const list = []
+  res.bars.forEach((b, bi) => b.cuts.forEach((c, ci) => list.push({ ...c, bar: bi + 1, k: ci + 1, stock: b.stock })))
+  const fit = (s, maxW, size, bold) => {
+    let sz = size
+    do { ctx.font = `${bold ? '700 ' : ''}${mm(sz)}px Arial, Helvetica, sans-serif`; if (ctx.measureText(s).width <= mm(maxW)) break; sz -= 0.3 } while (sz > 1.6)
+    return sz
+  }
+  const text = (s, x, y, size, opt = {}) => {
+    const sz = fit(String(s), opt.maxW || w - 4, size, opt.bold)
+    ctx.font = `${opt.bold ? '700 ' : ''}${mm(sz)}px Arial, Helvetica, sans-serif`
+    ctx.fillStyle = opt.color || INK; ctx.textAlign = opt.align || 'left'; ctx.textBaseline = 'alphabetic'
+    ctx.fillText(String(s), mm(x), mm(y))
+  }
+  const pages = list.map((c, i) => () => {
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, PW, PH)
+    ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.strokeRect(mm(1), mm(1), mm(w - 2), mm(h - 2))
+    text(job.name || '', 3, h * 0.17, h * 0.09, { bold: true })
+    text(job.material || '', 3, h * 0.29, h * 0.075, { color: MUTED })
+    text(`${fmt(c.len)} мм`, w / 2, h * 0.58, h * 0.24, { bold: true, align: 'center' })
+    if (c.angles) text(`∠ ${c.angles}°`, w - 3, h * 0.29, h * 0.08, { bold: true, align: 'right', maxW: w / 3 })
+    text(c.name || '', 3, h * 0.76, h * 0.09, { bold: true })
+    text(`хлыст ${c.bar} (${c.stock}) · отрезок ${c.k}`, 3, h * 0.92, h * 0.07, { color: MUTED, maxW: w * 0.68 })
+    text(`${i + 1}/${list.length}`, w - 3, h * 0.92, h * 0.07, { align: 'right', maxW: w * 0.3 })
+  })
+  return pdfFromCanvas(ctx, pages, (w / 25.4) * 72, (h / 25.4) * 72)
+}
+export async function shareLinearLabels(job, res, size) {
+  return shareFile(buildLinearLabels(job, res, size), safeName(`Бирки отрезков ${job.name || ''}`) + '.pdf')
 }

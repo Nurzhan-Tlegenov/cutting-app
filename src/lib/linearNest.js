@@ -47,8 +47,9 @@ export function linearCut({ pieces, stocks, kerf = 3, trim = 0 }) {
   for (const p of pieces || []) {
     const len = num(p.len), q = Math.max(0, Math.round(num(p.qty, 1)))
     if (!(len > 0) || !q) continue
-    const key = `${len}|${p.name || ''}`
-    if (!map.has(key)) map.set(key, { len, name: p.name || '', left: 0 })
+    const angles = p.angles || ''                    // углы реза: '' — прямой, '45' — один конец, '45/45' — оба (длина — по длинной стороне)
+    const key = `${len}|${p.name || ''}|${angles}`
+    if (!map.has(key)) map.set(key, { len, name: p.name || '', angles, left: 0 })
     map.get(key).left += q
   }
   const types = [...map.values()].sort((a, b) => b.len - a.len)
@@ -57,7 +58,7 @@ export function linearCut({ pieces, stocks, kerf = 3, trim = 0 }) {
   const bars = [], unplaced = []
   const maxCap = s => Math.round((s.len - 2 * T + K) * 10)
   for (const t of types) {
-    if (!st.some(s => maxCap(s) >= t.w)) { unplaced.push({ len: t.len, name: t.name, qty: t.left }); t.left = 0 }
+    if (!st.some(s => maxCap(s) >= t.w)) { unplaced.push({ len: t.len, name: t.name, angles: t.angles, qty: t.left }); t.left = 0 }
   }
   let guard = 0
   while (types.some(t => t.left > 0) && guard++ < 10000) {
@@ -78,7 +79,7 @@ export function linearCut({ pieces, stocks, kerf = 3, trim = 0 }) {
       break
     }
     const cuts = []
-    pick.live.forEach((t, i) => { for (let k = 0; k < pick.r.take[i]; k++) cuts.push({ len: t.len, name: t.name }); t.left -= pick.r.take[i] })
+    pick.live.forEach((t, i) => { for (let k = 0; k < pick.r.take[i]; k++) cuts.push({ len: t.len, name: t.name, angles: t.angles }); t.left -= pick.r.take[i] })
     cuts.sort((a, b) => b.len - a.len)
     const used = 2 * T + cuts.reduce((a, c) => a + c.len, 0) + K * Math.max(0, cuts.length - 1)
     bars.push({ stock: pick.s.len, cuts, used: r1(used), rest: r1(pick.s.len - used) })
@@ -101,7 +102,7 @@ export function linearCut({ pieces, stocks, kerf = 3, trim = 0 }) {
 export function groupBars(bars) {
   const out = []
   for (const b of bars) {
-    const key = b.stock + ':' + b.cuts.map(c => `${c.len}/${c.name}`).join(',')
+    const key = b.stock + ':' + b.cuts.map(c => `${c.len}/${c.name}/${c.angles || ''}`).join(',')
     const last = out[out.length - 1]
     if (last && last.key === key) last.count++
     else out.push({ ...b, key, count: 1 })
