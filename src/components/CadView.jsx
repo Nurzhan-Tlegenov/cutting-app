@@ -471,11 +471,10 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       }
       // тени от камеры не зависят: при вращении не пересчитываем; двигается дверь / ящик — пересчитываем сразу
       renderer.shadowMap.autoUpdate = animating || !fast
-      // один и тот же путь (составитель с тональной обработкой) и при вращении, и в покое — иначе фон и свет «мигают»;
-      // при вращении выключено только затенение в углах
+      // один и тот же путь и при вращении, и в покое: затенение в углах и стыках не выключаем — без «проявления» после остановки
+      // (быстрее — режим «Конструкторский»)
       if (hq && comp) {
         scene.background = bgRef.current
-        if (comp.__ao) comp.__ao.enabled = !fast
         if (comp.__w !== w || comp.__h !== h) { comp.setSize(w, h); comp.__w = w; comp.__h = h }
         comp.render()
       } else { scene.background = null; renderer.render(scene, camera) }
