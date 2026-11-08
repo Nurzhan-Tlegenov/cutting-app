@@ -16,7 +16,7 @@ import { useDesktop } from '../hooks/useDesktop'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
-import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront } from '../lib/cadCabinet'
+import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -145,7 +145,7 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes }) {
   )
 }
 
-function OpeningPanel({ it, set, sel, setSel, pull, setPull }) {
+function OpeningPanel({ it, set, sel, setSel, pull, setPull, onBlock }) {
   const p = { ...CAB_DEFAULTS, ...it.p }
   const tree = treeOf(p)
   const ops = useMemo(() => cabinetParts(p).openings || [], [it.p]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -173,6 +173,10 @@ function OpeningPanel({ it, set, sel, setSel, pull, setPull }) {
         </>}
         <button type="button" style={{ marginLeft: 'auto', border: 'none', background: 'none', fontSize: 16, cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setSel(null)}>✕</button>
       </div>
+      {onBlock && blocksOf(node).length > 0 && <div style={row}>
+        <span style={{ color: 'var(--text-muted)' }}>В проёме:</span>
+        {blocksOf(node).map(b => <button key={b.t} type="button" style={{ ...chipS(false), padding: '3px 8px', borderColor: '#f59e0b' }} onClick={() => onBlock(b)}>{blockTitle(node, b.t)} ›</button>)}
+      </div>}
       {node.split && node.children?.length > 0 && <div style={row}>
         <span>{node.split === 'v' ? 'Верт. панелей' : 'Гориз. панелей'}</span>
         <SmallNum width={44} value={node.children.length - 1} onChange={x => {
@@ -206,6 +210,130 @@ function OpeningPanel({ it, set, sel, setSel, pull, setPull }) {
       {node.front?.type === 'drawers' && <div style={row}><span>Ящиков</span>
         <SmallNum width={44} value={node.front.n} onChange={x => x >= 1 && x <= 10 && apply(opFront(tree, node.id, { ...node.front, n: Math.round(x) }))} />
       </div>}
+    </div>
+  )
+}
+
+// ── параметрический блок: всё, что поставлено в проём (панели деления, фронтальная панель, двери, ящики) ──
+// blk: { n: id проёма, t: 'split' | 'fpanel' | 'front', c?: id проёма перед выбранной панелью }
+const blockTitle = (node, t) => t === 'fpanel' ? 'Фронтальная панель'
+  : t === 'front' ? (node?.front?.type === 'drawers' ? `Ящики · ${node.front.n}` : `Двери · ${node?.front?.n || 1}`)
+    : node?.split === 'v' ? `Вертикальные панели · ${(node.children?.length || 1) - 1}` : `Горизонтальные панели · ${(node?.children?.length || 1) - 1}`
+const blocksOf = node => [
+  ...(node?.split && node.children?.length > 1 ? [{ n: node.id, t: 'split' }] : []),
+  ...(node?.fpanel ? [{ n: node.id, t: 'fpanel' }] : []),
+  ...(node?.front ? [{ n: node.id, t: 'front' }] : []),
+]
+
+function BlockCard({ it, set, blk, setBlk, onClose }) {
+  const p = { ...CAB_DEFAULTS, ...it.p }
+  const tree = treeOf(p)
+  const ops = useMemo(() => cabinetParts(p).openings || [], [it.p]) // eslint-disable-line react-hooks/exhaustive-deps
+  const r = findNode(tree, blk.n)
+  const node = r?.node
+  const o = ops.find(x => x.id === blk.n)
+  const alive = node && (blk.t === 'split' ? node.split && node.children?.length > 1 : blk.t === 'fpanel' ? !!node.fpanel : !!node.front)
+  if (!alive) return <div className="card" style={{ padding: '10px 12px', marginBottom: 10, fontSize: 13 }}>Блок убран. <button type="button" style={btnS()} onClick={onClose}>← К корпусу</button></div>
+  const apply = t => { if (t) set({ ...it, p: { ...p, tree: t } }) }
+  const patch = fn => apply(opPatch(tree, node.id, fn))
+  const replace = (what, n) => {
+    const busy = blk.t === 'split' && node.children.some(c => c.split || c.front || c.fpanel)
+    if (busy && !['h', 'v'].includes(what) && !window.confirm('В проёмах между панелями есть наполнение — оно пропадёт. Заменить?')) return
+    let t = opReplace(tree, node.id, what, n)
+    // заменили панели на ящики / двери — убираем старое деление; двери вместо ящиков и наоборот — просто меняем фасад
+    if (blk.t === 'split' && (what === 'doors')) t = opReplace(t, node.id, null)
+    apply(t)
+    setBlk(what === 'h' || what === 'v' ? { n: node.id, t: 'split' } : what === 'drawers' || what === 'doors' ? { n: node.id, t: 'front' } : null)
+  }
+  const isH = node.split === 'h'
+  const ch = node.children || []
+  const ci = blk.c ? ch.findIndex(c => c.id === blk.c) : -1
+  const one = blk.t === 'split' && ci >= 0 && ci < ch.length - 1
+  const pan = one ? (node.pan?.[blk.c] || {}) : {}
+  const setPan = patchP => patch(n => { n.pan = { ...(n.pan || {}) }; const cur = { ...(n.pan[blk.c] || {}), ...patchP }; Object.keys(cur).forEach(k => cur[k] == null && delete cur[k]); if (Object.keys(cur).length) n.pan[blk.c] = cur; else delete n.pan[blk.c] })
+  const endPanel = one && node.id === tree.id && node.split === 'v' && ((p.sideL === false && ci === 0) || (p.sideR === false && ci === ch.length - 2))
+  const defF = node.setFront ?? (isH ? (node.shelfType === 'loose' ? Math.max(num(p.shelfSetback) || 0, 2) : num(p.shelfSetback) || 0) : 0)
+  const fr = node.front
+  const row = { display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', marginBottom: 8 }
+  return (
+    <div className="card" style={{ padding: '8px 10px', marginBottom: 10, border: '1px solid #f59e0b' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <button type="button" style={{ ...btnS(), padding: '5px 9px' }} onClick={onClose} title="Свойства корпуса">← Корпус</button>
+        <b style={{ fontSize: 14, flex: 1 }}>{blockTitle(node, blk.t)}</b>
+        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>проём {o ? `${o.w}×${o.h}` : ''}</span>
+      </div>
+
+      {blk.t === 'split' && <>
+        <Grid cols={3}>
+          <NumField label="Сколько" unit="шт" value={ch.length - 1} onChange={v => { if (v >= 1) { const drop = ch.slice(Math.round(v) + 1); if (drop.some(c => c.split || c.front || c.fpanel) && !window.confirm('В убираемых проёмах есть наполнение — убрать?')) return; apply(opCount(tree, node.id, v)) } }} min={1} />
+          <NumField label="Отступ спереди" value={defF} onChange={v => patch(n => { n.setFront = v })} />
+          <NumField label="сзади" value={node.setBack ?? 0} onChange={v => patch(n => { n.setBack = v })} />
+          {isH ? <><NumField label="слева" value={node.setL ?? 0} onChange={v => patch(n => { n.setL = v })} /><NumField label="справа" value={node.setR ?? 0} onChange={v => patch(n => { n.setR = v })} /></>
+            : <><NumField label="снизу" value={node.setBot ?? 0} onChange={v => patch(n => { n.setBot = v })} /><NumField label="сверху" value={node.setTop ?? 0} onChange={v => patch(n => { n.setTop = v })} /></>}
+        </Grid>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Отступ с любой стороны — от края проёма (минус — выступает). Торец с отступом на виду — с кромкой.</p>
+        {isH && <>
+          <Chips label="Крепление (все панели блока)" value={node.shelfType || 'fixed'} onChange={v => patch(n => { n.shelfType = v })} options={[['fixed', 'Конфирмат (неподвижные)'], ['loose', 'Полкодержатели (съёмные)']]} />
+          <Chips label="Форма" value={node.shelfShape || 'rect'} onChange={v => patch(n => { n.shelfShape = v; if (v === 'round' && !n.shelfR) n.shelfR = 150 })} options={[['rect', 'Прямые'], ['round', 'Скруглённые']]} />
+          {node.shelfShape === 'round' && <Grid><NumField label="Радиус" value={node.shelfR || 150} onChange={v => v > 0 && patch(n => { n.shelfR = v })} min={1} /></Grid>}
+        </>}
+        {one && <Sub>
+          <div style={{ ...sect, marginTop: 4 }}>Эта панель · {ci + 1} из {ch.length - 1}</div>
+          {isH && <Chips label="Крепление" value={pan.type || ''} onChange={v => setPan({ type: v || null })} options={[['', 'Как у блока'], ['fixed', 'Конфирмат'], ['loose', 'Полкодержатели']]} />}
+          <Grid cols={2}>
+            <NumField label="Отступ спереди" value={pan.setF ?? defF} onChange={v => setPan({ setF: v })} />
+            <NumField label={endPanel ? 'Отступ от зада корпуса' : 'Отступ сзади'} value={pan.setB ?? (endPanel ? (p.sideBack ?? 0) : node.setBack ?? 0)} onChange={v => setPan({ setB: v })} />
+          </Grid>
+          {endPanel && p.back === 'groove' && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>
+            Крайняя панель вместо боковины. Отступ от зада меньше {num(p.grooveOffset) + num(p.grooveWidth)} мм (паз + ширина паза) — задняя стенка в пазу панели; больше — стенка проходит за панелью и закрывает её торец внахлёст (паза нет).</p>}
+          <div style={row}>
+            {(pan.type || pan.setF != null || pan.setB != null) && <button type="button" style={btnS()} onClick={() => setPan({ type: null, setF: null, setB: null })}>↺ Как у блока</button>}
+            <button type="button" style={{ ...btnS(), color: 'var(--danger)' }} onClick={() => {
+              const keep = ch[ci + 1]
+              if ((keep.split || keep.front || keep.fpanel) && !window.confirm('Проём над / справа от панели с наполнением — наполнение пропадёт. Убрать панель?')) return
+              apply(opRemovePanel(tree, node.id, blk.c)); setBlk(ch.length > 2 ? { n: node.id, t: 'split' } : null)
+            }}>🗑 Убрать эту панель</button>
+          </div>
+        </Sub>}
+        {!one && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 8px' }}>Двойной тап по панели на модели — её собственные настройки (крепление, отступы, убрать).</p>}
+      </>}
+
+      {blk.t === 'fpanel' && node.fpanel && <>
+        <Chips label="Положение по глубине" value={node.fpanel.from} onChange={v => patch(n => { n.fpanel = { ...n.fpanel, from: v } })} options={[['back', 'От зада'], ['front', 'От переда']]} />
+        <Grid cols={3}>
+          <NumField label="Расстояние" value={node.fpanel.dist} onChange={v => patch(n => { n.fpanel = { ...n.fpanel, dist: v } })} />
+          {[['l', 'Отступ слева'], ['r', 'справа'], ['b', 'снизу'], ['t', 'сверху']].map(([k, tt]) => <NumField key={k} label={tt} value={node.fpanel[k]} onChange={v => patch(n => { n.fpanel = { ...n.fpanel, [k]: v } })} />)}
+        </Grid>
+      </>}
+
+      {blk.t === 'front' && fr?.type === 'doors' && <>
+        <Grid cols={3}><NumField label="Сколько" unit="шт" value={fr.n} onChange={v => v >= 1 && apply(opFront(tree, node.id, { ...fr, n: Math.min(6, Math.round(v)) }))} min={1} /></Grid>
+        <Chips label="Расположение" value={fr.layout || 'v'} onChange={v => apply(opFront(tree, node.id, { ...fr, layout: v }))} options={[['v', 'Рядом'], ['h', 'Друг над другом']]} />
+        {(fr.n === 1 || fr.layout === 'h') && <Chips label="Открывание" value={fr.open || (fr.hinge === 'right' ? 'right' : 'left')} onChange={v => apply(opFront(tree, node.id, { ...fr, open: v, hinge: v }))} options={[['left', '← влево'], ['right', 'вправо →'], ['up', '↑ вверх'], ['down', '↓ вниз']]} />}
+      </>}
+      {blk.t === 'front' && fr?.type === 'drawers' && <>
+        <Grid cols={2}>
+          <NumField label="Сколько" unit="шт" value={fr.n} onChange={v => v >= 1 && apply(opFront(tree, node.id, { ...fr, n: Math.min(10, Math.round(v)) }))} min={1} />
+          <NumField label="Длина направляющих" value={fr.slideLen ?? p.slideLen} onChange={v => v >= 150 && apply(opFront(tree, node.id, { ...fr, slideLen: v }))} min={0} />
+          <NumField label="Короб от низа фасада" value={fr.boxBottom ?? 15} onChange={v => apply(opFront(tree, node.id, { ...fr, boxBottom: v }))} min={0} />
+          <NumField label="Короб от верха фасада" value={fr.boxTop ?? Math.max(0, (num(p.boxTopGap) ?? 40) - 15)} onChange={v => apply(opFront(tree, node.id, { ...fr, boxTop: v }))} min={0} />
+        </Grid>
+      </>}
+
+      <div style={{ ...sect, marginTop: 4 }}>Заменить на</div>
+      <div style={row}>
+        {blk.t === 'split' && <button type="button" style={chipS(false)} onClick={() => replace(isH ? 'v' : 'h')}>{isH ? '│ Вертикальные' : '─ Горизонтальные'}</button>}
+        {!(blk.t === 'front' && fr?.type === 'drawers') && <button type="button" style={chipS(false)} onClick={() => replace('drawers', blk.t === 'split' ? ch.length - 1 : 3)}>☰ Ящики</button>}
+        {!(blk.t === 'front' && fr?.type === 'doors') && blk.t !== 'fpanel' && <button type="button" style={chipS(false)} onClick={() => replace('doors', 1)}>▯ Дверь</button>}
+        {!(blk.t === 'front' && fr?.type === 'doors') && blk.t !== 'fpanel' && <button type="button" style={chipS(false)} onClick={() => replace('doors', 2)}>▯▯ 2 двери</button>}
+        {blk.t === 'front' && <button type="button" style={chipS(false)} onClick={() => { apply(opReplace(opFront(tree, node.id, null), node.id, 'h', fr?.type === 'drawers' ? Math.max(1, fr.n - 1) : 2)); setBlk({ n: node.id, t: 'split' }) }}>─ Полки</button>}
+        <button type="button" style={{ ...chipS(false), color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => {
+          if (!window.confirm('Убрать этот блок?')) return
+          if (blk.t === 'split') { if (ch.some(c => c.split || c.front || c.fpanel) && !window.confirm('Внутри есть наполнение — оно тоже пропадёт. Убрать?')) return; apply(opReplace(tree, node.id, null)) }
+          else apply(opReplace(tree, node.id, blk.t === 'fpanel' ? 'fpanel-off' : 'front-off'))
+          setBlk(null)
+        }}>🗑 Убрать блок</button>
+      </div>
     </div>
   )
 }
@@ -379,6 +507,8 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
       {(p.back === 'groove' || p.back === 'overlay') && <Sub>
         <Grid cols={2}><TextField label="Материал" value={p.backMaterial} onChange={v => up({ backMaterial: v })} list="cad-mats" /><NumField label="Толщина" value={p.backT} onChange={v => up({ backT: v })} min={1} /></Grid>
         {p.back === 'groove' && <Grid><NumField label="Паз от зад. торца" value={p.grooveOffset} onChange={v => up({ grooveOffset: v })} min={0} /><NumField label="Глубина паза" value={p.grooveDepth} onChange={v => up({ grooveDepth: v })} min={1} /><NumField label="Ширина паза" value={p.grooveWidth} onChange={v => up({ grooveWidth: v })} min={1} /></Grid>}
+        <div style={{ ...lbl, marginTop: 2 }}>{p.back === 'groove' ? 'Зазор в пазу (стенка меньше — входит свободно)' : 'Отступ от краёв корпуса'}</div>
+        <Grid cols={4}>{[['backGapL', 'слева'], ['backGapR', 'справа'], ['backGapB', 'снизу'], ['backGapT', 'сверху']].map(([k, tt]) => <NumField key={k} label={tt} value={p[k] ?? 1} onChange={v => up({ [k]: v })} />)}</Grid>
       </Sub>}
     </Fold>
 
@@ -701,6 +831,7 @@ export default function ConstructorPage() {
   const [selected, setSelected] = useState(null)
   const [selPid, setSelPid] = useState(null)
   const [selOpening, setSelOpening] = useState(null) // выбранный проём корпуса
+  const [selBlock, setSelBlock] = useState(null)     // выбранный параметрический блок (двойной тап по детали): { item, n, t, c }
   const [showSizes, setShowSizes] = useState(true)   // размеры проёмов на модели
   // свернутые / развёрнутые разделы карточки и высота картинки на телефоне — запоминаются за аккаунтом
   const [fold, setFold] = useState(() => { try { return getUserSettings(user)?.cadFold || {} } catch { return {} } })
@@ -782,6 +913,8 @@ export default function ConstructorPage() {
         p: [(b[0] + b[3]) / 2, v ? b[4] - Math.min(90, (b[4] - b[1]) / 4) : (b[1] + b[4]) / 2, b[5]] }
     })
   }, [selCab, cabOpenings, showSizes, selOpening])
+  const blk = selBlock && selCab && selBlock.item === selCab.id ? selBlock : null
+  const hiPids = useMemo(() => (blk ? new Set(parts.filter(sp => sp.item.id === blk.item && sp.blk && sp.blk.n === blk.n && sp.blk.t === blk.t).map(sp => sp.pid)) : null), [blk, parts])
   const room = project?.settings?.room?.on ? { ...PROJECT_DEFAULTS.room, ...project.settings.room } : null
   // линейный раскрой — только если он открыт этому аккаунту (мастер или бета «Линейный раскрой»)
   const [linearOk, setLinearOk] = useState(!!isMaster)
@@ -873,7 +1006,11 @@ export default function ConstructorPage() {
     setProject({ ...project, items: [...project.items, it] })
     setSelected(it.id); setTab('props')
   }
-  const select = (id, pid = null, opening = null) => { setSelected(id); setSelPid(id ? pid : null); setSelOpening(id ? opening : null); if (id) setTab('props') }
+  const select = (id, pid = null, opening = null, extra = null) => {
+    setSelected(id); setSelPid(id ? pid : null); setSelOpening(id ? opening : null)
+    setSelBlock(id && extra?.blk ? { item: id, ...extra.blk } : null)
+    if (id) setTab('props')
+  }
 
   const createNew = async () => {
     const name = window.prompt('Название проекта:', 'Новый проект')
@@ -940,9 +1077,13 @@ export default function ConstructorPage() {
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room}
-        labels={sizeLabels} onLabel={id => { setSelOpening(id); setTab('props') }} moveMode={moveMode} edgeLook={edgeLook}>
+        labels={sizeLabels} onLabel={id => { setSelOpening(id); setTab('props') }} moveMode={moveMode} edgeLook={edgeLook} hiPids={hiPids}>
         {selCab && <OpeningTools it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} showSizes={showSizes} setShowSizes={setShowSizes} />}
-        {selCab && selOpening && <OpeningPanel it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} pull={pull} setPull={setPull} />}
+        {selCab && selOpening && !blk && <OpeningPanel it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} pull={pull} setPull={setPull} onBlock={b => { setSelBlock({ item: selCab.id, ...b }); setSelPid(null); setTab('props') }} />}
+        {blk && <div style={{ position: 'absolute', left: 58, bottom: 6, zIndex: 3, display: 'flex', gap: 4, alignItems: 'center', background: 'rgba(255,255,255,0.95)', border: '1px solid #f59e0b', borderRadius: 14, padding: '3px 4px 3px 10px', fontSize: 12.5 }}>
+          <b>{blockTitle(findNode(treeOf({ ...CAB_DEFAULTS, ...selCab.p }), blk.n)?.node, blk.t)}</b>
+          <button type="button" style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setSelBlock(null)}>✕</button>
+        </div>}
       </CadView>
       <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
@@ -970,6 +1111,7 @@ export default function ConstructorPage() {
     {tab === 'scene' && <SceneList project={project} setProject={setProject} parts={parts} selected={selected} onSelect={select} onAdd={addItem}
       library={library} onLibraryDelete={id => { if (window.confirm('Убрать из библиотеки?')) saveLibrary(library.filter(l => l.id !== id)) }}
       onFromLibrary={l => { const b = parts.length ? sceneBox(parts) : [0, 0, 0, 0, 0, 0]; const it = { ...JSON.parse(JSON.stringify(l.item)), id: newId(), pos: { x: parts.length ? Math.round(b[3]) : 0, y: 0, z: 0 } }; setProject({ ...project, items: [...project.items, it] }); setSelected(it.id); setTab('props') }} />}
+    {tab === 'props' && blk && <BlockCard key={blk.n + blk.t} it={selCab} set={setItem} blk={blk} setBlk={b => setSelBlock(b ? { item: selCab.id, ...b } : null)} onClose={() => { setSelBlock(null); setSelPid(null) }} />}
     {tab === 'props' && selItem && (() => {
       const own = parts.filter(p => p.item.id === selItem.id && (p.kind === 'sheet'))
       const sp = own.find(p => p.pid === selPid)
@@ -1003,7 +1145,7 @@ export default function ConstructorPage() {
         </div>
       )
     })()}
-    {tab === 'props' && (selItem
+    {tab === 'props' && !blk && (selItem
       ? <ItemEditor key={selItem.id} it={selItem} set={setItem} info={info} selOpening={selOpening} setSelOpening={setSelOpening}
           sameKind={selItem.type === 'cabinet' ? project.items.filter(i => i.type === 'cabinet' && i.id !== selItem.id && (i.p?.kind || 'wardrobe') === (selItem.p?.kind || 'wardrobe')).length : 0}
           onApplyKind={gs => {

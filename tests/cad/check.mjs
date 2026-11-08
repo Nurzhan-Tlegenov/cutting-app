@@ -220,5 +220,34 @@ for (const rot of [0, 90, 180, 270]) {
   const bot = det.find(d => d.name === 'Дно')
   ok(Object.values(bot.edges).filter(Boolean).length === 2, 'bottom front + open end edged ' + JSON.stringify(bot.edges))
 }
+
+// блоки: отступ крайней панели 19 мм — стенка внахлёст без паза; зазоры стенки; отдельная полка на полкодержателях; отступы слева/справа; ящики свои
+{
+  const { newNode, opRemovePanel, opReplace, opCount } = await import('../../src/lib/cadCabinet.js')
+  const L = newNode({ id: 'a', split: 'h', children: [newNode({ id: 'h0' }), newNode({ id: 'h1' }), newNode({ id: 'h2' })], pan: { h0: { type: 'loose' } }, setR: 30 })
+  const root = newNode({ id: 'root', split: 'v', children: [L, newNode({ id: 'b' })], pan: { a: { setB: 20 } } })
+  const it = newItem('cabinet', { p: { W: 1000, H: 720, D: 400, sideR: false, back: 'groove', backGapL: 2, tree: root } })
+  const { parts, warn } = projectParts({ items: [it] })
+  ok(!warn.length, 'blocks warn ' + warn)
+  const back = parts.find(p => p.key === 'back'), div = parts.find(p => p.key === 'st_a')
+  ok(div.place.aabb[2] === 20 && !div.grooves.length, 'end divider set back 20, no groove ' + div.place.aabb)
+  ok(Math.abs(back.place.aabb[3] - (div.place.aabb[3] - 1)) < 0.01, 'back laps divider end ' + back.place.aabb)
+  ok(Math.abs(back.place.aabb[0] - (16 - 8 + 2)) < 0.01, 'back gap left 2 ' + back.place.aabb)
+  const sh = parts.filter(p => p.key.startsWith('sh_'))
+  ok(sh.length === 2 && sh.find(p => p.key === 'sh_h0').name.includes('съёмная') && !sh.find(p => p.key === 'sh_h1').name.includes('съёмная'), 'one loose shelf')
+  ok(sh.every(p => p.blk?.n === 'a' && p.blk.t === 'split'), 'shelf blk')
+  const sh1 = sh.find(p => p.key === 'sh_h1')
+  ok(Math.abs(sh1.place.aabb[3] - (div.place.aabb[0] - 30)) < 0.01 && sh1.edges['+x'], 'shelf set from right 30 + edge ' + sh1.place.aabb)
+  const t2 = opRemovePanel(root, 'a', 'h0')
+  ok(t2.children[0].children.length === 2 && !t2.children[0].pan?.h0, 'remove one panel')
+  ok(opCount(root, 'a', 4).children[0].children.length === 5, 'count 4')
+  const t3 = opReplace(root, 'a', 'drawers', 2)
+  ok(!t3.children[0].split && t3.children[0].front.n === 2, 'replace shelves by drawers')
+  t3.children[0].front = { ...t3.children[0].front, boxBottom: 30, boxTop: 50, slideLen: 300 }
+  const pr = projectParts({ items: [{ ...it, p: { ...it.p, tree: t3 } }] }).parts
+  const f = pr.find(p => p.name === 'Фасад ящика'), bs = pr.find(p => p.name === 'Ящик: боковина')
+  ok(f.blk?.t === 'front' && bs.blk?.n === 'a', 'drawer blk')
+  ok(Math.abs(bs.place.aabb[5] - bs.place.aabb[2] - 300) < 0.01, 'slide len per block ' + bs.place.aabb)
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

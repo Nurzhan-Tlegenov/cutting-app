@@ -48,7 +48,7 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, edgeLook = null, children, style }) {
+export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, edgeLook = null, hiPids = null, children, style }) {
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
@@ -139,6 +139,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     }
     const onFloor = (e, y) => { pick(e); const p = new THREE.Vector3(); return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), p) ? p : null }
     const pointers = new Set()
+    let lastTap = null   // двойной тап по детали — открыть её параметрический блок (полки, панели, ящики, двери)
     const onDown = e => {
       pointers.add(e.pointerId)
       if (pointers.size > 1) { if (dragging) { drag.current?.(dragging.id, 'cancel', 0, 0); dragging = null; controls.enabled = true } down = null; return }
@@ -174,6 +175,14 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       down = null
       if (moved > 6 || dt > 450) return
       pick(e)
+      const now = Date.now()
+      const dbl = lastTap && now - lastTap.t < 380 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30
+      lastTap = dbl ? null : { t: now, x: e.clientX, y: e.clientY }
+      if (dbl) {
+        // по двойному тапу видны и полупрозрачные фасады; проёмы пропускаем — ищем деталь блока
+        const hb = ray.intersectObjects(group.children.filter(o => o.isMesh && o.userData.pid), false).find(h => h.object.userData.blk)
+        if (hb) { sel.current?.(hb.object.userData.itemId, hb.object.userData.pid, null, { blk: hb.object.userData.blk }); return }
+      }
       const hit = ray.intersectObjects(group.children.filter(o => o.isMesh && !o.userData.ghost), false)[0]
       sel.current?.(hit ? hit.object.userData.itemId : null, hit ? hit.object.userData.pid || null : null, hit ? hit.object.userData.opening || null : null)
     }
@@ -222,18 +231,19 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const lk = lookOf(p.material)
       const isSel = selected && p.item.id === selected
       const isPart = selectedPid && p.pid === selectedPid
+      const isBlk = !isPart && hiPids?.has?.(p.pid)
       const ghost = ghostFronts && p.role === 'фасад' && p.item.id === selected
       const op = ghost ? 0.18 : xray ? Math.min(lk.opacity, 0.35) : lk.opacity
       const mat = new THREE.MeshStandardMaterial({
-        color: isPart ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.6) : isSel ? new THREE.Color(lk.color).lerp(new THREE.Color('#3b82f6'), 0.45) : lk.color,
+        color: isPart ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.6) : isBlk ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.35) : isSel ? new THREE.Color(lk.color).lerp(new THREE.Color('#3b82f6'), 0.45) : lk.color,
         roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.35 : 0.8, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.6 : 0,
         transparent: op < 1, opacity: op, depthWrite: op >= 1,
       })
       const mesh = new THREE.Mesh(geo, mat)
       if (!fig) mesh.position.set(b[0] + sx / 2, b[1] + sy / 2, b[2] + sz / 2)
-      mesh.userData = ghost ? { itemId: p.item.id, pid: p.pid, ghost: true } : { itemId: p.item.id, pid: p.pid }
+      mesh.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, ...(ghost ? { ghost: true } : {}) }
       group.add(mesh)
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: isPart ? '#b45309' : isSel ? '#1d4ed8' : '#5b6672', transparent: true, opacity: isSel ? 1 : 0.55 }))
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : '#5b6672', transparent: true, opacity: isSel ? 1 : 0.55 }))
       edges.position.copy(mesh.position)
       group.add(edges)
     }
@@ -278,7 +288,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       dim([b[0] - off, b[1], b[2]], [b[0] - off, b[1], b[5]], r(b[5] - b[2]), [b[0] - off - lh * 1.6, b[1] + lh * 0.7, (b[2] + b[5]) / 2])
     }
     if (!s.fitted && parts?.length) { fit(s, parts); s.fitted = true }
-  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook])
+  }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook, hiPids])
 
   // присадка (цилиндры по оси отверстия) и комната (пол и три стены)
   useEffect(() => {
