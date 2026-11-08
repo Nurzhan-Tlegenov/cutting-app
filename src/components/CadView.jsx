@@ -241,9 +241,12 @@ const LOOKS = [
 const PAL = ['#d9cdb4', '#b8c5d0', '#c9d6b8', '#d8bcae', '#c6bfdc']
 // свои цвета / текстуры материалов (за аккаунтом): { [материал]: { color, tex (картинка), scale (мм на картинку) } }
 const TEX = new Map()
+// перерисовать картинку (рисуем только когда что-то изменилось): загрузилась текстура и т. п.
+const WAKERS = new Set()
+const wakeAll = () => WAKERS.forEach(f => f())
 function texOf(src) {
   if (!src) return null
-  if (!TEX.has(src)) { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); const t = ld.load(src, undefined, undefined, () => { /* сайт не отдал картинку — останется цвет */ }); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; TEX.set(src, t) }
+  if (!TEX.has(src)) { const ld = new THREE.TextureLoader(); ld.setCrossOrigin('anonymous'); const t = ld.load(src, wakeAll, undefined, () => { /* сайт не отдал картинку — останется цвет */ }); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; TEX.set(src, t) }
   return TEX.get(src)
 }
 function lookOf(material, looks) {
@@ -282,6 +285,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
   useEffect(() => { qualRef.current = look.quality; bgRef.current = new THREE.Color(solidBg) }, [look.quality, solidBg])
   // яркость картинки (ползунок в «Отображении»)
   useEffect(() => { if (st.current?.renderer) st.current.renderer.toneMappingExposure = 0.92 * (Number(look.exposure) || 1) }, [look.exposure])
+  // любое обновление (детали, выбор, вид, размеры) — перерисовать кадр
+  useEffect(() => { st.current?.wake?.(3) })
   const hiRef = useRef(hiPids)
   useEffect(() => { hiRef.current = hiPids }, [hiPids])
   const animTarget = useRef(new Map())
@@ -402,8 +407,16 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     const over = new THREE.Scene()
     const extra = new THREE.Group(); scene.add(extra)   // присадка и стены комнаты — без выбора нажатием
     let raf = 0, alive = true, comp = null
+    // Рисуем только по необходимости: камера двигается, идёт анимация, что-то поменялось (иначе компьютер греется
+    // и тормозит — картинка с затенением перерисовывалась 60 раз в секунду). Пока крутим — быстрый кадр без затенения (AO),
+    // остановились — один кадр в полном качестве.
+    let need = 4, lastMove = 0, hqPending = false
+    const wake = (n = 2) => { need = Math.max(need, n) }
+    WAKERS.add(wake)
+    controls.addEventListener('change', () => { wake(); lastMove = performance.now() })
     const tick = () => {
       if (!alive) return
+      let animating = !!camAnim
       if (camAnim) {
         const k = Math.min(1, (performance.now() - camAnim.t0) / 380), e = 1 - Math.pow(1 - k, 3)
         camera.position.lerpVectors(camAnim.p0, camAnim.p1, e)
@@ -415,14 +428,22 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         let pr = animProg.current.get(id) || 0
         if (pr === tg && !g.userData.dirty) continue
         pr = tg > pr ? Math.min(tg, pr + 0.035) : Math.max(tg, pr - 0.035)
-        animProg.current.set(id, pr); g.userData.dirty = false
+        animProg.current.set(id, pr); g.userData.dirty = false; animating = true
         const e = pr < 0.5 ? 2 * pr * pr : 1 - Math.pow(-2 * pr + 2, 2) / 2
         if (a.kind === 'rot') g.quaternion.setFromAxisAngle(new THREE.Vector3(...a.axis).normalize(), a.ang * e)
         else g.position.set(a.dir[0] * a.dist * e, a.dir[1] * a.dist * e, a.dir[2] * a.dist * e)
       }
       const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight
+      const fast = animating || performance.now() - lastMove < 160
+      if (fast) { hqPending = true; need = Math.max(need, 1) } else if (hqPending) { hqPending = false; need = Math.max(need, 1) }
+      if (renderer.__w !== w || renderer.__h !== h) { renderer.__w = w; renderer.__h = h; need = Math.max(need, 2) }
+      if (need <= 0) { raf = requestAnimationFrame(tick); return }
+      need--
       // гладкость линий: плотность пикселей картинки (до 4×), при смене — пересоздаём сглаживание
-      const wantPr = Math.min(4, Math.min(window.devicePixelRatio || 1, 2) * smoothRef.current)
+      // «Конструкторский» (быстрый) режим: без теней и затенения, плотность картинки — как у экрана
+      const hq0 = qualRef.current === 'high'
+      dl.castShadow = hq0
+      const wantPr = Math.min(4, Math.min(window.devicePixelRatio || 1, 2) * (hq0 ? smoothRef.current : 1))
       if (Math.abs(renderer.getPixelRatio() - wantPr) > 0.01) {
         renderer.setPixelRatio(wantPr); renderer.setSize(w, h, false)
         if (comp) { comp.dispose?.(); comp = null }
@@ -445,11 +466,14 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
           comp.setPixelRatio(renderer.getPixelRatio()); comp.setSize(w, h)
         } catch { comp = null; qualRef.current = 'std' }
       }
-      if (hq && comp) {
+      // тени пересчитываем, только когда картинка встала (вращение камеры их не меняет)
+      renderer.shadowMap.autoUpdate = !fast
+      if (!fast) renderer.shadowMap.needsUpdate = true
+      if (hq && comp && !fast) {
         scene.background = bgRef.current
         if (comp.__w !== w || comp.__h !== h) { comp.setSize(w, h); comp.__w = w; comp.__h = h }
         comp.render()
-      } else { scene.background = null; renderer.render(scene, camera) }
+      } else { scene.background = hq ? bgRef.current : null; renderer.render(scene, camera) }
       renderer.autoClear = false; renderer.render(over, camera); renderer.autoClear = true
       // мини-оси в правом нижнем углу поворачиваются вместе с камерой (слева — кнопки проёмов)
       const s = cubeSize().s
@@ -574,9 +598,9 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     renderer.domElement.addEventListener('pointermove', onMove)
     renderer.domElement.addEventListener('pointerup', onUp)
     renderer.domElement.addEventListener('pointercancel', onUp)
-    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false, dl, floor, over, hemi }
+    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false, dl, floor, over, hemi, wake }
     return () => {
-      alive = false; cancelAnimationFrame(raf); ro.disconnect()
+      alive = false; cancelAnimationFrame(raf); ro.disconnect(); WAKERS.delete(wake)
       renderer.domElement.removeEventListener('pointerdown', onDown, { capture: true })
       renderer.domElement.removeEventListener('pointermove', onMove)
       renderer.domElement.removeEventListener('pointerup', onUp)

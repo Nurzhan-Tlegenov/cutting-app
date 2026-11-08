@@ -1603,6 +1603,8 @@ export default function ConstructorPage() {
           <button type="button" title="Вид модели" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(viewMenu ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setViewMenu(v => !v)}>{(VIEW_MODES.find(m => m[0] === viewMode) || VIEW_MODES[0])[1]}</button>
           {viewMenu && <div style={{ direction: 'ltr', position: 'absolute', right: 'calc(100% + 6px)', top: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: 5, boxShadow: '0 4px 14px rgba(0,0,0,.25)' }}>
             {VIEW_MODES.map(([k, ic, t]) => <button key={k} type="button" style={{ ...chipS(viewMode === k), padding: '5px 10px', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => { setLook({ view: k }); setViewMenu(false) }}>{ic} {t}</button>)}
+            <div style={{ borderTop: '1px solid var(--border)', margin: '2px 0' }} />
+            {[['std', '⚡', 'Конструкторский (быстро)'], ['high', '✨', 'Реалистичный']].map(([k, ic, t]) => <button key={k} type="button" style={{ ...chipS((look.quality || 'high') === k), padding: '5px 10px', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => { setLook({ quality: k }); setViewMenu(false) }}>{ic} {t}</button>)}
           </div>}
         </div>
  <button type="button" title="Отображение: подписи, линии, фон, кромка, тема" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px' }} onClick={() => { setTab('scene'); foldApi.toggle('look', true) }}>⚙</button>
@@ -1648,7 +1650,7 @@ export default function ConstructorPage() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!edgeLook.glow} onChange={e => setEdgeLook({ glow: e.target.checked })} />Светящаяся (видна сквозь детали)</label>
         <div style={sect}>Качество картинки</div>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Яркость</span><input type="range" min="0.5" max="1.6" step="0.02" value={look.exposure ?? 1} onChange={e => { const v = Number(e.target.value); setLook({ exposure: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.exposure ?? 1) * 100)}%</span></label>
-        <Chips value={look.quality} onChange={v => setLook({ quality: v })} options={[['high', 'Максимальное (тени, затенение в углах)'], ['std', 'Обычное (быстрее)']]}
+        <Chips value={look.quality} onChange={v => setLook({ quality: v })} options={[['high', 'Реалистичный (тени, затенение в углах)'], ['std', 'Конструкторский (быстро, без теней)']]}
           hint="Максимальное — как в программах визуализации: мягкие тени и затенение в стыках и углах. На слабом телефоне может подтормаживать — тогда «Обычное»." />
         <div style={sect}>Свет</div>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Основной свет</span><input type="range" min="0.2" max="2" step="0.05" value={look.lightKey ?? 1} onChange={e => { const v = Number(e.target.value); setLook({ lightKey: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.lightKey ?? 1) * 100) + '%'}</span></label>
