@@ -434,8 +434,11 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         else g.position.set(a.dir[0] * a.dist * e, a.dir[1] * a.dist * e, a.dir[2] * a.dist * e)
       }
       const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight
-      const fast = animating || performance.now() - lastMove < 160
+      // крутим камеру — быстрые кадры (без затенения в углах); анимация двери / ящика — в полном качестве
+      const orbit = performance.now() - lastMove < 160
+      const fast = orbit
       if (fast) { hqPending = true; need = Math.max(need, 1) } else if (hqPending) { hqPending = false; need = Math.max(need, 1) }
+      if (animating) need = Math.max(need, 1)
       if (renderer.__w !== w || renderer.__h !== h) { renderer.__w = w; renderer.__h = h; need = Math.max(need, 2) }
       if (need <= 0) { raf = requestAnimationFrame(tick); return }
       need--
@@ -461,19 +464,21 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
           const ao = new GTAOPass(scene, camera, w, h)
           ao.updateGtaoMaterial({ radius: 140, distanceExponent: 1.3, thickness: 60, scale: 1.25, samples: 16 })
           ao.blendIntensity = 1
-          comp.addPass(ao)
+          comp.addPass(ao); comp.__ao = ao
           comp.addPass(new OutputPass())
           comp.setPixelRatio(renderer.getPixelRatio()); comp.setSize(w, h)
         } catch { comp = null; qualRef.current = 'std' }
       }
-      // тени пересчитываем, только когда картинка встала (вращение камеры их не меняет)
-      renderer.shadowMap.autoUpdate = !fast
-      if (!fast) renderer.shadowMap.needsUpdate = true
-      if (hq && comp && !fast) {
+      // тени от камеры не зависят: при вращении не пересчитываем; двигается дверь / ящик — пересчитываем сразу
+      renderer.shadowMap.autoUpdate = animating || !fast
+      // один и тот же путь (составитель с тональной обработкой) и при вращении, и в покое — иначе фон и свет «мигают»;
+      // при вращении выключено только затенение в углах
+      if (hq && comp) {
         scene.background = bgRef.current
+        if (comp.__ao) comp.__ao.enabled = !fast
         if (comp.__w !== w || comp.__h !== h) { comp.setSize(w, h); comp.__w = w; comp.__h = h }
         comp.render()
-      } else { scene.background = hq ? bgRef.current : null; renderer.render(scene, camera) }
+      } else { scene.background = null; renderer.render(scene, camera) }
       renderer.autoClear = false; renderer.render(over, camera); renderer.autoClear = true
       // мини-оси в правом нижнем углу поворачиваются вместе с камерой (слева — кнопки проёмов)
       const s = cubeSize().s
