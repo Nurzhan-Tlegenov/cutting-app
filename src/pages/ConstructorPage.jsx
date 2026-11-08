@@ -23,7 +23,7 @@ import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS, partJoints } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { newLinearJob, readJobs, writeJobs, LINEAR_FEATURE } from '../lib/linearJobs'
-import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, partToDetail, overrideFromDraft, isFigured, PROJECT_DEFAULTS, mountOf } from '../lib/cadModel'
+import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, partToDetail, overrideFromDraft, isFigured, PROJECT_DEFAULTS, mountOf, POS_MODES, partPositions } from '../lib/cadModel'
 import { listProjects, loadProject, saveProject, deleteProject, isLocal, CAD_SQL_HINT } from '../lib/cadStore'
 
 const ContourEditor = lazy(() => import('../components/ContourEditor'))
@@ -1191,11 +1191,14 @@ function SceneList({ project, setProject, parts, selected, onSelect, onAdd, libr
 }
 
 function ProjectSettings({ project, setProject }) {
+  const { user } = useAuth()
   const st = { ...PROJECT_DEFAULTS, ...project.settings }
   const room = { ...PROJECT_DEFAULTS.room, ...(st.room || {}) }
   const setSt = patch => setProject({ ...project, settings: { ...st, ...patch } })
   return (<details style={{ marginTop: 14 }} open={false}>
     <summary style={{ ...sect, cursor: 'pointer', margin: '0 0 6px' }}>Настройки проекта и комната</summary>
+    <Chips label="Позиции деталей (в заказе, на бирках)" value={st.posMode || 'seq'} onChange={v => { setSt({ posMode: v }); saveUserSettings({ cadPosMode: v }, user) }} options={POS_MODES}
+      hint="По корпусам: первый корпус — 01, его детали — 01.01, 01.02…; второй — 02.01, 02.02… Порядок корпусов — как в списке сцены. Выбор запоминается за аккаунтом." />
     <Chips label="Крепёж на стыках плит" value={st.joint} onChange={v => setSt({ joint: v })} options={JOINTS}
       hint="Стыки находятся сами: торец детали упирается в пласть другой. Конфирмат — сквозное Ø7 в пласть и Ø5 в торец; шкант — Ø8×12 в пласть и Ø8×20 в торец. 50 мм от концов стыка, длинный стык — ещё посередине. Присадка уходит в детали заказа." />
     <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={st.hardwareHoles !== false} onChange={e => setSt({ hardwareHoles: e.target.checked })} />Отверстия фурнитуры: петли (чашка Ø35 и планка), полкодержатели, направляющие</label>
@@ -1357,6 +1360,8 @@ export default function ConstructorPage() {
       // крепёж фурнитуры — за аккаунтом: в проекте его ещё нет — берём из настроек аккаунта
       if (!p.settings?.mount) { try { const am = getUserSettings(user)?.cadMount; if (am) p = { ...p, settings: { ...(p.settings || {}), mount: am } } } catch { /* нет */ } }
       // свои схемы крепежа — за аккаунтом: добавляем к схемам проекта, чтобы ★ в проекте работали
+      // нумерация позиций деталей — за аккаунтом
+      if (!p.settings?.posMode) { try { const pm = getUserSettings(user)?.cadPosMode; if (pm) p = { ...p, settings: { ...(p.settings || {}), posMode: pm } } } catch { /* нет */ } }
       try { const aj = getUserSettings(user)?.cadJointSchemes; if (aj) p = { ...p, settings: { ...(p.settings || {}), jointSchemes: { ...aj, ...(p.settings?.jointSchemes || {}) } } } } catch { /* нет */ }
       projRef.current = p; setProjectState(p); setSelected(null); setFitKey(k => k + 1) }).catch(e => { if (a) setError(e.message) })
     return () => { a = false }
@@ -1645,21 +1650,21 @@ export default function ConstructorPage() {
           <button type="button" style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setSelBlock(null)}>✕</button>
         </div>}
       </CadView>
-      <div style={{ position: 'absolute', right: 8, top: 8, bottom: 26, display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(auto-fill, 40px)', gap: 6, direction: 'rtl', alignContent: 'start', pointerEvents: 'none' }}>
-        <button type="button" title="Показать всё" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
+      <div style={{ position: 'absolute', right: 8, top: 8, bottom: 26, display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(auto-fill, 38px)', gridAutoColumns: '38px', gap: 6, direction: 'rtl', alignContent: 'start', justifyContent: 'start', pointerEvents: 'none' }}>
+        <button type="button" title="Показать всё" style={{ ...btnS(), pointerEvents: 'auto', width: 38, height: 38, padding: 0, boxSizing: 'border-box' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
         <div style={{ position: 'relative', pointerEvents: 'auto' }}>
-          <button type="button" title="Вид модели" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(viewMenu ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setViewMenu(v => !v)}>{(VIEW_MODES.find(m => m[0] === viewMode) || VIEW_MODES[0])[1]}</button>
+          <button type="button" title="Вид модели" style={{ ...btnS(), pointerEvents: 'auto', width: 38, height: 38, padding: 0, boxSizing: 'border-box', ...(viewMenu ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setViewMenu(v => !v)}>{(VIEW_MODES.find(m => m[0] === viewMode) || VIEW_MODES[0])[1]}</button>
           {viewMenu && <div style={{ direction: 'ltr', position: 'absolute', right: 'calc(100% + 6px)', top: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: 5, boxShadow: '0 4px 14px rgba(0,0,0,.25)' }}>
             {VIEW_MODES.map(([k, ic, t]) => <button key={k} type="button" style={{ ...chipS(viewMode === k), padding: '5px 10px', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => { setLook({ view: k }); setViewMenu(false) }}>{ic} {t}</button>)}
             <div style={{ borderTop: '1px solid var(--border)', margin: '2px 0' }} />
             {[['std', '⚡', 'Конструкторский (быстро)'], ['high', '✨', 'Реалистичный']].map(([k, ic, t]) => <button key={k} type="button" style={{ ...chipS((look.quality || 'high') === k), padding: '5px 10px', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => { setLook({ quality: k }); setViewMenu(false) }}>{ic} {t}</button>)}
           </div>}
         </div>
- <button type="button" title="Отображение: подписи, линии, фон, кромка, тема" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px' }} onClick={() => { setTab('scene'); foldApi.toggle('look', true) }}>⚙</button>
-        <button type="button" title="Подсветка кромки" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(edgeLook.on ? { color: edgeLook.color, borderColor: edgeLook.color } : {}) }} onClick={() => setEdgeLook({ on: !edgeLook.on })}>▭</button>
-        <button type="button" title="Двигать выбранный элемент пальцем по полу" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(moveMode ? { color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setMoveMode(v => !v)}>✥</button>
-        <button type="button" title="Габаритные размеры корпусов" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(look.dims !== false ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setLook({ dims: look.dims === false })}>⟷</button>
-        <button type="button" title="Показать присадку" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(showHoles ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowHoles(v => !v)}>⊙</button>
+ <button type="button" title="Отображение: подписи, линии, фон, кромка, тема" style={{ ...btnS(), pointerEvents: 'auto', width: 38, height: 38, padding: 0, boxSizing: 'border-box' }} onClick={() => { setTab('scene'); foldApi.toggle('look', true) }}>⚙</button>
+        <button type="button" title="Подсветка кромки" style={{ ...btnS(), pointerEvents: 'auto', width: 38, height: 38, padding: 0, boxSizing: 'border-box', ...(edgeLook.on ? { color: edgeLook.color, borderColor: edgeLook.color } : {}) }} onClick={() => setEdgeLook({ on: !edgeLook.on })}>▭</button>
+        <button type="button" title="Двигать выбранный элемент пальцем по полу" style={{ ...btnS(), pointerEvents: 'auto', width: 38, height: 38, padding: 0, boxSizing: 'border-box', ...(moveMode ? { color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setMoveMode(v => !v)}>✥</button>
+        <button type="button" title="Габаритные размеры корпусов" style={{ ...btnS(), pointerEvents: 'auto', width: 38, height: 38, padding: 0, boxSizing: 'border-box', ...(look.dims !== false ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setLook({ dims: look.dims === false })}>⟷</button>
+        <button type="button" title="Показать присадку" style={{ ...btnS(), pointerEvents: 'auto', width: 38, height: 38, padding: 0, boxSizing: 'border-box', ...(showHoles ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowHoles(v => !v)}>⊙</button>
       </div>
       {project.items.length > 0 && (() => { const b = sceneBox(parts); return <div style={{ position: 'absolute', right: 8, bottom: 4, fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: '1px 6px' }}>{Math.round(b[3] - b[0])} × {Math.round(b[4] - b[1])} × {Math.round(b[5] - b[2])}</div> })()}
     </div>
@@ -1767,7 +1772,7 @@ export default function ConstructorPage() {
               <button type="button" style={btnS(true)} onClick={() => {
                 const map = projectDrill(project, pp).map
                 const own2 = parts.filter(p => p.item.id === selItem.id)
-                const d = partToDetail(sp, own2.indexOf(sp) + 1, map.get(sp.pid) || [])
+                const d = partToDetail(sp, partPositions(project, parts)?.get(sp.pid) ?? own2.indexOf(sp) + 1, map.get(sp.pid) || [])
                 setEditPart({ pid: sp.pid, itemId: selItem.id, key: sp.key, draft: d })
               }}>✎ Контур, вырезы, присадка</button>
               {(sp.ov || sp.ovStale) && <button type="button" style={btnS()} onClick={() => {
@@ -1784,6 +1789,7 @@ export default function ConstructorPage() {
                 <JointPick customs={jointSchemes} value={selItem.joint?.[sp.key]} onChange={v => { const j = { ...(selItem.joint || {}) }; if (v) j[sp.key] = v; else delete j[sp.key]; setItem({ ...selItem, joint: j }) }} />
                 <PartJoints parts={parts} sp={sp} project={project} setProject={setProject} customs={jointSchemes} />
                 <JointPick customs={jointSchemes} label="Крепёж во всём проекте (все стыки без своей схемы)" emptyText="" value={project.settings?.joint || PROJECT_DEFAULTS.joint} onChange={v => setProject({ ...project, settings: { ...project.settings, joint: v } })} />
+                <Chips label="Позиции деталей (в заказе, на бирках)" value={project.settings?.posMode || 'seq'} onChange={v => { setProject({ ...project, settings: { ...project.settings, posMode: v } }); saveUserSettings({ cadPosMode: v }, user) }} options={POS_MODES} />
                 <Fold id="jschemes" title="Свои схемы крепежа" right="за аккаунтом"><JointSchemes customs={jointSchemes} setCustoms={setJointSchemes} /></Fold>
               </>}
             </div>

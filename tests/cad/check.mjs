@@ -365,6 +365,15 @@ for (const rot of [0, 90, 180, 270]) {
   ok(td.some(d => d.d === 5 && d.kind === 'edge') && td.some(d => d.d === 8 && d.kind === 'edge') && td.some(d => d.d === 15 && d.kind === 'face'), 'custom holes in B ' + JSON.stringify(td.map(d => [d.d, d.kind])))
 }
 
+// позиции деталей по корпусам: 01.01, 02.01…
+{
+  const a1 = { ...newItem('cabinet', { p: { W: 600, H: 720, D: 500 } }), name: 'Тумба' }, a2 = { ...newItem('cabinet', { p: { W: 800, H: 2000, D: 560 } }), name: 'Шкаф', pos: { x: 700, y: 0, z: 0 } }
+  let det = exportAll({ items: [a1, a2], settings: { posMode: 'hier' } }).details
+  ok(det.some(d => d.contour.meta.pos === '01.01') && det.some(d => d.contour.meta.pos === '02.01') && det.every(d => /^0[12]\.\d\d$/.test(d.contour.meta.pos)), 'hier positions ' + det.map(d => d.contour.meta.pos).join(','))
+  det = exportAll({ items: [a1, a2], settings: { posMode: 'hierName' } }).details
+  ok(det.some(d => d.contour.meta.pos === 'Шкаф 02.01'), 'hier with name')
+}
+
 // петли блока: количество, обход полок по 32 мм, ручной сдвиг
 {
   const { cabinetParts, CAB_DEFAULTS } = await import('../../src/lib/cadCabinet.js')

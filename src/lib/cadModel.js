@@ -264,6 +264,25 @@ function editorGrooves(rec, place) {
 }
 
 /** Деталь сцены -> строка заказа (как из импорта): размеры, кромка, пазы и 3D-положение в contour.meta */
+/**
+ * Позиции деталей проекта (настройка проекта posMode, за аккаунтом):
+ * seq — сквозная нумерация в своём списке (как было); hier — по корпусам: корпус 01, его детали 01.01, 01.02…;
+ * hierName — то же с названием корпуса: «Тумба 01.01». -> Map(pid -> позиция) или null (seq)
+ */
+export const POS_MODES = [['seq', 'Сквозная: 1, 2, 3…'], ['hier', 'По корпусам: 01.01, 01.02…'], ['hierName', 'По корпусам с названием: «Тумба 01.01»']]
+export function partPositions(project, parts) {
+  const mode = project?.settings?.posMode || 'seq'
+  if (mode === 'seq') return null
+  const p2 = n => String(n).padStart(2, '0')
+  const items = (project?.items || []).filter(it => (parts || []).some(sp => sp.item.id === it.id && sp.kind === 'sheet'))
+  const out = new Map()
+  items.forEach((it, ii) => {
+    const own = parts.filter(sp => sp.item.id === it.id && sp.kind === 'sheet')
+    own.forEach((sp, k) => out.set(sp.pid, `${mode === 'hierName' && it.name ? it.name + ' ' : ''}${p2(ii + 1)}.${p2(k + 1)}`))
+  })
+  return out
+}
+
 export function partToDetail(sp, pos, drill = []) {
   const { place } = sp
   const W = place.W, L = place.L, T = place.T
@@ -316,8 +335,9 @@ export function exportForOrder(project, groupKey) {
   const rot = project.settings?.rotatable !== false
   const pp = projectParts(project)
   const { map } = projectDrill(project, pp)
-  const items = g.parts.map((sp, i) => ({ ...partToDetail(sp, i + 1, map.get(sp.pid) || []), rotatable: rot }))
-  const others = groups.filter(x => x !== g).flatMap(x => x.parts).map((sp, i) => partToDetail(sp, i + 1, map.get(sp.pid) || []))
+  const P = partPositions(project, pp.parts)
+  const items = g.parts.map((sp, i) => ({ ...partToDetail(sp, P?.get(sp.pid) ?? i + 1, map.get(sp.pid) || []), rotatable: rot }))
+  const others = groups.filter(x => x !== g).flatMap(x => x.parts).map((sp, i) => partToDetail(sp, P?.get(sp.pid) ?? i + 1, map.get(sp.pid) || []))
   const { parts } = pp
   const extras = parts.filter(sp => sp.kind !== 'sheet' && !sp.vis).map(partToExtra)
   return { items, material: g.material, thickness: g.thickness, orderName: project.name || '', scene: { parts: others, extras, hardware: [], meshes: [] }, linear: linearJobs(project, parts) }
@@ -347,7 +367,8 @@ export function exportAll(project) {
   const pp = projectParts(project)
   const { parts } = pp
   const { map } = projectDrill(project, pp)
-  const sheets = parts.filter(sp => sp.kind === 'sheet').map((sp, i) => partToDetail(sp, i + 1, map.get(sp.pid) || []))
+  const P = partPositions(project, parts)
+  const sheets = parts.filter(sp => sp.kind === 'sheet').map((sp, i) => partToDetail(sp, P?.get(sp.pid) ?? i + 1, map.get(sp.pid) || []))
   const extras = parts.filter(sp => sp.kind !== 'sheet' && !sp.vis).map(partToExtra)
   return { details: sheets, scene: { parts: [], extras, hardware: [], meshes: [] } }
 }
