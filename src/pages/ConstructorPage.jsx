@@ -348,7 +348,7 @@ function Fold({ id, title, def = false, on, onToggle, right, children }) {
   return (
     <div style={{ borderTop: '0.5px solid var(--border)', padding: '7px 0 4px', marginTop: 4 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        {on !== undefined && <input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!on} onChange={e => onToggle?.(e.target.checked)} />}
+        {on !== undefined && <input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!on} onChange={e => { onToggle?.(e.target.checked); if (e.target.checked && !open) toggle(id, true) }} />}
         <button type="button" onClick={() => toggle(id, !open)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'none', padding: 0, cursor: 'pointer', color: 'var(--text)', textAlign: 'left', minWidth: 0 }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: enabled ? 'var(--text)' : 'var(--text-hint)' }}>{title}</span>
           {right && <span style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>· {right}</span>}
@@ -500,9 +500,9 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
       </Sub>}
     </Fold>
 
-    <Fold id="back" title="Задняя стенка" on={p.back !== 'none'} onToggle={on => up(on ? { back: p.backLast && p.backLast !== 'none' ? p.backLast : 'groove' } : { back: 'none', backLast: p.back })}
+    <Fold id="back2" title="Задняя стенка" def on={p.back !== 'none'} onToggle={on => up(on ? { back: p.backLast && p.backLast !== 'none' ? p.backLast : 'groove' } : { back: 'none', backLast: p.back })}
       right={{ groove: 'в паз', overlay: 'накладная', inset: 'вкладная' }[p.back] || ''}>
-      <Chips value={p.back} onChange={v => up({ back: v })} options={[['groove', 'В паз'], ['overlay', 'Накладная'], ['inset', 'Вкладная ЛДСП']]}
+      <Chips label="Как ставится" value={p.back} onChange={v => up({ back: v })} options={[['groove', 'В паз'], ['overlay', 'Накладная'], ['inset', 'Вкладная ЛДСП']]}
         hint="Нет боковины, но есть крайняя вертикальная панель — задняя стенка идёт до неё (панель становится на всю глубину и получает паз)." />
       {(p.back === 'groove' || p.back === 'overlay') && <Sub>
         <Grid cols={2}><TextField label="Материал" value={p.backMaterial} onChange={v => up({ backMaterial: v })} list="cad-mats" /><NumField label="Толщина" value={p.backT} onChange={v => up({ backT: v })} min={1} /></Grid>
