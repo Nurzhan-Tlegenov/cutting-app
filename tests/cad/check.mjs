@@ -352,6 +352,16 @@ for (const rot of [0, 90, 180, 270]) {
   ok(hk.length === 2 && hk.every(d => d.d === 6), 'hook holes in bottom rear ' + JSON.stringify(hk))
 }
 
+// фасады МДФ — без кромки
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const it = newItem('cabinet', { p: { W: 600, H: 720, D: 560, facadeKind: 'mdf', tree: newNode({ id: 'root', front: { type: 'doors', n: 1 } }) } })
+  const door = projectParts({ items: [it] }).parts.find(p => p.role === 'фасад')
+  ok(!Object.keys(door.edges || {}).length, 'mdf facade without edge ' + JSON.stringify(door.edges))
+  const it2 = newItem('cabinet', { p: { W: 600, H: 720, D: 560, tree: newNode({ id: 'root', front: { type: 'doors', n: 1 } }) } })
+  ok(projectParts({ items: [it2] }).parts.find(p => p.role === 'фасад').edges?.all, 'ldsp facade edged')
+}
+
 // торцевая ручка с язычком: козырёк выступает от лица фасада на 20 мм
 {
   const { newNode } = await import('../../src/lib/cadCabinet.js')
@@ -384,6 +394,12 @@ for (const rot of [0, 90, 180, 270]) {
     const g3 = roundedSlab([16, 720, 560], 0, {}, 4, bd)
     g3.computeBoundingBox()
     ok(Math.abs(g3.boundingBox.max.z - g3.boundingBox.min.z - 560) < 1e-6 && g3.groups.length === 2, 'band without radius')
+    // развёртка пласти: u, v у вершин верхней пласти совпадают с положением (декор не ложится вкось)
+    const g4 = roundedSlab([600, 16, 500], 1, { '+z': 1 }, 4, null)
+    const P4 = g4.attributes.position.array, U4 = g4.attributes.uv.array
+    let skew = 0
+    for (let i = 0; i < P4.length / 3; i++) if (Math.abs(P4[i * 3 + 1] - 8) < 1e-6) { if (Math.abs(U4[i * 2] - (P4[i * 3] + 300) / 600) > 1e-6 || Math.abs(U4[i * 2 + 1] - (P4[i * 3 + 2] + 250) / 500) > 1e-6) skew++ }
+    ok(skew === 0, 'top face uv follows position ' + skew)
   }
 }
 

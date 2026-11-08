@@ -259,7 +259,8 @@ function HandleEditor({ h, onChange, door }) {
 }
 
 // параметры корпуса, которые запоминаются за аккаунтом: поменял в любом корпусе — так будет и в новых
-const CAB_REMEMBER = ['material', 't', 'facadeMaterial', 'facadeT', 'backMaterial', 'backT', 'edgeFront', 'edgeFacade', 'edgeBody', 'grooveOffset', 'grooveDepth', 'grooveWidth',
+const VIEW_MODES = [['tex', '◼', 'Сплошной с текстурой'], ['solid', '◧', 'Сплошной с линиями'], ['xray', '◫', 'Прозрачный с линиями'], ['lines', '▢', 'Только линии']]
+const CAB_REMEMBER = ['material', 't', 'facadeMaterial', 'facadeT', 'facadeKind', 'backMaterial', 'backT', 'edgeFront', 'edgeFacade', 'edgeBody', 'grooveOffset', 'grooveDepth', 'grooveWidth',
   'backGapL', 'backGapR', 'backGapB', 'backGapT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'hingeCup', 'hingeEnd', 'plateFront', 'box', 'slideGap', 'slideLen',
   'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce', 'handleDoor', 'handleDrawer', 'pinFront', 'pinBelow', 'plateType']
 // ── крепёж фурнитуры: на саморезы (без присадки) или сверлить d × глубина; запоминается за аккаунтом ──
@@ -449,7 +450,8 @@ function MatLookEditor({ name, looks, setLooks }) {
           <input type="file" accept="image/*" style={{ display: 'none' }} onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; try { set({ tex: await shrinkImage(f) }) } catch { window.alert('Не удалось открыть картинку') } }} /></label>
         <button type="button" style={{ ...btnS(true), padding: '4px 9px', fontSize: 12.5 }} onClick={() => setCat(v => !v)}>🌐 Декор из интернета</button>
         {own.tex && <><img src={own.tex} alt="" style={{ width: 34, height: 24, objectFit: 'cover', borderRadius: 4 }} />
-          <span>размер картинки</span><SmallNum width={56} value={own.scale || 600} onChange={v => v > 50 && set({ scale: v })} /><span>мм</span>
+          <span>картинка: вдоль волокна</span><SmallNum width={60} value={own.scale || 600} onChange={v => v > 50 && set({ scale: v })} /><span>× поперёк</span><SmallNum width={60} value={own.scaleW || own.scale || 600} onChange={v => v > 50 && set({ scaleW: v })} /><span>мм</span>
+          <button type="button" style={{ ...chipS(own.scale === 2800 && own.scaleW === 2070), padding: '2px 8px' }} onClick={() => set({ scale: 2800, scaleW: 2070 })}>= лист 2800×2070</button>
           <span>декор на фото</span>{[['v', '↕ вертикально'], ['h', '↔ горизонтально']].map(([k, t]) => <button key={k} type="button" style={{ ...chipS((own.dir || 'v') === k), padding: '2px 8px' }} onClick={() => set({ dir: k === 'v' ? null : k })}>{t}</button>)}
           <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => set({ tex: null })}>убрать фото</button></>}
         {(own.color || own.tex) && <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => setLooks(Object.fromEntries(Object.entries(looks || {}).filter(([k]) => k !== name)))}>↺ по умолчанию</button>}
@@ -781,7 +783,31 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
   }
   const clearFronts = type => { const T = JSON.parse(JSON.stringify(tree)); (function w(n) { if (n.front?.type === type) n.front = null; (n.children || []).forEach(w) })(T); return T }
 
+  const fKind = p.facadeKind || (p.facadeStyle && p.facadeStyle !== 'flat' ? 'mdf' : 'ldsp')
   return (<>
+    <Fold id="size" title="Габарит" def right={`${p.W}×${p.H}×${p.D}`}>
+      <Grid><NumField label="Ширина" value={p.W} onChange={v => up({ W: v })} min={50} /><NumField label="Высота" value={p.H} onChange={v => up({ H: v })} min={50} /><NumField label="Глубина" value={p.D} onChange={v => up({ D: v })} min={50} /></Grid>
+    </Fold>
+
+    {/* порядок постройки: габарит → материалы (каркас обычно одного цвета, фасады — отдельно: ЛДСП с кромкой или МДФ) → кромка */}
+    <Fold id="mats" title="Материалы" def right={`${p.material} / ${p.facadeMaterial}`}>
+      <div style={sect}>Каркас</div>
+      <Grid cols={2}><TextField label="Материал (весь каркас)" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><NumField label="Толщина" value={p.t} onChange={v => up({ t: v })} min={1} /></Grid>
+      <div style={sect}>Фасады</div>
+      <Chips value={fKind} onChange={v => up({ facadeKind: v, ...(v === 'ldsp' ? { facadeStyle: 'flat' } : {}) })} options={[['ldsp', 'ЛДСП с кромкой'], ['mdf', 'МДФ (крашеный, можно фрезеровку)']]} />
+      <Grid cols={2}><TextField label="Материал (все фасады)" value={p.facadeMaterial} onChange={v => up({ facadeMaterial: v })} list="cad-mats" /><NumField label="Толщина" value={p.facadeT} onChange={v => up({ facadeT: v })} min={1} /></Grid>
+      {fKind === 'mdf' && <Chips label="Фрезеровка фасадов (по умолчанию для всех)" value={p.facadeStyle || 'flat'} onChange={v => up({ facadeStyle: v })} options={FACADE_STYLES} />}
+      {Object.keys(it.mat || {}).length > 0 && <button type="button" style={{ ...btnS(), marginBottom: 6 }} onClick={() => set({ ...it, p, mat: {} })}>↺ Убрать свои материалы у отдельных деталей ({Object.keys(it.mat).length})</button>}
+    </Fold>
+    <Fold id="edges" title="Кромка" def right={`${p.edgeFront || '—'} / ${fKind === 'mdf' ? 'МДФ' : p.edgeFacade || '—'}`}>
+      <Chips label="Каркас — вся кромка разом" value={String(p.edgeFront || '') === String(p.edgeBody || '') ? String(p.edgeFront || '') : '~'} onChange={v => up({ edgeFront: v, edgeBody: v })} options={[['0,4', '0,4'], ['1', '1'], ['2', '2'], ['', 'без кромки']]} />
+      <Grid cols={2}><TextField label="Каркас спереди" value={p.edgeFront} onChange={v => up({ edgeFront: v })} /><TextField label="Прочее (ящики, задние торцы)" value={p.edgeBody} onChange={v => up({ edgeBody: v })} /></Grid>
+      {fKind === 'mdf'
+        ? <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 6px' }}>Фасады МДФ — без кромки (крашеные).</p>
+        : <><Chips label="Фасады — по периметру" value={String(p.edgeFacade || '')} onChange={v => up({ edgeFacade: v })} options={[['0,4', '0,4'], ['1', '1'], ['2', '2'], ['', 'без кромки']]} />
+          <Grid cols={2}><TextField label="Кромка фасадов" value={p.edgeFacade} onChange={v => up({ edgeFacade: v })} /></Grid></>}
+      <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Название вида кромки — как в бланке заказа (толщину и подрезку задаёте там). Выставленное запоминается за аккаунтом — в новых корпусах будет так же.</p>
+    </Fold>
     <Fold id="kind" title="Тип корпуса" def>
       <Chips value={p.kind || 'other'} onChange={v => up({ kind: v })} options={CAB_KINDS}
         hint="Тип нужен, чтобы менять сразу все корпуса одного типа: например, все верхние модули кухни — задняя стенка в паз." />
@@ -791,18 +817,6 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
         {CAB_PRESETS.map(([k, tt, v]) => <button key={k} type="button" style={chipS(false)}
           onClick={() => { if (window.confirm(`Заменить параметры корпуса шаблоном «${tt}»?`)) set({ ...it, name: tt, p: { ...CAB_DEFAULTS, ...Object.fromEntries(CAB_REMEMBER.map(k => [k, p[k]])), ...v } }) }}>{tt}</button>)}
       </div>
-    </Fold>
-    <Fold id="size" title="Габарит" def right={`${p.W}×${p.H}×${p.D}`}>
-      <Grid><NumField label="Ширина" value={p.W} onChange={v => up({ W: v })} min={50} /><NumField label="Высота" value={p.H} onChange={v => up({ H: v })} min={50} /><NumField label="Глубина" value={p.D} onChange={v => up({ D: v })} min={50} /></Grid>
-    </Fold>
-
-    <Fold id="mats" title="Материалы" def right={`${p.material} / ${p.facadeMaterial}`}>
-      <Grid cols={2}><TextField label="Корпус (весь)" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><TextField label="Фасады (все)" value={p.facadeMaterial} onChange={v => up({ facadeMaterial: v })} list="cad-mats" /></Grid>
-      {/* кромка разом: весь каркас (передние торцы и прочее) или все фасады */}
-      <Chips label="Кромка каркаса (вся)" value={String(p.edgeFront || '') === String(p.edgeBody || '') ? String(p.edgeFront || '') : '~'} onChange={v => up({ edgeFront: v, edgeBody: v })} options={[['0,4', '0,4'], ['1', '1'], ['2', '2'], ['', 'без кромки']]} />
-      <Chips label="Кромка фасадов (вся)" value={String(p.edgeFacade || '')} onChange={v => up({ edgeFacade: v })} options={[['0,4', '0,4'], ['1', '1'], ['2', '2'], ['', 'без кромки']]} />
-      <Chips label="Фрезеровка фасадов (по умолчанию для всех)" value={p.facadeStyle || 'flat'} onChange={v => up({ facadeStyle: v })} options={FACADE_STYLES} />
-      {Object.keys(it.mat || {}).length > 0 && <button type="button" style={{ ...btnS(), marginBottom: 6 }} onClick={() => set({ ...it, p, mat: {} })}>↺ Убрать свои материалы у отдельных деталей ({Object.keys(it.mat).length})</button>}
     </Fold>
     <Fold id="body" title="Каркас" def right={p.material}>
       <Grid cols={2}><TextField label="Материал" value={p.material} onChange={v => up({ material: v })} list="cad-mats" /><NumField label="Толщина" value={p.t} onChange={v => up({ t: v })} min={1} /></Grid>
@@ -929,8 +943,6 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
       <MountEditor mount={mount} setMount={setMount} />
     </Fold>
 
-    <div style={sect}>Кромка<Hint inline>Название вида кромки — как в бланке заказа (толщину и подрезку задаёте там). Каркас — передние торцы, фасады — по периметру.</Hint></div>
-    <Grid><TextField label="Каркас спереди" value={p.edgeFront} onChange={v => up({ edgeFront: v })} /><TextField label="Фасады" value={p.edgeFacade} onChange={v => up({ edgeFacade: v })} /><TextField label="Прочее" value={p.edgeBody} onChange={v => up({ edgeBody: v })} /></Grid>
 
     {sameKind > 0 && <div className="card" style={{ padding: '8px 10px', marginTop: 12 }}>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Применить к другим корпусам «{(CAB_KINDS.find(k => k[0] === p.kind) || [0, 'Другое'])[1]}» ({sameKind})</div>
@@ -1211,7 +1223,11 @@ export default function ConstructorPage() {
   const setLook = patch => setLookS(l => { const n = { ...l, ...patch }; saveUserSettings({ cadLook: n }, user); return n })
   const [theme, setThemeS] = useState(() => getTheme())
   useEffect(() => { const on = e => setThemeS(e.detail === 'dark' ? 'dark' : 'light'); window.addEventListener('themechange', on); return () => window.removeEventListener('themechange', on) }, [])
-  const viewLook = useMemo(() => ({ ...look, dark: theme === 'dark' }), [look, theme])
+  // вид модели (кнопка справа на модели, за аккаунтом): tex — сплошной с текстурой без линий, solid — сплошной с линиями,
+  // xray — полупрозрачный с линиями, lines — только линии
+  const viewMode = look.view || (look.lines === false ? 'tex' : 'solid')
+  const xray = viewMode === 'xray' || viewMode === 'lines'
+  const viewLook = useMemo(() => ({ ...look, dark: theme === 'dark', lines: viewMode !== 'tex', ...(viewMode === 'lines' ? { xrayOpacity: 0.02 } : {}) }), [look, theme, viewMode])
   // размеры проёмов на модели (кнопка 📏) — тоже за аккаунтом
   const showSizes = look.openSizes !== false
   const setShowSizes = f => setLook({ openSizes: typeof f === 'function' ? f(showSizes) : !!f })
@@ -1227,7 +1243,7 @@ export default function ConstructorPage() {
   const [tab, setTab] = useState('scene')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
-  const [xray, setXray] = useState(false)
+  const [viewMenu, setViewMenu] = useState(false)
   const [fitKey, setFitKey] = useState(0)
   const [toOrder, setToOrder] = useState(false)
   const [showHoles, setShowHoles] = useState(true)
@@ -1531,7 +1547,12 @@ export default function ConstructorPage() {
       </CadView>
       <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
-        <button type="button" title="Полупрозрачный вид" style={{ ...btnS(), padding: '6px 9px', ...(xray ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setXray(v => !v)}>◫</button>
+        <div style={{ position: 'relative' }}>
+          <button type="button" title="Вид модели" style={{ ...btnS(), padding: '6px 9px', ...(viewMenu ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setViewMenu(v => !v)}>{(VIEW_MODES.find(m => m[0] === viewMode) || VIEW_MODES[0])[1]}</button>
+          {viewMenu && <div style={{ position: 'absolute', right: 'calc(100% + 6px)', top: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: 5, boxShadow: '0 4px 14px rgba(0,0,0,.25)' }}>
+            {VIEW_MODES.map(([k, ic, t]) => <button key={k} type="button" style={{ ...chipS(viewMode === k), padding: '5px 10px', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => { setLook({ view: k }); setViewMenu(false) }}>{ic} {t}</button>)}
+          </div>}
+        </div>
  <button type="button" title="Отображение: подписи, линии, фон, кромка, тема" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => { setTab('scene'); foldApi.toggle('look', true) }}>⚙</button>
         <button type="button" title="Подсветка кромки" style={{ ...btnS(), padding: '6px 9px', ...(edgeLook.on ? { color: edgeLook.color, borderColor: edgeLook.color } : {}) }} onClick={() => setEdgeLook({ on: !edgeLook.on })}>▭</button>
         <button type="button" title="Двигать выбранный элемент пальцем по полу" style={{ ...btnS(), padding: '6px 9px', ...(moveMode ? { color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setMoveMode(v => !v)}>✥</button>
@@ -1559,7 +1580,10 @@ export default function ConstructorPage() {
             <button key={c} type="button" title={t} onClick={() => setLook({ labelColor: c })} style={{ width: 26, height: 26, borderRadius: 13, background: c, cursor: 'pointer', border: look.labelColor === c ? '3px solid var(--blue)' : '1px solid var(--border-md)' }} />)}
           <input type="color" value={look.labelColor} onChange={e => setLook({ labelColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></div>
         <div style={sect}>Вид деталей</div>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={look.lines !== false} onChange={e => setLook({ lines: e.target.checked })} />Линии контуров деталей (без них — сплошной вид, только материал и текстура)</label>
+        <Chips label="Вид модели (то же — кнопкой справа на модели)" value={viewMode} onChange={v => setLook({ view: v })} options={VIEW_MODES.map(([k, ic, t]) => [k, ic + ' ' + t])} />
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Гладкость линий</span><input type="range" min="1" max="2" step="0.25" value={look.smooth ?? 1} onChange={e => setLook({ smooth: Number(e.target.value) })} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.smooth ?? 1) * 100)}%</span></label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Толщина линий</span><input type="range" min="0.5" max="3" step="0.1" value={look.lineWidth ?? 1} onChange={e => setLook({ lineWidth: Number(e.target.value) })} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{(look.lineWidth ?? 1).toFixed(1)}</span></label>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '0 0 6px' }}>Гладкость выше — линии и края ровнее, но картинка тяжелее для телефона (быстрее садится батарея).</p>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Прозрачный вид ◫: насколько видно детали</span><input type="range" min="0.03" max="0.8" step="0.01" value={look.xrayOpacity ?? 0.3} onChange={e => { const v = Number(e.target.value); setLook({ xrayOpacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round((look.xrayOpacity ?? 0.3) * 100)}%</span></label>
         <div style={sect}>Линии деталей</div>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет линий каркаса</span><input type="color" value={look.lineColor} onChange={e => setLook({ lineColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>

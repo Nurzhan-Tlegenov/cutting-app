@@ -120,7 +120,7 @@ export const CAB_GROUPS = {
   body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'plinthBack', 'plinthBackOffset', 'railDepth', 'overhangFront', 'overhangSide', 'overhangL', 'overhangR', 'topRL', 'topRR', 'underTop', 'edgeFront', 'edgeBody',
     'sideL', 'sideR', 'sideFront', 'sideBack', 'topRails', 'topRailOffset', 'topDown', 'topFront', 'topBack', 'bottomRails', 'bottomRailOffset', 'bottomRailDepth', 'bottomUp', 'bottomFront', 'bottomBack'],
   back: ['back', 'backT', 'backMaterial', 'grooveOffset', 'grooveDepth', 'grooveWidth', 'backGapL', 'backGapR', 'backGapB', 'backGapT'],
-  fronts: ['facadeMaterial', 'facadeT', 'facadeStyle', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'plateType', 'hingeCount', 'handleDoor', 'handleDrawer'],
+  fronts: ['facadeMaterial', 'facadeT', 'facadeKind', 'facadeStyle', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'plateType', 'hingeCount', 'handleDoor', 'handleDrawer'],
   boxes: ['box', 'slideGap', 'slideLen', 'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce'],
 }
 
@@ -421,7 +421,9 @@ export function cabinetParts(params) {
 
   // ── наполнение: дерево проёмов ──
   const gap = num(p.gap, 3), fT = fT0, fMat = p.facadeMaterial || mat
-  const allE = { all: p.edgeFacade }
+  // фасады МДФ (крашеные) — без кромки
+  const fKind = p.facadeKind || (p.facadeStyle && p.facadeStyle !== 'flat' ? 'mdf' : 'ldsp')
+  const allE = fKind === 'mdf' || !p.edgeFacade ? {} : { all: p.edgeFacade }
   const openings = []        // проёмы в свету: { id, box, w, h, leaf, depth }
   const fronts = []          // проёмы с фасадом
   const shelfSetback = num(p.shelfSetback, 0)

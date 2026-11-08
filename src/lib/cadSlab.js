@@ -21,14 +21,22 @@ export function roundedSlab(size, ta, r, N = 4, bands = null) {
   const corner = i => { const a = sides[i], b = sides[(i + 1) % 4]; return [a.nu * hu + b.nu * hu, a.nv * hv + b.nv * hv] }   // угол между стороной i и i+1
   const buf = [{ pos: [], nor: [], uv: [] }, { pos: [], nor: [], uv: [] }]
   let pos, nor, uv
-  const toGroup = gi => { ({ pos, nor, uv } = buf[gi]) }
+  const toGroup = gi => { ({ pos, nor, uv } = buf[gi]); curG = gi }
+  // развёртка кромки (группа 1): вдоль торца — u, поперёк (по толщине) — v, в долях Lmax (одинаковый масштаб по обеим осям);
+  // edgeAlong — сторона, у которой рисуем торец (ось вдоль торца), null — полоски на пластях
+  let curG = 0, edgeAlong = null
+  const Lmax = Math.max(2 * hu, 2 * hv)
   toGroup(0)
   const V = (u, v, z, n) => {
     const p3 = [0, 0, 0]; p3[ua] = u; p3[va] = v; p3[ta] = z; pos.push(...p3)
     const n3 = [0, 0, 0]; n3[ua] = n[0]; n3[va] = n[1]; n3[ta] = n[2]; nor.push(...n3)
     // развёртка текстуры — как у пласти бруса в сцене (те же оси, что при расчёте повтора декора)
     const tu = ta === 0 ? 2 : 0, tv = ta === 2 ? 1 : ta === 0 ? 1 : 2
-    uv.push((p3[tu] + size[tu] / 2) / size[tu], (p3[tv] + size[tv] / 2) / size[tv])
+    if (curG === 1 && bands) {
+      if (edgeAlong === 'u') uv.push((u + hu) / Lmax, (z + ht) / Lmax)
+      else if (edgeAlong === 'v') uv.push((v + hv) / Lmax, (z + ht) / Lmax)
+      else uv.push((u + hu) / Lmax, (v + hv) / Lmax)
+    } else uv.push((p3[tu] + size[tu] / 2) / size[tu], (p3[tv] + size[tv] / 2) / size[tv])
   }
   const tri = (a, b, c) => { V(...a); V(...b); V(...c) }
   // точка профиля j стороны i у угла c (c — соседняя сторона)
@@ -40,7 +48,7 @@ export function roundedSlab(size, ta, r, N = 4, bands = null) {
   const J = P[0].length
   for (let i = 0; i < 4; i++) {
     const prev = (i + 3) % 4, next = (i + 1) % 4
-    toGroup(sides[i].b > 0 ? 1 : 0)
+    toGroup(sides[i].b > 0 ? 1 : 0); edgeAlong = sides[i].nu ? 'v' : 'u'
     for (let j = 0; j + 1 < J; j++) {
       const a = at(i, prev, j), b = at(i, next, j), c = at(i, next, j + 1), d = at(i, prev, j + 1)
       tri(a, d, c); tri(a, c, b)
@@ -53,6 +61,7 @@ export function roundedSlab(size, ta, r, N = 4, bands = null) {
       tri([...a.slice(0, 3), n], [...d.slice(0, 3), n], [...c.slice(0, 3), n]); tri([...a.slice(0, 3), n], [...c.slice(0, 3), n], [...b.slice(0, 3), n])
     }
   }
+  edgeAlong = null
   // пласти: сетка 3×3 — середина (материал) и полоски толщиной кромки у кромленых торцов (кромка)
   const e = i => (sides[i].b > 0 ? Math.max(sides[i].r, Math.min(sides[i].b, (i % 2 ? hv : hu) * 0.45)) : sides[i].r)
   const us = [-hu + sides[2].r, -hu + e(2), hu - e(0), hu - sides[0].r], vs = [-hv + sides[3].r, -hv + e(3), hv - e(1), hv - sides[1].r]
@@ -73,12 +82,17 @@ export function roundedSlab(size, ta, r, N = 4, bands = null) {
   g.setAttribute('uv', new THREE.Float32BufferAttribute([...buf[0].uv, ...buf[1].uv], 2))
   g.addGroup(0, n0, 0); if (n1) g.addGroup(n0, n1, 1)
   // обход граней — наружу (проверка по нормали первого треугольника каждой тройки; при развёрнутом базисе — переворачиваем)
-  const p3 = g.attributes.position.array, n3 = g.attributes.normal.array
+  const p3 = g.attributes.position.array, n3 = g.attributes.normal.array, uv2 = g.attributes.uv.array
   for (let k = 0; k < p3.length; k += 9) {
     const e1 = [p3[k + 3] - p3[k], p3[k + 4] - p3[k + 1], p3[k + 5] - p3[k + 2]], e2 = [p3[k + 6] - p3[k], p3[k + 7] - p3[k + 1], p3[k + 8] - p3[k + 2]]
     const cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2], cz = e1[0] * e2[1] - e1[1] * e2[0]
     const dn = cx * (n3[k] + n3[k + 3] + n3[k + 6]) + cy * (n3[k + 1] + n3[k + 4] + n3[k + 7]) + cz * (n3[k + 2] + n3[k + 5] + n3[k + 8])
-    if (dn < 0) for (let c = 0; c < 3; c++) { const t = p3[k + 3 + c]; p3[k + 3 + c] = p3[k + 6 + c]; p3[k + 6 + c] = t; const tn = n3[k + 3 + c]; n3[k + 3 + c] = n3[k + 6 + c]; n3[k + 6 + c] = tn }
+    if (dn < 0) {
+      for (let c = 0; c < 3; c++) { const t = p3[k + 3 + c]; p3[k + 3 + c] = p3[k + 6 + c]; p3[k + 6 + c] = t; const tn = n3[k + 3 + c]; n3[k + 3 + c] = n3[k + 6 + c]; n3[k + 6 + c] = tn }
+      // и развёртку текстуры — иначе декор на пласти ложится вкось
+      const t2 = uv2, q = (k / 9) * 6
+      for (let c = 0; c < 2; c++) { const t = t2[q + 2 + c]; t2[q + 2 + c] = t2[q + 4 + c]; t2[q + 4 + c] = t }
+    }
   }
   return g
 }

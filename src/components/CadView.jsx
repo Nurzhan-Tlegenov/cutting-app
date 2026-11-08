@@ -11,6 +11,9 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { verticesToPolygon } from '../lib/trueShapeNesting'
 import { roundedSlab, slabRadii, slabBands } from '../lib/cadSlab'
 import { detailHoles } from '../lib/partHoles'
@@ -245,7 +248,7 @@ function texOf(src) {
 }
 function lookOf(material, looks) {
   const own = looks?.[material]
-  if (own && (own.color || own.tex || own.gloss != null)) return { color: own.color || (own.tex ? '#ffffff' : lookOf(material)?.color), opacity: 1, tex: own.tex || null, scale: Number(own.scale) || 600, dir: own.dir || 'v', gloss: own.gloss ?? null }
+  if (own && (own.color || own.tex || own.gloss != null)) return { color: own.color || (own.tex ? '#ffffff' : lookOf(material)?.color), opacity: 1, tex: own.tex || null, scale: Number(own.scale) || 600, scaleW: Number(own.scaleW) || Number(own.scale) || 600, dir: own.dir || 'v', gloss: own.gloss ?? null }
   for (const [re, c, o] of LOOKS) if (re.test(material || '')) return { color: c, opacity: o }
   let h = 0
   for (const ch of String(material || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
@@ -270,6 +273,10 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
   const animObjs = useRef(new Map())
   const holeObjs = useRef([])
   const qualRef = useRef('high')
+  // гладкость линий (ползунок): во сколько раз чётче экрана рисуем картинку (1 — как сейчас, 2 — вдвое чётче)
+  const smoothRef = useRef(1)
+  useEffect(() => { smoothRef.current = Math.max(1, Math.min(2, Number(look.smooth) || 1)) }, [look.smooth])
+  const lineMats = useRef(new Set())   // толстые линии контура: им нужен размер экрана
   const bgRef = useRef(new THREE.Color('#eceff2'))
   const solidBg = look.bg === 'custom' ? look.bgColor : darkBg ? '#202226' : '#eceff2'
   useEffect(() => { qualRef.current = look.quality; bgRef.current = new THREE.Color(solidBg) }, [look.quality, solidBg])
@@ -414,6 +421,13 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         else g.position.set(a.dir[0] * a.dist * e, a.dir[1] * a.dist * e, a.dir[2] * a.dist * e)
       }
       const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight
+      // гладкость линий: плотность пикселей картинки (до 4×), при смене — пересоздаём сглаживание
+      const wantPr = Math.min(4, Math.min(window.devicePixelRatio || 1, 2) * smoothRef.current)
+      if (Math.abs(renderer.getPixelRatio() - wantPr) > 0.01) {
+        renderer.setPixelRatio(wantPr); renderer.setSize(w, h, false)
+        if (comp) { comp.dispose?.(); comp = null }
+      }
+      for (const m of lineMats.current) m.resolution.set(w, h)
       renderer.setViewport(0, 0, w, h); renderer.setScissorTest(false)
       // «Максимальное качество»: затенение в углах и стыках (ambient occlusion) — как в программах визуализации
       const hq = qualRef.current === 'high'
@@ -475,7 +489,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     const onFloor = (e, y) => { pick(e); const p = new THREE.Vector3(); return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), p) ? p : null }
     const pointers = new Set()
     // все детали, включая вложенные в группы анимации
-    const meshes = (f = () => true) => { const l = []; group.traverse(o => { if (o.isMesh && f(o)) l.push(o) }); return l }
+    const meshes = (f = () => true) => { const l = []; group.traverse(o => { if (o.isMesh && !o.isLineSegments2 && f(o)) l.push(o) }); return l }
     let lastTap = null   // двойной тап по двери / ящику — открыть или закрыть (анимация)
     let pendSel = 0      // отложенный выбор (первый тап по двери / ящику)
     let lp = 0           // удержание пальца на детали — свойства её параметрического блока
@@ -579,6 +593,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     const s = st.current
     if (!s) return
     const { group } = s
+    lineMats.current.clear()
     for (const o of [...group.children]) { group.remove(o); o.traverse(c => { c.geometry?.dispose?.(); [].concat(c.material || []).forEach(m => m.dispose?.()) }) }
     for (const o of [...s.over.children]) { s.over.remove(o); o.geometry?.dispose?.(); o.material?.map?.dispose?.(); [].concat(o.material || []).forEach(m => m.dispose?.()) }
     animObjs.current = new Map()
@@ -650,20 +665,34 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const geo = fig || rounded || new THREE.BoxGeometry(sx, sy, sz)
       const lk = lookOf(p.material, matLooks)
       // текстура материала: повтор по размеру детали, волокно — вдоль длины детали
-      let map = null
+      let map = null, bandMap = null
       if (lk.tex && p.kind !== 'hw') {
         const base = texOf(lk.tex)
         if (base) {
           map = base.clone(); map.needsUpdate = true
-          const sc = lk.scale
-          if (fig) map.repeat.set(1 / sc, 1 / sc)
+          // размер картинки в мм: вдоль волокна (scale) и поперёк (scaleW); на картинке волокно вертикально (dir v) или горизонтально
+          const sL = lk.scale, sW = lk.scaleW || lk.scale
+          const Iu = lk.dir === 'h' ? sL : sW, Iv = lk.dir === 'h' ? sW : sL
+          // у каждой детали — свой участок картинки (как при раскрое листа), без стыка картинок, если картинка больше детали
+          let hh = 0
+          for (const ch of String(p.pid || p.key || '')) hh = (hh * 31 + ch.charCodeAt(0)) >>> 0
+          const fr1 = (hh % 997) / 997, fr2 = ((hh >>> 10) % 991) / 991
+          if (fig) map.repeat.set(1 / Iu, 1 / Iv)
           else {
-            const dims = [sx, sy, sz], ti = dims.indexOf(Math.min(...dims))
+            const dims = [sx, sy, sz], ti = rounded ? [0, 1, 2].find(a => !Object.values(p.place.sideDir).map(d => 'xyz'.indexOf(d[1])).includes(a)) : dims.indexOf(Math.min(...dims))
             const [ua, va] = ti === 0 ? [2, 1] : ti === 1 ? [0, 2] : [0, 1]
             const m = p.place.m, ey = [Math.abs(m[1]), Math.abs(m[4]), Math.abs(m[7])], la = ey.indexOf(Math.max(...ey))
             // волокно — вдоль длины детали; на картинке декор вертикальный (по умолчанию) или горизонтальный; на детали можно повернуть
             const rot = (la === ua) !== (lk.dir === 'h') !== !!p.grainFlip
-            if (rot) { map.rotation = Math.PI / 2; map.repeat.set(dims[va] / sc, dims[ua] / sc) } else map.repeat.set(dims[ua] / sc, dims[va] / sc)
+            if (rot) { map.rotation = Math.PI / 2; map.repeat.set(dims[va] / Iu, dims[ua] / Iv) } else map.repeat.set(dims[ua] / Iu, dims[va] / Iv)
+            map.offset.set(fr1 * Math.max(0, 1 - map.repeat.x), fr2 * Math.max(0, 1 - map.repeat.y))
+            // кромка: декор всегда вдоль торца (как у настоящей кромки)
+            if (rounded && rounded.groups.length > 1) {
+              const Lm = Math.max(dims[ua], dims[va])
+              bandMap = base.clone(); bandMap.needsUpdate = true
+              if (lk.dir === 'h') bandMap.repeat.set(Lm / Iu, Lm / Iv)
+              else { bandMap.rotation = Math.PI / 2; bandMap.repeat.set(Lm / Iu, Lm / Iv) }
+            }
           }
         }
       }
@@ -693,7 +722,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       if (rounded && rounded.groups.length > 1) {
         // материал кромки: свой цвет из «Отображения» или цвет детали чуть темнее (как настоящая кромка в тон)
         const bm = mat.clone()
-        if (look.bandColor) { bm.color.set(look.bandColor); bm.map = null } else bm.color.multiplyScalar(0.9)
+        if (look.bandColor) { bm.color.set(look.bandColor); bm.map = null } else { bm.color.multiplyScalar(0.9); if (bandMap) bm.map = bandMap }
         bm.clearcoat = Math.max(bm.clearcoat, 0.15)
         mesh = new THREE.Mesh(geo, [mat, bm])
       } else mesh = new THREE.Mesh(geo, mat)
@@ -705,7 +734,13 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       hg.add(mesh)
       // контуры деталей — по настройке «Линии контуров» (выбранное — всегда с линиями)
       if (look.lines !== false || isSel || isPart || isBlk) {
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(rounded ? new THREE.BoxGeometry(sx, sy, sz) : geo, p.mill ? 50 : 20), new THREE.LineBasicMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : look.lineColor, transparent: true, opacity: isSel ? 1 : Math.max(0.05, Math.min(1, Number(look.lineOpacity))) }))
+      // линии — «толстые» (своей толщиной в пикселях экрана, ровные при любой плотности картинки)
+      const eg = new THREE.EdgesGeometry(rounded ? new THREE.BoxGeometry(sx, sy, sz) : geo, p.mill ? 50 : 20)
+      const lg = new LineSegmentsGeometry().setPositions(eg.attributes.position.array); eg.dispose()
+      const lmat = new LineMaterial({ color: isPart || isBlk ? '#b45309' : isSel ? '#1d4ed8' : look.lineColor, linewidth: (isSel || isPart ? 1.6 : 1) * Math.max(0.5, Number(look.lineWidth) || 1), transparent: true, opacity: isSel ? 1 : Math.max(0.05, Math.min(1, Number(look.lineOpacity))), worldUnits: false })
+      lmat.resolution.set(box.current?.clientWidth || 300, box.current?.clientHeight || 300)
+      lineMats.current.add(lmat)
+      const edges = new LineSegments2(lg, lmat)
       edges.position.copy(mesh.position)
       hg.add(edges)
       }
