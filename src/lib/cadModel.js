@@ -9,6 +9,7 @@
 import { cabinetParts, CAB_DEFAULTS } from './cadCabinet.js'
 import { frameParts, FRAME_DEFAULTS } from './cadFrame.js'
 import { projectDrillings } from './cadDrill.js'
+import { linearCut, parseStocks } from './linearNest.js'
 
 export const CAD_VERSION = 1
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d)
@@ -21,7 +22,8 @@ export const PROJECT_DEFAULTS = {
   joint: 'confirmat_dowel',      // крепёж на стыках плит (cadDrill.js)
   hardwareHoles: true,           // отверстия под петли, планки, полкодержатели, направляющие
   room: { on: false, W: 3500, D: 3000, H: 2700 },   // комната: стены слева, сзади, справа
-  stockLen: 6000, linearKerf: 3, // хлыст погонного материала и пропил при линейном раскрое
+  stockLen: 6000, linearKerf: 3, // хлыст погонного материала (по умолчанию) и пропил при линейном раскрое
+  stocks: {},                    // свои хлысты материала: { [название]: '2000, 3000, 6000' }
   prices: {},                    // цена материала: { [название]: число } — за м², за метр или за штуку (по виду)
 }
 
@@ -231,27 +233,17 @@ export function exportAll(project) {
   return { details: sheets, scene: { parts: [], extras, hardware: [], meshes: [] } }
 }
 
-// ── Линейный раскрой погонных материалов (профиль, труба, карниз) ──
-/** lengths — отрезки (мм), stock — длина хлыста, kerf — пропил -> { bars: [{ cuts: [...], used, rest }], tooLong: [...] } */
+// ── Линейный раскрой погонных материалов (профиль, труба, карниз) — см. linearNest.js ──
+/** lengths — отрезки (мм), stock — длина хлыста или список «2000, 3000, 6000», kerf — пропил */
 export function linearNest(lengths, stock = 6000, kerf = 3) {
-  const S = num(stock, 6000), k = Math.max(0, num(kerf, 0))
-  const tooLong = lengths.filter(l => l > S)
-  const list = lengths.filter(l => l > 0 && l <= S).sort((a, b) => b - a)
-  const bars = []
-  // первый подходящий по убыванию (FFD), затем лучший подходящий — достаточно для мебельных объёмов
-  for (const l of list) {
-    let best = null, bestRest = Infinity
-    for (const b of bars) {
-      const need = l + (b.cuts.length ? k : 0)
-      const rest = S - b.used - need
-      if (rest >= 0 && rest < bestRest) { best = b; bestRest = rest }
-    }
-    if (!best) { best = { cuts: [], used: 0 }; bars.push(best) }
-    best.used += l + (best.cuts.length ? k : 0)
-    best.cuts.push(l)
-  }
-  for (const b of bars) { b.used = r1(b.used); b.rest = r1(S - b.used) }
-  return { bars, tooLong }
+  const stocks = typeof stock === 'number' ? [{ len: stock, qty: null }] : parseStocks(stock)
+  const r = linearCut({ pieces: lengths.map(len => ({ len, qty: 1 })), stocks, kerf })
+  return { ...r, bars: r.bars.map(b => ({ ...b, cuts: b.cuts.map(c => c.len) })), tooLong: r.unplaced.flatMap(u => Array(u.qty).fill(u.len)) }
+}
+export const stocksOf = (settings, material) => {
+  const st = { ...PROJECT_DEFAULTS, ...(settings || {}) }
+  const own = parseStocks(st.stocks?.[material])
+  return own.length ? own : [{ len: num(st.stockLen, 6000), qty: null }]
 }
 
 /**
@@ -293,13 +285,16 @@ export function projectSpec(project) {
   const list = [...rows.values()].map(r => {
     const out = { ...r, qty: r.unit === 'шт' ? r.qty : Math.round(r.qty * 1000) / 1000 }
     if (r.kind === 'profile') {
-      out.nest = linearNest(r.lengths, st.stockLen, st.linearKerf)
+      const stocks = stocksOf(st, r.name)
+      out.nest = linearCut({ pieces: r.lengths.map(len => ({ len, qty: 1 })), stocks, kerf: st.linearKerf })
       out.bars = out.nest.bars.length
+      out.stockText = stocks.map(s => s.len).join(', ')
+      out.buyM = out.nest.total / 1000            // метров хлыстов к закупке
     }
     const pr = price(r.name)
-    // погонный: цена за хлыст, если считали хлысты; иначе — за единицу
+    // погонный: цена за метр хлыста (хлысты разной длины), остальное — за единицу
     out.price = pr
-    out.sum = pr ? Math.round(pr * (r.kind === 'profile' ? out.bars : out.qty) * 100) / 100 : 0
+    out.sum = pr ? Math.round(pr * (r.kind === 'profile' ? out.buyM : out.qty) * 100) / 100 : 0
     return out
   })
   const order = { sheet: 0, glass: 1, profile: 2, edge: 3, hw: 4 }

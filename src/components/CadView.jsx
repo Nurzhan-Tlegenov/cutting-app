@@ -18,11 +18,13 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, onSelect, xray = false, fitKey = 0, holes = [], room = null, style }) {
+export default function CadView({ parts, selected, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, style }) {
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
-  useEffect(() => { sel.current = onSelect }, [onSelect])
+  const drag = useRef(onDrag)
+  const selId = useRef(selected)
+  useEffect(() => { sel.current = onSelect; drag.current = onDrag; selId.current = selected }, [onSelect, onDrag, selected])
 
   // один раз: рендерер, камера, свет, пол
   useEffect(() => {
@@ -57,26 +59,65 @@ export default function CadView({ parts, selected, onSelect, xray = false, fitKe
     resize()
     const ro = new ResizeObserver(resize); ro.observe(el)
     // короткое нажатие без сдвига — выбор
-    let down = null
+    // Выбранный элемент можно тащить пальцем / мышью по полу (плоскость XZ на высоте точки касания);
+    // вращение камеры в это время выключено. Второй палец (щипок) — отменяет перетаскивание.
+    let down = null, dragging = null
     const ray = new THREE.Raycaster()
-    const onDown = e => { down = { x: e.clientX, y: e.clientY, t: Date.now() } }
+    const pick = e => {
+      const r = renderer.domElement.getBoundingClientRect()
+      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera)
+    }
+    const onFloor = (e, y) => { pick(e); const p = new THREE.Vector3(); return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), p) ? p : null }
+    const pointers = new Set()
+    const onDown = e => {
+      pointers.add(e.pointerId)
+      if (pointers.size > 1) { if (dragging) { drag.current?.(dragging.id, 'cancel', 0, 0); dragging = null; controls.enabled = true } down = null; return }
+      down = { x: e.clientX, y: e.clientY, t: Date.now() }
+      if (!selId.current || !drag.current) return
+      pick(e)
+      const hit = ray.intersectObjects(group.children.filter(o => o.isMesh), false)[0]
+      if (!hit || hit.object.userData.itemId !== selId.current) return
+      const start = onFloor(e, hit.point.y)
+      if (!start) return
+      dragging = { id: selId.current, y: hit.point.y, start, moved: false }
+      controls.enabled = false
+      drag.current(dragging.id, 'start', 0, 0)
+    }
+    const onMove = e => {
+      if (!dragging) return
+      const p = onFloor(e, dragging.y)
+      if (!p) return
+      const dx = p.x - dragging.start.x, dz = p.z - dragging.start.z
+      if (!dragging.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) return
+      dragging.moved = true
+      drag.current?.(dragging.id, 'move', dx, dz)
+    }
     const onUp = e => {
+      pointers.delete(e.pointerId)
+      if (dragging) {
+        const was = dragging; dragging = null; controls.enabled = true
+        if (was.moved) { drag.current?.(was.id, 'end', 0, 0); down = null; return }
+        drag.current?.(was.id, 'cancel', 0, 0)
+      }
       if (!down) return
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = Date.now() - down.t
       down = null
       if (moved > 6 || dt > 450) return
-      const r = renderer.domElement.getBoundingClientRect()
-      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera)
+      pick(e)
       const hit = ray.intersectObjects(group.children.filter(o => o.isMesh), false)[0]
       sel.current?.(hit ? hit.object.userData.itemId : null, hit ? hit.object.userData.pid : null)
     }
-    renderer.domElement.addEventListener('pointerdown', onDown)
+    renderer.domElement.addEventListener('pointerdown', onDown, { capture: true })
+    renderer.domElement.addEventListener('pointermove', onMove)
     renderer.domElement.addEventListener('pointerup', onUp)
+    renderer.domElement.addEventListener('pointercancel', onUp)
     st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false }
     return () => {
       alive = false; cancelAnimationFrame(raf); ro.disconnect()
-      renderer.domElement.removeEventListener('pointerdown', onDown)
+      renderer.domElement.removeEventListener('pointerdown', onDown, { capture: true })
+      renderer.domElement.removeEventListener('pointermove', onMove)
       renderer.domElement.removeEventListener('pointerup', onUp)
+      renderer.domElement.removeEventListener('pointercancel', onUp)
       controls.dispose(); renderer.dispose()
       group.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.() })
       extra.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.() })

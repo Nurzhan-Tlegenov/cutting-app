@@ -80,7 +80,14 @@ export default function NavDrawer({ notices, unread }) {
   const [shut, setShut] = useState({})                 // свёрнутые разделы
   // конструктор мебели (бета): мастер-аккаунт — всегда, остальные — если мастер выдал бету «Конструктор»
   const [cadBeta, setCadBeta] = useState(false)
-  useEffect(() => { if (!user || isMaster) return; let a = true; hasBeta('constructor').then(v => { if (a) setCadBeta(v) }); return () => { a = false } }, [user, isMaster])
+  const [linBeta, setLinBeta] = useState(false)       // линейный раскрой (бета) — так же
+  useEffect(() => {
+    if (!user || isMaster) return
+    let a = true
+    hasBeta('constructor').then(v => { if (a) setCadBeta(v) })
+    hasBeta('linear_cut').then(v => { if (a) setLinBeta(v) })
+    return () => { a = false }
+  }, [user, isMaster])
   const panel = useRef(null)
   // ширина панели — по окну; после смены «Размера текста и кнопок» окно в CSS-пикселях другое — пересчитываем.
   // Обработчики жестов читают её через ref: раньше они переподписывались посреди жеста (ширина менялась), отпускание
@@ -250,6 +257,7 @@ export default function NavDrawer({ notices, unread }) {
     { icon: I.plus, label: 'Новый заказ', on: isClient('/orders/new'), act: () => goClient('/orders/new') },
     { icon: I.tasks, label: 'Мои задачи', on: isClient('/tasks'), act: () => goClient('/tasks') },
     ...(isMaster || cadBeta ? [{ icon: I.cube, label: 'Конструктор β', on: pathname === '/constructor', act: () => goClient('/constructor') }] : []),
+    ...(isMaster || linBeta ? [{ icon: I.ruler, label: 'Линейный раскрой β', on: pathname === '/linear', act: () => goClient('/linear') }] : []),
   ] }
   // сотруднику — сначала рабочее место, потом клиент, потом своё производство; остальным — производство, клиент
   if (wps.length) sections.push(clientSec, prodSec); else sections.unshift(prodSec, clientSec)

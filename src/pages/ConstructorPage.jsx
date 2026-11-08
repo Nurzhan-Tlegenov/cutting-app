@@ -21,6 +21,7 @@ import { CAB_DEFAULTS, CAB_PRESETS } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
+import { newLinearJob, readJobs, writeJobs, LINEAR_FEATURE } from '../lib/linearJobs'
 import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, PROJECT_DEFAULTS } from '../lib/cadModel'
 import { listProjects, loadProject, saveProject, deleteProject, isLocal, CAD_SQL_HINT } from '../lib/cadStore'
 
@@ -274,7 +275,18 @@ function ProjectSettings({ project, setProject }) {
 }
 
 const KIND_T = { sheet: 'Плита', glass: 'Стекло', profile: 'Погонные (профиль, металл)', edge: 'Кромка', hw: 'Фурнитура' }
-function SpecPanel({ project, setProject }) {
+function BarRow({ b, count = 1, maxLen }) {
+  return (
+    <div style={{ marginBottom: 5 }}>
+      <div style={{ display: 'flex', height: 16, width: `${(b.stock / maxLen) * 100}%`, borderRadius: 3, overflow: 'hidden', background: 'var(--bg2)', border: '0.5px solid var(--border-md)' }}>
+        {b.cuts.map((c, j) => { const len = typeof c === 'number' ? c : c.len; return <div key={j} title={`${len} мм`} style={{ width: `${(len / b.stock) * 100}%`, background: j % 2 ? '#9fb3c8' : '#b8c8d8', borderRight: '1px solid white', fontSize: 9.5, color: '#123', overflow: 'hidden', textAlign: 'center', lineHeight: '16px' }}>{len}</div> })}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Хлыст {b.stock}{count > 1 ? ` × ${count}` : ''}: {b.cuts.map(c => (typeof c === 'number' ? c : c.len)).join(' + ')} · остаток {b.rest} мм</div>
+    </div>
+  )
+}
+
+function SpecPanel({ project, setProject, onLinear }) {
   const spec = useMemo(() => projectSpec(project), [project])
   const st = { ...PROJECT_DEFAULTS, ...project.settings }
   const setSt = patch => setProject({ ...project, settings: { ...st, ...patch } })
@@ -282,8 +294,8 @@ function SpecPanel({ project, setProject }) {
   const [openRow, setOpenRow] = useState('')
   const rows = spec.rows.map((r, i) => ({ ...r, head: i === 0 || spec.rows[i - 1].kind !== r.kind }))
   return (<>
-    <Grid><NumField label="Хлыст" value={st.stockLen} onChange={v => setSt({ stockLen: v })} min={100} /><NumField label="Пропил" value={st.linearKerf} onChange={v => setSt({ linearKerf: v })} min={0} />
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', alignSelf: 'end', paddingBottom: 6 }}>Деталей плиты: {spec.partsCount}<Hint inline>Погонные материалы (профиль, труба, карниз) раскраиваются на хлысты заданной длины с учётом пропила — видно, сколько хлыстов закупать. Цена профиля — за хлыст, плиты и стекла — за м², кромки — за метр, фурнитуры — за штуку.</Hint></div></Grid>
+    <Grid><NumField label="Хлыст по умолч." value={st.stockLen} onChange={v => setSt({ stockLen: v })} min={100} /><NumField label="Пропил" value={st.linearKerf} onChange={v => setSt({ linearKerf: v })} min={0} />
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', alignSelf: 'end', paddingBottom: 6 }}>Деталей плиты: {spec.partsCount}<Hint inline>Погонные материалы (профиль, труба, карниз) раскраиваются на хлысты. У каждого материала можно указать свои длины хлыстов через запятую — например 2000, 3000, 6000: приложение само подберёт, какие хлысты брать, чтобы отходов было меньше. Цена профиля — за метр хлыста, плиты и стекла — за м², кромки — за метр, фурнитуры — за штуку.</Hint></div></Grid>
     {rows.map(r => {
       const head = r.head ? <div style={sect}>{KIND_T[r.kind]}</div> : null
       const key = r.kind + r.name
@@ -293,25 +305,20 @@ function SpecPanel({ project, setProject }) {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-              {r.kind === 'sheet' || r.kind === 'glass' ? `${fmt(r.qty)} м² · ${r.count} дет.` : r.kind === 'profile' ? `${fmt(r.qty)} м · ${r.count} отр. · хлыстов: ${r.bars}` : `${fmt(r.qty)} ${r.unit}`}
+              {r.kind === 'sheet' || r.kind === 'glass' ? `${fmt(r.qty)} м² · ${r.count} дет.` : r.kind === 'profile' ? `${fmt(r.qty)} м · ${r.count} отр. · хлысты: ${r.nest.byStock.map(b => `${b.len}×${b.count}`).join(', ') || '—'} · отход ${r.nest.waste}%` : `${fmt(r.qty)} ${r.unit}`}
               {r.sum ? ` · ${fmt(r.sum)}` : ''}
               {r.kind === 'profile' && <button type="button" onClick={() => setOpenRow(openRow === key ? '' : key)} style={{ marginLeft: 6, border: 'none', background: 'none', color: 'var(--blue)', fontSize: 11.5, cursor: 'pointer', padding: 0 }}>{openRow === key ? 'скрыть' : 'раскрой хлыстов'}</button>}
             </div>
           </div>
-          <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>цена{r.kind === 'profile' ? '/хлыст' : r.unit === 'шт' ? '/шт' : '/' + r.unit}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>цена{r.kind === 'profile' ? '/м хлыста' : r.unit === 'шт' ? '/шт' : '/' + r.unit}</span>
           <input style={{ ...inp, padding: '5px 6px' }} inputMode="decimal" value={st.prices?.[r.name] ?? ''} placeholder="0"
             onChange={e => { const n = num(e.target.value); setPrice(r.name, e.target.value === '' ? undefined : n ?? st.prices?.[r.name]) }} />
         </div>
         {openRow === key && r.nest && <div style={{ padding: '6px 0 8px' }}>
-          {r.nest.bars.map((b, i) => (
-            <div key={i} style={{ marginBottom: 5 }}>
-              <div style={{ display: 'flex', height: 16, borderRadius: 3, overflow: 'hidden', background: 'var(--bg2)', border: '0.5px solid var(--border-md)' }}>
-                {b.cuts.map((c, j) => <div key={j} title={`${c} мм`} style={{ width: `${(c / st.stockLen) * 100}%`, background: j % 2 ? '#9fb3c8' : '#b8c8d8', borderRight: '1px solid white', fontSize: 9.5, color: '#123', overflow: 'hidden', textAlign: 'center', lineHeight: '16px' }}>{c}</div>)}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Хлыст {i + 1}: {b.cuts.join(' + ')} · остаток {b.rest} мм</div>
-            </div>
-          ))}
-          {r.nest.tooLong.length > 0 && <p className="error-text" style={{ fontSize: 12 }}>Длиннее хлыста: {r.nest.tooLong.join(', ')} мм</p>}
+          <Grid cols={2}><TextField label="Хлысты этого материала, мм (через запятую)" value={st.stocks?.[r.name] ?? ''} onChange={v => setSt({ stocks: { ...(st.stocks || {}), [r.name]: v } })} />
+            {onLinear && <button type="button" style={{ ...btnS(), alignSelf: 'end' }} onClick={() => onLinear(r)}>Линейный раскрой →</button>}</Grid>
+          {r.nest.bars.map((b, i) => <BarRow key={i} b={b} maxLen={Math.max(...r.nest.bars.map(x => x.stock))} />)}
+          {r.nest.unplaced.length > 0 && <p className="error-text" style={{ fontSize: 12 }}>Длиннее хлыста: {r.nest.unplaced.map(u => `${u.len}×${u.qty}`).join(', ')} мм</p>}
         </div>}
       </div>)
     })}
@@ -404,6 +411,79 @@ export default function ConstructorPage() {
   const { parts } = pp
   const holes = useMemo(() => (project && showHoles ? projectDrill(project, pp).holes : []), [project, pp, showHoles])
   const room = project?.settings?.room?.on ? { ...PROJECT_DEFAULTS.room, ...project.settings.room } : null
+  // линейный раскрой — только если он открыт этому аккаунту (мастер или бета «Линейный раскрой»)
+  const [linearOk, setLinearOk] = useState(!!isMaster)
+  useEffect(() => { if (isMaster) return; let a = true; hasBeta(LINEAR_FEATURE).then(v => { if (a) setLinearOk(v) }); return () => { a = false } }, [isMaster])
+  const toLinear = row => {
+    const st = { ...PROJECT_DEFAULTS, ...project.settings }
+    const map = new Map()
+    for (const sp of parts) {
+      if (sp.kind !== 'profile' || sp.material !== row.name) continue
+      const name = [sp.item.name, sp.name].filter(Boolean).join(' · ')
+      const k = `${sp.place.L}|${name}`
+      map.set(k, (map.get(k) || 0) + 1)
+    }
+    const pieces = [...map.entries()].map(([k, qty]) => { const [len, name] = k.split('|'); return { id: newId(), len: Number(len), qty, name } })
+    const stocks = String(st.stocks?.[row.name] || st.stockLen).split(/[\s,;]+/).filter(Boolean).map(len => ({ len: Number(len), qty: '' }))
+    const job = newLinearJob({ name: `${project.name} · ${row.name}`, material: row.name, kerf: st.linearKerf, stocks, pieces })
+    writeJobs([job, ...readJobs(user)], user)
+    flush()
+    navigate(`/linear?job=${job.id}`)
+  }
+  // перетаскивание выбранного элемента в 3D по полу с привязкой к стенам комнаты и к граням соседей (40 мм)
+  const dragSt = useRef(null)
+  const onDrag = (id, phase, dx, dz) => {
+    const cur = projRef.current
+    const it = cur?.items.find(i => i.id === id)
+    if (!it) return
+    if (phase === 'start') {
+      const own = parts.filter(p => p.item.id === id)
+      const others = [...new Set(parts.filter(p => p.item.id !== id).map(p => p.item.id))].map(oid => sceneBox(parts.filter(p => p.item.id === oid)))
+      dragSt.current = { pos: { ...it.pos }, box: sceneBox(own), others }
+      return
+    }
+    const d = dragSt.current
+    if (!d) return
+    if (phase === 'cancel') { dragSt.current = null; return }
+    if (phase === 'end') { dragSt.current = null; return }
+    const S = 40
+    const snap = (lo, hi, edges) => {
+      let best = 0, bd = S
+      for (const e of edges) for (const v of [lo, hi]) { const c = e - v; if (Math.abs(c) < bd) { bd = Math.abs(c); best = c } }
+      return best
+    }
+    const ex = [], ez = []
+    if (room) { ex.push(0, room.W); ez.push(0, room.D) }
+    for (const o of d.others) { ex.push(o[0], o[3]); ez.push(o[2], o[5]) }
+    let mx = dx, mz = dz
+    mx += snap(d.box[0] + mx, d.box[3] + mx, ex)
+    mz += snap(d.box[2] + mz, d.box[5] + mz, ez)
+    // внутри комнаты — не дальше стен
+    if (room) {
+      mx = Math.min(Math.max(mx, -d.box[0]), room.W - d.box[3])
+      mz = Math.min(Math.max(mz, -d.box[2]), room.D - d.box[5])
+    }
+    // на соседа не наезжаем: двигаем от прошлого положения отдельно по X и по Z и упираемся в ближайшего соседа
+    // (вплотную можно — зазор 0, как в 3D-просмотре); сквозь соседей элемент не проходит
+    const ov = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0) > 0.5
+    const sweep = (axis, from, to, other) => {
+      const lo = d.box[axis], hi = d.box[axis + 3]
+      const oa = axis === 0 ? 2 : 0
+      let v = to
+      for (const o of d.others) {
+        if (!ov(d.box[1], d.box[4], o[1], o[4]) || !ov(d.box[oa] + other, d.box[oa + 3] + other, o[oa], o[oa + 3])) continue
+        if (to > from && hi + from <= o[axis] + 0.5) v = Math.min(v, o[axis] - hi)
+        if (to < from && lo + from >= o[axis + 3] - 0.5) v = Math.max(v, o[axis + 3] - lo)
+      }
+      return v
+    }
+    const lx = d.last?.x ?? 0, lz = d.last?.z ?? 0
+    mx = sweep(0, lx, mx, lz)
+    mz = sweep(2, lz, mz, mx)
+    d.last = { x: mx, z: mz }
+    const pos = { ...d.pos, x: Math.round(num(d.pos.x) + mx), z: Math.round(num(d.pos.z) + mz) }
+    setProject({ ...cur, items: cur.items.map(i => (i.id === id ? { ...i, pos } : i)) })
+  }
   const saveLibrary = next => { setLibrary(next); saveUserSettings({ cadLibrary: next }, user) }
   const materials = useMemo(() => {
     const s = new Set(['ЛДСП Белый 16', 'ХДФ Белый 3', 'МДФ 16', 'Стекло прозрачное 4 мм', 'Зеркало 4 мм', 'Профиль 20×20 сталь', 'Профиль 40×20 сталь', 'Труба Ø25 хром'])
@@ -488,7 +568,7 @@ export default function ConstructorPage() {
 
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <CadView parts={parts} selected={selected} onSelect={select} xray={xray} fitKey={fitKey} holes={holes} room={room} />
+      <CadView parts={parts} selected={selected} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room} />
       <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
         <button type="button" title="Полупрозрачный вид" style={{ ...btnS(), padding: '6px 9px', ...(xray ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setXray(v => !v)}>◫</button>
@@ -511,8 +591,8 @@ export default function ConstructorPage() {
           onDelete={() => { if (!window.confirm(`Удалить «${selItem.name}»?`)) return; setProject({ ...project, items: project.items.filter(i => i.id !== selItem.id) }); setSelected(null); setTab('scene') }}
           onDuplicate={() => { const c = { ...JSON.parse(JSON.stringify(selItem)), id: newId(), name: selItem.name + ' (копия)' }; const own = parts.filter(p => p.item.id === selItem.id); const b = sceneBox(own); c.pos = { ...c.pos, x: Math.round((c.pos?.x || 0) + (b[3] - b[0])) }; setProject({ ...project, items: [...project.items, c] }); setSelected(c.id) }}
           onExplode={() => { if (!window.confirm('Разобрать корпус на отдельные панели? Параметры корпуса (пересчёт по габариту) пропадут — каждую панель можно будет менять отдельно.')) return; const ps = explodeCabinet(selItem); const idx = project.items.findIndex(i => i.id === selItem.id); const items = [...project.items]; items.splice(idx, 1, ...ps); setProject({ ...project, items }); setSelected(null); setTab('scene') }} />
-      : <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Нажмите на деталь в 3D или выберите элемент во вкладке «Сцена».</p>)}
-    {tab === 'spec' && <SpecPanel project={project} setProject={setProject} />}
+      : <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Нажмите на деталь в 3D или выберите элемент во вкладке «Сцена». Выбранный элемент (синий) можно тащить пальцем по полу — он прилипает к стенам и к соседям.</p>)}
+    {tab === 'spec' && <SpecPanel project={project} setProject={setProject} onLinear={linearOk ? toLinear : null} />}
   </>)
 
   const head = (

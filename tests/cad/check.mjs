@@ -78,5 +78,17 @@ for (const rot of [0, 90, 180, 270]) {
   const pf = projectSpec(pr3).rows.find(r => r.kind === 'profile')
   ok(pf && pf.bars >= 3, 'frame bars ' + pf?.bars)
 }
+// хлысты разной длины: короткие отрезки — в короткие хлысты
+{
+  const { linearCut } = await import('../../src/lib/linearNest.js')
+  const r = linearCut({ pieces: [{ len: 2900, qty: 2 }, { len: 1900, qty: 1 }], stocks: [{ len: 6000 }, { len: 3000 }, { len: 2000 }], kerf: 3 })
+  ok(r.unplaced.length === 0, 'unplaced')
+  ok(r.total === 8000, 'mixed stocks total ' + r.total + ' ' + JSON.stringify(r.byStock))
+  const lim = linearCut({ pieces: [{ len: 1000, qty: 7 }], stocks: [{ len: 3000, qty: 1 }, { len: 6000, qty: null }], kerf: 3 })
+  ok(lim.cutLen === 7000 && lim.bars.filter(b => b.stock === 3000).length <= 1, 'limited stocks')
+  const big = linearCut({ pieces: [{ len: 7000, qty: 1 }, { len: 500, qty: 2 }], stocks: [{ len: 6000 }], kerf: 3, trim: 10 })
+  ok(big.unplaced.length === 1 && big.unplaced[0].len === 7000, 'too long')
+  ok(Math.abs(big.bars[0].used - (20 + 1000 + 3)) < 0.01, 'trim+kerf ' + big.bars[0].used)
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)
