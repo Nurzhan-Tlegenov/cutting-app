@@ -352,6 +352,20 @@ for (const rot of [0, 90, 180, 270]) {
   ok(hk.length === 2 && hk.every(d => d.d === 6), 'hook holes in bottom rear ' + JSON.stringify(hk))
 }
 
+// петли блока: количество, обход полок по 32 мм, ручной сдвиг
+{
+  const { cabinetParts, CAB_DEFAULTS } = await import('../../src/lib/cadCabinet.js')
+  const tree = { id: 'root', split: 'h', children: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], front: { type: 'doors', n: 1, open: 'left', hingeCount: 3 } }
+  let r = cabinetParts({ ...CAB_DEFAULTS, W: 600, H: 2000, D: 560, tree })
+  ok(r.hinges.length === 3 && r.hinges[1].auto === 2 && !r.hinges.some(h => h.hit) && !r.warn.length, 'auto avoid shelf ' + JSON.stringify(r.hinges.map(h => [h.y, h.auto])))
+  r = cabinetParts({ ...CAB_DEFAULTS, W: 600, H: 2000, D: 560, tree: { ...tree, front: { ...tree.front, hingeAuto: false } } })
+  ok(r.hinges[1].hit && r.warn.some(w => /упирается/.test(w)), 'hit warned when auto off')
+  r = cabinetParts({ ...CAB_DEFAULTS, W: 600, H: 2000, D: 560, tree: { ...tree, front: { ...tree.front, hingeAuto: false, hingeShift: { 1: -2 } } } })
+  ok(r.hinges[1].y === r.hinges[1].base - 64 && !r.hinges[1].hit, 'manual shift -64')
+  const cup = r.holes.filter(h => h.note === 'Петля (чашка)')
+  ok(cup.length === 3 && cup.some(h => Math.abs(h.p[1] - r.hinges[1].y) < 0.01), 'cup follows shift')
+}
+
 // фасады МДФ — без кромки
 {
   const { newNode } = await import('../../src/lib/cadCabinet.js')

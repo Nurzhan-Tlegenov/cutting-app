@@ -497,7 +497,8 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
   const [selDr, setSelDr] = useState([])      // какие ящики блока правим (пусто — все)
   const p = { ...CAB_DEFAULTS, ...it.p }
   const tree = treeOf(p)
-  const ops = useMemo(() => cabinetParts(p).openings || [], [it.p]) // eslint-disable-line react-hooks/exhaustive-deps
+  const cab = useMemo(() => cabinetParts(p), [it.p]) // eslint-disable-line react-hooks/exhaustive-deps
+  const ops = cab.openings || []
   const r = findNode(tree, blk.n)
   const node = r?.node
   const o = ops.find(x => x.id === blk.n)
@@ -603,8 +604,28 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
         </div>
         <div style={sect}>Зазоры и перехлёст (весь корпус)</div>
         <FrontOverlap p={p} up={up} outerExt={outerExt} soloExt={soloExt} r1={r1} />
+        <div style={sect}>Петли этих дверей</div>
+        <Grid><NumField label="Петель на дверь" unit={num(fr.hingeCount ?? p.hingeCount) ? 'шт' : 'авто'} value={fr.hingeCount ?? p.hingeCount ?? 0} onChange={v => apply(opFront(tree, node.id, { ...fr, hingeCount: Math.max(0, Math.round(v)), hingeShift: undefined }))} min={0} />
+          <NumField label="Крайние от торца" value={fr.hingeEnd ?? p.hingeEnd} onChange={v => apply(opFront(tree, node.id, { ...fr, hingeEnd: v, hingeShift: undefined }))} min={20} /></Grid>
+        <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={fr.hingeAuto !== false} onChange={e => apply(opFront(tree, node.id, { ...fr, hingeAuto: e.target.checked }))} />Петля попала на полку — сдвигать саму по 32 мм</label>
+        {(() => {
+          const hs = (cab.hinges || []).filter(h => h.n === node.id)
+          if (!hs.length) return null
+          const d0 = (hs.find(h => h.hit) || hs[0]).door
+          const sh = fr.hingeShift || {}
+          const setSh = (j, v) => { const n2 = { ...sh, [j]: v }; if (!v) delete n2[j]; apply(opFront(tree, node.id, { ...fr, hingeShift: Object.keys(n2).length ? n2 : undefined })) }
+          return <div style={{ marginBottom: 6 }}>
+            {hs.filter(h => h.door === d0).map(h => <div key={h.j} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, padding: '3px 0', borderBottom: '0.5px solid var(--border)', color: h.hit ? '#dc2626' : undefined }}>
+              <span style={{ flex: 1 }}>Петля {h.j + 1}: {h.from} мм от низа двери{h.auto ? ` · сдвинута на ${h.auto > 0 ? '+' : ''}${h.auto * 32} (полка)` : ''}{h.hit ? ` · упирается в «${h.hit}»` : ''}</span>
+              <button type="button" title="Ниже на 32 мм" style={{ ...chipS(false), padding: '1px 9px' }} onClick={() => setSh(h.j, (sh[h.j] || 0) - 1)}>▼</button>
+              <button type="button" title="Выше на 32 мм" style={{ ...chipS(false), padding: '1px 9px' }} onClick={() => setSh(h.j, (sh[h.j] || 0) + 1)}>▲</button>
+              {!!sh[h.j] && <button type="button" title="Как было" style={{ ...chipS(false), padding: '1px 7px' }} onClick={() => setSh(h.j, 0)}>↺</button>}
+            </div>)}
+            <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '4px 0 0' }}>Сдвиг кратно 32 мм — для всех дверей блока. Красным — петля упирается в полку (планка и плечо на стенке проёма).</p>
+          </div>
+        })()}
         <div style={sect}>Петли (весь корпус)</div>
-        <Grid><NumField label="Чашка от края двери" value={p.hingeCup} onChange={v => up({ hingeCup: v })} min={5} /><NumField label="Крайние от торца" value={p.hingeEnd} onChange={v => up({ hingeEnd: v })} min={20} /><NumField label="Планка от переда" value={p.plateFront} onChange={v => up({ plateFront: v })} min={5} /></Grid>
+        <Grid><NumField label="Чашка от края двери" value={p.hingeCup} onChange={v => up({ hingeCup: v })} min={5} /><NumField label="Крайние от торца (по умолч.)" value={p.hingeEnd} onChange={v => up({ hingeEnd: v })} min={20} /><NumField label="Планка от переда" value={p.plateFront} onChange={v => up({ plateFront: v })} min={5} /></Grid>
         <Chips label="Ответная планка" value={p.plateType || 'cross'} onChange={v => up({ plateType: v })} options={[['cross', 'Крестообразная (2 отв. по вертикали)'], ['straight', 'Прямая (2 отв. по глубине, шаг 32)']]} />
         <div style={sect}>Крепёж</div>
         <MountEditor mount={mount} setMount={setMount} only={['cup', 'cupFix', 'plate', 'handle']} />

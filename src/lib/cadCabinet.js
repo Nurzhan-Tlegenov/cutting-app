@@ -280,7 +280,7 @@ export function cabinetParts(params) {
   const p = { ...CAB_DEFAULTS, ...(params || {}) }
   const W = num(p.W, 800), H = num(p.H, 2100), D = num(p.D, 560), t = num(p.t, 16)
   const mat = p.material || 'ЛДСП'
-  const parts = [], hw = [], warn = [], holes = []   // holes — отверстия фурнитуры: точка входа + направление внутрь детали
+  const parts = [], hw = [], warn = [], holes = [], hinges = []   // holes — отверстия фурнитуры: точка входа + направление внутрь детали
   const eB = p.edgeBody, eF = p.edgeFront
   const backT = num(p.backT, 3)
   const zb = p.back === 'overlay' ? backT : 0               // накладная задняя — сзади на торцах, корпус начинается за ней
@@ -728,8 +728,32 @@ export function cabinetParts(params) {
     const lay = fr.layout === 'h' ? 'h' : 'v'
     const dw = lay === 'v' ? (fx1 - fx0 - (n - 1) * gap) / n : fx1 - fx0
     const dh = lay === 'h' ? (fy1 - fy0 - (n - 1) * gap) / n : fy1 - fy0
-    const cnt = len => num(p.hingeCount, 0) > 0 ? Math.round(num(p.hingeCount)) : len < 900 ? 2 : len < 1600 ? 3 : len < 2000 ? 4 : 5
-    const along = (a0, a1, k) => Array.from({ length: k }, (_, j) => a0 + he + ((a1 - a0 - 2 * he) * j) / Math.max(1, k - 1))
+    // петли блока: количество и отступ крайних от торца — свои у блока (fr.hingeCount / fr.hingeEnd) или как в корпусе
+    const hCount = num(fr.hingeCount ?? p.hingeCount, 0), heB = num(fr.hingeEnd ?? he, he)
+    const cnt = len => hCount > 0 ? Math.round(hCount) : len < 900 ? 2 : len < 1600 ? 3 : len < 2000 ? 4 : 5
+    const along = (a0, a1, k) => Array.from({ length: k }, (_, j) => a0 + heB + ((a1 - a0 - 2 * heB) * j) / Math.max(1, k - 1))
+    // полки и другие горизонтальные панели корпуса (уже построены) — петля (планка, плечо) не должна в них упираться
+    const zoneH = straight ? 12 : 27
+    const shelves = parts.filter(q => q.kind === 'sheet' && q.tAxis === 1 && q.role !== 'фасад' && q.role !== 'ящик' && q.box[5] > D - pf - 30)
+    const hitAt = (wx, left, y) => shelves.find(q => (left ? q.box[0] <= wx + 1 && q.box[3] > wx + 5 : q.box[3] >= wx - 1 && q.box[0] < wx - 5) && q.box[1] < y + zoneH + 2 && q.box[4] > y - zoneH - 2)
+    // положение петель: базовое (равномерно), сдвиг вручную (fr.hingeShift[j] × 32 мм) и, если упирается в полку, — авто-сдвиг
+    // по 32 мм вверх / вниз до свободного места (fr.hingeAuto === false — не сдвигать)
+    const placeHinges = (base, a0, a1, wx, left, doorI) => {
+      const out = []
+      base.forEach((y0b, j) => {
+        const sh = Math.round(num(fr.hingeShift?.[j], 0))
+        let y = y0b + 32 * sh, auto = 0
+        const free = yy => yy >= a0 + 40 && yy <= a1 - 40 && !hitAt(wx, left, yy) && out.every(o => Math.abs(o.y - yy) >= 70)
+        let hit = wx != null && hitAt(wx, left, y)
+        if (hit && fr.hingeAuto !== false) {
+          for (let k2 = 1; k2 <= 10 && hit; k2++) for (const sg of [1, -1]) { const yy = y + sg * 32 * k2; if (free(yy)) { auto = sg * k2; y = yy; hit = null; break } }
+        }
+        out.push({ y, j })
+        hinges.push({ n: node.id, door: doorI, j, y: r1(y), base: r1(y0b), shift: sh, auto, hit: hit ? (hit.name || 'полка') : null, from: r1(y - a0) })
+        if (hit) warn.push(`Петля ${j + 1} упирается в «${hit.name || 'полку'}» — сдвиньте её (▲▼ по 32 мм) в свойствах дверей`)
+      })
+      return out.map(o => o.y)
+    }
     const AN = 95 * Math.PI / 180
     for (let i = 0; i < n; i++) {
       const dx0 = lay === 'v' ? fx0 + i * (dw + gap) : fx0, dx1 = dx0 + dw
@@ -749,7 +773,8 @@ export function cabinetParts(params) {
         const left = open === 'left'
         k = cnt(dh)
         const xc = left ? dx0 + hc : dx1 - hc
-        along(dy0, dy1, k).forEach((y, j) => {
+        const wall0 = left ? (lay === 'h' || i === 0) : (lay === 'h' || i === n - 1)
+        placeHinges(along(dy0, dy1, k), dy0, dy1, wall0 ? (left ? x0 : x1) : null, left, i).forEach((y, j) => {
           holes.push({ p: [xc, y, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)', key })
           for (const d of [-22.5, 22.5]) holes.push({ p: [left ? xc + 9.5 : xc - 9.5, y + d, D], n: '+z', d: 8, depth: 11.5, note: 'Петля (крепёж чашки)', key })
           vis(`${key}c${j}`, 'Петля', [xc - 24, y - 24, D - 4, xc + 24, y + 24, D + 11.5], blk, anim, { type: 'cup', L: 'x', N: '+z', side: left ? '-x' : '+x' })
@@ -805,5 +830,5 @@ export function cabinetParts(params) {
     const b = pr.box
     if (b[3] - b[0] <= 0 || b[4] - b[1] <= 0 || b[5] - b[2] <= 0) warn.push(`«${pr.name}»: размер получился нулевым или отрицательным — проверьте параметры`)
   }
-  return { parts, hw, warn, holes, openings }
+  return { parts, hw, warn, holes, openings, hinges }
 }
