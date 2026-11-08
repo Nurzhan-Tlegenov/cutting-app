@@ -100,7 +100,7 @@ export function itemRecords(it) {
       parts: [{
         key: 'p', name: it.name || (it.type === 'glass' ? 'Стекло' : 'Панель'), role: p.role || (it.type === 'glass' ? 'стекло' : 'панель'),
         kind: it.type === 'glass' ? 'glass' : 'sheet', box: [0, 0, 0, dx, dy, dz], tAxis, tSign: p.tSign === -1 ? -1 : 1, lAxis,
-        material: p.material || '', edges: it.type === 'glass' ? {} : edges, grooves: p.grooves || [],
+        material: p.material || '', edges: it.type === 'glass' ? {} : edges, grooves: p.grooves || [], ...(p.joint ? { joint: p.joint } : {}),
       }],
       holes: it.type === 'panel' ? (p.holes || []) : [],
       hw: it.type === 'glass' && p.mount && p.mount !== 'none' && num(p.mountQty, 0) > 0
@@ -166,6 +166,9 @@ export function projectParts(project) {
       const sp = { ...rec, item: it, ii, pid: `${it.id}:${rec.key}`, place: placeRecord(rec, it) }
       // свой материал (цвет / декор) у отдельной детали: item.mat[ключ]
       if (it.mat?.[rec.key]) sp.material = it.mat[rec.key]
+      // своя схема крепежа стыков этой детали и поворот текстуры на ней
+      if (it.joint?.[rec.key]) sp.joint = it.joint[rec.key]
+      if (it.grain?.[rec.key]) sp.grainFlip = true
       // как рисовать фурнитуру: оси модели — в координаты сцены
       if (rec.model) {
         const Rm = rotYMat(it.rotY), dv = k => { const a = 'xyz'.indexOf(k[k.length - 1]), v = [0, 0, 0]; v[a] = k[0] === '-' ? -1 : 1; return mulMV(Rm, v) }
@@ -369,6 +372,8 @@ export function projectSpec(project) {
   const dow = dh.filter(h => h.note === 'Шкант').length / 2
   if (conf) { const r = row('hw', 'Конфирмат 7×50', 'шт'); r.qty += conf; r.count += conf }
   if (dow) { const r = row('hw', 'Шкант 8×30', 'шт'); r.qty += Math.round(dow); r.count += Math.round(dow) }
+  const mfx = dh.filter(h => h.note === 'Минификс: эксцентрик').length
+  if (mfx) { const r = row('hw', 'Минификс (эксцентрик + штифт)', 'шт'); r.qty += mfx; r.count += mfx }
   const list = [...rows.values()].map(r => {
     const out = { ...r, qty: r.unit === 'шт' ? r.qty : Math.round(r.qty * 1000) / 1000 }
     if (r.kind === 'profile') {
@@ -411,7 +416,7 @@ export function explodeCabinet(it) {
     return {
       id: newId(), type: r.kind === 'glass' ? 'glass' : 'panel', name: r.name, rotY: it.rotY || 0,
       pos: { x: r1(o[0] + num(it.pos?.x)), y: r1(o[1] + num(it.pos?.y)), z: r1(o[2] + num(it.pos?.z)) },
-      p: { dx: r1(b[3] - b[0]), dy: r1(b[4] - b[1]), dz: r1(b[5] - b[2]), tAxis: r.tAxis, lAxis: r.lAxis, tSign: r.tSign, material: it.mat?.[r.key] || r.material, edgeAll: r.edges?.all || '', edges: r.edges?.all ? {} : { ...r.edges }, grooves: r.grooves || [], holes: own.get(r) || [], role: r.role, from: it.name },
+      p: { dx: r1(b[3] - b[0]), dy: r1(b[4] - b[1]), dz: r1(b[5] - b[2]), tAxis: r.tAxis, lAxis: r.lAxis, tSign: r.tSign, material: it.mat?.[r.key] || r.material, edgeAll: r.edges?.all || '', edges: r.edges?.all ? {} : { ...r.edges }, grooves: r.grooves || [], holes: own.get(r) || [], role: r.role, from: it.name, ...(it.joint?.[r.key] ? { joint: it.joint[r.key] } : {}) },
       ...(it.ov?.[r.key] ? { ov: { p: it.ov[r.key] } } : {}),
     }
   })

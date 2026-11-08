@@ -315,5 +315,18 @@ for (const rot of [0, 90, 180, 270]) {
   const door = projectParts({ items: [it3] }).parts.find(p => p.name === 'Дверь')
   ok(door.material === 'МДФ Белый глянец 18', 'part material override')
 }
+
+// крепёж отдельной детали: накладная крышка на минификсах — без сквозных Ø7, эксцентрики в боковинах изнутри
+{
+  const it = { ...newItem('cabinet', { p: { W: 800, H: 800, D: 500, top: 'overlay' } }), mat: {}, joint: { top: 'minifix' } }
+  const det = exportAll({ items: [it] }).details
+  const top = det.find(d => d.name === 'Крышка'), sL = det.find(d => d.name === 'Боковина левая')
+  ok(!top.contour.drillings.some(d => d.d === 7), 'top has no confirmat through holes')
+  ok(top.contour.drillings.filter(d => d.note === 'Минификс: штифт').length >= 2, 'minifix bolts in top')
+  const cams = sL.contour.drillings.filter(d => d.note === 'Минификс: эксцентрик')
+  ok(cams.length >= 2 && cams.every(d => d.d === 15 && d.kind === 'face'), 'cams in side ' + JSON.stringify(cams.map(d => [d.kind, d.face])))
+  const bot = det.find(d => d.name === 'Дно')
+  ok(bot.contour.drillings.some(d => d.d === 5 && d.note === 'Конфирмат'), 'other joints keep project scheme')
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

@@ -5,7 +5,11 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { sceneBox, isFigured, partEdges, partVerts } from '../lib/cadModel'
 import { contourSegments, segmentSide } from '../lib/edgeLength'
-import { CAD_LOOK } from '../lib/cadLook'
+import { CAD_LOOK, FINISHES } from '../lib/cadLook'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { verticesToPolygon } from '../lib/trueShapeNesting'
 import { detailHoles } from '../lib/partHoles'
 
@@ -92,6 +96,7 @@ function hwGeometries(p) {
   }
   return out
 }
+const HANDLE_MODELS = new Set(['rail', 'bar', 'arch', 'knob', 'knobsq', 'edge', 'edgeflat'])
 const HW_LOOK = {
   rail: ['#c9cdd2', 1, 0.28], bar: ['#c9cdd2', 1, 0.3], arch: ['#c9cdd2', 1, 0.28], knob: ['#c9cdd2', 1, 0.25], knobsq: ['#3a3c40', 0.9, 0.35],
   edge: ['#b8bcc1', 1, 0.38], edgeflat: ['#b8bcc1', 1, 0.38], cup: ['#d9dcdf', 1, 0.22], arm: ['#d9dcdf', 1, 0.22], plate: ['#cfd2d6', 1, 0.3],
@@ -126,7 +131,7 @@ function texOf(src) {
 }
 function lookOf(material, looks) {
   const own = looks?.[material]
-  if (own && (own.color || own.tex)) return { color: own.color || '#ffffff', opacity: 1, tex: own.tex || null, scale: Number(own.scale) || 600 }
+  if (own && (own.color || own.tex)) return { color: own.color || '#ffffff', opacity: 1, tex: own.tex || null, scale: Number(own.scale) || 600, dir: own.dir || 'v' }
   for (const [re, c, o] of LOOKS) if (re.test(material || '')) return { color: c, opacity: o }
   let h = 0
   for (const ch of String(material || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
@@ -136,8 +141,9 @@ function lookOf(material, looks) {
 export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, edgeLook = null, hiPids = null, look: look0 = null, matLooks = null, children, style }) {
   const look = { ...CAD_LOOK, ...(look0 || {}) }
   // на тёмном фоне стандартный синий плохо видно — светлее
-  if (isDarkBg(look) && look.labelColor === CAD_LOOK.labelColor) look.labelColor = '#8ab4f8'
-  if (isDarkBg(look) && look.lineColor === CAD_LOOK.lineColor) look.lineColor = '#9aa3ad'
+  const darkBg = isDarkBg(look)
+  if (darkBg && look.labelColor === CAD_LOOK.labelColor) look.labelColor = '#8ab4f8'
+  if (darkBg && look.lineColor === CAD_LOOK.lineColor) look.lineColor = '#9aa3ad'
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
@@ -148,6 +154,10 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
   // размеры проёмов — кнопки поверх 3D: каждый кадр ставим их в проекцию точки проёма на экран
   // анимация дверей и ящиков: id -> { g: группа, a: анимация }, цель (0 закрыто / 1 открыто) и текущее положение
   const animObjs = useRef(new Map())
+  const qualRef = useRef('high')
+  const bgRef = useRef(new THREE.Color('#eceff2'))
+  const solidBg = look.bg === 'custom' ? look.bgColor : darkBg ? '#202226' : '#eceff2'
+  useEffect(() => { qualRef.current = look.quality; bgRef.current = new THREE.Color(solidBg) }, [look.quality, solidBg])
   const hiRef = useRef(hiPids)
   useEffect(() => { hiRef.current = hiPids }, [hiPids])
   const animTarget = useRef(new Map())
@@ -175,8 +185,18 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     renderer.toneMappingExposure = 0.92
     renderer.outputColorSpace = THREE.SRGBColorSpace
     try { const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; pm.dispose() } catch { /* без окружения */ }
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x7d828a, 0.75))
-    const dl = new THREE.DirectionalLight(0xfff6ea, 1.5); dl.position.set(2500, 5000, 4200); scene.add(dl)
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x6f747c, 0.55))
+    const dl = new THREE.DirectionalLight(0xfff6ea, 1.5); dl.position.set(2500, 5000, 4200); scene.add(dl); scene.add(dl.target)
+    // мягкие тени: свет отбрасывает тени, пол их принимает (сам пол невидим — только тень)
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    dl.castShadow = true
+    dl.shadow.mapSize.set(2048, 2048)
+    dl.shadow.bias = -0.0004
+    dl.shadow.normalBias = 1.5
+    dl.shadow.radius = 4
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.ShadowMaterial({ opacity: 0.3, transparent: true }))
+    floor.receiveShadow = true; scene.add(floor)
     const dl2 = new THREE.DirectionalLight(0xffffff, 0.45); dl2.position.set(-4000, 2000, -2000); scene.add(dl2)
     // оси координат в углу (как в CAD-программах): X — красная, Y — зелёная, Z — синяя; начало — левый нижний задний угол
     const grid = new THREE.Group()        // (пол-сетку убрали; объект оставлен для совместимости)
@@ -195,7 +215,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     const origin = new THREE.AxesHelper(150); origin.material.depthTest = false; origin.renderOrder = 5; scene.add(origin)
     const group = new THREE.Group(); scene.add(group)
     const extra = new THREE.Group(); scene.add(extra)   // присадка и стены комнаты — без выбора нажатием
-    let raf = 0, alive = true
+    let raf = 0, alive = true, comp = null
     const tick = () => {
       if (!alive) return
       controls.update()
@@ -211,7 +231,25 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       }
       const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight
       renderer.setViewport(0, 0, w, h); renderer.setScissorTest(false)
-      renderer.render(scene, camera)
+      // «Максимальное качество»: затенение в углах и стыках (ambient occlusion) — как в программах визуализации
+      const hq = qualRef.current === 'high'
+      if (hq && !comp) {
+        try {
+          comp = new EffectComposer(renderer)
+          comp.addPass(new RenderPass(scene, camera))
+          const ao = new GTAOPass(scene, camera, w, h)
+          ao.updateGtaoMaterial({ radius: 140, distanceExponent: 1.3, thickness: 60, scale: 1.25, samples: 16 })
+          ao.blendIntensity = 1
+          comp.addPass(ao)
+          comp.addPass(new OutputPass())
+          comp.setPixelRatio(renderer.getPixelRatio()); comp.setSize(w, h)
+        } catch { comp = null; qualRef.current = 'std' }
+      }
+      if (hq && comp) {
+        scene.background = bgRef.current
+        if (comp.__w !== w || comp.__h !== h) { comp.setSize(w, h); comp.__w = w; comp.__h = h }
+        comp.render()
+      } else { scene.background = null; renderer.render(scene, camera) }
       // мини-оси в правом нижнем углу поворачиваются вместе с камерой (слева — кнопки проёмов)
       const s = Math.min(90, Math.round(Math.min(w, h) * 0.22))
       axCam.position.copy(camera.position).sub(controls.target).setLength(4.2); axCam.lookAt(0, 0, 0); axCam.up.copy(camera.up)
@@ -321,14 +359,14 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     renderer.domElement.addEventListener('pointermove', onMove)
     renderer.domElement.addEventListener('pointerup', onUp)
     renderer.domElement.addEventListener('pointercancel', onUp)
-    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false }
+    st.current = { renderer, scene, camera, controls, group, extra, grid, fitted: false, dl, floor }
     return () => {
       alive = false; cancelAnimationFrame(raf); ro.disconnect()
       renderer.domElement.removeEventListener('pointerdown', onDown, { capture: true })
       renderer.domElement.removeEventListener('pointermove', onMove)
       renderer.domElement.removeEventListener('pointerup', onUp)
       renderer.domElement.removeEventListener('pointercancel', onUp)
-      controls.dispose(); renderer.dispose()
+      controls.dispose(); comp?.dispose?.(); renderer.dispose()
       group.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.() })
       extra.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.() })
       el.removeChild(renderer.domElement)
@@ -372,14 +410,18 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const isSel0 = selected && p.item.id === selected, isPart0 = selectedPid && p.pid === selectedPid, isBlk0 = !isPart0 && hiPids?.has?.(p.pid)
       if (p.model) {
         // фурнитура: металл с отражениями, без контурных линий
-        const [hc, hm, hr] = HW_LOOK[p.model.type] || ['#c8ccd0', 1, 0.3]
-        const mat = new THREE.MeshStandardMaterial({ color: isPart0 || isBlk0 ? new THREE.Color(hc).lerp(new THREE.Color('#f59e0b'), 0.4) : hc, metalness: hm, roughness: hr, envMapIntensity: 1.2, side: THREE.DoubleSide,
+        const isHandle = HANDLE_MODELS.has(p.model.type)
+        const fin = p.model.type === 'mside' ? null : FINISHES.find(f => f[0] === (isHandle ? look.handleFinish : look.hwFinish))
+        const [hc, hm, hr] = fin ? [fin[2], fin[3], fin[4]] : (HW_LOOK[p.model.type] || ['#c8ccd0', 1, 0.3])
+        const mat = new THREE.MeshPhysicalMaterial({ color: isPart0 || isBlk0 ? new THREE.Color(hc).lerp(new THREE.Color('#f59e0b'), 0.4) : hc, metalness: hm, roughness: hr, envMapIntensity: 1.35, side: THREE.DoubleSide,
+          anisotropy: fin?.[5] || 0, clearcoat: fin?.[0] === 'chrome' ? 0.6 : 0, clearcoatRoughness: 0.05,
           transparent: xray, opacity: xray ? 0.5 : 1 })
         const { g: hg, off } = holder(p.anim)
         let geos
         try { geos = hwGeometries(p) } catch { geos = [] }
         for (const g of geos) {
           const m = new THREE.Mesh(g, mat)
+          m.castShadow = true
           m.position.set(-off[0], -off[1], -off[2])
           m.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, anim: p.anim?.id || null }
           hg.add(m)
@@ -401,7 +443,9 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
             const dims = [sx, sy, sz], ti = dims.indexOf(Math.min(...dims))
             const [ua, va] = ti === 0 ? [2, 1] : ti === 1 ? [0, 2] : [0, 1]
             const m = p.place.m, ey = [Math.abs(m[1]), Math.abs(m[4]), Math.abs(m[7])], la = ey.indexOf(Math.max(...ey))
-            if (la === ua) { map.rotation = Math.PI / 2; map.repeat.set(dims[va] / sc, dims[ua] / sc) } else map.repeat.set(dims[ua] / sc, dims[va] / sc)
+            // волокно — вдоль длины детали; на картинке декор вертикальный (по умолчанию) или горизонтальный; на детали можно повернуть
+            const rot = (la === ua) !== (lk.dir === 'h') !== !!p.grainFlip
+            if (rot) { map.rotation = Math.PI / 2; map.repeat.set(dims[va] / sc, dims[ua] / sc) } else map.repeat.set(dims[ua] / sc, dims[va] / sc)
           }
         }
       }
@@ -410,14 +454,21 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const isBlk = !isPart && hiPids?.has?.(p.pid)
       const ghost = ghostFronts && p.role === 'фасад' && p.item.id === selected
       const op = ghost ? 0.18 : xray ? Math.min(lk.opacity, 0.35) : lk.opacity
-      const mat = new THREE.MeshStandardMaterial({
+      const gloss = /глянец|глянц|gloss|акрил|high ?gloss/i.test(p.material || ''), matte = /матов|супермат|soft ?touch/i.test(p.material || '')
+      const glass = p.kind === 'glass' || /стекл|зеркал/i.test(p.material || '')
+      const mirror = /зеркал/i.test(p.material || '')
+      const mat = new THREE.MeshPhysicalMaterial({
+        clearcoat: gloss ? 1 : 0, clearcoatRoughness: 0.04, ior: glass ? 1.5 : 1.45, specularIntensity: glass ? 1 : 0.5,
+        ...(mirror ? { metalness: 1, roughness: 0.02 } : {}),
         color: isPart ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.6) : isBlk ? new THREE.Color(lk.color).lerp(new THREE.Color('#f59e0b'), 0.35) : isSel ? new THREE.Color(lk.color).lerp(new THREE.Color('#3b82f6'), 0.45) : lk.color,
-        roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.3 : p.kind === 'glass' ? 0.05 : 0.72, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.85 : 0,
-        envMapIntensity: p.kind === 'sheet' ? 0.3 : 1, map,
+        roughness: p.kind === 'profile' || p.kind === 'hw' ? 0.3 : glass ? 0.04 : gloss ? 0.18 : matte ? 0.9 : 0.68, metalness: p.kind === 'profile' || p.kind === 'hw' ? 0.85 : 0,
+        envMapIntensity: p.kind === 'sheet' ? (gloss ? 0.9 : 0.32) : glass ? 1.6 : 1, map,
         transparent: op < 1, opacity: op, depthWrite: op >= 1,
       })
+      if (mirror) mat.metalness = 1
       if (map && !isPart0 && !isBlk0 && !isSel0) mat.color.set('#ffffff')
       const mesh = new THREE.Mesh(geo, mat)
+      mesh.castShadow = op >= 1; mesh.receiveShadow = true
       const { g: hg, off } = holder(p.anim)
       if (!fig) mesh.position.set(b[0] + sx / 2 - off[0], b[1] + sy / 2 - off[1], b[2] + sz / 2 - off[2])
       else mesh.position.set(-off[0], -off[1], -off[2])
@@ -472,6 +523,17 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       dim([b[0], b[1], b[5] + off], [b[3], b[1], b[5] + off], r(b[3] - b[0]), [(b[0] + b[3]) / 2, b[1] + lh * 0.7, b[5] + off])
       dim([b[0] - off, b[1], b[5]], [b[0] - off, b[4], b[5]], r(b[4] - b[1]), [b[0] - off - lh * 1.6, (b[1] + b[4]) / 2, b[5]])
       dim([b[0] - off, b[1], b[2]], [b[0] - off, b[1], b[5]], r(b[5] - b[2]), [b[0] - off - lh * 1.6, b[1] + lh * 0.7, (b[2] + b[5]) / 2])
+    }
+    // тени и пол — под всю сцену
+    if (parts?.length && s.dl) {
+      const b = sceneBox(parts)
+      const c = new THREE.Vector3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2)
+      const R = Math.max(800, Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) * 0.75)
+      s.dl.position.copy(c).add(new THREE.Vector3(0.7, 1.15, 0.5).normalize().multiplyScalar(R * 2.2))
+      s.dl.target.position.copy(c)
+      const sc = s.dl.shadow.camera
+      sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.near = R * 0.2; sc.far = R * 4.5; sc.updateProjectionMatrix()
+      s.floor.position.set(c.x, b[1] - 0.5, c.z); s.floor.scale.set(R * 4, 1, R * 4)
     }
     if (!s.fitted && parts?.length) { fit(s, parts); s.fitted = true }
   }, [parts, selected, selectedPid, xray, dims, openings, selectedOpening, edgeLook, hiPids, matLooks, JSON.stringify(look)]) // eslint-disable-line react-hooks/exhaustive-deps

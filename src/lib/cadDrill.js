@@ -9,9 +9,13 @@
 export const JOINTS = [
   ['confirmat_dowel', 'Конфирмат + шкант'],
   ['confirmat', 'Конфирмат'],
+  ['minifix_dowel', 'Минификс + шкант'],
+  ['minifix', 'Минификс'],
   ['dowel', 'Шканты (на клей)'],
-  ['none', 'Без присадки'],
+  ['none', 'Без присадки (уголки, стяжки, саморезы)'],
 ]
+// минификс (эксцентрик Ø15): штифт Ø5 в пласть A (не насквозь), канал Ø8 в торец B до эксцентрика, эксцентрик Ø15 в скрытую пласть B
+export const MINIFIX = { cam: 15, camDepth: 12.5, camFrom: 24, bolt: 5, boltDepth: 11, channel: 8 }
 const NO_JOINT_ROLES = new Set(['фасад', 'задняя', 'опора', 'стекло', 'металл'])
 const EPS = 0.2
 const r1 = v => Math.round(v * 10) / 10
@@ -33,8 +37,7 @@ function spots(len, end = 50) {
 }
 
 /** Стыки и отверстия от них: [{ pid, p: [x,y,z] вход, n: [dx,dy,dz] внутрь детали, d, depth, note }] */
-export function jointHoles(parts, scheme = 'confirmat_dowel') {
-  if (scheme === 'none') return []
+export function jointHoles(parts, scheme0 = 'confirmat_dowel') {
   const out = []
   const cand = parts.filter(sp => sp.kind === 'sheet' && !NO_JOINT_ROLES.has(sp.role) && sp.place.T >= 10)
   for (const A of cand) {
@@ -62,6 +65,9 @@ export function jointHoles(parts, scheme = 'confirmat_dowel') {
     // сдвигаем, чтобы сквозной конфирмат и шканты не попали в одно место
     const facing = j => joins.some(o => o.side !== j.side && o.kb === j.kb && Math.min(o.o1, j.o1) - Math.max(o.o0, j.o0) > 0 && Math.min(o.m1, j.m1) - Math.max(o.m0, j.m0) > 0)
     for (const { B, kb, side, m, o0, o1, m0, m1 } of joins) {
+      // своя схема у детали (например, столешница на минификсах — без сквозных отверстий): A, затем B, иначе — проекта
+      const scheme = A.joint || B.joint || scheme0
+      if (scheme === 'none') continue
       const shifted = side < 0 && facing({ kb, side, o0, o1, m0, m1 })
       const c = (o0 + o1) / 2                      // середина торца B
       const face = side > 0 ? a[k + 3] : a[k]       // общая плоскость стыка
@@ -72,12 +78,23 @@ export function jointHoles(parts, scheme = 'confirmat_dowel') {
       const len = m1 - m0
       const ss = spots(len, shifted ? 100 : 50)
       const conf = scheme === 'confirmat' || scheme === 'confirmat_dowel'
-      const dow = scheme === 'dowel' || (scheme === 'confirmat_dowel' && len >= 200)
+      const mfx = scheme === 'minifix' || scheme === 'minifix_dowel'
+      const dow = scheme === 'dowel' || ((scheme === 'confirmat_dowel' || scheme === 'minifix_dowel') && len >= 200)
+      const b = B.place.aabb, TB = b[kb + 3] - b[kb]
       ss.forEach((s, i) => {
         const mv = m0 + s
         if (conf) {
           out.push({ pid: A.pid, p: at(outer, mv), n: into, d: 7, depth: r1(TA), note: 'Конфирмат' })
           out.push({ pid: B.pid, p: at(face, mv), n: into, d: 5, depth: r1(Math.max(10, 50 - TA)), note: 'Конфирмат' })
+        }
+        if (mfx) {
+          out.push({ pid: A.pid, p: at(face, mv), n: back, d: MINIFIX.bolt, depth: r1(Math.min(MINIFIX.boltDepth, TA - 3)), note: 'Минификс: штифт' })
+          out.push({ pid: B.pid, p: at(face, mv), n: into, d: MINIFIX.channel, depth: MINIFIX.camFrom + 4, note: 'Минификс: канал' })
+          // эксцентрик — в пласть B, что смотрит внутрь (к середине детали A): у левой боковины — внутренняя сторона и т. п.
+          const inward = (a[kb] + a[kb + 3]) / 2 > (b[kb] + b[kb + 3]) / 2
+          const pc = [0, 0, 0]; pc[k] = face + side * MINIFIX.camFrom; pc[kb] = inward ? b[kb + 3] : b[kb]; pc[m] = mv
+          const nc = [0, 0, 0]; nc[kb] = inward ? -1 : 1
+          out.push({ pid: B.pid, p: pc.map(r1), n: nc, d: MINIFIX.cam, depth: r1(Math.min(MINIFIX.camDepth, TB - 3)), note: 'Минификс: эксцентрик' })
         }
         if (dow) {
           // шкант — на 32 мм от конфирмата внутрь стыка (без конфирмата — на месте конфирмата)

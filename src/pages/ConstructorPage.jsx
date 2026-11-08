@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext'
 import { MenuButton } from '../components/NavDrawer'
 import Hint from '../components/Hint'
 import CadView from '../components/CadView'
-import { CAD_LOOK } from '../lib/cadLook'
+import { CAD_LOOK, FINISHES } from '../lib/cadLook'
 import { getTheme, setTheme } from '../lib/theme'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
@@ -319,6 +319,16 @@ function shrinkImage(file, max = 512) {
     fr.readAsDataURL(file)
   })
 }
+// крепёж стыков детали: своя схема (например, столешница на минификсах — без сквозных отверстий в лице)
+function JointPick({ value, onChange }) {
+  return (
+    <label style={{ display: 'block', marginTop: 8 }}><span style={lbl}>Крепёж стыков этой детали</span>
+      <select style={inp} value={value || ''} onChange={e => onChange(e.target.value || null)}>
+        <option value="">Как в проекте</option>
+        {JOINTS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+      </select></label>
+  )
+}
 // материал (декор) для выбранных деталей: другой материал — это и другой раскрой (детали уйдут в свою группу)
 function MatPick({ materials, value, onApply, onReset }) {
   const [v, setV] = useState(value || '')
@@ -345,10 +355,11 @@ function MatLookEditor({ name, looks, setLooks }) {
         <a href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(name + ' декор текстура')}`} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: 'var(--blue)' }}>🔎 найти в интернете</a>
         {own.tex && <><img src={own.tex} alt="" style={{ width: 34, height: 24, objectFit: 'cover', borderRadius: 4 }} />
           <span>размер картинки</span><SmallNum width={56} value={own.scale || 600} onChange={v => v > 50 && set({ scale: v })} /><span>мм</span>
+          <span>декор на фото</span>{[['v', '↕ вертикально'], ['h', '↔ горизонтально']].map(([k, t]) => <button key={k} type="button" style={{ ...chipS((own.dir || 'v') === k), padding: '2px 8px' }} onClick={() => set({ dir: k === 'v' ? null : k })}>{t}</button>)}
           <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => set({ tex: null })}>убрать фото</button></>}
         {(own.color || own.tex) && <button type="button" style={{ ...chipS(false), padding: '2px 8px' }} onClick={() => setLooks(Object.fromEntries(Object.entries(looks || {}).filter(([k]) => k !== name)))}>↺ по умолчанию</button>}
       </div>
-      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>Сфотографируйте образец или сохраните картинку из интернета и загрузите её — так деталь и все детали этого материала будут выглядеть на модели. Запоминается за аккаунтом.</p>
+      <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '4px 0 0' }}>Направление декора на фото укажите, как он идёт на картинке, — на детали он ляжет вдоль её длины (как волокно при раскрое); на отдельной детали можно повернуть. Сфотографируйте образец или сохраните картинку из интернета и загрузите её — так деталь и все детали этого материала будут выглядеть на модели. Запоминается за аккаунтом.</p>
     </div>
   )
 }
@@ -1139,6 +1150,11 @@ export default function ConstructorPage() {
   const hiPids = useMemo(() => (blk ? new Set(parts.filter(sp => sp.item.id === blk.item && sp.blk && sp.blk.n === blk.n && sp.blk.t === blk.t).map(sp => sp.pid)) : null), [blk, parts])
   const multiSet = useMemo(() => new Set(multiSel), [multiSel])
   // свой материал выбранным деталям (item.mat[ключ]); null — как в корпусе
+  const applyMultiJoint = v => {
+    const by = new Map()
+    for (const sp of parts) if (multiSet.has(sp.pid) && sp.kind === 'sheet') { if (!by.has(sp.item.id)) by.set(sp.item.id, []); by.get(sp.item.id).push(sp.key) }
+    setProject({ ...project, items: project.items.map(it => { const ks = by.get(it.id); if (!ks) return it; const j = { ...(it.joint || {}) }; for (const k of ks) { if (v) j[k] = v; else delete j[k] } return { ...it, joint: j } }) })
+  }
   const applyMultiMat = v => {
     const by = new Map()
     for (const sp of parts) if (multiSet.has(sp.pid)) { if (!by.has(sp.item.id)) by.set(sp.item.id, []); by.get(sp.item.id).push(sp.key) }
@@ -1389,6 +1405,12 @@ export default function ConstructorPage() {
           <input type="color" value={edgeLook.color} onChange={e => setEdgeLook({ color: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none', marginLeft: 8 }} /></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Яркость кромки</span><input type="range" min="0.1" max="1" step="0.05" value={edgeLook.opacity} onChange={e => { const v = Number(e.target.value); setEdgeLook({ opacity: v }) }} style={{ flex: 1, minWidth: 0 }} /><span style={{ width: 40, textAlign: 'right', color: 'var(--text-muted)' }}>{Math.round(edgeLook.opacity * 100)}%</span></label>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!edgeLook.glow} onChange={e => setEdgeLook({ glow: e.target.checked })} />Светящаяся (видна сквозь детали)</label>
+        <div style={sect}>Качество картинки</div>
+        <Chips value={look.quality} onChange={v => setLook({ quality: v })} options={[['high', 'Максимальное (тени, затенение в углах)'], ['std', 'Обычное (быстрее)']]}
+          hint="Максимальное — как в программах визуализации: мягкие тени и затенение в стыках и углах. На слабом телефоне может подтормаживать — тогда «Обычное»." />
+        <div style={sect}>Металл фурнитуры</div>
+        <Chips label="Ручки" value={look.handleFinish} onChange={v => setLook({ handleFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />
+        <Chips label="Петли и направляющие" value={look.hwFinish} onChange={v => setLook({ hwFinish: v })} options={FINISHES.map(f => [f[0], f[1]])} />
         <div style={sect}>Фон и тема</div>
         <Chips value={look.bg} onChange={v => setLook({ bg: v })} options={[['auto', 'По теме'], ['light', 'Светлый'], ['dark', 'Тёмный'], ['custom', 'Свой цвет']]} />
         {look.bg === 'custom' && <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, marginBottom: 6 }}><span style={{ width: 150 }}>Цвет фона</span><input type="color" value={look.bgColor} onChange={e => setLook({ bgColor: e.target.value })} style={{ width: 40, height: 26, padding: 0, border: 'none', background: 'none' }} /></label>}
@@ -1407,6 +1429,7 @@ export default function ConstructorPage() {
         {sel.length > 0 ? <>
           <MatPick materials={materials} value={mats.length === 1 ? mats[0] : ''} onApply={applyMultiMat} />
           {mats.length === 1 && <MatLookEditor name={mats[0]} looks={matLooks} setLooks={setMatLooks} />}
+          <JointPick value="" onChange={applyMultiJoint} />
         </> : <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Нажимайте детали на модели — они добавятся в выбор (ещё раз — убрать).</p>}
       </div>
     })()}
@@ -1443,6 +1466,8 @@ export default function ConstructorPage() {
             <div style={{ marginTop: 8 }}>
               <MatPick key={sp.pid} materials={materials} value={sp.material} onApply={v => { const m = { ...(selItem.mat || {}) }; if (v) m[sp.key] = v; else delete m[sp.key]; setItem({ ...selItem, mat: m }) }} />
               <MatLookEditor name={sp.material} looks={matLooks} setLooks={setMatLooks} />
+              {matLooks?.[sp.material]?.tex && <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={!!selItem.grain?.[sp.key]} onChange={e => { const g = { ...(selItem.grain || {}) }; if (e.target.checked) g[sp.key] = true; else delete g[sp.key]; setItem({ ...selItem, grain: g }) }} />Повернуть декор на этой детали</label>}
+              {sp.kind === 'sheet' && <JointPick value={selItem.joint?.[sp.key]} onChange={v => { const j = { ...(selItem.joint || {}) }; if (v) j[sp.key] = v; else delete j[sp.key]; setItem({ ...selItem, joint: j }) }} />}
             </div>
             <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '6px 0 0' }}>Присадка по стыкам и под фурнитуру пересчитывается сама; в редакторе добавляйте фигурный контур, вырезы, свою присадку и пазы. Поменяется размер детали — контур сбросится до прямоугольника.</p>
           </>}
