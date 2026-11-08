@@ -76,6 +76,42 @@ export function findNode(node, id, parent = null) {
   for (const c of node.children || []) { const r = findNode(c, id, node); if (r) return r }
   return null
 }
+// ── операции с деревом проёмов (возвращают новое дерево) ──
+const clone = n => JSON.parse(JSON.stringify(n))
+/** разделить проём панелями: kind 'v' — вертикальные, 'h' — горизонтальные; уже разделён так же — добавить ещё */
+export function opSplit(tree, id, kind, n = 1) {
+  const t = clone(tree), r = findNode(t, id)
+  if (!r) return t
+  const node = r.node
+  if (node.split === kind && node.children?.length) { for (let i = 0; i < n; i++) node.children.push(newNode()); return t }
+  if (node.split && node.children?.length) return null      // уже разделён по-другому — делим один из его проёмов
+  node.split = kind; node.children = Array.from({ length: n + 1 }, () => newNode()); node.shelfType = node.shelfType || 'fixed'
+  if (node.front?.type === 'drawers') node.front = null
+  return t
+}
+/**
+ * задать размер проёма в свету. dir — какие соседи «тянутся»: 'after' (выше / правее) или 'before' (ниже / левее):
+ * «авто»-проёмы с этой стороны делят изменение поровну (заданные остаются), с другой стороны — всё остаётся как есть.
+ * sizes — текущие размеры всех проёмов { id: { w, h } }.
+ */
+export function opSetSize(tree, id, v, dir, sizes) {
+  const t = clone(tree), r = findNode(t, id)
+  if (!r?.parent) return t
+  const sib = r.parent.children, i = sib.indexOf(r.node)
+  const key = r.parent.split === 'v' ? 'w' : 'h'
+  let side = dir === 'before' ? sib.slice(0, i) : sib.slice(i + 1)
+  if (!side.length) side = dir === 'before' ? sib.slice(i + 1) : sib.slice(0, i)
+  // с выбранной стороны тянутся «авто»-проёмы (заданные 📌 остаются); авто нет — тянутся все проёмы этой стороны
+  const pull = side.some(c => c.size == null) ? side.filter(c => c.size == null) : side
+  sib.forEach(c => { if (c !== r.node) c.size = pull.includes(c) ? null : (sizes?.[c.id]?.[key] ?? c.size) })
+  r.node.size = v
+  return t
+}
+export function opPatch(tree, id, fn) { const t = clone(tree), r = findNode(t, id); if (r) fn(r.node, r.parent); return t }
+export function opFront(tree, id, f) {
+  return opPatch(tree, id, n => { n.front = f; if (f) { const clear = x => (x.children || []).forEach(c => { c.front = null; clear(c) }); clear(n) } })
+}
+
 const anyFront = n => !!n && (!!n.front || (n.children || []).some(anyFront))
 
 /** размеры детей проёма: span — свет проёма по оси деления, t — толщина разделителя */
@@ -182,6 +218,14 @@ export function cabinetParts(params) {
     openings.push({ id: node.id, box: [x0, y0, zi0, x1, y1, D].map(r1), w: r1(x1 - x0), h: r1(y1 - y0), leaf: !(node.split && node.children?.length), depth })
     if (x1 - x0 < 50 || y1 - y0 < 30) warn.push(`Проём ${r1(x1 - x0)}×${r1(y1 - y0)} — слишком маленький`)
     if (node.front) fronts.push({ node, x0, x1, y0, y1 })
+    // фронтальная панель в проёме: параллельно фасаду, по глубине — от зада или от переда проёма, с отступами от сторон проёма
+    if (node.fpanel) {
+      const f = node.fpanel, d = num(f.dist, 0)
+      const fz0 = f.from === 'front' ? D - d - t : zi0 + d
+      parts.push(mk('fp_' + node.id, 'Фронтальная панель', 'наполнение',
+        [x0 + num(f.l, 0), y0 + num(f.b, 0), fz0, x1 - num(f.r, 0), y1 - num(f.t, 0), fz0 + t], 2, f.from === 'front' ? -1 : +1, 1, mat, { edges: f.from === 'front' ? {} : {} }))
+      if (fz0 < zi0 - 0.05 || fz0 + t > D + 0.05) warn.push('Фронтальная панель выходит за глубину проёма')
+    }
     const ch = node.children || []
     if (!node.split || !ch.length) return
     const sizes = childSizes(node, node.split === 'v' ? x1 - x0 : y1 - y0, t)
@@ -192,15 +236,17 @@ export function cabinetParts(params) {
       if (node.split === 'v') walk(c, a, b, y0, y1, depth + 1)
       else walk(c, x0, x1, a, b, depth + 1)
       if (i < ch.length - 1) {
-        if (node.split === 'v') parts.push(mk('st_' + c.id, 'Стойка', 'наполнение', [b, y0, zi0, b + t, y1, D], 0, +1, 1, mat, { edges: front }))
+        // отступы панелей этого деления спереди и сзади (короче по глубине)
+        const setF = node.setFront != null ? num(node.setFront) : null, setB = num(node.setBack, 0)
+        if (node.split === 'v') parts.push(mk('st_' + c.id, 'Вертикальная панель', 'наполнение', [b, y0, zi0 + setB, b + t, y1, D - (setF ?? 0)], 0, +1, 1, mat, { edges: front }))
         else {
           const loose = node.shelfType === 'loose', g = loose ? 1 : 0
-          const sb = loose ? Math.max(shelfSetback, 2) : shelfSetback
-          parts.push(mk('sh_' + c.id, loose ? 'Полка съёмная' : 'Полка', 'наполнение', [x0 + g, b, zi0 + g, x1 - g, b + t, D - sb], 1, +1, 0, mat, { edges: front }))
+          const sb = setF ?? (loose ? Math.max(shelfSetback, 2) : shelfSetback)
+          parts.push(mk('sh_' + c.id, loose ? 'Горизонтальная панель (съёмная)' : 'Горизонтальная панель', 'наполнение', [x0 + g, b, zi0 + g + setB, x1 - g, b + t, D - sb], 1, +1, 0, mat, { edges: front }))
           if (loose) {
             shelfLoose++
             const pf = num(p.pinFront, 37), yp = b - num(p.pinBelow, 8)
-            for (const z of [D - sb - pf, zi0 + g + pf]) {
+            for (const z of [D - sb - pf, zi0 + g + setB + pf]) {
               holes.push({ p: [x0, yp, z], n: '-x', d: 5, depth: 12, note: 'Полкодержатель' })
               holes.push({ p: [x1, yp, z], n: '+x', d: 5, depth: 12, note: 'Полкодержатель' })
             }

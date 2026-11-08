@@ -23,7 +23,7 @@ for (const rot of [0, 90, 180, 270]) for (const [, name, p] of CAB_PRESETS) for 
 const pr = newProject('Шкаф')
 pr.items.push(newItem('cabinet'))
 const g = exportForOrder(pr, sheetGroups(pr)[0].key)
-const side = g.items.find(x => x.name === 'Боковина левая'), shelf = g.items.find(x => x.name === 'Полка'), back = projectParts(pr).parts.find(x => x.key === 'back')
+const side = g.items.find(x => x.name === 'Боковина левая'), shelf = g.items.find(x => x.name === 'Горизонтальная панель'), back = projectParts(pr).parts.find(x => x.key === 'back')
 ok(side.w === 2100 && side.h === 560, `side ${side.w}x${side.h}`)
 ok(shelf.h === 768 || shelf.w === 768, `shelf ${shelf.w}x${shelf.h}`)
 ok(side.contour.grooves.length === 1, 'groove on side')
@@ -125,17 +125,40 @@ for (const rot of [0, 90, 180, 270]) {
   const it = newItem('cabinet', { p: { W: 2000, H: 2100, D: 560, top: 'overlay', overhangFront: 20, overhangSide: 10, tree: newNode({ id: 'root', split: 'v', children: [L, R] }) } })
   const { parts, warn, openings } = projectParts({ items: [it] })
   ok(!warn.length, 'tree warn ' + warn)
-  const st = parts.find(p => p.name === 'Стойка')
+  const st = parts.find(p => p.name === 'Вертикальная панель')
   ok(st && st.place.aabb[0] === 616, 'partition at 616: ' + st?.place.aabb[0])
   const door = parts.find(p => p.name === 'Дверь')
   ok(door && door.place.aabb[0] === 1.5 && door.place.aabb[3] === 622.5, 'door overlap ' + door?.place.aabb)
   ok(door.place.aabb[4] === 2100 - 16 - 1.5, 'door under overlay top ' + door.place.aabb[4])
   const top = parts.find(p => p.name === 'Крышка')
   ok(top.place.aabb[5] === 560 + 16 + 20 && top.place.aabb[0] === -10 && top.place.aabb[3] === 2010, 'overhang ' + top.place.aabb)
-  ok(parts.filter(p => p.name === 'Полка').length === 2 && parts.filter(p => p.name === 'Фасад ящика').length === 2, 'shelves + drawers')
+  ok(parts.filter(p => p.name === 'Горизонтальная панель').length === 2 && parts.filter(p => p.name === 'Фасад ящика').length === 2, 'shelves + drawers')
   ok(openings.length === 6, 'openings ' + openings.length)
   const right = openings.find(o => o.id === R.id)
   ok(Math.abs(right.w - (2000 - 32 - 600 - 16)) < 0.01, 'right opening width ' + right.w)
+}
+// одна полка двигается — группа полок с выбранной стороны сжимается/растягивается, другая сторона не меняется
+{
+  const { opSplit, opSetSize, cabinetParts } = await import('../../src/lib/cadCabinet.js')
+  let tree = { id: 'root', size: null, split: null, children: [], front: null }
+  tree = opSplit(tree, 'root', 'h', 4)                 // 5 ярусов
+  const p0 = { W: 800, H: 2100, D: 560, doors: 0, tree }
+  const sz = pp => Object.fromEntries(cabinetParts(pp).openings.map(o => [o.id, o]))
+  const before = sz(p0)
+  const ids = tree.children.map(c => c.id)
+  const t2 = opSetSize(tree, ids[1], 300, 'after', before)  // 2-й ярус — 300, тянем верхние
+  const after = sz({ ...p0, tree: t2 })
+  ok(after[ids[0]].h === before[ids[0]].h, 'lower kept')
+  ok(after[ids[1]].h === 300, 'set 300')
+  const up = [2, 3, 4].map(i => after[ids[i]].h)
+  ok(Math.abs(up[0] - up[2]) < 0.2 && Math.abs(up.reduce((a, b) => a + b, 0) + 300 + after[ids[0]].h + 4 * 16 - before.root.h) < 0.5, 'upper group shares ' + up)
+  const t3 = opSetSize(t2, ids[3], 250, 'before', after)   // 4-й — 250, тянем нижние (только авто ниже — 3-й), 5-й не меняется
+  const a3 = sz({ ...p0, tree: t3 })
+  ok(a3[ids[4]].h === after[ids[4]].h && a3[ids[3]].h === 250 && a3[ids[0]].h === after[ids[0]].h, 'before dir ' + [0, 1, 2, 3, 4].map(i => a3[ids[i]].h))
+  // фронтальная панель: от зада 100, отступы
+  const t4 = { ...t3, fpanel: { from: 'back', dist: 100, l: 0, r: 0, b: 10, t: 10 } }
+  const fp = cabinetParts({ ...p0, tree: t4 }).parts.find(x => x.name === 'Фронтальная панель')
+  ok(fp && fp.box[2] === 16 + 100 + 0 - 0 + (fp.box[2] - 116) && fp.box[5] - fp.box[2] === 16, 'fpanel ' + fp?.box)
 }
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

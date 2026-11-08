@@ -46,13 +46,17 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, style }) {
+export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, children, style }) {
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
   const drag = useRef(onDrag)
   const selId = useRef(selected)
   useEffect(() => { sel.current = onSelect; drag.current = onDrag; selId.current = selected }, [onSelect, onDrag, selected])
+  // размеры проёмов — кнопки поверх 3D: каждый кадр ставим их в проекцию точки проёма на экран
+  const labelEls = useRef(new Map())
+  const labelsRef = useRef(labels)
+  useEffect(() => { labelsRef.current = labels }, [labels])
 
   // один раз: рендерер, камера, свет, пол
   useEffect(() => {
@@ -95,13 +99,21 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight
       renderer.setViewport(0, 0, w, h); renderer.setScissorTest(false)
       renderer.render(scene, camera)
-      // мини-оси в левом нижнем углу поворачиваются вместе с камерой
+      // мини-оси в правом нижнем углу поворачиваются вместе с камерой (слева — кнопки проёмов)
       const s = Math.min(90, Math.round(Math.min(w, h) * 0.22))
       axCam.position.copy(camera.position).sub(controls.target).setLength(4.2); axCam.lookAt(0, 0, 0); axCam.up.copy(camera.up)
       renderer.autoClear = false; renderer.clearDepth()
-      renderer.setScissorTest(true); renderer.setScissor(6, 22, s, s); renderer.setViewport(6, 22, s, s)
+      renderer.setScissorTest(true); renderer.setScissor(w - s - 4, 22, s, s); renderer.setViewport(w - s - 4, 22, s, s)
       renderer.render(axScene, axCam)
       renderer.setScissorTest(false); renderer.autoClear = true
+      for (const l of labelsRef.current || []) {
+        const el = labelEls.current.get(l.id)
+        if (!el) continue
+        const v = new THREE.Vector3(...l.p).project(camera)
+        const vis = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05
+        el.style.display = vis ? 'block' : 'none'
+        if (vis) el.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h}px) translate(-50%, -50%)`
+      }
       raf = requestAnimationFrame(tick)
     }
     tick()
@@ -276,7 +288,18 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
   // «Показать всё»
   useEffect(() => { if (fitKey && st.current) fit(st.current, parts || []) }, [fitKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  return <div ref={box} style={{ position: 'relative', width: '100%', height: '100%', minHeight: 200, background: 'linear-gradient(#f4f6f8, #e6eaee)', borderRadius: 8, overflow: 'hidden', ...style }} />
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 200, borderRadius: 8, overflow: 'hidden', ...style }}>
+      <div ref={box} style={{ position: 'absolute', inset: 0, background: 'linear-gradient(#f4f6f8, #e6eaee)' }} />
+      {(labels || []).map(l => (
+        <button key={l.id} type="button" ref={el => { if (el) labelEls.current.set(l.id, el); else labelEls.current.delete(l.id) }}
+          onClick={() => onLabel?.(l.id)}
+          style={{ position: 'absolute', left: 0, top: 0, display: 'none', padding: '2px 6px', fontSize: 12, fontWeight: 600, borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+            border: `1px solid ${l.on ? '#1d4ed8' : '#93c5fd'}`, background: l.on ? '#1d4ed8' : 'rgba(255,255,255,0.9)', color: l.on ? 'white' : '#1d4ed8', zIndex: 2 }}>{l.text}</button>
+      ))}
+      {children}
+    </div>
+  )
 }
 
 function fit(s, parts) {
