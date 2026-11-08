@@ -285,7 +285,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       }
       controls.update()
       for (const [id, { g, a }] of animObjs.current) {
-        const tg = animTarget.current.get(id) || 0
+        const tg = animTarget.current.get(a.link || id) || 0
         let pr = animProg.current.get(id) || 0
         if (pr === tg && !g.userData.dirty) continue
         pr = tg > pr ? Math.min(tg, pr + 0.035) : Math.max(tg, pr - 0.035)
@@ -487,7 +487,8 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
         // фурнитура: металл с отражениями, без контурных линий
         const isHandle = HANDLE_MODELS.has(p.model.type)
         const fin = p.model.type === 'mside' ? null : FINISHES.find(f => f[0] === (isHandle ? look.handleFinish : look.hwFinish))
-        const [hc, hm, hr] = fin ? [fin[2], fin[3], fin[4]] : (HW_LOOK[p.model.type] || ['#c8ccd0', 1, 0.3])
+        const SIDE = { white: ['#eeeeec', 0.2, 0.4], grey: ['#a9adb2', 0.5, 0.38], anthracite: ['#3a3d42', 0.5, 0.4], steel: ['#c6cace', 1, 0.3] }
+        const [hc, hm, hr] = fin ? [fin[2], fin[3], fin[4]] : p.model.type === 'mside' ? (SIDE[p.model.color] || SIDE.white) : (HW_LOOK[p.model.type] || ['#c8ccd0', 1, 0.3])
         const mat = new THREE.MeshPhysicalMaterial({ color: isPart0 || isBlk0 ? new THREE.Color(hc).lerp(new THREE.Color('#f59e0b'), 0.4) : hc, metalness: hm, roughness: hr, envMapIntensity: 1.35, side: THREE.DoubleSide,
           anisotropy: fin?.[5] || 0, clearcoat: fin?.[0] === 'chrome' ? 0.6 : 0, clearcoatRoughness: 0.05,
           transparent: xray, opacity: xray ? 0.5 : 1 })
@@ -498,7 +499,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
           const m = new THREE.Mesh(g, mat)
           m.castShadow = true
           m.position.set(-off[0], -off[1], -off[2])
-          m.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, anim: p.anim?.id || null }
+          m.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, anim: p.anim?.link || p.anim?.id || null }
           hg.add(m)
         }
         continue
@@ -547,7 +548,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       const { g: hg, off } = holder(p.anim)
       if (!fig) mesh.position.set(b[0] + sx / 2 - off[0], b[1] + sy / 2 - off[1], b[2] + sz / 2 - off[2])
       else mesh.position.set(-off[0], -off[1], -off[2])
-      mesh.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, anim: p.anim?.id || null, ...(ghost ? { ghost: true } : {}) }
+      mesh.userData = { itemId: p.item.id, pid: p.pid, blk: p.blk || null, anim: p.anim?.link || p.anim?.id || null, ...(ghost ? { ghost: true } : {}) }
       hg.add(mesh)
       // контуры деталей — по настройке «Линии контуров» (выбранное — всегда с линиями)
       if (look.lines !== false || isSel || isPart || isBlk) {

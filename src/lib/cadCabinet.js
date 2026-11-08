@@ -627,7 +627,7 @@ export function cabinetParts(params) {
           const red = num(fr.sys?.reduce ?? p.metalReduce, 42)
           parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [x0 + red / 2, by0, z0, x1 - red / 2, by0 + t, zf], 1, +1, 0, mat))
           parts.push(mk(k + 'back', 'Ящик: задняя', 'ящик', [x0 + red / 2, by0 + t, z0, x1 - red / 2, by0 + bh, z0 + t], 2, +1, 0, mat))
-          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Металлобокс: боковина', [s > 0 ? a + 3 : a - red / 2, by0, z0, s > 0 ? a + red / 2 : a - 3, by0 + Math.min(bh, 150), zf], blk, anim, { type: 'mside', L: 'z', N: s > 0 ? '+x' : '-x' })
+          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Металлобокс: боковина', [s > 0 ? a + 3 : a - red / 2, by0, z0, s > 0 ? a + red / 2 : a - 3, by0 + Math.min(bh, 150), zf], blk, anim, { type: 'mside', L: 'z', N: s > 0 ? '+x' : '-x', color: fr.sideColor || 'white' })
           for (const s of [1, -1]) { const xc = s > 0 ? x0 + red / 4 + 1.5 : x1 - red / 4 - 1.5; fixPts.push([xc, by0 + 25], [xc, by0 + Math.min(bh, 150) - 25]) }
           hw.push({ name: `Металлобокс ${bd} мм (боковины)`, qty: 1 })
         } else if (sys.type === 'msys') {
@@ -635,7 +635,7 @@ export function cabinetParts(params) {
           const w = x1 - x0
           parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [x0 + bR / 2, by0, zf - (bd - lr), x1 - bR / 2, by0 + t, zf], 1, +1, 0, mat, { edges: { '+z': eB } }))
           parts.push(mk(k + 'back', 'Ящик: задняя', 'ящик', [x0 + kR / 2, by0 + t, zf - (bd - lr), x1 - kR / 2, by0 + Math.max(t + 20, sh - 15), zf - (bd - lr) + t], 2, +1, 0, mat, { edges: { '+y': eB } }))
-          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Боковина ящика (металл)', [s > 0 ? a + 3 : a - bR / 2 + 3, by0 - 5, z0, s > 0 ? a + bR / 2 - 3 : a - 3, by0 + sh, zf], blk, anim, { type: 'mside', L: 'z', N: s > 0 ? '+x' : '-x' })
+          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Боковина ящика (металл)', [s > 0 ? a + 3 : a - bR / 2 + 3, by0 - 5, z0, s > 0 ? a + bR / 2 - 3 : a - 3, by0 + sh, zf], blk, anim, { type: 'mside', L: 'z', N: s > 0 ? '+x' : '-x', color: fr.sideColor || 'white' })
           for (const s of [1, -1]) { const xc = s > 0 ? x0 + bR / 4 : x1 - bR / 4; fixPts.push([xc, by0 + 15], [xc, by0 + sh - 20]) }
           if (w - bR < 100) warn.push('Ящик слишком узкий для этой системы')
           hw.push({ name: `${drawerSystem(sysId)[1]} ${bd} мм, комплект`, qty: 1 })
@@ -709,7 +709,9 @@ export function cabinetParts(params) {
             const wx = left ? x0 : x1
             for (const d of [-16, 16]) holes.push({ p: [wx, y + d, D - pf], n: left ? '-x' : '+x', d: 5, depth: 12, note: 'Планка петли' })
             vis(`${key}p${j}`, 'Петля: планка', left ? [wx, y - 25, D - pf - 9, wx + 4, y + 25, D - pf + 9] : [wx - 4, y - 25, D - pf - 9, wx, y + 25, D - pf + 9], null, null, { type: 'plate', L: 'y', N: left ? '+x' : '-x' })
-            vis(`${key}a${j}`, 'Петля: плечо', left ? [wx + 4, y - 8, D - pf - 20, Math.max(wx + 20, xc - 6), y + 8, D - 3] : [Math.min(wx - 20, xc + 6), y - 8, D - pf - 20, wx - 4, y + 8, D - 3], null, null, { type: 'arm', L: 'z', N: left ? '+x' : '-x' })
+            // плечо петли поворачивается вокруг планки вслед за дверью (примерно на половину угла) — видно, как работает петля
+            vis(`${key}a${j}`, 'Петля: плечо', left ? [wx + 4, y - 8, D - pf - 20, Math.max(wx + 20, xc - 6), y + 8, D - 3] : [Math.min(wx - 20, xc + 6), y - 8, D - pf - 20, wx - 4, y + 8, D - 3], blk,
+              { id: `${key}arm${j}`, link: key, kind: 'rot', p: [wx, 0, D - pf], axis: [0, 1, 0], ang: anim.ang * 0.55 }, { type: 'arm', L: 'z', N: left ? '+x' : '-x' })
           }
         })
       } else {
@@ -725,7 +727,8 @@ export function cabinetParts(params) {
             const wy = up ? y1 : y0
             for (const d of [-16, 16]) holes.push(up ? { p: [x + d, wy, D - pf], n: '+y', d: 5, depth: 12, note: 'Планка петли' } : { p: [x + d, wy, D - pf], n: '-y', d: 5, depth: 12, note: 'Планка петли' })
             vis(`${key}p${j}`, 'Петля: планка', up ? [x - 25, wy - 4, D - pf - 9, x + 25, wy, D - pf + 9] : [x - 25, wy, D - pf - 9, x + 25, wy + 4, D - pf + 9], null, null, { type: 'plate', L: 'x', N: up ? '-y' : '+y' })
-            vis(`${key}a${j}`, 'Петля: плечо', up ? [x - 8, Math.min(wy - 20, yc + 6), D - pf - 20, x + 8, wy - 4, D - 3] : [x - 8, wy + 4, D - pf - 20, x + 8, Math.max(wy + 20, yc - 6), D - 3], null, null, { type: 'arm', L: 'z', N: up ? '-y' : '+y' })
+            vis(`${key}a${j}`, 'Петля: плечо', up ? [x - 8, Math.min(wy - 20, yc + 6), D - pf - 20, x + 8, wy - 4, D - 3] : [x - 8, wy + 4, D - pf - 20, x + 8, Math.max(wy + 20, yc - 6), D - 3], blk,
+              { id: `${key}arm${j}`, link: key, kind: 'rot', p: [0, wy, D - pf], axis: [1, 0, 0], ang: anim.ang * 0.55 }, { type: 'arm', L: 'z', N: up ? '-y' : '+y' })
           }
         })
       }

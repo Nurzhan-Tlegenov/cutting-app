@@ -519,6 +519,7 @@ function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
             <NumField label="Короб от низа фасада" value={fr.boxBottom ?? 15} onChange={v => apply(opFront(tree, node.id, { ...fr, boxBottom: v }))} min={0} />
             <NumField label="Короб от верха фасада" value={fr.boxTop ?? Math.max(0, (num(p.boxTopGap) ?? 40) - 15)} onChange={v => apply(opFront(tree, node.id, { ...fr, boxTop: v }))} min={0} />
           </Grid>
+          {(sys.type === 'msys' || sysId === 'metal') && <Chips label="Цвет боковин" value={fr.sideColor || 'white'} onChange={v => apply(opFront(tree, node.id, { ...fr, sideColor: v }))} options={[['white', 'Белый'], ['grey', 'Серый'], ['anthracite', 'Антрацит'], ['steel', 'Нержавейка']]} />}
           {(sys.type === 'ball' || sys.type === 'under') && <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={fr.falseFront !== false} onChange={e => apply(opFront(tree, node.id, { ...fr, falseFront: e.target.checked }))} />Фальшпанель (передняя стенка короба)</label>}
           {fr.falseFront === false && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-2px 0 8px' }}>Без фальшпанели боковины короба идут до фасада, фасад — передняя стенка; паз под дно делается и в фасаде (с изнанки).</p>}
           {sys.type === 'ball' && <>

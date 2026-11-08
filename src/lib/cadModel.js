@@ -178,7 +178,7 @@ export function projectParts(project) {
       if (rec.anim) {
         const Rr = rotYMat(it.rotY), ps = [num(it.pos?.x), num(it.pos?.y), num(it.pos?.z)]
         const a = rec.anim
-        sp.anim = { ...a, id: `${it.id}:${a.id}`, ...(a.p ? { p: mulMV(Rr, a.p).map((v, i) => v + ps[i]) } : {}), ...(a.axis ? { axis: mulMV(Rr, a.axis) } : {}), ...(a.dir ? { dir: mulMV(Rr, a.dir) } : {}) }
+        sp.anim = { ...a, id: `${it.id}:${a.id}`, ...(a.link ? { link: `${it.id}:${a.link}` } : {}), ...(a.p ? { p: mulMV(Rr, a.p).map((v, i) => v + ps[i]) } : {}), ...(a.axis ? { axis: mulMV(Rr, a.axis) } : {}), ...(a.dir ? { dir: mulMV(Rr, a.dir) } : {}) }
       }
       // правка детали в редакторе контура (фигурный контур, вырезы, своя присадка, кромка) — пока размер детали тот же;
       // размер поменялся — контур сбрасывается до прямоугольника с предупреждением (как в бланке заказа)
