@@ -16,12 +16,12 @@ import { useDesktop } from '../hooks/useDesktop'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
-import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace } from '../lib/cadCabinet'
+import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { newLinearJob, readJobs, writeJobs, LINEAR_FEATURE } from '../lib/linearJobs'
-import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, partToDetail, overrideFromDraft, isFigured, PROJECT_DEFAULTS } from '../lib/cadModel'
+import { newProject, newItem, projectParts, projectSpec, sheetGroups, exportForOrder, exportAll, explodeCabinet, sceneBox, newId, projectDrill, partToDetail, overrideFromDraft, isFigured, PROJECT_DEFAULTS, mountOf } from '../lib/cadModel'
 import { listProjects, loadProject, saveProject, deleteProject, isLocal, CAD_SQL_HINT } from '../lib/cadStore'
 
 const ContourEditor = lazy(() => import('../components/ContourEditor'))
@@ -125,6 +125,7 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes }) {
     ['v', '│', 'Верт.', () => addPanel('v'), !node],
     ['h', '─', 'Гориз.', () => addPanel('h'), !node],
     ['f', '▭', 'Фронт.', () => node && apply(opPatch(tree, node.id, n => { n.fpanel = n.fpanel ? null : { from: 'back', dist: 0, l: 0, r: 0, b: 0, t: 0 } })), !node, !!node?.fpanel],
+    ['rod', '⊸', 'Штанга', () => node && apply(opPatch(tree, node.id, n => { n.rod = n.rod ? null : { top: 60, d: 25 } })), !node, !!node?.rod],
     ['d1', '▯', 'Дверь', () => front({ type: 'doors', n: 1, hinge: 'left' }), !node, node?.front?.type === 'doors' && node.front.n === 1],
     ['d2', '▯▯', '2 двери', () => front({ type: 'doors', n: 2, hinge: 'auto' }), !node, node?.front?.type === 'doors' && node.front.n > 1],
     ['dr', '☰', 'Ящики', () => front({ type: 'drawers', n: 3 }), !node || !leaf, node?.front?.type === 'drawers'],
@@ -216,26 +217,90 @@ function OpeningPanel({ it, set, sel, setSel, pull, setPull, onBlock }) {
 
 // ── параметрический блок: всё, что поставлено в проём (панели деления, фронтальная панель, двери, ящики) ──
 // blk: { n: id проёма, t: 'split' | 'fpanel' | 'front', c?: id проёма перед выбранной панелью }
-const blockTitle = (node, t) => t === 'fpanel' ? 'Фронтальная панель'
+const blockTitle = (node, t) => t === 'rod' ? 'Штанга' : t === 'fpanel' ? 'Фронтальная панель'
   : t === 'front' ? (node?.front?.type === 'drawers' ? `Ящики · ${node.front.n}` : `Двери · ${node?.front?.n || 1}`)
     : node?.split === 'v' ? `Вертикальные панели · ${(node.children?.length || 1) - 1}` : `Горизонтальные панели · ${(node?.children?.length || 1) - 1}`
 const blocksOf = node => [
   ...(node?.split && node.children?.length > 1 ? [{ n: node.id, t: 'split' }] : []),
   ...(node?.fpanel ? [{ n: node.id, t: 'fpanel' }] : []),
   ...(node?.front ? [{ n: node.id, t: 'front' }] : []),
+  ...(node?.rod ? [{ n: node.id, t: 'rod' }] : []),
 ]
 
-function BlockCard({ it, set, blk, setBlk, onClose }) {
+// ── ручка блока: вид, положение (привязка к углу / центру, отступы), межцентровое (шаг 32) ──
+const CC = [64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 416, 480, 544, 640, 736, 832]
+const ANCHORS = [['c', 'Центр'], ['tc', 'Сверху по центру'], ['bc', 'Снизу по центру'], ['tl', '↖ угол'], ['tr', '↗ угол'], ['bl', '↙ угол'], ['br', '↘ угол'], ['free-t', 'Против петель, сверху'], ['free-c', 'Против петель, середина'], ['free-b', 'Против петель, снизу']]
+function HandleEditor({ h, onChange, door }) {
+  const on = h.on !== false && h.type !== 'none'
+  const set = patch => onChange({ ...h, ...patch })
+  return (<>
+    <label style={{ fontSize: 13.5, fontWeight: 600, display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0 6px' }}><input type="checkbox" style={{ width: 'auto', margin: 0 }} checked={on} onChange={e => set({ on: e.target.checked, type: h.type === 'none' ? 'bar' : h.type })} />Ручки</label>
+    {on && <Sub>
+      <Chips label="Вид" value={h.type || 'bar'} onChange={v => set({ type: v })} options={[['bar', 'Скоба'], ['knob', 'Кнопка'], ['edge', 'Торцевая']]} />
+      {h.type === 'edge' ? <>
+        <Grid cols={2}><NumField label="Длина (пусто — по ширине фасада)" value={h.len ?? ''} onChange={v => set({ len: v || null })} min={0} /></Grid>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Торцевая ручка крепится сзади фасада у верхнего торца (глухие отверстия в обратной пласти) и выходит над фасадом.</p>
+      </> : <>
+        {h.type !== 'knob' && <Chips label="Расположение" value={h.orient || 'h'} onChange={v => set({ orient: v })} options={[['h', 'Горизонтально'], ['v', 'Вертикально']]} />}
+        <Chips label="Привязка" value={h.anchor || 'c'} onChange={v => set({ anchor: v })} options={door ? ANCHORS : ANCHORS.slice(0, 7)} />
+        <Grid cols={3}>
+          {h.type !== 'knob' && <label style={{ display: 'block', minWidth: 0 }}><span style={lbl}>Межцентровое, мм</span>
+            <select style={inp} value={h.cc || 128} onChange={e => set({ cc: Number(e.target.value) })}>{(CC.includes(Number(h.cc)) ? CC : [...CC, Number(h.cc)].sort((a, b) => a - b)).map(v => <option key={v} value={v}>{v}</option>)}</select></label>}
+          <NumField label="От края сбоку" value={h.dx ?? 40} onChange={v => set({ dx: v })} />
+          <NumField label="От верха / низа" value={h.dy ?? 40} onChange={v => set({ dy: v })} />
+        </Grid>
+        <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Отступы — от края фасада до первого отверстия (по центру — не нужны). Отверстия ручки — сквозные, диаметр — в «Крепёж».</p>
+      </>}
+    </Sub>}
+  </>)
+}
+
+// параметры корпуса, которые запоминаются за аккаунтом: поменял в любом корпусе — так будет и в новых
+const CAB_REMEMBER = ['material', 't', 'facadeMaterial', 'facadeT', 'backMaterial', 'backT', 'edgeFront', 'edgeFacade', 'edgeBody', 'grooveOffset', 'grooveDepth', 'grooveWidth',
+  'backGapL', 'backGapR', 'backGapB', 'backGapT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'hingeCup', 'hingeEnd', 'plateFront', 'box', 'slideGap', 'slideLen',
+  'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce', 'handleDoor', 'handleDrawer', 'pinFront', 'pinBelow']
+// ── крепёж фурнитуры: на саморезы (без присадки) или сверлить d × глубина; запоминается за аккаунтом ──
+const MOUNT_ROWS = [['slide', 'Направляющие ящиков', true], ['plate', 'Планки петель', true], ['cup', 'Чашка петли', false], ['cupFix', 'Крепёж чашки', true], ['pin', 'Полкодержатели', false], ['handle', 'Ручки (сквозные)', false], ['rod', 'Штангодержатели', true]]
+function MountEditor({ mount, setMount, only }) {
+  const M = mountOf(mount)
+  const set = (k, patch) => setMount({ ...(mount || {}), [k]: { ...M[k], ...patch } })
+  return (<>
+    {MOUNT_ROWS.filter(([k]) => !only || only.includes(k)).map(([k, name, canNone]) => {
+      const m = M[k], drill = !canNone || m.mode === 'drill'
+      return <div key={k} style={{ marginBottom: 6 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', fontSize: 13 }}>
+          <span style={{ minWidth: 130, fontWeight: 600 }}>{name}</span>
+          {canNone && <><button type="button" style={{ ...chipS(m.mode === 'none'), padding: '3px 8px' }} onClick={() => set(k, { mode: 'none' })}>саморезы, без присадки</button>
+            <button type="button" style={{ ...chipS(m.mode === 'drill'), padding: '3px 8px' }} onClick={() => set(k, { mode: 'drill' })}>сверлить</button></>}
+        </div>
+        {drill && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', fontSize: 12.5, marginTop: 3, paddingLeft: 6 }}>
+          <span>Ø</span><SmallNum width={52} value={m.d} onChange={v => v > 0 && set(k, { d: v })} />
+          {k !== 'handle' && <><span>глубина</span><SmallNum width={52} value={m.depth} onChange={v => v > 0 && set(k, { depth: v })} /></>}
+          {canNone && <>{[[2.5, 3, 'наколка'], [5, 13, 'евровинт'], ...(k === 'cupFix' ? [[8, 11.5, 'впрессовка']] : [])].map(([d, dp, t]) =>
+            <button key={t} type="button" style={{ ...chipS(m.d === d && m.depth === dp), padding: '2px 7px', fontSize: 11.5 }} onClick={() => set(k, { d, depth: dp })}>{t} {d}×{dp}</button>)}</>}
+        </div>}
+      </div>
+    })}
+    <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '2px 0 6px' }}>Запоминается за вашим аккаунтом — так считается присадка для раскроя и ЧПУ во всех проектах.</p>
+  </>)
+}
+
+function BlockCard({ it, set, blk, setBlk, onClose, mount, setMount }) {
   const p = { ...CAB_DEFAULTS, ...it.p }
   const tree = treeOf(p)
   const ops = useMemo(() => cabinetParts(p).openings || [], [it.p]) // eslint-disable-line react-hooks/exhaustive-deps
   const r = findNode(tree, blk.n)
   const node = r?.node
   const o = ops.find(x => x.id === blk.n)
-  const alive = node && (blk.t === 'split' ? node.split && node.children?.length > 1 : blk.t === 'fpanel' ? !!node.fpanel : !!node.front)
+  const alive = node && (blk.t === 'split' ? node.split && node.children?.length > 1 : blk.t === 'fpanel' ? !!node.fpanel : blk.t === 'rod' ? !!node.rod : !!node.front)
   if (!alive) return <div className="card" style={{ padding: '10px 12px', marginBottom: 10, fontSize: 13 }}>Блок убран. <button type="button" style={btnS()} onClick={onClose}>← К корпусу</button></div>
   const apply = t => { if (t) set({ ...it, p: { ...p, tree: t } }) }
+  const up = patchP => set({ ...it, p: { ...p, ...patchP } })
   const patch = fn => apply(opPatch(tree, node.id, fn))
+  const tt = num(p.t) || 16, gp = num(p.gap) || 0, offs = num(p.frontOffset) || 0
+  const outerExt = p.frontMode === 'half' ? tt / 2 - gp / 2 : tt - offs
+  const soloExt = p.soloOverlap != null && p.soloOverlap !== '' ? num(p.soloOverlap) : outerExt
+  const r1 = v => Math.round(v * 10) / 10
   const replace = (what, n) => {
     const busy = blk.t === 'split' && node.children.some(c => c.split || c.front || c.fpanel)
     if (busy && !['h', 'v'].includes(what) && !window.confirm('В проёмах между панелями есть наполнение — оно пропадёт. Заменить?')) return
@@ -306,30 +371,93 @@ function BlockCard({ it, set, blk, setBlk, onClose }) {
         </Grid>
       </>}
 
+      {blk.t === 'rod' && node.rod && <>
+        <Grid cols={3}>
+          <NumField label="Ось ниже верха проёма" value={node.rod.top ?? 60} onChange={v => patch(n => { n.rod = { ...n.rod, top: v } })} min={0} />
+          <NumField label="Диаметр" value={node.rod.d ?? 25} onChange={v => v > 5 && patch(n => { n.rod = { ...n.rod, d: v } })} min={5} />
+          <NumField label="От переда (пусто — по центру)" value={node.rod.front ?? ''} onChange={v => patch(n => { n.rod = { ...n.rod, front: v || null } })} min={0} />
+        </Grid>
+        <TextField label="Материал (погонный — в линейный раскрой)" value={node.rod.material || `Труба Ø${node.rod.d ?? 25} хром`} onChange={v => patch(n => { n.rod = { ...n.rod, material: v } })} list="cad-mats" />
+        <div style={{ ...sect }}>Крепёж</div>
+        <MountEditor mount={mount} setMount={setMount} only={['rod']} />
+      </>}
+
       {blk.t === 'front' && fr?.type === 'doors' && <>
         <Grid cols={3}><NumField label="Сколько" unit="шт" value={fr.n} onChange={v => v >= 1 && apply(opFront(tree, node.id, { ...fr, n: Math.min(6, Math.round(v)) }))} min={1} /></Grid>
         <Chips label="Расположение" value={fr.layout || 'v'} onChange={v => apply(opFront(tree, node.id, { ...fr, layout: v }))} options={[['v', 'Рядом'], ['h', 'Друг над другом']]} />
         {(fr.n === 1 || fr.layout === 'h') && <Chips label="Открывание" value={fr.open || (fr.hinge === 'right' ? 'right' : 'left')} onChange={v => apply(opFront(tree, node.id, { ...fr, open: v, hinge: v }))} options={[['left', '← влево'], ['right', 'вправо →'], ['up', '↑ вверх'], ['down', '↓ вниз']]} />}
+        <HandleEditor door h={{ ...p.handleDoor, ...(fr.handle || {}) }} onChange={h => apply(opFront(tree, node.id, { ...fr, handle: h }))} />
+        <div style={row}>
+          {fr.handle && <button type="button" style={btnS()} onClick={() => apply(opFront(tree, node.id, { ...fr, handle: undefined }))}>↺ Ручка как в корпусе</button>}
+          <button type="button" style={btnS()} onClick={() => up({ handleDoor: { ...p.handleDoor, ...(fr.handle || {}) } })} title="Новые двери получат эту ручку; запоминается за аккаунтом">Сделать основной для дверей</button>
+        </div>
+        <div style={sect}>Зазоры и перехлёст (весь корпус)</div>
+        <FrontOverlap p={p} up={up} outerExt={outerExt} soloExt={soloExt} r1={r1} />
+        <div style={sect}>Петли (весь корпус)</div>
+        <Grid><NumField label="Чашка от края двери" value={p.hingeCup} onChange={v => up({ hingeCup: v })} min={5} /><NumField label="Крайние от торца" value={p.hingeEnd} onChange={v => up({ hingeEnd: v })} min={20} /><NumField label="Планка от переда" value={p.plateFront} onChange={v => up({ plateFront: v })} min={5} /></Grid>
+        <div style={sect}>Крепёж</div>
+        <MountEditor mount={mount} setMount={setMount} only={['cup', 'cupFix', 'plate', 'handle']} />
       </>}
-      {blk.t === 'front' && fr?.type === 'drawers' && <>
-        <Grid cols={2}>
-          <NumField label="Сколько" unit="шт" value={fr.n} onChange={v => v >= 1 && apply(opFront(tree, node.id, { ...fr, n: Math.min(10, Math.round(v)) }))} min={1} />
-          <NumField label="Длина направляющих" value={fr.slideLen ?? p.slideLen} onChange={v => v >= 150 && apply(opFront(tree, node.id, { ...fr, slideLen: v }))} min={0} />
-          <NumField label="Короб от низа фасада" value={fr.boxBottom ?? 15} onChange={v => apply(opFront(tree, node.id, { ...fr, boxBottom: v }))} min={0} />
-          <NumField label="Короб от верха фасада" value={fr.boxTop ?? Math.max(0, (num(p.boxTopGap) ?? 40) - 15)} onChange={v => apply(opFront(tree, node.id, { ...fr, boxTop: v }))} min={0} />
-        </Grid>
-      </>}
+      {blk.t === 'front' && fr?.type === 'drawers' && (() => {
+        const sysId = fr.box || p.box, sys = { ...drawerSystem(sysId)[2], ...(fr.sys || {}) }
+        const g = num(fr.gap ?? p.gap) ?? 3
+        const fParts = cabinetParts(p).parts.filter(x => x.blk?.n === node.id && x.name === 'Фасад ящика').sort((a, b) => a.box[1] - b.box[1])
+        const total = fParts.length ? fParts[fParts.length - 1].box[4] - fParts[0].box[1] : 0
+        const hs = drawerHeights(total, fr.n, g, fr.hs)
+        const setH = (i, v) => { const arr = Array.from({ length: fr.n }, (_, k) => fr.hs?.[k] ?? null); arr[i] = v; apply(opFront(tree, node.id, { ...fr, hs: arr })) }
+        const setSys = patchS => apply(opFront(tree, node.id, { ...fr, sys: { ...(fr.sys || {}), ...patchS } }))
+        return <>
+          <Grid cols={2}>
+            <NumField label="Сколько" unit="шт" value={fr.n} onChange={v => v >= 1 && apply(opFront(tree, node.id, { ...fr, n: Math.min(10, Math.round(v)), hs: (fr.hs || []).slice(0, Math.round(v)) }))} min={1} />
+            <NumField label="Зазор между фасадами" value={g} onChange={v => apply(opFront(tree, node.id, { ...fr, gap: v }))} min={0} />
+          </Grid>
+          <div style={{ ...lbl, marginBottom: 4 }}>Высоты фасадов (сверху вниз) — заданные 📌, остальные делят остаток поровну; можно менять и на модели</div>
+          {hs.map((h, i) => i).reverse().map(i => <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 13 }}>
+            <span style={{ width: 92 }}>{i === fr.n - 1 ? 'Верхний' : i === 0 ? 'Нижний' : `${i + 1}-й снизу`}</span>
+            <SmallNum width={70} value={Math.round(hs[i] * 10) / 10} onChange={v => v >= 40 && setH(i, v)} />
+            {fr.hs?.[i] != null ? <button type="button" style={{ ...chipS(true), padding: '2px 8px' }} onClick={() => setH(i, null)} title="Снова авто">📌 авто</button> : <span style={{ color: 'var(--text-hint)', fontSize: 11.5 }}>авто</span>}
+          </div>)}
+          <div style={sect}>Как ставятся фасады</div>
+          <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 6px' }}>Между фасадами ящиков — зазор {g} мм. К краю корпуса (боковина, дно, крышка) — перехлёст {r1(outerExt)} мм; к панели, за которой другой фасад, — до середины ({r1((num(p.t) || 16) / 2 - (num(p.gap) || 0) / 2)} мм); к панели без соседа — {r1(soloExt)} мм; под накладной крышкой — ниже крышки на зазор/2.</p>
+          <FrontOverlap p={p} up={up} outerExt={outerExt} soloExt={soloExt} r1={r1} />
+          <div style={sect}>Короб и направляющие</div>
+          <label style={{ display: 'block', marginBottom: 8 }}><span style={lbl}>Система</span>
+            <select style={inp} value={sysId} onChange={e => apply(opFront(tree, node.id, { ...fr, box: e.target.value, sys: undefined }))}>{DRAWER_SYSTEMS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+          <Grid cols={2}>
+            <NumField label="Длина направляющих" value={fr.slideLen ?? p.slideLen} onChange={v => v >= 150 && apply(opFront(tree, node.id, { ...fr, slideLen: v }))} min={0} />
+            {sys.type === 'ball' && <NumField label="Зазор на направляющую" value={fr.slideGap ?? p.slideGap} onChange={v => apply(opFront(tree, node.id, { ...fr, slideGap: v }))} min={0} />}
+            {sys.type === 'under' && <NumField label="Короб уже проёма с каждой стороны" value={sys.side} onChange={v => setSys({ side: v })} min={0} />}
+            {sys.type === 'under' && <NumField label="Дно выше низа боковин" value={sys.bottomUp} onChange={v => setSys({ bottomUp: v })} min={0} />}
+            {sysId === 'metal' && <NumField label="Дно и задняя уже проёма на" value={fr.sys?.reduce ?? p.metalReduce} onChange={v => setSys({ reduce: v })} min={0} />}
+            {sys.type === 'msys' && <><NumField label="Дно уже проёма на" value={sys.bottomRed} onChange={v => setSys({ bottomRed: v })} min={0} />
+              <NumField label="Задняя уже проёма на" value={sys.backRed} onChange={v => setSys({ backRed: v })} min={0} />
+              <NumField label="Высота боковины" value={sys.sideH} onChange={v => setSys({ sideH: v })} min={30} />
+              <NumField label="Дно короче направляющей на" value={sys.lenRed} onChange={v => setSys({ lenRed: v })} min={0} /></>}
+            <NumField label="Короб от низа фасада" value={fr.boxBottom ?? 15} onChange={v => apply(opFront(tree, node.id, { ...fr, boxBottom: v }))} min={0} />
+            <NumField label="Короб от верха фасада" value={fr.boxTop ?? Math.max(0, (num(p.boxTopGap) ?? 40) - 15)} onChange={v => apply(opFront(tree, node.id, { ...fr, boxTop: v }))} min={0} />
+          </Grid>
+          {sys.type !== 'ball' && <p style={{ fontSize: 11.5, color: 'var(--text-hint)', margin: '-4px 0 8px' }}>Размеры системы — типовые; сверьте с каталогом производителя (Blum, Hettich, DTC, GTV) и поправьте здесь.</p>}
+          <HandleEditor h={{ ...p.handleDrawer, ...(fr.handle || {}) }} onChange={h => apply(opFront(tree, node.id, { ...fr, handle: h }))} />
+          <div style={row}>
+            {fr.handle && <button type="button" style={btnS()} onClick={() => apply(opFront(tree, node.id, { ...fr, handle: undefined }))}>↺ Ручка как в корпусе</button>}
+            <button type="button" style={btnS()} onClick={() => up({ handleDrawer: { ...p.handleDrawer, ...(fr.handle || {}) } })} title="Новые ящики получат эту ручку; запоминается за аккаунтом">Сделать основной для ящиков</button>
+          </div>
+          <div style={sect}>Крепёж</div>
+          <MountEditor mount={mount} setMount={setMount} only={['slide', 'handle']} />
+        </>
+      })()}
 
       <div style={{ ...sect, marginTop: 4 }}>Заменить на</div>
       <div style={row}>
         {blk.t === 'split' && <button type="button" style={chipS(false)} onClick={() => replace(isH ? 'v' : 'h')}>{isH ? '│ Вертикальные' : '─ Горизонтальные'}</button>}
-        {!(blk.t === 'front' && fr?.type === 'drawers') && <button type="button" style={chipS(false)} onClick={() => replace('drawers', blk.t === 'split' ? ch.length - 1 : 3)}>☰ Ящики</button>}
-        {!(blk.t === 'front' && fr?.type === 'doors') && blk.t !== 'fpanel' && <button type="button" style={chipS(false)} onClick={() => replace('doors', 1)}>▯ Дверь</button>}
-        {!(blk.t === 'front' && fr?.type === 'doors') && blk.t !== 'fpanel' && <button type="button" style={chipS(false)} onClick={() => replace('doors', 2)}>▯▯ 2 двери</button>}
+        {!(blk.t === 'front' && fr?.type === 'drawers') && blk.t !== 'rod' && <button type="button" style={chipS(false)} onClick={() => replace('drawers', blk.t === 'split' ? ch.length - 1 : 3)}>☰ Ящики</button>}
+        {!(blk.t === 'front' && fr?.type === 'doors') && blk.t !== 'fpanel' && blk.t !== 'rod' && <button type="button" style={chipS(false)} onClick={() => replace('doors', 1)}>▯ Дверь</button>}
+        {!(blk.t === 'front' && fr?.type === 'doors') && blk.t !== 'fpanel' && blk.t !== 'rod' && <button type="button" style={chipS(false)} onClick={() => replace('doors', 2)}>▯▯ 2 двери</button>}
         {blk.t === 'front' && <button type="button" style={chipS(false)} onClick={() => { apply(opReplace(opFront(tree, node.id, null), node.id, 'h', fr?.type === 'drawers' ? Math.max(1, fr.n - 1) : 2)); setBlk({ n: node.id, t: 'split' }) }}>─ Полки</button>}
         <button type="button" style={{ ...chipS(false), color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => {
           if (!window.confirm('Убрать этот блок?')) return
           if (blk.t === 'split') { if (ch.some(c => c.split || c.front || c.fpanel) && !window.confirm('Внутри есть наполнение — оно тоже пропадёт. Убрать?')) return; apply(opReplace(tree, node.id, null)) }
+          else if (blk.t === 'rod') patch(n => { n.rod = null })
           else apply(opReplace(tree, node.id, blk.t === 'fpanel' ? 'fpanel-off' : 'front-off'))
           setBlk(null)
         }}>🗑 Убрать блок</button>
@@ -369,7 +497,7 @@ const Check = ({ on, onChange, children }) => (
 )
 const Sub = ({ children }) => <div style={{ borderLeft: '2px solid var(--blue-light, #dbe7fb)', paddingLeft: 9, marginLeft: 6 }}>{children}</div>
 
-function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKind }) {
+function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKind, mount, setMount }) {
   const p = { ...CAB_DEFAULTS, ...it.p }
   const up = patch => set({ ...it, p: { ...p, ...patch } })
   const tree = treeOf(p)
@@ -442,7 +570,7 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
     <Fold id="tpl" title="Шаблоны">
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
         {CAB_PRESETS.map(([k, tt, v]) => <button key={k} type="button" style={chipS(false)}
-          onClick={() => { if (window.confirm(`Заменить параметры корпуса шаблоном «${tt}»?`)) set({ ...it, name: tt, p: { ...CAB_DEFAULTS, ...v, material: p.material, t: p.t, facadeMaterial: p.facadeMaterial, backMaterial: p.backMaterial } }) }}>{tt}</button>)}
+          onClick={() => { if (window.confirm(`Заменить параметры корпуса шаблоном «${tt}»?`)) set({ ...it, name: tt, p: { ...CAB_DEFAULTS, ...Object.fromEntries(CAB_REMEMBER.map(k => [k, p[k]])), ...v } }) }}>{tt}</button>)}
       </div>
     </Fold>
     <Fold id="size" title="Габарит" def right={`${p.W}×${p.H}×${p.D}`}>
@@ -569,6 +697,10 @@ function CabinetEditor({ it, set, selOpening, setSelOpening, sameKind, onApplyKi
     <details style={{ marginTop: 12 }}><summary style={{ ...sect, cursor: 'pointer', margin: 0 }}>Проёмы (список)</summary>
       <TreeEditor it={it} sel={selOpening} setSel={setSelOpening} /></details>
 
+    <Fold id="mount" title="Крепёж фурнитуры" right="за аккаунтом">
+      <MountEditor mount={mount} setMount={setMount} />
+    </Fold>
+
     <div style={sect}>Кромка<Hint inline>Название вида кромки — как в бланке заказа (толщину и подрезку задаёте там). Каркас — передние торцы, фасады — по периметру.</Hint></div>
     <Grid><TextField label="Каркас спереди" value={p.edgeFront} onChange={v => up({ edgeFront: v })} /><TextField label="Фасады" value={p.edgeFacade} onChange={v => up({ edgeFacade: v })} /><TextField label="Прочее" value={p.edgeBody} onChange={v => up({ edgeBody: v })} /></Grid>
 
@@ -665,7 +797,7 @@ function Nudge({ it, set }) {
   )
 }
 
-function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, onToLibrary, info, selOpening, setSelOpening, sameKind, onApplyKind }) {
+function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, onToLibrary, info, selOpening, setSelOpening, sameKind, onApplyKind, mount, setMount }) {
   return (
     <div>
       <Grid cols={1}><TextField label="Название" value={it.name} onChange={v => set({ ...it, name: v })} /></Grid>
@@ -676,7 +808,7 @@ function ItemEditor({ it, set, onDelete, onDuplicate, onExplode, onToLibrary, in
         <Chips label="Поворот" value={it.rotY || 0} onChange={v => set({ ...it, rotY: v })} options={[[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']]} />
       </Fold>
       {info && <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0' }}>{info}</p>}
-      {it.type === 'cabinet' && <CabinetEditor it={it} set={set} selOpening={selOpening} setSelOpening={setSelOpening} sameKind={sameKind} onApplyKind={onApplyKind} />}
+      {it.type === 'cabinet' && <CabinetEditor it={it} set={set} selOpening={selOpening} setSelOpening={setSelOpening} sameKind={sameKind} onApplyKind={onApplyKind} mount={mount} setMount={setMount} />}
       {it.type === 'frame' && <FrameEditor it={it} set={set} />}
       {(it.type === 'panel' || it.type === 'glass') && <PanelEditor it={it} set={set} />}
       {it.type === 'glass' && <>
@@ -868,7 +1000,11 @@ export default function ConstructorPage() {
     let a = true
     if (!pid) { listProjects(user.id).then(l => { if (a) setList(l) }).catch(e => { if (a) setError(e.message) }); return () => { a = false } }
     if (projRef.current?.id === pid) return
-    loadProject(user.id, pid).then(p => { if (!a) return; if (!p) { setError('Проект не найден'); return } projRef.current = p; setProjectState(p); setSelected(null); setFitKey(k => k + 1) }).catch(e => { if (a) setError(e.message) })
+    loadProject(user.id, pid).then(p => {
+      if (!a) return; if (!p) { setError('Проект не найден'); return }
+      // крепёж фурнитуры — за аккаунтом: в проекте его ещё нет — берём из настроек аккаунта
+      if (!p.settings?.mount) { try { const am = getUserSettings(user)?.cadMount; if (am) p = { ...p, settings: { ...(p.settings || {}), mount: am } } } catch { /* нет */ } }
+      projRef.current = p; setProjectState(p); setSelected(null); setFitKey(k => k + 1) }).catch(e => { if (a) setError(e.message) })
     return () => { a = false }
   }, [pid, allowed, user])
 
@@ -915,6 +1051,29 @@ export default function ConstructorPage() {
   }, [selCab, cabOpenings, showSizes, selOpening])
   const blk = selBlock && selCab && selBlock.item === selCab.id ? selBlock : null
   const hiPids = useMemo(() => (blk ? new Set(parts.filter(sp => sp.item.id === blk.item && sp.blk && sp.blk.n === blk.n && sp.blk.t === blk.t).map(sp => sp.pid)) : null), [blk, parts])
+  const hiPidsRef = useRef(null)
+  useEffect(() => { hiPidsRef.current = hiPids }, [hiPids])
+  // высоты ящиков выбранного блока — подписи на модели; нажать — ввести высоту (остальные ящики перестроятся)
+  const drLabels = useMemo(() => {
+    if (!blk || blk.t !== 'front') return null
+    const fs = parts.filter(sp => hiPids?.has(sp.pid) && sp.name === 'Фасад ящика').sort((a, b) => a.place.aabb[1] - b.place.aabb[1])
+    if (!fs.length) return null
+    return fs.map((sp, i) => { const b = sp.place.aabb; return { id: 'drh:' + i, on: false, text: `↕ ${Math.round((b[4] - b[1]) * 10) / 10}`, p: [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, b[5]] } })
+  }, [blk, parts, hiPids])
+  const onLabel = id => {
+    if (!id.startsWith('drh:') || !blk) { setSelOpening(id); setSelBlock(null); setTab('props'); return }
+    const i = Number(id.slice(4))
+    const p0 = { ...CAB_DEFAULTS, ...selCab.p }, tree = treeOf(p0), r = findNode(tree, blk.n)
+    const fr = r?.node?.front
+    if (!fr) return
+    const cur = drLabels?.[i]?.text?.replace('↕ ', '')
+    const v = window.prompt(`Высота фасада ящика (${i === 0 ? 'нижний' : i === fr.n - 1 ? 'верхний' : `${i + 1}-й снизу`}), мм. Пусто — авто:`, cur)
+    if (v == null) return
+    const n2 = v.trim() === '' ? null : Number(v.replace(',', '.'))
+    if (n2 != null && !(n2 >= 40)) return
+    const arr = Array.from({ length: fr.n }, (_, k) => fr.hs?.[k] ?? null); arr[i] = n2
+    setItem({ ...selCab, p: { ...p0, tree: opFront(tree, blk.n, { ...fr, hs: arr }) } })
+  }
   const room = project?.settings?.room?.on ? { ...PROJECT_DEFAULTS.room, ...project.settings.room } : null
   // линейный раскрой — только если он открыт этому аккаунту (мастер или бета «Линейный раскрой»)
   const [linearOk, setLinearOk] = useState(!!isMaster)
@@ -996,11 +1155,22 @@ export default function ConstructorPage() {
     return [...s]
   }, [parts])
   const selItem = project?.items.find(i => i.id === selected) || null
-  const setItem = next => setProject({ ...project, items: project.items.map(i => (i.id === next.id ? next : i)) })
+  const accDef = () => { try { return getUserSettings(user)?.cadCabDefaults || {} } catch { return {} } }
+  const setItem = next => {
+    const prev = project.items.find(i => i.id === next.id)
+    if (next.type === 'cabinet' && prev) {
+      const ch = {}
+      for (const k of CAB_REMEMBER) if (next.p?.[k] !== undefined && JSON.stringify(prev.p?.[k]) !== JSON.stringify(next.p[k])) ch[k] = next.p[k]
+      if (Object.keys(ch).length) saveUserSettings({ cadCabDefaults: { ...accDef(), ...ch } }, user)
+    }
+    setProject({ ...project, items: project.items.map(i => (i.id === next.id ? next : i)) })
+  }
+  const mount = project?.settings?.mount
+  const setMount = m => { setProject({ ...project, settings: { ...project.settings, mount: m } }); saveUserSettings({ cadMount: m }, user) }
 
   const addItem = type => {
     const b = parts.length ? sceneBox(parts) : [0, 0, 0, 0, 0, 0]
-    const it = newItem(type)
+    const it = type === 'cabinet' ? newItem(type, { p: accDef() }) : newItem(type)
     it.pos = { x: parts.length ? Math.round(b[3] + (type === 'cabinet' ? 0 : 50)) : 0, y: 0, z: 0 }
     if (type === 'cabinet') it.name = `Корпус ${project.items.filter(i => i.type === 'cabinet').length + 1}`
     setProject({ ...project, items: [...project.items, it] })
@@ -1008,7 +1178,9 @@ export default function ConstructorPage() {
   }
   const select = (id, pid = null, opening = null, extra = null) => {
     setSelected(id); setSelPid(id ? pid : null); setSelOpening(id ? opening : null)
-    setSelBlock(id && extra?.blk ? { item: id, ...extra.blk } : null)
+    // тап по детали уже выбранного блока (например, первый тап двойного — открыть ящик) — блок остаётся выбранным
+    if (id && extra?.blk) setSelBlock({ item: id, ...extra.blk })
+    else if (!(id && pid && hiPidsRef.current?.has(pid))) setSelBlock(null)
     if (id) setTab('props')
   }
 
@@ -1016,7 +1188,10 @@ export default function ConstructorPage() {
     const name = window.prompt('Название проекта:', 'Новый проект')
     if (name == null) return
     const p = newProject(name.trim() || 'Новый проект')
-    p.items.push({ ...newItem('cabinet'), name: 'Шкаф' })
+    let ad = {}, am
+    try { ad = getUserSettings(user)?.cadCabDefaults || {}; am = getUserSettings(user)?.cadMount } catch { /* нет настроек */ }
+    p.items.push({ ...newItem('cabinet', { p: ad }), name: 'Шкаф' })
+    if (am) p.settings.mount = am
     try {
       const id = await saveProject(user.id, p)
       projRef.current = { ...p, id }; setProjectState(projRef.current)
@@ -1077,7 +1252,7 @@ export default function ConstructorPage() {
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room}
-        labels={sizeLabels} onLabel={id => { setSelOpening(id); setTab('props') }} moveMode={moveMode} edgeLook={edgeLook} hiPids={hiPids}>
+        labels={drLabels || sizeLabels} onLabel={onLabel} moveMode={moveMode} edgeLook={edgeLook} hiPids={hiPids}>
         {selCab && <OpeningTools it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} showSizes={showSizes} setShowSizes={setShowSizes} />}
         {selCab && selOpening && !blk && <OpeningPanel it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} pull={pull} setPull={setPull} onBlock={b => { setSelBlock({ item: selCab.id, ...b }); setSelPid(null); setTab('props') }} />}
         {blk && <div style={{ position: 'absolute', left: 58, bottom: 6, zIndex: 3, display: 'flex', gap: 4, alignItems: 'center', background: 'rgba(255,255,255,0.95)', border: '1px solid #f59e0b', borderRadius: 14, padding: '3px 4px 3px 10px', fontSize: 12.5 }}>
@@ -1111,7 +1286,7 @@ export default function ConstructorPage() {
     {tab === 'scene' && <SceneList project={project} setProject={setProject} parts={parts} selected={selected} onSelect={select} onAdd={addItem}
       library={library} onLibraryDelete={id => { if (window.confirm('Убрать из библиотеки?')) saveLibrary(library.filter(l => l.id !== id)) }}
       onFromLibrary={l => { const b = parts.length ? sceneBox(parts) : [0, 0, 0, 0, 0, 0]; const it = { ...JSON.parse(JSON.stringify(l.item)), id: newId(), pos: { x: parts.length ? Math.round(b[3]) : 0, y: 0, z: 0 } }; setProject({ ...project, items: [...project.items, it] }); setSelected(it.id); setTab('props') }} />}
-    {tab === 'props' && blk && <BlockCard key={blk.n + blk.t} it={selCab} set={setItem} blk={blk} setBlk={b => setSelBlock(b ? { item: selCab.id, ...b } : null)} onClose={() => { setSelBlock(null); setSelPid(null) }} />}
+    {tab === 'props' && blk && <BlockCard key={blk.n + blk.t} it={selCab} set={setItem} blk={blk} mount={mount} setMount={setMount} setBlk={b => setSelBlock(b ? { item: selCab.id, ...b } : null)} onClose={() => { setSelBlock(null); setSelPid(null) }} />}
     {tab === 'props' && selItem && (() => {
       const own = parts.filter(p => p.item.id === selItem.id && (p.kind === 'sheet'))
       const sp = own.find(p => p.pid === selPid)
@@ -1146,7 +1321,7 @@ export default function ConstructorPage() {
       )
     })()}
     {tab === 'props' && !blk && (selItem
-      ? <ItemEditor key={selItem.id} it={selItem} set={setItem} info={info} selOpening={selOpening} setSelOpening={setSelOpening}
+      ? <ItemEditor key={selItem.id} it={selItem} set={setItem} info={info} selOpening={selOpening} setSelOpening={setSelOpening} mount={mount} setMount={setMount}
           sameKind={selItem.type === 'cabinet' ? project.items.filter(i => i.type === 'cabinet' && i.id !== selItem.id && (i.p?.kind || 'wardrobe') === (selItem.p?.kind || 'wardrobe')).length : 0}
           onApplyKind={gs => {
             const kind = selItem.p?.kind || 'wardrobe'

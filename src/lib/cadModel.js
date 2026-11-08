@@ -27,6 +27,33 @@ export const PROJECT_DEFAULTS = {
   prices: {},                    // цена материала: { [название]: число } — за м², за метр или за штуку (по виду)
 }
 
+// крепёж фурнитуры — как пользователь собирает (запоминается за аккаунтом, копия — в проекте, чтобы заказ считался так же):
+// mode none — на саморезы, без присадки; drill — сверлить отверстие d × depth (наколка, евровинт, впрессовка — что задаст пользователь)
+export const MOUNT_DEFAULTS = {
+  slide: { mode: 'none', d: 5, depth: 13 },       // направляющие ящиков
+  plate: { mode: 'none', d: 5, depth: 13 },       // планки петель
+  cup: { d: 35, depth: 12 },                      // чашка петли — сверлится всегда
+  cupFix: { mode: 'none', d: 8, depth: 11.5 },    // крепёж чашки: саморезы или впрессовка (2 отв. рядом с чашкой)
+  pin: { d: 5, depth: 12 },                       // полкодержатели — сверлятся всегда
+  handle: { d: 5 },                               // ручки — сквозные
+  rod: { mode: 'none', d: 4, depth: 12 },         // штангодержатели
+}
+const MOUNT_OF = { 'Направляющая': 'slide', 'Планка петли': 'plate', 'Петля (чашка)': 'cup', 'Петля (крепёж чашки)': 'cupFix', 'Полкодержатель': 'pin', 'Ручка': 'handle', 'Штангодержатель': 'rod' }
+export const mountOf = mount => Object.fromEntries(Object.keys(MOUNT_DEFAULTS).map(k => [k, { ...MOUNT_DEFAULTS[k], ...(mount?.[k] || {}) }]))
+/** отверстия фурнитуры -> с диаметром и глубиной по крепежу пользователя; «на саморезы» — без отверстий */
+export function applyMount(holes, mount) {
+  const M = mountOf(mount)
+  const out = []
+  for (const h of holes) {
+    const g = MOUNT_OF[h.note]
+    if (!g) { out.push(h); continue }
+    const m = M[g]
+    if (m.mode === 'none') continue
+    out.push({ ...h, d: num(m.d, h.d), depth: g === 'handle' ? h.depth : num(m.depth, h.depth) })
+  }
+  return out
+}
+
 export function newProject(name = 'Новый проект') {
   return { v: CAD_VERSION, name, settings: { ...PROJECT_DEFAULTS }, items: [] }
 }
@@ -125,6 +152,12 @@ export function projectParts(project) {
     const r = itemRecords(it)
     r.parts.forEach(rec => {
       const sp = { ...rec, item: it, ii, pid: `${it.id}:${rec.key}`, place: placeRecord(rec, it) }
+      // анимация (дверь — поворот на петлях, ящик — выезд): в координаты сцены
+      if (rec.anim) {
+        const Rr = rotYMat(it.rotY), ps = [num(it.pos?.x), num(it.pos?.y), num(it.pos?.z)]
+        const a = rec.anim
+        sp.anim = { ...a, id: `${it.id}:${a.id}`, ...(a.p ? { p: mulMV(Rr, a.p).map((v, i) => v + ps[i]) } : {}), ...(a.axis ? { axis: mulMV(Rr, a.axis) } : {}), ...(a.dir ? { dir: mulMV(Rr, a.dir) } : {}) }
+      }
       // правка детали в редакторе контура (фигурный контур, вырезы, своя присадка, кромка) — пока размер детали тот же;
       // размер поменялся — контур сбрасывается до прямоугольника с предупреждением (как в бланке заказа)
       const ov = it.ov?.[rec.key]
@@ -153,7 +186,7 @@ export function projectParts(project) {
 /** Присадка всего проекта: стыки по схеме крепежа + отверстия фурнитуры -> { map: pid -> присадка детали, holes } */
 export function projectDrill(project, pp = projectParts(project)) {
   const st = { ...PROJECT_DEFAULTS, ...(project?.settings || {}) }
-  return projectDrillings(pp.parts, st.joint, st.hardwareHoles === false ? [] : pp.holes)
+  return projectDrillings(pp.parts, st.joint, st.hardwareHoles === false ? [] : applyMount(pp.holes, st.mount))
 }
 
 // кромка записи по сторонам редактора
@@ -235,7 +268,7 @@ export function exportForOrder(project, groupKey) {
   const items = g.parts.map((sp, i) => ({ ...partToDetail(sp, i + 1, map.get(sp.pid) || []), rotatable: rot }))
   const others = groups.filter(x => x !== g).flatMap(x => x.parts).map((sp, i) => partToDetail(sp, i + 1, map.get(sp.pid) || []))
   const { parts } = pp
-  const extras = parts.filter(sp => sp.kind !== 'sheet').map(partToExtra)
+  const extras = parts.filter(sp => sp.kind !== 'sheet' && !sp.vis).map(partToExtra)
   return { items, material: g.material, thickness: g.thickness, orderName: project.name || '', scene: { parts: others, extras, hardware: [], meshes: [] }, linear: linearJobs(project, parts) }
 }
 
@@ -264,7 +297,7 @@ export function exportAll(project) {
   const { parts } = pp
   const { map } = projectDrill(project, pp)
   const sheets = parts.filter(sp => sp.kind === 'sheet').map((sp, i) => partToDetail(sp, i + 1, map.get(sp.pid) || []))
-  const extras = parts.filter(sp => sp.kind !== 'sheet').map(partToExtra)
+  const extras = parts.filter(sp => sp.kind !== 'sheet' && !sp.vis).map(partToExtra)
   return { details: sheets, scene: { parts: [], extras, hardware: [], meshes: [] } }
 }
 
@@ -350,7 +383,8 @@ export function explodeCabinet(it) {
       [0, 1, 2].every(i => i === ax || (h.p[i] >= r.box[i] - 0.01 && h.p[i] <= r.box[i + 3] + 0.01)))
     if (!r) continue
     if (!own.has(r)) own.set(r, [])
-    own.get(r).push({ ...h, p: h.p.map((v, i) => r1(v - r.box[i])) })
+    const { key: _k, ...hh } = h   // eslint-disable-line no-unused-vars
+    own.get(r).push({ ...hh, p: h.p.map((v, i) => r1(v - r.box[i])) })
   }
   return sheets.map(r => {
     const b = r.box

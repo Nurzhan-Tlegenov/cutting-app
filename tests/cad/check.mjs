@@ -45,6 +45,7 @@ for (const rot of [0, 90, 180, 270]) {
 // присадка: конфирматы на боковине, торец дна, чашки петель на дверях, планки на боковинах
 {
   const pr2 = newProject('Присадка')
+  pr2.settings.mount = { plate: { mode: 'drill', d: 5, depth: 12 } }
   pr2.items.push({ ...newItem('cabinet', { p: { shelfType: 'loose', shelves: 2, doors: 2 } }), rotY: 90, pos: { x: 500, y: 0, z: 200 } })
   const all = exportAll(pr2).details
   const by = n => all.filter(d => d.name === n)
@@ -165,7 +166,7 @@ for (const rot of [0, 90, 180, 270]) {
   const { newNode } = await import('../../src/lib/cadCabinet.js')
   const L = newNode({ size: 600, front: { type: 'doors', n: 1, open: 'up' } })
   const it = newItem('cabinet', { p: { W: 2000, H: 720, D: 300, tree: newNode({ id: 'root', split: 'v', children: [L, newNode()] }) } })
-  const all = exportAll({ items: [it] }).details
+  const all = exportAll({ items: [it], settings: { mount: { plate: { mode: 'drill' } } } }).details
   const door = projectParts({ items: [it] }).parts.find(p => p.name === 'Дверь')
   ok(door.place.aabb[3] === 616 + 14.5, 'solo overlap ' + door.place.aabb[3])
   const top = all.find(d => d.name === 'Крышка')
@@ -248,6 +249,48 @@ for (const rot of [0, 90, 180, 270]) {
   const f = pr.find(p => p.name === 'Фасад ящика'), bs = pr.find(p => p.name === 'Ящик: боковина')
   ok(f.blk?.t === 'front' && bs.blk?.n === 'a', 'drawer blk')
   ok(Math.abs(bs.place.aabb[5] - bs.place.aabb[2] - 300) < 0.01, 'slide len per block ' + bs.place.aabb)
+}
+
+// ящики: высоты, системы, ручки, крепёж, анимация; штанга
+{
+  const { newNode, drawerHeights } = await import('../../src/lib/cadCabinet.js')
+  const hs = drawerHeights(800, 4, 3, [null, null, null, 140])
+  ok(Math.abs(hs[3] - 140) < 0.01 && Math.abs(hs[0] - (800 - 9 - 140) / 3) < 0.01, 'drawer heights ' + hs)
+  const root = newNode({ id: 'root', front: { type: 'drawers', n: 3, hs: [null, null, 150] } })
+  const it = newItem('cabinet', { p: { W: 800, H: 900, D: 500, tree: root } })
+  const pp = projectParts({ items: [it] })
+  ok(!pp.warn.length, 'drawers warn ' + pp.warn)
+  const fs = pp.parts.filter(p => p.name === 'Фасад ящика').sort((a, b) => a.place.aabb[1] - b.place.aabb[1])
+  ok(Math.abs(fs[2].place.aabb[4] - fs[2].place.aabb[1] - 150) < 0.01, 'top drawer 150')
+  ok(fs.every(f => f.anim?.kind === 'slide'), 'drawer anim')
+  const hh = pp.holes.filter(h => h.note === 'Ручка')
+  ok(hh.length === 6 && Math.abs(Math.abs(hh[0].p[0] - hh[1].p[0]) - 128) < 0.01, 'handle holes cc128 ' + hh.length)
+  const det = exportAll({ items: [it] }).details
+  const f0 = det.find(d => d.name === 'Фасад ящика')
+  ok(f0.contour.drillings.filter(d => d.note === 'Ручка' && d.depth === 16).length === 2, 'handle through holes on facade')
+  ok(!det.some(d => d.contour.drillings.some(x => x.note === 'Направляющая')), 'slides on screws: no holes by default')
+  const det2 = exportAll({ items: [it], settings: { mount: { slide: { mode: 'drill', d: 5, depth: 13 } } } }).details
+  ok(det2.some(d => d.contour.drillings.some(x => x.note === 'Направляющая' && x.d === 5 && x.depth === 13)), 'slides euro 5x13')
+  // Tandembox: дно уже проёма на 75
+  const it2 = newItem('cabinet', { p: { W: 800, H: 900, D: 500, tree: newNode({ id: 'root', front: { type: 'drawers', n: 2, box: 'tandembox', handle: { type: 'knob', anchor: 'tc', dy: 30 } } }) } })
+  const p2 = projectParts({ items: [it2] })
+  const bot = p2.parts.find(p => p.name === 'Ящик: дно')
+  ok(Math.abs(bot.place.aabb[3] - bot.place.aabb[0] - (768 - 75)) < 0.01, 'tandembox bottom ' + bot.place.aabb)
+  ok(p2.holes.filter(h => h.note === 'Ручка').length === 2, 'knob one hole per drawer')
+  ok(p2.hw.some(h => /Tandembox/.test(h.name)), 'tandembox hw')
+  // двери: анимация поворота, ручка против петель
+  const it3 = newItem('cabinet', { p: { W: 600, H: 720, D: 300, tree: newNode({ id: 'root', front: { type: 'doors', n: 1, open: 'left' } }) } })
+  const p3 = projectParts({ items: [it3] })
+  const door = p3.parts.find(p => p.name === 'Дверь')
+  ok(door.anim?.kind === 'rot' && door.anim.ang < 0, 'door anim')
+  const dh = p3.holes.filter(h => h.note === 'Ручка')
+  ok(dh.length === 2 && dh.every(h => h.p[0] > 500), 'door handle on free side ' + dh.map(h => h.p))
+  ok(!exportAll({ items: [it3] }).scene.extras.some(e => /Петля|Ручка/.test(e.name)), 'visual hardware not exported')
+  // штанга — погонный элемент
+  const it4 = newItem('cabinet', { p: { W: 800, H: 2000, D: 560, tree: newNode({ id: 'root', rod: { top: 60, d: 25 } }) } })
+  const p4 = projectParts({ items: [it4] })
+  const rod = p4.parts.find(p => p.name === 'Штанга')
+  ok(rod && rod.kind === 'profile' && Math.abs(rod.place.L - 766) < 0.01, 'rod ' + rod?.place.L)
 }
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)

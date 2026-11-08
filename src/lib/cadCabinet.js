@@ -37,6 +37,38 @@ export const CAB_DEFAULTS = {
   tree: null,                             // проёмы и наполнение (см. ниже); нет — строится из старых параметров (стойки, полки, двери, ящики)
   hingeCup: 22, hingeEnd: 100, plateFront: 37,   // петли: центр чашки от края двери, первая/последняя от торца двери, планка от переднего торца
   pinFront: 37, pinBelow: 8,                       // полкодержатели: от переднего/заднего торца полки, центр ниже полки
+  // ручки по умолчанию (у каждого блока дверей / ящиков — свои, front.handle): type bar — скоба (межцентровое cc, шаг 32),
+  // knob — кнопка, edge — торцевая (крепится сзади фасада, выходит за верхний торец), none — нет;
+  // orient h / v; anchor — привязка: c (центр), tc / bc, tl / tr / bl / br (углы), ml / mr, free-t / free-c / free-b (свободная сторона двери — против петель);
+  // dx, dy — от края фасада до первого отверстия (или до линии ручки)
+  handleDoor: { on: true, type: 'bar', cc: 128, orient: 'v', anchor: 'free-t', dx: 40, dy: 80 },
+  handleDrawer: { on: true, type: 'bar', cc: 128, orient: 'h', anchor: 'c', dx: 40, dy: 40 },
+}
+
+// системы ящиков: ball — ЛДСП-короб на шариковых направляющих (зазор на сторону slideGap); under — ЛДСП-короб на направляющих скрытого монтажа
+// (короб уже проёма на side с каждой стороны, дно в паз выше низа боковин на bottomUp); metal — металлобокс (дно и задняя ЛДСП уже проёма на reduce);
+// msys — система с металлическими боковинами: дно уже проёма на bottomRed, задняя — на backRed, высота боковины sideH, дно короче направляющей на lenRed.
+// Значения — типовые, их нужно сверить с каталогом производителя (меняются в блоке ящиков).
+export const DRAWER_SYSTEMS = [
+  ['ldsp_overlay', 'ЛДСП, дно накладное · шариковые', { type: 'ball' }],
+  ['ldsp_groove', 'ЛДСП, дно в паз · шариковые', { type: 'ball' }],
+  ['hidden', 'ЛДСП · скрытого монтажа (Blum Tandem / Movento, Hettich Quadro, DTC, GTV)', { type: 'under', side: 5, bottomUp: 13 }],
+  ['metal', 'Метабокс (металлобокс)', { type: 'metal' }],
+  ['tandembox', 'Blum Tandembox / Antaro', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 83, lenRed: 10 }],
+  ['legrabox', 'Blum Legrabox', { type: 'msys', bottomRed: 35, backRed: 38, sideH: 90, lenRed: 10 }],
+  ['innotech', 'Hettich InnoTech Atira', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 70, lenRed: 10 }],
+  ['dtc', 'DTC Modern Box', { type: 'msys', bottomRed: 75, backRed: 87, sideH: 84, lenRed: 10 }],
+]
+export const drawerSystem = id => (DRAWER_SYSTEMS.find(s => s[0] === id) || DRAWER_SYSTEMS[0])
+/** высоты фасадов ящиков блока (снизу вверх): hs[i] — заданная высота или null (авто — поровну из остатка) */
+export function drawerHeights(total, n, g, hs = []) {
+  const avail = total - (n - 1) * g
+  const set = Array.from({ length: n }, (_, i) => (hs?.[i] != null && hs[i] !== '' && Number.isFinite(Number(hs[i])) ? Number(hs[i]) : null))
+  const fixed = set.reduce((a, v) => a + (v ?? 0), 0)
+  const autos = set.filter(v => v == null).length
+  if (!autos) { set[n - 1] = null; return drawerHeights(total, n, g, set) }   // все заданы — верхний берёт остаток
+  const auto = (avail - fixed) / autos
+  return set.map(v => (v ?? auto))
 }
 
 export const CAB_KINDS = [['wardrobe', 'Шкаф'], ['base', 'Кухня: нижний'], ['wall', 'Кухня: верхний'], ['shelf', 'Стеллаж'], ['dresser', 'Комод'], ['other', 'Другое']]
@@ -45,7 +77,7 @@ export const CAB_GROUPS = {
   body: ['material', 't', 'top', 'bottom', 'base', 'legH', 'plinthH', 'plinthInset', 'plinthBack', 'plinthBackOffset', 'railDepth', 'overhangFront', 'overhangSide', 'overhangL', 'overhangR', 'topRL', 'topRR', 'underTop', 'edgeFront', 'edgeBody',
     'sideL', 'sideR', 'sideFront', 'sideBack', 'topRails', 'topRailOffset', 'topDown', 'topFront', 'topBack', 'bottomRails', 'bottomRailOffset', 'bottomRailDepth', 'bottomUp', 'bottomFront', 'bottomBack'],
   back: ['back', 'backT', 'backMaterial', 'grooveOffset', 'grooveDepth', 'grooveWidth', 'backGapL', 'backGapR', 'backGapB', 'backGapT'],
-  fronts: ['facadeMaterial', 'facadeT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'hingeCount'],
+  fronts: ['facadeMaterial', 'facadeT', 'gap', 'frontMode', 'frontOffset', 'soloOverlap', 'edgeFacade', 'hingeCup', 'hingeEnd', 'plateFront', 'hingeCount', 'handleDoor', 'handleDrawer'],
   boxes: ['box', 'slideGap', 'slideLen', 'boxTopGap', 'boxBottomT', 'boxBottomMaterial', 'metalReduce'],
 }
 
@@ -367,6 +399,18 @@ export function cabinetParts(params) {
       if (f.from === 'front') ze = fz0; else zs = fz0 + t
     }
     openings.push({ id: node.id, box: [x0, y0, zs, x1, y1, ze].map(r1), w: r1(x1 - x0), h: r1(y1 - y0), leaf: !(node.split && node.children?.length), depth })
+    // штанга: труба между стенками проёма, ось ниже верха проёма на top, по глубине — посередине (или от переда на front)
+    if (node.rod) {
+      const rd = node.rod, d = num(rd.d, 25), yc = y1 - num(rd.top, 60), zc = rd.front != null && rd.front !== '' ? ze - num(rd.front) : (zs + ze) / 2
+      const blk = { n: node.id, t: 'rod' }
+      parts.push({ ...mk('rod_' + node.id, 'Штанга', 'наполнение', [x0 + 1, yc - d / 2, zc - d / 2, x1 - 1, yc + d / 2, zc + d / 2], 2, +1, 0, rd.material || `Труба Ø${d} хром`), kind: 'profile', section: `Ø${d}`, len: r1(x1 - x0 - 2), blk })
+      for (const [x, n] of [[x0, '-x'], [x1, '+x']]) {
+        parts.push({ ...mk('rodh_' + node.id + n, 'Штангодержатель', 'фурнитура', [n === '-x' ? x : x - 6, yc - 22, zc - 22, n === '-x' ? x + 6 : x, yc + 22, zc + 22], 0, +1, 1, 'Фурнитура металл'), kind: 'hw', vis: true, blk })
+        for (const dz of [-14, 14]) holes.push({ p: [x, yc + 8, zc + dz], n, d: 4, depth: 12, note: 'Штангодержатель' })
+      }
+      hw.push({ name: `Штанга Ø${d}`, qty: 1 }, { name: 'Штангодержатель', qty: 2 })
+      if (yc - d < y0) warn.push('Штанга ниже проёма — уменьшите отступ от верха')
+    }
     const ch = node.children || []
     if (!node.split || !ch.length) return
     const sizes = childSizes(node, node.split === 'v' ? x1 - x0 : y1 - y0, t)
@@ -454,9 +498,54 @@ export function cabinetParts(params) {
     return outerExt
   }
   const he = num(p.hingeEnd, 100), hc = num(p.hingeCup, 22), pf = num(p.plateFront, 37)
-  const sg = num(p.slideGap, 13)
   const bT = num(p.boxBottomT, 3), bMat = p.boxBottomMaterial || 'ХДФ'
-  let doorsN = 0, hingesN = 0, drawersN = 0
+  let hingesN = 0
+  const MET = 'Фурнитура металл'
+  // видимая фурнитура (петли, направляющие, ручки) — только для картинки и анимации, в раскрой не идёт
+  const vis = (key, name, box, blk, anim) => parts.push({ ...mk(key, name, 'фурнитура', box, 1, +1, 0, MET), kind: 'hw', vis: true, blk, anim })
+  const hwCount = new Map()
+  const addHw = name => hwCount.set(name, (hwCount.get(name) || 0) + 1)
+  // ручка на фасаде [fx0..fx1]×[fy0..fy1] (фасад — z от D до D+fT); free — свободная сторона ('l' / 'r' / 't' / 'b')
+  const putHandle = (fr, isDrawer, key, fkey, x0f, y0f, x1f, y1f, free, blk, anim) => {
+    const h = { ...(isDrawer ? p.handleDrawer : p.handleDoor), ...(fr.handle || {}) }
+    if (!h || h.on === false || h.type === 'none') return
+    const dx = num(h.dx, 40), dy = num(h.dy, 40)
+    const cx = (x0f + x1f) / 2, cy = (y0f + y1f) / 2, zf = D + fT
+    if (h.type === 'edge') {
+      // торцевая: крепится к обратной пласти фасада у верхнего торца и выходит над ним
+      const len = Math.min(num(h.len, x1f - x0f), x1f - x0f)
+      const a0 = cx - len / 2, a1 = cx + len / 2
+      vis(key + 'h', 'Ручка торцевая', [a0, y1f - 30, D - 4, a1, y1f + 12, D], blk, anim)
+      vis(key + 'h2', 'Ручка торцевая', [a0, y1f, D - 4, a1, y1f + 12, zf + 2], blk, anim)
+      for (const x of len > 120 ? [a0 + 25, a1 - 25] : [cx]) holes.push({ p: [x, y1f - 15, D], n: '+z', d: 3, depth: Math.min(10, fT - 4), note: 'Ручка торцевая', key: fkey })
+      addHw(`Ручка торцевая ${r1(len)} мм`)
+      return
+    }
+    let a = h.anchor || 'c'
+    if (a.startsWith('free')) {
+      const pos = { 't': 't', 'c': 'm', 'b': 'b' }[a.slice(5)] || 't'
+      a = free === 'l' || free === 'r' ? pos + free : free + 'c'
+    }
+    if (a === 'c') a = 'mc'
+    const horiz = h.orient !== 'v'
+    const cc = h.type === 'knob' ? 0 : num(h.cc, 128)
+    let pts
+    if (horiz) {
+      const y = a[0] === 't' ? y1f - dy : a[0] === 'b' ? y0f + dy : cy
+      const xs = a[1] === 'l' ? [x0f + dx, x0f + dx + cc] : a[1] === 'r' ? [x1f - dx, x1f - dx - cc] : [cx - cc / 2, cx + cc / 2]
+      pts = (cc ? xs : [xs[0] + (a[1] === 'c' ? cc / 2 : 0)]).map(x => [x, y])
+    } else {
+      const x = a[1] === 'l' ? x0f + dx : a[1] === 'r' ? x1f - dx : cx
+      const ys = a[0] === 't' ? [y1f - dy, y1f - dy - cc] : a[0] === 'b' ? [y0f + dy, y0f + dy + cc] : [cy - cc / 2, cy + cc / 2]
+      pts = (cc ? ys : [ys[0] + (a[0] === 'm' ? cc / 2 : 0)]).map(y => [x, y])
+    }
+    for (const [x, y] of pts) holes.push({ p: [x, y, D], n: '+z', d: 5, depth: fT, note: 'Ручка', key: fkey })
+    const xs = pts.map(q => q[0]), ys = pts.map(q => q[1])
+    if (cc) vis(key + 'h', 'Ручка', horiz ? [Math.min(...xs) - 12, ys[0] - 6, zf, Math.max(...xs) + 12, ys[0] + 6, zf + 30] : [xs[0] - 6, Math.min(...ys) - 12, zf, xs[0] + 6, Math.max(...ys) + 12, zf + 30], blk, anim)
+    else vis(key + 'h', 'Ручка-кнопка', [xs[0] - 12, ys[0] - 12, zf, xs[0] + 12, ys[0] + 12, zf + 26], blk, anim)
+    if (pts.some(([x, y]) => x < x0f + 5 || x > x1f - 5 || y < y0f + 5 || y > y1f - 5)) warn.push('Ручка выходит за фасад — проверьте привязку и отступы')
+    addHw(cc ? `Ручка ${cc} мм` : 'Ручка-кнопка')
+  }
   fronts.forEach((F, fi) => {
     const { node, x0, x1, y0, y1 } = F
     cur = F
@@ -465,50 +554,80 @@ export function cabinetParts(params) {
     const blk = { n: node.id, t: 'front' }
     const n = Math.max(1, Math.round(num(fr.n, 1)))
     if (fr.type === 'drawers') {
-      const fh = (fy1 - fy0 - (n - 1) * gap) / n
-      // короб ящика — свои настройки блока ящиков: длина направляющих, отступ от низа и от верха фасада
+      // ящики блока: зазор между фасадами, высоты фасадов (заданные / авто), система, длина направляющих, отступы короба
+      const g = num(fr.gap ?? gap, gap)
+      const hs = drawerHeights(fy1 - fy0, n, g, fr.hs)
+      if (hs.some(v => v < 60)) warn.push('Ящик получился ниже 60 мм — проверьте высоты ящиков')
+      const sysId = fr.box || p.box
+      const sys = { ...drawerSystem(sysId)[2], ...(fr.sys || {}) }
       const bd = Math.min(num(fr.slideLen ?? p.slideLen, 450), D - zi0 - 10)
       const bBot = num(fr.boxBottom, 15), bTop = num(fr.boxTop ?? num(p.boxTopGap, 40) - 15, 25)
-      const bxa = x0 + sg, bxb = x1 - sg
+      const sg = sys.type === 'under' ? num(sys.side, 5) : num(fr.slideGap ?? p.slideGap, 13)
+      let dy0 = fy0
       for (let i = 0; i < n; i++) {
-        const dy0 = fy0 + i * (fh + gap)
+        const fh = hs[i]
         const k = `dr${fi}_${i}_`
         const p0 = parts.length
+        const anim = { id: k, kind: 'slide', dir: [0, 0, 1], dist: r1(bd * 0.85) }
         parts.push(mk(k + 'f', 'Фасад ящика', 'фасад', [fx0, dy0, D, fx1, dy0 + fh, D + fT], 2, +1, 0, fMat, { edges: allE, t: fT }))
+        putHandle(fr, true, k, k + 'f', fx0, dy0, fx1, dy0 + fh, 'r', blk, anim)
         const by0 = Math.max(dy0, y0) + bBot
         const bh = Math.max(60, Math.min(fh - bBot - bTop, y1 - by0 - 5))
         const zf = D - 2, z0 = zf - bd
-        const ys = by0 + 20
+        const ys = sys.type === 'under' ? by0 + 6 : by0 + 20
         for (const z of [D - 37, D - 37 - 224, D - 37 - Math.max(256, bd - 64)].filter(z => z > zi0 + 10)) {
           holes.push({ p: [x0, ys, z], n: '-x', d: 4, depth: 10, note: 'Направляющая' })
           holes.push({ p: [x1, ys, z], n: '+x', d: 4, depth: 10, note: 'Направляющая' })
         }
-        if (p.box === 'metal') {
-          const red = num(p.metalReduce, 42)
+        // направляющие: неподвижная часть — на стенке проёма, подвижная — едет с ящиком
+        if (sys.type === 'ball') {
+          for (const [a, s] of [[x0, 1], [x1, -1]]) {
+            const xa = s > 0 ? a : a - 6, xb = s > 0 ? a + 6 : a
+            vis(k + 'rf' + s, 'Направляющая', [xa, ys - 22, z0, xb, ys + 22, zf], null, null)
+            vis(k + 'rm' + s, 'Направляющая', [s > 0 ? a + 6 : a - 12.5, ys - 18, z0, s > 0 ? a + 12.5 : a - 6, ys + 18, zf], blk, anim)
+          }
+        } else if (sys.type === 'under') {
+          for (const [a, s] of [[x0, 1], [x1, -1]]) {
+            vis(k + 'rf' + s, 'Направляющая', [s > 0 ? a : a - 22, by0 - 14, z0, s > 0 ? a + 22 : a, by0 - 6, zf], null, null)
+            vis(k + 'rm' + s, 'Направляющая', [s > 0 ? a + sg : a - sg - 16, by0 - 6, z0, s > 0 ? a + sg + 16 : a - sg, by0, zf], blk, anim)
+          }
+        }
+        if (sysId === 'metal') {
+          const red = num(fr.sys?.reduce ?? p.metalReduce, 42)
           parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [x0 + red / 2, by0, z0, x1 - red / 2, by0 + t, zf], 1, +1, 0, mat))
           parts.push(mk(k + 'back', 'Ящик: задняя', 'ящик', [x0 + red / 2, by0 + t, z0, x1 - red / 2, by0 + bh, z0 + t], 2, +1, 0, mat))
+          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Металлобокс: боковина', [s > 0 ? a + 3 : a - red / 2, by0, z0, s > 0 ? a + red / 2 : a - 3, by0 + Math.min(bh, 150), zf], blk, anim)
           hw.push({ name: `Металлобокс ${bd} мм (боковины)`, qty: 1 })
-          for (const pr of parts.slice(p0)) pr.blk = blk
-          continue
-        }
-        const grooveBot = p.box === 'ldsp_groove'
-        const sy0 = grooveBot ? by0 : by0 + bT
-        const bE = { '+y': eB }
-        parts.push(mk(k + 'sL', 'Ящик: боковина', 'ящик', [bxa, sy0, z0, bxa + t, sy0 + bh, zf], 0, +1, 2, mat, { edges: bE }))
-        parts.push(mk(k + 'sR', 'Ящик: боковина', 'ящик', [bxb - t, sy0, z0, bxb, sy0 + bh, zf], 0, -1, 2, mat, { edges: bE }))
-        parts.push(mk(k + 'ff', 'Ящик: передняя', 'ящик', [bxa + t, sy0, zf - t, bxb - t, sy0 + bh, zf], 2, -1, 0, mat, { edges: bE }))
-        parts.push(mk(k + 'b', 'Ящик: задняя', 'ящик', [bxa + t, sy0, z0, bxb - t, sy0 + bh, z0 + t], 2, +1, 0, mat, { edges: bE }))
-        if (grooveBot) {
-          const go = 10, gd = 6, gw = bT + 1
-          const yB = sy0 + go + (gw - bT) / 2
-          parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t - gd + 1, yB, z0 + t - gd + 1, bxb - t + gd - 1, yB + bT, zf - t + gd - 1], 1, +1, 0, bMat, { t: bT }))
-          for (const pr of parts.slice(-5, -1)) pr.grooves.push({ from: '-y', offset: go, width: gw, depth: gd, along: 'L', note: 'Паз под дно ящика' })
+        } else if (sys.type === 'msys') {
+          const bR = num(sys.bottomRed, 75), kR = num(sys.backRed, 87), sh = num(sys.sideH, 83), lr = num(sys.lenRed, 10)
+          const w = x1 - x0
+          parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [x0 + bR / 2, by0, zf - (bd - lr), x1 - bR / 2, by0 + t, zf], 1, +1, 0, mat, { edges: { '+z': eB } }))
+          parts.push(mk(k + 'back', 'Ящик: задняя', 'ящик', [x0 + kR / 2, by0 + t, zf - (bd - lr), x1 - kR / 2, by0 + Math.max(t + 20, sh - 15), zf - (bd - lr) + t], 2, +1, 0, mat, { edges: { '+y': eB } }))
+          for (const [a, s] of [[x0, 1], [x1, -1]]) vis(k + 'ms' + s, 'Боковина ящика (металл)', [s > 0 ? a + 3 : a - bR / 2 + 3, by0 - 5, z0, s > 0 ? a + bR / 2 - 3 : a - 3, by0 + sh, zf], blk, anim)
+          if (w - bR < 100) warn.push('Ящик слишком узкий для этой системы')
+          hw.push({ name: `${drawerSystem(sysId)[1]} ${bd} мм, комплект`, qty: 1 })
         } else {
-          parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa, by0, z0, bxb, by0 + bT, zf], 1, +1, 0, bMat, { t: bT }))
+          const bxa = x0 + sg, bxb = x1 - sg
+          const grooveBot = sysId === 'ldsp_groove' || sys.type === 'under'
+          const sy0 = grooveBot ? by0 : by0 + bT
+          const bE = { '+y': eB }
+          parts.push(mk(k + 'sL', 'Ящик: боковина', 'ящик', [bxa, sy0, z0, bxa + t, sy0 + bh, zf], 0, +1, 2, mat, { edges: bE }))
+          parts.push(mk(k + 'sR', 'Ящик: боковина', 'ящик', [bxb - t, sy0, z0, bxb, sy0 + bh, zf], 0, -1, 2, mat, { edges: bE }))
+          parts.push(mk(k + 'ff', 'Ящик: передняя', 'ящик', [bxa + t, sy0, zf - t, bxb - t, sy0 + bh, zf], 2, -1, 0, mat, { edges: bE }))
+          parts.push(mk(k + 'b', 'Ящик: задняя', 'ящик', [bxa + t, sy0, z0, bxb - t, sy0 + bh, z0 + t], 2, +1, 0, mat, { edges: bE }))
+          if (grooveBot) {
+            const go = sys.type === 'under' ? num(sys.bottomUp, 13) : 10, gd = 6, gw = bT + 1
+            const yB = sy0 + go + (gw - bT) / 2
+            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa + t - gd + 1, yB, z0 + t - gd + 1, bxb - t + gd - 1, yB + bT, zf - t + gd - 1], 1, +1, 0, bMat, { t: bT }))
+            for (const pr of parts.filter(q => [k + 'sL', k + 'sR', k + 'ff', k + 'b'].includes(q.key))) pr.grooves.push({ from: '-y', offset: go, width: gw, depth: gd, along: 'L', note: 'Паз под дно ящика' })
+          } else {
+            parts.push(mk(k + 'bot', 'Ящик: дно', 'ящик', [bxa, by0, z0, bxb, by0 + bT, zf], 1, +1, 0, bMat, { t: bT }))
+          }
+          hw.push({ name: sys.type === 'under' ? `Направляющие скрытого монтажа ${bd} мм, пара` : `Направляющие ${bd} мм, пара`, qty: 1 })
         }
-        drawersN++
-        hw.push({ name: `Направляющие ${bd} мм, пара`, qty: 1 })
-        for (const pr of parts.slice(p0)) pr.blk = blk
+        for (const pr of parts.slice(p0)) { if (!pr.blk) pr.blk = blk; if (pr.anim === undefined) pr.anim = anim }
+        for (const pr of parts.slice(p0)) if (pr.anim === null) delete pr.anim
+        dy0 += fh + g
       }
       return
     }
@@ -519,38 +638,61 @@ export function cabinetParts(params) {
     const dh = lay === 'h' ? (fy1 - fy0 - (n - 1) * gap) / n : fy1 - fy0
     const cnt = len => num(p.hingeCount, 0) > 0 ? Math.round(num(p.hingeCount)) : len < 900 ? 2 : len < 1600 ? 3 : len < 2000 ? 4 : 5
     const along = (a0, a1, k) => Array.from({ length: k }, (_, j) => a0 + he + ((a1 - a0 - 2 * he) * j) / Math.max(1, k - 1))
+    const AN = 95 * Math.PI / 180
     for (let i = 0; i < n; i++) {
       const dx0 = lay === 'v' ? fx0 + i * (dw + gap) : fx0, dx1 = dx0 + dw
       const dy0 = lay === 'h' ? fy0 + i * (dh + gap) : fy0, dy1 = dy0 + dh
       const open = lay === 'v' && n > 1 ? (i < n / 2 ? 'left' : 'right') : (fr.open || (fr.hinge === 'right' ? 'right' : 'left'))
       const name = lay === 'v' && n > 1 ? (i === 0 ? 'Дверь левая' : i === n - 1 ? 'Дверь правая' : 'Дверь') : lay === 'h' && n > 1 ? (i === 0 ? 'Дверь нижняя' : i === n - 1 ? 'Дверь верхняя' : 'Дверь') : 'Дверь'
-      parts.push(mk(`door${fi}_${i}`, name, 'фасад', [dx0, dy0, D, dx1, dy1, D + fT], 2, +1, 1, fMat, { edges: allE, t: fT, blk }))
+      const key = `door${fi}_${i}`
+      // анимация: поворот вокруг оси петель у переднего края двери
+      const anim = open === 'left' ? { id: key, kind: 'rot', p: [dx0, 0, D + fT], axis: [0, 1, 0], ang: -AN }
+        : open === 'right' ? { id: key, kind: 'rot', p: [dx1, 0, D + fT], axis: [0, 1, 0], ang: AN }
+          : open === 'up' ? { id: key, kind: 'rot', p: [0, dy1, D + fT], axis: [1, 0, 0], ang: -AN }
+            : { id: key, kind: 'rot', p: [0, dy0, D + fT], axis: [1, 0, 0], ang: AN }
+      parts.push(mk(key, name, 'фасад', [dx0, dy0, D, dx1, dy1, D + fT], 2, +1, 1, fMat, { edges: allE, t: fT, blk, anim }))
+      putHandle(fr, false, key, key, dx0, dy0, dx1, dy1, { left: 'r', right: 'l', up: 'b', down: 't' }[open], blk, anim)
       let k
       if (open === 'left' || open === 'right') {
         const left = open === 'left'
         k = cnt(dh)
         const xc = left ? dx0 + hc : dx1 - hc
-        for (const y of along(dy0, dy1, k)) {
-          holes.push({ p: [xc, y, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)' })
+        along(dy0, dy1, k).forEach((y, j) => {
+          holes.push({ p: [xc, y, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)', key })
+          for (const d of [-22.5, 22.5]) holes.push({ p: [left ? xc + 9.5 : xc - 9.5, y + d, D], n: '+z', d: 8, depth: 11.5, note: 'Петля (крепёж чашки)', key })
+          vis(`${key}c${j}`, 'Петля', [xc - 17.5, y - 17.5, D - 0.5, xc + 17.5, y + 17.5, D + 11], blk, anim)
           // планка — на стенке проёма со стороны петель (боковина или вертикальная панель); у средних дверей при n > 2 — нет стенки
           const wall = left ? (lay === 'h' || i === 0) : (lay === 'h' || i === n - 1)
-          if (wall) for (const d of [-16, 16]) holes.push(left ? { p: [x0, y + d, D - pf], n: '-x', d: 5, depth: 12, note: 'Планка петли' } : { p: [x1, y + d, D - pf], n: '+x', d: 5, depth: 12, note: 'Планка петли' })
-        }
+          if (wall) {
+            const wx = left ? x0 : x1
+            for (const d of [-16, 16]) holes.push({ p: [wx, y + d, D - pf], n: left ? '-x' : '+x', d: 5, depth: 12, note: 'Планка петли' })
+            vis(`${key}p${j}`, 'Петля: планка', left ? [wx, y - 20, D - pf - 16, wx + 10, y + 20, D - pf + 16] : [wx - 10, y - 20, D - pf - 16, wx, y + 20, D - pf + 16], null, null)
+            vis(`${key}a${j}`, 'Петля: плечо', left ? [wx + 4, y - 9, D - pf - 10, Math.max(wx + 16, xc - 10), y + 9, D - 1] : [Math.min(wx - 16, xc + 10), y - 9, D - pf - 10, wx - 4, y + 9, D - 1], blk, anim)
+          }
+        })
       } else {
         const up = open === 'up'
         k = cnt(dw)
         const yc = up ? dy1 - hc : dy0 + hc
-        for (const x of along(dx0, dx1, k)) {
-          holes.push({ p: [x, yc, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)' })
+        along(dx0, dx1, k).forEach((x, j) => {
+          holes.push({ p: [x, yc, D], n: '+z', d: 35, depth: 12, note: 'Петля (чашка)', key })
+          for (const d of [-22.5, 22.5]) holes.push({ p: [x + d, up ? yc - 9.5 : yc + 9.5, D], n: '+z', d: 8, depth: 11.5, note: 'Петля (крепёж чашки)', key })
+          vis(`${key}c${j}`, 'Петля', [x - 17.5, yc - 17.5, D - 0.5, x + 17.5, yc + 17.5, D + 11], blk, anim)
           const wall = up ? (lay === 'v' || i === n - 1) : (lay === 'v' || i === 0)
-          if (wall) for (const d of [-16, 16]) holes.push(up ? { p: [x + d, y1, D - pf], n: '+y', d: 5, depth: 12, note: 'Планка петли' } : { p: [x + d, y0, D - pf], n: '-y', d: 5, depth: 12, note: 'Планка петли' })
-        }
+          if (wall) {
+            const wy = up ? y1 : y0
+            for (const d of [-16, 16]) holes.push(up ? { p: [x + d, wy, D - pf], n: '+y', d: 5, depth: 12, note: 'Планка петли' } : { p: [x + d, wy, D - pf], n: '-y', d: 5, depth: 12, note: 'Планка петли' })
+            vis(`${key}p${j}`, 'Петля: планка', up ? [x - 20, wy - 10, D - pf - 16, x + 20, wy, D - pf + 16] : [x - 20, wy, D - pf - 16, x + 20, wy + 10, D - pf + 16], null, null)
+            vis(`${key}a${j}`, 'Петля: плечо', up ? [x - 9, Math.min(wy - 16, yc + 10), D - pf - 10, x + 9, wy - 4, D - 1] : [x - 9, wy + 4, D - pf - 10, x + 9, Math.max(wy + 16, yc - 10), D - 1], blk, anim)
+          }
+        })
       }
-      doorsN++; hingesN += k
+      hingesN += k
     }
   })
+  for (const [name, qty] of hwCount) hw.push({ name, qty })
+  for (const pr of parts) { if (pr.blk === null) delete pr.blk; if (pr.anim == null) delete pr.anim }
   if (hingesN) hw.push({ name: 'Петля накладная', qty: hingesN })
-  if (doorsN + drawersN) hw.push({ name: 'Ручка', qty: doorsN + drawersN })
 
   // проверки
   for (const pr of parts) {

@@ -98,7 +98,7 @@ export function attachHoles(parts, holes) {
   for (const h of holes) {
     const n = Array.isArray(h.n) ? h.n : dirVec(h.n)
     const ax = axisOf(n), sg = n[ax]
-    const own = parts.filter(sp => sp.kind === 'sheet' && (!h.item || sp.item.id === h.item))
+    const own = parts.filter(sp => sp.kind === 'sheet' && (!h.item || sp.item.id === h.item) && (!h.key || sp.key === h.key))
     const hit = own.find(sp => {
       const b = sp.place.aabb
       if (Math.abs((sg > 0 ? b[ax] : b[ax + 3]) - h.p[ax]) > EPS) return false
