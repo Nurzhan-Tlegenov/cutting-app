@@ -7,7 +7,7 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { MenuButton } from '../components/NavDrawer'
+import NavDrawer, { MenuButton } from '../components/NavDrawer'
 import Hint from '../components/Hint'
 import CadView from '../components/CadView'
 import { CAD_LOOK, FINISHES } from '../lib/cadLook'
@@ -1334,7 +1334,7 @@ export default function ConstructorPage() {
   if (allowed === null) return <div className="page"><CncLoader label="Открываем конструктор…" /></div>
   if (!allowed) return (
     <div className="page"><div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10 }}><MenuButton /><h1 style={{ fontSize: 18, fontWeight: 500 }}>Конструктор</h1></div>
-      <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Конструктор мебели сейчас в бета-тесте. Доступ выдаёт мастер-аккаунт.</p></div>
+      <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Конструктор мебели сейчас в бета-тесте. Доступ выдаёт мастер-аккаунт.</p><NavDrawer /></div>
   )
 
   // ── список проектов ──
@@ -1358,6 +1358,7 @@ export default function ConstructorPage() {
         ))}
         {!list.length && <p style={{ fontSize: 13, color: 'var(--text-hint)' }}>Проектов пока нет.</p>}
       </>}
+      <NavDrawer />
     </div>
   )
 
@@ -1582,6 +1583,7 @@ export default function ConstructorPage() {
           {!left && grip}{!left && card}
         </div>
         {dialog}
+        <NavDrawer />
       </div>
     )
   }
@@ -1605,6 +1607,7 @@ export default function ConstructorPage() {
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 12 }}>{panel}</div>
       {dialog}
+      <NavDrawer />
     </div>
   )
 }
