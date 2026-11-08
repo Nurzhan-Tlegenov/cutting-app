@@ -46,13 +46,14 @@ function lookOf(material) {
   return { color: PAL[h % PAL.length], opacity: 1 }
 }
 
-export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, children, style }) {
+export default function CadView({ parts, selected, selectedPid = null, onSelect, onDrag, xray = false, fitKey = 0, holes = [], room = null, dims = true, openings = [], selectedOpening = null, labels = [], onLabel, moveMode = false, children, style }) {
   const box = useRef(null)
   const st = useRef(null)
   const sel = useRef(onSelect)
   const drag = useRef(onDrag)
   const selId = useRef(selected)
-  useEffect(() => { sel.current = onSelect; drag.current = onDrag; selId.current = selected }, [onSelect, onDrag, selected])
+  const moveRef = useRef(moveMode)
+  useEffect(() => { sel.current = onSelect; drag.current = onDrag; selId.current = selected; moveRef.current = moveMode }, [onSelect, onDrag, selected, moveMode])
   // размеры проёмов — кнопки поверх 3D: каждый кадр ставим их в проекцию точки проёма на экран
   const labelEls = useRef(new Map())
   const labelsRef = useRef(labels)
@@ -140,7 +141,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
       pointers.add(e.pointerId)
       if (pointers.size > 1) { if (dragging) { drag.current?.(dragging.id, 'cancel', 0, 0); dragging = null; controls.enabled = true } down = null; return }
       down = { x: e.clientX, y: e.clientY, t: Date.now() }
-      if (!selId.current || !drag.current) return
+      if (!moveRef.current || !selId.current || !drag.current) return   // двигаем только в режиме «Двигать» — иначе пальцы вращают и масштабируют
       pick(e)
       const hit = ray.intersectObjects(group.children.filter(o => o.isMesh && !o.userData.ghost), false)[0]
       if (!hit || hit.object.userData.itemId !== selId.current) return

@@ -160,5 +160,16 @@ for (const rot of [0, 90, 180, 270]) {
   const fp = cabinetParts({ ...p0, tree: t4 }).parts.find(x => x.name === 'Фронтальная панель')
   ok(fp && fp.box[2] === 16 + 100 + 0 - 0 + (fp.box[2] - 116) && fp.box[5] - fp.box[2] === 16, 'fpanel ' + fp?.box)
 }
+// перехлёст: за панелью нет соседнего фасада — фасад перекрывает её торец как боковину; открывание вверх — петли сверху
+{
+  const { newNode } = await import('../../src/lib/cadCabinet.js')
+  const L = newNode({ size: 600, front: { type: 'doors', n: 1, open: 'up' } })
+  const it = newItem('cabinet', { p: { W: 2000, H: 720, D: 300, tree: newNode({ id: 'root', split: 'v', children: [L, newNode()] }) } })
+  const all = exportAll({ items: [it] }).details
+  const door = projectParts({ items: [it] }).parts.find(p => p.name === 'Дверь')
+  ok(door.place.aabb[3] === 616 + 14.5, 'solo overlap ' + door.place.aabb[3])
+  const top = all.find(d => d.name === 'Крышка')
+  ok(top.contour.drillings.filter(d => d.d === 5 && d.note === 'Планка петли').length === 4, 'plates on top panel')
+}
 console.log(fail ? `${fail} ошибок` : 'Конструктор: всё верно')
 process.exit(fail ? 1 : 0)
