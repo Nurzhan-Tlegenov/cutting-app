@@ -1327,7 +1327,17 @@ export default function ConstructorPage() {
     } catch (e) { dirty.current = true; setStatus('Не сохранилось: ' + e.message) }
   }, [user, navigate])
   useEffect(() => () => { flush() }, [flush])   // уходим со страницы — дописать
-  const setProject = useCallback(next => {
+  // отмена / повтор действий: прошлые состояния проекта (до 60); частые изменения подряд (перетаскивание, ввод) — одним шагом
+  const undoRef = useRef({ back: [], fwd: [], t: 0 })
+  const [undoN, setUndoN] = useState(0)
+  const setProject = useCallback((next, how) => {
+    const u = undoRef.current, prev = projRef.current
+    if (how === 'undo' || how === 'redo') { /* стеки уже переставлены */ } else if (prev && prev !== next) {
+      const now = Date.now()
+      if (now - u.t > 700 || !u.back.length) { u.back.push(prev); if (u.back.length > 60) u.back.shift() }
+      u.t = now; u.fwd = []
+    }
+    setUndoN(u.back.length * 1000 + u.fwd.length)
     projRef.current = next
     setProjectState(next)
     dirty.current = true
@@ -1573,7 +1583,7 @@ export default function ConstructorPage() {
   })() : ''
 
   const view = (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
       <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room}
         labels={drLabels || sizeLabels} onLabel={onLabel} moveMode={moveMode} edgeLook={edgeLook} hiPids={multi ? multiSet : hiPids} look={viewLook} matLooks={matLooks}>
         {selCab && <OpeningTools it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} showSizes={showSizes} setShowSizes={setShowSizes} />}
@@ -1587,19 +1597,19 @@ export default function ConstructorPage() {
           <button type="button" style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setSelBlock(null)}>✕</button>
         </div>}
       </CadView>
-      <div style={{ position: 'absolute', right: 8, top: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <button type="button" title="Показать всё" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
-        <div style={{ position: 'relative' }}>
-          <button type="button" title="Вид модели" style={{ ...btnS(), padding: '6px 9px', ...(viewMenu ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setViewMenu(v => !v)}>{(VIEW_MODES.find(m => m[0] === viewMode) || VIEW_MODES[0])[1]}</button>
-          {viewMenu && <div style={{ position: 'absolute', right: 'calc(100% + 6px)', top: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: 5, boxShadow: '0 4px 14px rgba(0,0,0,.25)' }}>
+      <div style={{ position: 'absolute', right: 8, top: 8, bottom: 26, display: 'grid', gridAutoFlow: 'column', gridTemplateRows: 'repeat(auto-fill, 40px)', gap: 6, direction: 'rtl', alignContent: 'start', pointerEvents: 'none' }}>
+        <button type="button" title="Показать всё" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px' }} onClick={() => setFitKey(k => k + 1)}>⤢</button>
+        <div style={{ position: 'relative', pointerEvents: 'auto' }}>
+          <button type="button" title="Вид модели" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(viewMenu ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setViewMenu(v => !v)}>{(VIEW_MODES.find(m => m[0] === viewMode) || VIEW_MODES[0])[1]}</button>
+          {viewMenu && <div style={{ direction: 'ltr', position: 'absolute', right: 'calc(100% + 6px)', top: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: 5, boxShadow: '0 4px 14px rgba(0,0,0,.25)' }}>
             {VIEW_MODES.map(([k, ic, t]) => <button key={k} type="button" style={{ ...chipS(viewMode === k), padding: '5px 10px', whiteSpace: 'nowrap', textAlign: 'left' }} onClick={() => { setLook({ view: k }); setViewMenu(false) }}>{ic} {t}</button>)}
           </div>}
         </div>
- <button type="button" title="Отображение: подписи, линии, фон, кромка, тема" style={{ ...btnS(), padding: '6px 9px' }} onClick={() => { setTab('scene'); foldApi.toggle('look', true) }}>⚙</button>
-        <button type="button" title="Подсветка кромки" style={{ ...btnS(), padding: '6px 9px', ...(edgeLook.on ? { color: edgeLook.color, borderColor: edgeLook.color } : {}) }} onClick={() => setEdgeLook({ on: !edgeLook.on })}>▭</button>
-        <button type="button" title="Двигать выбранный элемент пальцем по полу" style={{ ...btnS(), padding: '6px 9px', ...(moveMode ? { color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setMoveMode(v => !v)}>✥</button>
-        <button type="button" title="Габаритные размеры корпусов" style={{ ...btnS(), padding: '6px 9px', ...(look.dims !== false ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setLook({ dims: look.dims === false })}>⟷</button>
-        <button type="button" title="Показать присадку" style={{ ...btnS(), padding: '6px 9px', ...(showHoles ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowHoles(v => !v)}>⊙</button>
+ <button type="button" title="Отображение: подписи, линии, фон, кромка, тема" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px' }} onClick={() => { setTab('scene'); foldApi.toggle('look', true) }}>⚙</button>
+        <button type="button" title="Подсветка кромки" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(edgeLook.on ? { color: edgeLook.color, borderColor: edgeLook.color } : {}) }} onClick={() => setEdgeLook({ on: !edgeLook.on })}>▭</button>
+        <button type="button" title="Двигать выбранный элемент пальцем по полу" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(moveMode ? { color: 'white', background: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setMoveMode(v => !v)}>✥</button>
+        <button type="button" title="Габаритные размеры корпусов" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(look.dims !== false ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setLook({ dims: look.dims === false })}>⟷</button>
+        <button type="button" title="Показать присадку" style={{ ...btnS(), pointerEvents: 'auto', padding: '6px 9px', ...(showHoles ? { color: 'var(--blue)', borderColor: 'var(--blue)' } : {}) }} onClick={() => setShowHoles(v => !v)}>⊙</button>
       </div>
       {project.items.length > 0 && (() => { const b = sceneBox(parts); return <div style={{ position: 'absolute', right: 8, bottom: 4, fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: '1px 6px' }}>{Math.round(b[3] - b[0])} × {Math.round(b[4] - b[1])} × {Math.round(b[5] - b[2])}</div> })()}
     </div>
@@ -1752,12 +1762,16 @@ export default function ConstructorPage() {
     {tab === 'spec' && <SpecPanel project={project} setProject={setProject} onLinear={linearOk ? toLinear : null} />}
   </FoldCtx.Provider>)
 
+  const undo = () => { const u = undoRef.current; const prev = u.back.pop(); if (!prev) return; u.fwd.push(projRef.current); u.t = 0; setProject(prev, 'undo') }
+  const redo = () => { const u = undoRef.current; const nx = u.fwd.pop(); if (!nx) return; u.back.push(projRef.current); u.t = 0; setProject(nx, 'redo') }
   const head = (
     <div style={{ display: 'flex', alignItems: 'center', gap: desk ? 6 : 4, padding: desk || land ? '6px 10px' : '4px 0 6px', flexWrap: desk ? 'wrap' : 'nowrap', flex: '0 0 auto' }}>
       <MenuButton />
       <button type="button" title="Все проекты" onClick={() => { flush(); navigate('/constructor') }} style={{ border: 'none', background: 'none', color: 'var(--blue)', fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap' }}>{desk ? '‹ Проекты' : '‹'}</button>
       <input value={project.name} onChange={e => setProject({ ...project, name: e.target.value })} style={{ ...inp, flex: 1, minWidth: desk ? 120 : 60, fontWeight: 500, border: '0.5px solid transparent', background: 'transparent', padding: '6px 4px' }} />
       {desk && <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{status}</span>}
+      <button type="button" title="Отменить действие" disabled={undoN < 1000} style={{ ...btnS(), padding: desk ? '8px 10px' : '7px 8px', opacity: undoN < 1000 ? 0.4 : 1 }} onClick={undo}>↶</button>
+      {undoN % 1000 > 0 && <button type="button" title="Вернуть отменённое" style={{ ...btnS(), padding: desk ? '8px 10px' : '7px 8px' }} onClick={redo}>↷</button>}
       {all3d && all3d.details.length > 0 && <Model3DButton details={all3d.details} title={project.name} getScene={async () => all3d.scene} label={desk ? '3D-просмотр' : '3D'} style={{ ...btnS(), width: 'auto', padding: desk ? '8px 12px' : '7px 9px' }} />}
       <button type="button" style={{ ...btnS(true), padding: desk ? '8px 12px' : '7px 10px' }} onClick={() => setToOrder(true)}>{desk ? 'В заказ →' : 'В заказ'}</button>
     </div>
