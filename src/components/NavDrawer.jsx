@@ -370,7 +370,7 @@ export default function NavDrawer({ notices, unread }) {
         {/* внизу меню — обучение: интерактивные туры для клиента и производства */}
         <div style={{ padding: '6px 10px 10px', borderTop: '0.5px solid var(--border)', opacity: k }}>
           <UiScaleRow />
-          {isMaster && <ThemeRow />}
+          <ThemeRow />
           <button type="button" onClick={() => go('/help')} className="nav-item"
             style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 12, border: 'none', textAlign: 'left', cursor: 'pointer',
               background: pathname === '/help' ? 'var(--blue-light)' : 'transparent', color: pathname === '/help' ? 'var(--blue)' : 'var(--text)', fontSize: 15, fontWeight: pathname === '/help' ? 600 : 400 }}>
@@ -406,7 +406,7 @@ export default function NavDrawer({ notices, unread }) {
   )
 }
 
-// «Тёмная тема» — пока для мастер-аккаунта (бета: часть экранов ещё со своими светлыми цветами)
+// «Тёмная тема» — у всех пользователей, по умолчанию выключена (бета: часть экранов ещё со своими светлыми цветами)
 function ThemeRow() {
   const [t, setT] = useState(() => getTheme())
   return (
