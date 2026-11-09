@@ -691,7 +691,34 @@ export function parseSkp(u8, opts = {}) {
       for (let i = 0; i < pu.length; i++) { const a = pu[i], b = pu[(i + 1) % pu.length]; ax += a[0] * b[1] - b[0] * a[1] }
       pf.push({ f, side, A: Math.abs(ax) / 2 })
     }
-    const outerF = pf.filter(x => x.side).sort((a, b) => b.A - a.A)[0]
+    let outerF = pf.filter(x => x.side).sort((a, b) => b.A - a.A)[0]
+    // пласть из нескольких граней в одной плоскости (модель «триангулирована» — прямоугольник из двух треугольников):
+    // контур — их общая граница (рёбра, которые есть только у одной грани), а не одна самая большая грань — иначе
+    // фасад в 3D и в контуре получался треугольником
+    if (outerF) {
+      const same = pf.filter(x => x.side === outerF.side)
+      if (same.length > 1) {
+        const dir = new Set(), edges = []
+        for (const x of same) for (const lp of x.f.loops) for (let i = 0; i < lp.length; i++) { const a = lp[i], b = lp[(i + 1) % lp.length]; dir.add(a + '>' + b); edges.push([a, b]) }
+        const next = new Map()
+        for (const [a, b] of edges) if (!dir.has(b + '>' + a)) { if (!next.has(a)) next.set(a, []); next.get(a).push(b) }
+        const merged = []
+        for (const start of [...next.keys()]) {
+          while ((next.get(start) || []).length) {
+            const lp = [start]
+            let cur = next.get(start).shift(), guard = 0
+            while (cur !== start && guard++ < 100000) { lp.push(cur); const nx = next.get(cur); if (!nx || !nx.length) { cur = null; break } cur = nx.shift() }
+            if (cur === start && lp.length >= 3) merged.push(lp)
+          }
+        }
+        const areaOf = lp => { const pu = lp.map(toUV).filter(Boolean); let ax = 0; for (let i = 0; i < pu.length; i++) { const a = pu[i], b = pu[(i + 1) % pu.length]; ax += a[0] * b[1] - b[0] * a[1] } return Math.abs(ax) / 2 }
+        if (merged.length) {
+          merged.sort((a, b) => areaOf(b) - areaOf(a))
+          const A = areaOf(merged[0])
+          if (A > outerF.A * 1.01) outerF = { ...outerF, A, f: { ...outerF.f, loops: merged } }
+        }
+      }
+    }
     const key = lp => { const P = lp.map(id => V.get(id)).filter(Boolean); const c = [0, 1].map(k => P.reduce((a, p) => a + (k ? lv(p) * sv : lu(p) * su), 0) / P.length); return c.map(x => Math.round(x)).join(',') + ':' + P.length }
     const otherKeys = new Set(pf.filter(x => x.side && outerF && x.side !== outerF.side).flatMap(x => x.f.loops.slice(1).map(key)))
     const holesW = []
