@@ -374,6 +374,22 @@ for (const rot of [0, 90, 180, 270]) {
   ok(det.some(d => d.contour.meta.pos === 'Шкаф 02.01'), 'hier with name')
 }
 
+// общий фасад на два соседних проёма из трёх; накладная задняя при цоколе — от низа дна
+{
+  const { cabinetParts, CAB_DEFAULTS, opGroup, opFront } = await import('../../src/lib/cadCabinet.js')
+  const tree = { id: 'root', split: 'h', children: [{ id: 'a', front: { type: 'drawers', n: 2 } }, { id: 'b' }, { id: 'c' }] }
+  const p = { ...CAB_DEFAULTS, W: 800, H: 2000, D: 560, tree }
+  const r0 = cabinetParts(p)
+  const g = opGroup(tree, ['c', 'b'], Object.fromEntries(r0.openings.map(o => [o.id, o])), p.t)
+  ok(g && !opGroup(tree, ['a', 'c'], {}, 16), 'group only neighbours')
+  const r = cabinetParts({ ...p, tree: opFront(g.tree, g.id, { type: 'doors', n: 2, hinge: 'auto' }) })
+  const doors = r.parts.filter(q => /Дверь/.test(q.name)), sh = r.parts.filter(q => q.name === 'Горизонтальная панель')
+  ok(doors.length === 2 && doors[0].box[4] - doors[0].box[1] > 1300 && sh.length === 2 && Math.abs(sh[0].box[1] - r0.parts.filter(q => q.name === 'Горизонтальная панель')[0].box[1]) < 0.3, 'doors over 2 openings, shelves kept')
+  const rb = cabinetParts({ ...CAB_DEFAULTS, W: 800, H: 2000, D: 560, base: 'plinth', plinthH: 80, back: 'overlay' })
+  const back = rb.parts.find(q => q.key === 'back')
+  ok(back.box[1] >= 80, 'overlay back from bottom, not floor ' + back.box)
+}
+
 // петли блока: количество, обход полок по 32 мм, ручной сдвиг
 {
   const { cabinetParts, CAB_DEFAULTS } = await import('../../src/lib/cadCabinet.js')

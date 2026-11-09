@@ -204,6 +204,38 @@ export function opFront(tree, id, f) {
   return opPatch(tree, id, n => { n.front = f; if (f) { const clear = x => (x.children || []).forEach(c => { c.front = null; clear(c) }); clear(n) } })
 }
 
+/**
+ * Общий фасад на несколько соседних проёмов одного деления (например, двери на два проёма из трёх):
+ * выбранные проёмы объединяются в новый проём-группу (внутри — те же проёмы и панели между ними, размеры как сейчас),
+ * на группу и ставится фасад. Все проёмы деления — фасад на сам делимый проём. -> { tree, id } или null (не соседние)
+ */
+export function opGroup(tree, ids, sizes, t = 16) {
+  const tr = clone(tree), r = findNode(tr, ids[0])
+  if (!r?.parent) return null
+  const P = r.parent, ch = P.children
+  const idx = [...new Set(ids)].map(id => ch.findIndex(c => c.id === id)).sort((a, b) => a - b)
+  if (idx.some(i => i < 0)) return null
+  for (let k = 1; k < idx.length; k++) if (idx[k] !== idx[k - 1] + 1) return null
+  if (idx.length === ch.length) return { tree: tr, id: P.id }
+  if (idx.length === 1) return { tree: tr, id: ch[idx[0]].id }
+  const key = P.split === 'v' ? 'w' : 'h'
+  const i0 = idx[0], grp = ch.slice(i0, idx[idx.length - 1] + 1)
+  grp.forEach(c => { c.size = sizes?.[c.id]?.[key] ?? c.size })
+  const g = newNode({ split: P.split, children: grp, shelfType: P.shelfType || 'fixed' })
+  if (P.setFront != null) g.setFront = P.setFront
+  if (P.setBack != null) g.setBack = P.setBack
+  g.size = grp.every(c => c.size != null) ? Math.round((grp.reduce((a, c) => a + num(c.size), 0) + (grp.length - 1) * t) * 10) / 10 : null
+  // отступы панелей деления: между объединёнными — в группу, панель после группы — по id группы
+  if (P.pan) {
+    g.pan = {}
+    grp.slice(0, -1).forEach(c => { if (P.pan[c.id]) { g.pan[c.id] = P.pan[c.id]; delete P.pan[c.id] } })
+    const last = grp[grp.length - 1]
+    if (P.pan[last.id]) { P.pan[g.id] = P.pan[last.id]; delete P.pan[last.id] }
+  }
+  ch.splice(i0, grp.length, g)
+  return { tree: tr, id: g.id }
+}
+
 /** сколько панелей в делении проёма (n >= 1): лишние проёмы убираются с конца, новые — пустые; размеры — снова «авто» */
 export function opCount(tree, id, n) {
   return opPatch(tree, id, nd => {
@@ -377,7 +409,8 @@ export function cabinetParts(params) {
   let zi0 = zb
   let backGroove = null
   if (p.back === 'overlay') {
-    const by0 = Math.min(sideY0, yb)
+    // накладная задняя — до низа дна (при цоколе / ножках не до пола: ниже дна — цоколь); без дна — по боковинам
+    const by0 = p.bottom === 'none' ? sideY0 : yb
     const bx0 = hasL ? gL : divL != null ? divL + gL : gL, bx1 = hasR ? W - gR : divR != null ? divR + t - gR : W - gR
     parts.push(mk('back', 'Задняя стенка', 'задняя', [bx0, by0 + gB, 0, bx1, H - gT, backT], 2, +1, 1, p.backMaterial || 'ХДФ', { t: backT }))
     zi0 = backT

@@ -640,7 +640,7 @@ export default function CadView({ parts, selected, selectedPid = null, onSelect,
     for (const o of openings || []) {
       const b = o.aabb, sx = b[3] - b[0], sy = b[4] - b[1], sz = b[5] - b[2]
       if (!(sx > 1 && sy > 1 && sz > 1)) continue
-      const on = o.id === selectedOpening
+      const on = Array.isArray(selectedOpening) ? selectedOpening.includes(o.id) : o.id === selectedOpening
       if (!o.leaf && !on) continue
       const m = new THREE.Mesh(new THREE.BoxGeometry(sx - 2, sy - 2, sz - 2), new THREE.MeshBasicMaterial({ color: on ? '#2563eb' : '#60a5fa', transparent: true, opacity: on ? 0.28 : 0.07, depthWrite: false }))
       m.position.set(b[0] + sx / 2, b[1] + sy / 2, b[2] + sz / 2)

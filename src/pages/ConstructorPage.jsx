@@ -18,7 +18,7 @@ import { useDesktop } from '../hooks/useDesktop'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
 import { packScene } from '../lib/basisB3d'
-import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, DRAWER_SYSTEMS, drawerSystem, drawerHeights, drawerSetHeight, HANDLE_TYPES, slideLength, FACADE_STYLES } from '../lib/cadCabinet'
+import { CAB_DEFAULTS, CAB_PRESETS, CAB_KINDS, CAB_GROUPS, treeOf, findNode, cabinetParts, opSplit, opSetSize, opPatch, opFront, opCount, opRemovePanel, opReplace, opGroup, DRAWER_SYSTEMS, drawerSystem, drawerHeights, drawerSetHeight, HANDLE_TYPES, slideLength, FACADE_STYLES } from '../lib/cadCabinet'
 import { FRAME_DEFAULTS, FRAME_PRESETS } from '../lib/cadFrame'
 import { JOINTS, partJoints } from '../lib/cadDrill'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
@@ -108,7 +108,7 @@ function SmallNum({ value, onChange, width = 64, title }) {
     onChange={e => { setTxt(e.target.value); const n = num(e.target.value); if (n != null) onChange(n) }} />
 }
 
-function OpeningTools({ it, set, sel, showSizes, setShowSizes, dimsOn, onDims }) {
+function OpeningTools({ it, set, sel, setSel, showSizes, setShowSizes, dimsOn, onDims, multiOn, setMultiOn, extra = [], setExtra }) {
   const p = { ...CAB_DEFAULTS, ...it.p }
   const tree = treeOf(p)
   const r = sel ? findNode(tree, sel) : null
@@ -122,7 +122,18 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes, dimsOn, onDims })
     if (!t) { window.alert('Этот проём уже разделён панелями другого направления — выберите один из его проёмов'); return }
     apply(t)
   }
-  const front = f => node && apply(opFront(tree, node.id, f))
+  // общий фасад на несколько соседних проёмов (⧉): проёмы объединяются в группу, фасад — на неё
+  const front = f => {
+    if (!node) return
+    if (extra.length) {
+      const ops = cabinetParts(p).openings || []
+      const g = opGroup(tree, [node.id, ...extra], Object.fromEntries(ops.map(o => [o.id, o])), num(p.t, 16))
+      if (!g) { window.alert('Выберите соседние проёмы одного деления (идущие подряд)'); return }
+      apply(opFront(g.tree, g.id, f)); setSel?.(g.id); setExtra?.([]); setMultiOn?.(false)
+      return
+    }
+    apply(opFront(tree, node.id, f))
+  }
   // выбран корпус, а не проём: двери ставятся на весь корпус (поверх всех проёмов); фасады в проёмах — заменяются
   const inner = []
   ;(function w(n) { for (const c of n.children || []) { if (c.front) inner.push(c); w(c) } })(tree)
@@ -145,7 +156,7 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes, dimsOn, onDims })
     ['rod', '⊸', 'Штанга', () => node && apply(opPatch(tree, node.id, n => { n.rod = n.rod ? null : { top: 60, d: 25 } })), !node, !!node?.rod],
     ['d1', '▯', 'Дверь', () => front({ type: 'doors', n: 1, hinge: 'left' }), !node, node?.front?.type === 'doors' && node.front.n === 1],
     ['d2', '▯▯', '2 двери', () => front({ type: 'doors', n: 2, hinge: 'auto' }), !node, node?.front?.type === 'doors' && node.front.n > 1],
-    ['dr', '☰', 'Ящики', () => front({ type: 'drawers', n: 3 }), !node || !leaf, node?.front?.type === 'drawers'],
+    ['dr', '☰', 'Ящики', () => front({ type: 'drawers', n: 3 }), !node || (!leaf && !extra.length), node?.front?.type === 'drawers'],
     ['nf', '∅', 'Без фас.', () => front(null), !node || !node.front],
     ['x', '✕', 'Убрать', () => { if (node && window.confirm('Убрать панели этого проёма и всё внутри?')) apply(opPatch(tree, node.id, n => { n.split = null; n.children = [] })) }, !node || leaf],
   ]
@@ -163,6 +174,8 @@ function OpeningTools({ it, set, sel, showSizes, setShowSizes, dimsOn, onDims })
         <b style={{ fontSize: 12 }}>×{cnt}</b>
         <button type="button" style={{ border: 'none', background: 'none', fontSize: 12, lineHeight: 1, padding: 0, cursor: 'pointer' }} onClick={() => setCnt(c => Math.max(1, c - 1))}>－</button>
       </div>}
+      {node && r?.parent && setMultiOn && <button type="button" title="Выбрать несколько соседних проёмов — общий фасад на них" style={{ ...toolBtn(multiOn), pointerEvents: 'auto' }} onClick={() => { setMultiOn(!multiOn); if (multiOn) setExtra([]) }}>⧉<br />{extra.length ? `${extra.length + 1} пр.` : 'Неск.'}</button>}
+      {multiOn && <div style={{ fontSize: 8.5, width: 40, color: 'var(--text-muted)', background: 'var(--bg)', borderRadius: 6, padding: 2, textAlign: 'center' }}>нажмите соседние проёмы</div>}
       {node && T.map(([k, ic, t, fn, dis, on]) => <button key={k} type="button" disabled={dis} title={t} style={{ ...toolBtn(on, dis), pointerEvents: 'auto' }} onClick={fn}>{ic}<br />{t}</button>)}
     </div>
   )
@@ -1295,6 +1308,7 @@ export default function ConstructorPage() {
   const [selected, setSelected] = useState(null)
   const [selPid, setSelPid] = useState(null)
   const [selOpening, setSelOpening] = useState(null) // выбранный проём корпуса
+  const [opMulti, setOpMulti] = useState(false), [opExtra, setOpExtra] = useState([])   // ⧉ несколько проёмов под общий фасад
   const [selBlock, setSelBlock] = useState(null)     // выбранный параметрический блок (двойной тап по детали): { item, n, t, c }
   // свернутые / развёрнутые разделы карточки и высота картинки на телефоне — запоминаются за аккаунтом
   const [fold, setFold] = useState(() => { try { return getUserSettings(user)?.cadFold || {} } catch { return {} } })
@@ -1562,6 +1576,12 @@ export default function ConstructorPage() {
   }
   const select = (id, pid = null, opening = null, extra = null) => {
     if (multi) { if (pid) setMultiSel(l => (l.includes(pid) ? l.filter(x => x !== pid) : [...l, pid])); return }
+    // ⧉ несколько проёмов: тап по проёму того же корпуса — добавить / убрать из выбранных
+    if (opMulti && opening && id && id === selected && selOpening) {
+      if (opening !== selOpening) setOpExtra(l => (l.includes(opening) ? l.filter(x => x !== opening) : [...l, opening]))
+      return
+    }
+    if (opExtra.length) setOpExtra([])
     setSelected(id); setSelPid(id ? pid : null); setSelOpening(id ? opening : null)
     // тап по детали уже выбранного блока (например, первый тап двойного — открыть ящик) — блок остаётся выбранным
     if (id && extra?.blk) setSelBlock({ item: id, ...extra.blk })
@@ -1637,9 +1657,9 @@ export default function ConstructorPage() {
 
   const view = (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
-      <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room}
+      <CadView parts={parts} selected={selected} selectedPid={selPid} openings={cabOpenings} selectedOpening={opExtra.length ? [selOpening, ...opExtra] : selOpening} onSelect={select} onDrag={onDrag} xray={xray} fitKey={fitKey} holes={holes} room={room}
         labels={drLabels || sizeLabels} onLabel={onLabel} moveMode={moveMode} edgeLook={edgeLook} hiPids={multi ? multiSet : hiPids} look={viewLook} matLooks={matLooks}>
-        {selCab && <OpeningTools it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} showSizes={showSizes} setShowSizes={setShowSizes} />}
+        {selCab && <OpeningTools it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} showSizes={showSizes} setShowSizes={setShowSizes} multiOn={opMulti} setMultiOn={setOpMulti} extra={opExtra} setExtra={setOpExtra} />}
         {selCab && selOpening && !blk && <OpeningPanel it={selCab} set={setItem} sel={selOpening} setSel={setSelOpening} pull={pull} setPull={setPull} onBlock={b => { setSelBlock({ item: selCab.id, ...b }); setSelPid(null); setTab('props') }} />}
         {multi && <div style={{ position: 'absolute', left: 58, bottom: 6, zIndex: 4, display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg)', border: '1px solid #f59e0b', borderRadius: 14, padding: '4px 6px 4px 10px', fontSize: 12.5 }}>
           <b>Выбрано: {multiSel.length}</b><span style={{ color: 'var(--text-muted)' }}>нажимайте детали</span>
