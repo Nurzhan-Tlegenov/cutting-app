@@ -393,21 +393,40 @@ export function parseSkp(u8, opts = {}) {
         }
         if (big) {
           const nl = big.n
-          let ul = null, ulL = 0
-          for (let i = 0; i < big.P.length; i++) { const a = big.P[i], b = big.P[(i + 1) % big.P.length]; const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = vlen(d); if (L > ulL) { ulL = L; ul = d } }
-          if (ul) {
-            ul = norm(ul.map((c, k) => c - dot(ul, nl) * nl[k]))
-            const vl = cross(nl, ul)
+          // направление длины: сначала, как раньше, — самое длинное ребро самой большой грани. У пласти, разбитой на
+          // треугольники (модель «триангулирована»), это диагональ: габарит выходит больше настоящего, и фасад не признавался
+          // деталью (чашки петель терялись вместе с ним). Тогда — по рёбрам граней пласти: то, при котором габарит наименьший.
+          // Модели, которые уже читались, не меняются: второй способ — только если первый не дал плиту.
+          const pl = fa.filter(x => Math.abs(dot(x.n, nl)) >= 0.999)
+          const flat = d => norm(d.map((c, k) => c - dot(d, nl) * nl[k]))
+          const tryAxis = ul0 => {
+            const ul = flat(ul0), vl = cross(nl, ul)
             const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
             for (const p of V.values()) { const q = [dot(p, ul), dot(p, vl), dot(p, nl)]; for (let k = 0; k < 3; k++) { if (q[k] < lo[k]) lo[k] = q[k]; if (q[k] > hi[k]) hi[k] = q[k] } }
             const tol = 0.3 / IN, box = (hi[0] - lo[0]) * (hi[1] - lo[1])
             let top = 0, bot = 0
-            for (const x of fa) {
-              if (Math.abs(dot(x.n, nl)) < 0.999) continue
+            for (const x of pl) {
               const z = dot(x.P[0], nl)
               if (Math.abs(z - hi[2]) < tol) top += x.A; else if (Math.abs(z - lo[2]) < tol) bot += x.A
             }
-            if (box > 0 && Math.max(top, bot) >= 0.6 * box && Math.min(top, bot) >= 0.3 * box) res = { nl, ul, vl, lo, hi }
+            return box > 0 && Math.max(top, bot) >= 0.6 * box && Math.min(top, bot) >= 0.3 * box ? { nl, ul, vl, lo, hi } : null
+          }
+          let ul = null, ulL = 0
+          for (let i = 0; i < big.P.length; i++) { const a = big.P[i], b = big.P[(i + 1) % big.P.length]; const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = vlen(d); if (L > ulL) { ulL = L; ul = d } }
+          if (ul) res = tryAxis(ul)
+          if (!res && pl.length > 1) {
+            const planeP = pl.flatMap(x => x.P)
+            let best = null, bestA = Infinity, bestL = 0
+            for (const x of pl.slice(0, 40)) for (let i = 0; i < x.P.length; i++) {
+              const a = x.P[i], b = x.P[(i + 1) % x.P.length]
+              const d0 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = vlen(d0); if (L < 1e-9) continue
+              const d = flat(d0), w = cross(nl, d)
+              let u0 = Infinity, u1 = -Infinity, w0 = Infinity, w1 = -Infinity
+              for (const p of planeP) { const pu = dot(p, d), pw = dot(p, w); if (pu < u0) u0 = pu; if (pu > u1) u1 = pu; if (pw < w0) w0 = pw; if (pw > w1) w1 = pw }
+              const area = (u1 - u0) * (w1 - w0)
+              if (area < bestA * (1 - 1e-6) || (area <= bestA * (1 + 1e-6) && L > bestL)) { bestA = area; bestL = L; best = d }
+            }
+            if (best) res = tryAxis(best)
           }
         }
       }
