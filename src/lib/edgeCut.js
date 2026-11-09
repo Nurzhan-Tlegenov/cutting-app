@@ -130,17 +130,25 @@ const withNarrow = (k, edges, types, W, L, contour = null) => {
  */
 export function finishedDims(row, types) {
   const raw = row?._raw || row || {}
+  const cut = row?._raw ? row : cutDetail(raw, types || {}) || raw
+  const a = finishedAdds(row, types)
+  return { l: r2(num(cut.length) + a.top + a.bottom), w: r2(num(cut.width) + a.left + a.right) }
+}
+
+/**
+ * На сколько готовая деталь (с кромкой) выходит за пильный край с каждой стороны, мм -> { left, right, top, bottom }:
+ * кромка − прифуговка − припуск модели − наращивание узкой детали. Расстояние от края готовой детали = от пильного + это.
+ */
+export function finishedAdds(row, types) {
+  const raw = row?._raw || row || {}
   const t = types || {}
-  const cut = row?._raw ? row : cutDetail(raw, t) || raw
-  let l = num(cut.length), w = num(cut.width)
   let c = raw.contour
   if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
   const eds = { left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }
   const al = allowApplied(eds, t, c) || {}
   const nr = narrowApplied(eds, t, num(raw.width), num(raw.length), c) || {}
-  const add = side => { const k = edgeKey(eds[side]); const ty = (k && t[k]) || {}; return (k ? edgeThick(t, k) - num(ty.joint) : 0) - (al[side] || 0) - (nr[side] || 0) }
-  l += add('top') + add('bottom'); w += add('left') + add('right')
-  return { l: r2(l), w: r2(w) }
+  const add = side => { const k = edgeKey(eds[side]); const ty = (k && t[k]) || {}; return r2((k ? edgeThick(t, k) - num(ty.joint) : 0) - (al[side] || 0) - (nr[side] || 0)) }
+  return { left: add('left'), right: add('right'), top: add('top'), bottom: add('bottom') }
 }
 
 /**

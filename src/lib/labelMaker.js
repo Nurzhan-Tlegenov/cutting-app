@@ -17,7 +17,7 @@ import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
-import { parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrowApplied, narrowSide as narrowSideOf, narrowTrimTo, finishedDims } from './edgeCut'
+import { parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrowApplied, narrowSide as narrowSideOf, narrowTrimTo, finishedDims, finishedAdds } from './edgeCut'
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
@@ -624,6 +624,8 @@ export function labelInfo(order, mat, si, pi, part = null) {
       return [nm, t > 0 && !has ? `${t} мм` : ''].filter(Boolean).join(' · ') })(),
     length: Number(d.length) || 0, width: Number(d.width) || 0, sizeX: even ? DW : DL, sizeY: even ? DL : DW,
     ...(() => { const f = finishedSize(order, d); return { finX: even ? f.w : f.l, finY: even ? f.l : f.w } })(), thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
+    // чертёж детали: размеры до торцевых отверстий — от края готовой детали (с кромкой), а не от пильного края
+    edgeAdd: finishedAdds(d, typesD),
     faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
@@ -683,7 +685,9 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
       const vert = e === 'l' || e === 'r', total = vert ? DL : DW
       const at = [...new Set(holePts.filter(q => q.edge && (q.dx ? (q.dx > 0 ? 'l' : 'r') : (q.dy > 0 ? 'b' : 't')) === e).map(q => Math.round((vert ? q.y : q.x) * 10) / 10))].filter(v => v > 0.05 && v < total - 0.05).sort((u, v) => u - v)
       if (!at.length) continue
-      const nodes = [0, ...at, total], texts = nodes.slice(1).map((v, i) => r1(v - nodes[i]))
+      // цепочка — от края готовой детали: крайние участки длиннее на кромку (минус прифуговка) своей стороны
+      const lo = Number((vert ? st.add?.bottom : st.add?.left) || 0), hi = Number((vert ? st.add?.top : st.add?.right) || 0)
+      const nodes = [0, ...at, total], fin = [0, ...at.map(v => v + lo), total + lo + hi], texts = fin.slice(1).map((v, i) => r1(v - fin[i]))
       groups.push({ e, vert, nodes, texts, n: dirOf(NORM[e]), tw: Math.max(...texts.map(t => ctx.measureText(t).width)) })
     }
     ctx.restore()
@@ -1052,7 +1056,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
     } else if (it.type === 'part') {
       const p = sheetCtx?.part || sheetCtx?.sheet.placed[sheetCtx.index]
       if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0,
-        tpl.part ? { contour: tpl.part.contour * mm, inner: tpl.part.contour * mm * 0.7, holeMin: tpl.part.hole * mm, ring: tpl.part.ring } : {})
+        { ...(tpl.part ? { contour: tpl.part.contour * mm, inner: tpl.part.contour * mm * 0.7, holeMin: tpl.part.hole * mm, ring: tpl.part.ring } : {}), add: info?.edgeAdd })
     } else {
       let text = labelText(it.type, info, tpl, it.cap), ghost = false
       if (!text) {

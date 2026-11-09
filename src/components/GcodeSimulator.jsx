@@ -63,6 +63,19 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     return { groups, grp, firstByLine }
   }, [prog, kinds])
   const total = prog.lines.length - (prog.lines[prog.lines.length - 1] === '' ? 1 : 0)
+  // инструменты программы: фреза — если им что-то режут (контуры, пазы, вырезы), иначе — сверло; свёрла головы — сверла.
+  // changes — где сменился инструмент (по рабочим и холостым ходам подряд)
+  const tools = useMemo(() => {
+    const mill = new Set(), changes = []
+    let prev = null
+    prog.moves.forEach((m, i) => {
+      const tl = m.tool
+      if (tl == null || !Number(tl)) return             // T0 — инструмент ещё не взят
+      if (!m.rapid && data.grp[i] !== 'hole' && data.grp[i] !== 'rapid') mill.add(Math.round(Number(tl)))
+      if (tl !== prev) { changes.push({ i, t: m.t0, from: prev, to: tl }); prev = tl }
+    })
+    return { mill, changes }
+  }, [prog, data])
 
   const wrapRef = useRef(null), mountRef = useRef(null), codeRef = useRef(null)
   const api = useRef(null)                 // сцена: setTime, select, setVis, setView, resize
@@ -72,6 +85,10 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
   const [speed, setSpeed] = useState(20)
   const [vis, setVis] = useState(() => Object.fromEntries(LAYERS.map(l => [l.id, true])))
   const [follow, setFollow] = useState(false)   // камера следит за шпинделем
+  // выноска у шпинделя: каким инструментом работает станок (номер, диаметр, фреза / сверло), смена инструмента — «T11 → T12»
+  const [toolTag, setToolTag] = useState(() => { try { return localStorage.getItem('simToolTag') !== '0' } catch { return true } })
+  const tagOnRef = useRef(toolTag), tagBoxRef = useRef(null), tagLineRef = useRef(null), tagDotRef = useRef(null)
+  useEffect(() => { tagOnRef.current = toolTag; try { localStorage.setItem('simToolTag', toolTag ? '1' : '0') } catch { /* без памяти */ } api.current?.tag() }, [toolTag])
   const [sel, setSel] = useState(-1)       // выделенное перемещение
   const [scrollTop, setScrollTop] = useState(0)
   const desk = useDesktop()   // компьютер: 3D слева на всю высоту, управление и G-код — колонкой справа
@@ -180,7 +197,29 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     const disposables = []
     const keep = x => { disposables.push(x); return x }
     let raf = 0
-    const render = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderer.render(scene, camera) }) }
+    // выноска инструмента: точка привязки (на шпинделе или на сверле головы) -> экран; двигается каждый кадр без React
+    const anchor = new THREE.Vector3(), tagP = new THREE.Vector3()
+    let anchorOk = false
+    const tag = () => {
+      const box = tagBoxRef.current, ln = tagLineRef.current, dot = tagDotRef.current
+      if (!box || !ln || !dot) return
+      const show = tagOnRef.current && anchorOk && box.textContent
+      if (!show) { box.style.display = 'none'; ln.style.display = 'none'; dot.style.display = 'none'; return }
+      tagP.copy(anchor).project(camera)
+      const w = el.clientWidth || W, h = el.clientHeight || H
+      if (tagP.z > 1 || tagP.z < -1) { box.style.display = 'none'; ln.style.display = 'none'; dot.style.display = 'none'; return }
+      const ax = (tagP.x + 1) / 2 * w, ay = (1 - tagP.y) / 2 * h
+      box.style.display = 'block'
+      const bw = box.offsetWidth, bh = box.offsetHeight
+      const right = ax + 26 + bw <= w - 4 || ax - 26 - bw < 4                 // у правого края — выноска влево
+      let bx = right ? ax + 26 : ax - 26 - bw, by = ay - 30 - bh / 2
+      bx = Math.max(4, Math.min(w - bw - 4, bx)); by = Math.max(4, Math.min(h - bh - 4, by))
+      box.style.left = bx + 'px'; box.style.top = by + 'px'
+      const ex = right ? bx : bx + bw, ey = by + bh / 2
+      ln.style.display = 'block'; ln.setAttribute('x1', ax); ln.setAttribute('y1', ay); ln.setAttribute('x2', ex); ln.setAttribute('y2', ey)
+      dot.style.display = 'block'; dot.setAttribute('cx', ax); dot.setAttribute('cy', ay)
+    }
+    const render = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderer.render(scene, camera); tag() }) }
     controls.addEventListener('change', render)
 
     // Стол и лист. Лист — «слоёный»: верх (ламинат) и несколько срезов сердцевины по толщине. Фреза вырезает
@@ -346,12 +385,15 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     // поставить каретку: инструмент (шпиндель или сверло головы) кончиком в точку x, y, z
     const placeCarriage = (x, y, z, t) => {
       const hi = head ? heads.indexOf(Math.round(Number(t))) : -1
+      anchorOk = !!Number(t)
       if (hi < 0) {
         tool.position.set(x, y, z)
+        anchor.set(x, y, z + 52)                           // цанга шпинделя, чуть выше фрезы
         if (head) { head.position.set(x - HEAD_OFF, y, z + LIFT); bits.forEach(b => { b.position.z = RETRACT }) }
         return
       }
       const hx = x - bitX(hi)                              // центр головы
+      anchor.set(x, y, z + 44)                             // патрон работающего сверла головы
       head.position.set(hx, y, z)
       bits.forEach((b, i) => { b.position.z = i === hi ? 0 : RETRACT; const d = diaRef.current?.(b.__t) || 5; b.scale.set(d, d, 1) })
       tool.position.set(hx + HEAD_OFF, y, z + LIFT)
@@ -493,7 +535,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
 
     base(); setView('iso'); setTime(tRef.current, tRef.current > 0)
     const setFollow = on => { st.follow = !!on; if (on) { const p = tool.position; camera.position.x += p.x - controls.target.x; camera.position.y += p.y - controls.target.y; controls.target.set(p.x, p.y, 0); controls.update(); render() } }
-    api.current = { setTime, select, setVisible, setView, setFollow }
+    api.current = { setTime, select, setVisible, setView, setFollow, tag: render }
     return () => {
       api.current = null
       clearTimeout(flushT); clearTimeout(resizeT)
@@ -537,6 +579,19 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
   }, [playing, prog])
 
   const ci = moveAt(t), cm = ci >= 0 ? prog.moves[ci] : null
+  // текст выноски: «T12 · Ø8 сверло»; сразу после смены (≈2,5 с при проигрывании) — «T11 → T12 · Ø8 сверло»
+  const tagText = (() => {
+    if (!cm || !Number(cm.tool)) return { text: '', changed: false }
+    const n = Math.round(Number(cm.tool)), dia = toolDia?.(cm.tool)
+    const kind = (headTools || []).map(Number).includes(n) ? 'сверло' : tools.mill.has(n) ? 'фреза' : 'сверло'
+    let ch = null
+    for (const c of tools.changes) { if (c.i <= ci) ch = c; else break }
+    const changed = !!(ch && ch.from != null && ch.to === cm.tool && t - ch.t <= Math.max(0.6, 2.5 * speed))
+    const fmt = v => `T${Math.round(Number(v))}`
+    const d = Number(dia) > 0 ? ` · Ø${Math.round(Number(dia) * 100) / 100}` : ''
+    return { text: `${changed ? fmt(ch.from) + ' → ' : ''}${fmt(cm.tool)}${d} ${kind}`, changed }
+  })()
+  useLayoutEffect(() => { api.current?.tag() }, [tagText.text, tagText.changed])
   const line = cm ? cm.line : 0
   const selLine = sel >= 0 ? prog.moves[sel]?.line : -1
   // текущая строка — всегда на виду в списке кода
@@ -567,7 +622,17 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
   const partView = (<>
       <div ref={wrapRef} style={{ position: 'relative', flex: desk ? '1 1 0' : '0 0 auto', minWidth: 0, height: desk ? '100%' : viewH, background: 'var(--bg3)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
         <div ref={mountRef} />
+        {/* выноска инструмента: положение двигает сцена (tag), текст — отсюда */}
+        <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+          <line ref={tagLineRef} stroke={tagText.changed ? '#D9480F' : '#2C2C2A'} strokeWidth="1" style={{ display: 'none' }} />
+          <circle ref={tagDotRef} r="2.2" fill={tagText.changed ? '#D9480F' : '#2C2C2A'} style={{ display: 'none' }} />
+        </svg>
+        <div ref={tagBoxRef} style={{ position: 'absolute', left: 0, top: 0, display: 'none', pointerEvents: 'none', whiteSpace: 'nowrap', fontSize: 11, lineHeight: '15px', padding: '2px 7px', borderRadius: 6,
+          background: tagText.changed ? '#FFF1E6' : 'rgba(255,255,255,0.88)', color: tagText.changed ? '#B23C00' : '#2C2C2A', fontWeight: tagText.changed ? 600 : 500,
+          border: '0.5px solid ' + (tagText.changed ? '#D9480F' : 'rgba(44,44,42,0.35)'), boxShadow: '0 1px 3px rgba(0,0,0,0.12)' }}>{toolTag ? tagText.text : ''}</div>
         <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
+          <button type="button" onClick={() => setToolTag(v => !v)} title="Выноска у шпинделя: номер инструмента, диаметр, фреза или сверло; при смене инструмента — «T11 → T12»"
+            style={{ ...viewBtn, ...(toolTag ? { background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' } : null) }}>T Инструмент</button>
           <button type="button" onClick={() => setFollow(f => !f)} title="Камера едет за шпинделем; расстояние и угол выбираются пальцами и сохраняются"
             style={{ ...viewBtn, ...(follow ? { background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' } : null) }}>◎ Следить</button>
           <button type="button" style={viewBtn} onClick={() => api.current?.setView('iso')}>3D</button>

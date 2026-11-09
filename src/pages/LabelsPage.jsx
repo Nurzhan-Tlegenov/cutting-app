@@ -657,7 +657,7 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
           <ItemStyle it={cur} tpl={tpl} edit={edit} chip={chip} />
           {cur.type === 'part' && (
             <div style={{ flex: '1 1 100%', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button type="button" style={chip(tpl.part.dims)} onClick={() => onChange({ ...tpl, part: { ...tpl.part, dims: !tpl.part.dims } })}>{tpl.part.dims ? '✓ ' : ''}Размеры торцевых отверстий от края</button>
+              <button type="button" style={chip(tpl.part.dims)} onClick={() => onChange({ ...tpl, part: { ...tpl.part, dims: !tpl.part.dims } })}>{tpl.part.dims ? '✓ ' : ''}Размеры торцевых отверстий от края (с кромкой)</button>
               {tpl.part.dims && (
                 <>
                   <button type="button" style={chip(false)} onClick={() => onChange({ ...tpl, part: { ...tpl.part, dimSize: tpl.part.dimSize - 0.2 } })}>A−</button>
@@ -891,7 +891,7 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared, previewEl = 
             </label>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
               <input type="checkbox" checked={!!tpl.part.dims} onChange={e => change({ part: { ...tpl.part, dims: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
-              Показывать размеры торцевых отверстий от края
+              Показывать размеры торцевых отверстий от края (с учётом кромки)
             </label>
             {tpl.part.dims && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px 24px', fontSize: 12.5, color: 'var(--text-muted)' }}>
