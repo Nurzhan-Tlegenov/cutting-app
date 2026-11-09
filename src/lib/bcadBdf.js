@@ -123,10 +123,13 @@ export function parseBdf(u8, opts = {}) {
     const tp = k.get(0x7f)?.[0]; if (!tp) return null
     return { type: str(...tp), name: (k.get(0x77)?.[0] && str(...k.get(0x77)[0])) || '', k, o, l }
   }
-  // вложенные объекты: запись 0x10 — либо сам объект (в слое), либо список объектов (в контейнере)
+  // вложенные объекты: запись 0x10 — либо сам объект (в слое), либо список объектов (в контейнере).
+  // В слое объекты бывают и в записи 0x6: так лежат отверстия, поставленные прямо в слой, без контейнера крепежа
+  // (например «Отверстие 5х13» под направляющие)
   const childrenOf = ob => {
     const out = []
-    for (const [a, ln] of ob.k.get(0x10) || []) {
+    const recs = ob.type === 'LAYER' ? [...(ob.k.get(0x10) || []), ...(ob.k.get(0x6) || [])] : ob.k.get(0x10) || []
+    for (const [a, ln] of recs) {
       const self = objOf(a, ln)
       if (self) { out.push(self); continue }
       for (const [, a2, l2] of kids(a, ln) || []) { const c = objOf(a2, l2); if (c) out.push(c) }
@@ -446,6 +449,8 @@ export function parseBdf(u8, opts = {}) {
     const texDir = U1 - U0 >= W1 - W0 ? 1 : 2
     makers.push(() => buildItem(keep({
       T, elems, texDir, M: Mp, butts, cutsRaw, decorRaw: [], pocketsRaw, edgeCutsRaw: [], warnCuts: 0, anyEnd: true,
+      // крепёж под плиту 16 мм в детали 18 мм (минификс 15х13): отверстие начинается на 1–2 мм в глубине пласти — всё равно её
+      tol: 2,
       name, prefix: '', material, rotatable: false, anim: null,
       meta: { src: 'bcad', ids: [id], des: '', pos: props.code, name, product, productDes: '', productPos: '', path: [], material, materialCode: '' },
     }), holes, opts.faceRule))
