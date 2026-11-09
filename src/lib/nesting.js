@@ -208,6 +208,17 @@ export async function runNesting({
     return next
   })
 
+  // Без «мелкие — в центр» мелкие тоже не должны сбиваться кучей на один лист (см. spreadSmall, keepLast)
+  const spreadSoft = (sheetsIn, ms) => {
+    if (cuttingMethod === 'guillotine' || !ms || basePieces.some(p => p.isSmall) || !basePieces.some(p => p.sm)) return sheetsIn
+    const tmp = sheetsIn.map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p, isSmall: !!pieceById.get(p.id)?.sm })) }))
+    // последний лист — только если его цельный обрезок не меньше (допуск 1 % листа)
+    const U = usableX * usableY
+    const lastOk = (was, now) => lastOffcutArea(gravityAll([now])[0], lastDir, usableX, usableY) >= lastOffcutArea(was, lastDir, usableX, usableY) - 0.01 * U
+    const spread = spreadSmall(tmp, scoringModes, direction, usableX, usableY, ms, Math.random, true, lastOk)
+    return spread === tmp ? sheetsIn : gravityAll(spread.map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p, isSmall: false })) })))
+  }
+
   // ─── Доводка раскладки до итогового вида ──────────────────────────────────
   // Последний лист — под наибольший цельный обрезок (тот же состав, затем состав вместе с 1–2 заполненными листами),
   // узкие — от края, стяжка к нулю, перестановка полос, страховки. Та же доводка и в итоге (полные бюджеты), и в
@@ -217,6 +228,17 @@ export async function runNesting({
     let out = sheetsIn
     // мелкие — по всем листам, а не кучей на последних (см. spreadSmall)
     if (cuttingMethod !== 'guillotine' && b.spreadMs) out = gravityAll(spreadSmall(out, scoringModes, direction, usableX, usableY, b.spreadMs))
+    // Без «мелкие — в центр» мелкие тоже не должны сбиваться кучей на один лист: на фрезере это почти верный брак
+    // (вакуум не держит). 261105_Timur_k1: на 17-м листе из 31 — 71 деталь, из них 51 мелкая. Те же листы
+    // переукладываются «мелкие по листам» (spreadSmall), но бережнее: последний лист — только если его цельный
+    // обрезок не уменьшается, число листов не растёт, правило края не включается. Мелкая здесь — по площади (квадрат из настроек,
+    // по умолчанию 300 мм), признак isSmall на время шага, потом — снова из исходных деталей (ниже)
+    // Без «мелкие — в центр» мелкие тоже не должны сбиваться кучей на один лист: на фрезере это почти верный брак
+    // (вакуум не держит). 261105_Timur_k1: на 17-м листе из 31 — 71 деталь, из них 62 мелкие. Переукладка «мелкие по
+    // листам» в то же число листов; последний лист — только если его обрезок не меньше; правило края не включается.
+    // Мелкая — по площади (квадрат из настроек, по умолчанию 300 мм). Ещё раз — в конце доводки (ниже): перекомпоновка
+    // последнего листа с соседними снова сгребала мелкие
+    out = spreadSoft(out, b.spreadMs)
     // Последний лист: тот же состав — так, чтобы цельный обрезок был наибольшим
     // (вдоль Y — справа, вдоль X — сверху, авто — бóльшая полоса). Остальные листы не трогаются.
     const settleOne = sh => (cuttingMethod === 'guillotine' ? sh : gravityAll([sh])[0])
@@ -260,6 +282,7 @@ export async function runNesting({
       const swept = sweepLast(out, scoringModes, direction, usableX, usableY, b.sweepMs || 0, stop)
       if (swept !== out) out = gravityAll(swept)
     }
+    out = spreadSoft(out, b.spreadMs ? Math.min(b.spreadMs, 1500) : 0)
     // Страховка: признаки «мелкая» и её пороги — заново из исходных деталей (по id),
     // чтобы ни один шаг укладки не мог их потерять (на них держатся проверка и подсветка)
     return out.map(sh => ({
@@ -278,6 +301,9 @@ export async function runNesting({
       (smallPartsMaxArea > 0 && area <= smallPartsMaxArea) ||
       (smallPartsMaxSide > 0 && minSide <= smallPartsMaxSide)
     )
+    // мелкая «для разброса по листам» (без «мелкие — в центр»): площадь не больше квадрата из настроек (по умолчанию 300 мм)
+    const spreadSq = smallPartsMaxSquareSide > 0 ? smallPartsMaxSquareSide : 300
+    p.sm = area <= spreadSq * spreadSq
     // Узкой деталью можно встать к краю листа только КОРОТКОЙ стороной (торцом
     // 90 мм у детали 400×90): длинные стороны тогда поджаты соседями. Сторона
     // «короткая», если она не длиннее порога «Узкая сторона до» (+ рез).
@@ -1561,7 +1587,9 @@ export function smallClump(sheets) {
 // Укладка «мелкие по листам»: листы заполняются по очереди. Каждому листу — своя доля мелких (их оставшаяся
 // площадь / оставшиеся листы): сначала крупные, но не больше «лист минус доля мелких», затем мелкие этого листа
 // (только не у края), затем добивка крупными и мелкими. Последний лист — всё, что осталось.
-function packSpread(order, mode, direction, usableX, usableY, nEst, fill = 0.92) {
+// isSm — какие детали считать мелкими для доли листа (по умолчанию isSmall; без «мелкие — в центр» — свой список,
+// тогда правило края не действует: у самих деталей isSmall = false)
+function packSpread(order, mode, direction, usableX, usableY, nEst, fill = 0.92, isSm = p => p.isSmall) {
   const family = mode.startsWith('g-') ? 'guillotine' : 'maxrects'
   const scoreMode = mode.startsWith('g-') ? mode.slice(2) : mode
   const U = usableX * usableY, ar = p => p.pw * p.ph
@@ -1577,7 +1605,7 @@ function packSpread(order, mode, direction, usableX, usableY, nEst, fill = 0.92)
     updateFreeBounds(sheet)
     return true
   }
-  let bigs = order.filter(p => !p.isSmall), smalls = order.filter(p => p.isSmall)
+  let bigs = order.filter(p => !isSm(p)), smalls = order.filter(p => isSm(p))
   const sheets = []
   while (bigs.length || smalls.length) {
     const k = sheets.length
@@ -1589,7 +1617,7 @@ function packSpread(order, mode, direction, usableX, usableY, nEst, fill = 0.92)
     const put = (list, cond, noEdge) => list.filter(p => {
       if (!cond(p)) return true
       if (!place(sheet, p, noEdge)) return true
-      if (p.isSmall) smArea += ar(p); else bigArea += ar(p)
+      if (isSm(p)) smArea += ar(p); else bigArea += ar(p)
       return false
     })
     bigs = put(bigs, p => bigArea + ar(p) <= bigBudget, false)
@@ -1637,7 +1665,9 @@ function packSpreadBlocks(bigs, smalls, m, mode, direction, usableX, usableY, ra
 // укладкой «мелкие по листам» (packSpread) в то же число листов. Берётся, если мелкие разошлись ровнее, мелких
 // у края не больше, а последний лист не потяжелел больше чем на 3 % листа. Плотность остальных листов не страдает:
 // пересобираются только взятые листы и только в то же их число.
-function spreadSmall(sheets, modes, direction, usableX, usableY, budgetMs, rand = Math.random) {
+// keepLast — бережный режим (без «мелкие — в центр»): мелкие — по списку, правило края не действует; последний лист
+// берётся, только если lastOk(старый, новый) — его цельный обрезок не уменьшился (нет lastOk — последний не трогаем)
+function spreadSmall(sheets, modes, direction, usableX, usableY, budgetMs, rand = Math.random, keepLast = false, lastOk = null) {
   if (sheets.length < 2 || budgetMs <= 0 || !sheets.some(sh => sh.placed.some(p => p.isSmall))) return sheets
   const deadline = Date.now() + budgetMs
   const n = sheets.length, U = usableX * usableY, last = n - 1
@@ -1646,8 +1676,10 @@ function spreadSmall(sheets, modes, direction, usableX, usableY, budgetMs, rand 
   const lastMax = sheetArea(cur[cur.length - 1]) + 0.03 * U
   for (let a = 0; Date.now() < deadline && clump > 0 && cur.length === n; a++) {
     const share = cur.map(sh => smallAreaOf(sh) / Math.max(1, sheetArea(sh)))
-    const order = share.map((v, i) => i).sort((x, y) => share[y] - share[x])
-    const S = order[Math.floor(rand() * rand() * Math.min(3, n))]
+    const order = share.map((v, i) => i).filter(i => !keepLast || lastOk || i !== last).sort((x, y) => share[y] - share[x])
+    if (!order.length) break
+    // keepLast: чаще всего — самый «мелкий» лист (куча обычно одна, её и разбираем)
+    const S = keepLast && rand() < 0.7 ? order[0] : order[Math.floor(rand() * rand() * Math.min(3, order.length))]
     const poor = order.filter(i => i !== S && share[i] < share[S] - 0.02)
     if (!poor.length) break
     const k = Math.min(poor.length, 1 + Math.floor(rand() * 3))
@@ -1657,24 +1689,29 @@ function spreadSmall(sheets, modes, direction, usableX, usableY, budgetMs, rand 
       if (!idx.includes(j)) idx.push(j)
     }
     const m = idx.length
-    const pool = idx.flatMap(j => cur[j].placed).map(placedToPiece)
-    let bo = pool.filter(p => !p.isSmall).sort((x, y) => ar(y) - ar(x))
+    // keepLast (без «мелкие — в центр»): мелкие — по списку, у самих деталей isSmall снят — правило края не действует
+    const smIds = keepLast ? new Set(idx.flatMap(j => cur[j].placed).filter(p => p.isSmall).map(p => p.id)) : null
+    const isSm = keepLast ? p => smIds.has(p.id) : p => p.isSmall
+    const pool = idx.flatMap(j => cur[j].placed).map(placedToPiece).map(p => (keepLast ? { ...p, isSmall: false } : p))
+    let bo = pool.filter(p => !isSm(p)).sort((x, y) => ar(y) - ar(x))
     if (rand() < 0.6) bo = perturbOrder(bo, rand() < 0.4)
-    let so = pool.filter(p => p.isSmall)
+    let so = pool.filter(p => isSm(p))
     so = rand() < 0.5 ? so.sort((x, y) => ar(y) - ar(x)) : shuffle(so)
     const mode = modes[Math.floor(rand() * modes.length)]
     const hasLast = idx.includes(last)
     // без последнего листа — все взятые листы заполнены; с ним — заполнение по средней
     const fill = Math.min(0.99, pool.reduce((t, p) => t + ar(p), 0) / (U * (hasLast ? m - 0.5 : m)) + 0.01 + rand() * 0.04)
-    const res = rand() < 0.5 ? packSpread(bo.concat(so), mode, direction, usableX, usableY, m, fill) : packSpreadBlocks(bo, so, m, mode, direction, usableX, usableY, rand)
+    let res = keepLast || rand() < 0.5 ? packSpread(bo.concat(so), mode, direction, usableX, usableY, m, fill, isSm) : packSpreadBlocks(bo, so, m, mode, direction, usableX, usableY, rand)
     if (res.length > m || res.reduce((t, sh) => t + sh.placed.length, 0) !== pool.length) continue
-    if (smallAtEdge(res, usableX, usableY) > idx.reduce((t, j) => t + smallAtEdge([cur[j]], usableX, usableY), 0)) continue
+    if (keepLast) res = res.map(sh => ({ ...sh, placed: sh.placed.map(p => ({ ...p, isSmall: smIds.has(p.id) })) }))
+    else if (smallAtEdge(res, usableX, usableY) > idx.reduce((t, j) => t + smallAtEdge([cur[j]], usableX, usableY), 0)) continue
     res.sort((x, y) => sheetArea(y) - sheetArea(x))
     const slots = idx.slice().sort((x, y) => x - y)              // тяжёлые — на ранние места, лёгкий — на последнее
     const next = cur.slice()
     slots.forEach((j, t) => { next[j] = res[t] ? { ...res[t], index: cur[j].index } : null })
     const out = next.filter(Boolean)
     if (out.length === n && hasLast && sheetArea(out[last]) > lastMax) continue
+    if (out.length === n && hasLast && keepLast && !lastOk(cur[last], out[last])) continue
     const c = smallClump(out)
     if (out.length < n || c < clump - 0.002) { cur = out.map((sh, i) => ({ ...sh, index: i })); clump = c; if (out.length < n) break }
   }
@@ -2771,7 +2808,7 @@ export async function colgenPack(pieces, modes, direction, usableX, usableY, bud
   const sheets = pool.solve(Math.max(150, Math.min(1500, budgetMs * 0.05)))
   return { sheets, lowerBound: pool.lowerBound, patterns: pool.size, pool }
 }
-export { buildPieces as _buildPieces }
+export { buildPieces as _buildPieces, spreadSmall as _spreadSmall, smallClump as _smallClump }
 
 // ─── Доводка: мелкие — внутрь, число листов не меняется ─────────────────────
 // Для раскладки, найденной без учёта мелких (так ищется плотнее всего), — потом
