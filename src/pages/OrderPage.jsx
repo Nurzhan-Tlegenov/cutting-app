@@ -142,7 +142,9 @@ export default function OrderPage() {
   const canProduce = inProduction && order.status !== 'draft' && (isOperator || !!(wperms?.all || wperms?.cnc || wperms?.labels))
   const canCnc = canProduce && (isOperator || !!(wperms?.all || wperms?.cnc)), canLabels = canProduce && (isOperator || !!(wperms?.all || wperms?.labels))
   // управляющие программы по отдельным деталям — производство, право на ЧПУ, есть раскрой на фрезере
-  const partCnc = inProduction && canCnc && nestings.some(m => !m.result?.beamSaw)
+  // галочки у деталей: «Создать УП» (только раскрой на фрезере), «Удалить детали», «Удалить присадку» (и у пильного центра)
+  const partCnc = inProduction && canCnc && nestings.length > 0
+  const partProg = nestings.some(m => !m.result?.beamSaw)
   const showPrices = !wperms || !!wperms.prices || !!wperms.owner   // сотруднику цены — только с галочкой «Цены»
   const actBtn = main => ({ flex: 1, padding: '10px 8px', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 500, cursor: 'pointer',
     border: main ? 'none' : '0.5px solid var(--blue)', background: main ? 'var(--blue)' : 'var(--bg)', color: main ? 'white' : 'var(--blue)' })
@@ -475,7 +477,7 @@ export default function OrderPage() {
             </tbody>
           </table>
         </div>
-        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} onChanged={fetchOrder} />}
+        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} onChanged={fetchOrder} canProg={partProg} />}
       </div>
       {isDraft && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>

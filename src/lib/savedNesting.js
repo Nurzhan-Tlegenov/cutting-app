@@ -53,8 +53,8 @@ export function savedNestings(order, allDetails) {
 /**
  * Карты раскроя без удалённых деталей (производство удалило детали из заказа, см. migration_production_detail_edit.sql):
  * укладки этих деталей убираются, номера остальных (detailIndex, id «номер_штука») пересчитываются по новому списку
- * деталей материала. Раскрой под пильный центр (дерево резов) так не поправить — у его материала карты сбрасываются,
- * перекроить заново. -> { value (строка для orders.nesting_result или null), reset: [названия материалов со сброшенным раскроем] }
+ * деталей материала. У пильного центра дерево резов строится по текущей карте — место детали просто станет отходом.
+ * -> { value (строка для orders.nesting_result или null), reset: [названия материалов со сброшенным раскроем] }
  */
 export function dropDetailsFromNesting(order, allDetails, ids) {
   const gone = new Set(ids)
@@ -62,13 +62,12 @@ export function dropDetailsFromNesting(order, allDetails, ids) {
   try { store = typeof order?.nesting_result === 'string' ? JSON.parse(order.nesting_result) : order?.nesting_result } catch { store = null }
   if (!store) return { value: order?.nesting_result ?? null, reset: [] }
   const reset = []
-  const fix = (result, details, label) => {
+  const fix = (result, details) => {
     if (!result) return result
     const map = new Map()                      // старый номер детали -> новый (null — удалена)
     let k = 0
     details.forEach((d, i) => map.set(i, gone.has(d.id) ? null : k++))
     if (![...map.values()].includes(null)) return result
-    if (result.beamSaw) { reset.push(label); return null }
     const walk = v => {
       if (Array.isArray(v)) return v.filter(x => !(x && typeof x === 'object' && typeof x.detailIndex === 'number' && map.get(x.detailIndex) === null)).map(walk)
       if (!v || typeof v !== 'object') return v
@@ -88,11 +87,11 @@ export function dropDetailsFromNesting(order, allDetails, ids) {
     const byMat = { ...(store.byMat || {}) }
     for (const m of mats) {
       if (!byMat[m.key]) continue
-      const r = fix(byMat[m.key], (allDetails || []).filter(d => detailMatKey(d, order) === m.key), m.label || m.key)
+      const r = fix(byMat[m.key], (allDetails || []).filter(d => detailMatKey(d, order) === m.key))
       if (r) byMat[m.key] = r; else delete byMat[m.key]
     }
     return { value: JSON.stringify({ ...store, byMat }), reset }
   }
-  const r = fix(store, allDetails || [], mats[0]?.label || order?.material_name || 'Материал')
+  const r = fix(store, allDetails || [])
   return { value: r ? JSON.stringify(r) : null, reset }
 }

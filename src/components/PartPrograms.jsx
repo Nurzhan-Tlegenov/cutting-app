@@ -41,7 +41,7 @@ function download(name, data) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
-export default function PartPrograms({ order, details, selected, onClear, onChanged }) {
+export default function PartPrograms({ order, details, selected, onClear, onChanged, canProg = true }) {
   const { user } = useAuth()
   const { cnc, ready } = useCnc(null, order?.production_id || null)
   const [off, setOff] = useState(() => ({ x: 10, y: 10, ...(getUserSettings(user).partProg || {}) }))
@@ -158,6 +158,8 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
         <span style={{ flex: 1 }} />
         <button type="button" onClick={onClear} style={{ padding: '4px 10px', fontSize: 12, borderRadius: 14, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>Снять выбор</button>
       </div>
+      {/* программы на отдельные детали — только для раскроя на фрезере (у пильного центра — только удалить) */}
+      {canProg && (<>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 8, fontSize: 13 }}>
         <span style={{ color: 'var(--text-muted)' }}>Отступ от нуля станка:</span>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>X <input type="text" inputMode="decimal" key={`x${off.x}`} defaultValue={off.x} onBlur={e => setO({ x: Math.max(0, n0(e.target.value)) })} style={inp} /> мм</label>
@@ -185,6 +187,7 @@ export default function PartPrograms({ order, details, selected, onClear, onChan
         {ready ? `Создать УП только на ${selected.length === 1 ? 'эту деталь' : 'эти детали'}` : 'Загружаем настройки ЧПУ…'}
       </button>
       <Hint>Отдельная программа на каждую выбранную деталь — чтобы вырезать испорченную деталь из заготовки чуть больше (делового остатка) на том же фрезере. Обработка — как в программах листов: настройки постпроцессора и «Обработка» → «Выводить в УП» (присадка, пазы, вырезы, контур). Деталь стоит как в раскрое; обработка начинается с отступа X / Y от нуля станка — заготовку берите больше детали хотя бы на два отступа. Отступы запоминаются.</Hint>
+      </>)}
       {/* другие действия с отмеченными деталями: удалить из заказа или удалить у них всю присадку */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
         <button type="button" disabled={!!busy || !selected.length} onClick={delParts}
