@@ -105,3 +105,14 @@ export async function saveProductionCnc(prodId, cnc) {
   if (!prodId) return
   try { await supabase.rpc('production_cnc_save', { p_prod: prodId, p_cnc: cnc }) } catch { /* без сети — сохранится при следующем изменении */ }
 }
+
+// Производство: удалить детали заказа / всю присадку у деталей (migration_production_detail_edit.sql)
+const DETAIL_SQL_HINT = 'В базе нет функции — выполните migration_production_detail_edit.sql в Supabase → SQL Editor.'
+export const productionDeleteDetails = async (orderId, ids, nesting) => {
+  const r = await call('production_delete_details', { p_order: orderId, p_ids: ids, p_nesting: nesting })
+  return r.missing ? { error: DETAIL_SQL_HINT } : r
+}
+export const productionStripDrilling = async (orderId, ids) => {
+  const r = await call('production_strip_drilling', { p_order: orderId, p_ids: ids })
+  return r.missing ? { error: DETAIL_SQL_HINT } : r
+}

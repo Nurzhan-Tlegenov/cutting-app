@@ -15,7 +15,8 @@ import { cornerShift } from '../lib/sheetCorner'
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import CncLoader from './CncLoader'
-import { savedNestings, sheetGeo } from '../lib/savedNesting'
+import { savedNestings, sheetGeo, dropDetailsFromNesting } from '../lib/savedNesting'
+import { productionDeleteDetails, productionStripDrilling } from '../lib/productionApi'
 import { cutDetails, parseEdgeTypes } from '../lib/edgeCut'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { toLatin } from '../lib/orderUtils'
@@ -40,7 +41,7 @@ function download(name, data) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
-export default function PartPrograms({ order, details, selected, onClear }) {
+export default function PartPrograms({ order, details, selected, onClear, onChanged }) {
   const { user } = useAuth()
   const { cnc, ready } = useCnc(null, order?.production_id || null)
   const [off, setOff] = useState(() => ({ x: 10, y: 10, ...(getUserSettings(user).partProg || {}) }))
@@ -52,6 +53,39 @@ export default function PartPrograms({ order, details, selected, onClear }) {
   const mats = useMemo(() => savedNestings(order, cutDetails(details, parseEdgeTypes(order?.edge_types))), [order, details])
   const [nameQ, setNameQ] = useState(() => ({ ...PART_NAME_DEFAULT, ...(getUserSettings(user).partProg?.name || {}) }))
   const [nameEdit, setNameEdit] = useState(false)
+  const [busy, setBusy] = useState('')
+  const [done, setDone] = useState('')
+  // у скольких выбранных деталей есть присадка (отверстия в пласть и в торец)
+  const drilled = selected.filter(id => {
+    const d = details.find(x => x.id === id)
+    let c = d?.contour
+    if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+    return (c?.drillings || []).length > 0
+  })
+  const nm = id => { const d = details.find(x => x.id === id); return [detailMeta(d)?.des, d?.name].filter(Boolean).join(' ') || 'Деталь' }
+  const list = ids => ids.slice(0, 8).map(nm).join(', ') + (ids.length > 8 ? ` и ещё ${ids.length - 8}` : '')
+  // удалить детали из заказа: из карт раскроя они убираются, остальные остаются на своих местах (перекроить — по желанию)
+  const delParts = async () => {
+    if (!window.confirm(`Удалить из заказа ${selected.length === 1 ? 'деталь' : `детали (${selected.length})`}: ${list(selected)}?\nИз карт раскроя ${selected.length === 1 ? 'она уберётся' : 'они уберутся'}, остальные детали останутся на местах. Отменить нельзя.`)) return
+    setBusy('del'); setDone('')
+    const nx = dropDetailsFromNesting(order, details, selected)
+    const r = await productionDeleteDetails(order.id, selected, nx.value)
+    setBusy('')
+    if (r.error) { window.alert('Не удалось удалить: ' + r.error); return }
+    setRes(null); onClear?.(); onChanged?.()
+    if (nx.reset.length) window.alert(`Раскрой под пильный центр (${nx.reset.join(', ')}) сброшен — перекроите этот материал.`)
+  }
+  // удалить всю присадку у деталей: отверстия в пласть и в торец; пазы, выемки, вырезы и контур остаются
+  const stripDrill = async () => {
+    if (!drilled.length) return
+    if (!window.confirm(`Удалить всю присадку (отверстия в пласть и в торец) у ${drilled.length === 1 ? 'детали' : `деталей (${drilled.length})`}: ${list(drilled)}?\nПазы, выемки, вырезы и контур останутся. Отменить нельзя.`)) return
+    setBusy('drill'); setDone('')
+    const r = await productionStripDrilling(order.id, drilled)
+    setBusy('')
+    if (r.error) { window.alert('Не удалось удалить присадку: ' + r.error); return }
+    setRes(null); onChanged?.()
+    setDone(`Присадка удалена у ${r.data ?? drilled.length} дет. Программы и бирки этого заказа создайте заново.`)
+  }
   const setName = v => { setNameQ(v); setRes(null); saveUserSettings({ partProg: { ...off, name: v } }, user) }
   // где деталь стоит в раскрое на фрезере -> { mat, sh, p, si, pi } или null
   const findHit = id => {
@@ -151,6 +185,17 @@ export default function PartPrograms({ order, details, selected, onClear }) {
         {ready ? `Создать УП только на ${selected.length === 1 ? 'эту деталь' : 'эти детали'}` : 'Загружаем настройки ЧПУ…'}
       </button>
       <Hint>Отдельная программа на каждую выбранную деталь — чтобы вырезать испорченную деталь из заготовки чуть больше (делового остатка) на том же фрезере. Обработка — как в программах листов: настройки постпроцессора и «Обработка» → «Выводить в УП» (присадка, пазы, вырезы, контур). Деталь стоит как в раскрое; обработка начинается с отступа X / Y от нуля станка — заготовку берите больше детали хотя бы на два отступа. Отступы запоминаются.</Hint>
+      {/* другие действия с отмеченными деталями: удалить из заказа или удалить у них всю присадку */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+        <button type="button" disabled={!!busy || !selected.length} onClick={delParts}
+          style={{ flex: 1, minWidth: 140, padding: '8px 10px', fontSize: 13, borderRadius: 'var(--radius)', border: '0.5px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
+          {busy === 'del' ? 'Удаляем…' : `🗑 Удалить ${selected.length === 1 ? 'деталь' : 'детали'}`}</button>
+        <button type="button" disabled={!!busy || !drilled.length} onClick={stripDrill}
+          style={{ flex: 1, minWidth: 140, padding: '8px 10px', fontSize: 13, borderRadius: 'var(--radius)', border: '0.5px solid var(--amber)', background: 'transparent', color: drilled.length ? 'var(--amber)' : 'var(--text-hint)', cursor: drilled.length ? 'pointer' : 'default' }}>
+          {busy === 'drill' ? 'Удаляем…' : drilled.length ? `⊘ Удалить присадку (${drilled.length})` : '⊘ Присадки нет'}</button>
+      </div>
+      <Hint>«Удалить детали» — убрать из заказа (и из карт раскроя; остальные детали остаются на местах, перекроить можно потом). «Удалить присадку» — убрать у отмеченных деталей все отверстия: в пласть и в торец. Пазы, выемки, вырезы и контур остаются.</Hint>
+      {done && <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6 }}>✓ {done}</div>}
       {res && (
         <div style={{ marginTop: 8 }}>
           {res.files.map(f => (

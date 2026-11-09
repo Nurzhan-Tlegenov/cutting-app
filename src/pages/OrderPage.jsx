@@ -475,7 +475,7 @@ export default function OrderPage() {
             </tbody>
           </table>
         </div>
-        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} />}
+        {partCnc && partSel.length > 0 && <PartPrograms order={order} details={details} selected={partSel} onClear={() => setPartSel([])} onChanged={fetchOrder} />}
       </div>
       {isDraft && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
