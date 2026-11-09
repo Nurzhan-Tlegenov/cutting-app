@@ -1404,12 +1404,28 @@ export function CncOps({ cnc, onChange, layers }) {
           const o = ops.holes?.[l.key] || {}
           const auto = holeToolFor({ key: l.key, d: l.d }, { ...cnc, ops: { ...ops, holes: { ...ops.holes, [l.key]: { ...o, tool: '' } } } })
           const none = !o.tool && !auto || (o.tool && o.tool !== 'none' && !hasTool(o.tool))
+          const delBtn = { padding: '3px 10px', fontSize: 12, borderRadius: 14, cursor: 'pointer', flex: '0 0 auto' }
+          const head = (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, ...(o.off ? { textDecoration: 'line-through', color: 'var(--text-hint)' } : null) }}>
+                Ø{r1(num(o.d) || l.d)} × {r1(num(o.depth) || l.depth)}{l.through && !num(o.depth) ? ' (сквозное)' : ''} <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}>· {l.count} шт.</span>
+                {!o.off && (num(o.d) || num(o.depth)) ? <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--amber)' }}> · изменено, в детали Ø{r1(l.d)} × {r1(l.depth)}</span> : null}
+              </div>
+              {o.off
+                ? <button type="button" onClick={() => setMap('holes', l.key, { off: false })} style={{ ...delBtn, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)' }}>↩ Вернуть</button>
+                : <button type="button" onClick={() => setMap('holes', l.key, { off: true })} style={{ ...delBtn, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--danger)' }}>🗑 Удалить</button>}
+            </div>
+          )
+          // удалённый слой: отверстия этого Ø × глубины не попадают в УП (ни в листы, ни в доприсадку, ни в программы по деталям)
+          if (o.off) return (
+            <div key={l.key} style={{ paddingTop: i ? 10 : 0, marginTop: i ? 10 : 0, borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
+              {head}
+              <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0 }}>Удалено — в программу не выводятся. Настройка станка: действует во всех заказах, пока не вернёте.</p>
+            </div>
+          )
           return (
             <div key={l.key} style={{ paddingTop: i ? 10 : 0, marginTop: i ? 10 : 0, borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
-              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                Ø{r1(num(o.d) || l.d)} × {r1(num(o.depth) || l.depth)}{l.through && !num(o.depth) ? ' (сквозное)' : ''} <span style={{ fontWeight: 400, color: 'var(--text-hint)' }}>· {l.count} шт.</span>
-                {(num(o.d) || num(o.depth)) ? <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--amber)' }}> · изменено, в детали Ø{r1(l.d)} × {r1(l.depth)}</span> : null}
-              </div>
+              {head}
               <ToolSelect cnc={cnc} maxD={num(o.d) || l.d} value={none && !o.tool ? '' : o.tool} auto={auto ? toolLabel(auto) : 'нет сверла Ø' + r1(num(o.d) || l.d)} onChange={v => setMap('holes', l.key, { tool: v })} />
               {none && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>Инструмент не назначен — эти отверстия в программу не попадут.</p>}
               <Hint>В списке — только инструменты не больше диаметра отверстия.</Hint>

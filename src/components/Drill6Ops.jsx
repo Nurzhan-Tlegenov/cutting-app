@@ -46,6 +46,7 @@ export default function Drill6Ops({ cnc, onChange, isMaster = false, layers = nu
   }
   const setTools = list => set({ d6Tools: list, d6Ops: ops })
   const setOp = (cat, patch) => set({ d6Ops: { ...ops, [cat]: { ...ops[cat], ...patch } }, d6Tools: tools })
+  const setHoleOff = (key, off) => { const h = { ...ops.holesOff }; if (off) h[key] = true; else delete h[key]; set({ d6Ops: { ...ops, holesOff: h }, d6Tools: tools }) }
   const setLayer = (key, v) => { const l = { ...ops.layers }; if (v) l[key] = v; else delete l[key]; set({ d6Ops: { ...ops, layers: l }, d6Tools: tools }) }
 
   if (part === 'tools') {
@@ -137,8 +138,32 @@ export default function Drill6Ops({ cnc, onChange, isMaster = false, layers = nu
   )
   const inOrder = n => (layers ? <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-hint)' }}> · в заказе {n} шт.</span> : null)
   const sum = l => (l || []).reduce((n, x) => n + x.count, 0)
+  // отверстия по слоям (Ø × глубина): «Удалить» — слой не идёт в программы станка (настройка станка, во всех заказах)
+  const offKeys = Object.keys(ops.holesOff || {})
+  const HoleRows = ({ list, where }) => (list || []).map(l => {
+    const off = !!ops.holesOff?.[l.key]
+    return (
+      <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
+        <div style={{ flex: 1, minWidth: 0, fontSize: 13, ...(off ? { textDecoration: 'line-through', color: 'var(--text-hint)' } : null) }}>
+          Ø{l.d} × {l.depth}{l.through ? ' (сквозное)' : ''} {where} <span style={{ color: 'var(--text-hint)' }}>· {l.count} шт.</span>
+        </div>
+        <button type="button" onClick={() => setHoleOff(l.key, !off)}
+          style={{ padding: '3px 10px', fontSize: 12, borderRadius: 14, cursor: 'pointer', flex: '0 0 auto', ...(off ? { border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)' } : { border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--danger)' }) }}>
+          {off ? '↩ Вернуть' : '🗑 Удалить'}
+        </button>
+      </div>
+    )
+  })
   return (
     <>
+      <div className="card" style={{ marginBottom: 10 }}>
+        <Title>Отверстия{layers ? inOrder(sum(layers.hole) + sum(layers.edgeHole)) : null}</Title>
+        {layers && !(layers.hole || []).length && !(layers.edgeHole || []).length && <p style={{ fontSize: 12, color: 'var(--text-hint)', margin: 0 }}>В этом заказе отверстий нет.</p>}
+        {HoleRows({ list: layers?.hole, where: 'в пласть' })}
+        {HoleRows({ list: layers?.edgeHole, where: 'в торец' })}
+        {!layers && offKeys.length > 0 && <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Удалено слоёв отверстий: {offKeys.length}. Список с кнопкой «Вернуть» — в «Обработке» заказа.</p>}
+        <Hint>«🗑 Удалить» — отверстия этого диаметра и глубины не попадают в программы станка. Это настройка станка: действует во всех заказах, пока не нажмёте «↩ Вернуть».</Hint>
+      </div>
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>1. Пазы в пласти{inOrder(sum(layers?.groove))}</Title>
         {Mode({ cat: 'groove', width: true })}

@@ -196,7 +196,7 @@ const toolById = (cnc, id) => (cnc.tools || []).find(t => t.id === id) || null
 /** Инструмент слоя отверстий: назначенный, а если не назначали — сверло того же диаметра */
 export function holeToolFor(layer, cnc) {
   const o = cnc.ops?.holes?.[layer.key]
-  if (o?.tool === 'none') return null
+  if (o?.tool === 'none' || o?.off) return null
   const d = n0(o?.d) || layer.d
   if (o?.tool) { const t = toolById(cnc, o.tool); return t && n0(t.d) > d + EPS ? null : t }   // инструмент больше отверстия — не годится
   const drill = (cnc.tools || []).find(t => t.type === 'drill' && Math.abs(n0(t.d) - d) < EPS)
@@ -981,6 +981,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       const t = holeToolFor(layer, cnc)
       const d = n0(o.d) || h.d, depth = n0(o.depth) || h.depth
       const label = `отверстия Ø${num(h.d)} × ${num(Math.min(h.depth, T))}`
+      if (o.off) continue                                // «Обработка» → слой отверстий удалён: в УП не выводится (без предупреждения)
       if (!t) { noTool(label); continue }
       const through = depth >= T - EPS
       const c = G([h.x, h.y])

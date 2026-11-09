@@ -515,7 +515,8 @@ export const D6_OPS_DEFAULT = () => ({
 })
 export function d6OpsOf(post) {
   const d = D6_OPS_DEFAULT(), o = post?.d6Ops || {}
-  const ops = { layers: { ...(o.layers || {}) } }
+  // holesOff — удалённые в «Обработке» слои отверстий (ключ holeLayerKey): в программу не выводятся
+  const ops = { layers: { ...(o.layers || {}) }, holesOff: { ...(o.holesOff || {}) } }
   for (const k of D6_CATS) ops[k] = { ...d[k], ...(o[k] || {}) }
   let tools = Array.isArray(post?.d6Tools) ? post.d6Tools.filter(t => t && t.id) : []
   // раньше был один инструмент на всё (d6Tool при снятой галочке «авто»)
@@ -526,6 +527,8 @@ export function d6OpsOf(post) {
   return { ops, tools }
 }
 export const layerKey = (cat, width, depth, size = '') => (cat === 'pocket' ? `p${size}x${r1(depth)}` : cat === 'edgePocket' ? `ep${size}x${r1(depth)}` : `${cat === 'edgeGroove' ? 'e' : 'g'}${r1(width)}x${r1(depth)}`)
+/** Слой отверстий шестистороннего: в пласть 'hole' или в торец 'edgeHole', Ø × глубина -> «h8x13» / «eh8x34» */
+export const holeLayerKey = (cat, d, depth) => `${cat === 'edgeHole' ? 'eh' : 'h'}${r1(d)}x${r1(depth)}`
 const r1 = v => Math.round(n0(v) * 10) / 10
 const GROOVE_EDGE = 0.5                  // конец паза ближе 0,5 мм к краю детали — паз выходит на край
 /** Какой инструмент у обработки: { tool (null — авто), how: 'layer' | 'tool' | 'width' | 'auto', missing } */
@@ -774,6 +777,12 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     return m
   }
   const holeKeys = new Set()                         // β: сквозное «с двух сторон» не дублируем
+  // слои отверстий (Ø × глубина, в пласть / в торец) — для «Обработки»; удалённый слой в программу не идёт
+  const holeLayer = (cat, dia, depth) => {
+    const key = holeLayerKey(cat, dia, depth)
+    layers.push({ key, cat, d: r1(dia), depth: r1(depth), ...(cat === 'hole' && depth >= T - EPS ? { through: true } : {}) })
+    return !o6.ops.holesOff?.[key]
+  }
   const faceHole = (x, y, face, dia, depth) => {
     const [X, Y] = fr.at(x, y), back = face === 'back'
     if (!b6) { (back ? bottom : top).push({ X, Y, depth: depth > 0 ? Math.min(depth, T) : T, dia, face: back ? fr.bottom : fr.top }); return }
@@ -806,6 +815,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
       if (dr.kind === 'edge' && !p.isFaceType) {
         const [X, Y] = fr.at(p.x, p.y), face = fr.faceAt(X, Y)
         if (!face) { warnings.push('отверстие в торец не на краю детали (в вырезе) — пропущено'); continue }
+        if (!holeLayer('edgeHole', dia, depth)) continue
         const zf = dr.offsetFace != null && dr.offsetFace !== '' ? n0(dr.offsetFace) : T / 2   // от лицевой пласти
         let ed = dia, edp = depth
         if (b6?.caps) {
@@ -817,6 +827,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
         continue
       }
       const face = p.ehFace ?? (dr.kind === 'edge' || p.isPair ? dr.pairFace ?? dr.face : dr.face) ?? 'front'
+      if (!holeLayer('hole', dia, depth > 0 ? Math.min(depth, T) : T)) continue
       if (face === 'both') { faceHole(p.x, p.y, 'front', dia, depth); faceHole(p.x, p.y, 'back', dia, depth) }
       else faceHole(p.x, p.y, face, dia, depth)
     }
@@ -1044,7 +1055,7 @@ export function drill6Folders(post, ctx) {
  * -> { groove: [{ key, width, depth, count }], edgeGroove: [...], pocket: [...], cutout, edge }
  */
 export function drill6Layers(details, T, post = {}, types = {}) {
-  const out = { groove: new Map(), edgeGroove: new Map(), pocket: new Map(), edgePocket: new Map(), cutout: 0, edge: 0 }
+  const out = { groove: new Map(), edgeGroove: new Map(), pocket: new Map(), edgePocket: new Map(), hole: new Map(), edgeHole: new Map(), cutout: 0, edge: 0 }
   for (const d of details || []) {
     let r
     try { r = panelXml(d, { T: n0(T) || 16, id: 'x', post: { ...post, d6All: true }, types }) } catch { r = null }
@@ -1057,7 +1068,8 @@ export function drill6Layers(details, T, post = {}, types = {}) {
     }
   }
   const list = m => [...m.values()].sort((a, b) => a.width - b.width || a.depth - b.depth)
-  return { groove: list(out.groove), edgeGroove: list(out.edgeGroove), pocket: list(out.pocket), edgePocket: list(out.edgePocket), cutout: out.cutout, edge: out.edge }
+  const holes = m => [...m.values()].sort((a, b) => a.d - b.d || a.depth - b.depth)
+  return { groove: list(out.groove), edgeGroove: list(out.edgeGroove), pocket: list(out.pocket), edgePocket: list(out.edgePocket), hole: holes(out.hole), edgeHole: holes(out.edgeHole), cutout: out.cutout, edge: out.edge }
 }
 
 /**

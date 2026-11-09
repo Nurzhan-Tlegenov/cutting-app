@@ -18,7 +18,7 @@ import { logPostUse } from '../lib/postAccess'
 import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useCnc } from '../hooks/useCnc'
-import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT, drill6Layers } from '../lib/drill6Xml'
+import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT, drill6Layers, d6OpsOf } from '../lib/drill6Xml'
 import Drill6Ops from '../components/Drill6Ops'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
@@ -147,11 +147,12 @@ export default function CncPage() {
     if (layers.cutouts && !sk.cutouts && !has(rview.ops.cutout.tool)) w.push(`контур выреза (${layers.cutouts} шт.)`)
     if (!sk.grooves) layers.grooveLayers.forEach(l => { if (!has(grooveOpFor(rview.ops, l.key).tool)) w.push(`пазы ${l.width} × ${l.depth} (${l.count} шт.)`) })
     if (!sk.pockets) layers.pockets.forEach(l => { if (!has(rview.ops.pockets?.[pocketKey(l.depth)]?.tool)) w.push(`выемки глубиной ${l.depth} (${l.count} шт.)`) })
-    layers.holes.forEach(l => { if (l.through ? sk.through : sk.blind) return; if (!holeToolFor(l, rview)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
+    layers.holes.forEach(l => { if (l.through ? sk.through : sk.blind) return; if (rview.ops.holes?.[l.key]?.off) return; if (!holeToolFor(l, rview)) w.push(`отверстия Ø${l.d} × ${l.depth} (${l.count} шт.)`) })
     return w
   }, [layers, rview])
   // что отключено в «Обработке» (Выводить в УП) — одной строкой у выпуска программ, чтобы оператор не удивлялся
-  const offOps = useMemo(() => skipLabels(skipOf(rview?.ops)), [rview])
+  // и удалённые слои отверстий («Обработка» → 5. Отверстия → «Удалить»)
+  const offOps = useMemo(() => [...skipLabels(skipOf(rview?.ops)), ...(layers?.holes || []).filter(l => rview?.ops?.holes?.[l.key]?.off).map(l => `отверстия Ø${l.d} × ${l.depth}`)], [rview, layers])
 
   // название программы собирается по шаблону постпроцессора (заказ, материал, номер листа… — что выбрал пользователь)
   // галочка «Папки, архив и PDF латиницей» станка, которым выпускается программа (пила или фрезер): выключена — архив,
@@ -623,6 +624,7 @@ export default function CncPage() {
               <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>
                 {r.files.length ? `Файлов: ${r.files.length} — по одному на каждую деталь с биркой; имя файла = код детали (${r.post.d6Name === 'own' ? 'своё имя' : 'код QR бирки'}): ${r.files[0].name}${r.files.length > 1 ? ' …' : ''}. Папка: ${drillDir(r).join(' / ') || '—'}.` : 'Нет деталей с обработкой.'}
                 {r.skipped > 0 ? ` Без обработки: ${r.skipped} — не выводятся.` : ''}
+                {(() => { const n = Object.keys(d6OpsOf(r.post).ops.holesOff || {}).length; return n ? ` Удалено слоёв отверстий (Обработка): ${n} — не выводятся.` : '' })()}
               </div>
               {r.warnings.length > 0 && (
                 <details style={{ marginBottom: 6 }}>
