@@ -1439,7 +1439,7 @@ const DIR_SHORT = { auto: 'Авто', along_y: 'Вдоль Y', along_x: 'Вдо�
 let CFG_SEQ = 0
 function newCfg(over = {}) {
   return {
-    id: ++CFG_SEQ, dir: 'auto', box: false, small: false, sq: '', area: '', side: '', edge: '50', end: '', secs: '12',
+    id: ++CFG_SEQ, dir: 'auto', box: false, strips: false, small: false, sq: '', area: '', side: '', edge: '50', end: '', secs: '12',
     live: true,          // онлайн-раскрой: считать до «Стоп», показывая каждое улучшение
     open: true, status: 'idle', // idle | queued | running | stopping | done | error
     startedAt: 0, doneAt: 0, error: '',
@@ -2143,7 +2143,7 @@ export default function NestingPage() {
       end: o.small_parts_end_side != null ? String(o.small_parts_end_side) : '',
       secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
       ...(saved ? {
-        dir: saved.config?.dir || 'auto', box: !!(saved.config?.box || saved.byBox),
+        dir: saved.config?.dir || 'auto', box: !!(saved.config?.box || saved.byBox), strips: !!saved.config?.strips,
         status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i, offAuto: sh.offAuto ?? true })),   // сохранённые раскладки — как сохранены, без авто-обрезков
         startedAt: 0, doneAt: 0, saved: true,
       } : {}),
@@ -2380,7 +2380,7 @@ export default function NestingPage() {
     const last = configs[configs.length - 1]
     const used = new Set(configs.map(c => c.dir))
     const dir = ['auto', 'along_y', 'along_x'].find(d => !used.has(d)) || last.dir
-    const cfg = newCfg({ box: last.box, small: last.small, sq: last.sq, area: last.area, side: last.side, edge: last.edge, end: last.end, secs: last.secs, dir })
+    const cfg = newCfg({ box: last.box, strips: last.strips, small: last.small, sq: last.sq, area: last.area, side: last.side, edge: last.edge, end: last.end, secs: last.secs, dir })
     setConfigs(cs => [...cs.map(c => ({ ...c, open: false })), cfg])
   }
 
@@ -2411,7 +2411,11 @@ export default function NestingPage() {
       // «Торцом к краю до, мм» (строка потерялась 2.10 при загрузке файлов — порог не доходил до раскроя)
       smallPartsEndSide: cfg.end === '' ? null : Number(cfg.end),
       optimizeSeconds: cfg.secs === '' ? 12 : Number(cfg.secs),
-      cuttingMethod,
+      // фрезер, «Укладка полосами»: раскрой считается алгоритмом форматно-раскроечного станка (сквозные резы, детали —
+      // прямоугольниками по габариту). Такая раскладка годится и фрезеру — заказ остаётся «ЧПУ», программы выпускаются как
+      // обычно. На заказах из одинаковых прямоугольников полосы бывают плотнее (261109_039: тот же 7-й лист, обрезок 0,72 м²
+      // против 0,45 м²); сравнить — двумя конфигурациями
+      cuttingMethod: cuttingMethod === 'nesting' && !beamSaw && cfg.strips ? 'guillotine' : cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
       byBox: (!!cfg.box || prodRectOnly) && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту (или производство режет только прямоугольники)
     }
@@ -2677,7 +2681,7 @@ export default function NestingPage() {
     delete result.rawSheets           // служебная копия раскладки до дозаполнения — в заказе не нужна
     const toSave = {
       ...result, sheets,
-      config: { dir: cfg.dir, box: !!cfg.box, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
+      config: { dir: cfg.dir, box: !!cfg.box, strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
     }
     const next = multiMat ? { ...savedByMat, [matKey]: toSave } : {}
     if (multiMat) setSavedByMat(next)
@@ -2956,7 +2960,7 @@ export default function NestingPage() {
       const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
       const result = { ...cfg.result }
       delete result.rawSheets
-      const toSave = { ...result, sheets, config: { dir: cfg.dir, box: !!cfg.box, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
+      const toSave = { ...result, sheets, config: { dir: cfg.dir, box: !!cfg.box, strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
       const nesting = multiMat ? JSON.stringify({ multi: true, byMat: { ...savedByMat, [matKey]: toSave } }) : JSON.stringify(toSave)
       const { data: src, error: e0 } = await supabase.from('orders').select('*').eq('id', id).single()
       if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
@@ -3388,7 +3392,7 @@ export default function NestingPage() {
               {cfg.saved && badge('✓ в заказе', '#e6f4ea', '#1e7e34')}
             </div>
             <div style={{ fontSize: 10.5, color: cfg.status === 'error' ? '#dc3545' : 'var(--text-hint)', marginTop: 1 }}>
-              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{(cfg.box || prodRectOnly) && hasShaped && cuttingMethod !== 'guillotine' ? ' · по габаритам' : ''}{cfg.small && !smallRuleOff(details, cfg) ? ' · мелкие в центр' : ''} · {statusLine}
+              {cfg.live ? 'до «Стоп»' : `${cfg.secs === '' ? 12 : cfg.secs} с`}{cfg.strips && cuttingMethod === 'nesting' && !beamSaw ? ' · полосами' : ''}{(cfg.box || prodRectOnly) && hasShaped && cuttingMethod !== 'guillotine' && !cfg.strips ? ' · по габаритам' : ''}{cfg.small && !smallRuleOff(details, cfg) ? ' · мелкие в центр' : ''} · {statusLine}
             </div>
           </div>
           {(isRunning || isQueued) && (
@@ -3420,8 +3424,21 @@ export default function NestingPage() {
               ))}
             </div>
 
+            {/* Фрезер: укладка полосами — алгоритмом форматно-раскроечного станка (для сравнения и выпуска с него программ) */}
+            {cuttingMethod === 'nesting' && !beamSaw && (
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="checkbox" checked={!!cfg.strips} onChange={e => updateCfg(cfg.id, { strips: e.target.checked })}
+                    style={{ width: 17, height: 17, flexShrink: 0 }} />
+                  Укладка полосами (как форматно-раскроечный)
+                </label>
+                <Hint>
+                  Раскрой считается алгоритмом форматно-раскроечного станка: сквозные резы, детали — прямоугольниками по габариту (фигурные — без сцепки и без деталей в вырезах, правило «мелкие в центр» не действует). Станок остаётся фрезером: ширина реза и отступы те же, программы ЧПУ, бирки и отправка на производство — как обычно. На заказах из одинаковых прямоугольных деталей полосы бывают плотнее и с бóльшим обрезком; на фигурных и разнокалиберных обычно выигрывает обычная укладка. Сравните: одна конфигурация — с галочкой, другая — без.
+                </Hint>
+              </div>
+            )}
             {/* Фигурные детали — по габаритам: для станков, которые режут только прямоугольники */}
-            {hasShaped && cuttingMethod !== 'guillotine' && (
+            {hasShaped && cuttingMethod !== 'guillotine' && !cfg.strips && (
               <div style={{ marginBottom: 8 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
                   <input type="checkbox" checked={!!cfg.box || prodRectOnly} disabled={prodRectOnly} onChange={e => updateCfg(cfg.id, { box: e.target.checked })}
