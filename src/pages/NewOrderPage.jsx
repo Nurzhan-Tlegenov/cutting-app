@@ -26,7 +26,7 @@ import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided, backSide } from '../lib/partInfo'
 import { saveOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import EdgeTypes from '../components/EdgeTypes'
-import { cutSize, listSize, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
+import { cutSize, listSize, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT, finishedOn, edgesWithoutThick } from '../lib/edgeCut'
 import Model3DButton from '../components/Model3DButton'
 import { fetchUserSettings, ORDER_DEFAULT_COLS, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useBackClose } from '../lib/backStack'
@@ -517,6 +517,11 @@ export default function NewOrderPage() {
   async function handleSave() {
     const valid = details.filter(d => d.w > 0 && d.h > 0)
     if (!valid.length) { setError('Добавьте хотя бы одну деталь с размерами'); return }
+    // «Размеры готовые (с кромкой)»: без толщины кромки размер в раскрой не посчитать — толщина обязательна
+    if (finishedOn(edgeTypes)) {
+      const noT = edgesWithoutThick(valid, edgeTypes)
+      if (noT.length) { setError(`Размеры готовые: укажите толщину кромки — ${noT.join(', ')} (Виды кромки)`); return }
+    }
     setSaving(true); setError('')
     try {
       const orderNumber = await getNextOrderNumber(supabase)
@@ -605,7 +610,9 @@ export default function NewOrderPage() {
       }
       if (dErr) throw dErr
       if (model3d) { const r = await saveOrderModel(order.id, model3d); if (!r.ok) window.alert(r.missing ? MODEL_TABLE_HINT : 'Заказ сохранён, но 3D-модель сохранить не удалось: ' + r.message) }
-      navigate(`/orders/${order.id}/nesting`)   // сразу к делу: статистика и детали есть и в раскрое
+      // сразу к делу: статистика и детали есть и в раскрое. replace — бланк не остаётся в истории: «Назад» из раскроя
+      // ведёт к списку заказов, а не в пустой бланк
+      navigate(`/orders/${order.id}/nesting`, { replace: true })
     } catch (err) {
       const lim = limitFromError(err)
       if (lim) { setLimitBlock(lim); resetLimitsCache() } else setError(err.message)

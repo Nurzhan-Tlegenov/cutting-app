@@ -2849,7 +2849,7 @@ export default function NestingPage() {
         if (st.parts) await fixOrderQuote(id, statsPayload(st, fresh))
       }
     } catch { /* не посчиталось — заказ всё равно оформлен, цена покажется по текущему прайсу */ }
-    navigate(`/orders/${id}`)
+    navigate(`/orders/${id}`, { replace: true })   // отправлен — раскрой не остаётся в истории: «Назад» ведёт к заказам
   }
 
   // Заказ из нескольких материалов уходит на производство отдельными заявками — по одной на материал, с тем же названием
@@ -2920,7 +2920,7 @@ export default function NestingPage() {
         if (fresh?.production_id) await fixQuote(fresh, (rows || []).filter(r => keyOf(r) === keepKey))
         setBusyId(null)
         if (made.length) window.alert(`Отправлено заявками: ${made.map(x => `№${x.number} — ${lab(x.key)}`).join('; ')}; ${lab(keepKey)} — этим заказом.`)
-        navigate(`/orders/${id}`)
+        navigate(`/orders/${id}`, { replace: true })   // отправлен — раскрой не остаётся в истории: «Назад» ведёт к заказам
         return
       }
       // в черновике остаются материалы без раскроя
@@ -2989,7 +2989,7 @@ export default function NestingPage() {
         if (st.parts) await fixOrderQuote(copy.id, statsPayload(st, copy))
       } catch { /* цена покажется по текущему прайсу */ }
       setBusyId(null)
-      navigate(`/orders/${copy.id}`)
+      navigate(`/orders/${copy.id}`, { replace: true })   // отправлен — раскрой не остаётся в истории: «Назад» ведёт к заказам
     } catch (err) {
       setBusyId(null)
       window.alert('Повторно отправить не удалось: ' + (err?.message || err))

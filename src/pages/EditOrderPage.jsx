@@ -23,7 +23,7 @@ import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided, backSide } from '../lib/partInfo'
 import { saveOrderModel, loadOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import EdgeTypes from '../components/EdgeTypes'
-import { cutSize, listSize, parseEdgeTypes, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
+import { cutSize, listSize, parseEdgeTypes, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT, finishedOn, edgesWithoutThick } from '../lib/edgeCut'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
@@ -476,6 +476,11 @@ export default function EditOrderPage() {
   async function handleSave() {
     const valid = details.filter(d => Number(d.w) > 0 && Number(d.h) > 0)
     if (!valid.length) { setError('Добавьте хотя бы одну деталь с размерами'); return }
+    // «Размеры готовые (с кромкой)»: без толщины кромки размер в раскрой не посчитать — толщина обязательна
+    if (finishedOn(edgeTypes)) {
+      const noT = edgesWithoutThick(valid, edgeTypes)
+      if (noT.length) { setError(`Размеры готовые: укажите толщину кромки — ${noT.join(', ')} (Виды кромки)`); return }
+    }
     setSaving(true); setError('')
     try {
       const orderPatch = {
@@ -540,7 +545,7 @@ export default function EditOrderPage() {
         if (dErr) throw new Error('Новые детали сохранены, но старые не удалились (проверьте заказ на дубли): ' + dErr.message)
       }
       if (model3d) { const r = await saveOrderModel(id, model3d); if (!r.ok) window.alert(r.missing ? MODEL_TABLE_HINT : 'Заказ сохранён, но 3D-модель сохранить не удалось: ' + r.message) }
-      navigate(`/orders/${id}/nesting`)   // сразу к делу: статистика и детали есть и в раскрое
+      navigate(`/orders/${id}/nesting`, { replace: true })   // сразу к делу; бланк правки не остаётся в истории
     } catch (err) {
       setError(err.message)
     } finally {

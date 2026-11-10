@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { blankType, OVER_KEY, overOf, thickFromName } from '../lib/edgeCut'
+import { blankType, OVER_KEY, overOf, thickFromName, FINISHED_KEY, finishedOn } from '../lib/edgeCut'
 
 // Виды кромки заказа. У каждого вида: толщина (обязательна), «подрезка» — деталь идёт в раскрой меньше
 // на толщину кромки с каждой закромленной стороны, «прифуговка» — припуск в мм, который снимает станок
@@ -48,8 +48,20 @@ export default function EdgeTypes({ edgeNames, edgeTypes, activeEdge, onNames, o
       </div>
     )
   }
+  const fin = finishedOn(edgeTypes)
+  const setFin = on => { const next = { ...edgeTypes }; if (on) next[FINISHED_KEY] = { on: true }; else delete next[FINISHED_KEY]; onTypes(next) }
   return (
     <div>
+      {/* размеры деталей: распиловочные (по умолчанию) или готовые — тогда минус толщина кромки с закромленных сторон */}
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={fin} onChange={e => setFin(e.target.checked)} style={{ width: 18, height: 18, flexShrink: 0, marginTop: 1 }} />
+        <span><b>Размеры готовые (с кромкой)</b>
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>
+            {fin ? 'В раскрой деталь пойдёт меньше на толщину кромки с каждой закромленной стороны: 300×300, кромка 1 мм с двух длинных сторон → 300×298. Толщина кромки обязательна.'
+              : 'Выключено — размеры распиловочные: деталь идёт в раскрой как записана.'}
+          </span>
+        </span>
+      </label>
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         <input type="text" placeholder="Название: ПВХ 2мм / ABS…" value={name} onChange={e => setName(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
         <input type="text" inputMode="decimal" placeholder="толщ., мм" value={thick} onChange={e => setThick(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} style={{ width: 86 }} />

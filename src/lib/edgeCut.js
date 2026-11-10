@@ -60,6 +60,28 @@ export function sideTrimOf(contour, trim = null) {
   }
 }
 
+// ─── «Размеры готовые (с кромкой)» — галочка в бланке заказа (по умолчанию выключена: размеры — распиловочные).
+// Включена — размеры деталей, внесённых вручную или из Excel/DXF, считаются готовыми: в раскрой деталь идёт меньше
+// на толщину кромки с каждой закромленной стороны (300×300, кромка 1 мм с двух длинных сторон → 300×298).
+// Детали из моделей мебельных программ — как задано в модели. Хранится в видах кромки заказа под служебным ключом.
+export const FINISHED_KEY = '__finished'
+export const finishedOn = types => !!parseEdgeTypes(types)[FINISHED_KEY]?.on
+/** Деталь из модели мебельной программы (у неё подрезка — своя, из модели) */
+export function isModelPart(contour, trim = null) {
+  let c = contour
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = null } }
+  return MODEL_SRCS.has(c?.meta?.src) || !!(trim || (c?.edgeTrim && typeof c.edgeTrim === 'object'))
+}
+/** Кромки деталей без толщины (при готовых размерах толщина обязательна) -> [названия] */
+export function edgesWithoutThick(details, types) {
+  const out = new Set()
+  for (const d of details || []) for (const sd of SIDES) {
+    const k = edgeKey(d?.edges?.[sd])
+    if (k && !(edgeThick(types, k) > 0)) out.add(k === 'default' ? 'Без названия' : k)
+  }
+  return [...out]
+}
+
 /** Подрезка по сторонам, заданная самой моделью при импорте (contour.edgeTrim: { left: true, top: false, … }) */
 export function edgeTrimOf(contour) {
   let c = contour
@@ -211,7 +233,10 @@ export function sideDeltas(edges, types, trim, contour = null) {
   const d = {}
   let any = false
   const al = contour ? allowApplied(edges, types, contour) : null      // припуск из модели — деталь больше с этой стороны
-  const tr = sideTrimOf(contour, trim)                                   // подрезка — только модели мебельных программ
+  // подрезка — у моделей мебельных программ как задано в модели; у остальных деталей — только если в бланке заказа
+  // включено «Размеры готовые (с кромкой)»: тогда с каждой закромленной стороны минус толщина кромки
+  const base = sideTrimOf(contour, trim)
+  const tr = finishedOn(types) && !isModelPart(contour, trim) ? () => true : base
   for (const s of SIDES) {
     const k = edgeKey(edges[s])
     d[s[0]] = !k ? 0 : edgeDelta({ ...(types[k] || {}), t: edgeThick(types, k), trim: tr(s) })
@@ -385,6 +410,7 @@ export function typesToSave(types, names) {
   if (types?.[NAMES_KEY] && Object.keys(types[NAMES_KEY]).length) out[NAMES_KEY] = types[NAMES_KEY]   // обозначения кромки от производства
   if (types?.[ALLOW_KEY]) out[ALLOW_KEY] = allowOf(types)                // выбор производства о припуске из модели
   if (narrowMm(types) > 0) out[NARROW_KEY] = { mm: narrowMm(types) }     // наименьшая ширина детали на кромочном станке
+  if (finishedOn(types)) out[FINISHED_KEY] = { on: true }                // размеры готовые — минус толщина кромки
   for (const n of ['default', ...(names || [])]) {
     const v = types?.[n]
     if (!v) continue
