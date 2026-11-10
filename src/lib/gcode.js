@@ -877,7 +877,7 @@ export function holdBlock(list, minArea) {
   return block
 }
 
-export function routeContours(list, from, sheetRect, smallFirst = true) {
+export function routeContours(list, from, sheetRect, smallFirst = true, anchor = null) {
   const n = list.length
   if (n < 2) return list.slice()
   const NEAR = 40                                        // мм: зазор, при котором детали — соседи
@@ -888,7 +888,27 @@ export function routeContours(list, from, sheetRect, smallFirst = true) {
   const mid = j => [(j.box[0] + j.box[2]) / 2, (j.box[1] + j.box[3]) / 2]
   const cx = (sheetRect.x0 + sheetRect.x1) / 2, cy = (sheetRect.y0 + sheetRect.y1) / 2
   const pool = smallFirst && list.some(j => !j.small) ? list.filter(j => !j.small) : list
-  const centre = pool.reduce((b, j) => (!b || (j.area || 0) > (b.area || 0) * 1.02 || (Math.abs((j.area || 0) - (b.area || 0)) <= (b.area || 0) * 0.02 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
+  // Блок удержания (anchor): он теперь «самая крупная деталь» листа — режется последним (дорез в конце), а остальные
+  // крупные идут к нему волной: из двух соседей раньше та, что дальше от блока (считая по соседям). Так каждая деталь
+  // в момент реза отделяется от ещё нетронутого соседа ближе к блоку или от самого блока, а не стоит уже прорезанной
+  // со всех сторон. Самая крупная из своих в этом случае последней не назначается — последним идёт блок.
+  const toBlock = new Map()
+  if (anchor?.length) {
+    const big = list.filter(j => !j.small)
+    const nb = j => big.filter(k => k !== j && gap(j, k) <= NEAR)
+    const spread = (roots, d0) => {
+      let wave = roots; roots.forEach(j => toBlock.set(j, d0))
+      while (wave.length) { const next = []; for (const j of wave) for (const k of nb(j)) if (!toBlock.has(k)) { toBlock.set(k, toBlock.get(j) + 1); next.push(k) } wave = next }
+    }
+    spread(big.filter(j => anchor.some(a => gap(j, a) <= NEAR)), 1)
+    // детали, не связанные с блоком через соседей: своя «волна» от крупнейшей, раньше всех связанных с блоком
+    for (;;) {
+      const rest = big.filter(j => !toBlock.has(j))
+      if (!rest.length) break
+      spread([rest.reduce((b, j) => ((j.area || 0) > (b.area || 0) ? j : b))], 1000)
+    }
+  }
+  const centre = anchor?.length ? null : pool.reduce((b, j) => (!b || (j.area || 0) > (b.area || 0) * 1.02 || (Math.abs((j.area || 0) - (b.area || 0)) <= (b.area || 0) * 0.02 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
   // кто кого ждёт: крупная деталь — ВСЕ мелкие листа; центральная — всех.
   // Среди мелких: сначала те, что дальше от крупных деталей (считая по соседям), последними — прилегающие к крупной.
   // Так мелкая деталь в момент реза ещё держится за нетронутого соседа, а фреза не возвращается в россыпь уже отрезанных.
@@ -915,7 +935,11 @@ export function routeContours(list, from, sheetRect, smallFirst = true) {
   }
   // и среди крупных: из двух соседей раньше режется та, что заметно меньше, — она отделяется от большей
   if (smallFirst) for (const s of list) if (!s.small) for (const b of list) {
-    if (b !== s && !b.small && gap(s, b) <= NEAR && (s.area || 0) < (b.area || 0) * 0.6) before.get(b).push(s)
+    if (b !== s && !b.small && gap(s, b) <= NEAR && (s.area || 0) < (b.area || 0) * 0.6 && (!toBlock.size || toBlock.get(s) === toBlock.get(b))) before.get(b).push(s)
+  }
+  // к блоку: из двух соседних крупных раньше та, что дальше от блока
+  if (toBlock.size) for (const s of list) if (!s.small) for (const b of list) {
+    if (b !== s && !b.small && gap(s, b) <= NEAR && toBlock.get(s) > toBlock.get(b)) before.get(b).push(s)
   }
   if (centre) for (const j of list) if (j !== centre && !before.get(j).includes(centre)) before.get(centre).push(j)
   const valid = R => { const pos = new Map(R.map((j, i) => [j, i])); return R.every(j => before.get(j).every(q => pos.get(q) < pos.get(j))) }
@@ -1357,7 +1381,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     // От этого меняются точки входа, поэтому маршрут строится ещё раз уже по ним — холостые переезды остаются короткими.
     let r = []
     for (let pass = 0; pass < 3; pass++) {
-      r = routeContours(own, cur, sheetRect, smallFirst)
+      r = routeContours(own, cur, sheetRect, smallFirst, block.length ? block : null)
       lastCutToSupport(r, sheetRect, offcuts)
     }
     r = withNestedOrder(r, heldCutouts, nestedState)
