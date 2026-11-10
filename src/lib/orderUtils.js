@@ -86,7 +86,7 @@ const latinName = s => toLatin(String(s ?? '')).replace(/[^\w.-]+/g, '_').replac
  */
 export function programName(tpl, ctx) {
   let t = String(tpl || '').trim() || NAME_TPL_DEFAULT
-  if (!/\{N\}/i.test(t)) t = '{N}_' + t
+  if (!/\{N(?::-?\d+)?\}/i.test(t)) t = '{N}_' + t
   return fillName(t, ctx) || (ctx.n == null ? 'zakaz' : String(ctx.n))
 }
 /** Название папки заказа при сохранении программ: тот же конструктор, но без номера листа */
@@ -111,6 +111,16 @@ function fillName(t, ctx) {
   const d = new Date(), date = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')
   const val = { N: ctx.n == null ? '' : String(ctx.n), ZAKAZ: String(ctx.order?.order_name || '').trim() || ctx.order?.order_number || '', NOMER: ctx.order?.order_number || '',
     MAT: ctx.material || '', T: ctx.thickness ? String(ctx.thickness).replace('.', '_') : '', DATA: date, LISTOV: ctx.total ? String(ctx.total) : '', KLIENT: String(ctx.client || '').trim() }
-  const out = t.replace(/\{([A-Z]+)\}/gi, (m, k) => (k.toUpperCase() in val ? val[k.toUpperCase()] : ''))
-  return ctx.latin === false ? nativeName(out) : latinName(out)
+  // {ZAKAZ:6} — первые 6 символов части, {ZAKAZ:-4} — последние 4 (как в коде детали на бирке). Обрезается уже
+  // готовая часть — после перевода в латиницу, — чтобы в имени файла было ровно столько знаков, сколько задано
+  const conv = ctx.latin === false ? nativeName : latinName
+  const out = t.replace(/\{([A-Z]+)(?::(-?\d+))?\}/gi, (m, k, n) => {
+    const K = k.toUpperCase()
+    if (!(K in val)) return ''
+    let v = val[K]
+    const lim = n != null ? parseInt(n, 10) : 0
+    if (lim) { v = conv(v); v = lim > 0 ? v.slice(0, lim) : v.slice(lim) }
+    return v
+  })
+  return conv(out)
 }

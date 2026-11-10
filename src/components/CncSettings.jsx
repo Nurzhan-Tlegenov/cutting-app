@@ -333,7 +333,9 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
           <Hint>
             Части в фигурных скобках подставляются сами, между ними можно писать свой текст. Получится, например:{' '}
             <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат', latin: post.progLatin !== false })}.{post.ext || 'nc'}</b>.
-            Номер листа обязателен — если его убрать, он встанет в начало.
+            Номер листа обязателен — если его убрать, он встанет в начало. У каждой части можно ограничить число символов
+            (список под полем, или прямо в шаблоне: <b style={{ fontFamily: 'monospace' }}>{'{ZAKAZ:6}'}</b> — первые 6, <b style={{ fontFamily: 'monospace' }}>{'{NOMER:-4}'}</b> — последние 4):
+            на пульте станка (NC Studio, Syntec и др.) длинное имя не помещается.
           </Hint>
           <ProgLatin on={post.progLatin !== false} onChange={v => set({ progLatin: v })} />
         </div>
