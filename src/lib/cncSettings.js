@@ -80,8 +80,8 @@ export const DEFAULT_DRILL = () => ({ id: uid(), type: 'drill', name: 'Свер�
 export const DEFAULT_OPS = () => ({
   // контур детали: smallArea — мелкая деталь (м²), режется первой; passes — число проходов;
   // sideAllow / leftover — припуск первого прохода по контуру и остаток по глубине; smallOnly — проходы только для мелких
-  // hold — «держать недорезом до конца листа»: детали меньше holdArea (м²) режутся с недорезом holdLeave (мм) и припуском
-  // holdAllow (мм), а начисто и насквозь — в самом конце программы листа, когда всё остальное уже вырезано
+  // hold — «держать недорезом до конца листа»: если на листе нет детали от holdArea (м²), блок соседних деталей суммарно
+  // от holdArea режется первым с недорезом holdLeave (мм) и припуском holdAllow (мм), а насквозь — в самом конце листа
   outer: { tool: '', dir: 'ccw', entry: 'ramp', angle: 45, smallFirst: true, smallArea: 0.12, smallSide: 150, passes: 1, sideAllow: 0, leftover: 0.5, smallOnly: false,
     holdOn: false, holdArea: 1, holdLeave: 1, holdAllow: 0.15 },
   cutout: { tool: '', dir: 'cw', entry: 'ramp', angle: 45 },   // контур выреза (фреза идёт внутри)
