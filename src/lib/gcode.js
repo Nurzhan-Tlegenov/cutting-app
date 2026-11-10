@@ -897,18 +897,18 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   // со всех сторон. Самая крупная из своих в этом случае последней не назначается — последним идёт блок.
   const toBlock = new Map()
   if (anchor?.length) {
-    const big = list.filter(j => !j.small)
-    const nb = j => big.filter(k => k !== j && gap(j, k) <= NEAR)
-    const spread = (roots, d0) => {
-      let wave = roots; roots.forEach(j => toBlock.set(j, d0))
-      while (wave.length) { const next = []; for (const j of wave) for (const k of nb(j)) if (!toBlock.has(k)) { toBlock.set(k, toBlock.get(j) + 1); next.push(k) } wave = next }
-    }
-    spread(big.filter(j => anchor.some(a => gap(j, a) <= NEAR)), 1)
-    // детали, не связанные с блоком через соседей: своя «волна» от крупнейшей, раньше всех связанных с блоком
-    for (;;) {
-      const rest = big.filter(j => !toBlock.has(j))
-      if (!rest.length) break
-      spread([rest.reduce((b, j) => ((j.area || 0) > (b.area || 0) ? j : b))], 1000)
+    // удалённость от блока — по соседям через ВСЕ детали листа, и мелкие тоже: мелкие между блоком и крупными не
+    // разрывают цепочку (иначе крупные за ними считались «островом» и волна шла не к блоку, а к своей крупнейшей)
+    const nb = j => list.filter(k => k !== j && gap(j, k) <= NEAR)
+    let wave = list.filter(j => anchor.some(a => gap(j, a) <= NEAR))
+    wave.forEach(j => toBlock.set(j, 1))
+    while (wave.length) { const next = []; for (const j of wave) for (const k of nb(j)) if (!toBlock.has(k)) { toBlock.set(k, toBlock.get(j) + 1); next.push(k) } wave = next }
+    // совсем не связанные с блоком (отдельно стоящие): по расстоянию до блока — дальние раньше
+    const far = list.filter(j => !toBlock.has(j))
+    if (far.length) {
+      const dist = j => Math.min(...anchor.map(a => gap(j, a)))
+      const top = Math.max(0, ...toBlock.values())
+      far.sort((a, b) => dist(a) - dist(b)).forEach((j, i) => toBlock.set(j, top + 1 + i))
     }
   }
   const centre = anchor?.length ? null : pool.reduce((b, j) => (!b || (j.area || 0) > (b.area || 0) * 1.02 || (Math.abs((j.area || 0) - (b.area || 0)) <= (b.area || 0) * 0.02 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
