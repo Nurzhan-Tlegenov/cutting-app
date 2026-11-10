@@ -1085,8 +1085,8 @@ export default function LabelsPage() {
   const exportFiles = async () => {
     setBusy(true)
     try {
-      const post = routerPost(getCnc(user)), base = programName(post.nameTpl, { n: null, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })   // как у программ ЧПУ
-      const files = await buildLabelFiles({ order, mat, base, post, tpl, ...beamOpts(mat, bp), sheets: mat.sheets.map((_, si) => ({ si, nc: `${programName(post.nameTpl, { n: si + 1, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })}.${post.ext || 'nc'}` })) })
+      const post = routerPost(getCnc(user)), base = programName(post.nameTpl, { n: null, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName, pad: post.namePad })   // как у программ ЧПУ
+      const files = await buildLabelFiles({ order, mat, base, post, tpl, ...beamOpts(mat, bp), sheets: mat.sheets.map((_, si) => ({ si, nc: `${programName(post.nameTpl, { n: si + 1, total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName, pad: post.namePad })}.${post.ext || 'nc'}` })) })
       setSaveAsk({ files, zipName: `Birki_${fileNameOf('zip', fileNamesOf(user).zip, { total: mat.sheets.length, order, material: mat.name || order.material_name || '', thickness: mat.thickness, client: clientName })}.zip` })
     } finally { setBusy(false) }
   }

@@ -159,15 +159,15 @@ export default function CncPage() {
   // PDF карт, PDF бирок и папки на языке заказа, как он назван; сами программы — всегда латиницей
   const mainLatin = (beamMat && saw ? saw : post)?.dirLatin !== false
   const nameCtx = n => ({ n, total: mat?.sheets?.length || 0, order, material: mat?.name || order?.material_name || '', thickness: mat?.thickness, client: clientName, latin: mainLatin })
-  const baseName = () => programName(post.nameTpl, { ...nameCtx(null), latin: true })                    // общая часть — для бирок
+  const baseName = () => programName(post.nameTpl, { ...nameCtx(null), latin: true, pad: post.namePad })                    // общая часть — для бирок
   const fileBase = kind => fileNameOf(kind, fileNamesOf(user)[kind], nameCtx(null))
   // имя архива «Сохранить все файлы» — конструктор прямо здесь, над папками (та же настройка аккаунта, что в «Имена файлов»)
   const [zipTpl, setZipTpl] = useState(() => fileNamesOf(user).zip)
   const [zipEdit, setZipEdit] = useState(false)
   const changeZipTpl = v => { setZipTpl(v); saveUserSettings({ fileNames: { ...fileNamesOf(user), zip: v } }, user) }   // имена PDF карт и архивов — по настройке аккаунта («Имена файлов»)
   // управляющие программы — латиницей, если у станка не снята галочка «Файлы программ — латиницей» (progLatin)
-  const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: post.progLatin !== false })}.${post.ext || 'nc'}`
-  const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: saw?.progLatin !== false })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
+  const fileName = si => `${programName(post.nameTpl, { ...nameCtx(si + 1), latin: post.progLatin !== false, pad: post.namePad })}.${post.ext || 'nc'}`
+  const beamName = () => `${String(programName(saw?.nameTpl || '{ZAKAZ}_{MAT}', { ...nameCtx(null), latin: saw?.progLatin !== false, pad: saw?.namePad })).replace(/^_+/, '')}.${saw?.ext || 'xml'}`
   // шестисторонний: файлы по деталям; β-постпроцессору — ещё ручное положение деталей
   const drillOf = (p, man = getUserSettings(user).d6Man || {}) => ({ post: p, ...buildDrill6Files({ mat, order, post: p.d6Beta ? { ...p, d6Man: man } : p, labelTpl, makeCode: (si, pi, q) => labelQr({ qr: q }, labelInfo(order, mat, si, pi)) }), folders: drill6Folders(p, nameCtx(null)) })
   const saveMan = next => {
@@ -190,7 +190,7 @@ export default function CncPage() {
     const second = r2 ? { post: r2, files: sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: r2.id } })
-      return { second: true, si, name: `${programName(r2.nameTpl, { ...nameCtx(si + 1), latin: r2.progLatin !== false })}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
+      return { second: true, si, name: `${programName(r2.nameTpl, { ...nameCtx(si + 1), latin: r2.progLatin !== false, pad: r2.namePad })}.${r2.ext || 'nc'}`, text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, time: parseGcode(r.text, { rapid: num(r2.rapid) || 20000, zShift: r.zShift }).time }
     }) } : null
     // шестисторонние присадочные станки: файл на каждую деталь материала (по готовой детали, с кромкой)
     const drill = drills.map(p => drillOf(p))
@@ -204,7 +204,7 @@ export default function CncPage() {
   // с обработкой с двух сторон; деталь переворачивают и кладут в угол укладки длинной стороной вдоль Y (backSide.js)
   const buildBack = () => {
     const T = mat.thickness, used = new Set(), lat = post.progLatin !== false
-    const base = programName(post.nameTpl, { ...nameCtx(null), latin: lat })
+    const base = programName(post.nameTpl, { ...nameCtx(null), latin: lat, pad: post.namePad })
     const nq = backOf(post).name || {}
     return backParts(mat, sel).map(({ detail, qty, at }) => {
       const j = backJob(detail, T, post)

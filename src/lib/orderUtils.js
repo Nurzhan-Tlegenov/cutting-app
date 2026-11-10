@@ -119,7 +119,12 @@ function fillName(t, ctx) {
     if (!(K in val)) return ''
     let v = val[K]
     const lim = n != null ? parseInt(n, 10) : 0
-    if (lim) { v = conv(v); v = lim > 0 ? v.slice(0, lim) : v.slice(lim) }
+    if (lim) {
+      v = conv(v); v = lim > 0 ? v.slice(0, lim) : v.slice(lim)
+      // «Дополнять до числа символов знаком» (как у бирки): {N:2} и знак 0 — лист 1 -> 01
+      const pc = ctx.pad ? [...String(ctx.pad)][0] : ''
+      if (pc && v.length < Math.abs(lim)) v = pc.repeat(Math.abs(lim) - v.length) + v
+    }
     return v
   })
   return conv(out)

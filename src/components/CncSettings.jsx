@@ -81,6 +81,21 @@ function Seg({ value, options, onChange }) {
   )
 }
 const toolLabel = t => `T${t.t} · ${t.name || (t.type === 'mill' ? 'Фреза' : 'Сверло')} Ø${r1(t.d)}`
+// «Дополнять до числа символов знаком» для названия программы — как у кода детали на бирке: часть с ограничением
+// символов ({N:2}) короче заданного дополняется спереди этим знаком (лист 1 -> 01). Пусто — не дополнять
+function NamePad({ value, onChange }) {
+  const v = typeof value === 'string' ? value : ''
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}
+      title="Если в части меньше символов, чем задано, — спереди дописывается этот знак: 1 при 2 символах -> 01. Пусто — не дополнять">
+      Дополнять до числа символов знаком
+      <input type="text" key={'p' + v} defaultValue={v} maxLength={1} placeholder="нет"
+        onBlur={e => { const c = [...e.target.value][0] || ''; if (c !== v) onChange(c) }}
+        style={{ width: 48, padding: '4px 6px', textAlign: 'center' }} />
+    </label>
+  )
+}
+
 function ToolSelect({ cnc, value, onChange, only, auto, maxD, empty }) {
   // maxD — диаметр отверстия: инструмент больше него выбрать нельзя
   const list = (cnc.tools || []).filter(t => (!only || t.type === only) && (!(maxD > 0) || num(t.d) <= maxD + 0.05))
@@ -330,9 +345,10 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
         <div style={{ marginTop: 10 }}>
           <label className="label">Название управляющей программы</label>
           <TplInput value={post.nameTpl || NAME_TPL_DEFAULT} def={NAME_TPL_DEFAULT} parts={NAME_PARTS} onChange={v => set({ nameTpl: v })} />
+          <NamePad value={post.namePad} onChange={v => set({ namePad: v })} />
           <Hint>
             Части в фигурных скобках подставляются сами, между ними можно писать свой текст. Получится, например:{' '}
-            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат', latin: post.progLatin !== false })}.{post.ext || 'nc'}</b>.
+            <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl, { n: 1, total: 3, order: { order_name: 'Кухня Ивановых', order_number: '261007_005' }, material: 'ЛДСП Белый', thickness: 16, client: 'Марат', latin: post.progLatin !== false, pad: post.namePad })}.{post.ext || 'nc'}</b>.
             Номер листа обязателен — если его убрать, он встанет в начало. У каждой части можно ограничить число символов
             (список под полем, или прямо в шаблоне: <b style={{ fontFamily: 'monospace' }}>{'{ZAKAZ:6}'}</b> — первые 6, <b style={{ fontFamily: 'monospace' }}>{'{NOMER:-4}'}</b> — последние 4):
             на пульте станка (NC Studio, Syntec и др.) длинное имя не помещается.
@@ -392,7 +408,8 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
       <div style={{ marginTop: 10 }}>
         <label className="label">Название программы</label>
         <TplInput value={post.nameTpl || BEAM_NAME_DEFAULT} def={BEAM_NAME_DEFAULT} parts={NAME_PARTS.filter(([code]) => code !== '{N}')} onChange={v => set({ nameTpl: v })} />
-        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null, latin: post.progLatin !== false })}.{post.ext || 'xml'}</b> — один файл на материал.</Hint>
+        <NamePad value={post.namePad} onChange={v => set({ namePad: v })} />
+        <Hint>Например: <b style={{ fontFamily: 'monospace' }}>{programName(post.nameTpl || BEAM_NAME_DEFAULT, { ...ex, n: null, latin: post.progLatin !== false, pad: post.namePad })}.{post.ext || 'xml'}</b> — один файл на материал.</Hint>
         <ProgLatin on={post.progLatin !== false} onChange={v => set({ progLatin: v })} />
       </div>
       <div style={{ marginTop: 10 }}>
