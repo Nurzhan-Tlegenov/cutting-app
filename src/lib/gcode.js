@@ -494,14 +494,18 @@ function cutLoop(out, passes, top, tool, op, safeZ, arcs = false) {
         const e = Mr.at(dE)
         out.g0(e[0], e[1], safeZ)
         out.g1(null, null, zt, inFeed)
-        const Lrm = ramp ? Math.min(blen, (zt - zl) / tan) : 0
-        const pts = Mr.cum.filter(d => d > dE + 1e-6 && d < Mr.per - 1e-6)
-        if (Lrm > 0) {
-          ;[...pts.filter(d => d < dE + Lrm - 1e-6), dE + Lrm].forEach(d => { const q = Mr.at(d); out.g1(q[0], q[1], zt + (zl - zt) * (d - dE) / Lrm, inFeed) })
-        } else out.g1(null, null, zl, inFeed)
-        ;[...pts.filter(d => d > dE + Lrm + 1e-6), Mr.per].forEach(d => { const q = Mr.at(d); out.g1(q[0], q[1], zl, inFeed) })
-        out.g1(ps.loop[0][0], ps.loop[0][1], zl, inFeed)        // на угол чистового контура (смещение на припуск)
-        out.g1(null, null, z, inFeed)                             // на всю глубину — фреза уже в резе мостика
+        // два спуска под наклоном (фреза не опускается отвесно — пригорает): вход до недореза, затем перед углом — до полной
+        // глубины, так что в угол фреза приходит уже на жертвенном столе. Спуски — на подаче врезания фрезы, по мостику — на основной
+        let L1 = ramp ? (zt - zl) / tan : 0, L2 = (zl - z) / tan
+        if (L1 + L2 > blen) { const k = blen / (L1 + L2); L1 *= k; L2 *= k }
+        const along = (d0, d1, z0, z1, f) => {
+          const ds = [...Mr.cum.filter(d => d > d0 + 1e-6 && d < d1 - 1e-6), d1]
+          ds.forEach(d => { const q = Mr.at(Math.min(d, Mr.per - 1e-9)); out.g1(q[0], q[1], z0 + (z1 - z0) * (d1 > d0 ? (d - d0) / (d1 - d0) : 1), f) })
+        }
+        if (L1 > 0) along(dE, dE + L1, zt, zl, inFeed); else out.g1(null, null, zl, inFeed)
+        if (Mr.per - L2 > dE + L1 + 1e-6) along(dE + L1, Mr.per - L2, zl, zl, feed)
+        along(Mr.per - L2, Mr.per, zl, z, inFeed)                      // к углу — под наклоном до полной глубины
+        out.g1(ps.loop[0][0], ps.loop[0][1], z, inFeed)                // смещение на припуск — на чистовой контур
         cur = ps.loop; M = m; zPrev = z
         R = arcs ? arcRuns([...cur, cur[0]]).map(a => ({ ...a, d0: M.cum[a.i0], d1: M.cum[a.i1] })) : []
       }
@@ -514,7 +518,14 @@ function cutLoop(out, passes, top, tool, op, safeZ, arcs = false) {
       const Lp = [...ps.loop.slice(bi), ...ps.loop.slice(0, bi)], m = loopMetric(Lp)
       if (m.per > 0 && bd < 5) {
         out.g1(Lp[0][0], Lp[0][1], null, inFeed)
-        out.g1(null, null, z, inFeed)
+        // до полной глубины — под наклоном, не отвесно: вперёд по чистовому контуру на глубине черновика и обратно к углу
+        // со спуском (этот участок потом проходится ещё раз на полной глубине в конце обхода)
+        const zc = out.pos[2] ?? zPrev, Ld = ramp && zc > z ? Math.min(m.per / 2, (zc - z) / tan) : 0
+        if (Ld > 0) {
+          const ds = m.cum.filter(d => d > 1e-6 && d < Ld - 1e-6)
+          ;[...ds, Ld].forEach(d => { const q = m.at(d); out.g1(q[0], q[1], zc, inFeed) })
+          ;[...ds.slice().reverse(), 0].forEach(d => { const q = m.at(d); out.g1(q[0], q[1], z + (zc - z) * d / Ld, inFeed) })
+        } else out.g1(null, null, z, inFeed)
         cur = ps.loop; M = m; zPrev = z
         R = arcs ? arcRuns([...Lp, Lp[0]]).map(a => ({ ...a, d0: M.cum[a.i0], d1: M.cum[a.i1] })) : []
       }
