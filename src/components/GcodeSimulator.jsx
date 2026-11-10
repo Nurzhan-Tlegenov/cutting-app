@@ -90,6 +90,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
   const tagOnRef = useRef(toolTag), tagBoxRef = useRef(null), tagLineRef = useRef(null), tagDotRef = useRef(null)
   useEffect(() => { tagOnRef.current = toolTag; try { localStorage.setItem('simToolTag', toolTag ? '1' : '0') } catch { /* без памяти */ } api.current?.tag() }, [toolTag])
   const [sel, setSel] = useState(-1)       // выделенное перемещение
+  const [tip, setTip] = useState(null)     // подсказка у выбранной траектории: { px, py, x, y, z, z0, z1, line }
   const [scrollTop, setScrollTop] = useState(0)
   const desk = useDesktop()   // компьютер: 3D слева на всю высоту, управление и G-код — колонкой справа
   const [sideW, sideHandle] = useSideWidth('gcode-sim', 420)
@@ -147,8 +148,19 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     return prev + (paths.acc[lo] - prev) * f
   })()
   const mtr = v => `${(Math.round(v / 100) / 10).toLocaleString('ru-RU')} м`
-  const choose = i => { setPlaying(false); setSel(i); if (i >= 0) seek(prog.moves[i].t1) }
+  const choose = i => { setPlaying(false); setSel(i); setTip(null); if (i >= 0) seek(prog.moves[i].t1) }
+  // Тап по траектории в 3D — только посмотреть: строка подсвечивается в коде, у пальца — X Y Z этой точки.
+  // Время симуляции не трогаем: «Пуск» продолжит с места паузы. Перейти к траектории — нажать её строку в коде
+  const inspect = h => {
+    const i = h?.i ?? -1
+    setSel(i)
+    if (i < 0) { setTip(null); return }
+    const m = prog.moves[i], f = h.f ?? 1, at = k => m[k + '0'] + (m[k + '1'] - m[k + '0']) * f
+    setTip({ px: h.px, py: h.py, x: at('x'), y: at('y'), z: at('z'), z0: m.z0, z1: m.z1, line: m.line })
+  }
   const chooseLine = li => {
+    // строка выбранной в 3D траектории — переход к ней (подтверждение); любая другая строка — тоже переход к ней
+    if (sel >= 0 && li === prog.moves[sel]?.line) { choose(sel); return }
     for (let k = li; k < total; k++) if (data.firstByLine.has(k)) { choose(data.firstByLine.get(k)); return }
   }
   useEffect(() => { speedRef.current = speed }, [speed])
@@ -166,7 +178,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
       setTimeout(() => { if (meta.getAttribute('content') === lock) meta.setAttribute('content', was) }, 400)
     }
   }, [])
-  useEffect(() => { diaRef.current = toolDia; pickRef.current = choose })
+  useEffect(() => { diaRef.current = toolDia; pickRef.current = inspect })
 
   // ─── сцена ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -501,7 +513,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     const v = new THREE.Vector3()
     const proj = (x, y, z) => { v.set(x, y, z).project(camera); return [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H, v.z] }
     const pick = (px, py) => {
-      let best = -1, bd = 18
+      let best = -1, bd = 18, bf = 1
       prog.moves.forEach((m, i) => {
         const g = data.grp[i]
         if (st.vis[LAYER_OF[g]] === false || (st.live && i > st.cur)) return
@@ -511,9 +523,9 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
         const f = l2 ? Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / l2)) : 0
         let d = Math.hypot(px - a[0] - f * dx, py - a[1] - f * dy)
         if (g === 'rapid') d = d * 2 + 5                 // холостые — в последнюю очередь
-        if (d < bd) { bd = d; best = i }
+        if (d < bd) { bd = d; best = i; bf = f }
       })
-      return best
+      return { i: best, px, py, f: bf }
     }
     let down = null
     const onDown = e => { down = e.isPrimary ? { x: e.clientX, y: e.clientY, t: performance.now() } : null }
@@ -602,6 +614,13 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
     const h = el.clientHeight
     if (y < el.scrollTop + LH || y > el.scrollTop + h - 2 * LH) el.scrollTop = Math.max(0, y - h / 2 + LH / 2)
   }, [line])
+  // выбранная в 3D траектория — её строка на виду в списке кода
+  useLayoutEffect(() => {
+    const el = codeRef.current
+    if (!el || selLine < 0) return
+    const y = selLine * LH, h = el.clientHeight
+    if (y < el.scrollTop + LH || y > el.scrollTop + h - 2 * LH) el.scrollTop = Math.max(0, y - h / 2 + LH / 2)
+  }, [selLine])
   const first = Math.max(0, Math.floor(scrollTop / LH) - 4), count = Math.ceil((typeof window !== 'undefined' ? window.innerHeight : 800) / LH) + 8
   const btnS = on => ({ flex: '0 0 auto', minWidth: 30, height: 28, padding: '0 4px', borderRadius: 14, fontSize: 12, border: 'none', background: on ? 'var(--blue)' : 'var(--bg2)', color: on ? 'white' : 'var(--text-muted)' })
   const viewBtn = { padding: '5px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'rgba(255,255,255,0.9)', color: 'var(--text)' }
@@ -630,6 +649,18 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
         <div ref={tagBoxRef} style={{ position: 'absolute', left: 0, top: 0, display: 'none', pointerEvents: 'none', whiteSpace: 'nowrap', fontSize: 11, lineHeight: '15px', padding: '2px 7px', borderRadius: 6,
           background: tagText.changed ? '#FFF1E6' : 'rgba(255,255,255,0.88)', color: tagText.changed ? '#B23C00' : '#2C2C2A', fontWeight: tagText.changed ? 600 : 500,
           border: '0.5px solid ' + (tagText.changed ? '#D9480F' : 'rgba(44,44,42,0.35)'), boxShadow: '0 1px 3px rgba(0,0,0,0.12)' }}>{toolTag ? tagText.text : ''}</div>
+        {tip && sel >= 0 && (() => {
+          const r1 = v => Math.round(v * 10) / 10, r2 = v => Math.round(v * 100) / 100
+          const W = wrapRef.current?.clientWidth || 300, left = Math.max(4, Math.min(W - 190, tip.px + 10)), top = Math.max(40, tip.py - 52)
+          return (
+            <div style={{ position: 'absolute', left, top, pointerEvents: 'none', fontSize: 11, lineHeight: '15px', padding: '4px 8px', borderRadius: 6, whiteSpace: 'nowrap',
+              background: '#FFF6DD', color: '#5C3B00', border: '0.5px solid #D9A300', boxShadow: '0 1px 4px rgba(0,0,0,0.15)' }}>
+              <div><b>X{r1(tip.x)} Y{r1(tip.y)} Z{r2(tip.z)}</b></div>
+              <div style={{ color: '#8A6400' }}>строка {tip.line + 1}{Math.abs(tip.z0 - tip.z1) > 0.005 ? ` · Z ${r2(tip.z0)} → ${r2(tip.z1)}` : ''}</div>
+              <div style={{ color: '#8A6400' }}>нажмите строку в коде — перейти</div>
+            </div>
+          )
+        })()}
         <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
           <button type="button" onClick={() => setToolTag(v => !v)} title="Выноска у шпинделя: номер инструмента, диаметр, фреза или сверло; при смене инструмента — «T11 → T12»"
             style={{ ...viewBtn, ...(toolTag ? { background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' } : null) }}>T Инструмент</button>
@@ -653,7 +684,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
         <input type="range" min={0} max={prog.time || 1} step="any" value={t} onChange={e => { setPlaying(false); seek(e.target.value) }} style={{ width: '100%', padding: 0, margin: '6px 0 4px', border: 'none' }} />
         {/* управление — одной строкой: пуск, в начало, шаг назад, шаг вперёд, в конец, скорости */}
         <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-          <button type="button" title={playing ? 'Пауза' : 'Пуск'} onClick={() => { if (t >= prog.time) seek(0); setSel(-1); setPlaying(p => !p) }}
+          <button type="button" title={playing ? 'Пауза' : 'Пуск'} onClick={() => { if (t >= prog.time) seek(0); setSel(-1); setTip(null); setPlaying(p => !p) }}
             style={{ flex: '0 0 auto', width: 38, height: 32, padding: 0, borderRadius: 16, border: 'none', background: 'var(--blue)', color: 'white', fontSize: 15 }}>{playing ? '⏸' : '▶'}</button>
           <button type="button" title="В начало" onClick={() => { setPlaying(false); seek(0) }} style={btnS(false)}>⏮</button>
           <button type="button" title="Шаг назад (держите — шаги подряд)" onPointerDown={() => holdStart(-1)} onPointerUp={holdEnd} onPointerLeave={holdEnd} onPointerCancel={holdEnd} style={{ ...btnS(false), touchAction: 'none' }}>◀</button>
@@ -670,7 +701,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, to
           {sel >= 0 && (
             <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
               <b style={{ fontWeight: 500, color: '#B26A00' }}>Выбрано: {GROUP[data.grp[sel]]?.[1]}, строка {selLine + 1}</b>
-              <button type="button" onClick={() => setSel(-1)} style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 15, padding: 0 }}>×</button>
+              <button type="button" onClick={() => { setSel(-1); setTip(null) }} style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 15, padding: 0 }}>×</button>
             </span>
           )}
         </div>
