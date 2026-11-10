@@ -948,6 +948,10 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const arcs = post.arcs === 'ij'                        // дуги — командами G2 / G3 (иначе — мелкими отрезками, см. smoothLoop)
   const smallArea = n0(ops.outer?.smallArea) > 0 ? n0(ops.outer.smallArea) : 0.12      // мельче — «мелкая деталь», режется первой
   const smallSide = ops.outer?.smallSide === '' || ops.outer?.smallSide == null ? 150 : Math.max(0, n0(ops.outer.smallSide))   // уже — тоже «мелкая»
+  // «Держать недорезом до конца листа» (Обработка → Контур детали): площадь надёжного удержания и недорез
+  const holdArea = n0(ops.outer?.holdArea) > 0 ? n0(ops.outer.holdArea) : 1
+  const holdLeave = Math.max(0.2, Math.min(T - 0.5, n0(ops.outer?.holdLeave) || 1))
+  if (ops.outer?.holdOn && n0(ops.outer?.holdLeave) > 0 && Math.abs(holdLeave - n0(ops.outer.holdLeave)) > EPS) warn.add(`Держать недорезом: недорез ${num(ops.outer.holdLeave)} мм при толщине ${num(T)} мм — взят ${num(holdLeave)} мм.`)
   const sheetRect = { x0: n0(post.originX), y0: n0(post.originY), x1: n0(post.originX) + geo.sheetW, y1: n0(post.originY) + geo.sheetL }
   const tool = id => toolById(cnc, id)
   // Высота режущей кромки фрезы (tool.edgeH): глубже неё фреза не режет — хвостовик трётся о материал. Проверяем
@@ -1135,7 +1139,17 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
           const Lm = mid ? orientFromInside(mid.map(G), o.dir, sheetRect) : null
           let mk                                         // проходы по контуру L (и черновому Lr)
           let Lr = null
-          if (N > 1 && (!o.smallOnly || small)) {
+          // «Держать недорезом до конца листа»: деталь меньше площади надёжного удержания вакуумом режется с припуском
+          // и недорезом (тонкое дно держит её на месте), а начисто и насквозь — в самом конце листа (см. hold ниже).
+          // Так к концу листа ни одна такая деталь не стоит отрезанной, и фреза не сдвигает её на полностью прорезанном листе
+          const held = !!o.holdOn && area < holdArea
+          if (held) {
+            const allow = Math.max(0, n0(o.holdAllow))
+            const rough = allow > 0 ? offsetLoop(smooth, r + allow) : null
+            Lr = rough ? orientFromInside(rough.map(G), o.dir, sheetRect) : null
+            const step = N > 1 ? Math.min(n0(t.maxPass) || 1e9, (T - holdLeave) / (N - 1) + 1e-6) : n0(t.maxPass)
+            mk = (A, B) => levels(T, holdLeave, step).map(z => ({ loop: B || A, z }))
+          } else if (N > 1 && (!o.smallOnly || small)) {
             // первые проходы — с припуском по контуру и остатком по глубине, последний — начисто
             const allow = Math.max(0, n0(o.sideAllow)), left = Math.max(0, Math.min(T - 0.5, n0(o.leftover)))
             const rough = allow > 0 ? offsetLoop(smooth, r + allow) : null
@@ -1144,7 +1158,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
           } else mk = A => levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: A, z }))
           const edgeDist = Math.min(geo.marginL + p.x + bb.x0, geo.sheetW - (geo.marginL + p.x + bb.x1), geo.marginB + p.y + bb.y0, geo.sheetL - (geo.marginB + p.y + bb.y1))
           const job = { stage: 1, rank: 5, tool: t, at: L[0], small, area, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1],
-            L, Lr, reach: r + 1.5, passes: mk(L, Lr),
+            L, Lr, reach: r + 1.5, passes: mk(L, Lr), held,
             // начать контур с другой его точки (см. lastCutToSupport): черновой контур — с ближайшей к ней
             restart(i) {
               this.L = [...this.L.slice(i), ...this.L.slice(0, i)]
@@ -1314,6 +1328,26 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   // обрезки отрезаются последними — когда все детали уже вырезаны
   cutTools.forEach(t => add(jobs.filter(j => j.stage === 2 && j.tool === t)))
   add(jobs.filter(j => j.stage === 2 && !cutTools.includes(j.tool)))
+  // Дорез деталей, оставленных на недорезе («Держать недорезом до конца листа»): в самом конце — после всех контуров
+  // и обрезков. Каждая деталь — одним проходом по чистовому контуру насквозь; фреза снимает только тонкое дно и
+  // припуск, усилия почти нет — деталь не сдвигается. Порядок — по тем же правилам, что и контуры: мелкие первыми,
+  // самая крупная — последней, последний отрезок — у нетронутого куска.
+  cutTools.forEach(t => {
+    const fin = seq.filter(j => j.held && j.tool === t).map(j => {
+      const o = ops.outer
+      const f = { stage: 4, rank: 5, tool: t, small: j.small, area: j.area, edgeDist: j.edgeDist, box: j.box, reach: j.reach, L: j.L, at: j.L[0],
+        restart(i) { this.L = [...this.L.slice(i), ...this.L.slice(0, i)]; this.at = this.L[0] },
+        run: out => cutLoop(out, [{ loop: f.L, z: -millOver }], T, t, o, safeZ, arcs) }
+      return f
+    })
+    if (!fin.length) return
+    let r = []
+    for (let pass = 0; pass < 3; pass++) {
+      r = routeContours(fin, cur, sheetRect, smallFirst)
+      lastCutToSupport(r, sheetRect)
+    }
+    seq.push(...r); cur = r[r.length - 1].at
+  })
   // ноль программы — в углу укладки (настройка станка): оси станка как есть, деталь от левого верхнего угла — в минусе по Y
   const sh0 = cornerShift(post.corner, geo.sheetW, geo.sheetL)
   const out = new Out(zTop ? T : 0, sh0.dx, sh0.dy)

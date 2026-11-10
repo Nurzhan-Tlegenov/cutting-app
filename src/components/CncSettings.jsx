@@ -1254,6 +1254,21 @@ export function CncOps({ cnc, onChange, layers }) {
           </label>
         </>
       )}
+      <div className="divider" />
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!o.holdOn} onChange={e => set('outer', { holdOn: e.target.checked })} style={{ width: 18, height: 18 }} />
+        <span style={{ fontWeight: 600 }}>Держать недорезом до конца листа</span>
+      </label>
+      {o.holdOn && (
+        <>
+          <Num label="Хорошо держится вакуумом — от" unit="м²" value={o.holdArea ?? 1} onChange={v => set('outer', { holdArea: v })} />
+          <div className="row2" style={{ marginTop: 8 }}>
+            <Num label="Сколько не дорезать" unit="мм" value={o.holdLeave ?? 1} onChange={v => set('outer', { holdLeave: v })} />
+            <Num label="Припуск по контуру" unit="мм" value={o.holdAllow ?? 0.15} onChange={v => set('outer', { holdAllow: v })} />
+          </div>
+        </>
+      )}
+      <Hint>Детали меньше заданной площади режутся не насквозь: фреза идёт с припуском по контуру и оставляет тонкое дно («сколько не дорезать», например 1 мм на 16 мм плите) — деталь остаётся частью листа и не сдвигается. Когда на листе вырезано всё остальное (контуры, обрезки), фреза проходит эти детали начисто и насквозь — снимает только дно и припуск, усилия почти нет. Нужно, когда на листе нет крупных деталей: к концу лист прорезан, вакуум уходит в резы, и последнюю деталь фреза сдвигает. Детали от этой площади и больше режутся как обычно. Число проходов для недореза — из «Количества проходов» (последний проход — дорез в конце).</Hint>
     </>
   )
   return (
