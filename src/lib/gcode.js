@@ -1318,6 +1318,17 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       const lines = scoreLines({ geo, outlines, paths, offcuts: sheet.manualOffcuts || [], r, gap, stepX: n0(sc.stepX), stepY: n0(sc.stepY) })
       const zs = levels(T, leave, n0(t.maxPass))
       edgeOk(t, T - leave, 'шинковка отходов')
+      // «Не выходить за край листа» (неподвижные упоры): надсечка у края не доходит до него — режущая кромка фрезы
+      // останавливается в «недорез» мм от края, центр фрезы — в «радиус + недорез». Не задано у шинковки — как у делового остатка
+      const ocs = { inside: true, gap: 0, ...ops.offcut }
+      const sIn = sc.inside === undefined ? ocs.inside !== false : sc.inside !== false
+      const lo = r + Math.max(0, n0(sc.gap === undefined || sc.gap === '' ? ocs.gap : sc.gap))
+      const W = n0(geo.sheetW), L = n0(geo.sheetL)
+      if (sIn && W > 0 && L > 0) for (const s of lines) for (const [k, o] of [['a', 'openA'], ['b', 'openB']]) {
+        if (!s[o]) continue
+        s[k] = [Math.max(lo, Math.min(W - lo, s[k][0])), Math.max(lo, Math.min(L - lo, s[k][1]))]
+        s[o] = false                                   // начало уже не в воздухе — вход под наклоном, как у контура
+      }
       for (const s of lines) {
         const pts = [[X0 + s.a[0], Y0 + s.a[1]], [X0 + s.b[0], Y0 + s.b[1]]]
         // начало за краем листа — фреза опускается прямо, в воздухе; иначе — под наклоном, как контур (реза там ещё нет)
