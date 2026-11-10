@@ -940,9 +940,10 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   if (smallFirst) for (const s of list) if (!s.small) for (const b of list) {
     if (b !== s && !b.small && gap(s, b) <= NEAR && (s.area || 0) < (b.area || 0) * 0.6 && (!toBlock.size || toBlock.get(s) === toBlock.get(b))) before.get(b).push(s)
   }
-  // к блоку: из двух соседних крупных раньше та, что дальше от блока
+  // к блоку — строгой волной: сначала все крупные дальнего от блока слоя (по соседям), потом следующего, ближе, и так
+  // до прилегающих к блоку. Маршрут не прыгает к блоку и обратно; каждая деталь отделяется от нетронутого слоя ближе к блоку
   if (toBlock.size) for (const s of list) if (!s.small) for (const b of list) {
-    if (b !== s && !b.small && gap(s, b) <= NEAR && toBlock.get(s) > toBlock.get(b)) before.get(b).push(s)
+    if (b !== s && !b.small && toBlock.get(s) > toBlock.get(b)) before.get(b).push(s)
   }
   if (centre) for (const j of list) if (j !== centre && !before.get(j).includes(centre)) before.get(centre).push(j)
   const valid = R => { const pos = new Map(R.map((j, i) => [j, i])); return R.every(j => before.get(j).every(q => pos.get(q) < pos.get(j))) }
