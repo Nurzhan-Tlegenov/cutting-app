@@ -1284,6 +1284,20 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
               // один проход с мостиком на длине замедления фрезы (мостик — с припуском и недорезом, дорез — в конце обхода)
               ? (A, B) => [{ loop: A, z: -millOver, bridge: { rough: B || A, z: left > 0 ? left : 0.5, len: n0(t.outLen) > 0 ? n0(t.outLen) : 100 } }]
               : (A, B) => [...levels(T, left, Math.min(n0(t.maxPass) || 1e9, (T - left) / (N - 1) + 1e-6)).map(z => ({ loop: B || A, z })), { loop: A, z: -millOver }]
+          } else if (o.bridgeAll) {
+            // «Вход с мостиком» для остальных контуров (обычно — крупные детали): как «один проход с мостиком» у мелких —
+            // вход раньше угла на длину замедления фрезы, там врезка с припуском до недореза, от угла — на всю глубину,
+            // мостик дорезается в конце обхода. Если фреза не берёт всю глубину за проход — режется как обычно
+            const ba = Math.max(0, n0(o.bridgeAllow)), bl = n0(o.bridgeLeave)
+            const full = T + millOver, mp = n0(t.maxPass)
+            if (mp > 0 && full > mp + 1e-6) {
+              warn.add(`Вход с мостиком: фреза ${t.name || 'T' + t.t} берёт за проход ${num(mp)} мм, а сквозной рез — ${num(full)} мм; контуры режутся как обычно.`)
+              mk = A => levels(T, -millOver, mp).map(z => ({ loop: A, z }))
+            } else {
+              const rough = ba > 0 ? offsetLoop(smooth, r + ba) : null
+              Lr = rough ? orientFromInside(rough.map(G), o.dir, sheetRect) : null
+              mk = (A, B) => [{ loop: A, z: -millOver, bridge: { rough: B || A, z: bl > 0 && bl < T ? bl : 0.5, len: n0(t.outLen) > 0 ? n0(t.outLen) : 100 } }]
+            }
           } else mk = A => levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: A, z }))
           const edgeDist = Math.min(geo.marginL + p.x + bb.x0, geo.sheetW - (geo.marginL + p.x + bb.x1), geo.marginB + p.y + bb.y0, geo.sheetL - (geo.marginB + p.y + bb.y1))
           const job = { stage: 1, rank: 5, tool: t, at: L[0], small, area, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1],
