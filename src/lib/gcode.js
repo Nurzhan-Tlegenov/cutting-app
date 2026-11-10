@@ -483,6 +483,42 @@ function cutLoop(out, passes, top, tool, op, safeZ, arcs = false) {
   let cur = null, M = null, zPrev = 0, R = []
   passes.forEach((ps, k) => {
     const last = k === passes.length - 1, z = ps.z
+    // «Один проход с мостиком»: вход раньше угла на длину замедления фрезы (участок перед углом — мостик): там врезка
+    // под наклоном по контуру с припуском и только до недореза; от угла — на всю глубину без припуска, весь периметр,
+    // и мостик дорезается в самом конце обхода — на замедлении. До последних сантиметров деталь держится за мостик
+    if (ps.bridge && ps.loop !== cur) {
+      const B = ps.bridge, Lr = B.rough?.length > 2 ? B.rough : ps.loop, Mr = loopMetric(Lr), m = loopMetric(ps.loop)
+      if (Mr.per > 0 && m.per > 0) {
+        if (cur) out.g0(null, null, safeZ)
+        const blen = Math.min(Mr.per / 2, B.len), dE = Mr.per - blen, zt = top + 1, zl = B.z
+        const e = Mr.at(dE)
+        out.g0(e[0], e[1], safeZ)
+        out.g1(null, null, zt, inFeed)
+        const Lrm = ramp ? Math.min(blen, (zt - zl) / tan) : 0
+        const pts = Mr.cum.filter(d => d > dE + 1e-6 && d < Mr.per - 1e-6)
+        if (Lrm > 0) {
+          ;[...pts.filter(d => d < dE + Lrm - 1e-6), dE + Lrm].forEach(d => { const q = Mr.at(d); out.g1(q[0], q[1], zt + (zl - zt) * (d - dE) / Lrm, inFeed) })
+        } else out.g1(null, null, zl, inFeed)
+        ;[...pts.filter(d => d > dE + Lrm + 1e-6), Mr.per].forEach(d => { const q = Mr.at(d); out.g1(q[0], q[1], zl, inFeed) })
+        out.g1(ps.loop[0][0], ps.loop[0][1], zl, inFeed)        // на угол чистового контура (смещение на припуск)
+        out.g1(null, null, z, inFeed)                             // на всю глубину — фреза уже в резе мостика
+        cur = ps.loop; M = m; zPrev = z
+        R = arcs ? arcRuns([...cur, cur[0]]).map(a => ({ ...a, d0: M.cum[a.i0], d1: M.cum[a.i1] })) : []
+      }
+    }
+    if (ps.loop !== cur && cur && (op.noLift || op.passMode === 'nolift') && out.pos) {
+      // «Чистовой проход — без подъёма фрезы»: из черновика (с припуском) — прямо в резе на чистовой контур: смещение на
+      // припуск у ближайшей вершины, опускание на глубину и обход от неё. Фреза не поднимается и не заходит заново
+      let bi = 0, bd = Infinity
+      ps.loop.forEach((v, i) => { const d = Math.hypot(v[0] - out.pos[0], v[1] - out.pos[1]); if (d < bd) { bd = d; bi = i } })
+      const Lp = [...ps.loop.slice(bi), ...ps.loop.slice(0, bi)], m = loopMetric(Lp)
+      if (m.per > 0 && bd < 5) {
+        out.g1(Lp[0][0], Lp[0][1], null, inFeed)
+        out.g1(null, null, z, inFeed)
+        cur = ps.loop; M = m; zPrev = z
+        R = arcs ? arcRuns([...Lp, Lp[0]]).map(a => ({ ...a, d0: M.cum[a.i0], d1: M.cum[a.i1] })) : []
+      }
+    }
     if (ps.loop !== cur) {
       const m = loopMetric(ps.loop)
       if (!(m.per > 0)) return
@@ -516,7 +552,7 @@ function cutLoop(out, passes, top, tool, op, safeZ, arcs = false) {
         if (L > 0) [...M.cum.filter(d => d > 1e-6 && d < L - 1e-6).reverse(), 0].forEach(d => { const q = M.at(d); out.g1(q[0], q[1], z + (zPrev - z) * d / L, inFeed) })
         else out.g1(null, null, z, inFeed)
       }
-    } else if (ramp) {
+    } else if (zPrev === z) { /* уже на глубине (чистовой без подъёма) */ } else if (ramp) {
       const h = Math.min(M.per / 2, (zPrev - z) / tan / 2), zm = (zPrev + z) / 2
       const ds = M.cum.filter(d => d > 1e-6 && d < h - 1e-6)
       ;[...ds, h].forEach(d => { const q = M.at(d); out.g1(q[0], q[1], zPrev + (zm - zPrev) * d / h, inFeed) })
@@ -1233,7 +1269,10 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
             const allow = Math.max(0, n0(o.sideAllow)), left = Math.max(0, Math.min(T - 0.5, n0(o.leftover)))
             const rough = allow > 0 ? offsetLoop(smooth, r + allow) : null
             Lr = rough ? orientFromInside(rough.map(G), o.dir, sheetRect) : null
-            mk = (A, B) => [...levels(T, left, Math.min(n0(t.maxPass) || 1e9, (T - left) / (N - 1) + 1e-6)).map(z => ({ loop: B || A, z })), { loop: A, z: -millOver }]
+            mk = o.passMode === 'bridge'
+              // один проход с мостиком на длине замедления фрезы (мостик — с припуском и недорезом, дорез — в конце обхода)
+              ? (A, B) => [{ loop: A, z: -millOver, bridge: { rough: B || A, z: left > 0 ? left : 0.5, len: n0(t.outLen) > 0 ? n0(t.outLen) : 100 } }]
+              : (A, B) => [...levels(T, left, Math.min(n0(t.maxPass) || 1e9, (T - left) / (N - 1) + 1e-6)).map(z => ({ loop: B || A, z })), { loop: A, z: -millOver }]
           } else mk = A => levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: A, z }))
           const edgeDist = Math.min(geo.marginL + p.x + bb.x0, geo.sheetW - (geo.marginL + p.x + bb.x1), geo.marginB + p.y + bb.y0, geo.sheetL - (geo.marginB + p.y + bb.y1))
           const job = { stage: 1, rank: 5, tool: t, at: L[0], small, area, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1],
