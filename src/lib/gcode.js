@@ -973,8 +973,11 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const smallSide = ops.outer?.smallSide === '' || ops.outer?.smallSide == null ? 150 : Math.max(0, n0(ops.outer.smallSide))   // уже — тоже «мелкая»
   // «Держать недорезом до конца листа» (Обработка → Контур детали): площадь надёжного удержания и недорез
   const holdArea = n0(ops.outer?.holdArea) > 0 ? n0(ops.outer.holdArea) : 1
-  const holdLeave = Math.max(0.2, Math.min(T - 0.5, n0(ops.outer?.holdLeave) || 1))
-  if (ops.outer?.holdOn && n0(ops.outer?.holdLeave) > 0 && Math.abs(holdLeave - n0(ops.outer.holdLeave)) > EPS) warn.add(`Держать недорезом: недорез ${num(ops.outer.holdLeave)} мм при толщине ${num(T)} мм — взят ${num(holdLeave)} мм.`)
+  // недорез и припуск — ровно как задал пользователь, без подстановок и округлений. Недорез не задан или не меньше
+  // толщины — блока нет (режется как обычно), пользователь видит предупреждение
+  const holdLeave = n0(ops.outer?.holdLeave)
+  const holdOk = !!ops.outer?.holdOn && holdLeave > 0 && holdLeave < T
+  if (ops.outer?.holdOn && !holdOk) warn.add(`«Держать недорезом до конца листа»: ${holdLeave > 0 ? `недорез ${num(holdLeave)} мм не меньше толщины ${num(T)} мм` : 'не задано, сколько не дорезать'} — блок удержания не делается (ЧПУ → Обработка → Контур детали).`)
   const sheetRect = { x0: n0(post.originX), y0: n0(post.originY), x1: n0(post.originX) + geo.sheetW, y1: n0(post.originY) + geo.sheetL }
   const tool = id => toolById(cnc, id)
   // Высота режущей кромки фрезы (tool.edgeH): глубже неё фреза не режет — хвостовик трётся о материал. Проверяем
@@ -1165,7 +1168,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
           // «Держать недорезом до конца листа»: если деталь попадёт в «блок удержания» (см. holdBlock ниже), она режется
           // с припуском и недорезом в самом начале, а начисто и насквозь — в самом конце листа
           let Lh = null, mkHold = null
-          if (o.holdOn) {
+          if (holdOk) {
             const allow = Math.max(0, n0(o.holdAllow))
             const rough = allow > 0 ? offsetLoop(smooth, r + allow) : null
             Lh = rough ? orientFromInside(rough.map(G), o.dir, sheetRect) : null
@@ -1342,7 +1345,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     // (площадь от holdArea), программа сама набирает блок из соседних деталей суммарно от holdArea. Блок режется
     // ПЕРВЫМ — с недорезом, пока лист цел; дальше лист режется как обычно (мелкие, крупные), а блок стоит одним
     // куском и держит лист. В самом конце блок дорезается насквозь (см. ниже).
-    const block = ops.outer?.holdOn ? holdBlock(own, holdArea) : []
+    const block = holdOk ? holdBlock(own, holdArea) : []
     if (block.length) {
       block.forEach(j => j.hold())
       blocks.set(t, block)

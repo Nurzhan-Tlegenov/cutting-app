@@ -83,7 +83,7 @@ export const DEFAULT_OPS = () => ({
   // hold — «держать недорезом до конца листа»: если на листе нет детали от holdArea (м²), блок соседних деталей суммарно
   // от holdArea режется первым с недорезом holdLeave (мм) и припуском holdAllow (мм), а насквозь — в самом конце листа
   outer: { tool: '', dir: 'ccw', entry: 'ramp', angle: 45, smallFirst: true, smallArea: 0.12, smallSide: 150, passes: 1, sideAllow: 0, leftover: 0.5, smallOnly: false,
-    holdOn: false, holdArea: 1, holdLeave: 1, holdAllow: 0.15 },
+    holdOn: false, holdArea: 1, holdLeave: '', holdAllow: '' },   // недорез и припуск задаёт сам пользователь — без подстановок
   cutout: { tool: '', dir: 'cw', entry: 'ramp', angle: 45 },   // контур выреза (фреза идёт внутри)
   groove: { tool: '', entry: 'straight', angle: 45 },          // пазы: общий инструмент и вход фрезы
   grooves: {},                                                 // пазы по слоям (ширина × глубина): слой -> { tool }
