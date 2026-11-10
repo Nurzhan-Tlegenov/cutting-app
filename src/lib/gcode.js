@@ -857,20 +857,23 @@ export function withNestedOrder(route, heldCutouts, state = { done: new Set(), c
 /**
  * Блок удержания: детали листа, которые режутся недорезом первыми и дорезаются последними.
  * Если на листе есть деталь от minArea (м²) — вакуум держит её сам, блок не нужен ([]).
- * Иначе — от самой крупной детали наращиваем соседей (сначала прилегающих, из них — крупнейшую), пока площадь
- * блока не наберёт minArea. Вложенные детали (в вырезах других) и детали с вложениями в блок не берутся.
+ * Иначе блок строится там, где лист и так заканчивается: order — обычный маршрут контуров (без блока). Начало блока —
+ * деталь, которую этот маршрут режет последней; к ней добираются соседи (прилегающие), из них — та, что в обычном
+ * маршруте идёт позже всех, пока площадь блока не наберёт minArea. Вложенные детали и детали с вложениями не берутся.
  */
-export function holdBlock(list, minArea) {
+export function holdBlock(list, minArea, order = list) {
   const free = list.filter(j => !j.nested && !j.ownHeld?.length)
   if (!free.length || list.some(j => (j.area || 0) >= minArea)) return []
   const gap = (a, b) => Math.max(a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], 0)
   const NEAR = 40
-  const block = [free.reduce((b, j) => ((j.area || 0) > (b.area || 0) ? j : b))]
+  const pos = new Map(order.map((j, i) => [j, i]))
+  const late = (b, j) => ((pos.get(j) ?? -1) > (pos.get(b) ?? -1) ? j : b)
+  const block = [free.reduce(late)]
   let sum = block[0].area || 0
   while (sum < minArea && block.length < free.length) {
     const rest = free.filter(j => !block.includes(j))
     const near = rest.filter(j => block.some(b => gap(j, b) <= NEAR))
-    const pick = near.length ? near.reduce((b, j) => ((j.area || 0) > (b.area || 0) ? j : b))
+    const pick = near.length ? near.reduce(late)
       : rest.reduce((b, j) => (Math.min(...block.map(k => gap(j, k))) < Math.min(...block.map(k => gap(b, k))) ? j : b))
     block.push(pick); sum += pick.area || 0
   }
@@ -1369,7 +1372,15 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     // (площадь от holdArea), программа сама набирает блок из соседних деталей суммарно от holdArea. Блок режется
     // ПЕРВЫМ — с недорезом, пока лист цел; дальше лист режется как обычно (мелкие, крупные), а блок стоит одним
     // куском и держит лист. В самом конце блок дорезается насквозь (см. ниже).
-    const block = holdOk ? holdBlock(own, holdArea) : []
+    // блок — там, где лист заканчивается без него: от детали, которую обычный маршрут режет последней
+    let block = []
+    if (holdOk) {
+      const keep = own.map(j => [j, j.L, j.Lr, j.at, j.passes])      // пробный маршрут меняет точки входа — потом вернём
+      let plain = []
+      for (let pass = 0; pass < 3; pass++) { plain = routeContours(own, cur, sheetRect, smallFirst); lastCutToSupport(plain, sheetRect, offcuts) }
+      block = holdBlock(own, holdArea, plain)
+      keep.forEach(([j, L, Lr, at, passes]) => Object.assign(j, { L, Lr, at, passes }))
+    }
     if (block.length) {
       block.forEach(j => j.hold())
       blocks.set(t, block)
