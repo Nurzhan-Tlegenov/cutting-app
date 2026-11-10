@@ -855,29 +855,57 @@ export function withNestedOrder(route, heldCutouts, state = { done: new Set(), c
 }
 
 /**
- * Блок удержания: детали листа, которые режутся недорезом первыми и дорезаются последними.
- * Если на листе есть деталь от minArea (м²) — вакуум держит её сам, блок не нужен ([]).
- * Иначе блок строится там, где лист и так заканчивается: order — обычный маршрут контуров (без блока). Начало блока —
- * деталь, которую этот маршрут режет последней; к ней добираются соседи (прилегающие), из них — та, что в обычном
- * маршруте идёт позже всех, пока площадь блока не наберёт minArea. Вложенные детали и детали с вложениями не берутся.
+ * Блоки удержания: детали листа, которые режутся недорезом первыми и дорезаются последними.
+ * Если на листе есть деталь от minArea (м²) — вакуум держит её сам, блоков нет ([]).
+ * Мелкие детали режутся первыми и делят лист на группы крупных деталей, связанных между собой (соседи, зазор ≤ 40 мм).
+ * У каждой группы — свой блок, иначе крупные детали группы без блока режутся уже окружённые резами. Блок группы
+ * ставится у края листа, где вокруг меньше всего мелких деталей: начало — крупная деталь у края с наименьшей долей
+ * мелких соседей, дальше — прилегающие крупные (у края и без мелких — раньше, затем крупнее), пока площадь не наберёт
+ * minArea; меньше minArea группа целиком — блок. Если крупных деталей на листе нет (лист из одних мелких) — группы
+ * строятся по всем деталям. Вложенные детали и детали с вложениями в блок не берутся.
  */
-export function holdBlock(list, minArea, order = list) {
-  const free = list.filter(j => !j.nested && !j.ownHeld?.length)
-  if (!free.length || list.some(j => (j.area || 0) >= minArea)) return []
+export function holdBlock(list, minArea, rect) {
+  if (!list.length || list.some(j => (j.area || 0) >= minArea)) return []
   const gap = (a, b) => Math.max(a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], 0)
-  const NEAR = 40
-  const pos = new Map(order.map((j, i) => [j, i]))
-  const late = (b, j) => ((pos.get(j) ?? -1) > (pos.get(b) ?? -1) ? j : b)
-  const block = [free.reduce(late)]
-  let sum = block[0].area || 0
-  while (sum < minArea && block.length < free.length) {
-    const rest = free.filter(j => !block.includes(j))
-    const near = rest.filter(j => block.some(b => gap(j, b) <= NEAR))
-    const pick = near.length ? near.reduce(late)
-      : rest.reduce((b, j) => (Math.min(...block.map(k => gap(j, k))) < Math.min(...block.map(k => gap(b, k))) ? j : b))
-    block.push(pick); sum += pick.area || 0
+  const NEAR = 40, EDGE = 30
+  const nodes = list.some(j => !j.small) ? list.filter(j => !j.small) : list
+  const smalls = list.filter(j => !nodes.includes(j))
+  const atEdge = j => rect && (j.box[0] - rect.x0 <= EDGE || rect.x1 - j.box[2] <= EDGE || j.box[1] - rect.y0 <= EDGE || rect.y1 - j.box[3] <= EDGE)
+  // доля периметра, которой деталь прилегает к мелким
+  const smallSide = j => {
+    const per = 2 * (j.box[2] - j.box[0] + j.box[3] - j.box[1]) || 1
+    let len = 0
+    for (const k of smalls) if (gap(j, k) <= NEAR) len += Math.max(0, Math.min(j.box[2], k.box[2]) - Math.max(j.box[0], k.box[0]), Math.min(j.box[3], k.box[3]) - Math.max(j.box[1], k.box[1]))
+    return len / per
   }
-  return block
+  const free = j => !j.nested && !j.ownHeld?.length
+  // группы связанных крупных
+  const seen = new Set(), groups = []
+  for (const j of nodes) {
+    if (seen.has(j)) continue
+    const g = [j]; seen.add(j)
+    for (let i = 0; i < g.length; i++) for (const k of nodes) if (!seen.has(k) && gap(g[i], k) <= NEAR) { seen.add(k); g.push(k) }
+    groups.push(g)
+  }
+  const out = []
+  const rank = j => (atEdge(j) ? 0 : 1) * 10 + smallSide(j)              // меньше — лучше
+  for (const g of groups) {
+    const cand = g.filter(free)
+    if (!cand.length) continue
+    const total = g.reduce((a, j) => a + (j.area || 0), 0)
+    if (total < minArea) { out.push(...cand); continue }
+    const seed = cand.reduce((b, j) => (rank(j) < rank(b) - 1e-6 || (Math.abs(rank(j) - rank(b)) <= 1e-6 && (j.area || 0) > (b.area || 0)) ? j : b))
+    const block = [seed]
+    let sum = seed.area || 0
+    while (sum < minArea && block.length < cand.length) {
+      const near = cand.filter(j => !block.includes(j) && block.some(b => gap(j, b) <= NEAR))
+      if (!near.length) break
+      const pick = near.reduce((b, j) => (rank(j) < rank(b) - 0.05 || (Math.abs(rank(j) - rank(b)) <= 0.05 && (j.area || 0) > (b.area || 0)) ? j : b))
+      block.push(pick); sum += pick.area || 0
+    }
+    out.push(...block)
+  }
+  return out
 }
 
 export function routeContours(list, from, sheetRect, smallFirst = true, anchor = null) {
@@ -897,18 +925,24 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   // со всех сторон. Самая крупная из своих в этом случае последней не назначается — последним идёт блок.
   const toBlock = new Map()
   if (anchor?.length) {
-    // удалённость от блока — по соседям через ВСЕ детали листа, и мелкие тоже: мелкие между блоком и крупными не
-    // разрывают цепочку (иначе крупные за ними считались «островом» и волна шла не к блоку, а к своей крупнейшей)
-    const nb = j => list.filter(k => k !== j && gap(j, k) <= NEAR)
-    let wave = list.filter(j => anchor.some(a => gap(j, a) <= NEAR))
+    // удалённость от блока — по соседям среди крупных (мелкие режутся первыми и опорой не служат); у каждой группы
+    // крупных свой блок (см. holdBlock), поэтому волна в каждой группе идёт к её блоку
+    const nodes = list.filter(j => !j.small)
+    const nb = j => nodes.filter(k => k !== j && gap(j, k) <= NEAR)
+    let wave = nodes.filter(j => anchor.some(a => gap(j, a) <= NEAR))
     wave.forEach(j => toBlock.set(j, 1))
     while (wave.length) { const next = []; for (const j of wave) for (const k of nb(j)) if (!toBlock.has(k)) { toBlock.set(k, toBlock.get(j) + 1); next.push(k) } wave = next }
-    // совсем не связанные с блоком (отдельно стоящие): по расстоянию до блока — дальние раньше
-    const far = list.filter(j => !toBlock.has(j))
+    // не связанные с блоком (не должно быть — у каждой группы свой блок): по расстоянию до блока, дальние раньше
+    const far = nodes.filter(j => !toBlock.has(j))
     if (far.length) {
       const dist = j => Math.min(...anchor.map(a => gap(j, a)))
       const top = Math.max(0, ...toBlock.values())
       far.sort((a, b) => dist(a) - dist(b)).forEach((j, i) => toBlock.set(j, top + 1 + i))
+    }
+    // лист из одних мелких: волна — по всем деталям
+    if (!nodes.length) {
+      let w = list.filter(j => anchor.some(a => gap(j, a) <= NEAR)); w.forEach(j => toBlock.set(j, 1))
+      while (w.length) { const next = []; for (const j of w) for (const k of list) if (k !== j && !toBlock.has(k) && gap(j, k) <= NEAR) { toBlock.set(k, toBlock.get(j) + 1); next.push(k) } w = next }
     }
   }
   const centre = anchor?.length ? null : pool.reduce((b, j) => (!b || (j.area || 0) > (b.area || 0) * 1.02 || (Math.abs((j.area || 0) - (b.area || 0)) <= (b.area || 0) * 0.02 && D(mid(j), [cx, cy]) < D(mid(b), [cx, cy])) ? j : b), null)
@@ -942,8 +976,9 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   }
   // к блоку — строгой волной: сначала все крупные дальнего от блока слоя (по соседям), потом следующего, ближе, и так
   // до прилегающих к блоку. Маршрут не прыгает к блоку и обратно; каждая деталь отделяется от нетронутого слоя ближе к блоку
-  if (toBlock.size) for (const s of list) if (!s.small) for (const b of list) {
-    if (b !== s && !b.small && toBlock.get(s) > toBlock.get(b)) before.get(b).push(s)
+  const allSmall = !list.some(j => !j.small)               // лист из одних мелких — волна к блоку по всем деталям
+  if (toBlock.size) for (const s of list) if (!s.small || allSmall) for (const b of list) {
+    if (b !== s && (!b.small || allSmall) && toBlock.get(s) > toBlock.get(b)) before.get(b).push(s)
   }
   if (centre) for (const j of list) if (j !== centre && !before.get(j).includes(centre)) before.get(centre).push(j)
   const valid = R => { const pos = new Map(R.map((j, i) => [j, i])); return R.every(j => before.get(j).every(q => pos.get(q) < pos.get(j))) }
@@ -1373,15 +1408,8 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     // (площадь от holdArea), программа сама набирает блок из соседних деталей суммарно от holdArea. Блок режется
     // ПЕРВЫМ — с недорезом, пока лист цел; дальше лист режется как обычно (мелкие, крупные), а блок стоит одним
     // куском и держит лист. В самом конце блок дорезается насквозь (см. ниже).
-    // блок — там, где лист заканчивается без него: от детали, которую обычный маршрут режет последней
-    let block = []
-    if (holdOk) {
-      const keep = own.map(j => [j, j.L, j.Lr, j.at, j.passes])      // пробный маршрут меняет точки входа — потом вернём
-      let plain = []
-      for (let pass = 0; pass < 3; pass++) { plain = routeContours(own, cur, sheetRect, smallFirst); lastCutToSupport(plain, sheetRect, offcuts) }
-      block = holdBlock(own, holdArea, plain)
-      keep.forEach(([j, L, Lr, at, passes]) => Object.assign(j, { L, Lr, at, passes }))
-    }
+    // блоки — у края листа, где меньше мелких; у каждой группы крупных (их делят мелкие) — свой
+    const block = holdOk ? holdBlock(own, holdArea, sheetRect) : []
     if (block.length) {
       block.forEach(j => j.hold())
       blocks.set(t, block)
