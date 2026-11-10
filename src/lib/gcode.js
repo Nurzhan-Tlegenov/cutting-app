@@ -950,7 +950,10 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   // Среди мелких: сначала те, что дальше от крупных деталей (считая по соседям), последними — прилегающие к крупной.
   // Так мелкая деталь в момент реза ещё держится за нетронутого соседа, а фреза не возвращается в россыпь уже отрезанных.
   const before = new Map(list.map(j => [j, []]))
-  if (smallFirst) {
+  // лист из одних мелких с блоком удержания: правила мелких не действуют — только волна к блоку (см. ниже)
+  const allSmall = !list.some(j => !j.small)
+  const smallRules = smallFirst && !(anchor?.length && allSmall)
+  if (smallRules) {
     const depth = supportDepth(list, gap, NEAR)
     // какой долей своей длины мелкая деталь прилегает к крупным: из двух соседних мелких на одном удалении
     // первой режется та, что держится за крупную слабее, — пока её держит и сосед
@@ -976,7 +979,6 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   }
   // к блоку — строгой волной: сначала все крупные дальнего от блока слоя (по соседям), потом следующего, ближе, и так
   // до прилегающих к блоку. Маршрут не прыгает к блоку и обратно; каждая деталь отделяется от нетронутого слоя ближе к блоку
-  const allSmall = !list.some(j => !j.small)               // лист из одних мелких — волна к блоку по всем деталям
   if (toBlock.size) for (const s of list) if (!s.small || allSmall) for (const b of list) {
     if (b !== s && (!b.small || allSmall) && toBlock.get(s) > toBlock.get(b)) before.get(b).push(s)
   }
