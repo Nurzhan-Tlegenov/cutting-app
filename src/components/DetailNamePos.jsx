@@ -24,15 +24,17 @@ export default function DetailNamePos({ detail, onUpdate, children }) {
   const fromModel = own ? '' : metaPos(meta)
   const inp = { fontSize: 12, padding: '3px 6px', minWidth: 0 }
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, paddingLeft: 36 }}>
-      <input type="text" value={own} placeholder={fromModel ? `поз. ${fromModel}` : 'Поз.'} title="Своя позиция детали — число или текст"
+    <div className="det-np" style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, paddingLeft: 36 }}>
+      <input className="det-pos" type="text" value={own} placeholder={fromModel ? `поз. ${fromModel}` : 'Поз.'} title="Своя позиция детали — число или текст"
         onChange={e => onUpdate(setDetailPos(detail, e.target.value))}
         style={{ ...inp, width: 64, flex: '0 0 auto', fontWeight: own ? 600 : 400, color: 'var(--blue-dark)' }} />
+      <div className="det-name" style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0 }}>
       {meta?.des && <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }} title="Обозначение из модели">{meta.des}</span>}
       <input type="text" value={detail.name || ''} placeholder="Наименование" title="Наименование детали"
         onChange={e => onUpdate({ ...detail, name: e.target.value || null })}
         style={{ ...inp, flex: 1 }} />
       {children}
+      </div>
     </div>
   )
 }

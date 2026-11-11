@@ -190,15 +190,31 @@ button { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 @media (min-width: 1100px) {
   .desk-hide { display: none !important; }
   .desk-only { display: flex !important; }
-  /* детали заказа — строкой слева направо: № · длина · ширина · кол-во · кромка по сторонам · вращение;
-     название, размер в раскрой, копирование и редактор контура — под строкой */
-  .det-card { display: flex; flex-wrap: wrap; align-items: center; column-gap: 14px; }
-  .det-card > * { flex: 1 1 100%; order: 2; }
-  .det-card > .det-row { flex: 0 1 460px; min-width: 340px; order: 0; }
-  .det-card > .det-edges { flex: 0 1 420px; min-width: 300px; margin-top: 0 !important; order: 1; }
-  .det-head { background: transparent; border: none; margin-bottom: 2px;
-    font-size: 11px; color: var(--text-hint); }
-  .det-head > .det-row, .det-head > .det-edges { min-height: 0; }
+  /* детали заказа — таблицей, одна деталь в строку: № · поз. · наименование · длина · ширина · кол. · кромка + вращение;
+     размер в раскрой, копирование, редактор контура — под строкой. Ширины колонок — --oc-* (тянутся в заголовке, DetailTableHead) */
+  .det-card { display: grid !important; grid-template-columns: var(--oc-num, 44px) var(--oc-pos, 70px) var(--oc-name, 240px) var(--oc-len, 80px) var(--oc-wid, 80px) var(--oc-qty, 50px) var(--oc-edge, 250px) auto 22px 1fr;
+    column-gap: 6px; row-gap: 2px; align-items: center; padding: 2px 8px !important; margin-bottom: 0 !important;
+    border-radius: 0 !important; border-width: 0 0 0.5px 0 !important; }
+  .det-card > * { grid-column: 1 / -1; }
+  .det-card > .det-row, .det-card .det-size, .det-card > .det-np { display: contents !important; }
+  .det-card .det-num { grid-row: 1; grid-column: 1; flex-direction: row !important; gap: 3px; justify-content: flex-start; min-width: 0 !important; }
+  .det-card .det-num > * { margin-top: 0 !important; }
+  .det-card .det-pos { grid-row: 1; grid-column: 2; width: auto !important; }
+  .det-card .det-name { grid-row: 1; grid-column: 3; overflow: hidden; }
+  .det-card .det-size > :nth-child(1) { grid-row: 1; grid-column: 4; }
+  .det-card .det-size > :nth-child(2) { grid-row: 1; grid-column: 5; }
+  .det-card .det-size > :nth-child(3) { grid-row: 1; grid-column: 6; width: auto !important; }
+  .det-card > .det-edges { grid-row: 1; grid-column: 7; margin-top: 0 !important; min-width: 0; }
+  .det-card > .det-edges > span:first-child { display: none; }
+  .det-card .det-chip { grid-row: 1; grid-column: 8; }
+  .det-card .det-del { grid-row: 1; grid-column: 9; }
+  .det-card input { padding: 4px 4px !important; font-size: 13px !important; }
+  .det-card > .det-edges button { padding: 3px 2px !important; min-height: 24px; }
+  .det-card > .det-edges button > div:first-child:not(:only-child) { display: none; }   /* сторона — в заголовке колонки */
+  .det-card > .det-edges button > div { margin-top: 0 !important; -webkit-line-clamp: 1 !important; }
+  .det-card > div:not(.det-row):not(.det-np):not(.det-edges) { padding-left: calc(var(--oc-num, 44px) + 6px); }
+  .card.det-card.det-head { display: grid !important; background: transparent; border: none !important; padding: 0 8px !important;
+    font-size: 11px; color: var(--text-hint); position: sticky; top: 0; z-index: 2; background: var(--bg2); }
 }
 /* раскрой на компьютере: строка листов прижата к низу левой колонки */
 .desk-preview > .sheet-chips { margin-top: auto; margin-bottom: 0 !important; padding-top: 6px; }

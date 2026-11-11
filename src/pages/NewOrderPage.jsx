@@ -1,3 +1,4 @@
+import DetailTableHead from '../components/DetailTableHead'
 import DetailNamePos from '../components/DetailNamePos'
 import Hint from '../components/Hint'
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
@@ -139,7 +140,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
     <div className="card det-card" style={{ marginBottom: 4, padding: '6px 10px' }}>
       <div className="det-row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* Номер + кнопка контура */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
+        <div className="det-num" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 28 }}>
           <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>#{index + 1}</div>
           <button type="button" data-tour="det-contour" onClick={() => setShowContour(v => !v)}
             title="Редактор контура"
@@ -161,7 +162,7 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
         </div>
 
         {/* Размеры */}
-        <div data-tour="det-size" style={{ display: 'flex', gap: 3, flex: 1 }}>
+        <div className="det-size" data-tour="det-size" style={{ display: 'flex', gap: 3, flex: 1 }}>
           <NumInput decimal value={ls.cut ? ls.l : detail.w} placeholder="Длина" onChange={v => onUpdate({ ...detail, w: ls.cut ? ls.toL(v) : v })} inputRef={lengthRef} onEnter={() => widthRef.current?.focus()} hint="next" />
           <NumInput decimal value={ls.cut ? ls.w : detail.h} placeholder="Ширина" onChange={v => onUpdate({ ...detail, h: ls.cut ? ls.toW(v) : v })} inputRef={widthRef} onEnter={() => qtyRef.current?.focus()} hint="next" />
           <div style={{ width: 44, flexShrink: 0 }}>
@@ -171,10 +172,10 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
               onEnter={onQtyEnter} hint="next" />
           </div>
         </div>
-        {groupUi && <GroupChip detail={detail} groups={groupUi.groups} active={groupUi.active} onChange={g => groupUi.assign(detail.uid, g)} />}
+        {groupUi && <div className="det-chip"><GroupChip detail={detail} groups={groupUi.groups} active={groupUi.active} onChange={g => groupUi.assign(detail.uid, g)} /></div>}
 
         {/* Удалить */}
-        <button type="button" onClick={onRemove}
+        <button type="button" className="det-del" onClick={onRemove}
           style={{ background: 'none', border: 'none', color: 'var(--text-hint)', fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1, flexShrink: 0 }}>
           ✕
         </button>
@@ -784,18 +785,7 @@ export default function NewOrderPage() {
         {/* Детали сгруппированные */}
         <MaterialFilter details={details} order={matOrder} value={matFilter} onChange={setMatFilter} />
         {/* компьютер: подписи колонок над строками деталей (детали идут строкой: размеры, кол-во, кромка, вращение) */}
-        <div className="card det-card det-head desk-only" style={{ padding: "0 10px" }}>
-          <div className="det-row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ minWidth: 28 }}>№</div>
-            <div style={{ display: 'flex', gap: 4, flex: 1 }}><div style={{ flex: 1 }}>Длина</div><div style={{ flex: 1 }}>Ширина</div><div style={{ width: 44 }}>Кол.</div></div>
-            <div style={{ width: 18 }} />
-          </div>
-          <div className="det-edges" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <div style={{ minWidth: 44 }}>Кромка</div>
-            {['Дл', 'Дп', 'Шв', 'Шн'].map(t => <div key={t} style={{ flex: 1, textAlign: 'center' }}>{t}</div>)}
-            <div style={{ width: 26, textAlign: 'center' }} title="Вращение">↻</div>
-          </div>
-        </div>
+        <DetailTableHead />
         {grouped.map(([pfx, dets]) => (
           <div key={pfx}>
             {pfx && (
