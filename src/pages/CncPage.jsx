@@ -557,10 +557,18 @@ export default function CncPage() {
             })}
           </div>
           {warnings.length > 0 && (() => {
-            // два столбца: «не назначен инструмент» (красным, нажать — к слою в «Обработке») и всё остальное, что не попало
+            // два столбца по месту обработки: «В торец» (фрезер их не сверлит) и «По пласти» — всё по пласти, что не попало
+            // в программу; без инструмента — красным, нажать — к слою в «Обработке». Общее (команды станка и т. п.) — ниже
             const MISS = /^(?:(.+?): )?Не назначен инструмент: (.+?) \((\d+) шт\.\)/
-            const miss = [], rest = []
-            warnings.forEach(w => { const m = w.match(MISS); if (m) miss.push({ w, post: m[1], what: m[2], cnt: m[3] }); else rest.push(w) })
+            const miss = [], edgeW = [], face = [], gen = []
+            warnings.forEach(w => {
+              const m = w.match(MISS)
+              if (m) miss.push({ w, post: m[1], what: m[2], cnt: m[3] })
+              else if (/в торец/i.test(w)) edgeW.push(w.replace(/^Отверстия в торец /, '').replace(/ на этом станке не сверлятся — в программу не попали\.$/, ''))
+              else if (/изнанк|выемк|отверст|паз|контур|шинковк|Не выводится|Фреза Ø|сверло/i.test(w)) face.push(w)
+              else gen.push(w)
+            })
+            const rest = gen
             const target = what => {
               let m
               if ((m = what.match(/^отверстия Ø([\d.,]+)/))) return ['holes', `hole:${m[1].replace(',', '.')}`]
@@ -588,26 +596,32 @@ export default function CncPage() {
             return (
               <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)', padding: '10px 12px' }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--amber)', marginBottom: 6 }}>Предупреждения</div>
-                <div style={{ display: 'grid', gridTemplateColumns: miss.length && rest.length ? 'repeat(auto-fit, minmax(240px, 1fr))' : '1fr', gap: 12 }}>
-                  {miss.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: (miss.length || face.length) && edgeW.length ? 'repeat(auto-fit, minmax(240px, 1fr))' : '1fr', gap: 12 }}>
+                  {(miss.length > 0 || face.length > 0) && (
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)', marginBottom: 4 }}>Не назначен инструмент — в программу не попали</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>По пласти</div>
                       {miss.map(x => (
                         <button key={x.w} type="button" onClick={() => go(x.what)} title="Открыть слой в «Обработке» и назначить инструмент"
                           style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12, padding: '5px 8px', marginBottom: 4, borderRadius: 6, cursor: 'pointer',
                             border: '0.5px solid var(--danger)', background: 'var(--danger-light, rgba(220,53,69,0.08))', color: 'var(--danger)' }}>
-                          {x.post ? `${x.post}: ` : ''}{x.what} · {x.cnt} шт. <span style={{ textDecoration: 'underline' }}>назначить →</span>
+                          {x.post ? `${x.post}: ` : ''}<b>{x.what}</b> · {x.cnt} шт. — инструмент не назначен, в программу не попали. <span style={{ textDecoration: 'underline' }}>Назначить →</span>
                         </button>
                       ))}
+                      {face.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
                     </div>
                   )}
-                  {rest.length > 0 && (
+                  {edgeW.length > 0 && (
                     <div>
-                      {miss.length > 0 && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Не обрабатывается / прочее</div>}
-                      {rest.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>В торец — на этом станке не сверлятся</div>
+                      {edgeW.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
                     </div>
                   )}
                 </div>
+                {rest.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    {rest.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
+                  </div>
+                )}
               </div>
             )
           })()}

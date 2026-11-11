@@ -155,7 +155,12 @@ export function partFeatures(p, detail, T, skip = null) {
   if (sk.through && sk.blind) return f
   ;(contour.drillings || []).forEach(dr => { if (dr.installed !== false && dr.kind !== 'edge' && dr.face === 'back') f.skipped.back++ })
   getAllDrillPoints(contour, W, H, true).forEach(pt => {
-    if (pt.edge) { f.skipped.edge++; return }
+    if (pt.edge) {
+      f.skipped.edge++
+      const k = `Ø${num(pt.d || 8)}${pt.depth > 0 ? ` × ${num(pt.depth)}` : ''}`        // по диаметрам — для столбца «В торец»
+      f.skipped.edgeBy = { ...(f.skipped.edgeBy || {}), [k]: ((f.skipped.edgeBy || {})[k] || 0) + 1 }
+      return
+    }
     const q = at(pt.x, pt.y), d = pt.d || 8, depth = pt.depth > 0 ? pt.depth : T
     if (depth >= T - EPS ? sk.through : sk.blind) return           // сквозные / глухие отключены в «Обработке»
     f.holes.push({ x: q[0], y: q[1], d, depth, key: holeKey(d, depth, T) })
@@ -1109,6 +1114,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   }
   const jobs = []                    // { stage, rank, tool, at: [x, y], area, run(out) }
   const miss = {}                    // на что не назначен инструмент -> сколько раз
+  const edgeBy = {}                  // торцевые отверстия: 'Ø8 × 32' -> сколько
   const noTool = what => { miss[what] = (miss[what] || 0) + 1 }
   let edge = 0, back = 0, odd = 0
 
@@ -1125,6 +1131,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     const bx = ox + p.x, by = oy + p.y
     const G = ([x, y]) => [bx + x, by + y]
     edge += f.skipped.edge; back += f.skipped.back; odd += f.skipped.odd
+    Object.entries(f.skipped.edgeBy || {}).forEach(([k, c]) => { edgeBy[k] = (edgeBy[k] || 0) + c })
 
     // отверстия
     for (const h of f.holes) {
@@ -1441,7 +1448,9 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const offList = skipLabels(skip)
   if (offList.length) warn.add('Не выводится в программу (настройки «Обработка»): ' + offList.join(', ') + '.')
   Object.entries(miss).forEach(([what, cnt]) => warn.add(`Не назначен инструмент: ${what} (${cnt} шт.) — в программу не попали.`))
-  if (edge) warn.add(`Отверстия в торец (${edge} шт.) на этом станке не сверлятся — в программу не попали.`)
+  // торцевые — по диаметрам (× глубина), чтобы в предупреждениях было видно, какие именно сверлить на присадке
+  if (edge) Object.entries(edgeBy).sort(([a], [b]) => a.localeCompare(b, 'ru', { numeric: true }))
+    .forEach(([k, c]) => warn.add(`Отверстия в торец ${k} (${c} шт.) на этом станке не сверлятся — в программу не попали.`))
   if (back) warn.add(`Обработка с изнанки (${back} шт.) в программу не попала — деталь нужно перевернуть.`)
   if (odd) warn.add(`Выемки сложной формы (${odd} шт.) пока не обрабатываются — в программу не попали.`)
 
