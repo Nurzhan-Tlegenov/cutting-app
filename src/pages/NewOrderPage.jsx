@@ -1,5 +1,5 @@
+import DetailNamePos from '../components/DetailNamePos'
 import Hint from '../components/Hint'
-import { metaPos } from '../lib/partLabel'
 import MaterialKind, { KIND_SQL_HINT } from '../components/MaterialKind'
 import { saveOrderNote, NOTES_SQL_HINT, saveOrderArticle, ARTICLE_SQL_HINT } from '../lib/orderNotes'
 import DeskSplit from '../components/DeskSplit'
@@ -180,14 +180,10 @@ function DetailCard({ detail, index, onUpdate, onRemove, activeEdgeName, edgeNam
         </button>
       </div>
 
-      {(detail.name || backSide(detail) || metaPos(detail.contour?.meta)) && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 36, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {/* позиция из модели (Базис, Астра, К3, таблица) — как у конструктора, а не номер строки в заказе */}
-          {metaPos(detail.contour?.meta) && <b style={{ fontWeight: 600, color: 'var(--blue-dark)' }}>поз. {metaPos(detail.contour.meta)} · </b>}
-          {detail.contour?.meta?.des ? `${detail.contour.meta.des} · ` : ''}{detail.name}
-          {isTwoSided(detail) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2' }}>⇅ 2 стороны</span>}{backSide(detail) === 'back' && <span title="Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇣ снизу</span>}
-        </div>
-      )}
+      {/* своя позиция и наименование — правятся прямо в бланке; позиция из модели (Базис, Астра, К3, таблица) — подсказкой */}
+      <DetailNamePos detail={detail} onUpdate={onUpdate}>
+        {isTwoSided(detail) && <span title="Обработка с двух сторон — деталь переворачивается на станке" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2' }}>⇅ 2 стороны</span>}{backSide(detail) === 'back' && <span title="Обработка только снизу (с нелицевой пласти) — на станке деталь переворачивают" style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 10, fontSize: 10, background: '#F3E5F5', color: '#7B1FA2', whiteSpace: 'nowrap' }}>⇣ снизу</span>}
+      </DetailNamePos>
 
       {/* Кромка — галочки */}
       {showEdge && (

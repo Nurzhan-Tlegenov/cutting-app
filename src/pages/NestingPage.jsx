@@ -955,7 +955,7 @@ function SheetCanvas({ corner = 'bl', sheet, usableX, usableY, sheetL, sheetW, m
     // Линии реза — по текущему расположению деталей (пересчитываются при
     // любом редактировании карты)
     if (showOffcuts && offcutMode === 'cuts') {
-      const { lines, unsplit } = computeCutLines(items, usableX, usableY, kerf, flipRects(manualOffcuts || []))
+      const { lines, unsplit } = computeCutLines(items, usableX, usableY, kerf, flipRects(manualOffcuts || []), sheet.beamAxis)
       // Участки, которые нельзя разрезать насквозь (после ручной правки)
       unsplit.forEach(r => {
         ctx.strokeStyle = '#E24B4A'

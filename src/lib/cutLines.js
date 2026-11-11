@@ -6,10 +6,12 @@
 // ни одной детали. Деталь занимает [x, x+w]×[y, y+h], где w/h включают
 // ширину реза на правой и нижней стороне; линия рисуется по центру пропила.
 // Участок делится рекурсивно.
-export function decomposeCuts(rects, usableX, usableY, kerf, pref) {
+// levels: резы по уровням, как у пильного центра — участок режется сначала той же осью, что его отрезала,
+// и только когда сквозного реза этой осью нет — поперёк (1-й уровень — pref)
+export function decomposeCuts(rects, usableX, usableY, kerf, pref, levels = false) {
   const EPS = 0.5
   const lines = [], unsplit = []
-  const queue = [{ x0: 0, y0: 0, x1: usableX, y1: usableY, parts: rects }]
+  const queue = [{ x0: 0, y0: 0, x1: usableX, y1: usableY, parts: rects, ax: pref }]
   const findCut = (reg, axis) => {
     const v = axis === 'v'
     const a0 = v ? reg.x0 : reg.y0, a1 = v ? reg.x1 : reg.y1
@@ -33,7 +35,8 @@ export function decomposeCuts(rects, usableX, usableY, kerf, pref) {
   while (queue.length) {
     const reg = queue.shift()
     if (!reg.parts.length) continue
-    const order = pref === 'v' ? ['v', 'h'] : ['h', 'v']
+    const first = levels ? reg.ax : pref
+    const order = first === 'v' ? ['v', 'h'] : ['h', 'v']
     let done = false
     for (const axis of order) {
       const cd = findCut(reg, axis)
@@ -44,8 +47,8 @@ export function decomposeCuts(rects, usableX, usableY, kerf, pref) {
         : { v: false, pos: cd.line, from: reg.x0, to: reg.x1 })
       const mid = o => v ? o.x + o.w / 2 : o.y + o.h / 2
       const A = reg.parts.filter(o => mid(o) < cd.c), B = reg.parts.filter(o => mid(o) >= cd.c)
-      queue.push(v ? { ...reg, x1: cd.c, parts: A } : { ...reg, y1: cd.c, parts: A })
-      queue.push(v ? { ...reg, x0: cd.c, parts: B } : { ...reg, y0: cd.c, parts: B })
+      queue.push(v ? { ...reg, x1: cd.c, parts: A, ax: axis } : { ...reg, y1: cd.c, parts: A, ax: axis })
+      queue.push(v ? { ...reg, x0: cd.c, parts: B, ax: axis } : { ...reg, y0: cd.c, parts: B, ax: axis })
       done = true
       break
     }
@@ -53,7 +56,10 @@ export function decomposeCuts(rects, usableX, usableY, kerf, pref) {
   }
   return { lines, unsplit }
 }
-export function computeCutLines(items, usableX, usableY, kerf, offcuts = []) {
+// beamAxis — ось 1-го уровня, как посчитал раскрой пильного центра (sheet.beamAxis): 'x' — полосы по карте
+// вертикальны (первые резы вертикальные), 'y' — горизонтальны. С ней линии идут по тем же уровням, что в программе
+// для пилы; без неё (форматник) — вариант с меньшей длиной резов, как раньше
+export function computeCutLines(items, usableX, usableY, kerf, offcuts = [], beamAxis = null) {
   const rects = items.map(p => ({ x: p.x, y: p.y, w: p.w, h: p.h }))
   // Выбранные обрезки — деловые заготовки, такие же "детали" для резов; у
   // обрезка зазор на рез идёт с каждой стороны, поэтому добавляем kerf
@@ -65,6 +71,10 @@ export function computeCutLines(items, usableX, usableY, kerf, offcuts = []) {
     const x1 = Math.min(usableX, o.x + o.w), y1 = Math.min(usableY, o.y + o.h)
     if (x1 - x0 > 1 && y1 - y0 > 1) rects.push({ x: x0, y: y0, w: x1 - x0 + kerf, h: y1 - y0 + kerf })
   })
+  if (beamAxis === 'x' || beamAxis === 'y') {
+    const r = decomposeCuts(rects, usableX, usableY, kerf, beamAxis === 'x' ? 'v' : 'h', true)
+    if (!r.unsplit.length) return r
+  }
   const a = decomposeCuts(rects, usableX, usableY, kerf, 'v')
   const b = decomposeCuts(rects, usableX, usableY, kerf, 'h')
   const len = r => r.lines.reduce((t, l) => t + (l.to - l.from), 0)

@@ -339,7 +339,7 @@ function drawSheet(ctx, bx, by, bw, bh, sheet, geo, details, noOf, opt = {}) {
     const items = sheet.placed.map(p => ({ x: p.x, y: uy - p.y - (p.h - kerf), w: p.w, h: p.h }))
     const offs = (sheet.manualOffcuts || []).map(o => ({ ...o, y: uy - o.y - o.h }))
     let res = null
-    try { res = computeCutLines(items, geo.usableX, uy, kerf, offs) } catch { res = null }
+    try { res = computeCutLines(items, geo.usableX, uy, kerf, offs, sheet.beamAxis) } catch { res = null }
     if (res) {
       ctx.save(); ctx.strokeStyle = CUT; ctx.lineWidth = mm(0.4); ctx.setLineDash([mm(1.6), mm(0.9)])
       const toY = sy => geo.marginB + (uy - sy)                       // экранная Y рабочей зоны -> от низа листа
