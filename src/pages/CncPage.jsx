@@ -8,7 +8,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
-import { CncBasic, CncCommands, CncTools, CncOps } from '../components/CncSettings'
+import { CncBasic, CncCommands, CncTools, CncOps, openOpsFold } from '../components/CncSettings'
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
@@ -556,12 +556,61 @@ export default function CncPage() {
               )
             })}
           </div>
-          {warnings.length > 0 && (
-            <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)', padding: '10px 12px' }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--amber)', marginBottom: 4 }}>Предупреждения</div>
-              {warnings.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
-            </div>
-          )}
+          {warnings.length > 0 && (() => {
+            // два столбца: «не назначен инструмент» (красным, нажать — к слою в «Обработке») и всё остальное, что не попало
+            const MISS = /^(?:(.+?): )?Не назначен инструмент: (.+?) \((\d+) шт\.\)/
+            const miss = [], rest = []
+            warnings.forEach(w => { const m = w.match(MISS); if (m) miss.push({ w, post: m[1], what: m[2], cnt: m[3] }); else rest.push(w) })
+            const target = what => {
+              let m
+              if ((m = what.match(/^отверстия Ø([\d.,]+)/))) return ['holes', `hole:${m[1].replace(',', '.')}`]
+              if ((m = what.match(/^пазы ([\d.,]+) × ([\d.,]+)/))) return ['groove', `groove:${m[1].replace(',', '.')}x${m[2].replace(',', '.')}`]
+              if ((m = what.match(/^выемки глубиной ([\d.,]+)/))) return ['pockets', `pocket:${m[1].replace(',', '.')}`]
+              if (/контур выреза/.test(what)) return ['cutout']
+              if (/контур обрезка/.test(what)) return ['offcut']
+              if (/шинковка/.test(what)) return ['score']
+              return ['outer']
+            }
+            const go = what => {
+              const [fold, layer] = target(what)
+              openOpsFold(fold)
+              setTab('ops')
+              setTimeout(() => {
+                const box = document.querySelector(`[data-fold="${fold}"]`)
+                const el = (layer && box?.querySelector(`[data-layer="${layer}"]`)) || box
+                if (!el) return
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                const prev = el.style.boxShadow
+                el.style.boxShadow = '0 0 0 2px var(--danger)'
+                setTimeout(() => { el.style.boxShadow = prev }, 2500)
+              }, 120)
+            }
+            return (
+              <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)', padding: '10px 12px' }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--amber)', marginBottom: 6 }}>Предупреждения</div>
+                <div style={{ display: 'grid', gridTemplateColumns: miss.length && rest.length ? 'repeat(auto-fit, minmax(240px, 1fr))' : '1fr', gap: 12 }}>
+                  {miss.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)', marginBottom: 4 }}>Не назначен инструмент — в программу не попали</div>
+                      {miss.map(x => (
+                        <button key={x.w} type="button" onClick={() => go(x.what)} title="Открыть слой в «Обработке» и назначить инструмент"
+                          style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12, padding: '5px 8px', marginBottom: 4, borderRadius: 6, cursor: 'pointer',
+                            border: '0.5px solid var(--danger)', background: 'var(--danger-light, rgba(220,53,69,0.08))', color: 'var(--danger)' }}>
+                          {x.post ? `${x.post}: ` : ''}{x.what} · {x.cnt} шт. <span style={{ textDecoration: 'underline' }}>назначить →</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {rest.length > 0 && (
+                    <div>
+                      {miss.length > 0 && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Не обрабатывается / прочее</div>}
+                      {rest.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
           {machine?.labelTable && (
             <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10 }}>
               🏷 Вместе с G-кодом будут созданы файлы маркировочного стола (бирка {labelTpl.w}×{labelTpl.h} мм).{' '}

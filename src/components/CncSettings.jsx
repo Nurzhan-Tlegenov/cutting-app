@@ -113,6 +113,10 @@ const Title = ({ children }) => <div style={{ fontWeight: 500, fontSize: 14, mar
 // Карточка «Обработки», свёрнутая по умолчанию: заголовок и короткая сводка; нажал — развернулась, выставил настройки.
 // Свёрнуто/развёрнуто запоминается на устройстве.
 const FOLD_KEY = 'cncOpsOpen'
+/** Открыть раздел «Обработки» (Fold) — до перехода на вкладку: раздел читает открытость при появлении */
+export function openOpsFold(id) {
+  try { const f = JSON.parse(localStorage.getItem(FOLD_KEY) || '{}'); localStorage.setItem(FOLD_KEY, JSON.stringify({ ...f, [id]: true })) } catch { /* без хранилища */ }
+}
 const readFolds = () => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) || '{}') || {} } catch { return {} } }
 function Fold({ id, title, summary, style, children }) {
   const [open, setOpen] = useState(() => !!readFolds()[id])
@@ -122,7 +126,7 @@ function Fold({ id, title, summary, style, children }) {
     return next
   })
   return (
-    <div className="card" style={{ marginBottom: 10, ...style }}>
+    <div className="card" data-fold={id} style={{ marginBottom: 10, ...style }}>
       <button type="button" onClick={toggle} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: 0, border: 'none', background: 'transparent', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
         <span style={{ fontSize: 12, color: 'var(--text-hint)', width: 12 }}>{open ? '▾' : '▸'}</span>
         <span style={{ fontWeight: 500, fontSize: 14, flex: 1, minWidth: 0 }}>{title}</span>
@@ -1448,7 +1452,7 @@ export function CncOps({ cnc, onChange, layers }) {
         <label className="label" style={{ marginTop: 8 }}>Вход фрезы</label>
         {Entry(ops.groove, 'straight', patch => set('groove', patch))}
         {layers?.grooveLayers?.map(l => (
-          <div key={l.key} style={{ marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
+          <div key={l.key} data-layer={`groove:${r1(l.width)}x${r1(l.depth)}`} style={{ marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
             <label className="label">Паз {r1(l.width)} × {r1(l.depth)} мм <span style={{ color: 'var(--text-hint)' }}>(ширина × глубина) · {l.count} шт.</span></label>
             <ToolSelect cnc={cnc} only="mill" maxD={l.width} value={ops.grooves?.[l.key]?.tool} empty={hasTool(ops.groove.tool) ? 'Как общий' : '— не назначен —'} onChange={v => setMap('grooves', l.key, { tool: v })} />
             {hasTool(grooveOpFor(ops, l.key).tool) && num((cnc.tools || []).find(t => t.id === grooveOpFor(ops, l.key).tool)?.d) > l.width + 0.05 && (
@@ -1462,7 +1466,7 @@ export function CncOps({ cnc, onChange, layers }) {
         {!layers && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>Выемки настраиваются по глубине — в заказе, где видно, какие глубины в нём есть.</p>}
         {layers && !layers.pockets.length && <p style={{ fontSize: 12, color: 'var(--text-hint)' }}>В этом заказе выемок нет.</p>}
         {layers?.pockets.map(l => (
-          <div key={l.key} style={{ marginBottom: 8 }}>
+          <div key={l.key} data-layer={`pocket:${r1(l.depth)}`} style={{ marginBottom: 8 }}>
             <label className="label">Выемка глубиной {r1(l.depth)} мм <span style={{ color: 'var(--text-hint)' }}>· {l.count} шт.</span></label>
             <ToolSelect cnc={cnc} only="mill" value={ops.pockets?.[l.key]?.tool} onChange={v => setMap('pockets', l.key, { tool: v })} />
             <label className="label" style={{ marginTop: 6 }}>Ход фрезы</label>
@@ -1506,7 +1510,7 @@ export function CncOps({ cnc, onChange, layers }) {
             </div>
           )
           return (
-            <div key={l.key} style={{ paddingTop: i ? 10 : 0, marginTop: i ? 10 : 0, borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
+            <div key={l.key} data-layer={`hole:${r1(l.d)}`} style={{ paddingTop: i ? 10 : 0, marginTop: i ? 10 : 0, borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
               {head}
               <ToolSelect cnc={cnc} maxD={num(o.d) || l.d} value={none && !o.tool ? '' : o.tool} auto={auto ? toolLabel(auto) : 'нет сверла Ø' + r1(num(o.d) || l.d)} onChange={v => setMap('holes', l.key, { tool: v })} />
               {none && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 3 }}>Инструмент не назначен — эти отверстия в программу не попадут.</p>}
