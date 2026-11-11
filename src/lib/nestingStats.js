@@ -5,7 +5,7 @@
 import { sheetGeo } from './savedNesting.js'
 import { partFeatures } from './gcode.js'
 import { detailEdgeList } from './edgeLength.js'
-import { rawDetail, overMm, parseEdgeTypes, edgeThick } from './edgeCut.js'
+import { rawDetail, overMm, parseEdgeTypes, edgeThick, narrowApplied } from './edgeCut.js'
 import { decomposeCuts } from './cutLines.js'
 import { beamSheetCuts } from './beamSawXml.js'
 
@@ -18,6 +18,7 @@ export const emptyStats = () => ({
   sheets: [], sheetCount: 0, offcutSheets: 0, parts: 0, kerf: 0, method: 'nesting',
   cutM: 0, cuts: 0, perimM: 0, partsM2: 0, sheetsM2: 0,
   trimM: 0, trimCuts: 0,
+  upils: 0, upilM: 0,   // упилы: узкую деталь пилят шире, после кромки упиливают в размер — отдельный рез вдоль детали (шт и м)
   offcutSizes: {},   // деловые остатки: { 'длина×ширина': шт } (обрезки, отмеченные на картах)   // пильный центр: опил (обрезка кромок листа, торцовка, подрезка узких) — уже входит в cutM / cuts
   edgeM: 0, edgeThinM: 0, edgeThickM: 0, edgeCurvedM: 0, edgeCurvedParts: 0,
   edgeByType: {},   // кромка по видам заказа: { название: м } (виды — из Excel или из бланка заказа; толщина — edgeTypeT)
@@ -60,6 +61,16 @@ export function nestingStats({ order, mat, method }) {
       if (f.holes.length || f.skipped.edge || f.skipped.back) { st.drillM2 += loopArea(f.outline) / 1e6; st.drillParts++ }
       st.pockets += f.pockets.length
       for (const g of f.grooves) { st.grooves++; st.grooveM += (g.len || Math.max(g.x1 - g.x0, g.y1 - g.y0)) / 1000 }
+      // упил узкой детали: пильный центр — пилится шириной «Пилить узкую деталь шириной» (p.trimTo), иначе — наращена
+      // под кромочный станок («Узкие детали» в видах кромки). Рез — вдоль детали: наращена ширина — по длине, и наоборот
+      if (p.trimTo) {
+        if (Math.abs((Number(p.origX) || 0) - (Number(p.trimTo.width) || 0)) > 0.5) { st.upils++; st.upilM += (Number(p.origY) || 0) / 1000 }
+        if (Math.abs((Number(p.origY) || 0) - (Number(p.trimTo.length) || 0)) > 0.5) { st.upils++; st.upilM += (Number(p.origX) || 0) / 1000 }
+      } else if (d) {
+        const raw = rawDetail(d), W = Number(raw.width) || 0, L = Number(raw.length) || 0
+        const nr = narrowApplied({ left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }, types, W, L, raw.contour)
+        for (const side of Object.keys(nr || {})) { st.upils++; st.upilM += (side === 'left' || side === 'right' ? L : W) / 1000 }
+      }
       // кромка этой детали
       if (d) {
         let curved = false
@@ -126,7 +137,7 @@ export function sumStats(list) {
 export function statsPayload(st, order = null) {
   return {
     sheets: st.sheets.map(s => ({ parts: s.parts })),
-    parts: st.parts, cut_m: r2(st.cutM),
+    parts: st.parts, cut_m: r2(st.cutM), upil_n: st.upils, upil_m: r2(st.upilM),
     edge_thin_m: r2(st.edgeThinM), edge_thick_m: r2(st.edgeThickM), edge_curved_m: r2(st.edgeCurvedM), edge_curved_parts: st.edgeCurvedParts,
     holes: st.holes, edge_holes: st.edgeHoles, // присадка за м² — от общей площади ВСЕХ деталей заказа, всегда (и для списка из Excel, где отверстий в данных нет:
     // детали всё равно перекладывают, обрабатывают); не начислять — «Без присадки» у стоимости работ (drill_kind 'none')
@@ -150,6 +161,7 @@ export function statsRows(st) {
     ['cuts', saw ? 'Количество резов' : 'Количество контуров реза', st.cuts, true],
     ['cutM', saw ? 'Длина реза' : 'Длина реза (траектория)', `${n2(st.cutM)} м`, true],   // пильный центр: опил уже входит в сумму
     ['perimM', 'Периметр всех деталей', `${n2(st.perimM)} м`, true],
+    ['upil', 'Упилы узких деталей', `${st.upils} шт · ${n2(st.upilM)} м`, st.upils > 0],
     ['shaped', 'Фигурных деталей', st.shapedParts, st.shapedParts > 0],
     ['cutouts', 'Вырезов', st.cutouts, st.cutouts > 0],
     ['edgeM', 'Кромка всего', `${n2(st.edgeM)} м`, st.edgeM > 0],

@@ -12,6 +12,8 @@ export const PRICE_GROUPS = [
     ['cut_m', 'Рез', 'за метр реза'],
     ['cut_sheet', 'Раскрой листа', 'за лист'],
     ['cut_part', 'Деталь', 'за деталь'],
+    ['upil', 'Упил узкой детали', 'за упил (узкую деталь пилят шире, после кромки упиливают в размер)'],
+    ['upil_m', 'Упил узкой детали (по метрам)', 'за метр упила — можно вместо цены за штуку или вместе с ней'],
     ['shaped_part', 'Фигурная деталь (доплата)', 'за деталь'],
     ['cutout', 'Вырез в детали', 'за вырез'],
   ] },
@@ -42,7 +44,7 @@ export const HDF_ITEMS = [
 export const GROUP_TITLE = Object.fromEntries(PRICE_GROUPS.map(g => [g.id, g.title]))
 const LINE_TITLE = { ...Object.fromEntries(PRICE_GROUPS.flatMap(g => g.items.map(([k, t]) => [k, t]))), cut_tiers: 'Раскрой листа (по числу деталей)',
   hdf_cut_m: 'Рез ХДФ', hdf_cut_sheet: 'Раскрой листа ХДФ', hdf_cut_tiers: 'Раскрой листа ХДФ (по числу деталей)', hdf_cut_part: 'Деталь ХДФ' }
-const LINE_UNIT = { cut_m: 'м', cut_sheet: 'л.', cut_tiers: 'л.', cut_part: 'дет.', shaped_part: 'дет.', cutout: 'шт.', edge_m: 'м', edge_thick_m: 'м', edge_curved_m: 'м', edge_curved_part: 'дет.', hole: 'шт.', edge_hole: 'шт.', drill_m2: 'м²', drill_m2_large: 'м²', groove_m: 'м', pocket: 'шт.', label: 'дет.', hdf_cut_m: 'м', hdf_cut_sheet: 'л.', hdf_cut_tiers: 'л.', hdf_cut_part: 'дет.' }
+const LINE_UNIT = { cut_m: 'м', cut_sheet: 'л.', cut_tiers: 'л.', cut_part: 'дет.', upil: 'шт.', upil_m: 'м', shaped_part: 'дет.', cutout: 'шт.', edge_m: 'м', edge_thick_m: 'м', edge_curved_m: 'м', edge_curved_part: 'дет.', hole: 'шт.', edge_hole: 'шт.', drill_m2: 'м²', drill_m2_large: 'м²', groove_m: 'м', pocket: 'шт.', label: 'дет.', hdf_cut_m: 'м', hdf_cut_sheet: 'л.', hdf_cut_tiers: 'л.', hdf_cut_part: 'дет.' }
 export const lineTitle = key => LINE_TITLE[key] || key
 export const lineUnit = key => LINE_UNIT[key] || ''
 
