@@ -822,7 +822,7 @@ function supportDepth(list, gap, near) {
  * проходятся раньше. route — контуры в порядке реза, rect — лист. Если все стороны уже прорезаны соседями —
  * начало остаётся как было.
  */
-function lastCutToSupport(route, rect, extra = []) {
+export function lastCutToSupport(route, rect, extra = []) {
   const NEAR = 40
   route.forEach((j, pos) => {
     if (!j.L || j.L.length < 3) return
@@ -854,15 +854,36 @@ function lastCutToSupport(route, rect, extra = []) {
       return free * (0.001 + mass + waste)
     }
     const score = { l: rate('l'), r: rate('r'), b: rate('b'), t: rate('t') }
+    let ar = 0; for (let i = 0; i < n; i++) { const p = P[i], q = P[(i + 1) % n]; ar += p[0] * q[1] - q[0] * p[1] }
+    const ccw = ar > 0
+    // сторона габарита, на которой лежит каждый отрезок (отрезок k — из P[k-1] в P[k])
+    const segSide = k => {
+      const a = P[(k - 1 + n) % n], b = P[k]
+      const u = [b[0] - a[0], b[1] - a[1]], lu = Math.hypot(u[0], u[1])
+      if (!(lu > 1e-6)) return null
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, flatX = Math.abs(u[0]) < 0.01 * lu, flatY = Math.abs(u[1]) < 0.01 * lu
+      let side = flatX && Math.abs(mx - x0) <= e ? 'l' : flatX && Math.abs(mx - x1) <= e ? 'r' : flatY && Math.abs(my - y0) <= e ? 'b' : flatY && Math.abs(my - y1) <= e ? 't' : null
+      // скошенная сторона (клин, трапеция — до ~26° от оси): сторона — по направлению наружу (при обходе против часовой —
+      // справа от хода). Иначе у клина к обрезку последний рез уходил на прямую сторону у края листа
+      if (!side && !flatX && !flatY) {
+        const nx = ccw ? u[1] : -u[1], ny = ccw ? -u[0] : u[0]
+        if (Math.abs(nx) >= 2 * Math.abs(ny)) side = nx > 0 ? 'r' : 'l'
+        else if (Math.abs(ny) >= 2 * Math.abs(nx)) side = ny > 0 ? 't' : 'b'
+      }
+      return side ? [side, lu] : null
+    }
+    const sides = P.map((_, k) => segSide(k))
     let best = -1, bs = 0
     for (let i = 0; i < n; i++) {
       const a = P[(i - 1 + n) % n], b = P[i], c = P[(i + 1) % n]
       const u = [b[0] - a[0], b[1] - a[1]], v = [c[0] - b[0], c[1] - b[1]], lu = Math.hypot(u[0], u[1]), lv = Math.hypot(v[0], v[1])
       if (!(lu > 1e-6 && lv > 1e-6) || (u[0] * v[0] + u[1] * v[1]) / (lu * lv) >= 0.94) continue          // не угол
-      // последний отрезок приходит в точку i: на какой стороне габарита он лежит
-      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, flatX = Math.abs(u[0]) < 0.01 * lu, flatY = Math.abs(u[1]) < 0.01 * lu
-      const side = flatX && Math.abs(mx - x0) <= e ? 'l' : flatX && Math.abs(mx - x1) <= e ? 'r' : flatY && Math.abs(my - y0) <= e ? 'b' : flatY && Math.abs(my - y1) <= e ? 't' : null
-      const sc = side ? score[side] * Math.min(1, lu / 50) : 0
+      // последний рез приходит в угол i: на какой стороне габарита он лежит и какой длины (отрезки этой стороны подряд)
+      const sd = sides[i]
+      if (!sd) continue
+      let run = 0
+      for (let k = 0; k < n; k++) { const q = sides[(i - k + n) % n]; if (!q || q[0] !== sd[0]) break; run += q[1] }
+      const sc = score[sd[0]] * Math.min(1, run / 50)
       if (sc > bs + 1e-9) { bs = sc; best = i }
     }
     if (best > 0) j.restart(best)
