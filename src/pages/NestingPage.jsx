@@ -1400,7 +1400,7 @@ function SheetCanvas({ corner = 'bl', sheet, usableX, usableY, sheetL, sheetW, m
       <div ref={wrapRef}
         style={{ overflow: zoom > 1 ? 'auto' : 'visible', maxHeight: zoom > 1 ? (pane ? Math.max(320, pane.h - DESK_RESERVE) : '70vh') : 'none', borderRadius: 8,
           display: zoom > 1 ? 'block' : 'flex', justifyContent: 'center' }}>
-        <canvas ref={canvasRef} width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
+        <canvas ref={canvasRef} className="dark-canvas" width={Math.round(canvasW * DPR)} height={Math.round(canvasH * DPR)}
           style={{ width: canvasW, height: 'auto', aspectRatio: `${canvasW} / ${canvasH}`, maxWidth: zoom > 1 ? 'none' : '100%', borderRadius: 8, display: 'block', touchAction: interactive ? (zoom > 1 ? 'pan-x pan-y' : 'none') : 'auto' }}
           onMouseDown={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerDown(e) }}
           onMouseMove={e => { if (Date.now() - lastTouchRef.current < 800) return; onPointerMove(e) }}

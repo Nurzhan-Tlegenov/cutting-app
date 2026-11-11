@@ -468,7 +468,7 @@ export default function SheetsOverview({
         style={{ height: viewH, overflowY: contentH > viewH ? 'auto' : 'hidden', overflowX: 'hidden', borderRadius: 8,
           scrollbarGutter: 'stable', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ height: contentH, position: 'relative' }}>
-          <canvas ref={canvasRef} onClick={onClick}
+          <canvas ref={canvasRef} className="dark-canvas" onClick={onClick}
             width={Math.round(canvasW * DPR)} height={Math.round(viewH * DPR)}
             style={{ position: 'sticky', top: 0, width: canvasW, height: viewH, display: 'block',
               cursor: onPickSheet ? 'pointer' : 'default', willChange: 'transform' }} />

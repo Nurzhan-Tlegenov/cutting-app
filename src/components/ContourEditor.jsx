@@ -1652,7 +1652,7 @@ function ContourCanvas({ detail, contour, activeIdx, previewVerts, onTap, showMa
 
   return (<>
     <div ref={wrapRef} style={{ overflow:'auto', WebkitOverflowScrolling:'touch', maxHeight:viewH, borderRadius:8, background:'var(--bg2)', touchAction:'pan-x pan-y', overscrollBehavior:'contain' }}>
-      <canvas ref={ref}
+      <canvas ref={ref} className="dark-canvas"
         onClick={handleTap}
         style={{ display:'block', cursor:'pointer', touchAction:'manipulation',
           outline: placeMode ? '2px solid #0E8A6D' : edgeMode ? '2px solid #2FA84F' : 'none' }} />

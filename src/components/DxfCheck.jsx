@@ -116,7 +116,7 @@ export default function DxfCheck({ dxf, opts, onOpts, busy }) {
       {fixedTxt.length > 0 && <div style={{ color: '#1F7A38', marginBottom: 6 }}>Исправлено само: {fixedTxt.join(' · ')}</div>}
 
       <div ref={boxRef} style={{ position: 'relative', border: '0.5px solid var(--border)', borderRadius: 8, background: '#fff', overflow: 'hidden', opacity: busy ? 0.6 : 1 }}>
-        <canvas ref={cvRef} onClick={onTap} style={{ display: 'block', cursor: 'pointer' }} />
+        <canvas ref={cvRef} className="dark-canvas" onClick={onTap} style={{ display: 'block', cursor: 'pointer' }} />
         <div style={{ position: 'absolute', right: 6, top: 6, display: 'flex', gap: 4 }}>
           {[['−', 1 / 1.6], ['+', 1.6]].map(([t, k]) => <button key={t} type="button" onClick={() => setZoom(z => Math.max(1, Math.min(40, z * k)))} style={{ width: 28, height: 26, borderRadius: 6, border: '0.5px solid var(--border-md)', background: 'var(--bg)', fontSize: 15, padding: 0, cursor: 'pointer' }}>{t}</button>)}
           {(focus || zoom > 1) && <button type="button" onClick={() => { setFocus(null); setZoom(1) }} style={{ height: 26, borderRadius: 6, border: '0.5px solid var(--border-md)', background: 'var(--bg)', fontSize: 11, padding: '0 8px', cursor: 'pointer' }}>весь чертёж</button>}
