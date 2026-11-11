@@ -594,9 +594,15 @@ export default function CncPage() {
               }, 120)
             }
             return (
-              <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)', padding: '10px 12px' }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--amber)', marginBottom: 6 }}>Предупреждения</div>
-                <div style={{ display: 'grid', gridTemplateColumns: (miss.length || face.length) && edgeW.length ? 'repeat(auto-fit, minmax(240px, 1fr))' : '1fr', gap: 12 }}>
+              // свёрнуто, если всё попало (только справка); развёрнуто, если есть слои без инструмента
+              <details key={miss.length ? 'miss' : 'ok'} open={miss.length > 0} className="card"
+                style={{ marginBottom: 10, border: `1px solid ${miss.length ? 'var(--danger)' : 'var(--amber)'}`, padding: '10px 12px' }}>
+                <summary style={{ fontSize: 13, fontWeight: 500, color: miss.length ? 'var(--danger)' : 'var(--amber)', cursor: 'pointer' }}>
+                  Предупреждения · {warnings.length}{miss.length ? ` · без инструмента: ${miss.length}` : ''}
+                </summary>
+                {/* телефон — столбцы друг под другом, монитор — рядом */}
+                <style>{`.cnc-warn-cols{display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px}@media (min-width:700px){.cnc-warn-cols.two{grid-template-columns:1fr 1fr}}`}</style>
+                <div className={`cnc-warn-cols${(miss.length || face.length) && edgeW.length ? ' two' : ''}`}>
                   {(miss.length > 0 || face.length > 0) && (
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>По пласти</div>
@@ -622,7 +628,7 @@ export default function CncPage() {
                     {rest.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
                   </div>
                 )}
-              </div>
+              </details>
             )
           })()}
           {machine?.labelTable && (
