@@ -49,7 +49,9 @@ export default function EdgeTypes({ edgeNames, edgeTypes, activeEdge, onNames, o
     )
   }
   const fin = finishedOn(edgeTypes)
-  const setFin = on => { const next = { ...edgeTypes }; if (on) next[FINISHED_KEY] = { on: true }; else delete next[FINISHED_KEY]; onTypes(next) }
+  // выключение пишется явно ({ on: false }), не удалением: настройки аккаунта сливаются со старыми, и удалённое
+  // «включено» возвращалось в следующем бланке. Выбор пользователя запоминается за аккаунтом — по умолчанию выключено
+  const setFin = on => onTypes({ ...edgeTypes, [FINISHED_KEY]: { on: !!on } })
   return (
     <div>
       {/* размеры деталей: распиловочные (по умолчанию) или готовые — тогда минус толщина кромки с закромленных сторон */}
