@@ -108,7 +108,16 @@ function PushBridge() {
       if (e.data?.type === 'notices-refresh') window.dispatchEvent(new Event('notices-seen'))
     }
     navigator.serviceWorker.addEventListener('message', on)
-    return () => navigator.serviceWorker.removeEventListener('message', on)
+    // Открыли приложение — уведомления в шторке и цифра на ярлыке («2» над иконкой) убираются: всё видно внутри,
+    // в «Сообщениях». Раньше они висели, пока их не смахнёшь в шторке, и было непонятно, откуда цифра на ярлыке
+    const clear = async () => {
+      if (document.visibilityState !== 'visible') return
+      try { const reg = await navigator.serviceWorker.getRegistration(); for (const n of (await reg?.getNotifications?.()) || []) n.close() } catch { /* нет доступа — не страшно */ }
+      try { await navigator.clearAppBadge?.() } catch { /* ярлык без цифры */ }
+    }
+    clear()
+    document.addEventListener('visibilitychange', clear)
+    return () => { navigator.serviceWorker.removeEventListener('message', on); document.removeEventListener('visibilitychange', clear) }
   }, [navigate])
   return null
 }
