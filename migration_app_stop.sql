@@ -37,14 +37,19 @@ begin
   insert into app_stop_log (user_id, kind, path, ua) values (u, 'visit', left(coalesce(p_path, ''), 300), left(coalesce(p_ua, ''), 300));
 end $$;
 
--- сообщение разработчику с заставки (можно и без входа); не больше 5 в час с одного аккаунта / номера
+-- сообщение разработчику с заставки (можно и без входа), только пока приложение остановлено;
+-- не больше 5 в час с одного аккаунта / номера, анонимы без номера — не больше 20 в час на всех
 create or replace function public.stop_message(p_name text, p_phone text, p_text text) returns void
 language plpgsql security definer set search_path = public as $$
 declare u uuid := auth.uid(); d text := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
 begin
+  if not app_stopped() then raise exception 'app not stopped'; end if;   -- только во время остановки
   if length(trim(coalesce(p_text, ''))) = 0 then raise exception 'empty'; end if;
   if (select count(*) from app_stop_log where kind = 'message' and at > now() - interval '1 hour'
       and ((u is not null and user_id = u) or (d <> '' and regexp_replace(coalesce(phone, ''), '\D', '', 'g') = d))) >= 5 then raise exception 'too many'; end if;
+  -- анонимы без телефона: общий лимит 20 в час (иначе журнал можно засыпать мусором)
+  if u is null and d = '' and (select count(*) from app_stop_log where kind = 'message' and user_id is null
+      and at > now() - interval '1 hour') >= 20 then raise exception 'too many'; end if;
   insert into app_stop_log (user_id, kind, name, phone, body)
   values (u, 'message', left(trim(coalesce(p_name, '')), 120), left(trim(coalesce(p_phone, '')), 40), left(trim(p_text), 2000));
 end $$;
