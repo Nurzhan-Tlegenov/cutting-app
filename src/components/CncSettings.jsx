@@ -96,12 +96,12 @@ function NamePad({ value, onChange }) {
   )
 }
 
-function ToolSelect({ cnc, value, onChange, only, auto, maxD, empty }) {
+function ToolSelect({ cnc, value, onChange, only, auto, maxD, empty, compact }) {
   // maxD — диаметр отверстия: инструмент больше него выбрать нельзя
   const list = (cnc.tools || []).filter(t => (!only || t.type === only) && (!(maxD > 0) || num(t.d) <= maxD + 0.05))
   const lost = value && value !== 'none' && !list.some(t => t.id === value)
   return (
-    <select value={lost ? '' : value || ''} onChange={e => onChange(e.target.value)} style={{ padding: '8px 10px', fontSize: 14, borderColor: !auto && !empty && (!value || lost) ? 'var(--amber)' : undefined }}>
+    <select value={lost ? '' : value || ''} onChange={e => onChange(e.target.value)} style={{ ...(compact ? { padding: '2px 6px', fontSize: 12, width: 'auto', maxWidth: 220, height: 26 } : { padding: '8px 10px', fontSize: 14 }), borderColor: !auto && !empty && (!value || lost) ? 'var(--amber)' : undefined }}>
       <option value="">{empty || (auto ? `Авто${auto === true ? '' : ': ' + auto}` : '— не назначен —')}</option>
       {auto && <option value="none">Не обрабатывать</option>}
       {list.map(t => <option key={t.id} value={t.id}>{toolLabel(t)}</option>)}
@@ -1539,19 +1539,19 @@ export function OpsQuick({ cnc, onChange, layers }) {
   const hasTool = id => (cnc.tools || []).some(t => t.id === id)
   const skip = skipOf(ops)
   const rows = []
-  if (!hasTool(ops.outer?.tool)) rows.push({ id: 'outer', title: 'Контур детали', miss: true, tool: <ToolSelect cnc={cnc} only="mill" value={ops.outer?.tool} onChange={v => set('outer', { tool: v })} /> })
-  if (layers.cutouts && !skip.cutouts) rows.push({ id: 'cutout', title: 'Контур выреза', count: layers.cutouts, miss: !hasTool(ops.cutout?.tool), tool: <ToolSelect cnc={cnc} only="mill" value={ops.cutout?.tool} onChange={v => set('cutout', { tool: v })} /> })
+  if (!hasTool(ops.outer?.tool)) rows.push({ id: 'outer', title: 'Контур детали', miss: true, tool: <ToolSelect compact cnc={cnc} only="mill" value={ops.outer?.tool} onChange={v => set('outer', { tool: v })} /> })
+  if (layers.cutouts && !skip.cutouts) rows.push({ id: 'cutout', title: 'Контур выреза', count: layers.cutouts, miss: !hasTool(ops.cutout?.tool), tool: <ToolSelect compact cnc={cnc} only="mill" value={ops.cutout?.tool} onChange={v => set('cutout', { tool: v })} /> })
   if (!skip.grooves) layers.grooveLayers.forEach(l => {
     const o = ops.grooves?.[l.key] || {}
     rows.push({ id: 'g' + l.key, k: 'grooves', key: l.key, title: `Паз ${r1(l.width)} × ${r1(num(o.depth) || l.depth)}`, changed: num(o.depth) ? `в детали ${r1(l.width)} × ${r1(l.depth)}` : '', count: l.count,
       miss: !hasTool(grooveOpFor(ops, l.key).tool), depthOnly: true, depth: num(o.depth) || l.depth, d0: l.depth,
-      tool: <ToolSelect cnc={cnc} only="mill" maxD={l.width} value={o.tool} empty={hasTool(ops.groove?.tool) ? 'Как общий' : '— не назначен —'} onChange={v => setMap('grooves', l.key, { tool: v })} /> })
+      tool: <ToolSelect compact cnc={cnc} only="mill" maxD={l.width} value={o.tool} empty={hasTool(ops.groove?.tool) ? 'Как общий' : '— не назначен —'} onChange={v => setMap('grooves', l.key, { tool: v })} /> })
   })
   if (!skip.pockets) layers.pockets.forEach(l => {
     const o = ops.pockets?.[l.key] || {}
     rows.push({ id: 'p' + l.key, k: 'pockets', key: l.key, title: `Выемка глубиной ${r1(num(o.depth) || l.depth)}`, changed: num(o.depth) ? `в детали ${r1(l.depth)}` : '', count: l.count,
       miss: !hasTool(o.tool), depthOnly: true, depth: num(o.depth) || l.depth, d0: l.depth,
-      tool: <ToolSelect cnc={cnc} only="mill" value={o.tool} onChange={v => setMap('pockets', l.key, { tool: v })} /> })
+      tool: <ToolSelect compact cnc={cnc} only="mill" value={o.tool} onChange={v => setMap('pockets', l.key, { tool: v })} /> })
   })
   layers.holes.forEach(l => {
     if (l.through ? skip.through : skip.blind) return
@@ -1562,37 +1562,35 @@ export function OpsQuick({ cnc, onChange, layers }) {
     rows.push({ id: 'h' + l.key, k: 'holes', key: l.key, title: `Отверстия Ø${r1(d)} × ${r1(depth)}${l.through && !num(o.depth) ? ' (сквозные)' : ''}`,
       changed: num(o.d) || num(o.depth) ? `в детали Ø${r1(l.d)} × ${r1(l.depth)}` : '', count: l.count,
       miss: !holeToolFor({ key: l.key, d: l.d }, cnc), d, depth, d0: l.d, dep0: l.depth,
-      tool: <ToolSelect cnc={cnc} maxD={d} value={o.tool && o.tool !== 'none' && !hasTool(o.tool) ? '' : o.tool} auto={auto ? toolLabel(auto) : 'нет сверла Ø' + r1(d)} onChange={v => setMap('holes', l.key, { tool: v })} /> })
+      tool: <ToolSelect compact cnc={cnc} maxD={d} value={o.tool && o.tool !== 'none' && !hasTool(o.tool) ? '' : o.tool} auto={auto ? toolLabel(auto) : 'нет сверла Ø' + r1(d)} onChange={v => setMap('holes', l.key, { tool: v })} /> })
   })
   if (!rows.length) return <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>Обработки по пласти нет.</div>
   const btn = { padding: '2px 9px', borderRadius: 12, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer', whiteSpace: 'nowrap' }
-  const inp = { width: 62, padding: '3px 6px', fontSize: 12 }
+  const inp = { width: 54, padding: '2px 5px', fontSize: 12, height: 26 }
   const save = r => {
     const dd = Number(edit.d), dp = Number(edit.depth)
     if (r.k === 'holes') setMap('holes', r.key, { d: dd > 0 && Math.abs(dd - r.d0) > 0.001 ? dd : '', depth: dp > 0 && Math.abs(dp - r.dep0) > 0.001 ? dp : '' })
     else setMap(r.k, r.key, { depth: dp > 0 && Math.abs(dp - r.d0) > 0.001 ? dp : '' })
     setEdit(null)
   }
+  // одна строка на слой: название · кол-во · [инструмент] · Изменить (поля Ø / глубина — в этой же строке)
   return rows.map(r => (
-    <div key={r.id} style={{ marginBottom: 6, padding: '6px 8px', borderRadius: 6, border: `0.5px solid ${r.miss ? 'var(--danger)' : 'var(--border)'}`, background: r.miss ? 'var(--danger-light, rgba(220,53,69,0.08))' : 'transparent' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, marginBottom: 4 }}>
-        <b style={{ color: r.miss ? 'var(--danger)' : 'var(--text)' }}>{r.title}</b>
-        {r.count ? <span style={{ color: 'var(--text-muted)' }}>· {r.count} шт.</span> : null}
-        {r.changed && <span style={{ color: 'var(--amber)', fontSize: 11 }}>· изменено, {r.changed}</span>}
-        {r.miss && <span style={{ color: 'var(--danger)', fontSize: 11 }}>· нет инструмента — в программу не попадут</span>}
-        <span style={{ flex: 1 }} />
-        {r.k && edit?.id !== r.id && <button type="button" style={btn} onClick={() => setEdit({ id: r.id, d: r.d ?? '', depth: r.depth })}>Изменить</button>}
-        {r.changed && edit?.id !== r.id && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => setMap(r.k, r.key, r.k === 'holes' ? { d: '', depth: '' } : { depth: '' })}>Вернуть</button>}
-      </div>
-      {edit?.id === r.id && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, marginBottom: 4 }}>
-          {r.k === 'holes' && <>Ø<input type="number" inputMode="decimal" value={edit.d} onChange={e => setEdit({ ...edit, d: e.target.value })} style={inp} /></>}
-          глуб.<input type="number" inputMode="decimal" value={edit.depth} onChange={e => setEdit({ ...edit, depth: e.target.value })} style={inp} />
-          <button type="button" style={{ ...btn, background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' }} onClick={() => save(r)}>OK</button>
-          <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => setEdit(null)}>Отмена</button>
-        </div>
-      )}
-      <div style={{ maxWidth: 360 }}>{r.tool}</div>
+    <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, marginBottom: 3, padding: '3px 6px', borderRadius: 6,
+      border: `0.5px solid ${r.miss ? 'var(--danger)' : 'transparent'}`, background: r.miss ? 'var(--danger-light, rgba(220,53,69,0.08))' : 'transparent' }}>
+      <b style={{ color: r.miss ? 'var(--danger)' : 'var(--text)', whiteSpace: 'nowrap' }} title={r.changed ? `изменено, ${r.changed}` : r.miss ? 'нет инструмента — в программу не попадут' : ''}>
+        {r.title}{r.changed ? <span style={{ color: 'var(--amber)', fontWeight: 400 }}> *</span> : null}
+      </b>
+      {r.count ? <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{r.count} шт.</span> : null}
+      {r.tool}
+      {edit?.id === r.id ? <>
+        {r.k === 'holes' && <>Ø<input type="number" inputMode="decimal" value={edit.d} onChange={e => setEdit({ ...edit, d: e.target.value })} style={inp} /></>}
+        глуб.<input type="number" inputMode="decimal" value={edit.depth} onChange={e => setEdit({ ...edit, depth: e.target.value })} style={inp} />
+        <button type="button" style={{ ...btn, background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' }} onClick={() => save(r)}>OK</button>
+        <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => setEdit(null)}>✕</button>
+      </> : <>
+        {r.k && <button type="button" style={btn} onClick={() => setEdit({ id: r.id, d: r.d ?? '', depth: r.depth })}>Изменить</button>}
+        {r.changed && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} title={`Вернуть: ${r.changed}`} onClick={() => setMap(r.k, r.key, r.k === 'holes' ? { d: '', depth: '' } : { depth: '' })}>Вернуть</button>}
+      </>}
     </div>
   ))
 }
