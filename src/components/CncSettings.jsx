@@ -408,8 +408,15 @@ function BeamSawPostBasic({ post, set, cnc, onChange }) {
   const dir = post.dirPath ?? BEAM_DIR_DEFAULT
   return (
     <div className="card" style={{ marginBottom: 10 }}>
-      <Title>Пильный центр · программа XML</Title>
-      <Hint>Программа для пильного центра KDT: дерево резов по всем листам материала — полосы, поперечные резы, детали, деловые обрезки, таблица деталей для бирок. Выпускается в окне ЧПУ заказа, если раскрой посчитан как «Пильный центр β».</Hint>
+      <Title>Пильный центр · программа</Title>
+      <div style={{ marginTop: 6 }}>
+        <label className="label">Станок / формат программы</label>
+        <Seg value={post.format === 'autocut' ? 'autocut' : 'kdt'} options={[['kdt', 'KDT (XML)'], ['autocut', 'HUAHUA · AutoCUT (.CUT)']]}
+          onChange={v => set({ format: v, ext: v === 'autocut' ? 'CUT' : 'xml' })} />
+      </div>
+      <Hint>{post.format === 'autocut'
+        ? 'Для пильных центров HUAHUA (HP-280 и др.) с программой AutoCUT на стойке: наш раскрой записывается проектом AutoCUT (.CUT) — детали, лист, пропил, обрезка кромок листа и готовая карта (дерево резов). Откройте файл в AutoCUT на станке — карта та же, что у нас; бирки печатает AutoCUT (в полях детали: заказ, позиция, примечание; кромка — в поле Edge). Первый файл проверьте вхолостую.'
+        : 'Программа для пильного центра KDT: дерево резов по всем листам материала — полосы, поперечные резы, детали, деловые обрезки, таблица деталей для бирок.'} Выпускается в окне ЧПУ заказа, если раскрой посчитан как «Пильный центр β».</Hint>
       <div style={{ marginTop: 10 }}>
         <label className="label">Название программы</label>
         <TplInput value={post.nameTpl || BEAM_NAME_DEFAULT} def={BEAM_NAME_DEFAULT} parts={NAME_PARTS.filter(([code]) => code !== '{N}')} onChange={v => set({ nameTpl: v })} />

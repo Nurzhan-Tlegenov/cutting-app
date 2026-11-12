@@ -48,6 +48,7 @@ import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from 
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { saveBeamSawXml, buildBeamSawXml } from '../lib/beamSawXml'
+import { buildAutoCut } from '../lib/autoCutXml'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import { fileNamesOf } from '../lib/fileNames'
 import { fileNameOf, FILE_NAME_PARTS, FILE_NAME_DEFAULTS } from '../lib/orderUtils'
@@ -253,8 +254,10 @@ export default function CncPage() {
     logPostUse(user, [saw], { orderId: order?.id || null, sheets: sel.length })
     const sub = { ...mat, sheets: sel.map(si => mat.sheets[si]) }
     let text = '', error = '', xml = null
-    try { xml = buildBeamSawXml({ order, mat: sub, geoOf: sh => sheetGeo(order, mat.result, sh) }); text = xml.text } catch (e) { error = String(e?.message || e) }
-    const files = [{ si: -1, beam: true, name: beamName(), text: text ? '\uFEFF' + text : '', kinds: [], opIds: [], lines: 0, warnings: error ? [`Программа пилы не собрана: ${error}`] : [
+    // формат пилы: KDT (XML) или HUAHUA / AutoCUT (проект .CUT — открывается в AutoCUT на стойке)
+    const autocut = saw?.format === 'autocut'
+    try { xml = (autocut ? buildAutoCut : buildBeamSawXml)({ order, mat: sub, geoOf: sh => sheetGeo(order, mat.result, sh) }); text = xml.text } catch (e) { error = String(e?.message || e) }
+    const files = [{ si: -1, beam: true, name: beamName(), text: text ? (autocut ? text : '\uFEFF' + text) : '', kinds: [], opIds: [], lines: 0, warnings: error ? [`Программа пилы не собрана: ${error}`] : [
       ...(xml?.droppedOffcuts ? [`Деловых обрезков, отмеченных вручную поперёк реза, — ${xml.droppedOffcuts}: в программу они не вошли (останутся остатком листа)`] : []),
       ...(xml?.wideStrips?.length ? [`Полоса шире максимальной (${xml.maxStrip} мм) после правки карты вручную — ${xml.wideStrips.join('; ')}. Программа собрана; проверьте, возьмёт ли станок такую полосу`] : []),
     ], empty: !text, time: 0 }]
@@ -262,7 +265,7 @@ export default function CncPage() {
     setBuilt({ files, drill, second: null, beam: true }); setSaved('')
     // бирки — файлами EMF с именами по кодам деталей программы, рядом с программой (как у программ KDT): станок печатает
     // бирку, когда выдаёт деталь с этим кодом; порядок и положение — как деталь выходит (beamSawLabels.js)
-    if (text && withLabels) {
+    if (text && withLabels && !autocut) {   // AutoCUT печатает бирки сам — по деталям проекта
       setLabelBusy(true)
       buildBeamEmfLabels({ order, mat, tpl: labelTpl, rows: xml.rows, offRows: xml.offRows, sheetIdx: i => sel[i], partOf: (sheet, pi) => beamExitPart(sheet.placed[pi], sheet, saw) })
         .then(labels => setBuilt(b => (b && b.files === files ? { ...b, labels, labelsOwnDir: false } : b)))
