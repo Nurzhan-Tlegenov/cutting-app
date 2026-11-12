@@ -8,7 +8,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
-import { CncBasic, CncCommands, CncTools, CncOps, openOpsFold } from '../components/CncSettings'
+import { CncBasic, CncCommands, CncTools, CncOps, OpsQuick, openOpsFold } from '../components/CncSettings'
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
@@ -516,7 +516,7 @@ export default function CncPage() {
           {offOps.length > 0 && !beamMat && (
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>В УП не выводятся: {offOps.join(', ')} <button type="button" style={{ ...small, padding: '1px 8px', marginLeft: 4 }} onClick={() => setTab('ops')}>Обработка</button></div>
           )}
-          {!beamMat && (shownW.length > 0 || edgeList.length > 0) && (() => {
+          {!beamMat && (shownW.length > 0 || edgeList.length > 0 || (layers && (layers.holes.length || layers.grooveLayers.length || layers.pockets.length))) && (() => {
             // два столбца по месту обработки: «В торец» (фрезер их не сверлит) и «По пласти» — всё по пласти, что не попало
             // в программу; без инструмента — красным, нажать — к слою в «Обработке». Общее (команды станка и т. п.) — ниже
             const MISS = /^(?:(.+?): )?Не назначен инструмент: (.+?)(?: \((\d+) шт\.\))?(?: — |$)/
@@ -529,6 +529,9 @@ export default function CncPage() {
               else gen.push(w)
             })
             const rest = gen
+            const missAll = miss.length
+            const miss2 = miss.filter(x => x.post)            // второй станок: его слои — в его «Обработке»
+            const faceRows = !!layers && (layers.holes.length + layers.grooveLayers.length + layers.pockets.length + (layers.cutouts || 0) > 0 || pre.length > 0)
             const target = what => {
               let m
               if ((m = what.match(/^отверстия Ø([\d.,]+)/))) return ['holes', `hole:${m[1].replace(',', '.')}`]
@@ -555,18 +558,19 @@ export default function CncPage() {
             }
             return (
               // свёрнуто, если всё попало (только справка); развёрнуто, если есть слои без инструмента
-              <details key={miss.length ? 'miss' : 'ok'} open={miss.length > 0} className="card"
-                style={{ marginBottom: 10, border: `1px solid ${miss.length ? 'var(--danger)' : 'var(--amber)'}`, padding: '10px 12px' }}>
-                <summary style={{ fontSize: 13, fontWeight: 500, color: miss.length ? 'var(--danger)' : 'var(--amber)', cursor: 'pointer' }}>
-                  {built ? 'Предупреждения' : 'Перед созданием программ'} · {shownW.length + edgeList.length}{miss.length ? ` · без инструмента: ${miss.length}` : ''}
+              <details key={missAll ? 'miss' : 'ok'} open={missAll > 0} className="card"
+                style={{ marginBottom: 10, border: `1px solid ${missAll ? 'var(--danger)' : 'var(--amber)'}`, padding: '10px 12px' }}>
+                <summary style={{ fontSize: 13, fontWeight: 500, color: missAll ? 'var(--danger)' : 'var(--amber)', cursor: 'pointer' }}>
+                  {built ? 'Предупреждения' : 'Перед созданием программ'}{missAll ? ` · без инструмента: ${missAll}` : ''}
                 </summary>
                 {/* телефон — столбцы друг под другом, монитор — рядом */}
                 <style>{`.cnc-warn-cols{display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px}@media (min-width:700px){.cnc-warn-cols.two{grid-template-columns:1fr 1fr}}`}</style>
-                <div className={`cnc-warn-cols${(miss.length || face.length) && edgeList.length ? ' two' : ''}`}>
-                  {(miss.length > 0 || face.length > 0) && (
+                <div className={`cnc-warn-cols${(faceRows || miss2.length || face.length) && edgeList.length ? ' two' : ''}`}>
+                  {(faceRows || miss2.length > 0 || face.length > 0) && (
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>По пласти</div>
-                      {miss.map(x => (
+                      <OpsQuick cnc={rview} onChange={v => change({ ...postBack({ ...cnc, post: post.id }, v), post: cnc.post })} layers={layers} />
+                      {miss2.map(x => (
                         <button key={x.w} type="button" onClick={() => go(x.what)} title="Открыть слой в «Обработке» и назначить инструмент"
                           style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12, padding: '5px 8px', marginBottom: 4, borderRadius: 6, cursor: 'pointer',
                             border: '0.5px solid var(--danger)', background: 'var(--danger-light, rgba(220,53,69,0.08))', color: 'var(--danger)' }}>

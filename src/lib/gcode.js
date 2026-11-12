@@ -1210,8 +1210,9 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       }
     }
     // пазы и выборки
-    const rects = [...f.grooves.map(g => { const d = g.depth || T, op = grooveOpFor(ops, grooveKey(g.width, d)); return { ...g, depth: d, op, t: tool(op.tool), rank: 2, label: `пазы ${num(g.width)} × ${num(d)}` } }),
-      ...f.pockets.map(k => { const op = ops.pockets?.[pocketKey(k.depth)] || {}; return { ...k, op, spiral: op.mode === 'spiral' ? (op.dir === 'ccw' ? 'ccw' : 'cw') : null, t: tool(op.tool), rank: 3, label: `выемки глубиной ${num(k.depth)}` } })]
+    // глубина слоя может быть изменена в «Обработке» / в предупреждениях (ops.grooves[key].depth, ops.pockets[key].depth)
+    const rects = [...f.grooves.map(g => { const d = g.depth || T, gk = grooveKey(g.width, d), op = grooveOpFor(ops, gk); return { ...g, depth: n0(ops.grooves?.[gk]?.depth) ? Math.min(T, n0(ops.grooves[gk].depth)) : d, op, t: tool(op.tool), rank: 2, label: `пазы ${num(g.width)} × ${num(d)}` } }),
+      ...f.pockets.map(k => { const op = ops.pockets?.[pocketKey(k.depth)] || {}; return { ...k, depth: n0(op.depth) ? Math.min(T, n0(op.depth)) : k.depth, op, spiral: op.mode === 'spiral' ? (op.dir === 'ccw' ? 'ccw' : 'cw') : null, t: tool(op.tool), rank: 3, label: `выемки глубиной ${num(k.depth)}` } })]
     for (const k of rects) {
       if (!k.t) { noTool(k.label); continue }
       if (k.t.type !== 'mill') { warn.add(`На ${k.label} назначено сверло — нужна фреза.`); continue }
