@@ -322,7 +322,14 @@ export default function UsersPage() {
                       {BETA_FEATURES.map(([f, label]) => {
                         const on = betaOf(u).includes(f)
                         return (
-                          <button key={f} type="button" disabled={busy} onClick={() => act(() => adminSetBeta(u.id, f, !on))}
+                          <button key={f} type="button" disabled={busy} onClick={() => act(async () => {
+                            const r = await adminSetBeta(u.id, f, !on)
+                            // выдача по запросу (🔑) — пользователю сразу уведомление в «Сообщения» (и пуш)
+                            if (!r?.error && GRANT_FEATURES.has(f)) await sendReply(user, profile, u.id, !on
+                              ? `🔑 Вам открыта «${label}». Пользуйтесь постоянно: на странице раскроя кнопка «⬇ DXF» — все листы, «DXF» у листа — один лист.`
+                              : `«${label}» для вашего аккаунта отключена.`, u.full_name || u.phone || '')
+                            return r
+                          })}
                             style={{ padding: '3px 10px', borderRadius: 14, fontSize: 11.5, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text-muted)' }}>
                             {GRANT_FEATURES.has(f) ? '🔑' : 'β'} {label}{on ? ' ✓' : ''}
                           </button>
