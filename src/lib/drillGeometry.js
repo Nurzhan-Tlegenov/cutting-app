@@ -337,7 +337,7 @@ export function getAllDrillPoints(contour, panelW, panelH, frontOnly = false) {
       if (dr.kind === 'edge' && !p.isFaceType && (p.dx || p.dy)) {
         const depth = p.ehDepth ?? (p.isPair ? (dr.pairDepth ?? dr.depth ?? 0) : (dr.depth ?? 0))
         pts.push({ x, y, d: p.ehD ?? (p.isPair ? (dr.pairD ?? d) : d), back: false, edge: true, dx: p.dx, dy: p.dy,
-          depth: less ? Math.max(0, Math.round((depth - less) * 100) / 100) : depth })
+          depth: less ? Math.max(0, Math.round((depth - less) * 100) / 100) : depth, defDepth: depth })   // defDepth — как задано в присадке (до кромки)
         return
       }
       // диаметр и глубина именно этого отверстия (у парного и дополнительного — свои)
