@@ -18,6 +18,7 @@ import { logPostUse } from '../lib/postAccess'
 import { routerPost, drillPosts, isDrill6, isBeamSaw, sawPost, postView, postBack, secondRouter, secondPost, setSecondPost, activePost } from '../lib/cncSettings'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { edgeHoleList, remapMat, edgeLabel } from '../lib/edgeRemap'
+import ColGrid from '../components/ColGrid'
 import { useCnc } from '../hooks/useCnc'
 import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT, drill6Layers, d6OpsOf } from '../lib/drill6Xml'
 import Drill6Ops from '../components/Drill6Ops'
@@ -564,7 +565,7 @@ export default function CncPage() {
                   {built ? 'Предупреждения' : 'Перед созданием программ'}{missAll ? ` · без инструмента: ${missAll}` : ''}
                 </summary>
                 {/* телефон — столбцы друг под другом, монитор — рядом */}
-                <style>{`.cnc-warn-cols{display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px}@media (min-width:700px){.cnc-warn-cols.two{grid-template-columns:1fr 1fr}}`}</style>
+                <style>{`.cnc-warn-cols{display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px}@media (min-width:700px){.cnc-warn-cols.two{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}}`}</style>
                 <div className={`cnc-warn-cols${(faceRows || miss2.length || face.length) && edgeList.length ? ' two' : ''}`}>
                   {(faceRows || miss2.length > 0 || face.length > 0) && (
                     <div>
@@ -833,36 +834,32 @@ export default function CncPage() {
 // Торцевые отверстия одним списком: Ø × глубина — сколько всего; «Изменить» — свой Ø и глубина для программ этого заказа
 function EdgeHoles({ list, remap, onChange }) {
   const [edit, setEdit] = useState(null)        // { key, d, depth }
-  const row = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, marginBottom: 4 }
-  const btn = { padding: '2px 9px', borderRadius: 12, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }
-  const inp = { width: 58, padding: '3px 6px', fontSize: 12 }
+  const btn = { padding: '2px 9px', borderRadius: 12, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer', whiteSpace: 'nowrap' }
+  const inp = { width: 54, padding: '2px 5px', fontSize: 12, height: 26 }
   if (!list.length) return <div style={{ fontSize: 12, color: 'var(--text-hint)' }}>—</div>
-  return list.map(h => {
-    const to = remap[h.key]
-    if (edit?.key === h.key) {
-      const ok = Number(edit.d) > 0 && Number(edit.depth) >= 0
-      return (
-        <div key={h.key} style={row}>
-          <span style={{ color: 'var(--text-muted)' }}>{edgeLabel(h.key)} →</span>
-          Ø<input type="number" inputMode="decimal" value={edit.d} onChange={e => setEdit({ ...edit, d: e.target.value })} style={inp} />
-          глуб.<input type="number" inputMode="decimal" value={edit.depth} onChange={e => setEdit({ ...edit, depth: e.target.value })} style={inp} />
-          <button type="button" disabled={!ok} style={{ ...btn, background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' }} onClick={() => {
-            const d = Number(edit.d), depth = Number(edit.depth), next = { ...remap }
-            if (d === h.d && depth === h.depth) delete next[h.key]; else next[h.key] = { d, depth }
-            onChange(next); setEdit(null)
-          }}>OK</button>
-          <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => setEdit(null)}>Отмена</button>
-        </div>
-      )
-    }
-    return (
-      <div key={h.key} style={row}>
-        <span style={{ color: to ? 'var(--text-hint)' : 'var(--text)', textDecoration: to ? 'line-through' : 'none' }}>{edgeLabel(h.key)}</span>
-        {to && <b style={{ color: 'var(--teal)' }}>→ Ø{to.d}{to.depth > 0 ? ` × ${to.depth}` : ''}</b>}
-        <span style={{ color: 'var(--text-muted)' }}>— {h.count} шт.</span>
-        <button type="button" style={btn} onClick={() => setEdit({ key: h.key, d: to?.d ?? h.d, depth: to?.depth ?? h.depth })}>Изменить</button>
-        {to && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => { const next = { ...remap }; delete next[h.key]; onChange(next) }}>Вернуть</button>}
-      </div>
-    )
-  })
+  return (
+    <ColGrid storeKey="cncEdgeCols" cols={[['hole', 'Отверстие', 120, 80], ['qty', 'Кол-во', 70, 44], ['to', 'Замена', 0]]}
+      rows={list.map(h => {
+        const to = remap[h.key]
+        const ok = edit && Number(edit.d) > 0 && Number(edit.depth) >= 0
+        return { key: h.key, cells: [
+          <b style={{ color: to ? 'var(--text-hint)' : 'var(--text)', textDecoration: to ? 'line-through' : 'none', whiteSpace: 'nowrap' }}>{edgeLabel(h.key)}</b>,
+          <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{h.count} шт.</span>,
+          edit?.key === h.key ? <>
+            Ø<input type="number" inputMode="decimal" value={edit.d} onChange={e => setEdit({ ...edit, d: e.target.value })} style={inp} />
+            глуб.<input type="number" inputMode="decimal" value={edit.depth} onChange={e => setEdit({ ...edit, depth: e.target.value })} style={inp} />
+            <button type="button" disabled={!ok} style={{ ...btn, background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' }} onClick={() => {
+              const d = Number(edit.d), depth = Number(edit.depth), next = { ...remap }
+              if (d === h.d && depth === h.depth) delete next[h.key]; else next[h.key] = { d, depth }
+              onChange(next); setEdit(null)
+            }}>OK</button>
+            <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => setEdit(null)}>✕</button>
+          </> : <>
+            {to && <b style={{ color: 'var(--teal)', whiteSpace: 'nowrap' }}>→ Ø{to.d}{to.depth > 0 ? ` × ${to.depth}` : ''}</b>}
+            <button type="button" style={btn} onClick={() => setEdit({ key: h.key, d: to?.d ?? h.d, depth: to?.depth ?? h.depth })}>Изменить</button>
+            {to && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => { const next = { ...remap }; delete next[h.key]; onChange(next) }}>Вернуть</button>}
+          </>,
+        ] }
+      })} />
+  )
 }

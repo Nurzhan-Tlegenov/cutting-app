@@ -7,6 +7,7 @@ import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES, d6bOrder, d6b
 import { kdtOf, isKdt } from '../lib/kdtXml'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import TplInput from './TplInput'
+import ColGrid from './ColGrid'
 import Drill6LivePreview from './Drill6LivePreview'
 import FileNamesSettings from './FileNamesSettings'
 import { useAuth } from '../context/AuthContext'
@@ -101,7 +102,7 @@ function ToolSelect({ cnc, value, onChange, only, auto, maxD, empty, compact }) 
   const list = (cnc.tools || []).filter(t => (!only || t.type === only) && (!(maxD > 0) || num(t.d) <= maxD + 0.05))
   const lost = value && value !== 'none' && !list.some(t => t.id === value)
   return (
-    <select value={lost ? '' : value || ''} onChange={e => onChange(e.target.value)} style={{ ...(compact ? { padding: '2px 6px', fontSize: 12, width: 'auto', maxWidth: 220, height: 26 } : { padding: '8px 10px', fontSize: 14 }), borderColor: !auto && !empty && (!value || lost) ? 'var(--amber)' : undefined }}>
+    <select value={lost ? '' : value || ''} onChange={e => onChange(e.target.value)} style={{ ...(compact ? { padding: '2px 6px', fontSize: 12, width: '100%', height: 26 } : { padding: '8px 10px', fontSize: 14 }), borderColor: !auto && !empty && (!value || lost) ? 'var(--amber)' : undefined }}>
       <option value="">{empty || (auto ? `Авто${auto === true ? '' : ': ' + auto}` : '— не назначен —')}</option>
       {auto && <option value="none">Не обрабатывать</option>}
       {list.map(t => <option key={t.id} value={t.id}>{toolLabel(t)}</option>)}
@@ -1573,24 +1574,25 @@ export function OpsQuick({ cnc, onChange, layers }) {
     else setMap(r.k, r.key, { depth: dp > 0 && Math.abs(dp - r.d0) > 0.001 ? dp : '' })
     setEdit(null)
   }
-  // одна строка на слой: название · кол-во · [инструмент] · Изменить (поля Ø / глубина — в этой же строке)
-  return rows.map(r => (
-    <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, marginBottom: 3, padding: '3px 6px', borderRadius: 6,
-      border: `0.5px solid ${r.miss ? 'var(--danger)' : 'transparent'}`, background: r.miss ? 'var(--danger-light, rgba(220,53,69,0.08))' : 'transparent' }}>
-      <b style={{ color: r.miss ? 'var(--danger)' : 'var(--text)', whiteSpace: 'nowrap' }} title={r.changed ? `изменено, ${r.changed}` : r.miss ? 'нет инструмента — в программу не попадут' : ''}>
-        {r.title}{r.changed ? <span style={{ color: 'var(--amber)', fontWeight: 400 }}> *</span> : null}
-      </b>
-      {r.count ? <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{r.count} шт.</span> : null}
-      {r.tool}
-      {edit?.id === r.id ? <>
-        {r.k === 'holes' && <>Ø<input type="number" inputMode="decimal" value={edit.d} onChange={e => setEdit({ ...edit, d: e.target.value })} style={inp} /></>}
-        глуб.<input type="number" inputMode="decimal" value={edit.depth} onChange={e => setEdit({ ...edit, depth: e.target.value })} style={inp} />
-        <button type="button" style={{ ...btn, background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' }} onClick={() => save(r)}>OK</button>
-        <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => setEdit(null)}>✕</button>
-      </> : <>
-        {r.k && <button type="button" style={btn} onClick={() => setEdit({ id: r.id, d: r.d ?? '', depth: r.depth })}>Изменить</button>}
-        {r.changed && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} title={`Вернуть: ${r.changed}`} onClick={() => setMap(r.k, r.key, r.k === 'holes' ? { d: '', depth: '' } : { depth: '' })}>Вернуть</button>}
-      </>}
-    </div>
-  ))
+  // таблица: слой · кол-во · инструмент · изменить (поля Ø / глубина — в этой же строке); колонки растягиваются
+  const red = { background: 'var(--danger-light, rgba(220,53,69,0.10))', boxShadow: 'inset 3px 0 0 var(--danger)' }
+  return (
+    <ColGrid storeKey="cncFaceCols" cols={[['layer', 'Слой', 200, 110], ['qty', 'Кол-во', 64, 44], ['tool', 'Инструмент', 250, 120], ['act', '', 0]]}
+      rows={rows.map(r => ({ key: r.id, style: r.miss ? red : null, cells: [
+        <b style={{ color: r.miss ? 'var(--danger)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.changed ? `изменено, ${r.changed}` : r.miss ? 'нет инструмента — в программу не попадут' : r.title}>
+          {r.title}{r.changed ? <span style={{ color: 'var(--amber)', fontWeight: 400 }}> *</span> : null}
+        </b>,
+        <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{r.count ? `${r.count} шт.` : ''}</span>,
+        <div style={{ width: '100%' }}>{r.tool}</div>,
+        edit?.id === r.id ? <>
+          {r.k === 'holes' && <>Ø<input type="number" inputMode="decimal" value={edit.d} onChange={e => setEdit({ ...edit, d: e.target.value })} style={inp} /></>}
+          глуб.<input type="number" inputMode="decimal" value={edit.depth} onChange={e => setEdit({ ...edit, depth: e.target.value })} style={inp} />
+          <button type="button" style={{ ...btn, background: 'var(--blue)', color: 'white', borderColor: 'var(--blue)' }} onClick={() => save(r)}>OK</button>
+          <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} onClick={() => setEdit(null)}>✕</button>
+        </> : <>
+          {r.k && <button type="button" style={btn} onClick={() => setEdit({ id: r.id, d: r.d ?? '', depth: r.depth })}>Изменить</button>}
+          {r.changed && <button type="button" style={{ ...btn, color: 'var(--text-muted)' }} title={`Вернуть: ${r.changed}`} onClick={() => setMap(r.k, r.key, r.k === 'holes' ? { d: '', depth: '' } : { depth: '' })}>Вернуть</button>}
+        </>,
+      ] }))} />
+  )
 }
