@@ -1962,9 +1962,10 @@ export default function NestingPage() {
   useEffect(() => {
     if (!order || !prodsReady || !canSetJoint() || !allDetails.length) return
     const pr = order.production_id ? productions.find(x => x.id === order.production_id) : productions.find(x => x.owner_id && x.owner_id === user?.id)
-    if (!pr) return
-    // галочка «Учитывать кромочный станок» выключена (по умолчанию) — наращивания нет
-    const want = pr.edge_min_on ? Math.max(0, Number(pr.edge_min_width) || 0) : 0
+    if (order.production_id && !pr) return              // производство выбрано, но ещё не загружено — не трогаем
+    // производство не выбрано — наращивания нет (раньше застрявшая отметка «узкие до N мм» так и оставалась в заказе);
+    // галочка «Учитывать кромочный станок» выключена (по умолчанию) — тоже нет
+    const want = pr && pr.edge_min_on ? Math.max(0, Number(pr.edge_min_width) || 0) : 0
     if (Math.abs(narrowMm(order.edge_types) - want) < 0.001) return
     const next = { ...parseEdgeTypes(order.edge_types) }
     if (want > 0) next[NARROW_KEY] = { mm: want }; else delete next[NARROW_KEY]

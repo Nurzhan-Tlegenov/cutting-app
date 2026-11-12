@@ -104,6 +104,8 @@ export function edgeTrimOf(contour) {
 // кромят после подрезки). Это не припуск: задаётся производством (Настройки → Лист и рез), пишется в виды кромки
 // заказа под ключом NARROW_KEY: { mm }.
 export const NARROW_KEY = '__narrow'
+/** Виды кромки без отметки «узкие до N мм» — для бланка и личных настроек (наращивание — только при раскрое, от производства) */
+export const withoutNarrow = types => { const t = parseEdgeTypes(types); if (!t[NARROW_KEY]) return t; const n = { ...t }; delete n[NARROW_KEY]; return n }
 export const narrowMm = types => Math.max(0, num(String(parseEdgeTypes(types)[NARROW_KEY]?.mm ?? '').replace(',', '.')))
 /**
  * С какой стороны упиливать узкую деталь (с неё же наращивают) — одно правило для пильного центра, форматника и фрезера.
@@ -260,8 +262,10 @@ export const modelTrimmed = contour => {
  */
 export function listSize(detail, types) {
   const L = num(detail?.w), W = num(detail?.h)
-  if (!(L > 0) || !(W > 0) || !(modelTrimmed(detail?.contour) || narrowApplied(detail?.edges, types, W, L, detail?.contour))) return { cut: false }
-  const cs = cutSize(L, W, detail.edges, types, detail.contour)
+  // наращивание узкой детали под кромочный станок здесь НЕ показывается: оно от производства и делается только при раскрое
+  // (раньше бланк показывал 120 вместо введённых 50, а отметка «узкие до N мм» застревала в личных настройках)
+  if (!(L > 0) || !(W > 0) || !modelTrimmed(detail?.contour)) return { cut: false }
+  const cs = cutSize(L, W, detail.edges, withoutNarrow(types), detail.contour)
   if (!cs) return { cut: false }
   const dl = r2(L - cs[0]), dw = r2(W - cs[1])
   const back = d => v => (v === '' ? '' : r2(num(v) + d))

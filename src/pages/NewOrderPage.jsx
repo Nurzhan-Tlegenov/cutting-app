@@ -27,7 +27,7 @@ import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided, backSide } from '../lib/partInfo'
 import { saveOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import EdgeTypes from '../components/EdgeTypes'
-import { cutSize, listSize, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT, finishedOn, edgesWithoutThick } from '../lib/edgeCut'
+import { cutSize, listSize, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT, finishedOn, edgesWithoutThick, withoutNarrow } from '../lib/edgeCut'
 import Model3DButton from '../components/Model3DButton'
 import { fetchUserSettings, ORDER_DEFAULT_COLS, getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useBackClose } from '../lib/backStack'
@@ -377,10 +377,10 @@ export default function NewOrderPage() {
   const [edgeNames, setEdgeNames] = useState([])
   const [activeEdge, setActiveEdge] = useState(null)
   // толщина, подрезка и прифуговка по видам кромки; запоминаются за аккаунтом для следующих заказов
-  const [edgeTypes, setEdgeTypesState] = useState(() => ({ ...(getUserSettings(user).edgeTypes || {}) }))
+  const [edgeTypes, setEdgeTypesState] = useState(() => withoutNarrow(getUserSettings(user).edgeTypes || {}))   // застрявшая отметка «узкие до N мм» — не берётся
   const setEdgeTypes = next => setEdgeTypesState(prev => {
     const v = typeof next === 'function' ? next(prev) : next
-    saveUserSettings({ edgeTypes: { ...(getUserSettings(user).edgeTypes || {}), ...v } }, user)
+    saveUserSettings({ edgeTypes: withoutNarrow({ ...(getUserSettings(user).edgeTypes || {}), ...v }) }, user)   // «узкие до N мм» в личные настройки не попадают
     return v
   })
 
@@ -550,7 +550,7 @@ export default function NewOrderPage() {
         cutting_method: SHEET_DEFAULTS.cuttingMethod,
         status: 'draft'
       }
-      const edgeSave = typesToSave(edgeTypes, edgeNames)
+      const edgeSave = typesToSave(withoutNarrow(edgeTypes), edgeNames)   // наращивание узких — от производства при раскрое, не из бланка
       let { data: order, error: oErr } = await supabase.from('orders').insert({ ...baseOrder, ...remembered, edge_types: edgeSave }).select().single()
       // в базе ещё нет колонки с настройками кромки — создаём заказ без неё
       let edgeMissing = false

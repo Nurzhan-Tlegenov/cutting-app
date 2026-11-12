@@ -24,7 +24,7 @@ import { sortDetails, SORT_MODES } from '../lib/sortDetails'
 import { isTwoSided, backSide } from '../lib/partInfo'
 import { saveOrderModel, loadOrderModel, MODEL_TABLE_HINT } from '../lib/orderModel'
 import EdgeTypes from '../components/EdgeTypes'
-import { cutSize, listSize, parseEdgeTypes, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT, finishedOn, edgesWithoutThick } from '../lib/edgeCut'
+import { cutSize, listSize, parseEdgeTypes, typesFromItems, mergeModelTypes, typesToSave, EDGE_TYPES_HINT, finishedOn, edgesWithoutThick, withoutNarrow } from '../lib/edgeCut'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import Model3DButton from '../components/Model3DButton'
 import CncLoader from '../components/CncLoader'
@@ -309,7 +309,7 @@ export default function EditOrderPage() {
   const [edgeTypes, setEdgeTypesState] = useState({})          // у сохранённого заказа — только свои настройки (см. fetchOrder)
   const setEdgeTypes = next => setEdgeTypesState(prev => {
     const v = typeof next === 'function' ? next(prev) : next
-    saveUserSettings({ edgeTypes: { ...(getUserSettings(user).edgeTypes || {}), ...v } }, user)
+    saveUserSettings({ edgeTypes: withoutNarrow({ ...(getUserSettings(user).edgeTypes || {}), ...v }) }, user)   // «узкие до N мм» в личные настройки не попадают
     return v
   })
   const [details, setDetails] = useState([])
