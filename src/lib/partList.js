@@ -42,8 +42,11 @@ const r1 = v => String(Math.round(Number(v) * 10) / 10).replace('.', ',')
 export function partListRows(order, mat, cols) {
   const sheets = mat?.sheets || [], details = mat?.details || []
   if (!sheets.length || !cols?.length) return []
-  const count = new Map()
-  for (const sh of sheets) for (const p of sh?.placed || []) if (p?.detailIndex != null) count.set(p.detailIndex, (count.get(p.detailIndex) || 0) + 1)
+  const count = new Map(), first = new Map()
+  for (const sh of sheets) for (const p of sh?.placed || []) if (p?.detailIndex != null) {
+    count.set(p.detailIndex, (count.get(p.detailIndex) || 0) + 1)
+    if (!first.has(p.detailIndex)) first.set(p.detailIndex, p)
+  }
   const tpl = { rot: false, edgeDims: false }      // кромка — по сторонам детали, как в заказе, без размера стороны
   const out = []
   for (const di of [...count.keys()].sort((a, b) => a - b)) {
@@ -51,7 +54,11 @@ export function partListRows(order, mat, cols) {
     if (!d) continue
     const W = Number(d.width) || 0, L = Number(d.length) || 0, qty = count.get(di)
     let info
-    try { info = labelInfo(order, mat, 0, 0, { detailIndex: di, x: 0, y: 0, w: W, h: L, origX: W, origY: L, rotation: 0, rotated: false }) } catch { info = null }
+    // деталь — как в заказе (без поворота), но с упилом пильного центра (пилится шире, trimTo) — для колонки «Упилить»
+    const q = first.get(di), tw = q?.trimTo ? Math.abs((Number(q.trimTo.width) || 0) - W) > 0.5 : false     // на карте повёрнута
+    const ox = q?.trimTo ? Number(tw ? q.origY : q.origX) || W : W, oy = q?.trimTo ? Number(tw ? q.origX : q.origY) || L : L
+    const trimTo = q?.trimTo ? (tw ? { width: q.trimTo.length, length: q.trimTo.width } : q.trimTo) : undefined
+    try { info = labelInfo(order, mat, 0, 0, { detailIndex: di, x: 0, y: 0, w: W, h: L, origX: ox, origY: oy, trimTo, rotation: 0, rotated: false }) } catch { info = null }
     const cell = type => {
       switch (type) {
         case ROW_NO: return String(out.length + 1)
