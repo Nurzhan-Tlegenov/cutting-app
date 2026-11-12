@@ -379,6 +379,8 @@ export default function UsersPage() {
                   <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
                     Регистрация {date(u.created_at)} · последний вход {date(u.last_sign_in_at)} · заказов создано {u.orders}{u.submitted != null ? `, оформлено ${u.submitted}` : ''}{u.last_order_at ? ` (последний ${date(u.last_order_at)})` : ''}
                   </div>
+                  {u.orders > 0 && <a href={`/all-orders?user=${u.id}`} onClick={e => { e.preventDefault(); window.history.pushState({}, '', `/all-orders?user=${u.id}`); window.dispatchEvent(new PopStateEvent('popstate')) }}
+                    style={{ display: 'inline-block', marginTop: 4, fontSize: 12, color: 'var(--blue)' }}>👁 Заказы пользователя ({u.orders})</a>}
                   </div>}
                 </div>
     )

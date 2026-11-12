@@ -1,6 +1,7 @@
 import { MenuButton } from '../components/NavDrawer'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { getPeek, setPeek } from '../lib/peek'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { adminUsers } from '../lib/adminApi'
@@ -28,6 +29,9 @@ export default function AllOrdersPage() {
   const [find, setFind] = useState(() => sessionStorage.getItem('allOrdersFind') || '')
   const [status, setStatus] = useState(() => sessionStorage.getItem('allOrdersStatus') || 'all')
   const [error, setError] = useState('')
+  // ?user=<id> — заказы одного пользователя (из сообщений / «Пользователей»): включается тихий просмотр (peek.js)
+  const [params, setParams] = useSearchParams()
+  const onlyUser = params.get('user') || getPeek()?.userId || ''
 
   useEffect(() => {
     if (!isMaster) return
@@ -50,6 +54,11 @@ export default function AllOrdersPage() {
     })
     return () => { alive = false }
   }, [isMaster])
+  useEffect(() => {
+    if (!onlyUser || !users.size || getPeek()?.userId === onlyUser) return
+    const u = users.get(onlyUser)
+    setPeek({ userId: onlyUser, name: u?.full_name || u?.phone || 'пользователь' })
+  }, [onlyUser, users])
   useEffect(() => { sessionStorage.setItem('allOrdersFind', find); sessionStorage.setItem('allOrdersStatus', status) }, [find, status])
 
   const owner = o => users.get(o.user_id)
@@ -66,7 +75,7 @@ export default function AllOrdersPage() {
   const stateOf = o => sendState(o, nested.has(o.id))
   const shown = useMemo(() => {
     const q = find.trim().toLowerCase(), qd = digits(q)
-    return (orders || []).filter(o => {
+    return (orders || []).filter(o => !onlyUser || o.user_id === onlyUser).filter(o => {
       if (status === 'all') return true
       const k = sendState(o, nested.has(o.id)).key
       if (status === 'unsent') return k !== 'sent'
@@ -77,7 +86,7 @@ export default function AllOrdersPage() {
       const u = users.get(o.user_id)
       return `${orderTitle(o)} ${o.order_number || ''} ${o.material_name || ''} ${u?.full_name || ''}`.toLowerCase().includes(q) || (qd.length > 2 && tel(u).includes(qd))
     })
-  }, [orders, users, nested, find, status])
+  }, [orders, users, nested, find, status, onlyUser])
 
   if (!isMaster) return (
     <div className="page" style={{ paddingBottom: 100 }}>
@@ -91,7 +100,8 @@ export default function AllOrdersPage() {
     <div className="page" style={{ paddingBottom: 100 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, paddingTop: 8 }}>
         <MenuButton />
-        <h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>Заказы всех клиентов</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 500, flex: 1 }}>{onlyUser ? `Заказы: ${users.get(onlyUser)?.full_name || users.get(onlyUser)?.phone || 'пользователь'}` : 'Заказы всех клиентов'}</h1>
+        {onlyUser && <button style={LINK} onClick={() => { setPeek(null); params.delete('user'); setParams(params, { replace: true }) }}>Все клиенты</button>}
         <span style={{ fontSize: 12, color: 'var(--text-hint)' }}>{shown.length} из {orders.length}</span>
       </div>
       {error && <div className="card" style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 10 }}>{error}</div>}

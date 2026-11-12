@@ -1,3 +1,4 @@
+import PeekBar from './components/PeekBar'
 import StopGate from './components/AppStop'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { Component, Suspense, useEffect } from 'react'
@@ -145,6 +146,8 @@ function AppRoutes() {
   const home = cabinet === 'production' ? '/production' : '/orders'   // с чего начинается кабинет
   return (
     <Suspense fallback={<CncLoader full label="Загружаем страницу…" />}>
+    <>
+    <PeekBar />
     <Routes>
       {/* 3D-модель по ссылке для клиента — без входа */}
       <Route path="/view/:token" element={<SharedModelPage />} />
@@ -187,6 +190,7 @@ function AppRoutes() {
       <Route path="/post/:id" element={<ProtectedRoute><PostPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to={user ? home : '/auth'} />} />
     </Routes>
+    </>
     </Suspense>
   )
 }

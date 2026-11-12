@@ -95,6 +95,8 @@ export default function Conversation({ userId, name, onClose, onSent }) {
           <div style={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isMaster ? <UserName id={userId} name={name} dir={dir} canWrite={false} /> : (name || 'Пользователь')}</div>
           {isMaster && <UserLine dir={dir} id={userId} />}
           <div style={{ fontSize: 11.5, color: 'var(--text-hint)' }}>Переписка: обращения и ответы{list ? ` · ${list.length}` : ''}</div>
+          {isMaster && userId && <button type="button" onClick={() => go(`/all-orders?user=${userId}`)} title="Тихо открыть его заказы и раскрои — пользователь не увидит, его заказы не меняются"
+            style={{ marginTop: 4, padding: '3px 10px', borderRadius: 12, fontSize: 12, border: '0.5px solid var(--blue)', background: 'transparent', color: 'var(--blue)', cursor: 'pointer' }}>👁 Заказы пользователя</button>}
         </div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 760, width: '100%', margin: '0 auto' }}>
