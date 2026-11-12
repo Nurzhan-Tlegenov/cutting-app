@@ -15,7 +15,7 @@ import { countryCode } from '../lib/productionLabel'
 import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
-import { adminBeta, adminSetBeta, BETA_FEATURES, GRANT_FEATURES } from '../lib/beta'
+import { adminBeta, adminSetBeta, BETA_FEATURES, GRANT_FEATURES, grantFeature } from '../lib/beta'
 import { adminPostAccess, adminUserPosts, grantPost, revokePost, setRequestStatus } from '../lib/postAccess'
 import { sendReply } from '../lib/messages'
 import WriteToUser, { WriteToUserDialog } from '../components/WriteToUser'
@@ -273,11 +273,7 @@ export default function UsersPage() {
                         <input type="text" value={locEdit.city} onChange={e => setLocEdit({ ...locEdit, city: e.target.value })} maxLength={80} style={{ fontSize: 13, padding: '6px 8px' }} />
                       </div>
                       <button type="button" style={btn()} onClick={() => setLocEdit(null)}>Отмена</button>
-                      <button type="button" style={btn('main')} disabled={busy || !locEdit.country.trim()} onClick={() => act(async () => {
-                        const r = await adminSetLocation(u.id, locEdit.country, locEdit.city)
-                        if (!r.error) { setLocEdit(null); setInfo(`Страна и город изменены: ${u.full_name || u.phone || 'пользователь'}.`) }
-                        return r
-                      })}>Сохранить</button>
+                      <button type="button" style={btn('main')} disabled={busy || !locEdit.country.trim()} onClick={() => act(() => GRANT_FEATURES.has(f) ? grantFeature(user, profile, u.id, u.full_name || u.phone || '', f, !on) : adminSetBeta(u.id, f, !on))}>Сохранить</button>
                     </div>
                   ) : (
                     <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8 }}>

@@ -9,6 +9,8 @@ import ExcludeStatsRequest from './ExcludeStatsRequest'
 import MsgFile from './MsgFile'
 import { UserName, UserLine } from './UserCard'
 import { useAdminDirectory } from '../lib/adminDirectory'
+import GrantButton from './GrantButton'
+import { grantOfMessage } from '../lib/beta'
 
 const when = v => (v ? new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
 const sizeTxt = n => (n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : n > 1024 ? Math.round(n / 1024) + ' КБ' : (n || 0) + ' Б')
@@ -117,8 +119,12 @@ export default function Conversation({ userId, name, onClose, onSent }) {
                     if (r.error) setError(r.error); else { load(); onSent?.() }
                   }} />
               )}
+              {isMaster && !mine && grantOfMessage(m) && !m.order_id && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}><GrantButton userId={userId} userName={name} feature={grantOfMessage(m)} onDone={() => { load(); onSent?.() }} /></div>
+              )}
               {isMaster && !mine && m.order_id && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                  {grantOfMessage(m) && <GrantButton userId={userId} userName={name} feature={grantOfMessage(m)} onDone={() => { load(); onSent?.() }} />}
                   <button type="button" onClick={() => go(`/orders/${m.order_id}/nesting`)} style={{ padding: '4px 10px', borderRadius: 16, fontSize: 12, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', color: 'var(--blue-dark)', cursor: 'pointer' }}>🧩 Раскрой заказа</button>
                   <button type="button" onClick={() => go(`/orders/${m.order_id}`)} style={{ padding: '4px 10px', borderRadius: 16, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}>📄 Заказ</button>
                 </div>

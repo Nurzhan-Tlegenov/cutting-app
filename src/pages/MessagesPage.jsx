@@ -17,6 +17,8 @@ import Conversation from '../components/Conversation'
 import { UserName, UserLine } from '../components/UserCard'
 import { useAdminDirectory } from '../lib/adminDirectory'
 import MsgFile from '../components/MsgFile'
+import GrantButton from '../components/GrantButton'
+import { grantOfMessage } from '../lib/beta'
 
 // Сообщения: у пользователя — новости мастер-аккаунта, ответы и свои обращения;
 // у мастер-аккаунта — обращения и файлы для отладки от пользователей (видно, от кого), новости для всех.
@@ -271,6 +273,7 @@ export default function MessagesPage() {
                       : <button type="button" style={{ ...small, color: 'white', background: 'var(--amber)', borderColor: 'var(--amber)' }} disabled={busy} onClick={() => doExclude(m, exclOrder, true)}>Убрать из итогов</button>
                   })()}
                   {excl && exclOrder && <button type="button" style={small} onClick={() => navigate(`/all-productions?order=${exclOrder.id}`)}>Итоги производства</button>}
+                  {isMaster && !mine && grantOfMessage(m) && <GrantButton userId={m.from_id} userName={m.from_name} feature={grantOfMessage(m)} onDone={load} />}
                   {isMaster && m.kind !== 'order' && m.kind !== 'reply' && m.order_id && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>🧩 Раскрой заказа</button>}
                   {m.kind === 'order' && m.order_id && <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => navigate(`/orders/${m.order_id}#order-chat`)}>Открыть заказ и ответить</button>}
                   {isMaster && m.order_id && !excl && m.kind !== 'order' && <button type="button" style={small} onClick={() => navigate(`/orders/${m.order_id}/nesting`)}>Открыть заказ</button>}
