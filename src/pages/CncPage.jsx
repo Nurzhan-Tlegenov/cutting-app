@@ -412,6 +412,7 @@ export default function CncPage() {
     raw.forEach(w => { const m = w.match(/\((\d+) шт\.\)/); const k = m ? w.replace(m[0], '(#)') : w; sum.set(k, (sum.get(k) || 0) + (m ? Number(m[1]) : 0)) })
     return [...sum].map(([k, n]) => k.replace('(#)', `(${n} шт.)`))
   })() : []
+  const shownW = built ? warnings : pre.map(w => `Не назначен инструмент: ${w}`)
   const selMat = mat0 ? { ...mat0, sheets: sel.map(i => mat0.sheets[i]).filter(Boolean) } : null
   const edgeList = selMat ? edgeHoleList(selMat) : []
   const chip = on => ({ flex: '0 0 auto', padding: '7px 12px', borderRadius: 20, border: 'none', fontSize: 13, background: on ? 'var(--blue)' : 'var(--bg)', color: on ? 'white' : 'var(--text-muted)' })
@@ -515,14 +516,81 @@ export default function CncPage() {
           {offOps.length > 0 && !beamMat && (
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>В УП не выводятся: {offOps.join(', ')} <button type="button" style={{ ...small, padding: '1px 8px', marginLeft: 4 }} onClick={() => setTab('ops')}>Обработка</button></div>
           )}
-          {pre.length > 0 && !beamMat && (
-            <div className="card" style={{ marginBottom: 10, border: '1px solid var(--amber)', background: 'var(--amber-light)', padding: '10px 12px' }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--amber)', marginBottom: 4 }}>⚠ Не назначен инструмент</div>
-              {pre.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)' }}>· {w}</div>)}
-              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Программу создать можно — эти операции в неё не попадут.</div>
-              <button type="button" style={{ ...small, marginTop: 6 }} onClick={() => setTab((cnc.tools || []).length ? 'ops' : 'tools')}>{(cnc.tools || []).length ? 'Назначить' : 'Создать инструменты'}</button>
-            </div>
-          )}
+          {!beamMat && (shownW.length > 0 || edgeList.length > 0) && (() => {
+            // два столбца по месту обработки: «В торец» (фрезер их не сверлит) и «По пласти» — всё по пласти, что не попало
+            // в программу; без инструмента — красным, нажать — к слою в «Обработке». Общее (команды станка и т. п.) — ниже
+            const MISS = /^(?:(.+?): )?Не назначен инструмент: (.+?)(?: \((\d+) шт\.\))?(?: — |$)/
+            const miss = [], edgeW = [], face = [], gen = []
+            shownW.forEach(w => {
+              const m = w.match(MISS)
+              if (m) miss.push({ w, post: m[1], what: m[2], cnt: m[3] })
+              else if (/в торец/i.test(w)) edgeW.push(w.replace(/^Отверстия в торец /, '').replace(/ на этом станке не сверлятся — в программу не попали\.$/, ''))
+              else if (/изнанк|выемк|отверст|паз|контур|шинковк|Не выводится|Фреза Ø|сверло/i.test(w)) face.push(w)
+              else gen.push(w)
+            })
+            const rest = gen
+            const target = what => {
+              let m
+              if ((m = what.match(/^отверстия Ø([\d.,]+)/))) return ['holes', `hole:${m[1].replace(',', '.')}`]
+              if ((m = what.match(/^пазы ([\d.,]+) × ([\d.,]+)/))) return ['groove', `groove:${m[1].replace(',', '.')}x${m[2].replace(',', '.')}`]
+              if ((m = what.match(/^выемки глубиной ([\d.,]+)/))) return ['pockets', `pocket:${m[1].replace(',', '.')}`]
+              if (/контур выреза/.test(what)) return ['cutout']
+              if (/контур обрезка/.test(what)) return ['offcut']
+              if (/шинковка/.test(what)) return ['score']
+              return ['outer']
+            }
+            const go = what => {
+              const [fold, layer] = target(what)
+              openOpsFold(fold)
+              setTab('ops')
+              setTimeout(() => {
+                const box = document.querySelector(`[data-fold="${fold}"]`)
+                const el = (layer && box?.querySelector(`[data-layer="${layer}"]`)) || box
+                if (!el) return
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                const prev = el.style.boxShadow
+                el.style.boxShadow = '0 0 0 2px var(--danger)'
+                setTimeout(() => { el.style.boxShadow = prev }, 2500)
+              }, 120)
+            }
+            return (
+              // свёрнуто, если всё попало (только справка); развёрнуто, если есть слои без инструмента
+              <details key={miss.length ? 'miss' : 'ok'} open={miss.length > 0} className="card"
+                style={{ marginBottom: 10, border: `1px solid ${miss.length ? 'var(--danger)' : 'var(--amber)'}`, padding: '10px 12px' }}>
+                <summary style={{ fontSize: 13, fontWeight: 500, color: miss.length ? 'var(--danger)' : 'var(--amber)', cursor: 'pointer' }}>
+                  {built ? 'Предупреждения' : 'Перед созданием программ'} · {shownW.length + edgeList.length}{miss.length ? ` · без инструмента: ${miss.length}` : ''}
+                </summary>
+                {/* телефон — столбцы друг под другом, монитор — рядом */}
+                <style>{`.cnc-warn-cols{display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px}@media (min-width:700px){.cnc-warn-cols.two{grid-template-columns:1fr 1fr}}`}</style>
+                <div className={`cnc-warn-cols${(miss.length || face.length) && edgeList.length ? ' two' : ''}`}>
+                  {(miss.length > 0 || face.length > 0) && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>По пласти</div>
+                      {miss.map(x => (
+                        <button key={x.w} type="button" onClick={() => go(x.what)} title="Открыть слой в «Обработке» и назначить инструмент"
+                          style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12, padding: '5px 8px', marginBottom: 4, borderRadius: 6, cursor: 'pointer',
+                            border: '0.5px solid var(--danger)', background: 'var(--danger-light, rgba(220,53,69,0.08))', color: 'var(--danger)' }}>
+                          {x.post ? `${x.post}: ` : ''}<b>{x.what}</b>{x.cnt ? ` · ${x.cnt} шт.` : ''} — инструмент не назначен — в программу {built ? 'не попали' : 'не попадут'}. <span style={{ textDecoration: 'underline' }}>Назначить →</span>
+                        </button>
+                      ))}
+                      {face.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
+                    </div>
+                  )}
+                  {edgeList.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>В торец — на этом станке не сверлятся</div>
+                      <EdgeHoles list={edgeList} remap={edgeRemap} onChange={setEdgeRemap} />
+                    </div>
+                  )}
+                </div>
+                {rest.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    {rest.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
+                  </div>
+                )}
+              </details>
+            )
+          })()}
           <div data-tour="cnc-sheets" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
             <p className="section-title" style={{ marginBottom: 0, flex: 1 }}>Листы ({sel.length} из {mat.sheets.length})</p>
             <button type="button" style={{ ...small, marginRight: 6 }} title="Карты раскроя: листы с деталями, размерами и кромкой; на последней странице — статистика раскроя и стоимость работ (что выводить, выбираете сами)"
@@ -574,81 +642,6 @@ export default function CncPage() {
               )
             })}
           </div>
-          {warnings.length > 0 && (() => {
-            // два столбца по месту обработки: «В торец» (фрезер их не сверлит) и «По пласти» — всё по пласти, что не попало
-            // в программу; без инструмента — красным, нажать — к слою в «Обработке». Общее (команды станка и т. п.) — ниже
-            const MISS = /^(?:(.+?): )?Не назначен инструмент: (.+?) \((\d+) шт\.\)/
-            const miss = [], edgeW = [], face = [], gen = []
-            warnings.forEach(w => {
-              const m = w.match(MISS)
-              if (m) miss.push({ w, post: m[1], what: m[2], cnt: m[3] })
-              else if (/в торец/i.test(w)) edgeW.push(w.replace(/^Отверстия в торец /, '').replace(/ на этом станке не сверлятся — в программу не попали\.$/, ''))
-              else if (/изнанк|выемк|отверст|паз|контур|шинковк|Не выводится|Фреза Ø|сверло/i.test(w)) face.push(w)
-              else gen.push(w)
-            })
-            const rest = gen
-            const target = what => {
-              let m
-              if ((m = what.match(/^отверстия Ø([\d.,]+)/))) return ['holes', `hole:${m[1].replace(',', '.')}`]
-              if ((m = what.match(/^пазы ([\d.,]+) × ([\d.,]+)/))) return ['groove', `groove:${m[1].replace(',', '.')}x${m[2].replace(',', '.')}`]
-              if ((m = what.match(/^выемки глубиной ([\d.,]+)/))) return ['pockets', `pocket:${m[1].replace(',', '.')}`]
-              if (/контур выреза/.test(what)) return ['cutout']
-              if (/контур обрезка/.test(what)) return ['offcut']
-              if (/шинковка/.test(what)) return ['score']
-              return ['outer']
-            }
-            const go = what => {
-              const [fold, layer] = target(what)
-              openOpsFold(fold)
-              setTab('ops')
-              setTimeout(() => {
-                const box = document.querySelector(`[data-fold="${fold}"]`)
-                const el = (layer && box?.querySelector(`[data-layer="${layer}"]`)) || box
-                if (!el) return
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                const prev = el.style.boxShadow
-                el.style.boxShadow = '0 0 0 2px var(--danger)'
-                setTimeout(() => { el.style.boxShadow = prev }, 2500)
-              }, 120)
-            }
-            return (
-              // свёрнуто, если всё попало (только справка); развёрнуто, если есть слои без инструмента
-              <details key={miss.length ? 'miss' : 'ok'} open={miss.length > 0} className="card"
-                style={{ marginBottom: 10, border: `1px solid ${miss.length ? 'var(--danger)' : 'var(--amber)'}`, padding: '10px 12px' }}>
-                <summary style={{ fontSize: 13, fontWeight: 500, color: miss.length ? 'var(--danger)' : 'var(--amber)', cursor: 'pointer' }}>
-                  Предупреждения · {warnings.length}{miss.length ? ` · без инструмента: ${miss.length}` : ''}
-                </summary>
-                {/* телефон — столбцы друг под другом, монитор — рядом */}
-                <style>{`.cnc-warn-cols{display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px}@media (min-width:700px){.cnc-warn-cols.two{grid-template-columns:1fr 1fr}}`}</style>
-                <div className={`cnc-warn-cols${(miss.length || face.length) && edgeW.length ? ' two' : ''}`}>
-                  {(miss.length > 0 || face.length > 0) && (
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>По пласти</div>
-                      {miss.map(x => (
-                        <button key={x.w} type="button" onClick={() => go(x.what)} title="Открыть слой в «Обработке» и назначить инструмент"
-                          style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12, padding: '5px 8px', marginBottom: 4, borderRadius: 6, cursor: 'pointer',
-                            border: '0.5px solid var(--danger)', background: 'var(--danger-light, rgba(220,53,69,0.08))', color: 'var(--danger)' }}>
-                          {x.post ? `${x.post}: ` : ''}<b>{x.what}</b> · {x.cnt} шт. — инструмент не назначен, в программу не попали. <span style={{ textDecoration: 'underline' }}>Назначить →</span>
-                        </button>
-                      ))}
-                      {face.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
-                    </div>
-                  )}
-                  {edgeW.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>В торец — на этом станке не сверлятся</div>
-                      <EdgeHoles list={edgeList} remap={edgeRemap} onChange={setEdgeRemap} />
-                    </div>
-                  )}
-                </div>
-                {rest.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    {rest.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
-                  </div>
-                )}
-              </details>
-            )
-          })()}
           {machine?.labelTable && (
             <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 10 }}>
               🏷 Вместе с G-кодом будут созданы файлы маркировочного стола (бирка {labelTpl.w}×{labelTpl.h} мм).{' '}
