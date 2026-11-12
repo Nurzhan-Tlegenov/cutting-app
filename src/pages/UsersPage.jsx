@@ -15,7 +15,7 @@ import { countryCode } from '../lib/productionLabel'
 import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
-import { adminBeta, adminSetBeta, BETA_FEATURES } from '../lib/beta'
+import { adminBeta, adminSetBeta, BETA_FEATURES, GRANT_FEATURES } from '../lib/beta'
 import { adminPostAccess, adminUserPosts, grantPost, revokePost, setRequestStatus } from '../lib/postAccess'
 import { sendReply } from '../lib/messages'
 import WriteToUser, { WriteToUserDialog } from '../components/WriteToUser'
@@ -324,7 +324,7 @@ export default function UsersPage() {
                         return (
                           <button key={f} type="button" disabled={busy} onClick={() => act(() => adminSetBeta(u.id, f, !on))}
                             style={{ padding: '3px 10px', borderRadius: 14, fontSize: 11.5, cursor: 'pointer', border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--text-muted)' }}>
-                            β {label}{on ? ' ✓' : ''}
+                            {GRANT_FEATURES.has(f) ? '🔑' : 'β'} {label}{on ? ' ✓' : ''}
                           </button>
                         )
                       })}
@@ -609,7 +609,7 @@ export default function UsersPage() {
                 const who = (users || []).filter(u => betaOf(u).includes(f))
                 return (
                   <div key={f} style={{ fontSize: 12.5, marginBottom: 4 }}>
-                    <b>β {label}</b>: {who.length ? who.map(u => u.full_name || u.phone || 'без имени').join(', ') : <span style={{ color: 'var(--text-hint)' }}>пока только вы</span>}
+                    <b>{GRANT_FEATURES.has(f) ? '🔑' : 'β'} {label}</b>: {who.length ? who.map(u => u.full_name || u.phone || 'без имени').join(', ') : <span style={{ color: 'var(--text-hint)' }}>пока только вы</span>}
                   </div>
                 )
               })}

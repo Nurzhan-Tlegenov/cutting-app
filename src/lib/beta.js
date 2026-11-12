@@ -7,7 +7,9 @@ export const BETA_FEATURES = [
   ['merge_nesting', 'Объединённый раскрой'],
   ['constructor', 'Конструктор мебели'],
   ['linear_cut', 'Линейный раскрой'],
+  ['dxf', 'Выгрузка DXF раскроя'],   // не бета: выдаётся по запросу, как постпроцессор (🔑)
 ]
+export const GRANT_FEATURES = new Set(['dxf'])          // выдаются по запросу — значок 🔑 вместо β
 export const BETA_SQL_HINT = 'Бета-тест ещё не включён в базе: выполните migration_beta.sql в Supabase (SQL Editor) — один раз.'
 const isMissing = e => /PGRST202|42883|schema cache|Could not find the function/i.test(`${e?.message || ''} ${e?.code || ''}`)
 

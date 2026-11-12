@@ -66,6 +66,7 @@ import SendToMaster from '../components/SendToMaster'
 import { lazyRetry } from '../lib/lazyRetry'
 import { useBackClose } from '../lib/backStack'
 import { hasBeta } from '../lib/beta'
+import { sendAppeal } from '../lib/messages'
 import { beamSettings, sameMaps, sameMapTag } from '../lib/beamSaw'
 import BeamSawSettings from '../components/BeamSawSettings'
 import { cutMethods } from '../lib/productionServices'
@@ -1849,6 +1850,18 @@ export default function NestingPage() {
   const [beamSetOpen, setBeamSetOpenState] = useState(() => getUserSettings(user).beamSetOpen === true)   // блок настроек пильного центра — раскрыт / свёрнут, как оставили
   const setBeamSetOpen = v => { if (v !== beamSetOpen) { setBeamSetOpenState(v); saveUserSettings({ beamSetOpen: v }, user) } }
   const [betaBeam, setBetaBeam] = useState(false)
+  // Выгрузка DXF раскроя — по запросу (как постпроцессор): мастер-аккаунт выдаёт в «Пользователях» (🔑 Выгрузка DXF раскроя).
+  // Кнопку видят все; без доступа — предложение отправить запрос разработчику
+  const [dxfOk, setDxfOk] = useState(false)
+  useEffect(() => { let alive = true; hasBeta('dxf').then(v => { if (alive) setDxfOk(v) }); return () => { alive = false } }, [])
+  const dxfAllowed = async () => {
+    if (isMaster || dxfOk) return true
+    if (await hasBeta('dxf', true)) { setDxfOk(true); return true }
+    if (!window.confirm('Выгрузка DXF раскроя выдаётся по запросу.\n\nОтправить запрос разработчику? Когда доступ откроют, ответ придёт в «Сообщения».')) return false
+    const r = await sendAppeal(user, profile, `Прошу открыть выгрузку DXF раскроя${order?.order_number ? ` (заказ ${order.order_number})` : ''}.`, { title: 'Запрос: выгрузка DXF', ...(order?.id ? { orderId: order.id } : {}) })
+    window.alert(r?.error ? `Не отправилось: ${r.error}` : 'Запрос отправлен. Ответ придёт в «Сообщения».')
+    return false
+  }
   useEffect(() => { let alive = true; hasBeta('beam_saw').then(v => { if (alive) setBetaBeam(v) }); return () => { alive = false } }, [])
   const [showOffcuts, setShowOffcuts] = useKeptState('offcuts', false)
   const [offcutMode, setOffcutMode] = useState('manual') // 'manual' | 'cuts'
@@ -3660,10 +3673,11 @@ export default function NestingPage() {
                     )}
                     {view === 'sheet' && (
                       <>
-                        {isMaster && <button onClick={() => downloadSheetDxf(cfg.activeSheet, cfg.sheetsData, `_k${idx + 1}`)}
+                        {<button onClick={async () => { if (await dxfAllowed()) downloadSheetDxf(cfg.activeSheet, cfg.sheetsData, `_k${idx + 1}`) }}
+                          title={isMaster || dxfOk ? 'Скачать DXF этого листа' : 'Выгрузка DXF — по запросу'}
                           style={{ padding: '4px 10px', borderRadius: 20, border: '0.5px solid var(--border-md)',
                             background: 'transparent', color: 'var(--text-hint)', fontSize: 11, cursor: 'pointer' }}>
-                          DXF
+                          DXF{isMaster || dxfOk ? '' : ' 🔑'}
                         </button>}
                         <button onClick={() => setShowOffcuts(v => !v)}
                           style={{ padding: '4px 10px', borderRadius: 20, border: `0.5px solid ${showOffcuts ? 'var(--teal)' : 'var(--border-md)'}`,
@@ -3915,17 +3929,17 @@ export default function NestingPage() {
                   )
                 )}
 
-                {/* DXF (мастер-аккаунт) · выбрать вариант · оформить — в одну строку */}
+                {/* DXF (по запросу, 🔑) · выбрать вариант · оформить — в одну строку */}
                 {(() => {
                   const blocked = locked || cfg.buffer.length > 0 || busyId === cfg.id
                   return (
                     <div style={{ display: 'flex', gap: 6, opacity: locked ? 0.5 : 1 }}>
-                      {isMaster && <button onClick={() => downloadNestingDxf(cfg.sheetsData.filter(sh => sh.placed.length), `_k${idx + 1}`)}
+                      {<button onClick={async () => { if (await dxfAllowed()) downloadNestingDxf(cfg.sheetsData.filter(sh => sh.placed.length), `_k${idx + 1}`) }}
                         disabled={locked}
-                        title="Скачать DXF всех листов (для сверки) — только мастер-аккаунт"
+                        title={isMaster || dxfOk ? 'Скачать DXF всех листов' : 'Выгрузка DXF — по запросу: нажмите, чтобы запросить'}
                         style={{ flex: '0 0 auto', padding: '9px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--teal)',
                           background: 'var(--teal-light)', color: 'var(--teal)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
-                        ⬇ DXF
+                        ⬇ DXF{isMaster || dxfOk ? '' : ' 🔑'}
                       </button>}
                       {/* исполненный заказ клиента не перезаписывается: перекроенный вариант уходит копией («Отправить повторно») */}
                       {!(cabinet !== 'production' && order.status === 'done' && order.user_id === user?.id) && <button data-tour="nest-pick" onClick={() => chooseCfg(cfg)} disabled={blocked || cfg.saved}
