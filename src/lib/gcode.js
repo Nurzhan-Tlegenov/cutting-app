@@ -351,6 +351,9 @@ class Out {
   push(line) { this.lines.push(line); this.kinds.push(this.tag ? this.tag[0] : null); this.opIds.push(this.tag ? this.tag[1] : 0) }
   raw(text) { String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).forEach(s => this.push(s)); this.f = null }
   move(g, x, y, z, feed) {
+    // splitDown: холостой ход со спуском по Z — сначала по XY, потом вниз (используется с высотой перемещения над листом)
+    if (this.splitDown && g === 'G0' && x != null && y != null && z != null && this.pos[2] != null && z < this.pos[2] - 1e-9
+      && (x !== this.pos[0] || y !== this.pos[1])) { this.move(g, x, y, null); this.move(g, null, null, z); return }
     let s = g
     if (x != null && y != null && (x !== this.pos[0] || y !== this.pos[1])) { s += ` X${fmt(x + this.dx)} Y${fmt(y + this.dy)}`; this.pos[0] = x; this.pos[1] = y }
     if (z != null && z !== this.pos[2]) { s += ` Z${fmt(z - this.zOff)}`; this.pos[2] = z }
@@ -1086,6 +1089,17 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const zTop = post.zRef === 'top'                       // ноль Z — верхняя пласть листа (иначе — стол)
   let safeZ = (n0(post.safeZ) || 25) + (zTop ? T : 0)
   if (safeZ < T + 5) { warn.add(`Высота безопасности Z${num(safeZ)} ниже верха материала ${num(T)} мм + 5 мм — в программе поднята до Z${num(T + 5)}.`); safeZ = T + 5 }
+  // высота перемещения над листом (необязательно): между отверстиями и операциями одним инструментом шпиндель
+  // поднимается только на неё — над верхней пластью листа, а не на общую высоту безопасности. На высоту безопасности —
+  // перед сменой инструмента и в конце программы. Пусто — как раньше: всё на высоте безопасности.
+  const travelSet = post.travelZ !== '' && post.travelZ != null && n0(post.travelZ) > 0
+  let liftZ = safeZ
+  if (travelSet) {
+    let tr = Math.abs(n0(post.travelZ))
+    if (tr < 2) { warn.add(`Высота перемещения над листом ${num(tr)} мм — меньше 2 мм, в программе поднята до 2 мм.`); tr = 2 }
+    liftZ = Math.min(safeZ, T + tr)
+  }
+  const travel = liftZ < safeZ - EPS
   if (cornerOf(geo.corner) !== cornerOf(post.corner)) warn.add(`Раскрой уложен от угла «${cornerLabel(geo.corner).toLowerCase()}», а у станка угол укладки «${cornerLabel(post.corner).toLowerCase()}» (ЧПУ → постпроцессор). Ноль программы — в углу станка; чтобы детали были прижаты к нему, пересчитайте раскрой с этим углом.`)
   if (n0(post.fieldX) && n0(post.originX) + geo.sheetW > n0(post.fieldX) + EPS) warn.add(`Лист по X (${num(n0(post.originX) + geo.sheetW)} мм) выходит за рабочее поле станка ${num(post.fieldX)} мм.`)
   if (n0(post.fieldY) && n0(post.originY) + geo.sheetL > n0(post.fieldY) + EPS) warn.add(`Лист по Y (${num(n0(post.originY) + geo.sheetL)} мм) выходит за рабочее поле станка ${num(post.fieldY)} мм.`)
@@ -1146,7 +1160,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       if (t.type === 'drill') {
         if (Math.abs(n0(t.d) - d) > EPS) warn.add(`На ${label} назначено сверло Ø${num(t.d)} — диаметр не совпадает.`)
         const z = through ? -drillOver : T - depth
-        jobs.push({ stage: 0, rank: 0, tool: t, at: c, run: out => { out.g0(c[0], c[1], safeZ); drillPlunge(out, t, T, z); out.g0(null, null, safeZ) } })
+        jobs.push({ stage: 0, rank: 0, tool: t, at: c, run: out => { out.g0(c[0], c[1], liftZ); drillPlunge(out, t, T, z); out.g0(null, null, liftZ) } })
       } else {
         // Отверстие фрезой — из центра наружу. Фреза не сверло: прямо вниз не врезается (горит), поэтому вход по спирали —
         // в центре отверстия, на малом радиусе (половина радиуса фрезы): фреза сразу выбирает середину, «бобышки» в центре
@@ -1186,13 +1200,13 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
           const feed = n0(t.feed) || 1000, inFeed = n0(t.inFeed) || feed
           const top = T + 1
           if (Re < 0.2) {
-            out.g0(c[0], c[1], safeZ); out.g1(null, null, top, inFeed)
+            out.g0(c[0], c[1], liftZ); out.g1(null, null, top, inFeed)
             levels(top, zBot, n0(t.maxPass) || dt / 2).forEach(z => out.g1(null, null, z, Math.max(100, Math.round(inFeed / 3))))
           } else {
             // спираль входа в центре: за оборот — не глубже угла входа и не больше макс. глубины за проход
             const pitch = Math.max(0.2, Math.min(2 * Math.PI * Re * tan, n0(t.maxPass) > 0 ? n0(t.maxPass) : dt * 0.75))
             const turns = Math.max(1, Math.ceil((top - zBot) / pitch - 1e-9))
-            out.g0(c[0] + Re, c[1], safeZ); out.g1(null, null, top, inFeed)
+            out.g0(c[0] + Re, c[1], liftZ); out.g1(null, null, top, inFeed)
             for (let k = 0; k < turns; k++) {
               const z0 = top - (top - zBot) * k / turns, z1 = top - (top - zBot) * (k + 1) / turns
               ring(Re, z0, z1).slice(1).forEach(q => out.g1(q[0], q[1], q[2], inFeed))
@@ -1205,7 +1219,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
             ring(R, zBot, zBot).slice(1).forEach(q => out.g1(q[0], q[1], null, feed))
           }
           out.g1(c[0] + Math.max(0, R - Math.min(0.5, R)), c[1], null, feed)     // отойти от стенки перед подъёмом
-          out.g0(null, null, safeZ)
+          out.g0(null, null, liftZ)
         } })
       }
     }
@@ -1228,7 +1242,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
             : (() => { const st = Math.max(0.5, Math.min(n0(k.t.step) > 0 ? n0(k.t.step) : r, 2 * r * 0.7)), n = Math.max(1, Math.ceil((b - a) / st - 1e-9)); return Array.from({ length: n + 1 }, (_, i) => a + (b - a) * i / n) })()
           const loops = offs.map(o => closedOffset(k.path, o)).filter(Boolean).map(L => { const M = L.map(G); return [...M, M[0]] })
           if (!loops.length) { warn.add(`Не удалось построить ${k.label} по замкнутой траектории — пропущено.`); continue }
-          loops.forEach(line => jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: line[0], run: out => cutOpen(out, line, zs, k.t, safeZ, T, k.op) }))
+          loops.forEach(line => jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: line[0], run: out => cutOpen(out, line, zs, k.t, liftZ, T, k.op) }))
           continue
         }
         if (k.path) {
@@ -1239,21 +1253,21 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
           if (k.width <= dt + 0.3) {                   // паз шириной с фрезу — один проход по середине полосы
             const mid = (k.lo + k.hi) / 2, B = bandPolygon(P, mid, mid)
             const line = B.slice(0, B.length / 2).map(G)
-            jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: line[0], run: out => cutOpen(out, line, zs, k.t, safeZ, T, k.op) })
+            jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: line[0], run: out => cutOpen(out, line, zs, k.t, liftZ, T, k.op) })
             continue
           }
           Q = bandPolygon(P, k.lo, k.hi)
         } else Q = smoothLoop(k.pts.map((q, i) => (k.out?.[i] ? [q[0] + k.out[i][0] * r, q[1] + k.out[i][1] * r] : q)))
         const segs = Q && polyPocket(Q.map(G), r, n0(k.t.step), k.op.dir === 'ccw' ? 'ccw' : 'cw')
         if (!segs) { warn.add(`Фреза Ø${num(dt)} не проходит в ${k.label} — пропущено.`); continue }
-        jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: segs[0].loop[0], run: out => cutPoly(out, segs, zs, k.t, safeZ, T, k.op) })
+        jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: segs[0].loop[0], run: out => cutPoly(out, segs, zs, k.t, liftZ, T, k.op) })
         continue
       }
       const paths = rectPaths(bx + k.x0, by + k.y0, bx + k.x1, by + k.y1, k.open, n0(k.t.d) / 2, n0(k.t.step), k.spiral)
       if (!paths) { warn.add(`Фреза Ø${num(k.t.d)} шире, чем ${k.label} (${num(Math.min(k.x1 - k.x0, k.y1 - k.y0))} мм) — пропущено.`); continue }
       edgeOk(k.t, k.depth >= T - EPS ? T + millOver : k.depth, k.label)
       const zs = levels(T, k.depth >= T - EPS ? -millOver : T - k.depth, n0(k.t.maxPass))
-      jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: [bx + k.x0, by + k.y0], run: out => cutRect(out, paths, zs, k.t, safeZ, T, k.op) })
+      jobs.push({ stage: 0, rank: k.rank, tool: k.t, at: [bx + k.x0, by + k.y0], run: out => cutRect(out, paths, zs, k.t, liftZ, T, k.op) })
     }
     // вырезы — фреза идёт внутри контура
     for (const c of f.cutouts) {
@@ -1266,7 +1280,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       const L = orientLoop(loop.map(G), ops.cutout.dir)
       edgeOk(t, T + millOver, 'сквозной рез выреза')
       const zs = levels(T, -millOver, n0(t.maxPass))
-      const job = { stage: 1, rank: 4, tool: t, at: L[0], holds: [], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.cutout, safeZ, arcs) }
+      const job = { stage: 1, rank: 4, tool: t, at: L[0], holds: [], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ops.cutout, liftZ, arcs) }
       jobs.push(job)
       part.cutouts.push({ job, pts: c.circle ? circleLoop(c.circle.cx, c.circle.cy, c.circle.r).map(G) : c.pts.map(G) })
     }
@@ -1339,7 +1353,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
               if (this.Lr) { const q = this.L[0]; let k = 0, bd = Infinity; this.Lr.forEach((v, n) => { const d = Math.hypot(v[0] - q[0], v[1] - q[1]); if (d < bd) { bd = d; k = n } }); this.Lr = [...this.Lr.slice(k), ...this.Lr.slice(0, k)] }
               this.at = this.L[0]; this.passes = this.mk(this.L, this.Lr)
             },
-            run: out => cutLoop(out, job.passes, T, t, Lm ? { ...o, entryLoop: Lm } : o, safeZ, arcs) }
+            run: out => cutLoop(out, job.passes, T, t, Lm ? { ...o, entryLoop: Lm } : o, liftZ, arcs) }
           jobs.push(job)
           part.contour = job
         }
@@ -1374,7 +1388,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     if (sides.every(s => s.skip)) continue                         // обрезок — весь лист: резать нечего
     if (!sides.some(s => s.skip)) {
       const L = orientFromInside(sides.map(s => s.a), ocOps.dir, sheetRect)
-      jobs.push({ stage: 2, rank: 6, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ocOps, safeZ) })
+      jobs.push({ stage: 2, rank: 6, tool: t, at: L[0], run: out => cutLoop(out, zs.map(z => ({ loop: L, z })), T, t, ocOps, liftZ) })
       continue
     }
     // незамкнутые цепочки из идущих подряд сторон; концы у края листа прижимаются к краю: обычно центр фрезы — на самом
@@ -1387,7 +1401,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     for (let k = 0; k < 4; k++) {
       const s = sides[(start + k) % 4]
       if (s.skip) { chain = null; continue }
-      if (!chain) { chain = [clamp(s.a)]; const pts = chain; jobs.push({ stage: 2, rank: 6, tool: t, at: pts[0], run: out => cutOpen(out, pts, zs, t, safeZ, T, ocOps) }) }
+      if (!chain) { chain = [clamp(s.a)]; const pts = chain; jobs.push({ stage: 2, rank: 6, tool: t, at: pts[0], run: out => cutOpen(out, pts, zs, t, liftZ, T, ocOps) }) }
       chain.push(clamp(s.b))
     }
   }
@@ -1426,7 +1440,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
         const pts = [[X0 + s.a[0], Y0 + s.a[1]], [X0 + s.b[0], Y0 + s.b[1]]]
         // начало за краем листа — фреза опускается прямо, в воздухе; иначе — под наклоном, как контур (реза там ещё нет)
         const job = { stage: 3, rank: 7, tool: t, at: pts[0], pts, open: [!!s.openA, !!s.openB],
-          run: out => cutOpen(out, job.pts, zs, t, safeZ, T, job.open[0] ? { entry: 'straight' } : { entry: 'ramp', angle: n0(ops.outer?.angle) || 45 }) }
+          run: out => cutOpen(out, job.pts, zs, t, liftZ, T, job.open[0] ? { entry: 'straight' } : { entry: 'ramp', angle: n0(ops.outer?.angle) || 45 }) }
         jobs.push(job)
       }
       scored = lines.length
@@ -1539,7 +1553,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       const o = ops.outer
       const f = { stage: 4, rank: 5, tool: t, small: j.small, area: j.area, edgeDist: j.edgeDist, box: j.box, reach: j.reach, L: j.L, at: j.L[0],
         restart(i) { this.L = [...this.L.slice(i), ...this.L.slice(0, i)]; this.at = this.L[0] },
-        run: out => cutLoop(out, [{ loop: f.L, z: -millOver }], T, t, o, safeZ, arcs) }
+        run: out => cutLoop(out, [{ loop: f.L, z: -millOver }], T, t, o, liftZ, arcs) }
       return f
     })
     if (!fin.length) return
@@ -1553,6 +1567,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   // ноль программы — в углу укладки (настройка станка): оси станка как есть, деталь от левого верхнего угла — в минусе по Y
   const sh0 = cornerShift(post.corner, geo.sheetW, geo.sheetL)
   const out = new Out(zTop ? T : 0, sh0.dx, sh0.dy)
+  out.splitDown = travel                                 // с высоты безопасности вниз — только после перехода по XY, не наискосок
   // новый постпроцессор создаётся с пустыми командами — их вписывает сам пользователь под свой станок
   if (!String(post.cmdToolStart || '').trim() && !String(post.cmdStart || '').trim()) warn.add(`Команды станка «${post.name || 'постпроцессор'}» не заданы (ЧПУ → Команды): в программе нет начала, смены инструмента и конца. Впишите команды своего станка.`)
   out.raw(post.cmdStart)
@@ -1561,9 +1576,11 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const used = []
   for (const j of seq) {
     if (j.tool !== active) {
+      if (travel && active) out.g0(null, null, safeZ)     // перед сменой инструмента — на высоту безопасности
       if (inHead(post, j.tool)) { out.raw(tpl(post.cmdHeadStart, j.tool)); out.raw(tpl(post.cmdHeadEnd, j.tool)) }   // своя команда — включается голова, а не шпиндель
       else { out.raw(tpl(post.cmdToolStart, j.tool)); out.raw(tpl(post.cmdToolEnd, j.tool)) }
       out.pos = [null, null, null]
+      if (travel) out.g0(null, null, safeZ)               // после смены — сначала на высоту безопасности, потом к первой операции
       active = j.tool
       if (!used.includes(j.tool)) used.push(j.tool)
     }
@@ -1571,6 +1588,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     j.run(out)
     out.tag = null
   }
+  if (travel && seq.length) out.g0(null, null, safeZ)   // конец программы — на высоте безопасности
   // конечное положение: шпиндель уходит в точку парковки на безопасной высоте
   if (seq.length && post.endX !== '' && post.endY !== '' && post.endX != null && post.endY != null) { out.g0(null, null, safeZ); out.g0(n0(post.endX) - sh0.dx, n0(post.endY) - sh0.dy, null) }   // парковка — в координатах станка, без сдвига
   out.raw(post.cmdEnd)

@@ -342,6 +342,10 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
           <Num label="Высота безопасности Z" unit="мм" value={post.safeZ} onChange={v => set({ safeZ: v })} hint={post.zRef === 'top' ? 'над верхней пластью листа' : 'от жертвенного стола'} />
           <Num label="Холостые перемещения" unit="мм/мин" value={post.rapid} onChange={v => set({ rapid: v })} hint="для расчёта времени" />
         </div>
+        <div className="row2" style={{ marginTop: 8 }}>
+          <Num label="Высота перемещения над листом" unit="мм" value={post.travelZ} onChange={v => set({ travelZ: v })} hint="над верхней пластью; пусто — не задана" />
+        </div>
+        <Hint>Между отверстиями и операциями одним инструментом шпиндель поднимается только на эту высоту над листом (например, 10 мм), а не на высоту безопасности — меньше холостых подъёмов. На высоту безопасности — перед сменой инструмента и в конце программы. Учитывайте прижимы и упоры на столе. Пусто — всё на высоте безопасности, как раньше.</Hint>
         {/* заглубление фрезы (сквозной рез контура) — не здесь, а во вкладке «Обработка» → «Контур детали», рядом с остальной обработкой контура */}
         <div className="row2" style={{ marginTop: 8 }}>
           <SignedNum label="Заглубление сверла в стол" unit="мм" value={-Math.abs(Number(post.drillOver) || 0)} onChange={v => set({ drillOver: Math.abs(v) })} />
