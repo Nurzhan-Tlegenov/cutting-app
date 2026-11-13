@@ -44,17 +44,20 @@ export default function HelpPage() {
         const c = TOURS[id], shown = open === id
         return (
           <div key={id} className="card" style={{ marginBottom: 10, padding: '12px 14px' }}>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 26, lineHeight: 1 }}>{ico}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 15 }}>{c.title}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>{c.short}</div>
+            {/* шапка курса и кнопки — одной строкой на мониторе; на телефоне кнопки сами переносятся под заголовок */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 12px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flex: '1 1 260px', minWidth: 0 }}>
+                <span style={{ fontSize: 26, lineHeight: 1 }}>{ico}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{c.title}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-hint)', marginTop: 2 }}>{c.short}</div>
+                </div>
               </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              <button type="button" className="btn-primary" style={{ flex: 1, padding: 9, fontSize: 14 }} onClick={() => setVideo(id)}>▶ Смотреть видео</button>
-              {ruOnly && <button type="button" className="btn-secondary" style={{ flex: '0 0 auto', padding: '9px 12px', fontSize: 13 }} onClick={() => start(id)}>Пройти самому</button>}
-              {ruOnly && <button type="button" className="btn-secondary" style={{ flex: '0 0 auto', padding: '9px 14px', fontSize: 13 }} onClick={() => setOpen(shown ? null : id)}>{shown ? 'Скрыть шаги' : 'Шаги'}</button>}
+              <div style={{ display: 'flex', gap: 6, flex: '0 0 auto', marginLeft: 'auto' }}>
+                <button type="button" className="btn-primary" style={{ width: 'auto', padding: '8px 12px', fontSize: 13, whiteSpace: 'nowrap' }} onClick={() => setVideo(id)}>▶ Смотреть видео</button>
+                {ruOnly && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '8px 10px', fontSize: 13, whiteSpace: 'nowrap' }} onClick={() => start(id)}>Пройти самому</button>}
+                {ruOnly && <button type="button" className="btn-secondary" style={{ width: 'auto', padding: '8px 10px', fontSize: 13, whiteSpace: 'nowrap' }} onClick={() => setOpen(shown ? null : id)}>{shown ? 'Скрыть шаги' : 'Шаги'}</button>}
+              </div>
             </div>
             {shown && (
               <ol style={{ margin: '10px 0 0', paddingLeft: 20, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.45 }}>
