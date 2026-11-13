@@ -246,8 +246,8 @@ async function chooseHybridPlan(params, meta) {
 }
 // Готовая раскладка (seed) в терминах гибридных деталей: настоящие номера деталей → гибридные. Детали из
 // сцепленных пар так не переводятся — тогда продолжить с раскладки нельзя, поиск идёт с нуля.
-function seedToHybrid(m, singles) {
-  if (!m?.seed) return m
+function seedToHybrid(m, singles, hdet = null) {
+  if (!m?.seed && !m?.sheets) return m
   const hi = new Map()
   singles.forEach((di, h) => { if (di !== undefined) hi.set(di, h) })
   const cnt = {}
@@ -260,6 +260,13 @@ function seedToHybrid(m, singles) {
     delete out.polygon
     return out
   }) }))
+  // Раскладка соседнего потока годится, только если у него тот же план пар: каждая гибридная деталь — ровно столько,
+  // сколько в нашем плане. План выбирается пробами с ограничением по времени, и у потоков он бывает разный (пара
+  // у соседа — две одиночные у нас и наоборот). Без этой проверки чужая раскладка принималась как своя: лишние копии
+  // одних деталей, потерянные другие и наложения (Kuhnya_k1, 5.14: «54» ×3 при 1 шт., «6, 7, 8, 17, 19» потеряны)
+  if (ok && hdet) {
+    for (let h = 0; h < hdet.length; h++) if ((cnt[h] || 0) !== (Number(hdet[h].qty) || 0)) { ok = false; break }
+  }
   return ok ? { ...m, sheets, ids: sheets.flatMap(sh => sh.placed.map(p => p.id)) } : null
 }
 async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigrant, onStats, t0 }) {
@@ -279,8 +286,8 @@ async function runHybrid(params, meta, { live, shouldStop, onProgress, takeMigra
       ...params, details: plan.hybridDetails, algo: 'raster', cuttingMethod: 'nesting',
       optimizeSeconds: live ? LIVE_BUDGET_SECONDS : params.optimizeSeconds,
       // «Продолжить»: готовая раскладка — сразу стартовый лучший вариант поиска (в гибридных деталях)
-      seed: Array.isArray(params.seed) ? (seedToHybrid({ seed: true, sheets: params.seed }, plan.singles)?.sheets || null) : null,
-      shouldStop, takeMigrant: takeMigrant ? () => seedToHybrid(takeMigrant(), plan.singles) : null,
+      seed: Array.isArray(params.seed) ? (seedToHybrid({ seed: true, sheets: params.seed }, plan.singles, plan.hybridDetails)?.sheets || null) : null,
+      shouldStop, takeMigrant: takeMigrant ? () => seedToHybrid(takeMigrant(), plan.singles, plan.hybridDetails) : null,
       onStats: onStats ? st => onStats({ ...st, hybrid: true, t: Date.now() - t0 }) : null,
       onProgress: onProgress ? ({ sheets, searchSheets, iter, genome, seeded }) => {
         let out = withFilled(plan.expand({ ...meta, sheets }), params, false)
