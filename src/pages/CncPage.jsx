@@ -624,7 +624,7 @@ export default function CncPage() {
                   {f && (
                     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
                       <div style={{ fontSize: 12, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>{f.empty ? 'пусто — нет назначенных инструментов' : `${f.lines} строк · ≈ ${fmtTime(f.time)}${f.scored ? ` · шинковка: ${f.scored} надс.` : ''}`}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>{f.empty ? 'пусто — нет назначенных инструментов' : <><b style={{ color: 'var(--text)', fontWeight: 600 }}>⏱ ≈ {fmtTime(f.time)}</b> · {f.lines} строк{f.scored ? ` · шинковка: ${f.scored} надс.` : ''}</>}</div>
                       {!f.empty && (
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button type="button" onClick={() => openSim(f)} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>▶ Симулятор</button>
@@ -637,7 +637,7 @@ export default function CncPage() {
                     <div style={{ marginTop: 8, paddingTop: 8, borderTop: '0.5px dashed var(--border)' }}>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{built.second.post.name}</div>
                       <div style={{ fontSize: 12, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f2.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>{f2.empty ? 'пусто — у этого станка не назначены инструменты' : `${f2.lines} строк · ≈ ${fmtTime(f2.time)}`}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>{f2.empty ? 'пусто — у этого станка не назначены инструменты' : <><b style={{ color: 'var(--text)', fontWeight: 600 }}>⏱ ≈ {fmtTime(f2.time)}</b> · {f2.lines} строк</>}</div>
                       {!f2.empty && (
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button type="button" onClick={() => openSim(f2)} style={{ ...small, background: 'var(--blue-light)', color: 'var(--blue-dark)', borderColor: 'var(--blue)' }}>▶ Симулятор</button>
@@ -763,6 +763,19 @@ export default function CncPage() {
                   </div>
                 )}
               </div>
+            )
+          })()}
+          {built && (() => {
+            // ориентировочное время обработки: длина ходов / подача из программы, холостые — по «Холостым перемещениям» станка;
+            // смена инструмента, разгон и торможение не учитываются
+            const tm = fl => (fl || []).filter(f => !f.empty).reduce((a, f) => a + (f.time || 0), 0)
+            const t1 = tm(built.files), t2 = tm(built.second?.files), n1 = built.files.filter(f => !f.empty).length
+            if (!n1 || built.beam) return null
+            return (
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 2px 8px' }}>
+                ⏱ Время обработки ≈ <b style={{ color: 'var(--text)' }}>{fmtTime(t1)}</b> — {n1} {n1 === 1 ? 'лист' : n1 < 5 ? 'листа' : 'листов'}{built.second && t2 > 0 && <> · {built.second.post.name}: ≈ <b style={{ color: 'var(--text)' }}>{fmtTime(t2)}</b></>}
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Ориентировочно: по подачам инструментов и скорости холостых перемещений станка; смена инструмента не учитывается.</span>
+              </p>
             )
           })()}
           {built && allCount() > 1 && (
