@@ -19,6 +19,11 @@ import {
   polygonsOverlapRobust, bboxOf, translate,
 } from './nfpGeometry'
 
+// Сколько экземпляров детали класть. qty = 0 — ни одного: так вложение в вырезы (nestInHoles.js) снимает деталь с
+// раскроя (она встанет в вырез хозяина). Раньше «0 || 1» давало 1 — деталь ложилась и на лист, и в вырез (Test Kuhnya:
+// «Лишние детали … спрятана под К5.Полка вверх»). Пусто — по-старому 1.
+const pieceQty = d => (d.qty === 0 || d.qty === '0' ? 0 : (Number(d.qty) || 1))
+
 function rotate90(polygon, w) { return polygon.map(([x, y]) => [y, w - x]) }
 function polygonArea(poly) { let a=0; for (let i=0;i<poly.length;i++){const q=poly[(i+1)%poly.length]; a+=poly[i][0]*q[1]-q[0]*poly[i][1]} return Math.abs(a)/2 }
 
@@ -991,7 +996,7 @@ export async function packNFP({
   details.forEach((d, di) => {
     const variants = buildPieceVariants(d, kerf)
     const v0bb = bboxOf(variants[0].polygon)
-    const qty = Number(d.qty) || 1
+    const qty = pieceQty(d)
     const singleInst = {
       id: -1, detailIndex: di, variants,
       label: d.display_name || d.name, prefix: d.prefix,

@@ -50,6 +50,11 @@
 import { gravityPolygons } from './gravity'
 import { packExact, exactBetter, expandPlacement, tileIntoPairs } from './exactPack'
 
+// Сколько экземпляров детали класть. qty = 0 — ни одного: так вложение в вырезы (nestInHoles.js) снимает деталь с
+// раскроя (она встанет в вырез хозяина). Раньше «0 || 1» давало 1 — деталь ложилась и на лист, и в вырез (Test Kuhnya:
+// «Лишние детали … спрятана под К5.Полка вверх»). Пусто — по-старому 1.
+const pieceQty = d => (d.qty === 0 || d.qty === '0' ? 0 : (Number(d.qty) || 1))
+
 
 const MIN_CELL_MM = 4
 const MAX_CELL_MM = 12
@@ -308,7 +313,7 @@ export function buildHybridPlan({ details, kerf, sheetL, sheetW, marginT, margin
   details.forEach((d, di) => {
     if (!d.contour) return
     const variants = buildPieceKind(d, cellSize, kerf)
-    for (let q = 0; q < (Number(d.qty) || 1); q++) {
+    for (let q = 0; q < pieceQty(d); q++) {
       instances.push({
         id: instances.length, detailIndex: di, cellSize, isSmall: false, variants,
         label: d.display_name || d.name, prefix: d.prefix,
@@ -1103,7 +1108,7 @@ export async function packTrueShape({
       (smallMaxArea > 0 && area <= smallMaxArea) ||
       (smallPartsMaxSide > 0 && minSide <= smallPartsMaxSide)
     )
-    for (let q = 0; q < (Number(d.qty) || 1); q++) {
+    for (let q = 0; q < pieceQty(d); q++) {
       instances.push({
         id: instances.length, detailIndex: di, cellSize, isSmall,
         variants: kindsByDetail[di],
