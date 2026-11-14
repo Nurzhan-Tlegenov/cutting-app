@@ -47,7 +47,7 @@ export default function SupportPage() {
     if (!ok) return
     const t = setTimeout(load, archive ? 350 : 0)
     if (archive) return () => clearTimeout(t)
-    const iv = setInterval(load, 30000)          // доска обновляется сама раз в 30 с
+    const iv = setInterval(() => { if (!document.hidden) load() }, 30000)          // доска обновляется сама раз в 30 с (если открыта на экране)
     return () => { clearTimeout(t); clearInterval(iv) }
   }, [ok, load, archive])
   // новые сообщения в чате команды (с прошлого открытия чата)
@@ -56,7 +56,7 @@ export default function SupportPage() {
     if (team === 'chat') return () => markChatSeen()   // ушли из чата — всё, что пришло, пока он был открыт, прочитано
     let alive = true
     const check = () => supportNotes(null).then(r => { if (alive && r.data) { const seen = chatSeenAt(); setChatNew(r.data.filter(n => n.author !== user?.id && (!seen || n.created_at > seen)).length) } })
-    const t = setTimeout(check, 0), iv = setInterval(check, 30000)
+    const t = setTimeout(check, 0), iv = setInterval(() => { if (!document.hidden) check() }, 30000)
     return () => { alive = false; clearTimeout(t); clearInterval(iv) }
   }, [ok, team, user?.id])
   const openView = v => { if (v === 'chat') { markChatSeen(); setChatNew(0) } setTeam(t => (t === v ? '' : v)) }

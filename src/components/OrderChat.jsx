@@ -24,7 +24,14 @@ export default function OrderChat({ orderId, title, hint }) {
     if (r.error) { setError(r.missing ? ORDER_CHAT_SQL_HINT : r.error); setList([]); return }
     setError(''); setList(r.data)
   }, [orderId])
-  useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t) }, [load])
+  // опрос — только пока приложение на экране; вернулись в приложение — сразу обновить
+  useEffect(() => {
+    load()
+    const t = setInterval(() => { if (!document.hidden) load() }, 20000)
+    const vis = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', vis)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis) }
+  }, [load])
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }) }, [list?.length])
   // пришли из «Сообщений» или по пушу (#order-chat) — сразу к переписке
   useEffect(() => {

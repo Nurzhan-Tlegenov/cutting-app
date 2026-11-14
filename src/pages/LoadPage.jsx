@@ -15,7 +15,11 @@ const size = b => (b == null ? '—' : b >= 1024 * MB ? `${(b / 1024 / MB).toFix
 const ms = v => (v == null ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)} с` : `${Math.round(v)} мс`)
 const clamp = v => Math.max(0, Math.min(100, v))
 // время ответа -> нагрузка, %: до 150 мс — свободно, 2,5 с в худших запросах — предел
-const speedLoad = p95 => (p95 == null ? null : clamp((p95 - 150) / (2500 - 150) * 100))
+const speedLoad = p95 => (p95 == null ? null : clamp((p95 - 150) / (2500 - 150) * 100))   // цвет столбиков графика
+// «батарейка»: скорость — по ОБЫЧНОМУ ответу (половина запросов быстрее), а не по 5 % худших. Время меряется на
+// телефонах: худшие 5 % — это почти всегда плохой мобильный интернет у кого-то из пользователей, а не нехватка
+// сервера; по ним батарейка была «0 %» при двух людях в приложении (ноябрь 2026)
+const typicalLoad = p50 => (p50 == null ? null : clamp((p50 - 300) / (3000 - 300) * 100))
 const color = v => (v >= 80 ? 'var(--danger)' : v >= 55 ? 'var(--amber)' : 'var(--teal)')
 // понятные названия мест, где идут запросы
 const PLACE = { orders: 'Заказы', order_details: 'Детали заказов', profiles: 'Профили', productions: 'Производства', app_messages: 'Сообщения', user_settings: 'Настройки аккаунта',
@@ -43,7 +47,7 @@ export default function LoadPage() {
     else { setErr(''); setD(data || {}) }
     setAt(new Date())
   }
-  useEffect(() => { Promise.resolve().then(load); const t = setInterval(load, 60000); return () => clearInterval(t) }, [])
+  useEffect(() => { Promise.resolve().then(load); const t = setInterval(() => { if (!document.hidden) load() }, 60000); return () => clearInterval(t) }, [])
   if (!isMaster) return <div className="page"><p>Раздел доступен только мастер-аккаунту.</p><BottomNav /></div>
   const setLimit = (k, v) => { const next = { ...lim, [k]: v.replace(/[^0-9.,]/g, '') }; setLim(next); saveUserSettings({ loadLimits: next }, user) }
   const gb = v => Number(String(v || '').replace(',', '.')) || 0
@@ -52,7 +56,7 @@ export default function LoadPage() {
   const h = d?.hour || {}, now = d?.now || {}
   const files = (d?.storage || []).reduce((a, b) => a + Number(b.bytes || 0), 0)
   const parts = [
-    ['Скорость ответа', speedLoad(h.p95 ?? now.p95), h.p95 != null ? `худшие запросы за час — ${ms(h.p95)}` : 'замеров за час ещё нет'],
+    ['Скорость ответа', typicalLoad(h.p50 ?? now.p50), h.p50 != null ? `обычный ответ за час — ${ms(h.p50)}, худшие — ${ms(h.p95)}` : 'замеров за час ещё нет'],
     ['Ошибки запросов', h.n ? clamp((h.err / h.n) * 100 * 10) : null, h.n ? `${((h.err / h.n) * 100).toFixed(1)} % запросов за час не прошли` : ''],
     ['Место в базе', gb(lim.db) ? clamp(d?.db?.bytes / (gb(lim.db) * 1024 * MB) * 100) : null, gb(lim.db) ? `${size(d?.db?.bytes)} из ${lim.db} ГБ` : 'впишите лимит тарифа ниже'],
     ['Место для файлов', gb(lim.files) ? clamp(files / (gb(lim.files) * 1024 * MB) * 100) : null, gb(lim.files) ? `${size(files)} из ${lim.files} ГБ` : 'впишите лимит тарифа ниже'],
@@ -101,7 +105,7 @@ export default function LoadPage() {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 24, fontWeight: 700, color: free == null ? 'var(--text-hint)' : color(loadPct) }}>{free == null ? '—' : `${free} %`}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{free == null ? 'запас — появится с первыми замерами' : loadPct >= 80 ? 'запаса почти нет — пора расширять тариф или искать, что тормозит' : loadPct >= 55 ? 'запас есть, но в часы пик тесновато' : 'запас хороший'}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{free == null ? 'запас — появится с первыми замерами' : loadPct >= 80 ? 'запаса почти нет — сначала посмотрите ниже, что дольше всего ждут; тариф — если медленно и в самой базе' : loadPct >= 55 ? 'запас есть, но в часы пик тесновато' : 'запас хороший'}</div>
             </div>
           </div>
           <div style={{ marginTop: 8 }}>

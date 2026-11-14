@@ -27,7 +27,7 @@ export function useAppStopped() {
       try { localStorage.setItem(KEY, v ? '1' : '0') } catch { /* без памяти */ }
     })
     check()
-    const t = setInterval(check, 60000)
+    const t = setInterval(() => { if (!document.hidden) check() }, 60000)
     const vis = () => { if (document.visibilityState === 'visible') check() }
     document.addEventListener('visibilitychange', vis)
     window.addEventListener('app-stop-changed', check)

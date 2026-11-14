@@ -110,7 +110,7 @@ export default function BottomNav() {
       }
     }
     check()
-    const timer = setInterval(check, 45000)
+    const timer = setInterval(() => { if (!document.hidden) check() }, 45000)   // свёрнуто — не опрашиваем, при возврате onShow
     const onShow = () => { if (!document.hidden) check() }
     document.addEventListener('visibilitychange', onShow)
     window.addEventListener('notices-seen', check)

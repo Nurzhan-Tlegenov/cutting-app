@@ -17,8 +17,10 @@ export default function SupportNotes({ cardId = null, me, isMaster, onSent, tall
   }, [cardId])
   useEffect(() => {
     const t = setTimeout(load, 0)
-    const iv = setInterval(load, cardId ? 30000 : 15000)
-    return () => { clearTimeout(t); clearInterval(iv) }
+    const iv = setInterval(() => { if (!document.hidden) load() }, cardId ? 30000 : 15000)
+    const vis = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', vis)
+    return () => { clearTimeout(t); clearInterval(iv); document.removeEventListener('visibilitychange', vis) }
   }, [load, cardId])
   useEffect(() => { if (tall && list?.length) endRef.current?.scrollIntoView({ block: 'end' }) }, [tall, list?.length])
   const send = async () => {

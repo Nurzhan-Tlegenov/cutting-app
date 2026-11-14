@@ -42,7 +42,7 @@ export default function SupportCardPage() {
   useEffect(() => {
     if (!ok) return
     const t = setTimeout(load, 0)
-    const iv = setInterval(load, 30000)
+    const iv = setInterval(() => { if (!document.hidden) load() }, 30000)
     return () => { clearTimeout(t); clearInterval(iv) }
   }, [ok, load])
   useEffect(() => { if (d?.messages?.length) endRef.current?.scrollIntoView({ block: 'end' }) }, [d?.messages?.length])
