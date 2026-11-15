@@ -9,7 +9,10 @@
 // Запросы:
 //   • от Telegram (вебхук) — заголовок X-Telegram-Bot-Api-Secret-Token;
 //   • из приложения (только мастер-аккаунт): { action: 'setup' } — подключить вебхук,
-//     { action: 'send_code', request_id } — отправить код по одобренной заявке в Telegram.
+//     { action: 'send_code', request_id } — отправить код по одобренной заявке в Telegram;
+//     { action: 'remind', request_id } — напомнить тому, кто не закончил: открыл бота, но не поделился номером —
+//     снова кнопка «Поделиться номером»; номер подтверждён и заявка одобрена — код ещё раз (migration_tg_remind.sql).
+//     Написать тому, кто бота ни разу не открывал, Telegram не даёт — ему мастер шлёт ссылку на бота в WhatsApp.
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
@@ -165,6 +168,18 @@ async function onApp(req: Request, body: any) {
     if (data?.error) return json({ error: data.error })
     const r = await send(data.chat, codeText(data.code), { reply_markup: codeKb(data.code, String(body.tel || ''), body.origin) })
     return json(r.ok ? { ok: true } : { error: r.description || 'Telegram не доставил сообщение' })
+  }
+  if (body.action === 'remind') {
+    const { data, error } = await getDb().rpc('svc_tg_remind', { p_id: body.request_id })
+    if (error) return json({ error: /svc_tg_remind/.test(error.message) ? 'Выполните migration_tg_remind.sql в Supabase' : error.message })
+    if (data?.error) return json({ error: data.error })
+    const r = data.mode === 'code'
+      ? await send(data.chat, '🔔 <b>Напоминание:</b> регистрация в RaskroyPro не завершена.\n\n' + codeText(data.code), { reply_markup: codeKb(data.code, String(body.tel || ''), body.origin) })
+      : await send(data.chat, '🔔 <b>Напоминание:</b> регистрация в RaskroyPro не завершена — номер телефона ещё не подтверждён.\n\n' +
+          'Нажмите кнопку <b>«📱 Поделиться номером»</b> внизу экрана. Если кнопки не видно — нажмите значок клавиатуры ⌨️ (квадратик) справа в строке ввода.\n\n' +
+          'Сразу после этого сюда придёт код для регистрации (если заявку уже одобрили).', { reply_markup: SHARE_KB })
+    if (!r.ok) return json({ error: /blocked|deactivated|chat not found/i.test(r.description || '') ? 'человек остановил или удалил бота' : (r.description || 'Telegram не доставил сообщение') })
+    return json({ ok: true, mode: data.mode })
   }
   return json({ error: `Функция не поняла запрос (action: ${JSON.stringify(body?.action ?? null)})` })
 }

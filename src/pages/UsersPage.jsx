@@ -7,7 +7,7 @@ import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
 import { adminEmailSignup, adminSetEmailSignup } from '../lib/adminApi'
 import SupportToggle from '../components/SupportToggle'
-import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone } from '../lib/adminApi'
+import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone, tgStartLink } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
 import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
@@ -33,6 +33,13 @@ const isEmail = v => String(v || '').includes('@')
 // ссылка открывает «У меня есть код» с подставленными номером и кодом — остаётся придумать пароль
 const codeLink = (code, digits) => `${siteOrigin()}/auth?code=${code}&tel=${digits}`
 const codeMsg = (code, digits) => `Ваша заявка в RaskroyPro одобрена. Код: ${code}\n\nЗавершите регистрацию по ссылке — номер и код уже подставлены, останется придумать пароль:\n${codeLink(code, digits)}\n\nИли откройте приложение → «У меня есть код». Код действует 3 дня.`
+
+// ссылка на бота в WhatsApp — тому, кто бота ни разу не открывал (Telegram не даёт боту написать первым)
+const tgLinkMsg = r => `Здравствуйте! Вы оставили заявку на регистрацию в RaskroyPro, но номер в Telegram не подтвердили — поэтому регистрация не завершилась.\n\n1) Откройте ссылку: ${tgStartLink(r.tg_token)}\n2) В Telegram нажмите «СТАРТ» (Запустить)\n3) Нажмите кнопку «📱 Поделиться номером» внизу экрана (если её не видно — значок ⌨️ справа в строке ввода)\n\nКод для регистрации бот пришлёт сразу${r.status === 'approved' ? '' : ', как только заявку одобрят'}.`
+// застрял в Telegram: подавал заявку, номер не подтверждён — или подтверждён, одобрен, а код не ввёл
+const tgStuck = r => !r.registered && r.status !== 'rejected' && (
+  (!r.phone_verified_at && (r.messenger === 'telegram' || r.tg_pending)) || (!!r.phone_verified_at && r.tg_linked && r.status === 'approved'))
+const canRemind = r => tgStuck(r) && (r.tg_pending || (r.phone_verified_at && r.tg_linked))
 
 // Как подтверждён номер заявки
 function VerifyBadge({ r }) {
@@ -145,6 +152,42 @@ export default function UsersPage() {
     setInfo(t.error ? `Код не ушёл в Telegram: ${t.error}` : `Код отправлен в Telegram — ${r.full_name || r.phone}.`)
     return {}
   })
+  // Напомнить в Telegram: открыл бота, но не поделился номером — снова кнопка; подтвердил и одобрен — код ещё раз
+  const remindErr = e => (e === 'no_chat' ? 'человек ни разу не открыл бота — отправьте ему ссылку на бота в WhatsApp'
+    : e === 'registered' ? 'уже зарегистрирован' : e === 'not_approved' ? 'номер подтверждён — заявку нужно одобрить, тогда код придёт сам' : e)
+  const remind = r => act(async () => {
+    const t = await tgBot({ action: 'remind', request_id: r.id, tel: r.digits, origin: siteOrigin() })
+    setInfo(t.error ? `${r.full_name || r.phone}: не ушло — ${remindErr(t.error)}` : `${r.full_name || r.phone}: ${t.mode === 'code' ? 'код отправлен ещё раз' : 'напоминание с кнопкой «Поделиться номером» отправлено'} в Telegram.`)
+    return {}
+  })
+  const remindAll = list => {
+    if (!window.confirm(`Напомнить в Telegram ${list.length} чел.?\n\nКто открыл бота, но не поделился номером, — получит кнопку «Поделиться номером»; кто подтвердил номер — код ещё раз.`)) return
+    act(async () => {
+      let ok = 0; const bad = []
+      for (const r of list) {
+        const t = await tgBot({ action: 'remind', request_id: r.id, tel: r.digits, origin: siteOrigin() })
+        if (t.error) bad.push(`${r.full_name || r.phone} — ${remindErr(t.error)}`); else ok++
+      }
+      setInfo(`Напоминание в Telegram: отправлено ${ok}${bad.length ? `, не ушло ${bad.length}:\n${bad.join('\n')}` : ''}`)
+      return {}
+    })
+  }
+  // строка «застрял в Telegram» в карточке заявки: что случилось и что можно сделать
+  const tgRow = r => {
+    if (!tgStuck(r) || r.phone_verified_at) return null
+    return (
+      <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 8, background: 'var(--amber-light)' }}>
+        <div style={{ fontSize: 12, color: 'var(--amber)', lineHeight: 1.35 }}>
+          {r.tg_pending ? 'Открыл бота, но не нажал «Поделиться номером».' : 'Бота не открывал (или не нажал «Старт») — бот сам написать ему не может.'}
+          {r.tg_reminded_at ? <span style={{ color: 'var(--text-hint)' }}> · напоминали {dateTime(r.tg_reminded_at)}</span> : ''}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+          {r.tg_pending && <button type="button" disabled={busy} style={btn('main')} onClick={() => remind(r)}>🔁 Напомнить в Telegram</button>}
+          {r.tg_token && <a href={`https://wa.me/${r.digits}?text=${encodeURIComponent(tgLinkMsg(r))}`} target="_blank" rel="noreferrer" style={{ ...btn(r.tg_pending ? undefined : 'main'), textDecoration: 'none' }}>Ссылку на бота — в WhatsApp</a>}
+        </div>
+      </div>
+    )
+  }
   const setupBot = () => act(async () => {
     const t = await tgBot({ action: 'setup' })
     setInfo(t.error ? `Бот не подключён: ${t.error}` : `Бот @${t.bot || TG_BOT} подключён и отвечает.`)
@@ -395,7 +438,7 @@ export default function UsersPage() {
         <h1 style={{ fontSize: 18, fontWeight: 500 }}>Пользователи</h1>
       </div>
       {error && <p className="error-text" style={{ marginBottom: 12 }}>{error}</p>}
-      {info && <p style={{ fontSize: 13, color: 'var(--teal)', marginBottom: 12 }} onClick={() => setInfo('')}>{info}</p>}
+      {info && <p style={{ fontSize: 13, color: 'var(--teal)', marginBottom: 12, whiteSpace: 'pre-line' }} onClick={() => setInfo('')}>{info}</p>}
       {users === null ? <CncLoader label="Собираем список…" /> : !ready ? (
         <div className="card">
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>Список пользователей и переключатель регистрации появятся, когда база будет обновлена: откройте Supabase → SQL Editor, вставьте содержимое файла <b>migration_security_all.sql</b> и нажмите Run.</p>
@@ -497,6 +540,19 @@ export default function UsersPage() {
 
           <p className="section-title">Заявки на регистрацию{fresh.length ? ` · новых ${fresh.length}` : ''}</p>
           <div className="card" style={{ marginBottom: 12 }}>
+            {(() => {
+              const stuck = reqs.filter(tgStuck), can = stuck.filter(canRemind)
+              if (!stuck.length) return null
+              return (
+                <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: '0.5px solid var(--border)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.35 }}>
+                    Не завершили регистрацию через Telegram: <b>{stuck.length}</b>. Бот может написать {can.length} из них (открывали бота);
+                    {stuck.length - can.length > 0 ? ` остальным ${stuck.length - can.length} — «Ссылку на бота — в WhatsApp» в их заявке.` : ' всем.'}
+                  </div>
+                  {can.length > 0 && <button type="button" disabled={busy} style={btn('main')} onClick={() => remindAll(can)}>🔁 Напомнить в Telegram всем ({can.length})</button>}
+                </div>
+              )
+            })()}
             {!fresh.length && <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 8 }}>Новых заявок нет.</p>}
             {fresh.map(r => (
               <div key={r.id} data-focus={`rq:${r.id}`} style={{ padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
@@ -508,6 +564,7 @@ export default function UsersPage() {
                 {(r.country || r.city) && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{[countryCode(r.country), r.city].filter(Boolean).join(' · ')}</div>}
                 {r.comment && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{r.comment}</div>}
                 <div style={{ marginTop: 2 }}><VerifyBadge r={r} /></div>
+                {tgRow(r)}
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <button type="button" disabled={busy} style={btn('main')} onClick={() => approve(r)}>Одобрить</button>
                   <button type="button" disabled={busy} style={btn('danger')} onClick={() => act(() => adminSetRequest(r.id, 'rejected'))}>Отклонить</button>
@@ -528,6 +585,7 @@ export default function UsersPage() {
                 <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Заявка подана {dateTime(r.created_at)}</div>
                 {r.ref_by_name && <div style={{ fontSize: 11, color: 'var(--teal)' }}>по ссылке{r.ref_kind === 'production' ? ' для производства' : r.ref_kind === 'friend' ? ' «знакомому»' : ''} от «{r.ref_by_name}» — одобрена сама</div>}
                 <VerifyBadge r={r} />
+                {tgRow(r)}
                 {codeRow(r)}
                 <div style={{ marginTop: 4 }}>
                   <button type="button" disabled={busy} style={{ ...btn('danger'), padding: '3px 10px', fontSize: 11 }} onClick={() => act(() => adminSetRequest(r.id, 'rejected'))}>Отозвать</button>
