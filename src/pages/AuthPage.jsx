@@ -481,7 +481,7 @@ export default function AuthPage() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {[['telegram', 'Telegram', open ? 'сразу — номер подтверждается в 1 тап, код приходит сам' : 'быстро — номер подтверждается в 1 тап, код приходит сам'],
                     ['whatsapp', 'WhatsApp', refI ? 'код пришлёт тот, кто вас пригласил' : open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения'],
-                    ...(refI ? [] : [['max', 'MAX', open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения']])].map(([k, title, sub]) => (
+                    ['max', 'MAX', refI ? 'код пришлёт тот, кто вас пригласил' : open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения']].map(([k, title, sub]) => (
                     <button key={k} type="button" onClick={() => setMessenger(k)}
                       style={{ flex: k === 'telegram' ? '1 1 100%' : '1 1 40%', textAlign: 'left', padding: '10px 10px 8px', borderRadius: 'var(--radius)', cursor: 'pointer', position: 'relative',
                         border: messenger === k ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)', background: messenger === k ? 'var(--blue-light, var(--bg2))' : 'transparent' }}>

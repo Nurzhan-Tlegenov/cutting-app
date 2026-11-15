@@ -33,14 +33,23 @@ export default function InvitePage() {
   const first = asked || (ownOk ? 'client' : 'friend')   // без своего производства — сначала «знакомому»
 
   // код в WhatsApp: номер, сам код и ссылка, по которой номер и код подставятся сами
+  const [note, setNote] = useState('')
   const sendCode = async p => {
     const r = await refSendCode(p.id)
     if (r.error || r.data?.error) { setErr(r.data?.error === 'registered' ? 'Этот человек уже зарегистрировался.' : r.error || 'Не удалось получить код'); return }
     const { code, digits, ref } = r.data
     const link = `${siteOrigin()}/auth?code=${code}&tel=${digits}${ref ? `&r=${ref}` : ''}`
     const text = `Код для регистрации в RaskroyPro: ${code}\n\nОткройте ссылку — номер и код уже подставлены, останется придумать пароль:\n${link}\n\nКод действует 3 дня.`
-    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, '_blank')
     setSent(s => ({ ...s, [p.id]: true }))
+    if (p.contact_app === 'max') {
+      // у MAX нет ссылки «написать на номер»: «Поделиться» телефона → MAX → человек; нет «Поделиться» — текст в буфер
+      try { if (navigator.share) { setNote(''); await navigator.share({ text }); return } } catch (e) { if (e?.name === 'AbortError') return }
+      try { await navigator.clipboard.writeText(text) } catch { /* без буфера */ }
+      window.open('https://web.max.ru', '_blank', 'noreferrer')
+      setNote(`Текст с кодом скопирован. В MAX найдите +${digits} (поиск по номеру) и вставьте сообщение.`)
+      return
+    }
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, '_blank')
   }
 
   const byKind = people?.by_kind || {}
@@ -95,12 +104,12 @@ export default function InvitePage() {
                 <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.full_name || 'без имени'} <span style={{ color: 'var(--text-hint)', fontWeight: 400 }}>+{p.digits}</span></div>
                 <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>
                   {p.kind === 'production' ? 'производство · ' : p.kind === 'friend' ? 'знакомый · ' : ''}
-                  {p.messenger === 'telegram' ? (p.verified ? '✓ Telegram — бот прислал код сам, вам делать ничего не нужно' : '⏳ Telegram — подтверждает номер в боте, код придёт сам; вам делать ничего не нужно') : sent[p.id] || p.code_sent_at ? 'WhatsApp — код отправлен' : 'WhatsApp — отправьте ему код'}
+                  {p.messenger === 'telegram' ? (p.verified ? '✓ Telegram — бот прислал код сам, вам делать ничего не нужно' : '⏳ Telegram — подтверждает номер в боте, код придёт сам; вам делать ничего не нужно') : `${p.contact_app === 'max' ? 'MAX' : 'WhatsApp'} — ${sent[p.id] || p.code_sent_at ? 'код отправлен' : `отправьте ему код${p.contact_app === 'max' ? ` (найдите +${p.digits} в MAX)` : ''}`}`}
                 </div>
               </div>
               <button type="button" onClick={() => sendCode(p)} className={p.messenger === 'whatsapp' && !sent[p.id] && !p.code_sent_at ? 'btn-primary' : 'btn-secondary'}
-                style={{ padding: '6px 10px', fontSize: 12, flexShrink: 0, ...(p.messenger === 'whatsapp' && !sent[p.id] && !p.code_sent_at ? { background: '#25D366' } : {}) }}>
-                {sent[p.id] || p.code_sent_at ? 'Ещё раз' : 'Код в WhatsApp'}
+                style={{ padding: '6px 10px', fontSize: 12, flexShrink: 0, ...(p.messenger === 'whatsapp' && !sent[p.id] && !p.code_sent_at ? { background: p.contact_app === 'max' ? '#5B47E0' : '#25D366' } : {}) }}>
+                {sent[p.id] || p.code_sent_at ? 'Ещё раз' : p.contact_app === 'max' ? 'Код в MAX' : 'Код в WhatsApp'}
               </button>
             </div>
           ))}
@@ -111,6 +120,7 @@ export default function InvitePage() {
       {(first === 'friend' ? ['friend', 'client', 'production'] : first === 'production' ? ['production', 'friend', 'client'] : ['client', 'friend', 'production']).map(block)}
 
       {people && <p style={{ fontSize: 12, color: 'var(--text-hint)', textAlign: 'center' }}>Зарегистрировались по вашим ссылкам: {people.registered || 0}</p>}
+      {note && <p style={{ fontSize: 12, color: 'var(--teal)', textAlign: 'center' }}>{note}</p>}
       {err && <p className="error-text" style={{ fontSize: 12 }}>{err}</p>}
       <BottomNav />
     </div>
