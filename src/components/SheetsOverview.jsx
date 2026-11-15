@@ -4,6 +4,7 @@ import { partLabel } from '../lib/partLabel'
 import { smallEdgeReal } from '../lib/nesting'
 import { backSide } from '../lib/partInfo'
 import { usePane } from './DeskSplit'
+import { tr } from '../i18n'
 import { useDevicePixelRatio } from '../hooks/useDesktop'
 
 // ─── Обзор ВСЕХ листов раскроя на одном холсте ──────────────────────────────
@@ -189,7 +190,7 @@ export default function SheetsOverview({
         const fs = Math.max(7, Math.min(11, w / 7))
         if (w > 34 && h > fs * 2.4) {
           ctx.fillStyle = '#B85C00'; ctx.font = `bold ${fs}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-          ctx.fillText('обрезок', x + w / 2, y + h / 2 - fs * 0.6)
+          ctx.fillText(tr('обрезок'), x + w / 2, y + h / 2 - fs * 0.6)
           ctx.fillText(`${Math.round(of.h)}×${Math.round(of.w)}`, x + w / 2, y + h / 2 + fs * 0.6)
         }
       })
@@ -206,9 +207,9 @@ export default function SheetsOverview({
       ctx.fillStyle = active ? '#185FA5' : 'rgba(0,0,0,0.65)'
       ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'
       const cellPx = cellW * sc
-      const name = `${D.offcut ? 'Обр.' : 'Лист'} ${si + 1}`
+      const name = tr(`${D.offcut ? 'Обр.' : 'Лист'} ${si + 1}`)   // надписи на холсте — через словарь языка (i18n)
       if (cellPx > 150) {
-        ctx.fillText(`${name} · ${Math.round(D.sl)}×${Math.round(D.sw)} · ${s.placed.length} дет. · ${Math.round(fill * 100)}%`, X(o.x), Y(o.y) - 2)
+        ctx.fillText(`${name} · ${Math.round(D.sl)}×${Math.round(D.sw)} · ${s.placed.length} ${tr('дет.')} · ${Math.round(fill * 100)}%`, X(o.x), Y(o.y) - 2)
       } else {
         // мелкие листы — номер «бейджем» внутри листа, иначе непонятно, к какому листу подпись
         badges.push({ t: cellPx > 80 ? `${si + 1} · ${Math.round(fill * 100)}%` : `${si + 1}`, x: X(o.x), y: Y(o.y), active, fs: Math.max(8, Math.min(11, cellPx / 6)) })
