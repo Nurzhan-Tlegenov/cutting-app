@@ -2981,5 +2981,20 @@
 "Проверьте адрес почты.": "Sprawdź adres e-mail.",
 "На {0} ушло письмо для смены адреса — откройте ссылку в нём, затем вернитесь сюда.": "Na {0} wysłano e-mail do zmiany adresu — otwórz link w nim, a potem wróć tutaj.",
 "Код принят, но отметка не записалась — нажмите «Подтвердить» ещё раз.": "Kod przyjęty, ale oznaczenie się nie zapisało — naciśnij „Potwierdź” jeszcze raz.",
-"Не получилось, попробуйте ещё раз.": "Nie udało się, spróbuj ponownie."
+"Не получилось, попробуйте ещё раз.": "Nie udało się, spróbuj ponownie.",
+"Операции в этом раскрое": "Operacje w tym rozkroju",
+", которых нет в прайсе": ", których nie ma w cenniku",
+"— нажмите, чтобы добавить и указать цену:": "— naciśnij, aby dodać i podać cenę:",
+"Раскрой листов": "Rozkrój arkuszy",
+"Распил (погонные метры)": "Cięcie (metry bieżące)",
+"Кромкование": "Oklejanie",
+"Кромкование толстой кромкой": "Oklejanie grubym obrzeżem",
+"Криволинейное кромкование": "Oklejanie krzywoliniowe",
+"Склейка": "Klejenie",
+"Широкая кромка (склейка)": "Szerokie obrzeże (klejenie)",
+"Присадка (отверстия)": "Wiercenie (otwory)",
+"Торцевые отверстия": "Otwory czołowe",
+"Выборки (карманы)": "Kieszenie",
+"Фигурный раскрой": "Rozkrój kształtowy",
+"Упил": "Docięcie"
 }

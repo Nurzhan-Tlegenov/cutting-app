@@ -14,6 +14,30 @@ import { syncProductionReports } from '../lib/productionReports'
 // Прайс-лист производства не меняется; правки запоминаются на этот заказ и материал.
 const clean = v => String(v ?? '').replace(/[^0-9.,\s-]/g, '')
 const n2 = v => (Math.round(Number(v) * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+// Операции раскроя для подсказок сметы: { title, qty, unit, keys — какие строки прайса это уже покрывают }
+const r2 = v => Math.round((Number(v) || 0) * 100) / 100
+function opsOf(st) {
+  if (!st) return []
+  const sheets = (st.sheetCount || 0) - (st.offcutSheets || 0)
+  const wide = st.edgeWideM || 0
+  const list = [
+    ['Раскрой листов', sheets, 'л.', ['cut_sheet', 'cut_tiers', 'hdf_cut_sheet', 'hdf_cut_tiers']],
+    ['Распил (погонные метры)', st.cutM, 'м', ['cut_m', 'hdf_cut_m']],
+    ['Кромкование', (st.edgeThinM || 0) - (st.edgeWideThinM || 0), 'м', ['edge_m']],
+    ['Кромкование толстой кромкой', (st.edgeThickM || 0) - (st.edgeWideThickM || 0), 'м', ['edge_thick_m']],
+    ['Криволинейное кромкование', st.edgeCurvedM, 'м', ['edge_curved_m', 'edge_curved_part']],
+    ['Склейка', st.glueM2, 'м²', ['glue_m2', 'glue_part']],
+    ['Широкая кромка (склейка)', wide, 'м', ['edge_wide_m', 'edge_wide_part']],
+    ['Присадка (отверстия)', st.holes, 'отв.', ['hole', 'drill_m2', 'drill_m2_large']],
+    ['Торцевые отверстия', st.edgeHoles, 'отв.', ['edge_hole']],
+    ['Паз', st.grooveM, 'м', ['groove_m']],
+    ['Выборки (карманы)', st.pockets, 'шт.', ['pocket']],
+    ['Фигурный раскрой', st.shapedParts, 'дет.', ['shaped_part']],
+    ['Вырезы', st.cutouts, 'шт.', ['cutout']],
+    ['Упил', st.upils, 'шт.', ['upil', 'upil_m']],
+  ]
+  return list.filter(([, q]) => Number(q) > 0).map(([title, q, unit, keys]) => ({ title, qty: r2(q), unit, keys }))
+}
 let uid = 0
 const newId = () => `x${Date.now().toString(36)}${++uid}`
 
@@ -81,6 +105,20 @@ export function EstimateEditor({ quote, stats, mat, est, onChange }) {
           </div>
         </div>
       ))}
+      {/* операции этого раскроя — подсказки, чтобы ничего не пропустить: нажал — строка с количеством, цену вписать */}
+      {(() => {
+        const ops = opsOf(stats).filter(o => !(est.extra || []).some(x => x.title === o.title) && (noPrice || !base.some(l => !l.off && o.keys.includes(l.key))))
+        if (!ops.length) return null
+        return (
+          <div style={{ margin: '8px 0 4px' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 4 }}>Операции в этом раскрое{noPrice ? '' : ', которых нет в прайсе'} — нажмите, чтобы добавить и указать цену:</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {ops.map(o => <button key={o.title} type="button" onClick={() => add({ title: o.title, qty: String(o.qty), unit: o.unit })}
+                style={{ ...small, borderStyle: 'dashed', color: 'var(--text-muted)', borderColor: 'var(--border-md)' }}>+ {o.title} ({n2(o.qty)} {o.unit})</button>)}
+            </div>
+          </div>
+        )
+      })()}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0' }}>
         <button type="button" style={small} onClick={() => add({ title: matTitle ? `Материал ${matTitle}` : 'Материал', qty: String(sheets || 1), unit: 'л.' })}>+ Материал{sheets ? ` (${sheets} л.)` : ''}</button>
         {stats?.edgeM > 0 && <button type="button" style={small} onClick={() => add({ title: 'Кромка (материал)', qty: n2(stats.edgeM).replace(/\s/g, ''), unit: 'м' })}>+ Кромка ({n2(stats.edgeM)} м)</button>}

@@ -2983,5 +2983,20 @@
 "Проверьте адрес почты.": "Check the email address.",
 "На {0} ушло письмо для смены адреса — откройте ссылку в нём, затем вернитесь сюда.": "An email to change the address was sent to {0} — open the link in it, then come back here.",
 "Код принят, но отметка не записалась — нажмите «Подтвердить» ещё раз.": "The code was accepted, but the mark wasn't saved — press «Confirm» again.",
-"Не получилось, попробуйте ещё раз.": "That didn't work, please try again."
+"Не получилось, попробуйте ещё раз.": "That didn't work, please try again.",
+"Операции в этом раскрое": "Operations in this nesting",
+", которых нет в прайсе": " that aren't in the price list",
+"— нажмите, чтобы добавить и указать цену:": "— tap to add and set a price:",
+"Раскрой листов": "Sheet cutting",
+"Распил (погонные метры)": "Sawing (running metres)",
+"Кромкование": "Edge banding",
+"Кромкование толстой кромкой": "Thick edge banding",
+"Криволинейное кромкование": "Curved edge banding",
+"Склейка": "Gluing",
+"Широкая кромка (склейка)": "Wide edge (glued parts)",
+"Присадка (отверстия)": "Drilling (holes)",
+"Торцевые отверстия": "Edge holes",
+"Выборки (карманы)": "Pockets",
+"Фигурный раскрой": "Shaped cutting",
+"Упил": "Extra trim cut"
 }
