@@ -41,6 +41,8 @@ export async function requestSignup2(name, phone, comment, country, city, messen
   if (r.error) return { error: /bad phone/.test(r.error) ? 'Проверьте номер телефона' : r.error }
   return r.data || {}
 }
+/** Куда мастеру слать код: 'max' — в MAX (migration_max_messenger.sql); без функции в базе — тихо ничего */
+export async function signupSetApp(phone, app) { await call('signup_set_app', { p_phone: phone || '', p_app: app || '' }) }
 /** Код из Telegram / WhatsApp перед регистрацией. -> { ok } | { error } */
 /** Чего не хватает в одобренной заявке номера ('' — всё есть или база ещё без функции): 'name,country,city' — migration_signup_required.sql */
 export async function signupMissing(phone) {

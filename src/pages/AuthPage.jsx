@@ -2,7 +2,7 @@ import { nameOk } from '../lib/profileRules'
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom, getLang, tr } from '../i18n'
-import { signupOpen, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
+import { signupOpen, signupSetApp, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
 import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, guessCountryName, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
 import { useAuth, googleEnabled } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -210,9 +210,13 @@ export default function AuthPage() {
         if (!invite && form.country.trim().length < 2) throw new Error('Укажите страну')
         if (!invite && form.city.trim().length < 2) throw new Error('Укажите город')
         if (byRequest) {
-          let r = refI ? await requestSignupRef(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), messenger, refCode) : null
-          if (!r || r.missing) r = await requestSignup2(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), messenger)
+          // MAX: в базе — как WhatsApp (код присылают вручную), плюс отметка «слать в MAX»
+          const srvMsg = messenger === 'max' ? 'whatsapp' : messenger
+          const app = messenger === 'max' ? 'MAX' : 'WhatsApp'
+          let r = refI ? await requestSignupRef(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), srvMsg, refCode) : null
+          if (!r || r.missing) r = await requestSignup2(form.full_name, regPhone, form.comment, form.country.trim(), form.city.trim(), srvMsg)
           if (r.error) throw new Error(r.error)
+          await signupSetApp(regPhone, messenger)
           const byRef = r.ref === 'ok'
           setReq(r)
           const tgMode = r.messenger === 'telegram'
@@ -223,7 +227,7 @@ export default function AuthPage() {
             const pre = r.auto || byRef ? '' : 'Заявка одобрена. '   // открытая регистрация или ссылка-приглашение — одобрять нечего, сразу подтверждение номера
             setNote(r.code_issued || (byRef && tgMode && r.verified) ? `${pre}Введите код из ${tgMode && r.verified ? 'Telegram' : 'сообщения'} и придумайте пароль.`
               : tgMode && !r.verified ? `${pre}Подтвердите номер в Telegram: нажмите кнопку ниже, затем «Поделиться номером» — бот сразу пришлёт код.`
-              : byRef ? `Код пришлёт в WhatsApp ${r.inviter || 'тот, кто вас пригласил'} — ему уже пришло уведомление. Введите код ниже и придумайте пароль. Не хотите ждать — нажмите «Получить код в Telegram»: он придёт сразу.`
+              : byRef ? `Код пришлёт в ${app} ${r.inviter || 'тот, кто вас пригласил'} — ему уже пришло уведомление. Введите код ниже и придумайте пароль. Не хотите ждать — нажмите «Получить код в Telegram»: он придёт сразу.`
               : `${pre}Код ещё не отправлен — дождитесь сообщения от администратора.`)
           }
           else if (r.status === 'rejected') setError(
@@ -232,10 +236,10 @@ export default function AuthPage() {
             : r.resubmit === 'limit' ? 'Заявка для этого номера отклонена несколько раз. Свяжитесь с нами.'
             : 'Заявка для этого номера отклонена. Исправьте данные (имя и фамилия, страна, город) и отправьте заявку ещё раз.')
           else if (r.resubmit === 'ok' && tgMode && r.verified) setNote('Повторная заявка отправлена, номер подтверждён ✓. Как только её одобрят, код для регистрации придёт в Telegram.')
-          else if (r.resubmit === 'ok' && !tgMode) setNote('Повторная заявка отправлена. После одобрения администратор пришлёт код в WhatsApp.')
+          else if (r.resubmit === 'ok' && !tgMode) setNote(`Повторная заявка отправлена. После одобрения администратор пришлёт код в ${app}.`)
           else if (tgMode && !r.verified) setNote('Заявка отправлена. Остался один шаг: подтвердите номер в Telegram — нажмите кнопку ниже, затем «Поделиться номером» в боте. Код для регистрации придёт туда же после одобрения.')
           else if (tgMode) setNote('Заявка отправлена, номер подтверждён ✓. Как только заявку одобрят, код для регистрации придёт в Telegram.')
-          else setNote('Заявка отправлена. После одобрения администратор пришлёт код в WhatsApp — откройте «Регистрация», введите этот же номер и код.')
+          else setNote(`Заявка отправлена. После одобрения администратор пришлёт код в ${app} — откройте «Регистрация», введите этот же номер и код.`)
           // написал на своём языке (имя, страна, город) — предложить переключить приложение на него
           if (r.status !== 'approved' && r.status !== 'open') offerLangFrom([form.full_name, form.country, form.city, form.comment].join(' '))
           return
@@ -474,10 +478,12 @@ export default function AuthPage() {
             {byRequest && (
               <div>
                 <label className="label">Куда прислать код подтверждения</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {[['telegram', 'Telegram', open ? 'сразу — номер подтверждается в 1 тап, код приходит сам' : 'быстро — номер подтверждается в 1 тап, код приходит сам'], ['whatsapp', 'WhatsApp', refI ? 'код пришлёт тот, кто вас пригласил' : open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения']].map(([k, title, sub]) => (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[['telegram', 'Telegram', open ? 'сразу — номер подтверждается в 1 тап, код приходит сам' : 'быстро — номер подтверждается в 1 тап, код приходит сам'],
+                    ['whatsapp', 'WhatsApp', refI ? 'код пришлёт тот, кто вас пригласил' : open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения'],
+                    ...(refI ? [] : [['max', 'MAX', open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения']])].map(([k, title, sub]) => (
                     <button key={k} type="button" onClick={() => setMessenger(k)}
-                      style={{ flex: 1, textAlign: 'left', padding: '10px 10px 8px', borderRadius: 'var(--radius)', cursor: 'pointer', position: 'relative',
+                      style={{ flex: k === 'telegram' ? '1 1 100%' : '1 1 40%', textAlign: 'left', padding: '10px 10px 8px', borderRadius: 'var(--radius)', cursor: 'pointer', position: 'relative',
                         border: messenger === k ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)', background: messenger === k ? 'var(--blue-light, var(--bg2))' : 'transparent' }}>
                       {k === 'telegram' && <span style={{ position: 'absolute', top: -8, right: 8, fontSize: 10, background: 'var(--teal)', color: 'white', borderRadius: 10, padding: '1px 7px' }}>рекомендуем</span>}
                       <div style={{ fontSize: 14, fontWeight: 600, color: messenger === k ? 'var(--blue)' : 'var(--text)' }}>{messenger === k ? '● ' : '○ '}{title}</div>
