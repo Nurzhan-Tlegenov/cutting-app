@@ -4,6 +4,7 @@ import { forgetPush } from '../lib/push'
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
 import { purgeArchived } from '../lib/orderArchive'
 import { touchActivity } from '../lib/activity'
+import { myEmailStatus } from '../lib/adminApi'
 import { GUEST_USER, GUEST_PROFILE, guestFlag, setGuestActive, setRealSession, endGuest, claimGuestOrders } from '../lib/guest'
 
 let purged = false   // заказы с истёкшим сроком хранения в архиве удаляются раз за запуск приложения
@@ -26,6 +27,7 @@ export async function googleEnabled() {
   return googleOnCache
 }
 
+let gateSeq = 0
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -63,7 +65,7 @@ export function AuthProvider({ children }) {
     const apply = session => {
       if (session?.user) { setRealSession(true); setUser(session.user); fetchProfile(session.user.id); claim(session.user.id) }
       else if (guestFlag()) { setRealSession(false); enterGuest() }
-      else { setRealSession(false); setGuestActive(false); setUser(null); setProfile(null); setLoading(false) }
+      else { setRealSession(false); setGuestActive(false); setUser(null); setProfile(null); setEmailGate(null); setLoading(false) }
     }
     supabase.auth.getSession().then(({ data: { session } }) => apply(session))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -76,12 +78,24 @@ export function AuthProvider({ children }) {
     return () => { subscription.unsubscribe(); window.removeEventListener('guest-change', onGuest) }
   }, [])
 
+  // Подтверждение почты: null — не нужно; { email } — нужно ввести код из письма (экран EmailVerifyPage)
+  const [emailGate, setEmailGate] = useState(null)
+  async function refreshEmailGate() {
+    const n = ++gateSeq   // применяется только ответ последнего запроса (вход кодом шлёт два почти одновременно)
+    try {
+      const st = await myEmailStatus()
+      if (n === gateSeq) setEmailGate(st?.required && !st?.verified ? { email: st.email || '' } : null)
+    } catch { if (n === gateSeq) setEmailGate(null) }
+  }
   async function fetchProfile(userId) {
     if (!purged) { purged = true; purgeArchived() }
     const { data: { session: ses } } = await supabase.auth.getSession()
     // настройки аккаунта — до показа приложения (их читают сразу: шаблон бирок, ЧПУ, параметры раскроя)
     let [{ data }] = await Promise.all([supabase.from('profiles').select('*').eq('id', userId).maybeSingle(), loadUserSettings(ses?.user).catch(() => {})])
     const byPhone = isPhoneAccount(ses?.user)
+    // новый аккаунт по почте — почта должна быть подтверждена кодом (migration_email_verify.sql); старые не трогаем
+    if (!byPhone) await refreshEmailGate()
+    else setEmailGate(null)
     // Профиля нет или в нём нет имени / телефона (так бывало после регистрации по заявке) — производство тогда не видит,
     // чей заказ. Дозаполняем: база берёт имя из заявки на регистрацию и номер входа, остальное — из данных регистрации.
     // У аккаунта по почте (email, Google) телефона может не быть — его отсутствие не повод для лишних запросов при каждом входе.
@@ -198,7 +212,7 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, setContactEmail, refreshProfile: () => (user ? fetchProfile(user.id) : null),
       signInWithGoogle, sendResetEmail, setNewPassword, completeProfile, recovery, needsProfile,
-      cabinet, setCabinet, isMaster: profile?.role === 'admin', isGuest: !!user?.guest }}>
+      cabinet, setCabinet, isMaster: profile?.role === 'admin', isGuest: !!user?.guest, emailGate, refreshEmailGate }}>
       {children}
     </AuthContext.Provider>
   )

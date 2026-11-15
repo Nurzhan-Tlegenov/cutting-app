@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
-import { adminEmailSignup, adminSetEmailSignup, adminGuestMode, adminSetGuestMode } from '../lib/adminApi'
+import { adminEmailSignup, adminSetEmailSignup, adminGuestMode, adminSetGuestMode, adminEmailVerifications } from '../lib/adminApi'
 import SupportToggle from '../components/SupportToggle'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone, tgStartLink } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
@@ -96,11 +96,13 @@ export default function UsersPage() {
   const [blkPhone, setBlkPhone] = useState('')
   const [blkNote, setBlkNote] = useState('')
 
+  const [emailVer, setEmailVer] = useState({})   // новые аккаунты по почте: id -> подтвердил ли почту (migration_email_verify.sql)
   const [guestOpen, setGuestOpen] = useState(null)   // пробный режим без регистрации: true / false, null — нет migration_guest_mode.sql
   const [emailOpen, setEmailOpen] = useState(null)   // регистрация по почте и Google: true / false, null — в базе ещё нет (migration_email_login.sql)
   const load = async () => {
     const [u, r, o, pr, lm, lh, bt, bl, eo, pa, up] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones(), adminEmailSignup(), adminPostAccess(), adminUserPosts()])
     adminGuestMode().then(setGuestOpen)
+    adminEmailVerifications().then(list => setEmailVer(Object.fromEntries((list || []).map(x => [x.id, !!x.verified]))))
     if (pa.error) setPosts(null)
     else {
       const has = new Map(), asks = new Map()
@@ -309,6 +311,7 @@ export default function UsersPage() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13 }}>
                         {tel ? <a href={`tel:+${tel}`} style={{ color: 'var(--blue)' }}>{u.phone || `+${tel}`}</a> : <span style={{ color: 'var(--text-hint)' }}>{u.email}</span>}
+                        {u.id in emailVer && <span style={{ marginLeft: 8, fontSize: 11, color: emailVer[u.id] ? 'var(--teal)' : 'var(--amber)' }}>{emailVer[u.id] ? '✓ почта подтверждена' : '⚠ почта не подтверждена'}</span>}
                         {wa && <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', marginLeft: 10, fontSize: 12 }}>WhatsApp</a>}
                         {u.id !== user?.id && <button type="button" onClick={() => { setWriteTo(writeTo === u.id ? null : u.id); setDraft('') }}
                           style={{ marginLeft: 10, fontSize: 12, color: 'var(--blue)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>✉ Написать</button>}

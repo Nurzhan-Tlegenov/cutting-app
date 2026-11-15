@@ -34,6 +34,7 @@ import './index.css'
 
 import AuthPage from './pages/AuthPage'
 import { CompleteProfilePage, NewPasswordPage } from './pages/CompleteProfilePage'
+import EmailVerifyPage from './pages/EmailVerifyPage'
 import OrdersPage from './pages/OrdersPage'
 const OrderPage = lazyPage(() => import('./pages/OrderPage'))
 const NewOrderPage = lazyPage(() => import('./pages/NewOrderPage'))
@@ -129,7 +130,7 @@ function PushBridge() {
 const AFTER_LOGIN = 'afterLogin'
 const afterLogin = () => { try { const v = sessionStorage.getItem(AFTER_LOGIN); if (v) sessionStorage.removeItem(AFTER_LOGIN); return v && v.startsWith('/') ? v : null } catch { return null } }
 function ProtectedRoute({ children }) {
-  const { user, loading, recovery, needsProfile } = useAuth()
+  const { user, loading, recovery, needsProfile, emailGate } = useAuth()
   const loc = useLocation()
   if (loading) return <CncLoader full label="Открываем приложение…" />
   if (!user) {
@@ -138,6 +139,7 @@ function ProtectedRoute({ children }) {
   }
   if (user.guest && !guestPathOk(loc.pathname)) return <GuestGate />   // пробный режим: только заказы и раскрой
   if (recovery) return <NewPasswordPage />           // ссылка из письма «сменить пароль»
+  if (emailGate) return <EmailVerifyPage />          // новый аккаунт по почте: подтвердить почту кодом
   if (needsProfile) return <CompleteProfilePage />   // вход по почте / Google: имя, страна, город — до работы
   return children
 }

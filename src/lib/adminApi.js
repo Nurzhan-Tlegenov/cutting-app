@@ -170,3 +170,10 @@ export async function guestModeOpen() { const r = await call('guest_mode_open');
 /** Мастер: состояние для переключателя (null — в базе ещё нет функции) */
 export async function adminGuestMode() { const r = await call('guest_mode_open'); return r.error ? null : r.data !== false }
 export const adminSetGuestMode = open => call('admin_set_guest_mode', { p_open: !!open })
+
+// ── Подтверждение почты кодом для новых аккаунтов по почте (migration_email_verify.sql) ──
+/** Мой статус: { required, verified, email }; базы без функции — { required: false } */
+export async function myEmailStatus() { const r = await call('my_email_status'); return r.error || !r.data ? { required: false } : r.data }
+export async function markEmailVerified() { const r = await call('mark_email_verified'); return r.error ? { error: r.error } : (r.data || {}) }
+/** Мастер: [{ id, verified, verified_at }] — только новые аккаунты по почте; null — нет функции */
+export async function adminEmailVerifications() { const r = await call('admin_email_verifications'); return r.error ? null : (r.data || []) }
