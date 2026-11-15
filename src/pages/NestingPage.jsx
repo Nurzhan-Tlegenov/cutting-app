@@ -77,6 +77,7 @@ import { prepCorner, flipResult, moveCorner, cornerOf, cornerLabel } from '../li
 import CornerPick from '../components/CornerPick'
 import { readOffcutsFile } from '../lib/importDetails'
 import { fetchOrderDetails, insertOrderDetails } from '../lib/orderDetails.js'
+import EstimateModal from '../components/EstimateEditor'
 // Сколько id за раз в фильтре .in(): адрес запроса ограничен по длине (uuid — 36 знаков)
 const ID_CHUNK = 100
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
@@ -2751,12 +2752,21 @@ export default function NestingPage() {
       await saveBeamSawXml({ order, mat, geoOf: sh => geoOf(order, cfg.result, sh) })
     } catch (e) { window.alert('Не удалось собрать XML для пилы: ' + (e?.message || e)) }
   }
-  async function pdfCfg(cfg, idx) {
+  const pdfMatOf = cfg => {
+    const m = materials.find(x => x.key === matKey) || materials[0] || {}
+    const [name, thick] = String(m.key || '|').split('|')
+    return { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details, method: cuttingMethod }
+  }
+  // кабинет производства с галочкой «Смета»: перед PDF — окно сметы (поправить строки прайса, добавить свои: материал, доставка…)
+  const [estAsk, setEstAsk] = useState(null)   // { cfg, idx, mat }
+  function pdfClick(cfg, idx) {
+    if (cabinet === 'production' && pdfEstimate) { setEstAsk({ cfg, idx, mat: pdfMatOf(cfg) }); return }
+    pdfCfg(cfg, idx)
+  }
+  async function pdfCfg(cfg, idx, est = null, mat0 = null) {
     setPdfBusy(cfg.id)
     try {
-      const m = materials.find(x => x.key === matKey) || materials[0] || {}
-      const [name, thick] = String(m.key || '|').split('|')
-      const mat = { name: name || order.material_name || '', thickness: Number(thick) || Number(order.material_thickness) || 16, result: cfg.result, sheets: cfg.sheetsData.filter(sh => sh.placed.length), details, method: cuttingMethod }
+      const mat = mat0 || pdfMatOf(cfg)
       // кабинет производства: своё оформление листа, а с галочкой «Смета» — ещё страница со статистикой раскроя и сметой
       let summary = null
       // клиент с выбранным производством: PDF — как настроило производство (смета, вид статистики, свой макет листа)
@@ -2764,7 +2774,7 @@ export default function NestingPage() {
       const prodRep = cabinet !== 'production' && order.production_id ? clientReport(productions.find(p => p.id === order.production_id)) : null
       if (cabinet === 'production' ? pdfEstimate : prodRep?.estimate) {
         const { stats, quote } = await statsAndQuote({ order, mats: [mat], method: cuttingMethod })
-        summary = pdfSummaryOf(stats, quote, (cabinet === 'production' ? getUserSettings(user).pdfSummary : prodRep.summary) || {})
+        summary = pdfSummaryOf(stats, quote, (cabinet === 'production' ? getUserSettings(user).pdfSummary : prodRep.summary) || {}, true, cabinet === 'production' ? est : null)
       }
       await saveNestingPdf({ order, fileName: `${fileNameOf('maps', fileNamesOf(user).maps, { total: mat.sheets.length, order, material: mat.name, thickness: mat.thickness, client: clientName })}${configs.length > 1 ? `_k${idx + 1}` : ''}.pdf`, mat,
         summary, tpl: cabinet === 'production' ? userPdfTpl(user) : prodRep?.tpl || null, same: showSame ? sameAlpha : 0, statsPage: pdfStatsPage || !!prodRep?.statsPage, statsFirst: pdfStatsFirst })
@@ -3952,7 +3962,7 @@ export default function NestingPage() {
                         {cfg.saved ? '✓ Выбран' : busyId === cfg.id ? 'Сохранение…' : 'Выбрать'}
                       </button>}
                       <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                        <button onClick={() => pdfCfg(cfg, idx)} disabled={!!pdfBusy} title="Карты раскроя в PDF: листы с деталями, размерами, кромкой и процентом использования материала"
+                        <button onClick={() => pdfClick(cfg, idx)} disabled={!!pdfBusy} title="Карты раскроя в PDF: листы с деталями, размерами, кромкой и процентом использования материала"
                           style={{ padding: '9px 12px', background: 'var(--bg)', color: 'var(--blue)', border: '0.5px solid var(--blue-mid)', borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: pdfBusy ? 'default' : 'pointer' }}>
                           {pdfBusy === cfg.id ? '…' : 'PDF'}
                         </button>
@@ -4615,6 +4625,10 @@ export default function NestingPage() {
   </>)
 
   // Компьютер: слева — карты раскроя (на всю высоту окна), справа — всё остальное; ширину колонок тянут мышью
+  const estModal = estAsk && (
+    <EstimateModal order={order} mat={estAsk.mat} method={cuttingMethod} onClose={() => setEstAsk(null)}
+      onMake={est => { const a = estAsk; setEstAsk(null); pdfCfg(a.cfg, a.idx, est, a.mat) }} />
+  )
   if (desk) return (
     <div className="page desk-page">
       <DeskSplit id="nesting" def={0.62}
@@ -4628,11 +4642,13 @@ export default function NestingPage() {
           <div ref={setPreviewEl} style={{ height: previewId ? '100%' : 0 }} />
         </>}
         right={pageBody} />
+      {estModal}
     </div>
   )
   return (
     <div className="page" style={{ paddingBottom: 100 }}>
       {pageBody}
+      {estModal}
     </div>
   )
 }

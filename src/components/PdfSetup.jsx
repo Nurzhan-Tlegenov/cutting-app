@@ -5,14 +5,14 @@ import { useAuth } from '../context/AuthContext'
 import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { useNestingQuote } from '../hooks/useNestingQuote'
 import { statsRows } from '../lib/nestingStats'
-import { money } from '../lib/pricing'
 import { saveNestingPdf, renderPdfPages } from '../lib/nestingPdf'
 import PdfPreview from './PdfPreview'
 import { userSameAlpha } from '../lib/sameParts'
-import { quoteLines, pdfSummaryOf, userPdfTpl, orderRows } from '../lib/pdfSummary'
+import { pdfSummaryOf, userPdfTpl, orderRows } from '../lib/pdfSummary'
 import PdfLayoutEditor from './PdfLayoutEditor'
 import { syncProductionReports } from '../lib/productionReports'
 import { useBackClose } from '../lib/backStack'
+import { EstimateEditor, useEstimate } from './EstimateEditor'
 
 // PDF карт раскроя из кабинета производства — конструктор: что из статистики раскроя и стоимости вывести
 // на последней странице. Выбор запоминается за аккаунтом.
@@ -37,13 +37,12 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const rows = stats ? orderRows(statsRows(stats), cfg.order) : []
   const off = new Set(cfg.off || [])
   const toggle = key => change({ off: off.has(key) ? [...off].filter(k => k !== key) : [...off, key] })
-  const priced = quote && !quote.empty && Number(quote.total) > 0
-  const lines = priced ? quoteLines(quote) : []
+  const [est, setEst] = useEstimate(order, mat)   // своя смета: правки строк прайса и свои строки (материал, доставка…)
   const make = async () => {
     setBusy('…'); setError('')
     try {
       syncProductionReports(user)
-      const summary = pdfSummaryOf(stats, quote, cfg)
+      const summary = pdfSummaryOf(stats, quote, cfg, true, est)
       await saveNestingPdf({ order, mat, fileName, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, statsFirst, onProgress: (a, b) => setBusy(`${a}/${b}`) })
       onClose()
     } catch (e) { setError('Не удалось собрать PDF: ' + (e?.message || e)); setBusy('') }
@@ -89,24 +88,13 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
           </div>
           <p className="section-title">Смета</p>
           {quote === undefined ? <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 10 }}>Считаем…</p>
-            : !priced ? <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 10 }}>Цен нет: прайс-лист производства не заполнен или выключен (Производство → Прайс-лист).</p>
             : (
               <>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
                   {PRICE_MODES.map(([k, l]) => <button key={k} type="button" style={chip(cfg.price === k)} onClick={() => change({ price: k })}>{l}</button>)}
                 </div>
-                {cfg.price === 'lines' && lines.map((l, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12.5, padding: '2px 0' }}>
-                    <span style={{ flex: 1, minWidth: 0, color: 'var(--text-muted)' }}>{l.title}</span>
-                    <span style={{ color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>{l.qty}{l.rate ? ` × ${l.rate}` : ''}</span>
-                    <b style={{ fontWeight: 500, minWidth: 60, textAlign: 'right' }}>{l.sum}</b>
-                  </div>
-                ))}
-                {cfg.price !== 'none' && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '4px 0 10px' }}>
-                    <span>Итого{quote.min_applied ? ' (минимальная сумма)' : ''}</span><b>{money(quote.total, quote.currency)}</b>
-                  </div>
-                )}
+                {!(quote && !quote.empty && Number(quote.total) > 0) && cfg.price !== 'none' && <p style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 6 }}>Прайс-лист производства не заполнен или выключен (Производство → Прайс-лист) — можно добавить свои строки.</p>}
+                {cfg.price !== 'none' && <EstimateEditor quote={quote} stats={stats} mat={mat} est={est} onChange={setEst} />}
               </>
             )}
         </div>
@@ -120,7 +108,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
         </div>
       </div>
       {preview && <PdfPreview title="Просмотр PDF" onClose={() => setPreview(false)}
-        make={prog => renderPdfPages({ order, mat, summary: pdfSummaryOf(stats, quote, cfg), tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, statsFirst, onProgress: (a, b) => prog(`${a}/${b}`) })} />}
+        make={prog => renderPdfPages({ order, mat, summary: pdfSummaryOf(stats, quote, cfg, true, est), tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage, statsFirst, onProgress: (a, b) => prog(`${a}/${b}`) })} />}
       {layout && <PdfLayoutEditor order={order} mat={mat} onClose={() => { setLayout(false); syncProductionReports(user) }} />}
     </div>
   )

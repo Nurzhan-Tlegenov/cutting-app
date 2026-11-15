@@ -5,6 +5,7 @@ import { getUserSettings } from './userSettings'
 import { nestingStats, sumStats, statsPayload, statsRows } from './nestingStats'
 import { fetchQuote, fetchFixedQuote, freshFixedQuote, money, GROUP_TITLE, lineTitle, lineUnit } from './pricing'
 import { normalizePdfTpl } from './nestingPdf'
+import { applyEstimate, isCustom } from './estimateEdit'
 
 const num = v => (Math.round(Number(v) * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 
@@ -47,8 +48,22 @@ export function summaryLayout(cfg = {}) {
   return { sections: noOrder && noProd ? all.filter(k => k !== 'notes') : all, size: Number(cfg.size) || 3.1, cols: cfg.cols === 1 ? 1 : 2, noOrderNote: noOrder, noProdNote: noProd,
     parts: cfg.parts?.on ? { cols: Array.isArray(cfg.parts.cols) ? cfg.parts.cols.filter(c => c && c.type) : [], wrap: cfg.parts.wrap !== false, size: Number(cfg.parts.size) || 0 } : null }
 }
-export function pdfSummaryOf(stats, quote, cfg = {}, estimate = true) {
+// est — своя смета (estimateEdit.js: правки строк прайса, свои строки, «Без прайса»); нет — смета как по прайсу
+export function pdfSummaryOf(stats, quote, cfg = {}, estimate = true, est = null) {
   const off = new Set(cfg.off || [])
+  const custom = isCustom(est)
+  if (custom) {
+    const a = applyEstimate(quote, est)
+    const priced = estimate && cfg.price !== 'none' && (a.lines.length > 0 || a.total > 0)
+    return {
+      ...pdfSummaryOf(stats, null, cfg, false),
+      lines: priced && cfg.price !== 'total' ? a.lines : [],
+      total: priced ? a.totalText : null,
+      currency: priced ? a.currency : '', minApplied: priced && a.minApplied,
+      // свои строки (материал, доставка) — подпись «Стоимость», без «материал в сумму не входит»
+      custom: (est.extra || []).length > 0 || !!est.noPrice,
+    }
+  }
   const lines = quoteLines(quote)
   const priced = lines.length > 0 && estimate && cfg.price !== 'none'
   return {

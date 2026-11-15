@@ -8,6 +8,7 @@ import { detailEdgeList } from './edgeLength.js'
 import { rawDetail, overMm, parseEdgeTypes, edgeThick, narrowApplied } from './edgeCut.js'
 import { decomposeCuts } from './cutLines.js'
 import { beamSheetCuts } from './beamSawXml.js'
+import { glueRoles } from './glue.js'
 
 const loopLen = pts => { let l = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; l += Math.hypot(b[0] - a[0], b[1] - a[1]) } return l }
 const loopArea = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1] } return Math.abs(s) / 2 }
@@ -26,6 +27,9 @@ export const emptyStats = () => ({
   holes: 0, edgeHoles: 0, grooves: 0, grooveM: 0, pockets: 0, cutouts: 0, shapedParts: 0,
   drillM2: 0, drillParts: 0,   // детали с присадкой (отверстия в пласть, с изнанки, в торец): их площадь и число — для сведения;
                                // цена «присадка за м²» считается от площади ВСЕХ деталей заказа, если присадка в нём есть (statsPayload)
+  glueN: 0, glueM2: 0,   // склейка (две плиты в одну деталь): число склеенных деталей и их площадь по одной стороне (glue.js)
+  edgeWideM: 0, edgeWideParts: 0, edgeWideThinM: 0, edgeWideThickM: 0,   // широкая кромка — вся прямая кромка склеенных деталей;
+                               // она же входит в edgeThinM / edgeThickM (по толщине), а в смете отдельно — если у неё есть своя цена
   hdf: false,   // материал заказа — ХДФ / ДВП: распил в прайс-листе по своим ценам
 })
 
@@ -43,6 +47,7 @@ export function nestingStats({ order, mat, method }) {
   const types = parseEdgeTypes(order?.edge_types)
   const over = overMm(types)
   const thickOf = name => edgeThick(types, name === 'Кромка' ? 'default' : name)   // не задана — из названия кромки
+  const glue = glueRoles(details)
   for (const sh of mat.sheets || []) {
     if (!sh?.placed?.length) continue
     const geo = sheetGeo(order, mat.result, sh)
@@ -71,19 +76,26 @@ export function nestingStats({ order, mat, method }) {
         const nr = narrowApplied({ left: raw.edge_left, right: raw.edge_right, top: raw.edge_top, bottom: raw.edge_bottom }, types, W, L, raw.contour)
         for (const side of Object.keys(nr || {})) { st.upils++; st.upilM += (side === 'left' || side === 'right' ? L : W) / 1000 }
       }
+      // склейка: считается один раз — по склеенной детали (основе), площадь по одной стороне
+      const gr = glue.get(p.detailIndex)
+      if (gr === 'base') { st.glueN++; st.glueM2 += loopArea(f.outline) / 1e6 }
       // кромка этой детали
       if (d) {
-        let curved = false
+        let curved = false, wide = false
         for (const e of detailEdgeList(rawDetail(d))) {
           const m = (e.mm + over) / 1000
           st.edgeM += m
           st.edgeByType[e.name] = (st.edgeByType[e.name] || 0) + m
           if (thickOf(e.name) > 0) st.edgeTypeT[e.name] = thickOf(e.name)
-          if (e.curved) { st.edgeCurvedM += m; curved = true }
-          else if (thickOf(e.name) > THICK_FROM) st.edgeThickM += m
+          if (e.curved) { st.edgeCurvedM += m; curved = true; continue }
+          const thick = thickOf(e.name) > THICK_FROM
+          if (thick) st.edgeThickM += m
           else st.edgeThinM += m
+          // кромка на склеенной детали — широкая
+          if (gr) { wide = true; st.edgeWideM += m; if (thick) st.edgeWideThickM += m; else st.edgeWideThinM += m }
         }
         if (curved) st.edgeCurvedParts++
+        if (wide) st.edgeWideParts++
       }
     }
     // пильный центр: резы — как в программе станка, вместе с опилом (обрезка кромок листа, торцовка) и подрезкой узких
@@ -138,6 +150,10 @@ export function statsPayload(st, order = null) {
   return {
     sheets: st.sheets.map(s => ({ parts: s.parts })),
     parts: st.parts, cut_m: r2(st.cutM), upil_n: st.upils, upil_m: r2(st.upilM),
+    // склейка и широкая кромка (migration_glue.sql): широкая кромка входит и в edge_thin_m / edge_thick_m —
+    // база вычитает её оттуда, только если у широкой кромки есть своя цена (иначе — как раньше, по цене обычной)
+    ...(st.glueN ? { glue_n: st.glueN, glue_m2: r2(st.glueM2) } : {}),
+    ...(st.edgeWideM > 0 ? { edge_wide_m: r2(st.edgeWideM), edge_wide_parts: st.edgeWideParts, edge_wide_thin_m: r2(st.edgeWideThinM), edge_wide_thick_m: r2(st.edgeWideThickM) } : {}),
     edge_thin_m: r2(st.edgeThinM), edge_thick_m: r2(st.edgeThickM), edge_curved_m: r2(st.edgeCurvedM), edge_curved_parts: st.edgeCurvedParts,
     holes: st.holes, edge_holes: st.edgeHoles, // присадка за м² — от общей площади ВСЕХ деталей заказа, всегда (и для списка из Excel, где отверстий в данных нет:
     // детали всё равно перекладывают, обрабатывают); не начислять — «Без присадки» у стоимости работ (drill_kind 'none')
@@ -167,6 +183,8 @@ export function statsRows(st) {
     ['edgeM', 'Кромка всего', `${n2(st.edgeM)} м`, st.edgeM > 0],
     ['edgeThin', 'Кромка прямая до 1 мм', `${n2(st.edgeThinM)} м`, st.edgeThinM > 0 && (st.edgeThickM > 0 || st.edgeCurvedM > 0)],
     ['edgeThick', 'Кромка прямая толще 1 мм', `${n2(st.edgeThickM)} м`, st.edgeThickM > 0],
+    ['glue', 'Склейка', `${st.glueN} дет. · ${n2(st.glueM2)} м²`, st.glueN > 0],
+    ['edgeWide', 'Широкая кромка (склейка)', `${n2(st.edgeWideM)} м · ${st.edgeWideParts} дет.`, st.edgeWideM > 0],
     ['edgeCurved', 'Кромка криволинейная', `${n2(st.edgeCurvedM)} м · ${st.edgeCurvedParts} дет.`, st.edgeCurvedM > 0],
     ['holes', 'Отверстий в пласть', st.holes, st.holes > 0],
     ['edgeHoles', 'Отверстий в торец', st.edgeHoles, st.edgeHoles > 0],

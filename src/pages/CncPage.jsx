@@ -39,6 +39,7 @@ import PdfSetup from '../components/PdfSetup'
 import { buildNestingPdf } from '../lib/nestingPdf'
 import { userSameAlpha } from '../lib/sameParts'
 import { userPdfTpl, statsAndQuote, pdfSummaryOf } from '../lib/pdfSummary'
+import { loadEstimate, estimateKey } from '../lib/estimateEdit'
 import { parseGcode, fmtTime } from '../lib/gcodeSim'
 import SimLinksBox from '../components/SimLinksBox'
 import { packSim, getSimShare, saveSimShare, deleteSimShare, simShareUrl } from '../lib/simShare'
@@ -352,7 +353,7 @@ export default function CncPage() {
         if (getUserSettings(user).pdfEstimate) {
           try {
             const { stats, quote } = await statsAndQuote({ order, mats: [mat], method: order.cutting_method || 'nesting' })
-            summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {})
+            summary = pdfSummaryOf(stats, quote, getUserSettings(user).pdfSummary || {}, true, loadEstimate(user, estimateKey(order, mat)))
           } catch { summary = null }
         }
         maps = { name: `${fileBase('maps')}.pdf`, data: await buildNestingPdf({ order, mat, summary, tpl: userPdfTpl(user), same: userSameAlpha(user), statsPage: !!getUserSettings(user).pdfStatsPage, statsFirst: !!getUserSettings(user).pdfStatsFirst, onProgress: (a, b) => setMapsBusy(`Карты PDF: ${a} из ${b}`) }), dir: [] }

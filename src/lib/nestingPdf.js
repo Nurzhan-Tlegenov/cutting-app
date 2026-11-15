@@ -790,10 +790,10 @@ function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo, partRows
       const lines = summary.lines || []
       if (!lines.length && summary.total == null) return
       const cur = summary.currency ? `, ${summary.currency}` : ''
-      text(ctx, 'Стоимость работ', 10, y, { size: 3.6, bold: true }); y += 6
+      text(ctx, summary.custom ? 'Стоимость' : 'Стоимость работ', 10, y, { size: 3.6, bold: true }); y += 6
       if (lines.length) {
         ctx.fillStyle = '#EFEDE6'; ctx.fillRect(mm(10), mm(y - 4.2), mm(190), mm(6))
-        text(ctx, 'Операция', 12, y, { size: 2.7, bold: true, color: MUTED })
+        text(ctx, summary.custom ? 'Наименование' : 'Операция', 12, y, { size: 2.7, bold: true, color: MUTED })
         text(ctx, 'Количество', 136, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
         text(ctx, `Цена${cur}`, 168, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
         text(ctx, `Сумма${cur}`, 198, y, { size: 2.7, bold: true, color: MUTED, align: 'right' })
@@ -812,7 +812,7 @@ function drawSummaryPage(ctx, { order, matName, summary, notes, pageNo, partRows
         text(ctx, summary.minApplied ? 'Итого (минимальная сумма заказа)' : 'Итого', 12, y, { size: 3.8, bold: true })
         text(ctx, summary.total, 198, y, { size: 5, bold: true, align: 'right' })
         rule(ctx, 10, y + 2.4, 200, y + 2.4, 0.35, INK); y += 8
-        text(ctx, 'Стоимость работ; материал и кромка в сумму не входят.', 12, y, { size: 2.5, color: MUTED }); y += 8
+        if (!summary.custom) { text(ctx, 'Стоимость работ; материал и кромка в сумму не входят.', 12, y, { size: 2.5, color: MUTED }); y += 8 }
       }
     },
     notes: () => {
