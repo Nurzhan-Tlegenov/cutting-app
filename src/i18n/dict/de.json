@@ -2581,5 +2581,21 @@
 "Великобритания": "Vereinigtes Königreich",
 "Чехия": "Tschechien",
 "Польша": "Polen",
-"Германия": "Deutschland"
+"Германия": "Deutschland",
+"Попробовать без регистрации": "Ohne Registrierung testen",
+"Создайте заказ и посмотрите раскрой прямо сейчас — без данных о себе. Заказ хранится на этом устройстве.": "Erstellen Sie einen Auftrag und sehen Sie den Zuschnitt sofort — ohne persönliche Daten. Der Auftrag wird auf diesem Gerät gespeichert.",
+"← Вернуться к пробному заказу": "← Zurück zum Testauftrag",
+"Пробный режим — заказы хранятся только на этом устройстве": "Testmodus — Aufträge werden nur auf diesem Gerät gespeichert",
+"Нужна регистрация": "Registrierung erforderlich",
+"«{0}» — доступно после регистрации.": "«{0}» ist nach der Registrierung verfügbar.",
+"Это доступно после регистрации.": "Das ist nach der Registrierung verfügbar.",
+"Регистрация бесплатная. Ваши пробные заказы не пропадут — они сами перейдут в аккаунт.": "Die Registrierung ist kostenlos. Ihre Testaufträge gehen nicht verloren — sie werden automatisch in Ihr Konto übernommen.",
+"У меня есть аккаунт": "Ich habe ein Konto",
+"Позже": "Später",
+"✓ Пробные заказы перенесены в ваш аккаунт:": "✓ Testaufträge in Ihr Konto übernommen:",
+"Этот раздел — после регистрации": "Dieser Bereich ist nach der Registrierung verfügbar",
+"В пробном режиме можно создать заказ, загрузить модель или детали и выполнить раскрой. Регистрация бесплатная — пробные заказы перейдут в аккаунт.": "Im Testmodus können Sie einen Auftrag anlegen, ein Modell oder Teile importieren und den Zuschnitt berechnen. Die Registrierung ist kostenlos — Testaufträge werden in Ihr Konto übernommen.",
+"Выгрузка DXF": "DXF-Export",
+"Программа для пильного центра": "Programm für die Plattenaufteilsäge",
+"Отправка заказа на производство": "Auftrag an die Werkstatt senden"
 }

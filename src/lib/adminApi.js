@@ -163,3 +163,10 @@ export const adminSetEmailSignup = open => call('admin_set_email_signup', { p_op
 
 // ── Кто чей сотрудник — для карточки пользователя (migration_admin_memberships.sql) ──
 export const adminMemberships = () => call('admin_memberships')
+
+// ── Пробный режим без регистрации (migration_guest_mode.sql) ──
+/** Включён ли пробный режим (кнопка «Попробовать без регистрации»). Базы без функции — включён */
+export async function guestModeOpen() { const r = await call('guest_mode_open'); return r.error ? true : r.data !== false }
+/** Мастер: состояние для переключателя (null — в базе ещё нет функции) */
+export async function adminGuestMode() { const r = await call('guest_mode_open'); return r.error ? null : r.data !== false }
+export const adminSetGuestMode = open => call('admin_set_guest_mode', { p_open: !!open })

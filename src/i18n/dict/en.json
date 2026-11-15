@@ -2583,5 +2583,21 @@
 "Великобритания": "United Kingdom",
 "Чехия": "Czech Republic",
 "Польша": "Poland",
-"Германия": "Germany"
+"Германия": "Germany",
+"Попробовать без регистрации": "Try without signing up",
+"Создайте заказ и посмотрите раскрой прямо сейчас — без данных о себе. Заказ хранится на этом устройстве.": "Create an order and see the cutting layout right now — no personal details needed. The order is stored on this device.",
+"← Вернуться к пробному заказу": "← Back to my trial order",
+"Пробный режим — заказы хранятся только на этом устройстве": "Trial mode — orders are stored only on this device",
+"Нужна регистрация": "Sign-up required",
+"«{0}» — доступно после регистрации.": "«{0}» is available after signing up.",
+"Это доступно после регистрации.": "This is available after signing up.",
+"Регистрация бесплатная. Ваши пробные заказы не пропадут — они сами перейдут в аккаунт.": "Signing up is free. Your trial orders won't be lost — they move to your account automatically.",
+"У меня есть аккаунт": "I have an account",
+"Позже": "Later",
+"✓ Пробные заказы перенесены в ваш аккаунт:": "✓ Trial orders moved to your account:",
+"Этот раздел — после регистрации": "This section is available after signing up",
+"В пробном режиме можно создать заказ, загрузить модель или детали и выполнить раскрой. Регистрация бесплатная — пробные заказы перейдут в аккаунт.": "In trial mode you can create an order, import a model or parts and run the cutting optimization. Signing up is free — trial orders move to your account.",
+"Выгрузка DXF": "DXF export",
+"Программа для пильного центра": "Beam saw program",
+"Отправка заказа на производство": "Sending the order to a workshop"
 }

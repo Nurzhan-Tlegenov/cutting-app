@@ -2,13 +2,14 @@ import { nameOk } from '../lib/profileRules'
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom, getLang, tr } from '../i18n'
-import { signupOpen, signupSetApp, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
+import { guestModeOpen, signupOpen, signupSetApp, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
 import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, guessCountryName, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
 import { useAuth, googleEnabled } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { pendingInvite } from '../lib/workplaces'
 import { pendingRef, savePendingRef, clearPendingRef, refInfo, requestSignupRef } from '../lib/refLinks'
 import { appVersionText } from '../lib/version'
+import { startGuest, pauseGuest, resumeGuest } from '../lib/guest'
 
 const COUNTRIES = COUNTRY_NAMES
 
@@ -43,8 +44,12 @@ export default function AuthPage() {
   const [mode, setMode] = useState(linkCode ? 'code' : qs.get('reg') ? 'register' : 'login')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const { signIn, signUp, signInWithGoogle, sendResetEmail } = useAuth()
+  const { signIn, signUp, signInWithGoogle, sendResetEmail, isGuest } = useAuth()
   const navigate = useNavigate()
+  // пробный режим без регистрации: кнопка — пока мастер его не выключил; гость на этом экране — запросы в настоящую базу
+  const [guestOn, setGuestOn] = useState(false)
+  useEffect(() => { let alive = true; guestModeOpen().then(v => { if (alive) setGuestOn(v) }); return () => { alive = false } }, [])
+  useEffect(() => { if (!isGuest) return; pauseGuest(); return () => resumeGuest() }, [isGuest])
   // Способ входа: по номеру телефона (Telegram / WhatsApp) или по почте. Зарубежным Telegram и WhatsApp не нужны —
   // для языков Европы и дальнего зарубежья сразу открывается почта; выбор запоминается на этом устройстве.
   const [method, setMethodState] = useState(() => {
@@ -308,6 +313,15 @@ export default function AuthPage() {
               </button>
             ))}
           </div>
+
+          {!invite && !refI && (mode === 'login' || mode === 'register') && (isGuest ? (
+            <button type="button" onClick={() => navigate('/orders')} className="btn-secondary" style={{ width: '100%', marginBottom: 14 }}>← Вернуться к пробному заказу</button>
+          ) : guestOn && (
+            <div style={{ marginBottom: 16, padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px dashed var(--blue-mid)', textAlign: 'center' }}>
+              <button type="button" onClick={() => { startGuest(); navigate('/orders/new') }} className="btn-secondary" style={{ width: '100%', color: 'var(--blue)', fontWeight: 600 }}>Попробовать без регистрации</button>
+              <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginTop: 6, lineHeight: 1.35 }}>Создайте заказ и посмотрите раскрой прямо сейчас — без данных о себе. Заказ хранится на этом устройстве.</div>
+            </div>
+          ))}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {googleOn && !invite && (mode === 'login' || mode === 'register') && (

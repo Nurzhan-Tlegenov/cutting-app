@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 // браузер не даёт — зато на любом снимке видно, с чьего аккаунта он сделан. У администратора знака нет.
 export default function Watermark() {
   const { user, profile } = useAuth()
-  if (!user || profile?.role === 'admin') return null
+  if (!user || user.guest || profile?.role === 'admin') return null   // гость (пробный режим) — без знака
   const digits = String(profile?.phone || (/@raskoypro\.local$/i.test(String(user.email || '')) ? user.email : '') || '').split('@')[0].replace(/\D/g, '')
   const text = [digits ? '+' + digits : (/@raskoypro\.local$/i.test(String(user.email || '')) ? '' : user.email || ''), profile?.full_name || ''].filter(Boolean).join(' · ') || user.id.slice(0, 8)
   const esc = text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]))

@@ -4,6 +4,7 @@ import { forgetPush } from '../lib/push'
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/supabase'
 import { purgeArchived } from '../lib/orderArchive'
 import { touchActivity } from '../lib/activity'
+import { GUEST_USER, GUEST_PROFILE, guestFlag, setGuestActive, setRealSession, endGuest, claimGuestOrders } from '../lib/guest'
 
 let purged = false   // заказы с истёкшим сроком хранения в архиве удаляются раз за запуск приложения
 import { getUserSettings, saveUserSettings, fetchUserSettings, loadUserSettings } from '../lib/userSettings'
@@ -43,27 +44,36 @@ export function AuthProvider({ children }) {
   }, [user?.id])
   // «пользователь в приложении» — для статистики вовлечённости мастер-аккаунта (раз в полчаса, и когда приложение снова открыли)
   useEffect(() => {
-    if (!user?.id) return
+    if (!user?.id || user?.guest) return
     touchActivity(user.id)
     const on = () => { if (document.visibilityState === 'visible') touchActivity(user.id) }
     document.addEventListener('visibilitychange', on)
     return () => document.removeEventListener('visibilitychange', on)
-  }, [user?.id])
+  }, [user?.id, user?.guest])
   const setCabinet = mode => { const m = mode === 'production' ? 'production' : 'client'; setCabinetState(m); saveUserSettings({ cabinet: m }, user) }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else setLoading(false)
-    })
+    // пробный режим без регистрации (guest.js): «гость» — без сессии, база на устройстве
+    const enterGuest = () => { setGuestActive(true); setUser(GUEST_USER); setProfile(GUEST_PROFILE); setLoading(false) }
+    // вошёл по-настоящему, а на устройстве — пробные заказы: переносим их в аккаунт
+    const claim = uid => {
+      if (!guestFlag()) return
+      claimGuestOrders(supabase, uid).then(n => { if (n) window.dispatchEvent(new CustomEvent('guest-claimed', { detail: n })) }).catch(() => {})
+    }
+    const apply = session => {
+      if (session?.user) { setRealSession(true); setUser(session.user); fetchProfile(session.user.id); claim(session.user.id) }
+      else if (guestFlag()) { setRealSession(false); enterGuest() }
+      else { setRealSession(false); setGuestActive(false); setUser(null); setProfile(null); setLoading(false) }
+    }
+    supabase.auth.getSession().then(({ data: { session } }) => apply(session))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') setRecovery(true)
-      setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else { setProfile(null); setLoading(false) }
+      apply(session)
     })
-    return () => subscription.unsubscribe()
+    // «Попробовать без регистрации» / выход из пробного режима
+    const onGuest = () => supabase.auth.getSession().then(({ data: { session } }) => apply(session))
+    window.addEventListener('guest-change', onGuest)
+    return () => { subscription.unsubscribe(); window.removeEventListener('guest-change', onGuest) }
   }, [])
 
   async function fetchProfile(userId) {
@@ -174,6 +184,7 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    if (user?.guest) { endGuest(); return }   // выход из пробного режима: заказы гостя остаются на устройстве
     await forgetPush()   // этот телефон больше не получает уведомления этого аккаунта
     // сервер не принял выход (например, «Bad Request») — всё равно выйти на этом устройстве
     const { error } = await supabase.auth.signOut()
@@ -181,13 +192,13 @@ export function AuthProvider({ children }) {
   }
 
   // аккаунт по почте без имени, страны или города — сначала дозаполнить профиль (у Google их нет до входа)
-  const needsProfile = !!user && !loading && !isPhoneAccount(user) && profile?.role !== 'admin'
+  const needsProfile = !!user && !user.guest && !loading && !isPhoneAccount(user) && profile?.role !== 'admin'
     && (!nameOk(profile?.full_name) || !phoneOk(profile?.phone) || !String(profile?.country || '').trim() || !String(profile?.city || '').trim())
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signOut, setContactEmail, refreshProfile: () => (user ? fetchProfile(user.id) : null),
       signInWithGoogle, sendResetEmail, setNewPassword, completeProfile, recovery, needsProfile,
-      cabinet, setCabinet, isMaster: profile?.role === 'admin' }}>
+      cabinet, setCabinet, isMaster: profile?.role === 'admin', isGuest: !!user?.guest }}>
       {children}
     </AuthContext.Provider>
   )

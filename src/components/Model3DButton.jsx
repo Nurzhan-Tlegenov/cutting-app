@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { saveOrderModel } from '../lib/orderModel'
 import { packScene } from '../lib/basisB3d'
 import { parseEdgeTypes, typesToSave, EDGE_TYPES_HINT } from '../lib/edgeCut'
+import { guestBlock } from '../lib/guest'
 
 import { lazyRetry } from '../lib/lazyRetry'
 const Model3D = lazyRetry(() => import('./Model3D'))
@@ -42,6 +43,7 @@ export default function Model3DButton({ details, title, getScene, label = '3D-м
   }, [orderId])
   if (!hasModel(details)) return null
   const show = async () => {
+    if (guestBlock('3D-модель')) return
     if (scene === undefined) {
       let s
       try { s = getScene ? await getScene() : null } catch (e) { if (e?.limit) { window.alert(e.message); return } s = null }

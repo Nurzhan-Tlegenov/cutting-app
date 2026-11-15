@@ -71,6 +71,7 @@ import { beamSettings, sameMaps, sameMapTag } from '../lib/beamSaw'
 import BeamSawSettings from '../components/BeamSawSettings'
 import { cutMethods } from '../lib/productionServices'
 import { saveBeamSawXml } from '../lib/beamSawXml'
+import { guestBlock } from '../lib/guest'
 
 import { mm } from '../lib/mmFmt'
 import { prepCorner, flipResult, moveCorner, cornerOf, cornerLabel } from '../lib/sheetCorner'
@@ -1799,7 +1800,7 @@ export default function NestingPage() {
   }, [details, order?.material_kind])
   // есть детали с фигурным контуром — показываем галочку «по габаритам»
   const hasShaped = useMemo(() => { try { return needsTrueShape(details) } catch { return false } }, [details])
-  const { user, profile, refreshProfile, cabinet, isMaster } = useAuth()
+  const { user, profile, refreshProfile, cabinet, isMaster, isGuest } = useAuth()
   const [clientName, setClientName] = useState('')   // имя заказчика — для имени PDF карт (настройка «Имена файлов»)
   useEffect(() => { let alive = true; orderClient(id).then(r => { if (alive && !r.error) setClientName(r.data?.full_name || '') }).catch(() => {}); return () => { alive = false } }, [id])
   // кабинет производства: ЧПУ и бирки по принятому раскрою
@@ -1856,6 +1857,7 @@ export default function NestingPage() {
   const [dxfOk, setDxfOk] = useState(false)
   useEffect(() => { let alive = true; hasBeta('dxf').then(v => { if (alive) setDxfOk(v) }); return () => { alive = false } }, [])
   const dxfAllowed = async () => {
+    if (guestBlock('Выгрузка DXF')) return false
     if (isMaster || dxfOk) return true
     if (await hasBeta('dxf', true)) { setDxfOk(true); return true }
     if (!window.confirm('Выгрузка DXF раскроя выдаётся по запросу.\n\nОтправить запрос разработчику? Когда доступ откроют, ответ придёт в «Сообщения».')) return false
@@ -1877,10 +1879,10 @@ export default function NestingPage() {
   const [needProd, setNeedProd] = useState(null)         // «Оформить» без производства: { cfg, force, pick, own }
   // «Где будете резать?» — производство выбирается до раскроя: { mine } пока окно открыто
   const [pickProd, setPickProd] = useState(null)
-  const [noProdOk, setNoProdOkState] = useState(() => readOwnParams(id))   // «Свои параметры» — производство само не подставляется
+  const [noProdOk, setNoProdOkState] = useState(() => isGuest || readOwnParams(id))   // «Свои параметры» — производство само не подставляется (у гостя — всегда)
   const setNoProdOk = on => { setNoProdOkState(on); writeOwnParams(id, on) }
   const [ownFor, setOwnFor] = useState(id)   // другой заказ на той же странице — его собственный выбор
-  if (ownFor !== id) { setOwnFor(id); setNoProdOkState(readOwnParams(id)) }
+  if (ownFor !== id) { setOwnFor(id); setNoProdOkState(isGuest || readOwnParams(id)) }
   const runAfterRef = useRef(null)                       // какой раскрой запустить, когда производство выбрано
   const [prodsReady, setProdsReady] = useState(false)    // список производств загружен (и последнее выбранное подставлено)
   // Сменили станок — в поля листа подставляются рез и отступы этого станка выбранного производства
@@ -2544,7 +2546,7 @@ export default function NestingPage() {
 
   // Свой неотправленный заказ без производства — сначала «Где будете резать?», раскрой запустится после выбора
   async function askProductionFirst(run) {
-    if (!order || order.user_id !== user?.id || (order.status && order.status !== 'draft') || order.production_id || noProdOk) return false
+    if (isGuest || !order || order.user_id !== user?.id || (order.status && order.status !== 'draft') || order.production_id || noProdOk) return false
     const mine = await myProduction(user?.id)
     if (mine === undefined) return false                  // в базе ещё нет кабинета производства — как раньше
     runAfterRef.current = run
@@ -2745,6 +2747,7 @@ export default function NestingPage() {
   const setPdfStatsFirst = on => { setPdfStatsFirstState(on); saveUserSettings({ pdfStatsFirst: on }, user) }
   // β Пильный центр: программа для пилы KDT (XML) — по текущей карте, с ручными правками и обрезками
   async function xmlCfg(cfg) {
+    if (guestBlock('Программа для пильного центра')) return
     try {
       const m = materials.find(x => x.key === matKey) || materials[0] || {}
       const [name, thick] = String(m.key || '|').split('|')
@@ -2760,6 +2763,7 @@ export default function NestingPage() {
   // кабинет производства с галочкой «Смета»: перед PDF — окно сметы (поправить строки прайса, добавить свои: материал, доставка…)
   const [estAsk, setEstAsk] = useState(null)   // { cfg, idx, mat }
   function pdfClick(cfg, idx) {
+    if (guestBlock('PDF карт раскроя')) return
     if (cabinet === 'production' && pdfEstimate) { setEstAsk({ cfg, idx, mat: pdfMatOf(cfg) }); return }
     pdfCfg(cfg, idx)
   }
@@ -2808,6 +2812,7 @@ export default function NestingPage() {
   // Заказ оформляется на производство. Если оно не выбрано: у кого есть своё производство — заказ идёт туда;
   // остальным предлагаем выбрать производство или зарегистрировать своё.
   async function submitOrder(cfg, force = false, prodId = null) {
+    if (guestBlock('Отправка заказа на производство')) return
     if (!checkCfg(cfg)) return
     const wasPid = order.production_id || null
     let pid = prodId || order.production_id || null
@@ -4001,7 +4006,7 @@ export default function NestingPage() {
                       </>) :
                       // «Выбрать» только сохраняет раскладку за заказом. Отправка — отдельным действием и только у выбранного варианта
                       !cfg.saved ? null :
-                      <button data-tour="nest-send" onClick={() => { if (multiMat || window.confirm('Отправить заказ на производство?\n\nПока производство не приняло заказ, его можно отозвать кнопкой «Редактировать».')) submitOrder(cfg) }} disabled={blocked}
+                      <button data-tour="nest-send" onClick={() => { if (guestBlock('Отправка заказа на производство')) return; if (multiMat || window.confirm('Отправить заказ на производство?\n\nПока производство не приняло заказ, его можно отозвать кнопкой «Редактировать».')) submitOrder(cfg) }} disabled={blocked}
                         title={multiMat ? 'Материалы с выбранным раскроем уходят на производство отдельными заявками — по одной на материал' : 'Отправить заказ с выбранным раскроем на производство'}
                         style={{ flex: 1, padding: 9, background: 'var(--teal)', color: 'white', border: 'none',
                           borderRadius: 'var(--radius)', fontSize: 13, fontWeight: 500, cursor: blocked ? 'default' : 'pointer' }}>

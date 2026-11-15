@@ -795,3 +795,12 @@ git push
 - Источник «К3-Мебель» в импорте деталей. К3 отдаёт сцену `.k3` (закрытый формат — не читаем) и базу Access `.mdb` рядом с ней — читаем только базу, прямо в браузере: `src/lib/k3Mdb.js` (`parseK3`, `readK3File`, `isK3File`) поверх пакета `mdb-reader` (грузится динамически; в `vite.config.js` его зависимости для шифрованных баз `browserify-aes`/`create-hash` заменены заглушкой `src/lib/shims/mdbCrypto.js`, глобальный `Buffer` — из пакета `buffer`). Структура таблиц описана в шапке `k3Mdb.js` (образцы К3 8.1, база 21.5).
 - Общая часть с Базисом/Астрой — `buildItem`. Для К3 `src`: контур — путь «с кромкой» (`TPaths.IsPlanePath = 0`, участки в `TParams`: Hold2 1 — отрезок, 2 — дуга по трём точкам XM/YM), кромка — ссылка `BandUnitPos` у участка контура → элемент «Кромка» → номенклатура (толщина — свойство 10, ширина 21, подрезка 45, прифуговка 280 → `meta.edges[side] = { thick, trim, joint }`; `typesFromItems` теперь берёт и подрезку с прифуговкой). Отверстия `THoles` уже в системе панели (ось — 3-й столбец матрицы), вход на пласть выравнивается по знаку оси (у К3 отверстие ручки начинается с z = −22); пазы `TSlots` (Plane 0 — пласть z = 0) + `TCuts.ExtrZ`. Положение в 3D — цепочка матриц `TElems` через `ParentPos`, вверх у К3 — Z (перевод в сцену как у Астры).
 - Решение Нуржана: размер детали — габарит с кромкой, как в К3 (`Length/Width`), кромка со своей толщиной и прифуговкой — размер пила считается нашим правилом и совпадает с `PlaneLength/PlaneWidth` К3 при прифуговке = толщине. В окне импорта об этом подсказка. Проверка: `npm run test:k3` (образцы `tests/k3/*.mdb` + `.json`), как у Астры.
+
+## Пробный режим без регистрации (ноя 2026, src/lib/guest.js)
+- Кнопка «Попробовать без регистрации» на /auth (выключатель мастера — migration_guest_mode.sql, `guest_mode_open()`).
+- Гость = `GUEST_USER` в AuthContext без сессии; все запросы к Supabase (кроме /auth/v1) перехватываются в supabase.js →
+  `guestFetch` — мини-PostgREST на IndexedDB (orders, order_details, order_models, user_settings хранятся, остальное — пусто).
+- Разрешено: /orders, /orders/new, /orders/:id, /nesting, /edit (`guestPathOk`), остальное — `GuestGate`.
+  Закрытые действия — `guestBlock('…')`: 3D (Model3DButton), PDF, DXF, XML пилы, отправка на производство.
+- На /auth у гостя перехват на паузе (pauseGuest/resumeGuest). После входа/регистрации `claimGuestOrders` переносит заказы в аккаунт.
+- Откат: ROLLBACK.md (Vercel Instant Rollback, выключатели, ветки stable-ГГГГ-ММ-ДД).

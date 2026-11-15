@@ -72,7 +72,7 @@ const IconMsg = () => (
 
 // Нижнее меню зависит от кабинета: «Клиент» — заказы и новый заказ, «Производство» — заявки.
 export default function BottomNav() {
-  const { user, cabinet, isMaster } = useAuth()
+  const { user, cabinet, isMaster, isGuest } = useAuth()
   const [unread, setUnread] = useState(0)
   useEffect(() => {
     let alive = true
@@ -127,7 +127,7 @@ export default function BottomNav() {
     <>
     <NavDrawer notices={notices} unread={unread} />
     <RefreshCorner />
-    {pathname !== '/notices' && pathname !== '/profile' && <PushAsk />}
+    {!isGuest && pathname !== '/notices' && pathname !== '/profile' && <PushAsk />}
     {toast && (
       <div onClick={() => { setToast(null); navigate(toast.more > 0 ? '/notices' : toast.to) }}
         style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top))', left: 10, right: 10, zIndex: 1200, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',

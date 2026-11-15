@@ -1,4 +1,6 @@
 import PeekBar from './components/PeekBar'
+import { GuestBar, GuestRegisterModal, GuestClaimedNote, GuestGate } from './components/GuestUi'
+import { guestPathOk } from './lib/guest'
 import StopGate from './components/AppStop'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { Component, Suspense, useEffect } from 'react'
@@ -134,6 +136,7 @@ function ProtectedRoute({ children }) {
     try { sessionStorage.setItem(AFTER_LOGIN, loc.pathname + loc.search) } catch { /* без памяти */ }
     return <Navigate to="/auth" replace />
   }
+  if (user.guest && !guestPathOk(loc.pathname)) return <GuestGate />   // пробный режим: только заказы и раскрой
   if (recovery) return <NewPasswordPage />           // ссылка из письма «сменить пароль»
   if (needsProfile) return <CompleteProfilePage />   // вход по почте / Google: имя, страна, город — до работы
   return children
@@ -148,13 +151,16 @@ function AppRoutes() {
     <Suspense fallback={<CncLoader full label="Загружаем страницу…" />}>
     <>
     <PeekBar />
+    <GuestBar />
+    <GuestRegisterModal />
+    <GuestClaimedNote />
     <Routes>
       {/* 3D-модель по ссылке для клиента — без входа */}
       <Route path="/view/:token" element={<SharedModelPage />} />
       <Route path="/v/:code" element={<SharedModelPage />} />
       {/* симуляция обработки листа по ссылке — без входа */}
       <Route path="/s/:code" element={<SharedSimPage />} />
-      <Route path="/auth" element={user ? <Navigate to={pendingInvite() ? `/join/${pendingInvite()}` : pendingRef() ? `/r/${pendingRef()}` : (afterLogin() || home)} /> : <AuthPage />} />
+      <Route path="/auth" element={user && !user.guest ? <Navigate to={pendingInvite() ? `/join/${pendingInvite()}` : pendingRef() ? `/r/${pendingRef()}` : (afterLogin() || home)} /> : <AuthPage />} />
       <Route path="/install" element={<InstallPage />} />   {/* ссылка-установка — без входа */}
       <Route path="/join/:code" element={<JoinPage />} />
       <Route path="/r/:code" element={<RefPage />} />

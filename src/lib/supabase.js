@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { recordRequest, startPerf, perfMark } from './perf'
 import { fetchRetry } from './netRetry'
 import { peekBlocked } from './peek'
+import { guestActive, guestFetch } from './guest'
 
 // База напрямую. Из России адреса Supabase и Vercel заблокированы — там приложение открывается через зеркало
 // (ru.raskroypro.com, сервер-посредник, см. deploy/mirror-setup.sh): на зеркале запросы к базе идут через тот же адрес /sb.
@@ -14,6 +15,8 @@ export const SUPABASE_ANON_KEY = 'sb_publishable_M1nC2YyHn_4zJI5QFAI9Cw_IaC6Ou7u
 // каждый запрос к базе засекается — для страницы «Нагрузка» мастер-аккаунта (perf.js)
 const timedFetch = async (input, init) => {
   const t0 = performance.now(), mark = perfMark(), url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url || ''
+  // пробный режим без регистрации: база — на устройстве гостя (guest.js), на сервер ничего не уходит (кроме входа)
+  if (guestActive() && !/\/auth\/v1\//.test(url)) return guestFetch(input, init)
   // мастер в режиме просмотра чужих заказов — запись в заказы не отправляем, отвечаем «записано» (peek.js)
   if (peekBlocked(url, init?.method || input?.method)) return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
   try {

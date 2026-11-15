@@ -2581,5 +2581,21 @@
 "Великобритания": "Wielka Brytania",
 "Чехия": "Czechy",
 "Польша": "Polska",
-"Германия": "Niemcy"
+"Германия": "Niemcy",
+"Попробовать без регистрации": "Wypróbuj bez rejestracji",
+"Создайте заказ и посмотрите раскрой прямо сейчас — без данных о себе. Заказ хранится на этом устройстве.": "Utwórz zamówienie i zobacz rozkrój od razu — bez podawania danych. Zamówienie jest zapisane na tym urządzeniu.",
+"← Вернуться к пробному заказу": "← Wróć do zamówienia próbnego",
+"Пробный режим — заказы хранятся только на этом устройстве": "Tryb próbny — zamówienia są zapisane tylko na tym urządzeniu",
+"Нужна регистрация": "Wymagana rejestracja",
+"«{0}» — доступно после регистрации.": "«{0}» jest dostępne po rejestracji.",
+"Это доступно после регистрации.": "To jest dostępne po rejestracji.",
+"Регистрация бесплатная. Ваши пробные заказы не пропадут — они сами перейдут в аккаунт.": "Rejestracja jest bezpłatna. Zamówienia próbne nie zginą — same przejdą na Twoje konto.",
+"У меня есть аккаунт": "Mam konto",
+"Позже": "Później",
+"✓ Пробные заказы перенесены в ваш аккаунт:": "✓ Zamówienia próbne przeniesiono na Twoje konto:",
+"Этот раздел — после регистрации": "Ta sekcja jest dostępna po rejestracji",
+"В пробном режиме можно создать заказ, загрузить модель или детали и выполнить раскрой. Регистрация бесплатная — пробные заказы перейдут в аккаунт.": "W trybie próbnym możesz utworzyć zamówienie, wczytać model lub elementy i wykonać rozkrój. Rejestracja jest bezpłatna — zamówienia próbne przejdą na konto.",
+"Выгрузка DXF": "Eksport DXF",
+"Программа для пильного центра": "Program dla piły panelowej",
+"Отправка заказа на производство": "Wysyłanie zamówienia do zakładu"
 }

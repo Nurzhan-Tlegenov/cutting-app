@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
 import { adminSetProduction } from '../lib/productionApi'
-import { adminEmailSignup, adminSetEmailSignup } from '../lib/adminApi'
+import { adminEmailSignup, adminSetEmailSignup, adminGuestMode, adminSetGuestMode } from '../lib/adminApi'
 import SupportToggle from '../components/SupportToggle'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone, tgStartLink } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
@@ -96,9 +96,11 @@ export default function UsersPage() {
   const [blkPhone, setBlkPhone] = useState('')
   const [blkNote, setBlkNote] = useState('')
 
+  const [guestOpen, setGuestOpen] = useState(null)   // пробный режим без регистрации: true / false, null — нет migration_guest_mode.sql
   const [emailOpen, setEmailOpen] = useState(null)   // регистрация по почте и Google: true / false, null — в базе ещё нет (migration_email_login.sql)
   const load = async () => {
     const [u, r, o, pr, lm, lh, bt, bl, eo, pa, up] = await Promise.all([adminUsers(), adminRequests(), signupOpen(), adminPasswordResets(), adminLimits(), adminLoginHelp(), adminBeta(), adminBlockedPhones(), adminEmailSignup(), adminPostAccess(), adminUserPosts()])
+    adminGuestMode().then(setGuestOpen)
     if (pa.error) setPosts(null)
     else {
       const has = new Map(), asks = new Map()
@@ -481,6 +483,17 @@ export default function UsersPage() {
                   {emailOpen ? 'Выключить' : 'Включить'}</button>
               </div>
             )}
+            {/* пробный режим без регистрации — кнопка на экране входа; выключить мгновенно, если что-то пойдёт не так (ROLLBACK.md) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{guestOpen == null ? 'Пробный режим без регистрации — включён' : guestOpen ? 'Пробный режим без регистрации — включён' : 'Пробный режим без регистрации — выключен'}</div>
+                <Hint>Кнопка «Попробовать без регистрации» на экране входа: человек создаёт заказ и кроит без аккаунта, заказ хранится только на его устройстве (базу не нагружает). 3D, PDF, DXF, бирки, ЧПУ и отправка — после регистрации, пробные заказы переходят в аккаунт. Выключили — кнопка пропадает сразу.</Hint>
+                {guestOpen == null && <div style={{ fontSize: 11.5, color: 'var(--amber)' }}>Чтобы появился выключатель, выполните migration_guest_mode.sql в Supabase.</div>}
+              </div>
+              {guestOpen != null && <button type="button" disabled={busy} style={btn(guestOpen ? 'danger' : 'main')}
+                onClick={() => { if (guestOpen && !window.confirm('Выключить пробный режим? Кнопка «Попробовать без регистрации» пропадёт с экрана входа.')) return; act(async () => { const r = await adminSetGuestMode(!guestOpen); if (!r.error) setGuestOpen(!guestOpen); return r }) }}>
+                {guestOpen ? 'Выключить' : 'Включить'}</button>}
+            </div>
           </div>
 
           <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
