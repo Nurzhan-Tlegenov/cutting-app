@@ -35,6 +35,7 @@ import PartGroups, { GroupChip } from '../components/PartGroups'
 import { groupsOf, groupDir, PART_GROUPS_SQL_HINT } from '../lib/partGroups'
 import { keyboardHeight, fullHeight } from '../lib/keyboard'
 import { insertOrderDetails } from '../lib/orderDetails.js'
+import { confirmRows } from '../lib/orderCheck'
 
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
@@ -514,6 +515,7 @@ export default function NewOrderPage() {
   async function handleSave() {
     const valid = details.filter(d => d.w > 0 && d.h > 0)
     if (!valid.length) { setError('Добавьте хотя бы одну деталь с размерами'); return }
+    if (!confirmRows(details)) return   // строки без размеров / без количества — показать, а не терять молча
     // «Размеры готовые (с кромкой)»: без толщины кромки размер в раскрой не посчитать — толщина обязательна
     if (finishedOn(edgeTypes)) {
       const noT = edgesWithoutThick(valid, edgeTypes)

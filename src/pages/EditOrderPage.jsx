@@ -33,6 +33,7 @@ import PartGroups, { GroupChip } from '../components/PartGroups'
 import { groupsOf, groupDir, PART_GROUPS_SQL_HINT } from '../lib/partGroups'
 import { fetchOrderDetails, insertOrderDetails } from '../lib/orderDetails.js'
 import { withRetry } from '../lib/netRetry.js'
+import { confirmRows } from '../lib/orderCheck'
 const SHEET_DEFAULTS = {
   length: 2750, width: 1830,
   margin_top: 15, margin_left: 15, margin_bottom: 10, margin_right: 10,
@@ -473,6 +474,7 @@ export default function EditOrderPage() {
   async function handleSave() {
     const valid = details.filter(d => Number(d.w) > 0 && Number(d.h) > 0)
     if (!valid.length) { setError('Добавьте хотя бы одну деталь с размерами'); return }
+    if (!confirmRows(details)) return   // строки без размеров / без количества — показать, а не терять молча
     // «Размеры готовые (с кромкой)»: без толщины кромки размер в раскрой не посчитать — толщина обязательна
     if (finishedOn(edgeTypes)) {
       const noT = edgesWithoutThick(valid, edgeTypes)

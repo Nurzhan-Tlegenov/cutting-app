@@ -3001,5 +3001,13 @@
 "Упил": "Extra trim cut",
 "Деталь «{0}» с нулевым размером ({1}×{2}) — резать нечего, она пропущена. Исправьте или удалите её в заказе и пересчитайте раскрой.": "Part «{0}» has zero size ({1}×{2}) — nothing to cut, it was skipped. Fix or delete it in the order and recalculate the nesting.",
 "Деталь «{0}» ({1}×{2}): не удалось построить обход контура — она пропущена, проверьте её контур.": "Part «{0}» ({1}×{2}): could not build the contour path — it was skipped, check its contour.",
-"⚠ Детали с нулевым размером в раскрой не идут — исправьте или удалите их в заказе:": "⚠ Parts with zero size are not nested — fix or delete them in the order:"
+"⚠ Детали с нулевым размером в раскрой не идут — исправьте или удалите их в заказе:": "⚠ Parts with zero size are not nested — fix or delete them in the order:",
+"{0} — не указаны размеры": "{0} — sizes missing",
+"{0} — не указана длина": "{0} — length missing",
+"{0} — не указана ширина": "{0} — width missing",
+"{0} — не указано количество": "{0} — quantity missing",
+"Проверьте позиции:": "Check the positions:",
+"… и ещё {0}": "… and {0} more",
+"Строки без размеров не попадут в заказ, без количества — сохранятся как 1 шт.": "Rows without sizes won't be saved to the order; rows without quantity will be saved as 1 pc.",
+"OK — сохранить так, «Отмена» — вернуться и исправить.": "OK — save as is, «Cancel» — go back and fix."
 }

@@ -2999,5 +2999,13 @@
 "Упил": "Nachschnitt",
 "Деталь «{0}» с нулевым размером ({1}×{2}) — резать нечего, она пропущена. Исправьте или удалите её в заказе и пересчитайте раскрой.": "Teil „{0}“ hat die Größe null ({1}×{2}) — nichts zu schneiden, es wurde übersprungen. Korrigieren oder löschen Sie es im Auftrag und berechnen Sie den Zuschnitt neu.",
 "Деталь «{0}» ({1}×{2}): не удалось построить обход контура — она пропущена, проверьте её контур.": "Teil „{0}“ ({1}×{2}): Konturweg konnte nicht erzeugt werden — übersprungen, prüfen Sie die Kontur.",
-"⚠ Детали с нулевым размером в раскрой не идут — исправьте или удалите их в заказе:": "⚠ Teile mit Größe null kommen nicht in den Zuschnitt — korrigieren oder löschen Sie sie im Auftrag:"
+"⚠ Детали с нулевым размером в раскрой не идут — исправьте или удалите их в заказе:": "⚠ Teile mit Größe null kommen nicht in den Zuschnitt — korrigieren oder löschen Sie sie im Auftrag:",
+"{0} — не указаны размеры": "{0} — Maße fehlen",
+"{0} — не указана длина": "{0} — Länge fehlt",
+"{0} — не указана ширина": "{0} — Breite fehlt",
+"{0} — не указано количество": "{0} — Anzahl fehlt",
+"Проверьте позиции:": "Positionen prüfen:",
+"… и ещё {0}": "… und {0} weitere",
+"Строки без размеров не попадут в заказ, без количества — сохранятся как 1 шт.": "Zeilen ohne Maße kommen nicht in den Auftrag, Zeilen ohne Anzahl werden als 1 Stk. gespeichert.",
+"OK — сохранить так, «Отмена» — вернуться и исправить.": "OK — so speichern, „Abbrechen“ — zurück und korrigieren."
 }
