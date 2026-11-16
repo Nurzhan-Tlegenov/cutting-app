@@ -3007,5 +3007,10 @@
 "Проверьте позиции:": "Positionen prüfen:",
 "… и ещё {0}": "… und {0} weitere",
 "Строки без размеров не попадут в заказ, без количества — сохранятся как 1 шт.": "Zeilen ohne Maße kommen nicht in den Auftrag, Zeilen ohne Anzahl werden als 1 Stk. gespeichert.",
-"OK — сохранить так, «Отмена» — вернуться и исправить.": "OK — so speichern, „Abbrechen“ — zurück und korrigieren."
+"OK — сохранить так, «Отмена» — вернуться и исправить.": "OK — so speichern, „Abbrechen“ — zurück und korrigieren.",
+"У всех деталей": "Bei allen Teilen",
+"У {0} из {1} деталей": "Bei {0} von {1} Teilen",
+"код получается пустой — в выбранных частях у них ничего нет": "ist der Code leer — die gewählten Teile haben dort keine Daten",
+"(чаще всего — нет «Обозначения»: оно есть не у всех деталей модели)": "(meist fehlt die „Bezeichnung“: nicht jedes Teil des Modells hat eine)",
+"На таких бирках QR не печатается. Добавьте в код ещё часть — позицию, наименование или номер детали: пустые части пропускаются сами.": "Auf solchen Etiketten wird kein QR gedruckt. Fügen Sie dem Code einen weiteren Teil hinzu — Position, Name oder Teilenummer: leere Teile werden automatisch übersprungen."
 }

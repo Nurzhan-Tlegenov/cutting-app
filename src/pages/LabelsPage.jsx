@@ -736,6 +736,26 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
           )}
           {/* тот же конструктор — у имени файла присадочного станка (ЧПУ → постпроцессор присадки) */}
           <QrPartsEditor value={tpl.qr} props={userItems(mat?.details)} onChange={qr => onChange({ ...tpl, qr })} preview={mat ? labelQr(tpl, labelInfo(order, mat, 0, 0)) : null} />
+          {/* у каких деталей код пустой (нет обозначения и т. п.) — у них QR на бирке не печатается: показать, а не молчать */}
+          {mat && (() => {
+            let total = 0, empty = 0
+            const ex = []
+            for (const [si, sh] of (mat.sheets || []).entries()) for (const [pi, pp] of (sh.placed || []).entries()) {
+              if (total >= 600) break
+              total++
+              let code
+              try { code = labelQr(tpl, labelInfo(order, mat, si, pi)) } catch { code = '' }
+              if (!code) { empty++; if (ex.length < 3) ex.push(pp.label || mat.details?.[pp.detailIndex]?.name || '') }
+            }
+            if (!empty) return null
+            return (
+              <p style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', borderRadius: 8, padding: '6px 9px', margin: '8px 0 0', lineHeight: 1.4 }}>
+                ⚠ {empty === total ? 'У всех деталей' : `У ${empty} из ${total} деталей`} код получается пустой — в выбранных частях у них ничего нет
+                (чаще всего — нет «Обозначения»: оно есть не у всех деталей модели){ex.filter(Boolean).length ? `, например: ${ex.filter(Boolean).join(', ')}` : ''}.
+                На таких бирках QR не печатается. Добавьте в код ещё часть — позицию, наименование или номер детали: пустые части пропускаются сами.
+              </p>
+            )
+          })()}
           <Hint>Этот же код может быть именем файла программы шестистороннего станка: на станке бирку сканируют — открывается программа детали (настройка в постпроцессоре присадки).</Hint>
         </div>
       )}

@@ -3009,5 +3009,10 @@
 "Проверьте позиции:": "Check the positions:",
 "… и ещё {0}": "… and {0} more",
 "Строки без размеров не попадут в заказ, без количества — сохранятся как 1 шт.": "Rows without sizes won't be saved to the order; rows without quantity will be saved as 1 pc.",
-"OK — сохранить так, «Отмена» — вернуться и исправить.": "OK — save as is, «Cancel» — go back and fix."
+"OK — сохранить так, «Отмена» — вернуться и исправить.": "OK — save as is, «Cancel» — go back and fix.",
+"У всех деталей": "For all parts",
+"У {0} из {1} деталей": "For {0} of {1} parts",
+"код получается пустой — в выбранных частях у них ничего нет": "the code comes out empty — the selected parts have no data for them",
+"(чаще всего — нет «Обозначения»: оно есть не у всех деталей модели)": "(most often there's no «Designation»: not every part of the model has one)",
+"На таких бирках QR не печатается. Добавьте в код ещё часть — позицию, наименование или номер детали: пустые части пропускаются сами.": "No QR is printed on such labels. Add another part to the code — position, name or part number: empty parts are skipped automatically."
 }
