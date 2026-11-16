@@ -1292,7 +1292,14 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       else {
         edgeOk(t, T + millOver, 'сквозной рез контура детали')
         const r = n0(t.d) / 2, smooth = smoothLoop(f.outline), base = offsetLoop(smooth, r)
-        if (!base) warn.add('Не удалось построить обход контура одной из деталей — она пропущена.')
+        if (!base) {
+          // какая именно деталь — чтобы было понятно, о чём речь (чаще всего это строка с нулевым размером)
+          const dd = details?.[p.detailIndex] || {}, nm = dd.display_name || dd.name || p.label || 'без названия'
+          const L0 = Number(dd.length) || 0, W0 = Number(dd.width) || 0
+          warn.add(L0 > 0 && W0 > 0
+            ? `Деталь «${nm}» (${num(L0)}×${num(W0)}): не удалось построить обход контура — она пропущена, проверьте её контур.`
+            : `Деталь «${nm}» с нулевым размером (${num(L0)}×${num(W0)}) — резать нечего, она пропущена. Исправьте или удалите её в заказе и пересчитайте раскрой.`)
+        }
         else {
           const L = orientFromInside(base.map(G), o.dir, sheetRect)
           const bb = bboxOf(f.outline)

@@ -2996,5 +2996,8 @@
 "Торцевые отверстия": "Otwory czołowe",
 "Выборки (карманы)": "Kieszenie",
 "Фигурный раскрой": "Rozkrój kształtowy",
-"Упил": "Docięcie"
+"Упил": "Docięcie",
+"Деталь «{0}» с нулевым размером ({1}×{2}) — резать нечего, она пропущена. Исправьте или удалите её в заказе и пересчитайте раскрой.": "Element „{0}” ma zerowy wymiar ({1}×{2}) — nie ma czego ciąć, pominięto go. Popraw lub usuń go w zamówieniu i przelicz rozkrój.",
+"Деталь «{0}» ({1}×{2}): не удалось построить обход контура — она пропущена, проверьте её контур.": "Element „{0}” ({1}×{2}): nie udało się zbudować obejścia konturu — pominięto go, sprawdź jego kontur.",
+"⚠ Детали с нулевым размером в раскрой не идут — исправьте или удалите их в заказе:": "⚠ Elementy o zerowym wymiarze nie trafiają do rozkroju — popraw lub usuń je w zamówieniu:"
 }

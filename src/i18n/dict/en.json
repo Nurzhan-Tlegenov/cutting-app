@@ -2998,5 +2998,8 @@
 "Торцевые отверстия": "Edge holes",
 "Выборки (карманы)": "Pockets",
 "Фигурный раскрой": "Shaped cutting",
-"Упил": "Extra trim cut"
+"Упил": "Extra trim cut",
+"Деталь «{0}» с нулевым размером ({1}×{2}) — резать нечего, она пропущена. Исправьте или удалите её в заказе и пересчитайте раскрой.": "Part «{0}» has zero size ({1}×{2}) — nothing to cut, it was skipped. Fix or delete it in the order and recalculate the nesting.",
+"Деталь «{0}» ({1}×{2}): не удалось построить обход контура — она пропущена, проверьте её контур.": "Part «{0}» ({1}×{2}): could not build the contour path — it was skipped, check its contour.",
+"⚠ Детали с нулевым размером в раскрой не идут — исправьте или удалите их в заказе:": "⚠ Parts with zero size are not nested — fix or delete them in the order:"
 }

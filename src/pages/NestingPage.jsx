@@ -1785,7 +1785,10 @@ export default function NestingPage() {
     ...Object.keys(parseEdgeTypes(order?.edge_types)).filter(k => !k.startsWith('__')),
     ...allDetails.flatMap(d => [d.edge_left, d.edge_right, d.edge_top, d.edge_bottom]),
   ].filter(v => v && v !== 'default' && v !== 'false' && v !== true))], [order, allDetails])
-  const details = useMemo(() => cutDetails(multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails, parseEdgeTypes(order?.edge_types)), [allDetails, multiMat, matKey, order])
+  // деталь с нулевым размером (пустая строка, ошибка импорта) в раскрой не идёт: qty 0 — индексы деталей те же (сохранённые раскрои не сбиваются)
+  const details = useMemo(() => cutDetails(multiMat ? allDetails.filter(d => detailMatKey(d, order) === matKey) : allDetails, parseEdgeTypes(order?.edge_types))
+    .map(d => (Number(d.length) > 0 && Number(d.width) > 0 ? d : { ...d, qty: 0, zeroSize: true })), [allDetails, multiMat, matKey, order])
+  const zeroParts = useMemo(() => details.filter(d => d.zeroSize), [details])
   // что нужно заказу от производства — для предупреждений в окне выбора производства
   const orderNeeds = useMemo(() => {
     try {
@@ -4411,6 +4414,11 @@ export default function NestingPage() {
           {anyRunning ? 'Считаю…' : configs.length > 1 ? '▶ Запустить все' : '▶ Выполнить раскрой'}
         </button>
       </div>
+      {zeroParts.length > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', borderRadius: 8, padding: '6px 10px', marginBottom: 6, lineHeight: 1.4 }}>
+          ⚠ Детали с нулевым размером в раскрой не идут — исправьте или удалите их в заказе: {zeroParts.map(d => d.display_name || d.name || 'без названия').join(', ')}
+        </div>
+      )}
       {configs.length > 1 && (
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginBottom: 4, fontSize: 12, color: 'var(--text-muted)' }}
           title="Время оптимизации идёт по часам: на слабом телефоне при одновременном расчёте каждая конфигурация получает меньше вычислений. Если результат хуже — снимите галочку, конфигурации пойдут по очереди.">
