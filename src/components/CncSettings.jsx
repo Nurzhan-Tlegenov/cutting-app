@@ -602,14 +602,18 @@ const FACE_OPTS = [[1, 'Face 1'], [2, 'Face 2'], [3, 'Face 3'], [4, 'Face 4']]
 
 // ─── Формат файла шестистороннего β: SWJ (Syntec) или KDT (KDTPanelFormat, как у Базис-ЧПУ «KDT CNC Drill») ───
 function KdtFormat({ post, set }) {
-  const on = isKdt(post), k = kdtOf(post)
+  const on = isKdt(post), k = kdtOf(post), scx = post?.d6Fmt === 'scx'
+  const cur = on ? 'kdt' : scx ? 'scx' : 'swj'
   const setK = patch => set({ kdt: { ...(post.kdt || {}), ...patch } })
   const pick = v => {
-    if (v === (on ? 'kdt' : 'swj')) return
-    if (v === 'swj') { set({ d6Fmt: '' }); return }
+    if (v === cur) return
+    const extBack = /^scx$/i.test(post.ext || '') ? { ext: 'XML' } : {}
+    if (v === 'swj') { set({ d6Fmt: '', ...extBack }); return }
+    // Nanxing NCB612S: файл .SCX, имя — обозначение детали (как в образце со станка: 01.01.SCX)
+    if (v === 'scx') { set({ d6Fmt: 'scx', ext: 'SCX', ...(post.d6Name === 'own' ? {} : { d6Name: 'own', d6Qr: { ...D6_QR_DEFAULT, parts: ['des'], sep: '.', latin: true } }) }); return }
     // как в Базис-ЧПУ: край — по часовой, без захода за деталь и без надсечки; имя файла — заказ.обозначение
     const o = post.d6Ops || {}
-    set({ d6Fmt: 'kdt', d6Ops: { ...o, edge: { ...(o.edge || {}), dir: 'cw', lead: 0, notch: false } },
+    set({ d6Fmt: 'kdt', ...extBack, d6Ops: { ...o, edge: { ...(o.edge || {}), dir: 'cw', lead: 0, notch: false } },
       ...(post.d6Name === 'own' ? {} : { d6Name: 'own', d6Qr: { ...D6_QR_DEFAULT, parts: ['order', 'des'], sep: '.', latin: true } }) })
   }
   const tools = (side, label) => (
@@ -628,7 +632,8 @@ function KdtFormat({ post, set }) {
   return (
     <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
       <label className="label">Формат файла</label>
-      <Seg value={on ? 'kdt' : 'swj'} options={[['swj', 'SWJ (Syntec)'], ['kdt', 'KDT (KDTPanelFormat)']]} onChange={pick} />
+      <Seg value={cur} options={[['swj', 'SWJ (Syntec)'], ['kdt', 'KDT (KDTPanelFormat)'], ['scx', 'Nanxing (.SCX)']]} onChange={pick} />
+      {scx && <Hint>Nanxing BuiltInCad 2.0 — как у станка NCB612S: файл .SCX на деталь, UTF-8, CRLF. Те же отверстия, торцы и фрезеровка, что у SWJ; пазы — фрезеровкой одной линией шириной паза (Diameter = ширина). Фрезам в «Обработке» нужен Ø — станок берёт его из файла. Имя файла — обозначение детали (как на станке: 01.01.SCX). Первые файлы проверьте в симуляторе станка.</Hint>}
       {on && (
         <>
           <Hint>Как у Базис-ЧПУ (постпроцессор «KDT CNC Drill»): файл на деталь, UTF-8 без BOM, CRLF. Контур детали — с кромкой по сторонам (на стойке видно, где кромка), отверстия сверху и снизу, в торцы, пазы, фрезеровка по траектории. Пласть паза и траектории станок узнаёт по фрезе: у верхнего и нижнего шпинделя свои имена. Пазы и выемки в торце — на торец (Quadrant), высота Z1 от нижней пласти; фреза торца — из фрез верхнего шпинделя (не шире паза).</Hint>

@@ -40,6 +40,8 @@ import { parsePolygonFromDetail } from './trueShapeNesting'
 import { loopElements } from './arcFit'
 import { flipDetail } from './mirrorDetail'
 import { isKdt, kdtPanel } from './kdtXml'
+/** Формат Nanxing BuiltInCad (.SCX) — вариант β для станка NCB612S */
+export const isScx = post => post?.d6Fmt === 'scx'
 import { polyPocket } from './gcode'
 import { metaDes } from './partLabel'
 import { contourSegments, segmentSide, distToPolyline } from './edgeLength'
@@ -990,6 +992,60 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   const counts = { top: top.length, bottom: bottom.length, edge: edge.length, edgeGrooves: edgeGrooves.length + edgeMills.length,
     groovesTop: grooves.filter(g => g.face === fr.top).length, groovesBottom: grooves.filter(g => g.face !== fr.top).length,
     millsTop: mills.filter(m => m.face === fr.top).length, millsBottom: mills.filter(m => m.face !== fr.top).length }
+  // Nanxing BuiltInCad 2.0 (.SCX, станок NCB612S): тот же разбор детали, что у SWJ — другой «диалект» файла.
+  // Отличия по образцу со станка: корень <Root Cad="BuiltInCad" version="2.0">, у обработок нет ID, контур пишется всегда
+  // (прямоугольник — 4 точки от (L,W) против часовой), у Type 3 обязателен Diameter и пустой MillPreDefinedRectangle,
+  // LineID с 0, пазы — Type 3 одной линией с Diameter = ширина паза, у кромки Pre_Milling/X/Y/CentralAngle. Числа — без хвостовых нулей.
+  let scx = null
+  if (isScx(post)) {
+    const g = v => { const r = Math.round(n0(v) * 1000) / 1000; return String(Object.is(r, -0) ? 0 : r) }
+    const sl = []
+    const sHole = h => sl.push(`\t\t\t\t\t<Machining Type="2" IsGenCode="2" Face="${h.face}" X="${g(h.X)}" Y="${g(h.Y)}" Diameter="${g(h.dia)}" Depth="${g(h.depth)}" />`)
+    const sMill = (m, dia) => {
+      const z3 = m.start.length > 2
+      const d = dia || n0(m.tool?.d)
+      if (!(d > 0)) { const w = 'фрезеровка без фрезы — в файле SCX Diameter=0: назначьте фрезу в «Обработке»'; if (!warnings.includes(w)) warnings.push(w) }
+      sl.push(`\t\t\t\t\t<Machining Type="3" IsGenCode="2" Face="${m.face}" X="${g(m.start[0])}" Y="${g(m.start[1])}"${z3 ? ` Z="${g(m.start[2])}"` : ''} Depth="${g(m.depth)}" Diameter="${g(d)}" ToolOffset="${m.offset || '中'}" Pocket="${m.pocket ? 1 : 0}" Closed="${m.closed ? 1 : 0}">`)
+      sl.push('\t\t\t\t\t\t<MillPreDefinedRectangle Length="0" Width="0" X="0" Y="0" Z="0" Radius="0" CornerBotLeft="0" CornerBotRight="0" CornerTopLeft="0" CornerTopRight="0" />')
+      sl.push('\t\t\t\t\t\t<Lines>')
+      m.segs.forEach((q, i) => sl.push(`\t\t\t\t\t\t\t<Line LineID="${i}" EndX="${g(q.to[0])}" EndY="${g(q.to[1])}"${z3 ? ` EndZ="${g(q.to[2])}"` : ''} Angle="${g(q.angle)}" />`))
+      sl.push('\t\t\t\t\t\t</Lines>', '\t\t\t\t\t</Machining>')
+    }
+    // паз одной линией: фреза по оси паза (ToolOffset 中), Diameter = ширина паза — так пишет сам станок
+    const sGroove = (q, z) => sMill({ face: q.face, start: z == null ? [q.line[0], q.line[1]] : [q.line[0], q.line[1], z], segs: [{ to: z == null ? [q.line[2], q.line[3]] : [q.line[2], q.line[3], z], angle: 0 }], depth: q.depth, offset: '中', closed: false }, q.width)
+    top.forEach(sHole)
+    edge.forEach(h => sl.push(`\t\t\t\t\t<Machining Type="1" IsGenCode="2" Face="${h.face}" X="${g(h.X)}" Y="${g(h.Y)}" Z="${g(h.Z)}" Diameter="${g(h.dia)}" Depth="${g(h.depth)}" />`))
+    mills.filter(m => m.face === fr.top && !late(m)).forEach(m => sMill(m))
+    grooves.forEach(q => (q.mill ? sMill(q.mill, q.width) : sGroove(q)))
+    if (edgeGrooves.length) warnings.push('паз в торце в формате SCX записан фрезеровкой по торцу (Type 3 с Z) — в образце станка таких нет, проверьте в симуляторе')
+    edgeGrooves.forEach(q => sGroove(q, q.Z))
+    edgeMills.forEach(m => sMill(m))
+    bottom.forEach(sHole)
+    mills.filter(m => m.face !== fr.top && !late(m)).forEach(m => sMill(m))
+    mills.filter(late).forEach(m => sMill(m))
+    const pts = outline && !rectBlank ? outline : [{ X: fr.L, Y: fr.Wm }, { X: 0, Y: fr.Wm }, { X: 0, Y: 0 }, { X: fr.L, Y: 0 }]
+    scx = [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<Root Cad="BuiltInCad" version="2.0">',
+      '\t<Project>',
+      '\t\t<Panels>',
+      `\t\t\t<Panel IsProduce="true" ID="${esc(id)}" Name="${esc(id)}" Length="${g(fr.L)}" Width="${g(fr.Wm)}" Thickness="${g(T)}" MachiningPoint="1">`,
+      '\t\t\t\t<Outline>',
+      ...pts.map(p => `\t\t\t\t\t<Point X="${g(p.X)}" Y="${g(p.Y)}"${p.R ? ` Radius="${g(p.R)}"` : ''} />`),
+      '\t\t\t\t</Outline>',
+      '\t\t\t\t<Machines>',
+      ...sl,
+      '\t\t\t\t</Machines>',
+      '\t\t\t\t<EdgeGroup X1="0" Y1="0">',
+      ...[1, 2, 3, 4].map(f => `\t\t\t\t\t<Edge Face="${f}" Thickness="${g(faceEdge[f] > 0 ? faceEdge[f] : 0)}" Pre_Milling="0" X="0" Y="0" CentralAngle="0" />`),
+      '\t\t\t\t</EdgeGroup>',
+      '\t\t\t</Panel>',
+      '\t\t</Panels>',
+      '\t</Project>',
+      '</Root>',
+      '',
+    ].join('\r\n')
+  }
   // KDT (KDTPanelFormat): тот же разбор детали — другой формат файла; xml (SWJ) остаётся для просмотра и симуляции в приложении
   let kdt = null
   if (isKdt(post)) {
@@ -1022,7 +1078,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     kdt = r.text
     r.warnings.forEach(w => { if (!warnings.includes(w)) warnings.push(w) })
   }
-  return { xml, ...(kdt != null ? { kdt } : {}), ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
+  return { xml, ...(kdt != null ? { kdt } : {}), ...(scx != null ? { scx } : {}), ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
 }
 
 // ─── Имена файлов и папки ───────────────────────────────────────────────────
@@ -1108,7 +1164,8 @@ export function buildDrill6Files({ mat, order, post = {}, labelTpl, makeCode }) 
     byCode.set(code, di)
     r.warnings.forEach(w => warnings.add(`${rawDetail(d).name || 'Деталь'}: ${w}`))
     const view = r.xml.replace('\u0000ID\u0000', esc(code))
-    files.push({ name: `${code}.${ext}`, code, data: r.kdt != null ? r.kdt : view, ...(r.kdt != null ? { view } : {}), detail: rawDetail(d).name || '', ops: r.ops })
+    const alt = r.kdt != null ? r.kdt : r.scx != null ? r.scx.replace('\u0000ID\u0000', esc(code)).replace('\u0000ID\u0000', esc(code)) : null
+    files.push({ name: `${code}.${ext}`, code, data: alt != null ? alt : view, ...(alt != null ? { view } : {}), detail: rawDetail(d).name || '', ops: r.ops })
   }))
   return { files, skipped: skippedDi.size, warnings: [...warnings] }
 }
