@@ -118,7 +118,7 @@ function sortRows(rows, order) {
     return 0
   })
 }
-const res = (body, status = 200, extra = {}) => new Response(body == null ? '' : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...extra } })
+const res = (body, status = 200, extra = {}) => new Response(status === 204 || status === 304 ? null : body == null ? '' : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...extra } })
 const noRow = () => res({ code: 'PGRST116', details: 'The result contains 0 rows', hint: null, message: 'JSON object requested, multiple (or no) rows returned' }, 406)
 
 /** Ответ на запрос к Supabase для гостя — без сети */
