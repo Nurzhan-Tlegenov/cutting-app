@@ -748,6 +748,13 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
       ctx.beginPath(); for (let t = x0 - (y1 - y0); t < x1; t += 5 * line) { ctx.moveTo(t, y1); ctx.lineTo(t + (y1 - y0), y0) } ctx.stroke()
       ctx.restore()
     })
+    // пазы с изнанки — пунктиром, без штриховки: видно, где паз, и что он с другой стороны
+    getGrooveRects(c, DW, DL).filter(r => r.back).forEach(r => {
+      const pts = r.pts.map(([px, py]) => R(px, py))
+      ctx.save(); ctx.lineWidth = iw
+      if (typeof ctx.setLineDash === 'function') ctx.setLineDash([3 * line, 2 * line])
+      poly(pts); ctx.stroke(); ctx.restore()
+    })
     // отверстия: в пласть — кружок по диаметру, в торец — полоса от кромки на глубину
     holePts.forEach(pt => {
       const a = R(pt.x, pt.y)
