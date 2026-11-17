@@ -297,7 +297,21 @@ export function offsetLoops(poly, delta) {
     const cos = n1[0] * n2[0] + n1[1] * n2[1]
     if (cos > 1 - 1e-6) { out.push([cur[0] + n1[0] * delta, cur[1] + n1[1] * delta]); continue }
     const k = 1 + cos                                   // вершина эквидистанты: cur + (n1 + n2) * delta / (1 + cos)
-    if (k < 0.12) { out.push([cur[0] + n1[0] * delta, cur[1] + n1[1] * delta], [cur[0] + n2[0] * delta, cur[1] + n2[1] * delta]); continue }
+    if (k < 0.12) {
+      // очень острый угол (поворот больше ~150°). Выпуклый в сторону фрезы (острый «рог» детали снаружи, узкий карман внутри) —
+      // фреза обходит вершину по дуге радиусом |delta|; прямая срезка между двумя точками врезалась бы в деталь,
+      // и контур отбрасывался целиком (деталь пропадала из программы). Вогнутый — две точки, лишняя петля уходит в splitLoops.
+      const cr = (cur[0] - prev[0]) * (next[1] - cur[1]) - (cur[1] - prev[1]) * (next[0] - cur[0])
+      if (cr * delta > 0) {
+        const a1 = Math.atan2(n1[1], n1[0])
+        let sw = Math.atan2(n2[1], n2[0]) - a1
+        while (sw > Math.PI) sw -= 2 * Math.PI
+        while (sw < -Math.PI) sw += 2 * Math.PI
+        const ad = Math.abs(delta), st = 2 * Math.acos(Math.max(0, 1 - 0.01 / ad)), m = Math.max(2, Math.ceil(Math.abs(sw) / st))
+        for (let j = 0; j <= m; j++) { const a = a1 + sw * j / m; out.push([cur[0] + Math.cos(a) * delta, cur[1] + Math.sin(a) * delta]) }
+      } else out.push([cur[0] + n1[0] * delta, cur[1] + n1[1] * delta], [cur[0] + n2[0] * delta, cur[1] + n2[1] * delta])
+      continue
+    }
     out.push([cur[0] + (n1[0] + n2[0]) * delta / k, cur[1] + (n1[1] + n2[1]) * delta / k])
   }
   const need = Math.abs(delta) - 0.02
