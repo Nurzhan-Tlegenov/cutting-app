@@ -234,6 +234,29 @@ function dedupe(P) {
   while (out.length > 1 && Math.hypot(out[0][0] - out[out.length - 1][0], out[0][1] - out[out.length - 1][1]) <= 1e-6) out.pop()
   return out
 }
+// «Иглы» контура: острый угол (поворот почти назад), где материал тоньше tol мм — например, дуга выреза из модели,
+// касательно выходящая на край детали (вырез, рассчитанный на деталь длиннее, упирается в торец). Фреза такую
+// иглу всё равно не прорежет, а эквидистанта вокруг неё выворачивается — и деталь пропадала из программы.
+// Срезаем такие вершины, пока игла тоньше tol: контур меняется не больше чем на tol.
+function despike(P, tol = 0.5) {
+  let L = P.slice(), changed = true, guard = 0
+  while (changed && L.length > 3 && guard++ < 2000) {
+    changed = false
+    for (let i = 0; i < L.length && L.length > 3; i++) {
+      const a = L[(i - 1 + L.length) % L.length], b = L[i], c = L[(i + 1) % L.length]
+      const d1x = b[0] - a[0], d1y = b[1] - a[1], d2x = c[0] - b[0], d2y = c[1] - b[1]
+      const l1 = Math.hypot(d1x, d1y), l2 = Math.hypot(d2x, d2y)
+      if (!l1 || !l2) { L.splice(i, 1); changed = true; i--; continue }
+      const dot = (d1x * d2x + d1y * d2y) / (l1 * l2)
+      if (dot > -0.9) continue                                   // не игла (острее ~25° — только такие)
+      const lx = c[0] - a[0], ly = c[1] - a[1], ll = Math.hypot(lx, ly)
+      const h = ll ? Math.abs(lx * (b[1] - a[1]) - ly * (b[0] - a[0])) / ll : Math.min(l1, l2)
+      if (h > tol) continue                                      // толстый острый угол — оставляем как есть
+      L.splice(i, 1); changed = true; i--
+    }
+  }
+  return L
+}
 function segX(a, b, c, d) {
   const r = [b[0] - a[0], b[1] - a[1]], s = [d[0] - c[0], d[1] - c[1]]
   const den = r[0] * s[1] - r[1] * s[0]
@@ -262,7 +285,7 @@ function splitLoops(P, depth = 0) {
 export function offsetLoop(poly, delta) { return offsetLoops(poly, delta)[0] || null }
 /** То же, но все получившиеся контуры (узкая перемычка делит выборку на части) — крупные первыми */
 export function offsetLoops(poly, delta) {
-  let P = dedupe(poly)
+  let P = despike(dedupe(poly))
   if (P.length < 3) return []
   if (signedArea(P) < 0) P.reverse()
   if (Math.abs(delta) < 1e-9) return [P]
