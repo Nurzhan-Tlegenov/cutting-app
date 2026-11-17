@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
 import { setLabelBack, setLabelClient, REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
-import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, userItemsBySrc, pickParse, pickType, srcName, MODEL_SRC, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, saveRemTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap } from '../lib/labelMaker'
+import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, userItemsBySrc, pickParse, pickType, srcName, MODEL_SRC, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, saveRemTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap, GROOVE_TYPES } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc, activePost } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
 import CncLoader from '../components/CncLoader'
@@ -334,6 +334,14 @@ function ItemStyle({ it, tpl, edit, chip }) {
       <span style={lab}>Оформление:</span>
       <button type="button" style={chip(!!it.box)} onClick={() => edit({ box: !it.box || undefined })}>{it.box ? '✓ ' : ''}▭ В рамке</button>
       <button type="button" style={chip(!!it.inv)} onClick={() => edit({ inv: !it.inv || undefined })}>{it.inv ? '✓ ' : ''}◼ Белым по чёрному</button>
+      {GROOVE_TYPES.includes(it.type) && (
+        <label style={{ flex: '1 1 100%', display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, margin: 0, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!it.backInv} onChange={e => edit({ backInv: e.target.checked || undefined })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
+          <span>Паз с изнанки — в обратных цветах
+            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>У детали есть паз с обратной стороны — элемент печатается наоборот: {it.inv ? 'чёрным по белому (а с лица — белым по чёрному)' : 'белым по чёрному (а с лица — чёрным по белому)'}. Так сразу видно, с какой стороны паз.</span>
+          </span>
+        </label>
+      )}
       {it.inv && it.type === 'qr' && <span style={{ flex: '1 1 100%', fontSize: 11, color: 'var(--text-hint)' }}>Перевёрнутый QR-код читают не все сканеры — проверьте своим.</span>}
       {it.box && thick}
     </div>

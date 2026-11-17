@@ -416,6 +416,7 @@ export function normalizeLabel(raw) {
     } else {
       if (i.box) { o.box = true; o.lw = lw }
       if (i.inv) o.inv = true
+      if (i.backInv && GROOVE_TYPES.includes(i.type)) o.backInv = true   // паз с изнанки — в обратных цветах
     }
     if (!pic) {
       if ([0, 90, 180, 270].includes(Number(i.trot))) o.trot = Number(i.trot)
@@ -640,7 +641,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     ...(() => { const f = finishedSize(order, d); return { finX: even ? f.w : f.l, finY: even ? f.l : f.w } })(), thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
     // чертёж детали: размеры до торцевых отверстий — от края готовой детали (с кромкой), а не от пильного края
     edgeAdd: finishedAdds(d, typesD),
-    faceHoles: face, backHoles: back, endHoles: end, grooves, grooveDims, pockets, cutouts, meta: m, chain: blockChain(m),
+    faceHoles: face, backHoles: back, endHoles: end, grooves, grooveDims, backGroove: grooveDims.some(g => g.back), pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
     allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow), narrowTrim, narrowTrimCw: cw(narrowTrim),
@@ -859,6 +860,8 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
   endHoles: 'Отв. в торец:', grooves: 'Пазов:', grooveDims: 'Паз:', grooveSpan: 'Паз:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
+/** Элементы бирки про пазы — у них есть «С изнанки — в обратных цветах» */
+export const GROOVE_TYPES = ['grooves', 'grooveDims', 'grooveSpan']
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
 export const canCaption = type => !NO_CAP.has(type)
 export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
@@ -1030,7 +1033,10 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
     const it = it0.bind && it0.type === 'narrow' && narrowSide(info, rot) ? toSide(it0, narrowSide(info, rot), tpl.w, tpl.h)
       : it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0
     // подсветка припуска: кромка с этой стороны — в обратных цветах (чёрным по белому ↔ белым по чёрному)
-    return EDGE_TYPES.includes(it.type) && allowHit(tpl, info, it.type.slice(4).toLowerCase()) ? { ...it, inv: !it.inv } : it
+    if (EDGE_TYPES.includes(it.type) && allowHit(tpl, info, it.type.slice(4).toLowerCase())) return { ...it, inv: !it.inv }
+    // паз с изнанки: у элементов пазов с галочкой «С изнанки — в обратных цветах» — наоборот (чёрным по белому ↔ белым по чёрному)
+    if (it.backInv && GROOVE_TYPES.includes(it.type) && info?.backGroove) return { ...it, inv: !it.inv }
+    return it
   }
   const px1 = v => Math.max(1, Math.round(v * mm))                      // линия не тоньше точки принтера
   // Параметра нет (нет отверстий снизу, нет кромки…) — нет и рамки (в превью шаблона рамка видна)
