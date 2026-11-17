@@ -46,6 +46,8 @@ export const LABEL_ITEMS = [
   ['backHoles', 'Отверстия с изнанки (нижняя присадка)', 'text'],
   ['endHoles', 'Отверстия в торец', 'text'],
   ['grooves', 'Пазы', 'text'],
+  ['grooveDims', 'Пазы — отступ / ширина / глубина', 'text'],
+  ['grooveSpan', 'Пазы — от края до края / глубина', 'text'],
   ['pockets', 'Выемки', 'text'],
   ['cutouts', 'Вырезы', 'text'],
   ['twoSided', 'Обработка с двух сторон', 'text'],
@@ -608,6 +610,18 @@ export function labelInfo(order, mat, si, pi, part = null) {
   const face = holePts.filter(q => !q.edge && !q.back).length, back = holePts.filter(q => !q.edge && q.back).length, end = holePts.filter(q => q.edge).length
   const grooves = (c?.grooves || []).length + (c?.edgeGrooves || []).length, pockets = (c?.holes || []).filter(h => h.type === 'pocket').length
   const cutouts = (c?.holes || []).filter(h => h.type !== 'pocket').length
+  // размеры пазов для бирки: отступ — от ближнего к пазу края детали (паз вдоль длины — от продольного края), ширина, глубина.
+  // { off, w, d, back, edge } — текст собирает labelValue в одном из двух видов (16 / 4 / 8 или 16–20 / 8)
+  const grooveDims = [
+    ...(c ? getGrooveRects(c, DW, DL) : []).map(r => {
+      const xs = r.pts.map(q => q[0]), ys = r.pts.map(q => q[1])
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
+      const alongX = x1 - x0 >= y1 - y0                  // паз вдоль X — отступ по Y, и наоборот
+      const lo = alongX ? y0 : x0, hi = alongX ? DL - y1 : DW - x1
+      return { off: Math.max(0, Math.min(lo, hi)), w: r.width, d: r.depth, back: r.back }
+    }),
+    ...(c?.edgeGrooves || []).filter(g => (g.kind || 'groove') === 'groove').map(g => ({ off: Number(g.fromFace) || 0, w: Number(g.width) || 0, d: Number(g.depth) || 0, edge: true })),
+  ]
   const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
     // объединённый раскрой: «Заказ» на бирке — заказ самой детали (mergeOrders.js → meta.srcOrder)
@@ -626,7 +640,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     ...(() => { const f = finishedSize(order, d); return { finX: even ? f.w : f.l, finY: even ? f.l : f.w } })(), thickness: mat.thickness, qty: nestedQty(mat, p.detailIndex) || Number(d.qty) || 1,
     // чертёж детали: размеры до торцевых отверстий — от края готовой детали (с кромкой), а не от пильного края
     edgeAdd: finishedAdds(d, typesD),
-    faceHoles: face, backHoles: back, endHoles: end, grooves, pockets, cutouts, meta: m, chain: blockChain(m),
+    faceHoles: face, backHoles: back, endHoles: end, grooves, grooveDims, pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
     allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow), narrowTrim, narrowTrimCw: cw(narrowTrim),
@@ -844,7 +858,7 @@ function wrapText(ctx, text, maxW, size, weight, maxLines) {
 // Подпись перед значением на бирке («Поз. 12», «Карта 3», «Пазов: 2»). У каждого элемента шаблона её можно стереть или
 // написать свою (it.cap); не задана — стандартная. У заказа стандартная — подпись из настроек заказа (tpl.order.prefix)
 export const LABEL_CAPS = { order: 'Заказ', pos: 'Поз.', sheet: 'Карта', curved: 'Крив. кромка:', faceHoles: 'Отв. в пласть:', backHoles: 'Нижняя присадка:',
-  endHoles: 'Отв. в торец:', grooves: 'Пазов:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
+  endHoles: 'Отв. в торец:', grooves: 'Пазов:', grooveDims: 'Паз:', grooveSpan: 'Паз:', pockets: 'Выемок:', cutouts: 'Вырезов:', edgeList: 'Кромка:', allow: 'Припуск', glue: 'Склейка', narrow: 'Упилить после кромки:', article: 'Арт.', remTitle: 'ДЕЛОВОЙ ОСТАТОК', remText: 'Свой текст' }
 const NO_CAP = new Set(['edgeTop', 'edgeBottom', 'edgeLeft', 'edgeRight', 'qr', 'map', 'part', 'image', 'hline', 'vline', 'rect', 'table'])
 export const canCaption = type => !NO_CAP.has(type)
 export const defaultCap = (type, tpl) => (type === 'order' ? (tpl?.order ? tpl.order.prefix : 'Заказ') : LABEL_CAPS[type] || '')
@@ -896,6 +910,15 @@ function labelValue(type, info, tpl = null) {
     case 'backHoles': return info.backHoles ? String(info.backHoles) : ''
     case 'endHoles': return info.endHoles ? String(info.endHoles) : ''
     case 'grooves': return info.grooves ? String(info.grooves) : ''
+    // размеры пазов: «16 / 4 / 8» — отступ / ширина / глубина; «16–20 / 8» — паз от 16 до 20 мм от края, глубина 8.
+    // У паза с изнанки — «изн.», у паза в торце — «торец» (отступ — от лицевой пласти). Несколько пазов — через «; »
+    case 'grooveDims': case 'grooveSpan': {
+      const seen = new Set()
+      return (info.grooveDims || []).map(g => {
+        const body = type === 'grooveSpan' ? `${r1(g.off)}–${r1(g.off + g.w)} / ${r1(g.d)}` : `${r1(g.off)} / ${r1(g.w)} / ${r1(g.d)}`
+        return `${g.edge ? 'торец ' : g.back ? 'изн. ' : ''}${body}`
+      }).filter(t => !seen.has(t) && seen.add(t)).join('; ')
+    }
     case 'pockets': return info.pockets ? String(info.pockets) : ''
     case 'cutouts': return info.cutouts ? String(info.cutouts) : ''
     case 'twoSided': return info.twoSided ? '⇅ обработка с двух сторон' : ''
