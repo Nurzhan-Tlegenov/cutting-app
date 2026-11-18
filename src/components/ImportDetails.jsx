@@ -21,6 +21,7 @@ import { getUserSettings, saveUserSettings } from '../lib/userSettings'
 import { makePreset, applyPreset, bestPreset } from '../lib/importPresets'
 import { useBackClose } from '../lib/backStack'
 import { isDesktop } from '../hooks/useDesktop'
+import { flipDetail } from '../lib/mirrorDetail'
 import SendToMaster from './SendToMaster'
 import { fileToPayload, REPORT_RAW_MAX_MB } from '../lib/messages'
 
@@ -34,6 +35,20 @@ const FACE_CRITERIA = [
 const FACE_ORDER_DEFAULT = ['model', 'holes', 'groove']
 const LEGACY_ORDER = { holes: ['model', 'holes', 'groove'], groove: ['model', 'groove', 'holes'], sum: ['model', 'holes', 'groove'], model: ['model', 'holes', 'groove'] }
 // сохранённое правило (старое — строкой) → полный порядок трёх признаков
+// Пазы на детали: сколько с лица и сколько с изнанки (пазы по пласти и пазы по траектории с плоским дном)
+function grooveFaces(c) {
+  let front = 0, back = 0
+  for (const g of [...(c?.grooves || []), ...(c?.decor || []).filter(dc => dc.flat)]) (g.face === 'back' ? back++ : front++)
+  return { front, back }
+}
+// «Пазы — всегда снизу»: деталь, у которой пазов с лица больше, чем с изнанки, переворачивается (как кнопка в редакторе
+// контура: контур, кромка, присадка зеркалятся, лицо и изнанка меняются) — паз оказывается на нижней пласти
+export function groovesDown(it, T) {
+  const { front, back } = grooveFaces(it.contour)
+  if (!(front > back)) return it
+  return flipDetail(it, T)
+}
+
 function savedFaceOrder(v) {
   const list = Array.isArray(v) ? v.filter(c => FACE_CRITERIA.some(([k]) => k === c)) : (LEGACY_ORDER[v] || FACE_ORDER_DEFAULT)
   return [...list, ...FACE_ORDER_DEFAULT.filter(c => !list.includes(c))]
@@ -126,6 +141,10 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
   const [reportable, setReportable] = useState(false)   // файл выбран — можно сообщить о проблеме
   const [report, setReport] = useState(null)     // окно «Сообщить разработчику» (SendToMaster)
   const basisFileRef = useRef(null)              // выбранный файл модели — чтобы пересчитать при смене правила
+  // «Пазы — всегда снизу (с изнанки)»: для тех, кто пилит пазы на форматно-раскроечном станке (пила снизу).
+  // Своё у аккаунта, по умолчанию выключено — у тех, кто фрезерует пазы на ЧПУ, всё как было
+  const [gDown, setGDownState] = useState(() => !!getUserSettings(user).importGroovesDown)
+  const setGDown = v => { setGDownState(v); saveUserSettings({ importGroovesDown: v }, user) }
   const [faceRule, setFaceRule] = useState(() => savedFaceOrder(getUserSettings(user).basisFaceOrder || getUserSettings(user).basisFaceRule))
   const [source, setSource] = useState(SOURCES[0])
   const [busy, setBusy] = useState(false)
@@ -374,10 +393,13 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
       : result.groups.find(x => x.key === activeKey)
     setOpenState(openSaved())   // после импорта — как пользователь оставил
     onImport({
-      items: chosen.map(it => ({
-        name: it.name, w: it.w, h: it.h, qty: it.qty, edges: it.edges, prefix: it.prefix,
-        contour: it.contour || null, rotatable: !!it.rotatable,
-      })),
+      items: chosen.map(it0 => {
+        const it = gDown && it0.contour ? groovesDown(it0, Number(it0.thickness) || Number(g?.thickness) || Number(thickness) || 16) : it0
+        return {
+          name: it.name, w: it.w, h: it.h, qty: it.qty, edges: it.edges, prefix: it.prefix,
+          contour: it.contour || null, rotatable: !!it.rotatable,
+        }
+      }),
       mode: hasDetails ? mode : 'replace',
       material: g?.material || '',
       thickness: g?.thickness || null,
@@ -587,6 +609,19 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                       : `Эта модель уже импортировалась в заказ (${dupOf(chosen)} дет. совпадают) — детали заказа заменятся новыми, без задвоения.`}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Пазы — всегда снизу: для любого источника (модели, Excel, SketchCut, DXF) */}
+            {chosen.some(it => grooveFaces(it.contour).front + grooveFaces(it.contour).back > 0) && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={gDown} disabled={busy} onChange={e => setGDown(e.target.checked)} style={{ width: 18, height: 18, flex: '0 0 auto' }} />
+                  <span style={{ flex: 1 }}>Пазы — всегда снизу (с изнанки)
+                    {gDown && <span style={{ color: 'var(--text-hint)', fontSize: 12 }}> · перевернётся деталей: {chosen.filter(it => { const f = grooveFaces(it.contour); return f.front > f.back }).length}</span>}
+                  </span>
+                </label>
+                <Hint>Для тех, кто пилит пазы на форматно-раскроечном станке (пила снизу): деталь с пазом сверху при импорте переворачивается — паз оказывается на нижней пласти, контур, кромка и присадка зеркалятся вместе с ней. Работает для любого импорта (Базис, Астра, К3, SketchUp, bCAD, PRO100, SketchCut, DXF, Excel) и важнее приоритета лицевой стороны. Галочка запоминается за аккаунтом; кто фрезерует пазы на ЧПУ — оставляет её выключенной, у них пазы сверху, как сейчас.</Hint>
               </div>
             )}
 
