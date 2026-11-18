@@ -518,7 +518,9 @@ export const D6_OPS_DEFAULT = () => ({
 export function d6OpsOf(post) {
   const d = D6_OPS_DEFAULT(), o = post?.d6Ops || {}
   // holesOff — удалённые в «Обработке» слои отверстий (ключ holeLayerKey): в программу не выводятся
-  const ops = { layers: { ...(o.layers || {}) }, holesOff: { ...(o.holesOff || {}) } }
+  // order — очерёдность слоёв отверстий (ключи holeLayerKey): в пласть (hole) и в торец (edgeHole), кнопки ↑↓ в «Обработке»
+  const ord = o.order || {}, keys = v => (Array.isArray(v) ? v.filter(Boolean) : [])
+  const ops = { layers: { ...(o.layers || {}) }, holesOff: { ...(o.holesOff || {}) }, order: { hole: keys(ord.hole), edgeHole: keys(ord.edgeHole) } }
   for (const k of D6_CATS) ops[k] = { ...d[k], ...(o[k] || {}) }
   let tools = Array.isArray(post?.d6Tools) ? post.d6Tools.filter(t => t && t.id) : []
   // раньше был один инструмент на всё (d6Tool при снятой галочке «авто»)
@@ -785,9 +787,9 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     layers.push({ key, cat, d: r1(dia), depth: r1(depth), ...(cat === 'hole' && depth >= T - EPS ? { through: true } : {}) })
     return !o6.ops.holesOff?.[key]
   }
-  const faceHole = (x, y, face, dia, depth) => {
+  const faceHole = (x, y, face, dia, depth, key = null) => {
     const [X, Y] = fr.at(x, y), back = face === 'back'
-    if (!b6) { (back ? bottom : top).push({ X, Y, depth: depth > 0 ? Math.min(depth, T) : T, dia, face: back ? fr.bottom : fr.top }); return }
+    if (!b6) { (back ? bottom : top).push({ X, Y, depth: depth > 0 ? Math.min(depth, T) : T, dia, face: back ? fr.bottom : fr.top, key }); return }
     let d = depth > 0 ? Math.min(depth, T) : T
     if (b6.caps) { dia = capDia(dia, faceList, 'в пласть'); if (dia == null) return }
     const through = d >= T - EPS
@@ -796,7 +798,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
       const k = `${bk ? 'b' : 't'}|${f3(X)}|${f3(Y)}|${f3(dia)}|${f3(dd)}`
       if (holeKeys.has(k)) return
       holeKeys.add(k)
-      ;(bk ? bottom : top).push({ X, Y, depth: dd, dia, face: bk ? fr.bottom : fr.top })
+      ;(bk ? bottom : top).push({ X, Y, depth: dd, dia, face: bk ? fr.bottom : fr.top, key })
     }
     const maxD = n0(b6.splitMaxD)
     if (b6.split && through && (!(maxD > 0) || dia <= maxD + 0.001)) {
@@ -825,13 +827,14 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
           if (ed == null) continue
           edp = capDepth(depth, b6.edgeMaxDepth, `отверстие Ø${r1(ed)} в торец`)
         }
-        edge.push({ face, X, Y, Z: T - zf, depth: edp, dia: ed })   // на станке Z — от нижней пласти, лицевая сверху
+        edge.push({ face, X, Y, Z: T - zf, depth: edp, dia: ed, key: holeLayerKey('edgeHole', dia, depth) })   // на станке Z — от нижней пласти, лицевая сверху
         continue
       }
       const face = p.ehFace ?? (dr.kind === 'edge' || p.isPair ? dr.pairFace ?? dr.face : dr.face) ?? 'front'
       if (!holeLayer('hole', dia, depth > 0 ? Math.min(depth, T) : T)) continue
-      if (face === 'both') { faceHole(p.x, p.y, 'front', dia, depth); faceHole(p.x, p.y, 'back', dia, depth) }
-      else faceHole(p.x, p.y, face, dia, depth)
+      const hk = holeLayerKey('hole', dia, depth > 0 ? Math.min(depth, T) : T)
+      if (face === 'both') { faceHole(p.x, p.y, 'front', dia, depth, hk); faceHole(p.x, p.y, 'back', dia, depth, hk) }
+      else faceHole(p.x, p.y, face, dia, depth, hk)
     }
   })
 
@@ -935,8 +938,12 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
 
   // порядок — как в образце: пласть сверху (по Y, затем по X), торцы, пазы, пласть снизу
   const byYX = (a, b) => a.Y - b.Y || a.X - b.X
-  top.sort(byYX); bottom.sort(byYX)
-  edge.sort((a, b) => a.face - b.face || a.X - b.X || a.Y - b.Y)
+  // очерёдность слоёв (Ø × глубина), заданная пользователем: слой выше в списке — раньше; незаданные — после, как было
+  const rankOf = list => k => { const i = list.indexOf(k); return i >= 0 ? i : 1e6 }
+  const rH = rankOf(o6.ops.order.hole), rE = rankOf(o6.ops.order.edgeHole)
+  top.sort((a, b) => rH(a.key) - rH(b.key) || byYX(a, b)); bottom.sort((a, b) => rH(a.key) - rH(b.key) || byYX(a, b))
+  edge.sort((a, b) => rE(a.key) - rE(b.key) || a.face - b.face || a.X - b.X || a.Y - b.Y)
+  top.forEach(h => { h.ord = rH(h.key) }); bottom.forEach(h => { h.ord = rH(h.key) }); edge.forEach(h => { h.ord = rE(h.key) })   // для KDT — он сортирует сам
   let mid = 1000
   const nextId = () => { const v = mid; mid += 10; return v }
   const lines = []

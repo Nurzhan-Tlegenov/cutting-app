@@ -16,7 +16,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useDesktop } from '../hooks/useDesktop'
 import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
 import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot, forkShared } from '../lib/cncSettings'
-import { holeToolFor, grooveOpFor, skipOf, SKIP_KEYS } from '../lib/gcode'
+import { holeToolFor, grooveOpFor, skipOf, SKIP_KEYS, faceToolList } from '../lib/gcode'
+import OrderList, { mergeOrder } from './OrderList'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
 // cnc — настройки целиком, onChange(cnc) — сохранить.
@@ -1547,6 +1548,28 @@ export function CncOps({ cnc, onChange, layers }) {
 // ─── Быстро из предупреждений: все слои по пласти одним списком ─────────────
 // Инструмент — прямо здесь (без перехода в «Обработку»); «Изменить» — Ø и глубина отверстий, глубина пазов и выемок.
 // Это те же настройки, что в «Обработке» (действуют для станка, пока не вернёте). Без инструмента — красным.
+/**
+ * Очерёдность инструментов по пласти (фрезер): каждый инструмент делает всё своё за раз, ↑ — раньше.
+ * Запоминается за аккаунтом (ops.toolOrder). Вырезы и контуры — всегда в конце: внутренний контур предпоследний, внешний последний.
+ */
+export function FaceToolOrder({ cnc, onChange, layers, post = null }) {
+  const list = faceToolList(cnc, layers, post)
+  if (list.length < 2) return null
+  const own = (cnc.ops?.toolOrder || []).length > 0
+  const set = keys => onChange({ ...cnc, ops: { ...cnc.ops, toolOrder: keys } })
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+        <div style={{ flex: 1, fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Очерёдность инструментов{own ? '' : ' · по умолчанию'}</div>
+        {own && <button type="button" onClick={() => set([])} title="Свёрла, потом фрезы, фреза контура — последней"
+          style={{ padding: '2px 9px', borderRadius: 12, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>По умолчанию</button>}
+      </div>
+      <OrderList items={list.map(x => ({ key: x.tool.id, title: toolLabel(x.tool), sub: x.what.join(', ') }))}
+        onChange={keys => set(mergeOrder(keys, cnc.ops?.toolOrder))} />
+      <Hint>Каждый инструмент проходит всё своё по листу, потом — смена. ↑ — раньше: например, сначала сквозные Ø8, потом зенковка. Порядок запоминается за аккаунтом. Вырезы и контуры деталей всегда в конце: внутренний контур — предпоследним, внешний — последним.{post?.drillHead ? ' Свёрла присадочной головы идут первыми, одним проходом.' : ''}</Hint>
+    </div>
+  )
+}
 export function OpsQuick({ cnc, onChange, layers }) {
   const ops = cnc.ops
   const [edit, setEdit] = useState(null)          // { k, key, d, depth }

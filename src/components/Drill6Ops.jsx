@@ -6,6 +6,45 @@ import Hint from './Hint'
 import { activePost, newId, forkShared } from '../lib/cncSettings'
 import { d6OpsOf, resolveD6Tool } from '../lib/drill6Xml'
 import { SaveSnapshotButton } from './CncSettings'
+import OrderList, { mergeOrder } from './OrderList'
+
+/**
+ * Очерёдность слоёв отверстий шестистороннего станка (Ø × глубина): отдельно в пласть и в торец, ↑ — раньше.
+ * Хранится в станке (post.d6Ops.order) — запоминается за аккаунтом. post — какой станок (по умолчанию открытый в настройках).
+ */
+export function D6HoleOrder({ cnc, onChange, layers, post: post0 = null, isMaster = false, title = true, style = null }) {
+  const post = post0 || activePost(cnc)
+  if (!post || !layers) return null
+  const { ops, tools } = d6OpsOf(post)
+  const live = l => (l || []).filter(x => !ops.holesOff?.[x.key])
+  const sorted = (list, saved) => { const r = k => { const i = saved.indexOf(k); return i >= 0 ? i : 1e6 }; return [...list].sort((a, b) => r(a.key) - r(b.key)) }
+  const face = sorted(live(layers.hole), ops.order.hole), edge = sorted(live(layers.edgeHole), ops.order.edgeHole)
+  if (face.length < 2 && edge.length < 2) return null
+  const set = (cat, keys) => {
+    const patch = { d6Ops: { ...ops, order: { ...ops.order, [cat]: keys } }, d6Tools: tools }
+    if (post.shared && !isMaster) { onChange(forkShared(cnc, post, patch)); return }
+    onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
+  }
+  const block = (cat, list, label) => list.length > 1 && (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+        <div style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{label}{ops.order[cat].length ? '' : ' · по умолчанию'}</div>
+        {ops.order[cat].length > 0 && <button type="button" onClick={() => set(cat, [])}
+          style={{ padding: '2px 9px', borderRadius: 12, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>По умолчанию</button>}
+      </div>
+      <OrderList items={list.map(l => ({ key: l.key, title: `Ø${l.d} × ${l.depth}${l.through ? ' (сквозное)' : ''}`, sub: `${l.count} шт.` }))}
+        onChange={keys => set(cat, mergeOrder(keys, ops.order[cat]))} />
+    </div>
+  )
+  return (
+    <div style={style}>
+      {title && <div style={{ fontSize: 12, fontWeight: 600, marginTop: 4 }}>Очерёдность отверстий · {post.name}</div>}
+      {block('hole', face, 'В пласть')}
+      {block('edgeHole', edge, 'В торец')}
+      <Hint>↑ — раньше: в программе станка отверстия идут слоями в этом порядке (например, сначала сквозные, потом глухие). Запоминается за аккаунтом, в настройках станка. По умолчанию — по положению на детали.</Hint>
+    </div>
+  )
+}
 
 const num = v => { const x = Number(String(v ?? '').replace(',', '.')); return isFinite(x) ? x : 0 }
 const r1 = v => Math.round(num(v) * 10) / 10
@@ -161,6 +200,7 @@ export default function Drill6Ops({ cnc, onChange, isMaster = false, layers = nu
         {layers && !(layers.hole || []).length && !(layers.edgeHole || []).length && <p style={{ fontSize: 12, color: 'var(--text-hint)', margin: 0 }}>В этом заказе отверстий нет.</p>}
         {HoleRows({ list: layers?.hole, where: 'в пласть' })}
         {HoleRows({ list: layers?.edgeHole, where: 'в торец' })}
+        {layers && <D6HoleOrder cnc={cnc} onChange={onChange} layers={layers} isMaster={isMaster} title={false} style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }} />}
         {!layers && offKeys.length > 0 && <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Удалено слоёв отверстий: {offKeys.length}. Список с кнопкой «Вернуть» — в «Обработке» заказа.</p>}
         <Hint>«🗑 Удалить» — отверстия этого диаметра и глубины не попадают в программы станка. Это настройка станка: действует во всех заказах, пока не нажмёте «↩ Вернуть».</Hint>
       </div>

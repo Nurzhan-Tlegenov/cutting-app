@@ -197,6 +197,32 @@ export function collectLayers(sheets, details, T, skip = null) {
   return out
 }
 
+// ─── очерёдность инструментов по пласти ─────────────────────────────────────
+// Внутри деталей (отверстия, пазы, выемки) каждый инструмент проходит всё своё за раз, потом — смена.
+// По умолчанию: свёрла, потом фрезы, фреза контура — последней. Пользователь может задать свой порядок
+// (ops.toolOrder — id инструментов): например, сначала сквозные Ø8, потом зенковка. Вырезы и контуры деталей
+// это не меняет — внутренний контур всегда предпоследний, внешний — последний.
+const defaultToolRank = (t, lastTool) => (t.type === 'drill' ? 0 : t === lastTool || (lastTool && t.id === lastTool.id) ? 2 : 1) * 1000 + n0(t.t)
+export function faceToolRank(ops, lastTool) {
+  const order = Array.isArray(ops?.toolOrder) ? ops.toolOrder : []
+  return t => { const i = order.indexOf(t.id); return i >= 0 ? i : 1e6 + defaultToolRank(t, lastTool) }
+}
+/**
+ * Инструменты обработки по пласти на этих слоях — в том порядке, в каком они пойдут в программу.
+ * -> [{ tool, what: ['Ø8 × 16', 'паз 4 × 8', …] }]. Свёрла присадочной головы сюда не входят (идут первыми, одним проходом).
+ */
+export function faceToolList(cnc, layers, post = null) {
+  if (!layers) return []
+  const ops = cnc.ops || {}, sk = skipOf(ops), by = new Map()
+  const put = (t, what) => { if (!t || inHead(post, t)) return; if (!by.has(t.id)) by.set(t.id, { tool: t, what: [] }); by.get(t.id).what.push(what) }
+  layers.holes.forEach(l => { if (l.through ? sk.through : sk.blind) return; const o = ops.holes?.[l.key] || {}; if (o.off) return
+    put(holeToolFor(l, cnc), `Ø${num(n0(o.d) || l.d)} × ${num(n0(o.depth) || l.depth)}`) })
+  if (!sk.grooves) layers.grooveLayers.forEach(l => put(toolById(cnc, grooveOpFor(ops, l.key).tool), `паз ${num(l.width)} × ${num(l.depth)}`))
+  if (!sk.pockets) layers.pockets.forEach(l => put(toolById(cnc, ops.pockets?.[l.key ?? pocketKey(l.depth)]?.tool), `выемка ${num(l.depth)}`))
+  const lastTool = toolById(cnc, ops.outer?.tool) || toolById(cnc, ops.cutout?.tool)
+  const rank = faceToolRank(ops, lastTool)
+  return [...by.values()].sort((a, b) => rank(a.tool) - rank(b.tool))
+}
 const toolById = (cnc, id) => (cnc.tools || []).find(t => t.id === id) || null
 /** Инструмент слоя отверстий: назначенный, а если не назначали — сверло того же диаметра */
 export function holeToolFor(layer, cnc) {
@@ -1515,7 +1541,9 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
 
   // порядок: сначала всё внутри деталей (по инструментам), потом вырезы и контуры
   const lastTool = jobs.find(j => j.rank === 5)?.tool || jobs.find(j => j.rank === 4)?.tool || null
-  const toolRank = t => (t.type === 'drill' ? 0 : t === lastTool ? 2 : 1) * 1000 + n0(t.t)
+  // очерёдность инструментов по пласти — своя у аккаунта (ops.toolOrder, кнопки ↑↓ в «Перед созданием программ»),
+  // иначе как было: свёрла, фрезы, фреза контура — последней (без лишней смены перед контурами)
+  const toolRank = faceToolRank(ops, lastTool)
   const seq = []
   let cur = [0, 0]
   const add = list => { const o = shortenTravel(nearestOrder(list, cur), cur); seq.push(...o); if (o.length) cur = o[o.length - 1].at }

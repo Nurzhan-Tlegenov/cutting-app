@@ -147,7 +147,9 @@ export function normalizeCnc(raw, shared = [], { beam = false } = {}) {
 }
 export function normOps(raw) {
   const d = DEFAULT_OPS(), o = raw || {}
-  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes }, skip: { ...d.skip, ...o.skip }, score: { ...d.score, ...o.score }, offcut: { ...d.offcut, ...o.offcut } }
+  return { outer: { ...d.outer, ...o.outer }, cutout: { ...d.cutout, ...o.cutout }, groove: { ...d.groove, ...o.groove }, grooves: { ...o.grooves }, pockets: { ...o.pockets }, holes: { ...o.holes }, skip: { ...d.skip, ...o.skip }, score: { ...d.score, ...o.score }, offcut: { ...d.offcut, ...o.offcut },
+    // очерёдность инструментов по пласти (id), своя у аккаунта — см. faceToolRank в gcode.js
+    toolOrder: Array.isArray(o.toolOrder) ? o.toolOrder.filter(Boolean) : [] }
 }
 export { postView, postBack, hasOwnTools } from './postTools'
 

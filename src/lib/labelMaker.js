@@ -1540,7 +1540,7 @@ export async function buildStockLabelsPdf({ tpl, items, onProgress }) {
     obj(page, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${cont} 0 R >>`)
     obj(cont, `<< /Length ${content.length} >>`, content)
     obj(im, `<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /FlateDecode /Length ${img.length} >>`, img)
-    onProgress?.(++done, pages.length)
+    done++; onProgress?.(done, pages.length)
     if (done % 8 === 0) await new Promise(res => setTimeout(res))
   }
   obj(1, '<< /Type /Catalog /Pages 2 0 R >>')
@@ -1588,7 +1588,8 @@ export async function buildLabelsPdf({ order, mat, tpl, onProgress, seqOf = null
       obj(page, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im0 ${im} 0 R >> >> /Contents ${cont} 0 R >>`)
       obj(cont, `<< /Length ${content.length} >>`, content)
       obj(im, `<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /FlateDecode /Length ${img.length} >>`, img)
-      onProgress?.(++done, total)
+      // счётчик — отдельно: onProgress?.(++done) без onProgress не выполняет ++done, и все бирки получали страницу 1
+      done++; onProgress?.(done, total)
       if (done % 8 === 0) await new Promise(r => setTimeout(r))      // не замораживаем экран
     }
   }

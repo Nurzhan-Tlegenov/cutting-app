@@ -156,11 +156,12 @@ export function kdtPanel(g, post) {
     path(m, bottom)
   }
 
-  const top = g.top.slice().sort((a, b) => b.Y - a.Y || a.X - b.X)
-  const bottom = g.bottom.slice().sort((a, b) => b.Y - a.Y || a.X - b.X)
+  // ord — очерёдность слоя отверстий, заданная пользователем (drill6Xml.js); внутри слоя — как было
+  const top = g.top.slice().sort((a, b) => (a.ord || 0) - (b.ord || 0) || b.Y - a.Y || a.X - b.X)
+  const bottom = g.bottom.slice().sort((a, b) => (a.ord || 0) - (b.ord || 0) || b.Y - a.Y || a.X - b.X)
   top.forEach(h => hole(h, 1))
   g.mills.filter(m => m.face === fr.top).forEach(m => millOut(m, false))
-  g.edge.slice().sort((a, b) => a.face - b.face || a.X - b.X || a.Y - b.Y).forEach(h => cad([
+  g.edge.slice().sort((a, b) => (a.ord || 0) - (b.ord || 0) || a.face - b.face || a.X - b.X || a.Y - b.Y).forEach(h => cad([
     ['TypeNo', 2], ['TypeName', 'Horizontal Hole'], ['Quadrant', n0(k.quad[h.face]) || h.face], ['X1', f2(h.X)], ['Y1', f2(h.Y)], ['Z1', f2(h.Z)],
     ['Depth', f2(h.depth)], ['Diameter', f2(h.dia)], ['HoleNo', 1], ['IntervalX', '0.00'], ['IntervalY', '0.00']]))
   // паз в торце — как паз (Line) на торце: Quadrant, отрезок на торце, Z1 — середина паза от нижней пласти

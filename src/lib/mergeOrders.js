@@ -143,7 +143,7 @@ async function writeContours(patches, onProgress) {
       const p = queue.shift()
       const { error } = await supabase.from('order_details').update({ contour: p.contour }).eq('id', p.id)
       if (error) err = error
-      onProgress?.(++done, patches.length)
+      done++; onProgress?.(done, patches.length)
     }
   }
   await Promise.all(Array.from({ length: 6 }, worker))

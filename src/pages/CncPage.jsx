@@ -8,7 +8,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import BottomNav from '../components/BottomNav'
-import { CncBasic, CncCommands, CncTools, CncOps, OpsQuick, openOpsFold } from '../components/CncSettings'
+import { CncBasic, CncCommands, CncTools, CncOps, OpsQuick, FaceToolOrder, openOpsFold } from '../components/CncSettings'
 import PostPicker from '../components/PostPicker'
 import { useKeptState } from '../hooks/useKeptState'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
@@ -21,7 +21,7 @@ import { edgeHoleList, remapMat, edgeLabel } from '../lib/edgeRemap'
 import ColGrid from '../components/ColGrid'
 import { useCnc } from '../hooks/useCnc'
 import { buildDrill6Files, drill6Folders, drill6Qr, DRILL_DIR_DEFAULT, drill6Layers, d6OpsOf } from '../lib/drill6Xml'
-import Drill6Ops from '../components/Drill6Ops'
+import Drill6Ops, { D6HoleOrder } from '../components/Drill6Ops'
 import DirPathEditor, { routerDirDefault } from '../components/DirPathEditor'
 import Drill6Viewer from '../components/Drill6Viewer'
 import Drill6Orient from '../components/Drill6Orient'
@@ -149,6 +149,9 @@ export default function CncPage() {
   const open6 = activePost(cnc), drill6Open = isDrill6(open6)
   const layers6 = useMemo(() => (mat && drill6Open ? drill6Layers(mat.details, mat.thickness, open6, parseEdgeTypes(order?.edge_types)) : null), [mat, drill6Open, open6, order?.edge_types])
   const tchange = v => change(postBack(cnc, v))
+  // шестисторонний, выпускающий программы вместе с фрезером: его слои отверстий — для очерёдности в «Перед созданием программ»
+  const d6main = drills.find(isDrill6) || null
+  const layersD6 = useMemo(() => (mat && d6main ? drill6Layers(mat.details, mat.thickness, d6main, parseEdgeTypes(order?.edge_types)) : null), [mat, d6main, order?.edge_types])
   const sel = mat ? (picked ?? mat.sheets.map((_, i) => i)) : []
   const toggle = i => { setPicked(sel.includes(i) ? sel.filter(x => x !== i) : [...sel, i].sort((a, b) => a - b)); setBuilt(null) }
 
@@ -575,6 +578,7 @@ export default function CncPage() {
                     <div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>По пласти</div>
                       <OpsQuick cnc={rview} onChange={v => change({ ...postBack({ ...cnc, post: post.id }, v), post: cnc.post })} layers={layers} />
+                      <FaceToolOrder cnc={rview} onChange={v => change({ ...postBack({ ...cnc, post: post.id }, v), post: cnc.post })} layers={layers} post={post} />
                       {miss2.map(x => (
                         <button key={x.w} type="button" onClick={() => go(x.what)} title="Открыть слой в «Обработке» и назначить инструмент"
                           style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 12, padding: '5px 8px', marginBottom: 4, borderRadius: 6, cursor: 'pointer',
@@ -592,6 +596,7 @@ export default function CncPage() {
                     </div>
                   )}
                 </div>
+                {d6main && layersD6 && <D6HoleOrder cnc={cnc} onChange={change} post={d6main} layers={layersD6} isMaster={isMaster} style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }} />}
                 {rest.length > 0 && (
                   <div style={{ marginTop: 8 }}>
                     {rest.map(w => <div key={w} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 2 }}>· {w}</div>)}
