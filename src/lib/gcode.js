@@ -1826,6 +1826,22 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     // От этого меняются точки входа, поэтому маршрут строится ещё раз уже по ним — холостые переезды остаются короткими.
     let r = routeFor(own, hb.anchors.length ? hb.anchors : null, offcuts)
     if (edits) r = applyCutEdits(r, edits, rr => lastCutToSupport(rr, sheetRect, offcuts))
+    // Если после всех правил рискованная деталь всё же осталась — она режется НЕДОРЕЗОМ первой (с припуском, как блок
+    // удержания), пока соседи вокруг целы, а начисто дорезается в самом конце листа вместе с блоком: снимается тонкое
+    // дно, усилия почти нет — деталь не сдвинется. Таких 1–3 на лист, по времени почти ничего (при «набирать блок»)
+    if (holdOk) {
+      const rs = new Set(contourRisks(r, sheetRect, offcuts).map(x => x.pi))
+      const hj = r.filter(j => rs.has(j.pi) && !j.held && typeof j.hold === 'function')
+      if (hj.length) {
+        hj.forEach(j => j.hold())
+        add(hj)
+        r = r.filter(j => !hj.includes(j))
+        lastCutToSupport(r, sheetRect, [...offcuts, ...hj])
+        blocks.set(t, [...(blocks.get(t) || []), ...hj])
+        route.block.push(...hj.map(j => j.pi))
+        warn.add(`Недорезом в начале листа, начисто в конце — рискованные мелкие детали (${hj.length} шт.): так их не сдвинет.`)
+      }
+    }
     risks.push(...contourRisks(r, sheetRect, offcuts))
     route.push(...r.map(j => ({ pi: j.pi, corner: startCornerOf(j) })))
     r = withNestedOrder(r, heldCutouts, nestedState)
