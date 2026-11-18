@@ -1096,7 +1096,12 @@ export function holdBlock(list, minArea, rect, offcuts = [], place = null) {
   // place — где набирать блок: null — как раньше (у края, из крупных); 'l' / 'r' / 'b' / 't' — полосой вдоль этого края;
   // 'lb' / 'rb' / 'lt' / 'rt' — углом. Разные места сравнивает buildSheetGcode (см. pickRoute) по рискованным деталям
   const none = { block: [], anchors: [] }
-  if (!list.length || list.some(j => (j.area || 0) >= minArea)) return none
+  if (!list.length) return none
+  // На листе уже есть детали, которые вакуум держит сами (от minArea) — блок набирать не нужно: они и есть опора.
+  // Волна идёт к ним (как к блоку), и они режутся последними. Раньше в этом случае всё резалось «как обычно» — мелкие
+  // первыми по всему листу, и ряд мелких между средними деталями разрезал лист на части
+  const big = list.filter(j => (j.area || 0) >= minArea)
+  if (big.length) return { block: [], anchors: big }
   const gap = (a, b) => Math.max(a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], 0)
   const NEAR = 40, EDGE = 30
   const atEdge = j => rect && (j.box[0] - rect.x0 <= EDGE || rect.x1 - j.box[2] <= EDGE || j.box[1] - rect.y0 <= EDGE || rect.y1 - j.box[3] <= EDGE)
