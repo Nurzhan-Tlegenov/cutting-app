@@ -619,10 +619,17 @@ export function labelInfo(order, mat, si, pi, part = null) {
       const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
       const alongX = x1 - x0 >= y1 - y0                  // паз вдоль X — отступ по Y, и наоборот
       const lo = alongX ? y0 : x0, hi = alongX ? DL - y1 : DW - x1
-      return { off: Math.max(0, Math.min(lo, hi)), w: r.width, d: r.depth, back: r.back }
+      // сторона детали (как в заказе), от которой отступ: ближний к пазу край
+      const side = alongX ? (lo <= hi ? 'bottom' : 'top') : (lo <= hi ? 'left' : 'right')
+      return { off: Math.max(0, Math.min(lo, hi)), w: r.width, d: r.depth, back: r.back, side }
     }),
-    ...(c?.edgeGrooves || []).filter(g => (g.kind || 'groove') === 'groove').map(g => ({ off: Number(g.fromFace) || 0, w: Number(g.width) || 0, d: Number(g.depth) || 0, edge: true })),
+    ...(c?.edgeGrooves || []).filter(g => (g.kind || 'groove') === 'groove').map(g => ({ off: Number(g.fromFace) || 0, w: Number(g.width) || 0, d: Number(g.depth) || 0, edge: true, side: g.edgeSide || null })),
   ]
+  // сторона бирки, у которой паз (как деталь лежит на карте): элемент пазов с «Привязать к стороне детали» ставится
+  // к ней — по самому пазу, а не просто поворачивается вместе с деталью (иначе паз у другой стороны — подпись не там)
+  const gSide = grooveDims.find(g => g.side)?.side
+  const grooveSideMap = gSide ? toLabel({ [gSide]: 1 }) : null
+  const grooveSide = grooveSideMap ? Object.keys(grooveSideMap).find(k => grooveSideMap[k]) : null
   const work = [face && `отв. в пласть ${face}`, back && `с изнанки ${back}`, end && `в торец ${end}`, grooves && `пазов ${grooves}`, pockets && `выемок ${pockets}`, cutouts && `вырезов ${cutouts}`].filter(Boolean)
   return {
     // объединённый раскрой: «Заказ» на бирке — заказ самой детали (mergeOrders.js → meta.srcOrder)
@@ -644,6 +651,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     faceHoles: face, backHoles: back, endHoles: end, grooves, grooveDims, backGroove: grooveDims.some(g => g.back), pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
+    grooveSide, grooveSideCw: grooveSide ? { left: 'top', right: 'bottom', bottom: 'left', top: 'right' }[grooveSide] : null,
     allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow), narrowTrim, narrowTrimCw: cw(narrowTrim),
     // пильный центр: узкая деталь пилится шире и потом подрезается в размер — сколько пилили и до скольких подрезать
     // side / sideCw — сторона бирки, с которой упиливать лишнее (по тому же правилу, что у кромочного станка:
@@ -1037,7 +1045,9 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H)
   ctx.fillStyle = '#000'; ctx.textBaseline = 'middle'
   const place = it0 => {
+    const gs = rot ? info?.grooveSideCw : info?.grooveSide
     const it = it0.bind && it0.type === 'narrow' && narrowSide(info, rot) ? toSide(it0, narrowSide(info, rot), tpl.w, tpl.h)
+      : it0.bind && GROOVE_TYPES.includes(it0.type) && gs ? toSide(it0, gs, tpl.w, tpl.h)
       : it0.bind && info?.quarter ? boundItem(it0, info.quarter, tpl.w, tpl.h) : it0
     // подсветка припуска: кромка с этой стороны — в обратных цветах (чёрным по белому ↔ белым по чёрному)
     if (EDGE_TYPES.includes(it.type) && allowHit(tpl, info, it.type.slice(4).toLowerCase())) return { ...it, inv: !it.inv }
