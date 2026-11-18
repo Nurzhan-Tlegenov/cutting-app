@@ -980,6 +980,48 @@ export function lastCutToSupport(route, rect, extra = []) {
 }
 
 /**
+ * Рискованные детали маршрута — для пометки на карте и в симуляции (оператор видит лист, где деталь может сдвинуться).
+ * route — контуры в порядке реза (с уже выбранным началом), rect — лист, extra — куски, целые до конца (блок, обрезки).
+ * -> [{ pi, why }]: free — в момент реза деталь уже отделена со всех сторон (соседи вырезаны / за стороной узкая полоса
+ * у края листа), держит только вакуум и мостик; short — узкая деталь отделяется последним резом по короткой стороне.
+ */
+export function contourRisks(route, rect, extra = []) {
+  const NEAR = 40, out = []
+  route.forEach((j, pos) => {
+    // только мелкие (по площади или узкие): крупную держит вакуум
+    if (!j.small || !j.L || j.L.length < 3 || j.pi == null || j.pi < 0) return
+    const [x0, y0, x1, y1] = j.box, earlier = route.slice(0, pos), later = [...route.slice(pos + 1), ...extra]
+    const vert = sd => sd === 'l' || sd === 'r'
+    const cover = (sd, list) => {
+      const len = Math.max(1, vert(sd) ? y1 - y0 : x1 - x0)
+      let c = 0
+      for (const k of list) {
+        const [a0, b0, a1, b1] = k.box
+        const d = sd === 'l' ? x0 - a1 : sd === 'r' ? a0 - x1 : sd === 'b' ? y0 - b1 : b0 - y1
+        if (d < -1 || d > NEAR) continue
+        const ov = vert(sd) ? Math.min(y1, b1) - Math.max(y0, b0) : Math.min(x1, a1) - Math.max(x0, a0)
+        if (ov > 1) c += ov
+      }
+      return Math.min(1, c / len)
+    }
+    const toEdge = sd => (rect ? (sd === 'l' ? x0 - rect.x0 : sd === 'r' ? rect.x1 - x1 : sd === 'b' ? y0 - rect.y0 : rect.y1 - y1) : 1e9)
+    // сторона держит, если вдоль неё ещё не резали и за ней целая деталь / блок или нормальный кусок листа (не узкая полоса у края)
+    const holds = sd => cover(sd, earlier) < 0.5 && (cover(sd, later) > 0.3 || toEdge(sd) > NEAR)
+    const bw = x1 - x0, bh = y1 - y0
+    if (!['l', 'r', 'b', 't'].some(holds)) out.push({ pi: j.pi, why: 'free' })
+    else if (Math.max(bw, bh) >= 2 * Math.min(bw, bh)) {
+      // узкая деталь держится только короткими сторонами (вдоль длинных уже резали / край листа) — тоже риск
+      const longs = bh > bw ? ['l', 'r'] : ['b', 't']
+      if (!longs.some(holds)) { out.push({ pi: j.pi, why: 'short' }); return }
+      const P = j.L, a = P[P.length - 1], b = P[0], dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1])
+      const shortLast = bh > bw ? dx > dy : dy > dx           // последний отрезок — поперёк длинной оси
+      if (shortLast) out.push({ pi: j.pi, why: 'short' })
+    }
+  })
+  return out
+}
+
+/**
  * Порядок реза контуров деталей — без пробегов из конца в конец листа.
  * list: [{ at: [x, y] — точка входа, box: [x0, y0, x1, y1], edgeDist, small }], from — где сейчас фреза.
  *  • начинаем с детали у края листа, ближайшей к фрезе, и идём от соседа к соседу (каждый раз ближайшая деталь);
@@ -1475,7 +1517,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
             }
           } else mk = A => levels(T, -millOver, n0(t.maxPass)).map(z => ({ loop: A, z }))
           const edgeDist = Math.min(geo.marginL + p.x + bb.x0, geo.sheetW - (geo.marginL + p.x + bb.x1), geo.marginB + p.y + bb.y0, geo.sheetL - (geo.marginB + p.y + bb.y1))
-          const job = { stage: 1, rank: 5, tool: t, at: L[0], small, area, edgeDist, mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1],
+          const job = { stage: 1, rank: 5, tool: t, at: L[0], small, area, edgeDist, pi: sheet.placed.indexOf(p), mid: [bx + (bb.x0 + bb.x1) / 2, by + (bb.y0 + bb.y1) / 2], box: [bx + bb.x0, by + bb.y0, bx + bb.x1, by + bb.y1],
             L, Lr, reach: r + 1.5, mk, passes: mk(L, Lr), held: false, nested: false,
             // в блок удержания: проходы — недорез по черновому контуру с припуском (дорез — отдельно, в конце листа)
             hold() { this.held = true; this.Lr = Lh; this.mk = mkHold; this.passes = this.mk(this.L, this.Lr) },
@@ -1645,6 +1687,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const smallFirst = ops.outer?.smallFirst !== false
   const nestedState = { done: new Set(), cutoutsDone: new Set() }
   const blocks = new Map()                       // инструмент -> детали блока удержания
+  const risks = []                               // рискованные детали (см. contourRisks) — пометка в симуляции
   cutTools.forEach(t => {
     let own = stage1.filter(j => j.tool === t && j.rank === 5)
     const offcuts = (sheet.manualOffcuts || []).map(of => ({ box: [ox + of.x, oy + of.y, ox + of.x + of.w, oy + of.y + of.h], area: of.w * of.h / 1e6 }))
@@ -1669,6 +1712,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       r = routeContours(own, cur, sheetRect, smallFirst, hb.anchors.length ? hb.anchors : null)
       lastCutToSupport(r, sheetRect, offcuts)
     }
+    risks.push(...contourRisks(r, sheetRect, offcuts))
     r = withNestedOrder(r, heldCutouts, nestedState)
     if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
@@ -1727,5 +1771,6 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   if (seq.length && post.endX !== '' && post.endY !== '' && post.endX != null && post.endY != null) { out.g0(null, null, safeZ); out.g0(n0(post.endX) - sh0.dx, n0(post.endY) - sh0.dy, null) }   // парковка — в координатах станка, без сдвига
   out.raw(post.cmdEnd)
   if (!seq.length) warn.add('На листе нечего обрабатывать: не назначены инструменты.')
-  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds, scored }
+  if (risks.length) warn.add(`Рискованные мелкие детали: ${risks.length} — в момент реза их почти ничего не держит (отделены кругом или держатся только короткой стороной). В симуляции они отмечены оранжевым: проверьте или режьте их в 2 прохода.`)
+  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds, scored, risks }
 }

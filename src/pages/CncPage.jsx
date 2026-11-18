@@ -200,7 +200,7 @@ export default function CncPage() {
     const files = sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
       const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: post.id } })
-      return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, scored: r.scored || 0, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
+      return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, scored: r.scored || 0, risks: r.risks || [], time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
     })
     // второй раскроечный станок — свой G-код тех же листов (свои инструменты, команды, имя файла)
     const second = r2 ? { post: r2, files: sel.map(si => {
@@ -811,7 +811,7 @@ export default function CncPage() {
           <div style={{ maxWidth: window.innerWidth >= 1100 ? 'none' : 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(simP?.rapid) || 20000} zShift={sim.zShift}
-                toolDia={toolDia} headTools={simHead} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} />
+                toolDia={toolDia} headTools={simHead} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} risks={sim.risks} />
             </Suspense>
           </div>
         </div>, document.body
