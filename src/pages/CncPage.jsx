@@ -434,7 +434,8 @@ export default function CncPage() {
   // по всем листам одним списком: одинаковые предупреждения с разным «(N шт.)» складываются
   const warnings = built ? (() => {
     const sum = new Map()
-    const raw = [...built.files.flatMap(f => [...new Set(f.warnings)]), ...(built.second?.files || []).flatMap(f => [...new Set(f.warnings)].map(w => `${built.second.post.name}: ${w}`))]
+    // рискованные детали — не общей строкой (не видно, на каком листе), а списком листов с кнопками (см. ниже)
+    const raw = [...built.files.flatMap(f => [...new Set(f.warnings)].filter(w => !/^Рискованные мелкие детали/.test(w))), ...(built.second?.files || []).flatMap(f => [...new Set(f.warnings)].map(w => `${built.second.post.name}: ${w}`))]
     raw.forEach(w => { const m = w.match(/\((\d+) шт\.\)/); const k = m ? w.replace(m[0], '(#)') : w; sum.set(k, (sum.get(k) || 0) + (m ? Number(m[1]) : 0)) })
     return [...sum].map(([k, n]) => k.replace('(#)', `(${n} шт.)`))
   })() : []
@@ -633,6 +634,24 @@ export default function CncPage() {
             )}
             <button type="button" style={small} onClick={() => { setPicked(sel.length === mat.sheets.length ? [] : null); setBuilt(null) }}>{sel.length === mat.sheets.length ? 'Снять все' : 'Выбрать все'}</button>
           </div>
+          {(() => {
+            // на каких листах рискованные детали: кнопка — сразу в симуляцию этого листа (там они оранжевые)
+            const rf = (built?.files || []).filter(f => !f.empty && f.risks?.length)
+            if (!rf.length) return null
+            return (
+              <div style={{ background: '#FFF1E0', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10 }}>
+                <div style={{ fontSize: 12.5, color: '#B35F00', fontWeight: 500, marginBottom: 6 }}>
+                  ⚠ Рискованные мелкие детали ({rf.reduce((a, f) => a + f.risks.length, 0)}) — в момент реза их почти ничего не держит. Проверьте эти листы:
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {rf.map(f => (
+                    <button key={f.si} type="button" onClick={() => openSim(f)}
+                      style={{ ...small, color: '#B35F00', borderColor: '#E07B00', background: 'white' }}>▶ Лист {f.si + 1} · {f.risks.length} дет.</button>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
           <div className="desk-grid" style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
             {mat.sheets.map((sh, i) => {
               const g = sheetGeo(order, mat.result, sh), on = sel.includes(i), f = built?.files.find(x => x.si === i), f2 = built?.second?.files.find(x => x.si === i)
@@ -641,7 +660,9 @@ export default function CncPage() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
                     <input type="checkbox" checked={on} onChange={() => toggle(i)} style={{ width: 20, height: 20, flex: '0 0 auto' }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500 }}>{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {i + 1}</div>
+                      <div style={{ fontSize: 14, fontWeight: 500 }}>{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {i + 1}
+                        {f?.risks?.length > 0 && <span style={{ marginLeft: 8, fontSize: 11.5, fontWeight: 500, color: '#B35F00', background: '#FFF1E0', borderRadius: 10, padding: '1px 7px' }}>⚠ рискованных: {f.risks.length}</span>}
+                        {f?.edited && <span style={{ marginLeft: 6, fontSize: 11.5, color: 'var(--blue)' }}>✎ порядок изменён</span>}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{g.sheetL}×{g.sheetW} · деталей {sh.placed.length}</div>
                     </div>
                   </label>
