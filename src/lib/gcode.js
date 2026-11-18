@@ -561,7 +561,16 @@ function cutLoop(out, passes, top, tool, op, safeZ, arcs = false) {
       const B = ps.bridge, Lr = B.rough?.length > 2 ? B.rough : ps.loop, Mr = loopMetric(Lr), m = loopMetric(ps.loop)
       if (Mr.per > 0 && m.per > 0) {
         if (cur) out.g0(null, null, safeZ)
-        const blen = Math.min(Mr.per / 2, B.len), dE = Mr.per - blen, zt = top + 1, zl = B.z
+        // мостик — не длиннее 0,8 последней стороны: иначе у узкой детали он съедает всю держащую сторону и заходит
+        // за угол на предпоследнюю — пока режется остальной контур, деталь держится только на недорезе
+        let lastRun = 0
+        { const nL = Lr.length, d0 = [Lr[0][0] - Lr[nL - 1][0], Lr[0][1] - Lr[nL - 1][1]], l0 = Math.hypot(d0[0], d0[1])
+          for (let q = nL - 1; q >= 0 && l0 > 1e-6; q--) {
+            const a = Lr[q], b = q === nL - 1 ? Lr[0] : Lr[q + 1], u = [b[0] - a[0], b[1] - a[1]], lu = Math.hypot(u[0], u[1])
+            if (!(lu > 1e-6) || (u[0] * d0[0] + u[1] * d0[1]) / (lu * l0) < 0.999) break
+            lastRun += lu
+          } }
+        const blen = Math.min(Mr.per / 2, B.len, lastRun > 20 ? lastRun * 0.8 : B.len), dE = Mr.per - blen, zt = top + 1, zl = B.z
         const e = Mr.at(dE)
         out.g0(e[0], e[1], safeZ)
         out.g1(null, null, zt, inFeed)
@@ -952,9 +961,14 @@ export function lastCutToSupport(route, rect, extra = []) {
       // последний рез приходит в угол i: на какой стороне габарита он лежит и какой длины (отрезки этой стороны подряд)
       const sd = sides[i]
       if (!sd) continue
-      let run = 0
-      for (let k = 0; k < n; k++) { const q = sides[(i - k + n) % n]; if (!q || q[0] !== sd[0]) break; run += q[1] }
-      const sc = score[sd[0]] * Math.min(1, run / 50)
+      let run = 0, k = 0
+      for (; k < n; k++) { const q = sides[(i - k + n) % n]; if (!q || q[0] !== sd[0]) break; run += q[1] }
+      // предпоследняя сторона: пока режутся первые стороны, деталь держат ДВЕ последние. Если предпоследняя — у края листа
+      // или вдоль уже отрезанного соседа, то рез перед ней толкает деталь туда, где её ничего не подпирает (узкая деталь
+      // у края: короткий рез в сторону края, когда держит только последняя сторона). Её опора тоже учитывается — вполовину
+      let prev = null
+      for (; k < n; k++) { const q = sides[(i - k + n) % n]; if (q && q[0] !== sd[0]) { prev = q[0]; break } }
+      const sc = (score[sd[0]] + (prev ? 0.5 * score[prev] : 0)) * Math.min(1, run / 50)
       if (sc > bs + 1e-9) { bs = sc; best = i }
     }
     if (best > 0) j.restart(best)
@@ -1076,6 +1090,9 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   // Среди мелких: сначала те, что дальше от крупных деталей (считая по соседям), последними — прилегающие к крупной.
   // Так мелкая деталь в момент реза ещё держится за нетронутого соседа, а фреза не возвращается в россыпь уже отрезанных.
   const before = new Map(list.map(j => [j, []]))
+  // сколько сторон детали у края листа (узкая полоса отхода за ними деталь не подпирает): мелкая деталь в углу листа
+  // режется раньше мелкого соседа — пока он цел и держит её
+  const edgeSides = j => !sheetRect ? 0 : [j.box[0] - sheetRect.x0, j.box[1] - sheetRect.y0, sheetRect.x1 - j.box[2], sheetRect.y1 - j.box[3]].filter(d => d <= NEAR).length
   // с опорами (блок / большой обрезок) правила мелких и крупных не действуют — только волна к опоре (см. ниже)
   const smallRules = smallFirst && !toBlock.size
   if (smallRules) {
@@ -1095,7 +1112,8 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
     for (const s of list) if (s.small) for (const b of list) {
       if (b === s) continue
       if (!b.small) before.get(b).push(s)
-      else if (gap(s, b) <= NEAR && (depth.get(s) > depth.get(b) || (depth.get(s) === depth.get(b) && hold.get(s) < hold.get(b) - 0.05))) before.get(b).push(s)
+      else if (gap(s, b) <= NEAR && (depth.get(s) > depth.get(b) || (depth.get(s) === depth.get(b) && (edgeSides(s) > edgeSides(b)
+        || (edgeSides(s) === edgeSides(b) && hold.get(s) < hold.get(b) - 0.05))))) before.get(b).push(s)
     }
   }
   // и среди крупных: из двух соседей раньше режется та, что заметно меньше, — она отделяется от большей
@@ -1106,7 +1124,15 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   // до прилегающих к блоку. Маршрут не прыгает к блоку и обратно; каждая деталь отделяется от нетронутого слоя ближе к блоку
   // в одном слое из двух соседей раньше та, что дальше от опоры (длинная планка у края — раньше соседей ближе к опоре)
   const toAnchor = new Map(toBlock.size ? list.map(j => [j, Math.min(...anchor.map(a => Math.hypot(Math.max(a.box[0] - j.box[2], j.box[0] - a.box[2], 0), Math.max(a.box[1] - j.box[3], j.box[1] - a.box[3], 0))))]) : [])
+  // «Мелкие — первыми» действует и при опорах: мелкая деталь режется раньше крупных, пока соседи вокруг неё целы и держат
+  // её (иначе волна к опоре оставляла узкую деталь у края последней — уже прорезанной со всех сторон, и короткий рез
+  // толкал её туда, где ничего не подпирает). Волна к опоре — внутри мелких и внутри крупных; лист из одних мелких — волной
+  const mixed = smallFirst && list.some(j => j.small) && list.some(j => !j.small)
+  if (toBlock.size && mixed) for (const s of list) if (s.small) for (const b of list) if (!b.small) before.get(b).push(s)
   if (toBlock.size) for (const s of list) for (const b of list) {
+    if (mixed && !!s.small !== !!b.small) continue
+    // среди мелких соседей — сначала та, у которой больше сторон у края листа; при равенстве — волна к опоре
+    if (mixed && s.small && b !== s && gap(s, b) <= NEAR && edgeSides(s) !== edgeSides(b)) { if (edgeSides(s) > edgeSides(b)) before.get(b).push(s); continue }
     if (b !== s && (toBlock.get(s) > toBlock.get(b) || (toBlock.get(s) === toBlock.get(b) && gap(s, b) <= NEAR && toAnchor.get(s) > toAnchor.get(b) + 50))) before.get(b).push(s)
   }
   if (centre) for (const j of list) if (j !== centre && !before.get(j).includes(centre)) before.get(centre).push(j)
