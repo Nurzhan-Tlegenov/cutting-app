@@ -968,7 +968,11 @@ export function lastCutToSupport(route, rect, extra = []) {
       // у края: короткий рез в сторону края, когда держит только последняя сторона). Её опора тоже учитывается — вполовину
       let prev = null
       for (; k < n; k++) { const q = sides[(i - k + n) % n]; if (q && q[0] !== sd[0]) { prev = q[0]; break } }
-      const sc = (score[sd[0]] + (prev ? 0.5 * score[prev] : 0)) * Math.min(1, run / 50)
+      // узкая деталь (длина ≥ 2 ширин): последний рез и вход с мостиком — только по длинной стороне. Вход с торца узкой
+      // стороны раскачивает длинную планку, как маятник, и короткий рез толкает её вбок. Короткая — лишь если у длинных опоры нет
+      const bw = x1 - x0, bh = y1 - y0, slim = Math.max(bw, bh) >= 2 * Math.min(bw, bh)
+      const shortSide = slim && (vert(sd[0]) ? bh < bw : bw < bh)
+      const sc = (score[sd[0]] + (prev ? 0.5 * score[prev] : 0)) * Math.min(1, run / 50) * (shortSide ? 0.05 : 1)
       if (sc > bs + 1e-9) { bs = sc; best = i }
     }
     if (best > 0) j.restart(best)
@@ -1106,9 +1110,17 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
       const grp = [s0]; seen.add(s0); grpOf.set(s0, s0)
       for (let i = 0; i < grp.length; i++) for (const k of smalls) if (!seen.has(k) && gap(grp[i], k) <= NEAR) { seen.add(k); grp.push(k); grpOf.set(k, s0) }
       const top = Math.max(...grp.map(edgeSides))
-      let wave = grp.filter(j => edgeSides(j) === top)
-      if (wave.length === grp.length) continue                       // все одинаково у края — порядок по остальным правилам
-      wave.forEach(j => edgeHop.set(j, 0))
+      const seeds = grp.filter(j => edgeSides(j) === top)
+      if (seeds.length === grp.length && grp.length < 3) continue    // две одинаково у края — порядок по остальным правилам
+      // начало цепочки — ОДНО: иначе цепочки с двух концов сходились к середине, и последняя планка оставалась между двумя
+      // уже отрезанными. Начало — подальше от опоры (блок, обрезок, самая крупная деталь): цепочка идёт к ней, и каждая
+      // планка отделяется от ещё целого куска
+      const big = anchor?.length ? anchor : list.filter(j => !j.small).sort((a, b) => (b.area || 0) - (a.area || 0)).slice(0, 1)
+      const far = j => (big.length ? Math.min(...big.map(a => gap(j, a))) : -D(j.at, from))
+      const mid0 = j => [(j.box[0] + j.box[2]) / 2, (j.box[1] + j.box[3]) / 2]
+      const seed = seeds.reduce((b, j) => (!b || far(j) > far(b) + 1 || (Math.abs(far(j) - far(b)) <= 1 && D(mid0(j), from) < D(mid0(b), from)) ? j : b), null)
+      let wave = [seed]
+      edgeHop.set(seed, 0)
       while (wave.length) {
         const next = []
         for (const j of wave) for (const k of grp) if (!edgeHop.has(k) && gap(j, k) <= NEAR) { edgeHop.set(k, edgeHop.get(j) + 1); next.push(k) }
