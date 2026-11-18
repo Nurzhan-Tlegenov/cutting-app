@@ -1242,8 +1242,10 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   // толкал её туда, где ничего не подпирает). Волна к опоре — внутри мелких и внутри крупных; лист из одних мелких — волной
   // только узкие мелкие (планки): квадратные мелкие идут общей волной, иначе лист резался на части и фреза металась
   const slimS = j => j.small && Math.min(j.box[2] - j.box[0], j.box[3] - j.box[1]) <= 200
-  const mixed = smallFirst && list.some(slimS) && list.some(j => !slimS(j))
-  if (toBlock.size && mixed) for (const s of list) if (slimS(s)) for (const b of list) if (!slimS(b)) before.get(b).push(s)
+  // с опорой мелкие НЕ режутся первыми по всему листу (лист делился на части, фреза прыгала): волна идёт полосами от
+  // дальнего от опоры края, и в каждой полосе — сначала её мелкие детали (см. выбор ниже), потом крупные. Мелкая в
+  // середине листа отделяется от целого куска и так
+  const mixed = false
   if (toBlock.size) for (const s of list) for (const b of list) {
     if (mixed && slimS(s) !== slimS(b)) continue
     // среди мелких соседей — сначала та, у которой больше сторон у края листа; при равенстве — волна к опоре
@@ -1263,7 +1265,10 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
     if (!R.length) { const edge = free.filter(j => j.edgeDist <= me + NEAR); if (edge.length) free = edge }
     // с опорой — проход полосой к опоре: из доступных — самые дальние от неё (в пределах 150 мм), среди них ближайшая.
     // Получается «змейка» от дальнего края к блоку, без перескоков через лист
-    if (anchor?.length && free.length > 1) { const far = Math.max(...free.map(dCen)); free = free.filter(j => dCen(j) >= far - 150) }
+    if (anchor?.length && free.length > 1) {
+      const far = Math.max(...free.map(dCen)); free = free.filter(j => dCen(j) >= far - 150)
+      if (smallFirst) { const sm = free.filter(j => j.small); if (sm.length) free = sm }     // в полосе — сначала мелкие
+    }
     const next = free.reduce((b, j) => (!b || D(j.at, cur) < D(b.at, cur) ? j : b), null)
     R.push(next); done.add(next); cur = next.at
   }
