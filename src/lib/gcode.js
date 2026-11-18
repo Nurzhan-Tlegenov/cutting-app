@@ -1093,6 +1093,30 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   // сколько сторон детали у края листа (узкая полоса отхода за ними деталь не подпирает): мелкая деталь в углу листа
   // режется раньше мелкого соседа — пока он цел и держит её
   const edgeSides = j => !sheetRect ? 0 : [j.box[0] - sheetRect.x0, j.box[1] - sheetRect.y0, sheetRect.x1 - j.box[2], sheetRect.y1 - j.box[3]].filter(d => d <= NEAR).length
+  // Ряд мелких соседей (узкие планки бок о бок) режется цепочкой от угла листа внутрь: сначала та, у которой больше
+  // сторон у края, затем её сосед, затем следующий… — без перескоков через деталь. Так каждая планка в момент реза
+  // держится за ещё целого соседа с другой стороны (иначе средняя оставалась между двумя уже отрезанными и короткий
+  // рез толкал её в пустой рез соседа). edgeHop — сколько соседей до начала цепочки в своей группе мелких
+  const edgeHop = new Map(), grpOf = new Map()
+  {
+    // только узкие мелкие (планки): у широких мелких своя опора — им хватает обычных правил
+    const smalls = list.filter(j => j.small && Math.min(j.box[2] - j.box[0], j.box[3] - j.box[1]) <= 200), seen = new Set()
+    for (const s0 of smalls) {
+      if (seen.has(s0)) continue
+      const grp = [s0]; seen.add(s0); grpOf.set(s0, s0)
+      for (let i = 0; i < grp.length; i++) for (const k of smalls) if (!seen.has(k) && gap(grp[i], k) <= NEAR) { seen.add(k); grp.push(k); grpOf.set(k, s0) }
+      const top = Math.max(...grp.map(edgeSides))
+      let wave = grp.filter(j => edgeSides(j) === top)
+      if (wave.length === grp.length) continue                       // все одинаково у края — порядок по остальным правилам
+      wave.forEach(j => edgeHop.set(j, 0))
+      while (wave.length) {
+        const next = []
+        for (const j of wave) for (const k of grp) if (!edgeHop.has(k) && gap(j, k) <= NEAR) { edgeHop.set(k, edgeHop.get(j) + 1); next.push(k) }
+        wave = next
+      }
+    }
+  }
+  const hopCmp = (s, b) => (edgeHop.has(s) && edgeHop.has(b) && grpOf.get(s) === grpOf.get(b) && edgeHop.get(s) !== edgeHop.get(b) ? Math.sign(edgeHop.get(b) - edgeHop.get(s)) : 0)   // 1 — s раньше
   // с опорами (блок / большой обрезок) правила мелких и крупных не действуют — только волна к опоре (см. ниже)
   const smallRules = smallFirst && !toBlock.size
   if (smallRules) {
@@ -1112,8 +1136,8 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
     for (const s of list) if (s.small) for (const b of list) {
       if (b === s) continue
       if (!b.small) before.get(b).push(s)
-      else if (gap(s, b) <= NEAR && (depth.get(s) > depth.get(b) || (depth.get(s) === depth.get(b) && (edgeSides(s) > edgeSides(b)
-        || (edgeSides(s) === edgeSides(b) && hold.get(s) < hold.get(b) - 0.05))))) before.get(b).push(s)
+      else if (gap(s, b) <= NEAR && (depth.get(s) > depth.get(b) || (depth.get(s) === depth.get(b) && (hopCmp(s, b) > 0
+        || (hopCmp(s, b) === 0 && hold.get(s) < hold.get(b) - 0.05))))) before.get(b).push(s)
     }
   }
   // и среди крупных: из двух соседей раньше режется та, что заметно меньше, — она отделяется от большей
@@ -1132,7 +1156,7 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
   if (toBlock.size) for (const s of list) for (const b of list) {
     if (mixed && !!s.small !== !!b.small) continue
     // среди мелких соседей — сначала та, у которой больше сторон у края листа; при равенстве — волна к опоре
-    if (mixed && s.small && b !== s && gap(s, b) <= NEAR && edgeSides(s) !== edgeSides(b)) { if (edgeSides(s) > edgeSides(b)) before.get(b).push(s); continue }
+    if (b !== s && edgeHop.has(s) && edgeHop.has(b) && grpOf.get(s) === grpOf.get(b)) { if (hopCmp(s, b) > 0) before.get(b).push(s); if (hopCmp(s, b)) continue }
     if (b !== s && (toBlock.get(s) > toBlock.get(b) || (toBlock.get(s) === toBlock.get(b) && gap(s, b) <= NEAR && toAnchor.get(s) > toAnchor.get(b) + 50))) before.get(b).push(s)
   }
   if (centre) for (const j of list) if (j !== centre && !before.get(j).includes(centre)) before.get(centre).push(j)
