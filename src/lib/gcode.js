@@ -1050,6 +1050,37 @@ export function contourRisks(route, rect, extra = []) {
 }
 
 /**
+ * Починка маршрута по рискованным деталям: правила порядка общие, и иногда они сами ставят мелкую деталь после обоих
+ * её соседей (узкая планка между двумя уже вырезанными). Такая деталь пробуется раньше — перед каждым из уже
+ * вырезанных к её очереди соседей; перестановка остаётся, если рискованных деталей (с учётом остальных) стало меньше.
+ */
+export function repairRisks(route, rect, extra = []) {
+  const NEAR = 40
+  const gap = (a, b) => Math.max(a.box[0] - b.box[2], b.box[0] - a.box[2], a.box[1] - b.box[3], b.box[1] - a.box[3], 0)
+  const cost = rr => contourRisks(rr, rect, extra).reduce((a, x) => a + (x.why === 'free' ? 10 : 6), 0)
+  let cur = route.slice(), best = cost(cur)
+  for (let it = 0; it < 2 * cur.length && best > 0; it++) {
+    let moved = false
+    for (const x of contourRisks(cur, rect, extra)) {
+      const i = cur.findIndex(q => q.pi === x.pi)
+      if (i < 0) continue
+      const j = cur[i]
+      const spots = cur.slice(0, i).map((q, k) => (gap(q, j) <= NEAR ? k : -1)).filter(k => k >= 0)
+      for (const p of spots) {
+        const t = cur.slice(); t.splice(i, 1); t.splice(p, 0, j)
+        lastCutToSupport(t, rect, extra)
+        const c = cost(t)
+        if (c < best - 1e-9) { cur = t; best = c; moved = true; break }
+      }
+      lastCutToSupport(cur, rect, extra)
+      if (moved) break
+    }
+    if (!moved) break
+  }
+  return cur
+}
+
+/**
  * Порядок реза контуров деталей — без пробегов из конца в конец листа.
  * list: [{ at: [x, y] — точка входа, box: [x0, y0, x1, y1], edgeDist, small }], from — где сейчас фреза.
  *  • начинаем с детали у края листа, ближайшей к фрезе, и идём от соседа к соседу (каждый раз ближайшая деталь);
@@ -1758,7 +1789,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
     const routeFor = (lst, anchors, extra) => {
       let rr = []
       for (let pass = 0; pass < 3; pass++) { rr = routeContours(lst, cur, sheetRect, smallFirst, anchors); lastCutToSupport(rr, sheetRect, extra) }
-      return rr
+      return repairRisks(rr, sheetRect, extra)
     }
     const saveL = new Map(own.map(j => [j, { L: j.L, Lr: j.Lr, at: j.at, passes: j.passes }]))
     const restoreL = () => own.forEach(j => Object.assign(j, saveL.get(j)))
