@@ -979,6 +979,34 @@ export function lastCutToSupport(route, rect, extra = []) {
   })
 }
 
+// угол габарита, у которого начинается (и заканчивается) контур детали
+export function startCornerOf(j) {
+  if (!j.L?.length || !j.box) return null
+  const [x, y] = j.L[0], [x0, y0, x1, y1] = j.box
+  return (Math.abs(x - x0) <= Math.abs(x - x1) ? 'l' : 'r') + (Math.abs(y - y0) <= Math.abs(y - y1) ? 'b' : 't')
+}
+/** Ручная правка маршрута контуров: порядок (edits.order — pi по порядку) и угол входа (edits.ends[pi]) */
+export function applyCutEdits(route, edits, restarts = null) {
+  let r = route
+  const ord = Array.isArray(edits?.order) ? edits.order : []
+  if (ord.length) {
+    const pos = new Map(r.map((j, i) => [j, i]))
+    const rank = j => { const i = ord.indexOf(j.pi); return i >= 0 ? i : ord.length + pos.get(j) }
+    r = [...r].sort((a, b) => rank(a) - rank(b))
+    restarts?.(r)                     // порядок другой — начала контуров (последний рез к целому куску) выбираются заново
+  }
+  const ends = edits?.ends || {}
+  for (const j of r) {
+    const c = ends[j.pi]
+    if (!c || !j.L?.length || !j.restart) continue
+    const [x0, y0, x1, y1] = j.box, tx = c[0] === 'l' ? x0 : x1, ty = c[1] === 'b' ? y0 : y1
+    let bi = 0, bd = Infinity
+    j.L.forEach((v, i) => { const d = Math.hypot(v[0] - tx, v[1] - ty); if (d < bd) { bd = d; bi = i } })
+    if (bi > 0) j.restart(bi)
+  }
+  return r
+}
+
 /**
  * Рискованные детали маршрута — для пометки на карте и в симуляции (оператор видит лист, где деталь может сдвинуться).
  * route — контуры в порядке реза (с уже выбранным началом), rect — лист, extra — куски, целые до конца (блок, обрезки).
@@ -1259,7 +1287,9 @@ export function routeContours(list, from, sheetRect, smallFirst = true, anchor =
  * sheet — лист из раскроя, geo — геометрия листа (sheetGeo), details — детали материала, thickness — толщина,
  * cnc — настройки (см. cncSettings.js).  -> { text, lines, warnings, tools }
  */
-export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, outer = true, score = true }) {
+export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, outer = true, score = true, edits = null }) {
+  // edits — ручная правка оператора из симуляции (своя у листа): { order: [pi…] — порядок контуров деталей,
+  // ends: { pi: 'lb'|'rb'|'rt'|'lt' } — угол входа/последнего реза детали }. Ответственность — на том, кто правил
   // outer: false — без контура деталей (доприсадка обратной стороны, backSide.js); score: false — без шинковки
   // инструменты и обработка — те, что видит этот постпроцессор (свой набор у настроенного по чужой программе, см. postTools.js)
   const cnc = postView(cncAll)
@@ -1702,6 +1732,8 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const nestedState = { done: new Set(), cutoutsDone: new Set() }
   const blocks = new Map()                       // инструмент -> детали блока удержания
   const risks = []                               // рискованные детали (см. contourRisks) — пометка в симуляции
+  const route = []                               // порядок контуров деталей и угол входа — для ручной правки в симуляции
+  route.block = []
   cutTools.forEach(t => {
     let own = stage1.filter(j => j.tool === t && j.rank === 5)
     const offcuts = (sheet.manualOffcuts || []).map(of => ({ box: [ox + of.x, oy + of.y, ox + of.x + of.w, oy + of.y + of.h], area: of.w * of.h / 1e6 }))
@@ -1747,11 +1779,14 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       add(block)                                   // недорез блока — кратчайшим маршрутом, в самом начале контуров
       own = own.filter(j => !block.includes(j))
       offcuts.push(...block)                       // для «последнего реза у нетронутого куска»: блок цел до конца
+      route.block.push(...block.map(j => j.pi))
     }
     // Последний рез каждой детали — по стороне, где ещё не резали, у самого крупного нетронутого куска (деталь или обрезок).
     // От этого меняются точки входа, поэтому маршрут строится ещё раз уже по ним — холостые переезды остаются короткими.
     let r = routeFor(own, hb.anchors.length ? hb.anchors : null, offcuts)
+    if (edits) r = applyCutEdits(r, edits, rr => lastCutToSupport(rr, sheetRect, offcuts))
     risks.push(...contourRisks(r, sheetRect, offcuts))
+    route.push(...r.map(j => ({ pi: j.pi, corner: startCornerOf(j) })))
     r = withNestedOrder(r, heldCutouts, nestedState)
     if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
   })
@@ -1811,5 +1846,5 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   out.raw(post.cmdEnd)
   if (!seq.length) warn.add('На листе нечего обрабатывать: не назначены инструменты.')
   if (risks.length) warn.add(`Рискованные мелкие детали: ${risks.length} — в момент реза их почти ничего не держит (отделены кругом или держатся только короткой стороной). В симуляции они отмечены оранжевым: проверьте или режьте их в 2 прохода.`)
-  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds, scored, risks }
+  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds, scored, risks, route }
 }

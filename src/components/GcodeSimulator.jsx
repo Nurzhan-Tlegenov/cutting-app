@@ -47,7 +47,44 @@ function groupOf(m, kind) {
   return kind === 'cutout' ? 'cutout' : 'outer'
 }
 
-export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, risks = null, toolDia, headTools, thickness = 16, rapid = 20000, zShift = 0, title = '', onClose, onDownload, onShare }) {
+// Ручная правка порядка резки и угла входа деталей: номер в списке = номер на детали в симуляции
+const CORNERS = [['lb', '↙'], ['rb', '↘'], ['rt', '↗'], ['lt', '↖']]
+function CutOrderPanel({ route, risks, edited, edits, onEdit }) {
+  const [open, setOpen] = useState(false)
+  const risky = new Map((risks || []).map(r => [r.pi, r.why]))
+  const set = patch => onEdit({ order: edits?.order || route.map(x => x.pi), ends: { ...(edits?.ends || {}) }, ...patch })
+  const move = (i, d) => { const o = route.map(x => x.pi); [o[i], o[i + d]] = [o[i + d], o[i]]; set({ order: o }) }
+  const btn = on => ({ minWidth: 28, height: 26, padding: '0 5px', borderRadius: 7, fontSize: 13, border: `0.5px solid ${on ? 'var(--blue)' : 'var(--border-md)'}`, background: on ? 'var(--blue-light, #E6F1FB)' : 'var(--bg)', color: on ? 'var(--blue)' : 'var(--text-muted)' })
+  return (
+    <div style={{ marginBottom: 6, flex: '0 0 auto', border: '0.5px solid var(--border)', borderRadius: 8, background: 'var(--bg)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', cursor: 'pointer' }} onClick={() => setOpen(v => !v)}>
+        <span style={{ flex: 1, fontSize: 12.5, fontWeight: 500 }}>✎ Порядок резки и вход{edited ? ' · изменён вручную' : ''}</span>
+        {edited && <button type="button" onClick={e => { e.stopPropagation(); if (window.confirm('Вернуть порядок и входы, как их строит программа?')) onEdit(null) }} style={{ ...btn(false), fontSize: 11.5 }}>Сбросить</button>}
+        <span style={{ color: 'var(--text-hint)', fontSize: 12 }}>{open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <div style={{ maxHeight: 240, overflowY: 'auto', padding: '0 8px 6px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 4 }}>
+            Номер — как на детали в симуляции. ↑↓ — раньше/позже, ↙↘↗↖ — угол входа (там же последний рез). Правка запоминается для этого листа; ответственность — на том, кто правил. Программа пересоздаётся сразу.
+          </div>
+          {route.map((x, i) => (
+            <div key={x.pi} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 0', borderTop: i ? '0.5px solid var(--border)' : 'none' }}>
+              <span style={{ width: 22, fontSize: 12, fontWeight: 600, textAlign: 'right' }}>{i + 1}.</span>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: risky.has(x.pi) ? '#B35F00' : 'var(--text)' }}>
+                {risky.has(x.pi) ? '⚠ ' : ''}{x.name} <span style={{ color: 'var(--text-hint)' }}>{x.size}</span>
+              </div>
+              <button type="button" style={btn(false)} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+              <button type="button" style={btn(false)} disabled={i === route.length - 1} onClick={() => move(i, 1)}>↓</button>
+              {CORNERS.map(([c, ic]) => <button key={c} type="button" style={btn(x.corner === c)} onClick={() => set({ ends: { ...(edits?.ends || {}), [x.pi]: c } })}>{ic}</button>)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, risks = null, cutRoute = null, cutBlock = null, cutEdited = false, cutEdits = null, onCutEdit = null, toolDia, headTools, thickness = 16, rapid = 20000, zShift = 0, title = '', onClose, onDownload, onShare }) {
   const prog = useMemo(() => parseGcode(text, { rapid, zShift }), [text, rapid, zShift])
   const headKey = (headTools || []).join(',')       // свёрла головы — строкой, чтобы сцена не пересобиралась на каждой отрисовке
   const data = useMemo(() => {
@@ -289,6 +326,19 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, ri
         pts.forEach(([x, y], i) => (i ? cA.lineTo(PX(x), PY(y)) : cA.moveTo(PX(x), PY(y))))
         cA.closePath(); cA.fill(); cA.stroke()
       })
+      // номер детали в порядке резки (как в списке «Порядок резки»): по нему находят деталь для правки
+      if (cutRoute?.length) {
+        const no = new Map(cutRoute.map((x, i) => [x.pi, String(i + 1)]))
+        ;(cutBlock || []).forEach(pi => no.set(pi, 'Б'))
+        cA.fillStyle = '#5F5E5A'; cA.textAlign = 'center'; cA.textBaseline = 'middle'
+        ;(outlines || []).forEach((pts, i) => {
+          if (!no.has(i) || !pts.length) return
+          const xs = pts.map(q => q[0]), ys = pts.map(q => q[1])
+          const w = (Math.max(...xs) - Math.min(...xs)) * k, h = (Math.max(...ys) - Math.min(...ys)) * k
+          cA.font = `600 ${Math.max(9, Math.min(w, h, 60 * k) * 0.45)}px system-ui, sans-serif`
+          cA.fillText(no.get(i), PX((Math.min(...xs) + Math.max(...xs)) / 2), PY((Math.min(...ys) + Math.max(...ys)) / 2))
+        })
+      }
       for (const L of [A, B]) L.ctx.globalCompositeOperation = 'destination-out'
     }, null, list)
     const erase = (c, ax, ay, bx, by, d) => {
@@ -569,7 +619,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, ri
       // принудительно — чуть позже, когда экран уже закрылся (иначе закрытие ждёт, пока видеокарта доделает очередь)
       setTimeout(() => { try { renderer.forceContextLoss() } catch { /* контекст уже потерян */ } el.width = el.height = 1 }, 250)
     }
-  }, [prog, data, opIds, sheet, outlines, risks, thickness, headKey])
+  }, [prog, data, opIds, sheet, outlines, risks, cutRoute, cutBlock, thickness, headKey])
 
   useEffect(() => { api.current?.setTime(tRef.current, playing || tRef.current > 0) }, [t, playing, prog, data, sheet, outlines, thickness, opIds, headKey])
   useEffect(() => { api.current?.setVisible(vis) }, [vis, prog, data, sheet, outlines, thickness, opIds, headKey])
@@ -646,6 +696,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, ri
           ⚠ Рискованные детали: {risks.length} — отмечены оранжевым. В момент реза их почти ничего не держит: {[...new Set(risks.map(r => r.why))].map(w => (w === 'free' ? 'отделены со всех сторон' : 'узкая держится только короткой стороной')).join('; ')}.
         </div>
       )}
+      {cutRoute?.length > 0 && onCutEdit && <CutOrderPanel route={cutRoute} risks={risks} edited={cutEdited} edits={cutEdits} onEdit={onCutEdit} />}
   </>)
   const partView = (<>
       <div ref={wrapRef} style={{ position: 'relative', flex: desk ? '1 1 0' : '0 0 auto', minWidth: 0, height: desk ? '100%' : viewH, background: 'var(--bg3)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>

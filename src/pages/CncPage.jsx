@@ -190,6 +190,28 @@ export default function CncPage() {
     setD6Man(next); saveUserSettings({ d6Man: next }, user)
     setBuilt(bt => (bt?.drill ? { ...bt, drill: bt.drill.map(r => (r.post.d6Beta ? drillOf(r.post, next) : r)) } : bt))
   }
+  // Ручная правка порядка резки и угла входа деталей (из симуляции) — своя у каждого листа заказа, запоминается за
+  // аккаунтом (на любом устройстве). Ответственность за правку — на том, кто правил
+  const [cutEdits, setCutEdits] = useState(() => getUserSettings(user).cutEdits || {})
+  const editKey = si => `${order?.id || ''}|${mat?.key || ''}|${si}`
+  const editsOf = si => cutEdits[editKey(si)] || null
+  const buildMain = (si, edits = editsOf(si)) => {
+    const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
+    const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: post.id }, edits })
+    const route = (r.route || []).map(x => {
+      const p = sheet.placed[x.pi], d = p ? mat.details[p.detailIndex] : null
+      return { ...x, name: d?.name || `Деталь ${x.pi + 1}`, size: p ? `${num(p.w ?? d?.width)}×${num(p.h ?? d?.length)}` : '' }
+    })
+    return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, scored: r.scored || 0, risks: r.risks || [], route, block: r.route?.block || [], edited: !!edits, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
+  }
+  const editSheet = (si, edits) => {
+    const k = editKey(si), next = { ...cutEdits }
+    if (edits) next[k] = edits; else delete next[k]
+    // храним правки последних 60 листов — не раздувать настройки
+    const keys = Object.keys(next); if (keys.length > 60) keys.slice(0, keys.length - 60).forEach(x => delete next[x])
+    setCutEdits(next); saveUserSettings({ cutEdits: next }, user)
+    setBuilt(b => (b ? { ...b, files: b.files.map(f => (f.si === si ? buildMain(si, edits) : f)) } : b))
+  }
   const build = () => {
     if (faults.length) return                              // раскрой с нарушением реза — программы не создаём
     // производство обязательно выбирает, чьи деловые остатки раскроя (мои — на склад / клиента) — иначе забудут
@@ -197,11 +219,7 @@ export default function CncPage() {
     syncOrderRemnants(order, mats)          // «Мои остатки» — на склад остатков (без дублей при повторном выпуске)
     if (order?.id) stockUseOrder(order.id)   // остатки со склада, взятые в этот раскрой, — списываются «в заказ»
     if (beamMat && saw) return buildBeam()
-    const files = sel.map(si => {
-      const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
-      const r = buildSheetGcode({ sheet, geo, details: mat.details, thickness: mat.thickness, cnc: { ...cnc, post: post.id } })
-      return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, scored: r.scored || 0, risks: r.risks || [], time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
-    })
+    const files = sel.map(si => buildMain(si))
     // второй раскроечный станок — свой G-код тех же листов (свои инструменты, команды, имя файла)
     const second = r2 ? { post: r2, files: sel.map(si => {
       const sheet = mat.sheets[si], geo = sheetGeo(order, mat.result, sheet)
@@ -811,7 +829,9 @@ export default function CncPage() {
           <div style={{ maxWidth: window.innerWidth >= 1100 ? 'none' : 1100, margin: '0 auto', height: '100%' }}>
             <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(simP?.rapid) || 20000} zShift={sim.zShift}
-                toolDia={toolDia} headTools={simHead} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} risks={sim.risks} />
+                toolDia={toolDia} headTools={simHead} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} risks={sim.risks}
+                cutRoute={sim.second ? null : sim.route} cutBlock={sim.block} cutEdited={sim.edited}
+                onCutEdit={sim.second ? null : edits => editSheet(sim.si, edits)} cutEdits={sim.second ? null : editsOf(sim.si)} />
             </Suspense>
           </div>
         </div>, document.body
