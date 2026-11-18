@@ -202,7 +202,7 @@ export default function CncPage() {
       const p = sheet.placed[x.pi], d = p ? mat.details[p.detailIndex] : null
       return { ...x, name: d?.name || `Деталь ${x.pi + 1}`, size: p ? `${num(p.w ?? d?.width)}×${num(p.h ?? d?.length)}` : '' }
     })
-    return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, scored: r.scored || 0, risks: r.risks || [], route, block: r.route?.block || [], edited: !!edits, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
+    return { si, name: fileName(si), text: r.text, kinds: r.kinds, opIds: r.opIds, lines: r.lines, warnings: r.warnings, empty: r.empty, zShift: r.zShift, scored: r.scored || 0, risks: r.risks || [], twoPass: r.twoPass || [], route, block: r.route?.block || [], edited: !!edits, time: parseGcode(r.text, { rapid: num(post.rapid) || 20000, zShift: r.zShift }).time }
   }
   const editSheet = (si, edits) => {
     const k = editKey(si), next = { ...cutEdits }
@@ -662,6 +662,7 @@ export default function CncPage() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 500 }}>{sh.stock === 'offcut' ? 'Обрезок' : 'Лист'} {i + 1}
                         {f?.risks?.length > 0 && <span style={{ marginLeft: 8, fontSize: 11.5, fontWeight: 500, color: '#B35F00', background: '#FFF1E0', borderRadius: 10, padding: '1px 7px' }}>⚠ рискованных: {f.risks.length}</span>}
+                        {f?.twoPass?.length > 0 && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 500, color: '#5B3FA8', background: '#EEEAFB', borderRadius: 10, padding: '1px 7px' }}>✂ в 2 прохода: {f.twoPass.length}</span>}
                         {f?.edited && <span style={{ marginLeft: 6, fontSize: 11.5, color: 'var(--blue)' }}>✎ порядок изменён</span>}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{g.sheetL}×{g.sheetW} · деталей {sh.placed.length}</div>
                     </div>
@@ -851,7 +852,7 @@ export default function CncPage() {
             <Suspense fallback={<CncLoader label="Запускаем симулятор…" />}>
               <GcodeSimulator key={sim.name} text={sim.text} kinds={sim.kinds} opIds={sim.opIds} title={sim.name} thickness={mat.thickness} rapid={num(simP?.rapid) || 20000} zShift={sim.zShift}
                 toolDia={toolDia} headTools={simHead} onClose={closeSim} onDownload={() => { download(sim.name, sim.text); mark('files') }} onShare={openShare} sheet={simView?.sheet} outlines={simView?.outlines} risks={sim.risks}
-                cutRoute={sim.second ? null : sim.route} cutBlock={sim.block} cutEdited={sim.edited}
+                twoPass={sim.twoPass} cutRoute={sim.second ? null : sim.route} cutBlock={sim.block} cutEdited={sim.edited}
                 onCutEdit={sim.second ? null : edits => editSheet(sim.si, edits)} cutEdits={sim.second ? null : editsOf(sim.si)} />
             </Suspense>
           </div>

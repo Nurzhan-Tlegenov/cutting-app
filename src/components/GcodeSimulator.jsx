@@ -84,7 +84,7 @@ function CutOrderPanel({ route, risks, edited, edits, onEdit }) {
   )
 }
 
-export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, risks = null, cutRoute = null, cutBlock = null, cutEdited = false, cutEdits = null, onCutEdit = null, toolDia, headTools, thickness = 16, rapid = 20000, zShift = 0, title = '', onClose, onDownload, onShare }) {
+export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, risks = null, twoPass = null, cutRoute = null, cutBlock = null, cutEdited = false, cutEdits = null, onCutEdit = null, toolDia, headTools, thickness = 16, rapid = 20000, zShift = 0, title = '', onClose, onDownload, onShare }) {
   const prog = useMemo(() => parseGcode(text, { rapid, zShift }), [text, rapid, zShift])
   const headKey = (headTools || []).join(',')       // свёрла головы — строкой, чтобы сцена не пересобиралась на каждой отрисовке
   const data = useMemo(() => {
@@ -318,10 +318,11 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, ri
       cA.fillStyle = '#FAF8F2'; cA.fillRect(0, 0, Wp, Hp)
       cA.fillStyle = '#F1EEE6'; cA.strokeStyle = 'rgba(40,40,40,0.28)'; cA.lineWidth = Math.max(1, k)
       // рискованные мелкие детали (см. contourRisks в gcode.js) — оранжевые: в момент реза их почти ничего не держит
-      const riskSet = new Set((risks || []).map(r => r.pi))
+      // в 2 прохода (рискованные, недорез в начале + дорез по ходу волны) — сиреневые
+      const riskSet = new Set((risks || []).map(r => r.pi)), twoSet = new Set(twoPass || [])
       ;(outlines || []).forEach((pts, i) => {
-        const risky = riskSet.has(i)
-        cA.fillStyle = risky ? '#FCD9B0' : '#F1EEE6'; cA.strokeStyle = risky ? '#E07B00' : 'rgba(40,40,40,0.28)'; cA.lineWidth = Math.max(1, k) * (risky ? 2.5 : 1)
+        const risky = riskSet.has(i), two = twoSet.has(i)
+        cA.fillStyle = risky ? '#FCD9B0' : two ? '#E4DCFA' : '#F1EEE6'; cA.strokeStyle = risky ? '#E07B00' : two ? '#6B4FC8' : 'rgba(40,40,40,0.28)'; cA.lineWidth = Math.max(1, k) * (risky || two ? 2.5 : 1)
         cA.beginPath()
         pts.forEach(([x, y], i) => (i ? cA.lineTo(PX(x), PY(y)) : cA.moveTo(PX(x), PY(y))))
         cA.closePath(); cA.fill(); cA.stroke()
@@ -619,7 +620,7 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, ri
       // принудительно — чуть позже, когда экран уже закрылся (иначе закрытие ждёт, пока видеокарта доделает очередь)
       setTimeout(() => { try { renderer.forceContextLoss() } catch { /* контекст уже потерян */ } el.width = el.height = 1 }, 250)
     }
-  }, [prog, data, opIds, sheet, outlines, risks, cutRoute, cutBlock, thickness, headKey])
+  }, [prog, data, opIds, sheet, outlines, risks, twoPass, cutRoute, cutBlock, thickness, headKey])
 
   useEffect(() => { api.current?.setTime(tRef.current, playing || tRef.current > 0) }, [t, playing, prog, data, sheet, outlines, thickness, opIds, headKey])
   useEffect(() => { api.current?.setVisible(vis) }, [vis, prog, data, sheet, outlines, thickness, opIds, headKey])
@@ -694,6 +695,11 @@ export default function GcodeSimulator({ text, kinds, opIds, sheet, outlines, ri
       {risks?.length > 0 && (
         <div style={{ fontSize: 11.5, color: '#B35F00', background: '#FFF1E0', borderRadius: 8, padding: '4px 8px', marginBottom: 6, flex: '0 0 auto' }}>
           ⚠ Рискованные детали: {risks.length} — отмечены оранжевым. В момент реза их почти ничего не держит: {[...new Set(risks.map(r => r.why))].map(w => (w === 'free' ? 'отделены со всех сторон' : 'узкая держится только короткой стороной')).join('; ')}.
+        </div>
+      )}
+      {twoPass?.length > 0 && (
+        <div style={{ fontSize: 11.5, color: '#5B3FA8', background: '#EEEAFB', borderRadius: 8, padding: '4px 8px', marginBottom: 6, flex: '0 0 auto' }}>
+          ✂ В 2 прохода: {twoPass.length} дет. (сиреневые) — рискованные: в начале листа прорезаются не насквозь, пока соседи целы, и дорезаются начисто в свою очередь. Так их не сдвинет.
         </div>
       )}
       {cutRoute?.length > 0 && onCutEdit && <CutOrderPanel route={cutRoute} risks={risks} edited={cutEdited} edits={cutEdits} onEdit={onCutEdit} />}

@@ -1774,6 +1774,7 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   const blocks = new Map()                       // инструмент -> детали блока удержания
   const risks = []                               // рискованные детали (см. contourRisks) — пометка в симуляции
   const route = []                               // порядок контуров деталей и угол входа — для ручной правки в симуляции
+  const twoPass = []                             // рискованные детали, которые режутся в 2 прохода (недорез + дорез) — пометка в симуляции
   route.block = []
   cutTools.forEach(t => {
     let own = stage1.filter(j => j.tool === t && j.rank === 5)
@@ -1834,15 +1835,20 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
       const hj = r.filter(j => rs.has(j.pi) && !j.held && typeof j.hold === 'function')
       if (hj.length) {
         hj.forEach(j => j.hold())
-        add(hj)
-        r = r.filter(j => !hj.includes(j))
-        lastCutToSupport(r, sheetRect, [...offcuts, ...hj])
-        blocks.set(t, [...(blocks.get(t) || []), ...hj])
-        route.block.push(...hj.map(j => j.pi))
-        warn.add(`Недорезом в начале листа, начисто в конце — рискованные мелкие детали (${hj.length} шт.): так их не сдвинет.`)
+        add(hj)                                    // недорез — в начале листа, пока соседи целы
+        // дорез начисто — на своём месте в волне (фреза рядом, возвращаться в конце листа не нужно)
+        const o = ops.outer
+        r = r.map(j => {
+          if (!hj.includes(j)) return j
+          const f = { stage: 1, rank: 5, tool: t, pi: j.pi, small: j.small, area: j.area, edgeDist: j.edgeDist, box: j.box, reach: j.reach, L: j.L, at: j.L[0],
+            restart(i) { this.L = [...this.L.slice(i), ...this.L.slice(0, i)]; this.at = this.L[0] },
+            run: out => cutLoop(out, [{ loop: f.L, z: -millOver }], T, t, o, liftZ, arcs) }
+          return f
+        })
+        twoPass.push(...hj.map(j => j.pi))
       }
     }
-    risks.push(...contourRisks(r, sheetRect, offcuts))
+    risks.push(...contourRisks(r, sheetRect, offcuts).filter(x => !twoPass.includes(x.pi)))   // недорезанные заранее — уже не риск
     route.push(...r.map(j => ({ pi: j.pi, corner: startCornerOf(j) })))
     r = withNestedOrder(r, heldCutouts, nestedState)
     if (r.length) { seq.push(...r); cur = r[r.length - 1].at }
@@ -1903,5 +1909,5 @@ export function buildSheetGcode({ sheet, geo, details, thickness, cnc: cncAll, o
   out.raw(post.cmdEnd)
   if (!seq.length) warn.add('На листе нечего обрабатывать: не назначены инструменты.')
   if (risks.length) warn.add(`Рискованные мелкие детали: ${risks.length} — в момент реза их почти ничего не держит (отделены кругом или держатся только короткой стороной). В симуляции они отмечены оранжевым: проверьте или режьте их в 2 прохода.`)
-  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds, scored, risks, route }
+  return { text: out.lines.join('\n') + '\n', zShift: zTop ? T : 0, lines: out.lines.length, warnings: [...warn], tools: used, empty: !seq.length, kinds: out.kinds, opIds: out.opIds, scored, risks, route, twoPass }
 }
