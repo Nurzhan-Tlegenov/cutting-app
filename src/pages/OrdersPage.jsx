@@ -4,6 +4,7 @@ import ShareBadge from '../components/ShareBadge'
 import { openOrderEdit, canEditOrder, EDIT_BTN } from '../lib/editOrder'
 import { useKeptState } from '../hooks/useKeptState'
 import { changedOrders, markOrdersSeen } from '../lib/notices'
+import { myProduction } from '../lib/productionApi'
 import { useNoticeFocus } from '../lib/noticeNav'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -91,7 +92,12 @@ export default function OrdersPage() {
     setLoading(false)
     // у каких своих заказов статус сменился с прошлого раза — подсветить; раз список открыт, считаем их просмотренными
     const mine = (data || []).filter(o => o.user_id === user.id)
-    setChanged(changedOrders(user.id, mine))
+    // заказы на своё же производство не подсвечиваем: статус меняет сам владелец (в кабинете производства)
+    const prod = await myProduction(user.id).catch(() => null)
+    const ownProd = prod && (prod.status ?? 'approved') === 'approved' ? prod.id : null
+    const ch = changedOrders(user.id, mine)
+    if (ownProd) for (const o of mine) if (o.production_id === ownProd) ch.delete(o.id)
+    setChanged(ch)
     markOrdersSeen(user.id, mine)
     listShares((data || []).map(o => o.id)).then(setShares)      // у каких заказов открыта ссылка на 3D-модель
     simShareOrders().then(setSimShares)

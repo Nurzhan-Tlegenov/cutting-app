@@ -64,10 +64,13 @@ export async function fetchNotices({ user, isMaster }) {
       for (const u of prods) res.list.push({ key: `pd:${u.production_id}`, text: `Производство ждёт подтверждения: ${u.production_name || u.full_name || ''}`, to: goUrl('users', `pd:${u.production_id}`), where: WHERE.users, src: 'users' })
     }).catch(() => {}))
   }
-  jobs.push(myProduction(user.id).then(async p => {
+  // своё производство (аккаунт — и заказчик, и производство): свои заказы на него — уведомления только на стороне
+  // производства («Новая заявка»), а в кабинете заказчика о них не сообщаем — человек сам отправил и сам принял
+  const prodP = myProduction(user.id).catch(() => null)
+  jobs.push(prodP.then(async p => {
     if (!p || (p.status ?? 'approved') !== 'approved') return
     const r = await productionOrders()
-    const fresh = (r.data || []).filter(o => o.status === 'new' && !o.own)
+    const fresh = (r.data || []).filter(o => o.status === 'new')
     res.production += fresh.length
     res.ownNew = fresh.length; res.ownId = p.id ?? null
     for (const o of fresh) res.list.push({ key: `po:${o.id}`, text: `Новая заявка: ${orderTitle(o)}${o.client_name ? ' — ' + o.client_name : ''}`, to: goUrl('own', o.id), where: WHERE.own, src: 'own' })
@@ -81,8 +84,10 @@ export async function fetchNotices({ user, isMaster }) {
       res.list.push({ key: `ps:${q.stage_id}`, text: `Новый заказ на посту «${q.post_name}»: ${orderTitle(q)}`, to: goUrl('work', q.stage_id, q.production_id), where: `${WHERE.work} · «${q.post_name}»`, src: `work:${q.production_id || ''}`, pid: q.production_id })
     }
   }).catch(() => {}))
-  jobs.push(supabase.from('orders').select('id,status,order_name,order_number,created_at').eq('user_id', user.id).then(({ data }) => {
-    const changed = changedOrders(user.id, data || [])
+  jobs.push(Promise.all([prodP, supabase.from('orders').select('id,status,order_name,order_number,created_at,production_id').eq('user_id', user.id)]).then(([p, { data: all }]) => {
+    const ownProd = p && (p.status ?? 'approved') === 'approved' ? p.id : null
+    const data = (all || []).filter(o => !ownProd || o.production_id !== ownProd)
+    const changed = changedOrders(user.id, data)
     res.orders = changed.size
     for (const o of data || []) if (changed.has(o.id)) res.list.push({ key: `os:${o.id}:${o.status}`, text: `Заказ «${orderTitle(o)}»: ${(STATUS_LABELS[o.status] || o.status).toLowerCase()}`, to: goUrl('client', o.id), where: WHERE.client, src: 'client' })
   }).catch(() => {}))
