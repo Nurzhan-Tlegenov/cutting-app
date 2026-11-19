@@ -13,6 +13,19 @@ import { glueRoles } from './glue.js'
 const loopLen = pts => { let l = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; l += Math.hypot(b[0] - a[0], b[1] - a[1]) } return l }
 const loopArea = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1] } return Math.abs(s) / 2 }
 const r2 = v => Math.round(v * 100) / 100
+// паз «узкий» (обычно под ХДФ) — до 4 мм шириной включительно; шире — другая цена за штуку
+export const GROOVE_NARROW = 4
+const swapF = f => (f === 'back' ? 'front' : 'back')
+const parseC = c => { try { return typeof c === 'string' ? JSON.parse(c) : c || null } catch { return null } }
+/** Пазы с изнанки детали (как partFeatures отдаёт лицевые) */
+function backGrooves(p, d, T) {
+  const c = parseC(d?.contour)
+  if (!c) return []
+  const g = (c.grooves || []).filter(x => x.face === 'back'), dc = (c.decor || []).filter(x => x.face === 'back')
+  if (!g.length && !dc.length) return []
+  const c2 = { ...c, grooves: g.map(x => ({ ...x, face: swapF(x.face) })), decor: dc.map(x => ({ ...x, face: swapF(x.face) })), drillings: [], holes: [], edgeGrooves: [] }
+  try { return partFeatures(p, { ...d, contour: c2 }, T).grooves } catch { return [] }
+}
 const THICK_FROM = 1          // кромка толще 1 мм считается «толстой» (обычно 2 мм), до 1 мм — «тонкой» (0,4–1 мм)
 
 export const emptyStats = () => ({
@@ -24,7 +37,7 @@ export const emptyStats = () => ({
   edgeM: 0, edgeThinM: 0, edgeThickM: 0, edgeCurvedM: 0, edgeCurvedParts: 0,
   edgeByType: {},   // кромка по видам заказа: { название: м } (виды — из Excel или из бланка заказа; толщина — edgeTypeT)
   edgeTypeT: {},
-  holes: 0, edgeHoles: 0, grooves: 0, grooveM: 0, pockets: 0, cutouts: 0, shapedParts: 0,
+  holes: 0, edgeHoles: 0, grooves: 0, grooveM: 0, groovesNarrow: 0, groovesWide: 0, pockets: 0, cutouts: 0, shapedParts: 0,
   drillM2: 0, drillParts: 0,   // детали с присадкой (отверстия в пласть, с изнанки, в торец): их площадь и число — для сведения;
                                // цена «присадка за м²» считается от площади ВСЕХ деталей заказа, если присадка в нём есть (statsPayload)
   glueN: 0, glueM2: 0,   // склейка (две плиты в одну деталь): число склеенных деталей и их площадь по одной стороне (glue.js)
@@ -65,7 +78,12 @@ export function nestingStats({ order, mat, method }) {
       st.holes += f.holes.length; st.edgeHoles += f.skipped.edge
       if (f.holes.length || f.skipped.edge || f.skipped.back) { st.drillM2 += loopArea(f.outline) / 1e6; st.drillParts++ }
       st.pockets += f.pockets.length
-      for (const g of f.grooves) { st.grooves++; st.grooveM += (g.len || Math.max(g.x1 - g.x0, g.y1 - g.y0)) / 1000 }
+      // пазы — с обеих пластей: с изнанки (в т.ч. «Пазы — всегда снизу» при импорте) partFeatures не отдаёт
+      // (фрезер их не режет) — для отчётов и сметы берём их с перевёрнутой детали
+      for (const g of [...f.grooves, ...backGrooves(p, d, T)]) {
+        st.grooves++; st.grooveM += (g.len || Math.max(g.x1 - g.x0, g.y1 - g.y0)) / 1000
+        if ((Number(g.width) || 0) <= GROOVE_NARROW + 0.05) st.groovesNarrow++; else st.groovesWide++
+      }
       // упил узкой детали: пильный центр — пилится шириной «Пилить узкую деталь шириной» (p.trimTo), иначе — наращена
       // под кромочный станок («Узкие детали» в видах кромки). Рез — вдоль детали: наращена ширина — по длине, и наоборот
       if (p.trimTo) {
@@ -157,7 +175,7 @@ export function statsPayload(st, order = null) {
     edge_thin_m: r2(st.edgeThinM), edge_thick_m: r2(st.edgeThickM), edge_curved_m: r2(st.edgeCurvedM), edge_curved_parts: st.edgeCurvedParts,
     holes: st.holes, edge_holes: st.edgeHoles, // присадка за м² — от общей площади ВСЕХ деталей заказа, всегда (и для списка из Excel, где отверстий в данных нет:
     // детали всё равно перекладывают, обрабатывают); не начислять — «Без присадки» у стоимости работ (drill_kind 'none')
-    drill_m2: order?.drill_kind === 'none' ? 0 : r2(st.partsM2), drill_parts: st.drillParts, groove_m: r2(st.grooveM), pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
+    drill_m2: order?.drill_kind === 'none' ? 0 : r2(st.partsM2), drill_parts: st.drillParts, groove_m: r2(st.grooveM), groove_n_narrow: st.groovesNarrow, groove_n_wide: st.groovesWide, pockets: st.pockets, cutouts: st.cutouts, shaped_parts: st.shapedParts,
     ...(st.hdf ? { hdf: true } : {}),
     ...(order?.drill_kind === 'large' ? { drill_kind: 'large' } : {}),   // ХДФ / ДВП — база берёт цены распила ХДФ (migration_hdf_prices.sql)
   }
@@ -189,7 +207,7 @@ export function statsRows(st) {
     ['holes', 'Отверстий в пласть', st.holes, st.holes > 0],
     ['edgeHoles', 'Отверстий в торец', st.edgeHoles, st.edgeHoles > 0],
     ['drillM2', 'Присадка: площадь деталей заказа', `${n2(st.partsM2)} м² · присадка у ${st.drillParts} дет.`, st.drillParts > 0],
-    ['grooves', 'Пазы', `${st.grooves} шт. · ${n2(st.grooveM)} м`, st.grooves > 0],
+    ['grooves', 'Пазы', `${st.grooves} шт. · ${n2(st.grooveM)} м${st.groovesNarrow && st.groovesWide ? ` (до ${GROOVE_NARROW} мм — ${st.groovesNarrow} шт., шире — ${st.groovesWide} шт.)` : ''}`, st.grooves > 0],
     ['pockets', 'Выемок', st.pockets, st.pockets > 0],
     ['offcuts', 'Деловые остатки', `${Object.values(st.offcutSizes || {}).reduce((a, v) => a + v, 0)} шт`, Object.keys(st.offcutSizes || {}).length > 0],
   ]

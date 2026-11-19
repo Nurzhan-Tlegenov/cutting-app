@@ -35,6 +35,8 @@ export const PRICE_GROUPS = [
     ['drill_m2', 'Присадка за м² — кухни, ванные (мелкие детали)', 'за м² площади всех деталей заказа; в заказе можно выбрать «Без присадки»'],
     ['drill_m2_large', 'Присадка за м² — шкафы (крупные детали)', 'за м²; заполнены обе цены — клиент выбирает тип изделия, пусто — одна цена для всех'],
     ['groove_m', 'Паз', 'за метр'],
+    ['groove_narrow', 'Паз до 4 мм шириной', 'за паз (обычно под ХДФ) — можно вместо цены за метр или вместе с ней'],
+    ['groove_wide', 'Паз шире 4 мм', 'за паз'],
     ['pocket', 'Выемка', 'за выемку'],
   ] },
   { id: 'other', title: 'Прочее', items: [
@@ -50,7 +52,7 @@ export const HDF_ITEMS = [
 export const GROUP_TITLE = Object.fromEntries(PRICE_GROUPS.map(g => [g.id, g.title]))
 const LINE_TITLE = { ...Object.fromEntries(PRICE_GROUPS.flatMap(g => g.items.map(([k, t]) => [k, t]))), cut_tiers: 'Раскрой листа (по числу деталей)',
   hdf_cut_m: 'Рез ХДФ', hdf_cut_sheet: 'Раскрой листа ХДФ', hdf_cut_tiers: 'Раскрой листа ХДФ (по числу деталей)', hdf_cut_part: 'Деталь ХДФ' }
-const LINE_UNIT = { cut_m: 'м', cut_sheet: 'л.', cut_tiers: 'л.', cut_part: 'дет.', upil: 'шт.', upil_m: 'м', shaped_part: 'дет.', cutout: 'шт.', edge_m: 'м', edge_thick_m: 'м', edge_curved_m: 'м', edge_curved_part: 'дет.', hole: 'шт.', edge_hole: 'шт.', drill_m2: 'м²', drill_m2_large: 'м²', groove_m: 'м', pocket: 'шт.', label: 'дет.', glue_m2: 'м²', glue_part: 'дет.', edge_wide_m: 'м', edge_wide_part: 'дет.', hdf_cut_m: 'м', hdf_cut_sheet: 'л.', hdf_cut_tiers: 'л.', hdf_cut_part: 'дет.' }
+const LINE_UNIT = { cut_m: 'м', cut_sheet: 'л.', cut_tiers: 'л.', cut_part: 'дет.', upil: 'шт.', upil_m: 'м', shaped_part: 'дет.', cutout: 'шт.', edge_m: 'м', edge_thick_m: 'м', edge_curved_m: 'м', edge_curved_part: 'дет.', hole: 'шт.', edge_hole: 'шт.', drill_m2: 'м²', drill_m2_large: 'м²', groove_m: 'м', groove_narrow: 'шт.', groove_wide: 'шт.', pocket: 'шт.', label: 'дет.', glue_m2: 'м²', glue_part: 'дет.', edge_wide_m: 'м', edge_wide_part: 'дет.', hdf_cut_m: 'м', hdf_cut_sheet: 'л.', hdf_cut_tiers: 'л.', hdf_cut_part: 'дет.' }
 export const lineTitle = key => LINE_TITLE[key] || key
 export const lineUnit = key => LINE_UNIT[key] || ''
 

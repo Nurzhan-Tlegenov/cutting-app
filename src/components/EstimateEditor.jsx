@@ -31,6 +31,8 @@ function opsOf(st) {
     ['Присадка (отверстия)', st.holes, 'отв.', ['hole', 'drill_m2', 'drill_m2_large']],
     ['Торцевые отверстия', st.edgeHoles, 'отв.', ['edge_hole']],
     ['Паз', st.grooveM, 'м', ['groove_m']],
+    ['Паз до 4 мм (шт.)', st.groovesNarrow, 'шт.', ['groove_narrow']],
+    ['Паз шире 4 мм (шт.)', st.groovesWide, 'шт.', ['groove_wide']],
     ['Выборки (карманы)', st.pockets, 'шт.', ['pocket']],
     ['Фигурный раскрой', st.shapedParts, 'дет.', ['shaped_part']],
     ['Вырезы', st.cutouts, 'шт.', ['cutout']],
