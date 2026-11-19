@@ -17,7 +17,7 @@ import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
-import { parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrowApplied, narrowSide as narrowSideOf, narrowTrimTo, finishedDims, finishedAdds } from './edgeCut'
+import { edgeThick, parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrowApplied, narrowSide as narrowSideOf, narrowTrimTo, finishedDims, finishedAdds } from './edgeCut'
 import { orderTitle, toLatin } from './orderUtils'
 import { cachedShare, getShare, shareUrl } from './modelShare'
 export { toLatin }
@@ -417,6 +417,18 @@ export function normalizeLabel(raw) {
       if (i.box) { o.box = true; o.lw = lw }
       if (i.inv) o.inv = true
       if (i.backInv && GROOVE_TYPES.includes(i.type)) o.backInv = true   // паз с изнанки — в обратных цветах
+      // кромка чертой под размером (Длина / Ширина / Размер): толщина черты по толщине кромки (мм) и её вид
+      if (i.eul && ['length', 'width', 'size'].includes(i.type)) {
+        o.eul = true
+        const W = {}, D = {}
+        for (const k of ['t05', 't1', 't2']) {
+          const v = Number(String(i.eulW?.[k] ?? '').replace(',', '.'))
+          if (v > 0) W[k] = Math.min(3, Math.max(0.05, v))
+          if (['dash', 'dot', 'dashdot'].includes(i.eulD?.[k])) D[k] = i.eulD[k]
+        }
+        if (Object.keys(W).length) o.eulW = W
+        if (Object.keys(D).length) o.eulD = D
+      }
     }
     if (!pic) {
       if ([0, 90, 180, 270].includes(Number(i.trot))) o.trot = Number(i.trot)
@@ -567,11 +579,15 @@ export function labelInfo(order, mat, si, pi, part = null) {
   // (пилится шириной «Пилить узкую деталь шириной», trimTo), и кромка дальней стороны уезжала на соседнюю
   const BW = turns % 2 ? DL : DW, BH = turns % 2 ? DW : DL
   const sides = { top: '', right: '', bottom: '', left: '' }
+  // толщина кромки по сторонам бирки (мм; 0 — без кромки): для подчёркивания размеров (элементы «Длина», «Ширина»,
+  // «Размер» — галочка «Кромка чертой под размером»). Толщина не известна (ни в видах, ни в названии) — -1
+  const sidesT = { top: 0, right: 0, bottom: 0, left: 0 }
+  const typesT = parseEdgeTypes(order?.edge_types)
   ;[['left', 0, DL / 2, d.edge_left], ['right', DW, DL / 2, d.edge_right], ['bottom', DW / 2, 0, d.edge_bottom], ['top', DW / 2, DL, d.edge_top]].forEach(([, x, y, v]) => {
     const q = rotatePointTimes(x, y, DW, DL, turns), bw = BW, bh = BH
     const dist = { left: q.x, right: bw - q.x, bottom: q.y, top: bh - q.y }
     const on = Object.keys(dist).sort((a, b) => dist[a] - dist[b])[0]
-    if (edgeName(v)) sides[on] = edgeName(v)
+    if (edgeName(v)) { sides[on] = edgeName(v); const raw = edgeNameRaw(v); sidesT[on] = edgeThick(typesT, raw === 'Кромка' ? 'default' : raw) || -1 }
   })
   // припуск из модели (сколько реально добавлено в раскрой) и наращивание узкой детали под кромочный станок —
   // по сторонам бирки, так же, как кромка
@@ -651,6 +667,7 @@ export function labelInfo(order, mat, si, pi, part = null) {
     faceHoles: face, backHoles: back, endHoles: end, grooves, grooveDims, backGroove: grooveDims.some(g => g.back), pockets, cutouts, meta: m, chain: blockChain(m),
     edgeList: [...new Set([d.edge_left, d.edge_right, d.edge_top, d.edge_bottom].map(edgeName).filter(Boolean))],
     sides, sidesCw: { top: sides.left, bottom: sides.right, left: sides.bottom, right: sides.top },
+    sidesT, sidesTCw: { top: sidesT.left, bottom: sidesT.right, left: sidesT.bottom, right: sidesT.top },
     grooveSide, grooveSideCw: grooveSide ? { left: 'top', right: 'bottom', bottom: 'left', top: 'right' }[grooveSide] : null,
     allow, allowCw: cw(allow), narrow, narrowCw: cw(narrow), narrowTrim, narrowTrimCw: cw(narrowTrim),
     // пильный центр: узкая деталь пилится шире и потом подрезается в размер — сколько пилили и до скольких подрезать
@@ -1039,6 +1056,46 @@ export function toSide(it, target, W, H) {
   return k ? boundItem(it, k, W, H) : it
 }
 
+// ─── Кромка чертой под размером ──────────────────────────────────────────────────────────────────────────────────────
+// Под числом «Длины» — по черте на каждую кромку верхней / нижней стороны бирки (кромка с двух сторон — две черты),
+// под «Шириной» — левой / правой; у «Размера» — под каждым из двух чисел. Толщина и вид черты — от толщины кромки
+// (0,4–0,5 / 1 / 2 мм), задаёт пользователь (it.eulW — мм, it.eulD — вид). Оператор узнаёт кромку по черте.
+export const EUL_CLASSES = [['t05', 'Кромка 0,4–0,5'], ['t1', 'Кромка 1'], ['t2', 'Кромка 2']]
+export const EUL_DEFAULT_W = { t05: 0.2, t1: 0.45, t2: 0.8 }
+export const EUL_DASHES = [['solid', 'Сплошная'], ['dash', 'Штрих'], ['dot', 'Точки'], ['dashdot', 'Штрих-точка']]
+const eulClass = t => (t < 0 ? 't1' : t <= 0.6 ? 't05' : t <= 1.4 ? 't1' : 't2')
+function drawEdgeUnderline(ctx, it, info, tpl, t, ax, sz, mm, wT) {
+  if (!info || !['length', 'width', 'size'].includes(it.type)) return
+  const rot = tpl ? tpl.rot !== false : true
+  const S = (rot ? info.sidesTCw : info.sidesT) || {}
+  const segs = []
+  const tw = ctx.measureText(t).width, x00 = it.align === 'right' ? wT - tw : it.align === 'center' ? (wT - tw) / 2 : 0
+  if (it.type === 'size') {
+    const L = String(labelValue('length', info, tpl)), W = String(labelValue('width', info, tpl))
+    const iL = t.indexOf(L), iW = t.indexOf(W, iL >= 0 ? iL + L.length : 0)
+    if (iL >= 0) segs.push({ x: x00 + ctx.measureText(t.slice(0, iL)).width, w: ctx.measureText(L).width, sides: ['top', 'bottom'] })
+    if (iW >= 0) segs.push({ x: x00 + ctx.measureText(t.slice(0, iW)).width, w: ctx.measureText(W).width, sides: ['left', 'right'] })
+  } else segs.push({ x: x00, w: tw, sides: it.type === 'length' ? ['top', 'bottom'] : ['left', 'right'] })
+  const W0 = { ...EUL_DEFAULT_W, ...(it.eulW || {}) }, D0 = it.eulD || {}
+  ctx.save()
+  ctx.strokeStyle = ctx.fillStyle; ctx.lineCap = 'butt'
+  for (const sg of segs) {
+    let y = sz * 1.08
+    for (const s of sg.sides) {
+      const th = Number(S[s]) || 0
+      if (!th) continue
+      const c = eulClass(th), lw = Math.max(1, (Number(W0[c]) || EUL_DEFAULT_W[c]) * mm)
+      const dash = D0[c] || 'solid'
+      ctx.setLineDash(dash === 'dash' ? [2 * mm, 1 * mm] : dash === 'dot' ? [0.35 * mm, 0.6 * mm] : dash === 'dashdot' ? [2 * mm, 0.6 * mm, 0.35 * mm, 0.6 * mm] : [])
+      ctx.lineWidth = lw
+      y += lw / 2
+      ctx.beginPath(); ctx.moveTo(sg.x, y); ctx.lineTo(sg.x + sg.w, y); ctx.stroke()
+      y += lw / 2 + 0.5 * mm
+    }
+  }
+  ctx.restore()
+}
+
 export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
   const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height
   const mm = W / tpl.w, line = Math.max(1, mm * 0.17), rot = tpl.rot !== false
@@ -1162,6 +1219,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
       ctx.fillStyle = it.inv ? (ghost ? '#c8cdd2' : '#fff') : ghost ? '#9aa3ad' : '#000'   // белым по чёрному
       lines.forEach((t, li) => {
         ctx.fillText(t, ax, li * LH + sz * 0.62)
+        if (it.eul && !ghost && li === 0) drawEdgeUnderline(ctx, it, info, tpl, t, ax, sz, mm, wT)
         if (it.ul === 'below' || it.ul === 'above') { const tw = ctx.measureText(t).width, x0 = it.align === 'right' ? wT - tw : it.align === 'center' ? (wT - tw) / 2 : 0, uh = Math.max(1, Math.round(sz * 0.09)); ctx.fillRect(x0, li * LH + (it.ul === 'below' ? sz * 1.16 : 0), tw, uh) }
       })
       ctx.restore()

@@ -1,4 +1,12 @@
 import Hint from '../components/Hint'
+import { useState as useStateEul } from 'react'
+
+// толщина черты кромки — вводится свободно (0,3 / 0.45), сохраняется при выходе из поля
+function EulWidth({ value, onCommit }) {
+  const [v, setV] = useStateEul(String(value))
+  const commit = () => { const n = Number(String(v).replace(',', '.')); if (n > 0) onCommit(n); else setV(String(value)) }
+  return <input inputMode="decimal" value={v} onChange={e => setV(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} style={{ width: 64 }} />
+}
 import { createPortal } from 'react-dom'
 import DeskSplit from '../components/DeskSplit'
 import { useDesktop } from '../hooks/useDesktop'
@@ -16,7 +24,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { savedNestings, sheetGeo } from '../lib/savedNesting'
 import QrPartsEditor from '../components/QrPartsEditor'
-import { setLabelBack, setLabelClient, REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx } from '../lib/labelMaker'
+import { setLabelBack, setLabelClient, REM_QR_PARTS, REM_ITEMS, PART_ITEMS, SHAPE_ITEMS, isShape, remTplOf, remInfo, remQrText, remSheetCtx, EUL_CLASSES, EUL_DEFAULT_W, EUL_DASHES } from '../lib/labelMaker'
 import { sheetOffcuts, drawOffcutLabel, labelPages, OFFCUT_CORNERS, labelQr, qrHasLink, itemKind, itemTitle, isBox, isVert, itemBox, textRot, textThick, metaItems, userItems, userItemsBySrc, pickParse, pickType, srcName, MODEL_SRC, preloadLabelImages, labelImageSize, imageToLabel, labelImageSrc, newLabelItem, DEFAULT_LABEL, resizeLabel, getLabelTpl, saveLabelTpl, saveRemTpl, getLabelSaved, saveLabelSaved, normalizeLabel, labelInfo, drawLabel, demoLabelSample, labelPx, labelOrder, buildLabelFiles, buildLabelsPdf, canCaption, defaultCap, GROOVE_TYPES } from '../lib/labelMaker'
 import { getCnc, routerPost, sawPost, normalizeCnc, activePost } from '../lib/cncSettings'
 import { beamLabelSeq, beamExitPart } from '../lib/beamSawLabels'
@@ -558,6 +566,27 @@ function LabelEditor({ tpl, onChange, order, mat, shared, previewEl = null, rem 
               <button type="button" style={chip(false)} onClick={() => edit({ size: cur.size + 0.3 })}>A+</button>
               <button type="button" style={{ ...chip(cur.bold), fontWeight: 700 }} onClick={() => edit({ bold: !cur.bold })}>Ж</button>
               <button type="button" style={chip(cur.ul !== 'none')} onClick={() => edit({ ul: cur.ul === 'none' ? 'below' : cur.ul === 'below' ? 'above' : 'none' })}>{cur.ul === 'below' ? 'Черта снизу' : cur.ul === 'above' ? 'Черта сверху' : 'Без черты'}</button>
+              {/* кромка чертой под размером: черта на каждую кромку стороны, толщина и вид — от толщины кромки */}
+              {['length', 'width', 'size'].includes(cur.type) && (
+                <div style={{ flex: '1 1 100%' }}>
+                  <button type="button" style={chip(!!cur.eul)} onClick={() => edit({ eul: !cur.eul })}>{cur.eul ? '✓ ' : ''}Кромка чертой под размером</button>
+                  {cur.eul && (
+                    <div style={{ marginTop: 6 }}>
+                      {EUL_CLASSES.map(([k, l]) => (
+                        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 96 }}>{l}:</span>
+                          <EulWidth key={cur.id + k} value={(cur.eulW || {})[k] ?? EUL_DEFAULT_W[k]} onCommit={v => edit({ eulW: { ...(cur.eulW || {}), [k]: v } })} />
+                          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>мм</span>
+                          <select value={(cur.eulD || {})[k] || 'solid'} onChange={e => edit({ eulD: { ...(cur.eulD || {}), [k]: e.target.value } })} style={{ width: 'auto' }}>
+                            {EUL_DASHES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                      <Hint>Под числом — по черте на каждую кромку вдоль этого размера: кромка с одной стороны — одна черта, с двух — две. «Длина» — кромка верхней и нижней стороны бирки, «Ширина» — левой и правой (как кромка по сторонам). Толщину и вид черты задаёте для каждой толщины кромки — оператор узнаёт кромку по черте.</Hint>
+                    </div>
+                  )}
+                </div>
+              )}
               {/* текст в рамке: по строке — влево / центр / вправо; поперёк — вверх / центр / вниз; поворот */}
               <div style={{ flex: '1 1 100%', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 62 }}>По строке:</span>
