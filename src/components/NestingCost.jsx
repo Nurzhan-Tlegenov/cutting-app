@@ -84,7 +84,7 @@ export default function NestingCost({ order, mats, method, productionId, full = 
       </div>
     )
   }
-  const rows = statsRows(stats)
+  const rows = statsRows(stats, { split: !!getUserSettings(user).pdfSummary?.split })
   return (
     <div className="card" style={{ fontSize: 13, ...style }}>
       <p className="section-title">Статистика раскроя{note ? ` ${note}` : ''}</p>

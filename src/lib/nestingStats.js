@@ -9,22 +9,31 @@ import { rawDetail, overMm, parseEdgeTypes, edgeThick, narrowApplied } from './e
 import { decomposeCuts } from './cutLines.js'
 import { beamSheetCuts } from './beamSawXml.js'
 import { glueRoles } from './glue.js'
+import { backContour } from './backSide.js'
 
 const loopLen = pts => { let l = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; l += Math.hypot(b[0] - a[0], b[1] - a[1]) } return l }
 const loopArea = pts => { let s = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1] } return Math.abs(s) / 2 }
 const r2 = v => Math.round(v * 100) / 100
 // паз «узкий» (обычно под ХДФ) — до 4 мм шириной включительно; шире — другая цена за штуку
 export const GROOVE_NARROW = 4
-const swapF = f => (f === 'back' ? 'front' : 'back')
 const parseC = c => { try { return typeof c === 'string' ? JSON.parse(c) : c || null } catch { return null } }
-/** Пазы с изнанки детали (как partFeatures отдаёт лицевые) */
-function backGrooves(p, d, T) {
+const NO_FEAT = { holes: [], grooves: [], pockets: [] }
+/**
+ * Обработка с изнанки детали — отверстия (глухие; сквозные уже посчитаны с лица), пазы, выемки. partFeatures отдаёт
+ * только лицевую (её режет фрезер), но изнанку всё равно делают — на шестистороннем станке, доприсадкой или вручную,
+ * поэтому в отчётах и смете она считается всегда
+ */
+function backFeatures(p, d, T) {
   const c = parseC(d?.contour)
-  if (!c) return []
-  const g = (c.grooves || []).filter(x => x.face === 'back'), dc = (c.decor || []).filter(x => x.face === 'back')
-  if (!g.length && !dc.length) return []
-  const c2 = { ...c, grooves: g.map(x => ({ ...x, face: swapF(x.face) })), decor: dc.map(x => ({ ...x, face: swapF(x.face) })), drillings: [], holes: [], edgeGrooves: [] }
-  try { return partFeatures(p, { ...d, contour: c2 }, T).grooves } catch { return [] }
+  if (!c) return NO_FEAT
+  const back = x => x.face === 'back'
+  if (!(c.drillings || []).some(back) && !(c.grooves || []).some(back) && !(c.decor || []).some(back) && !(c.holes || []).some(back)) return NO_FEAT
+  try { return partFeatures(p, { ...d, contour: backContour(c, T, { holes: true, grooves: true, pockets: true, contour: false }) }, T) } catch { return NO_FEAT }
+}
+/** Пазы в торец (Астра, Базис) — штуки и метры */
+function edgeGrooveList(d) {
+  const c = parseC(d?.contour)
+  return (c?.edgeGrooves || []).filter(g => (g.kind || 'groove') === 'groove')
 }
 const THICK_FROM = 1          // кромка толще 1 мм считается «толстой» (обычно 2 мм), до 1 мм — «тонкой» (0,4–1 мм)
 
@@ -37,7 +46,7 @@ export const emptyStats = () => ({
   edgeM: 0, edgeThinM: 0, edgeThickM: 0, edgeCurvedM: 0, edgeCurvedParts: 0,
   edgeByType: {},   // кромка по видам заказа: { название: м } (виды — из Excel или из бланка заказа; толщина — edgeTypeT)
   edgeTypeT: {},
-  holes: 0, edgeHoles: 0, grooves: 0, grooveM: 0, groovesNarrow: 0, groovesWide: 0, pockets: 0, cutouts: 0, shapedParts: 0,
+  holes: 0, holesBack: 0, edgeHoles: 0, grooves: 0, grooveM: 0, groovesNarrow: 0, groovesWide: 0, groovesBack: 0, groovesEdge: 0, pockets: 0, pocketsBack: 0, cutouts: 0, shapedParts: 0,
   drillM2: 0, drillParts: 0,   // детали с присадкой (отверстия в пласть, с изнанки, в торец): их площадь и число — для сведения;
                                // цена «присадка за м²» считается от площади ВСЕХ деталей заказа, если присадка в нём есть (statsPayload)
   glueN: 0, glueM2: 0,   // склейка (две плиты в одну деталь): число склеенных деталей и их площадь по одной стороне (glue.js)
@@ -75,13 +84,16 @@ export function nestingStats({ order, mat, method }) {
       contourM += per / 1000; contours++
       for (const c of f.cutouts) { contourM += (c.circle ? 2 * Math.PI * c.circle.r : loopLen(c.pts)) / 1000; contours++; st.cutouts++ }
       if (Array.isArray(p.polygon) && p.polygon.length > 2 && !(f.outline.length === 4 && Math.abs(loopArea(f.outline) - p.origX * p.origY) < 1)) st.shapedParts++
-      st.holes += f.holes.length; st.edgeHoles += f.skipped.edge
+      const bf = backFeatures(p, d, T)
+      st.holes += f.holes.length + bf.holes.length; st.holesBack += bf.holes.length; st.edgeHoles += f.skipped.edge
       if (f.holes.length || f.skipped.edge || f.skipped.back) { st.drillM2 += loopArea(f.outline) / 1e6; st.drillParts++ }
-      st.pockets += f.pockets.length
+      st.pockets += f.pockets.length + bf.pockets.length; st.pocketsBack += bf.pockets.length
       // пазы — с обеих пластей: с изнанки (в т.ч. «Пазы — всегда снизу» при импорте) partFeatures не отдаёт
       // (фрезер их не режет) — для отчётов и сметы берём их с перевёрнутой детали
-      for (const g of [...f.grooves, ...backGrooves(p, d, T)]) {
-        st.grooves++; st.grooveM += (g.len || Math.max(g.x1 - g.x0, g.y1 - g.y0)) / 1000
+      const eg = edgeGrooveList(d).map(g => ({ len: Number(g.length) || 0, width: Number(g.width) || 0, edge: true }))
+      for (const g of [...f.grooves, ...bf.grooves.map(g => ({ ...g, back: true })), ...eg]) {
+        st.grooves++; st.grooveM += (g.len || Math.max(g.x1 - g.x0, g.y1 - g.y0) || 0) / 1000
+        if (g.back) st.groovesBack++; if (g.edge) st.groovesEdge++
         if ((Number(g.width) || 0) <= GROOVE_NARROW + 0.05) st.groovesNarrow++; else st.groovesWide++
       }
       // упил узкой детали: пильный центр — пилится шириной «Пилить узкую деталь шириной» (p.trimTo), иначе — наращена
@@ -183,7 +195,9 @@ export function statsPayload(st, order = null) {
 
 const n2 = v => (Math.round(v * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 /** Строки статистики для экрана и PDF: [{ key, label, value }] (нулевые необязательные строки пропускаются) */
-export function statsRows(st) {
+export function statsRows(st, opt = {}) {
+  // opt.split — разделять обработку по сторонам: лицо / изнанка / торец (галочка в «Отчёты (PDF)»); без неё — общим числом
+  const sp = (total, back, edge = 0) => (opt.split && (back || edge) ? ` (лицо ${total - back - edge}${back ? ` · изнанка ${back}` : ''}${edge ? ` · торец ${edge}` : ''})` : '')
   const saw = st.method === 'guillotine'
   const rows = [
     ['sheets', 'Листов', st.sheetCount - st.offcutSheets + (st.offcutSheets ? ` + ${st.offcutSheets} обрезк.` : ''), true],
@@ -204,11 +218,11 @@ export function statsRows(st) {
     ['glue', 'Склейка', `${st.glueN} дет. · ${n2(st.glueM2)} м²`, st.glueN > 0],
     ['edgeWide', 'Широкая кромка (склейка)', `${n2(st.edgeWideM)} м · ${st.edgeWideParts} дет.`, st.edgeWideM > 0],
     ['edgeCurved', 'Кромка криволинейная', `${n2(st.edgeCurvedM)} м · ${st.edgeCurvedParts} дет.`, st.edgeCurvedM > 0],
-    ['holes', 'Отверстий в пласть', st.holes, st.holes > 0],
+    ['holes', 'Отверстий в пласть', `${st.holes}${sp(st.holes, st.holesBack || 0)}`, st.holes > 0],
     ['edgeHoles', 'Отверстий в торец', st.edgeHoles, st.edgeHoles > 0],
     ['drillM2', 'Присадка: площадь деталей заказа', `${n2(st.partsM2)} м² · присадка у ${st.drillParts} дет.`, st.drillParts > 0],
-    ['grooves', 'Пазы', `${st.grooves} шт. · ${n2(st.grooveM)} м${st.groovesNarrow && st.groovesWide ? ` (до ${GROOVE_NARROW} мм — ${st.groovesNarrow} шт., шире — ${st.groovesWide} шт.)` : ''}`, st.grooves > 0],
-    ['pockets', 'Выемок', st.pockets, st.pockets > 0],
+    ['grooves', 'Пазы', `${st.grooves} шт. · ${n2(st.grooveM)} м${st.groovesNarrow && st.groovesWide ? ` (до ${GROOVE_NARROW} мм — ${st.groovesNarrow} шт., шире — ${st.groovesWide} шт.)` : ''}${sp(st.grooves, st.groovesBack || 0, st.groovesEdge || 0)}`, st.grooves > 0],
+    ['pockets', 'Выемок', `${st.pockets}${sp(st.pockets, st.pocketsBack || 0)}`, st.pockets > 0],
     ['offcuts', 'Деловые остатки', `${Object.values(st.offcutSizes || {}).reduce((a, v) => a + v, 0)} шт`, Object.keys(st.offcutSizes || {}).length > 0],
   ]
   // кромка по видам: каждый вид — своей строкой (ключ один — галочка и порядок в конструкторе на все сразу)

@@ -67,7 +67,7 @@ export function pdfSummaryOf(stats, quote, cfg = {}, estimate = true, est = null
   const lines = quoteLines(quote)
   const priced = lines.length > 0 && estimate && cfg.price !== 'none'
   return {
-    rows: stats ? orderRows(statsRows(stats), cfg.order).filter(r => !off.has(r.key)).map(r => ({ key: r.key, label: r.label, value: r.value })) : [],
+    rows: stats ? orderRows(statsRows(stats, { split: !!cfg.split }), cfg.order).filter(r => !off.has(r.key)).map(r => ({ key: r.key, label: r.label, value: r.value })) : [],
     layout: summaryLayout(cfg),
     // деловые остатки: [[длина, ширина, шт]] — крупные первыми
     offcuts: stats ? Object.entries(stats.offcutSizes || {}).map(([k, n]) => [...k.split('×').map(Number), n]).sort((a, b) => b[0] * b[1] - a[0] * a[1]) : [],

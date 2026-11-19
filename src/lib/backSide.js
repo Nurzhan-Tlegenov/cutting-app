@@ -28,7 +28,7 @@ const swap = f => (f === 'front' ? 'back' : f === 'back' ? 'front' : f)
 
 // деталь «как её видно с обратной стороны» (без зеркала): обработка изнанки становится лицевой, лицевая — изнанкой;
 // сквозное, в торец и вырезы — уже сделаны первой программой, не выводятся
-function backContour(c, T, o) {
+export function backContour(c, T, o) {
   const through = dr => !(n0(dr.depth) > 0) || n0(dr.depth) >= T - 0.05
   const drillings = o.holes ? (c.drillings || []).filter(dr => dr.kind !== 'edge' && dr.installed !== false).map(dr => {
     const d = { ...dr, face: through(dr) ? 'back' : swap(dr.face || 'front') }      // сквозное — на «изнанку»: не выводится

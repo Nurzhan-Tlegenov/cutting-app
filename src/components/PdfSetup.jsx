@@ -34,7 +34,7 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
   const [layout, setLayout] = useState(false)       // открыт конструктор листа
   const customTpl = userPdfTpl(user)
   const change = patch => { const next = { ...cfg, ...patch }; setCfg(next); saveUserSettings({ pdfSummary: next }, user); syncProductionReports(user) }
-  const rows = stats ? orderRows(statsRows(stats), cfg.order) : []
+  const rows = stats ? orderRows(statsRows(stats, { split: !!cfg.split }), cfg.order) : []
   const off = new Set(cfg.off || [])
   const toggle = key => change({ off: off.has(key) ? [...off].filter(k => k !== key) : [...off, key] })
   const [est, setEst] = useEstimate(order, mat)   // своя смета: правки строк прайса и свои строки (материал, доставка…)
@@ -67,6 +67,12 @@ export default function PdfSetup({ order, mat, method, fileName, onClose }) {
             <input type="checkbox" checked={statsPage} onChange={e => setStatsPage(e.target.checked)} style={{ width: 'auto', marginTop: 2 }} />
             <span>Статистика листов на отдельной странице
               <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>На листе — только карта, список деталей и обозначения, карта крупнее; использование, кромка и обрезки по листам — таблицей в конце</span>
+            </span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '0 0 10px', fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!cfg.split} onChange={e => change({ split: e.target.checked })} style={{ width: 'auto', marginTop: 2 }} />
+            <span>Обработку разделять по сторонам
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-hint)' }}>Отверстия, пазы и выемки — «лицо · изнанка · торец» в скобках; без галочки — общим числом. Изнанка считается всегда (её делают на шестистороннем станке, доприсадкой или вручную)</span>
             </span>
           </label>
           <label className="label">Порядок страниц</label>
