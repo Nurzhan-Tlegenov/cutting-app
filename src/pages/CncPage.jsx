@@ -251,7 +251,8 @@ export default function CncPage() {
       let nm = own || `${base}_${lat ? safeName(title) : String(title).replace(/[\\/:*?"<>|]+/g, '_')}_x${qty}`, k = 2
       while (used.has(nm)) nm = `${nm}_${k++}`
       used.add(nm)
-      return { name: `${nm}.${post.ext || 'nc'}`, qty, part: detail.name, text: r.text, empty: r.empty, warnings: r.warnings.filter(w => !/изнанк/.test(w)) }
+      const ext = String(backOf(post).ext || '').trim().replace(/^\.+/, '') || post.ext || 'nc'     // своё расширение доприсадки
+      return { name: `${nm}.${ext}`, qty, part: detail.name, text: r.text, empty: r.empty, warnings: r.warnings.filter(w => !/изнанк/.test(w)) }
     })
   }
   // Бирки к программам: у станка с маркировочным столом — файлы стола рядом с G-кодом (как было);

@@ -19,7 +19,9 @@ import { rawDetail } from './edgeCut'
 // edge: true — программа по готовой детали с кромкой (доприсадка после кромления), false — по заготовке без кромки (сразу после раскроя)
 // name — имя файла программы: шаблон тем же конструктором, что QR-код бирки ({OBOZ}, {POZ}, {NAIM}, {KOL}…)
 export const BACK_NAME_DEFAULT = () => ({ tpl: '{POZ}_{NAIM}_x{KOL}', sep: '_', latin: true })
-export const BACK_DEFAULT = () => ({ on: false, edge: false, contour: false, holes: true, grooves: true, pockets: true, name: BACK_NAME_DEFAULT() })
+// offset — деталь кладут не в ноль станка (Г-образный упор на шкантах и т.п.): offX / offY — отступ от нуля, мм;
+// ext — своё расширение файла доприсадки (пусто — как у программ листов)
+export const BACK_DEFAULT = () => ({ on: false, edge: false, contour: false, holes: true, grooves: true, pockets: true, name: BACK_NAME_DEFAULT(), offset: false, offX: '', offY: '', ext: '' })
 export const backOf = post => ({ ...BACK_DEFAULT(), ...(post?.back || {}) })
 
 const n0 = v => Number(v) || 0
@@ -82,7 +84,11 @@ export function backJob(d0, T, post) {
   const rotation = m.turns * 90
   let polygon
   try { polygon = roughShapePolygons(dB)[rotation].map(([x, y]) => ({ x, y })) } catch { polygon = undefined }
-  const part = { detailIndex: 0, x: 0, y: 0, origX: m.mw, origY: m.mh, w: m.mw, h: m.mh, rotation, rotated: m.turns === 1, label: d.name, ...(polygon ? { polygon } : {}) }
-  const geo = { sheetW: m.mw, sheetL: m.mh, marginL: 0, marginR: 0, marginT: 0, marginB: 0, kerf: 0, usableX: m.mw, usableY: m.mh, corner: cornerOf(post?.corner) }
+  // отступ от нуля: «заготовка» шире детали на отступ с каждой стороны, деталь — с отступом от угла укладки
+  // (как у программ отдельных деталей — PartPrograms.jsx), так он отсчитывается от угла укладки при любом угле
+  const ox = o.offset ? Math.max(0, n0(o.offX)) : 0, oy = o.offset ? Math.max(0, n0(o.offY)) : 0
+  const part = { detailIndex: 0, x: ox, y: oy, origX: m.mw, origY: m.mh, w: m.mw, h: m.mh, rotation, rotated: m.turns === 1, label: d.name, ...(polygon ? { polygon } : {}) }
+  const W = m.mw + 2 * ox, L = m.mh + 2 * oy
+  const geo = { sheetW: W, sheetL: L, marginL: 0, marginR: 0, marginT: 0, marginB: 0, kerf: 0, usableX: W, usableY: L, corner: cornerOf(post?.corner) }
   return { sheet: { placed: [part] }, geo, details: [dB], outer: !!o.contour }
 }

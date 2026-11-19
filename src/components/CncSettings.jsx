@@ -308,6 +308,14 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
               <div style={{ marginTop: 4, paddingLeft: 4 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, marginBottom: 4 }}>Деталь на доприсадке:</div>
                 <Seg value={bk.edge ? 'edge' : 'blank'} options={[['blank', 'Без кромки'], ['edge', 'С кромкой']]} onChange={v => setBk({ edge: v === 'edge' })} />
+                {row('offset', 'Отступ от нуля станка')}
+                {bk.offset && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                    <div style={{ flex: 1 }}><label className="label">Отступ по X, мм</label><input type="number" inputMode="decimal" value={bk.offX ?? ''} placeholder="0" onChange={e => setBk({ offX: e.target.value })} /></div>
+                    <div style={{ flex: 1 }}><label className="label">Отступ по Y, мм</label><input type="number" inputMode="decimal" value={bk.offY ?? ''} placeholder="0" onChange={e => setBk({ offY: e.target.value })} /></div>
+                  </div>
+                )}
+                {bk.offset && <Hint>Деталь кладут не в ноль станка, а к своему упору (например, Г-образному на шкантах): обработка сдвигается на этот отступ от угла укладки — как у программ отдельных деталей.</Hint>}
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>Что выпускать в доприсадку:</div>
                 {row('holes', 'Отверстия в пласть (глухие)')}
                 {row('grooves', 'Пазы')}
@@ -315,7 +323,10 @@ export function CncBasic({ cnc, onChange, isMaster = false, orderCtx = null }) {
                 {row('contour', 'Контур детали')}
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, marginBottom: 4 }}>Имя файла доприсадки — как на бирке, чтобы оператор сразу нашёл программу детали:</div>
                 <QrPartsEditor value={bk.name || BACK_NAME_DEFAULT()} exclude={['link']} onChange={v => setBk({ name: v })}
-                  preview={`${labelQr({ qr: { ...(bk.name || BACK_NAME_DEFAULT()) } }, { orderName: 'Кухня Ивановых', orderNumber: '261007_005', order: 'Кухня Ивановых', des: 'КБ.01.003', name: 'Боковина', pos: '3', prefix: 'Шкаф', materialName: 'ЛДСП Белый', length: 720, width: 560, thickness: 16, sheet: 2, num: 5, qty: 4, client: 'Иванов' })}.${post.ext || 'nc'}`} />
+                  preview={`${labelQr({ qr: { ...(bk.name || BACK_NAME_DEFAULT()) } }, { orderName: 'Кухня Ивановых', orderNumber: '261007_005', order: 'Кухня Ивановых', des: 'КБ.01.003', name: 'Боковина', pos: '3', prefix: 'Шкаф', materialName: 'ЛДСП Белый', length: 720, width: 560, thickness: 16, sheet: 2, num: 5, qty: 4, client: 'Иванов' })}.${String(bk.ext || '').trim() || post.ext || 'nc'}`} />
+                <label className="label" style={{ marginTop: 8 }}>Расширение файла доприсадки</label>
+                <input value={bk.ext ?? ''} placeholder={post.ext || 'nc'} onChange={e => setBk({ ext: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })} style={{ maxWidth: 140 }} />
+                <Hint>Пусто — как у программ листов (.{post.ext || 'nc'}).</Hint>
                 <button type="button" onClick={() => { const q = getLabelTpl(user)?.qr || {}; setBk({ name: { ...BACK_NAME_DEFAULT(), ...q, tpl: `${qrTemplateOf(q) || '{OBOZ}'}_x{KOL}` } }) }}
                   style={{ marginTop: 6, padding: '5px 10px', borderRadius: 20, fontSize: 12, border: '0.5px solid var(--border-md)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>Как код QR на бирке + количество</button>
               </div>
