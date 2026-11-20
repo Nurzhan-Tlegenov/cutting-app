@@ -710,7 +710,12 @@ export default function UsersPage() {
                 onCancelNext={() => act(() => adminCancelGroupNext(g))}
                 raised={(users || []).filter(u => { const x = lim.users.get(u.id); return u.role !== 'admin' && x && (x.group || 'client') === g && (x.unlimited || Object.keys(x.limits || {}).length) && !x.expired })
                   .map(u => ({ id: u.id, name: u.full_name || u.phone || u.email || '—', find: u.phone || u.full_name || u.email || '', data: lim.users.get(u.id) }))}
-                onFind={t => { setFind(t); setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50) }}
+                onFind={(t, id) => {
+                  // найти человека в списке, раскрыть его карточку и прокрутить к ней (а не наверх страницы)
+                  setFind(t)
+                  if (id) setOpenU(prev => new Set(prev).add(id))
+                  setTimeout(() => document.querySelector(`[data-focus="nu:${id}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150)
+                }}
                 onExpireAll={at => act(async () => {
                   const r = await adminLimitsExpireGroup(at, g)
                   if (r.error) return { error: /function|schema|PGRST202/i.test(r.error) ? 'Выполните migration_limits_timer.sql в Supabase (SQL Editor) — один раз.' : r.error }

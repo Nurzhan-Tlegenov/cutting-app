@@ -118,7 +118,7 @@ export function DefaultLimits({ group = 'client', title, note, defaults, next, o
           {raised.length > 0 && (
             <div style={{ marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
               {raised.map(r => (
-                <button key={r.id} type="button" onClick={() => onFind?.(r.find)} title="Показать в списке"
+                <button key={r.id} type="button" onClick={() => onFind?.(r.find, r.id)} title="Открыть карточку"
                   style={{ display: 'flex', gap: 6, alignItems: 'baseline', textAlign: 'left', padding: '4px 8px', fontSize: 12, borderRadius: 6, border: '0.5px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)' }}>
                   <span style={{ flex: 1 }}>{r.name}</span>
                   <span style={{ fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>
