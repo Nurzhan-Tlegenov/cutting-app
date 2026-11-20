@@ -2,7 +2,7 @@ import { nameOk } from '../lib/profileRules'
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom, getLang, tr } from '../i18n'
-import { guestModeOpen, signupOpen, signupSetApp, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest } from '../lib/adminApi'
+import { guestModeOpen, signupOpen, signupSetApp, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest, tgResetLink, resetByMail } from '../lib/adminApi'
 import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, guessCountryName, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
 import { useAuth, googleEnabled } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -31,6 +31,8 @@ export default function AuthPage() {
   const linkCode = (() => { try { return new URLSearchParams(window.location.search).get('code') || '' } catch { return '' } })()
   const linkTel = (() => { try { return (new URLSearchParams(window.location.search).get('tel') || '').replace(/\D/g, '') } catch { return '' } })()
   const qs = (() => { try { return new URLSearchParams(window.location.search) } catch { return new URLSearchParams() } })()
+  // ссылка из письма / бота со сменой пароля: /auth?reset=123456&tel=77011234567 — сразу «Забыли пароль?» с номером и кодом
+  const linkReset = (qs.get('reset') || '').replace(/\D/g, '').slice(0, 8)
   // пригласительная ссылка (/r/код → «Зарегистрироваться», или код от пригласившего в WhatsApp с &r=код)
   const [refCode] = useState(() => { const r = (qs.get('r') || '').replace(/[^0-9a-f]/gi, ''); if (r) savePendingRef(r); return r || pendingRef() })
   const [refI, setRefI] = useState(null)   // { kind, inviter, production_name } — действующая ссылка
@@ -41,7 +43,7 @@ export default function AuthPage() {
     return () => { alive = false }
   }, [refCode])
   const refBy = refI ? (refI.kind === 'client' ? refI.production_name : refI.inviter) || '' : ''
-  const [mode, setMode] = useState(linkCode ? 'code' : qs.get('reg') ? 'register' : 'login')
+  const [mode, setMode] = useState(linkReset ? 'forgot' : linkCode ? 'code' : qs.get('reg') ? 'register' : 'login')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { signIn, signUp, signInWithGoogle, sendResetEmail, isGuest } = useAuth()
@@ -53,6 +55,7 @@ export default function AuthPage() {
   // Способ входа: по номеру телефона (Telegram / WhatsApp) или по почте. Зарубежным Telegram и WhatsApp не нужны —
   // для языков Европы и дальнего зарубежья сразу открывается почта; выбор запоминается на этом устройстве.
   const [method, setMethodState] = useState(() => {
+    if (linkReset) return 'phone'
     try { const v = localStorage.getItem('authMethod'); if (v === 'email' || v === 'phone') return v } catch { /* без памяти */ }
     return ['ru', 'uk', 'kk', 'ky', 'uz', 'az'].includes(getLang()) ? 'phone' : 'email'
   })
@@ -62,7 +65,7 @@ export default function AuthPage() {
 
   const [showPass, setShowPass] = useState(false)
   const [form, setForm] = useState(() => ({
-    full_name: '', phone: '', whatsapp: '', email: '', password: '', comment: '', code: linkCode.replace(/\D/g, '').slice(0, 8), country: (method === 'email' ? tr(guessCountryName()) : guessCountryName()) || (method === 'phone' ? phoneCountry(guessPhoneCountry()).name : ''), city: ''
+    full_name: '', phone: linkReset && linkTel ? '+' + linkTel : '', whatsapp: '', email: '', password: '', comment: '', code: linkReset || linkCode.replace(/\D/g, '').slice(0, 8), country: (method === 'email' ? tr(guessCountryName()) : guessCountryName()) || (method === 'phone' ? phoneCountry(guessPhoneCountry()).name : ''), city: ''
   }))
   // Регистрация может быть закрыта: тогда новый человек оставляет заявку, а регистрируется после одобрения
   const [open, setOpen] = useState(true)
@@ -133,15 +136,24 @@ export default function AuthPage() {
     else setHelp(h => ({ ...h, sent: true }))
   }
 
-  // «Забыли пароль?»: человек просит код, администратор сообщает его (WhatsApp), здесь вводится код и новый пароль
-  async function askCode() {
+  // «Забыли пароль?»: код приходит сам — в Telegram (бот) или на почту; либо его присылает администратор
+  // в WhatsApp / MAX. Здесь вводится код и новый пароль.
+  async function askCode(via) {
     setError(''); setNote('')
     if (form.phone.replace(/\D/g, '').length < 10) { setError('Введите номер телефона, с которым вы регистрировались'); return }
     setLoading(true)
-    const r = await requestPasswordReset(form.phone)
+    if (via === 'email') {
+      const r = await resetByMail(form.phone)
+      setLoading(false)
+      if (r.error) setError(r.error)
+      else if (r.wait) setNote('Письмо уже отправлено — подождите пару минут и проверьте почту (и «Спам»).')
+      else setNote('Если при регистрации вы указали почту, код придёт на неё в течение минуты (проверьте «Спам»). Письма нет — выберите Telegram, WhatsApp или MAX.')
+      return
+    }
+    const r = await requestPasswordReset(form.phone, via)
     setLoading(false)
     if (r.error) setError(r.error)
-    else setNote('Запрос отправлен. Мы пришлём вам код (обычно в WhatsApp) — введите его ниже вместе с новым паролем.')
+    else setNote(`Запрос отправлен. Мы пришлём код в ${via === 'max' ? 'MAX' : 'WhatsApp'} на этот номер — введите его ниже вместе с новым паролем.`)
   }
 
   // приглашённый выбрал WhatsApp, но не хочет ждать код от пригласившего — переключаемся на Telegram (код придёт сам)
@@ -526,10 +538,25 @@ export default function AuthPage() {
 
             {mode === 'forgot' && (
               <>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
-                  Введите номер телефона и нажмите «Запросить код». Мы пришлём код — впишите его и придумайте новый пароль.
-                </p>
-                <button type="button" className="btn-secondary" disabled={loading} onClick={askCode}>Запросить код</button>
+                {linkReset ? (
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px' }}>
+                    Номер и код уже подставлены — придумайте новый пароль.
+                  </p>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '8px 10px', margin: 0 }}>
+                      Введите номер телефона и выберите, куда прислать код. Telegram и почта — код придёт сразу; WhatsApp и MAX — код пришлёт администратор.
+                    </p>
+                    <a href={tgResetLink()} target="_blank" rel="noreferrer" className="btn-primary"
+                      style={{ display: 'block', textAlign: 'center', textDecoration: 'none', background: '#229ED9' }}>📱 Код в Telegram</a>
+                    <p style={{ fontSize: 11, color: 'var(--text-hint)', margin: '-4px 0 0' }}>В боте нажмите «Поделиться номером» — номер Telegram должен совпадать с номером входа.</p>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button type="button" className="btn-secondary" disabled={loading} style={{ flex: '1 1 30%' }} onClick={() => askCode('email')}>✉️ На почту</button>
+                      <button type="button" className="btn-secondary" disabled={loading} style={{ flex: '1 1 30%' }} onClick={() => askCode('whatsapp')}>WhatsApp</button>
+                      <button type="button" className="btn-secondary" disabled={loading} style={{ flex: '1 1 30%' }} onClick={() => askCode('max')}>MAX</button>
+                    </div>
+                  </>
+                )}
                 <div>
                   <label className="label">Код *</label>
                   <input type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="6 цифр" maxLength={8} value={form.code}

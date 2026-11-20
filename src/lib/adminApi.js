@@ -89,8 +89,10 @@ export const adminSetRole = (userId, role) => call('admin_set_role', { p_user: u
 // ── Восстановление пароля через администратора (migration_password_reset.sql) ──
 export const RESET_SQL_HINT = 'Восстановление пароля ещё не включено: выполните migration_password_reset.sql в Supabase (SQL Editor) — один раз.'
 /** С экрана входа: попросить код для смены пароля. -> {} | { error } */
-export async function requestPasswordReset(phone) {
-  const r = await call('request_password_reset', { p_phone: phone || '' })
+export async function requestPasswordReset(phone, via = 'whatsapp') {
+  // мессенджер для кода (WhatsApp / MAX) — migration_reset_channels.sql; без неё — как раньше
+  let r = await call('request_password_reset2', { p_phone: phone || '', p_via: via })
+  if (r.missing) r = await call('request_password_reset', { p_phone: phone || '' })
   if (r.error) return { error: r.missing ? 'Восстановление пароля пока недоступно. Напишите нам.' : /bad phone/.test(r.error) ? 'Проверьте номер телефона' : r.error }
   return {}
 }
@@ -100,6 +102,20 @@ export async function confirmPasswordReset(phone, code, password) {
   if (r.error) return { error: r.missing ? 'Восстановление пароля пока недоступно. Напишите нам.' : r.error }
   const text = { bad: 'Код не подошёл. Проверьте номер телефона и код.', expired: 'Срок действия кода вышел. Запросите новый.', blocked: 'Слишком много попыток. Попросите выдать новый код.', weak: 'Пароль минимум 6 символов' }[r.data]
   return text ? { error: text } : { ok: true }
+}
+/** Ссылка на бота: «Поделиться номером» → код для смены пароля приходит сам */
+export const tgResetLink = () => `https://t.me/${TG_BOT}?start=reset`
+/** Код на почту, указанную при регистрации по номеру (функция reset-mail). -> { ok } | { wait } | { error } */
+export async function resetByMail(phone) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/reset-mail`, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: JSON.stringify({ phone: phone || '' }),
+    })
+    if (r.status === 404) return { error: 'Код на почту пока недоступен — выберите Telegram, WhatsApp или MAX.' }
+    const data = await r.json().catch(() => null)
+    if (!data) return { error: `Не получилось отправить письмо (${r.status}). Выберите другой способ.` }
+    return data.error ? { error: data.error } : data
+  } catch { return { error: 'Нет связи. Проверьте интернет или выберите другой способ.' } }
 }
 export const adminPasswordResets = () => call('admin_password_resets')
 export const adminIssueReset = id => call('admin_issue_reset', { p_id: id })

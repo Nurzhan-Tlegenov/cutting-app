@@ -549,6 +549,7 @@ export default function UsersPage() {
                         <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.full_name || 'Без имени'}</span>
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.phone || '+' + r.digits}</span>
                       </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>Код просит в {r.via === 'max' ? 'MAX' : 'WhatsApp'}</div>
                       {r.status === 'issued' && (
                         <div style={{ fontSize: 13, marginTop: 2 }}>
                           Код: <b style={{ fontSize: 16, letterSpacing: 2 }}>{r.code}</b>
@@ -557,7 +558,8 @@ export default function UsersPage() {
                       )}
                       <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                         <button type="button" disabled={busy} style={btn(r.status === 'new' || dead ? 'main' : undefined)} onClick={() => act(() => adminIssueReset(r.id))}>{r.status === 'new' ? 'Выдать код' : 'Новый код'}</button>
-                        {r.status === 'issued' && !dead && <a href={`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" style={{ ...btn('main'), textDecoration: 'none' }}>Отправить в WhatsApp</a>}
+                        {r.status === 'issued' && !dead && r.via === 'max' && <button type="button" style={btn('main')} onClick={() => toMax(msg, r)}>Отправить в MAX</button>}
+                        {r.status === 'issued' && !dead && <a href={`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" style={{ ...btn(r.via === 'max' ? undefined : 'main'), textDecoration: 'none' }}>{r.via === 'max' ? 'В WhatsApp' : 'Отправить в WhatsApp'}</a>}
                         <button type="button" disabled={busy} style={btn('danger')} onClick={() => act(() => adminCloseReset(r.id))}>Отказать</button>
                       </div>
                     </div>

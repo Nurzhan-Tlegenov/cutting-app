@@ -13,6 +13,8 @@
 //     { action: 'remind', request_id } — напомнить тому, кто не закончил: открыл бота, но не поделился номером —
 //     снова кнопка «Поделиться номером»; номер подтверждён и заявка одобрена — код ещё раз (migration_tg_remind.sql).
 //     Написать тому, кто бота ни разу не открывал, Telegram не даёт — ему мастер шлёт ссылку на бота в WhatsApp.
+//   • восстановление пароля: ссылка t.me/RaskroyProBot?start=reset → «Поделиться номером» → код для смены пароля
+//     (migration_reset_channels.sql).
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 
@@ -77,6 +79,14 @@ const codeText = (code: string) =>
 const codeKb = (code: string, tel: string, origin?: string) =>
   ({ inline_keyboard: [[{ text: '✅ Завершить регистрацию', url: codeLink(code, tel, origin) }]] })
 
+// Код для смены пароля: кнопка открывает «Забыли пароль?» с подставленными номером и кодом
+const resetText = (code: string) =>
+  `🔑 <b>Код для смены пароля RaskroyPro:</b> <code>${code}</code>\n\n` +
+  `Нажмите кнопку ниже — номер и код уже подставлены, останется придумать новый пароль.\n` +
+  `Или откройте ${APP} → «Забыли пароль?». Код действует 1 час. Если вы не просили — просто ничего не делайте.`
+const resetKb = (code: string, tel: string) =>
+  ({ inline_keyboard: [[{ text: '🔑 Сменить пароль', url: `https://${APP}/auth?reset=${encodeURIComponent(code)}&tel=${encodeURIComponent(String(tel || '').replace(/\D/g, ''))}` }]] })
+
 // ── Сообщения от Telegram ──
 async function onUpdate(u: any) {
   const msg = u?.message
@@ -88,6 +98,18 @@ async function onUpdate(u: any) {
     // свой номер — только кнопкой «Поделиться номером»: тогда contact.user_id совпадает с отправителем
     if (msg.contact.user_id !== msg.from?.id) {
       await send(chat, 'Нужен ваш собственный номер. Нажмите кнопку «📱 Поделиться номером» внизу.', { reply_markup: SHARE_KB })
+      return
+    }
+    // сначала — не просил ли человек восстановить пароль (ссылка ?start=reset, migration_reset_channels.sql)
+    const rs = await getDb().rpc('tg_reset_contact', { p_chat: chat, p_phone: String(msg.contact.phone_number || '') })
+    if (!rs.error && rs.data?.result === 'no_account') {
+      await send(chat, `Аккаунта с номером этого Telegram в RaskroyPro нет.\n\nЕсли вы входили по другому номеру — получите код другим способом на ${APP} → «Забыли пароль?». Ещё не зарегистрированы — ${APP} → «Регистрация».`,
+        { reply_markup: NO_KB })
+      return
+    }
+    if (!rs.error && rs.data?.result === 'ok') {
+      await send(chat, '✅ Номер подтверждён.', { reply_markup: NO_KB })
+      await send(chat, resetText(rs.data.code), { reply_markup: resetKb(rs.data.code, rs.data.digits) })
       return
     }
     const { data, error } = await getDb().rpc('tg_contact', { p_chat: chat, p_phone: String(msg.contact.phone_number || '') })
@@ -115,6 +137,13 @@ async function onUpdate(u: any) {
 
   const text = String(msg.text || '').trim()
   const start = text.match(/^\/start(?:\s+(\S+))?/)
+  if (start?.[1] === 'reset') {
+    const { error } = await getDb().rpc('tg_reset_start', { p_chat: chat })
+    if (error) { await send(chat, `Восстановление пароля через бота пока не включено. Откройте ${APP} → «Забыли пароль?» и выберите WhatsApp или MAX.`); return }
+    await send(chat, '🔑 <b>Восстановление пароля RaskroyPro</b>\n\nНажмите кнопку <b>«📱 Поделиться номером»</b> внизу — если аккаунт с этим номером есть, сюда сразу придёт код для смены пароля.\n\n' +
+      'Кнопки не видно — нажмите значок клавиатуры ⌨️ справа в строке ввода.', { reply_markup: SHARE_KB })
+    return
+  }
   if (start?.[1]) {
     const { data } = await getDb().rpc('tg_start', { p_token: start[1], p_chat: chat })
     if (data === 'verified') { await send(chat, '✅ Номер уже подтверждён. Код придёт сюда, когда заявку одобрят.', { reply_markup: NO_KB }); return }
