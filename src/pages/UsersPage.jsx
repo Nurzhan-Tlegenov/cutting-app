@@ -10,7 +10,7 @@ import SupportToggle from '../components/SupportToggle'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone, tgStartLink } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
-import { adminLimits, adminSetDefaultLimits, adminSetUserLimits } from '../lib/limits'
+import { adminLimits, adminSetDefaultLimits, adminSetUserLimits, adminLimitsExpireAll } from '../lib/limits'
 import { countryCode } from '../lib/productionLabel'
 import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
@@ -134,7 +134,7 @@ export default function UsersPage() {
   useEffect(() => { Promise.resolve().then(load) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
   useNoticeFocus()   // пришли по уведомлению — нужная заявка подсвечена
 
-  const act = async fn => { setBusy(true); const r = await fn(); setBusy(false); if (r?.error) setError(r.error); else await load() }
+  const act = async fn => { setBusy(true); const r = await fn(); setBusy(false); if (r?.error) setError(r.error); else await load(); return r }
   const toggle = () => {
     const next = !open
     if (!next && !window.confirm('Закрыть свободную регистрацию? Зарегистрироваться смогут только те, чьи заявки вы одобрите.')) return
@@ -429,7 +429,7 @@ export default function UsersPage() {
                     </div>
                   )}
                   {lim && !lim.error && <UserLimits key={JSON.stringify(lim.users.get(u.id) || {})} u={u} data={lim.users.get(u.id)} defaults={lim.defaults} isProd={isProd(u)} busy={busy}
-                    onSave={(id, unl, l) => act(() => adminSetUserLimits(id, unl, l))} />}
+                    onSave={(id, unl, l, exp) => act(() => adminSetUserLimits(id, unl, l, exp))} />}
                   {u.id !== user?.id && u.role !== 'admin' && <SupportToggle userId={u.id} name={u.full_name || u.phone || ''} style={{ marginTop: 8 }} />}
                   {u.id !== user?.id && u.role !== 'admin' && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
@@ -693,7 +693,13 @@ export default function UsersPage() {
             </>
           )}
           {lim?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{lim.error}</p>
-            : lim && <DefaultLimits key={JSON.stringify(lim.defaults)} defaults={lim.defaults} busy={busy} onSave={v => act(() => adminSetDefaultLimits(v))} />}
+            : lim && <DefaultLimits key={JSON.stringify(lim.defaults)} defaults={lim.defaults} busy={busy} onSave={v => act(() => adminSetDefaultLimits(v))}
+                raised={[...lim.users.values()].filter(x => (x.unlimited || Object.keys(x.limits || {}).length) && !x.expired).length}
+                onExpireAll={at => act(async () => {
+                  const r = await adminLimitsExpireAll(at)
+                  if (r.error) return { error: /function|schema|PGRST202/i.test(r.error) ? 'Выполните migration_limits_timer.sql в Supabase (SQL Editor) — один раз.' : r.error }
+                  return r
+                })} />}
           {beta?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{beta.error}</p> : beta instanceof Map && (
             <details className="card" style={{ marginBottom: 12, padding: '10px 12px' }}>
               <summary style={{ fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Бета-тест · {(users || []).filter(u => betaOf(u).length).length}</summary>

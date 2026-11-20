@@ -1,15 +1,36 @@
 import Hint from './Hint'
 import { useState } from 'react'
-import { LIMIT_KEYS, isCap } from '../lib/limits'
+import { LIMIT_KEYS, isCap, datePlus, dayStartIso, dmy, ymd } from '../lib/limits'
 
 // Мастер-аккаунт: лимиты бесплатного использования — общие пороги (кабинет клиента и кабинет производства)
 // и личные у отдельного пользователя: снять ограничения или поставить свои пороги. Пустое поле — без лимита
 // (в общих) или «как у всех» (в личных).
 const num = v => { const s = String(v ?? '').trim(); if (s === '') return null; const n = Math.floor(Number(s.replace(',', '.'))); return isFinite(n) && n >= 0 ? n : null }
 const GROUPS = [['client', 'Кабинет клиента'], ['production', 'Кабинет производства']]
+const TERMS = [['', 'Бессрочно'], ['2w', '2 недели'], ['3w', '3 недели'], ['1m', 'Месяц'], ['date', 'До даты…']]
 
-export function DefaultLimits({ defaults, onSave, busy }) {
+// Срок: период или своя дата → 'ГГГГ-ММ-ДД' (с этого дня — снова общие лимиты) или '' — бессрочно
+function TermPicker({ term, setTerm, date, setDate }) {
+  const until = term === 'date' ? date : term ? datePlus(term) : ''
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ flex: '1 1 auto' }}>Срок</span>
+        <select value={term} onChange={e => { setTerm(e.target.value); if (e.target.value === 'date' && !date) setDate(datePlus('1m')) }} style={{ padding: '5px 8px', fontSize: 12.5 }}>
+          {TERMS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+        </select>
+        {term === 'date' && <input type="date" value={date} min={ymd(new Date())} onChange={e => setDate(e.target.value)} style={{ padding: '4px 6px', fontSize: 12.5 }} />}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>
+        {until ? `Действует до ${dmy(dayStartIso(until))} — с этого дня снова лимиты как у всех.` : 'Без срока — пока не измените сами.'}
+      </div>
+    </div>
+  )
+}
+
+export function DefaultLimits({ defaults, onSave, busy, raised = 0, onExpireAll }) {
   const [v, setV] = useState(() => Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, defaults?.[k] ?? ''])))
+  const [allDate, setAllDate] = useState(() => datePlus('1m'))
   const save = () => onSave(Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, num(v[k])]).filter(([, n]) => n != null)))
   return (
     <details className="card" style={{ marginBottom: 12, padding: '10px 12px' }}>
@@ -29,6 +50,24 @@ export function DefaultLimits({ defaults, onSave, busy }) {
         </div>
       ))}
       <button type="button" className="btn-primary" disabled={busy} onClick={save} style={{ padding: 9, fontSize: 14 }}>Сохранить лимиты</button>
+      {onExpireAll && (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
+          <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 4 }}>Срок всем, кому подняты лимиты</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 6 }}>
+            Сейчас поднятые лимиты (или «без ограничений») у {raised} польз. С выбранного дня у всех них — снова лимиты как у всех; кому продлить — поставьте новый срок в его карточке.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {[['2w', '2 нед.'], ['3w', '3 нед.'], ['1m', 'Месяц']].map(([k, t]) => (
+              <button key={k} type="button" onClick={() => setAllDate(datePlus(k))} style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--border-md)', background: allDate === datePlus(k) ? 'var(--blue-light)' : 'transparent', color: 'var(--text-muted)' }}>{t}</button>
+            ))}
+            <input type="date" value={allDate} min={ymd(new Date())} onChange={e => setAllDate(e.target.value)} style={{ padding: '4px 6px', fontSize: 12.5 }} />
+          </div>
+          <button type="button" className="btn-secondary" disabled={busy || !raised || !allDate} style={{ marginTop: 6, padding: 8, fontSize: 13 }}
+            onClick={() => { if (window.confirm(`Поставить срок до ${dmy(dayStartIso(allDate))} всем ${raised} польз. с поднятыми лимитами?`)) onExpireAll(dayStartIso(allDate)) }}>
+            Поставить срок до {allDate ? dmy(dayStartIso(allDate)) : '…'}
+          </button>
+        </div>
+      )}
     </details>
   )
 }
@@ -38,25 +77,33 @@ export function UserLimits({ u, data, defaults, isProd, onSave, busy }) {
   const [edit, setEdit] = useState(false)
   const [unl, setUnl] = useState(!!data?.unlimited)
   const [v, setV] = useState(() => Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, data?.limits?.[k] ?? ''])))
+  // срок: действующий — как был (своя дата); истёкший — по умолчанию месяц
+  const [term, setTerm] = useState(() => data?.expires_at && !data?.expired ? 'date' : data?.expired ? '1m' : '')
+  const [date, setDate] = useState(() => data?.expires_at && !data?.expired ? ymd(new Date(data.expires_at)) : '')
   if (u.role === 'admin') return <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>Мастер-аккаунт — без лимитов</div>
   const keys = LIMIT_KEYS.filter(([, , c]) => c === 'client' || isProd)
-  const eff = k => (data?.unlimited ? null : data?.limits && k in data.limits ? data.limits[k] : defaults?.[k] ?? null)
-  const used = k => data?.used?.[k] ?? 0
   const own = data?.unlimited || Object.keys(data?.limits || {}).length > 0
+  const live = own && !data?.expired   // личные настройки действуют (срок не вышел)
+  const eff = k => (live && data?.unlimited ? null : live && data?.limits && k in data.limits ? data.limits[k] : defaults?.[k] ?? null)
+  const used = k => data?.used?.[k] ?? 0
   const save = async () => {
-    await onSave(u.id, unl, Object.fromEntries(keys.map(([k]) => [k, num(v[k])]).filter(([, n]) => n != null)))
-    setEdit(false)
+    const until = term === 'date' ? date : term ? datePlus(term) : ''
+    const lim = Object.fromEntries(keys.map(([k]) => [k, num(v[k])]).filter(([, n]) => n != null))
+    const r = await onSave(u.id, unl, lim, until && (unl || Object.keys(lim).length) ? dayStartIso(until) : null)
+    if (!r?.error) setEdit(false)
   }
   return (
     <div style={{ marginTop: 6, fontSize: 11.5 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ flex: 1, color: 'var(--text-hint)' }}>
-          {data?.unlimited ? <b style={{ color: 'var(--teal)' }}>Без ограничений</b> : keys.map(([k, label], i) => {
+          {live && data?.unlimited ? <b style={{ color: 'var(--teal)' }}>Без ограничений</b> : keys.map(([k, label], i) => {
             const lim = eff(k), full = lim != null && used(k) >= lim
             if (isCap(k)) return <span key={k}>{i ? ' · ' : ''}{label.toLowerCase()} <b style={{ color: 'var(--text-muted)' }}>{lim != null ? lim : 'без лимита'}</b></span>
             return <span key={k}>{i ? ' · ' : ''}{label.split(' (')[0].toLowerCase()} <b style={{ color: full ? 'var(--amber)' : 'var(--text-muted)' }}>{used(k)}{lim != null ? ` из ${lim}` : ''}</b></span>
           })}
-          {own && !data?.unlimited && <span style={{ color: 'var(--blue)' }}> · свои пороги</span>}
+          {live && !data?.unlimited && <span style={{ color: 'var(--blue)' }}> · свои пороги</span>}
+          {live && data?.expires_at && <span style={{ color: 'var(--blue)' }}> до {dmy(data.expires_at)}</span>}
+          {own && data?.expired && <span style={{ color: 'var(--amber)' }}> · поднятые лимиты истекли {dmy(data.expires_at)} — сейчас как у всех</span>}
         </span>
         <button type="button" onClick={() => setEdit(e => !e)} style={{ padding: '3px 10px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>{edit ? 'Закрыть' : 'Лимиты'}</button>
       </div>
@@ -74,6 +121,7 @@ export function UserLimits({ u, data, defaults, isProd, onSave, busy }) {
             </label>
           ))}
           {!unl && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 6 }}>Пустое поле — как у всех. Чтобы повысить порог, впишите своё число.</div>}
+          <TermPicker term={term} setTerm={setTerm} date={date} setDate={setDate} />
           <button type="button" className="btn-primary" disabled={busy} onClick={save} style={{ padding: 8, fontSize: 13 }}>Сохранить</button>
         </div>
       )}
