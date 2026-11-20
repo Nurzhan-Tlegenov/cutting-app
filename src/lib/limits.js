@@ -64,7 +64,14 @@ const call = async (fn, args) => {
   return { data }
 }
 export const adminLimits = () => call('admin_limits')
-export const adminSetDefaultLimits = limits => call('admin_set_default_limits', { p_limits: limits })
+// at — ISO-время, с которого действуют новые общие лимиты (null — сразу); без migration_limits_schedule.sql — только сразу
+export async function adminSetDefaultLimits(limits, at = null) {
+  const r = await call('admin_set_default_limits2', { p_limits: limits, p_at: at })
+  if (!r.error) return r
+  if (at) return { error: 'Общие лимиты с даты ещё не включены в базе: выполните migration_limits_schedule.sql в Supabase (SQL Editor) — один раз.' }
+  return call('admin_set_default_limits', { p_limits: limits })
+}
+export const adminCancelNextLimits = () => call('admin_cancel_next_limits')
 // expires — ISO-время, до которого действуют личные лимиты (null — бессрочно); без migration_limits_timer.sql — без срока
 export async function adminSetUserLimits(userId, unlimited, limits, expires = null) {
   const r = await call('admin_set_user_limits2', { p_user: userId, p_unlimited: !!unlimited, p_limits: limits || {}, p_expires: expires })

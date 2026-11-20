@@ -28,10 +28,25 @@ function TermPicker({ term, setTerm, date, setDate }) {
   )
 }
 
-export function DefaultLimits({ defaults, onSave, busy, raised = [], onExpireAll, onFind }) {
+const limText = l => LIMIT_KEYS.filter(([k]) => l?.[k] != null).map(([k, label]) => `${label.split(' (')[0].toLowerCase()} ${l[k]}`).join(' · ') || 'без лимитов'
+
+export function DefaultLimits({ defaults, next, onSave, onCancelNext, busy, raised = [], onExpireAll, onFind }) {
   const [v, setV] = useState(() => Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, defaults?.[k] ?? ''])))
   const [allDate, setAllDate] = useState(() => datePlus('1m'))
-  const save = () => onSave(Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, num(v[k])]).filter(([, n]) => n != null)))
+  // с какого дня новые общие лимиты: сразу или с даты; тем, кому подняты, — тот же день
+  const [when, setWhen] = useState('now')
+  const [from, setFrom] = useState(() => datePlus('1m'))
+  const [withRaised, setWithRaised] = useState(true)
+  const save = () => {
+    const lim = Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, num(v[k])]).filter(([, n]) => n != null))
+    if (when === 'date') {
+      if (!from) return
+      const at = dayStartIso(from)
+      const also = withRaised && raised.length > 0
+      if (!window.confirm(`С ${dmy(at)} общие лимиты: ${limText(lim)}.${also ? `\nТем, кому подняты лимиты (${raised.length}), — тоже с ${dmy(at)} как у всех.` : ''}\nДо этого дня всё работает как сейчас. Заказы ни у кого не пропадают.`)) return
+      onSave(lim, at, also)
+    } else onSave(lim, null, false)
+  }
   return (
     <details className="card" style={{ marginBottom: 12, padding: '10px 12px' }}>
       <summary style={{ fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Лимиты бесплатного использования</summary>
@@ -49,10 +64,47 @@ export function DefaultLimits({ defaults, onSave, busy, raised = [], onExpireAll
           ))}
         </div>
       ))}
-      <button type="button" className="btn-primary" disabled={busy} onClick={save} style={{ padding: 9, fontSize: 14 }}>Сохранить лимиты</button>
+      <div style={{ margin: '4px 0 8px', padding: '8px 10px', background: 'var(--bg2)', borderRadius: 'var(--radius)', fontSize: 12.5 }}>
+        <div style={{ fontWeight: 500, marginBottom: 4 }}>Когда действуют эти цифры</div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, cursor: 'pointer' }}>
+          <input type="radio" checked={when === 'now'} onChange={() => setWhen('now')} /> Сразу
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }}>
+          <input type="radio" checked={when === 'date'} onChange={() => setWhen('date')} /> С даты
+          {when === 'date' && <input type="date" value={from} min={ymd(new Date())} onChange={e => setFrom(e.target.value)} style={{ padding: '4px 6px', fontSize: 12.5 }} />}
+        </label>
+        {when === 'date' && (
+          <>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0' }}>
+              {[['2w', '2 нед.'], ['3w', '3 нед.'], ['1m', 'Месяц']].map(([k, t]) => (
+                <button key={k} type="button" onClick={() => setFrom(datePlus(k))} style={{ padding: '3px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--border-md)', background: from === datePlus(k) ? 'var(--blue-light)' : 'transparent', color: 'var(--text-muted)' }}>{t}</button>
+              ))}
+            </div>
+            {raised.length > 0 && (
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', color: 'var(--text-muted)' }}>
+                <input type="checkbox" checked={withRaised} onChange={e => setWithRaised(e.target.checked)} style={{ marginTop: 2 }} />
+                <span>И тем, кому подняты лимиты ({raised.length}), — с этого же дня как у всех</span>
+              </label>
+            )}
+            <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
+              До {from ? dmy(dayStartIso(from)) : '…'} всё работает по прежним лимитам. Заказы ни у кого не пропадают: что заведено раньше — доделывается.
+            </div>
+          </>
+        )}
+      </div>
+      <button type="button" className="btn-primary" disabled={busy || (when === 'date' && !from)} onClick={save} style={{ padding: 9, fontSize: 14 }}>
+        {when === 'date' ? `Сохранить — с ${from ? dmy(dayStartIso(from)) : '…'}` : 'Сохранить лимиты'}
+      </button>
+      {next?.at && (
+        <div style={{ marginTop: 8, padding: '7px 10px', fontSize: 12, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', borderRadius: 'var(--radius)' }}>
+          Запланировано с <b>{dmy(next.at)}</b>: {limText(next.limits)}.
+          <button type="button" disabled={busy} onClick={() => { if (window.confirm('Отменить запланированные общие лимиты?')) onCancelNext?.() }}
+            style={{ marginLeft: 8, padding: '2px 10px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--danger)' }}>Отменить</button>
+        </div>
+      )}
       {onExpireAll && (
         <div style={{ marginTop: 12, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
-          <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 4 }}>Срок всем, кому подняты лимиты</div>
+          <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 4 }}>Только срок тем, кому подняты лимиты (общие лимиты не меняются)</div>
           <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 6 }}>
             Сейчас поднятые лимиты (или «без ограничений») у {raised.length} польз. С выбранного дня у всех них — снова лимиты как у всех; кому продлить — поставьте новый срок в его карточке.
             Их заказы никуда не деваются: всё, что заведено до этого дня, можно доделать и отправить; новое — только в пределах лимита.

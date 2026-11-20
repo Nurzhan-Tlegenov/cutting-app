@@ -10,7 +10,7 @@ import SupportToggle from '../components/SupportToggle'
 import { adminUsers, adminRequests, adminSetSignup, adminSetRequest, adminAllowPhone, adminSetRole, signupOpen, adminPasswordResets, adminIssueReset, adminCloseReset, RESET_SQL_HINT, adminApproveRequest, tgBot, TG_BOT, adminLoginHelp, adminCloseLoginHelp, adminDeleteUser, adminSetLocation, adminBlockedPhones, adminBlockPhone, adminUnblockPhone, tgStartLink } from '../lib/adminApi'
 import CncLoader from '../components/CncLoader'
 import { DefaultLimits, UserLimits } from '../components/LimitsAdmin'
-import { adminLimits, adminSetDefaultLimits, adminSetUserLimits, adminLimitsExpireAll } from '../lib/limits'
+import { adminLimits, adminSetDefaultLimits, adminSetUserLimits, adminLimitsExpireAll, adminCancelNextLimits } from '../lib/limits'
 import { countryCode } from '../lib/productionLabel'
 import { useNoticeFocus } from '../lib/noticeNav'
 import { siteOrigin } from '../lib/siteOrigin'
@@ -114,7 +114,7 @@ export default function UsersPage() {
     setBlocked(bl.error ? { error: bl.error } : bl.data || [])
     setBeta(bt.error ? { error: bt.error } : bt.data)
     setHelps(lh.error ? null : lh.data || [])
-    setLim(lm.error ? { error: lm.error } : { defaults: lm.data?.defaults || {}, users: new Map((lm.data?.users || []).map(x => [x.user_id, x])) })
+    setLim(lm.error ? { error: lm.error } : { defaults: lm.data?.defaults || {}, next: lm.data?.next || null, users: new Map((lm.data?.users || []).map(x => [x.user_id, x])) })
     setResets(pr.error ? null : pr.data || [])
     if (u.error) { setError(u.error); setReady(false); setUsers([]); return }
     setError(''); setReady(true); setUsers(u.data || []); setReqs(r.data || []); setOpen(o)
@@ -693,7 +693,14 @@ export default function UsersPage() {
             </>
           )}
           {lim?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{lim.error}</p>
-            : lim && <DefaultLimits key={JSON.stringify(lim.defaults)} defaults={lim.defaults} busy={busy} onSave={v => act(() => adminSetDefaultLimits(v))}
+            : lim && <DefaultLimits key={JSON.stringify([lim.defaults, lim.next])} defaults={lim.defaults} next={lim.next} busy={busy}
+                onSave={(v, at, also) => act(async () => {
+                  const r = await adminSetDefaultLimits(v, at)
+                  if (r.error || !also) return r
+                  const e = await adminLimitsExpireAll(at)
+                  return e.error ? { error: 'Общие лимиты сохранены, но срок тем, кому подняты, не поставился: ' + (/function|schema|PGRST202/i.test(e.error) ? 'выполните migration_limits_timer.sql.' : e.error) } : r
+                })}
+                onCancelNext={() => act(() => adminCancelNextLimits())}
                 raised={(users || []).filter(u => { const x = lim.users.get(u.id); return u.role !== 'admin' && x && (x.unlimited || Object.keys(x.limits || {}).length) && !x.expired })
                   .map(u => ({ id: u.id, name: u.full_name || u.phone || u.email || '—', find: u.phone || u.full_name || u.email || '', data: lim.users.get(u.id) }))}
                 onFind={t => { setFind(t); setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50) }}
