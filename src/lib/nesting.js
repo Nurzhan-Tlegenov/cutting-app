@@ -2759,8 +2759,16 @@ export function makePatternPool(pieces, modes, direction, usableX, usableY, rand
           const l = t === undefined ? null : rem[t]
           if (!l || !l.length) continue
           const q = l.pop(), src = pieceById.get(p.id)
-          // та же позиция — как было; другая позиция того же вида — её название и кромка (с тем же поворотом)
-          placed.push(!src || src.detailIndex === q.detailIndex ? { ...p, id: q.id } : { ...makePlacedFrom(q, p, !!p.rotated, p.w, p.h), ...pickExtra(p) })
+          // та же позиция — как было; другая позиция того же вида — её название и кромка (с тем же поворотом).
+          // Повёрнута ли деталь — только по размерам места: флаг rotated у листов из истории поиска считается от
+          // исходной детали, а не от pw/ph (раскрой его переписывает), и по нему габарит и размер детали
+          // расходились — «дно» 451×402 на месте 455×406 лежало как 402×451: «пересекаются», «заходит на отступ»
+          // (261110_013, листы, собранные из одного шаблона)
+          const same = Math.abs(p.w - q.pw) < 0.05 && Math.abs(p.h - q.ph) < 0.05
+          const turned = Math.abs(p.w - q.ph) < 0.05 && Math.abs(p.h - q.pw) < 0.05
+          const rot = same && turned ? !!p.rotated : !same
+          const fits = Math.abs(p.w - (rot ? q.ph : q.pw)) < 0.05 && Math.abs(p.origX - (rot ? q.origY : q.origX)) < 0.05
+          placed.push(src && src.detailIndex === q.detailIndex && fits ? { ...p, id: q.id } : { ...makePlacedFrom(q, p, rot, p.w, p.h), ...pickExtra(p) })
         }
         if (!placed.length) return
         const sh = { index: sheets.length, family: 'maxrects', placed, freeRects: [{ x: 0, y: 0, w: usableX, h: usableY }] }
