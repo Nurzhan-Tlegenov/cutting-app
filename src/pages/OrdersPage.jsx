@@ -236,10 +236,11 @@ export default function OrdersPage() {
               Удержите заказ для выбора{canMerge ? ', объединения в раскрой' : ''} и удаления
             </p>
           )}
-          {/* исполненные заказы просим отправить в архив: тяжёлые данные удаляются, заказ остаётся в истории */}
+          {/* архива у пользователей больше нет (20.11.2026): исполненный заказ удаляется — исходники (файлы, модели)
+              у человека и так есть, хранить их в сервисе незачем. Что уже лежит в архиве — остаётся как было */}
           {!selectMode && orders.some(o => o.status === 'done' && !o.archived_at) && (
             <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
-              Исполненных заказов не в архиве: <b>{orders.filter(o => o.status === 'done' && !o.archived_at).length}</b>. Отправьте их в архив — кнопка «📦 В архив» на заказе.
+              Исполненных заказов: <b>{orders.filter(o => o.status === 'done' && !o.archived_at).length}</b>. Готовый заказ удалите — кнопка «🗑 Удалить» на заказе: исходные файлы у вас остаются, а место освобождается для новых заказов.
             </div>
           )}
           <div className="desk-grid" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -336,7 +337,7 @@ export default function OrdersPage() {
                         ? (isMaster ? 'В архиве · заказы мастер-аккаунта сами не удаляются' : `В архиве · хранится до ${keepUntilText(order.archived_at)} (осталось ${daysLeft(order.archived_at)} дн.), потом удалится`)
                         : new Date(order.created_at).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })}
                     </div>
-                    {!selectMode && (order.archived_at || canArchive(order)) && (
+                    {!selectMode && (order.archived_at || (isMaster && canArchive(order))) && (
                       <button type="button" disabled={archBusy === order.id}
                         onClick={e => { e.stopPropagation(); if (order.archived_at) fromArchive(order); else toArchive(order) }}
                         onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
