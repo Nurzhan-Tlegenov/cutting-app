@@ -694,7 +694,9 @@ export default function UsersPage() {
           )}
           {lim?.error ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 12 }}>{lim.error}</p>
             : lim && <DefaultLimits key={JSON.stringify(lim.defaults)} defaults={lim.defaults} busy={busy} onSave={v => act(() => adminSetDefaultLimits(v))}
-                raised={[...lim.users.values()].filter(x => (x.unlimited || Object.keys(x.limits || {}).length) && !x.expired).length}
+                raised={(users || []).filter(u => { const x = lim.users.get(u.id); return u.role !== 'admin' && x && (x.unlimited || Object.keys(x.limits || {}).length) && !x.expired })
+                  .map(u => ({ id: u.id, name: u.full_name || u.phone || u.email || '—', find: u.phone || u.full_name || u.email || '', data: lim.users.get(u.id) }))}
+                onFind={t => { setFind(t); setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50) }}
                 onExpireAll={at => act(async () => {
                   const r = await adminLimitsExpireAll(at)
                   if (r.error) return { error: /function|schema|PGRST202/i.test(r.error) ? 'Выполните migration_limits_timer.sql в Supabase (SQL Editor) — один раз.' : r.error }

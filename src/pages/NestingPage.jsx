@@ -2921,11 +2921,14 @@ export default function NestingPage() {
         if (!mine.length || !byMat[k]) continue
         const row = {}
         for (const [c, v] of Object.entries(src)) {
-          if (c === 'id' || c === 'order_number' || c === 'status' || c.endsWith('_at') || c === 'archived_by' || c === 'archived_sheets' || c === 'return_note' || c === 'nesting_result') continue
+          if (c === 'id' || c === 'split_of' || c === 'order_number' || c === 'status' || c.endsWith('_at') || c === 'archived_by' || c === 'archived_sheets' || c === 'return_note' || c === 'nesting_result') continue
           row[c] = v
         }
         Object.assign(row, matCols(k), { order_number: await getNextOrderNumber(supabase), status: 'new', submitted_at: now, nesting_result: JSON.stringify(byMat[k]) })
-        const { data: copy, error: e1 } = await supabase.from('orders').insert(row).select().single()
+        // часть того же заказа — лимит «заказов в кабинете» на неё не действует (migration_limits_timer.sql);
+        // в базе без колонки split_of — как раньше
+        let { data: copy, error: e1 } = await supabase.from('orders').insert({ ...row, split_of: id }).select().single()
+        if (e1 && /split_of/.test(e1.message || '')) ({ data: copy, error: e1 } = await supabase.from('orders').insert(row).select().single())
         if (e1 || !copy) throw new Error(/limit/i.test(e1?.message || '') ? 'Достигнут предел бесплатного использования: заказов слишком много. Удалите или отправьте в архив ненужные.' : (e1?.message || 'не удалось создать заявку'))
         const { error: e2 } = await insertOrderDetails(mine.map(r => { const { id: _i, created_at: _c, ...restCols } = r; void _i; void _c; return { ...restCols, order_id: copy.id } }))
         if (e2) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e2.message) }
@@ -2998,7 +3001,7 @@ export default function NestingPage() {
       if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
       const row = {}
       for (const [k, v] of Object.entries(src)) {
-        if (k === 'id' || k === 'order_number' || k === 'status' || k.endsWith('_at') || k === 'archived_by' || k === 'archived_sheets' || k === 'return_note' || k === 'nesting_result') continue
+        if (k === 'id' || k === 'split_of' || k === 'order_number' || k === 'status' || k.endsWith('_at') || k === 'archived_by' || k === 'archived_sheets' || k === 'return_note' || k === 'nesting_result') continue
         row[k] = v
       }
       const now = new Date().toISOString()

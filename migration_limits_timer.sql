@@ -1,6 +1,10 @@
 -- Срок у личных лимитов: мастер поднял пользователю лимит (или снял все) до даты — с этой даты у него снова
 -- общие лимиты, как у всех. Ничего по расписанию не запускается: срок проверяется при каждой проверке лимита.
 -- Выполнить один раз в Supabase → SQL Editor (можно повторно). После migration_limits.sql.
+--
+-- Ничего не пропадает: лимит не трогает то, что уже есть, — только не даёт завести новое. Всё, что заведено до
+-- окончания поднятого лимита (или до того, как мастер понизил общие лимиты), доделывается без ограничений:
+-- 3D-модель к такому заказу, отправка его по материалам, приём производством, просмотр 3D-модели в работе.
 
 alter table public.user_limits add column if not exists expires_at timestamptz;
 
@@ -67,4 +71,77 @@ end $$;
 
 revoke all on function public.admin_set_user_limits2(uuid, boolean, jsonb, timestamptz), public.admin_limits_expire_all(timestamptz) from public, anon;
 grant execute on function public.admin_set_user_limits2(uuid, boolean, jsonb, timestamptz), public.admin_limits_expire_all(timestamptz) to authenticated;
+
+-- ── доделать начатое ──
+-- заказ, отправленный по материалам, делится на части — это тот же заказ, а не новый
+alter table public.orders add column if not exists split_of uuid;
+insert into public.app_config (key, value) values ('limits_at', to_jsonb(now())) on conflict (key) do nothing;
+
+-- до какого момента у пользователя «старое» (доделывается без лимита): конец его поднятого лимита или
+-- последнее изменение общих лимитов мастером — что позже. null — ничего такого не было
+create or replace function public.limit_grace(p_user uuid) returns timestamptz
+language sql security definer set search_path = public stable as $$
+  select nullif(greatest(
+    coalesce((select expires_at from user_limits where user_id = p_user and expires_at <= now()), '-infinity'::timestamptz),
+    coalesce((select (value #>> '{}')::timestamptz from app_config where key = 'limits_at'), '-infinity'::timestamptz)), '-infinity'::timestamptz)
+$$;
+
+create or replace function public.admin_set_default_limits(p_limits jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin() then raise exception 'not admin'; end if;
+  insert into app_config (key, value) values ('limits', coalesce(p_limits, '{}'::jsonb)) on conflict (key) do update set value = excluded.value;
+  insert into app_config (key, value) values ('limits_at', to_jsonb(now())) on conflict (key) do update set value = excluded.value;
+end $$;
+
+create or replace function public.trg_limit_orders() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.split_of is not null and exists (select 1 from orders where id = new.split_of and user_id = new.user_id) then return new; end if;
+  perform check_limit(new.user_id, 'orders');
+  return new;
+end $$;
+
+create or replace function public.trg_limit_models() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare o record;
+begin
+  if exists (select 1 from order_models where order_id = new.order_id) then return new; end if;
+  select user_id, created_at into o from orders where id = new.order_id;
+  if o.created_at < limit_grace(o.user_id) then return new; end if;
+  perform check_limit(o.user_id, 'models');
+  return new;
+end $$;
+
+-- принять заказ: повторно (после доработки) или пришедший до конца лимита — можно
+create or replace function public.trg_limit_accept() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare owner uuid;
+begin
+  if new.production_id is not null and new.status in ('inwork', 'done') and coalesce(old.status, '') not in ('inwork', 'done') and not is_admin() then
+    if old.accepted_at is not null and old.production_id is not distinct from new.production_id then return new; end if;
+    owner := (select owner_id from productions where id = new.production_id);
+    if coalesce(old.submitted_at, old.created_at) < limit_grace(owner) then return new; end if;
+    perform check_limit(owner, 'accepted');
+  end if;
+  return new;
+end $$;
+
+create or replace function public.open_order_model(p_order uuid) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare o record;
+begin
+  select * into o from orders where id = p_order;
+  if not found or o.user_id = auth.uid() or is_admin() or not is_my_production(o.production_id) then return true; end if;
+  if exists (select 1 from production_model_views where user_id = auth.uid() and order_id = p_order) then return true; end if;
+  if coalesce(o.accepted_at, o.submitted_at, o.created_at) < limit_grace(auth.uid()) then
+    insert into production_model_views (user_id, order_id) values (auth.uid(), p_order) on conflict do nothing;
+    return true;
+  end if;
+  perform check_limit(auth.uid(), 'views3d');
+  insert into production_model_views (user_id, order_id) values (auth.uid(), p_order) on conflict do nothing;
+  return true;
+end $$;
+
+revoke all on function public.limit_grace(uuid) from public, anon, authenticated;
 notify pgrst, 'reload schema';

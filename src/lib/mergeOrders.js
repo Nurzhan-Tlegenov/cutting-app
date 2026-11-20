@@ -96,7 +96,7 @@ export async function createMergedOrder(orders, productionId = null, onProgress,
   const row = {}
   for (const [c, v] of Object.entries(base)) {
     if (c === 'id' || c === 'order_number' || c === 'status' || c.endsWith('_at') || c === 'archived_by' || c === 'archived_sheets'
-      || c === 'return_note' || c === 'nesting_result' || c === 'merged_into' || c === 'merge_of' || c === 'offcuts_owner' || c === 'offcuts') continue
+      || c === 'return_note' || c === 'nesting_result' || c === 'merged_into' || c === 'merge_of' || c === 'split_of' || c === 'offcuts_owner' || c === 'offcuts') continue
     row[c] = v
   }
   const title = `Объединение: ${list.map(o => o.order_number || orderTitle(o)).join(' + ')}`

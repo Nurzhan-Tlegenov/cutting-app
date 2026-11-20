@@ -28,7 +28,7 @@ function TermPicker({ term, setTerm, date, setDate }) {
   )
 }
 
-export function DefaultLimits({ defaults, onSave, busy, raised = 0, onExpireAll }) {
+export function DefaultLimits({ defaults, onSave, busy, raised = [], onExpireAll, onFind }) {
   const [v, setV] = useState(() => Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, defaults?.[k] ?? ''])))
   const [allDate, setAllDate] = useState(() => datePlus('1m'))
   const save = () => onSave(Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, num(v[k])]).filter(([, n]) => n != null)))
@@ -54,16 +54,30 @@ export function DefaultLimits({ defaults, onSave, busy, raised = 0, onExpireAll 
         <div style={{ marginTop: 12, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
           <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 4 }}>Срок всем, кому подняты лимиты</div>
           <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 6 }}>
-            Сейчас поднятые лимиты (или «без ограничений») у {raised} польз. С выбранного дня у всех них — снова лимиты как у всех; кому продлить — поставьте новый срок в его карточке.
+            Сейчас поднятые лимиты (или «без ограничений») у {raised.length} польз. С выбранного дня у всех них — снова лимиты как у всех; кому продлить — поставьте новый срок в его карточке.
+            Их заказы никуда не деваются: всё, что заведено до этого дня, можно доделать и отправить; новое — только в пределах лимита.
           </div>
+          {raised.length > 0 && (
+            <div style={{ marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {raised.map(r => (
+                <button key={r.id} type="button" onClick={() => onFind?.(r.find)} title="Показать в списке"
+                  style={{ display: 'flex', gap: 6, alignItems: 'baseline', textAlign: 'left', padding: '4px 8px', fontSize: 12, borderRadius: 6, border: '0.5px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)' }}>
+                  <span style={{ flex: 1 }}>{r.name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-hint)', whiteSpace: 'nowrap' }}>
+                    {r.data?.unlimited ? 'без ограничений' : 'свои пороги'}{r.data?.expires_at ? ` · до ${dmy(r.data.expires_at)}` : ' · бессрочно'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             {[['2w', '2 нед.'], ['3w', '3 нед.'], ['1m', 'Месяц']].map(([k, t]) => (
               <button key={k} type="button" onClick={() => setAllDate(datePlus(k))} style={{ padding: '4px 10px', borderRadius: 14, fontSize: 12, border: '0.5px solid var(--border-md)', background: allDate === datePlus(k) ? 'var(--blue-light)' : 'transparent', color: 'var(--text-muted)' }}>{t}</button>
             ))}
             <input type="date" value={allDate} min={ymd(new Date())} onChange={e => setAllDate(e.target.value)} style={{ padding: '4px 6px', fontSize: 12.5 }} />
           </div>
-          <button type="button" className="btn-secondary" disabled={busy || !raised || !allDate} style={{ marginTop: 6, padding: 8, fontSize: 13 }}
-            onClick={() => { if (window.confirm(`Поставить срок до ${dmy(dayStartIso(allDate))} всем ${raised} польз. с поднятыми лимитами?`)) onExpireAll(dayStartIso(allDate)) }}>
+          <button type="button" className="btn-secondary" disabled={busy || !raised.length || !allDate} style={{ marginTop: 6, padding: 8, fontSize: 13 }}
+            onClick={() => { if (window.confirm(`Поставить срок до ${dmy(dayStartIso(allDate))} всем ${raised.length} польз. с поднятыми лимитами?\nЗаказы у них останутся — доделать и отправить их можно и после этого дня.`)) onExpireAll(dayStartIso(allDate)) }}>
             Поставить срок до {allDate ? dmy(dayStartIso(allDate)) : '…'}
           </button>
         </div>
