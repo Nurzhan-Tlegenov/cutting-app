@@ -28,9 +28,11 @@ function TermPicker({ term, setTerm, date, setDate }) {
   )
 }
 
-const limText = l => LIMIT_KEYS.filter(([k]) => l?.[k] != null).map(([k, label]) => `${label.split(' (')[0].toLowerCase()} ${l[k]}`).join(' · ') || 'без лимитов'
+const limText = (l, group = 'prod') => LIMIT_KEYS.filter(([k, , c]) => l?.[k] != null && (group === 'prod' || c === 'client')).map(([k, label]) => `${label.split(' (')[0].toLowerCase()} ${l[k]}`).join(' · ') || 'без лимитов'
 
-export function DefaultLimits({ defaults, next, onSave, onCancelNext, busy, raised = [], onExpireAll, onFind }) {
+// group: 'client' — аккаунты без производства (только лимиты клиента); 'prod' — аккаунты со своим производством
+// (лимиты и как клиента, и как производства)
+export function DefaultLimits({ group = 'client', title, note, defaults, next, onSave, onCancelNext, busy, raised = [], onExpireAll, onFind }) {
   const [v, setV] = useState(() => Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, defaults?.[k] ?? ''])))
   const [allDate, setAllDate] = useState(() => datePlus('1m'))
   // с какого дня новые общие лимиты: сразу или с даты; тем, кому подняты, — тот же день
@@ -38,22 +40,26 @@ export function DefaultLimits({ defaults, next, onSave, onCancelNext, busy, rais
   const [from, setFrom] = useState(() => datePlus('1m'))
   const [withRaised, setWithRaised] = useState(true)
   const save = () => {
-    const lim = Object.fromEntries(LIMIT_KEYS.map(([k]) => [k, num(v[k])]).filter(([, n]) => n != null))
+    // у клиентов пороги производства не показываются — сохраняются прежними (пока у аккаунтов с производством
+    // нет своих лимитов, они берутся отсюда)
+    const keep = group === 'prod' ? {} : Object.fromEntries(LIMIT_KEYS.filter(([k, , c]) => c !== 'client' && defaults?.[k] != null).map(([k]) => [k, defaults[k]]))
+    const lim = { ...keep, ...Object.fromEntries(LIMIT_KEYS.filter(([, , c]) => group === 'prod' || c === 'client').map(([k]) => [k, num(v[k])]).filter(([, n]) => n != null)) }
     if (when === 'date') {
       if (!from) return
       const at = dayStartIso(from)
       const also = withRaised && raised.length > 0
-      if (!window.confirm(`С ${dmy(at)} общие лимиты: ${limText(lim)}.${also ? `\nТем, кому подняты лимиты (${raised.length}), — тоже с ${dmy(at)} как у всех.` : ''}\nДо этого дня всё работает как сейчас. Заказы ни у кого не пропадают.`)) return
+      if (!window.confirm(`С ${dmy(at)} общие лимиты: ${limText(lim, group)}.${also ? `\nТем, кому подняты лимиты (${raised.length}), — тоже с ${dmy(at)} как у всех.` : ''}\nДо этого дня всё работает как сейчас. Заказы ни у кого не пропадают.`)) return
       onSave(lim, at, also)
     } else onSave(lim, null, false)
   }
   return (
     <details className="card" style={{ marginBottom: 12, padding: '10px 12px' }}>
-      <summary style={{ fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>Лимиты бесплатного использования</summary>
+      <summary style={{ fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>{title || 'Лимиты бесплатного использования'}</summary>
+      {note && <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0' }}>{note}</div>}
       <Hint>
         Сколько чего может быть у пользователя одновременно: лимит заказов 3 — не больше трёх заказов в кабинете; удалил один — может завести ещё один. Пустое поле — без лимита. На мастер-аккаунт лимиты не действуют; отдельному пользователю их можно снять или повысить — в его карточке ниже.
       </Hint>
-      {GROUPS.map(([g, title]) => (
+      {GROUPS.filter(([g]) => group === 'prod' || g === 'client').map(([g, title]) => (
         <div key={g} style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>{title}</div>
           {LIMIT_KEYS.filter(([, , c]) => c === g).map(([k, label]) => (
@@ -83,7 +89,7 @@ export function DefaultLimits({ defaults, next, onSave, onCancelNext, busy, rais
             {raised.length > 0 && (
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer', color: 'var(--text-muted)' }}>
                 <input type="checkbox" checked={withRaised} onChange={e => setWithRaised(e.target.checked)} style={{ marginTop: 2 }} />
-                <span>И тем, кому подняты лимиты ({raised.length}), — с этого же дня как у всех</span>
+                <span>И тем{group === 'prod' ? ' аккаунтам с производством' : ' клиентам'}, кому подняты лимиты ({raised.length}), — с этого же дня как у всех</span>
               </label>
             )}
             <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 4 }}>
@@ -97,14 +103,14 @@ export function DefaultLimits({ defaults, next, onSave, onCancelNext, busy, rais
       </button>
       {next?.at && (
         <div style={{ marginTop: 8, padding: '7px 10px', fontSize: 12, border: '0.5px solid var(--blue)', background: 'var(--blue-light)', borderRadius: 'var(--radius)' }}>
-          Запланировано с <b>{dmy(next.at)}</b>: {limText(next.limits)}.
+          Запланировано с <b>{dmy(next.at)}</b>: {limText(next.limits, group)}.
           <button type="button" disabled={busy} onClick={() => { if (window.confirm('Отменить запланированные общие лимиты?')) onCancelNext?.() }}
             style={{ marginLeft: 8, padding: '2px 10px', borderRadius: 14, fontSize: 11.5, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--danger)' }}>Отменить</button>
         </div>
       )}
       {onExpireAll && (
         <div style={{ marginTop: 12, paddingTop: 10, borderTop: '0.5px solid var(--border)' }}>
-          <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 4 }}>Только срок тем, кому подняты лимиты (общие лимиты не меняются)</div>
+          <div style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 4 }}>Только срок тем, кому подняты лимиты{group === 'prod' ? ' (аккаунты с производством)' : ' (клиенты)'} — общие лимиты не меняются</div>
           <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 6 }}>
             Сейчас поднятые лимиты (или «без ограничений») у {raised.length} польз. С выбранного дня у всех них — снова лимиты как у всех; кому продлить — поставьте новый срок в его карточке.
             Их заказы никуда не деваются: всё, что заведено до этого дня, можно доделать и отправить; новое — только в пределах лимита.

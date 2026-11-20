@@ -72,6 +72,25 @@ export async function adminSetDefaultLimits(limits, at = null) {
   return call('admin_set_default_limits', { p_limits: limits })
 }
 export const adminCancelNextLimits = () => call('admin_cancel_next_limits')
+const GROUPS_HINT = 'Отдельные лимиты для аккаунтов с производством ещё не включены в базе: выполните migration_limits_groups.sql в Supabase (SQL Editor) — один раз.'
+const missingFn = e => /function|schema|PGRST202/i.test(e || '')
+/** Общие лимиты группы ('client' | 'prod') с даты at (null — сразу) */
+export async function adminSetGroupLimits(group, limits, at = null) {
+  const r = await call('admin_set_group_limits', { p_group: group, p_limits: limits, p_at: at })
+  if (!r.error || !missingFn(r.error)) return r
+  return group === 'client' ? adminSetDefaultLimits(limits, at) : { error: GROUPS_HINT }
+}
+export async function adminCancelGroupNext(group) {
+  const r = await call('admin_cancel_group_next', { p_group: group })
+  if (!r.error || !missingFn(r.error)) return r
+  return group === 'client' ? adminCancelNextLimits() : { error: GROUPS_HINT }
+}
+/** Срок тем, кому подняты лимиты, в группе (null — всем) */
+export async function adminLimitsExpireGroup(at, group) {
+  const r = await call('admin_limits_expire_group', { p_at: at, p_group: group })
+  if (!r.error || !missingFn(r.error)) return r
+  return group ? { error: GROUPS_HINT } : adminLimitsExpireAll(at)
+}
 // expires — ISO-время, до которого действуют личные лимиты (null — бессрочно); без migration_limits_timer.sql — без срока
 export async function adminSetUserLimits(userId, unlimited, limits, expires = null) {
   const r = await call('admin_set_user_limits2', { p_user: userId, p_unlimited: !!unlimited, p_limits: limits || {}, p_expires: expires })
