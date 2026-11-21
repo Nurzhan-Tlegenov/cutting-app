@@ -170,7 +170,14 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
   const [layersOff, setLayersOff] = useState(() => new Set())   // слои модели Базиса, которые не берём в заказ
   // лимит бесплатного использования: сколько материалов можно взять за один импорт (null — сколько угодно)
   const [matCap, setMatCap] = useState(null)
-  useEffect(() => { let alive = true; myLimits().then(l => { if (alive) setMatCap(l?.limits?.import_mats?.limit ?? null) }); return () => { alive = false } }, [])
+  // свободных раскроев (каждый материал заказа с сохранённым раскроем — один раскрой); null — без лимита
+  const [nestFree, setNestFree] = useState(null)
+  useEffect(() => { let alive = true; myLimits().then(l => {
+    if (!alive) return
+    setMatCap(l?.limits?.import_mats?.limit ?? null)
+    const n = l?.limits?.nestings
+    setNestFree(n && n.limit != null ? Math.max(0, n.limit - (n.used || 0)) : null)
+  }); return () => { alive = false } }, [])
   const [mode, setMode] = useState('add')
   const [basis, setBasis] = useState(null)       // разобранная модель Базиса или Астры (вместо таблицы)
   // выемки по объектам-меткам Астры: выключенные метки и включённые кандидаты (объекты без названия «viemka»)
@@ -593,6 +600,18 @@ export default function ImportDetails({ hasDetails, onImport, existing = null, t
                 {!allowAll && <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4 }}>Бесплатно — не больше {matCap} материал{matCap === 1 ? 'а' : 'ов'} за один импорт. Остальные можно загрузить в другие заказы.</div>}
               </div>
             )}
+            {/* предупреждение заранее: импортировать можно всё, раскроить — сколько свободно раскроев */}
+            {nestFree != null && (() => {
+              const n = activeKey === ALL ? result.groups.length : 1
+              if (n <= nestFree) return null
+              return (
+                <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 12 }}>
+                  {n > 1 ? <>Материалов в импорте: <b>{n}</b> — каждый раскраивается отдельно. </> : null}
+                  Свободно раскроев: <b>{nestFree}</b>. Импортировать можно всё — заказ сохранится, но раскроить сейчас получится {nestFree ? `только ${nestFree} материал${nestFree === 1 ? '' : nestFree < 5 ? 'а' : 'ов'}` : 'ничего'}.
+                  Чтобы раскроить остальное — удалите заказы, которые уже не нужны, или напишите администратору.
+                </div>
+              )
+            })()}
 
             {/* Добавить / заменить */}
             {hasDetails && (

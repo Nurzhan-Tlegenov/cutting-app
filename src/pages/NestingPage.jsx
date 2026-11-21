@@ -8,6 +8,7 @@ import ShareBadge from '../components/ShareBadge'
 import { useKeptState } from '../hooks/useKeptState'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { limitFromError, resetLimitsCache, myLimits } from '../lib/limits'
 import { supabase } from '../lib/supabase'
 import { computeOffcutAtPoint, smallAtEdge, smallEdgeReal } from '../lib/nesting'
 import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
@@ -1989,6 +1990,13 @@ export default function NestingPage() {
   const [stockPick, setStockPick] = useState(false)    // «Взять со склада» — выбор остатков склада производства
   const hadStockRef = useRef(false)                     // у заказа были остатки со склада — при сохранении снять/обновить резерв
   const [sheetOpen, setSheetOpen] = useKeptState('sheetOpen', false)   // «Лист и обрезки» по умолчанию свёрнут
+  // свободных сохранённых раскроев у хозяина заказа (null — без лимита / не известно)
+  const [nestFree, setNestFree] = useState(null)
+  useEffect(() => {
+    let alive = true
+    myLimits().then(l => { const n = l?.limits?.nestings; if (alive) setNestFree(n && n.limit != null ? Math.max(0, n.limit - (n.used || 0)) : null) })
+    return () => { alive = false }
+  }, [order?.nesting_result])
   const [paramsWarn, setParamsWarn] = useState(() => {
     // страница только что перезагрузилась из-за не поднявшихся потоков (см. reloadOnce) — скажем, что делать
     try { return Date.now() - (Number(sessionStorage.getItem(WORKER_RELOAD_KEY)) || 0) < 10000 ? 'Приложение обновилось до новой версии — нажмите «Выполнить раскрой» ещё раз.' : '' } catch { return '' }
@@ -2185,8 +2193,22 @@ export default function NestingPage() {
     // чужой заказ (его перекраивает производство) пишется через функцию базы — напрямую заказ меняет только хозяин
     if (order?.user_id && order.user_id !== user?.id && profile?.role !== 'admin') {
       const r = await productionSaveNesting(id, value)
-      if (r.error) { setParamsWarn(r.missing ? 'Раскрой не сохранён: выполните migration_production_nesting.sql в Supabase (SQL Editor) — один раз.' : 'Не удалось сохранить раскрой: ' + r.error); return false }
-    } else await supabase.from('orders').update({ nesting_result: value }).eq('id', id)
+      if (r.error) {
+        const lim = limitFromError(r.error)
+        if (lim) { window.alert(lim.text); return false }
+        setParamsWarn(r.missing ? 'Раскрой не сохранён: выполните migration_production_nesting.sql в Supabase (SQL Editor) — один раз.' : 'Не удалось сохранить раскрой: ' + r.error); return false
+      }
+    } else {
+      // предел сохранённых раскроев (каждый материал заказа — отдельный раскрой): заказ остаётся, раскрой не сохраняется
+      const { error } = await supabase.from('orders').update({ nesting_result: value }).eq('id', id)
+      if (error) {
+        const lim = limitFromError(error)
+        window.alert(lim ? lim.text : 'Не удалось сохранить раскрой: ' + error.message)
+        if (lim) resetLimitsCache()
+        return false
+      }
+      resetLimitsCache()
+    }
     setOrder(o => ({ ...o, nesting_result: value }))
     return true
   }
@@ -2704,8 +2726,9 @@ export default function NestingPage() {
       config: { dir: cfg.dir, box: !!cfg.box, strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
     }
     const next = multiMat ? { ...savedByMat, [matKey]: toSave } : {}
+    // не сохранилось (например, предел раскроев) — дальше не идём: ни выбора, ни ЧПУ, ни отправки
+    if (!(await writeSaved(next, toSave))) return null
     if (multiMat) setSavedByMat(next)
-    await writeSaved(next, toSave)
     await reserveStock(sheets)
     return next
   }
@@ -2795,9 +2818,10 @@ export default function NestingPage() {
     if (!checkCfg(cfg)) return
     if (!cfg.saved) {
       setBusyId(cfg.id)
-      await saveNesting(cfg)
-      setConfigs(cs => cs.map(c => ({ ...c, saved: c.id === cfg.id })))
+      const ok = await saveNesting(cfg)
       setBusyId(null)
+      if (!ok) return
+      setConfigs(cs => cs.map(c => ({ ...c, saved: c.id === cfg.id })))
     }
     navigate(`/orders/${id}/${where}`)
   }
@@ -2806,10 +2830,11 @@ export default function NestingPage() {
   async function chooseCfg(cfg) {
     if (!checkCfg(cfg)) return
     setBusyId(cfg.id)
-    await saveNesting(cfg)
+    const ok = await saveNesting(cfg)
+    setBusyId(null)
+    if (!ok) return
     setConfigs(cs => cs.map(c => ({ ...c, saved: c.id === cfg.id })))
     setFocusId(cfg.id)
-    setBusyId(null)
   }
 
   // Заказ оформляется на производство. Если оно не выбрано: у кого есть своё производство — заказ идёт туда;
@@ -2870,7 +2895,7 @@ export default function NestingPage() {
     // Хронология нужна только на время раскроя — после оформления очищается
     historyRef.current = {}
     setConfigs(cs => cs.map(c => ({ ...c, history: null, histPos: -1 })))
-    await saveNesting(cfg)
+    if (!(await saveNesting(cfg))) { setBusyId(null); return }
     await supabase.from('orders').update({ status: 'new', submitted_at: new Date().toISOString() }).eq('id', id)
     // цена работ фиксируется в момент оформления: по сохранённым картам всех материалов и прайс-листу производства
     try {
@@ -2898,6 +2923,7 @@ export default function NestingPage() {
     setConfigs(cs => cs.map(c => ({ ...c, history: null, histPos: -1 })))
     try {
       const byMat = await saveNesting(cfg)
+      if (!byMat) { setBusyId(null); return }
       const { data: src, error: e0 } = await supabase.from('orders').select('*').eq('id', id).single()
       if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
       const { data: rows } = await fetchOrderDetails(id)
@@ -2929,7 +2955,7 @@ export default function NestingPage() {
         // в базе без колонки split_of — как раньше
         let { data: copy, error: e1 } = await supabase.from('orders').insert({ ...row, split_of: id }).select().single()
         if (e1 && /split_of/.test(e1.message || '')) ({ data: copy, error: e1 } = await supabase.from('orders').insert(row).select().single())
-        if (e1 || !copy) throw new Error(/limit/i.test(e1?.message || '') ? 'Достигнут предел бесплатного использования: заказов слишком много. Удалите или отправьте в архив ненужные.' : (e1?.message || 'не удалось создать заявку'))
+        if (e1 || !copy) throw new Error(limitFromError(e1)?.text || e1?.message || 'не удалось создать заявку')
         const { error: e2 } = await insertOrderDetails(mine.map(r => { const { id: _i, created_at: _c, ...restCols } = r; void _i; void _c; return { ...restCols, order_id: copy.id } }))
         if (e2) { await supabase.from('orders').delete().eq('id', copy.id); throw new Error(e2.message) }
         // Пачками (сотни id не помещаются в адрес запроса); сбой посередине — удалённые строки возвращаем на место
@@ -3007,7 +3033,7 @@ export default function NestingPage() {
       const now = new Date().toISOString()
       Object.assign(row, { user_id: user.id, order_number: await getNextOrderNumber(supabase), status: 'new', submitted_at: now, nesting_result: nesting })
       const { data: copy, error: e1 } = await supabase.from('orders').insert(row).select().single()
-      if (e1 || !copy) throw new Error(/limit/i.test(e1?.message || '') ? 'Достигнут предел бесплатного использования: заказов слишком много. Удалите или отправьте в архив ненужные.' : (e1?.message || 'не удалось создать заказ'))
+      if (e1 || !copy) throw new Error(limitFromError(e1)?.text || e1?.message || 'не удалось создать заказ')
       const { data: rows } = await fetchOrderDetails(id)
       if (rows?.length) {
         const { error: e2 } = await insertOrderDetails(rows.map(r => { const { id: _i, created_at: _c, ...rest } = r; void _i; void _c; return { ...rest, order_id: copy.id } }))
@@ -4287,6 +4313,14 @@ export default function NestingPage() {
           </div>
         )
       })()}
+
+      {/* предел сохранённых раскроев: посчитать можно, сохранить — нет (материал ещё без раскроя) */}
+      {nestFree === 0 && order?.user_id === user?.id && !(multiMat ? savedByMat[matKey] : order?.nesting_result) && (
+        <div style={{ fontSize: 12.5, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 10 }}>
+          Свободных раскроев нет. Посчитать раскрой можно, но сохранить, отправить на производство и выгрузить — нет:
+          каждый материал заказа — отдельный раскрой. Удалите заказ, который уже не нужен, или напишите администратору.
+        </div>
+      )}
 
       {/* Объединённый раскрой нескольких заказов: из каких заказов, объединение материалов */}
       <MergePanel order={order} allDetails={allDetails} materials={materials} savedByMat={savedByMat} disabled={anyRunning}
