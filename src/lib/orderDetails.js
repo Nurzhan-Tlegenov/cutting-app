@@ -9,6 +9,7 @@
 // Слабая связь: каждая пачка при обрыве повторяется (до 4 раз). Чтобы повтор не создал дубли,
 // у строк заранее свой id: если первая попытка всё-таки дошла до базы, повтор получит «такой id уже есть»
 // — значит, пачка уже записана.
+import { limitFromError } from './limits'
 import { supabase } from './supabase'
 import { withRetry } from './netRetry'
 
@@ -54,7 +55,9 @@ export async function insertOrderDetails(rows, onProgress) {
     )))
     if (error) {
       for (let k = 0; k < done.length; k += 200) await withRetry(() => supabase.from('order_details').delete().in('id', done.slice(k, k + 200)))
-      return { error }
+      // предел раскроев (новый материал в заказе — новый раскрой): понятным текстом
+      const lim = limitFromError(error)
+      return { error: lim ? { ...error, message: `${lim.text}\n\nДетали не добавлены: в них материал, которого в заказе ещё нет. Загрузите только материалы, которые уже есть в заказе, или освободите место.` } : error }
     }
     for (const r of part) done.push(r.id)
     onProgress?.(done.length, list.length)
