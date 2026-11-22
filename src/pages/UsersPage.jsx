@@ -153,6 +153,24 @@ export default function UsersPage() {
     } else setInfo(`Заявка одобрена. Отправьте код ${r.full_name || r.phone} в ${r.contact_app === 'max' ? 'MAX' : 'WhatsApp'}.`)
     return {}
   })
+  // «Не получается войти», аккаунта нет: выдать код регистрации прямо здесь (заявки нет — она создаётся одобренной),
+  // дальше — отправить его в WhatsApp / MAX / Telegram кнопками под кодом
+  const giveCode = h => act(async () => {
+    setInfo('')
+    let rq = reqs.find(q => q.digits === h.digits)
+    if (!rq) {
+      const a = await adminAllowPhone('+' + h.digits, h.name || '')
+      if (a.error) return a
+      const rr = await adminRequests()
+      rq = (rr.data || []).find(q => q.digits === h.digits)
+      if (!rq) return { error: 'Не нашлась заявка этого номера — обновите страницу.' }
+    }
+    const a = await adminApproveRequest(rq.id)
+    if (a.missing) return adminSetRequest(rq.id, 'approved')
+    if (a.error) return a
+    setInfo(`Код для ${h.name || '+' + h.digits} готов — отправьте его кнопкой ниже (WhatsApp, MAX или Telegram).`)
+    return {}
+  })
   const sendTg = r => act(async () => {
     const t = await tgBot({ action: 'send_code', request_id: r.id, tel: r.digits, origin: siteOrigin() })
     setInfo(t.error ? `Код не ушёл в Telegram: ${t.error}` : `Код отправлен в Telegram — ${r.full_name || r.phone}.`)
@@ -521,7 +539,7 @@ export default function UsersPage() {
             <>
               <p className="section-title">Не получается войти · {helps.filter(h => h.status === 'new').length}</p>
               <div className="card" data-focus="lh" style={{ marginBottom: 12, border: '1px solid var(--amber)' }}>
-                <Hint>Написали с экрана входа. Аккаунт есть — ниже, в «Восстановлении пароля», уже есть запрос: выдайте код и отправьте в WhatsApp. Аккаунта нет — свяжитесь с человеком или разрешите регистрацию его номеру.</Hint>
+                <Hint>Написали с экрана входа. Аккаунт есть — ниже, в «Восстановлении пароля», уже есть запрос: выдайте код и отправьте. Аккаунта нет — «Выдать код регистрации» и отправьте код в WhatsApp, MAX или Telegram: человек вводит его на экране входа вместе с паролем.</Hint>
                 {helps.filter(h => h.status === 'new').map(h => (
                   <div key={h.id} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -534,10 +552,12 @@ export default function UsersPage() {
                     {h.body && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{h.body}</div>}
                     <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                       <a href={`https://wa.me/${h.digits}`} target="_blank" rel="noreferrer" style={{ ...btn('main'), textDecoration: 'none', background: '#25D366' }}>WhatsApp</a>
-                      {!h.registered && <button type="button" disabled={busy} style={btn()} onClick={() => act(() => adminAllowPhone('+' + h.digits, h.name || ''))}>Разрешить регистрацию</button>}
+                      {!h.registered && !(reqs.find(q => q.digits === h.digits)?.code) && <button type="button" disabled={busy} style={btn()} onClick={() => giveCode(h)}>Выдать код регистрации</button>}
                       {h.registered && h.user_id && <button type="button" disabled={busy} style={btn('danger')} onClick={() => { const u = (users || []).find(x => x.id === h.user_id); if (u) delUser(u) }}>Удалить аккаунт</button>}
                       <button type="button" disabled={busy} style={btn()} onClick={() => act(() => adminCloseLoginHelp(h.id))}>Решено</button>
                     </div>
+                    {/* код регистрации этого номера и кнопки «отправить» — прямо здесь */}
+                    {!h.registered && (() => { const rq = reqs.find(q => q.digits === h.digits); return rq?.code ? codeRow(rq) : null })()}
                   </div>
                 ))}
               </div>
