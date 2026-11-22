@@ -276,9 +276,15 @@ export default function UsersPage() {
     if (!window.confirm(`Заблокировать ${who ? `«${who}» (${ph})` : ph}?\n\nС этим номером нельзя будет зарегистрироваться, оставить заявку или войти. Сообщение о блокировке человек не увидит — у него просто не получится.\nАккаунт и заказы не удаляются (удалить можно отдельно). Снять блокировку — в списке «Заблокированные номера».`)) return
     act(async () => { const r = await adminBlockPhone(ph, note); if (!r.error) { setBlkPhone(''); setBlkNote(''); setInfo(`Номер ${ph} заблокирован.`) } return r })
   }
+  // Код по номеру: человек написал в MAX / WhatsApp («Регистрация»), а в приложении его нет или найти долго —
+  // вписать номер → заявка создаётся одобренной, выдаётся код → ниже кнопки «отправить»
+  const [codeFor, setCodeFor] = useState('')
   const allow = () => {
-    if (digits(phone).length < 10) { setError('Введите номер телефона полностью'); return }
-    act(async () => { const r = await adminAllowPhone(phone, name); if (!r.error) { setPhone(''); setName('') } return r })
+    const d = digits(phone)
+    if (d.length < 10) { setError('Введите номер телефона полностью'); return }
+    if ((users || []).some(u => digits(u.phone) === d)) { setInfo(`+${d} уже зарегистрирован. Забыл пароль — пусть на экране входа нажмёт «Забыли пароль?» → MAX, а вы выдадите код в «Восстановлении пароля».`); return }
+    setCodeFor(d)
+    giveCode({ digits: d, name: name.trim() })
   }
 
   const fresh = reqs.filter(r => r.status === 'new')
@@ -602,6 +608,17 @@ export default function UsersPage() {
 
           <p className="section-title">Заявки на регистрацию{fresh.length ? ` · новых ${fresh.length}` : ''}</p>
           <div className="card" style={{ marginBottom: 12 }}>
+            {/* код по номеру — для тех, кто написал в MAX / WhatsApp */}
+            <div style={{ paddingBottom: 10, marginBottom: 8, borderBottom: '0.5px solid var(--border)' }}>
+              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Написали в MAX или WhatsApp — код по номеру</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-hint)', marginBottom: 6 }}>Вставьте номер, с которого написали, и нажмите «Выдать код» — ниже появится код и кнопки «В MAX», «В WhatsApp». Человек вводит номер и код на экране входа («Регистрация» → «У меня есть код») и придумывает пароль.</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input type="tel" placeholder="+7 900 000 00 00" value={phone} onChange={e => setPhone(e.target.value)} style={{ flex: 1.2, minWidth: 0 }} />
+                <input type="text" placeholder="Имя (если знаете)" value={name} onChange={e => setName(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+                <button type="button" disabled={busy} style={btn('main')} onClick={allow}>Выдать код</button>
+              </div>
+              {codeFor && (() => { const rq = reqs.find(q => q.digits === codeFor); return rq?.code ? codeRow(rq) : null })()}
+            </div>
             {(() => {
               const stuck = reqs.filter(tgStuck), can = stuck.filter(canRemind)
               if (!stuck.length) return null
@@ -657,12 +674,6 @@ export default function UsersPage() {
             ))}
             </details>
             )}
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '10px 0 6px' }}>Разрешить регистрацию номеру без заявки:</div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <input type="tel" placeholder="+7 700 000 00 00" value={phone} onChange={e => setPhone(e.target.value)} style={{ flex: 1.2, minWidth: 0 }} />
-              <input type="text" placeholder="Имя" value={name} onChange={e => setName(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
-              <button type="button" disabled={busy} style={btn('main')} onClick={allow}>Разрешить</button>
-            </div>
             {/* Заблокированные номера: ни регистрации, ни заявки, ни входа — без сообщения о блокировке */}
             <details style={{ marginTop: 12 }}>
               <summary style={{ fontSize: 12, color: 'var(--danger)', cursor: 'pointer' }}>🚫 Заблокированные номера{Array.isArray(blocked) ? ` (${blocked.length})` : ''}</summary>
