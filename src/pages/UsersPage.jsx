@@ -205,6 +205,13 @@ export default function UsersPage() {
     window.open('https://web.max.ru', '_blank', 'noreferrer')
     setInfo(`Текст скопирован. В MAX найдите ${who} (поиск по номеру) и вставьте сообщение.`)
   }
+  // В Telegram вручную (бот человеку писать не может — он бота не открывал): текст копируется, открывается
+  // чат с этим номером в Telegram — вставить и отправить
+  const toTgManual = async (text, r) => {
+    try { await navigator.clipboard.writeText(text) } catch { /* без буфера */ }
+    window.open(`https://t.me/+${r.digits}`, '_blank', 'noreferrer')
+    setInfo(`Текст скопирован. В Telegram откроется чат с +${r.digits} — вставьте сообщение и отправьте. Если чат не открылся — у человека номер скрыт в Telegram, отправьте в WhatsApp или MAX.`)
+  }
   const setupBot = () => act(async () => {
     const t = await tgBot({ action: 'setup' })
     setInfo(t.error ? `Бот не подключён: ${t.error}` : `Бот @${t.bot || TG_BOT} подключён и отвечает.`)
@@ -218,7 +225,7 @@ export default function UsersPage() {
     const tgWait = r.messenger === 'telegram' && !r.phone_verified_at
     const tgSent = !!r.phone_verified_at && !!r.code_sent_at && !dead
     const todo = tgSent ? ['✓ Код отправлен ботом в Telegram автоматически — ничего делать не нужно, ждём, когда человек его введёт.', 'var(--teal)']
-      : tgWait ? ['⏳ Ничего делать не нужно: человек подтверждает номер в Telegram, бот пришлёт код сам. Если он пишет, что не получается, — отправьте код в WhatsApp.', 'var(--text-muted)']
+      : tgWait ? ['⏳ Ничего делать не нужно: человек подтверждает номер в Telegram, бот пришлёт код сам. Если он пишет, что не получается, — выдайте код и отправьте его в WhatsApp, MAX или в Telegram вручную.', 'var(--text-muted)']
       : r.phone_verified_at ? ['Номер подтверждён в Telegram — нажмите «В Telegram», бот отправит код.', 'var(--amber)']
       : r.code_sent_at ? [`✓ Код отправлен${r.contact_app === 'max' ? '' : ' в WhatsApp'} — ждём, когда человек его введёт.`, 'var(--teal)']
       : [`👉 Отправьте код в ${r.contact_app === 'max' ? 'MAX' : 'WhatsApp'} — кнопка ниже.`, 'var(--amber)']
@@ -232,11 +239,12 @@ export default function UsersPage() {
           </span>
         </div>}
         <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-          {dead ? <button type="button" disabled={busy} style={btn(tgWait ? undefined : 'main')} onClick={() => approve(r)}>{tgWait ? 'Выдать код для WhatsApp' : r.code ? 'Новый код' : 'Выдать код'}</button>
+          {dead ? <button type="button" disabled={busy} style={btn(tgWait ? undefined : 'main')} onClick={() => approve(r)}>{tgWait ? 'Выдать код (WhatsApp / MAX)' : r.code ? 'Новый код' : 'Выдать код'}</button>
             : <>
-              {r.tg_linked && <button type="button" disabled={busy} style={btn('main')} onClick={() => sendTg(r)}>В Telegram</button>}
-              {r.contact_app === 'max' && <button type="button" style={btn('main')} onClick={() => toMax(codeMsg(r.code, r.digits), r)}>В MAX</button>}
+              {r.tg_linked && <button type="button" disabled={busy} style={btn('main')} onClick={() => sendTg(r)}>В Telegram (бот)</button>}
               <a href={`https://wa.me/${r.digits}?text=${encodeURIComponent(codeMsg(r.code, r.digits))}`} target="_blank" rel="noreferrer" style={{ ...btn(r.tg_linked || r.contact_app === 'max' ? undefined : 'main'), textDecoration: 'none' }}>В WhatsApp</a>
+              <button type="button" style={btn(r.contact_app === 'max' && !r.tg_linked ? 'main' : undefined)} onClick={() => toMax(codeMsg(r.code, r.digits), r)}>В MAX</button>
+              <button type="button" style={btn()} onClick={() => toTgManual(codeMsg(r.code, r.digits), r)}>В Telegram вручную</button>
               <button type="button" disabled={busy} style={btn()} onClick={() => approve(r)}>Новый код</button>
             </>}
         </div>
@@ -559,8 +567,9 @@ export default function UsersPage() {
                       )}
                       <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                         <button type="button" disabled={busy} style={btn(r.status === 'new' || dead ? 'main' : undefined)} onClick={() => act(() => adminIssueReset(r.id))}>{r.status === 'new' ? 'Выдать код' : 'Новый код'}</button>
-                        {r.status === 'issued' && !dead && r.via === 'max' && <button type="button" style={btn('main')} onClick={() => toMax(msg, r)}>Отправить в MAX</button>}
-                        {r.status === 'issued' && !dead && <a href={`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" style={{ ...btn(r.via === 'max' ? undefined : 'main'), textDecoration: 'none' }}>{r.via === 'max' ? 'В WhatsApp' : 'Отправить в WhatsApp'}</a>}
+                        {r.status === 'issued' && !dead && <a href={`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" style={{ ...btn(r.via === 'max' ? undefined : 'main'), textDecoration: 'none' }}>В WhatsApp</a>}
+                        {r.status === 'issued' && !dead && <button type="button" style={btn(r.via === 'max' ? 'main' : undefined)} onClick={() => toMax(msg, r)}>В MAX</button>}
+                        {r.status === 'issued' && !dead && <button type="button" style={btn()} onClick={() => toTgManual(msg, r)}>В Telegram</button>}
                         <button type="button" disabled={busy} style={btn('danger')} onClick={() => act(() => adminCloseReset(r.id))}>Отказать</button>
                       </div>
                     </div>
@@ -601,7 +610,7 @@ export default function UsersPage() {
                   <button type="button" disabled={busy} style={btn('main')} onClick={() => approve(r)}>Одобрить</button>
                   <button type="button" disabled={busy} style={btn('danger')} onClick={() => act(() => adminSetRequest(r.id, 'rejected'))}>Отклонить</button>
                   <a href={`https://wa.me/${r.digits}`} target="_blank" rel="noreferrer" style={{ ...btn(), textDecoration: 'none' }}>WhatsApp</a>
-                  {r.contact_app === 'max' && <button type="button" style={btn()} onClick={() => toMax(`Здравствуйте! Это RaskroyPro — по вашей заявке на регистрацию.`, r)}>MAX</button>}
+                  <button type="button" style={btn()} onClick={() => toMax(`Здравствуйте! Это RaskroyPro — по вашей заявке на регистрацию.`, r)}>MAX</button>
                 </div>
               </div>
             ))}
