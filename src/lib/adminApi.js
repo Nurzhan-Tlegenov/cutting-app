@@ -30,6 +30,10 @@ export async function requestSignup(name, phone, comment, country = '', city = '
 
 // ── Подтверждение номера (migration_phone_verify.sql, функция бота supabase/functions/tg-bot) ──
 export const TG_BOT = 'RaskroyProBot'
+// Номер администратора в MAX: первым незнакомому в MAX написать часто нельзя (приватность у получателя) —
+// поэтому выбравший MAX пишет сюда сам, с своего номера (так и номер подтверждается), а код приходит ответом.
+// Пусто — блок «напишите нам первым» не показывается.
+export const MAX_ADMIN_PHONE = ''
 export const tgStartLink = token => `https://t.me/${TG_BOT}?start=${token}`
 export const VERIFY_SQL_HINT = 'Подтверждение номера ещё не включено: выполните migration_phone_verify.sql в Supabase (SQL Editor) — один раз.'
 

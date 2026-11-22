@@ -2,7 +2,7 @@ import { nameOk } from '../lib/profileRules'
 import { useEffect, useState } from 'react'
 import LangPicker from '../components/LangPicker'
 import { offerLangFrom, getLang, tr } from '../i18n'
-import { guestModeOpen, signupOpen, signupSetApp, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest, tgResetLink, resetByMail } from '../lib/adminApi'
+import { guestModeOpen, signupOpen, signupSetApp, requestSignup2, confirmSignupCode, signupMissing, tgStartLink, requestPasswordReset, confirmPasswordReset, loginHelpRequest, tgResetLink, resetByMail, MAX_ADMIN_PHONE } from '../lib/adminApi'
 import { COUNTRY_NAMES, PHONE_COUNTRIES, phoneCountry, guessPhoneCountry, guessCountryName, nationalDigits, formatNational, fullPhone, phoneProblem, splitFullPhone } from '../lib/phoneCountries'
 import { useAuth, googleEnabled } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -97,6 +97,7 @@ export default function AuthPage() {
   }
   // Куда прислать код: Telegram (бот подтверждает номер сразу) или WhatsApp (код пришлёт администратор)
   const [messenger, setMessenger] = useState('telegram')
+  const [maxReset, setMaxReset] = useState(false)   // «Забыли пароль?» → код в MAX: показать «напишите нам первым»
   const [req, setReq] = useState(null)   // ответ на заявку: статус, метка для бота, подтверждён ли номер, выдан ли код
   const needCode = approved && req && req.status === 'approved' && !req.legacy
 
@@ -153,7 +154,10 @@ export default function AuthPage() {
     const r = await requestPasswordReset(form.phone, via)
     setLoading(false)
     if (r.error) setError(r.error)
-    else setNote(`Запрос отправлен. Мы пришлём код в ${via === 'max' ? 'MAX' : 'WhatsApp'} на этот номер — введите его ниже вместе с новым паролем.`)
+    else {
+      setMaxReset(via === 'max')
+      setNote(`Запрос отправлен. Мы пришлём код в ${via === 'max' ? 'MAX' : 'WhatsApp'} на этот номер — введите его ниже вместе с новым паролем.`)
+    }
   }
 
   // приглашённый выбрал WhatsApp, но не хочет ждать код от пригласившего — переключаемся на Telegram (код придёт сам)
@@ -507,7 +511,7 @@ export default function AuthPage() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {[['telegram', 'Telegram', open ? 'сразу — номер подтверждается в 1 тап, код приходит сам' : 'быстро — номер подтверждается в 1 тап, код приходит сам'],
                     ['whatsapp', 'WhatsApp', refI ? 'код пришлёт тот, кто вас пригласил' : open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения'],
-                    ['max', 'MAX', refI ? 'код пришлёт тот, кто вас пригласил' : open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения']].map(([k, title, sub]) => (
+                    ['max', 'MAX', refI ? 'код пришлёт тот, кто вас пригласил' : MAX_ADMIN_PHONE ? 'напишите нам первым в MAX — код придёт ответом' : open ? 'код пришлёт администратор — придётся подождать' : 'код пришлёт администратор после одобрения']].map(([k, title, sub]) => (
                     <button key={k} type="button" onClick={() => setMessenger(k)}
                       style={{ flex: k === 'telegram' ? '1 1 100%' : '1 1 40%', textAlign: 'left', padding: '10px 10px 8px', borderRadius: 'var(--radius)', cursor: 'pointer', position: 'relative',
                         border: messenger === k ? '1.5px solid var(--blue)' : '0.5px solid var(--border-md)', background: messenger === k ? 'var(--blue-light, var(--bg2))' : 'transparent' }}>
@@ -596,6 +600,23 @@ export default function AuthPage() {
             </div>}
 
             {note && <p style={{ fontSize: 13, color: 'var(--teal)' }}>{note}</p>}
+            {/* MAX: первым незнакомому там часто не написать — человек пишет нам сам, со своего номера (это и подтверждает
+                номер), код приходит ответом */}
+            {MAX_ADMIN_PHONE && ((mode === 'register' && messenger === 'max' && req && !req.registered && req.ref !== 'ok' && req.status !== 'rejected') || (mode === 'forgot' && maxReset)) && (
+              <div style={{ fontSize: 13, background: 'var(--bg2)', border: '1px solid #5B47E0', borderRadius: 'var(--radius)', padding: '10px 12px' }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Обязательно: напишите нам первым в MAX</div>
+                <div style={{ color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                  С вашего номера напишите в MAX на номер <b style={{ color: 'var(--text)' }}>{MAX_ADMIN_PHONE}</b> одно слово: «{mode === 'forgot' ? 'Пароль' : 'Регистрация'}».
+                  Так мы увидим, что номер ваш, и ответим кодом. Без вашего сообщения MAX может не пропустить наш ответ.
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn-secondary" style={{ flex: '1 1 40%' }}
+                    onClick={async () => { try { await navigator.clipboard.writeText(MAX_ADMIN_PHONE); setNote('Номер скопирован — найдите его в MAX и напишите.') } catch { /* без буфера */ } }}>Скопировать номер</button>
+                  <a href="https://max.ru" target="_blank" rel="noreferrer" className="btn-primary"
+                    style={{ flex: '1 1 40%', textAlign: 'center', textDecoration: 'none', background: '#5B47E0' }}>Открыть MAX</a>
+                </div>
+              </div>
+            )}
             {mode === 'register' && req?.tg_token && !req.verified && !req.registered && (
               <a href={tgStartLink(req.tg_token)} target="_blank" rel="noreferrer" className="btn-primary"
                 style={{ display: 'block', textAlign: 'center', textDecoration: 'none', background: '#229ED9' }}>📱 Подтвердить номер в Telegram</a>

@@ -246,7 +246,8 @@ export default function UsersPage() {
       : tgWait ? ['⏳ Ничего делать не нужно: человек подтверждает номер в Telegram, бот пришлёт код сам. Если он пишет, что не получается, — выдайте код и отправьте его в WhatsApp, MAX или в Telegram вручную.', 'var(--text-muted)']
       : r.phone_verified_at ? ['Номер подтверждён в Telegram — нажмите «В Telegram», бот отправит код.', 'var(--amber)']
       : r.code_sent_at ? [`✓ Код отправлен${r.contact_app === 'max' ? '' : ' в WhatsApp'} — ждём, когда человек его введёт.`, 'var(--teal)']
-      : [`👉 Отправьте код в ${r.contact_app === 'max' ? 'MAX' : 'WhatsApp'} — кнопка ниже.`, 'var(--amber)']
+      : r.contact_app === 'max' ? ['👉 Выбрал MAX: он должен написать вам в MAX первым (так подтверждается номер) — ответьте ему кодом, кнопка «В MAX». Не пишет — отправьте в WhatsApp.', 'var(--amber)']
+      : ['👉 Отправьте код в WhatsApp — кнопка ниже.', 'var(--amber)']
     return (
       <div style={{ marginTop: 6 }}>
         <div style={{ fontSize: 12, color: todo[1], marginBottom: 4, lineHeight: 1.35 }}>{todo[0]}</div>
