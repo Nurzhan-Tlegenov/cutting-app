@@ -33,7 +33,7 @@ export const TG_BOT = 'RaskroyProBot'
 // Номер администратора в MAX: первым незнакомому в MAX написать часто нельзя (приватность у получателя) —
 // поэтому выбравший MAX пишет сюда сам, с своего номера (так и номер подтверждается), а код приходит ответом.
 // Пусто — блок «напишите нам первым» не показывается.
-export const MAX_ADMIN_PHONE = ''
+export const MAX_ADMIN_PHONE = '+7 705 875 13 44'
 export const tgStartLink = token => `https://t.me/${TG_BOT}?start=${token}`
 export const VERIFY_SQL_HINT = 'Подтверждение номера ещё не включено: выполните migration_phone_verify.sql в Supabase (SQL Editor) — один раз.'
 

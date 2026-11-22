@@ -611,7 +611,7 @@ export default function AuthPage() {
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                   <button type="button" className="btn-secondary" style={{ flex: '1 1 40%' }}
-                    onClick={async () => { try { await navigator.clipboard.writeText(MAX_ADMIN_PHONE); setNote('Номер скопирован — найдите его в MAX и напишите.') } catch { /* без буфера */ } }}>Скопировать номер</button>
+                    onClick={async () => { try { await navigator.clipboard.writeText(MAX_ADMIN_PHONE.replace(/\s/g, '')); setNote('Номер скопирован — найдите его в MAX и напишите.') } catch { /* без буфера */ } }}>Скопировать номер</button>
                   <a href="https://max.ru" target="_blank" rel="noreferrer" className="btn-primary"
                     style={{ flex: '1 1 40%', textAlign: 'center', textDecoration: 'none', background: '#5B47E0' }}>Открыть MAX</a>
                 </div>
