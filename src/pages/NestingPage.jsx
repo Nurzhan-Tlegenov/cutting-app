@@ -11,7 +11,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { limitFromError, resetLimitsCache, myLimits } from '../lib/limits'
 import { supabase } from '../lib/supabase'
 import { computeOffcutAtPoint, smallAtEdge, smallEdgeReal } from '../lib/nesting'
-import { runLiveNesting, liveScore, liveBetter } from '../lib/liveNesting'
+import { runLiveNesting, liveScore, liveBetter, boxKey } from '../lib/liveNesting'
 import SheetsOverview from '../components/SheetsOverview'
 import DeskSplit, { usePane } from '../components/DeskSplit'
 import { useDesktop, useDevicePixelRatio } from '../hooks/useDesktop'
@@ -517,6 +517,20 @@ function findFreeSpot(sheetPlaced, part, usableX, usableY, kerf, canRotate) {
   return null
 }
 
+// Настоящий силуэт фигурной детали (скругления, косые срезы, вырезы на краю) в координатах уложенной детали — как
+// p.polygon: [{ x, y }]. Для деталей «по габаритам» (p.box): на карте виден силуэт внутри габарита. null — прямоугольная
+function boxSilhouette(p, d) {
+  if (!d) return null
+  if (d._boxSil === undefined) {
+    let pr
+    try { pr = parsePolygonFromDetail({ ...d, contour: typeof d.contour === 'string' ? d.contour : d.contour ? JSON.stringify(d.contour) : null }) } catch { pr = null }
+    d._boxSil = pr?.custom ? pr.polygon.map(q => (Array.isArray(q) ? q : [q.x, q.y])) : null
+  }
+  if (!d._boxSil) return null
+  const W = Number(d.width) || 0, H = Number(d.length) || 0, t = placedTurns(p, d)
+  return d._boxSil.map(([x, y]) => rotatePointTimes(x, y, W, H, t))
+}
+
 function SheetCanvas({ corner = 'bl', sheet, usableX, usableY, sheetL, sheetW, marginL, marginT, kerf, colorMap, details, labelMode = 'name', showEdges = true, dimScale = 1, sameFill = null, sameAlpha = 0.22, onMove, interactive, showOffcuts, offcutMode, manualOffcuts, onManualOffcuts, selectedIdx = -1, onSelect, onEditPart, onSwipe = null, canSwipe = null }) {
   const canvasRef = useRef(null)
   const draggingRef = useRef(null)
@@ -722,7 +736,18 @@ function SheetCanvas({ corner = 'bl', sheet, usableX, usableY, sheetL, sheetW, m
       ctx.fillStyle = hasCollision ? 'rgba(226,75,74,0.35)' : (isDragging ? 'rgba(24,95,165,0.12)' : (isSelected ? 'rgba(184,92,0,0.18)' : atEdge ? 'rgba(245,158,11,0.28)' : baseFill))
       ctx.strokeStyle = hasCollision ? '#E24B4A' : (isSelected ? '#B85C00' : atEdge ? '#D97706' : PART_STROKE)
       ctx.lineWidth = hasCollision ? 2.5 : (isSelected ? 2.5 : atEdge ? 2 : 1.4)
-      if (hasShape) {
+      const sil = !hasShape && p.box && details ? boxSilhouette(p, details[p.detailIndex]) : null
+      if (sil) {
+        // «по габаритам»: габарит (так деталь режется) — бледно и штрихом, внутри — настоящий силуэт детали
+        ctx.save()
+        ctx.globalAlpha = 0.35; ctx.fillRect(x, y, w, h); ctx.globalAlpha = 1
+        if (typeof ctx.setLineDash === 'function') ctx.setLineDash([4, 3])
+        ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h)
+        ctx.restore()
+        ctx.beginPath()
+        sil.forEach((pt, vi) => { const sx = x + pt.x * sc, sy = y + h - pt.y * sc; if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy) })
+        ctx.closePath(); ctx.fill(); ctx.stroke()
+      } else if (hasShape) {
         ctx.beginPath()
         p.polygon.forEach((pt, vi) => {
           const sx = x + pt.x * sc, sy = y + h - pt.y * sc
@@ -2678,6 +2703,37 @@ export default function NestingPage() {
     }))
   }
 
+  // «По габаритам» → «Выборочно»: какие фигурные детали по габариту. Меняется сразу и на готовом раскрое, без пересчёта:
+  // деталь «по габариту» → по контуру — её силуэт внутри того же габарита (соседей не задевает); по контуру → по габариту —
+  // прямоугольник габарита (если задевает соседа, на карте подсветится — тогда пересчитать)
+  function setBoxIds(cfgId, ids) {
+    setConfigs(cs => cs.map(c => {
+      if (c.id !== cfgId) return c
+      const want = new Set((ids || []).map(String))
+      if (!c.result || !c.sheetsData?.length) return { ...c, boxIds: [...want] }
+      let clash = false
+      const sheetsData = c.sheetsData.map(sh => ({ ...sh, placed: sh.placed.map(p => {
+        const d = details[p.detailIndex]
+        if (!d || !boxSilhouette(p, d)) return p
+        const on = want.has(boxKey(d, p.detailIndex))
+        if (on && !p.box) {
+          const q = { ...p, box: true }; delete q.polygon
+          const x1 = p.x + p.w, y1 = p.y + p.h
+          if (sh.placed.some(o => o !== p && o.x < x1 - 0.5 && o.x + o.w > p.x + 0.5 && o.y < y1 - 0.5 && o.y + o.h > p.y + 0.5)) clash = true
+          return q
+        }
+        if (!on && p.box) {
+          const q = { ...p }; delete q.box
+          q.polygon = boxSilhouette(p, d); q.rotation = placedTurns(p, d) * 90
+          return q
+        }
+        return p
+      }) }))
+      return { ...c, boxIds: [...want], sheetsData, saved: false, result: { ...c.result, boxIds: [...want] },
+        note: clash ? 'Габарит детали задевает соседей (сцеплена с ними по контуру) — пересчитайте раскрой' : '' }
+    }))
+  }
+
   function fromBuffer(cfgId, toNewSheet) {
     setConfigs(cs => cs.map(c => {
       if (c.id !== cfgId || !c.result) return c
@@ -3523,7 +3579,7 @@ export default function NestingPage() {
                     ))}
                   </div>
                 )}
-                {cfg.box && cfg.boxPick && !prodRectOnly && <ShapedPick details={details} value={cfg.boxIds || []} onChange={v => updateCfg(cfg.id, { boxIds: v })} />}
+                {cfg.box && cfg.boxPick && !prodRectOnly && <ShapedPick details={details} value={cfg.boxIds || []} onChange={v => setBoxIds(cfg.id, v)} />}
                 <Hint>
                   Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах, и фрезер режет её прямоугольником. Включите, если производство режет только прямоугольники. «Выборочно» — отметьте, какие детали по габариту (вырез потом: после кромки, на шестистороннем), остальные укладываются и режутся сразу по контуру. На бирке у всех деталей — настоящий силуэт с вырезами.
                 </Hint>
@@ -3892,6 +3948,16 @@ export default function NestingPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: (cfg.buffer.length || selPartObj) ? 6 : 0 }}>
                       <span style={{ fontSize: 12, fontWeight: 500, color: '#B85C00' }}>Буфер · {cfg.buffer.length}</span>
                       <div style={{ flex: 1 }} />
+                      {view === 'sheet' && selPartObj && cfg.box && cfg.boxPick && !prodRectOnly && boxSilhouette(selPartObj, details[selPartObj.detailIndex]) && (() => {
+                        const k = boxKey(details[selPartObj.detailIndex], selPartObj.detailIndex), on = (cfg.boxIds || []).map(String).includes(k)
+                        return (
+                          <button onClick={() => setBoxIds(cfg.id, on ? (cfg.boxIds || []).filter(x => String(x) !== k) : [...(cfg.boxIds || []), k])}
+                            title="Резать эту деталь прямоугольником габарита (вырез потом) или сразу по контуру"
+                            style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: '0.5px solid var(--blue)', background: on ? 'var(--blue)' : 'transparent', color: on ? 'white' : 'var(--blue)', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                            {on ? '▭ По габариту ✓' : '▭ По габариту'}
+                          </button>
+                        )
+                      })()}
                       {view === 'sheet' && selPartObj && (
                         <button onClick={() => toBuffer(cfg.id)}
                           style={{ padding: '5px 10px', borderRadius: 'var(--radius)', border: 'none', background: '#B85C00',

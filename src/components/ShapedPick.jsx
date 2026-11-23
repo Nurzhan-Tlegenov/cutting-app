@@ -3,15 +3,18 @@
 // value — ключи отмеченных деталей (boxKey из liveNesting.js: id строки заказа)
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { boxKey } from '../lib/liveNesting'
+import { detailHoles } from '../lib/partHoles'
 
 const r1 = v => Math.round((Number(v) || 0) * 10) / 10
 
-function Thumb({ poly, w, l }) {
-  const S = 40, k = Math.min((S - 4) / (w || 1), (S - 4) / (l || 1)), ox = (S - w * k) / 2, oy = (S - l * k) / 2
-  const pts = poly.map(([x, y]) => `${(ox + x * k).toFixed(1)},${(S - oy - y * k).toFixed(1)}`).join(' ')
+function Thumb({ poly, holes = [], w, l }) {
+  const S = 44, k = Math.min((S - 4) / (w || 1), (S - 4) / (l || 1)), ox = (S - w * k) / 2, oy = (S - l * k) / 2
+  const pts = list => list.map(([x, y]) => `${(ox + x * k).toFixed(1)},${(S - oy - y * k).toFixed(1)}`).join(' ')
   return (
     <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} style={{ flex: '0 0 auto' }}>
-      <polygon points={pts} fill="var(--bg2)" stroke="var(--text-muted)" strokeWidth="1" />
+      <rect x={ox} y={oy} width={w * k} height={l * k} fill="none" stroke="var(--text-hint)" strokeWidth="0.6" strokeDasharray="2 2" />
+      <polygon points={pts(poly)} fill="var(--bg2)" stroke="var(--text-muted)" strokeWidth="1" />
+      {holes.map((h, i) => <polygon key={i} points={pts(h)} fill="var(--bg)" stroke="var(--danger)" strokeWidth="0.8" />)}
     </svg>
   )
 }
@@ -24,7 +27,7 @@ export default function ShapedPick({ details, value, onChange }) {
     let pr
     try { pr = parsePolygonFromDetail({ ...d, contour: typeof d.contour === 'string' ? d.contour : d.contour ? JSON.stringify(d.contour) : null }) } catch { pr = null }
     if (!pr?.custom) return
-    parts.push({ key: boxKey(d, i), name: String(r.name || d.name || 'Деталь'), w: Number(d.width) || 0, l: Number(d.length) || 0, qty: Number(d.qty) || 1, poly: pr.polygon.map(q => (Array.isArray(q) ? q : [q.x, q.y])) })
+    parts.push({ key: boxKey(d, i), name: String(r.name || d.name || 'Деталь'), w: Number(d.width) || 0, l: Number(d.length) || 0, qty: Number(d.qty) || 1, poly: pr.polygon.map(q => (Array.isArray(q) ? q : [q.x, q.y])), holes: (() => { try { return detailHoles(d).map(h => h.map(q => [q.x, q.y])) } catch { return [] } })() })
   })
   if (!parts.length) return null
   const put = (keys, on) => { const n = new Set(sel); keys.forEach(k => (on ? n.add(k) : n.delete(k))); onChange([...n].filter(k => parts.some(p => p.key === k))) }
@@ -41,7 +44,7 @@ export default function ShapedPick({ details, value, onChange }) {
         {parts.map(p => (
           <label key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', borderTop: '0.5px solid var(--border)', cursor: 'pointer' }}>
             <input type="checkbox" checked={sel.has(p.key)} onChange={e => put([p.key], e.target.checked)} style={{ width: 17, height: 17, flex: '0 0 auto' }} />
-            <Thumb poly={p.poly} w={p.w} l={p.l} />
+            <Thumb poly={p.poly} holes={p.holes} w={p.w} l={p.l} />
             <span style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>
               <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
               <span style={{ fontSize: 11, color: 'var(--text-hint)' }}>{r1(p.l)} × {r1(p.w)} · {p.qty} шт · {sel.has(p.key) ? 'по габариту (прямоугольник)' : 'по контуру'}</span>
