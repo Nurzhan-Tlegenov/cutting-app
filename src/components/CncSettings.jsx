@@ -19,6 +19,7 @@ import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
 import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot, forkShared } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor, skipOf, SKIP_KEYS, faceToolList } from '../lib/gcode'
 import OrderList, { mergeOrder } from './OrderList'
+import RectPick from './RectPick'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
 // cnc — настройки целиком, onChange(cnc) — сохранить.
@@ -1278,7 +1279,7 @@ export function CncTools({ cnc, onChange }) {
 }
 
 // ─── Обработка контуров ─────────────────────────────────────────────────────
-export function CncOps({ cnc, onChange, layers }) {
+export function CncOps({ cnc, onChange, layers, details = null }) {
   const ops = cnc.ops
   // Глубина сквозного реза контура — заглубление фрезы ниже стола у раскроечного станка, которым выпускается G-код.
   // Задаётся только здесь (на «Основных» её нет), рядом с остальной обработкой контура; самонастройка её не трогает.
@@ -1308,7 +1309,7 @@ export function CncOps({ cnc, onChange, layers }) {
   const hasTool = id => (cnc.tools || []).some(t => t.id === id)
   // что не выводить в программу — все шесть ключей пишутся явно; старые face/holes больше не нужны (см. skipOf)
   const skip = skipOf(ops)
-  const setSkip = patch => { const next = { ...skip, ...patch }; onChange({ ...cnc, ops: { ...ops, skip: Object.fromEntries(SKIP_KEYS.map(k => [k, !!next[k]])) } }) }
+  const setSkip = patch => { const next = { ...skip, ...patch }; onChange({ ...cnc, ops: { ...ops, skip: { ...(ops.skip || {}), ...Object.fromEntries(SKIP_KEYS.map(k => [k, !!next[k]])) } } }) }
   const offStyle = off => (off ? { opacity: 0.45 } : null)
   const OffNote = ({ on }) => (on ? <p style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>Отключено — в программу не попадает (см. «Выводить в УП»).</p> : null)
   const toolName = id => { const t = (cnc.tools || []).find(x => x.id === id); return t ? `T${t.t} Ø${r1(t.d)}` : '' }
@@ -1552,6 +1553,7 @@ export function CncOps({ cnc, onChange, layers }) {
             </div>
             <Hint>Снимите галочку — эта обработка не попадёт ни в программу, ни в симуляцию. Удобно, если присадку делаете на шестистороннем станке. «Фигурные контуры» выключены — каждая деталь режется прямоугольником по своему габариту, и раскрой фигурных деталей идёт по габаритам. Сквозное — глубина не меньше толщины листа.</Hint>
             {skip.contour && <Hint>Раскрой должен быть сделан по габаритам: если фигурные детали уложены вплотную друг в друга, при создании программы будет предупреждение.</Hint>}
+            <RectPick skip={skip} details={details} onSkip={patch => onChange({ ...cnc, ops: { ...ops, skip: { ...(ops.skip || {}), ...patch } } })} />
           </Fold>
         )
       })()}

@@ -14,6 +14,7 @@
  */
 import { getAllDrillPoints, getGrooveRects, rotatePointTimes } from './drillGeometry'
 import { detailHoles, placedTurns } from './partHoles'
+import { parsePolygonFromDetail } from './trueShapeNesting'
 import { smoothLoop, arcRuns } from './arcFit'
 import { bandPolygon, extendEnd, flatOf, closedOffset } from './pathBand'
 import { postView } from './postTools'
@@ -82,8 +83,13 @@ export const skipOf = ops => {
     pockets: has('pockets') ? !!s.pockets : !!s.face,
     through: has('through') ? !!s.through : !!s.holes,
     blind: has('blind') ? !!s.blind : !!s.holes,
+    // «Резать прямоугольниками» выборочно: pick — режутся прямоугольником только отмеченные детали (rect: id строки
+    // детали -> true), остальные — по своему контуру; без pick — все фигурные (как было)
+    pick: !!s.contourPick, rect: s.rectSel && typeof s.rectSel === 'object' ? s.rectSel : {},
   }
 }
+/** Режется ли эта деталь прямоугольником по габариту (detail — строка заказа или её копия с _raw) */
+export const rectCut = (sk, detail) => !!sk?.contour && (!sk.pick || !!sk.rect?.[(detail?._raw || detail)?.id])
 
 /** Всё, что надо обработать на уложенной детали p — в её локальных координатах на листе (как p.polygon), мм, Y вверх.
  *  skip — см. skipOf; без него — вся обработка детали (так считает статистика и цена). */
@@ -91,7 +97,19 @@ export function partFeatures(p, detail, T, skip = null) {
   let outline = Array.isArray(p.polygon) && p.polygon.length > 2 ? p.polygon.map(q => [q.x, q.y]) : [[0, 0], [p.origX, 0], [p.origX, p.origY], [0, p.origY]]
   const sk = skip || {}
   let boxed = false
-  if (sk.contour) {
+  // «Резать прямоугольниками» → «Выборочно», деталь не отмечена: раскрой по габаритам (p.box, силуэта на листе нет), а
+  // режется она по контуру —
+  // контур — настоящий силуэт детали, повёрнутый как она лежит; он помещается в свой габарит
+  if (p.box && detail && sk.contour && sk.pick && !rectCut(sk, detail)) {
+    try {
+      const pr = parsePolygonFromDetail({ ...detail, contour: typeof detail.contour === 'string' ? detail.contour : detail.contour ? JSON.stringify(detail.contour) : null })
+      if (pr?.custom) {
+        const W0 = Number(detail.width) || 0, H0 = Number(detail.length) || 0, tm = placedTurns(p, detail)
+        outline = pr.polygon.map(q => { const r = rotatePointTimes(Array.isArray(q) ? q[0] : q.x, Array.isArray(q) ? q[1] : q.y, W0, H0, tm); return [r.x, r.y] })
+      }
+    } catch { /* силуэт не разобрался — режем габарит */ }
+  }
+  if (rectCut(sk, detail)) {
     const bb = bboxOf(outline)
     if (!isAxisRect(outline, bb)) { outline = [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]; boxed = true }
   }

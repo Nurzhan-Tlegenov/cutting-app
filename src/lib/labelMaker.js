@@ -15,6 +15,7 @@ import { isTwoSided } from './partInfo'
 import { backMarkCorner } from './backSide'
 import { placedTurns, placedHoles, edgeHole } from './partHoles'
 import { rotatePointTimes, getAllDrillPoints, getGrooveRects } from './drillGeometry'
+import { parsePolygonFromDetail } from './trueShapeNesting'
 import { detailEdgeList } from './edgeLength'
 import { sheetGeo } from './savedNesting'
 import { edgeThick, parseEdgeTypes, edgeAliases, edgeAlias, allowApplied, narrowApplied, narrowSide as narrowSideOf, narrowTrimTo, finishedDims, finishedAdds } from './edgeCut'
@@ -753,12 +754,27 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
   ctx.save()
   ctx.strokeStyle = '#000'; ctx.fillStyle = '#000'; ctx.lineJoin = 'round'; ctx.lineCap = 'butt'
   ctx.lineWidth = cw
-  poly(outline.map(q => S(q[0], q[1]))); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); ctx.fillStyle = '#000'
+  // Деталь уложена и вырезана прямоугольником по габариту («Резать только прямоугольники» / «по габаритам»): на бирке —
+  // всё равно её настоящий силуэт с вырезами (сплошной), а габарит, которым её вырезали, — штрихом. Иначе рабочий
+  // видит прямоугольник и думает, что деталь готова, а вырез ещё делать (на шестистороннем, после кромки и т. п.)
+  let real = null
+  if (p.box && d) {
+    try {
+      const pr = parsePolygonFromDetail({ ...d, contour: typeof d.contour === 'string' ? d.contour : c ? JSON.stringify(c) : null })
+      if (pr?.custom) real = pr.polygon.map(q => (Array.isArray(q) ? R(q[0], q[1]) : R(q.x, q.y)))
+    } catch { real = null }
+  }
+  if (real) {
+    ctx.save(); ctx.lineWidth = Math.max(1, iw * 0.7)
+    if (typeof ctx.setLineDash === 'function') ctx.setLineDash([3 * line, 2 * line])
+    poly(outline.map(q => S(q[0], q[1]))); ctx.stroke(); ctx.restore()
+    poly(real); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); ctx.fillStyle = '#000'
+  } else { poly(outline.map(q => S(q[0], q[1]))); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); ctx.fillStyle = '#000' }
   if (c) {
     // вырезы — сплошной линией с крестом (сквозные), выемки — штриховой
     const holes = placedHoles({ ...p, box: false }, d), src = c.holes || []
     holes.forEach((hp, i) => {
-      if (p.box && edgeHole(hp, p)) return          // «по габаритам»: угловых и краевых вырезов у детали нет
+      if (p.box && !real && edgeHole(hp, p)) return  // «по габаритам», силуэт не нашёлся — краевые вырезы не рисуем
       const hole = src.length === holes.length ? src[i] : null
       if (hole?.type === 'pocket' && hole.face === 'back') return
       const pts = hp.map(q => S(q.x, q.y))

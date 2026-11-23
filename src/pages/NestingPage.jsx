@@ -3587,7 +3587,7 @@ export default function NestingPage() {
             )}
             {/* «Выводить в УП» — быстрый доступ для производства (те же галочки, что в ЧПУ → «Обработка»), фрезер */}
             {canCnc && !beamSaw && cuttingMethod === 'nesting' && (
-              <CncSkipQuick prodId={order?.production_id || null} onChanged={() => bumpCnc(n => n + 1)} />
+              <CncSkipQuick prodId={order?.production_id || null} details={details} onChanged={() => bumpCnc(n => n + 1)} />
             )}
             {/* Какие детали попадают в «мелкие» при этих порогах — видно сразу, до запуска */}
             {cfg.small && (cfg.sq !== '' || cfg.side !== '') && (() => {
