@@ -673,23 +673,48 @@ function KdtFormat({ post, set }) {
   )
 }
 
-// ─── Торцевая присадка PMSK PT2-28 (β): только отверстия в торец, G-код .nc на деталь ───
+// ─── Торцевая присадка PMSK PT2-28 (β): вся обработка торцов, G-код .nc на деталь ───
+// Шпиндели T1, T2… — не сверлильная группа: в каждом сверло или фреза (пользователь меняет сам)
 function PmskSettings({ post, set }) {
   const k = pmskOf(post)
   const setP = patch => set({ pmsk: { ...(post.pmsk || {}), ...patch } })
+  const tools = k.tools
+  const setT = (i, patch) => { const l = tools.map(t => ({ ...t })); if (i < l.length) l[i] = { ...l[i], ...patch }; else l.push({ name: `T${l.length + 1}`, kind: 'drill', d: 8, step: 0, len: 0, ...patch }); setP({ tools: l.filter(t => t.name && t.d > 0) }) }
+  const cell = { padding: '7px 8px', minWidth: 0 }
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px' }}>
-        Торцевой сверлильно-присадочный станок: в программу идут <b>только отверстия в торец</b>, одна программа .nc на деталь, имя — код QR с бирки.
-        <span style={{ display: 'block', marginTop: 4 }}>Деталь всегда <b>биркой вверх</b> — не переворачивается, только поворачивается. Торцы пронумерованы <b>1–4 по часовой</b>: 1 — левый, 2 — верхний, 3 — правый, 4 — нижний (как деталь нарисована на бирке). Команда <b>M601…M604</b> в программе — номер торца, который ставится к упору; между торцами — пауза M00.</span>
+        Торцевой станок: в программу идёт <b>вся обработка торцов</b> — отверстия, пазы и выемки в торце; одна программа .nc на деталь, имя — код QR с бирки.
+        <span style={{ display: 'block', marginTop: 4 }}>Деталь всегда <b>биркой вверх</b> — не переворачивается, только поворачивается. Торцы <b>1–4 по часовой</b>: 1 — левый, 2 — верхний, 3 — правый, 4 — нижний (как деталь нарисована на бирке). <b>M601…M604</b> — какой торец поставить к упору; между торцами — пауза M00.</span>
         <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>Чтобы номера торцов были на бирке: шаблон бирок → «Чертёж детали» → галочка <b>«Номера торцов для торцевой присадки»</b>, и на бирке должен стоять элемент «Чертёж детали».</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-        <Num label="T1 — Ø сверла" unit="мм" value={k.t1} onChange={v => setP({ t1: v })} />
-        <Num label="T2 — Ø сверла" unit="мм" value={k.t2} onChange={v => setP({ t2: v })} />
-        <SignedNum label="Безопасный отскок Y" unit="мм" value={k.retract} onChange={v => setP({ retract: v })} />
+      <div style={{ fontSize: 12.5, fontWeight: 500, marginTop: 10 }}>Шпиндели и что в них стоит</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '58px 1fr 62px 70px 70px', gap: 4, marginTop: 4, fontSize: 11, color: 'var(--text-hint)' }}>
+        <span>Имя</span><span>Инструмент</span><span>Ø, мм</span><span>За проход</span><span>Длина</span>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Отскок — куда сверло уходит от торца перед переездом к следующему отверстию (−5: не царапает торец).</div>
+      {[...tools, null].map((t, i) => (
+        <div key={i + ':' + (t ? t.name + t.kind + t.d + t.step + t.len : 'new')} style={{ display: 'grid', gridTemplateColumns: '58px 1fr 62px 70px 70px', gap: 4, marginTop: 4 }}>
+          <input type="text" defaultValue={t?.name || ''} placeholder={`T${tools.length + 1}`} onBlur={e => { const v = e.target.value.trim(); if (v !== (t?.name || '')) setT(i, { name: v }) }} style={cell} />
+          {t ? (
+            <select value={t.kind} onChange={e => setT(i, { kind: e.target.value })} style={cell}>
+              <option value="drill">сверло</option>
+              <option value="mill">фреза</option>
+            </select>
+          ) : <span style={{ fontSize: 11, color: 'var(--text-hint)', alignSelf: 'center' }}>+ ещё шпиндель</span>}
+          {['d', 'step', 'len'].map(f => (
+            <input key={f} type="text" inputMode="decimal" defaultValue={t && t[f] ? String(t[f]).replace('.', ',') : ''} placeholder={f === 'd' ? 'Ø' : '—'} disabled={!t && f !== 'd'}
+              onBlur={e => { const v = Number(e.target.value.replace(',', '.')) || 0; if (t ? v !== t[f] : v > 0) setT(i, { [f]: v }) }} style={cell} />
+          ))}
+        </div>
+      ))}
+      <Hint>Имя — как команда на станке (T1, T2). Пустое имя или Ø — шпиндель удаляется. «За проход» — сколько мм вглубь за один проход (пусто — сразу на всю глубину): глубокий паз или выемка фрезой идут в несколько проходов, сверло — с выводом для стружки. «Длина» — рабочая длина инструмента: глубже — предупреждение. Отверстие — сверлом своего Ø; если такого сверла нет — фрезой меньшего Ø (от центра винтом вниз, потом кольцами наружу). Паз и выемка в торце — самой широкой фрезой не шире паза: вход наклоном вдоль торца, строчки по высоте, чистовой обход.</Hint>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+        <SignedNum label="Безопасный отскок Y" unit="мм" value={k.retract} onChange={v => setP({ retract: v })} />
+        <Num label="Шаг дуги" unit="мм" value={k.seg} onChange={v => setP({ seg: v })} hint="круг отрезками G01 X Z" />
+        <Num label="Подача фрезы F" unit="мм/мин" value={k.feed} onChange={v => setP({ feed: v })} hint="пусто — F не пишется" />
+        <Num label="Подача врезания F" unit="мм/мин" value={k.plunge} onChange={v => setP({ plunge: v })} hint="пусто — F не пишется" />
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Отскок — куда инструмент уходит от торца перед переездом (−5: не царапает торец).</div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
         <input type="checkbox" checked={k.endX0 !== false} onChange={e => setP({ endX0: e.target.checked })} style={{ width: 18, height: 18 }} />
         В конце программы — в X0 (G00 X0)
@@ -698,7 +723,7 @@ function PmskSettings({ post, set }) {
         <input type="checkbox" checked={!!k.ccw} onChange={e => setP({ ccw: e.target.checked })} style={{ width: 16, height: 16 }} />
         Отверстия выходят с другого конца торца — отсчитывать X наоборот
       </label>
-      <Hint>Отверстия другого диаметра (не T1 и не T2) в программу не попадают — будет предупреждение. Высота Z — от нижней пласти, глубина Y — от торца. Отверстия на торце — сначала все T1, потом T2, слева направо. Настройки «Положение деталей β» на этот станок не действуют.</Hint>
+      <Hint>Обработка с пласти (вертикальная голова, если она есть на станке) пока не выводится — пришлите программу из Базиса с такой обработкой, добавим. Настройки «Положение деталей β» на этот станок не действуют.</Hint>
     </div>
   )
 }

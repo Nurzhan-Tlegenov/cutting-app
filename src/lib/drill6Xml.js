@@ -762,6 +762,7 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   }
   const drillAttr = t => (t ? ` Drill="${esc(latin(t.name) || t.name)}"` : '')
   const top = [], bottom = [], edge = [], grooves = [], edgeGrooves = [], edgeMills = []
+  const pmskOn = isPmsk(post), pmCuts = []
 
   // присадка — по тем же правилам, что 3D-модель детали: у каждого отверстия своя пласть (лицевая, обратная или обе),
   // у торцевого — высота от лицевой пласти (offsetFace). Размеры — готовой детали, без подрезки под кромку.
@@ -881,6 +882,8 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     const isPocket = isEdgePocket(g)
     if (!face) { warnings.push(`${isPocket ? 'выемка' : 'паз'} в торце не на краю детали — пропущен${isPocket ? 'а' : ''}`); return }
     const zc = T - n0(g.fromFace) - width / 2                   // середина по высоте, от нижней пласти
+    // торцевой станок PMSK: паз / выемка в торце — прямоугольник на торце (вдоль × по высоте), фрезеруется шпинделем
+    if (pmskOn) pmCuts.push({ face, p0, p1, zc, h: width, r: isPocket ? n0(g.r) : 0, depth, pocket: isPocket })
     if (!isPocket) {
       edgeGrooves.push({ face, line: [...p0, ...p1], Z: zc, width, depth, tool: toolOf('edgeGroove', width, depth, `паз в торце ${r1(width)} × ${r1(depth)}`) })
       return
@@ -1091,8 +1094,11 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
   // PMSK (торцевая присадка, .nc): только отверстия в торец; xml (SWJ) остаётся для просмотра в приложении
   let pmsk = null
   if (isPmsk(post)) {
-    const r = pmskNc({ fr, edge }, post)
-    r.warnings.forEach(w => { if (!warnings.includes(w)) warnings.push(w) })
+    const r = pmskNc({ fr, edge, cuts: pmCuts }, post)
+    // у торцевого станка своё: предупреждения шестистороннего (пласть, фрезы «Обработки») здесь ни к чему
+    const own = warnings.filter(w => /торц/i.test(w) && !/инструмент не назначен|фреза .* шире/i.test(w))
+    warnings.length = 0
+    ;[...own, ...r.warnings].forEach(w => { if (!warnings.includes(w)) warnings.push(w) })
     if (r.text == null && !post.d6All) return null
     pmsk = r.text ?? ''
   }

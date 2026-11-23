@@ -796,9 +796,10 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
     })
   }
   // номера торцов для торцевой присадки (PMSK): 1 — левый, 2 — верхний, 3 — правый, 4 — нижний в «родных» координатах
-  // детали (по часовой) — только у торцов с отверстиями; поворачиваются вместе с деталью, цифры стоят прямо
+  // детали (по часовой) — только у торцов с обработкой (отверстия, пазы, выемки); поворачиваются вместе с деталью, цифры стоят прямо
   if (st.sides > 0 && c) {
     const has = new Set(holePts.filter(q => q.edge).map(q => (q.dx ? (q.dx > 0 ? 'l' : 'r') : (q.dy > 0 ? 'b' : 't'))))
+    ;(c.edgeGrooves || []).forEach(g => { const e = { left: 'l', right: 'r', top: 't', bottom: 'b' }[g.edgeSide]; if (e) has.add(e) })   // пазы и выемки в торце
     const SIDE = [['l', 1, 0, DL / 2], ['t', 2, DW / 2, DL], ['r', 3, DW, DL / 2], ['b', 4, DW / 2, 0]]
     const ctr = R(DW / 2, DL / 2), fs = st.sides, rr = fs * 0.75
     ctx.save(); ctx.font = `bold ${Math.max(6, Math.round(fs))}px Arial, Helvetica, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
