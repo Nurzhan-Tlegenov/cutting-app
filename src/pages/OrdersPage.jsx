@@ -238,7 +238,7 @@ export default function OrdersPage() {
           )}
           {/* архива у пользователей больше нет (20.11.2026): исполненный заказ удаляется — исходники (файлы, модели)
               у человека и так есть, хранить их в сервисе незачем. Что уже лежит в архиве — остаётся как было */}
-          {!selectMode && orders.some(o => o.status === 'done' && !o.archived_at) && (
+          {!selectMode && !isMaster && orders.some(o => o.status === 'done' && !o.archived_at) && (
             <div style={{ fontSize: 12, color: 'var(--amber)', background: 'var(--amber-light)', border: '0.5px solid var(--amber)', borderRadius: 'var(--radius)', padding: '7px 10px', marginBottom: 8 }}>
               Исполненных заказов: <b>{orders.filter(o => o.status === 'done' && !o.archived_at).length}</b>. Готовый заказ удалите — кнопка «🗑 Удалить» на заказе: исходные файлы у вас остаются, а место освобождается для новых заказов.
             </div>
