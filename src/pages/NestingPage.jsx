@@ -80,6 +80,7 @@ import CornerPick from '../components/CornerPick'
 import { readOffcutsFile } from '../lib/importDetails'
 import { fetchOrderDetails, insertOrderDetails } from '../lib/orderDetails.js'
 import EstimateModal from '../components/EstimateEditor'
+import ShapedPick from '../components/ShapedPick'
 // Сколько id за раз в фильтре .in(): адрес запроса ограничен по длине (uuid — 36 знаков)
 const ID_CHUNK = 100
 const Model3D = lazyRetry(() => import('../components/Model3D'))   // 3D-вид одной детали — по удержанию на карте
@@ -2171,7 +2172,7 @@ export default function NestingPage() {
       end: o.small_parts_end_side != null ? String(o.small_parts_end_side) : '',
       secs: o.optimize_seconds != null ? String(o.optimize_seconds) : '12',
       ...(saved ? {
-        dir: saved.config?.dir || 'auto', box: !!(saved.config?.box || saved.byBox), strips: !!saved.config?.strips,
+        dir: saved.config?.dir || 'auto', box: !!(saved.config?.box || saved.byBox || saved.boxIds?.length), boxPick: !!saved.config?.boxPick, boxIds: saved.config?.boxIds || saved.boxIds || [], strips: !!saved.config?.strips,
         status: 'done', result: saved, sheetsData: (saved.sheets || []).map((sh, i) => ({ ...sh, index: i, offAuto: sh.offAuto ?? true })),   // сохранённые раскладки — как сохранены, без авто-обрезков
         startedAt: 0, doneAt: 0, saved: true,
       } : {}),
@@ -2459,7 +2460,9 @@ export default function NestingPage() {
       // против 0,45 м²); сравнить — двумя конфигурациями
       cuttingMethod: cuttingMethod === 'nesting' && !beamSaw && cfg.strips ? 'guillotine' : cuttingMethod,
       algo: useNfp ? 'nfp' : 'raster',
-      byBox: (!!cfg.box || prodRectOnly) && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту (или производство режет только прямоугольники)
+      byBox: ((!!cfg.box && !cfg.boxPick) || prodRectOnly) && cuttingMethod !== 'guillotine',   // фигурные детали — прямоугольником по габариту (или производство режет только прямоугольники)
+      // «Выборочно»: по габариту — только отмеченные фигурные детали, остальные — по контуру
+      boxIds: !!cfg.box && cfg.boxPick && !prodRectOnly && cuttingMethod !== 'guillotine' ? (cfg.boxIds || []) : null,
     }
     // β Пильный центр: свой алгоритм (src/lib/beamSawNesting.js) и свои настройки пильного центра производства —
     // выбранного в заказе, иначе своего: пропил и обрезка листа тоже свои (не «Параметры станка» пилы / фрезера);
@@ -2485,6 +2488,7 @@ export default function NestingPage() {
       res.algoVersion = NESTING_VERSION // версия алгоритма запишется вместе с результатом
       res.algo = params.algo // 'nfp' | 'raster' — чтобы на карте было видно, чем реально посчитано
       res.byBox = !!params.byBox // фигурные детали уложены по габариту (станок режет только прямоугольники)
+      if (params.boxIds?.length) res.boxIds = params.boxIds; else delete res.boxIds   // «Выборочно»: какие детали уложены по габариту
       res.paramsKey = paramsKey(params) // с какими параметрами листа считали
       return res
     }
@@ -2723,7 +2727,7 @@ export default function NestingPage() {
     delete result.rawSheets           // служебная копия раскладки до дозаполнения — в заказе не нужна
     const toSave = {
       ...result, sheets,
-      config: { dir: cfg.dir, box: !!cfg.box, strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
+      config: { dir: cfg.dir, box: !!cfg.box, boxPick: !!cfg.boxPick, boxIds: cfg.boxIds || [], strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs },
     }
     const next = multiMat ? { ...savedByMat, [matKey]: toSave } : {}
     // не сохранилось (например, предел раскроев) — дальше не идём: ни выбора, ни ЧПУ, ни отправки
@@ -3021,7 +3025,7 @@ export default function NestingPage() {
       const sheets = cfg.sheetsData.filter(sh => sh.placed.length).map((sh, i) => ({ ...sh, index: i }))
       const result = { ...cfg.result }
       delete result.rawSheets
-      const toSave = { ...result, sheets, config: { dir: cfg.dir, box: !!cfg.box, strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
+      const toSave = { ...result, sheets, config: { dir: cfg.dir, box: !!cfg.box, boxPick: !!cfg.boxPick, boxIds: cfg.boxIds || [], strips: !!cfg.strips, small: cfg.small, sq: cfg.sq, side: cfg.side, edge: cfg.edge, end: cfg.end, secs: cfg.secs } }
       const nesting = multiMat ? JSON.stringify({ multi: true, byMat: { ...savedByMat, [matKey]: toSave } }) : JSON.stringify(toSave)
       const { data: src, error: e0 } = await supabase.from('orders').select('*').eq('id', id).single()
       if (e0 || !src) throw new Error(e0?.message || 'заказ не найден')
@@ -3511,8 +3515,17 @@ export default function NestingPage() {
                     Включено всегда: производство режет на фрезере только прямоугольники (ЧПУ → «Обработка» → «Резать только прямоугольники»).
                   </div>
                 )}
+                {cfg.box && !prodRectOnly && (
+                  <div style={{ display: 'flex', gap: 4, margin: '4px 0 0 23px' }}>
+                    {[[false, 'Все фигурные'], [true, 'Выборочно']].map(([v, l]) => (
+                      <button key={l} type="button" onClick={() => updateCfg(cfg.id, { boxPick: v })}
+                        style={{ flex: 1, padding: '6px 6px', borderRadius: 'var(--radius)', fontSize: 12, border: '0.5px solid ' + (!!cfg.boxPick === v ? 'var(--blue)' : 'var(--border-md)'), background: !!cfg.boxPick === v ? 'var(--blue-light)' : 'var(--bg)', color: !!cfg.boxPick === v ? 'var(--blue-dark)' : 'var(--text-muted)' }}>{l}</button>
+                    ))}
+                  </div>
+                )}
+                {cfg.box && cfg.boxPick && !prodRectOnly && <ShapedPick details={details} value={cfg.boxIds || []} onChange={v => updateCfg(cfg.id, { boxIds: v })} />}
                 <Hint>
-                  Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах. Включите, если производство режет только прямоугольники.
+                  Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах, и фрезер режет её прямоугольником. Включите, если производство режет только прямоугольники. «Выборочно» — отметьте, какие детали по габариту (вырез потом: после кромки, на шестистороннем), остальные укладываются и режутся сразу по контуру. На бирке у всех деталей — настоящий силуэт с вырезами.
                 </Hint>
               </div>
             )}
@@ -3587,7 +3600,7 @@ export default function NestingPage() {
             )}
             {/* «Выводить в УП» — быстрый доступ для производства (те же галочки, что в ЧПУ → «Обработка»), фрезер */}
             {canCnc && !beamSaw && cuttingMethod === 'nesting' && (
-              <CncSkipQuick prodId={order?.production_id || null} details={details} onChanged={() => bumpCnc(n => n + 1)} />
+              <CncSkipQuick prodId={order?.production_id || null} onChanged={() => bumpCnc(n => n + 1)} />
             )}
             {/* Какие детали попадают в «мелкие» при этих порогах — видно сразу, до запуска */}
             {cfg.small && (cfg.sq !== '' || cfg.side !== '') && (() => {
@@ -3672,15 +3685,19 @@ export default function NestingPage() {
               const geo = geoOf(order, cfg.result)                 // обычный лист
               const cgeo = geoOf(order, cfg.result, canvasSheet)   // открытый лист (может быть обрезком)
               // раскрой «по габаритам» сделан не по габаритам (производство теперь режет только прямоугольники) — тоже пересчитать
-              const wantBox = (!!cfg.box || prodRectOnly) && cuttingMethod !== 'guillotine' && hasShaped
+              const wantBox = ((!!cfg.box && !cfg.boxPick) || prodRectOnly) && cuttingMethod !== 'guillotine' && hasShaped
+              const pickKey = ids => JSON.stringify([...(ids || [])].map(String).sort())
+              const wantPick = !!cfg.box && !!cfg.boxPick && !prodRectOnly && cuttingMethod !== 'guillotine' && hasShaped
+              const stalePick = !isRunning && !cfg.result.beamSaw && (wantPick ? pickKey(cfg.boxIds) !== pickKey(cfg.result.boxIds) : !!cfg.result.boxIds?.length && !wantBox)
               const staleBox = !isRunning && wantBox && !cfg.result.byBox && !cfg.result.beamSaw
-              const stale = staleBox || (!isRunning && cfg.result.paramsKey && cfg.result.paramsKey !== curParamsKeyFor(!!cfg.result.byBox))
+              const stale = staleBox || stalePick || (!isRunning && cfg.result.paramsKey && cfg.result.paramsKey !== curParamsKeyFor(!!cfg.result.byBox))
               return (
               <div>
                 {stale && (
                   <p style={{ fontSize: 11, color: '#9a5b00', background: '#fff3d6', border: '1px solid #f0c674',
                     borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>
                     {staleBox ? 'Этот раскрой сделан по контуру, а фигурные детали нужно укладывать по габаритам (станок режет только прямоугольники) — пересчитайте раскрой'
+                      : stalePick ? 'Выбор фигурных деталей «по габаритам» изменился после расчёта — пересчитайте раскрой'
                       : 'Параметры листа или обрезки изменились после расчёта — пересчитайте раскрой'}
                   </p>
                 )}

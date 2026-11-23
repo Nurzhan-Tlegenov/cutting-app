@@ -693,8 +693,26 @@ async function runBeamSawStock(params, opts = {}) {
   return toFull(await runBeamSaw({ ...params, details: subDetails, offcuts: null }, { ...opts, onProgress }))
 }
 
+/** Ключ детали для выборочной укладки «по габаритам»: id строки заказа (у новой, ещё не сохранённой — номер) */
+export const boxKey = (d, i) => String((d?._raw || d)?.id ?? 'i' + i)
+
 export async function runLiveNesting(params, opts = {}) {
-  if (params.beamSaw) return runBeamSawStock(params, opts)   // β Пильный центр — свой алгоритм уровнями резов (island, onStats — для потоков и хронологии)
+  if (params.beamSaw) return runBeamSawStock(params, opts)
+  // «Фигурные детали — по габаритам» → «Выборочно»: прямоугольником габарита укладываются (и режутся) только отмеченные
+  // фигурные детали, остальные — по своему контуру. Отмеченным контур на входе снимается, на выходе они помечаются p.box
+  // (без polygon) — как при галочке на все детали: фрезер режет их прямоугольником, на бирке — настоящий силуэт
+  if (!params.byBox && Array.isArray(params.boxIds) && params.boxIds.length) {
+    const pick = new Set(params.boxIds.map(String)), idx = new Set()
+    const details = params.details.map((d, i) => { if (!pick.has(boxKey(d, i))) return d; idx.add(i); return { ...d, contour: null } })
+    if (idx.size) {
+      const mark = list => (list || []).map(sh => ({ ...sh, placed: (sh.placed || []).map(p => { if (!idx.has(p.detailIndex)) return p; const q = { ...p, box: true }; delete q.polygon; return q }) }))
+      const fix = res => (res?.sheets ? { ...res, sheets: mark(res.sheets), ...(res.rawSheets ? { rawSheets: mark(res.rawSheets) } : {}), boxIds: [...pick] } : res)
+      const inner = { ...params, details, boxIds: null }
+      if (Array.isArray(inner.seed?.sheets)) inner.seed = { ...inner.seed, sheets: inner.seed.sheets.map(sh => ({ ...sh, placed: (sh.placed || []).map(p => { if (!idx.has(p.detailIndex)) return p; const q = { ...p }; delete q.polygon; delete q.rotation; return q }) })) }
+      const onProgress = opts.onProgress ? res => opts.onProgress(fix(res)) : null
+      return fix(await runLiveNesting(inner, { ...opts, onProgress }))
+    }
+  }   // β Пильный центр — свой алгоритм уровнями резов (island, onStats — для потоков и хронологии)
   // Группы деталей с общей текстурой: фрезер и форматник со складом обрезков — группа одним блоком на входе, детали на
   // выходе (partGroupBlocks.js); форматник без склада знает группы сам (полосами, beamSawNesting)
   const stripsPath = (params.cuttingMethod || 'nesting') === 'guillotine' && !params.offcuts?.items?.length

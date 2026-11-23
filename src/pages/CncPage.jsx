@@ -840,7 +840,7 @@ export default function CncPage() {
         </>
       ))}
       {(tab === 'tools' || tab === 'ops') && drill6Open && <Drill6Ops cnc={cnc} onChange={change} isMaster={isMaster} part={tab} layers={layers6} />}
-      {tab === 'ops' && !drill6Open && <CncOps cnc={tview} onChange={tchange} layers={layers} details={mat?.details || null} />}
+      {tab === 'ops' && !drill6Open && <CncOps cnc={tview} onChange={tchange} layers={layers} />}
       {tab === 'tools' && !drill6Open && <CncTools cnc={tview} onChange={tchange} />}
       {tab !== 'sheets' && <PostPicker cnc={cnc} onChange={change} isMaster={isMaster} />}
       {tab === 'basic' && <CncBasic cnc={cnc} onChange={change} isMaster={isMaster} orderCtx={order ? { order, mat, mats, setMatKey } : null} />}

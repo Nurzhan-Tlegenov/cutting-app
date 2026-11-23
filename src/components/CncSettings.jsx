@@ -19,7 +19,6 @@ import { learnFromProgram, readProgramFile } from '../lib/gcodeLearn'
 import { normOps, sameName, secondPost, backupPost, setSecondPost, DEFAULT_MILL, DEFAULT_DRILL, KINDS, isDrill6, isBeamSaw, isRouterPost, activePost, routerPost, drillPosts, toggleUse6, newId, saveSnapshot, applySnapshot, removeSnapshot, renameSnapshot, forkShared } from '../lib/cncSettings'
 import { holeToolFor, grooveOpFor, skipOf, SKIP_KEYS, faceToolList } from '../lib/gcode'
 import OrderList, { mergeOrder } from './OrderList'
-import RectPick from './RectPick'
 
 // Вкладки настроек ЧПУ: «Основные» и «Команды» (постпроцессор), «Инструменты» (база), «Обработка» (контуры).
 // cnc — настройки целиком, onChange(cnc) — сохранить.
@@ -1279,7 +1278,7 @@ export function CncTools({ cnc, onChange }) {
 }
 
 // ─── Обработка контуров ─────────────────────────────────────────────────────
-export function CncOps({ cnc, onChange, layers, details = null }) {
+export function CncOps({ cnc, onChange, layers }) {
   const ops = cnc.ops
   // Глубина сквозного реза контура — заглубление фрезы ниже стола у раскроечного станка, которым выпускается G-код.
   // Задаётся только здесь (на «Основных» её нет), рядом с остальной обработкой контура; самонастройка её не трогает.
@@ -1553,7 +1552,6 @@ export function CncOps({ cnc, onChange, layers, details = null }) {
             </div>
             <Hint>Снимите галочку — эта обработка не попадёт ни в программу, ни в симуляцию. Удобно, если присадку делаете на шестистороннем станке. «Фигурные контуры» выключены — каждая деталь режется прямоугольником по своему габариту, и раскрой фигурных деталей идёт по габаритам. Сквозное — глубина не меньше толщины листа.</Hint>
             {skip.contour && <Hint>Раскрой должен быть сделан по габаритам: если фигурные детали уложены вплотную друг в друга, при создании программы будет предупреждение.</Hint>}
-            <RectPick skip={skip} details={details} onSkip={patch => onChange({ ...cnc, ops: { ...ops, skip: { ...(ops.skip || {}), ...patch } } })} />
           </Fold>
         )
       })()}

@@ -5,7 +5,6 @@ import { useCnc } from '../hooks/useCnc'
 import { routerPost, isRouterPost, postView, postBack } from '../lib/cncSettings'
 import { skipOf, SKIP_KEYS } from '../lib/gcode'
 import Hint from './Hint'
-import RectPick from './RectPick'
 
 const ITEMS = [
   ['contour', 'Фигурные контуры'], ['cutouts', 'Внутренние вырезы'],
@@ -13,29 +12,19 @@ const ITEMS = [
   ['grooves', 'Пазы'], ['pockets', 'Выемки'],
 ]
 
-export default function CncSkipQuick({ prodId, onChanged, details = null }) {
+export default function CncSkipQuick({ prodId, onChanged }) {
   const { cnc, change, ready } = useCnc(null, prodId)
   if (!ready) return null
   const rp = routerPost(cnc)
   if (!isRouterPost(rp)) return null
   const skip = skipOf(postView({ ...cnc, post: rp.id }).ops)
-  // «Выборочно» и отмеченные детали — тоже в ops.skip раскроечного станка (contourPick, rectSel)
-  const setRaw = patch => {
-    change(prev => {
-      const at = { ...prev, post: rp.id }
-      const v = postView(at)
-      const back = postBack(at, { ...v, ops: { ...v.ops, skip: { ...(v.ops?.skip || {}), ...patch } } })
-      return { ...back, post: prev.post }
-    })
-    onChanged?.()
-  }
   const setSkip = patch => {
     change(prev => {
       // правим «Обработку» именно раскроечного станка; выбранный в настройках постпроцессор не меняем
       const at = { ...prev, post: rp.id }
       const v = postView(at)
       const sk = { ...skipOf(v.ops), ...patch }
-      const back = postBack(at, { ...v, ops: { ...v.ops, skip: { ...(v.ops?.skip || {}), ...Object.fromEntries(SKIP_KEYS.map(k => [k, !!sk[k]])) } } })
+      const back = postBack(at, { ...v, ops: { ...v.ops, skip: Object.fromEntries(SKIP_KEYS.map(k => [k, !!sk[k]])) } })
       return { ...back, post: prev.post }
     })
     onChanged?.()
@@ -55,7 +44,6 @@ export default function CncSkipQuick({ prodId, onChanged, details = null }) {
           </label>
         ))}
       </div>
-      <RectPick skip={skip} details={details} onSkip={setRaw} />
       <Hint>Те же галочки, что в ЧПУ → «Обработка» → «Выводить в УП»: изменили здесь — там так же, и запоминается. Снятая обработка не попадает ни в программу, ни в симуляцию. «Фигурные контуры» сняты — фигурные детали режутся прямоугольником и раскраиваются по габаритам (раскрой пересчитать).</Hint>
     </div>
   )
