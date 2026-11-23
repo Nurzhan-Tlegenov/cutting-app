@@ -4,6 +4,7 @@
 import { parsePolygonFromDetail } from '../lib/trueShapeNesting'
 import { boxKey } from '../lib/liveNesting'
 import { detailHoles } from '../lib/partHoles'
+import { detailMeta, metaDes, metaPos } from '../lib/partLabel'
 
 const r1 = v => Math.round((Number(v) || 0) * 10) / 10
 
@@ -19,7 +20,18 @@ function Thumb({ poly, holes = [], w, l }) {
   )
 }
 
-export default function ShapedPick({ details, value, onChange }) {
+// подпись — как на карте раскроя (labelMode): обозначение, позиция, наименование
+function titleOf(d, r, mode) {
+  const name = String(r.name || d.name || 'Деталь')
+  const m = detailMeta(d) || detailMeta(r), des = metaDes(m), pos = metaPos(m)
+  if (mode === 'des') return des || name
+  if (mode === 'des_name') return des ? `${des} ${name}` : name
+  if (mode === 'pos') return pos || name
+  if (mode === 'pos_name') return pos ? `${pos} ${name}` : name
+  return name
+}
+
+export default function ShapedPick({ details, value, onChange, labelMode = 'name' }) {
   const sel = new Set((value || []).map(String))
   const parts = []
   ;(details || []).forEach((d, i) => {
@@ -27,7 +39,7 @@ export default function ShapedPick({ details, value, onChange }) {
     let pr
     try { pr = parsePolygonFromDetail({ ...d, contour: typeof d.contour === 'string' ? d.contour : d.contour ? JSON.stringify(d.contour) : null }) } catch { pr = null }
     if (!pr?.custom) return
-    parts.push({ key: boxKey(d, i), name: String(r.name || d.name || 'Деталь'), w: Number(d.width) || 0, l: Number(d.length) || 0, qty: Number(d.qty) || 1, poly: pr.polygon.map(q => (Array.isArray(q) ? q : [q.x, q.y])), holes: (() => { try { return detailHoles(d).map(h => h.map(q => [q.x, q.y])) } catch { return [] } })() })
+    parts.push({ key: boxKey(d, i), name: titleOf(d, r, labelMode), w: Number(d.width) || 0, l: Number(d.length) || 0, qty: Number(d.qty) || 1, poly: pr.polygon.map(q => (Array.isArray(q) ? q : [q.x, q.y])), holes: (() => { try { return detailHoles(d).map(h => h.map(q => [q.x, q.y])) } catch { return [] } })() })
   })
   if (!parts.length) return null
   const put = (keys, on) => { const n = new Set(sel); keys.forEach(k => (on ? n.add(k) : n.delete(k))); onChange([...n].filter(k => parts.some(p => p.key === k))) }

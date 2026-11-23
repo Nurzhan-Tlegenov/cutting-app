@@ -3579,7 +3579,7 @@ export default function NestingPage() {
                     ))}
                   </div>
                 )}
-                {cfg.box && cfg.boxPick && !prodRectOnly && <ShapedPick details={details} value={cfg.boxIds || []} onChange={v => setBoxIds(cfg.id, v)} />}
+                {cfg.box && cfg.boxPick && !prodRectOnly && <ShapedPick details={details} labelMode={labelMode} value={cfg.boxIds || []} onChange={v => setBoxIds(cfg.id, v)} />}
                 <Hint>
                   Каждая фигурная деталь укладывается прямоугольником своего габарита — без сцепки с соседями и без деталей в вырезах, и фрезер режет её прямоугольником. Включите, если производство режет только прямоугольники. «Выборочно» — отметьте, какие детали по габариту (вырез потом: после кромки, на шестистороннем), остальные укладываются и режутся сразу по контуру. На бирке у всех деталей — настоящий силуэт с вырезами.
                 </Hint>
