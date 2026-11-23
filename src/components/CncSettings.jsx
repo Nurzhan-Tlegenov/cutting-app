@@ -505,6 +505,23 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
       <Hint>Только мастер-аккаунт. Включите, настройте, отметьте «Для всех» и выдайте 🔑 производству-тестеру. Основной шестисторонний постпроцессор не меняется.</Hint>
     </div>
   ) : null
+  // торцевой станок PMSK: свои простые настройки, всё шестистороннее (Face 1–6, положение, фрезеровка пласти) скрыто
+  if (isPmsk(post)) return (
+    <div className="card" style={{ marginBottom: 10, borderColor: 'var(--amber)' }}>
+      <Title>β · Торцевая присадка PMSK</Title>
+      {isMaster && (
+        <>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input type="checkbox" checked onChange={() => set({ d6Beta: false })} style={{ width: 16, height: 16 }} />
+            β-постпроцессор (только мастер видит эту галочку и формат файла)
+          </label>
+          <KdtFormat post={post} set={set} bare />
+        </>
+      )}
+      {!used && <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6 }}>Сейчас программы этим станком не выпускаются: в карточке «Выпуск управляющих программ» ниже выберите его вторым постпроцессором.</div>}
+      <PmskSettings post={post} set={set} />
+    </div>
+  )
   return (
     <div className="card" style={{ marginBottom: 10, borderColor: 'var(--amber)' }}>
       <Title>β · Присадка</Title>
@@ -614,7 +631,7 @@ function Drill6Beta({ post, set, isMaster, used, orderCtx }) {
 const FACE_OPTS = [[1, 'Face 1'], [2, 'Face 2'], [3, 'Face 3'], [4, 'Face 4']]
 
 // ─── Формат файла шестистороннего β: SWJ (Syntec) или KDT (KDTPanelFormat, как у Базис-ЧПУ «KDT CNC Drill») ───
-function KdtFormat({ post, set }) {
+function KdtFormat({ post, set, bare = false }) {
   const on = isKdt(post), k = kdtOf(post), scx = post?.d6Fmt === 'scx', pm = isPmsk(post)
   const cur = on ? 'kdt' : scx ? 'scx' : pm ? 'pmsk' : 'swj'
   const setK = patch => set({ kdt: { ...(post.kdt || {}), ...patch } })
@@ -648,7 +665,7 @@ function KdtFormat({ post, set }) {
     <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
       <label className="label">Формат файла</label>
       <Seg value={cur} options={[['swj', 'SWJ (Syntec)'], ['kdt', 'KDT (KDTPanelFormat)'], ['scx', 'Nanxing (.SCX)'], ['pmsk', 'Торцевая PMSK']]} onChange={pick} />
-      {pm && <PmskSettings post={post} set={set} />}
+      {pm && !bare && <PmskSettings post={post} set={set} />}
       {scx && <Hint>Nanxing BuiltInCad 2.0 — как у станка NCB612S: файл .SCX на деталь, UTF-8, CRLF. Те же отверстия, торцы и фрезеровка, что у SWJ; пазы — фрезеровкой одной линией шириной паза (Diameter = ширина). Фрезам в «Обработке» нужен Ø — станок берёт его из файла. Имя файла — обозначение детали (как на станке: 01.01.SCX). Первые файлы проверьте в симуляторе станка.</Hint>}
       {on && (
         <>
@@ -739,9 +756,10 @@ function Drill6Basic({ post, set, router }) {
   const labelHasQr = (ltpl.items || []).some(i => i.type === 'qr')
   const exampleInfo = { orderName: 'Кухня Ивановых', orderNumber: '261007_005', order: 'Кухня Ивановых', des: 'КБ.01.003', name: 'Боковина', pos: '3', prefix: 'Шкаф', materialName: 'ЛДСП Белый', length: 720, width: 560, thickness: 16, sheet: 2, num: 5 }
   const example = q => labelQr({ qr: noLink(q) }, exampleInfo)
+  const pm = isPmsk(post)
   return (
     <>
-      <div className="card" style={{ marginBottom: 10 }}>
+      {!pm && <div className="card" style={{ marginBottom: 10 }}>
         <Title>Деталь на станке</Title>
         {/* лицевая пласть — синхронно с фрезерным ЧПУ, отдельной настройки нет */}
         <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px', marginTop: 8 }}>
@@ -755,7 +773,7 @@ function Drill6Basic({ post, set, router }) {
           Выводить и детали без обработки
         </label>
         <Hint>На станок уходит вся обработка детали: отверстия в пласти и торцы, пазы, фигурный контур, вырезы, выемки, фрезеровка фасада — даже то, что уже сделал фрезерный ЧПУ на раскрое. Лишнее отключается фильтром на стойке станка (например, всю обработку верхней пласти Face 5).</Hint>
-      </div>
+      </div>}
       <div className="card" style={{ marginBottom: 10 }}>
         <Title>Имя файла и папка</Title>
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, cursor: 'pointer' }}>
@@ -781,15 +799,15 @@ function Drill6Basic({ post, set, router }) {
           ? <ProgLatin on={!!labelQrSet.latin} onChange={v => { saveLabelTpl({ ...ltpl, qr: { ...(ltpl.qr || {}), latin: v } }, user); bump(x => x + 1) }} />
           : <ProgLatin on={(post.d6Qr || D6_QR_DEFAULT).latin !== false} onChange={v => set({ d6Qr: { ...(post.d6Qr || D6_QR_DEFAULT), latin: v } })} />}
         <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-          <label className="label">📁 Папки для программ присадки{<span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', whiteSpace: 'nowrap', fontWeight: 500 }}>шестисторонний · .{post.ext || 'XML'}</span>}</label>
+          <label className="label">📁 Папки для программ присадки{<span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 7px', borderRadius: 9, background: 'var(--amber-light)', color: 'var(--amber)', whiteSpace: 'nowrap', fontWeight: 500 }}>{pm ? 'торцевой' : 'шестисторонний'} · .{post.ext || 'XML'}</span>}</label>
           <DirPathEditor value={post.dirPath ?? DRILL_DIR_DEFAULT} def={DRILL_DIR_DEFAULT} preview={dirPreview(post.dirPath ?? DRILL_DIR_DEFAULT, post.dirLatin !== false)} onChange={x => set({ dirPath: x })} latin={post.dirLatin !== false} onLatin={x => set({ dirLatin: x })} latinLabel="Имена папок латиницей" />
-          <Hint>Куда складываются XML-файлы при сохранении (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
+          <Hint>Куда складываются {pm ? 'программы .nc' : 'XML-файлы'} при сохранении (и в архиве). «+ вложенная папка» — папка внутри папки.</Hint>
         </div>
         <div style={{ marginTop: 8, maxWidth: 160 }}>
           <label className="label">Расширение файла</label>
           <input type="text" key={post.id + post.ext} defaultValue={post.ext || 'XML'} onBlur={e => { const v = e.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 8); if (v && v !== post.ext) set({ ext: v }) }} />
         </div>
-        <Hint>Формат SWJ (как у вашего станка): размеры детали с кромкой, отверстия в пласть сверху и снизу, отверстия в 4 торца, пазы, толщина кромки по сторонам.</Hint>
+        {!pm && <Hint>Формат SWJ (как у вашего станка): размеры детали с кромкой, отверстия в пласть сверху и снизу, отверстия в 4 торца, пазы, толщина кромки по сторонам.</Hint>}
       </div>
     </>
   )

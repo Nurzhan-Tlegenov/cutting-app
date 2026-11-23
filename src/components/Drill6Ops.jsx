@@ -5,6 +5,7 @@ import Hint from './Hint'
 // Направление обхода — у вырезов и фигурного края. Данные — в постпроцессоре: post.d6Tools, post.d6Ops (см. drill6Xml.js).
 import { activePost, newId, forkShared } from '../lib/cncSettings'
 import { d6OpsOf, resolveD6Tool } from '../lib/drill6Xml'
+import { isPmsk } from '../lib/pmskNc'
 import { SaveSnapshotButton } from './CncSettings'
 import OrderList, { mergeOrder } from './OrderList'
 
@@ -84,6 +85,12 @@ export default function Drill6Ops({ cnc, onChange, isMaster = false, layers = nu
     onChange({ ...cnc, posts: cnc.posts.map(p => (p.id === post.id ? { ...p, ...patch } : p)) })
   }
   const setTools = list => set({ d6Tools: list, d6Ops: ops })
+  // торцевой станок PMSK: шпиндели и обработка — в «Основных», в одной карточке; шестисторонние вкладки здесь ни к чему
+  if (isPmsk(post)) return (
+    <div className="card" style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>У торцевого станка «{post.name}» шпиндели (сверло или фреза, Ø, глубина за проход) и вся обработка торцов настраиваются во вкладке <b>«Основные»</b> — карточка «Торцевая присадка PMSK».</div>
+    </div>
+  )
   const setOp = (cat, patch) => set({ d6Ops: { ...ops, [cat]: { ...ops[cat], ...patch } }, d6Tools: tools })
   const setHoleOff = (key, off) => { const h = { ...ops.holesOff }; if (off) h[key] = true; else delete h[key]; set({ d6Ops: { ...ops, holesOff: h }, d6Tools: tools }) }
   const setLayer = (key, v) => { const l = { ...ops.layers }; if (v) l[key] = v; else delete l[key]; set({ d6Ops: { ...ops, layers: l }, d6Tools: tools }) }
