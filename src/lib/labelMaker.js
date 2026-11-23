@@ -458,7 +458,9 @@ export function normalizeLabel(raw) {
     // чертёж детали: размеры торцевых отверстий от края и высота их цифр (мм)
     // contour — толщина линии контура, мм; hole — наименьший размер точки отверстия, мм; ring — отверстия кружком, без заливки
     part: { dims: !!t.part?.dims, dimSize: Math.max(1, Math.min(6, Number(t.part?.dimSize) || 2)),
-      contour: Math.max(0.08, Math.min(0.8, Number(t.part?.contour) || 0.18)), hole: Math.max(0.15, Math.min(2, Number(t.part?.hole) || 0.35)), ring: !!t.part?.ring },
+      contour: Math.max(0.08, Math.min(0.8, Number(t.part?.contour) || 0.18)), hole: Math.max(0.15, Math.min(2, Number(t.part?.hole) || 0.35)), ring: !!t.part?.ring,
+      // номера торцов 1–4 для торцевой присадки (PMSK): у торцов с отверстиями, высота цифр, мм
+      sides: !!t.part?.sides, sideSize: Math.max(1, Math.min(8, Number(t.part?.sideSize) || 2.5)) },
     qr: { parts: Array.isArray(t.qr?.parts) ? [...new Set(t.qr.parts.map(k => (k === 'number' ? 'order' : k)))].filter(k => QR_PARTS.some(x => x[0] === k)) : [...QR_DEFAULT.parts], sep: typeof t.qr?.sep === 'string' ? t.qr.sep.slice(0, 3) : ';', text: String(t.qr?.text || '').slice(0, 60), latin: !!t.qr?.latin, ...(typeof t.qr?.pad === 'string' && t.qr.pad ? { pad: [...t.qr.pad][0] } : {}), ...(typeof t.qr?.tpl === 'string' && t.qr.tpl.trim() ? { tpl: t.qr.tpl.slice(0, 300) } : {}) } }
 }
 /** Новый размер бирки — элементы растягиваются вместе с ней */
@@ -792,6 +794,23 @@ export function drawPart(ctx, x0, y0, w0, h0, p, d, line = 1, rot = false, dimPx
       ctx.beginPath(); ctx.arc(a[0], a[1], r, 0, Math.PI * 2)
       if (st.ring && r >= 1.5) { ctx.lineWidth = Math.max(1, iw * 0.7); ctx.stroke() } else ctx.fill()
     })
+  }
+  // номера торцов для торцевой присадки (PMSK): 1 — левый, 2 — верхний, 3 — правый, 4 — нижний в «родных» координатах
+  // детали (по часовой) — только у торцов с отверстиями; поворачиваются вместе с деталью, цифры стоят прямо
+  if (st.sides > 0 && c) {
+    const has = new Set(holePts.filter(q => q.edge).map(q => (q.dx ? (q.dx > 0 ? 'l' : 'r') : (q.dy > 0 ? 'b' : 't'))))
+    const SIDE = [['l', 1, 0, DL / 2], ['t', 2, DW / 2, DL], ['r', 3, DW, DL / 2], ['b', 4, DW / 2, 0]]
+    const ctr = R(DW / 2, DL / 2), fs = st.sides, rr = fs * 0.75
+    ctx.save(); ctx.font = `bold ${Math.max(6, Math.round(fs))}px Arial, Helvetica, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    for (const [e, num, px, py] of SIDE) {
+      if (!has.has(e)) continue
+      const a = R(px, py), vx = ctr[0] - a[0], vy = ctr[1] - a[1], L = Math.hypot(vx, vy) || 1
+      const off = Math.min(L * 0.6, rr + Math.max(cw, 2) + fs * 0.35)              // внутрь детали от середины торца
+      const cx = a[0] + vx / L * off, cy = a[1] + vy / L * off
+      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fillStyle = '#000'; ctx.fill()
+      ctx.fillStyle = '#fff'; ctx.fillText(String(num), cx, cy + fs * 0.04)
+    }
+    ctx.restore()
   }
   // размеры — тонкими линиями по целым точкам (без размытия), цифры без подложки
   if (groups.length) {
@@ -1159,7 +1178,7 @@ export function drawLabel(canvas, tpl, info, sheetCtx = null, opts = {}) {
     } else if (it.type === 'part') {
       const p = sheetCtx?.part || sheetCtx?.sheet.placed[sheetCtx.index]
       if (p) drawPart(ctx, x, y, w, it.h * mm, p, sheetCtx.detail, line, rot, tpl.part?.dims ? tpl.part.dimSize * mm : 0,
-        { ...(tpl.part ? { contour: tpl.part.contour * mm, inner: tpl.part.contour * mm * 0.7, holeMin: tpl.part.hole * mm, ring: tpl.part.ring } : {}), add: info?.edgeAdd })
+        { ...(tpl.part ? { contour: tpl.part.contour * mm, inner: tpl.part.contour * mm * 0.7, holeMin: tpl.part.hole * mm, ring: tpl.part.ring, ...(tpl.part.sides ? { sides: tpl.part.sideSize * mm } : {}) } : {}), add: info?.edgeAdd })
     } else {
       let text = labelText(it.type, info, tpl, it.cap), ghost = false
       if (!text) {

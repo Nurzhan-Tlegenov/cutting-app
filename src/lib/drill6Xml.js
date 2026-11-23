@@ -40,6 +40,7 @@ import { parsePolygonFromDetail } from './trueShapeNesting'
 import { loopElements } from './arcFit'
 import { flipDetail } from './mirrorDetail'
 import { isKdt, kdtPanel } from './kdtXml'
+import { isPmsk, pmskNc } from './pmskNc'
 /** Формат Nanxing BuiltInCad (.SCX) — вариант β для станка NCB612S */
 export const isScx = post => post?.d6Fmt === 'scx'
 import { polyPocket } from './gcode'
@@ -703,6 +704,8 @@ export function d6Preview(d, { T, post = {}, types = {} }) {
 }
 
 export function panelXml(d, opts) {
+  // торцевая присадка PMSK: деталь всегда биркой вверх, без поворота — стороны 1…4 считаются от самой детали
+  if (isPmsk(opts.post)) { const r = panelCore(d, opts, { turn: 0, flip: false }); if (r) delete r.geo; return r }
   if (!d6bOf(opts.post)) return panelCore(d, opts, null)
   const T = opts.T
   const o = d6Orient(d, { T, post: opts.post, types: opts.types })
@@ -1085,7 +1088,15 @@ function panelCore(d, { T, id, post = {}, types = {} }, orient = null) {
     kdt = r.text
     r.warnings.forEach(w => { if (!warnings.includes(w)) warnings.push(w) })
   }
-  return { xml, ...(kdt != null ? { kdt } : {}), ...(scx != null ? { scx } : {}), ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
+  // PMSK (торцевая присадка, .nc): только отверстия в торец; xml (SWJ) остаётся для просмотра в приложении
+  let pmsk = null
+  if (isPmsk(post)) {
+    const r = pmskNc({ fr, edge }, post)
+    r.warnings.forEach(w => { if (!warnings.includes(w)) warnings.push(w) })
+    if (r.text == null && !post.d6All) return null
+    pmsk = r.text ?? ''
+  }
+  return { xml, ...(kdt != null ? { kdt } : {}), ...(scx != null ? { scx } : {}), ...(pmsk != null ? { pmsk } : {}), ops, warnings, counts, layers, ...(orient ? { geo: { fr, T, top, bottom, outline, edges: edgesByFace(fr, W, H, et), edge, grooves, edgeGrooves, edgeMills, mills, turn: fr.turn, flip: !!orient.flip } } : {}) }
 }
 
 // ─── Имена файлов и папки ───────────────────────────────────────────────────
@@ -1171,7 +1182,7 @@ export function buildDrill6Files({ mat, order, post = {}, labelTpl, makeCode }) 
     byCode.set(code, di)
     r.warnings.forEach(w => warnings.add(`${rawDetail(d).name || 'Деталь'}: ${w}`))
     const view = r.xml.replace('\u0000ID\u0000', esc(code))
-    const alt = r.kdt != null ? r.kdt : r.scx != null ? r.scx.replace('\u0000ID\u0000', esc(code)).replace('\u0000ID\u0000', esc(code)) : null
+    const alt = r.pmsk != null ? r.pmsk : r.kdt != null ? r.kdt : r.scx != null ? r.scx.replace('\u0000ID\u0000', esc(code)).replace('\u0000ID\u0000', esc(code)) : null
     files.push({ name: `${code}.${ext}`, code, data: alt != null ? alt : view, ...(alt != null ? { view } : {}), detail: rawDetail(d).name || '', ops: r.ops })
   }))
   return { files, skipped: skippedDi.size, warnings: [...warnings] }

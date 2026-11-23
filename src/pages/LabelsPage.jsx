@@ -950,6 +950,20 @@ export function LabelSetup({ tpl, setTpl, user, order, mat, shared, previewEl = 
               <input type="checkbox" checked={!!tpl.part.dims} onChange={e => change({ part: { ...tpl.part, dims: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
               Показывать размеры торцевых отверстий от края (с учётом кромки)
             </label>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12.5, cursor: 'pointer', marginBottom: 6 }}>
+              <input type="checkbox" checked={!!tpl.part.sides} onChange={e => change({ part: { ...tpl.part, sides: e.target.checked } })} style={{ width: 17, height: 17, flex: '0 0 auto', marginTop: 1 }} />
+              <span>Номера торцов для торцевой присадки (1–4)
+                <Hint inline>Для торцевого станка (постпроцессор «Торцевая PMSK»): у торцов с отверстиями — номер в чёрном кружке, 1 — левый, 2 — верхний, 3 — правый, 4 — нижний, по часовой. Номера поворачиваются вместе с деталью, как кромка. Станок показывает M601…M604 — оператор ставит к упору торец с этим номером, деталь биркой вверх.</Hint>
+              </span>
+            </label>
+            {tpl.part.sides && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px 24px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                Высота номера
+                <button type="button" onClick={() => change({ part: { ...tpl.part, sideSize: tpl.part.sideSize - 0.5 } })} style={{ padding: '5px 12px', borderRadius: 20, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>A−</button>
+                <span>{tpl.part.sideSize.toFixed(1)} мм</span>
+                <button type="button" onClick={() => change({ part: { ...tpl.part, sideSize: tpl.part.sideSize + 0.5 } })} style={{ padding: '5px 12px', borderRadius: 20, fontSize: 13, border: '0.5px solid var(--border-md)', background: 'transparent', color: 'var(--text-muted)' }}>A+</button>
+              </div>
+            )}
             {tpl.part.dims && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px 24px', fontSize: 12.5, color: 'var(--text-muted)' }}>
                 Высота цифр

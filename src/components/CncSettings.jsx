@@ -5,6 +5,7 @@ import { backOf, BACK_NAME_DEFAULT } from '../lib/backSide'
 import QrPartsEditor from './QrPartsEditor'
 import { D6_QR_DEFAULT, DRILL_DIR_DEFAULT, D6B_DEFAULT, D6B_RULES, d6bOrder, d6bRuleOn } from '../lib/drill6Xml'
 import { kdtOf, isKdt } from '../lib/kdtXml'
+import { isPmsk, pmskOf } from '../lib/pmskNc'
 import DirPathEditor, { routerDirDefault } from './DirPathEditor'
 import TplInput from './TplInput'
 import ColGrid from './ColGrid'
@@ -614,13 +615,15 @@ const FACE_OPTS = [[1, 'Face 1'], [2, 'Face 2'], [3, 'Face 3'], [4, 'Face 4']]
 
 // ─── Формат файла шестистороннего β: SWJ (Syntec) или KDT (KDTPanelFormat, как у Базис-ЧПУ «KDT CNC Drill») ───
 function KdtFormat({ post, set }) {
-  const on = isKdt(post), k = kdtOf(post), scx = post?.d6Fmt === 'scx'
-  const cur = on ? 'kdt' : scx ? 'scx' : 'swj'
+  const on = isKdt(post), k = kdtOf(post), scx = post?.d6Fmt === 'scx', pm = isPmsk(post)
+  const cur = on ? 'kdt' : scx ? 'scx' : pm ? 'pmsk' : 'swj'
   const setK = patch => set({ kdt: { ...(post.kdt || {}), ...patch } })
   const pick = v => {
     if (v === cur) return
-    const extBack = /^scx$/i.test(post.ext || '') ? { ext: 'XML' } : {}
+    const extBack = /^(scx|nc)$/i.test(post.ext || '') ? { ext: 'XML' } : {}
     if (v === 'swj') { set({ d6Fmt: '', ...extBack }); return }
+    // торцевая присадка PMSK PT2-28: G-код .nc на деталь, имя — код QR бирки (станок сканирует бирку)
+    if (v === 'pmsk') { set({ d6Fmt: 'pmsk', ext: 'nc' }); return }
     // Nanxing NCB612S: файл .SCX, имя — обозначение детали (как в образце со станка: 01.01.SCX)
     if (v === 'scx') { set({ d6Fmt: 'scx', ext: 'SCX', ...(post.d6Name === 'own' ? {} : { d6Name: 'own', d6Qr: { ...D6_QR_DEFAULT, parts: ['des'], sep: '.', latin: true } }) }); return }
     // как в Базис-ЧПУ: край — по часовой, без захода за деталь и без надсечки; имя файла — заказ.обозначение
@@ -644,7 +647,8 @@ function KdtFormat({ post, set }) {
   return (
     <div style={{ marginTop: 10, paddingTop: 8, borderTop: '0.5px solid var(--border)' }}>
       <label className="label">Формат файла</label>
-      <Seg value={cur} options={[['swj', 'SWJ (Syntec)'], ['kdt', 'KDT (KDTPanelFormat)'], ['scx', 'Nanxing (.SCX)']]} onChange={pick} />
+      <Seg value={cur} options={[['swj', 'SWJ (Syntec)'], ['kdt', 'KDT (KDTPanelFormat)'], ['scx', 'Nanxing (.SCX)'], ['pmsk', 'Торцевая PMSK']]} onChange={pick} />
+      {pm && <PmskSettings post={post} set={set} />}
       {scx && <Hint>Nanxing BuiltInCad 2.0 — как у станка NCB612S: файл .SCX на деталь, UTF-8, CRLF. Те же отверстия, торцы и фрезеровка, что у SWJ; пазы — фрезеровкой одной линией шириной паза (Diameter = ширина). Фрезам в «Обработке» нужен Ø — станок берёт его из файла. Имя файла — обозначение детали (как на станке: 01.01.SCX). Первые файлы проверьте в симуляторе станка.</Hint>}
       {on && (
         <>
@@ -665,6 +669,36 @@ function KdtFormat({ post, set }) {
           <Hint>По выгрузкам Базис-ЧПУ: X макс — 1, X 0 — 2, Y макс — 3, Y 0 — 4; дуга по часовой — 0, против — 1.</Hint>
         </>
       )}
+    </div>
+  )
+}
+
+// ─── Торцевая присадка PMSK PT2-28 (β): только отверстия в торец, G-код .nc на деталь ───
+function PmskSettings({ post, set }) {
+  const k = pmskOf(post)
+  const setP = patch => set({ pmsk: { ...(post.pmsk || {}), ...patch } })
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg2)', borderRadius: 'var(--radius)', padding: '7px 10px' }}>
+        Торцевой сверлильно-присадочный станок: в программу идут <b>только отверстия в торец</b>, одна программа .nc на деталь, имя — код QR с бирки.
+        <span style={{ display: 'block', marginTop: 4 }}>Деталь всегда <b>биркой вверх</b> — не переворачивается, только поворачивается. Торцы пронумерованы <b>1–4 по часовой</b>: 1 — левый, 2 — верхний, 3 — правый, 4 — нижний (как деталь нарисована на бирке). Команда <b>M601…M604</b> в программе — номер торца, который ставится к упору; между торцами — пауза M00.</span>
+        <span style={{ display: 'block', marginTop: 4, color: 'var(--amber)' }}>Чтобы номера торцов были на бирке: шаблон бирок → «Чертёж детали» → галочка <b>«Номера торцов для торцевой присадки»</b>, и на бирке должен стоять элемент «Чертёж детали».</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+        <Num label="T1 — Ø сверла" unit="мм" value={k.t1} onChange={v => setP({ t1: v })} />
+        <Num label="T2 — Ø сверла" unit="мм" value={k.t2} onChange={v => setP({ t2: v })} />
+        <SignedNum label="Безопасный отскок Y" unit="мм" value={k.retract} onChange={v => setP({ retract: v })} />
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>Отскок — куда сверло уходит от торца перед переездом к следующему отверстию (−5: не царапает торец).</div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={k.endX0 !== false} onChange={e => setP({ endX0: e.target.checked })} style={{ width: 18, height: 18 }} />
+        В конце программы — в X0 (G00 X0)
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginTop: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!k.ccw} onChange={e => setP({ ccw: e.target.checked })} style={{ width: 16, height: 16 }} />
+        Отверстия выходят с другого конца торца — отсчитывать X наоборот
+      </label>
+      <Hint>Отверстия другого диаметра (не T1 и не T2) в программу не попадают — будет предупреждение. Высота Z — от нижней пласти, глубина Y — от торца. Отверстия на торце — сначала все T1, потом T2, слева направо. Настройки «Положение деталей β» на этот станок не действуют.</Hint>
     </div>
   )
 }
