@@ -421,6 +421,11 @@ export function Preview({ p, filter, sel, onSel, focus, dims, marks = null }) {
 
 export default function Drill6Viewer({ files: initial = [], onClose, title = 'Просмотр XML присадки' }) {
   useBackClose(true, onClose)   // «Назад» телефона — закрыть
+  useEffect(() => {              // компьютер: Esc — закрыть
+    const k = e => { if (e.key === 'Escape') onClose?.() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
   const [files, setFiles] = useState(initial)
   const parsed = useMemo(() => files.map(f => ({ ...f, ...(f.error ? { panels: [] } : parseDrillXml(f.view || f.data, f.name)) })), [files])
   const panels = useMemo(() => parsed.flatMap(f => f.panels), [parsed])
@@ -477,13 +482,15 @@ export default function Drill6Viewer({ files: initial = [], onClose, title = 'П
     <div style={{ position: 'fixed', inset: 0, background: 'var(--bg)', zIndex: 220, display: 'flex', flexDirection: 'column', height: '100dvh' }}>
       <div style={{ flex: '0 0 auto', padding: '8px 12px 0' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          {/* закрыть просмотр — заметно, слева, как «назад» (на компьютере ещё Esc) */}
+          <button type="button" onClick={onClose} title="Закрыть просмотр (Esc)" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)', fontWeight: 500, flex: '0 0 auto' }}>← Назад</button>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 500, fontSize: 15 }}>{title}</div>
             <div style={{ fontSize: 11, color: 'var(--text-hint)' }}>{panels.length ? `Деталей: ${panels.length} · файлов: ${files.length}` : 'Откройте XML-файлы станка или архив .zip'}</div>
           </div>
           <button type="button" style={{ ...small, color: 'var(--blue)', borderColor: 'var(--blue)' }} onClick={() => inp.current?.click()}>{busy ? 'Открываем…' : 'Открыть файлы'}</button>
           <input ref={inp} type="file" multiple accept=".xml,.XML,.zip,text/xml,application/xml,application/zip" style={{ display: 'none' }} onChange={e => { open(e.target.files); e.target.value = '' }} />
-          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 26, lineHeight: 1, color: 'var(--text-muted)', padding: '0 4px' }}>×</button>
+          <button type="button" onClick={onClose} title="Закрыть просмотр (Esc)" style={{ ...small, flex: '0 0 auto' }}>✕ Закрыть</button>
         </div>
         {errors.length > 0 && <div style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 6 }}>{errors.map(f => <div key={f.name}>{f.name}: {f.error}</div>)}</div>}
         {p && (
