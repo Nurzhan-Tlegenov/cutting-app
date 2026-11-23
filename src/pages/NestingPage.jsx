@@ -772,13 +772,17 @@ function SheetCanvas({ corner = 'bl', sheet, usableX, usableY, sheetL, sheetW, m
         ctx.fillStyle = SHEET_FILL
         ctx.strokeStyle = '#C0392B'
         ctx.lineWidth = 1.2
-        holes.forEach(poly => {
+        // «по габаритам выборочно»: убранный вырез фрезер не режет — деталь в этом месте целая, вырез (сделать потом) — штрихом
+        const gone = !p.box && p.cut?.holes?.length ? new Set(p.cut.holes) : null
+        holes.forEach((poly, hi) => {
           ctx.beginPath()
           poly.forEach((pt, vi) => {
             const sx = x + pt.x * sc, sy = y + h - pt.y * sc
             if (vi === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy)
           })
-          ctx.closePath(); ctx.fill(); ctx.stroke()
+          ctx.closePath()
+          if (gone?.has(hi)) { ctx.save(); if (typeof ctx.setLineDash === 'function') ctx.setLineDash([4, 3]); ctx.strokeStyle = '#B85C00'; ctx.lineWidth = 1; ctx.stroke(); ctx.restore(); return }
+          ctx.fill(); ctx.stroke()
         })
         ctx.restore()
       }
